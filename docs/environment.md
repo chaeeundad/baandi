@@ -111,3 +111,13 @@ and reusable ndrustfft handlers over rustfft, with no Accelerate linkage in
 workspace source. FFT normalization and tolerances are specified in
 `physics-conventions.md`. Offline checks use the verified Rust 1.99.1 temporary
 rustup-home procedure above; no global toolchain changes are needed.
+
+## Current implementation note (P6E)
+
+The P0 native ABI discussion and its measurements above remain historical.
+The current SCF uses sequential faer and serial ndrustfft/rustfft through
+`dft-numerics`, with no unsafe code or native adapter in workspace Rust source.
+The statement that no QE comparison had been performed applies to the P0 probe;
+remote QE 7.6 comparisons are now recorded in [validation](validation.md).
+See [architecture](architecture.md) and [dependencies](dependencies.md) for the
+current implementation and locked packages.

@@ -7,3 +7,17 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+libm.workspace = true
+nalgebra.workspace = true
+ndarray.workspace = true
+num-complex.workspace = true
+thiserror.workspace = true
+dft-units = { path = "../dft-units" }
+dft-geometry = { path = "../dft-geometry" }
+dft-numerics = { path = "../dft-numerics" }
+dft-basis = { path = "../dft-basis" }
+
+[dev-dependencies]
+xcx.workspace = true

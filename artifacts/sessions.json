@@ -178,5 +178,23 @@
     "ended_at": "2026-11-02T11:58:10Z",
     "exit_code": 0,
     "note": ""
+  },
+  {
+    "run_id": "P4A-EIGENSOLVER#1",
+    "task_id": "P4A-EIGENSOLVER",
+    "mode": "new",
+    "role": "implementer (P4A eigensolver)",
+    "status": "done",
+    "codex_pid": 89226,
+    "wrapper_pid": 89211,
+    "session_id": "01a19c21-c6b2-74e3-b1f4-22213c7c9e4f",
+    "branch": "task/P4A-EIGENSOLVER",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P4A-EIGENSOLVER",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P4A-EIGENSOLVER.md",
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P4A-EIGENSOLVER/report.json",
+    "started_at": "2026-11-02T12:00:21Z",
+    "ended_at": "2026-11-02T12:12:06Z",
+    "exit_code": 0,
+    "note": ""
   }
 ]

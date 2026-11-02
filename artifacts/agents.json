@@ -106,5 +106,14 @@
     "task": "P1B-BASIS-CLI",
     "ref": "pid 87719, session 01a19c17, task/P1B-BASIS-CLI",
     "updated": "2026-11-02"
+  },
+  {
+    "id": "A13",
+    "agent": "Codex",
+    "role": "implementer (P4A eigensolver)",
+    "state": "active",
+    "task": "P4A-EIGENSOLVER",
+    "ref": "pid 89226, session no sessi, task/P4A-EIGENSOLVER",
+    "updated": "2026-11-02"
   }
 ]

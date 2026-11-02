@@ -111,9 +111,27 @@
     "id": "A13",
     "agent": "Codex",
     "role": "implementer (P4A eigensolver)",
-    "state": "active",
+    "state": "done",
     "task": "P4A-EIGENSOLVER",
-    "ref": "pid 89226, session no sessi, task/P4A-EIGENSOLVER",
+    "ref": "pid 89226, session 01a19c21, task/P4A-EIGENSOLVER",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A14",
+    "agent": "Codex",
+    "role": "implementer (P3A functionals)",
+    "state": "done",
+    "task": "P3A-FUNCTIONALS",
+    "ref": "pid 92479, session 01a19c2e, task/P3A-FUNCTIONALS",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A15",
+    "agent": "Codex",
+    "role": "implementer (P2A UPF and radial)",
+    "state": "active",
+    "task": "P2A-UPF-RADIAL",
+    "ref": "pid 95570, session no sessi, task/P2A-UPF-RADIAL",
     "updated": "2026-11-02"
   }
 ]

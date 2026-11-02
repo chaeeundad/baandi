@@ -86,5 +86,21 @@
     "status": "mitigated",
     "phase": "P0",
     "detail": "Spike code not merged (tag spike/p0c). Rule added: tests over about 10 s in debug must be #[ignore] with a release command."
+  },
+  {
+    "id": "I12",
+    "title": "upf crate is new and little used",
+    "severity": "medium",
+    "status": "open",
+    "phase": "P2",
+    "detail": "ADR 0008: used for reading only (71 downloads), our layer validates everything. Cross-check key fields on the real Si file once approved; fallback is a small quick-xml reader."
+  },
+  {
+    "id": "I13",
+    "title": "Spherical Bessel and Y_lm hand-written",
+    "severity": "low",
+    "status": "mitigated",
+    "phase": "P2",
+    "detail": "No suitable permissive light crate (scilib is GPL-3.0; scirs2-special not trialed). Verified by identities and closed forms, not by a library oracle."
   }
 ]

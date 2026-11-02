@@ -110,5 +110,29 @@
     "result": "pass",
     "detail": "Reproduced by Claude: valid input exit 0; three bad inputs print the cause and exit 1",
     "date": "2026-11-02"
+  },
+  {
+    "id": "T15",
+    "check": "P4A: faer dense eig/GEMM/orthonormalization; Davidson vs dense on synthetic Hermitian matrices",
+    "phase": "P4",
+    "result": "pass",
+    "detail": "Gates re-run by Claude and code read. N=200: eigenvalue diff 6e-14, residual 8e-11, orthonormality 3e-15; N=300 preconditioned 52 iterations vs 2286 without; degenerate, near-degenerate, restart, determinism and NotConverged cases covered",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T16",
+    "check": "P3A: Hartree single-mode and Poisson, kinetic, density sum rule, LDA-PZ finite difference, xcx exchange cross-check, Ewald invariances",
+    "phase": "P3",
+    "result": "pass",
+    "detail": "Gates re-run by Claude, XC test confirmed to differentiate n*eps_xc. Hartree cosine error 1.2e-16; XC FD error 1.9e-11; exchange vs xcx 3.2e-16; Ewald eta/scale/supercell errors <= 1e-14; PZ81 jump at rs=1: 3.2e-5 Ha (inherent to published parameters)",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T17",
+    "check": "Si Ewald energy (a=5.43 A, Z=4), informational",
+    "phase": "P3",
+    "result": "pending",
+    "detail": "Value -8.39947 Ha measured; to be compared with QE's ewald contribution in P6, not asserted against any external number",
+    "date": "2026-11-02"
   }
 ]

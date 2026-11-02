@@ -18,26 +18,26 @@
   {
     "id": "P2",
     "name": "UPF parser, local and KB nonlocal terms",
-    "status": "pending",
+    "status": "in progress",
     "gates_done": 0,
     "gates_total": 7,
-    "note": "Ready except the pseudopotential: needs the user's decision on Si.pz-vbc.UPF (blank author and license)"
+    "note": "P2A running (parser, radial transforms on synthetic fixtures). Real Si UPF still needs the user's decision (blank author and license)"
   },
   {
     "id": "P3",
     "name": "Hamiltonian, Hartree, LDA XC",
-    "status": "pending",
-    "gates_done": 0,
+    "status": "in progress",
+    "gates_done": 4,
     "gates_total": 6,
-    "note": "Starts after P1 and P2"
+    "note": "P3A merged: kinetic, Hartree, LDA-PZ, density, Ewald verified. Left: local and nonlocal pseudopotential assembly, H Hermiticity, convolution vs explicit matrix"
   },
   {
     "id": "P4",
     "name": "Eigensolver (dense baseline, then Davidson/LOBPCG)",
-    "status": "pending",
-    "gates_done": 0,
+    "status": "done",
+    "gates_done": 5,
     "gates_total": 5,
-    "note": "Can start now (independent math tests, faer dense baseline)"
+    "note": "Dense (faer) and block Davidson verified. LOBPCG not needed for MVP"
   },
   {
     "id": "P5",

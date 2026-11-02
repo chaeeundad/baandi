@@ -46,3 +46,8 @@
 - P1B (Codex session 01a19c17) merged: PlaneWaveBasis, density sphere, FftGridSpec with 2,3,5 rule, scatter/gather, TOML config with deny_unknown_fields, `validate` and `grid` CLI. Run #1 stopped BLOCKED on manifest ownership (Claude fixed ndarray and Cargo.lock), run #2 finished.
 - Si fcc a=5.43 A, 30 Ry: 749 plane waves, 5985 density G, FFT 25^3 (independent rule; compare with QE in P6).
 - Next: P4 math pieces (eigensolver) can run now; P2 waits for the user's UPF decision.
+
+## 2026-11-02 P4A and P3A merged, P2A started
+- P4A (Codex session 01a19c21): faer adapter, LinearOperator, dense baseline, block Davidson; ADR 0006. Claude read the Davidson loop: convergence only from recomputed residuals.
+- P3A (Codex session 01a19c2e): density, kinetic, Hartree, LDA-PZ, Ewald; ADR 0007 (xcx dev-only, no PZ81 in xcx so PZ is in-tree). Si Ewald -8.39947 Ha informational.
+- P2A (UPF parser via upf crate, radial transforms, inspect-upf) delegated on synthetic fixtures; ADR 0008.

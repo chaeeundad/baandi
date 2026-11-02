@@ -1,6 +1,6 @@
 # QE reference interchange
 
-No QE reference output exists in this change. `../fixtures_format/` contains
+Real QE reference bundles now exist (`si30_ours`, `si30_auto`, `scan_e*`); this opening paragraph describes the original tooling change, which shipped before any real output existed. `../fixtures_format/` contains
 invented FORMAT FIXTURES, not calculations. Never move those files here or
 remove their `is_format_fixture: true` marker to call them references.
 

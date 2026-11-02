@@ -1,9 +1,12 @@
 # UPF v2 NC support (P2A, P2C)
 
 `dft-upf::parse_upf(&str)` and `from_file(path)` read through the vendored
-`upf` 0.1.1 crate and return an immutable `Pseudopotential`. No real Si file,
-other real pseudopotential, or QE calculation has been used. No QE source
-was read. The format reference is the public specification distributed at
+`upf` 0.1.1 crate and return an immutable `Pseudopotential`. The reader and the
+radial mathematics were developed on synthetic fixtures only; the real
+`Si.pz-vbc.UPF` (provenance unverified, see candidate-si-upf.md) was later read
+and used for validation (docs/validation.md R1 to R5), which exposed the three
+real-world deviations handled in P2C and P5C. The file was never given to the
+implementation agent. No QE source was read. The format reference is the public specification distributed at
 `../rust-dft-vendor/upf/docs/reference/upf-spec.html`; the reader's MIT/Apache
 Rust model was inspected to establish its field coverage.
 

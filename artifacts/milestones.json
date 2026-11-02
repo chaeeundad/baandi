@@ -5,7 +5,7 @@
     "status": "done",
     "gates_done": 5,
     "gates_total": 5,
-    "note": "Verified by Claude. Backend decided in ADR 0004 (faer, ndrustfft) after spike P0C; hand-written FFI is removed in P1"
+    "note": "Verified by Claude. Backend decided in ADR 0004 (faer, ndrustfft) after spike P0C; the hand-written FFI was removed in P1A"
   },
   {
     "id": "P1",
@@ -45,7 +45,7 @@
     "status": "done",
     "gates_done": 7,
     "gates_total": 7,
-    "note": "Si Gamma-only LDA SCF converges (11 iterations, 1.2 s): -7.295530468210927 Ha. Not yet compared with QE (P6)"
+    "note": "Si Gamma-only LDA SCF converges (11 iterations, 1.2 s): -7.295530468210927 Ha; compared with QE 7.6 in P6 (docs/validation.md R3 to R5)"
   },
   {
     "id": "P6",

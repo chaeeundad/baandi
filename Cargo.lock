@@ -465,7 +465,9 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "dft-basis",
+ "dft-engine",
  "dft-geometry",
+ "dft-physics",
  "dft-units",
  "dft-upf",
  "serde",

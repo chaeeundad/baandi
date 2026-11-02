@@ -232,5 +232,14 @@
     "task": "P6D-DENSITY-COMPARE",
     "ref": "pid 38420, session 01a19cc8, task/P6D-DENSITY-COMPARE",
     "updated": "2026-11-02"
+  },
+  {
+    "id": "A27",
+    "agent": "Codex",
+    "role": "implementer (P6E docs refresh)",
+    "state": "done",
+    "task": "P6E-DOCS-REFRESH",
+    "ref": "pid 41429, session 01a19cd0, task/P6E-DOCS-REFRESH",
+    "updated": "2026-11-02"
   }
 ]

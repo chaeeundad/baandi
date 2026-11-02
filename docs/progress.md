@@ -41,3 +41,8 @@
 - Codex P1A (session 01a19c0c): units, Cell/reciprocal lattice, FftPlan3d on ndrustfft, physics-conventions.md. Claude review found value-dependent shortcuts in the FFT that made the constant test vacuous; removed via resume (run #3), tests now tolerance-based.
 - delegate.sh fixes found by real use: resume rejects -C/-s, stale report was read as result, relative prompt path after cd.
 - Remaining for P1: G-vector cutoff, density/FFT grid rule, plane-wave<->grid mapping, CLI (ticket P1B).
+
+## 2026-11-02 P1 closed
+- P1B (Codex session 01a19c17) merged: PlaneWaveBasis, density sphere, FftGridSpec with 2,3,5 rule, scatter/gather, TOML config with deny_unknown_fields, `validate` and `grid` CLI. Run #1 stopped BLOCKED on manifest ownership (Claude fixed ndarray and Cargo.lock), run #2 finished.
+- Si fcc a=5.43 A, 30 Ry: 749 plane waves, 5985 density G, FFT 25^3 (independent rule; compare with QE in P6).
+- Next: P4 math pieces (eigensolver) can run now; P2 waits for the user's UPF decision.

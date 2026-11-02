@@ -94,5 +94,21 @@
     "result": "pass",
     "detail": "Found and removed exact-equality shortcuts that made the constant test vacuous; tests now use 1e-14 tolerances",
     "date": "2026-11-02"
+  },
+  {
+    "id": "T13",
+    "check": "P1B: cutoff boundary, brute-force G completeness on 4 cells, count vs continuum, FFT grid rule, scatter/gather round trip, normalization identity, grid enlargement",
+    "phase": "P1",
+    "result": "pass",
+    "detail": "Re-run by Claude. Si 30 Ry: 749 PW vs continuum 749.6 (0.33% rel. diff on large-cutoff test); coefficient errors 6e-17; normalization error 4e-15",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T14",
+    "check": "CLI: grid and validate on examples/si_lda.toml; unknown field, non-Gamma k-point, negative cutoff rejected",
+    "phase": "P1",
+    "result": "pass",
+    "detail": "Reproduced by Claude: valid input exit 0; three bad inputs print the cause and exit 1",
+    "date": "2026-11-02"
   }
 ]

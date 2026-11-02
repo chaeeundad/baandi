@@ -88,5 +88,23 @@
     "task": "P1A-FOUNDATION",
     "ref": "pid 85592, session 01a19c0c, task/P1A-FOUNDATION",
     "updated": "2026-11-02"
+  },
+  {
+    "id": "A11",
+    "agent": "Codex",
+    "role": "implementer (P1B basis and CLI)",
+    "state": "blocked",
+    "task": "P1B-BASIS-CLI: Stopped BLOCKED on manifest/lock ownership (ndarray dependency, Cargo.lock)",
+    "ref": "pid 86583, session 01a19c17, task/P1B-BASIS-CLI",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A12",
+    "agent": "Codex",
+    "role": "implementer (P1B unblock)",
+    "state": "done",
+    "task": "P1B-BASIS-CLI",
+    "ref": "pid 87719, session 01a19c17, task/P1B-BASIS-CLI",
+    "updated": "2026-11-02"
   }
 ]

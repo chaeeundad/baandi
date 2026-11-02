@@ -10,10 +10,10 @@
   {
     "id": "P1",
     "name": "Units, lattice, G-vectors, FFT",
-    "status": "in progress",
-    "gates_done": 5,
+    "status": "done",
+    "gates_done": 7,
     "gates_total": 7,
-    "note": "P1A merged: units, lattice, 3D FFT verified. P1B left: G-vector cutoff boundary, plane-wave to grid round trip, basis and CLI output"
+    "note": "Verified by Claude. Si fcc 30 Ry: 749 plane waves, 5985 density G, FFT 25x25x25. FFT grid choice vs QE is compared in P6"
   },
   {
     "id": "P2",
@@ -21,7 +21,7 @@
     "status": "pending",
     "gates_done": 0,
     "gates_total": 7,
-    "note": "Needs a Si NC UPF v2 file approved by the user"
+    "note": "Ready except the pseudopotential: needs the user's decision on Si.pz-vbc.UPF (blank author and license)"
   },
   {
     "id": "P3",
@@ -37,7 +37,7 @@
     "status": "pending",
     "gates_done": 0,
     "gates_total": 5,
-    "note": "Math tests can start in parallel"
+    "note": "Can start now (independent math tests, faer dense baseline)"
   },
   {
     "id": "P5",

@@ -214,5 +214,13 @@
     "result": "pass",
     "detail": "All six verify_qe.py runs exit 0. Total energy difference 1.27 to 1.28e-6 Ha/atom, constant in cutoff; eigenvalues <= 2.1e-6 Ha; curves parallel to 2e-9 Ha. Offset explained by the origin-segment quadrature of the G=0 constant (predicted 2.548e-6 Ha, observed 2.556e-6 Ha)",
     "date": "2026-11-02"
+  },
+  {
+    "id": "T28",
+    "check": "Density in Fourier space vs QE charge-density.dat (rho(0), sum |rho|^2, 12 sampled coefficients)",
+    "phase": "P6",
+    "result": "pass",
+    "detail": "rho(0) identical, sum |rho|^2 relative 1.1e-8 (tolerance 1e-6), largest coefficient difference 4.0e-9 e/Bohr^3 (tolerance 1e-7); QE's own symmetry spread 6.8e-9 vs ours 2.1e-11. Summary mode; full-file mode tested on synthetic files only. 90 Python tests pass",
+    "date": "2026-11-03"
   }
 ]

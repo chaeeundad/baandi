@@ -78,3 +78,7 @@
 ## 2026-11-02 QE cutoff scan (R4)
 - Six QE bundles (20 to 80 Ry) verified and compared: all pass; difference constant at 1.28e-6 Ha/atom. Diagnostic on the real pseudopotential traced the offset to the mesh-origin segment of the G=0 constant (predicted 2.548e-6 Ha, observed 2.556e-6 Ha); stated as consistent with QE, not proven.
 - QE's automatic FFT grid equals ours at all scanned cutoffs. Remaining P6 item: density comparison; then final report and approval.
+
+## 2026-11-03 Density comparison (R5), P6 gates complete
+- pp.x is not installed on the runner; QE's native charge-density.dat was parsed read-only instead (Fourier coefficients, no grid dependence). Comparison tool P6D merged (90 Python tests). Result: rho(0) identical, sum |rho|^2 relative 1.1e-8, largest sampled coefficient difference 4.0e-9 e/Bohr^3.
+- P6 comparison gates are all met. Remaining: documentation refresh (P6E), final review, and the user's decisions (license, MVP approval, UPF provenance statement).

@@ -51,9 +51,9 @@
     "id": "P6",
     "name": "QE reference comparison and MVP approval",
     "status": "in progress",
-    "gates_done": 5,
+    "gates_done": 6,
     "gates_total": 6,
-    "note": "QE 7.6: energy, eigenvalues, electrons, iterations and cutoff scan (20 to 80 Ry) agree, difference constant 1.28e-6 Ha/atom (explained by a quadrature detail of the G=0 constant). Left: density comparison, final approval. Pseudopotential provenance unverified"
+    "note": "All six comparison gates met against QE 7.6 on Si (energy, eigenvalues, electrons, iterations, cutoff scan, density in Fourier space). Left: final review and the user's approval. Pseudopotential provenance unverified; one cell, Gamma only; density checked on 12 sampled coefficients"
   },
   {
     "id": "P7",

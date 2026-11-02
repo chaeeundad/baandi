@@ -1,0 +1,511 @@
+# Fourier density comparison
+
+PASS (summary mode)
+
+Coefficient differences and symmetry spreads are in e/Bohr^3.
+
+| Metric | Measured difference | Tolerance |
+| --- | ---: | ---: |
+| Largest coefficient | 4.008255174783675e-09 | 1e-07 |
+| rho(0) | 0.0 | 1e-12 |
+| Relative sum of squares | 1.1078135768010342e-08 | 1e-06 |
+
+Non-default tolerances: {}
+
+Largest difference Miller triplet: (0, 1, 0)
+
+Set comparison: {'verified': False, 'note': 'Summary omits the full QE Miller list. Count and listed indices checked; full set equality cannot be certified.'}
+
+Only the magnitude is gated; differing symmetry-equivalent maximum triplets do not fail.
+
+Maximum |rho|: ours 0.007870759977270471 at (1, 0, 0); QE 0.007870760226540662 at (0, -1, 0).
+
+Informational symmetry spread: ours 2.0612697482580963e-11; QE 6.76471376811322e-09.
+
+Full measurements, coefficient values, validation and source metadata:
+
+```json
+{
+  "mode": "summary",
+  "units": "e/Bohr^3",
+  "sum_abs2_units": "e^2/Bohr^6",
+  "tolerances": {
+    "coefficient": 1e-07,
+    "rho0": 1e-12,
+    "parseval": 1e-06,
+    "relative_l2": 1e-06
+  },
+  "non_default_tolerances": {},
+  "set_comparison": {
+    "verified": false,
+    "note": "Summary omits the full QE Miller list. Count and listed indices checked; full set equality cannot be certified."
+  },
+  "max_coefficient_difference": {
+    "miller": [
+      0,
+      1,
+      0
+    ],
+    "ours": {
+      "re": 0.005565469165407768,
+      "im": -0.00556546634054616
+    },
+    "qe": {
+      "re": 0.005565472170485251,
+      "im": -0.0055654636880720565
+    },
+    "abs_difference": 4.008255174783675e-09
+  },
+  "samples": [
+    {
+      "miller": [
+        -2,
+        1,
+        2
+      ],
+      "ours": {
+        "re": -0.0001705173509349338,
+        "im": 0.00017051718093424173
+      },
+      "qe": {
+        "re": -0.00017051729285829195,
+        "im": 0.00017051722303274008
+      },
+      "abs_difference": 7.172990933328532e-11
+    },
+    {
+      "miller": [
+        -1,
+        1,
+        0
+      ],
+      "ours": {
+        "re": -0.00023961037017157245,
+        "im": -4.371807462708257e-12
+      },
+      "qe": {
+        "re": -0.000239610201271723,
+        "im": 1.0643530951717421e-09
+      },
+      "abs_difference": 1.0819889447943642e-09
+    },
+    {
+      "miller": [
+        0,
+        0,
+        0
+      ],
+      "ours": {
+        "re": 0.029617874491946364,
+        "im": 0.0
+      },
+      "qe": {
+        "re": 0.029617874491946364,
+        "im": 0.0
+      },
+      "abs_difference": 0.0
+    },
+    {
+      "miller": [
+        0,
+        0,
+        1
+      ],
+      "ours": {
+        "re": 0.0055654691800050065,
+        "im": -0.0055654663259926745
+      },
+      "qe": {
+        "re": 0.0055654672244259155,
+        "im": -0.005565468303031364
+      },
+      "abs_difference": 2.780822101918925e-09
+    },
+    {
+      "miller": [
+        0,
+        1,
+        0
+      ],
+      "ours": {
+        "re": 0.005565469165407768,
+        "im": -0.00556546634054616
+      },
+      "qe": {
+        "re": 0.005565472170485251,
+        "im": -0.0055654636880720565
+      },
+      "abs_difference": 4.008255174783675e-09
+    },
+    {
+      "miller": [
+        1,
+        0,
+        0
+      ],
+      "ours": {
+        "re": 0.005565469174707759,
+        "im": -0.00556546633133113
+      },
+      "qe": {
+        "re": 0.005565469785703572,
+        "im": -0.005565465837858067
+      },
+      "abs_difference": 7.853862407368111e-10
+    },
+    {
+      "miller": [
+        1,
+        1,
+        1
+      ],
+      "ours": {
+        "re": 0.005565469189520997,
+        "im": 0.005565466316177934
+      },
+      "qe": {
+        "re": 0.005565469196292004,
+        "im": 0.005565466417524934
+      },
+      "abs_difference": 1.0157293351019925e-10
+    },
+    {
+      "miller": [
+        1,
+        2,
+        3
+      ],
+      "ours": {
+        "re": 1.215103984092544e-10,
+        "im": -7.67756762028518e-15
+      },
+      "qe": {
+        "re": 2.2827593888514326e-10,
+        "im": 2.6070873233689784e-11
+      },
+      "abs_difference": 1.099043740940513e-10
+    },
+    {
+      "miller": [
+        2,
+        0,
+        0
+      ],
+      "ours": {
+        "re": -7.415560815686624e-10,
+        "im": -0.003402533316017713
+      },
+      "qe": {
+        "re": -7.474317292605753e-10,
+        "im": -0.0034025331229332644
+      },
+      "abs_difference": 1.931738272341089e-10
+    },
+    {
+      "miller": [
+        3,
+        -1,
+        0
+      ],
+      "ours": {
+        "re": -1.2689076136332997e-10,
+        "im": -0.00032607517147073046
+      },
+      "qe": {
+        "re": -2.1113781293095012e-10,
+        "im": -0.0003260751065056361
+      },
+      "abs_difference": 1.0638622645973061e-10
+    },
+    {
+      "miller": [
+        4,
+        2,
+        -3
+      ],
+      "ours": {
+        "re": 5.143205082569484e-06,
+        "im": 5.143328041478574e-06
+      },
+      "qe": {
+        "re": 5.143202917515142e-06,
+        "im": 5.1433249481477215e-06
+      },
+      "abs_difference": 3.775732520589794e-12
+    },
+    {
+      "miller": [
+        5,
+        0,
+        -5
+      ],
+      "ours": {
+        "re": 1.1353293874266885e-07,
+        "im": 2.5607584764686733e-16
+      },
+      "qe": {
+        "re": 1.1353250104931511e-07,
+        "im": 1.2239864419642975e-13
+      },
+      "abs_difference": 4.544164157635006e-13
+    }
+  ],
+  "rho0": {
+    "ours": {
+      "re": 0.029617874491946364,
+      "im": 0.0
+    },
+    "qe": {
+      "re": 0.029617874491946364,
+      "im": 0.0
+    },
+    "abs_difference": 0.0
+  },
+  "parseval": {
+    "ours_sum_abs2": 0.0016169479487451713,
+    "qe_sum_abs2": 0.0016169479308324026,
+    "abs_difference": 1.7912768707564752e-11,
+    "relative_difference": 1.1078135768010342e-08,
+    "denominator": "QE sum_abs2"
+  },
+  "max_abs_nonzero": {
+    "ours_value": 0.007870759977270471,
+    "ours_miller": [
+      1,
+      0,
+      0
+    ],
+    "qe_value": 0.007870760226540662,
+    "qe_miller": [
+      0,
+      -1,
+      0
+    ],
+    "abs_difference": 2.4927019129372674e-10,
+    "note": "Only the magnitude is gated; differing symmetry-equivalent maximum triplets do not fail."
+  },
+  "symmetry_noise": {
+    "informational_only": true,
+    "definition": "maximum pairwise complex distance",
+    "millers": [
+      [
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        1
+      ]
+    ],
+    "complete_triplet": true,
+    "ours_spread": 2.0612697482580963e-11,
+    "qe_spread": 6.76471376811322e-09
+  },
+  "failures": [],
+  "exit_code": 0,
+  "passed": true,
+  "validation": {
+    "integral_electrons": 8.000000000000004,
+    "expected_electrons": 8.0,
+    "charge_error_electrons": 3.552713678800501e-15,
+    "sha256": "c4fde645365f4e7ed609486d76233335b3894540239b0443880351eea82257cd",
+    "grid_rule": "Each axis: -(n//2) <= m <= (n-1)//2; negative even Nyquist; unique m mod n.",
+    "density_g_count": 5985
+  },
+  "source": {
+    "path": "tests/reference/si30_ours/density/qe_rhoG_summary.json",
+    "sha256": "186ac751ac4ff89fa7debe2e9865af4bf678b2941a9698f2777f72c4a85edb77",
+    "metadata": {
+      "source": "QE 7.6 charge-density.dat of run qe_si30_ours (tmp_si30ours/si30ours.save), parsed read-only on dev08 by the dft5090 session with parse_rho.py (the script was shown in full in the runner message but is not stored here)",
+      "charge_density_dat_sha256": "7fdc2ce8d509ea587cc4fc55e0cc41666cc7b64d3e011902f03e51de14000f27",
+      "charge_density_dat_bytes": 167696,
+      "format": "4 Fortran sequential records, little endian: (gamma_only, ngm_g, nspin) int32; b1,b2,b3 float64; mill(3,ngm_g) int32; rho(G) complex128; units e/Bohr^3",
+      "gamma_only": 0,
+      "ngm_g": 5985,
+      "nspin": 1,
+      "rho_000": {
+        "re": 0.029617874491946364,
+        "im": 0.0
+      },
+      "sum_abs2": 0.0016169479308324026,
+      "max_abs_nonzero": {
+        "value": 0.007870760226540662,
+        "miller": [
+          0,
+          -1,
+          0
+        ]
+      },
+      "symmetry": {
+        "missing_negatives": 0,
+        "conjugate_violations_1e-12": 0,
+        "largest_deviation": 1.2266347333466993e-18
+      },
+      "samples": [
+        {
+          "miller": [
+            0,
+            0,
+            0
+          ],
+          "re": 0.029617874491946364,
+          "im": 0.0
+        },
+        {
+          "miller": [
+            1,
+            0,
+            0
+          ],
+          "re": 0.005565469785703572,
+          "im": -0.005565465837858067
+        },
+        {
+          "miller": [
+            0,
+            1,
+            0
+          ],
+          "re": 0.005565472170485251,
+          "im": -0.0055654636880720565
+        },
+        {
+          "miller": [
+            0,
+            0,
+            1
+          ],
+          "re": 0.0055654672244259155,
+          "im": -0.005565468303031364
+        },
+        {
+          "miller": [
+            1,
+            1,
+            1
+          ],
+          "re": 0.005565469196292004,
+          "im": 0.005565466417524934
+        },
+        {
+          "miller": [
+            -1,
+            1,
+            0
+          ],
+          "re": -0.000239610201271723,
+          "im": 1.0643530951717421e-09
+        },
+        {
+          "miller": [
+            2,
+            0,
+            0
+          ],
+          "re": -7.474317292605753e-10,
+          "im": -0.0034025331229332644
+        },
+        {
+          "miller": [
+            1,
+            2,
+            3
+          ],
+          "re": 2.2827593888514326e-10,
+          "im": 2.6070873233689784e-11
+        },
+        {
+          "miller": [
+            -2,
+            1,
+            2
+          ],
+          "re": -0.00017051729285829195,
+          "im": 0.00017051722303274008
+        },
+        {
+          "miller": [
+            3,
+            -1,
+            0
+          ],
+          "re": -2.1113781293095012e-10,
+          "im": -0.0003260751065056361
+        },
+        {
+          "miller": [
+            4,
+            2,
+            -3
+          ],
+          "re": 5.143202917515142e-06,
+          "im": 5.1433249481477215e-06
+        },
+        {
+          "miller": [
+            5,
+            0,
+            -5
+          ],
+          "re": 1.1353250104931511e-07,
+          "im": 1.2239864419642975e-13
+        }
+      ],
+      "first_miller_in_file_order": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          -1,
+          -1,
+          -1
+        ],
+        [
+          -1,
+          0,
+          0
+        ],
+        [
+          0,
+          -1,
+          0
+        ],
+        [
+          0,
+          0,
+          -1
+        ]
+      ],
+      "b_vectors_as_stored": [
+        [
+          -0.612323844648251,
+          0.612323844648251,
+          0.612323844648251
+        ],
+        [
+          0.612323844648251,
+          -0.612323844648251,
+          0.612323844648251
+        ],
+        [
+          0.612323844648251,
+          0.612323844648251,
+          -0.612323844648251
+        ]
+      ],
+      "note": "Numbers transcribed by the receiving session from the runner's message; the runner's script prints repr() of float64 values. Pseudopotential provenance unverified."
+    }
+  },
+  "ours_dir": "tests/reference/si30_ours/ours",
+  "override_flags_supplied": []
+}
+```

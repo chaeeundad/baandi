@@ -13,7 +13,11 @@ pub fn array(x: &[f64]) -> String {
         .join(" ")
 }
 pub fn fixture() -> String {
-    let n = 601;
+    fixture_with_points(601)
+}
+
+/// Generate synthetic UPF text at a selected radial resolution.
+pub fn fixture_with_points(n: usize) -> String {
     let (r, rab) = mesh(n, 12.0);
     let local: Vec<_> = r
         .iter()

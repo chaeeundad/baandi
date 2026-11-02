@@ -1,6 +1,7 @@
-//! Gamma-only functionals in Hartree atomic units; no pseudopotential terms.
+//! Gamma-only functionals and pseudopotential operators in Hartree atomic units.
 pub mod density;
 pub mod ewald;
+pub mod hamiltonian;
 pub mod hartree;
 pub mod kinetic;
 pub mod xc;

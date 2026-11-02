@@ -206,5 +206,13 @@
     "result": "pass",
     "detail": "Tool refused the first real output (singular 'level' label), fixed in P6B; now exit 0 on si30_ours and si30_auto; format fixtures exit 4; hash and provenance mismatches exit 2",
     "date": "2026-11-02"
+  },
+  {
+    "id": "T27",
+    "check": "QE cutoff scan 20 to 80 Ry (6 bundles, explicit grids) vs ours; QE auto grid equals ours at all points",
+    "phase": "P6",
+    "result": "pass",
+    "detail": "All six verify_qe.py runs exit 0. Total energy difference 1.27 to 1.28e-6 Ha/atom, constant in cutoff; eigenvalues <= 2.1e-6 Ha; curves parallel to 2e-9 Ha. Offset explained by the origin-segment quadrature of the G=0 constant (predicted 2.548e-6 Ha, observed 2.556e-6 Ha)",
+    "date": "2026-11-02"
   }
 ]

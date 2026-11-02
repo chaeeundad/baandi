@@ -1,0 +1,284 @@
+{
+  "header": "QE comparison\nPseudopotential provenance is unverified",
+  "passed": true,
+  "provenance": {
+    "command": "cd ~/rustdft_p6\nsource ~/fq/env.sh\nexport OMP_NUM_THREADS=1 MKL_NUM_THREADS=1\ntimeout 14400 mpirun -np 4 --map-by core --bind-to core ~/fq/builds/orig-mpi-dfti/bin/pw.x -in e60_ours.in > e60_ours.out 2> e60_ours.err",
+    "qe_version": "Program PWSCF v.7.6 starts on  2Nov2026 at 23:45:30",
+    "host": "dev08 (192.168.0.228), Rocky Linux 9.7",
+    "mpi_processes": 4,
+    "omp_threads": 1,
+    "date_utc": "2026-11-02T14:45:30Z",
+    "input_sha256": "dfc60b0d13a2a9ba48cd77610d58f65c83d23a01ac93e4324c107f5260354074",
+    "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+    "wall_time_s": 0.1,
+    "returned_by": "dft5090 session (Claude Remote Control), relayed by the 'master' bridge; executed on dev08",
+    "notes": "Cutoff-scan run. Input produced by editing prefix, outdir, ecutwfc, ecutrho and nr1-3 of the verified 30 Ry input; size and sha256 verified by the runner before running. wall_time_s is QE's own WALL value. stdout returned inside one tar+gzip+base64 stream of 6 outputs (8460 characters), verified by piece, whole stream, gzip, tar and per-file SHA-256 on receipt (several pieces had to be resent because of transcription errors on the receiving side). stderr not returned. Pseudopotential Si.pz-vbc.UPF: provenance unverified; used with the user's approval for internal validation.",
+    "is_format_fixture": false,
+    "uptime_before_load_average": "0.10, 0.03, 0.01",
+    "mpi_launcher_options": "--map-by core --bind-to core",
+    "pw_x_path": "~/fq/builds/orig-mpi-dfti/bin/pw.x (symlink to ../PW/src/pw.x, built 2026-10-19, OpenMPI 5.0.8, MKL 2026.1)"
+  },
+  "ours_results_sha256": "b3074a1752bbbb33a2ad716fa0f17681e2fa6038841462498eeb2c7335c86813",
+  "qe_output_sha256": "28a260d3835d7d1e91a248cffc92c5c177de8236495900059ca1479d24a64fe0",
+  "qe": {
+    "version": "Program PWSCF v.7.6 starts on  2Nov2026 at 23:45:30",
+    "electrons": 8.0,
+    "bands": 8,
+    "ecutwfc": 60.0,
+    "ecutrho": 240.0,
+    "nk": 1,
+    "xc": "SLA  PZ   NOGX NOGC",
+    "iterations": 11,
+    "grid": [
+      36,
+      36,
+      36
+    ],
+    "dense_g_vectors": 16889,
+    "npw": 2109,
+    "eigenvalues_ha": [
+      -0.19016304253014432,
+      0.2586013052178666,
+      0.2586013052178666,
+      0.2586013052178666,
+      0.3370978573850657,
+      0.3370978573850657,
+      0.3370978573850657,
+      0.3777573074402103
+    ],
+    "total": -7.296041155,
+    "one_electron_ha": 2.79112479,
+    "hartree_ha": 0.8362787,
+    "xc_ha": -2.52397278,
+    "ewald_ha": -8.39947187,
+    "levels_ev": [
+      7.0369,
+      9.1729
+    ],
+    "wall_time_text": "0.10s",
+    "wall_time_s": 0.1
+  },
+  "ours_grid": [
+    36,
+    36,
+    36
+  ],
+  "qe_grid": [
+    36,
+    36,
+    36
+  ],
+  "warnings": [],
+  "tolerances": {
+    "energy": 0.0001,
+    "term": 0.0001,
+    "eigenvalue": 0.001,
+    "gap": 0.001,
+    "electrons": 1e-08
+  },
+  "maximum_tolerance_ratio": {
+    "item": "our occupied eigen residual",
+    "ratio": 0.08056559795528742
+  },
+  "nondefault_tolerances": {},
+  "decomposition_note": null,
+  "checks": [
+    {
+      "item": "total energy per atom",
+      "ours": -3.648019303943711,
+      "qe": -3.6480205775,
+      "absolute_difference": 1.2735562888721574e-06,
+      "unit": "Ha/atom",
+      "tolerance": 0.0001,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "one_electron",
+      "ours": 2.7911273479267633,
+      "qe": 2.79112479,
+      "absolute_difference": 2.5579267632913627e-06,
+      "unit": "Ha",
+      "tolerance": 0.0001,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "hartree",
+      "ours": 0.8362786964167871,
+      "qe": 0.8362787,
+      "absolute_difference": 3.583212948576886e-09,
+      "unit": "Ha",
+      "tolerance": 0.0001,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "xc",
+      "ours": -2.5239727857213405,
+      "qe": -2.52397278,
+      "absolute_difference": 5.72134073451025e-09,
+      "unit": "Ha",
+      "tolerance": 0.0001,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "ewald",
+      "ours": -8.399471866509632,
+      "qe": -8.39947187,
+      "absolute_difference": 3.490367106451231e-09,
+      "unit": "Ha",
+      "tolerance": 0.0001,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "eigenvalue band 1",
+      "ours": -0.1901629948992458,
+      "qe": -0.19016304253014432,
+      "absolute_difference": 4.763089853088154e-08,
+      "unit": "Ha",
+      "tolerance": 0.001,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "eigenvalue band 2",
+      "ours": 0.2586001655208945,
+      "qe": 0.2586013052178666,
+      "absolute_difference": 1.139696972130011e-06,
+      "unit": "Ha",
+      "tolerance": 0.001,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "eigenvalue band 3",
+      "ours": 0.25860016552223103,
+      "qe": 0.2586013052178666,
+      "absolute_difference": 1.1396956355880228e-06,
+      "unit": "Ha",
+      "tolerance": 0.001,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "eigenvalue band 4",
+      "ours": 0.25860016552845805,
+      "qe": 0.2586013052178666,
+      "absolute_difference": 1.1396894085691223e-06,
+      "unit": "Ha",
+      "tolerance": 0.001,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "eigenvalue band 5",
+      "ours": 0.33709653907369064,
+      "qe": 0.3370978573850657,
+      "absolute_difference": 1.3183113750647735e-06,
+      "unit": "Ha",
+      "tolerance": 0.001,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "eigenvalue band 6",
+      "ours": 0.337096539074285,
+      "qe": 0.3370978573850657,
+      "absolute_difference": 1.3183107807068772e-06,
+      "unit": "Ha",
+      "tolerance": 0.001,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "eigenvalue band 7",
+      "ours": 0.33709653907529036,
+      "qe": 0.3370978573850657,
+      "absolute_difference": 1.3183097753444173e-06,
+      "unit": "Ha",
+      "tolerance": 0.001,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "eigenvalue band 8",
+      "ours": 0.3777584347527404,
+      "qe": 0.3777573074402103,
+      "absolute_difference": 1.1273125301025644e-06,
+      "unit": "Ha",
+      "tolerance": 0.001,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "HOMO-LUMO gap",
+      "ours": 0.07849637354523259,
+      "qe": 0.07849655216719909,
+      "absolute_difference": 1.786219664956512e-07,
+      "unit": "Ha",
+      "tolerance": 0.001,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "electron count",
+      "ours": 8.0,
+      "qe": 8.0,
+      "absolute_difference": 0.0,
+      "unit": "electrons",
+      "tolerance": 8e-08,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "our integrated relative charge error",
+      "ours": 0.0,
+      "qe": 2.398081733190338e-14,
+      "absolute_difference": 2.398081733190338e-14,
+      "unit": "relative",
+      "tolerance": 1e-08,
+      "passed": true,
+      "informational": false
+    },
+    {
+      "item": "our occupied eigen residual",
+      "ours": 0.0,
+      "qe": 8.056559795528742e-09,
+      "absolute_difference": 8.056559795528742e-09,
+      "unit": "Ha",
+      "tolerance": 1e-07,
+      "passed": true,
+      "informational": false
+    }
+  ],
+  "maximum_differences": {
+    "eigenvalues": {
+      "item": "eigenvalue band 5",
+      "ours": 0.33709653907369064,
+      "qe": 0.3370978573850657,
+      "absolute_difference": 1.3183113750647735e-06,
+      "unit": "Ha",
+      "tolerance": 0.001,
+      "passed": true,
+      "informational": false
+    },
+    "energy terms": {
+      "item": "one_electron",
+      "ours": 2.7911273479267633,
+      "qe": 2.79112479,
+      "absolute_difference": 2.5579267632913627e-06,
+      "unit": "Ha",
+      "tolerance": 0.0001,
+      "passed": true,
+      "informational": false
+    }
+  },
+  "limitations": [
+    "Orthogonality is not exported by results.json or this QE stdout protocol; not assessed.",
+    "QE electron count is configured count, not an independent density integral.",
+    "1 Ha = 2 Ry exactly; 1 Ha = 27.211386245988 eV (CODATA 2018). QE constant differences at 1e-9 relative are irrelevant to default eigenvalue tolerances."
+  ]
+}

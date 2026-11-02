@@ -107,9 +107,9 @@
     "id": "I14",
     "title": "Minimal FFT grid changes XC energy by 1e-7 Ha",
     "severity": "low",
-    "status": "open",
+    "status": "resolved",
     "phase": "P6",
-    "detail": "Our 25^3 and QE's automatic grid coincide at 30 Ry; QE scan at other cutoffs requested to compare grid choices. Energy change between 25^3 and 40^3 in our code: 4e-8 Ha."
+    "detail": "QE's automatic FFT grid equals ours at 30 Ry and at the other five scanned cutoffs (24, 24, 30, 36, 36, 45 cubed). Energy change between 25^3 and 40^3 in our code: 4e-8 Ha."
   },
   {
     "id": "I15",
@@ -121,10 +121,10 @@
   },
   {
     "id": "I16",
-    "title": "Residual 2.6e-6 Ha one-electron difference vs QE not explained",
+    "title": "Constant 2.56e-6 Ha offset vs QE explained quantitatively",
     "severity": "low",
-    "status": "open",
+    "status": "mitigated",
     "phase": "P6",
-    "detail": "All other terms agree to 1e-8 Ha. Likely a numerical-integration or tabulation detail of the pseudopotential transforms; untested. Far below the 1e-4 Ha/atom target, kept for completeness."
+    "detail": "Offset is cutoff independent (2.545 to 2.565e-6 Ha over 20 to 80 Ry). Matches the mesh-origin segment omitted by a direct Coulomb-subtracted integral of the local potential: 8*2*4*pi*Z*r0^2/(2*Omega) = 2.548e-6 Ha. Our erf-subtracted route is the more accurate. QE internals not inspected, so stated as consistent with. See docs/validation.md R4."
   }
 ]

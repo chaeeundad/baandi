@@ -74,3 +74,7 @@
 - Two real QE 7.6 runs (dev08 via dft5090) verified by chunk/gz/stdout SHA-256 and stored as tests/reference bundles. Strict tooling initially refused the real output (singular HOMO/LUMO label); fixed in P6B with a regression test on the real bundle.
 - Comparison passes: total energy 1.28e-6 Ha/atom, Hartree/XC/Ewald <= 2e-8 Ha, one-electron 2.6e-6 Ha, eigenvalues <= 1.3e-6 Ha. Cause of the 2.6e-6 Ha one-electron residual unknown (issue I16).
 - Requested from dft5090: QE cutoff scan (12 inputs; full stdout for the 6 same-grid runs, grid and energy lines for the 6 auto-grid runs).
+
+## 2026-11-02 QE cutoff scan (R4)
+- Six QE bundles (20 to 80 Ry) verified and compared: all pass; difference constant at 1.28e-6 Ha/atom. Diagnostic on the real pseudopotential traced the offset to the mesh-origin segment of the G=0 constant (predicted 2.548e-6 Ha, observed 2.556e-6 Ha); stated as consistent with QE, not proven.
+- QE's automatic FFT grid equals ours at all scanned cutoffs. Remaining P6 item: density comparison; then final report and approval.

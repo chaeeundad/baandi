@@ -1,0 +1,17 @@
+{
+  "command": "cd ~/rustdft_p6\nsource ~/fq/env.sh\nexport OMP_NUM_THREADS=1 MKL_NUM_THREADS=1\ntimeout 14400 mpirun -np 4 --map-by core --bind-to core ~/fq/builds/orig-mpi-dfti/bin/pw.x -in e25_ours.in > e25_ours.out 2> e25_ours.err",
+  "qe_version": "Program PWSCF v.7.6 starts on  2Nov2026 at 23:45:29",
+  "host": "dev08 (192.168.0.228), Rocky Linux 9.7",
+  "mpi_processes": 4,
+  "omp_threads": 1,
+  "date_utc": "2026-11-02T14:45:29Z",
+  "input_sha256": "30efd70d170c3f49a5ed6d6248a21c5ac61e053714ed1c343313bd4456c88c48",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "wall_time_s": 0.05,
+  "returned_by": "dft5090 session (Claude Remote Control), relayed by the 'master' bridge; executed on dev08",
+  "notes": "Cutoff-scan run. Input produced by editing prefix, outdir, ecutwfc, ecutrho and nr1-3 of the verified 30 Ry input; size and sha256 verified by the runner before running. wall_time_s is QE's own WALL value. stdout returned inside one tar+gzip+base64 stream of 6 outputs (8460 characters), verified by piece, whole stream, gzip, tar and per-file SHA-256 on receipt (several pieces had to be resent because of transcription errors on the receiving side). stderr not returned. Pseudopotential Si.pz-vbc.UPF: provenance unverified; used with the user's approval for internal validation.",
+  "is_format_fixture": false,
+  "uptime_before_load_average": "0.02, 0.01, 0.00",
+  "mpi_launcher_options": "--map-by core --bind-to core",
+  "pw_x_path": "~/fq/builds/orig-mpi-dfti/bin/pw.x (symlink to ../PW/src/pw.x, built 2026-10-19, OpenMPI 5.0.8, MKL 2026.1)"
+}

@@ -70,5 +70,23 @@
     "ended_at": "2026-11-02T10:53:07Z",
     "exit_code": null,
     "note": "Stopped by Claude on user directive (prefer general-purpose libraries, ADR 0003); partial diff saved as .delegate/P0B-partial.patch (not merged); worktree removed. Times approximate"
+  },
+  {
+    "run_id": "P0C-BACKEND-SPIKE#1",
+    "task_id": "P0C-BACKEND-SPIKE",
+    "mode": "new",
+    "role": "implementer (backend spike)",
+    "status": "running",
+    "codex_pid": 81382,
+    "wrapper_pid": 81372,
+    "session_id": null,
+    "branch": "task/P0C-BACKEND-SPIKE",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P0C-BACKEND-SPIKE",
+    "ticket": "tickets/P0C-BACKEND-SPIKE.md",
+    "report": null,
+    "started_at": "2026-11-02T11:17:12Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

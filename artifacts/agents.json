@@ -52,5 +52,14 @@
     "task": "P0B-COMPLEX-ABI: Stopped by Claude on user directive (prefer general-purpose libraries, ADR 0003)",
     "ref": "pid 78149, session 01a19be0, task/P0B-COMPLEX-ABI",
     "updated": "2026-11-02"
+  },
+  {
+    "id": "A7",
+    "agent": "Codex",
+    "role": "implementer (backend spike)",
+    "state": "active",
+    "task": "P0C-BACKEND-SPIKE",
+    "ref": "pid 81382, session no sessi, task/P0C-BACKEND-SPIKE",
+    "updated": "2026-11-02"
   }
 ]

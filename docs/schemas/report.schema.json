@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "status", "changed_files", "design_choices", "commands", "numerical_outputs", "reference_comparison", "limitations", "open_questions", "commit"],
+  "properties": {
+    "task_id": {"type": "string"},
+    "status": {"type": "string", "enum": ["DONE", "BLOCKED", "FAILED"]},
+    "changed_files": {"type": "array", "items": {"type": "string"}},
+    "design_choices": {"type": "array", "items": {"type": "string"}},
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "exit_code"],
+        "properties": {"command": {"type": "string"}, "exit_code": {"type": "integer"}}
+      }
+    },
+    "numerical_outputs": {"type": "array", "items": {"type": "string"}},
+    "reference_comparison": {"type": "string"},
+    "limitations": {"type": "array", "items": {"type": "string"}},
+    "open_questions": {"type": "array", "items": {"type": "string"}},
+    "commit": {"type": "string"}
+  }
+}

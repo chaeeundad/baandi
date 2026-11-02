@@ -42,6 +42,11 @@ fi
 prompt_file="$(cd "$(dirname "$prompt_file")" && pwd)/$(basename "$prompt_file")"   # absolute: the script cd's into the worktree
 if [[ "$mode" == "new" || "$mode" == "fork" ]]; then
   [[ -d "$wt" ]] || git -C "$repo" worktree add -b "task/$task" "$wt" HEAD
+  # Codex sandbox has no network: point cargo at the shared vendored crates (untracked, see .gitignore).
+  if [[ -d "$repo/../rust-dft-wt/rust-dft-vendor" && ! -f "$wt/.cargo/config.toml" ]]; then
+    mkdir -p "$wt/.cargo"
+    printf '[source.crates-io]\nreplace-with = "vendored-sources"\n\n[source.vendored-sources]\ndirectory = "../rust-dft-vendor"\n' > "$wt/.cargo/config.toml"
+  fi
 fi
 
 common=(-C "$wt" -s workspace-write --json

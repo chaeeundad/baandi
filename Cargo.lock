@@ -439,6 +439,7 @@ dependencies = [
  "dft-basis",
  "dft-geometry",
  "dft-units",
+ "dft-upf",
  "serde",
  "thiserror 2.0.21",
  "toml",

@@ -377,3 +377,187 @@ Nyquist modes on the fcc cell (spectral coefficients and Poisson residual
 < 1e-12 relative), and a neutral pair in equivalent cubic and skew,
 left-handed lattice representations (< 1e-10 relative). Doubling all
 charges checks quadratic Ewald scaling (< 1e-12 relative).
+
+## 14. P2A UPF boundary and radial storage
+
+The public UPF specification shipped with `upf` 0.1.1 defines Bohr lengths,
+Ry local potentials and nominal Ry D_ij. The stored projector is
+u_l(r)=r*beta_l(r), with u in Bohr^-1/2, hence beta in Bohr^-3/2.
+Our validated representation retains u, converting only PP_LOCAL and D
+with the shared Ry-to-Ha conversion at parse time. The nonlocal energy
+bilinear beta*D*beta then has Hartree units. The specification mentions
+alternative converter scalings (energy-valued beta and reciprocal-energy D);
+these cannot be inferred from unlabelled numbers. P2A assumes the nominal
+convention, rejects explicit alternative units, and requires producer auditing
+before real-data use. See `upf-support.md` for reader and validation limits.
+
+The projector cutoff index is a count: samples 0..cutoff_index are valid
+(exclusive Rust upper bound), equivalent to UPF's one-based final index.
+At r>0 beta=u/r. At r=0 its finite limit is not reconstructed from a single
+zero u sample; the transform uses r*u directly, whose origin value is zero.
+This avoids interpolation or an arbitrary beta(0). No volume factor, Y_lm,
+(-i)^l or atomic structure factor is included in the radial projector result.
+
+## 15. P2A mesh quadrature and elementary angular functions
+
+Treat the mesh index t as a continuous coordinate with unit step and
+rab_i=dr/dt at node i. Then integral f(r)dr = integral f(r(t))rab(t)dt.
+Apply Simpson's 1/3 rule to successive two-interval panels of this product.
+For odd n, all n-1 intervals are covered by 1/3 panels. For even n>=4,
+the last three intervals use the 3/8 rule, with weights (3/8)*(1,3,3,1);
+all preceding intervals use 1/3 panels. For n=2 use the index-space
+trapezoid. A one-point projector prefix has no interval and integrates to
+zero. Panel sums use compensated summation. This is fourth-order for smooth
+index-space integrands, except for the explicitly two-point trapezoid case.
+The tests use r_i=r0*(exp(i*dx)-1), rab_i=dx*(r_i+r0), r0=0.02 Bohr;
+convergence is measured rather than assuming every arbitrary mesh is resolved.
+
+Spherical Bessel j_l follows its regular power series:
+
+```text
+j_l(x) = x^l/(2l+1)!! * sum_{k>=0} a_k,
+a_0=1,  a_k/a_(k-1) = -x^2/[2k*(2l+2k+1)].
+```
+
+For x<4 the series stops once a term is below machine epsilon times the
+partial sum (80 terms is a conservative cap for this range). For x>=4,
+use j_0=sin(x)/x, j_1=(j_0-cos(x))/x and
+j_(l+1)=(2l+1)*j_l/x-j_(l-1), through l=3. At zero the regular series gives
+j_0=1 and the other j_l=0. Tests compare independently evaluated closed forms
+away from zeros at relative 1e-13, and the x^l/(2l+1)!! limit for
+x=1e-8,1e-20,1e-90 at relative 1e-13. Recurrence residuals are normalized
+by the sum of absolute operands and bounded by 1e-13; normalizing by the
+small cancelled sum at large x would measure conditioning rather than
+function accuracy. No irregular y_l function is implemented.
+
+Let complex harmonics use Condon-Shortley associated Legendre polynomials:
+Y_l^m=N_lm*P_l^m(cos(theta))*exp(i*m*phi),
+N_lm=sqrt((2l+1)/(4*pi)*(l-m)!/(l+m)!). Our real basis is
+
+```text
+m=0:  N_l0 P_l(cos(theta))
+m>0:  sqrt(2)*(-1)^m*N_lm*P_l^m(cos(theta))*cos(m*phi)
+m<0:  sqrt(2)*(-1)^|m|*N_l|m|*P_l^|m|(cos(theta))*sin(|m|*phi).
+```
+
+Within each l the order is m=-l,...,0,...,+l; flattening successive l blocks
+would use index l*l+l+m. Thus l=1 is proportional to (y,z,x).
+P_m^m=(-1)^m*(2m-1)!!*(1-z^2)^(m/2), P_(m+1)^m=(2m+1)zP_m^m,
+and (l-m)P_l^m=(2l-1)zP_(l-1)^m-(l+m-1)P_(l-2)^m give all l<=3.
+The real basis is an orthogonal change from complex harmonics, preserving
+unit angular norm and the addition theorem. Quadrature uses 12 Gauss-Legendre
+nodes in cos(theta) and 32 uniform azimuths, checking all 16x16 overlaps to
+absolute 1e-12. The addition theorem uses 100 fixed-seed unit-vector pairs
+and absolute 1e-13. Directions supplied to the API are normalized internally.
+
+## 16. P2A local Fourier transform and finite zero mode
+
+Angular integration of exp(-i G.r) gives 4*pi*j_0(Gr). Set
+W(r)=V(r)+Z*erf(r)/r. The smooth unit-width reference Coulomb potential
+has Fourier transform -4*pi*Z*exp(-G^2/4)/G^2: applying Poisson's equation
+reduces the result to the Fourier transform of the normalized Gaussian
+charge pi^(-3/2)*exp(-r^2). Thus for G>0,
+
+```text
+Vloc(G) = (4*pi/Omega) integral r^2 W(r) j_0(Gr) dr
+          -4*pi*Z*exp(-G^2/4)/(Omega*G^2).
+```
+
+The numerical integrand is formed as r^2*V+Z*r*erf(r), finite at r=0.
+libm supplies erf. The analytic tail extends to infinity. The numerical
+upper bound defaults to min(mesh end,10 Bohr), rounded down to a mesh point;
+`effective_r_max` exposes that choice. No table or interpolation is used.
+Mesh integration starts at r_min; if positive, the omitted origin interval
+requires convergence checking. Short-range tail truncation also requires
+convergence; it is not the truncation of the long-range Coulomb tail.
+
+Define the returned alpha-Z quantity C (in Ha) precisely by
+
+```text
+C = (4*pi/Omega) integral_0^infinity r^2 [V(r)+Z/r] dr
+  = (4*pi/Omega) integral_0^infinity r^2 W(r) dr + pi*Z/Omega.
+```
+
+The last equality follows from integral_0^infinity r*erfc(r)dr=1/4:
+insert erfc(r)=(2/sqrt(pi))*integral_r^infinity exp(-t^2)dt, interchange
+integrals, and use the Gaussian second moment. Expanding the analytic tail
+also gives -4*pi*Z/(Omega*G^2)+pi*Z/Omega+O(G^2), establishing the same
+finite remainder. `alpha_z()` therefore adds pi*Z/Omega to the numerically
+truncated W integral, including the reference's finite remainder exactly.
+It equals the infinite-domain definition up to the stated numerical
+quadrature/origin/short-range-tail omissions. It is not merely integral W.
+
+This defines the local zero-mode constant consistent with dropping the
+bare Coulomb 1/G^2 divergence. Section 10 sets V_H(0)=0; section 12 specifies
+the Ewald compensating-background convention. In later assembly, retain
+C for each ion (the local G=0 potential is their sum); its electron–ion
+energy contribution is N_e*sum_I C_I. Combine with the existing Hartree/Ewald
+zero-mode/background terms without adding the erf reference constant a
+second time. P2A implements no electrostatic energy assembly or structure
+factors and makes no QE zero-mode agreement claim.
+
+Independent closed forms follow from the Gaussian Fourier integral and
+Poisson's equation. For V=-Z*erf(r/rc)/r+A*exp(-r^2/s^2),
+
+```text
+Vloc(G) = [-4*pi*Z*exp(-G^2*rc^2/4)/G^2
+           + A*pi^(3/2)*s^3*exp(-G^2*s^2/4)]/Omega
+C = [pi*Z*rc^2 + A*pi^(3/2)*s^3]/Omega.
+```
+
+The tests evaluate these closed forms separately from the radial integrator,
+including A=0, and compare C to direct quadrature of r^2*V+Z*r.
+Local Fourier relative tolerance is 1e-8 over G=0.1..12 Bohr^-1;
+zero-mode and final cutoff convergence absolute tolerance is 1e-11 Ha.
+Parameters, measured errors and cutoff sensitivity are in `upf-support.md`.
+
+## 17. P2A projector Fourier-Bessel normalization
+
+Define B_l(q)=4*pi*integral r^2*beta(r)*j_l(qr)dr
+=4*pi*integral r*u(r)*j_l(qr)dr. It has units Bohr^(3/2) under the
+nominal UPF convention. Angular integration of a single beta(r)*Y_lm(rhat)
+against a plane wave gives (-i)^l*B_l(q)*Y_lm(qhat). Later P2B must multiply
+by Omega^(-1/2) and the atomic phase; those are not part of this routine.
+
+For beta(r)=r^l*exp(-r^2/(2*s^2)), the Gaussian Cartesian transform is
+(2*pi)^(3/2)*s^3*exp(-s^2*q^2/2). Applying the corresponding harmonic
+polynomial in derivatives with respect to q yields, without radial
+quadrature,
+
+```text
+B_l(q)=4*pi*sqrt(pi/2)*s^(2l+3)*q^l*exp(-s^2*q^2/2).
+```
+
+These analytic test functions have arbitrary amplitudes; dimensional units
+can be restored by multiplying the r^l amplitude by Bohr^(-l-3/2).
+The comparison uses l=0,1,2 and relative tolerance 1e-9.
+
+Spherical-Bessel completeness reads
+integral_0^infinity q^2*j_l(qr)*j_l(qr')dq=pi*delta(r-r')/(2*r^2).
+Substituting the definition of B gives the exact Parseval statement
+
+```text
+(2/pi) integral q^2 |B_l(q)|^2 dq
+    = (4*pi)^2 integral r^2 |beta(r)|^2 dr.
+```
+
+Equivalently, with integral |Y_lm|^2 dOmega=1, three-dimensional Fourier
+Parseval is integral q^2|B_l|^2dq/(2*pi)^3 = integral r^2|beta|^2dr.
+There is no extra angular 4*pi for a normalized single Y_lm. For the
+Gaussian the right radial integral is
+s^(2l+3)*Gamma(l+3/2)/2, evaluated from half-integer Gaussian moments.
+Tests integrate the **computed** B_l on an independent 401-point linear
+q mesh up to 12/s and compare at relative 1e-9.
+
+## 18. P2A numerical evidence boundaries
+
+Only synthetic strings and analytic functions have been verified. No UPF
+file is committed or taken from a real pseudopotential library, and no QE
+comparison is made. Parser fixtures have 601 points; separate analytic
+quadrature meshes are refined to 12001 points for local transforms and
+4001 for projectors. Absolute D symmetry tolerance is 1e-12 Ha. Exact zeros
+beyond a declared projector cutoff and between different-l D channels are
+structural requirements, not adjustable tolerances. All P2A test tolerances,
+mesh sizes and measured errors are listed in `upf-support.md`. Unsampled
+origin behavior, producer-dependent beta scaling, and exponentially small
+large-G signals remain explicit numerical/input limitations.

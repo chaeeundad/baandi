@@ -32,3 +32,14 @@ no new releases, dependencies, native installs, or vendor changes are introduced
 The historical backend spike documents internal allocation and performance
 limits. This direct-dependency inventory is not a fresh transitive license audit.
 The project's own LICENSE remains undecided.
+
+## P3A dft-physics usage
+
+No dependencies were added. Production physics glue uses the existing
+path dependencies dft-units, dft-geometry, dft-basis and dft-numerics;
+ndarray/num-complex hold grids and coefficients, nalgebra handles fixed
+three-dimensional Ewald geometry, thiserror supplies typed errors, and
+libm::erfc evaluates Ewald screening (ADR 0007). The existing xcx 0.3.1
+dev-dependency cross-checks LDA_X and supplies a loose LDA_C_PW sanity
+comparison; it remains test-only and is not a PZ81 oracle. License and
+backend decisions remain those already recorded in ADRs 0004/0005/0007.

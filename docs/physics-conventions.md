@@ -210,3 +210,170 @@ its counts and FFT dimensions and checks internal consistency only. These
 are not external reference numbers. All P1B tests belong to the fast debug
 gate and can be inspected with
 `cargo test --offline -p dft-basis -p dft-cli -- --nocapture`.
+
+## 9. P3A density and kinetic energy
+
+`dft-physics` uses `Array3<f64>` for real-space number density n in
+Bohr^-3: this enforces reality and avoids storing meaningless imaginary
+components. Transform inputs are explicitly converted to complex arrays.
+The reciprocal density is `to_reciprocal(n)`, so n(r) = sum_G n(G) exp(iG.r)
+and n(0) is the mean density, not the integrated electron count.
+For each orbital, psi_b = `to_real(scatter(c_b))` / sqrt(Omega), with
+sum_G |c_b|^2 = 1. Occupations are finite, nonnegative electron counts
+(2 for a doubly occupied orbital). The implementation evaluates
+n(r) = sum_b f_b |psi_b(r)|^2 without normalizing supplied coefficients.
+The caller supplies normalized coefficients and a compatible density grid
+from the same cell. Thus (Omega/N) sum_r n(r) = sum_b f_b.
+
+T = sum_b f_b sum_G (|G|^2/2) |c_b(G)|^2, in Ha. Grid and coefficient
+count mismatches and invalid numerical inputs are typed errors. Pointwise
+routines perform no I/O, and pointwise XC allocates no memory.
+
+## 10. P3A Hartree and full-grid frequencies
+
+V_H(G) = 4*pi*n(G)/|G|^2 for nonzero G, and V_H(0) = 0 explicitly.
+E_H = (Omega/2) sum_{G != 0} 4*pi*|n(G)|^2/|G|^2, in Ha.
+V_H(r) = `to_real(V_H(G))`. Every represented FFT frequency participates;
+there is no density-sphere filter. Even-grid Nyquist indices use the
+negative frequency rule in section 4. Components outside the density
+sphere are the caller's responsibility. On skew cells with occupied mixed
+Nyquist modes this canonical kernel need not preserve conjugate symmetry;
+therefore the potential is returned as a complex array without discarding
+imaginary components or silently symmetrizing the kernel. Alias-free
+physical densities supported inside the density sphere avoid this issue.
+
+The divergent G=0 contributions of Hartree, local pseudopotential and
+Ewald must later be handled together through the alpha-Z term. No such
+assembly is implemented in P3A. The real-space energy test compares E_H
+with (Omega/(2N)) sum_r [n(r)-mean(n)] V_H(r), including a check on the
+imaginary residual. Subtracting the mean explicitly removes the G=0 term;
+since V_H has zero mean this equals (1/2) integral n V_H to roundoff.
+The Poisson test applies the exact spectral multiplier |G|^2 and compares
+with 4*pi*[n(r)-mean(n)], with no finite-difference Laplacian.
+
+## 11. P3A unpolarized LDA-PZ
+
+This is Slater exchange (alpha = 2/3) plus PZ81 correlation, the combination
+called `sla+pz` by QE. All energies and potentials below are in Hartree;
+eps is energy per electron, whereas n*eps is energy per volume.
+
+```text
+rs = (3/(4*pi*n))^(1/3)
+eps_x = -(3/4)*(3/pi)^(1/3)*n^(1/3)
+v_x = (4/3)*eps_x
+rs >= 1: eps_c = gamma / d, d = 1 + beta1*sqrt(rs) + beta2*rs
+         gamma=-0.1423, beta1=1.0529, beta2=0.3334
+         deps_c/drs = -gamma*(beta1/(2*sqrt(rs)) + beta2)/d^2
+rs < 1:  eps_c = A*ln(rs) + B + C*rs*ln(rs) + D*rs
+         A=0.0311, B=-0.048, C=0.0020, D=-0.0116
+         deps_c/drs = A/rs + C*(ln(rs)+1) + D
+```
+
+Since drs/dn = -rs/(3n), differentiating n*eps_c gives
+v_c = eps_c - (rs/3)*deps_c/drs. Hence v_xc = d[n*(eps_x+eps_c)]/dn.
+For n <= 1e-10 Bohr^-3, all eps and v components are set to zero.
+This is our explicit vanishing-density choice intended to match QE;
+P6 must verify it. Non-finite n and n < -1e-14 Bohr^-3 are typed errors.
+The closed interval [-1e-14,0] Bohr^-3 is treated as zero roundoff density
+in XC and Hartree. No positive-density threshold is applied in Hartree.
+
+Grid evaluation returns v_xc, E_xc = (Omega/N) sum_r n*eps_xc, and the
+separate double-counting integral (Omega/N) sum_r n*v_xc, in Ha.
+Rounded PZ81 constants leave small finite jumps at rs=1; they are not
+smoothed. Tests calculate the one-sided limits directly from the listed
+parameters, report measured jumps, and check their size below 1e-4 Ha.
+Finite differences of n*eps_xc use a relative density step of 1e-5,
+including rs=0.999 and 1.001; stencils do not cross the discontinuous join
+or the density threshold, where differentiability is not claimed.
+
+## 12. P3A Ewald point charges and error control
+
+For charges Z_I at positions r_I = A*s_I, with a uniform compensating
+background and eta in Bohr^-1, the energy in Ha is
+
+```text
+E_real = (1/2) sum_IJ Z_I Z_J sum_R' erfc(eta*|r_I-r_J+R|)/|r_I-r_J+R|
+E_recip = (2*pi/Omega) sum_{G != 0} exp(-G^2/(4*eta^2))/G^2
+          * |sum_I Z_I exp(iG.r_I)|^2
+E_self = -eta/sqrt(pi) * sum_I Z_I^2
+E_background = -pi*(sum_I Z_I)^2/(2*Omega*eta^2)
+E = E_real + E_recip + E_self + E_background
+```
+
+The prime excludes I=J,R=0. Distinct ions at identical wrapped positions
+are errors. Fractional positions are wrapped into [0,1) before summation;
+charges may have either sign and must be finite. `libm::erfc` supplies the
+special function. Default eta = sqrt(pi)/Omega^(1/3); callers may set any
+finite positive eta. Real and reciprocal contributions are returned
+separately for audit. **P6 note:** compare this combined energy and its
+background/zero-mode convention with QE's reported "ewald contribution"
+using real run provenance; no agreement with QE is claimed here.
+
+The default absolute truncation budget is 1e-13*Qabs^2/L Ha, with
+Qabs=sum_I |Z_I| and L=Omega^(1/3). It is relative to an electrostatic
+scale, not to E, which may vanish by cancellation. The returned tail bound
+excludes floating-point summation error. Let rho be half the sum of the
+three lattice-column lengths, so a centered primitive parallelepiped
+covers every point within rho of its lattice site. Let rho_g be the same
+quantity for reciprocal columns and Omega_g=(2*pi)^3/Omega.
+For spherical cutoffs R=u+2*rho and Gmax=v+2*rho_g, positive u,v give
+conservative omitted-energy bounds per Qabs^2:
+
+```text
+B_real = sqrt(pi)/(Omega*eta^3*u) * (1+rho/u)^2 * exp(-eta^2*u^2)
+B_recip = (2*pi/Omega) * (8*pi*eta^2/(Omega_g*v))
+          * (1+rho_g/v)^2 * exp(-v^2/(4*eta^2))
+```
+
+To derive these bounds, tile space by centered primitive cells (shifted
+by r_I-r_J for real space). A cell associated with an omitted site lies
+outside cutoff-rho, and its site's distance is at least |x|-rho.
+Replace the monotone radial kernel by its value there and integrate over
+that exterior region. Substitution w=|x|-rho gives lower limit
+cutoff-2*rho and a radial factor (w+rho)^2. Use
+erfc(eta*w) <= exp(-eta^2*w^2)/(sqrt(pi)*eta*w), bound
+(1+rho/w)^2 by its lower-limit value, and use
+integral_u^infinity exp(-a*w^2) dw <= exp(-a*u^2)/(2*a*u).
+For reciprocal space also use |structure factor| <= Qabs.
+
+Set t=sqrt(-ln(tolerance)), u=t/eta, v=2*eta*t, then increase t by 1
+until B_real+B_recip <= tolerance/L. Enumeration uses duality bounds:
+|m_i+delta_s_i| <= |b_i|*R/(2*pi) in real space and
+|m_i| <= |a_i|*Gmax/(2*pi) in reciprocal space. Wrapped differences have
+|delta_s_i| < 1, so real bounds include 1 for the displacement. Ceil each
+bound and add one integer for rounding protection, enumerate the box,
+and retain only vectors inside the spherical cutoff. This holds for
+skew and left-handed cells. Unrepresentable bounds are typed errors;
+extremely skew cells or extreme eta can be expensive. No special
+configuration-dependent energy shortcuts are used.
+
+## 13. P3A validation tolerances
+
+All P3A tests run in the debug gate and print values with `--nocapture`.
+The deterministic pseudo-random fixture uses four normalized complex
+orbitals on fcc Si (a=5.43 Angstrom, Ecut=10 Ry).
+
+| Check | Bound |
+| --- | --- |
+| Density electron count | relative < 1e-12 |
+| Single plane wave and weighted-superposition kinetic energy | relative < 1e-14 |
+| Uniform Hartree energy and maximum potential | absolute < 1e-14 Ha |
+| Cosine Hartree energy, potential, integral, linearity, spectral Poisson | relative/max-amplitude < 1e-12 |
+| Exchange closed form and xcx LDA_X (n=1e-6 through 10) | relative < 1e-12 |
+| XC energy-density central derivative (rs=0.1 through 20) | relative < 1e-7 |
+| PZ81 branch jumps vs parameter-derived one-sided limits | absolute < 1e-10 Ha |
+| PZ81 vs xcx PW92 correlation | absolute < 0.005 Ha/electron (different fits; sanity only) |
+| Uniform XC energy and integral n*v_xc | relative < 1e-12 |
+| Ewald eta variation, translation, scaling (0.8 and 1.3) | relative < 1e-10 |
+| Ewald doubled-cell replication | relative < 1e-9 |
+| Ewald cutoff refinement (1e-13 to 1e-16) | sum of tail bounds + 1e-13 Ha roundoff |
+
+The Si Ewald energy print is informational, not a reference benchmark.
+Run `scripts/check.sh dft-physics`, `scripts/check.sh`, and
+`cargo test --offline -p dft-physics -- --nocapture`.
+
+Additional tests exercise odd-grid signed modes and even-grid mixed
+Nyquist modes on the fcc cell (spectral coefficients and Poisson residual
+< 1e-12 relative), and a neutral pair in equivalent cubic and skew,
+left-handed lattice representations (< 1e-10 relative). Doubling all
+charges checks quadratic Ewald scaling (< 1e-12 relative).

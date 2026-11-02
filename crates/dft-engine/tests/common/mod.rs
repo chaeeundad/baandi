@@ -22,6 +22,15 @@ fn array(v: &[f64]) -> String {
         .join(" ")
 }
 pub fn potential(z: f64, rc: f64, nonlocal: bool, points: usize) -> Pseudopotential {
+    potential_with_functional(z, rc, nonlocal, points, "SLA PZ")
+}
+pub fn potential_with_functional(
+    z: f64,
+    rc: f64,
+    nonlocal: bool,
+    points: usize,
+    functional: &str,
+) -> Pseudopotential {
     let end = 12.0;
     let r0 = 0.02;
     let dx = (1.0_f64 + end / r0).ln() / (points - 1) as f64;
@@ -52,7 +61,7 @@ pub fn potential(z: f64, rc: f64, nonlocal: bool, points: usize) -> Pseudopotent
     };
     let xml = format!(
         r#"<UPF version="2.0.1"><PP_INFO>SYNTHETIC Gaussian ion, no real data.</PP_INFO>
-<PP_HEADER generated="synthetic" author="tests" date="2026" comment="synthetic" element="Xx" pseudo_type="NC" relativistic="scalar" is_ultrasoft="F" is_paw="F" is_coulomb="F" has_so="F" has_wfc="F" has_gipaw="F" core_correction="F" functional="SLA PZ" z_valence="{z}" total_psenergy="0" wfc_cutoff="0" rho_cutoff="0" l_max="1" l_max_rho="0" l_local="-1" mesh_size="{points}" number_of_wfc="0" number_of_proj="{np}" />
+<PP_HEADER generated="synthetic" author="tests" date="2026" comment="synthetic" element="Xx" pseudo_type="NC" relativistic="scalar" is_ultrasoft="F" is_paw="F" is_coulomb="F" has_so="F" has_wfc="F" has_gipaw="F" core_correction="F" functional="{functional}" z_valence="{z}" total_psenergy="0" wfc_cutoff="0" rho_cutoff="0" l_max="1" l_max_rho="0" l_local="-1" mesh_size="{points}" number_of_wfc="0" number_of_proj="{np}" />
 <PP_MESH dx="{dx}" mesh="{points}" xmin="0" rmax="12" zmesh="1"><PP_R>{}</PP_R><PP_RAB>{}</PP_RAB></PP_MESH><PP_LOCAL>{}</PP_LOCAL><PP_NONLOCAL>{beta}<PP_DIJ>{dij}</PP_DIJ></PP_NONLOCAL><PP_RHOATOM>{}</PP_RHOATOM></UPF>"#,
         array(&r),
         array(&rab),

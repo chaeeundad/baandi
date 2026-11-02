@@ -19,7 +19,13 @@ Rust model was inspected to establish its field coverage.
   unsupported; this is a reader limit, not a physical restriction of NC.
 - `functional` must be nonempty and is stored/reported without classifying it.
   SUPPORTED means format support; it does **not** certify LDA compatibility.
-  The engine must select/reject the functional before using the dataset.
+  The shared `dft-upf::functional_is_lda_pz` helper is used by the engine and CLI
+  to accept exactly the case-sensitive token sequences `SLA PZ` and
+  `SLA PZ NOGX NOGC`. It splits on ASCII whitespace; leading, trailing and repeated
+  whitespace is ignored for compatibility only. `NOGX NOGC` explicitly means no
+  exchange or correlation gradient correction. All other sequences are rejected
+  by SCF validation. The original label, including whitespace, is retained in
+  the parsed potential and CLI `results.json`.
 - PP_LOCAL, PP_MESH, PP_NONLOCAL and PP_RHOATOM are required by the reader.
   The reader also requires its documented header and mesh attributes; absence
   of such reader-required metadata may produce a Parse error. Projectors need

@@ -345,3 +345,57 @@ fn small_synthetic_fixed_point() {
     assert!(cert.density_residual <= options.density_tolerance);
     assert!(cert.occupied_eigenvalue_change <= 1e-7);
 }
+
+#[test]
+fn functional_labels_preserve_energy_and_reject_other_functionals() {
+    let c = dft_geometry::Cell::from_user_rows_bohr([
+        [4.0, 0.0, 0.0],
+        [0.0, 4.0, 0.0],
+        [0.0, 0.0, 4.0],
+    ])
+    .unwrap();
+    let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let options = ScfOptions {
+        cutoff_hartree: 1.5,
+        ..Default::default()
+    };
+    let mut energies = Vec::new();
+    for label in ["SLA PZ", " SLA  PZ   NOGX NOGC "] {
+        let pp = potential_with_functional(2.0, 1.0, false, 401, label);
+        let result = ScfProblem::new(
+            &c,
+            &atoms,
+            &[SpeciesPotential {
+                label: "Xx",
+                potential: &pp,
+            }],
+            options.clone(),
+        )
+        .unwrap()
+        .run()
+        .unwrap();
+        energies.push(result.total_hartree());
+    }
+    assert_eq!(energies[0].to_bits(), energies[1].to_bits()); // Exact equality, Ha.
+    println!(
+        "functional labels: energies={energies:?} Ha; difference={} Ha",
+        energies[1] - energies[0]
+    );
+    let pp = potential_with_functional(2.0, 1.0, false, 401, "SLA PW");
+    let err = ScfProblem::new(
+        &c,
+        &atoms,
+        &[SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }],
+        options,
+    )
+    .err()
+    .expect("unsupported functional must fail");
+    assert!(matches!(err, ScfError::UnsupportedFunctional(_)));
+    assert_eq!(
+        err.to_string(),
+        "unsupported UPF functional \"SLA PW\": requires SLA PZ or SLA PZ NOGX NOGC"
+    );
+}

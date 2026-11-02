@@ -21,6 +21,7 @@ use std::{
 #[derive(Debug)]
 pub enum ScfError {
     InvalidInput(&'static str),
+    UnsupportedFunctional(String),
     OddElectronCount(f64),
     InsufficientBands {
         bands: usize,
@@ -38,7 +39,14 @@ pub enum ScfError {
 }
 impl fmt::Display for ScfError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:?}")
+        if let Self::UnsupportedFunctional(label) = self {
+            write!(
+                f,
+                "unsupported UPF functional {label:?}: requires SLA PZ or SLA PZ NOGX NOGC"
+            )
+        } else {
+            write!(f, "{self:?}")
+        }
     }
 }
 impl std::error::Error for ScfError {}
@@ -179,7 +187,7 @@ impl ScfResult {
         self.energy.total_rydberg()
     }
 }
-/// Species labels resolve explicitly against Atom::species; the PP must declare SLA PZ.
+/// Species labels resolve explicitly against Atom::species; the PP must declare SLA PZ or SLA PZ NOGX NOGC.
 pub struct SpeciesPotential<'a> {
     pub label: &'a str,
     pub potential: &'a Pseudopotential,
@@ -257,14 +265,9 @@ impl ScfProblem {
             if potentials[..i].iter().any(|p| p.label == s.label) {
                 return Err(ScfError::InvalidInput("duplicate species"));
             }
-            if s.potential
-                .functional()
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                != ["SLA", "PZ"]
-            {
-                return Err(ScfError::InvalidInput(
-                    "only explicitly labelled SLA PZ potentials are supported",
+            if !dft_upf::functional_is_lda_pz(s.potential.functional()) {
+                return Err(ScfError::UnsupportedFunctional(
+                    s.potential.functional().to_string(),
                 ));
             }
         }

@@ -328,3 +328,11 @@ fn inspect_wrapped_nonrelativistic_synthetic_file() {
     assert!(stdout.contains("601 points"), "{stdout}");
     assert!(stdout.contains("z_valence: 4"), "{stdout}");
 }
+
+#[test]
+fn functional_label_preserves_whitespace() {
+    let label = " SLA  PZ   NOGX NOGC ";
+    let p = parse_upf(&common::fixture().replace("SLA PZ", label)).unwrap();
+    assert_eq!(p.functional(), label);
+    assert!(parse_upf(&common::fixture().replace("SLA PZ", "   ")).is_err());
+}

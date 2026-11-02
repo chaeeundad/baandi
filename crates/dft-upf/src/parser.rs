@@ -317,8 +317,8 @@ pub fn parse_upf(text: &str) -> Result<Pseudopotential, UpfError> {
             attr(h, "relativistic")?
         )));
     }
-    let functional = attr(h, "functional")?.trim().to_string();
-    if functional.is_empty() {
+    let functional = attr(h, "functional")?.to_string();
+    if functional.trim().is_empty() {
         return Err(invalid("functional", "empty label"));
     }
     for t in &metadata {

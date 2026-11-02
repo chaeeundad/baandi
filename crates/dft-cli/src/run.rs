@@ -216,11 +216,11 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         let data = fs::read(&path).map_err(|e| error(5, format!("{}: {e}", path.display())))?;
         let p = parse_upf(std::str::from_utf8(&data).map_err(|e| error(2, e))?)
             .map_err(|e| error(2, format!("{}: {e}", path.display())))?;
-        if p.functional().split_whitespace().collect::<Vec<_>>() != ["SLA", "PZ"] {
+        if !dft_upf::functional_is_lda_pz(p.functional()) {
             return Err(error(
                 2,
                 format!(
-                    "unsupported UPF functional {:?}: requires SLA PZ",
+                    "unsupported UPF functional {:?}: requires SLA PZ or SLA PZ NOGX NOGC",
                     p.functional()
                 ),
             ));

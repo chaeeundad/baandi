@@ -314,3 +314,32 @@ fn protects_inputs() {
         fs::remove_file(dest).unwrap();
     }
 }
+
+#[test]
+fn functional_compatibility_and_original_label() {
+    let c = Case::new(false);
+    for label in ["SLA  PZ   NOGX NOGC", " SLA  PZ   NOGX NOGC "] {
+        fs::write(
+            c.dir.join("synthetic.xml"),
+            c.fixture.replace("SLA PZ", label),
+        )
+        .unwrap();
+        status(&c.run("", None), 0);
+        let results = c.json("results", "results.json");
+        assert_eq!(results["convergence"]["converged"], true);
+        assert_eq!(results["species"][0]["functional"], label);
+    }
+    fs::write(
+        c.dir.join("synthetic.xml"),
+        c.fixture.replace("SLA PZ", "SLA PW"),
+    )
+    .unwrap();
+    let output = c.run("", None);
+    status(&output, 2);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr
+            .contains("unsupported UPF functional \"SLA PW\": requires SLA PZ or SLA PZ NOGX NOGC"),
+        "{stderr}"
+    );
+}

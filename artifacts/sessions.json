@@ -220,17 +220,17 @@
     "task_id": "P2A-UPF-RADIAL",
     "mode": "new",
     "role": "implementer (P2A UPF and radial)",
-    "status": "running",
+    "status": "done",
     "codex_pid": 95570,
     "wrapper_pid": 95555,
-    "session_id": null,
+    "session_id": "01a19c3a-627a-7fb3-9963-4b5bcae9d082",
     "branch": "task/P2A-UPF-RADIAL",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P2A-UPF-RADIAL",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P2A-UPF-RADIAL.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P2A-UPF-RADIAL/report.json",
     "started_at": "2026-11-02T12:27:14Z",
-    "ended_at": null,
-    "exit_code": null,
+    "ended_at": "2026-11-02T12:44:48Z",
+    "exit_code": 0,
     "note": ""
   }
 ]

@@ -16,7 +16,7 @@ deps = ["dft-units", "dft-geometry", "dft-numerics"]
 [crates.dft-upf]        # independent UPF v2 NC parser
 deps = ["dft-units"]
 [crates.dft-physics]    # potentials, Hamiltonian, density, XC
-deps = ["dft-units", "dft-geometry", "dft-numerics", "dft-basis", "dft-upf"]
+deps = ["dft-units", "dft-geometry", "dft-numerics", "dft-basis", "dft-upf", "dft-solvers"]   # solvers only for the LinearOperator trait
 [crates.dft-solvers]    # eigensolvers, mixers, SCF driver pieces
 deps = ["dft-numerics"]
 [crates.dft-engine]     # orchestration and energy audit

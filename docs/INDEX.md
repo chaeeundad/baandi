@@ -9,7 +9,7 @@
 | Architecture and API sketches | `architecture.md` |
 | Measured environment (toolchain, Accelerate, FFI notes) | `environment.md` |
 | Dependencies, licenses, pinned versions | `dependencies.md` |
-| Decisions (immutable, append new ones) | `decisions/` (0001 backend isolation, 0002 FFT backend, 0003 general-purpose libraries) |
+| Decisions (immutable, append new ones) | `decisions/` (0001 backend isolation, 0002 FFT backend, 0003 general-purpose libraries, 0004 backend libraries); `backend-spike-results.md` holds the measurements behind 0004 |
 | Current state and history | `progress.md`, `../artifacts/*.json` |
 | Codex run registry (PID, role, session, status) | `../artifacts/sessions.json` |
 | Report schema for Codex results | `schemas/report.schema.json` |

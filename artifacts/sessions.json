@@ -76,17 +76,17 @@
     "task_id": "P0C-BACKEND-SPIKE",
     "mode": "new",
     "role": "implementer (backend spike)",
-    "status": "running",
+    "status": "done",
     "codex_pid": 81382,
     "wrapper_pid": 81372,
-    "session_id": null,
+    "session_id": "01a19bfa-4410-7860-b580-780be8c73012",
     "branch": "task/P0C-BACKEND-SPIKE",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P0C-BACKEND-SPIKE",
     "ticket": "tickets/P0C-BACKEND-SPIKE.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P0C-BACKEND-SPIKE/report.json",
     "started_at": "2026-11-02T11:17:12Z",
-    "ended_at": null,
-    "exit_code": null,
+    "ended_at": "2026-11-02T11:33:53Z",
+    "exit_code": 0,
     "note": ""
   }
 ]

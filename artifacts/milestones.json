@@ -2,10 +2,10 @@
   {
     "id": "P0",
     "name": "Bootstrap: toolchain, workspace, Accelerate ABI",
-    "status": "in progress",
-    "gates_done": 4,
+    "status": "done",
+    "gates_done": 5,
     "gates_total": 5,
-    "note": "Gates 1-4 verified. Backend (complex LA, FFT) to be re-decided by spike P0C under ADR 0003; hand-written FFI will be replaced"
+    "note": "Verified by Claude. Backend decided in ADR 0004 (faer, ndrustfft) after spike P0C; hand-written FFI is removed in P1"
   },
   {
     "id": "P1",
@@ -13,7 +13,7 @@
     "status": "pending",
     "gates_done": 0,
     "gates_total": 7,
-    "note": "Needs FFT crate decision (license, Apple Silicon)"
+    "note": "Ready to start: backend libraries decided (ADR 0004)"
   },
   {
     "id": "P2",

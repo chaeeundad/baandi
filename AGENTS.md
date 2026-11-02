@@ -20,9 +20,10 @@ Claude Code = architect, orchestrator, reviewer. Codex = implementer. The user =
 - Gamma-only complex calculation, spin-unpolarized, norm-conserving, LDA. Do not relax tolerances to make a test pass; trace mismatches in this order: units, FFT normalization, G=0, UPF projectors, double counting, XC parameterization.
 
 ## Library policy (ADR 0003)
-Prefer maintained general-purpose crates over hand-written numerics or FFI (linear algebra, FFT, arrays, serde/toml, XC cross-checks). Hand-write only physics glue. New crates need license, maintenance and Apple Silicon checks and an entry in `docs/dependencies.md`; the Codex sandbox has no network, so Claude fetches crates and adds them to manifests.
+Adopted so far (ADR 0004): faer, ndrustfft/rustfft, ndarray, num-complex. Prefer maintained general-purpose crates over hand-written numerics or FFI (linear algebra, FFT, arrays, serde/toml, XC cross-checks). Hand-write only physics glue. New crates need license, maintenance and Apple Silicon checks and an entry in `docs/dependencies.md`; the Codex sandbox has no network, so Claude fetches crates and adds them to manifests.
 
 ## Hard rules
+- Keep `scripts/check.sh` fast: a test that takes more than about 10 s in debug must be `#[ignore]` and documented with its release-mode command (ADR 0004).
 - Out of scope until MVP approval: CUDA, Metal, MPI, PAW, USPP, PBE, forces, stress, smearing, multiple k-points.
 - Never copy QE (GPL) source. Never commit UPF files. Never record numbers as "QE reference" unless they were produced by a real run with command, version, input and UPF SHA-256.
 - QE reference runs are executed remotely (dev08 via the dft5090 session). Do not install pw.x on this Mac.

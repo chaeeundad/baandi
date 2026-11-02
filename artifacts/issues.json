@@ -17,11 +17,11 @@
   },
   {
     "id": "I3",
-    "title": "FFT backend: rustfft chosen, NEON unverified",
+    "title": "FFT backend decided",
     "severity": "medium",
-    "status": "mitigated",
+    "status": "resolved",
     "phase": "P1",
-    "detail": "ADR 0002: rustfft (MIT/Apache) with our own 3D axis loop. Apple Silicon NEON speedup and non-power-of-two accuracy to be verified in P1."
+    "detail": "ADR 0004: ndrustfft over rustfft. NEON effect still unmeasured."
   },
   {
     "id": "I4",
@@ -57,11 +57,11 @@
   },
   {
     "id": "I8",
-    "title": "Complex linear algebra backend not decided",
+    "title": "Complex linear algebra backend decided",
     "severity": "medium",
-    "status": "open",
+    "status": "resolved",
     "phase": "P0",
-    "detail": "Superseded by ADR 0003: no more hand-written FFI. Spike P0C compares faer vs LAPACK via blas-src/lapack-src for complex Hermitian eig and gemm. Partial P0B diff discarded."
+    "detail": "ADR 0004: faer for complex Hermitian eig and GEMM, LAPACK kept as test oracle. Evidence in docs/backend-spike-results.md."
   },
   {
     "id": "I9",
@@ -76,7 +76,15 @@
     "title": "Existing hand-written Accelerate FFI conflicts with library policy",
     "severity": "low",
     "status": "open",
+    "phase": "P1",
+    "detail": "Hand-written real ddot/dsyev FFI in dft-numerics is deleted in P1 (ADR 0004)."
+  },
+  {
+    "id": "I11",
+    "title": "Debug-mode spike test took 707 s",
+    "severity": "low",
+    "status": "mitigated",
     "phase": "P0",
-    "detail": "dft-numerics ddot/dsyev FFI from P0 is to be replaced after the P0C spike."
+    "detail": "Spike code not merged (tag spike/p0c). Rule added: tests over about 10 s in debug must be #[ignore] with a release command."
   }
 ]

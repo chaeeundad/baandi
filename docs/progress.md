@@ -32,3 +32,7 @@
 
 ## 2026-11-02 QE reference route ready (reported)
 - dft5090 reported dev08 access, pw.x 7.6 (orig-mpi-dfti), idle node, scp exchange, and the same Si.pz-vbc.UPF digest on both of its hosts. Details and run protocol: docs/reference-environment.md. UPF provenance remains unverified (blank author/license).
+
+## 2026-11-02 P0 closed, backend decided
+- Spike P0C (Codex, session 01a19bfa) re-run by Claude in release: all tolerances held. ADR 0004 adopts faer (complex Hermitian eig, GEMM) and ndrustfft (3D FFT). Spike code kept at tag spike/p0c, results doc merged.
+- P0 gates 5/5. Next: P1 (units, lattice, G-vectors, FFT on ndrustfft), which also deletes the hand-written FFI.

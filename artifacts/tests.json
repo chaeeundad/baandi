@@ -64,19 +64,19 @@
     "date": "2026-11-02"
   },
   {
-    "id": "T10",
-    "check": "Accelerate FFI (complex): zheev or zgemm",
-    "phase": "P0",
-    "result": "pending",
-    "detail": "Required by the P0 ticket but not covered by Codex; follow-up ticket",
-    "date": "2026-11-02"
-  },
-  {
     "id": "T9",
     "check": "Total energy vs QE (Si, Gamma, LDA)",
     "phase": "P6",
     "result": "blocked",
     "detail": "QE reference unavailable",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T10",
+    "check": "Spike P0C: faer vs LAPACK complex Hermitian eig (N up to 1000), GEMM, ndrustfft 3D FFT",
+    "phase": "P0",
+    "result": "pass",
+    "detail": "Re-run by Claude in release (6.75 s). Eigenvalue diff 2.1e-13 at N=1000; FFT round trip worst 1.6e-15; Parseval worst 1.9e-14; all asserted tolerances held",
     "date": "2026-11-02"
   }
 ]

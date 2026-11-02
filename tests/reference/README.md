@@ -219,3 +219,48 @@ unverified pseudopotential warning, singular/plural level labels, and refusals
 for altered provenance, missing energy, and mismatched conditions. The bundle
 must never be edited: all mutation tests use temporary copies, and all reports
 are written to temporary directories. No external UPF or QE executable is needed.
+
+## Fourier density comparison (P6D)
+
+Run the standard-library tool in isolated Python, with **fresh** report paths:
+
+```sh
+python3 -I scripts/compare_rhog.py \
+  --ours-dir tests/reference/si30_ours/ours \
+  --qe-summary tests/reference/si30_ours/density/qe_rhoG_summary.json \
+  --json-report /tmp/rhog-report.json --markdown-report /tmp/rhog-report.md
+```
+
+For all-coefficient comparison replace `--qe-summary ...` with
+`--qe-file /path/to/charge-density.dat`. The strict reader supports only the
+specified little-endian, four-record, non-HDF5, full-complex (`gamma_only=0`),
+single-spin format. No QE installation or external Python packages are needed.
+
+Our directory must contain `density.bin`, `density.json`, and `results.json`.
+The tool checks the density digest and integrated charge (absolute error at most
+1e-10 electrons), then independently computes a normalized separable DFT.
+It reconstructs our density sphere from the lattice and `ecutwfc_ha` in the
+results (density cutoff = 4 times the wavefunction cutoff, relative boundary
+allowance 1e-12), checking its reported count. It does not select our G set from
+QE's list. Each axis requires `-(n//2) <= m <= (n-1)//2`, with negative even
+Nyquist and distinct wrapped indices. Full-file mode reports both set differences;
+a mismatch exits 3. Summary mode checks the count and listed indices, but cannot
+certify equality of the complete QE set because that list is absent from the
+stored summary. Summary sums and maxima are compared over our density sphere.
+
+Default gates: coefficient and nonzero maximum magnitude differences <= 1e-7
+ e/Bohr^3, rho(0) difference <= 1e-12 e/Bohr^3, relative sum-of-squares difference
+(using QE as denominator) <= 1e-6, and full-file relative L2 difference (using our
+norm as denominator) <= 1e-6. Override with `--coefficient-tol`, `--rho0-tol`,
+`--parseval-tol`, or `--relative-l2-tol`; reports identify non-default values and
+explicit override flags. Different maximizing Miller triplets do not fail the
+magnitude comparison. The maximum pairwise complex distance among the available
+(1,0,0), (0,1,0), (0,0,1) samples is an informational symmetry noise estimate.
+Exit codes are 0 (pass), 5 (tolerance failure), 3 (inconsistent input/format),
+and 1 (usage/I/O). Existing output paths are never overwritten.
+
+`python3 -I -m unittest discover -s scripts/tests -v` includes analytic DFT,
+malformed-record, CLI and real-summary regression tests. The latter prints the
+measured differences and uses only repository evidence. The original summary's
+provenance limitations, including unverified pseudopotential provenance, remain
+in effect; a passing density comparison does not resolve them.

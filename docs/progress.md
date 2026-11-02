@@ -23,3 +23,9 @@
 ## 2026-11-02 QE reference policy
 - User decision: do NOT install pw.x on this Mac. Reference runs execute on dev08 through the dft5090 session; results are returned with command, QE version, input/UPF SHA-256 and wall time.
 - Readiness check sent to dft5090 (read-only). P6 stays blocked until the reply and a valid reference setup.
+
+## 2026-11-02 Policies added
+- ADR 0003: prefer general-purpose libraries; P0B (hand-written complex FFI) stopped and discarded; spike P0C will choose faer vs LAPACK and ndrustfft.
+- AI-first structure: AGENTS.md (read order), docs/INDEX.md, ownership.toml, tickets/, scripts/check.sh, per-crate AGENTS.md.
+- Codex run registry: artifacts/sessions.json written by scripts/delegate.sh (PID, role, session, status, exit code); `delegate.sh stop` kills only the recorded PID.
+- dft5090 reported it cannot reach dev08; waiting for user to supply a connection path.

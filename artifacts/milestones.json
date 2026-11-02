@@ -5,7 +5,7 @@
     "status": "in progress",
     "gates_done": 4,
     "gates_total": 5,
-    "note": "Build, test, fmt, clippy verified by Claude. Complex-valued Accelerate calls still untested"
+    "note": "Gates 1-4 verified. Backend (complex LA, FFT) to be re-decided by spike P0C under ADR 0003; hand-written FFI will be replaced"
   },
   {
     "id": "P1",

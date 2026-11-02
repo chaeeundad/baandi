@@ -1,35 +1,38 @@
-# AGENTS.md — rust-dft (Codex/구현 에이전트용 상시 지침)
+# AGENTS.md: rust-dft (read this first)
 
-Rust-first plane-wave DFT 엔진. 첫 성과는 빠른 계산이 아니라 **검증 가능한 계산**이다.
+Rust-first plane-wave DFT engine. Goal of the first release: a **verifiable** Si Gamma-only LDA SCF, not speed. This repo is AI-first: future changes are made by AI agents, so every contract below is written to be read and checked by machines and humans.
 
-## 역할
-- Claude Code = 아키텍트/검수자. Codex(당신) = 구현/테스트/수정 책임자. 사용자 = 최종 승인.
-- 완료 선언은 신뢰되지 않는다. 실제 명령을 실행해 종료 코드와 수치 출력을 보고하라. 미실행 테스트를 성공으로 쓰지 마라.
+## Read order for any task
+1. This file. 2. `docs/INDEX.md` (map of all docs). 3. `ownership.toml` (who may touch what, crate dependencies). 4. `crates/<name>/AGENTS.md` for each crate you edit. 5. Your ticket (`tickets/<TASK_ID>.md`). 6. Relevant ADRs in `docs/decisions/`.
 
-## 환경
-- Apple Silicon macOS. Rust stable 1.99 (rustup, `/opt/homebrew/opt/rustup/bin`이 PATH에 없으면 추가).
-- 필수 통과 명령: `cargo build --workspace`, `cargo test --workspace`, `cargo fmt --check`,
-  `cargo clippy --workspace --all-targets -- -D warnings`.
-- 네트워크가 막힐 수 있다. 새 crate 추가가 필요하면 임의로 추가하지 말고 BLOCKED로 보고하라.
+## Roles
+Claude Code = architect, orchestrator, reviewer. Codex = implementer. The user = final approver. A completion claim is never trusted: run `scripts/check.sh` and report real exit codes and numbers. Never report an untested command as passing.
 
-## 물리/수치 규약 (변경 금지, 상세는 docs/physics-conventions.md)
-- 내부 단위: Hartree atomic units (Bohr, Hartree). 1 Ha = 2 Ry. 입출력에서만 Å/Ry/eV 변환.
-- 역격자 B = 2π(A⁻¹)ᵀ, 격자벡터는 A의 열. ψ(r)=Ω^-1/2 Σ c(G)e^{iG·r}, Σ|c|²=1.
-- Γ-only 복소수 계산. spin-unpolarized, norm-conserving, LDA만.
-- 물리적 정합성 > 성능. 허용오차를 임의로 완화하지 마라. 불일치 원인 추적 순서:
-  단위 → FFT 정규화 → G=0 → UPF projector → double counting → XC 파라미터화.
+## One-command verification
+`scripts/check.sh [crate]` runs build, test, fmt, clippy (`-D warnings`) and prints PASS/FAIL per gate. Toolchain pinned in `rust-toolchain.toml`; add `/opt/homebrew/opt/rustup/bin` to PATH if cargo is missing.
 
-## 금지
-- CUDA/Metal/MPI/PAW/USPP/PBE/힘/응력/smearing/다중 k-point (MVP 범위 밖).
-- QE(GPL) 소스 복사·번역. UPF 파서는 공개 명세로 독립 구현.
-- UPF 파일을 Git에 커밋. 실제 계산으로 얻지 않은 수치를 'QE reference'로 기록.
-- 소유 파일(OWNED_FILES) 밖 수정. 공통 타입/Cargo workspace manifest/public API는 티켓이 허락한 경우에만.
-- 핵심 수치 루프에 로깅/JSON/파일 I/O. unsafe는 FFI 어댑터에만, 전제조건 주석+테스트 필수.
-- 원격 서버, 대량 설치, 파괴적 Git 작업(reset --hard, force push 등).
+## Source of truth for state
+`artifacts/*.json` (milestones, issues, tests, agents, sessions), `docs/progress.md`, `docs/decisions/` (ADRs), tickets, and git commits. Update the JSON files when a gate is verified. Every Codex run is recorded in `artifacts/sessions.json` (PID, role, session id, status); use `scripts/delegate.sh`, and stop runs only with `scripts/delegate.sh stop <TASK_ID>`, never by process name.
 
-## 상태의 원천
-`docs/progress.md`, `docs/decisions/`(ADR), 티켓 ID, Git 커밋만이 상태 원천이다. 설계 결정은 ADR에 남겨라.
+## Physics and numerics conventions (details: `docs/physics-conventions.md`)
+- Hartree atomic units internally (Bohr, Hartree). 1 Ha = 2 Ry. Convert only at I/O boundaries.
+- Lattice vectors are the columns of A; B = 2*pi*inverse(A)^T; psi(r) = Omega^-1/2 * sum_G c(G) exp(iG.r), sum |c|^2 = 1.
+- Gamma-only complex calculation, spin-unpolarized, norm-conserving, LDA. Do not relax tolerances to make a test pass; trace mismatches in this order: units, FFT normalization, G=0, UPF projectors, double counting, XC parameterization.
 
-## 완료 보고
-최종 메시지는 `docs/schemas/report.schema.json` 형식을 따른다 (status, changed files, 테스트 명령+종료 코드,
-수치 출력(단위 포함), 한계/위험, 열린 질문, 커밋 해시). 작업 브랜치에 커밋하고 해시를 보고하라.
+## Library policy (ADR 0003)
+Prefer maintained general-purpose crates over hand-written numerics or FFI (linear algebra, FFT, arrays, serde/toml, XC cross-checks). Hand-write only physics glue. New crates need license, maintenance and Apple Silicon checks and an entry in `docs/dependencies.md`; the Codex sandbox has no network, so Claude fetches crates and adds them to manifests.
+
+## Hard rules
+- Out of scope until MVP approval: CUDA, Metal, MPI, PAW, USPP, PBE, forces, stress, smearing, multiple k-points.
+- Never copy QE (GPL) source. Never commit UPF files. Never record numbers as "QE reference" unless they were produced by a real run with command, version, input and UPF SHA-256.
+- QE reference runs are executed remotely (dev08 via the dft5090 session). Do not install pw.x on this Mac.
+- No JSON, logging or file I/O in numerical hot loops. `unsafe` only in FFI adapters, with preconditions documented and tested.
+- Stay inside `OWNED_FILES` of your ticket; `ownership.toml` lists frozen files.
+- The sandbox cannot write git metadata for task worktrees: leave changes uncommitted and say so; Claude commits after review.
+- No remote server changes, bulk installs or destructive git operations.
+
+## Language
+All agent-facing artifacts (docs, tickets, reports, code comments, commit messages) are in English.
+
+## Report format
+Final message follows `docs/schemas/report.schema.json`: status, changed files, commands with exit codes, numerical outputs with units, limitations, open questions, commit.

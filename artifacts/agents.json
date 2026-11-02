@@ -4,44 +4,53 @@
     "agent": "Claude Code",
     "role": "Architect, orchestrator, reviewer",
     "state": "active",
-    "task": "Status dashboard; next: FFT crate evaluation and the complex Accelerate ticket",
+    "task": "Library survey (ADR 0003), AI-first repo structure; next: backend spike P0C",
     "ref": "this session",
     "updated": "2026-11-02"
   },
   {
     "id": "A2",
-    "agent": "Codex",
-    "role": "Implementer",
-    "state": "queued",
-    "task": "P0b: complex Accelerate FFI check (zheev, zgemm), not started",
-    "ref": "no session yet",
+    "agent": "dft5090",
+    "role": "Remote QE reference runner (via dev08)",
+    "state": "blocked",
+    "task": "Cannot reach dev08 (no host/account/key). Waiting for the user to provide a connection path",
+    "ref": "Remote Control session",
     "updated": "2026-11-02"
   },
   {
     "id": "A3",
     "agent": "Codex",
-    "role": "Implementer",
+    "role": "wrapper-test",
     "state": "done",
-    "task": "P0-BOOTSTRAP: workspace and Accelerate smoke test. Reviewed and merged by Claude",
-    "ref": "task/P0-BOOTSTRAP, session 01a19bd8",
+    "task": "PING",
+    "ref": "pid 78887, session 01a19be4, task/PING",
     "updated": "2026-11-02"
   },
   {
     "id": "A4",
     "agent": "Codex",
-    "role": "Implementer",
+    "role": "implementer (wrapper smoke test)",
     "state": "done",
-    "task": "SMOKE: read-only wrapper test; worktree removed",
-    "ref": "session 01a19bd7",
+    "task": "SMOKE: Backfilled before registry existed: PID not recorded",
+    "ref": "pid not recorded, session 01a19bd7, task/SMOKE",
     "updated": "2026-11-02"
   },
   {
     "id": "A5",
-    "agent": "dft5090",
-    "role": "Remote QE reference runner (via dev08)",
-    "state": "queued",
-    "task": "Readiness check requested: pw.x on dev08, file exchange, UPF availability. Reply pending",
-    "ref": "Remote Control session d7431c",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "blocked",
+    "task": "P0-BOOTSTRAP: Backfilled: PID not recorded",
+    "ref": "pid not recorded, session 01a19bd8, task/P0-BOOTSTRAP",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A6",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "killed",
+    "task": "P0B-COMPLEX-ABI: Stopped by Claude on user directive (prefer general-purpose libraries, ADR 0003)",
+    "ref": "pid 78149, session 01a19be0, task/P0B-COMPLEX-ABI",
     "updated": "2026-11-02"
   }
 ]

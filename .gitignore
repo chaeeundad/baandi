@@ -3,3 +3,5 @@ target/
 results/
 *.UPF
 *.upf
+artifacts/*.lock
+artifacts/*.tmp

@@ -1,11 +1,11 @@
 [
   {
     "id": "I1",
-    "title": "QE reference will run remotely, not on this Mac",
-    "severity": "medium",
-    "status": "open",
+    "title": "dev08 unreachable for QE reference runs",
+    "severity": "high",
+    "status": "needs decision",
     "phase": "P6",
-    "detail": "User decision: no local pw.x. dft5090 session runs it on dev08 and returns results. Readiness check requested; reply pending."
+    "detail": "dft5090 has no route to dev08 (no DNS, ssh config or key). Needs host/account/key from the user. Candidate pw.x elsewhere: fastqe qe-orig (PWSCF 7.6, serial+OpenMP, dirty tree). Shared NFS /cluster-data exists for file exchange."
   },
   {
     "id": "I2",
@@ -13,7 +13,7 @@
     "severity": "medium",
     "status": "needs decision",
     "phase": "P2",
-    "detail": "File must be user-approved; license and checksum go in docs/upf-support.md. Not committed to Git."
+    "detail": "Candidate seen on dft5090 host: Si.pz-vbc.UPF (NC, LDA PZ, z_valence 4, sha256 e8d93375...5217) but author, date and license are blank in the file. Provenance unverified; user decides."
   },
   {
     "id": "I3",
@@ -57,11 +57,11 @@
   },
   {
     "id": "I8",
-    "title": "Complex Accelerate ABI not verified",
+    "title": "Complex linear algebra backend not decided",
     "severity": "medium",
     "status": "open",
     "phase": "P0",
-    "detail": "Only real ddot/dsyev were tested. Plane-wave code needs complex zheev/zgemm; legacy Accelerate API is also deprecated (LP64 vs ILP64 to decide)."
+    "detail": "Superseded by ADR 0003: no more hand-written FFI. Spike P0C compares faer vs LAPACK via blas-src/lapack-src for complex Hermitian eig and gemm. Partial P0B diff discarded."
   },
   {
     "id": "I9",
@@ -70,5 +70,13 @@
     "status": "mitigated",
     "phase": "P0",
     "detail": "Git metadata lives outside the worktree folder. Claude commits after verification."
+  },
+  {
+    "id": "I10",
+    "title": "Existing hand-written Accelerate FFI conflicts with library policy",
+    "severity": "low",
+    "status": "open",
+    "phase": "P0",
+    "detail": "dft-numerics ddot/dsyev FFI from P0 is to be replaced after the P0C spike."
   }
 ]

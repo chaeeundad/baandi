@@ -1,0 +1,25 @@
+# Machine-readable ownership and gates. Agents read this before editing.
+# "frozen" = public API or shared contract; change only when a ticket says so (single owner).
+[global]
+frozen = ["Cargo.toml", "rust-toolchain.toml", "docs/physics-conventions.md", "docs/schemas/", "ownership.toml", "AGENTS.md"]
+gates = "scripts/check.sh"
+
+[crates.dft-units]      # units and constants
+deps = []
+[crates.dft-geometry]   # cell, atoms, reciprocal lattice
+deps = ["dft-units"]
+[crates.dft-numerics]   # the only place with unsafe/FFI: BLAS/LAPACK/FFT adapters
+deps = []
+unsafe_allowed = true
+[crates.dft-basis]      # G-vectors, cutoff, FFT index mapping
+deps = ["dft-units", "dft-geometry", "dft-numerics"]
+[crates.dft-upf]        # independent UPF v2 NC parser
+deps = ["dft-units"]
+[crates.dft-physics]    # potentials, Hamiltonian, density, XC
+deps = ["dft-units", "dft-geometry", "dft-numerics", "dft-basis", "dft-upf"]
+[crates.dft-solvers]    # eigensolvers, mixers, SCF driver pieces
+deps = ["dft-numerics"]
+[crates.dft-engine]     # orchestration and energy audit
+deps = ["dft-physics", "dft-solvers", "dft-basis", "dft-geometry", "dft-upf"]
+[crates.dft-cli]        # I/O only, no numerics
+deps = ["dft-engine"]

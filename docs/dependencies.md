@@ -43,3 +43,17 @@ libm::erfc evaluates Ewald screening (ADR 0007). The existing xcx 0.3.1
 dev-dependency cross-checks LDA_X and supplies a loose LDA_C_PW sanity
 comparison; it remains test-only and is not a PZ81 oracle. License and
 backend decisions remain those already recorded in ADRs 0004/0005/0007.
+
+## P2A dft-upf usage
+
+No external dependency was added. The predeclared `upf` 0.1.1 reader
+(MIT OR Apache-2.0; ADR 0008) supplies typed UPF arrays; a supplemental
+metadata scanner recovers functional and cutoff indices omitted by its model.
+The reader enumerates only three numbered beta/chi entries; this limit is
+explicitly documented and rejected rather than silently truncating data.
+`thiserror` supplies typed validation errors, `libm` 0.2.16 supplies erf,
+and `dft-units` performs Ry-to-Ha conversion. Elementary l<=3 angular
+functions and index-mesh Simpson quadrature follow ADR 0008. The only
+manifest addition is the ownership-permitted dft-cli -> dft-upf path edge.
+No SHA-256 dependency or implementation was introduced. See `upf-support.md`
+for the nominal/alternative UPF unit distinction and synthetic verification.

@@ -25,3 +25,14 @@ unsafe_op_in_unsafe_fn = "deny"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 undocumented_unsafe_blocks = "deny"
+
+[workspace.dependencies]
+ndarray = "0.17"
+num-complex = "0.4"
+rustfft = "6.4"
+ndrustfft = "0.6"
+nalgebra = "0.35"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+clap = { version = "4", features = ["derive"] }

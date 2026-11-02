@@ -7,3 +7,10 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+ndarray.workspace = true
+num-complex.workspace = true
+rustfft.workspace = true
+ndrustfft.workspace = true
+thiserror.workspace = true

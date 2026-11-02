@@ -18,10 +18,10 @@
   {
     "id": "P2",
     "name": "UPF parser, local and KB nonlocal terms",
-    "status": "in progress",
-    "gates_done": 6,
+    "status": "done",
+    "gates_done": 7,
     "gates_total": 7,
-    "note": "P2A and P2B verified on synthetic fixtures (translation phase, Hermitian D, norm identity). Left: parse the real Si file (needs the user's decision) and its projector checks"
+    "note": "Parser, radial transforms, KB assembly verified on synthetic fixtures; the real Si file parses (three real-world deviations fixed in P2C and P5C) and its header matches dft5090's report"
   },
   {
     "id": "P3",
@@ -42,18 +42,18 @@
   {
     "id": "P5",
     "name": "SCF loop and total energy",
-    "status": "in progress",
-    "gates_done": 6,
+    "status": "done",
+    "gates_done": 7,
     "gates_total": 7,
-    "note": "SCF, mixers and energy audit verified on synthetic pseudopotentials (gate 7, a converged real Si run, needs the CLI and the user's UPF decision). Next: P5B CLI run and outputs"
+    "note": "Si Gamma-only LDA SCF converges (11 iterations, 1.2 s): -7.295530468210927 Ha. Not yet compared with QE (P6)"
   },
   {
     "id": "P6",
     "name": "QE reference comparison and MVP approval",
-    "status": "blocked",
+    "status": "in progress",
     "gates_done": 0,
     "gates_total": 6,
-    "note": "BLOCKED: QE reference unavailable (pw.x not installed)"
+    "note": "Reference route ready (dft5090 via dev08, pw.x 7.6). Next: QE input generator, comparison script, cutoff and grid convergence scans"
   },
   {
     "id": "P7",

@@ -64,3 +64,8 @@
 - P5A (Codex session 01a19c5d; run #1 hit a transient 'model at capacity' error, retried once via resume): SCF driver, LinearMixer and PulayMixer, term-by-term energy, ADR 0009.
 - Gaussian electrostatic cross-check passes at 3.3e-14 over 48 cases; Claude re-derived the self-energy constant. This closes the main G=0 / Ewald convention risk on synthetic systems; QE energy-component comparison remains for P6.
 - Next: P5B (CLI `run`, results.json, density file, exit codes), then the real-Si run once the user decides on the UPF.
+
+## 2026-11-02 Real Si run (R1), P2 and P5 closed
+- Si.pz-vbc.UPF transferred from dft5090 in three base64 chunks and verified (gz and original SHA-256). Real-file parsing needed P2C (relativistic="no", newline-separated arrays) and P5C (functional label with NOGX NOGC); the file was not given to Codex.
+- Real Si SCF (Gamma only, 30 Ry, a=5.43 A): converged in 11 iterations, -7.295530468210927 Ha; degenerate levels preserved to 1e-12. Recorded in docs/validation.md (R1). Not yet compared with QE.
+- Next: P6 (QE input generator, comparison script, cutoff/FFT/tolerance scans, reference runs through dft5090).

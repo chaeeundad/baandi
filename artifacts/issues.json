@@ -13,7 +13,7 @@
     "severity": "low",
     "status": "mitigated",
     "phase": "P2",
-    "detail": "User approved on 2026-11-02: internal validation only, no redistribution, never committed. Author, date, license remain unknown (PP_INFO blank). Awaiting transfer from dft5090; must match sha256 e8d93375...5217."
+    "detail": "Used for the first real run (R1) with the user's approval; provenance still unverified, stated in docs/validation.md."
   },
   {
     "id": "I3",
@@ -91,9 +91,9 @@
     "id": "I12",
     "title": "upf crate is new and little used",
     "severity": "medium",
-    "status": "open",
+    "status": "mitigated",
     "phase": "P2",
-    "detail": "ADR 0008: reading only. The Si candidate has 2 projectors, within the crate's limit of 3. Cross-check key fields on the real file once approved; fallback is a quick-xml reader."
+    "detail": "Materialized on the real file: the upf crate failed on newline-separated arrays (fixed by whitespace normalization in P2C). Real-file fields cross-checked against dft5090's report. Keep watching for further deviations in other UPF files."
   },
   {
     "id": "I13",
@@ -110,5 +110,13 @@
     "status": "open",
     "phase": "P6",
     "detail": "15^3 vs 32^3 energy difference 9.7e-8 Ha from nonlinear XC quadrature (synthetic system). Well below the 1e-4 Ha/atom target, but the FFT mesh must match QE's for comparisons and be varied in the convergence study."
+  },
+  {
+    "id": "I15",
+    "title": "Real-file deviations were invisible to synthetic fixtures",
+    "severity": "medium",
+    "status": "mitigated",
+    "phase": "P2",
+    "detail": "Three real-world UPF deviations (relativistic=no, newline-only arrays, functional label with NOGX NOGC) needed fixes found only on the real file. Lesson: add real-format variants to fixtures for each new file used; fixtures now cover them."
   }
 ]

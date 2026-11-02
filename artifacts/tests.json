@@ -131,8 +131,8 @@
     "id": "T17",
     "check": "Si Ewald energy (a=5.43 A, Z=4), informational",
     "phase": "P3",
-    "result": "pending",
-    "detail": "Value -8.39947 Ha measured; to be compared with QE's ewald contribution in P6, not asserted against any external number",
+    "result": "pass",
+    "detail": "Si Ewald -8.399471866509632 Ha (-16.7989 Ry) reproduced in the real run; QE's own 'ewald contribution' comparison is pending (P6)",
     "date": "2026-11-02"
   },
   {
@@ -173,6 +173,22 @@
     "phase": "P5",
     "result": "pass",
     "detail": "Gates re-run by Claude. Linear 252 vs Pulay 15 iterations, energy difference 1.8e-14 Ha; charge error <= 2.6e-14; min density 6.4e-3; translation 1.1e-12 Ha; functional-difference exponents 2.009/2.005/2.002; convergence needs 4 criteria plus a fixed-point certification step",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T23",
+    "check": "P5B CLI end to end on synthetic UPF: results.json fields, SHA-256 values, density files, exit codes, determinism",
+    "phase": "P5",
+    "result": "pass",
+    "detail": "Gates re-run by Claude. Energy-sum error 0, direct-engine difference 0, charge error 1.2e-14 (14 iterations in the fcc release test)",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T24",
+    "check": "Real Si.pz-vbc.UPF: inspect-upf matches dft5090's header report; SCF converges",
+    "phase": "P5",
+    "result": "pass",
+    "detail": "Converged in 11 iterations, 1.2 s, total -7.295530468210927 Ha (-14.591061 Ry). Degenerate levels equal to 1e-12 Ha. UPF sha256 e8d93375...5217 recorded in results.json. Record in docs/validation.md R1",
     "date": "2026-11-02"
   }
 ]

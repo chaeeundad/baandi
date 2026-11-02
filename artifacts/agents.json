@@ -174,9 +174,27 @@
     "id": "A20",
     "agent": "Codex",
     "role": "implementer (P5B CLI run)",
-    "state": "active",
+    "state": "done",
     "task": "P5B-CLI-RUN",
-    "ref": "pid 9834, session no sessi, task/P5B-CLI-RUN",
+    "ref": "pid 9834, session 01a19c7c, task/P5B-CLI-RUN",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A21",
+    "agent": "Codex",
+    "role": "implementer (P2C real-world UPF)",
+    "state": "done",
+    "task": "P2C-REAL-WORLD-UPF",
+    "ref": "pid 18659, session 01a19c8e, task/P2C-REAL-WORLD-UPF",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A22",
+    "agent": "Codex",
+    "role": "implementer (P5C functional string)",
+    "state": "done",
+    "task": "P5C-FUNCTIONAL-STRING",
+    "ref": "pid 24044, session 01a19c94, task/P5C-FUNCTIONAL-STRING",
     "updated": "2026-11-02"
   }
 ]

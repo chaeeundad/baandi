@@ -1,0 +1,182 @@
+{
+  "source": "QE 7.6 charge-density.dat of run qe_si30_ours (tmp_si30ours/si30ours.save), parsed read-only on dev08 by the dft5090 session with parse_rho.py (script as run is stored beside this file as parse_rho.py.txt, output verbatim in parse_rho.out.txt)",
+  "charge_density_dat_sha256": "7fdc2ce8d509ea587cc4fc55e0cc41666cc7b64d3e011902f03e51de14000f27",
+  "charge_density_dat_bytes": 167696,
+  "format": "4 Fortran sequential records, little endian: (gamma_only, ngm_g, nspin) int32; b1,b2,b3 float64; mill(3,ngm_g) int32; rho(G) complex128; units e/Bohr^3",
+  "gamma_only": 0,
+  "ngm_g": 5985,
+  "nspin": 1,
+  "rho_000": {
+    "re": 0.029617874491946364,
+    "im": 0.0
+  },
+  "sum_abs2": 0.0016169479308324026,
+  "max_abs_nonzero": {
+    "value": 0.007870760226540662,
+    "miller": [
+      0,
+      -1,
+      0
+    ]
+  },
+  "symmetry": {
+    "missing_negatives": 0,
+    "conjugate_violations_1e-12": 0,
+    "largest_deviation": 1.2266347333466993e-18
+  },
+  "samples": [
+    {
+      "miller": [
+        0,
+        0,
+        0
+      ],
+      "re": 0.029617874491946364,
+      "im": 0.0
+    },
+    {
+      "miller": [
+        1,
+        0,
+        0
+      ],
+      "re": 0.005565469785703572,
+      "im": -0.005565465837858067
+    },
+    {
+      "miller": [
+        0,
+        1,
+        0
+      ],
+      "re": 0.005565472170485251,
+      "im": -0.0055654636880720565
+    },
+    {
+      "miller": [
+        0,
+        0,
+        1
+      ],
+      "re": 0.0055654672244259155,
+      "im": -0.005565468303031364
+    },
+    {
+      "miller": [
+        1,
+        1,
+        1
+      ],
+      "re": 0.005565469196292004,
+      "im": 0.005565466417524934
+    },
+    {
+      "miller": [
+        -1,
+        1,
+        0
+      ],
+      "re": -0.000239610201271723,
+      "im": 1.0643530951717421e-09
+    },
+    {
+      "miller": [
+        2,
+        0,
+        0
+      ],
+      "re": -7.474317292605753e-10,
+      "im": -0.0034025331229332644
+    },
+    {
+      "miller": [
+        1,
+        2,
+        3
+      ],
+      "re": 2.2827593888514326e-10,
+      "im": 2.6070873233689784e-11
+    },
+    {
+      "miller": [
+        -2,
+        1,
+        2
+      ],
+      "re": -0.00017051729285829195,
+      "im": 0.00017051722303274008
+    },
+    {
+      "miller": [
+        3,
+        -1,
+        0
+      ],
+      "re": -2.1113781293095012e-10,
+      "im": -0.0003260751065056361
+    },
+    {
+      "miller": [
+        4,
+        2,
+        -3
+      ],
+      "re": 5.143202917515142e-06,
+      "im": 5.1433249481477215e-06
+    },
+    {
+      "miller": [
+        5,
+        0,
+        -5
+      ],
+      "re": 1.1353250104931511e-07,
+      "im": 1.2239864419642975e-13
+    }
+  ],
+  "first_miller_in_file_order": [
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      -1,
+      -1,
+      -1
+    ],
+    [
+      -1,
+      0,
+      0
+    ],
+    [
+      0,
+      -1,
+      0
+    ],
+    [
+      0,
+      0,
+      -1
+    ]
+  ],
+  "b_vectors_as_stored": [
+    [
+      -0.612323844648251,
+      0.612323844648251,
+      0.612323844648251
+    ],
+    [
+      0.612323844648251,
+      -0.612323844648251,
+      0.612323844648251
+    ],
+    [
+      0.612323844648251,
+      0.612323844648251,
+      -0.612323844648251
+    ]
+  ],
+  "note": "Numbers transcribed by the receiving session from the runner's message; the runner's script prints repr() of float64 values. Pseudopotential provenance unverified."
+}

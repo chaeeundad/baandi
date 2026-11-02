@@ -17,11 +17,11 @@
   },
   {
     "id": "I3",
-    "title": "FFT backend not selected",
+    "title": "FFT backend: rustfft chosen, NEON unverified",
     "severity": "medium",
-    "status": "open",
+    "status": "mitigated",
     "phase": "P1",
-    "detail": "FFTW is GPL-family; candidates need license, maintenance and Apple Silicon checks. Claude evaluates before P1."
+    "detail": "ADR 0002: rustfft (MIT/Apache) with our own 3D axis loop. Apple Silicon NEON speedup and non-power-of-two accuracy to be verified in P1."
   },
   {
     "id": "I4",

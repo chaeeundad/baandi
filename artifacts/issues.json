@@ -109,7 +109,7 @@
     "severity": "low",
     "status": "open",
     "phase": "P6",
-    "detail": "15^3 vs 32^3 energy difference 9.7e-8 Ha from nonlinear XC quadrature (synthetic system). Well below the 1e-4 Ha/atom target, but the FFT mesh must match QE's for comparisons and be varied in the convergence study."
+    "detail": "Our 25^3 and QE's automatic grid coincide at 30 Ry; QE scan at other cutoffs requested to compare grid choices. Energy change between 25^3 and 40^3 in our code: 4e-8 Ha."
   },
   {
     "id": "I15",
@@ -118,5 +118,13 @@
     "status": "mitigated",
     "phase": "P2",
     "detail": "Three real-world UPF deviations (relativistic=no, newline-only arrays, functional label with NOGX NOGC) needed fixes found only on the real file. Lesson: add real-format variants to fixtures for each new file used; fixtures now cover them."
+  },
+  {
+    "id": "I16",
+    "title": "Residual 2.6e-6 Ha one-electron difference vs QE not explained",
+    "severity": "low",
+    "status": "open",
+    "phase": "P6",
+    "detail": "All other terms agree to 1e-8 Ha. Likely a numerical-integration or tabulation detail of the pseudopotential transforms; untested. Far below the 1e-4 Ha/atom target, kept for completeness."
   }
 ]

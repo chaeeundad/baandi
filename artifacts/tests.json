@@ -64,14 +64,6 @@
     "date": "2026-11-02"
   },
   {
-    "id": "T9",
-    "check": "Total energy vs QE (Si, Gamma, LDA)",
-    "phase": "P6",
-    "result": "blocked",
-    "detail": "QE reference unavailable",
-    "date": "2026-11-02"
-  },
-  {
     "id": "T10",
     "check": "Spike P0C: faer vs LAPACK complex Hermitian eig (N up to 1000), GEMM, ndrustfft 3D FFT",
     "phase": "P0",
@@ -189,6 +181,30 @@
     "phase": "P5",
     "result": "pass",
     "detail": "Converged in 11 iterations, 1.2 s, total -7.295530468210927 Ha (-14.591061 Ry). Degenerate levels equal to 1e-12 Ha. UPF sha256 e8d93375...5217 recorded in results.json. Record in docs/validation.md R1",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T9",
+    "check": "Total energy vs QE 7.6 (Si, Gamma, LDA-PZ, 30 Ry, FFT 25^3)",
+    "phase": "P6",
+    "result": "pass",
+    "detail": "Difference 1.28e-6 Ha/atom (tolerance 1e-4); Hartree 1e-8, XC 3e-9, Ewald 1.8e-8, one-electron 2.6e-6 Ha. Real pw.x output, verified by tools; both FFT variants identical (QE auto grid = 25^3)",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T25",
+    "check": "QE eigenvalues, HOMO-LUMO gap, electron count, SCF iterations vs ours",
+    "phase": "P6",
+    "result": "pass",
+    "detail": "Eigenvalues max diff 1.27e-6 Ha (tolerance 1e-3), gap 9.8e-7 Ha, electrons 8 vs 8, 11 vs 11 iterations. Orthogonality not assessed in the comparison",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T26",
+    "check": "verify_qe.py on real bundles + 62 Python tests (real-bundle regression, negative cases)",
+    "phase": "P6",
+    "result": "pass",
+    "detail": "Tool refused the first real output (singular 'level' label), fixed in P6B; now exit 0 on si30_ours and si30_auto; format fixtures exit 4; hash and provenance mismatches exit 2",
     "date": "2026-11-02"
   }
 ]

@@ -201,9 +201,18 @@
     "id": "A23",
     "agent": "Codex",
     "role": "implementer (P6A QE tooling)",
-    "state": "active",
+    "state": "done",
     "task": "P6A-QE-TOOLING",
-    "ref": "pid 27778, session no sessi, task/P6A-QE-TOOLING",
+    "ref": "pid 27778, session 01a19c99, task/P6A-QE-TOOLING",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A24",
+    "agent": "Codex",
+    "role": "implementer (P6B verifier real format)",
+    "state": "done",
+    "task": "P6B-VERIFY-REAL-FORMAT",
+    "ref": "pid 32111, session 01a19cb3, task/P6B-VERIFY-REAL-FORMAT",
     "updated": "2026-11-02"
   }
 ]

@@ -51,9 +51,9 @@
     "id": "P6",
     "name": "QE reference comparison and MVP approval",
     "status": "in progress",
-    "gates_done": 0,
+    "gates_done": 4,
     "gates_total": 6,
-    "note": "Reference route ready (dft5090 via dev08, pw.x 7.6). Next: QE input generator, comparison script, cutoff and grid convergence scans"
+    "note": "QE 7.6 comparison at 30 Ry passes with large margins (total 1.3e-6 Ha/atom vs 1e-4, eigenvalues 1.3e-6 vs 1e-3 Ha). Left: QE cutoff scan (requested), density comparison, final approval. Pseudopotential provenance unverified"
   },
   {
     "id": "P7",

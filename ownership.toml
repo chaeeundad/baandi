@@ -22,4 +22,4 @@ deps = ["dft-numerics"]
 [crates.dft-engine]     # orchestration and energy audit
 deps = ["dft-physics", "dft-solvers", "dft-basis", "dft-geometry", "dft-upf"]
 [crates.dft-cli]        # I/O only, no numerics
-deps = ["dft-engine", "dft-units", "dft-geometry", "dft-basis"]   # direct deps on lower crates allowed until dft-engine exists
+deps = ["dft-engine", "dft-units", "dft-geometry", "dft-basis", "dft-upf"]   # direct deps on lower crates allowed until dft-engine exists

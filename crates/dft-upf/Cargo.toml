@@ -7,3 +7,9 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+upf.workspace = true
+thiserror.workspace = true
+dft-units = { path = "../dft-units" }
+libm.workspace = true

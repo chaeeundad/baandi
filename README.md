@@ -108,4 +108,4 @@ maintained general-purpose libraries over hand-written numerics or FFI;
 project code supplies physics glue. Versions, consumers and licenses are in
 [dependencies](docs/dependencies.md).
 
-No project license has been selected yet; this is pending a user decision.
+The project is licensed under the MIT License (see [LICENSE](LICENSE)), selected by the user on 2026-11-03. The Si pseudopotential used for validation is not part of the repository and is not covered by this license.

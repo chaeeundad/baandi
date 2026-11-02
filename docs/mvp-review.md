@@ -15,7 +15,7 @@ All spec gates P0 to P6 are met with evidence recorded in [validation.md](valida
 | P4 eigensolver | met | Dense (faer) versus block Davidson, degenerate and near-degenerate cases, explicit non-convergence errors |
 | P5 SCF and total energy | met | Real Si converges (11 iterations); convergence needs density, energy, eigen residual and charge criteria plus a fixed-point certification step |
 | P6 QE comparison and cutoff convergence | met | R3 to R5: total energy 1.28e-6 Ha/atom (tolerance 1e-4), eigenvalues <= 2.1e-6 Ha (1e-3), same grid, same iteration count; six cutoffs 20 to 80 Ry; density in Fourier space |
-| Documentation | met except license | README, architecture, dependencies, conventions, UPF support, CLI, validation, ADR 0001 to 0010 |
+| Documentation | met | README, architecture, dependencies, conventions, UPF support, CLI, validation, ADR 0001 to 0010 |
 | Claude final review | this document | |
 | User approval | **pending** | |
 
@@ -34,7 +34,7 @@ All spec gates P0 to P6 are met with evidence recorded in [validation.md](valida
 7. **Real-format compatibility of the verifier** was only established on one real QE output (a regression test protects it).
 
 ## Decisions that belong to the user
-- Engine license (none selected; no GPL code was copied; QE source was never read).
+- Engine license: MIT, selected by the user on 2026-11-03 (no GPL code was copied; QE source was never read).
 - Whether to accept the MVP with the pseudopotential caveat above, or to first obtain a verifiable pseudopotential.
 - When to start P7 (k-points, PBE through a library, GPU backend design). Nothing of P7 has been started.
 

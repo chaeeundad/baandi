@@ -97,4 +97,4 @@ modules; comparison tools support Python 3.9+ and are invoked with `python3 -I`.
 No pip dependency is required. Shell verification uses Cargo; the macOS benchmark
 helper uses `/usr/bin/time -l` as documented in [CLI documentation](cli.md).
 
-The project's own license is not selected; a user decision is pending.
+The project's own license is MIT (see `LICENSE`; selected by the user on 2026-11-03).

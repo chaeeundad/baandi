@@ -82,3 +82,8 @@
 ## 2026-11-03 Density comparison (R5), P6 gates complete
 - pp.x is not installed on the runner; QE's native charge-density.dat was parsed read-only instead (Fourier coefficients, no grid dependence). Comparison tool P6D merged (90 Python tests). Result: rho(0) identical, sum |rho|^2 relative 1.1e-8, largest sampled coefficient difference 4.0e-9 e/Bohr^3.
 - P6 comparison gates are all met. Remaining: documentation refresh (P6E), final review, and the user's decisions (license, MVP approval, UPF provenance statement).
+
+## 2026-11-03: MVP approved, license selected
+- The user approved the MVP (P0 to P6 gates met; see docs/mvp-review.md) with the known caveats: the validation Si UPF has unverified provenance, and the validation scope is one cell, one pseudopotential and Gamma only.
+- The user selected the MIT License. `LICENSE` added; `license = "MIT"` set in the workspace manifest and inherited by all crates.
+- The user asked to start P7 now. P7 planning follows in `docs/p7-plan.md`; no P7 code exists yet.

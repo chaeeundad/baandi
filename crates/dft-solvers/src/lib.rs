@@ -1,4 +1,6 @@
 //! Backend-independent dense and matrix-free Hermitian eigensolvers.
+pub mod mixing;
+
 use dft_numerics::linalg::{
     ComplexMatrix, LinalgError,
     MatrixOp::{Adjoint, Identity},

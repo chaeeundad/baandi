@@ -302,6 +302,22 @@ impl Hamiltonian {
             scratch,
         })
     }
+    /// Replace only the effective local samples, retaining FFT and projector plans.
+    /// Invalid input leaves the previous potential intact.
+    pub fn set_local_potential(&mut self, potential: Array3<f64>) -> Result<(), HamiltonianError> {
+        if potential.shape() != self.potential.shape() {
+            return Err(HamiltonianError::Shape);
+        }
+        if !potential.iter().all(|v| v.is_finite()) {
+            return Err(HamiltonianError::NonFinite);
+        }
+        self.potential = potential;
+        Ok(())
+    }
+    /// Read-only access for term-by-term orbital energy audits.
+    pub fn nonlocal(&self) -> &NonlocalOperator {
+        &self.nonlocal
+    }
     pub fn kinetic_diagonal(&self) -> &[f64] {
         &self.kinetic
     }

@@ -67,7 +67,7 @@ pub enum Functional {
     #[serde(rename = "lda-pz")]
     LdaPz,
 }
-/// Parsed but not used to run SCF in P1.
+/// Optional SCF controls; omitted fields use engine defaults.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scf {
@@ -76,8 +76,12 @@ pub struct Scf {
     pub energy_tolerance_ha: Option<f64>,
     pub density_residual_tolerance: Option<f64>,
     pub mixing_beta: Option<f64>,
+    pub nbands: Option<usize>,
+    pub extra_bands: Option<usize>,
+    pub eigen_tolerance: Option<f64>,
+    pub seed: Option<u64>,
 }
-/// Parsed but no output files are written in P1.
+/// Output paths resolve against the process working directory.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Output {

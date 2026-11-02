@@ -201,6 +201,13 @@ pub struct ScfProblem {
     options: ScfOptions,
     setup_time: Duration,
 }
+/// Output-oriented completion, including a nonconverged final evaluated state.
+/// Numerical failures still return `ScfError`; this is not a convergence bypass.
+pub struct ScfOutcome {
+    pub converged: bool,
+    pub result: ScfResult,
+}
+
 pub struct ScfStep {
     pub solution: EigenSolution,
     pub density: Array3<f64>,
@@ -443,7 +450,23 @@ impl ScfProblem {
             timings,
         })
     }
-    pub fn run(mut self) -> Result<ScfResult, ScfError> {
+    /// Original success-only API; exhausted budgets remain errors.
+    pub fn run(self) -> Result<ScfResult, ScfError> {
+        let outcome = self.run_impl(false)?;
+        if outcome.converged {
+            Ok(outcome.result)
+        } else {
+            Err(ScfError::NotConverged {
+                history: outcome.result.history,
+            })
+        }
+    }
+    /// Retain the last evaluated state on budget exhaustion for output clients.
+    /// Only the existing fixed-point certificate can set `converged` to true.
+    pub fn run_outcome(self) -> Result<ScfOutcome, ScfError> {
+        self.run_impl(true)
+    }
+    fn run_impl(mut self, retain_last: bool) -> Result<ScfOutcome, ScfError> {
         let start = Instant::now();
         let mut mixer: Box<dyn DensityMixer> = match self.options.mixing {
             Mixing::Linear { beta } => Box::new(LinearMixer { beta }),
@@ -586,18 +609,21 @@ impl ScfProblem {
             } else {
                 false
             };
-            if certified {
-                return Ok(ScfResult {
-                    energy: step.energy,
-                    eigenvalues: step.solution.eigenvalues,
-                    occupations: self.occupations,
-                    orbitals: step.solution.eigenvectors,
-                    density: step.density,
-                    charge,
-                    history,
-                    ewald_breakdown: self.ewald,
-                    setup_time: self.setup_time,
-                    total_time: start.elapsed() + self.setup_time,
+            if certified || (retain_last && iteration == self.options.max_iterations) {
+                return Ok(ScfOutcome {
+                    converged: certified,
+                    result: ScfResult {
+                        energy: step.energy,
+                        eigenvalues: step.solution.eigenvalues,
+                        occupations: self.occupations,
+                        orbitals: step.solution.eigenvectors,
+                        density: step.density,
+                        charge,
+                        history,
+                        ewald_breakdown: self.ewald,
+                        setup_time: self.setup_time,
+                        total_time: start.elapsed() + self.setup_time,
+                    },
                 });
             }
             let mix_start = Instant::now();

@@ -1,4 +1,4 @@
-# P1 input example
+# Input example
 
 Run from the repository root:
 
@@ -18,7 +18,7 @@ and are not wrapped. The energy input is in Ry: 30 Ry = 15 Ha.
 Only `kpoints = [[0.0, 0.0, 0.0]]` and `functional = "lda-pz"` are accepted.
 All structured sections reject unknown keys. Pseudopotential keys are
 species labels and their values are paths; every atom needs a matching
-entry. The UPF path is an intentional placeholder. P1 parses it without
+entry. The UPF path is an intentional placeholder. These commands parse it without
 checking file existence or reading UPF contents. Neither command runs SCF.
 
 The grid report prints the full complex Gamma sphere (both G and -G),
@@ -42,8 +42,18 @@ density_residual_tolerance = 1e-6
 directory = "results"
 ```
 
-Both sections and every field within them are optional. `max_iterations`
-is an integer, `mixing` and `directory` are strings, and the three tolerance/
-mixing-beta values are floats. In P1, `grid` and `validate` only type-check
-these sections and reject unknown fields; they otherwise ignore them.
-SCF semantics and output writing are deferred.
+Both sections and every field within them are optional. The run command uses
+these controls; `mixing = "pulay"` is also supported and is the default.
+`nbands`, `extra_bands`, `eigen_tolerance`, and `seed` are optional controls.
+See [CLI documentation](../docs/cli.md) for defaults and the complete output schema.
+
+```sh
+cargo run --offline -p dft-cli -- run input.toml --output-dir results
+```
+
+Supply your own supported NC SLA PZ input path; no real UPF is included here.
+Relative UPF paths resolve against the TOML directory. Output paths resolve
+against the working directory. The CLI writes results.json, density.bin and
+density.json, with checksums and reproducibility metadata. Only engine-certified
+convergence returns exit code 0; exhausted budgets write results and return 3.
+Synthetic end-to-end verification commands are documented in docs/cli.md.

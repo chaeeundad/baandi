@@ -19,3 +19,7 @@ dft-basis = { path = "../dft-basis" }
 dft-geometry = { path = "../dft-geometry" }
 dft-units = { path = "../dft-units" }
 dft-upf = { path = "../dft-upf" }
+dft-engine = { path = "../dft-engine" }
+
+[dev-dependencies]
+dft-physics = { path = "../dft-physics" }

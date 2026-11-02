@@ -94,3 +94,13 @@ reviewer must reconcile those five path dependency names when committing. No
 new package versions need resolving or downloading. All verification is offline
 on the existing Apple Silicon toolchain. Artifact/session JSON updates remain
 with the orchestrator because those files are outside this ticket's ownership.
+
+## P5B CLI output
+
+No external dependency added. The CLI uses the already adopted sha2 and
+serde_json (ADR 0010) and adds the permitted dft-engine path dependency. CLI tests additionally use
+the permitted dft-physics path dependency for the existing libm erf re-export
+in the previously verified synthetic Gaussian fixture.
+UTC civil-date formatting and compile-time git/rustc capture use std only.
+The engine input facade re-exports existing geometry/UPF types; sequential
+faer/FFT execution remains explicit in the existing numerical backend.

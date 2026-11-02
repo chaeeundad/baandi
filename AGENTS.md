@@ -24,7 +24,7 @@ Adopted so far (ADR 0004): faer, ndrustfft/rustfft, ndarray, num-complex. Prefer
 
 ## Hard rules
 - Keep `scripts/check.sh` fast: a test that takes more than about 10 s in debug must be `#[ignore]` and documented with its release-mode command (ADR 0004).
-- Out of scope until MVP approval: CUDA, Metal, MPI, PAW, USPP, PBE, forces, stress, smearing, multiple k-points.
+- MVP approved 2026-11-03; P7 in progress (see `docs/p7-plan.md`). Still out of scope unless a P7 ticket says otherwise: CUDA, Metal, MPI, PAW, USPP, forces, stress, smearing. In scope only through the named P7 tickets: multiple k-points (P7A), PBE through a library (P7B), GPU backend design note (P7C, no GPU code).
 - Never copy QE (GPL) source. Never commit UPF files. Never record numbers as "QE reference" unless they were produced by a real run with command, version, input and UPF SHA-256.
 - QE reference runs are executed remotely (dev08 via the dft5090 session). Do not install pw.x on this Mac.
 - No JSON, logging or file I/O in numerical hot loops. `unsafe` only in FFI adapters, with preconditions documented and tested.

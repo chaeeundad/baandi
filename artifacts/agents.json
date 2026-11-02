@@ -57,9 +57,9 @@
     "id": "A7",
     "agent": "Codex",
     "role": "implementer (backend spike)",
-    "state": "active",
+    "state": "done",
     "task": "P0C-BACKEND-SPIKE",
-    "ref": "pid 81382, session no sessi, task/P0C-BACKEND-SPIKE",
+    "ref": "pid 81382, session 01a19bfa, task/P0C-BACKEND-SPIKE",
     "updated": "2026-11-02"
   }
 ]

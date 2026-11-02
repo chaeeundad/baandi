@@ -5,3 +5,5 @@ results/
 *.upf
 artifacts/*.lock
 artifacts/*.tmp
+.cargo/
+vendor/

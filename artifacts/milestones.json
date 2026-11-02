@@ -1,0 +1,66 @@
+[
+  {
+    "id": "P0",
+    "name": "Bootstrap: toolchain, workspace, Accelerate ABI",
+    "status": "in progress",
+    "gates_done": 4,
+    "gates_total": 5,
+    "note": "Build, test, fmt, clippy verified by Claude. Complex-valued Accelerate calls still untested"
+  },
+  {
+    "id": "P1",
+    "name": "Units, lattice, G-vectors, FFT",
+    "status": "pending",
+    "gates_done": 0,
+    "gates_total": 7,
+    "note": "Needs FFT crate decision (license, Apple Silicon)"
+  },
+  {
+    "id": "P2",
+    "name": "UPF parser, local and KB nonlocal terms",
+    "status": "pending",
+    "gates_done": 0,
+    "gates_total": 7,
+    "note": "Needs a Si NC UPF v2 file approved by the user"
+  },
+  {
+    "id": "P3",
+    "name": "Hamiltonian, Hartree, LDA XC",
+    "status": "pending",
+    "gates_done": 0,
+    "gates_total": 6,
+    "note": "Starts after P1 and P2"
+  },
+  {
+    "id": "P4",
+    "name": "Eigensolver (dense baseline, then Davidson/LOBPCG)",
+    "status": "pending",
+    "gates_done": 0,
+    "gates_total": 5,
+    "note": "Math tests can start in parallel"
+  },
+  {
+    "id": "P5",
+    "name": "SCF loop and total energy",
+    "status": "pending",
+    "gates_done": 0,
+    "gates_total": 6,
+    "note": "Starts after P3 and P4 pass"
+  },
+  {
+    "id": "P6",
+    "name": "QE reference comparison and MVP approval",
+    "status": "blocked",
+    "gates_done": 0,
+    "gates_total": 6,
+    "note": "BLOCKED: QE reference unavailable (pw.x not installed)"
+  },
+  {
+    "id": "P7",
+    "name": "GPU, k-points, PBE, AI hooks",
+    "status": "out of scope",
+    "gates_done": 0,
+    "gates_total": 0,
+    "note": "Not allowed before P6 approval"
+  }
+]

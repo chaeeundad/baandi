@@ -1,0 +1,82 @@
+[
+  {
+    "id": "T1",
+    "check": "Codex wrapper smoke test (new mode)",
+    "phase": "P0",
+    "result": "pass",
+    "detail": "Report matched schema; session id captured; worktree removed",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T2",
+    "check": "Rust toolchain: rustc, cargo, clippy, rustfmt",
+    "phase": "P0",
+    "result": "pass",
+    "detail": "rustc 1.99.1, cargo 1.99.1, clippy 0.1.99, rustfmt 1.10.0",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T3",
+    "check": "delegate.sh syntax check",
+    "phase": "P0",
+    "result": "pass",
+    "detail": "bash -n exit 0",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T4",
+    "check": "cargo build --workspace",
+    "phase": "P0",
+    "result": "pass",
+    "detail": "Re-run by Claude, exit 0 (9 crates, 0 external deps)",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T5",
+    "check": "cargo test --workspace",
+    "phase": "P0",
+    "result": "pass",
+    "detail": "Re-run by Claude, exit 0; 10 unit tests passed, 0 failed",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T6",
+    "check": "cargo fmt --check",
+    "phase": "P0",
+    "result": "pass",
+    "detail": "Re-run by Claude, exit 0",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T7",
+    "check": "cargo clippy -D warnings",
+    "phase": "P0",
+    "result": "pass",
+    "detail": "Re-run by Claude, exit 0; first Codex run failed on lint priority, then fixed",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T8",
+    "check": "Accelerate FFI (real): ddot and dsyev on a 2x2 matrix",
+    "phase": "P0",
+    "result": "pass",
+    "detail": "ddot=32 (expected 32); dsyev eigenvalues [1, 3], INFO=0; orthogonality error 2.2e-16; all dimensionless",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T10",
+    "check": "Accelerate FFI (complex): zheev or zgemm",
+    "phase": "P0",
+    "result": "pending",
+    "detail": "Required by the P0 ticket but not covered by Codex; follow-up ticket",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T9",
+    "check": "Total energy vs QE (Si, Gamma, LDA)",
+    "phase": "P6",
+    "result": "blocked",
+    "detail": "QE reference unavailable",
+    "date": "2026-11-02"
+  }
+]

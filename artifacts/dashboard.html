@@ -1,0 +1,155 @@
+<meta name="dash-one-writer">
+<style>
+  #dash-root { --dash-gutter: clamp(16px, 3vw, 32px); }
+  .rd { display: grid; gap: var(--cds-gap-lg); max-width: 1180px; margin-inline: auto; font-family: var(--font-anthropic-sans); }
+  .rd h1 { margin: 0; font-family: var(--font-anthropic-serif); font-weight: 400; font-size: 1.75rem; }
+  .rd .take { margin: 0.25rem 0 0; color: var(--color-fg-muted); font-size: var(--cds-font-size-body); }
+  .rd .take b { color: var(--color-fg); font-variant-numeric: tabular-nums; }
+  .rd .tiles { display: grid; gap: var(--cds-gap-md); grid-template-columns: repeat(auto-fit, minmax(min(100%, 9.5rem), 1fr)); }
+  .rd .tile, .rd .card { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-lg); min-width: 0; }
+  .rd .tile .k { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .rd .tile .v { font-family: var(--font-anthropic-serif); font-size: 2rem; line-height: 1.15; font-variant-numeric: tabular-nums; }
+  .rd .tile .s { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .rd .card h2 { margin: 0; font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); }
+  .rd .card .note { margin: 0.125rem 0 var(--cds-gap-md); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  .rd .two { display: grid; gap: var(--cds-gap-lg); grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); }
+  .rd .scroll { overflow-x: auto; }
+  .rd table { width: 100%; border-collapse: collapse; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+  .rd th { text-align: left; font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); padding: 0.375rem 0.5rem; border-bottom: 1px solid var(--color-border-line); white-space: nowrap; }
+  .rd td { padding: 0.5rem; border-bottom: 1px solid var(--color-border-line); vertical-align: top; }
+  .rd tr:last-child td { border-bottom: 0; }
+  .rd .detail { color: var(--color-fg-muted); min-width: 14rem; }
+  .rd .pill::before { content: ""; display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: currentColor; margin-right: 0.375rem; }
+  .rd .pill { white-space: nowrap; }
+  .rd .st-done, .rd .r-pass, .rd .i-resolved, .rd .i-mitigated { color: var(--color-ok); }
+  .rd .st-in-progress { color: var(--color-fg); }
+  .rd .st-pending, .rd .r-pending, .rd .st-out-of-scope, .rd .i-open { color: var(--color-fg-muted); }
+  .rd .st-blocked, .rd .r-blocked, .rd .r-fail { color: var(--color-bad); }
+  .rd .i-needs-decision, .rd .sv-high { color: var(--color-warn); }
+  .rd .sv-high { font-weight: var(--cds-font-weight-medium); }
+  .rd .bar { display: block; height: 0.25rem; width: 4.5rem; margin-top: 0.25rem; border-radius: 2px; background: var(--cds-chart-grid); overflow: hidden; }
+  .rd .bar i { display: block; height: 100%; background: var(--color-ok); }
+  .rd [data-dash-source-state=empty] { color: transparent; }
+  .rd [data-dash-source-state=refreshing] { opacity: .5; transition: opacity var(--cds-dur-slow); }
+</style>
+<div class="rd">
+  <header>
+    <h1>rust-dft status</h1>
+    <p class="take"><b data-draw="done" data-source="summary" data-field="done">—</b> of <b data-draw="total" data-source="summary" data-field="total">—</b> gate checks for P0 to P6 are verified, <b data-draw="open" data-source="summary" data-field="open">—</b> issues are unresolved and <b data-draw="decide" data-source="summary" data-field="decide">—</b> of them wait for your decision.</p>
+  </header>
+
+  <section class="tiles" aria-label="Summary">
+    <div class="tile"><div class="k">MVP progress</div><div class="v" data-draw="pct" data-source="summary" data-field="pct">—</div><div class="s">verified gates, P0 to P6</div></div>
+    <div class="tile"><div class="k">Tests passed</div><div class="v" data-draw="pass" data-source="summary" data-field="pass">—</div><div class="s">logged checks</div></div>
+    <div class="tile"><div class="k">Tests pending</div><div class="v" data-draw="pending" data-source="summary" data-field="pending">—</div><div class="s">not yet run or verified</div></div>
+    <div class="tile"><div class="k">Failed or blocked</div><div class="v" data-draw="bad" data-source="summary" data-field="bad">—</div><div class="s">needs attention</div></div>
+  </section>
+
+  <section class="card">
+    <h2>Milestones</h2>
+    <p class="note">Each bar counts verified acceptance gates from the spec test lists. Gates count only after Claude re-runs them.</p>
+    <div class="scroll">
+      <table data-source="milestones" data-row-key="id">
+        <thead><tr><th data-field="id">Phase</th><th data-field="name">Milestone</th><th data-field="status">Status</th><th data-field="gates_done">Gates done</th><th data-field="gates_total">Total</th><th data-field="note">Note</th></tr></thead>
+        <tbody data-draw="ms-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="two">
+    <section class="card">
+      <h2>Issues</h2>
+      <p class="note">Open items and risks, most severe first.</p>
+      <div class="scroll">
+        <table data-source="issues" data-row-key="id">
+          <thead><tr><th data-field="id">ID</th><th data-field="title">Issue</th><th data-field="severity">Severity</th><th data-field="status">Status</th><th data-field="phase">Phase</th><th data-field="detail">Detail</th></tr></thead>
+          <tbody data-draw="is-body"></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Test results</h2>
+      <p class="note">Every result was run in this environment. Nothing is copied from a reference.</p>
+      <div class="scroll">
+        <table data-source="tests" data-row-key="id">
+          <thead><tr><th data-field="id">ID</th><th data-field="check">Check</th><th data-field="phase">Phase</th><th data-field="result">Result</th><th data-field="detail">Detail</th><th data-field="date">Date</th></tr></thead>
+          <tbody data-draw="ts-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+<script>
+  dash.calc('summary', {
+    inputs: ['milestones', 'tests', 'issues'],
+    title: 'Overall summary',
+    description: 'Verified gates, test counts and unresolved issues.',
+    fn: (milestones, tests, issues) => {
+      const sum = (a, k) => a.reduce((s, r) => s + Number(r[k]), 0);
+      const cnt = (a, k, v) => a.filter((r) => r[k] === v).length;
+      const done = sum(milestones, 'gates_done');
+      const total = sum(milestones, 'gates_total');
+      return [{
+        done, total, pct: total ? done / total : 0,
+        pass: cnt(tests, 'result', 'pass'),
+        pending: cnt(tests, 'result', 'pending'),
+        bad: cnt(tests, 'result', 'fail') + cnt(tests, 'result', 'blocked'),
+        open: issues.filter((r) => r.status !== 'resolved' && r.status !== 'mitigated').length,
+        decide: cnt(issues, 'status', 'needs decision'),
+      }];
+    },
+  });
+
+  const rowsOf = (id) => { const d = dash.data(id); return d.status === 'ok' ? d.data : null; };
+  const slug = (s) => String(s).toLowerCase().replace(/\s+/g, '-');
+  const pctFmt = d3.format('.0%');
+  const num = d3.format(',');
+
+  const tile = (name, field, fmt) => dash.draw(name, (el) => {
+    const r = rowsOf('summary');
+    el.textContent = r && r.length ? fmt(r[0][field]) : '—';
+  });
+  tile('done', 'done', num); tile('total', 'total', num); tile('open', 'open', num); tile('decide', 'decide', num);
+  tile('pct', 'pct', pctFmt); tile('pass', 'pass', num); tile('pending', 'pending', num); tile('bad', 'bad', num);
+
+  const td = (text, cls) => { const c = document.createElement('td'); c.textContent = text; if (cls) c.className = cls; return c; };
+  const pill = (text, cls) => { const c = td(text, 'pill ' + cls); return c; };
+
+  dash.draw('ms-body', (tb) => {
+    const r = rowsOf('milestones');
+    if (!r) { tb.replaceChildren(); return; }
+    tb.replaceChildren(...r.map((m) => {
+      const tr = document.createElement('tr');
+      const done = td(num(m.gates_done));
+      if (m.gates_total > 0) {
+        const bar = document.createElement('span'); bar.className = 'bar';
+        const fill = document.createElement('i'); fill.style.width = (100 * m.gates_done / m.gates_total) + '%';
+        bar.append(fill); done.append(bar);
+      }
+      tr.append(td(m.id), td(m.name), pill(m.status, 'st-' + slug(m.status)), done, td(num(m.gates_total)), td(m.note, 'detail'));
+      return tr;
+    }));
+  });
+
+  const sevRank = { high: 0, medium: 1, low: 2 };
+  dash.draw('is-body', (tb) => {
+    const r = rowsOf('issues');
+    if (!r) { tb.replaceChildren(); return; }
+    const sorted = [...r].sort((a, b) => (sevRank[a.severity] ?? 9) - (sevRank[b.severity] ?? 9));
+    tb.replaceChildren(...sorted.map((i) => {
+      const tr = document.createElement('tr');
+      tr.append(td(i.id), td(i.title), td(i.severity, 'sv-' + slug(i.severity)), pill(i.status, 'i-' + slug(i.status)), td(i.phase), td(i.detail, 'detail'));
+      return tr;
+    }));
+  });
+
+  dash.draw('ts-body', (tb) => {
+    const r = rowsOf('tests');
+    if (!r) { tb.replaceChildren(); return; }
+    tb.replaceChildren(...r.map((t) => {
+      const tr = document.createElement('tr');
+      tr.append(td(t.id), td(t.check), td(t.phase), pill(t.result, 'r-' + slug(t.result)), td(t.detail, 'detail'), td(t.date));
+      return tr;
+    }));
+  });
+</script>

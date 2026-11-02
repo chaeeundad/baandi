@@ -13,3 +13,9 @@
 - Required build/test/fmt/clippy commands executed successfully (exit 0); 10 unit tests. Initial clippy lint priority failure (101) corrected.
 - Environment, dependency inventory, P1 API proposal and ADR 0001 recorded. Offline tests use a temporary rustup home referencing verified installed 1.99.1; see docs/environment.md.
 - BLOCKED on commit: git add exited 128 because sandbox denied creation of /Users/mino/Develop/rust-dft/.git/worktrees/P0-BOOTSTRAP/index.lock. Implementation and required checks complete; no commit created. Complex ABI, FFT, QE reference and license selection remain outside P0.
+
+## 2026-11-02 P0 verified
+- Claude re-ran build, test, fmt, clippy in the P0 worktree: all exit 0 (10 unit tests). Merged to main as 7ce7209.
+- Accelerate FFI verified for real ddot and dsyev only. Complex zheev/zgemm and LP64/ILP64 choice remain open (issue I8).
+- Codex cannot write git metadata for a worktree; Claude commits after verification.
+- Status dashboard data lives in artifacts/ (see artifacts/README.md).

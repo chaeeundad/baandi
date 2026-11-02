@@ -1,0 +1,74 @@
+[
+  {
+    "id": "I1",
+    "title": "QE pw.x is not installed",
+    "severity": "high",
+    "status": "needs decision",
+    "phase": "P6",
+    "detail": "No reference engine on this Mac. P6 stays BLOCKED until the user approves an install or another reference."
+  },
+  {
+    "id": "I2",
+    "title": "No Si norm-conserving UPF v2 chosen",
+    "severity": "medium",
+    "status": "needs decision",
+    "phase": "P2",
+    "detail": "File must be user-approved; license and checksum go in docs/upf-support.md. Not committed to Git."
+  },
+  {
+    "id": "I3",
+    "title": "FFT backend not selected",
+    "severity": "medium",
+    "status": "open",
+    "phase": "P1",
+    "detail": "FFTW is GPL-family; candidates need license, maintenance and Apple Silicon checks. Claude evaluates before P1."
+  },
+  {
+    "id": "I4",
+    "title": "codex mcp-server removed from Codex CLI",
+    "severity": "medium",
+    "status": "mitigated",
+    "phase": "P0",
+    "detail": "Using codex exec through scripts/delegate.sh (approved by the user). Verified by the smoke test and the P0 run."
+  },
+  {
+    "id": "I5",
+    "title": "Codex sandbox blocks network",
+    "severity": "low",
+    "status": "open",
+    "phase": "P0",
+    "detail": "No external crates in P0. Crates must be vetted and fetched by Claude."
+  },
+  {
+    "id": "I6",
+    "title": "delegate.sh fork mode untested",
+    "severity": "low",
+    "status": "open",
+    "phase": "P0",
+    "detail": "new mode verified by smoke test; fork and resume still unverified."
+  },
+  {
+    "id": "I7",
+    "title": "Engine LICENSE not decided",
+    "severity": "low",
+    "status": "needs decision",
+    "phase": "P0",
+    "detail": "Left to the user; no GPL code is copied."
+  },
+  {
+    "id": "I8",
+    "title": "Complex Accelerate ABI not verified",
+    "severity": "medium",
+    "status": "open",
+    "phase": "P0",
+    "detail": "Only real ddot/dsyev were tested. Plane-wave code needs complex zheev/zgemm; legacy Accelerate API is also deprecated (LP64 vs ILP64 to decide)."
+  },
+  {
+    "id": "I9",
+    "title": "Codex sandbox cannot commit in a worktree",
+    "severity": "low",
+    "status": "mitigated",
+    "phase": "P0",
+    "detail": "Git metadata lives outside the worktree folder. Claude commits after verification."
+  }
+]

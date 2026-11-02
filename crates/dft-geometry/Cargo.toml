@@ -7,3 +7,7 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+nalgebra.workspace = true
+thiserror.workspace = true

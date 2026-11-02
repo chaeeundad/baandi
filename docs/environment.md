@@ -101,3 +101,13 @@ and VECLIB_MAXIMUM_THREADS=1 settings above.
 | `cargo fmt --check` | 0 |
 | `cargo clippy --workspace --all-targets -- -D warnings` | first 101 (lint group priority), then 0 after setting group priority=-1 |
 | `cargo test -p dft-numerics -- --nocapture` | 0 (2 native tests, values above) |
+
+## P1A: Accelerate FFI removed
+
+Per ADR 0004, P1A removes `dft-numerics/src/accelerate.rs` and its native ABI
+tests. The P0 ABI discussion and measurements above are historical, not the
+current implementation. The foundation now uses safe Rust nalgebra geometry
+and reusable ndrustfft handlers over rustfft, with no Accelerate linkage in
+workspace source. FFT normalization and tolerances are specified in
+`physics-conventions.md`. Offline checks use the verified Rust 1.99.1 temporary
+rustup-home procedure above; no global toolchain changes are needed.

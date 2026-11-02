@@ -376,5 +376,23 @@
     "ended_at": "2026-11-02T14:29:25Z",
     "exit_code": 0,
     "note": ""
+  },
+  {
+    "run_id": "P6B-VERIFY-REAL-FORMAT#1",
+    "task_id": "P6B-VERIFY-REAL-FORMAT",
+    "mode": "new",
+    "role": "implementer (P6B verifier real format)",
+    "status": "running",
+    "codex_pid": 32111,
+    "wrapper_pid": 32086,
+    "session_id": null,
+    "branch": "task/P6B-VERIFY-REAL-FORMAT",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P6B-VERIFY-REAL-FORMAT",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P6B-VERIFY-REAL-FORMAT.md",
+    "report": null,
+    "started_at": "2026-11-02T14:39:44Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

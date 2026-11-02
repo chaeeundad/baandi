@@ -1,0 +1,17 @@
+{
+  "command": "cd ~/rustdft_p6\nsource ~/fq/env.sh\nexport OMP_NUM_THREADS=1 MKL_NUM_THREADS=1\ntimeout 14400 mpirun -np 4 --map-by core --bind-to core ~/fq/builds/orig-mpi-dfti/bin/pw.x -in qe_si30_auto.in > qe_si30_auto.out 2> qe_si30_auto.err",
+  "qe_version": "Program PWSCF v.7.6 starts on  2Nov2026 at 23:32: 0",
+  "host": "dev08 (192.168.0.228), Rocky Linux 9.7",
+  "mpi_processes": 4,
+  "omp_threads": 1,
+  "date_utc": "2026-11-02T14:32:00Z",
+  "input_sha256": "61f0499c2056a5668c1b3a5ad6004aa6c0e8f44abb3cbe93185b34b51d209887",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "wall_time_s": 0.07,
+  "returned_by": "dft5090 session (Claude Remote Control), relayed by the 'master' bridge; executed on dev08",
+  "notes": "Automatic FFT grid (no nr1..nr3 in the input); QE chose 25x25x25. wall_time_s is QE's own WALL value (0.07 s; the runner's shell estimate was 0.175 s). stdout returned as gzip+base64; the first single-chunk transfer failed my hash check (transcription error on my side, discarded) and was resent in 8 pieces of 554 characters, every piece, the concatenation, the gzip and the stdout verified by SHA-256 on receipt. stderr (759 bytes, same PMIx and IEEE_DIVIDE_BY_ZERO notices as run A) was not returned. Pseudopotential Si.pz-vbc.UPF: provenance unverified; used with the user's approval for internal validation.",
+  "is_format_fixture": false,
+  "uptime_before": " 23:32:00 up 268 days,  4:29,  1 user,  load average: 0.09, 0.03, 0.01",
+  "mpi_launcher_options": "--map-by core --bind-to core",
+  "pw_x_path": "~/fq/builds/orig-mpi-dfti/bin/pw.x (symlink to ../PW/src/pw.x, built 2026-10-19, OpenMPI 5.0.8, MKL 2026.1)"
+}

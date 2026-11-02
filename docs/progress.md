@@ -6,3 +6,10 @@
 - pw.x(QE) 없음 → P6는 BLOCKED: QE reference unavailable.
 - Codex CLI 0.166.0 (ChatGPT 로그인). `codex mcp-server`는 제거됨(≥0.154 추정, 공식 deprecated 2026-08-24).
   결정: `codex exec` + scripts/delegate.sh 방식 (사용자 승인). 컨텍스트는 AGENTS.md + docs + fork/resume.
+
+## P0-BOOTSTRAP — 2026-11-02
+- task/P0-BOOTSTRAP: nine std-only skeleton crates, Rust 1.99.1 pin, resolver 3, shared lints.
+- Private Accelerate LP64 ddot/dsyev smoke tests: dot=32, eigenvalues=[1,3], residual=0, orthogonality error=2.2204460492503131e-16 (dimensionless).
+- Required build/test/fmt/clippy commands executed successfully (exit 0); 10 unit tests. Initial clippy lint priority failure (101) corrected.
+- Environment, dependency inventory, P1 API proposal and ADR 0001 recorded. Offline tests use a temporary rustup home referencing verified installed 1.99.1; see docs/environment.md.
+- BLOCKED on commit: git add exited 128 because sandbox denied creation of /Users/mino/Develop/rust-dft/.git/worktrees/P0-BOOTSTRAP/index.lock. Implementation and required checks complete; no commit created. Complex ABI, FFT, QE reference and license selection remain outside P0.

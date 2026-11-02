@@ -1,0 +1,27 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/dft-units",
+    "crates/dft-geometry",
+    "crates/dft-numerics",
+    "crates/dft-basis",
+    "crates/dft-upf",
+    "crates/dft-physics",
+    "crates/dft-solvers",
+    "crates/dft-engine",
+    "crates/dft-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "deny"

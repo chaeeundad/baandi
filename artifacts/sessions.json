@@ -304,5 +304,23 @@
     "ended_at": "2026-11-02T13:37:08Z",
     "exit_code": 0,
     "note": ""
+  },
+  {
+    "run_id": "P5B-CLI-RUN#1",
+    "task_id": "P5B-CLI-RUN",
+    "mode": "new",
+    "role": "implementer (P5B CLI run)",
+    "status": "running",
+    "codex_pid": 9834,
+    "wrapper_pid": 9819,
+    "session_id": null,
+    "branch": "task/P5B-CLI-RUN",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P5B-CLI-RUN",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P5B-CLI-RUN.md",
+    "report": null,
+    "started_at": "2026-11-02T13:39:45Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

@@ -169,5 +169,14 @@
     "task": "P5A-SCF-ENERGY",
     "ref": "pid 5961, session 01a19c5d, task/P5A-SCF-ENERGY",
     "updated": "2026-11-02"
+  },
+  {
+    "id": "A20",
+    "agent": "Codex",
+    "role": "implementer (P5B CLI run)",
+    "state": "active",
+    "task": "P5B-CLI-RUN",
+    "ref": "pid 9834, session no sessi, task/P5B-CLI-RUN",
+    "updated": "2026-11-02"
   }
 ]

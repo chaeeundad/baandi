@@ -23,6 +23,8 @@
   .rd .pill { white-space: nowrap; }
   .rd .st-done, .rd .r-pass, .rd .i-resolved, .rd .i-mitigated { color: var(--color-ok); }
   .rd .st-in-progress { color: var(--color-fg); }
+  .rd .a-active { color: var(--color-ok); }
+  .rd .a-queued, .rd .a-done { color: var(--color-fg-muted); }
   .rd .st-pending, .rd .r-pending, .rd .st-out-of-scope, .rd .i-open { color: var(--color-fg-muted); }
   .rd .st-blocked, .rd .r-blocked, .rd .r-fail { color: var(--color-bad); }
   .rd .i-needs-decision, .rd .sv-high { color: var(--color-warn); }
@@ -43,6 +45,17 @@
     <div class="tile"><div class="k">Tests passed</div><div class="v" data-draw="pass" data-source="summary" data-field="pass">—</div><div class="s">logged checks</div></div>
     <div class="tile"><div class="k">Tests pending</div><div class="v" data-draw="pending" data-source="summary" data-field="pending">—</div><div class="s">not yet run or verified</div></div>
     <div class="tile"><div class="k">Failed or blocked</div><div class="v" data-draw="bad" data-source="summary" data-field="bad">—</div><div class="s">needs attention</div></div>
+  </section>
+
+  <section class="card">
+    <h2>Agents</h2>
+    <p class="note">Who is working on what. Codex runs as separate one-shot sessions, one worktree per task.</p>
+    <div class="scroll">
+      <table data-source="agents" data-row-key="id">
+        <thead><tr><th data-field="id">ID</th><th data-field="agent">Agent</th><th data-field="role">Role</th><th data-field="state">State</th><th data-field="task">Task</th><th data-field="ref">Branch / session</th><th data-field="updated">Updated</th></tr></thead>
+        <tbody data-draw="ag-body"></tbody>
+      </table>
+    </div>
   </section>
 
   <section class="card">
@@ -114,6 +127,16 @@
 
   const td = (text, cls) => { const c = document.createElement('td'); c.textContent = text; if (cls) c.className = cls; return c; };
   const pill = (text, cls) => { const c = td(text, 'pill ' + cls); return c; };
+
+  dash.draw('ag-body', (tb) => {
+    const r = rowsOf('agents');
+    if (!r) { tb.replaceChildren(); return; }
+    tb.replaceChildren(...r.map((a) => {
+      const tr = document.createElement('tr');
+      tr.append(td(a.id), td(a.agent), td(a.role), pill(a.state, 'a-' + slug(a.state)), td(a.task, 'detail'), td(a.ref), td(a.updated));
+      return tr;
+    }));
+  });
 
   dash.draw('ms-body', (tb) => {
     const r = rowsOf('milestones');

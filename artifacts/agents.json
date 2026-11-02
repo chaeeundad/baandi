@@ -1,0 +1,6 @@
+[
+  {"id": "A1", "agent": "Claude Code", "role": "Architect, orchestrator, reviewer", "state": "active", "task": "Status dashboard; next: FFT crate evaluation and the complex Accelerate ticket", "ref": "this session", "updated": "2026-11-02"},
+  {"id": "A2", "agent": "Codex", "role": "Implementer", "state": "queued", "task": "P0b: complex Accelerate FFI check (zheev, zgemm), not started", "ref": "no session yet", "updated": "2026-11-02"},
+  {"id": "A3", "agent": "Codex", "role": "Implementer", "state": "done", "task": "P0-BOOTSTRAP: workspace and Accelerate smoke test. Reviewed and merged by Claude", "ref": "task/P0-BOOTSTRAP, session 01a19bd8", "updated": "2026-11-02"},
+  {"id": "A4", "agent": "Codex", "role": "Implementer", "state": "done", "task": "SMOKE: read-only wrapper test; worktree removed", "ref": "session 01a19bd7", "updated": "2026-11-02"}
+]

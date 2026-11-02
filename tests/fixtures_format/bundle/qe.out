@@ -1,0 +1,23 @@
+FORMAT FIXTURE: synthetic self-test, not a reference
+Program PWSCF v.TEST starts on invented date
+number of electrons = 2.0
+number of Kohn-Sham states = 3
+kinetic-energy cutoff = 20.0 Ry
+charge density cutoff = 80.0 Ry
+number of k points = 1
+Dense grid: 1111 G-vectors FFT dimensions: ( 12, 15, 18 )
+Exchange-correlation = SLA PZ NOGX NOGC ( 1 1 0 0 )
+convergence has been achieved in 11 iterations
+End of self-consistent calculation
+k = 0.0000 0.0000 0.0000 ( 1111 PWs) bands (ev):
+
+30234.873304304598 60469.746608609195 90704.619912913782
+
+highest occupied, lowest unoccupied levels (ev): 30234.873304304598 60469.746608609195
+! total energy = 46666.6662 Ry
+one-electron contribution = 13333.333200000001 Ry
+hartree contribution = 8888.8888000000006 Ry
+xc contribution = 11111.111000000001 Ry
+ewald contribution = 13333.333199999999 Ry
+PWSCF : 1.11s CPU 2.22s WALL
+JOB DONE.

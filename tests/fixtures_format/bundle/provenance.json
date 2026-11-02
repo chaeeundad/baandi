@@ -1,0 +1,14 @@
+{
+  "command": "FORMAT FIXTURE ONLY; no command was run",
+  "qe_version": "Program PWSCF v.TEST starts on invented date",
+  "host": "invented",
+  "mpi_processes": 1,
+  "omp_threads": 1,
+  "date_utc": "2026-01-01T00:00:00Z",
+  "input_sha256": "e9e0ab6b3201e4c77a7a4fcfc36e5be1dcadc388a9c143b9e0a1d778508b0a0c",
+  "upf_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "wall_time_s": 1111.1111,
+  "returned_by": "test generator",
+  "notes": "synthetic self-test, not a reference",
+  "is_format_fixture": true
+}

@@ -322,5 +322,23 @@
     "ended_at": "2026-11-02T13:53:09Z",
     "exit_code": 0,
     "note": ""
+  },
+  {
+    "run_id": "P2C-REAL-WORLD-UPF#1",
+    "task_id": "P2C-REAL-WORLD-UPF",
+    "mode": "new",
+    "role": "implementer (P2C real-world UPF)",
+    "status": "done",
+    "codex_pid": 18659,
+    "wrapper_pid": 18641,
+    "session_id": "01a19c8e-2b26-73c0-890c-0bd2c8dd9371",
+    "branch": "task/P2C-REAL-WORLD-UPF",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P2C-REAL-WORLD-UPF",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P2C-REAL-WORLD-UPF.md",
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P2C-REAL-WORLD-UPF/report.json",
+    "started_at": "2026-11-02T13:58:45Z",
+    "ended_at": "2026-11-02T14:03:03Z",
+    "exit_code": 0,
+    "note": ""
   }
 ]

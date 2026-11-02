@@ -135,3 +135,78 @@ gate; run `scripts/check.sh` and
 - Hartree G=0 handling, ionic terms, and energy double counting.
 - UPF projector conventions, XC parameterization, and SCF convergence.
 - QE constant agreement and physical reference validation (P6).
+
+## 6. P1B Gamma-only basis and density sphere
+
+This section defines the P1B items previously listed as not yet defined.
+Miller indices (m1,m2,m3) in Z^3 label G = m1*b1 + m2*b2 + m3*b3,
+where the reciprocal columns B come from dft-geometry in Bohr^-1.
+`PlaneWaveBasis` stores the cutoff in Hartree and each vector's Miller
+indices, Cartesian components (Bohr^-1), and squared norm (Bohr^-2).
+It includes the full complex Gamma sphere, including G=0 and both G and
+-G; it is not the real-Gamma half sphere.
+
+The wavefunction inclusion condition is
+`0.5*|G|^2 <= Ecut_wfc*(1 + 1e-12)`. The density basis uses cutoff
+`4*Ecut_wfc` with the identical relative boundary allowance, hence radius
+2*Gmax_wfc. Sums and differences of two wavefunction vectors lie within
+this density sphere, including the same relative radial allowance.
+Cutoffs must be finite and positive; nonrepresentable bounds are errors.
+
+Enumeration uses the duality identity m_i = a_i dot G / (2*pi).
+Cauchy-Schwarz gives |m_i| <= |a_i|*Gmax/(2*pi) even for skewed cells.
+The implementation uses the tolerance-expanded radius, rounds the bound
+up, and adds one integer for floating-point rounding protection before
+looping over the full box. Tests independently enumerate a box two larger
+on every side for cubic, fcc primitive, hexagonal and strongly skewed
+triclinic cells. Vectors are sorted by ascending computed |G|^2, without a
+comparison tolerance, then by (m1,m2,m3) lexicographically for exact ties.
+G=0 is first. A cubic reciprocal unit lattice tests the exact 0.5 Ha shell
+and both sides of the boundary allowance.
+
+## 7. P1B FFT grid and index tables
+
+For the density sphere let M_i = max |m_i|. The required axis lengths are
+2*M_i + 1, ensuring distinct sampled frequencies for all density vectors.
+Automatic grid selection rounds each required length up to the next
+integer having only prime factors 2, 3 and 5 (including 1). This is an
+independent implementation, not a claim of agreement with QE; P6 compares.
+An explicit override must meet every required length; otherwise
+`GridTooSmall` is returned. Larger overrides need not be smooth.
+Zero dimensions and unrepresentable storage sizes are rejected.
+
+An axis frequency m maps to m for m >= 0 and n+m for m < 0.
+The canonical allowed interval is `-floor(n/2) <= m <= floor((n-1)/2)`;
+in particular even grids allow -n/2 and reject +n/2, matching section 4.
+Out-of-range indices return `IndexOutOfRange`. Grid construction stores
+coefficient-to-grid indices and a C-order flat grid-to-coefficient table;
+entries outside the selected coefficient basis are None. Grid dimensions
+and tables are immutable after validation. Supply the density basis from
+the same cell and four-times wavefunction cutoff when constructing a grid.
+
+Coefficient vectors use the G-list order. Scatter fills an
+`Array3<Complex64>` with zeros and writes each c(G) to its mapped index.
+Gather reads these indices in G-list order. Wrong coefficient counts and
+array shapes are typed errors. No data-dependent transform shortcuts are
+used. As with the FFT backend, allocation failure is not recoverable;
+large but representable inputs can demand substantial time and memory.
+
+## 8. P1B normalization verification
+
+With sum_G |c(G)|^2 = 1, apply P1A `to_real` to the scattered coefficients
+and divide the result by sqrt(Omega) to obtain psi(r). Then
+`(Omega/N) * sum_r |psi(r)|^2 = 1`. Fixed-seed normalized complex test
+coefficients verify scatter -> to_real -> to_reciprocal -> gather with
+maximum absolute coefficient error < 1e-12 and the normalization identity
+with absolute dimensionless error < 1e-12. Repeating on an enlarged grid
+must preserve gathered coefficients with maximum absolute error < 1e-12.
+
+The large-cutoff count test compares the discrete full-sphere count to
+`Omega*Gmax^3/(6*pi^2)` (sphere volume divided by reciprocal-cell volume).
+A cubic fixture has Miller-space radius 20; a 5% relative bound allows
+finite-shell lattice-point fluctuations and is only an asymptotic sanity
+check. The Si primitive fixture at a=5.43 Angstrom and Ecut_wfc=30 Ry prints
+its counts and FFT dimensions and checks internal consistency only. These
+are not external reference numbers. All P1B tests belong to the fast debug
+gate and can be inspected with
+`cargo test --offline -p dft-basis -p dft-cli -- --nocapture`.

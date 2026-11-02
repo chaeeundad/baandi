@@ -148,7 +148,11 @@ checksum = "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6"
 name = "dft-basis"
 version = "0.1.0"
 dependencies = [
+ "dft-geometry",
+ "dft-numerics",
+ "dft-units",
  "nalgebra",
+ "ndarray",
  "num-complex",
  "thiserror",
 ]
@@ -158,6 +162,9 @@ name = "dft-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "dft-basis",
+ "dft-geometry",
+ "dft-units",
  "serde",
  "thiserror",
  "toml",

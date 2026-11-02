@@ -12,3 +12,9 @@ workspace = true
 nalgebra.workspace = true
 num-complex.workspace = true
 thiserror.workspace = true
+ndarray.workspace = true
+dft-geometry = { path = "../dft-geometry" }
+dft-units = { path = "../dft-units" }
+
+[dev-dependencies]
+dft-numerics = { path = "../dft-numerics" }

@@ -1,4 +1,6 @@
 //! Reusable complex FFTs with explicit plane-wave normalization.
+pub mod linalg;
+
 use ndarray::Array3;
 use ndrustfft::{FftHandler, ndfft, ndifft};
 use num_complex::Complex64;

@@ -1,0 +1,17 @@
+{
+  "is_format_fixture": true,
+  "schema_version": 1,
+  "xc": "lda-pz",
+  "species": [{"name": "Xx", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "functional": "SLA PZ"}],
+  "cell": {"lattice_columns_bohr": [[4.0, 0.125, 0.25], [0.5, 5.0, 0.75], [0.875, 1.25, 6.0]]},
+  "atoms": [{"species": "Xx", "fractional": [0.125, 0.25, 0.5]}],
+  "cutoff": {"ecutwfc_ry": 20.0},
+  "basis": {"n_plane_waves": 1111, "fft_grid": [12, 15, 18]},
+  "electrons": 2.0,
+  "bands": 3,
+  "occupations": [2.0, 0.0, 0.0],
+  "scf": {"density_residual_tolerance": 1e-7},
+  "convergence": {"converged": true, "iterations": 11, "last_iteration": {"relative_charge_error": 0.0, "max_eigen_residual_ha": 0.0}},
+  "energies": {"kinetic": {"ha": 1111.1111}, "local": {"ha": 2222.2222}, "nonlocal": {"ha": 3333.3333}, "hartree": {"ha": 4444.4444}, "xc": {"ha": 5555.5555}, "ewald": {"ha": 6666.6666}, "total": {"ha": 23333.3331}},
+  "eigenvalues": {"ha": [1111.1111, 2222.2222, 3333.3333]}
+}

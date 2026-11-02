@@ -1,6 +1,6 @@
 # Candidate Si pseudopotential (facts reported by dft5090)
 
-Reported by the `dft5090` session on 2026-11-02 after a read-only inspection; not verified by this session. The file is NOT in this repository and must never be committed.
+Reported by the `dft5090` session on 2026-11-02 after a read-only inspection; not verified by this session. The file is NOT in this repository and must never be committed. (Use approved by the user on 2026-11-02, see "Decision record".)
 
 | Item | Reported value |
 | --- | --- |
@@ -17,3 +17,6 @@ Reported by the `dft5090` session on 2026-11-02 after a read-only inspection; no
 - 2 projectors is within the `upf` crate reader limit (3). Mesh length, units and the Coulomb tail match the assumptions of P2A.
 - The projector cutoff index 359 should be used as the valid prefix (P2A already stores the valid prefix); verify that the transform does not change when integrating to the full mesh.
 - Use as an internal validation input only; do not redistribute. Final use needs the user's decision (issue I2).
+
+## Decision record
+2026-11-02: the user approved using this file ("응 사용해봐"). Conditions kept by the project: internal validation use only; no redistribution or packaging; never committed (see .gitignore); provenance and license remain **unverified** and must be stated in docs/validation.md and any report that uses it. The local copy lives outside the repository (`../rust-dft-wt/pseudo/Si.pz-vbc.UPF`) and must match the sha256 above before use.

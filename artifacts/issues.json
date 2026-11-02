@@ -9,11 +9,11 @@
   },
   {
     "id": "I2",
-    "title": "No Si norm-conserving UPF v2 chosen",
-    "severity": "medium",
-    "status": "needs decision",
+    "title": "Si.pz-vbc.UPF approved for internal use; provenance unverified",
+    "severity": "low",
+    "status": "mitigated",
     "phase": "P2",
-    "detail": "dft5090 inspected Si.pz-vbc.UPF (NC, LDA PZ, Z=4, 2 projectors, tail -2Z/r matches). Facts in docs/candidate-si-upf.md. Author, date, license and generation input are blank: provenance unverified. Needs the user's decision before P5."
+    "detail": "User approved on 2026-11-02: internal validation only, no redistribution, never committed. Author, date, license remain unknown (PP_INFO blank). Awaiting transfer from dft5090; must match sha256 e8d93375...5217."
   },
   {
     "id": "I3",

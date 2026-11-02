@@ -57,3 +57,19 @@ functions and index-mesh Simpson quadrature follow ADR 0008. The only
 manifest addition is the ownership-permitted dft-cli -> dft-upf path edge.
 No SHA-256 dependency or implementation was introduced. See `upf-support.md`
 for the nominal/alternative UPF unit distinction and synthetic verification.
+
+## P2B Hamiltonian path dependencies
+
+`dft-physics` adds only the ownership-approved workspace path dependencies
+`dft-upf` (validated radial transforms) and `dft-solvers` (LinearOperator;
+solver comparisons in tests). No external crates, versions or licenses change.
+The test imports the existing synthetic UPF text generator with a selectable
+801-point resolution; the default UPF fixture remains 601 points. Production
+numerics perform no parsing or I/O during application.
+
+Cargo automatically adds these two path edges to its lockfile while running
+checks. The ticket forbids retaining Cargo.lock edits, so the original lockfile
+is restored after verification. The reviewer must include those two dependency
+names in the dft-physics lockfile entry when committing the manifest change.
+Artifact/session registry paths are outside this ticket's ownership; the final
+structured report supplies gate evidence for the orchestrator to reconcile.

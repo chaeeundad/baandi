@@ -561,3 +561,296 @@ structural requirements, not adjustable tolerances. All P2A test tolerances,
 mesh sizes and measured errors are listed in `upf-support.md`. Unsampled
 origin behavior, producer-dependent beta scaling, and exponentially small
 large-G signals remain explicit numerical/input limitations.
+
+## 19. P2B ionic and Kleinman–Bylander operators
+
+`dft_physics::hamiltonian` uses the fixed full-complex basis order of section 6.
+`Species` supplies a validated potential and Cartesian atomic positions in Bohr.
+For each species s, S_s(G)=sum_I exp(-i G.tau_I). `ionic_local` returns
+V_ion(G)=sum_s v_s(|G|) S_s(G), in Ha, **only on the supplied density sphere**;
+all other Fourier components are zero. Supply the density basis of the same
+cell and four-times wavefunction cutoff. The local transform already contains
+1/Omega and the Coulomb tail of section 16. For G=0 use alpha_z(), including
+its finite reference remainder, exactly once per atom. Nonzero modes use
+at_g(), without an additional alpha-Z shift. Scatter on the density mapping
+and apply to_real to obtain the grid potential; its imaginary roundoff is
+retained for inspection by the caller before conversion to a real array.
+
+Rayleigh expansion and translation of beta_i(r)Y_lm(rhat) give
+
+```text
+P_{I,i,m}(G) = <G|beta_{I,i,l,m}>
+            = Omega^(-1/2) exp(-i G.tau_I) (-i)^l Y_lm(Ghat) B_i(|G|)
+V_NL = sum_{I,i,j,m} |beta_{I,i,m}> D_ij <beta_{I,j,m}|
+p_{I,j,m} = sum_G conj(P_{I,j,m}(G)) c(G)
+(V_NL c)(G) = sum_{I,i,j,m} P_{I,i,m}(G) D_ij p_{I,j,m}.
+```
+
+B is the radial transform of section 17, with no additional 4*pi. The real
+harmonics use section 15, ordered m=-l..l for each radial projector. At G=0
+we evaluate the harmonic along the positive z axis: all l>0 radial transforms
+vanish exactly, and Y_00=1/sqrt(4*pi), so this choice has no physical effect.
+Nonzero D entries between unequal l are explicitly rejected (also rejected
+by the parser); coupling is repeated only for matching l and m. The parser's
+symmetry allowance of 1e-12 Ha is retained without symmetrizing D.
+
+Construction evaluates each radial transform once per species, radial index
+and G, and each harmonic per channel and G; atoms reuse these tables with
+individual translation phases. Stored atom columns and small channel coupling
+matrices are exposed read-only. Application first projects, then couples and
+expands; no plane-wave-square matrix is stored. P is dimensionless under the
+nominal UPF units and D and V_NL are in Ha. The public standalone nonlocal
+apply allocates its small projection buffer; Hamiltonian application reuses it.
+
+## 20. P2B local convolution and Hamiltonian lifecycle
+
+`Hamiltonian::new` takes a real Array3<f64> V_eff(r) in Ha, the wavefunction
+basis and cell, and its nonlocal operator. The caller forms V_eff from ionic,
+Hartree and XC contributions; no SCF or energy assembly occurs here. The cell,
+basis and nonlocal volume must describe the same physical cell. The constructor
+checks the nonlocal G list against the wavefunction basis and derives the
+minimum density grid from the supplied cell and cutoff, accepting any larger
+valid dimensions supplied by the potential. All values must be finite.
+
+```text
+(V_eff c)(G) = gather(to_reciprocal(V_eff(r)*to_real(scatter(c))))
+(H c)(G) = (|G|^2/2)c(G) + (V_eff c)(G) + (V_NL c)(G).
+```
+
+The wavefunction normalization factors sqrt(Omega) cancel between the two
+transforms. Section 4's FFT scaling therefore gives v0*c for constant V_eff.
+The reciprocal and real scratch arrays, FFT plan and projection scratch are
+allocated at construction. `LinearOperator::apply` and `apply_block` reuse
+these across calls; the block method borrows scratch once and streams columns.
+Interior mutability is needed for the trait's shared receiver. The operator is
+not Sync; a conflicting scratch borrow returns an application error. Backend
+lane allocation remains possible as described in section 5. No per-call plan
+creation, numerical I/O, unsafe code or input-dependent FFT shortcuts occur.
+
+For Fourier support inside the density sphere the local matrix element is
+exactly V_eff(G-G') up to roundoff. Indeed every difference G-G' is inside
+that sphere, with axis bounds M_i, and every supported potential mode also
+has bounds M_i. A wrapped equality q=G-G' modulo n_i would require a nonzero
+multiple of n_i with magnitude at most 2*M_i, whereas n_i>=2*M_i+1. Thus none
+is possible, even though the full product may have modes outside the grid.
+
+Outside-sphere components require care: represented canonical modes outside
+the sphere have no projected matrix elements, since G-G' is inside it. They
+do not automatically cause aliasing. True unresolved high frequencies can
+alias into the sphere on sampling; for example a cosine with Miller index
+(n1+1,0,0) samples identically to (1,0,0), causing a spurious 0.5 Ha matrix
+element for a unit-Ha cosine. `truncate_to_density_sphere` FFTs the input,
+zeros represented coefficients outside the supplied density sphere, and
+inverts. It returns real values, discarding imaginary roundoff (the retained
+sphere contains both signs and excludes Nyquist modes). It cannot remove
+already-aliased in-sphere coefficients. Resolve the original function on a
+sufficiently fine grid before truncating if such frequencies matter.
+
+## 21. P2B independent synthetic validation
+
+The in-memory UPF fixture is SYNTHETIC Xx, Z=4, with two s and one p Gaussian
+projector and a symmetric D with off-diagonal s coupling. It uses 801 logarithmic
+radial points to 12 Bohr and an erf-screened Coulomb local potential. The
+existing UPF test generator now exposes `fixture_with_points`; its original
+`fixture()` still uses 601 points. No parser behavior or real UPF data changed.
+All ordinary tests use the fcc diamond primitive cell, a=5.43 Angstrom,
+two atoms, Ecut_wfc=6 Ry, 65 plane waves and a 12x12x12 FFT grid.
+
+Reference matrices are built entrywise: local entries look up independently
+indexed Fourier coefficients at the signed Miller difference (no FFT), kinetic
+entries use |G|^2/2, and nonlocal entries explicitly sum atom and radial pairs.
+Reference projector columns use separate Cartesian s,p harmonics and sine/cosine
+phases and the trusted P2A radial transform; they do not read production tables.
+The full Hamiltonian test includes ionic Fourier coefficients plus small real
+band-limited terms. Grid samples are synthesized by a direct Fourier sum.
+Fixed-seed complex vectors exercise Hermiticity. No tolerance is inferred from
+the observed result or loosened after testing.
+
+| Check | Bound |
+| --- | --- |
+| Ionic imaginary part / maximum real magnitude | <1e-12 |
+| Ionic translation and direct coefficients | max absolute <1e-12 Ha |
+| One-atom structure-factor modulus error | <1e-12 |
+| Projector columns and translation | max absolute <1e-12, dimensionless |
+| Nonlocal dense action | max absolute <1e-12 Ha |
+| Nonlocal and H Hermiticity | relative <1e-12 |
+| p-channel angular sum vs (3/(4*pi*Omega))*B_1(q)^2 | relative <1e-12 |
+| Local convolution and constant potential action | max absolute <1e-12 Ha |
+| H entries vs independent dense matrix | max absolute <1e-11 Ha |
+| Free-electron dense eigenvalues | max absolute <1e-12 Ha |
+| Full dense eigenvalues vs independent matrix | max absolute <1e-11 Ha |
+| Lowest eight Davidson eigenvalues vs independent dense matrix | max absolute <1e-9 Ha |
+| Davidson absolute residual 2-norm | <1e-10 Ha |
+| Block vs separate applications | max absolute <1e-14 Ha |
+| Consecutive applications | identical arrays |
+| Filter retention/removal; analytic alias example | max absolute <1e-12 Ha |
+
+The large-cutoff projector norm check is ignored in debug. The exact identity
+for a periodized localized projector b(r)=beta_i(r)Y_lm(rhat) is
+
+```text
+sum_G |P(G)|^2 = integral_cell |sum_R b(r-R)|^2 dr
+              = sum_R integral_R3 conj(b(r)) b(r-R) dr.
+```
+
+The R=0 term is integral_0^infinity |u_i(r)|^2 dr, dimensionless. Equality to
+that isolated radial norm requires nonoverlapping periodic images (or the
+large-cell limit), not merely increasing cutoff. The ignored test reports
+finite sums at 16 and 64 Ry for all five channels, alongside the radial norm
+and relative differences; there is no unjustified convergence tolerance.
+Gaussian image overlaps and radial quadrature error remain at fixed cell.
+
+Reproduction (offline toolchain alias on this host):
+
+```sh
+export PATH=/opt/homebrew/opt/rustup/bin:$PATH
+export RUSTUP_HOME=/private/tmp/p0c-rustup
+scripts/check.sh
+cargo test --offline -p dft-physics -p dft-upf -- --nocapture
+cargo test --offline --release -p dft-physics --test hamiltonian projector_norm_convergence -- --ignored --nocapture
+```
+
+These comparisons are mathematical synthetic tests, not QE references.
+
+Measured P2B results on this host (the commands above exited 0): ionic
+imaginary/real ratio 0; translation error 5.721958498152797e-17 Ha;
+alpha-Z 0.046523648459421495 Ha per atom. Nonlocal action error
+1.1487223069389168e-15 Ha, relative Hermiticity 3.3647837479443684e-16,
+and p rotation relative error 6.249593393505841e-16. Local convolution
+error 9.485749680535094e-16 Ha; full H entry error 8.883093345818638e-16 Ha;
+relative H Hermiticity 6.864949379572692e-16; block error 0. Davidson took
+88 iterations with maximum residual 8.749042190309645e-11 Ha and eigenvalue
+error 9.769962616701378e-15 Ha. The complete fast P2B test binary took
+5.88 seconds; the release norm test took 0.04 seconds, excluding compilation.
+
+| Cutoff | Plane waves | Relative norm difference, s0 | s1 | each p channel |
+| --- | --- | --- | --- | --- |
+| 16 Ry | 283 | 1.3107218632658238e-3 | 2.2330470096246616e-5 | 9.001145971986984e-3 |
+| 64 Ry | 2277 | 4.423816356522835e-11 | 2.3077474408052375e-5 | 9.001139925153145e-3 |
+
+Radial norms are 0.15666426716443535, 0.44311346272637686 and
+1.831615675600615, respectively (dimensionless). The broader projectors'
+nonvanishing fixed-cell differences illustrate the periodic-image caveat;
+no isolated-norm equality at fixed cell size is asserted.
+
+## 22. P2B review: isolated normalization and independent image evidence
+
+`projector_norm_isolation_and_images` closes the fixed-cell ambiguity in
+section 21. It is ignored in debug and must be run with:
+
+```sh
+export PATH=/opt/homebrew/opt/rustup/bin:$PATH
+export RUSTUP_HOME=/private/tmp/p0c-rustup
+cargo test --offline --release -p dft-physics --test hamiltonian projector_norm_isolation_and_images -- --ignored --nocapture
+scripts/check.sh
+```
+
+There is one atom at the origin in a cubic cell of side 40 Bohr. The actual
+last radial mesh point is 12.000000000000012 Bohr. The nearest-image
+**support-to-support gap** is 40-2*12 = 16 Bohr (15.999999999999975 in floating
+point), exceeding the required 10 Bohr. The stored cutoff makes each
+projector zero beyond this radius, so distinct periodic supports do not overlap.
+The exact complete-basis identity is
+
+```text
+b(r) = beta_i(r) Y_lm(rhat)
+P(G) = Omega^(-1/2) integral_R3 b(r) exp(-i G.r) dr
+sum_G |P(G)|^2 = integral_cell |sum_R b(r-R)|^2 dr
+              = integral_R3 |b(r)|^2 dr
+                + sum_{R != 0} integral_R3 conj(b(r)) b(r-R) dr.
+```
+
+The isolated term is integral |u_i(r)|^2 dr, because u=r*beta and the
+harmonic has unit angular norm. All these norms and overlaps are dimensionless.
+The test evaluates the production projector columns, including every m, at
+four cutoffs. The largest-cutoff relative error must be below **1e-8 for
+each channel**. Errors must decrease while above that bound; strict
+monotonicity is not imposed once quadrature and summation roundoff dominate.
+No pre-existing tolerance changed.
+
+The initial 32 Ry endpoint failed for s0 with error 5.334481956165149e-7.
+This was investigated using independent Cartesian Gaussian Fourier integrals,
+not accepted by relaxing the bound. For beta=exp(-a*r^2),
+
+```text
+|P_s(G)|^2 = pi^2/(4*Omega*a^3) * exp(-G^2/(2*a))
+|P_p_axis(G)|^2 = |P_s(G)|^2 * 3*G_axis^2/(4*a^2).
+```
+
+Here a=1, 1/2, 1/3 Bohr^-2 for s0, s1, p respectively; p uses the second
+formula with a=1/3. The independently summed s0 deficit at 32 Ry is
+5.334481676388947e-7, and numerical-versus-analytic norm error is
+2.799222200852258e-14 relative to the radial norm. Thus the failed endpoint
+is a resolved finite reciprocal-cutoff tail, not an unexplained normalization
+error. The test now includes 64 Ry and asserts numerical-versus-analytic
+agreement below 1e-10 at every cutoff and for every channel.
+
+Measured absolute relative differences from isolated radial norms:
+
+| Cutoff (Ry) | Plane waves | s0, m=0 | s1, m=0 | p, m=-1 | p, m=0 | p, m=+1 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 8 | 24405 | 4.624596137854697e-2 | 1.146562961354958e-3 | 2.205771232657305e-4 | 2.205771232665077e-4 | 2.205771232669518e-4 |
+| 16 | 68999 | 1.148225308833961e-3 | 5.370953475303253e-7 | 3.689525795991244e-9 | 3.689526462125059e-9 | 3.689527017236571e-9 |
+| 32 | 195269 | 5.334481956165149e-7 | 5.007105841059456e-14 | 3.169686735304822e-13 | 3.177458296477198e-13 | 3.181899188575699e-13 |
+| 64 | 552629 | 2.709721336202620e-12 | 5.007105841059456e-14 | 3.169686735304822e-13 | 3.177458296477198e-13 | 3.181899188575699e-13 |
+
+To predict the Si-cell image contribution independently, the test integrates
+the Gaussian translated overlap analytically in real space. Completing the
+square with t=r-R/2 gives
+
+```text
+I_s(R)/I_s(0) = exp(-a*R^2/2)
+I_p_axis(R)/I_p_axis(0) = (1-a*R_axis^2) exp(-a*R^2/2).
+```
+
+The p factor follows from the Gaussian moment
+< t_axis^2 > = 1/(4*a), since
+r_axis*(r_axis-R_axis) = t_axis^2-R_axis^2/4. Its negative contributions
+explain why the periodic p norm is smaller than the isolated norm. The test
+sums these real-space overlaps over nonzero fcc translations with Miller
+coordinates in [-4,4]^3 and verifies agreement with [-5,5]^3 to 1e-15
+absolute. It does not use production radial transforms, Bessel functions,
+harmonics or projector tables to compute the predicted image corrections.
+
+The Gaussian formulas extend to infinity, whereas the fixture stops at
+12 Bohr. This difference is negligible with an explicit bound: the largest
+omitted radial norm fraction, for p, is 1.4597160698215574e-39, obtained
+from integral_12^infinity r^4 exp(-2*r^2/3) dr using integration by parts
+and erfc. Cauchy-Schwarz bounds the overlap perturbation per image relative
+to the isolated norm by 2*sqrt(f)+f. Across the 728 nonzero translations
+in [-4,4]^3 this is below 5.563e-17. Outside that box,
+R^2 >= a_lattice^2*|m|^2/4, so the closest possible omitted image is farther
+than 25.65 Bohr and the compact supports cannot overlap. The remaining
+infinite-Gaussian image tail is bounded by
+
+```text
+sum_{k=5}^infinity (2*k+1)^3 * (1+3*a_lattice^2*k^2)
+                 * exp(-a_lattice^2*k^2/24) < 2.446e-41.
+```
+
+Here k=max|m_i|; the overestimate counts an entire cube per shell and uses
+the slowest exponent a=1/3. Successive terms are bounded by a geometric
+ratio (6/5)^5*exp(-11*a_lattice^2/24). These errors are far smaller than
+the required image-correction comparison tolerance.
+
+At 64 Ry in the original Si cell, define the signed correction
+(sum_G |P|^2 / radial_norm)-1. The independent prediction and measured result:
+
+| Channel | Measured signed correction | Predicted signed image correction | Relative disagreement |
+| --- | --- | --- | --- |
+| s1 | +2.307747440810637e-5 | +2.307747440887537e-5 | 3.332257552956900e-11 |
+| p, m=-1 | -9.001139925153168e-3 | -9.001139925151924e-3 | 1.381821349982378e-13 |
+| p, m=0 | -9.001139925153168e-3 | -9.001139925151926e-3 | 1.379894123552834e-13 |
+| p, m=+1 | -9.001139925153168e-3 | -9.001139925151922e-3 | 1.383748576411921e-13 |
+
+Each of these four comparisons asserts relative disagreement below **1e-3**.
+The corresponding absolute image terms are +1.022593959629611e-5 for s1
+and approximately -1.648662898518281e-2 for each p channel. For completeness,
+s0's measured correction is 4.423816868381891e-11 versus prediction
+4.438073340755477e-11; its tiny signal is limited by finite-cutoff and
+floating-point errors, so it is checked with the isolated 1e-8 absolute
+relative-norm bound, not the s1/p image-signal-relative certificate.
+
+The release test passed in 13.80 seconds excluding compilation. This evidence
+separates normalization correctness in the isolated cell from the independently
+predicted periodic-image contribution in Si; no production code changed.

@@ -19,5 +19,8 @@ dft-geometry = { path = "../dft-geometry" }
 dft-numerics = { path = "../dft-numerics" }
 dft-basis = { path = "../dft-basis" }
 
+dft-upf = { path = "../dft-upf" }
+dft-solvers = { path = "../dft-solvers" }
+
 [dev-dependencies]
 xcx.workspace = true

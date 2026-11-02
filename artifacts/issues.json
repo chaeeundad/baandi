@@ -102,5 +102,13 @@
     "status": "mitigated",
     "phase": "P2",
     "detail": "No suitable permissive light crate (scilib is GPL-3.0; scirs2-special not trialed). Verified by identities and closed forms, not by a library oracle."
+  },
+  {
+    "id": "I14",
+    "title": "Minimal FFT grid changes XC energy by 1e-7 Ha",
+    "severity": "low",
+    "status": "open",
+    "phase": "P6",
+    "detail": "15^3 vs 32^3 energy difference 9.7e-8 Ha from nonlinear XC quadrature (synthetic system). Well below the 1e-4 Ha/atom target, but the FFT mesh must match QE's for comparisons and be varied in the convergence study."
   }
 ]

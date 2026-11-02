@@ -42,10 +42,10 @@
   {
     "id": "P5",
     "name": "SCF loop and total energy",
-    "status": "pending",
-    "gates_done": 0,
-    "gates_total": 6,
-    "note": "Ready to start on synthetic pseudopotentials: SCF, mixing, energy audit"
+    "status": "in progress",
+    "gates_done": 6,
+    "gates_total": 7,
+    "note": "SCF, mixers and energy audit verified on synthetic pseudopotentials (gate 7, a converged real Si run, needs the CLI and the user's UPF decision). Next: P5B CLI run and outputs"
   },
   {
     "id": "P6",

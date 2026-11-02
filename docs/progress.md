@@ -59,3 +59,8 @@
 ## 2026-11-02 P2B merged
 - P2B (Codex session 01a19c4c) merged. Review question on projector norms (p stuck at 9.0e-3) settled by measurement: isolated-cell norm error 3e-13, Si image overlap predicted to 1e-13.
 - P3 gates complete on synthetic pseudopotentials. Next: P5A (SCF, mixing, total energy audit, electrostatic cross-check) on synthetic PPs; real Si file waits for the user's decision.
+
+## 2026-11-02 P5A merged
+- P5A (Codex session 01a19c5d; run #1 hit a transient 'model at capacity' error, retried once via resume): SCF driver, LinearMixer and PulayMixer, term-by-term energy, ADR 0009.
+- Gaussian electrostatic cross-check passes at 3.3e-14 over 48 cases; Claude re-derived the self-energy constant. This closes the main G=0 / Ewald convention risk on synthetic systems; QE energy-component comparison remains for P6.
+- Next: P5B (CLI `run`, results.json, density file, exit codes), then the real-Si run once the user decides on the UPF.

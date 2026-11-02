@@ -156,9 +156,18 @@
     "id": "A18",
     "agent": "Codex",
     "role": "implementer (P5A SCF and energy)",
-    "state": "active",
+    "state": "failed",
+    "task": "P5A-SCF-ENERGY: Run ended by transient Codex service error ('Selected model is at capacity') after writing crates/dft-solvers/src/mixing.rs",
+    "ref": "pid 4031, session 01a19c5d, task/P5A-SCF-ENERGY",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A19",
+    "agent": "Codex",
+    "role": "implementer (P5A retry 1)",
+    "state": "done",
     "task": "P5A-SCF-ENERGY",
-    "ref": "pid 4031, session no sessi, task/P5A-SCF-ENERGY",
+    "ref": "pid 5961, session 01a19c5d, task/P5A-SCF-ENERGY",
     "updated": "2026-11-02"
   }
 ]

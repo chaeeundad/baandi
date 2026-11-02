@@ -158,5 +158,21 @@
     "result": "pass",
     "detail": "Isolated-cell norm error 5e-14 (s1) and 3e-13 (p) at 32 Ry, s0 needs 64 Ry (2.7e-12). Si-cell deviations predicted to 3e-11 (s1) and 1.4e-13 (p) relative. Release test 13.8 s, ignored in debug",
     "date": "2026-11-02"
+  },
+  {
+    "id": "T21",
+    "check": "P5A electrostatic cross-check: engine (Hartree + alpha-Z local + point-charge Ewald + derived Gaussian self-energy) vs pure reciprocal-space direct energy",
+    "phase": "P5",
+    "result": "pass",
+    "detail": "48 cases (3 rc, 2 cells incl. skewed, several shapes, translation): max relative discrepancy 3.3e-14, required 1e-9. Constant C derived analytically (self-energy Z^2/(sqrt(2 pi) rc) minus erfc pair terms), read and re-derived by Claude",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T22",
+    "check": "P5A SCF on synthetic Si-like system: linear vs Pulay, charge conservation, positivity, seeds, fixed-point and quadratic functional checks, divergence, invariances",
+    "phase": "P5",
+    "result": "pass",
+    "detail": "Gates re-run by Claude. Linear 252 vs Pulay 15 iterations, energy difference 1.8e-14 Ha; charge error <= 2.6e-14; min density 6.4e-3; translation 1.1e-12 Ha; functional-difference exponents 2.009/2.005/2.002; convergence needs 4 criteria plus a fixed-point certification step",
+    "date": "2026-11-02"
   }
 ]

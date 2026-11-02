@@ -10,10 +10,10 @@
   {
     "id": "P1",
     "name": "Units, lattice, G-vectors, FFT",
-    "status": "pending",
-    "gates_done": 0,
+    "status": "in progress",
+    "gates_done": 5,
     "gates_total": 7,
-    "note": "Ready to start: backend libraries decided (ADR 0004)"
+    "note": "P1A merged: units, lattice, 3D FFT verified. P1B left: G-vector cutoff boundary, plane-wave to grid round trip, basis and CLI output"
   },
   {
     "id": "P2",

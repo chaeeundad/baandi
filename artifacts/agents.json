@@ -61,5 +61,32 @@
     "task": "P0C-BACKEND-SPIKE",
     "ref": "pid 81382, session 01a19bfa, task/P0C-BACKEND-SPIKE",
     "updated": "2026-11-02"
+  },
+  {
+    "id": "A8",
+    "agent": "Codex",
+    "role": "implementer (P1A foundation)",
+    "state": "done",
+    "task": "P1A-FOUNDATION",
+    "ref": "pid 84356, session 01a19c0c, task/P1A-FOUNDATION",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A9",
+    "agent": "Codex",
+    "role": "implementer (P1A fix 1)",
+    "state": "failed",
+    "task": "P1A-FOUNDATION: resume failed at argument parsing (exit 2): resume does not accept -C/-s",
+    "ref": "pid 85432, session 01a19c0c, task/P1A-FOUNDATION",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A10",
+    "agent": "Codex",
+    "role": "implementer (P1A fix 1)",
+    "state": "done",
+    "task": "P1A-FOUNDATION",
+    "ref": "pid 85592, session 01a19c0c, task/P1A-FOUNDATION",
+    "updated": "2026-11-02"
   }
 ]

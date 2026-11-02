@@ -36,3 +36,8 @@
 ## 2026-11-02 P0 closed, backend decided
 - Spike P0C (Codex, session 01a19bfa) re-run by Claude in release: all tolerances held. ADR 0004 adopts faer (complex Hermitian eig, GEMM) and ndrustfft (3D FFT). Spike code kept at tag spike/p0c, results doc merged.
 - P0 gates 5/5. Next: P1 (units, lattice, G-vectors, FFT on ndrustfft), which also deletes the hand-written FFI.
+
+## 2026-11-02 P1A merged
+- Codex P1A (session 01a19c0c): units, Cell/reciprocal lattice, FftPlan3d on ndrustfft, physics-conventions.md. Claude review found value-dependent shortcuts in the FFT that made the constant test vacuous; removed via resume (run #3), tests now tolerance-based.
+- delegate.sh fixes found by real use: resume rejects -C/-s, stale report was read as result, relative prompt path after cd.
+- Remaining for P1: G-vector cutoff, density/FFT grid rule, plane-wave<->grid mapping, CLI (ticket P1B).

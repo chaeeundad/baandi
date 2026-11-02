@@ -78,5 +78,21 @@
     "result": "pass",
     "detail": "Re-run by Claude in release (6.75 s). Eigenvalue diff 2.1e-13 at N=1000; FFT round trip worst 1.6e-15; Parseval worst 1.9e-14; all asserted tolerances held",
     "date": "2026-11-02"
+  },
+  {
+    "id": "T11",
+    "check": "P1A: lattice duality, volumes, FFT round trip, Parseval, signed modes, constant function, band-limited across grids",
+    "phase": "P1",
+    "result": "pass",
+    "detail": "Re-run by Claude after fix. Duality 1.4e-14, FFT round trip 1.8e-15, Parseval 3.6e-15, constant leakage 1.1e-16; no unsafe left in workspace",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T12",
+    "check": "Review gate: no value-dependent shortcuts inside FFT",
+    "phase": "P1",
+    "result": "pass",
+    "detail": "Found and removed exact-equality shortcuts that made the constant test vacuous; tests now use 1e-14 tolerances",
+    "date": "2026-11-02"
   }
 ]

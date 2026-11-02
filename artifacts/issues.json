@@ -45,7 +45,7 @@
     "severity": "low",
     "status": "open",
     "phase": "P0",
-    "detail": "new mode verified by smoke test; fork and resume still unverified."
+    "detail": "new and resume verified in real runs (resume needed three wrapper fixes). fork still unverified."
   },
   {
     "id": "I7",
@@ -75,9 +75,9 @@
     "id": "I10",
     "title": "Existing hand-written Accelerate FFI conflicts with library policy",
     "severity": "low",
-    "status": "open",
+    "status": "resolved",
     "phase": "P1",
-    "detail": "Hand-written real ddot/dsyev FFI in dft-numerics is deleted in P1 (ADR 0004)."
+    "detail": "Hand-written FFI deleted in P1A; zero unsafe in the workspace."
   },
   {
     "id": "I11",

@@ -124,5 +124,23 @@
     "ended_at": "2026-11-02T11:45:24Z",
     "exit_code": 2,
     "note": "resume failed at argument parsing (exit 2): resume does not accept -C/-s; wrapper wrongly read the stale report as done. Fixed in delegate.sh"
+  },
+  {
+    "run_id": "P1A-FOUNDATION#3",
+    "task_id": "P1A-FOUNDATION",
+    "mode": "resume",
+    "role": "implementer (P1A fix 1)",
+    "status": "done",
+    "codex_pid": 85592,
+    "wrapper_pid": 85580,
+    "session_id": "01a19c0c-7d32-72e3-8189-2b7b425d69e4",
+    "branch": "task/P1A-FOUNDATION",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P1A-FOUNDATION",
+    "ticket": "/Users/mino/Develop/rust-dft/.delegate/p1a_fix1.md",
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P1A-FOUNDATION/report.json",
+    "started_at": "2026-11-02T11:46:03Z",
+    "ended_at": "2026-11-02T11:46:59Z",
+    "exit_code": 0,
+    "note": ""
   }
 ]

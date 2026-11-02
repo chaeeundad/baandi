@@ -120,3 +120,31 @@ not certify a clean worktree. With `--emit-qe-inputs`, every point emits both
 explicit-our-grid and automatic-QE-grid inputs plus their sidecars. Manifest
 entries bind each input hash to its matching results path/hash and expected UPF
 digest. No QE execution or comparison occurs during a scan.
+
+## R2: rust-dft convergence scans, real Si (ours only, no QE yet)
+- Engine commit: `bf65e26f15a060f3c180f7fbbaeaf852a34d2368`; release build; single thread.
+- Command: `python3 -I scripts/convergence_scan.py --input ../rust-dft-wt/runs/si_30ry/input.toml --dft-cli ./target/release/dft-cli --out-dir ../rust-dft-wt/runs/si_scan --scan all --emit-qe-inputs --pseudo-dir /home/mino/fq/pseudo --upf-name Si.pz-vbc.UPF` (32 s).
+- Base input sha256 `30d9dc99f2439f3997d9583bf67762d32b1397e6137300c0edb3a3abc2dcf2bd`; UPF sha256 `e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217` (provenance unverified, see top of this file).
+- Results (energies in Ha, two atoms; the "difference to finest" column is relative to the last/finest point of each scan):
+
+| point_id | parameter | total_energy_ha | energy_per_atom_ha | difference_to_finest_ha | gap_ev | iterations | wall_time_s |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 000-ecut-20Ry | 20Ry | -7.291089364151892 | -3.645544682075946 | 0.004951545907649901 | 2.132876256889901 | 11 | 0.475500333 |
+| 001-ecut-25Ry | 25Ry | -7.294268118369173 | -3.6471340591845864 | 0.0017727916903691465 | 2.136868446135041 | 11 | 0.510810167 |
+| 002-ecut-30Ry | 30Ry | -7.295530468210927 | -3.6477652341054636 | 0.0005104418486148177 | 2.136426740250426 | 11 | 1.172997791 |
+| 003-ecut-40Ry | 40Ry | -7.295929509540116 | -3.647964754770058 | 0.00011140051942604146 | 2.136181653414427 | 11 | 1.6263766670000002 |
+| 004-ecut-50Ry | 50Ry | -7.296019054644814 | -3.648009527322407 | 2.1855414727767197e-05 | 2.13599958636852 | 11 | 3.229204833 |
+| 005-ecut-60Ry | 60Ry | -7.296038607887422 | -3.648019303943711 | 2.3021721196059275e-06 | 2.1359951394486782 | 11 | 3.177454084 |
+| 006-ecut-80Ry | 80Ry | -7.296040910059542 | -3.648020455029771 | 0.0 | 2.135991484381121 | 11 | 6.002052917 |
+| 007-grid-automatic | automatic | -7.295530468210927 | -3.6477652341054636 | 4.132113762267409e-08 | 2.136426740250426 | 11 | 1.189520917 |
+| 008-grid-0-25x25x25 | 0-25x25x25 | -7.295530468210927 | -3.6477652341054636 | 4.132113762267409e-08 | 2.136426740250426 | 11 | 1.176850291 |
+| 009-grid-1-32x32x32 | 1-32x32x32 | -7.295530546544072 | -3.647765273272036 | -3.7012006792735974e-08 | 2.1364271673422257 | 11 | 1.6912443750000001 |
+| 010-grid-2-40x40x40 | 2-40x40x40 | -7.295530509532065 | -3.6477652547660324 | 0.0 | 2.136427387739426 | 11 | 3.505630833 |
+| 011-tolerance-1e-05 | 1e-05 | -7.295530468209554 | -3.647765234104777 | 1.3873346915715956e-12 | 2.136426261911646 | 8 | 1.064756625 |
+| 012-tolerance-1e-06 | 1e-06 | -7.295530468209568 | -3.647765234104784 | 1.3731238368563936e-12 | 2.136426261911551 | 8 | 1.100988959 |
+| 013-tolerance-1e-07 | 1e-07 | -7.295530468210927 | -3.6477652341054636 | 1.4210854715202004e-14 | 2.136426740250426 | 11 | 1.186914625 |
+| 014-tolerance-1e-08 | 1e-08 | -7.295530468210915 | -3.6477652341054574 | 2.6645352591003757e-14 | 2.13642680073045 | 15 | 1.245200917 |
+| 015-tolerance-1e-09 | 1e-09 | -7.295530468210941 | -3.6477652341054707 | 0.0 | 2.1364268001950073 | 18 | 1.333065417 |
+
+- Reading: (1) cutoff: the energy decreases monotonically; at 30 Ry it is 5.1e-4 Ha (2.6e-4 Ha/atom) above the 80 Ry value, at 50 Ry 2.2e-5 Ha, at 60 Ry 2.3e-6 Ha. A comparison with QE must use the same cutoff, not an absolute converged value. (2) FFT grid at 30 Ry: 25^3, 32^3, 40^3 differ by at most 7.8e-8 Ha (XC quadrature); the gap changes by 1e-6 eV. (3) SCF tolerance: density tolerance 1e-5 already reproduces the 1e-9 energy to 1.4e-12 Ha (the energy is stationary, error quadratic in the density residual); eigenvalue/gap digits keep changing at the 1e-7 eV level until the tolerance is 1e-7.
+- Status: **ours only.** Matching QE inputs were generated for every scan point (22 files, manifest in the scan directory) but no QE run has been compared yet.

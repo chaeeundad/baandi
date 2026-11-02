@@ -29,3 +29,6 @@
 - AI-first structure: AGENTS.md (read order), docs/INDEX.md, ownership.toml, tickets/, scripts/check.sh, per-crate AGENTS.md.
 - Codex run registry: artifacts/sessions.json written by scripts/delegate.sh (PID, role, session, status, exit code); `delegate.sh stop` kills only the recorded PID.
 - dft5090 reported it cannot reach dev08; waiting for user to supply a connection path.
+
+## 2026-11-02 QE reference route ready (reported)
+- dft5090 reported dev08 access, pw.x 7.6 (orig-mpi-dfti), idle node, scp exchange, and the same Si.pz-vbc.UPF digest on both of its hosts. Details and run protocol: docs/reference-environment.md. UPF provenance remains unverified (blank author/license).

@@ -1,11 +1,11 @@
 [
   {
     "id": "I1",
-    "title": "dev08 unreachable for QE reference runs",
-    "severity": "high",
-    "status": "needs decision",
+    "title": "QE reference route to dev08",
+    "severity": "low",
+    "status": "mitigated",
     "phase": "P6",
-    "detail": "dft5090 has no route to dev08 (no DNS, ssh config or key). Needs host/account/key from the user. Candidate pw.x elsewhere: fastqe qe-orig (PWSCF 7.6, serial+OpenMP, dirty tree). Shared NFS /cluster-data exists for file exchange."
+    "detail": "dft5090 reports pw.x 7.6 (orig-mpi-dfti, MPI, MKL) reachable on dev08, idle, key ssh, scp exchange. Reported not verified; see docs/reference-environment.md. First real run happens in P6."
   },
   {
     "id": "I2",
@@ -13,7 +13,7 @@
     "severity": "medium",
     "status": "needs decision",
     "phase": "P2",
-    "detail": "Candidate seen on dft5090 host: Si.pz-vbc.UPF (NC, LDA PZ, z_valence 4, sha256 e8d93375...5217) but author, date and license are blank in the file. Provenance unverified; user decides."
+    "detail": "Si.pz-vbc.UPF exists on dev08 (NC, LDA PZ, z_valence 4, sha256 e8d93375...5217) but author, date and license are blank. Provenance unverified; needs a user decision before use."
   },
   {
     "id": "I3",

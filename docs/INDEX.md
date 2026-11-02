@@ -13,6 +13,7 @@
 | Current state and history | `progress.md`, `../artifacts/*.json` |
 | Codex run registry (PID, role, session, status) | `../artifacts/sessions.json` |
 | Report schema for Codex results | `schemas/report.schema.json` |
+| QE reference environment and run protocol | `reference-environment.md` |
 | Physics conventions, units, normalization (to be written in P1) | `physics-conventions.md` |
 | Validation evidence and reference provenance (to be written in P6) | `validation.md` |
 

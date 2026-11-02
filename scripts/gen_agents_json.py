@@ -7,8 +7,8 @@ state = {"running": "active", "done": "done", "blocked": "blocked", "failed": "f
 rows = [
     {"id": "A1", "agent": "Claude Code", "role": "Architect, orchestrator, reviewer", "state": "active",
      "task": "Library survey (ADR 0003), AI-first repo structure; next: backend spike P0C", "ref": "this session", "updated": "2026-11-02"},
-    {"id": "A2", "agent": "dft5090", "role": "Remote QE reference runner (via dev08)", "state": "blocked",
-     "task": "Cannot reach dev08 (no host/account/key). Waiting for the user to provide a connection path", "ref": "Remote Control session", "updated": "2026-11-02"},
+    {"id": "A2", "agent": "dft5090", "role": "Remote QE reference runner (via dev08)", "state": "idle",
+     "task": "Readiness check done: pw.x 7.6 on dev08 reachable (reported). Waiting for P6 inputs with SHA-256", "ref": "Remote Control session", "updated": "2026-11-02"},
 ]
 for i, r in enumerate(runs, start=3):
     pid = f"pid {r['codex_pid']}" if r.get("codex_pid") else "pid not recorded"

@@ -179,3 +179,152 @@ fn supplemental_metadata_and_storage_boundaries() {
     assert_eq!(p.projectors()[0].radial_times_r(), u);
     assert!(p.projector_transform(0, 1.0).unwrap().is_finite());
 }
+
+#[test]
+fn real_world_layouts_are_bit_exact() {
+    use common::{Options, fixture_with_options};
+    // Zero tolerance in the stored UPF units and converted atomic units.
+    let bits = |xs: &[f64]| xs.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    let baseline = Options {
+        wavefunctions: true,
+        ..Options::default()
+    };
+    let expected = parse_upf(&fixture_with_options(601, &baseline)).unwrap();
+    for (relativistic, wrap, separator, crlf) in [
+        ("no", false, " ", false),
+        ("nonrelativistic", false, " ", false),
+        ("scalar", true, " ", false),
+        ("scalar", true, " ", true),
+        ("scalar", false, "\t", false),
+        ("scalar", false, "  ", false),
+        ("scalar", false, "\r", false),
+        ("scalar", false, "\x0c", false),
+        ("scalar", false, "\x0b", false),
+        ("no", true, " \t  \r\x0c", true),
+    ] {
+        let options = Options {
+            relativistic,
+            wrap,
+            separator,
+            crlf,
+            wavefunctions: true,
+        };
+        let text = fixture_with_options(601, &options);
+        if wrap {
+            // Both the mesh (601) and D (9) end with a one-value row.
+            for tag in ["PP_R", "PP_DIJ"] {
+                let start = text.find(&format!("<{tag} columns=\"4\">")).unwrap();
+                let end = text.find(&format!("</{tag}>")).unwrap();
+                assert_eq!(
+                    text[start..end]
+                        .lines()
+                        .last()
+                        .unwrap()
+                        .split_ascii_whitespace()
+                        .count(),
+                    1
+                );
+            }
+        }
+        let actual = parse_upf(&text).unwrap();
+        for (a, b) in [
+            (actual.mesh().r(), expected.mesh().r()),
+            (actual.mesh().rab(), expected.mesh().rab()),
+            (actual.local_hartree(), expected.local_hartree()),
+            (actual.dij_hartree(), expected.dij_hartree()),
+            (&actual.raw().local.values, &expected.raw().local.values),
+            (
+                &actual.raw().nonlocal.dij.values,
+                &expected.raw().nonlocal.dij.values,
+            ),
+            (&actual.raw().rhoatom.values, &expected.raw().rhoatom.values),
+        ] {
+            assert_eq!(bits(a), bits(b));
+        }
+        for (a, b) in actual.projectors().iter().zip(expected.projectors()) {
+            assert_eq!(bits(a.radial_times_r()), bits(b.radial_times_r()));
+        }
+        use upf::model::PpChiNode;
+        let orbital_bits = |p: &dft_upf::Pseudopotential| {
+            p.raw()
+                .pswfc
+                .as_ref()
+                .unwrap()
+                .orbitals
+                .iter()
+                .map(|node| {
+                    let (PpChiNode::Chi1(w) | PpChiNode::Chi2(w) | PpChiNode::Chi3(w)) = node;
+                    bits(&w.values)
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(orbital_bits(&actual), orbital_bits(&expected));
+        assert_eq!(actual.z_valence().to_bits(), expected.z_valence().to_bits());
+        // Also compare every raw header/mesh/projector/orbital attribute. Only
+        // the requested relativistic spelling differs from the baseline.
+        let mut raw = actual.raw().clone();
+        assert_eq!(raw.header.relativistic, relativistic);
+        raw.header.relativistic = expected.raw().header.relativistic.clone();
+        assert_eq!(&raw, expected.raw());
+    }
+}
+
+#[test]
+fn unsupported_relativistic_values_are_named() {
+    for value in ["full", "foo"] {
+        let text = common::fixture_with_options(
+            601,
+            &common::Options {
+                relativistic: value,
+                ..common::Options::default()
+            },
+        );
+        let error = parse_upf(&text).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            format!("unsupported feature: relativistic={value}")
+        );
+        assert!(matches!(error, UpfError::Unsupported(f) if f == format!("relativistic={value}")));
+    }
+}
+
+#[test]
+fn inspect_wrapped_nonrelativistic_synthetic_file() {
+    // This test lives in dft-upf to respect ticket ownership. Cargo builds the
+    // CLI explicitly because CARGO_BIN_EXE is only set for a package's own bins.
+    let path = std::env::temp_dir().join(format!("dft-upf-wrapped-{}.xml", std::process::id()));
+    let text = common::fixture_with_options(
+        601,
+        &common::Options {
+            relativistic: "no",
+            wrap: true,
+            crlf: true,
+            ..common::Options::default()
+        },
+    );
+    std::fs::write(&path, text).unwrap();
+    let result = std::process::Command::new(env!("CARGO"))
+        .args([
+            "run",
+            "--offline",
+            "--quiet",
+            "-p",
+            "dft-cli",
+            "--",
+            "inspect-upf",
+        ])
+        .arg(&path)
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .output()
+        .unwrap();
+    std::fs::remove_file(path).unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let stdout = String::from_utf8(result.stdout).unwrap();
+    assert!(stdout.contains("Support: SUPPORTED"), "{stdout}");
+    assert!(stdout.contains("601 points"), "{stdout}");
+    assert!(stdout.contains("z_valence: 4"), "{stdout}");
+}

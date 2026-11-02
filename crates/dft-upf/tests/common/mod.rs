@@ -18,6 +18,29 @@ pub fn fixture() -> String {
 
 /// Generate synthetic UPF text at a selected radial resolution.
 pub fn fixture_with_points(n: usize) -> String {
+    fixture_with_options(n, &Options::default())
+}
+
+pub struct Options<'a> {
+    pub relativistic: &'a str,
+    pub wrap: bool,
+    pub separator: &'a str,
+    pub crlf: bool,
+    pub wavefunctions: bool,
+}
+impl Default for Options<'_> {
+    fn default() -> Self {
+        Self {
+            relativistic: "scalar",
+            wrap: false,
+            separator: " ",
+            crlf: false,
+            wavefunctions: false,
+        }
+    }
+}
+
+pub fn fixture_with_options(n: usize, options: &Options<'_>) -> String {
     let (r, rab) = mesh(n, 12.0);
     let local: Vec<_> = r
         .iter()
@@ -37,7 +60,7 @@ pub fn fixture_with_points(n: usize) -> String {
             .collect();
         beta.push_str(&format!("<PP_BETA.{} index=\"{}\" angular_momentum=\"{l}\" cutoff_radius=\"12\" cutoff_radius_index=\"{n}\">{}</PP_BETA.{}>",i+1,i+1,array(&values),i+1));
     }
-    format!(
+    let mut text = format!(
         r#"<UPF version="2.0.1">
 <PP_INFO>SYNTHETIC Xx fixture; not a real pseudopotential.</PP_INFO>
 <PP_HEADER generated="synthetic" author="tests" date="2026" comment="synthetic"
@@ -52,5 +75,63 @@ pub fn fixture_with_points(n: usize) -> String {
         array(&rab),
         array(&local),
         array(&vec![0.0; n])
-    )
+    );
+    text = text.replace(
+        "relativistic=\"scalar\"",
+        &format!("relativistic=\"{}\"", options.relativistic),
+    );
+    if options.wavefunctions {
+        text = text.replace("number_of_wfc=\"0\"", "number_of_wfc=\"3\"");
+        let mut chi = String::from("<PP_PSWFC>");
+        for i in 1..=3 {
+            chi.push_str(&format!(
+                "<PP_CHI.{i} label=\"synthetic{i}\" l=\"0\" occupation=\"1\">{}</PP_CHI.{i}>",
+                array(&r)
+            ));
+        }
+        chi.push_str("</PP_PSWFC></UPF>");
+        text = text.replace("</UPF>", &chi);
+    }
+    for tag in [
+        "PP_R",
+        "PP_RAB",
+        "PP_LOCAL",
+        "PP_BETA.1",
+        "PP_BETA.2",
+        "PP_BETA.3",
+        "PP_DIJ",
+        "PP_CHI.1",
+        "PP_CHI.2",
+        "PP_CHI.3",
+        "PP_RHOATOM",
+    ] {
+        let Some(start) = text
+            .find(&format!("<{tag}>"))
+            .or_else(|| text.find(&format!("<{tag} ")))
+        else {
+            continue;
+        };
+        let body = start + text[start..].find('>').unwrap() + 1;
+        let end = text.find(&format!("</{tag}>")).unwrap();
+        let tokens: Vec<_> = text[body..end].split_ascii_whitespace().collect();
+        let mut formatted = String::new();
+        for (i, token) in tokens.iter().enumerate() {
+            if i > 0 {
+                formatted.push_str(if options.wrap && i % 4 == 0 {
+                    "\n"
+                } else {
+                    options.separator
+                });
+            }
+            formatted.push_str(token);
+        }
+        text.replace_range(body..end, &formatted);
+        if options.wrap {
+            text.insert_str(body - 1, " columns=\"4\"");
+        }
+    }
+    if options.crlf {
+        text = text.replace('\n', "\r\n");
+    }
+    text
 }

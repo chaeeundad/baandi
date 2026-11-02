@@ -308,7 +308,10 @@ pub fn parse_upf(text: &str) -> Result<Pseudopotential, UpfError> {
             attr(h, "pseudo_type")?
         )));
     }
-    if !matches!(attr(h, "relativistic")?, "scalar" | "nonrelativistic") {
+    if !matches!(
+        attr(h, "relativistic")?,
+        "scalar" | "nonrelativistic" | "no"
+    ) {
         return Err(UpfError::Unsupported(format!(
             "relativistic={}",
             attr(h, "relativistic")?
@@ -365,7 +368,20 @@ pub fn parse_upf(text: &str) -> Result<Pseudopotential, UpfError> {
     for i in 1..=np {
         find(&format!("PP_BETA.{i}"))?;
     }
-    let raw = upf::from_str(text).map_err(|e| match e {
+    // The vendor's serde array decoder separates numbers on spaces only.
+    // Replace one ASCII whitespace character with one space: numeric spelling,
+    // non-ASCII text and byte offsets are preserved, but line numbers are not.
+    let normalized: String = text
+        .chars()
+        .map(|c| {
+            if c.is_ascii_whitespace() || c == '\x0b' {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let raw = upf::from_str(&normalized).map_err(|e| match e {
         upf::UpfError::Validation(s) => {
             let field = ["PP_RAB", "PP_LOCAL", "PP_RHOATOM", "PP_R"]
                 .into_iter()

@@ -1,4 +1,4 @@
-# UPF v2 NC support (P2A)
+# UPF v2 NC support (P2A, P2C)
 
 `dft-upf::parse_upf(&str)` and `from_file(path)` read through the vendored
 `upf` 0.1.1 crate and return an immutable `Pseudopotential`. No real Si file,
@@ -49,6 +49,46 @@ unit annotations are rejected.
 No checksum implementation or dependency was added. Compute SHA-256 of the
 original input bytes in the calling script (for example `shasum -a 256 file`);
 `inspect-upf` does not claim or print a checksum.
+
+## Real-world generator compatibility (P2C)
+
+Two producer conventions were missing from the original synthetic coverage:
+
+- The specification lists `scalar | full | nonrelativistic`, but older
+  generators also emit `relativistic="no"`. The reader accepts `no` as a
+  synonym of `nonrelativistic`, while retaining the original spelling in
+  `raw().header.relativistic`. `scalar` remains supported. `full` and every
+  unknown value fail with `unsupported feature: relativistic=<value>`.
+- Real numeric sections wrap rows, commonly with `columns="4"`. The vendored
+  reader's serde decoder for mesh/local/density arrays separates tokens on
+  spaces; literal newlines can join two numbers into an invalid token.
+  Before calling the reader, we replace each ASCII whitespace character
+  (space, tab, LF, CR, vertical tab, form feed) with one space. This supports
+  LF and CRLF, mixed separators and runs of whitespace in PP_R, PP_RAB,
+  PP_LOCAL, PP_BETA.*, PP_DIJ, PP_CHI.* and PP_RHOATOM. `columns` is a layout
+  hint, not a size constraint; the final row may be short.
+
+This is safe for supported numerical data because whitespace only separates
+numbers: no non-whitespace character, numeric spelling, sign, exponent or unit
+is changed, and no values are inferred. Non-ASCII characters are unchanged.
+Supplemental metadata validation uses the original text. The reader receives
+normalized whitespace throughout the document, including informational text
+and attribute values, so `raw()` does not preserve their original whitespace
+formatting. Each replacement occupies one byte: byte offsets remain aligned
+with the original input, but reader line/column locations refer to the
+normalized single-line text and must not be treated as original locations.
+Typed validation errors retain their field names and identifying payloads.
+
+Synthetic tests compare all arrays bit for bit (zero tolerance, including
+Ry-to-Ha converted fields), with three optional PP_CHI arrays, 601 mesh
+samples and nine D entries; wrapped final rows contain one entry. Separate
+variants cover the accepted relativistic spellings, LF, CRLF, tabs, double
+spaces, CR, form feed, vertical tab and mixed separators. Existing negative
+and radial-math tests remain in place. A process-boundary test under
+`dft-upf/tests/parser.rs` invokes `cargo run --offline -p dft-cli -- inspect-upf`
+on a temporary wrapped CRLF, `relativistic="no"` fixture and checks SUPPORTED.
+No real UPF dataset or independent real-file result was available for this
+implementation; these are synthetic compatibility checks only.
 
 ## Validation and typed errors
 

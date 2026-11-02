@@ -1,11 +1,11 @@
 [
   {
     "id": "I1",
-    "title": "QE pw.x is not installed",
-    "severity": "high",
-    "status": "needs decision",
+    "title": "QE reference will run remotely, not on this Mac",
+    "severity": "medium",
+    "status": "open",
     "phase": "P6",
-    "detail": "No reference engine on this Mac. P6 stays BLOCKED until the user approves an install or another reference."
+    "detail": "User decision: no local pw.x. dft5090 session runs it on dev08 and returns results. Readiness check requested; reply pending."
   },
   {
     "id": "I2",

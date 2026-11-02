@@ -19,3 +19,7 @@
 - Accelerate FFI verified for real ddot and dsyev only. Complex zheev/zgemm and LP64/ILP64 choice remain open (issue I8).
 - Codex cannot write git metadata for a worktree; Claude commits after verification.
 - Status dashboard data lives in artifacts/ (see artifacts/README.md).
+
+## 2026-11-02 QE reference policy
+- User decision: do NOT install pw.x on this Mac. Reference runs execute on dev08 through the dft5090 session; results are returned with command, QE version, input/UPF SHA-256 and wall time.
+- Readiness check sent to dft5090 (read-only). P6 stays blocked until the reply and a valid reference setup.

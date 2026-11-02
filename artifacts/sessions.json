@@ -232,5 +232,23 @@
     "ended_at": "2026-11-02T12:44:48Z",
     "exit_code": 0,
     "note": ""
+  },
+  {
+    "run_id": "P2B-HAMILTONIAN#1",
+    "task_id": "P2B-HAMILTONIAN",
+    "mode": "new",
+    "role": "implementer (P2B Hamiltonian)",
+    "status": "running",
+    "codex_pid": 99246,
+    "wrapper_pid": 99225,
+    "session_id": null,
+    "branch": "task/P2B-HAMILTONIAN",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P2B-HAMILTONIAN",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P2B-HAMILTONIAN.md",
+    "report": null,
+    "started_at": "2026-11-02T12:46:36Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

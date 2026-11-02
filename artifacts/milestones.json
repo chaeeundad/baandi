@@ -19,9 +19,9 @@
     "id": "P2",
     "name": "UPF parser, local and KB nonlocal terms",
     "status": "in progress",
-    "gates_done": 0,
+    "gates_done": 4,
     "gates_total": 7,
-    "note": "P2A running (parser, radial transforms on synthetic fixtures). Real Si UPF still needs the user's decision (blank author and license)"
+    "note": "P2A merged: parser, validation, radial transforms verified on synthetic fixtures. Left: nonlocal assembly and phase tests (P2B), real Si file parse after the user's decision"
   },
   {
     "id": "P3",

@@ -51,3 +51,7 @@
 - P4A (Codex session 01a19c21): faer adapter, LinearOperator, dense baseline, block Davidson; ADR 0006. Claude read the Davidson loop: convergence only from recomputed residuals.
 - P3A (Codex session 01a19c2e): density, kinetic, Hartree, LDA-PZ, Ewald; ADR 0007 (xcx dev-only, no PZ81 in xcx so PZ is in-tree). Si Ewald -8.39947 Ha informational.
 - P2A (UPF parser via upf crate, radial transforms, inspect-upf) delegated on synthetic fixtures; ADR 0008.
+
+## 2026-11-02 P2A merged, Si candidate facts
+- P2A (Codex session 01a19c3a) merged; Claude checked the UPF units against the specification (Rydberg atomic units; vloc and D in Ry; r*beta storage).
+- dft5090 reported header facts of the candidate Si file (docs/candidate-si-upf.md): 2 projectors, D diagonal, tail -2Z/r matches, provenance blank. P2B (Hamiltonian assembly on synthetic pseudopotentials) delegated.

@@ -13,7 +13,7 @@
     "severity": "medium",
     "status": "needs decision",
     "phase": "P2",
-    "detail": "Si.pz-vbc.UPF exists on dev08 (NC, LDA PZ, z_valence 4, sha256 e8d93375...5217) but author, date and license are blank. Provenance unverified; needs a user decision before use."
+    "detail": "dft5090 inspected Si.pz-vbc.UPF (NC, LDA PZ, Z=4, 2 projectors, tail -2Z/r matches). Facts in docs/candidate-si-upf.md. Author, date, license and generation input are blank: provenance unverified. Needs the user's decision before P5."
   },
   {
     "id": "I3",
@@ -93,7 +93,7 @@
     "severity": "medium",
     "status": "open",
     "phase": "P2",
-    "detail": "ADR 0008: used for reading only (71 downloads), our layer validates everything. Cross-check key fields on the real Si file once approved; fallback is a small quick-xml reader."
+    "detail": "ADR 0008: reading only. The Si candidate has 2 projectors, within the crate's limit of 3. Cross-check key fields on the real file once approved; fallback is a quick-xml reader."
   },
   {
     "id": "I13",

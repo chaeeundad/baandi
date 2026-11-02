@@ -134,5 +134,13 @@
     "result": "pending",
     "detail": "Value -8.39947 Ha measured; to be compared with QE's ewald contribution in P6, not asserted against any external number",
     "date": "2026-11-02"
+  },
+  {
+    "id": "T18",
+    "check": "P2A: synthetic UPF parse and negative cases, Simpson, Bessel, Y_lm, local and projector transforms, inspect-upf CLI",
+    "phase": "P2",
+    "result": "pass",
+    "detail": "Gates re-run by Claude. Local transform error 2e-12, projector transform 8e-13, Bessel 7.5e-15, addition theorem 1e-15; r_max sensitivity 2e-6, 2e-10, 6e-17 Ha at 3, 5, 8 Bohr; no real UPF used",
+    "date": "2026-11-02"
   }
 ]

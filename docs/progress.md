@@ -55,3 +55,7 @@
 ## 2026-11-02 P2A merged, Si candidate facts
 - P2A (Codex session 01a19c3a) merged; Claude checked the UPF units against the specification (Rydberg atomic units; vloc and D in Ry; r*beta storage).
 - dft5090 reported header facts of the candidate Si file (docs/candidate-si-upf.md): 2 projectors, D diagonal, tail -2Z/r matches, provenance blank. P2B (Hamiltonian assembly on synthetic pseudopotentials) delegated.
+
+## 2026-11-02 P2B merged
+- P2B (Codex session 01a19c4c) merged. Review question on projector norms (p stuck at 9.0e-3) settled by measurement: isolated-cell norm error 3e-13, Si image overlap predicted to 1e-13.
+- P3 gates complete on synthetic pseudopotentials. Next: P5A (SCF, mixing, total energy audit, electrostatic cross-check) on synthetic PPs; real Si file waits for the user's decision.

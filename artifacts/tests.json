@@ -142,5 +142,21 @@
     "result": "pass",
     "detail": "Gates re-run by Claude. Local transform error 2e-12, projector transform 8e-13, Bessel 7.5e-15, addition theorem 1e-15; r_max sensitivity 2e-6, 2e-10, 6e-17 Ha at 3, 5, 8 Bohr; no real UPF used",
     "date": "2026-11-02"
+  },
+  {
+    "id": "T19",
+    "check": "P2B: ionic local and KB nonlocal assembly, matrix-free H vs independent explicit matrix, Hermiticity, translation phases, Davidson vs dense",
+    "phase": "P3",
+    "result": "pass",
+    "detail": "Gates re-run by Claude, code read. H entry error 9e-16, Hermiticity 7e-16, local convolution 9e-16, Davidson eigenvalue error 1e-14 (88 iterations); synthetic pseudopotentials only",
+    "date": "2026-11-02"
+  },
+  {
+    "id": "T20",
+    "check": "P2B follow-up: projector norm identity in an isolated 40 Bohr cell and Si image-overlap prediction",
+    "phase": "P2",
+    "result": "pass",
+    "detail": "Isolated-cell norm error 5e-14 (s1) and 3e-13 (p) at 32 Ry, s0 needs 64 Ry (2.7e-12). Si-cell deviations predicted to 3e-11 (s1) and 1.4e-13 (p) relative. Release test 13.8 s, ignored in debug",
+    "date": "2026-11-02"
   }
 ]

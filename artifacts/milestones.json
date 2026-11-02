@@ -19,17 +19,17 @@
     "id": "P2",
     "name": "UPF parser, local and KB nonlocal terms",
     "status": "in progress",
-    "gates_done": 4,
+    "gates_done": 6,
     "gates_total": 7,
-    "note": "P2A merged: parser, validation, radial transforms verified on synthetic fixtures. Left: nonlocal assembly and phase tests (P2B), real Si file parse after the user's decision"
+    "note": "P2A and P2B verified on synthetic fixtures (translation phase, Hermitian D, norm identity). Left: parse the real Si file (needs the user's decision) and its projector checks"
   },
   {
     "id": "P3",
     "name": "Hamiltonian, Hartree, LDA XC",
-    "status": "in progress",
-    "gates_done": 4,
+    "status": "done",
+    "gates_done": 6,
     "gates_total": 6,
-    "note": "P3A merged: kinetic, Hartree, LDA-PZ, density, Ewald verified. Left: local and nonlocal pseudopotential assembly, H Hermiticity, convolution vs explicit matrix"
+    "note": "Hamiltonian, Hartree, XC, kinetic, Ewald, local convolution vs explicit matrix verified on synthetic pseudopotentials. Real-Si validation comes with P5/P6"
   },
   {
     "id": "P4",
@@ -45,7 +45,7 @@
     "status": "pending",
     "gates_done": 0,
     "gates_total": 6,
-    "note": "Starts after P3 and P4 pass"
+    "note": "Ready to start on synthetic pseudopotentials: SCF, mixing, energy audit"
   },
   {
     "id": "P6",

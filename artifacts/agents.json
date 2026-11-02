@@ -129,9 +129,27 @@
     "id": "A15",
     "agent": "Codex",
     "role": "implementer (P2A UPF and radial)",
-    "state": "active",
+    "state": "done",
     "task": "P2A-UPF-RADIAL",
-    "ref": "pid 95570, session no sessi, task/P2A-UPF-RADIAL",
+    "ref": "pid 95570, session 01a19c3a, task/P2A-UPF-RADIAL",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A16",
+    "agent": "Codex",
+    "role": "implementer (P2B Hamiltonian)",
+    "state": "done",
+    "task": "P2B-HAMILTONIAN",
+    "ref": "pid 99246, session 01a19c4c, task/P2B-HAMILTONIAN",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A17",
+    "agent": "Codex",
+    "role": "implementer (P2B fix 1)",
+    "state": "done",
+    "task": "P2B-HAMILTONIAN",
+    "ref": "pid 3249, session 01a19c4c, task/P2B-HAMILTONIAN",
     "updated": "2026-11-02"
   }
 ]

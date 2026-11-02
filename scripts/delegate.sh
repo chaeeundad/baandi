@@ -39,6 +39,7 @@ PY
 fi
 
 [[ -n "$prompt_file" ]] || { echo "prompt file required" >&2; exit 2; }
+prompt_file="$(cd "$(dirname "$prompt_file")" && pwd)/$(basename "$prompt_file")"   # absolute: the script cd's into the worktree
 if [[ "$mode" == "new" || "$mode" == "fork" ]]; then
   [[ -d "$wt" ]] || git -C "$repo" worktree add -b "task/$task" "$wt" HEAD
 fi
@@ -49,13 +50,15 @@ common=(-C "$wt" -s workspace-write --json
 case "$mode" in
   new)    cmd=(codex exec "${common[@]}" -) ;;
   fork)   cmd=(codex exec fork "$base" "${common[@]}" -) ;;
-  resume) cmd=(codex exec resume "$(cat "$out/session_id")" "${common[@]}" -) ;;
+  resume) cmd=(codex exec resume "$(cat "$out/session_id")" --json --output-schema "$repo/docs/schemas/report.schema.json" -o "$out/report.json" -c 'sandbox_mode="workspace-write"' -) ;;
   *) echo "unknown mode $mode" >&2; exit 2 ;;
 esac
 
 run="$(reg start --task "$task" --mode "$mode" --role "$role" --ticket "$prompt_file" \
        --worktree "$wt" --branch "task/$task" --wrapper-pid $$)"
-[[ "$mode" == "resume" ]] && redir=">>" || redir=">"
+# resume/fork do not accept -C: run from inside the worktree instead.
+cd "$wt"
+rm -f "$out/report.json"   # never let a stale report from an earlier run be read as this run's result
 if [[ "$mode" == "resume" ]]; then "${cmd[@]}" < "$prompt_file" >> "$out/events.jsonl" & else "${cmd[@]}" < "$prompt_file" > "$out/events.jsonl" & fi
 cpid=$!
 reg set "$run" codex_pid="$cpid"
@@ -65,8 +68,10 @@ sid="$(grep -o -E '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 [[ -n "$sid" && ! -f "$out/session_id" ]] && echo "$sid" > "$out/session_id"
 status="$(python3 - "$out/report.json" "$rc" <<'PY'
 import json,sys
-try: s=json.load(open(sys.argv[1]))["status"].lower()
-except Exception: s="failed" if sys.argv[2]!="0" else "unknown"
+if sys.argv[2]!="0": s="failed"
+else:
+    try: s=json.load(open(sys.argv[1]))["status"].lower()
+    except Exception: s="unknown"
 print(s)
 PY
 )"

@@ -41,6 +41,8 @@ def parse_output(text):
         raise Error('expected number of k points = 1', 3)
     grid = match(text, r'^\s*Dense\s+grid:[^\n]*FFT dimensions:\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*$', 'Dense grid FFT dimensions')
     q['grid'] = [int(x) for x in grid.groups()]
+    dense_count = re.search(r'Dense\s+grid:\s*(\d+)\s+G-vectors\b', grid.group(0))
+    q['dense_g_vectors'] = int(dense_count.group(1)) if dense_count else None
     end = match(text, r'^\s*End of self-consistent calculation\s*$', 'End of self-consistent calculation')
     final = text[end.end():]
     k = match(final, r'^\s*k\s*=\s*' + n + r'\s+' + n + r'\s+' + n +
@@ -77,8 +79,8 @@ def parse_output(text):
     q['levels_ev'] = None
     if 'highest occupied' in final:
         pair = 'highest occupied, lowest unoccupied' in final
-        label = 'highest occupied, lowest unoccupied levels' if pair else 'highest occupied level'
-        pattern = r'^\s*' + re.escape(label) + r' \(ev\):\s*' + n
+        label = 'highest occupied, lowest unoccupied levels?' if pair else 'highest occupied level'
+        pattern = r'^\s*' + label + r' \(ev\):\s*' + n
         if pair:
             pattern += r'\s+' + n
         m = match(final, pattern + r'\s*$', label + ' (ev)')

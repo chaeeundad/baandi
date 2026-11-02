@@ -1,5 +1,5 @@
 {
-  "source": "QE 7.6 charge-density.dat of run qe_si30_ours (tmp_si30ours/si30ours.save), parsed read-only on dev08 by the dft5090 session with parse_rho.py (script as run is stored beside this file as parse_rho.py.txt, output verbatim in parse_rho.out.txt)",
+  "source": "QE 7.6 charge-density.dat of run qe_si30_ours (tmp_si30ours/si30ours.save), parsed read-only on dev08 by the dft5090 session with parse_rho.py (the script was shown in full in the runner message but is not stored here)",
   "charge_density_dat_sha256": "7fdc2ce8d509ea587cc4fc55e0cc41666cc7b64d3e011902f03e51de14000f27",
   "charge_density_dat_bytes": 167696,
   "format": "4 Fortran sequential records, little endian: (gamma_only, ngm_g, nspin) int32; b1,b2,b3 float64; mill(3,ngm_g) int32; rho(G) complex128; units e/Bohr^3",

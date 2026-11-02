@@ -1,4 +1,5 @@
 //! Gamma-only functionals and pseudopotential operators in Hartree atomic units.
+pub mod data;
 pub mod density;
 pub mod ewald;
 pub mod hamiltonian;

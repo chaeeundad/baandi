@@ -7,3 +7,10 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+dft-physics = { path = "../dft-physics" }
+dft-solvers = { path = "../dft-solvers" }
+dft-basis = { path = "../dft-basis" }
+dft-geometry = { path = "../dft-geometry" }
+dft-upf = { path = "../dft-upf" }

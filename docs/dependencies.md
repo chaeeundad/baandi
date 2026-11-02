@@ -73,3 +73,24 @@ is restored after verification. The reviewer must include those two dependency
 names in the dft-physics lockfile entry when committing the manifest change.
 Artifact/session registry paths are outside this ticket's ownership; the final
 structured report supplies gate evidence for the orchestrator to reconcile.
+
+## P5A SCF and mixing
+
+No external dependency, backend version, license or vendor changes. dft-engine
+adds only the ownership-permitted path edges to dft-physics, dft-solvers,
+dft-basis, dft-geometry and dft-upf. dft-solvers uses its existing dft-numerics
+edge for the small Anderson Gram eigensolve (sequential faer), with a spectral
+pseudoinverse cutoff. No hand-written dense linear solver is introduced.
+
+The additive `dft_physics::data` facade re-exports existing physics API types
+(ndarray arrays, complex numbers, Hartree units, FFT plans, matrix/error types)
+and existing libm erf/erfc, so engine code requires no forbidden direct backend
+edge. New physics methods update a Hamiltonian potential transactionally and
+expose read-only nonlocal data. All previous signatures and tests remain intact.
+
+Cargo regenerates the dft-engine lockfile dependency list during verification;
+Cargo.lock is restored afterward because it is outside P5A ownership. The
+reviewer must reconcile those five path dependency names when committing. No
+new package versions need resolving or downloading. All verification is offline
+on the existing Apple Silicon toolchain. Artifact/session JSON updates remain
+with the orchestrator because those files are outside this ticket's ownership.

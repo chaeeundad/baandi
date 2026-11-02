@@ -448,6 +448,13 @@ dependencies = [
 [[package]]
 name = "dft-engine"
 version = "0.1.0"
+dependencies = [
+ "dft-basis",
+ "dft-geometry",
+ "dft-physics",
+ "dft-solvers",
+ "dft-upf",
+]
 
 [[package]]
 name = "dft-geometry"

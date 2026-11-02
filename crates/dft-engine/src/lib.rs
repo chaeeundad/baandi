@@ -1,9 +1,4 @@
-//! Reserved boundary for dft-engine; no DFT implementation in P0.
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn skeleton_compiles() {
-        // Compilation sentinel only; this does not validate physics.
-    }
-}
+//! Gamma-only, spin-unpolarized insulating LDA-PZ SCF and energy audit.
+pub mod energy;
+pub mod scf;
+pub use scf::*;

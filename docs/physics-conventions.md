@@ -854,3 +854,196 @@ relative-norm bound, not the s1/p image-signal-relative certificate.
 The release test passed in 13.80 seconds excluding compilation. This evidence
 separates normalization correctness in the isolated cell from the independently
 predicted periodic-image contribution in Si; no production code changed.
+
+## 23. P5A orbital total energy and double counting
+
+P5A implements the assembly deferred in sections 10, 16 and 20. All terms here
+are in Ha, and all grid integrals use weight Omega/Ngrid. For normalized complex
+Gamma orbitals with occupations f_b=2 or 0, and their density n_out,
+
+```text
+T       = sum_b f_b sum_G (G^2/2) |c_b(G)|^2
+E_loc   = Omega sum_G Re[conj(n_out(G)) V_ion(G)]
+E_NL    = sum_b f_b Re[<c_b | V_NL c_b>]
+E_H     = (Omega/2) sum_{G!=0} 4*pi |n_out(G)|^2/G^2
+E_xc    = integral n_out eps_xc(n_out)
+E       = T + E_loc + E_NL + E_H + E_xc + E_ewald.
+```
+
+`energy::local_energy` computes a full-grid Parseval sum with the production FFT.
+Ionic coefficients outside the density sphere are zero. No term is inferred by
+subtracting the others from a known total. `EnergyAudit` exposes every term,
+total_hartree(), total_rydberg()=2*total_hartree(), band sum, double counting,
+band form, Harris-Foulkes functional, and its difference bound. `ScfResult` also
+exposes the Ewald real, reciprocal, self, background and truncation-bound audit.
+
+The local zero mode is alpha-Z, as defined in section 16, once per atom:
+
+```text
+V_ion(0) = sum_I alpha_Z_I
+E_loc(0) = Omega*n_out(0)*V_ion(0) = N_out*sum_I alpha_Z_I.
+```
+
+There is no further reference-erf constant. Hartree still sets V_H(0)=0 and
+Ewald still uses the point-charge plus compensating-background convention in
+section 12. N_out differs from the requested N_e only by measured orbital/FFT
+roundoff; the audit uses its actual charge.
+
+Let x=n_in, y=n_out, V_in=V_H[x]+v_xc[x], and B=sum_b f_b eps_b for the
+Hamiltonian constructed at x. With exact eigenpairs,
+
+```text
+B = T + E_loc + E_NL + integral y V_in
+D = integral y V_in
+E_band_form = B - D + E_H[y] + E_xc[y] + E_ewald = E_direct.
+E_HF[x] = B - E_H[x] + E_xc[x] - integral x v_xc[x] + E_ewald.
+```
+
+In particular, subtracting output-density potentials from an input-Hamiltonian
+band sum would be incorrect away from convergence. The code reports the exact
+input-potential integral, not that incorrect mixture.
+
+For R=y-x, define remainders
+
+```text
+Q_H  = E_H[y]-E_H[x]-integral R V_H[x] = E_H[R] >= 0
+Q_xc = E_xc[y]-E_xc[x]-integral R v_xc[x]
+delta_eig = sum_b f_b Re[<c_b | H[x]c_b-eps_b c_b>]
+E_direct-E_HF = Q_H + Q_xc + delta_eig
+|E_direct-E_HF| <= |Q_H| + |Q_xc| + sum_b f_b ||residual_b||.
+```
+
+The last bound assumes normalized orbitals, which Davidson guarantees to
+roundoff. Tests allow an additional 1e-12 Ha for independent scalar summations.
+The code computes Q_H and Q_xc from independently evaluated functionals and
+linear integrals and reports this bound; it does not use the observed total
+energy difference as its bound. Where e_xc(n)=n eps_xc(n) is twice differentiable
+on each interval from x to y, |Q_xc| <= (1/2) integral M(r) R(r)^2 with
+M(r)=sup |d v_xc/dn| on that interval. Also
+Q_H <= (2*pi/G_min^2) integral R^2 for the smallest represented nonzero G.
+Thus the difference is quadratic in the density residual, up to eigensolver
+error. Section 11's threshold and rounded rs=1 join preclude a universal smooth
+quadratic bound across those crossings; the exact remainder audit still applies.
+
+## 24. P5A independent Gaussian electrostatic identity
+
+Use Gaussian ionic charge
+rho_I(r)=Z_I/(pi*rc_I^2)^(3/2) exp(-|r-tau_I|^2/rc_I^2), periodized over the
+cell, with analytic transform rho_I(G)=Z_I/Omega exp(-G^2 rc_I^2/4) exp(-iG.tau_I).
+Its electron potential is -Z_I erf(r/rc_I)/r. Section 16 then gives
+alpha_Z_I=pi Z_I rc_I^2/Omega, including the finite Coulomb remainder.
+For a prescribed neutral electron density, integral n=Q=sum_I Z_I,
+
+```text
+E_direct = (Omega/2) sum_{G!=0} 4*pi |rho_ion(G)-n(G)|^2/G^2
+         = E_H[n] + E_loc_nonzero[n] + U_Gaussian
+U_Gaussian = (Omega/2) sum_{G!=0} 4*pi |rho_ion(G)|^2/G^2.
+```
+
+This direct expression has neither alpha-Z nor Ewald. Convolution of two
+Gaussians gives pair interaction Z_I Z_J erf(d/sqrt(rc_I^2+rc_J^2))/d. The
+isolated Gaussian self energy is Z_I^2/(sqrt(2*pi)*rc_I), including the factor
+one half. Consequently, the exact conversion from the point-ion/background
+convention to the zero-mean Gaussian reciprocal convention is
+
+```text
+S = sum_I Z_I^2/(sqrt(2*pi)*rc_I)
+P = (1/2) sum_IJR' Z_I Z_J erfc(d_IJR/sqrt(rc_I^2+rc_J^2))/d_IJR
+U_Gaussian = E_ewald_point + S - P + (pi/Omega)*Q*sum_I Z_I rc_I^2.
+```
+
+The prime excludes I=J,R=0, but includes same-ion nonzero images. The last term
+is essential: expansion of |sum Z_I exp(-G^2 rc_I^2/4)exp(-iG.tau_I)|^2 at
+G=0 changes the finite background term by pi*Q*sum Z_I rc_I^2/Omega. An
+independent derivation for a common rc sets eta=1/(sqrt(2)*rc) in section 12:
+its reciprocal term is exactly U_Gaussian, real term is P, self is -S, and
+background is -pi*Q^2*rc^2/Omega. Rearranging gives the same relation.
+
+Since E_loc(0)=pi*Q*sum Z_I rc_I^2/Omega in the neutral engine assembly,
+
+```text
+E_engine_electrostatic = E_H + E_loc_nonzero + E_loc(0) + E_ewald_point
+C = S - P
+E_engine_electrostatic + C = E_direct.
+```
+
+C is analytically fixed, with no fitting to test energies. P is exponentially
+small when all pair/image separations are large compared with Gaussian widths;
+it is nevertheless explicitly summed, never dropped based on a desired answer.
+All cases use a common rc per system, different charges in the triclinic cell,
+and the full pair/image correction. The pair sum is truncated at
+12*sqrt(2)*rc Bohr using dual-lattice enumeration bounds including fractional
+shifts. erfc(t)<=exp(-t^2)/(sqrt(pi)*t) at t>=12 makes the omitted pair energy
+below 1e-60 Ha for the two fixture cells. This is not a general-purpose Ewald
+replacement. The reciprocal spheres have Gmax=12 and sqrt(180) Bohr^-1; the
+slowest ionic energy tail is exp(-rc^2 G^2/2), below exp(-46.08) at the smaller
+cutoff. Both cutoffs are tested. Production local transforms use a 2001-point
+log mesh to 12 Bohr and their existing default short-range cutoff of 10 Bohr;
+short-range Gaussian tails and quadrature errors are independently constrained
+by the comparison, not absorbed in C.
+
+The test electron coefficients are sums of normalized periodic Gaussians of
+width 1.0 or 1.4 Bohr, centered at translated ionic fractional positions plus
+shape-dependent offsets (0.07,0.03,-0.09) or (-0.15,0.17,0.04). Their total
+charge is Q. Positive sampled density, imaginary roundoff <1e-12 Bohr^-3 and
+charge error <1e-12 relative are asserted. All-atom/electron translation by
+(0.183,-0.227,0.319) leaves the direct energy invariant within 1e-10 Ha.
+The production and independent energies must agree within **1e-9 relative**
+for each of the 48 combinations. These are mathematical fixtures, not QE data.
+
+## 25. P5A SCF density, convergence and quadrature contracts
+
+`DensityMixer` acts on uniform-grid number density, R=n_out-n_in. Linear uses
+x+beta R; type-II Anderson minimizes ||R-DR gamma|| and uses
+x+beta R-(DX+beta DR)gamma. Default Pulay beta is 0.3, history length 6;
+Gram eigenvalues <=1e-12*lambda_max are discarded through dft-numerics. Two
+uniform mean corrections after mixing enforce N_e/Omega to roundoff. Explicit
+reset, shape/mean changes, and a damped infeasible Pulay proposal clear history.
+The feasibility step is the single global convex fraction defined in ADR 0009;
+no pointwise clipping is performed. Linear infeasibility is divergence.
+
+The driver starts at N_e/Omega and uses default density/energy/eigen thresholds
+1e-7 Bohr^(-3/2), 1e-8 Ha and 1e-8 Ha. The normalized density residual is
+sqrt(integral R^2)/N_e. Charge errors are relative electron counts. Energy change,
+density residual, maximum occupied eigen residual, requested eigensolver
+accuracy, and input/output charge errors must all pass on the same iteration.
+Charge tolerance is 1e-8; tests require the stronger 1e-10 on every record.
+No convergence on the first iteration or energy change alone is possible.
+A returned success additionally passes a fresh n_out-potential fixed-point
+certificate: density change <=density_tolerance, occupied eigenvalue change
+<=1e-7 Ha, solve tolerance 0.1*eigen_tolerance. Certificate work is recorded.
+
+Default eigen tolerance at iteration k is
+max(0.1*eigen_tolerance, initial_eigen_tolerance*decay^(k-1)), with initial=1e-5 Ha
+and decay=0.5. There are 200 default SCF iterations, 400 Davidson iterations,
+48 subspace vectors and four extra bands. Odd or nonintegral electron counts
+and fewer than occupied bands are errors. Species labels must resolve uniquely,
+and pseudopotentials must explicitly declare SLA PZ. An exhausted SCF budget
+returns typed NotConverged with history; nonfinite arithmetic, invalid density,
+or residual above 20*max(best,density_tolerance) for three consecutive iterations
+returns typed Diverged with history. Factor/patience are configurable.
+
+Hamiltonian local-potential updates retain scratch/FFT/nonlocal plans and are
+transactional on invalid arrays. Nonlocal access is read-only. The physics data
+facade re-exports existing API types, with no new algorithm or dependency.
+Orbitals and their output density are never charge-renormalized; n=sum f|psi|^2
+is nonnegative in exact arithmetic. The existing allowed negative roundoff is
+1e-14 Bohr^-3, and tests print the actual minimum. Mixing is constrained as above
+because an Anderson extrapolate is not itself an orbital density.
+
+The basis grid rule eliminates density aliasing, but nonlinear XC can have
+unresolved Fourier content. Thus increasing the grid at fixed basis is an XC
+quadrature convergence study, not an exact identity. The acceptance translation
+and grid comparisons use 32^3 and 36^3 samples, with **1e-8 Ha** bounds. A default
+coarser grid is retained as an explicit user-controlled choice and its measured
+energy difference is recorded in ADR 0009. Hartree/local/nonlocal zero-mode
+conventions are unchanged by oversampling.
+
+For completeness, a conservative bound on section 24's omitted pair sum uses
+disjoint balls of radius p=1/(2*||A^(-1)||_F) about each lattice image. With
+s=sqrt(2)*rc, R=12*s, the number of images in shell [R+k*s,R+(k+1)*s) is at most
+[(R+(k+1)*s+p)/p]^3. Multiply this by the decreasing kernel bound
+exp(-(12+k)^2)/(sqrt(pi)*(12+k)*(R+k*s)) and Q^2/2. Successive terms have ratio
+at most [1+s/(R+s+p)]^3*exp(-25). The resulting geometric upper bound is at most
+5.743308e-61 Ha over the six cell/width choices, establishing the stated
+1e-60 Ha omission bound without fitting to any reciprocal energy.

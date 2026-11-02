@@ -209,3 +209,13 @@ The real-binary scan test generates its synthetic UPF in a temporary directory;
 no UPF is committed. It uses `target/debug/dft-cli` or the `DFT_CLI` environment
 variable and passes it through the driver's `--dft-cli` argument. If absent,
 the test skips with instructions to build via `scripts/check.sh`.
+
+## Real bundle regression
+
+The earlier fixture-only notes above describe the initial tooling release.
+`si30_ours/` now contains the real returned QE 7.6 bundle. The regression in
+`scripts/tests/test_qe_real.py` protects its printed values, full comparison,
+unverified pseudopotential warning, singular/plural level labels, and refusals
+for altered provenance, missing energy, and mismatched conditions. The bundle
+must never be edited: all mutation tests use temporary copies, and all reports
+are written to temporary directories. No external UPF or QE executable is needed.

@@ -1,111 +1,136 @@
-# rust-dft
+# BAANDI
 
-Rust-first CPU plane-wave DFT engine for Gamma-only, spin-unpolarized,
-norm-conserving, insulating LDA-PZ self-consistent calculations. The current
-implementation uses complex wavefunctions, Davidson diagonalization, and linear
-or Pulay density mixing, with an explicit total-energy audit.
+**A modern, state-aware density functional theory engine for materials research.**
 
-Si diamond has been compared with Quantum ESPRESSO 7.6. The
-[validation record](docs/validation.md) reports passing energy comparisons at
-1e-4 Ha/atom, eigenvalues and gap at 1e-3 Ha, and electron count at 1e-8 relative.
-It includes a cutoff scan and a Fourier-density comparison of sampled
-coefficients and aggregates; full-set density agreement is not certified.
-Evidence covers one cell and one pseudopotential, not general material accuracy.
-Final MVP approval remains pending.
+BAANDI is an experimental, open-source electronic structure engine written in Rust. It is being developed to explore new approaches to density functional theory (DFT), electronic-state exploration, and interoperability across computational scales.
 
-Out of scope until MVP approval: CUDA, Metal, MPI, PAW, ultrasoft
-pseudopotentials, PBE, forces, stress, smearing and multiple k-points.
+The project begins with a plane-wave Kohn–Sham DFT implementation, with an emphasis on numerical correctness, modular architecture, and reproducible scientific computing.
 
-## Build and check
+Our longer-term ambition is to build an electronic structure engine that does more than converge to a single solution.
 
-Use Rust 1.99.1 (pinned in [rust-toolchain.toml](rust-toolchain.toml)), rustfmt,
-clippy and a working native linker. The verified host is Apple Silicon macOS
-with Xcode Command Line Tools; other platforms are not established by this
-record. See [environment](docs/environment.md) for the offline toolchain setup.
-The local Cargo configuration uses a shared, untracked vendor directory; it must
-be available for offline builds (see [dependencies](docs/dependencies.md)).
-Python 3.9+ is needed for the standard-library comparison tools.
+## Why BAANDI?
 
-From the repository root:
+Conventional DFT workflows typically focus on obtaining a converged electronic structure for a given atomic configuration.
 
-```sh
-export PATH=/opt/homebrew/opt/rustup/bin:$PATH
-export CARGO_NET_OFFLINE=true
-scripts/check.sh
-# The four gates, individually:
-cargo build --workspace
-cargo test --workspace
-cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-```
+However, convergence does not necessarily imply that the lowest-energy electronic state has been found. Different initial conditions may lead to distinct self-consistent solutions, particularly in materials with complex magnetic, electronic, or charge-ordering behavior.
 
-Long numerical tests are ignored in the fast debug gate; their release commands
-are linked from [architecture](docs/architecture.md).
+Furthermore, electronic structure calculations are increasingly used as components of larger computational workflows involving molecular dynamics, machine-learned interatomic potentials, electrochemical environments, and continuum-scale models.
 
-## Run the Si example
+BAANDI is designed with these challenges in mind.
 
-```sh
-cargo run --offline -p dft-cli -- validate examples/si_lda.toml
-cargo run --offline -p dft-cli -- grid examples/si_lda.toml
-# Supply your UPF and replace the placeholder path in examples/si_lda.toml first:
-cargo run --offline -p dft-cli -- inspect-upf /absolute/path/to/Si.UPF
-cargo run --offline --release -p dft-cli -- run examples/si_lda.toml --output-dir results
-```
+Its development is guided by three principles:
 
-[si_lda.toml](examples/si_lda.toml) is the minimal input. `validate` and `grid`
-check configuration and basis/grid settings without opening the UPF.
-No UPF file is distributed: supply a supported pseudopotential yourself and
-check its license. The Si file used for validation has unverified provenance
-and an unknown license; its user-approved use was for internal validation only,
-with no redistribution. See [candidate notes](docs/candidate-si-upf.md) and
-[UPF support](docs/upf-support.md).
+### 1. A modern electronic structure foundation
 
-Relative UPF paths resolve against the input directory. Output defaults to
-`results/` relative to the working directory; `--output-dir` overrides it.
-The CLI writes `results.json` (energies, convergence history and provenance),
-`density.bin` (little-endian f64 density) and `density.json` (metadata/checksum).
-Existing output files are overwritten. Only certified convergence with successful
-writes returns 0; budget exhaustion writes the final state and returns 3.
-See [CLI documentation](docs/cli.md) for controls, units and all exit codes.
+Develop a modular plane-wave DFT engine using Rust, with clear separation between physical models, numerical algorithms, and computational backends.
 
-## Reproduce the comparisons
+Correctness, validation, and reproducibility take precedence over premature optimization.
 
-QE runs are executed remotely on dev08 through the dft5090 session, using the
-[reference protocol](docs/reference-environment.md); do not install or run QE
-locally. The [reference bundles and tooling guide](tests/reference/README.md)
-define the required inputs, hashes, provenance and comparison gates.
+### 2. Electronic-state landscape exploration
 
-```sh
-python3 -I scripts/make_qe_input.py --results results/results.json \
-  --pseudo-dir /remote/pseudo --upf-name Si.pz-vbc.UPF --out /tmp/qe.in
-# Recheck the stored real bundle; this does not run QE:
-python3 -I scripts/verify_qe.py --ours tests/reference/si30_ours/ours \
-  --bundle tests/reference/si30_ours --json /tmp/si-comparison.json \
-  --markdown /tmp/si-comparison.md
-python3 -I scripts/compare_rhog.py --ours-dir tests/reference/si30_ours/ours \
-  --qe-summary tests/reference/si30_ours/density/qe_rhoG_summary.json \
-  --json-report /tmp/si-density.json --markdown-report /tmp/si-density.md
-```
+Move beyond the assumption that one converged SCF calculation is sufficient.
 
-Use fresh density-report paths. [convergence_scan.py](scripts/convergence_scan.py)
-runs isolated cutoff/grid/SCF studies and can emit QE inputs; its invocation and
-measured results are in [validation](docs/validation.md). The example needs a
-real UPF path before a scan. Regression tests use stored bundles without QE:
-`python3 -I -m unittest discover -s scripts/tests -v`.
+BAANDI aims to support the discovery, comparison, and tracking of distinct self-consistent electronic states, including metastable solutions where the underlying physical model permits them.
 
-## Working in this repository
+The objective is not to guarantee a global minimum, but to make the electronic-state landscape more accessible and systematically explorable.
 
-This is an AI-first repository. Follow [AGENTS.md](AGENTS.md): read it first,
-then [docs/INDEX.md](docs/INDEX.md), [ownership.toml](ownership.toml), relevant
-crate guides, the [ticket](tickets/) and relevant ADRs. Crates separate units,
-geometry, numerics, basis, UPF, physics, solvers, engine and CLI; see
-[architecture](docs/architecture.md). Delegated runs use
-[scripts/delegate.sh](scripts/delegate.sh) and the session registry
-[artifacts/sessions.json](artifacts/sessions.json).
+### 3. Multiscale-ready scientific interfaces
 
-[ADR 0003](docs/decisions/0003-prefer-general-purpose-libraries.md) prefers
-maintained general-purpose libraries over hand-written numerics or FFI;
-project code supplies physics glue. Versions, consumers and licenses are in
-[dependencies](docs/dependencies.md).
+Treat interoperability as an architectural requirement rather than an afterthought.
 
-The project is licensed under the MIT License (see [LICENSE](LICENSE)), selected by the user on 2026-11-03. The Si pseudopotential used for validation is not part of the repository and is not covered by this license.
+BAANDI aims to provide physically consistent interfaces for exchanging structures, electronic densities, potentials, energies, forces, stresses, and electronic-state metadata with external computational tools.
+
+Potential applications include QM/MM coupling, explicit and implicit solvent environments, machine-learned interatomic potentials, and multiscale materials simulations.
+
+BAANDI does not aim to replace specialized molecular dynamics, machine learning, or continuum simulation engines.
+
+## Technical Direction
+
+The initial implementation focuses on:
+
+- Plane-wave basis sets and reciprocal-space operations
+- Periodic boundary conditions and k-point sampling
+- Norm-conserving pseudopotentials
+- Local and nonlocal Hamiltonian operators
+- Hartree and exchange-correlation potentials
+- Kohn–Sham eigensolvers
+- Self-consistent field calculations
+- Validation against established electronic structure implementations
+
+The architecture is intended to accommodate future developments in spin polarization, electronic-state exploration, forces and stresses, external-field coupling, and heterogeneous computing.
+
+These are development directions, not claims of currently available functionality.
+
+## Development Status
+
+**BAANDI is in an early experimental stage.**
+
+The initial numerical infrastructure and k-point functionality are under development and validation. A complete, production-ready DFT calculation workflow is not yet available.
+
+The project should not currently be used for scientific conclusions or production calculations without independent validation.
+
+Implementation progress and supported features will be documented as they become available.
+
+## Architecture Philosophy
+
+BAANDI follows a few guiding rules:
+
+- **Physics before performance.** Numerical correctness and physical consistency must be established before optimization.
+- **Explicit scientific conventions.** Units, signs, coordinate systems, boundary conditions, and numerical assumptions should be documented.
+- **Modularity without unnecessary abstraction.** Components should remain independently testable and replaceable.
+- **Interoperability without dependency.** External scientific software should connect through well-defined interfaces rather than become embedded in the DFT core.
+- **Reproducibility by design.** Calculations should preserve sufficient metadata to understand and reproduce their results.
+- **No silent physical assumptions.** Distinct electronic states, approximations, and convergence limitations should be made visible.
+
+## Implementation
+
+BAANDI is written primarily in **Rust**.
+
+Initial development targets CPU execution, including development and validation on Apple Silicon. Future computational backends may support GPU acceleration and distributed execution.
+
+The implementation is being developed independently, with established electronic structure codes serving as scientific references for validation.
+
+## AI-Assisted Development
+
+BAANDI is being developed through an AI-assisted software engineering workflow.
+
+Human contributors define scientific objectives, physical requirements, validation criteria, and architectural direction. AI coding agents participate in implementation, code review, testing, and documentation.
+
+AI-generated code is subject to the same requirements for correctness, reproducibility, and scientific validation as human-written code.
+
+The use of AI does not constitute evidence of numerical or physical correctness.
+
+## The Name
+
+**BAANDI** is inspired by *bandi* (반디), a Korean word associated with fireflies.
+
+A small light can reveal something otherwise hidden.
+
+The name reflects the project's ambition to illuminate electronic states and physical behavior that may be overlooked by conventional computational workflows.
+
+## Roadmap
+
+The broad development sequence is:
+
+1. Establish and validate the foundational plane-wave DFT implementation.
+2. Complete a reliable self-consistent electronic structure workflow.
+3. Extend physical capabilities and validate energies, forces, and stresses.
+4. Introduce systematic electronic-state exploration.
+5. Develop general-purpose interfaces for external physical environments and multiscale coupling.
+6. Investigate advanced numerical methods and accelerated computing backends.
+
+The roadmap is exploratory and may change as the implementation and scientific requirements evolve.
+
+## Contributing
+
+BAANDI is an early-stage research software project.
+
+Contribution guidelines, development documentation, and validation procedures will be published as the project matures.
+
+## License
+
+License information will be added once the project's distribution policy has been finalized.
+
+---
+
+*BAANDI — Exploring matter beyond a single electronic state.*

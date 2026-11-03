@@ -57,3 +57,5 @@ Conventions: docs are English; one fact lives in one place and others link to it
 | ADR 0028 agent-native runtime commitments | [decisions/0028-agent-native-runtime.md](decisions/0028-agent-native-runtime.md) |
 | Runtime implementation sequencing and acceptance gates | [roadmap/runtime.md](roadmap/runtime.md) |
 | Classic, Observed and AgentControlled modes; switch rules and path separation | [architecture/execution-modes.md](architecture/execution-modes.md) |
+| Scientific integration specs (P11I): workflow API, low-level coupling API, active-learning contract | `architecture/workflow-api.md`, `architecture/coupling-api-lowlevel.md`, `architecture/active-learning-contract.md`, `research/external-coupling-efficiency.md`, ADR 0027 |
+| Three execution modes (Classic, Observed, AgentControlled) | `architecture/execution-modes.md`, `architecture/runtime-control.md`, `architecture/scientific-state-api.md`, ADR 0028 |

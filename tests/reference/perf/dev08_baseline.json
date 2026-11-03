@@ -1,0 +1,115 @@
+{
+ "_note": "Relayed attestation (not re-verifiable here): measured on dev08 by the dft5090 session on 2026-11-03, same node, single batch, no concurrent jobs. results.json and qe outputs stay on dev08 under ~/rustdft_p6/perf. Times are wall seconds from /usr/bin/time; QE inputs are copies of the verified inputs (sha256 given), not edited.",
+ "host": {
+  "cpu": "Intel Xeon Gold 6230 @ 2.10 GHz, 2 sockets x 20 cores, SMT on (80 logical)",
+  "os": "Rocky Linux 9.7",
+  "uptime_before": "13:45:14 up 268 days, load average 1.77, 1.31, 0.54",
+  "uptime_after": "13:51:06 up 268 days, load average 0.42, 0.92, 0.63"
+ },
+ "code": {
+  "repo": "https://github.com/chaeeundad/baandi",
+  "commit": "32749552997b65da23f7e2b3be93165b5f4097d3",
+  "build": "cargo build --release -p dft-cli, rustc 1.99.1 (58cf8f9c3 2026-10-13), 58.13 s wall",
+  "threads": "1 (explicit sequential faer, serial FFT)",
+  "pinning": "taskset -c 6 for single-core runs"
+ },
+ "qe": {
+  "version": "7.6",
+  "binary": "~/fq/builds/orig-mpi-dfti/bin/pw.x (MKL 2026.1)",
+  "env": "OMP_NUM_THREADS=1 MKL_NUM_THREADS=1",
+  "np4": "mpirun -np 4 --map-by core --bind-to core",
+  "input_sha256": {
+   "gamma": "017e91ea...4065 (prefix given by the sender, truncated)",
+   "k444s": "a45ed650b613c768bdd3ba999ade0941fed5a22325d9a625c69138823e296600"
+  },
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+ },
+ "cases": {
+  "gamma": {
+   "label": "Gamma only, 30 Ry",
+   "k_points": 1,
+   "ours_1thread": {
+    "wall_s": [
+     2.28,
+     2.29,
+     2.28
+    ],
+    "maxrss_mb": "15-17",
+    "total_energy_ha": -7.295530468210918,
+    "iterations": 11,
+    "engine_total_s": 2.281966125,
+    "phases_s": {
+     "diagonalization": 2.077243759,
+     "density": 0.030812406,
+     "potential": 0.024658952,
+     "total_energy": 0.031698702,
+     "mixing": 0.003413089
+    },
+    "setup_s": 0.11323746
+   },
+   "qe_np1": {
+    "wall_s": [
+     0.22,
+     0.22,
+     0.21
+    ],
+    "total_energy_ry": -14.59106606,
+    "iterations": 11,
+    "pwscf_wall_s": 0.12
+   },
+   "qe_np4": {
+    "wall_s": [
+     0.18,
+     0.17,
+     0.17
+    ],
+    "pwscf_wall_s": 0.07
+   }
+  },
+  "k444s": {
+   "label": "4x4x4 shifted, 30 Ry",
+   "k_points": 32,
+   "ours_1thread": {
+    "wall_s": [
+     94.53,
+     94.34,
+     93.98
+    ],
+    "maxrss_mb": "85-92",
+    "total_energy_ha": -7.925976126648072,
+    "iterations": 11,
+    "engine_total_s": 94.525708028,
+    "phases_s": {
+     "diagonalization": 91.838329384,
+     "density": 0.961877644,
+     "potential": 0.034907181,
+     "total_energy": 0.992300187,
+     "mixing": 0.007263802
+    },
+    "setup_s": 0.688761083
+   },
+   "qe_np1": {
+    "wall_s": [
+     1.81,
+     1.82,
+     1.82
+    ],
+    "total_energy_ry": -15.85195738,
+    "iterations": 8,
+    "pwscf_wall_s": 1.71
+   },
+   "qe_np4": {
+    "wall_s": [
+     0.87,
+     0.89,
+     0.88
+    ],
+    "pwscf_wall_s": 0.76
+   }
+  }
+ },
+ "mac_reference_total_energy_ha": {
+  "gamma": -7.295530468210927,
+  "k444s": -7.925976126648072
+ }
+}

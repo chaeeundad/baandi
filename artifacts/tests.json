@@ -278,5 +278,13 @@
     "result": "pass",
     "detail": "Design only; main corrections recorded in docs/research/electronic-state-landscape.md section 7",
     "date": "2026-11-03"
+  },
+  {
+    "id": "T36",
+    "check": "Same-node performance baseline vs QE 7.6 and Linux x86 vs macOS reproducibility",
+    "phase": "P7",
+    "result": "pass",
+    "detail": "Measured, not a pass/fail gate: Gamma 2.28 s vs QE 0.217 s (1 process); 4x4x4 94.3 s vs 1.82 s. Total energy Linux vs macOS: +8.9e-15 Ha (Gamma), bit-identical (4x4x4). Relayed attestation.",
+    "date": "2026-11-03"
   }
 ]

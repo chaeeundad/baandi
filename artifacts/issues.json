@@ -150,5 +150,13 @@
     "status": "needs decision",
     "phase": "P7",
     "detail": "dev08 has no rustc or cargo and 16 GB free disk. Installing a toolchain there needs the user's approval; the comparison is only meaningful on the same machine with matched threading."
+  },
+  {
+    "id": "I20",
+    "title": "rust-dft is 10 to 100 times slower than QE (not yet optimized)",
+    "severity": "medium",
+    "status": "open",
+    "phase": "P7",
+    "detail": "Same node, single thread: 10.5x slower at Gamma (2.28 s vs 0.217 s) and 51.9x at 32 k points (94.3 s vs 1.82 s); diagonalization is 91% to 97% of the engine time. No profile yet, so the cause is not established. Performance work was out of scope before the MVP; it needs a prioritization decision."
   }
 ]

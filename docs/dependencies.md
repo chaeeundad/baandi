@@ -98,3 +98,6 @@ No pip dependency is required. Shell verification uses Cargo; the macOS benchmar
 helper uses `/usr/bin/time -l` as documented in [CLI documentation](cli.md).
 
 The project's own license is MIT (see `LICENSE`; selected by the user on 2026-11-03).
+
+P7A-KPOINTS (ADR 0011): no new dependencies or manifest changes. Bloch sampling
+and weighted SCF use the existing geometry, FFT, complex-array and Davidson APIs.

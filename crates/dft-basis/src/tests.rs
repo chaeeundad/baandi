@@ -242,3 +242,39 @@ fn fft_roundtrip_normalization_and_enlargement() {
     println!("grid enlargement coefficient_max_abs={difference:.16e}");
     assert!(difference < 1e-12);
 }
+
+#[test]
+fn shifted_basis_keeps_density_grid_and_handles_skewed_gauge() {
+    let cell = Cell::from_user_rows_bohr([
+        [TAU, 0.0, 0.0],
+        [100.0 * TAU, 0.1 * TAU, 0.0],
+        [0.0, 0.0, TAU],
+    ])
+    .unwrap();
+    let cutoff = Hartree(0.001);
+    let gamma = PlaneWaveBasis::new(&cell, cutoff).unwrap();
+    let shifted = PlaneWaveBasis::at_k(&cell, cutoff, [0.01, 0.0, 0.0]).unwrap();
+    let density = shifted.density_basis(&cell).unwrap();
+    assert_eq!(
+        density.vectors(),
+        gamma.density_basis(&cell).unwrap().vectors()
+    );
+    // q=(0.01,0,0), G=(0,10,0): its periodic part aliases to the sole grid
+    // entry, but its density and all represented differences are exactly G=0.
+    assert_eq!(shifted.vectors().len(), 1);
+    assert_eq!(shifted.vectors()[0].miller, [0, 1, 0]);
+    let grid = FftGridSpec::new(&shifted, &density, None).unwrap();
+    assert_eq!(
+        grid.dims(),
+        FftGridSpec::new(&gamma, &density, None).unwrap().dims()
+    );
+    let c = [Complex64::new(0.6, 0.8)];
+    assert_eq!(grid.gather(&grid.scatter(&c).unwrap()).unwrap(), c);
+    let error = (shifted.momenta()[0].norm_squared / 2.0 - 0.00005).abs();
+    println!(
+        "skewed shifted gauge: grid={:?}, kinetic error={error:.16e} Ha",
+        grid.dims()
+    );
+    assert!(error < 1e-12);
+    assert!(PlaneWaveBasis::at_k(&cell, cutoff, [f64::NAN, 0.0, 0.0]).is_err());
+}

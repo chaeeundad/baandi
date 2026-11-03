@@ -173,3 +173,27 @@ pub fn evaluate(a: AuditInput<'_>, fft: &mut FftPlan3d) -> Result<EnergyAudit, S
     }
     Ok(audit)
 }
+
+// Each audit uses the SAME total density and input potential. Thus averaging
+// adds k weights only to orbital terms; common nonlinear terms occur once.
+pub(crate) fn weighted_audits(audits: &[(f64, EnergyAudit)]) -> EnergyAudit {
+    macro_rules! sum {
+        ($field:ident) => {
+            audits.iter().map(|(w, a)| w * a.$field).sum()
+        };
+    }
+    EnergyAudit {
+        kinetic: sum!(kinetic),
+        local: sum!(local),
+        local_zero_mode: sum!(local_zero_mode),
+        nonlocal: sum!(nonlocal),
+        hartree: sum!(hartree),
+        xc: sum!(xc),
+        ewald: sum!(ewald),
+        band_sum: sum!(band_sum),
+        double_counting: sum!(double_counting),
+        band_form: sum!(band_form),
+        harris_foulkes: sum!(harris_foulkes),
+        functional_difference_bound: sum!(functional_difference_bound),
+    }
+}

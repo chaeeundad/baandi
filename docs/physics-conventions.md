@@ -1047,3 +1047,35 @@ exp(-(12+k)^2)/(sqrt(pi)*(12+k)*(R+k*s)) and Q^2/2. Successive terms have ratio
 at most [1+s/(R+s+p)]^3*exp(-25). The resulting geometric upper bound is at most
 5.743308e-61 Ha over the six cell/width choices, establishing the stated
 1e-60 Ha omission bound without fitting to any reciprocal energy.
+
+## 26. P7A Bloch k points (library API)
+
+The boundary accepts fractional reciprocal k; internally k=B*k_fractional is
+Cartesian Bohr^-1. `psi_nk(r)=Omega^(-1/2) sum_G c_nk(G) exp(+i(k+G).r)`,
+with sum_G |c_nk(G)|^2=1 and kinetic cutoff |k+G|^2/2<=Ecut. Fractional k is
+canonicalized modulo integers into [-1/2,1/2); returned orbitals use this gauge.
+`vectors()` remains G and `momenta()` supplies k+G. Gamma is the zero-k call
+of the same basis, kinetic and nonlocal implementations.
+
+Sampling uses k_i=(m_i+s_i)/n_i, m_i=0..n_i-1, s_i=0 or 1/2 in grid steps,
+wrapped into [-1/2,1/2). Only time reversal k~-k modulo integers is reduced;
+weights are summed multiplicities/full count. Thus unshifted 2^3 has eight
+self-inverse points; half-shifted 2^3 reduces to four, unshifted 4^3 to 36.
+Weights are positive and sum to one within 1e-14; no silent normalization.
+
+Nonlocal columns use q=k+G in the existing radial transform, real spherical
+harmonic, (-i)^l prefactor and exp(-i q.tau) structure factor. The density
+sphere (4*Ecut) and FFT grid are k-independent. FFTs transform the periodic
+part u_nk; the Bloch phase cancels in the density. Density, kinetic, nonlocal
+energy and eigenvalue sums carry w_k f_n; Hartree/XC/local energies use the
+combined density and Ewald occurs once.
+
+The new `ScfProblem::with_kpoints` API requires an explicit insulating policy,
+f_n=2 for the lowest N_el/2 bands at every k, and at least one empty band.
+Partial occupations/smearing are rejected. Convergence additionally certifies
+a positive sampled indirect gap above the requested gap threshold and twice
+the eigen tolerance. This cannot establish a gap between sampled points.
+Legacy Gamma construction keeps its prior occupation contract. All original
+SCF convergence tolerances remain unchanged. Per-k eigenpairs and weights are
+reported; old scalar-block result fields refer to the first k point.
+See ADR 0011 for APIs, gap errors, compatibility and measured validation.

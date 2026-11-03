@@ -4,7 +4,7 @@ use dft_basis::PlaneWaveBasis;
 use dft_units::Hartree;
 use num_complex::Complex64;
 
-/// T = sum_b f_b sum_G |c_b(G)|^2 |G|^2/2, in Ha.
+/// T = sum_b f_b sum_G |c_b(G)|^2 |k+G|^2/2, in Ha.
 pub fn energy(
     basis: &PlaneWaveBasis,
     coefficients: &[Vec<Complex64>],
@@ -17,7 +17,7 @@ pub fn energy(
         .map(|(c, f)| {
             f * c
                 .iter()
-                .zip(basis.vectors())
+                .zip(basis.momenta())
                 .map(|(c, g)| 0.5 * g.norm_squared * c.norm_sqr())
                 .sum::<f64>()
         })

@@ -1,4 +1,4 @@
-//! Full complex Gamma-only plane waves and alias-free density FFT grids.
+//! Full complex Bloch plane waves and alias-free density FFT grids.
 use dft_geometry::Cell;
 use dft_units::Hartree;
 use ndarray::Array3;
@@ -13,6 +13,8 @@ pub const CUTOFF_TOLERANCE: f64 = 1e-12;
 pub enum BasisError {
     #[error("cutoff must be finite, positive, and representable in Hartree")]
     InvalidCutoff,
+    #[error("nonfinite fractional k point")]
+    InvalidKPoint,
     #[error("basis bounds or FFT storage size cannot be represented")]
     SizeOverflow,
     #[error("FFT override {provided:?} is smaller than required {required:?}")]
@@ -41,6 +43,9 @@ pub struct GVector {
 pub struct PlaneWaveBasis {
     cutoff: Hartree,
     vectors: Vec<GVector>,
+    momenta: Vec<GVector>,
+    k_fractional: [f64; 3],
+    k_cartesian: [f64; 3],
 }
 
 fn bounding_box(cell: &Cell, cutoff: Hartree) -> Result<[i32; 3], BasisError> {
@@ -65,8 +70,18 @@ fn bounding_box(cell: &Cell, cutoff: Hartree) -> Result<[i32; 3], BasisError> {
 
 impl PlaneWaveBasis {
     pub fn new(cell: &Cell, cutoff: Hartree) -> Result<Self, BasisError> {
-        let bounds = bounding_box(cell, cutoff)?;
+        Self::at_k(cell, cutoff, [0.0; 3])
+    }
+    /// Bloch basis with |k+G|^2/2 <= cutoff (Ha). Fractional reciprocal k is
+    /// canonicalized modulo integers to [-1/2,1/2); internally k is in Bohr^-1.
+    /// Coefficients describe the periodic part of the Bloch wavefunction.
+    pub fn at_k(cell: &Cell, cutoff: Hartree, fractional: [f64; 3]) -> Result<Self, BasisError> {
+        let k_fractional = dft_geometry::kpoints::wrap_fractional(fractional)
+            .map_err(|_| BasisError::InvalidKPoint)?;
+        let bounds = bounding_box(cell, cutoff)?.map(|b| b + 1);
         let b = cell.reciprocal_columns_inverse_bohr();
+        let k_cartesian: [f64; 3] =
+            std::array::from_fn(|i| (0..3).map(|j| b[i][j] * k_fractional[j]).sum());
         let mut vectors = Vec::new();
         for m1 in -bounds[0]..=bounds[0] {
             for m2 in -bounds[1]..=bounds[1] {
@@ -79,7 +94,10 @@ impl PlaneWaveBasis {
                     if !norm_squared.is_finite() {
                         return Err(BasisError::SizeOverflow);
                     }
-                    if 0.5 * norm_squared <= cutoff.0 * (1.0 + CUTOFF_TOLERANCE) {
+                    let q2: f64 = (0..3)
+                        .map(|i| (cartesian[i] + k_cartesian[i]).powi(2))
+                        .sum();
+                    if 0.5 * q2 <= cutoff.0 * (1.0 + CUTOFF_TOLERANCE) {
                         vectors.push(GVector {
                             miller,
                             cartesian,
@@ -94,14 +112,45 @@ impl PlaneWaveBasis {
                 .total_cmp(&b.norm_squared)
                 .then(a.miller.cmp(&b.miller))
         });
-        Ok(Self { cutoff, vectors })
+        let momenta = vectors
+            .iter()
+            .map(|g| {
+                let cartesian = std::array::from_fn(|i| g.cartesian[i] + k_cartesian[i]);
+                GVector {
+                    miller: g.miller,
+                    norm_squared: cartesian.iter().map(|x| x * x).sum(),
+                    cartesian,
+                }
+            })
+            .collect();
+        Ok(Self {
+            cutoff,
+            vectors,
+            momenta,
+            k_fractional,
+            k_cartesian,
+        })
+    }
+    /// Cartesian k+G and squared magnitude, in the same ordering as `vectors`.
+    pub fn momenta(&self) -> &[GVector] {
+        &self.momenta
+    }
+    /// Canonical fractional reciprocal k.
+    pub fn k_fractional(&self) -> [f64; 3] {
+        self.k_fractional
+    }
+    /// Cartesian k in Bohr^-1.
+    pub fn k_cartesian(&self) -> [f64; 3] {
+        self.k_cartesian
     }
     pub fn cutoff(&self) -> Hartree {
         self.cutoff
     }
+    /// Reciprocal lattice vectors G (not k+G), sorted by G norm then Miller index.
     pub fn vectors(&self) -> &[GVector] {
         &self.vectors
     }
+    /// Unshifted density sphere at four times Ecut, independent of k.
     pub fn density_basis(&self, cell: &Cell) -> Result<Self, BasisError> {
         Self::new(cell, Hartree(4.0 * self.cutoff.0))
     }
@@ -173,11 +222,30 @@ impl FftGridSpec {
         let g_to_fft = basis
             .vectors()
             .iter()
-            .map(|g| Self::map_miller(g.miller, dims))
+            .map(|g| {
+                if basis.k_fractional == [0.0; 3] {
+                    Self::map_miller(g.miller, dims)
+                } else {
+                    // A shifted sphere can have an absolute G outside the
+                    // canonical FFT interval in a very skewed cell. Only
+                    // differences G-G' enter density/local matrix elements;
+                    // those remain inside the unshifted density sphere.
+                    Ok(std::array::from_fn(|i| {
+                        i128::from(g.miller[i]).rem_euclid(dims[i] as i128) as usize
+                    }))
+                }
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let mut fft_to_g = vec![None; size];
         for (g, &[i, j, k]) in g_to_fft.iter().enumerate() {
-            fft_to_g[(i * dims[1] + j) * dims[2] + k] = Some(g);
+            let index = (i * dims[1] + j) * dims[2] + k;
+            if fft_to_g[index].is_some() {
+                return Err(BasisError::IndexOutOfRange {
+                    miller: basis.vectors()[g].miller,
+                    dims,
+                });
+            }
+            fft_to_g[index] = Some(g);
         }
         Ok(Self {
             dims,

@@ -1,6 +1,9 @@
 use crate::energy::{self, AuditInput, EnergyAudit};
 use dft_basis::{FftGridSpec, PlaneWaveBasis};
-use dft_geometry::{Atom, Cell};
+use dft_geometry::{
+    Atom, Cell,
+    kpoints::{self, KPoint},
+};
 use dft_physics::{
     data::*,
     density,
@@ -23,6 +26,11 @@ pub enum ScfError {
     InvalidInput(&'static str),
     UnsupportedFunctional(String),
     OddElectronCount(f64),
+    /// The sampled indirect gap does not certify fixed integer occupations.
+    NonInsulating {
+        gap_hartree: f64,
+        required_hartree: f64,
+    },
     InsufficientBands {
         bands: usize,
         occupied: usize,
@@ -166,12 +174,38 @@ pub struct FixedPointCertificate {
     pub davidson_iterations: usize,
     pub timings: PhaseTimings,
 }
+/// Explicit occupation contract for the k-point API. Partial occupations and
+/// smearing are unsupported. At least one empty band per k is required.
+#[derive(Clone, Copy, Debug)]
+pub enum OccupationPolicy {
+    /// Require a sampled indirect gap larger than this positive threshold (Ha)
+    /// and twice the requested eigen residual tolerance.
+    Insulator { minimum_gap_hartree: f64 },
+    /// Explicitly rejected: this engine cannot compute metallic occupations.
+    PartialOccupations,
+}
+
+/// Eigenpairs at one canonical fractional reciprocal point, in its basis order.
+#[derive(Clone, Debug)]
+pub struct KPointSolution {
+    /// Canonical fractional k and its normalized integration weight.
+    pub point: KPoint,
+    /// Eigenvalues/residuals in Ha and normalized coefficients in this k basis.
+    pub solution: EigenSolution,
+}
+
 #[derive(Debug)]
 pub struct ScfResult {
     pub energy: EnergyAudit,
+    /// First k point, retained for Gamma API compatibility; see `k_points`.
     pub eigenvalues: Vec<f64>,
     pub occupations: Vec<f64>,
+    /// First k point, retained for Gamma API compatibility.
     pub orbitals: ComplexMatrix,
+    /// All eigenpairs with normalized weights and canonical fractional k.
+    pub k_points: Vec<KPointSolution>,
+    /// Sampled indirect gap in Ha; None for the legacy Gamma constructor.
+    pub gap_hartree: Option<f64>,
     pub density: Array3<f64>,
     pub charge: f64,
     pub history: Vec<IterationRecord>,
@@ -197,17 +231,23 @@ pub struct SpeciesPotential<'a> {
 /// `step` is exposed for independent post-SCF fixed-point verification.
 pub struct ScfProblem {
     cell: Cell,
-    basis: PlaneWaveBasis,
+    states: Vec<KState>,
     grid: FftGridSpec,
     ionic_g: Array3<Complex64>,
     ionic_real: Array3<f64>,
-    hamiltonian: Hamiltonian,
     fft: FftPlan3d,
     ewald: ewald::EwaldEnergy,
     occupations: Vec<f64>,
     electrons: f64,
     options: ScfOptions,
     setup_time: Duration,
+    minimum_gap: Option<f64>,
+}
+struct KState {
+    point: KPoint,
+    basis: PlaneWaveBasis,
+    grid: FftGridSpec,
+    hamiltonian: Hamiltonian,
 }
 /// Output-oriented completion, including a nonconverged final evaluated state.
 /// Numerical failures still return `ScfError`; this is not a convergence bypass.
@@ -217,7 +257,10 @@ pub struct ScfOutcome {
 }
 
 pub struct ScfStep {
+    /// First-k compatibility view; `k_points` contains every solution.
     pub solution: EigenSolution,
+    /// Every k block in input quadrature order.
+    pub k_points: Vec<KPointSolution>,
     pub density: Array3<f64>,
     pub energy: EnergyAudit,
     pub timings: PhaseTimings,
@@ -229,6 +272,62 @@ impl ScfProblem {
         potentials: &[SpeciesPotential<'_>],
         options: ScfOptions,
     ) -> Result<Self, ScfError> {
+        Self::construct(
+            cell,
+            atoms,
+            potentials,
+            options,
+            &[KPoint {
+                fractional: [0.0; 3],
+                weight: 1.0,
+            }],
+            None,
+        )
+    }
+    /// Construct a weighted Bloch SCF problem. Coordinates are fractional
+    /// reciprocal; weights must be positive and sum to one within 1e-14.
+    /// Integer occupations are accepted only with an explicit insulating policy.
+    /// The sampled indirect gap is checked on the converged state and certificate.
+    pub fn with_kpoints(
+        cell: &Cell,
+        atoms: &[Atom],
+        potentials: &[SpeciesPotential<'_>],
+        options: ScfOptions,
+        points: &[KPoint],
+        policy: OccupationPolicy,
+    ) -> Result<Self, ScfError> {
+        let OccupationPolicy::Insulator {
+            minimum_gap_hartree,
+        } = policy
+        else {
+            return Err(ScfError::InvalidInput(
+                "partial occupations/smearing unsupported",
+            ));
+        };
+        if !minimum_gap_hartree.is_finite() || minimum_gap_hartree <= 0.0 {
+            return Err(ScfError::InvalidInput(
+                "positive finite insulating gap required",
+            ));
+        }
+        Self::construct(
+            cell,
+            atoms,
+            potentials,
+            options,
+            points,
+            Some(minimum_gap_hartree),
+        )
+    }
+    fn construct(
+        cell: &Cell,
+        atoms: &[Atom],
+        potentials: &[SpeciesPotential<'_>],
+        options: ScfOptions,
+        points: &[KPoint],
+        minimum_gap: Option<f64>,
+    ) -> Result<Self, ScfError> {
+        kpoints::validate(points)
+            .map_err(|_| ScfError::InvalidInput("invalid k-point quadrature"))?;
         let start = Instant::now();
         if atoms.is_empty() || potentials.is_empty() {
             return Err(ScfError::InvalidInput("empty system"));
@@ -312,17 +411,14 @@ impl ScfProblem {
         if bands < occupied {
             return Err(ScfError::InsufficientBands { bands, occupied });
         }
-        let basis = PlaneWaveBasis::new(cell, Hartree(options.cutoff_hartree))?;
-        if bands > basis.vectors().len()
-            || (options.davidson_subspace.min(basis.vectors().len()) <= bands
-                && bands != basis.vectors().len())
-        {
+        if minimum_gap.is_some() && bands <= occupied {
             return Err(ScfError::InvalidInput(
-                "bands/subspace incompatible with basis",
+                "gap certification requires an empty band at every k",
             ));
         }
-        let density_basis = basis.density_basis(cell)?;
-        let grid = FftGridSpec::new(&basis, &density_basis, options.grid_override)?;
+        let gamma = PlaneWaveBasis::new(cell, Hartree(options.cutoff_hartree))?;
+        let density_basis = gamma.density_basis(cell)?;
+        let grid = FftGridSpec::new(&gamma, &density_basis, options.grid_override)?;
         let dg = FftGridSpec::new(&density_basis, &density_basis, Some(grid.dims()))?;
         let species: Vec<_> = potentials
             .iter()
@@ -345,29 +441,52 @@ impl ScfProblem {
             return Err(ScfError::Numerical("ionic imaginary potential".into()));
         }
         let ionic_real = ionic.mapv(|z| z.re);
-        let hamiltonian = Hamiltonian::new(
-            cell,
-            &basis,
-            ionic_real.clone(),
-            NonlocalOperator::new(&basis, cell.volume_bohr3(), &species)?,
-        )?;
+        let mut states = Vec::new();
+        for point in points {
+            let basis =
+                PlaneWaveBasis::at_k(cell, Hartree(options.cutoff_hartree), point.fractional)?;
+            if bands > basis.vectors().len()
+                || (options.davidson_subspace.min(basis.vectors().len()) <= bands
+                    && bands != basis.vectors().len())
+            {
+                return Err(ScfError::InvalidInput(
+                    "bands/subspace incompatible with k basis",
+                ));
+            }
+            let k_grid = FftGridSpec::new(&basis, &density_basis, Some(grid.dims()))?;
+            let hamiltonian = Hamiltonian::new(
+                cell,
+                &basis,
+                ionic_real.clone(),
+                NonlocalOperator::new(&basis, cell.volume_bohr3(), &species)?,
+            )?;
+            states.push(KState {
+                point: KPoint {
+                    fractional: basis.k_fractional(),
+                    weight: point.weight,
+                },
+                basis,
+                grid: k_grid,
+                hamiltonian,
+            });
+        }
         let ewald = ewald::energy(cell, &ions, EwaldOptions::default())?;
         let occupations = (0..bands)
             .map(|b| if b < occupied { 2.0 } else { 0.0 })
             .collect();
         Ok(Self {
             cell: cell.clone(),
-            basis,
+            states,
             grid,
             ionic_g,
             ionic_real,
-            hamiltonian,
             fft,
             ewald,
             occupations,
             electrons,
             options,
             setup_time: start.elapsed(),
+            minimum_gap,
         })
     }
     pub fn grid_dimensions(&self) -> [usize; 3] {
@@ -385,6 +504,25 @@ impl ScfProblem {
         initial: Option<&ComplexMatrix>,
         tolerance: f64,
     ) -> Result<ScfStep, ScfError> {
+        if self.states.len() != 1 {
+            return Err(ScfError::InvalidInput(
+                "use step_kpoints for multiple k points",
+            ));
+        }
+        let initial = initial.map(|v| vec![v.clone()]);
+        self.step_kpoints(n, initial.as_deref(), tolerance)
+    }
+    /// One fixed-point map, with warm-start matrices in quadrature order.
+    /// Intermediate maps use integer occupations; gap acceptance occurs in run.
+    pub fn step_kpoints(
+        &mut self,
+        n: &Array3<f64>,
+        initial: Option<&[ComplexMatrix]>,
+        tolerance: f64,
+    ) -> Result<ScfStep, ScfError> {
+        if initial.is_some_and(|v| v.len() != self.states.len()) {
+            return Err(ScfError::InvalidInput("one warm start required per k"));
+        }
         if n.shape() != self.grid.dims() {
             return Err(ScfError::InvalidInput("input density grid"));
         }
@@ -395,7 +533,9 @@ impl ScfProblem {
         for ((v, h), x) in effective.iter_mut().zip(&h.potential).zip(&x.potential) {
             *v += h.re + x;
         }
-        self.hamiltonian.set_local_potential(effective)?;
+        for state in &mut self.states {
+            state.hamiltonian.set_local_potential(effective.clone())?;
+        }
         let mut timings = PhaseTimings {
             potential: start.elapsed(),
             ..Default::default()
@@ -409,45 +549,73 @@ impl ScfProblem {
             block_size: self.occupations.len(),
             seed: self.options.seed,
         };
-        let preconditioner =
-            DiagonalPreconditioner::new(self.hamiltonian.kinetic_diagonal().to_vec(), 0.1)?;
-        let solution = solver.solve(&self.hamiltonian, initial, Some(&preconditioner))?;
+        let mut k_points = Vec::new();
+        for (i, state) in self.states.iter().enumerate() {
+            let preconditioner =
+                DiagonalPreconditioner::new(state.hamiltonian.kinetic_diagonal().to_vec(), 0.1)?;
+            let solution = solver.solve(
+                &state.hamiltonian,
+                initial.map(|v| &v[i]),
+                Some(&preconditioner),
+            )?;
+            k_points.push(KPointSolution {
+                point: state.point,
+                solution,
+            });
+        }
         timings.diagonalization = start.elapsed();
         let start = Instant::now();
-        let orbitals: Vec<_> = (0..solution.eigenvectors.cols())
-            .map(|b| solution.eigenvectors.column(b).to_vec())
+        let orbitals: Vec<Vec<Vec<Complex64>>> = k_points
+            .iter()
+            .map(|k| {
+                (0..k.solution.eigenvectors.cols())
+                    .map(|b| k.solution.eigenvectors.column(b).to_vec())
+                    .collect()
+            })
             .collect();
-        let output = density::from_orbitals(
-            &orbitals,
-            &self.occupations,
-            &self.grid,
-            self.cell.volume_bohr3(),
-            &mut self.fft,
-        )?;
+        let mut output = Array3::zeros(self.grid.dims());
+        for (state, orbitals) in self.states.iter().zip(&orbitals) {
+            let nk = density::from_orbitals(
+                orbitals,
+                &self.occupations,
+                &state.grid,
+                self.cell.volume_bohr3(),
+                &mut self.fft,
+            )?;
+            for (out, n) in output.iter_mut().zip(nk) {
+                *out += state.point.weight * n;
+            }
+        }
         timings.density = start.elapsed();
         let start = Instant::now();
-        let energy = energy::evaluate(
-            AuditInput {
-                cell: &self.cell,
-                basis: &self.basis,
-                grid: &self.grid,
-                ionic_g: &self.ionic_g,
-                nonlocal: self.hamiltonian.nonlocal(),
-                orbitals: &orbitals,
-                occupations: &self.occupations,
-                eigenvalues: &solution.eigenvalues,
-                eigen_residuals: &solution.residuals,
-                input_density: n,
-                output_density: &output,
-                input_hartree: &h,
-                input_xc: &x,
-                ewald: self.ewald.energy.0,
-            },
-            &mut self.fft,
-        )?;
+        let mut audits = Vec::new();
+        for ((state, k), orbitals) in self.states.iter().zip(&k_points).zip(&orbitals) {
+            let audit = energy::evaluate(
+                AuditInput {
+                    cell: &self.cell,
+                    basis: &state.basis,
+                    grid: &state.grid,
+                    ionic_g: &self.ionic_g,
+                    nonlocal: state.hamiltonian.nonlocal(),
+                    orbitals,
+                    occupations: &self.occupations,
+                    eigenvalues: &k.solution.eigenvalues,
+                    eigen_residuals: &k.solution.residuals,
+                    input_density: n,
+                    output_density: &output,
+                    input_hartree: &h,
+                    input_xc: &x,
+                    ewald: self.ewald.energy.0,
+                },
+                &mut self.fft,
+            )?;
+            audits.push((state.point.weight, audit));
+        }
+        let energy = energy::weighted_audits(&audits);
         timings.energy = start.elapsed();
         Ok(ScfStep {
-            solution,
+            solution: k_points[0].solution.clone(),
+            k_points,
             density: output,
             energy,
             timings,
@@ -484,7 +652,7 @@ impl ScfProblem {
         )?;
         mixer.reset();
         let mut history: Vec<IterationRecord> = Vec::new();
-        let mut previous = None;
+        let mut previous: Option<Vec<ComplexMatrix>> = None;
         let weight = self.cell.volume_bohr3() / n.len() as f64;
         let mut best = f64::INFINITY;
         let mut growing = 0;
@@ -504,7 +672,7 @@ impl ScfProblem {
                     .powf((iteration - 1) as f64))
             .max(0.1 * self.options.eigen_tolerance);
             let step = self
-                .step(&n, previous.as_ref(), tolerance)
+                .step_kpoints(&n, previous.as_deref(), tolerance)
                 .map_err(|e| match e {
                     ScfError::NonFinite => ScfError::Diverged {
                         reason: "nonfinite SCF arithmetic".into(),
@@ -521,10 +689,9 @@ impl ScfProblem {
                 .last()
                 .map(|r| step.energy.total_hartree() - r.energy.total_hartree());
             let max_eigen_residual = step
-                .solution
-                .residuals
+                .k_points
                 .iter()
-                .zip(&self.occupations)
+                .flat_map(|k| k.solution.residuals.iter().zip(&self.occupations))
                 .filter(|(_, f)| **f > 0.0)
                 .map(|(r, _)| *r)
                 .fold(0.0, f64::max);
@@ -538,7 +705,7 @@ impl ScfProblem {
                 density_residual: residual,
                 max_eigen_residual,
                 requested_eigen_tolerance: tolerance,
-                davidson_iterations: step.solution.iterations,
+                davidson_iterations: step.k_points.iter().map(|k| k.solution.iterations).sum(),
                 charge_error,
                 input_charge_error,
                 min_density: step.density.iter().copied().fold(f64::INFINITY, f64::min),
@@ -572,10 +739,15 @@ impl ScfProblem {
             // Certify the returned output density itself, not just the input
             // fixed-point residual. A small-gap response can amplify that residual.
             let certified = if converged {
+                let warm: Vec<_> = step
+                    .k_points
+                    .iter()
+                    .map(|k| k.solution.eigenvectors.clone())
+                    .collect();
                 let check = self
-                    .step(
+                    .step_kpoints(
                         &step.density,
-                        Some(&step.solution.eigenvectors),
+                        Some(&warm),
                         0.1 * self.options.eigen_tolerance,
                     )
                     .map_err(|e| match e {
@@ -592,11 +764,16 @@ impl ScfProblem {
                     self.electrons,
                 );
                 let occupied_eigenvalue_change = check
-                    .solution
-                    .eigenvalues
+                    .k_points
                     .iter()
-                    .zip(&step.solution.eigenvalues)
-                    .zip(&self.occupations)
+                    .zip(&step.k_points)
+                    .flat_map(|(a, b)| {
+                        a.solution
+                            .eigenvalues
+                            .iter()
+                            .zip(&b.solution.eigenvalues)
+                            .zip(&self.occupations)
+                    })
                     .filter(|(_, f)| **f > 0.0)
                     .map(|((a, b), _)| (a - b).abs())
                     .fold(0.0, f64::max);
@@ -605,17 +782,27 @@ impl ScfProblem {
                 history.last_mut().unwrap().fixed_point_certificate = Some(FixedPointCertificate {
                     density_residual,
                     occupied_eigenvalue_change,
-                    davidson_iterations: check.solution.iterations,
+                    davidson_iterations: check.k_points.iter().map(|k| k.solution.iterations).sum(),
                     timings: check.timings,
                 });
+                if passed {
+                    self.check_gap(&check.k_points)?;
+                }
                 passed
             } else {
                 false
             };
             if certified || (retain_last && iteration == self.options.max_iterations) {
+                let gap_hartree = if certified {
+                    self.check_gap(&step.k_points)?
+                } else {
+                    self.minimum_gap.map(|_| self.sampled_gap(&step.k_points))
+                };
                 return Ok(ScfOutcome {
                     converged: certified,
                     result: ScfResult {
+                        k_points: step.k_points,
+                        gap_hartree,
                         energy: step.energy,
                         eigenvalues: step.solution.eigenvalues,
                         occupations: self.occupations,
@@ -662,9 +849,40 @@ impl ScfProblem {
             }
             n.as_slice_mut().unwrap().copy_from_slice(&mixed);
             history.last_mut().unwrap().timings.mixing = mix_start.elapsed();
-            previous = Some(step.solution.eigenvectors);
+            previous = Some(
+                step.k_points
+                    .into_iter()
+                    .map(|k| k.solution.eigenvectors)
+                    .collect(),
+            );
         }
         Err(ScfError::NotConverged { history })
+    }
+    fn sampled_gap(&self, points: &[KPointSolution]) -> f64 {
+        let occupied = self.occupations.iter().filter(|f| **f > 0.0).count();
+        let valence = points
+            .iter()
+            .map(|k| k.solution.eigenvalues[occupied - 1])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let conduction = points
+            .iter()
+            .map(|k| k.solution.eigenvalues[occupied])
+            .fold(f64::INFINITY, f64::min);
+        conduction - valence
+    }
+    fn check_gap(&self, points: &[KPointSolution]) -> Result<Option<f64>, ScfError> {
+        let Some(minimum) = self.minimum_gap else {
+            return Ok(None);
+        };
+        let gap = self.sampled_gap(points);
+        let required = minimum.max(2.0 * self.options.eigen_tolerance);
+        if !gap.is_finite() || gap <= required {
+            return Err(ScfError::NonInsulating {
+                gap_hartree: gap,
+                required_hartree: required,
+            });
+        }
+        Ok(Some(gap))
     }
 }
 pub fn density_distance(a: &Array3<f64>, b: &Array3<f64>, volume: f64, electrons: f64) -> f64 {

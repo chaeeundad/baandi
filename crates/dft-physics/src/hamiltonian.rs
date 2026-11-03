@@ -1,4 +1,4 @@
-//! Ionic and Kleinman–Bylander terms, and a reusable Gamma Hamiltonian.
+//! Ionic and Kleinman–Bylander terms, and a reusable Bloch Hamiltonian.
 use dft_basis::{FftGridSpec, GVector, PlaneWaveBasis};
 use dft_geometry::Cell;
 use dft_numerics::{Fft3d, FftPlan3d, linalg::ComplexMatrix};
@@ -103,6 +103,8 @@ pub struct NonlocalOperator {
     max_channels: usize,
 }
 impl NonlocalOperator {
+    /// Build projectors at q=k+G from the basis momenta, including exp(-i q.tau).
+    /// Gamma uses exactly the same radial/angular and structure-factor path.
     pub fn new(
         basis: &PlaneWaveBasis,
         volume_bohr3: f64,
@@ -134,15 +136,15 @@ impl NonlocalOperator {
                 .collect();
             let nc = channels.len();
             max_channels = max_channels.max(nc);
-            let mut table = vec![vec![Complex64::default(); basis.vectors().len()]; nc];
+            let mut table = vec![vec![Complex64::default(); basis.momenta().len()]; nc];
             // Radial transforms are evaluated once per radial projector and G,
             // independent of the number of atoms and magnetic channels.
-            for (ig, g) in basis.vectors().iter().enumerate() {
+            for (ig, g) in basis.momenta().iter().enumerate() {
                 let radial: Vec<_> = (0..np)
                     .map(|i| pp.projector_transform(i, g.norm_squared.sqrt()))
                     .collect::<Result<_, _>>()?;
                 // Direction at zero is arbitrary: all l>0 radial transforms vanish.
-                let direction = if g.miller == [0; 3] {
+                let direction = if g.norm_squared == 0.0 {
                     [0.0, 0.0, 1.0]
                 } else {
                     g.cartesian
@@ -164,7 +166,7 @@ impl NonlocalOperator {
             }
             for &r in s.positions_bohr {
                 let phases = basis
-                    .vectors()
+                    .momenta()
                     .iter()
                     .map(|g| phase(g.cartesian, r))
                     .collect::<Result<Vec<_>, _>>()?;
@@ -187,7 +189,7 @@ impl NonlocalOperator {
             }
         }
         Ok(Self {
-            basis: basis.vectors().to_vec(),
+            basis: basis.momenta().to_vec(),
             atoms,
             max_channels,
         })
@@ -266,13 +268,15 @@ pub struct Hamiltonian {
     scratch: RefCell<Scratch>,
 }
 impl Hamiltonian {
+    /// Bloch Hamiltonian for the supplied basis: |k+G|^2/2 + V_local + V_NL(k).
+    /// FFTs act on the periodic part; local samples are on the common density grid.
     pub fn new(
         cell: &Cell,
         basis: &PlaneWaveBasis,
         potential: Array3<f64>,
         nonlocal: NonlocalOperator,
     ) -> Result<Self, HamiltonianError> {
-        if basis.vectors() != nonlocal.basis {
+        if basis.momenta() != nonlocal.basis {
             return Err(HamiltonianError::Shape);
         }
         let dims = [
@@ -293,7 +297,7 @@ impl Hamiltonian {
         Ok(Self {
             grid,
             kinetic: basis
-                .vectors()
+                .momenta()
                 .iter()
                 .map(|g| 0.5 * g.norm_squared)
                 .collect(),

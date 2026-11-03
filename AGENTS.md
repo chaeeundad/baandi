@@ -54,6 +54,9 @@ The original rule "never copy QE (GPL) source" stays. On 2026-11-03 the user als
 - Evidence independence: the QE comparisons recorded before this date (R1 to R8, README) were produced by an engine written without reading QE source and stay valid as independent evidence; statements in the docs that the QE source was not read are historical and are annotated, not deleted. Results of code changed after a note are still compared against QE outputs, and the notes list what was learned so that the influence is visible.
 - If a note would require reproducing non-obvious expression from QE (for example a specific table or formula layout) it is not written: describe the principle instead.
 
+## Disk hygiene (user request, 2026-11-03)
+Each task worktree builds its own `target/` (1 to 6 GB; the worktree folder had grown to 79 GB and filled the disk). After a task is merged or rejected run `python3 -I scripts/wt_cleanup.py` (it removes `../rust-dft-wt/<TASK>/target` only for tasks whose latest run is not running; `--dry-run` lists first). Never delete anything else in `rust-dft-wt` (vendor, pseudo, qe-src, runs) without the user's say.
+
 ## Output formats policy (user rule, 2026-11-03)
 Scientific outputs are written in standard, widely readable formats first, and in the established codes' formats where a de-facto convention exists, so that existing tools and workflows work without conversion; the project's own JSON/CSV is the complete record, not the only format. Priorities:
 - Volumetric data (density, ELF, potentials, partial charge): Gaussian cube and XSF first; VASP CHGCAR/LOCPOT style and VTK image data (`.vti`, ParaView) as additional writers; raw binary only as an internal exchange.

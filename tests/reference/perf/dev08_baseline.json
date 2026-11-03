@@ -111,5 +111,72 @@
  "mac_reference_total_energy_ha": {
   "gamma": -7.295530468210927,
   "k444s": -7.925976126648072
- }
+ },
+ "bench_steps_note": "Steps measured with scripts/bench_scf.py (median of 3, taskset -c 6, quiet dev08, relayed attestation by the dft5090 session on 2026-11-03). Earlier wall times in cases[] were taken with /usr/bin/time and include process start; the two methods differ by up to about 5 percent (k444s pre-optimization: 94.3 s by /usr/bin/time, 98.98 s by the script median). Each later step compares against the first by --require-identical or by energy difference.",
+ "bench_steps": [
+  {
+   "label": "before optimization",
+   "commit": "3274955",
+   "binary_sha256": "d2381454fb2a848ac81304df784038ed7c34256c0825697883e3d4cd25a56753",
+   "identical_to_baseline": true,
+   "cases": {
+    "gamma": {
+     "wall_s": 2.278,
+     "engine_s": 2.272,
+     "diag_s": 2.068,
+     "iters": 11
+    },
+    "k222s": {
+     "wall_s": 10.972,
+     "engine_s": 10.94,
+     "diag_s": 10.495,
+     "iters": 11
+    },
+    "k222": {
+     "wall_s": 21.236,
+     "engine_s": 21.454,
+     "diag_s": 20.692,
+     "iters": 11
+    },
+    "k444s": {
+     "wall_s": 98.975,
+     "engine_s": 98.964,
+     "diag_s": 96.223,
+     "iters": 11
+    }
+   }
+  },
+  {
+   "label": "O1 + O3 (FFT)",
+   "commit": "f6e3679",
+   "binary_sha256": "94c223d456b84cda161ee607764fd95d427faf09144ac3ab14bf9d0215784057",
+   "identical_to_baseline": true,
+   "cases": {
+    "gamma": {
+     "wall_s": 1.219,
+     "engine_s": 1.23,
+     "diag_s": 1.038,
+     "iters": 11
+    },
+    "k222s": {
+     "wall_s": 5.602,
+     "engine_s": 5.575,
+     "diag_s": 5.177,
+     "iters": 11
+    },
+    "k222": {
+     "wall_s": 10.735,
+     "engine_s": 10.728,
+     "diag_s": 10.063,
+     "iters": 11
+    },
+    "k444s": {
+     "wall_s": 46.975,
+     "engine_s": 46.967,
+     "diag_s": 44.65,
+     "iters": 11
+    }
+   }
+  }
+ ]
 }

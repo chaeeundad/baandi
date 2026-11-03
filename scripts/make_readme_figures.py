@@ -66,16 +66,17 @@ def kpoint_data():
 def perf_data():
     d = load(os.path.join(REF, "perf", "dev08_baseline.json"))
     mean = lambda a: sum(a) / len(a)
+    steps = d["bench_steps"]
     out = []
-    for key in ("gamma", "k444s"):
+    for key, label in (("gamma", "Gamma, 1 k point"), ("k444s", "4x4x4 shifted, 32 k points")):
         c = d["cases"][key]
-        o, q1, q4 = (mean(c["ours_1thread"]["wall_s"]), mean(c["qe_np1"]["wall_s"]), mean(c["qe_np4"]["wall_s"]))
-        ph = c["ours_1thread"]["phases_s"]
-        out.append({"label": c["label"], "nk": c["k_points"], "ours": o, "qe1": q1, "qe4": q4,
-                    "diag_frac": ph["diagonalization"] / c["ours_1thread"]["engine_total_s"],
-                    "ours_it": c["ours_1thread"]["iterations"], "qe_it": c["qe_np1"]["iterations"]})
+        q1, q4 = mean(c["qe_np1"]["wall_s"]), mean(c["qe_np4"]["wall_s"])
+        last = steps[-1]["cases"][key]
+        out.append({"label": label + ", 30 Ry", "nk": c["k_points"], "steps": [(st["label"], st["cases"][key]["wall_s"]) for st in steps],
+                    "qe1": q1, "qe4": q4, "diag_frac": last["diag_s"] / last["engine_s"],
+                    "ours_it": last["iters"], "qe_it": c["qe_np1"]["iterations"]})
     xp = {k: d["cases"][k]["ours_1thread"]["total_energy_ha"] - d["mac_reference_total_energy_ha"][k] for k in ("gamma", "k444s")}
-    return {"rows": out, "xplat": xp, "commit": d["code"]["commit"][:7], "cpu": d["host"]["cpu"]}
+    return {"rows": out, "xplat": xp, "commit": steps[-1]["commit"], "cpu": d["host"]["cpu"], "steps": [st["label"] for st in steps]}
 
 
 def svg_open(w, h, title):
@@ -160,23 +161,28 @@ def fig_kpoints(gamma, kruns):
 
 def fig_perf(perf):
     rows = perf["rows"]
-    w, h = 760, 70 + 96 * len(rows) + 60
-    s = svg_open(w, h, "Wall time of rust-dft and Quantum ESPRESSO 7.6 on the same node")
-    s += txt(20, 24, "Wall time on one node (Si, 30 Ry): rust-dft is not yet optimized", 14, weight="bold")
-    x0, x1 = 210, 730
-    lo, hi = -1.0, 3.3
+    nst = len(perf["steps"])
+    group = nst + 2
+    w, h = 800, 70 + (group * 22 + 30) * len(rows) + 60
+    s = svg_open(w, h, "Wall time of rust-dft optimization steps and Quantum ESPRESSO 7.6 on the same node")
+    s += txt(20, 24, "Wall time on one node (Si, 30 Ry): rust-dft optimization steps against QE 7.6", 14, weight="bold")
+    x0, x1 = 230, 770
+    lo, hi = -1.0, 3.7
     def px(v): return x0 + (math.log10(v) - lo) / (hi - lo) * (x1 - x0)
     top = 50
     for k in range(-1, 3):
         xx = px(10.0 ** k)
         s += f'<line x1="{xx:.1f}" y1="{top}" x2="{xx:.1f}" y2="{h - 56}" stroke="{GRID}"/>' + txt(xx, h - 40, f"{10.0 ** k:g} s", 11, "middle", MUTED)
-    s += txt((x0 + x1) / 2, h - 22, "wall time, mean of 3 runs (log scale)", 12, "middle", MUTED)
+    s += txt((x0 + x1) / 2, h - 22, "wall time (median of 3 for rust-dft steps, mean of 3 for QE; log scale)", 12, "middle", MUTED)
+    shades = ["#7fb2e5", "#3d85d1", C_OURS, "#0a3f7a", "#052a52"]
     for i, r in enumerate(rows):
-        y = top + 12 + i * 96
+        y = top + 12 + i * (group * 22 + 30)
         s += txt(x0 - 12, y + 14, r["label"], 12, "end", INK, "bold") + txt(x0 - 12, y + 30, f"{r['nk']} k point(s)", 11, "end", MUTED)
-        for j, (key, col, name) in enumerate((("ours", C_OURS, "rust-dft, 1 thread"), ("qe1", C_QE, "QE, 1 MPI process"), ("qe4", "#7c3aed", "QE, 4 MPI processes"))):
+        bars = [(name, t, shades[min(j, len(shades) - 1)]) for j, (name, t) in enumerate(r["steps"])]
+        bars += [("QE, 1 MPI process", r["qe1"], C_QE), ("QE, 4 MPI processes", r["qe4"], "#7c3aed")]
+        for j, (name, t, col) in enumerate(bars):
             yy = y + j * 22
-            s += f'<rect x="{x0}" y="{yy}" width="{px(r[key]) - x0:.1f}" height="16" fill="{col}"/>' + txt(px(r[key]) + 6, yy + 12, f"{r[key]:.3g} s  {name}", 11)
+            s += f'<rect x="{x0}" y="{yy}" width="{px(t) - x0:.1f}" height="16" fill="{col}"/>' + txt(px(t) + 6, yy + 12, f"{t:.3g} s  {name}", 11)
     return s + "</svg>\n"
 
 
@@ -199,15 +205,16 @@ def block(rows, kruns, gamma, perf=None):
               "The 4x4x4 and PBE evidence are relayed text summaries; the other LDA runs are whole-file, hash-verified outputs. The PBE rows use QE's `input_dft = 'pbe'` override on the LDA pseudopotential: a code-to-code consistency test of the PBE implementation, not a physically meaningful PBE result for this pseudopotential.", "",
               ]
     if perf:
-        lines += ["### Performance baseline (not optimized)", "",
-                  f"Same node ({perf['cpu']}), commit `{perf['commit']}`, rust-dft on one thread against QE 7.6 on one and on four MPI processes; "
-                  "mean of three runs; relayed measurement, see [validation record](docs/validation.md) R7. "
+        lines += ["### Performance (rust-dft optimization steps against QE 7.6, same node)", "",
+                  f"Same node ({perf['cpu']}), rust-dft on one thread (steps measured with `scripts/bench_scf.py`, median of 3, quiet node) against QE 7.6 on one and on four MPI processes "
+                  f"(mean of 3); latest step: commit `{perf['commit']}`. Relayed measurements, see [validation record](docs/validation.md) R7 and the [optimization log](docs/performance/optimization-log.md). "
                   "QE converges to a much tighter threshold (1e-12) than the rust-dft defaults, so compare iterations and final energies as well as times.", "",
-                  "![wall time](docs/img/performance.svg)", "",
-                  "| Case | rust-dft, 1 thread (s) | QE 1 process (s) | QE 4 processes (s) | slower than QE 1 process | iterations rust-dft / QE | diagonalization share of rust-dft time |",
-                  "|---|---|---|---|---|---|---|"]
+                  "![wall time](docs/img/performance.svg)", ""]
+        head = "| Case | " + " | ".join(f"{n} (s)" for n in perf["steps"]) + " | QE 1 process (s) | QE 4 processes (s) | latest vs QE 1 process | speedup vs before | iterations rust-dft / QE | diagonalization share |"
+        lines += [head, "|" + "---|" * (len(perf["steps"]) + 7)]
         for r in perf["rows"]:
-            lines.append(f"| {r['label']} ({r['nk']} k) | {r['ours']:.3g} | {r['qe1']:.3g} | {r['qe4']:.3g} | {r['ours'] / r['qe1']:.1f}x | {r['ours_it']} / {r['qe_it']} | {100 * r['diag_frac']:.0f}% |")
+            ts = [t for _, t in r["steps"]]
+            lines.append(f"| {r['label']} ({r['nk']} k) | " + " | ".join(f"{t:.3g}" for t in ts) + f" | {r['qe1']:.3g} | {r['qe4']:.3g} | {ts[-1] / r['qe1']:.1f}x slower | {ts[0] / ts[-1]:.2f}x | {r['ours_it']} / {r['qe_it']} | {100 * r['diag_frac']:.0f}% |")
         lines += ["", f"Cross-platform check: the total energy on this Linux x86 build differs from the macOS Apple Silicon build by {perf['xplat']['gamma']:+.2e} Ha (Gamma) and {perf['xplat']['k444s']:+.2e} Ha (4x4x4, shifted).", ""]
     lines += [
               "Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; "

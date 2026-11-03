@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/img/baandi-logo.webp" alt="BAANDI: Bridging Agents And Numerical Density-functional Interfaces" width="720"></p>
+
 # BAANDI
 
 **A modern, state-aware density functional theory engine for materials research.**

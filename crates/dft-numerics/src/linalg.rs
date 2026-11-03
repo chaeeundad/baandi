@@ -211,7 +211,26 @@ pub struct Orthonormalized {
 }
 /// Stable Euclidean norm (avoids squaring very large/small components).
 pub fn norm(x: &[Complex64]) -> f64 {
-    x.iter().fold(0.0_f64, |s, z| s.hypot(z.re).hypot(z.im))
+    let mut sums = [0.0; 4];
+    let (chunks, remainder) = x.as_chunks::<2>();
+    for pair in chunks {
+        sums[0] += pair[0].re * pair[0].re;
+        sums[1] += pair[0].im * pair[0].im;
+        sums[2] += pair[1].re * pair[1].re;
+        sums[3] += pair[1].im * pair[1].im;
+    }
+    for z in remainder {
+        sums[0] += z.re * z.re;
+        sums[1] += z.im * z.im;
+    }
+    let sum = (sums[0] + sums[1]) + (sums[2] + sums[3]);
+    // At most 2*n subnormal products lose <= MIN_POSITIVE*EPSILON each.
+    // This conservative threshold bounds that loss relative to sum by EPSILON.
+    if sum.is_finite() && sum > f64::MIN_POSITIVE * (2.0 * x.len() as f64).max(1.0) {
+        sum.sqrt()
+    } else {
+        x.iter().fold(0.0_f64, |s, z| s.hypot(z.re).hypot(z.im))
+    }
 }
 /// Two-pass modified Gram-Schmidt. `against` must already be orthonormal.
 /// Filtering is relative to each original column norm, hence scale independent.
@@ -270,7 +289,18 @@ pub fn orthonormalize(
     })
 }
 fn subtract_projection(v: &mut [Complex64], q: &[Complex64]) {
-    let dot: Complex64 = q.iter().zip(v.iter()).map(|(q, v)| q.conj() * v).sum();
+    let mut sums = [Complex64::new(0.0, 0.0); 4];
+    let (qc, qr) = q.as_chunks::<4>();
+    let (vc, vr) = v.as_chunks::<4>();
+    for (q, v) in qc.iter().zip(vc) {
+        for k in 0..4 {
+            sums[k] += q[k].conj() * v[k];
+        }
+    }
+    let mut dot = (sums[0] + sums[1]) + (sums[2] + sums[3]);
+    for (q, v) in qr.iter().zip(vr) {
+        dot += q.conj() * v;
+    }
     for (v, q) in v.iter_mut().zip(q) {
         *v -= dot * q;
     }

@@ -165,3 +165,175 @@ fn rank_filter_and_validation() {
     let empty = ComplexMatrix::zeros(0, 0).unwrap();
     assert!(hermitian_eigh(&empty).unwrap().0.is_empty());
 }
+
+fn legacy_norm(x: &[Complex64]) -> f64 {
+    x.iter().fold(0.0_f64, |s, z| s.hypot(z.re).hypot(z.im))
+}
+fn legacy_orthonormalize(
+    block: &ComplexMatrix,
+    against: Option<&ComplexMatrix>,
+) -> Result<Orthonormalized, LinalgError> {
+    block.validate_finite()?;
+    if let Some(q) = against {
+        q.validate_finite()?;
+        if q.rows != block.rows {
+            return Err(LinalgError::Dimension);
+        }
+    }
+    let mut data = Vec::new();
+    let mut dropped = Vec::new();
+    let mut count = 0;
+    for j in 0..block.cols {
+        let mut v = block.column(j).to_vec();
+        let original = legacy_norm(&v);
+        if !original.is_finite() {
+            return Err(LinalgError::NonFinite);
+        }
+        // Normalize first so rank decisions also work for very small input columns.
+        if original == 0.0 {
+            dropped.push(j);
+            continue;
+        }
+        for z in &mut v {
+            *z /= original;
+        }
+        for _ in 0..2 {
+            if let Some(q) = against {
+                for k in 0..q.cols {
+                    legacy_subtract_projection(&mut v, q.column(k));
+                }
+            }
+            for k in 0..count {
+                legacy_subtract_projection(&mut v, &data[k * block.rows..(k + 1) * block.rows]);
+            }
+        }
+        let remaining = legacy_norm(&v);
+        if !remaining.is_finite() {
+            return Err(LinalgError::NonFinite);
+        }
+        if remaining <= DEPENDENCE_TOLERANCE {
+            dropped.push(j);
+        } else {
+            data.extend(v.iter().map(|z| z / remaining));
+            count += 1;
+        }
+    }
+    Ok(Orthonormalized {
+        vectors: ComplexMatrix::new(block.rows, count, data)?,
+        dropped,
+    })
+}
+fn legacy_subtract_projection(v: &mut [Complex64], q: &[Complex64]) {
+    let dot: Complex64 = q.iter().zip(v.iter()).map(|(q, v)| q.conj() * v).sum();
+    for (v, q) in v.iter_mut().zip(q) {
+        *v -= dot * q;
+    }
+}
+
+#[test]
+fn norm_extremes_and_orthogonalization_oracle() {
+    for scale in [0.0, 1e-300, 1e-100, 1.0, 1e300] {
+        let x = [
+            Complex64::new(3.0 * scale, 4.0 * scale),
+            Complex64::new(1e-300, 0.0),
+        ];
+        let expected = legacy_norm(&x);
+        assert!((norm(&x) / expected - 1.0).abs() <= 5e-16);
+    }
+    assert_eq!(norm(&[]), 0.0);
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let a = matrix(2, 1, |_, _| Complex64::new(bad, 0.0));
+        assert_eq!(
+            orthonormalize(&a, None).unwrap_err(),
+            LinalgError::NonFinite
+        );
+    }
+    // Orthogonal Fourier modes give singular values sqrt(8+eps^2), eps.
+    for epsilon in [
+        1.0,
+        (8.0_f64 / (1e12 - 1.0)).sqrt(),
+        (8.0_f64 / (1e20 - 1.0)).sqrt(),
+        0.0,
+    ] {
+        for scale in [1e-300, 1.0, 1e300] {
+            let a = matrix(32, 8, |i, j| {
+                let phase = std::f64::consts::TAU * i as f64 / 32.0;
+                scale
+                    * (Complex64::from_polar(1.0, phase)
+                        + epsilon * Complex64::from_polar(1.0, phase * (j + 2) as f64))
+            });
+            let old = legacy_orthonormalize(&a, None).unwrap();
+            let new = orthonormalize(&a, None).unwrap();
+            assert_eq!(old.dropped, new.dropped);
+            let gram = gemm(&new.vectors, Adjoint, &new.vectors, Identity).unwrap();
+            let mut defect: f64 = 0.0;
+            for j in 0..gram.cols() {
+                for i in 0..gram.rows() {
+                    defect = defect.max((gram[(i, j)] - if i == j { 1.0 } else { 0.0 }).norm());
+                }
+            }
+            println!("epsilon={epsilon:e} scale={scale:e} orthogonality={defect:e}");
+            assert!(defect <= 2e-15);
+        }
+    }
+}
+
+#[test]
+fn random_blocks_against_oracle() {
+    let mut state = 17_u64;
+    for _ in 0..12 {
+        let mut a = ComplexMatrix::zeros(64, 12).unwrap();
+        for z in &mut a.data {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            z.re = (state >> 11) as f64 / (1_u64 << 53) as f64 - 0.5;
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            z.im = (state >> 11) as f64 / (1_u64 << 53) as f64 - 0.5;
+        }
+        let q = orthonormalize(&a, None).unwrap().vectors;
+        let old = legacy_orthonormalize(&a, Some(&q)).unwrap();
+        let new = orthonormalize(&a, Some(&q)).unwrap();
+        assert_eq!(old.dropped, new.dropped);
+        assert_eq!(new.vectors.cols(), 0);
+        let gram = gemm(&q, Adjoint, &q, Identity).unwrap();
+        for j in 0..12 {
+            for i in 0..12 {
+                assert!((gram[(i, j)] - if i == j { 1.0 } else { 0.0 }).norm() <= 2e-15);
+            }
+        }
+    }
+}
+
+/// Run: cargo test --release -p dft-numerics kernel_timing -- --ignored --nocapture
+#[test]
+#[ignore]
+fn kernel_timing() {
+    use std::{hint::black_box, time::Instant};
+    let x: Vec<_> = (0..2048)
+        .map(|i| Complex64::new((i as f64).sin(), (i as f64).cos()))
+        .collect();
+    for (name, f) in [
+        ("old norm", legacy_norm as fn(&[Complex64]) -> f64),
+        ("new norm", norm),
+    ] {
+        let t = Instant::now();
+        for _ in 0..20000 {
+            black_box(f(black_box(&x)));
+        }
+        println!("{name}: {} s", t.elapsed().as_secs_f64());
+    }
+    for (name, f) in [
+        (
+            "old projection",
+            legacy_subtract_projection as fn(&mut [Complex64], &[Complex64]),
+        ),
+        ("new projection", subtract_projection),
+    ] {
+        let mut v = x.clone();
+        let q: Vec<_> = x.iter().map(|z| z / norm(&x)).collect();
+        let t = Instant::now();
+        for _ in 0..20000 {
+            f(black_box(&mut v), black_box(&q));
+        }
+        println!("{name}: {} s", t.elapsed().as_secs_f64());
+    }
+}

@@ -567,6 +567,79 @@ registry), tickets, manifests, baselines and all other crates remain untouched
 under the ticket's explicit exclusions. Final k444s count verification overlapped
 release tests; use the earlier isolated combined detail wall quoted above.
 
+## 2026-11-03: P7P5 O2 investigation
+
+Pre-change evidence: supplied post-O4c 32-k-point profile, 2330 samples,
+hypot 12.2%, orthonormalization 8.3%, GEMM 8.7%. No fresh profile claimed.
+Residual products already call the shared norm, so require no solver edit.
+
+Candidate: four independent norm accumulators, sqrt only when the squared sum
+is finite and exceeds `MIN_POSITIVE * max(1, 2*n)`. Each subnormal product loses
+at most MIN_POSITIVE*EPSILON, so this bounds aggregate underflow loss relative
+to the sum by EPSILON. Otherwise the original hypot fold is used. Rounding
+changes at roughly machine precision (1e-16 order for short vectors; accumulation
+error depends on length); results are not bit-identical. Projection dots use
+four independent complex accumulators; subtraction and both MGS passes remain.
+No solver edit is needed: residual_from_products already imports this norm.
+No new dependencies, unsafe, production allocations or public API changes.
+
+Separate measurements (Apple Silicon shared host, release, 3 repeats; seconds):
+
+| case | local before | norm only | norm + projection |
+| --- | ---: | ---: | ---: |
+| gamma | 0.157 | 0.180 | 0.162 |
+| k222s | 0.572 | 0.531 | 0.511 |
+| k222 | 1.066 | 1.736 | 0.955 |
+
+Raw benchmark records and final detail results are retained in
+`crates/dft-numerics/benches/p7p5-evidence.json`. Shared-host noise prevents a
+controlled SCF speedup claim; Claude must remeasure on quiet dev08. An ignored
+release kernel test (2048 complex entries, 20000 calls) measured old/new norm
+0.689414/0.014653 s and old/new projection 0.046215/0.042230 s; this run overlapped
+Clippy and is indicative only. No fresh sampling profile was taken.
+
+Oracle tests retain the complete previous MGS and hypot implementations.
+Fourier columns have analytic condition numbers 1e6 and 1e10 before floating
+point construction; degenerate, random, rank-zero against an existing block,
+1e-300/1e300 and mixed-scale fixtures pass. Dropped sets match the oracle;
+maximum reported Fourier Gram defect is 6.662e-16 (limit 2e-15).
+NaN/infinity rejection remains in the original finite-input validation.
+Tiny vectors still use hypot before initial scaling; normalized arithmetic can
+change rounding, so tiny output columns are not claimed bit-identical.
+
+Combined SCF energy deltas against O4c: gamma 2.665e-15, k222s 1.776e-15,
+k222 4.441e-15 Ha (absolute); all retain 10 iterations. The supplied O4c JSON
+has no k444s entry: that specific baseline gate cannot be evaluated. k444s
+energy is -7.925976126648081 Ha, differing from stored reference by 8.882e-15 Ha.
+QE script PASS for k222/k222s/k444s with unchanged tolerances: energy offsets
+1.28143942746e-6 / 1.28126546661e-6 / 1.28167595959e-6 Ha/atom; maximum eigenvalue
+offsets 1.99041970013e-6 / 1.77233410771e-6 / 2.10013302574e-6 Ha. Changes from
+stored rust-dft eigenvalues are at most 3.378e-9 / 5.213e-9 / 3.656e-9 Ha,
+respectively, all below 1e-8. These reuse stored QE evidence, not new QE runs.
+
+Rejected/deferred: block GEMM requires copies/allocations through the present
+adapter, so was not implemented; skipping the second pass has no established
+bound here and was not attempted. The accumulator variants were retained as
+review candidates based on kernel savings and the larger SCF cases, pending
+quiet-host acceptance. Gamma has no measured wall-time improvement.
+
+Commands: release builds and norm-only/combined benchmark scripts exited 0;
+`python3 /tmp/p7p5-details.py` ran all three requested QE comparisons, exit 0.
+`cargo test --release -p dft-numerics -- --include-ignored --nocapture` exited 0
+(16 tests). Initial `cargo fmt --all --check` exited 1 before formatting.
+Initial `scripts/check.sh` exited 1: build/test/fmt passed, Clippy required
+`as_chunks` instead of `chunks_exact`; corrected without changing arithmetic.
+A diagnostic baseline lookup exited 1 because k444s is absent, as noted above.
+Explicit ownership excludes README, session artifacts and baselines; untouched.
+Changes remain uncommitted.
+
+Final `scripts/check.sh`: exit 0, all four gates PASS. Final release rebuild,
+three-repeat benchmark and all three QE comparisons: exit 0. Final wall medians
+(gamma/k222s/k222) 0.147/0.541/1.129 s; energies and QE offsets exactly reproduce
+the preceding combined run. This variability reinforces that SCF performance
+acceptance is pending quiet-dev08 measurement. Final evidence is stored alongside
+the intermediate stages. The missing k444s O4c baseline remains an open gate.
+
 ## P7P6: deterministic threads over independent k-point solves (2026-11-03)
 
 Pre-change release build with debug symbols, commit 672d03f, shared Mac:

@@ -102,6 +102,8 @@ impl Default for Mixing {
 }
 #[derive(Clone, Debug)]
 pub struct ScfOptions {
+    /// Experimental opt-in hybrid; Davidson remains the default.
+    pub eigensolver: dft_solvers::SolverChoice,
     /// Independent k-point workers; zero means one, capped at the k-point count.
     pub threads: usize,
     pub functional: Functional,
@@ -132,6 +134,7 @@ pub struct ScfOptions {
 impl Default for ScfOptions {
     fn default() -> Self {
         Self {
+            eigensolver: dft_solvers::SolverChoice::default(),
             threads: 1,
             functional: Functional::LdaPz,
             allow_functional_override: false,
@@ -725,7 +728,8 @@ impl ScfProblem {
                     None
                 };
                 let solution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    solver.solve(
+                    self.options.eigensolver.solve(
+                        &solver,
                         &state.hamiltonian,
                         initial.map(|v| &v[i]).or(guess.as_ref()),
                         Some(&preconditioner),
@@ -755,7 +759,8 @@ impl ScfProblem {
                 } else {
                     None
                 };
-                let solution = solver.solve(
+                let solution = self.options.eigensolver.solve(
+                    &solver,
                     &state.hamiltonian,
                     initial.map(|v| &v[i]).or(guess.as_ref()),
                     Some(&preconditioner),

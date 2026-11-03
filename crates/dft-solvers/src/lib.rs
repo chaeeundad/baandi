@@ -1,5 +1,9 @@
 //! Backend-independent dense and matrix-free Hermitian eigensolvers.
 pub mod mixing;
+pub mod rmm;
+pub use rmm::{
+    HybridPhase, HybridRmm, HybridSolution, RmmDiis, RmmError, RmmFailureReason, SolverChoice,
+};
 
 use dft_numerics::linalg::{
     ComplexMatrix, LinalgError,

@@ -1,0 +1,11 @@
+# Flat TOML: one JSON-compatible value per line. Lengths in Bohr.
+id = "si-skew"
+purpose = "Sheared primitive lattice, broken degeneracies"
+system_class = "skewed"
+tier = "default"
+potential = "si"
+lattice = [[0.7, 5.130606428358966, 5.130606428358966], [5.130606428358966, 0, 5.130606428358966], [5.130606428358966, 5.130606428358966, 0.3]]
+atoms = [[0, 0, 0], [0.25, 0.25, 0.25]]
+cutoff_ry = 30
+timeout_s = 240
+deterministic = true

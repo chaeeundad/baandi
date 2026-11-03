@@ -952,5 +952,41 @@
     "ended_at": null,
     "exit_code": null,
     "note": ""
+  },
+  {
+    "run_id": "P9A-USER-INTERFACE-DESIGN#1",
+    "task_id": "P9A-USER-INTERFACE-DESIGN",
+    "mode": "new",
+    "role": "reviewer",
+    "status": "running",
+    "codex_pid": 12093,
+    "wrapper_pid": 12078,
+    "session_id": null,
+    "branch": "task/P9A-USER-INTERFACE-DESIGN",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P9A-USER-INTERFACE-DESIGN",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P9A-USER-INTERFACE-DESIGN.md",
+    "report": null,
+    "started_at": "2026-11-03T08:30:42Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
+  },
+  {
+    "run_id": "P8G-INPUT-PREFLIGHT#1",
+    "task_id": "P8G-INPUT-PREFLIGHT",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 12255,
+    "wrapper_pid": 12240,
+    "session_id": null,
+    "branch": "task/P8G-INPUT-PREFLIGHT",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P8G-INPUT-PREFLIGHT",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P8G-INPUT-PREFLIGHT.md",
+    "report": null,
+    "started_at": "2026-11-03T08:30:45Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

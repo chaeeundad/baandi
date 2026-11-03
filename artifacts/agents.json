@@ -29,15 +29,6 @@
   {
     "id": "A4",
     "agent": "Codex",
-    "role": "implementer",
-    "state": "active",
-    "task": "P8D-XC-ROADMAP: 조사: 스핀, 평활화, DFT+U, 하이브리드, RPA, cRPA 등 확장 계획 문서",
-    "ref": "pid 89396, session no sessi, task/P8D-XC-ROADMAP",
-    "updated": "2026-11-03"
-  },
-  {
-    "id": "A5",
-    "agent": "Codex",
     "role": "reviewer",
     "state": "active",
     "task": "P8F-MASTER-FEATURE-MATRIX: 조사: VASP, QE 등 전체 기능 비교표와 마스터 개발 계획",
@@ -45,12 +36,21 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A6",
+    "id": "A5",
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P8B-VOLUMETRIC: 기능: 전자밀도, ELF 등 체적 데이터 출력(cube, XSF 등)",
-    "ref": "pid 5055, session no sessi, task/P8B-VOLUMETRIC",
+    "task": "P8A-BANDS-DOS: 기능: 밴드 구조와 DOS 출력(CSV, SVG 그림, 표준 형식)",
+    "ref": "pid 5174, session no sessi, task/P8A-BANDS-DOS",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A6",
+    "agent": "Codex",
+    "role": "reviewer",
+    "state": "active",
+    "task": "P9A-USER-INTERFACE-DESIGN: 설계: 사용자 인터페이스(표준 포맷/타 코드 입력, 자연어 요청, Materials Project 연동, 대화형 CLI, 링크 기반 시각화)",
+    "ref": "pid 12093, session no sessi, task/P9A-USER-INTERFACE-DESIGN",
     "updated": "2026-11-03"
   },
   {
@@ -58,8 +58,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P8A-BANDS-DOS: 기능: 밴드 구조와 DOS 출력(CSV, SVG 그림, 표준 형식)",
-    "ref": "pid 5174, session no sessi, task/P8A-BANDS-DOS",
+    "task": "P8G-INPUT-PREFLIGHT: 기능: 입력 사전 검사(원소/의사퍼텐셜 일치, SCF 설정, 평문 요약)",
+    "ref": "pid 12255, session no sessi, task/P8G-INPUT-PREFLIGHT",
     "updated": "2026-11-03"
   },
   {
@@ -400,8 +400,26 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
+    "task": "P8D-XC-ROADMAP: 조사: 스핀, 평활화, DFT+U, 하이브리드, RPA, cRPA 등 확장 계획 문서",
+    "ref": "pid 89396, session 01a1a071, task/P8D-XC-ROADMAP",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A46",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
     "task": "P8E-FEATURE-GAPS: 조사: 사용성, 워크플로, 견고성 격차와 실제 입력 실험",
     "ref": "pid 89577, session 01a1a071, task/P8E-FEATURE-GAPS",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A47",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P8B-VOLUMETRIC: 기능: 전자밀도, ELF 등 체적 데이터 출력(cube, XSF 등)",
+    "ref": "pid 5055, session 01a1a071, task/P8B-VOLUMETRIC",
     "updated": "2026-11-03"
   }
 ]

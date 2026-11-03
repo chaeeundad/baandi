@@ -13,7 +13,7 @@ use dft_physics::{
     hartree, xc,
 };
 use dft_solvers::{
-    Davidson, DiagonalPreconditioner, EigenSolution,
+    BandTolerances, Davidson, DiagonalPreconditioner, EigenSolution,
     kerker::{Kerker, MixerHistory, PreconditionedPulay},
     mixing::{LinearMixer, PulayMixer},
 };
@@ -136,6 +136,7 @@ pub struct ScfOptions {
     pub free_electron_initial_guess: bool,
     pub max_iterations: usize,
     pub davidson_max_iterations: usize,
+    /// Minimum working capacity; the engine also reserves six columns per band.
     pub davidson_subspace: usize,
     pub seed: u64,
     pub divergence_factor: f64,
@@ -208,6 +209,10 @@ pub struct IterationRecord {
 }
 #[derive(Clone, Debug)]
 pub struct FixedPointCertificate {
+    /// True residuals (Ha) for the occupied bands and first empty band.
+    pub strict_residuals_per_k: Vec<Vec<f64>>,
+    /// Informational only: these higher empty bands are not certified.
+    pub buffer_residuals_per_k: Vec<Vec<f64>>,
     pub density_residual: f64,
     pub occupied_eigenvalue_change: f64,
     pub davidson_iterations: usize,
@@ -696,6 +701,16 @@ impl ScfProblem {
         initial: Option<&[ComplexMatrix]>,
         tolerance: f64,
     ) -> Result<ScfStep, ScfError> {
+        self.step_kpoints_with_certification(n, initial, tolerance, true)
+    }
+
+    fn step_kpoints_with_certification(
+        &mut self,
+        n: &Array3<f64>,
+        initial: Option<&[ComplexMatrix]>,
+        tolerance: f64,
+        certify: bool,
+    ) -> Result<ScfStep, ScfError> {
         if initial.is_some_and(|v| v.len() != self.states.len()) {
             return Err(ScfError::InvalidInput("one warm start required per k"));
         }
@@ -725,9 +740,19 @@ impl ScfProblem {
             bands: self.occupations.len(),
             tolerance,
             max_iterations: self.options.davidson_max_iterations,
-            max_subspace: self.options.davidson_subspace,
+            max_subspace: self
+                .options
+                .davidson_subspace
+                .max(6 * self.occupations.len()),
             block_size: self.occupations.len(),
             seed: self.options.seed,
+        };
+        // Occupied states determine density; the first empty state determines
+        // the sampled gap. Higher empty states are only subspace buffers.
+        let policy = BandTolerances {
+            strict_bands: (self.occupations.iter().filter(|&&f| f > 0.0).count() + 1)
+                .min(self.occupations.len()),
+            buffer_tolerance: tolerance.max(1e-5),
         };
         let k_points = if self.options.threads.max(1).min(self.states.len()) == 1 {
             let mut k_points = Vec::new();
@@ -745,10 +770,12 @@ impl ScfProblem {
                     None
                 };
                 let solution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    solver.solve(
+                    solver.solve_with_band_tolerances_and_certification(
                         &state.hamiltonian,
                         initial.map(|v| &v[i]).or(guess.as_ref()),
                         Some(&preconditioner),
+                        policy,
+                        certify,
                     )
                 }))
                 .map_err(|_| ScfError::Numerical(format!("k index {i}: solve panicked")))?
@@ -775,10 +802,12 @@ impl ScfProblem {
                 } else {
                     None
                 };
-                let solution = solver.solve(
+                let solution = solver.solve_with_band_tolerances_and_certification(
                     &state.hamiltonian,
                     initial.map(|v| &v[i]).or(guess.as_ref()),
                     Some(&preconditioner),
+                    policy,
+                    certify,
                 )?;
                 Ok(KPointSolution {
                     point: state.point,
@@ -960,7 +989,12 @@ impl ScfProblem {
                 .max(0.1 * self.options.eigen_tolerance)
             };
             let step = self
-                .step_kpoints(&n, previous.as_deref(), tolerance)
+                .step_kpoints_with_certification(
+                    &n,
+                    previous.as_deref(),
+                    tolerance,
+                    tolerance <= self.options.eigen_tolerance,
+                )
                 .map_err(|e| match e {
                     ScfError::NonFinite => ScfError::Diverged {
                         reason: "nonfinite SCF arithmetic".into(),
@@ -1090,6 +1124,30 @@ impl ScfProblem {
                 let passed = density_residual <= self.options.density_tolerance
                     && occupied_eigenvalue_change <= 1e-7;
                 history.last_mut().unwrap().fixed_point_certificate = Some(FixedPointCertificate {
+                    strict_residuals_per_k: check
+                        .k_points
+                        .iter()
+                        .map(|k| {
+                            k.solution
+                                .residuals
+                                .iter()
+                                .zip(&k.solution.buffer)
+                                .filter_map(|(&r, &buffer)| (!buffer).then_some(r))
+                                .collect()
+                        })
+                        .collect(),
+                    buffer_residuals_per_k: check
+                        .k_points
+                        .iter()
+                        .map(|k| {
+                            k.solution
+                                .residuals
+                                .iter()
+                                .zip(&k.solution.buffer)
+                                .filter_map(|(&r, &buffer)| buffer.then_some(r))
+                                .collect()
+                        })
+                        .collect(),
                     density_residual,
                     occupied_eigenvalue_change,
                     davidson_iterations: check.k_points.iter().map(|k| k.solution.iterations).sum(),

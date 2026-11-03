@@ -1,0 +1,10 @@
+TASK_ID: P11B-RUNTIME-POLICY
+GOAL: Controllable runtime: state machine (Created, Initialized, Running, PauseRequested, Paused, Restarting, Converged, Failed, Cancelled), safe-point policy changes with a validation engine, transactional rejection and audit records. Directive items B1, B2, B3.
+OWNED_FILES: crates/dft-engine/src/runtime.rs (new), crates/dft-engine/src/policy.rs (new), crates/dft-engine/src/lib.rs, crates/dft-engine/tests/runtime_policy.rs, crates/dft-engine/AGENTS.md
+DEPENDENCIES: P11A merged
+IMPLEMENTATION_STEPS: transition table with explicit illegal-transition errors; pause/cancel requests honored at the next safe point; PolicyChange typed enum (mixing kind/beta/history, eigen tolerances, schedule flags, density/convergence tolerances, max_iterations increase, divergence parameters); restricted fields are not representable in the enum or are rejected with a named reason; validation = schema + invariants + compatibility with current state (e.g. mixer history reset semantics documented); apply atomically between iterations; audit record (id, sequence, timestamp, requester label, reason text capped, before, after, outcome); replay: a recorded change log re-applied gives bit-identical result.
+TEST_COMMANDS: scripts/check.sh dft-engine; tests: every transition legal/illegal, rejected change leaves state byte-identical, restricted change rejected, change at iteration k then replay equality, tolerance never loosened below the global hard floor documented in the ticket (user rule: do not relax tolerances to pass; a policy may not lower the convergence criterion below the certificate threshold defaults without an explicit `unsafe_relaxed` label recorded in the result).
+ACCEPTANCE_CRITERIA: transactional rejection proven; audit complete; result records that policy changes occurred; convergence still only via certificate.
+NON_GOALS: diagnostics, MCP, agents.
+GIT: branch task/P11B-RUNTIME-POLICY, uncommitted
+RETURN_FORMAT: docs/schemas/report.schema.json

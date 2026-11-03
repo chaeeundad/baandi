@@ -1,4 +1,6 @@
 //! Backend-independent dense and matrix-free Hermitian eigensolvers.
+#[path = "mixing/kerker.rs"]
+pub mod kerker;
 pub mod mixing;
 
 use dft_numerics::linalg::{

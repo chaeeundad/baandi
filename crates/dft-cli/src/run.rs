@@ -77,15 +77,7 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
         if let Some(x) = s.seed {
             o.seed = x;
         }
-        let beta = s.mixing_beta.unwrap_or(0.3);
-        if !beta.is_finite() || beta <= 0. {
-            return Err(error(1, "mixing_beta must be finite and positive"));
-        }
-        o.mixing = match s.mixing.as_deref().unwrap_or("pulay") {
-            "linear" => Mixing::Linear { beta },
-            "pulay" => Mixing::Pulay { beta, history: 6 },
-            _ => return Err(error(1, "mixing must be linear or pulay")),
-        };
+        o.mixing = s.mixing_strategy().map_err(|e| error(1, e.to_string()))?;
     }
     if o.max_iterations == 0
         || [o.energy_tolerance, o.density_tolerance, o.eigen_tolerance]
@@ -103,6 +95,13 @@ fn options_json(o: &ScfOptions) -> Value {
     let mixing = match o.mixing {
         Mixing::Linear { beta } => json!({"method":"linear","beta":beta}),
         Mixing::Pulay { beta, history } => json!({"method":"pulay","beta":beta,"history":history}),
+        Mixing::KerkerPulay {
+            beta,
+            history,
+            q0_inverse_bohr,
+        } => {
+            json!({"method":"kerker-pulay","beta":beta,"history":history,"q0_inverse_bohr":q0_inverse_bohr})
+        }
     };
     json!({"threads":o.threads,"cutoff_hartree":o.cutoff_hartree,"nbands":o.bands,"extra_bands":o.extra_bands,"grid_override":o.grid_override,"mixing":mixing,
         "density_residual_tolerance":o.density_tolerance,"energy_tolerance_ha":o.energy_tolerance,"eigen_tolerance":o.eigen_tolerance,
@@ -141,7 +140,7 @@ fn history_json(r: &IterationRecord) -> Value {
     json!({"iteration":r.iteration,"energies":energy_json(&r.energy),"delta_energy_ha":r.energy_change,"density_residual":r.density_residual,
         "max_eigen_residual_ha":r.max_eigen_residual,"requested_eigen_tolerance_ha":r.requested_eigen_tolerance,"davidson_iterations":r.davidson_iterations,"operator_applications":r.operator_applications,"davidson_iterations_per_k":r.davidson_iterations_per_k,"operator_applications_per_k":r.operator_applications_per_k,
         "relative_charge_error":r.charge_error,"relative_input_charge_error":r.input_charge_error,"min_density_electrons_per_bohr3":r.min_density,
-        "mixing_fraction":r.mixing_fraction,"mixer_reset":r.mixer_reset,"timings":phase_json(&r.timings),
+        "mixing_fraction":r.mixing_fraction,"mixer_reset":r.mixer_reset,"density_contraction":r.density_contraction,"mixing_history_used":r.mixing_history_used,"mixing_resets":r.mixing_resets,"mixing_raw_recovery":r.mixing_raw_recovery,"timings":phase_json(&r.timings),
         "fixed_point_certificate":r.fixed_point_certificate.as_ref().map(|c| json!({"density_residual":c.density_residual,"occupied_eigenvalue_change_ha":c.occupied_eigenvalue_change,"davidson_iterations":c.davidson_iterations,"operator_applications":c.operator_applications,"davidson_iterations_per_k":c.davidson_iterations_per_k,"operator_applications_per_k":c.operator_applications_per_k,"timings":phase_json(&c.timings)}))})
 }
 /// Gregorian UTC conversion from nonnegative Unix seconds, including leap years.

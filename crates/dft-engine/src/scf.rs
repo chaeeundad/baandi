@@ -14,7 +14,8 @@ use dft_physics::{
 };
 use dft_solvers::{
     Davidson, DiagonalPreconditioner, EigenSolution,
-    mixing::{DensityMixer, LinearMixer, PulayMixer},
+    kerker::{Kerker, MixerHistory, PreconditionedPulay},
+    mixing::{LinearMixer, PulayMixer},
 };
 use dft_upf::Pseudopotential;
 use std::{
@@ -89,8 +90,19 @@ impl From<dft_solvers::SolverError> for ScfError {
 
 #[derive(Clone, Debug)]
 pub enum Mixing {
-    Linear { beta: f64 },
-    Pulay { beta: f64, history: usize },
+    Linear {
+        beta: f64,
+    },
+    Pulay {
+        beta: f64,
+        history: usize,
+    },
+    /// Optional filtering; q0 is a positive inverse screening length in Bohr^-1.
+    KerkerPulay {
+        beta: f64,
+        history: usize,
+        q0_inverse_bohr: f64,
+    },
 }
 impl Default for Mixing {
     fn default() -> Self {
@@ -183,6 +195,14 @@ pub struct IterationRecord {
     /// Pulay feasibility damping; one means the full proposal was accepted.
     pub mixing_fraction: f64,
     pub mixer_reset: bool,
+    /// Raw SCF residual ratio to the previous iteration; None initially/after zero.
+    pub density_contraction: Option<f64>,
+    /// Differences used by this proposal, or None if no mixing was needed.
+    pub mixing_history_used: Option<usize>,
+    /// Cumulative feasibility resets; excludes parameter-validation reset.
+    pub mixing_resets: usize,
+    /// New strategy only: a raw convex step rescued an infeasible first correction.
+    pub mixing_raw_recovery: bool,
     pub fixed_point_certificate: Option<FixedPointCertificate>,
     pub timings: PhaseTimings,
 }
@@ -863,9 +883,42 @@ impl ScfProblem {
     }
     fn run_impl(mut self, retain_last: bool) -> Result<ScfOutcome, ScfError> {
         let start = Instant::now();
-        let mut mixer: Box<dyn DensityMixer> = match self.options.mixing {
+        let mut mixer: Box<dyn MixerHistory> = match self.options.mixing {
             Mixing::Linear { beta } => Box::new(LinearMixer { beta }),
             Mixing::Pulay { beta, history } => Box::new(PulayMixer::new(beta, history)?),
+            Mixing::KerkerPulay {
+                beta,
+                history,
+                q0_inverse_bohr,
+            } => {
+                let dims = self.grid.dims();
+                let mut fft = FftPlan3d::new(dims)?;
+                let mut source = Array3::<Complex64>::zeros(dims);
+                let mut target = source.clone();
+                let transform = move |values: &mut [Complex64], inverse: bool| {
+                    source.as_slice_mut().unwrap().copy_from_slice(values);
+                    let result = if inverse {
+                        fft.to_real(&source, &mut target)
+                    } else {
+                        fft.to_reciprocal(&source, &mut target)
+                    };
+                    result.map_err(|e| dft_solvers::SolverError::Application(e.to_string()))?;
+                    values.copy_from_slice(target.as_slice().unwrap());
+                    Ok(())
+                };
+                let filter = Kerker::new(
+                    dims,
+                    self.cell.reciprocal_columns_inverse_bohr(),
+                    q0_inverse_bohr,
+                    transform,
+                )?;
+                Box::new(PreconditionedPulay::new(
+                    beta,
+                    history,
+                    dims.iter().product(),
+                    filter,
+                )?)
+            }
         };
         // Validate mixer parameters even if a future system converges immediately.
         let mut n = self.uniform_density();
@@ -880,6 +933,7 @@ impl ScfProblem {
         let weight = self.cell.volume_bohr3() / n.len() as f64;
         let mut best = f64::INFINITY;
         let mut growing = 0;
+        let mut mixing_resets = 0;
         for iteration in 1..=self.options.max_iterations {
             if n.iter()
                 .any(|n| !n.is_finite() || *n < -xc::NEGATIVE_ROUNDOFF)
@@ -933,6 +987,13 @@ impl ScfProblem {
                 fixed_point_certificate: None,
                 mixing_fraction: 1.0,
                 mixer_reset: false,
+                density_contraction: history
+                    .last()
+                    .filter(|r| r.density_residual > 0.0)
+                    .map(|r| residual / r.density_residual),
+                mixing_history_used: None,
+                mixing_resets,
+                mixing_raw_recovery: false,
                 iteration,
                 energy: step.energy.clone(),
                 energy_change,
@@ -1091,10 +1152,16 @@ impl ScfProblem {
                     reason: e.to_string(),
                     history: history.clone(),
                 })?;
+            history.last_mut().unwrap().mixing_history_used =
+                Some(mixer.history_len().saturating_sub(1));
+            history.last_mut().unwrap().mixing_raw_recovery = mixer.used_raw_recovery();
             // Anderson extrapolation is unconstrained. A convex step toward its
             // proposal preserves charge and Fourier support while keeping XC in
             // its density domain. Never clip individual spatial samples.
-            if matches!(self.options.mixing, Mixing::Pulay { .. }) {
+            if matches!(
+                self.options.mixing,
+                Mixing::Pulay { .. } | Mixing::KerkerPulay { .. }
+            ) {
                 let fraction = n
                     .iter()
                     .zip(&mixed)
@@ -1109,6 +1176,8 @@ impl ScfProblem {
                     let record = history.last_mut().unwrap();
                     record.mixing_fraction = fraction;
                     record.mixer_reset = true;
+                    mixing_resets += 1;
+                    record.mixing_resets = mixing_resets;
                 }
             }
             n.as_slice_mut().unwrap().copy_from_slice(&mixed);
@@ -1237,6 +1306,10 @@ mod tests {
             min_density: 1.0,
             mixing_fraction: 1.0,
             mixer_reset: false,
+            density_contraction: None,
+            mixing_history_used: None,
+            mixing_resets: 0,
+            mixing_raw_recovery: false,
             fixed_point_certificate: None,
             timings: PhaseTimings::default(),
         };

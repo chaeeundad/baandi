@@ -494,3 +494,47 @@ The starting binary fails to converge its Davidson solve for this input;
 therefore this case currently reports failure, not an accepted SCF speedup.
 Benchmark records add `phase_medians_s` and `engine_total_median_s`; the older
 last-run fields and default case selection retain their meanings.
+
+### Optional Kerker–Pulay density mixing (P10D)
+
+The default remains `mixing = "pulay"`, beta 0.3, six history differences.
+For an explicit reciprocal-space preconditioner:
+
+```toml
+[scf]
+mixing = "kerker-pulay"
+mixing_beta = 0.3
+mixing_history = 6
+mixing_q0_inverse_bohr = 1.0
+```
+
+`mixing_q0_inverse_bohr` is required for this strategy, in Bohr^-1 (not inverse
+Angstrom); there is no fitted/default screening length. It must be positive and
+finite with a representable nonzero square. The residual multiplier is
+|G|^2/(|G|^2+q0^2), with |G| from the cell's reciprocal basis; its G=0 coefficient
+is zero. A larger q0 damps more wavelengths and can slow insulating/vacuum
+regions. The example is illustrative, not a recommended universal parameter.
+The Pulay least-squares fit uses the filtered residual. Convergence and the
+fixed-point certificate always use the original, unfiltered density residual.
+
+`mixing_history` accepts a positive integer (number of differences), defaults
+to six for both Pulay strategies, and is rejected for `linear`. A q0 key is
+rejected for other strategies rather than ignored. Both new numeric keys
+support the existing expression-input mechanism. Effective method, beta,
+history and q0 are stored in run metadata. No beta/q0 fitting or silent SCF retry occurs. For Kerker–Pulay only, an
+infeasible proposal with no secant history uses one raw convex linear step with
+beta=min(requested beta,1). This deterministic positivity recovery prevents
+repeated filtering/damping from trapping density on the boundary. It keeps
+charge and the sampled history pair; it does not clip density. Remaining
+feasibility damping and divergence errors apply as before.
+
+Iteration records add `density_contraction` (raw SCF residual/current-to-previous
+ratio, null initially or after a zero residual), `mixing_history_used` (number
+of differences presented to a proposal, null when no proposal was made) and
+`mixing_resets` (cumulative feasibility resets, excluding initialization).
+`mixing_raw_recovery` records the raw convex recovery step described above.
+History size is not retained numerical rank. `mixing_history_used` describes
+the proposal before any feasibility reset; `mixer_reset` identifies that reset.
+A small filtered residual never proves convergence. Density samples are in
+electrons/Bohr^3; the existing normalized SCF residual is in Bohr^-3/2.
+No metallic convergence is supported or implied.

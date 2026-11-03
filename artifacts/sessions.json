@@ -448,5 +448,41 @@
     "ended_at": "2026-11-02T15:18:35Z",
     "exit_code": 0,
     "note": ""
+  },
+  {
+    "run_id": "P7A-KPOINTS#1",
+    "task_id": "P7A-KPOINTS",
+    "mode": "new",
+    "role": "implementer",
+    "status": "done",
+    "codex_pid": 59488,
+    "wrapper_pid": 59473,
+    "session_id": "01a19e90-74f9-7763-a7be-b2c45ec89f4b",
+    "branch": "task/P7A-KPOINTS",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P7A-KPOINTS",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P7A-KPOINTS.md",
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P7A-KPOINTS/report.json",
+    "started_at": "2026-11-02T23:20:29Z",
+    "ended_at": "2026-11-02T23:29:36Z",
+    "exit_code": 0,
+    "note": ""
+  },
+  {
+    "run_id": "P7U-UNITS#1",
+    "task_id": "P7U-UNITS",
+    "mode": "new",
+    "role": "implementer",
+    "status": "done",
+    "codex_pid": 69481,
+    "wrapper_pid": 69466,
+    "session_id": "01a19f1e-d9b2-7f30-aa39-225882c8608d",
+    "branch": "task/P7U-UNITS",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P7U-UNITS",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P7U-UNITS.md",
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P7U-UNITS/report.json",
+    "started_at": "2026-11-03T01:56:01Z",
+    "ended_at": "2026-11-03T02:03:25Z",
+    "exit_code": 0,
+    "note": ""
   }
 ]

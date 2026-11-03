@@ -335,3 +335,234 @@ The UPF was read only at the supplied external path, never copied or committed.
 Comparisons are against rust-dft, not new QE references. Baseline, manifests,
 lockfile and other ticket-owned files were not modified. Changes are left
 uncommitted for Claude review.
+
+## 2026-11-03: P7P4 / O4c SCF schedule and initial subspace
+
+Pre-change evidence: the supplied post-O1 sampling profile attributes 75.4% to
+FFT work; the application/iteration analysis above identifies excessive early
+Davidson work after product reuse. This experiment uses that existing profile;
+no fresh sampling profile is claimed. Counters are collected in memory and
+serialized after SCF, including separate certificate and per-k counters.
+Local pre-change measurements are collected before changing the algorithm.
+
+Decisions: retain both measured algorithm changes. The residual schedule uses
+c=0.1 with the existing normalized density L2 measure in atomic units, floor
+0.1*eigen_tolerance and cap 1e-2 Ha. The loose first request avoids solving an
+unconverged potential precisely; 1e-2 is motivated by the supplied QE starting
+threshold, but our residual-norm criterion is not asserted to be QE's energy
+threshold. c=0.1 tightens the request to eigen_tolerance when the density residual
+reaches the default 1e-7; it is an empirical scheduler, not a unit conversion.
+No sweep or optimality claim is made for c. The existing requested-tolerance gate
+and the actual occupied residual gate both still apply. The independent solve
+still requests 0.1*eigen_tolerance and checks the same density/eigenvalue bounds.
+The new explicit Boolean mode defaults to true; false restores the original
+initial_eigen_tolerance and eigen_tolerance_decay semantics. No existing numeric
+control or convergence gate changed.
+
+Cold subspaces use exactly bands lowest-kinetic coordinate vectors, sorted by
+kinetic energy (equivalently |k+G|^2), then original basis index. These columns
+already have full rank, so zero random completion columns are normally needed;
+existing seeded Davidson rank completion remains available. Existing
+Rayleigh–Ritz handles this initial subspace. No atomic/UPF guess is used. Warm
+starts are unchanged. The additive free_electron_initial_guess switch restores
+the previous random cold start when false.
+
+Capacity 48 and block size bands are retained. Davidson already selects only
+unconverged bands for correction. Capacity 32 increases total applications;
+64 produces exactly the same iterations, applications, energies and density
+hashes as 48 on these cases, with larger allocated capacity. Block 4 reduces
+applications slightly for some k cases but increases iterations, worsens Gamma,
+and does not improve measured wall time consistently. These are rejected ideas,
+not default changes. No solver implementation, dependency or unsafe changes.
+
+All counts below include certificate solves unless labeled per-step. Independent
+ablation runs use the same release build configuration and supplied external
+read-only UPF. Temporary detail runs retain results at /tmp/p7p4/<stage>/<case>;
+the tables here preserve their key numerical evidence. Before = old schedule
+and random start, schedule = residual schedule only, guess = kinetic guess only,
+combined = both, capacity32/64 and block4 = both with that one parameter changed.
+The parameter experiments temporarily changed engine defaults and were restored.
+
+| Stage | Case | SCF steps | Total Davidson iterations | Total vector applications | E (Ha) |
+| --- | --- | ---: | ---: | ---: | ---: |
+| before | gamma | 11 | 95 | 833 | -7.295530468210919 |
+| before | k222s | 11 | 484 | 3863 | -7.919423412469071 |
+| before | k222 | 11 | 955 | 7437 | -7.831230057121077 |
+| before | k444s | 11 | 4207 | 31963 | -7.925976126648079 |
+| schedule | gamma | 11 | 71 | 592 | -7.29553046821087 |
+| schedule | k222s | 10 | 318 | 2604 | -7.919423412469079 |
+| schedule | k222 | 10 | 577 | 4924 | -7.83123005712114 |
+| schedule | k444s | 10 | 2547 | 21078 | -7.925976126648085 |
+| guess | gamma | 11 | 78 | 690 | -7.295530468210897 |
+| guess | k222s | 11 | 419 | 3168 | -7.919423412469081 |
+| guess | k222 | 11 | 787 | 6145 | -7.831230057121135 |
+| combined | gamma | 10 | 50 | 422 | -7.295530468210769 |
+| combined | k222s | 10 | 235 | 1883 | -7.919423412469065 |
+| combined | k222 | 10 | 453 | 3661 | -7.83123005712114 |
+| combined | k444s | 10 | 1921 | 15015 | -7.925976126648079 |
+| capacity32 | gamma | 10 | 53 | 462 | -7.295530468210799 |
+| capacity32 | k222s | 10 | 225 | 2032 | -7.919423412469083 |
+| capacity32 | k222 | 10 | 481 | 4086 | -7.831230057121113 |
+| capacity64 | gamma | 10 | 50 | 422 | -7.295530468210769 |
+| capacity64 | k222s | 10 | 235 | 1883 | -7.919423412469065 |
+| capacity64 | k222 | 10 | 453 | 3661 | -7.83123005712114 |
+| block4 | gamma | 12 | 98 | 510 | -7.295530468210892 |
+| block4 | k222s | 10 | 375 | 1858 | -7.919423412469069 |
+| block4 | k222 | 10 | 715 | 3653 | -7.831230057121113 |
+
+Timing environment: macOS Apple Silicon, same worktree, release, no threading
+changes, shared machine. Pre-change three-repeat benchmark overlapped the
+separate count run; final three-repeat timing ran after local build/check work
+finished. These are observations, not controlled quiet-machine speedup claims.
+Stage detail wall times include cold-start effects and are not used for ratios.
+The k444s before/combined single-run walls were 8.911642208 / 4.239271917 s.
+
+| Case | Before median wall (s) | After median wall (s) | After samples (s) | dE vs post-O4 (Ha) | dE vs original (Ha) |
+| --- | ---: | ---: | --- | ---: | ---: |
+| gamma | 0.266296208 | 0.156326875 | [0.6753115000000001, 0.15632687499999998, 0.1558603329999999] | 1.501021529e-13 | 1.580957587e-13 |
+| k222s | 1.103937459 | 0.568264000 | [0.5678403750000001, 0.5682639999999999, 0.5683251249999999] | 6.217248938e-15 | 5.329070518e-15 |
+| k222 | 2.089890833 | 1.062432875 | [1.0624328750000003, 1.0621882919999996, 1.064506625] | -6.306066780e-14 | -6.394884622e-14 |
+
+All three strict 1e-12 Ha gates pass. Neither stored baseline contains k444s;
+its independently captured pre-change E=-7.925976126648079 Ha is identical to
+the combined result (delta 0 Ha). This is a local pre-change comparison, not a
+claim to a missing stored baseline. Every run converged below the 100-step
+budget. Density hashes change as expected for an algorithm change. Gamma's
+1.50e-13 Ha shift exceeds the roughly 1e-14–3e-14 Ha tight-tolerance noise in
+validation.md R2 but is below 1e-12; its larger final density residual is
+consistent with a trajectory-dependent, second-order SCF energy difference.
+No threshold was relaxed and no failing energy comparison was hidden.
+
+Per-step sequences below sum over k points and exclude certificate work.
+Certificates (including any failed attempts) are listed separately. The final
+counts above include all such attempts.
+
+### gamma count and certificate evidence
+
+- before Davidson iterations: `[29, 9, 8, 8, 7, 6, 6, 6, 5, 5, 2]`
+- before vector applications: `[241, 83, 80, 73, 72, 56, 56, 46, 36, 33, 24]`
+- before step 11 certificate: 4 iterations, 33 applications, density residual 5.5840226030339960e-10 Bohr^(-3/2), occupied eigenvalue change 6.1261934414247321e-09 Ha.
+- combined Davidson iterations: `[5, 4, 5, 4, 4, 4, 4, 4, 4, 5]`
+- combined vector applications: `[47, 35, 41, 34, 33, 40, 36, 33, 34, 40]`
+- combined step 10 certificate: 7 iterations, 49 applications, density residual 6.9320805331347533e-08 Bohr^(-3/2), occupied eigenvalue change 3.2212220946181702e-08 Ha.
+- Final requested tolerance 8.3773221955763188e-09 Ha, occupied residual 3.9046074818507481e-09 Ha, density residual 4.1634599737292189e-08 Bohr^(-3/2), dE -4.8849813083506888e-14 Ha, relative charge error 3.5527136788005009e-15.
+
+First-step effect per k point (existing CLI k order):
+
+- before: iterations `[29]`; applications `[241]`.
+- schedule: iterations `[22]`; applications `[180]`.
+- guess: iterations `[13]`; applications `[102]`.
+- combined: iterations `[5]`; applications `[47]`.
+
+### k222s count and certificate evidence
+
+- before Davidson iterations: `[142, 54, 50, 42, 52, 31, 25, 24, 21, 9, 11]`
+- before vector applications: `[1217, 395, 383, 329, 347, 271, 211, 189, 185, 97, 91]`
+- before step 11 certificate: 23 iterations, 148 applications, density residual 2.4226970542703381e-10 Bohr^(-3/2), occupied eigenvalue change 7.3706521441785355e-10 Ha.
+- combined Davidson iterations: `[25, 20, 20, 20, 20, 20, 20, 24, 20, 23]`
+- combined vector applications: `[206, 172, 175, 151, 175, 160, 163, 180, 171, 177]`
+- combined step 10 certificate: 23 iterations, 153 applications, density residual 7.9514072114933366e-10 Bohr^(-3/2), occupied eigenvalue change 1.4192803182710989e-09 Ha.
+- Final requested tolerance 1.9944572382027465e-09 Ha, occupied residual 1.1071737237635544e-09 Ha, density residual 6.8382774302015153e-09 Bohr^(-3/2), dE 1.5987211554602254e-14 Ha, relative charge error 2.2204460492503131e-15.
+
+First-step effect per k point (existing CLI k order):
+
+- before: iterations `[32, 35, 37, 38]`; applications `[283, 312, 312, 310]`.
+- schedule: iterations `[24, 27, 26, 30]`; applications `[218, 239, 236, 236]`.
+- guess: iterations `[20, 19, 19, 19]`; applications `[129, 131, 131, 131]`.
+- combined: iterations `[7, 6, 6, 6]`; applications `[53, 51, 51, 51]`.
+
+### k222 count and certificate evidence
+
+- before Davidson iterations: `[320, 98, 95, 76, 80, 62, 67, 55, 32, 16, 19]`
+- before vector applications: `[2288, 739, 719, 642, 648, 532, 551, 425, 291, 155, 186]`
+- before step 11 certificate: 35 iterations, 261 applications, density residual 2.7679612999013162e-10 Bohr^(-3/2), occupied eigenvalue change 1.1329614468813531e-09 Ha.
+- combined Davidson iterations: `[57, 39, 40, 39, 40, 35, 40, 45, 40, 47]`
+- combined vector applications: `[406, 331, 345, 310, 341, 297, 333, 345, 326, 364]`
+- combined step 10 certificate: 31 iterations, 263 applications, density residual 3.6636979692294761e-10 Bohr^(-3/2), occupied eigenvalue change 3.1084336216125052e-09 Ha.
+- Final requested tolerance 1.7768811374767566e-09 Ha, occupied residual 1.7142994349745229e-09 Ha, density residual 5.2367282855205105e-09 Bohr^(-3/2), dE -4.4408920985006262e-15 Ha, relative charge error 1.1102230246251565e-16.
+
+First-step effect per k point (existing CLI k order):
+
+- before: iterations `[29, 41, 42, 41, 42, 40, 42, 43]`; applications `[241, 288, 289, 305, 287, 294, 296, 288]`.
+- schedule: iterations `[22, 23, 23, 22, 23, 22, 23, 25]`; applications `[180, 212, 214, 209, 209, 211, 212, 212]`.
+- guess: iterations `[13, 16, 16, 26, 16, 26, 26, 16]`; applications `[102, 117, 117, 143, 117, 143, 143, 117]`.
+- combined: iterations `[5, 7, 7, 8, 7, 8, 8, 7]`; applications `[47, 50, 50, 53, 50, 53, 53, 50]`.
+
+### k444s count and certificate evidence
+
+- before Davidson iterations: `[1264, 507, 458, 390, 413, 240, 256, 167, 183, 92, 76]`
+- before vector applications: `[10247, 3345, 3106, 2641, 2776, 2163, 2172, 1335, 1457, 811, 727]`
+- before step 11 certificate: 161 iterations, 1183 applications, density residual 2.9030864194408356e-10 Bohr^(-3/2), occupied eigenvalue change 4.1669112604836300e-10 Ha.
+- combined Davidson iterations: `[225, 178, 173, 172, 170, 170, 167, 172, 168, 180]`
+- combined vector applications: `[1666, 1385, 1415, 1259, 1400, 1288, 1356, 1337, 1379, 1372]`
+- combined step 10 certificate: 146 iterations, 1158 applications, density residual 7.6732956439607595e-10 Bohr^(-3/2), occupied eigenvalue change 3.1090208046924417e-09 Ha.
+- Final requested tolerance 4.8209214642495654e-09 Ha, occupied residual 4.8066611153274375e-09 Ha, density residual 5.5647399322741725e-09 Bohr^(-3/2), dE -8.1712414612411521e-14 Ha, relative charge error 1.5543122344752192e-15.
+
+First-step effect per k point (existing CLI k order):
+
+- before: iterations `[31, 39, 39, 33, 34, 40, 41, 38, 34, 40, 47, 38, 35, 37, 38, 37, 41, 34, 41, 37, 38, 40, 46, 46, 41, 45, 49, 42, 38, 43, 40, 42]`; applications `[277, 316, 310, 295, 294, 314, 339, 331, 296, 336, 332, 332, 311, 324, 334, 316, 318, 296, 333, 327, 312, 291, 331, 336, 340, 330, 330, 339, 323, 334, 334, 316]`.
+- schedule: iterations `[24, 26, 26, 24, 25, 26, 27, 27, 25, 27, 30, 26, 26, 27, 27, 26, 26, 25, 27, 27, 26, 23, 28, 27, 27, 27, 29, 27, 27, 28, 26, 26]`; applications `[216, 240, 233, 227, 229, 236, 259, 257, 229, 248, 240, 248, 233, 247, 260, 241, 242, 233, 248, 258, 234, 216, 243, 239, 259, 239, 238, 259, 248, 243, 245, 235]`.
+- combined: iterations `[5, 7, 8, 7, 7, 7, 7, 7, 8, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 8]`; applications `[47, 54, 52, 54, 54, 53, 52, 51, 52, 52, 51, 51, 54, 51, 51, 54, 54, 53, 52, 51, 53, 53, 52, 51, 52, 52, 52, 52, 51, 51, 52, 52]`.
+
+Validation: synthetic small schedule energy difference 8.8817841970012523e-16 Ha;
+full nonlocal synthetic comparison 9.2370555648813024e-14 Ha (both <=1e-12).
+Tests check the final requested tolerance and unchanged convergence gates,
+certificate presence, and deterministic kinetic ordering including a tie.
+The unchanged divergence/iteration-budget test passes. The existing seeded
+positivity-safeguard audit explicitly selects both legacy controls, because its
+seed-specific assertion tests a particular trajectory. Its assertion is retained;
+a new full synthetic test covers the new defaults and the same energy audit.
+An exploratory capacity-64 release test initially failed that seed-specific
+assertion (6 passed / 1 failed); the final release SCF suite passes 8/8. One
+initial build failed for a missing LinalgError conversion in the new helper;
+it was corrected by using the existing SolverError conversion.
+
+QE evidence: compare_kpoints_qe.py with unchanged defaults passes for new Gamma,
+k222 and k222s results against tests/reference/si30_auto/qe.out and
+kpoints/{k222_c,k222s_c}/qe.out. Energy offsets are respectively
+1.2808946152631506e-6, 1.2814394296789544e-6, 1.2812654675009583e-6 Ha/atom;
+max eigenvalue differences 1.2836681463664567e-6, 1.9904196993442533e-6,
+1.7723341061606671e-6 Ha; normalized weight differences zero. Against the
+stored rust-dft k222/k222s reference results, maximum eigenvalue changes are
+3.3778383978777526e-9 / 5.212579257118932e-9 Ha, and total-energy changes
+-6.394884621840902e-14 / 5.329070518200751e-15 Ha: all below 1e-8 Ha.
+These reuse real stored QE 7.6 evidence; no new QE run is claimed.
+
+Reproduction and verification (real exit codes):
+
+- `cargo build --release -p dft-cli`: 0 for all completed measurement stages
+  and the final build; the initial helper-conversion error exited 101.
+- `python3 /tmp/p7p4-details.py <stage> [gamma,k222s,k222]`: 0 for before,
+  schedule, guess, combined, capacity32, capacity64, block4 and final. The helper
+  imports `scripts/bench_scf.py`'s TEMPLATE and CASES, writes temporary inputs,
+  runs the release CLI once per case and retains results.json/density.bin.
+  Before, schedule, combined and final also include k444s. No UPF was copied.
+- `scripts/check.sh`: 0, build/test/fmt/clippy all PASS.
+- `cargo test --release -p dft-engine --test scf -- --include-ignored --nocapture`:
+  final 0, 8 passed; exploratory capacity64 version 101 as explained above.
+- `cargo test --release --workspace -- --ignored`: 0, all 14 ignored tests pass,
+  including existing solver, engine, physics and CLI release cases.
+- `python3 -I scripts/compare_kpoints_qe.py --ours
+  /tmp/p7p4/final/k222/results.json --qe-out
+  tests/reference/kpoints/k222_c/qe.out`: 0. Substituting k222s/k222s_c: 0;
+  gamma/tests/reference/si30_auto/qe.out: 0. No overrides.
+- `git diff --check`: 0. Final detail runs reproduce combined energies and
+  counts exactly for all four cases; capacity64 densities are byte-identical
+  to capacity48 for all three tested cases.
+
+Before and final benchmark commands each exited 0 (substitute `before` for
+`final` in `--record` for the pre-change run):
+
+```sh
+python3 -I scripts/bench_scf.py \
+  --binary "$PWD/target/release/dft-cli" \
+  --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF \
+  --cases gamma,k222s,k222 --repeats 3 \
+  --baseline docs/performance/baseline-after-o4.json \
+  --record /tmp/p7p4-final.json
+```
+
+Changes remain uncommitted for review. README, artifacts (including the session
+registry), tickets, manifests, baselines and all other crates remain untouched
+under the ticket's explicit exclusions. Final k444s count verification overlapped
+release tests; use the earlier isolated combined detail wall quoted above.

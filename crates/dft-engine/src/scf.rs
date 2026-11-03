@@ -112,9 +112,14 @@ pub struct ScfOptions {
     pub density_tolerance: f64,
     pub energy_tolerance: f64,
     pub eigen_tolerance: f64,
+    /// Legacy schedule (residual_eigen_schedule=false):
     /// tau_k = max(0.1*eigen_tolerance, initial_eigen_tolerance*decay^(k-1)).
     pub initial_eigen_tolerance: f64,
     pub eigen_tolerance_decay: f64,
+    /// Use density-residual scheduling; false selects the legacy geometric schedule.
+    pub residual_eigen_schedule: bool,
+    /// Start cold solves from deterministic lowest-kinetic plane waves.
+    pub free_electron_initial_guess: bool,
     pub max_iterations: usize,
     pub davidson_max_iterations: usize,
     pub davidson_subspace: usize,
@@ -137,6 +142,8 @@ impl Default for ScfOptions {
             eigen_tolerance: 1e-8,
             initial_eigen_tolerance: 1e-5,
             eigen_tolerance_decay: 0.5,
+            residual_eigen_schedule: true,
+            free_electron_initial_guess: true,
             max_iterations: 200,
             davidson_max_iterations: 400,
             davidson_subspace: 48,
@@ -163,6 +170,10 @@ pub struct IterationRecord {
     pub max_eigen_residual: f64,
     pub requested_eigen_tolerance: f64,
     pub davidson_iterations: usize,
+    /// Hamiltonian vector applications in this solve; certificate work is separate.
+    pub operator_applications: usize,
+    pub davidson_iterations_per_k: Vec<usize>,
+    pub operator_applications_per_k: Vec<usize>,
     pub charge_error: f64,
     pub input_charge_error: f64,
     pub min_density: f64,
@@ -177,6 +188,10 @@ pub struct FixedPointCertificate {
     pub density_residual: f64,
     pub occupied_eigenvalue_change: f64,
     pub davidson_iterations: usize,
+    /// Hamiltonian vector applications in this certificate solve.
+    pub operator_applications: usize,
+    pub davidson_iterations_per_k: Vec<usize>,
+    pub operator_applications_per_k: Vec<usize>,
     pub timings: PhaseTimings,
 }
 /// Explicit occupation contract for the k-point API. Partial occupations and
@@ -568,9 +583,17 @@ impl ScfProblem {
         for (i, state) in self.states.iter().enumerate() {
             let preconditioner =
                 DiagonalPreconditioner::new(state.hamiltonian.kinetic_diagonal().to_vec(), 0.1)?;
+            let guess = if initial.is_none() && self.options.free_electron_initial_guess {
+                Some(free_electron_guess(
+                    state.hamiltonian.kinetic_diagonal(),
+                    self.occupations.len(),
+                )?)
+            } else {
+                None
+            };
             let solution = solver.solve(
                 &state.hamiltonian,
-                initial.map(|v| &v[i]),
+                initial.map(|v| &v[i]).or(guess.as_ref()),
                 Some(&preconditioner),
             )?;
             k_points.push(KPointSolution {
@@ -681,12 +704,22 @@ impl ScfProblem {
                     history,
                 });
             }
-            let tolerance = (self.options.initial_eigen_tolerance
-                * self
-                    .options
-                    .eigen_tolerance_decay
-                    .powf((iteration - 1) as f64))
-            .max(0.1 * self.options.eigen_tolerance);
+            let tolerance = if self.options.residual_eigen_schedule {
+                // Residual is the normalized density L2 norm in atomic units.
+                // 0.1 is an empirical scheduling coefficient in atomic units.
+                history
+                    .last()
+                    .map_or(1e-2, |r| 0.1 * r.density_residual)
+                    .min(1e-2)
+                    .max(0.1 * self.options.eigen_tolerance)
+            } else {
+                (self.options.initial_eigen_tolerance
+                    * self
+                        .options
+                        .eigen_tolerance_decay
+                        .powf((iteration - 1) as f64))
+                .max(0.1 * self.options.eigen_tolerance)
+            };
             let step = self
                 .step_kpoints(&n, previous.as_deref(), tolerance)
                 .map_err(|e| match e {
@@ -722,6 +755,21 @@ impl ScfProblem {
                 max_eigen_residual,
                 requested_eigen_tolerance: tolerance,
                 davidson_iterations: step.k_points.iter().map(|k| k.solution.iterations).sum(),
+                operator_applications: step
+                    .k_points
+                    .iter()
+                    .map(|k| k.solution.operator_applications)
+                    .sum(),
+                davidson_iterations_per_k: step
+                    .k_points
+                    .iter()
+                    .map(|k| k.solution.iterations)
+                    .collect(),
+                operator_applications_per_k: step
+                    .k_points
+                    .iter()
+                    .map(|k| k.solution.operator_applications)
+                    .collect(),
                 charge_error,
                 input_charge_error,
                 min_density: step.density.iter().copied().fold(f64::INFINITY, f64::min),
@@ -799,6 +847,21 @@ impl ScfProblem {
                     density_residual,
                     occupied_eigenvalue_change,
                     davidson_iterations: check.k_points.iter().map(|k| k.solution.iterations).sum(),
+                    operator_applications: check
+                        .k_points
+                        .iter()
+                        .map(|k| k.solution.operator_applications)
+                        .sum(),
+                    davidson_iterations_per_k: check
+                        .k_points
+                        .iter()
+                        .map(|k| k.solution.iterations)
+                        .collect(),
+                    operator_applications_per_k: check
+                        .k_points
+                        .iter()
+                        .map(|k| k.solution.operator_applications)
+                        .collect(),
                     timings: check.timings,
                 });
                 if passed {
@@ -914,6 +977,19 @@ pub fn density_distance(a: &Array3<f64>, b: &Array3<f64>, volume: f64, electrons
     (volume / a.len() as f64 * a.iter().zip(b).map(|(a, b)| (a - b).powi(2)).sum::<f64>()).sqrt()
         / electrons
 }
+/// Coordinate vectors are independent; Davidson supplies seeded columns if rank is missing.
+/// Equal kinetic energies retain the original basis index order.
+fn free_electron_guess(kinetic: &[f64], bands: usize) -> Result<ComplexMatrix, ScfError> {
+    let mut order: Vec<_> = (0..kinetic.len()).collect();
+    order.sort_by(|&a, &b| kinetic[a].total_cmp(&kinetic[b]).then(a.cmp(&b)));
+    let mut guess = ComplexMatrix::zeros(kinetic.len(), bands.min(kinetic.len()))
+        .map_err(dft_solvers::SolverError::from)?;
+    for (j, &i) in order.iter().take(guess.cols()).enumerate() {
+        guess.column_mut(j)[i] = Complex64::new(1.0, 0.0);
+    }
+    Ok(guess)
+}
+
 fn converged(r: &IterationRecord, o: &ScfOptions) -> bool {
     r.density_residual <= o.density_tolerance
         && r.energy_change
@@ -927,6 +1003,22 @@ fn converged(r: &IterationRecord, o: &ScfOptions) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn free_electron_order_and_determinism() {
+        let kinetic = [3.0, 0.0, 1.0, 1.0, 2.0];
+        let a = free_electron_guess(&kinetic, 4).unwrap();
+        assert_eq!(a, free_electron_guess(&kinetic, 4).unwrap());
+        for (j, row) in [1, 2, 3, 4].into_iter().enumerate() {
+            for i in 0..kinetic.len() {
+                assert_eq!(
+                    a.column(j)[i],
+                    Complex64::new(if i == row { 1.0 } else { 0.0 }, 0.0)
+                );
+            }
+        }
+    }
+
     #[test]
     fn convergence_requires_every_certificate_on_same_iteration() {
         let o = ScfOptions::default();
@@ -952,6 +1044,9 @@ mod tests {
             max_eigen_residual: 0.0,
             requested_eigen_tolerance: o.eigen_tolerance,
             davidson_iterations: 1,
+            operator_applications: 0,
+            davidson_iterations_per_k: vec![1],
+            operator_applications_per_k: vec![0],
             charge_error: 0.0,
             input_charge_error: 0.0,
             min_density: 1.0,

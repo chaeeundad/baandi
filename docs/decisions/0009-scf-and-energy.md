@@ -301,3 +301,20 @@ and collinear-history fixed-point error <1e-13. Reset/fresh-mixer agreement and
 transactional Hamiltonian update/fresh-operator agreement use exact equality.
 Ionic inverse-FFT imaginary components must be <=1e-12*max(1,max|Re V_ion|) Ha.
 The existing density/Hartree/XC validation tolerances remain unchanged.
+
+## P7P4 notes
+
+O4c adds `ScfOptions::residual_eigen_schedule` (default true): first request
+1e-2 Ha, subsequently `max(0.1*eigen_tolerance,
+min(1e-2, 0.1*previous_density_residual))` Ha. The residual is the existing
+normalized density L2 norm evaluated numerically in atomic units; the factor
+0.1 is an empirical scheduling coefficient, not an equality of physical units.
+False selects the original geometric schedule with its unchanged controls.
+`free_electron_initial_guess` (default true) supplies lowest-kinetic coordinate
+vectors for cold solves, with deterministic basis-index tie order. Existing
+Davidson rank completion and Rayleigh–Ritz are reused. False restores the random
+start. No solver parameter, convergence gate or fixed-point certificate changes.
+The required final requested tolerance remains <= eigen_tolerance. Additive
+in-memory application/per-k counters separate main and certificate work.
+Measurements, rejected parameter settings and limitations are in the P7P4 entry
+of `docs/performance/optimization-log.md`.

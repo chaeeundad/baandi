@@ -412,3 +412,26 @@ records the label and both flags in QE input comments. It reuses the same
 pseudopotential basename and SHA-256 without reading or modifying the UPF.
 Missing override permission for a mismatched label is an error. Legacy LDA
 QE input remains byte-identical to the stored golden file.
+
+### P7P4 additive SCF diagnostics
+
+`results.json` convergence history now includes `operator_applications` (number
+of Hamiltonian vector columns, not block calls), `davidson_iterations_per_k`
+and `operator_applications_per_k`, in the same order as `kpoints.points`.
+These counters cover the main solve only. Each `fixed_point_certificate` has
+its own counters with the same names; sum both to obtain total work, including
+failed certification attempts. Existing `davidson_iterations` is unchanged.
+
+The recorded engine options additionally include `residual_eigen_schedule` and
+`free_electron_initial_guess`. Both default to true. These are Rust `ScfOptions`
+controls, not new TOML input keys. Setting `residual_eigen_schedule=false`
+selects the legacy `initial_eigen_tolerance`/`eigen_tolerance_decay` schedule;
+those controls retain their original meanings in that mode. Setting
+`free_electron_initial_guess=false` restores the seeded random cold start.
+The new schedule requests `max(0.1*eigen_tolerance,
+min(1e-2, 0.1*previous_density_residual))` Ha, initially 1e-2 Ha. The density
+residual is the existing normalized density L2 norm, numerically in atomic
+units. All convergence criteria and the tighter independent certificate remain
+unchanged. Cold initial vectors select the lowest kinetic energies, with basis
+index breaking ties; Davidson performs its existing Rayleigh–Ritz procedure
+and seeded rank completion. Warm starts retain previous eigenvectors.

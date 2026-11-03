@@ -124,6 +124,9 @@ fn synthetic_scf_audit() {
     let pp = potential(4.0, 1.0, true, 1201);
     let options = ScfOptions {
         max_iterations: 600,
+        // Preserve the seeded trajectory that exercises the positivity safeguard.
+        residual_eigen_schedule: false,
+        free_electron_initial_guess: false,
         ..Default::default()
     };
     let linear_options = ScfOptions {
@@ -398,4 +401,80 @@ fn functional_labels_preserve_energy_and_reject_other_functionals() {
         err.to_string(),
         "unsupported UPF functional \"SLA PW\": requires SLA PZ or SLA PZ NOGX NOGC"
     );
+}
+
+#[test]
+fn residual_schedule_matches_legacy_energy_and_finishes_tightly() {
+    let pp = potential(2.0, 1.0, false, 401);
+    let c = dft_geometry::Cell::from_user_rows_bohr([
+        [4.0, 0.0, 0.0],
+        [0.0, 4.0, 0.0],
+        [0.0, 0.0, 4.0],
+    ])
+    .unwrap();
+    let mut energies = Vec::new();
+    for residual_eigen_schedule in [false, true] {
+        let options = ScfOptions {
+            cutoff_hartree: 1.5,
+            residual_eigen_schedule,
+            ..Default::default()
+        };
+        let result = ScfProblem::new(
+            &c,
+            &[Atom::new("Xx", [0.13, 0.21, 0.32])],
+            &[SpeciesPotential {
+                label: "Xx",
+                potential: &pp,
+            }],
+            options.clone(),
+        )
+        .unwrap()
+        .run()
+        .unwrap();
+        check(&result, &options);
+        assert!(
+            result.history.last().unwrap().requested_eigen_tolerance <= options.eigen_tolerance
+        );
+        assert!(
+            result
+                .history
+                .last()
+                .unwrap()
+                .fixed_point_certificate
+                .is_some()
+        );
+        assert_eq!(
+            result.history[0].requested_eigen_tolerance,
+            if residual_eigen_schedule {
+                1e-2
+            } else {
+                options.initial_eigen_tolerance
+            }
+        );
+        energies.push(result.total_hartree());
+    }
+    println!(
+        "schedule energy difference = {:.16e} Ha",
+        (energies[0] - energies[1]).abs()
+    );
+    assert!((energies[0] - energies[1]).abs() < 1e-12);
+}
+
+#[test]
+#[ignore = "full synthetic schedule comparison; cargo test --release -p dft-engine --test scf full_schedule_equivalence -- --ignored --nocapture"]
+fn full_schedule_equivalence() {
+    let pp = potential(4.0, 1.0, true, 1201);
+    let legacy_options = ScfOptions {
+        residual_eigen_schedule: false,
+        free_electron_initial_guess: false,
+        ..Default::default()
+    };
+    let legacy = problem(&pp, legacy_options.clone()).run().unwrap();
+    check(&legacy, &legacy_options);
+    let options = ScfOptions::default();
+    let result = problem(&pp, options.clone()).run().unwrap();
+    check(&result, &options);
+    let difference = (result.total_hartree() - legacy.total_hartree()).abs();
+    println!("full schedule energy difference = {difference:.16e} Ha");
+    assert!(difference <= 1e-12);
 }

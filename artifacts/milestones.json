@@ -57,10 +57,18 @@
   },
   {
     "id": "P7",
-    "name": "k-points, units, expressions, PBE, GPU design",
+    "name": "k점, 단위, 수식 입력, PBE, 성능 개선(5~9배), 병렬화",
     "status": "in progress",
     "gates_done": 0,
     "gates_total": 0,
-    "note": "Done and verified: P7A k-points (QE 7.6 comparison on 3 grids), P7A2 CLI k-point input, P7U units (uom), P7E and P7E2 expression inputs. Pending: P7B PBE via a library, P7C GPU design note. ESLE and coupling architecture are design-only (no implementation)"
+    "note": "완료: k점(QE 3개 격자 일치), 단위(uom), 수식 입력, PBE(QE와 일치), 성능 개선(FFT, Davidson, SCF 스케줄, k점/밴드 병렬화; dev08 32개 k점 98.98 s -> 1.23 s, QE 같은 코어 수 대비 1.8배 느림). 진행: 8원자 셀 미수렴 수정(P7PC), MKL 선택 백엔드 설계(ADR 0019). 남음: GPU 설계 노트"
+  },
+  {
+    "id": "P8",
+    "name": "기능 확장 기획과 출력(밴드/DOS, 체적), 마스터 계획",
+    "status": "in progress",
+    "gates_done": 0,
+    "gates_total": 0,
+    "note": "밴드/DOS 출력(P8A), 체적 데이터 출력(P8B), XC·다체물리 로드맵(P8D), 기능 격차 조사(P8E), VASP/QE 전체 기능 행렬과 마스터 계획(P8F)을 병렬 진행 중. 결과는 마스터 로드맵으로 통합 예정"
   }
 ]

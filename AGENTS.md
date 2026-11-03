@@ -37,6 +37,7 @@ All agent-facing artifacts (docs, tickets, reports, code comments, commit messag
 
 ## Reporting rules to the user (user rule, 2026-11-03, apply for the whole session)
 The user reads Korean; these rules govern the final messages of the orchestrating agent. Silence from the user means "carry on": a task is considered in progress until reported otherwise, and nobody should ask whether it is still running.
+0. (added 2026-11-03) Every report shows the tasks in progress at the very top (after a `[승인필요]` line if there is one), each with its ID and a plain Korean description of what it does (descriptions live in `artifacts/task_titles.json`; add an entry whenever a task is created), and every report is accompanied by an update of the dashboard artifact (`scripts/gen_agents_json.py`, then upload the four `artifacts/*.json` files and update the datasets).
 1. A decision needed from the user starts the message with `[승인필요]` in the first one or two lines, with the options and ONE recommendation. Nothing else is asked of the user.
 2. Every other report is per milestone and has three lines: done / in progress / next.
 3. A task expected to take more than 30 minutes gets an estimated duration when it starts, and its progress is updated on the dashboard.

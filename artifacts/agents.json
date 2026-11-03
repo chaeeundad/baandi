@@ -4,7 +4,7 @@
     "agent": "Claude Code",
     "role": "Architect, orchestrator, reviewer",
     "state": "active",
-    "task": "Library survey (ADR 0003), AI-first repo structure; next: backend spike P0C",
+    "task": "총괄 설계와 검토: 성능 개선 지휘(목표: QE 같은 코어 수에서 1.5배 이내), 새 기능 조사 결과를 마스터 로드맵으로 통합",
     "ref": "this session",
     "updated": "2026-11-02"
   },
@@ -13,21 +13,39 @@
     "agent": "dft5090",
     "role": "Remote QE reference runner (via dev08)",
     "state": "idle",
-    "task": "Readiness check done: pw.x 7.6 on dev08 reachable (reported). Waiting for P6 inputs with SHA-256",
+    "task": "dev08에서 QE 기준 계산과 성능 측정을 대신 실행하는 세션(요청이 오면 실행, 지금은 대기)",
     "ref": "Remote Control session",
     "updated": "2026-11-02"
   },
   {
     "id": "A3",
     "agent": "Codex",
-    "role": "wrapper-test",
-    "state": "done",
-    "task": "PING",
-    "ref": "pid 78887, session 01a19be4, task/PING",
-    "updated": "2026-11-02"
+    "role": "implementer",
+    "state": "active",
+    "task": "P7PC-BUFFER-BANDS: 버그 수정+성능: 8원자 셀 미수렴(맨 위 밴드가 축퇴에 걸림) 해결과 빈 밴드 허용오차",
+    "ref": "pid 86726, session no sessi, task/P7PC-BUFFER-BANDS",
+    "updated": "2026-11-03"
   },
   {
     "id": "A4",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "active",
+    "task": "P8D-XC-ROADMAP: 조사: 스핀, 평활화, DFT+U, 하이브리드, RPA, cRPA 등 확장 계획 문서",
+    "ref": "pid 89396, session no sessi, task/P8D-XC-ROADMAP",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A5",
+    "agent": "Codex",
+    "role": "reviewer",
+    "state": "active",
+    "task": "P8F-MASTER-FEATURE-MATRIX: 조사: VASP, QE 등 전체 기능 비교표와 마스터 개발 계획",
+    "ref": "pid 90251, session no sessi, task/P8F-MASTER-FEATURE-MATRIX",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A6",
     "agent": "Codex",
     "role": "implementer (wrapper smoke test)",
     "state": "done",
@@ -36,16 +54,34 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A5",
+    "id": "A7",
     "agent": "Codex",
     "role": "implementer",
     "state": "blocked",
-    "task": "P0-BOOTSTRAP: Backfilled: PID not recorded",
+    "task": "P0-BOOTSTRAP: 프로젝트 뼈대(러스트 작업공간, 도구) 구성",
     "ref": "pid not recorded, session 01a19bd8, task/P0-BOOTSTRAP",
     "updated": "2026-11-02"
   },
   {
-    "id": "A6",
+    "id": "A8",
+    "agent": "Codex",
+    "role": "wrapper-test",
+    "state": "done",
+    "task": "PING: PING",
+    "ref": "pid 78887, session 01a19be4, task/PING",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A9",
+    "agent": "Codex",
+    "role": "implementer (backend spike)",
+    "state": "done",
+    "task": "P0C-BACKEND-SPIKE: 수치 라이브러리(FFT, 선형대수) 후보 비교 실험",
+    "ref": "pid 81382, session 01a19bfa, task/P0C-BACKEND-SPIKE",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A10",
     "agent": "Codex",
     "role": "implementer",
     "state": "killed",
@@ -54,48 +90,12 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A7",
-    "agent": "Codex",
-    "role": "implementer (backend spike)",
-    "state": "done",
-    "task": "P0C-BACKEND-SPIKE",
-    "ref": "pid 81382, session 01a19bfa, task/P0C-BACKEND-SPIKE",
-    "updated": "2026-11-02"
-  },
-  {
-    "id": "A8",
-    "agent": "Codex",
-    "role": "implementer (P1A foundation)",
-    "state": "done",
-    "task": "P1A-FOUNDATION",
-    "ref": "pid 84356, session 01a19c0c, task/P1A-FOUNDATION",
-    "updated": "2026-11-02"
-  },
-  {
-    "id": "A9",
-    "agent": "Codex",
-    "role": "implementer (P1A fix 1)",
-    "state": "failed",
-    "task": "P1A-FOUNDATION: resume failed at argument parsing (exit 2): resume does not accept -C/-s",
-    "ref": "pid 85432, session 01a19c0c, task/P1A-FOUNDATION",
-    "updated": "2026-11-02"
-  },
-  {
-    "id": "A10",
-    "agent": "Codex",
-    "role": "implementer (P1A fix 1)",
-    "state": "done",
-    "task": "P1A-FOUNDATION",
-    "ref": "pid 85592, session 01a19c0c, task/P1A-FOUNDATION",
-    "updated": "2026-11-02"
-  },
-  {
     "id": "A11",
     "agent": "Codex",
-    "role": "implementer (P1B basis and CLI)",
-    "state": "blocked",
-    "task": "P1B-BASIS-CLI: Stopped BLOCKED on manifest/lock ownership (ndarray dependency, Cargo.lock)",
-    "ref": "pid 86583, session 01a19c17, task/P1B-BASIS-CLI",
+    "role": "implementer (P1A fix 1)",
+    "state": "done",
+    "task": "P1A-FOUNDATION: P1A-FOUNDATION",
+    "ref": "pid 85592, session 01a19c0c, task/P1A-FOUNDATION",
     "updated": "2026-11-02"
   },
   {
@@ -103,7 +103,7 @@
     "agent": "Codex",
     "role": "implementer (P1B unblock)",
     "state": "done",
-    "task": "P1B-BASIS-CLI",
+    "task": "P1B-BASIS-CLI: P1B-BASIS-CLI",
     "ref": "pid 87719, session 01a19c17, task/P1B-BASIS-CLI",
     "updated": "2026-11-02"
   },
@@ -112,7 +112,7 @@
     "agent": "Codex",
     "role": "implementer (P4A eigensolver)",
     "state": "done",
-    "task": "P4A-EIGENSOLVER",
+    "task": "P4A-EIGENSOLVER: P4A-EIGENSOLVER",
     "ref": "pid 89226, session 01a19c21, task/P4A-EIGENSOLVER",
     "updated": "2026-11-02"
   },
@@ -121,7 +121,7 @@
     "agent": "Codex",
     "role": "implementer (P3A functionals)",
     "state": "done",
-    "task": "P3A-FUNCTIONALS",
+    "task": "P3A-FUNCTIONALS: P3A-FUNCTIONALS",
     "ref": "pid 92479, session 01a19c2e, task/P3A-FUNCTIONALS",
     "updated": "2026-11-02"
   },
@@ -130,152 +130,152 @@
     "agent": "Codex",
     "role": "implementer (P2A UPF and radial)",
     "state": "done",
-    "task": "P2A-UPF-RADIAL",
+    "task": "P2A-UPF-RADIAL: P2A-UPF-RADIAL",
     "ref": "pid 95570, session 01a19c3a, task/P2A-UPF-RADIAL",
     "updated": "2026-11-02"
   },
   {
     "id": "A16",
     "agent": "Codex",
-    "role": "implementer (P2B Hamiltonian)",
+    "role": "implementer (P2B fix 1)",
     "state": "done",
-    "task": "P2B-HAMILTONIAN",
-    "ref": "pid 99246, session 01a19c4c, task/P2B-HAMILTONIAN",
+    "task": "P2B-HAMILTONIAN: P2B-HAMILTONIAN",
+    "ref": "pid 3249, session 01a19c4c, task/P2B-HAMILTONIAN",
     "updated": "2026-11-02"
   },
   {
     "id": "A17",
     "agent": "Codex",
-    "role": "implementer (P2B fix 1)",
+    "role": "implementer (P5A retry 1)",
     "state": "done",
-    "task": "P2B-HAMILTONIAN",
-    "ref": "pid 3249, session 01a19c4c, task/P2B-HAMILTONIAN",
+    "task": "P5A-SCF-ENERGY: 자기일관(SCF) 반복과 총에너지 계산 구현",
+    "ref": "pid 5961, session 01a19c5d, task/P5A-SCF-ENERGY",
     "updated": "2026-11-02"
   },
   {
     "id": "A18",
     "agent": "Codex",
-    "role": "implementer (P5A SCF and energy)",
-    "state": "failed",
-    "task": "P5A-SCF-ENERGY: Run ended by transient Codex service error ('Selected model is at capacity') after writing crates/dft-solvers/src/mixing.rs",
-    "ref": "pid 4031, session 01a19c5d, task/P5A-SCF-ENERGY",
+    "role": "implementer (P5B CLI run)",
+    "state": "done",
+    "task": "P5B-CLI-RUN: P5B-CLI-RUN",
+    "ref": "pid 9834, session 01a19c7c, task/P5B-CLI-RUN",
     "updated": "2026-11-02"
   },
   {
     "id": "A19",
     "agent": "Codex",
-    "role": "implementer (P5A retry 1)",
+    "role": "implementer (P2C real-world UPF)",
     "state": "done",
-    "task": "P5A-SCF-ENERGY",
-    "ref": "pid 5961, session 01a19c5d, task/P5A-SCF-ENERGY",
+    "task": "P2C-REAL-WORLD-UPF: P2C-REAL-WORLD-UPF",
+    "ref": "pid 18659, session 01a19c8e, task/P2C-REAL-WORLD-UPF",
     "updated": "2026-11-02"
   },
   {
     "id": "A20",
     "agent": "Codex",
-    "role": "implementer (P5B CLI run)",
+    "role": "implementer (P5C functional string)",
     "state": "done",
-    "task": "P5B-CLI-RUN",
-    "ref": "pid 9834, session 01a19c7c, task/P5B-CLI-RUN",
+    "task": "P5C-FUNCTIONAL-STRING: P5C-FUNCTIONAL-STRING",
+    "ref": "pid 24044, session 01a19c94, task/P5C-FUNCTIONAL-STRING",
     "updated": "2026-11-02"
   },
   {
     "id": "A21",
     "agent": "Codex",
-    "role": "implementer (P2C real-world UPF)",
+    "role": "implementer (P6A QE tooling)",
     "state": "done",
-    "task": "P2C-REAL-WORLD-UPF",
-    "ref": "pid 18659, session 01a19c8e, task/P2C-REAL-WORLD-UPF",
+    "task": "P6A-QE-TOOLING: P6A-QE-TOOLING",
+    "ref": "pid 27778, session 01a19c99, task/P6A-QE-TOOLING",
     "updated": "2026-11-02"
   },
   {
     "id": "A22",
     "agent": "Codex",
-    "role": "implementer (P5C functional string)",
+    "role": "implementer (P6B verifier real format)",
     "state": "done",
-    "task": "P5C-FUNCTIONAL-STRING",
-    "ref": "pid 24044, session 01a19c94, task/P5C-FUNCTIONAL-STRING",
+    "task": "P6B-VERIFY-REAL-FORMAT: P6B-VERIFY-REAL-FORMAT",
+    "ref": "pid 32111, session 01a19cb3, task/P6B-VERIFY-REAL-FORMAT",
     "updated": "2026-11-02"
   },
   {
     "id": "A23",
     "agent": "Codex",
-    "role": "implementer (P6A QE tooling)",
+    "role": "implementer (P6D density compare)",
     "state": "done",
-    "task": "P6A-QE-TOOLING",
-    "ref": "pid 27778, session 01a19c99, task/P6A-QE-TOOLING",
+    "task": "P6D-DENSITY-COMPARE: QE와 전자밀도 비교 도구 구현",
+    "ref": "pid 38420, session 01a19cc8, task/P6D-DENSITY-COMPARE",
     "updated": "2026-11-02"
   },
   {
     "id": "A24",
     "agent": "Codex",
-    "role": "implementer (P6B verifier real format)",
+    "role": "implementer (P6E docs refresh)",
     "state": "done",
-    "task": "P6B-VERIFY-REAL-FORMAT",
-    "ref": "pid 32111, session 01a19cb3, task/P6B-VERIFY-REAL-FORMAT",
+    "task": "P6E-DOCS-REFRESH: 문서 최신화",
+    "ref": "pid 41429, session 01a19cd0, task/P6E-DOCS-REFRESH",
     "updated": "2026-11-02"
   },
   {
     "id": "A25",
     "agent": "Codex",
-    "role": "implementer (P6D density compare)",
-    "state": "failed",
-    "task": "P6D-DENSITY-COMPARE: Never started: orchestrator command error (sed delimiter) meant the ticket file did not exist",
-    "ref": "pid 36341, session no sessi, task/P6D-DENSITY-COMPARE",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7A-KPOINTS: 여러 k점 계산 구현",
+    "ref": "pid 59488, session 01a19e90, task/P7A-KPOINTS",
     "updated": "2026-11-02"
   },
   {
     "id": "A26",
     "agent": "Codex",
-    "role": "implementer (P6D density compare)",
+    "role": "implementer",
     "state": "done",
-    "task": "P6D-DENSITY-COMPARE",
-    "ref": "pid 38420, session 01a19cc8, task/P6D-DENSITY-COMPARE",
-    "updated": "2026-11-02"
+    "task": "P7U-UNITS: 단위 변환을 범용 라이브러리로 교체",
+    "ref": "pid 69481, session 01a19f1e, task/P7U-UNITS",
+    "updated": "2026-11-03"
   },
   {
     "id": "A27",
     "agent": "Codex",
-    "role": "implementer (P6E docs refresh)",
+    "role": "implementer",
     "state": "done",
-    "task": "P6E-DOCS-REFRESH",
-    "ref": "pid 41429, session 01a19cd0, task/P6E-DOCS-REFRESH",
-    "updated": "2026-11-02"
+    "task": "P7A2-KPOINTS-CLI: k점 입력(격자, 목록)을 명령줄에 연결",
+    "ref": "pid 79599, session 01a19f83, task/P7A2-KPOINTS-CLI",
+    "updated": "2026-11-03"
   },
   {
     "id": "A28",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
-    "task": "P7A-KPOINTS",
-    "ref": "pid 59488, session 01a19e90, task/P7A-KPOINTS",
-    "updated": "2026-11-02"
+    "task": "P7E-EXPR: 입력에 수식(1/4 등) 허용 - 계산기 부분",
+    "ref": "pid 83190, session 01a19f86, task/P7E-EXPR",
+    "updated": "2026-11-03"
   },
   {
     "id": "A29",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
-    "task": "P7U-UNITS",
-    "ref": "pid 69481, session 01a19f1e, task/P7U-UNITS",
+    "task": "P7E2-EXPR-CLI: 입력 파일에 수식 허용 - 연결",
+    "ref": "pid 88620, session 01a19f90, task/P7E2-EXPR-CLI",
     "updated": "2026-11-03"
   },
   {
     "id": "A30",
     "agent": "Codex",
-    "role": "implementer",
+    "role": "reviewer",
     "state": "done",
-    "task": "P7A2-KPOINTS-CLI",
-    "ref": "pid 79599, session 01a19f83, task/P7A2-KPOINTS-CLI",
+    "task": "P8R-ESLE-REVIEW: 검토: 전자 상태 탐색(ESLE) 설계 독립 검토",
+    "ref": "pid 92546, session 01a19f9a, task/P8R-ESLE-REVIEW",
     "updated": "2026-11-03"
   },
   {
     "id": "A31",
     "agent": "Codex",
-    "role": "implementer",
+    "role": "reviewer",
     "state": "done",
-    "task": "P7E-EXPR",
-    "ref": "pid 83190, session 01a19f86, task/P7E-EXPR",
+    "task": "P9R-COUPLING-REVIEW: 검토: 외부 환경 결합(QM/MM, 용매 등) 설계 독립 검토",
+    "ref": "pid 95749, session 01a19fa7, task/P9R-COUPLING-REVIEW",
     "updated": "2026-11-03"
   },
   {
@@ -283,53 +283,53 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
-    "task": "P7E2-EXPR-CLI",
-    "ref": "pid 88620, session 01a19f90, task/P7E2-EXPR-CLI",
+    "task": "P7P1-FFT-ALLOC: 성능: FFT 메모리 할당 제거",
+    "ref": "pid 10022, session 01a19fc7, task/P7P1-FFT-ALLOC",
     "updated": "2026-11-03"
   },
   {
     "id": "A33",
     "agent": "Codex",
-    "role": "reviewer",
+    "role": "implementer",
     "state": "done",
-    "task": "P8R-ESLE-REVIEW",
-    "ref": "pid 92546, session 01a19f9a, task/P8R-ESLE-REVIEW",
+    "task": "P7B-PBE: PBE 교환상관 함수 추가",
+    "ref": "pid 10240, session 01a19fbd, task/P7B-PBE",
     "updated": "2026-11-03"
   },
   {
     "id": "A34",
     "agent": "Codex",
-    "role": "reviewer",
+    "role": "implementer",
     "state": "done",
-    "task": "P9R-COUPLING-REVIEW",
-    "ref": "pid 95749, session 01a19fa7, task/P9R-COUPLING-REVIEW",
+    "task": "P7P2-PRUNED-FFT: 성능: 영(0) 줄을 건너뛰는 FFT",
+    "ref": "pid 15448, session 01a19fcf, task/P7P2-PRUNED-FFT",
     "updated": "2026-11-03"
   },
   {
     "id": "A35",
     "agent": "Codex",
     "role": "implementer",
-    "state": "blocked",
-    "task": "P7B-PBE",
-    "ref": "pid 525, session 01a19fbd, task/P7B-PBE",
+    "state": "done",
+    "task": "P7P3-DAVIDSON-HV: 성능: Davidson이 계산 결과를 저장해 재사용",
+    "ref": "pid 21266, session 01a19fd9, task/P7P3-DAVIDSON-HV",
     "updated": "2026-11-03"
   },
   {
     "id": "A36",
     "agent": "Codex",
     "role": "implementer",
-    "state": "killed",
-    "task": "P7B-PBE: stopped by Claude via delegate.sh stop",
-    "ref": "pid 725, session 01a19fbd, task/P7B-PBE",
+    "state": "done",
+    "task": "P7P4-SCF-DAVIDSON-SCHEDULE: 성능: SCF 허용오차 스케줄과 시작 추정 개선",
+    "ref": "pid 30877, session 01a19ff2, task/P7P4-SCF-DAVIDSON-SCHEDULE",
     "updated": "2026-11-03"
   },
   {
     "id": "A37",
     "agent": "Codex",
     "role": "implementer",
-    "state": "done",
-    "task": "P7P1-FFT-ALLOC",
-    "ref": "pid 10022, session 01a19fc7, task/P7P1-FFT-ALLOC",
+    "state": "blocked",
+    "task": "P7P5-ORTHO-NORM: 성능: 직교화와 노름 계산 정리",
+    "ref": "pid 38474, session 01a1a007, task/P7P5-ORTHO-NORM",
     "updated": "2026-11-03"
   },
   {
@@ -337,17 +337,17 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
-    "task": "P7B-PBE",
-    "ref": "pid 10240, session 01a19fbd, task/P7B-PBE",
+    "task": "P7P6-KPOINT-THREADS: 성능: k점별 스레드 병렬화",
+    "ref": "pid 38647, session 01a1a007, task/P7P6-KPOINT-THREADS",
     "updated": "2026-11-03"
   },
   {
     "id": "A39",
     "agent": "Codex",
     "role": "implementer",
-    "state": "done",
-    "task": "P7P2-PRUNED-FFT",
-    "ref": "pid 15448, session 01a19fcf, task/P7P2-PRUNED-FFT",
+    "state": "failed",
+    "task": "P7P7-DAVIDSON-QE-INFORMED: 성능: QE 분석 노트 기반 Davidson 튜닝 시험(대부분 기각)",
+    "ref": "pid 51991, session 01a1a021, task/P7P7-DAVIDSON-QE-INFORMED",
     "updated": "2026-11-03"
   },
   {
@@ -355,8 +355,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
-    "task": "P7P3-DAVIDSON-HV",
-    "ref": "pid 21266, session 01a19fd9, task/P7P3-DAVIDSON-HV",
+    "task": "P7P9-FFT-LANE-LAYOUT: 성능: FFT 메모리 배치 개선 시험(기각)",
+    "ref": "pid 52174, session 01a1a021, task/P7P9-FFT-LANE-LAYOUT",
     "updated": "2026-11-03"
   },
   {
@@ -364,8 +364,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
-    "task": "P7P4-SCF-DAVIDSON-SCHEDULE",
-    "ref": "pid 30877, session 01a19ff2, task/P7P4-SCF-DAVIDSON-SCHEDULE",
+    "task": "P7PA-PARALLEL-SEQUENTIAL-PHASES: 성능: 설정, 밀도, 에너지 계산 단계 병렬화",
+    "ref": "pid 64667, session 01a1a031, task/P7PA-PARALLEL-SEQUENTIAL-PHASES",
     "updated": "2026-11-03"
   },
   {
@@ -373,26 +373,26 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "blocked",
-    "task": "P7P5-ORTHO-NORM",
-    "ref": "pid 38474, session 01a1a007, task/P7P5-ORTHO-NORM",
+    "task": "P7PB-BAND-FFT-THREADS: 성능: k점 안에서 밴드별 병렬화",
+    "ref": "pid 72451, session 01a1a03e, task/P7PB-BAND-FFT-THREADS",
     "updated": "2026-11-03"
   },
   {
     "id": "A43",
     "agent": "Codex",
     "role": "implementer",
-    "state": "done",
-    "task": "P7P6-KPOINT-THREADS",
-    "ref": "pid 38647, session 01a1a007, task/P7P6-KPOINT-THREADS",
+    "state": "failed",
+    "task": "P8A-BANDS-DOS: 기능: 밴드 구조와 DOS 출력(CSV, SVG 그림, 표준 형식)",
+    "ref": "pid 89034, session 01a1a071, task/P8A-BANDS-DOS",
     "updated": "2026-11-03"
   },
   {
     "id": "A44",
     "agent": "Codex",
     "role": "implementer",
-    "state": "failed",
-    "task": "P7P7-DAVIDSON-QE-INFORMED",
-    "ref": "pid 51991, session 01a1a021, task/P7P7-DAVIDSON-QE-INFORMED",
+    "state": "blocked",
+    "task": "P8B-VOLUMETRIC: 기능: 전자밀도, ELF 등 체적 데이터 출력(cube, XSF 등)",
+    "ref": "pid 89222, session 01a1a071, task/P8B-VOLUMETRIC",
     "updated": "2026-11-03"
   },
   {
@@ -400,35 +400,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
-    "task": "P7P9-FFT-LANE-LAYOUT",
-    "ref": "pid 52174, session 01a1a021, task/P7P9-FFT-LANE-LAYOUT",
-    "updated": "2026-11-03"
-  },
-  {
-    "id": "A46",
-    "agent": "Codex",
-    "role": "implementer",
-    "state": "done",
-    "task": "P7PA-PARALLEL-SEQUENTIAL-PHASES",
-    "ref": "pid 64667, session 01a1a031, task/P7PA-PARALLEL-SEQUENTIAL-PHASES",
-    "updated": "2026-11-03"
-  },
-  {
-    "id": "A47",
-    "agent": "Codex",
-    "role": "implementer",
-    "state": "blocked",
-    "task": "P7PB-BAND-FFT-THREADS",
-    "ref": "pid 72451, session 01a1a03e, task/P7PB-BAND-FFT-THREADS",
-    "updated": "2026-11-03"
-  },
-  {
-    "id": "A48",
-    "agent": "Codex",
-    "role": "implementer",
-    "state": "active",
-    "task": "P7PC-BUFFER-BANDS (estimate 40 to 60 min, started 2026-11-03 17:25 KST)",
-    "ref": "pid 86726, session no sessi, task/P7PC-BUFFER-BANDS",
+    "task": "P8E-FEATURE-GAPS: 조사: 사용성, 워크플로, 견고성 격차와 실제 입력 실험",
+    "ref": "pid 89577, session 01a1a071, task/P8E-FEATURE-GAPS",
     "updated": "2026-11-03"
   }
 ]

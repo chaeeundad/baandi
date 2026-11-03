@@ -494,3 +494,38 @@ The starting binary fails to converge its Davidson solve for this input;
 therefore this case currently reports failure, not an accepted SCF speedup.
 Benchmark records add `phase_medians_s` and `engine_total_median_s`; the older
 last-run fields and default case selection retain their meanings.
+
+## Pseudopotential registry (P9B)
+
+Offline commands use the embedded metadata-only registry:
+
+```sh
+dft-cli pseudo list [--element Si] [--supported]
+dft-cli pseudo show ID
+dft-cli pseudo verify /outside/file.upf [--id ID]
+dft-cli pseudo path
+dft-cli pseudo suggest SiO2
+dft-cli pseudo suggest Si O
+dft-cli pseudo fetch ID [--yes] [--offline]
+dft-cli inspect-upf /outside/file.upf --json
+```
+
+`pseudo --registry /outside/registry.json COMMAND` selects an explicitly trusted
+registry; validate it first with `python3 -I scripts/pseudo_registry_check.py`.
+Unknown/mismatching identities and fetch failures return nonzero. JSON inspection
+returns exit 0 for a completed report, with `supported_by_engine: false` and
+reasons for unsupported/invalid contents; I/O failures return nonzero. Existing
+text inspection behavior is unchanged. Suggestions require verified identity and
+engine support, rank ascending source wavefunction cutoff (Ry), unknown last, then
+ID; they print XC and reasons and do not select a potential for a calculation.
+
+Fetch accepts only verified, supported entries with verified licenses. It rehashes
+cache hits and checks provenance. Offline misses fail without network. Online
+misses require `--yes` and then fail with the deliberately unavailable P9A transport;
+the hash-verifying publication path is implemented and tested with synthetic data.
+`BAANDI_PSEUDO_DIR` overrides the platform cache; it must be absolute and fetch
+rejects repositories. The initial registry has no verified files. Input `registry:`
+resolution is a future P8G contract, not implemented config syntax.
+
+See [the user guide](howto-pseudopotentials.md) for platform cache paths and
+[source evidence, schema and fetch contracts](architecture/pseudopotential-registry.md).

@@ -1,3 +1,4 @@
+mod pseudo;
 use clap::{Parser, Subcommand};
 use dft_cli::{config::Config, grid_report};
 use std::{path::PathBuf, process::ExitCode};
@@ -32,14 +33,31 @@ enum Command {
         output_dir: Option<PathBuf>,
     },
     /// Inspect a UPF v2 NC pseudopotential and report strict support validation.
-    InspectUpf { file: PathBuf },
+    InspectUpf {
+        file: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Offline pseudopotential registry and verified cache.
+    Pseudo {
+        #[arg(long)]
+        registry: Option<PathBuf>,
+        #[command(subcommand)]
+        command: pseudo::Command,
+    },
     /// Validate input and basis/grid settings; does not read UPF files.
     Validate { input: PathBuf },
     /// Print cell, cutoff, basis counts and FFT dimensions.
     Grid { input: PathBuf },
 }
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    if let Command::InspectUpf { file } = &cli.command {
+    if let Command::Pseudo { command, registry } = &cli.command {
+        return pseudo::execute(command, registry.as_deref());
+    }
+    if let Command::InspectUpf { file, json } = &cli.command {
+        if *json {
+            return pseudo::inspect_json(file);
+        }
         let p = dft_upf::from_file(file)
             .map_err(|e| format!("{}: UNSUPPORTED or INVALID: {e}", file.display()))?;
         println!(
@@ -75,6 +93,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let input = match &cli.command {
         Command::Validate { input } | Command::Grid { input } => input,
         Command::Eval { .. }
+        | Command::Pseudo { .. }
         | Command::InspectUpf { .. }
         | Command::Run { .. }
         | Command::Convert { .. } => {
@@ -96,6 +115,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             config.system.name
         ),
         Command::Eval { .. }
+        | Command::Pseudo { .. }
         | Command::InspectUpf { .. }
         | Command::Run { .. }
         | Command::Convert { .. } => {

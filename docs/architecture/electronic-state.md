@@ -1,6 +1,6 @@
 # ElectronicState: representation, serialization, compatibility (proposal)
 
-Status: proposal; nothing here is implemented and no existing interface changes until Phase B (see [../roadmap/esle.md](../roadmap/esle.md), ADR [0016](../decisions/0016-esle-layering.md)). Statements about current code are marked "verified" with a file.
+Status: proposal, reconciled with the independent Codex review (`../research/esle-codex-review.md`); nothing here is implemented and no existing interface changes until Phase B (see [../roadmap/esle.md](../roadmap/esle.md), ADR [0016](../decisions/0016-esle-layering.md)). Statements about current code are marked "verified" with a file.
 
 ## 1. Current state of the code (verified)
 | Topic | Fact | Where |
@@ -13,14 +13,13 @@ Status: proposal; nothing here is implemented and no existing interface changes 
 | Spin | none (`nspin = 1` implied) | no spin field anywhere |
 | Wavefunctions | complex coefficients per k in that k's plane-wave order (`ComplexMatrix`); kept in memory only | `scf.rs`, `dft-basis` |
 | Persistence | CLI writes `results.json`, `density.bin` (f64 LE, C order) with `density.json` (grid, units, SHA-256); no wavefunction file, no reader, no restart | `crates/dft-cli/src/run.rs`, `docs/cli.md` |
-| Atomic density | UPF `PP_RHOATOM` is validated but not exposed | `crates/dft-upf/src/parser.rs` |
+| Atomic density | UPF `PP_RHOATOM` is parsed and checked and reachable through `Pseudopotential::raw()`; no normalized accessor or superposition initializer exists | `crates/dft-upf/src/parser.rs` |
 | Determinism | fixed seed in options; single execution thread recorded by the CLI; no other source of nondeterminism found yet (to be certified by Phase B tests, not assumed) | `ScfOptions::seed`, `docs/cli.md` |
 
-## 2. Layering
-Numerical kernels (basis, Hamiltonian, eigensolver, mixer, SCF loop) stay free of persistence, registries and policies. New code lives in two new layers added only when their phase starts:
-- `dft-state` (Phase B): data types, versioned serialization, compatibility checks, provenance. Dependencies: dft-units, dft-geometry, serde stack only (no solver crates), so any producer and consumer can use it.
-- `dft-landscape` (Phase C): comparison, registry, initialization strategies, multi-start, tracking, exploration policy. Depends on dft-state and dft-engine.
-Two crates at most; `dft-validation` is not a crate (tests and scripts already exist: `tests/reference`, `scripts/`). Both are proposals subject to `ownership.toml` changes made when the phase starts.
+## 2. Layering (revised after the independent review)
+Numerical kernels (basis, Hamiltonian, eigensolver, mixer, SCF loop) stay free of persistence, registries and policies. No new crates initially (ADR 0016): pure state types, compatibility checks, comparison and exploration policy are modules in `dft-engine` (no file access, allowed by `ownership.toml`); state persistence (immutable manifest committed after payload writes) and the driving loop live in `dft-cli`; density transfer and atomic-density physics are separate tickets in `dft-physics` and `dft-upf`. A crate is extracted only when an independent client justifies an ownership change. The first draft proposed `dft-state` and `dft-landscape`; that was dropped because the repository already has the needed boundaries.
+Four distinct contracts, not one: (1) `InitialGuess` (a start: density and/or orbital guesses plus its recipe; it has no energy or eigenvalues), (2) `EvaluatedState` (the outcome of a run: converged or not; only converged and certified states are eligible for ranking), (3) `AttemptRecord` (every attempt, including failures with no state), (4) the archive `ElectronicState` (versioned, validated; may omit orbital payloads and then states that capability loss explicitly). An exact trajectory checkpoint (mixer history, subspaces) is a fifth, optional thing and is not promised.
+Gaps in the current outcome that the envelope must fill: `ScfResult` carries no geometry, pseudopotential hashes, basis labels or build identity (verified `scf.rs`, `ScfResult`).
 
 ## 3. ElectronicState v1 fields
 M = mandatory in v1 (a state without it is invalid); O = optional; F = future (reserved name, rejected if present before the physics exists).
@@ -52,7 +51,7 @@ M = mandatory in v1 (a state without it is invalid); O = optional; F = future (r
 ## 5. Compatibility rules
 | Use | Must be equal (else error) | May differ (explicit conversion step, recorded) |
 |---|---|---|
-| Compare two states (distance metrics) | `model_fingerprint` for energy and spectrum metrics | none; density metrics may also compare across grids through the common G sphere if the cell is equal, stated in the report |
+| Compare two states (distance metrics; result is Exact, Convertible(plan) or Incompatible(reasons) per operation) | `model_fingerprint` for energy and spectrum metrics | none; density metrics may also compare across grids through the common G sphere if the cell is equal, stated in the report |
 | Restart from density, same model | `model_fingerprint` | none |
 | Restart from wavefunctions | `model_fingerprint`, basis ordering | none (a different cutoff or cell needs the conversion below) |
 | Density transfer to another structure | pseudopotentials, functional, `nspin`, electron count, occupation policy | cell, positions, grid, cutoff, k set: the density is resampled in G space, renormalized to the electron count, and the new state records the parent and `FromState{transfer}` |
@@ -60,19 +59,23 @@ Energies of states with different fingerprints are never ranked; a report may sh
 
 ## 6. Interface sketches (not code; additive only)
 ```rust
-// dft-engine (additive, Phase B): the existing run() is unchanged.
-pub enum InitialDensity { Uniform, Given(Array3<f64>) }
-pub struct StartState { pub density: InitialDensity, pub orbitals: Option<Vec<ComplexMatrix>> }
-impl ScfProblem { pub fn run_from(self, start: StartState) -> Result<ScfOutcome, ScfError>; }
+// dft-engine (additive, Phase B): the existing run() is unchanged; None keeps the uniform start.
+pub enum InitialState {
+    Density { density: Array3<f64>, basis: StateBasis },
+    Orbitals { blocks: Vec<OrbitalBlock>, basis: StateBasis },
+    DensityAndOrbitalGuess { density: Array3<f64>, blocks: Vec<OrbitalBlock>, basis: StateBasis },
+}
+pub struct ScfRequest { pub initial: Option<InitialState> }
+impl ScfProblem { pub fn run_from(self, request: ScfRequest) -> Result<ScfOutcome, ScfError>; }
 
-// dft-state
+// dft-engine state module (pure, no file access)
 pub struct ElectronicState { /* fields of section 3 */ }
 pub fn from_outcome(problem_model: &ModelSpec, outcome: &ScfOutcome, prov: Provenance) -> ElectronicState;
 pub fn save(state: &ElectronicState, dir: &Path) -> Result<(), StateError>;
 pub fn load(dir: &Path) -> Result<ElectronicState, StateError>;
 pub fn check_compatible(a: &ElectronicState, b: &ElectronicState, use_: Use) -> Result<(), Incompatible>;
 
-// dft-landscape
+// dft-engine landscape module (pure) and a dft-cli StateStore for persistence
 pub trait StateDistance { fn distance(&self, a: &ElectronicState, b: &ElectronicState) -> Result<DistanceReport, Incompatible>; }
 pub trait Initializer { fn start(&self, model: &ModelSpec, parent: Option<&ElectronicState>) -> Result<StartState, InitError>; }
 pub trait ExplorationPolicy { fn next(&mut self, history: &Registry, budget: &mut Budget) -> Option<Attempt>; }
@@ -80,4 +83,4 @@ pub trait ExplorationPolicy { fn next(&mut self, history: &Registry, budget: &mu
 Registry records every attempt (initialization, outcome, failure, cost) and never discards non-converged runs. The Hamiltonian and eigensolver never see these types.
 
 ## 7. Breaking versus additive
-All Phase B changes are additive (`run_from`, new crates). The one place that needs care is `ScfResult.occupations`/`orbitals` (legacy first-k fields): they stay as they are. Nothing in the current k-point validation is touched.
+All Phase B changes are additive (`run_from` and new modules); adding a required field to public `ScfOptions` or `ScfResult`, replacing the first-k fields or changing the `run` return type would be breaking and is avoided. The one place that needs care is `ScfResult.occupations`/`orbitals` (legacy first-k fields): they stay as they are. Nothing in the current k-point validation is touched.

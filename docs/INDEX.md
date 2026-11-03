@@ -21,6 +21,7 @@
 | ESLE: motivation, formulation, hypotheses | `research/electronic-state-landscape.md` |
 | ESLE: ElectronicState design, compatibility, interfaces | `architecture/electronic-state.md` |
 | ESLE roadmap and review checklist | `roadmap/esle.md` |
+| ESLE independent architecture review (Codex) | `research/esle-codex-review.md` |
 | ADR 0016 ESLE layering | `decisions/0016-esle-layering.md` |
 | Validation evidence, QE comparison and convergence studies | [validation.md](validation.md) |
 | CLI commands, SCF controls, output schemas and exit codes | [cli.md](cli.md) |

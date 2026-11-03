@@ -1,7 +1,8 @@
 # Current architecture
 
-The workspace implements a CPU, full-complex Gamma-only, spin-unpolarized,
-insulating norm-conserving LDA-PZ SCF. [Physics conventions](physics-conventions.md)
+The workspace implements a CPU, full-complex Bloch-sampled (Gamma and Monkhorst-Pack
+k points, time-reversal reduction only), spin-unpolarized, insulating
+norm-conserving LDA-PZ SCF. [Physics conventions](physics-conventions.md)
 are authoritative for units, reciprocal vectors, FFT normalization, zero modes,
 projector normalization and energy bookkeeping. Internally the engine uses
 Bohr/Hartree; lattice vectors are matrix columns.

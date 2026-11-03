@@ -1,4 +1,6 @@
 # Review of the Agent-Native Scientific Computing Runtime directive (2026-11-03)
+
+Name: BAANDI = Bridging Agents And Numerical Density-functional Interfaces (user decision, 2026-11-03).
 Source: user's master directive (five layers A numerical core, B typed state, C runtime control, D integration, E agent tools; phases 1 observable, 2 controllable, 3 agent tools, 4 interoperability, 5 provenance/workflow; first demo: Self-Healing SCF).
 
 ## Verdict

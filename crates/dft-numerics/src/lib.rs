@@ -1,5 +1,12 @@
 //! Reusable complex FFTs with explicit plane-wave normalization.
+pub mod fused;
 pub mod linalg;
+#[cfg(feature = "mkl")]
+pub mod mkl_backend;
+#[cfg(not(feature = "mkl"))]
+pub use RustFftPlan3d as FftPlan3d;
+#[cfg(feature = "mkl")]
+pub use mkl_backend::MklFftPlan3d as FftPlan3d;
 
 use ndarray::Array3;
 use num_complex::Complex64;
@@ -11,6 +18,9 @@ use thiserror::Error;
 pub enum FftError {
     #[error("grid dimensions must be nonzero and their storage size must fit isize")]
     InvalidGrid,
+    #[cfg(feature = "mkl")]
+    #[error("MKL FFT: {0}")]
+    Mkl(#[from] dft_mkl::Error),
     #[error("input and output must have the plan's shape and standard C layout")]
     IncompatibleArray,
 }
@@ -95,7 +105,7 @@ impl SpherePattern {
 /// After construction, transforms only copy slices, gather/scatter lanes, scale,
 /// and call rustfft's allocation-free `process_with_scratch`. No buffers grow.
 /// Scratch requirements are checked before every axis pass in debug builds.
-pub struct FftPlan3d {
+pub struct RustFftPlan3d {
     shape: [usize; 3],
     forward: [Arc<dyn Fft<f64>>; 3],
     inverse: [Arc<dyn Fft<f64>>; 3],
@@ -105,7 +115,7 @@ pub struct FftPlan3d {
     #[cfg(test)]
     pruned_lane_count: usize,
 }
-impl FftPlan3d {
+impl RustFftPlan3d {
     pub fn new(shape: [usize; 3]) -> Result<Self, FftError> {
         let n = shape
             .iter()
@@ -293,7 +303,7 @@ impl FftPlan3d {
         Ok(())
     }
 }
-impl Fft3d for FftPlan3d {
+impl Fft3d for RustFftPlan3d {
     fn shape(&self) -> [usize; 3] {
         self.shape
     }
@@ -314,4 +324,9 @@ impl Fft3d for FftPlan3d {
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    // Existing tests include implementation-specific lane-count assertions.
+    // They always exercise Rust; MKL contracts have their own tests.
+    use super::RustFftPlan3d as FftPlan3d;
+    include!("tests.rs");
+}

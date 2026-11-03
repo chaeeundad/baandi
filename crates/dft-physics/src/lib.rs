@@ -6,6 +6,7 @@ pub mod gga;
 pub mod hamiltonian;
 pub mod hartree;
 pub mod kinetic;
+pub mod volumetric;
 pub mod xc;
 
 use num_complex::Complex64;

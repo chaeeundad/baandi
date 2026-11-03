@@ -1,0 +1,12 @@
+# Flat TOML: one JSON-compatible value per line. Lengths in Bohr.
+id = "si-k222"
+purpose = "Existing unshifted 2x2x2 mesh"
+system_class = "si-primitive"
+tier = "default"
+potential = "si"
+lattice = [[0, 5.130606428358966, 5.130606428358966], [5.130606428358966, 0, 5.130606428358966], [5.130606428358966, 5.130606428358966, 0]]
+atoms = [[0, 0, 0], [0.25, 0.25, 0.25]]
+cutoff_ry = 30
+timeout_s = 240
+deterministic = true
+kgrid = [2, 2, 2]

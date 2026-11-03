@@ -1,0 +1,14 @@
+# Flat TOML: one JSON-compatible value per line. Lengths in Bohr.
+id = "syn-d3"
+purpose = "Three coupled projectors in d channel"
+system_class = "synthetic-projectors"
+tier = "default"
+potential = "synthetic"
+lattice = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]
+atoms = [[0.13, 0.21, 0.32]]
+cutoff_ry = 3
+timeout_s = 240
+deterministic = true
+valence = 4
+channels = [2, 2, 2]
+shape = "soft"

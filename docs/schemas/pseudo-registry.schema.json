@@ -1,0 +1,275 @@
+{
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [
+        1
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[a-z0-9][a-z0-9.-]*$"
+          },
+          "element": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[A-Z][a-z]?$"
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "version": {
+                "type": "string",
+                "minLength": 1
+              },
+              "file_url": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "pattern": "^https?://[^\\s]+$"
+              },
+              "project_url": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^https?://[^\\s]+$"
+              }
+            },
+            "required": [
+              "family",
+              "version",
+              "file_url",
+              "project_url"
+            ],
+            "additionalProperties": false
+          },
+          "license": {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1
+              },
+              "url": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^https?://[^\\s]+$"
+              },
+              "verified": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "identifier",
+              "url",
+              "verified"
+            ],
+            "additionalProperties": false
+          },
+          "attribution": {
+            "type": "string",
+            "minLength": 1
+          },
+          "citations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "formats": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          },
+          "xc": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "valence_electrons": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "exclusiveMinimum": 0
+          },
+          "relativistic": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "pseudo_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1
+          },
+          "nlcc": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "spin_orbit": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "paw": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "ultrasoft": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "projector_counts": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "patternProperties": {
+              "^[0-9]+$": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "additionalProperties": false
+          },
+          "suggested_cutoffs": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "wavefunction_ry": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "density_ry": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "exclusiveMinimum": 0
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^https?://[^\\s]+$"
+              }
+            },
+            "required": [
+              "wavefunction_ry",
+              "density_ry",
+              "source"
+            ],
+            "additionalProperties": false
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "date_checked": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "supported_by_engine": {
+            "type": "boolean"
+          },
+          "support_reasons": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "unverified",
+              "deprecated"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "element",
+          "source",
+          "license",
+          "attribution",
+          "citations",
+          "formats",
+          "xc",
+          "valence_electrons",
+          "relativistic",
+          "pseudo_type",
+          "nlcc",
+          "spin_orbit",
+          "paw",
+          "ultrasoft",
+          "projector_counts",
+          "suggested_cutoffs",
+          "sha256",
+          "size_bytes",
+          "date_checked",
+          "supported_by_engine",
+          "support_reasons",
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "entries"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://baandi.invalid/schemas/pseudo-registry.schema.json",
+  "title": "Metadata-only pseudopotential registry"
+}

@@ -56,5 +56,8 @@
  "P11D-SCF-DIAGNOSTICS": "기능: SCF 정체/진동/발산 자동 진단(근거와 가설 구분)",
  "P11E-SELF-HEALING-DEMO": "시연: 스스로 복구하는 SCF 전체 흐름(기준/규칙 복구/에이전트 감독 비교)",
  "P11F-MCP-SERVER": "기능: 에이전트용 MCP 서버(관찰/감독 모드, 감사 기록)",
- "P11G-PYTHON-ASE": "기능: Python/ASE 계산기 연동(힘/응력은 미구현 오류로 처리)"
+ "P11G-PYTHON-ASE": "기능: Python/ASE 계산기 연동(힘/응력은 미구현 오류로 처리)",
+ "P11H-CLI-UX": "기능: baandi run/--observe/--agent, status, explain 명령(세 가지 실행 모드 사용자 경험)",
+ "P11I-COUPLING-API-SPEC": "설계: 외부 결합 인터페이스(고수준 워크플로 API, 저수준 결합 API, 능동학습 계약)",
+ "P11J-RUNTIME-BENCH": "측정: 세 실행 모드의 오버헤드와 재현성 비교 보고서"
 }

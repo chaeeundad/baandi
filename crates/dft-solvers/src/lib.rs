@@ -1,5 +1,11 @@
 //! Backend-independent dense and matrix-free Hermitian eigensolvers.
+#[path = "mixing/kerker.rs"]
+pub mod kerker;
 pub mod mixing;
+pub mod rmm;
+pub use rmm::{
+    HybridPhase, HybridRmm, HybridSolution, RmmDiis, RmmError, RmmFailureReason, SolverChoice,
+};
 
 use dft_numerics::linalg::{
     ComplexMatrix, LinalgError,
@@ -118,6 +124,12 @@ pub struct EigenSolution {
     pub eigenvalues: Vec<f64>,
     pub eigenvectors: ComplexMatrix,
     pub residuals: Vec<f64>,
+    /// Whether each residual meets its band's requested tolerance.
+    pub converged: Vec<bool>,
+    /// Bands outside the strict prefix; excluded from strict certification.
+    pub buffer: Vec<bool>,
+    /// True when residuals were recomputed by applying the operator to Ritz vectors.
+    pub residuals_certified: bool,
     pub iterations: usize,
     /// Maximum residual 2-norm at each Rayleigh-Ritz iteration. In recurrence
     /// mode this is the recurrence norm, replaced by the true norm whenever
@@ -159,11 +171,28 @@ impl DenseEigensolver {
             eigenvalues: values,
             eigenvectors: vectors,
             residuals,
+            converged: vec![true; bands],
+            buffer: vec![false; bands],
+            residuals_certified: true,
             iterations: 1,
             history: vec![maximum],
             operator_applications: n + bands,
         })
     }
+}
+
+/// Additive accuracy policy. Residual norms use the operator's eigenvalue units.
+#[derive(Debug, Clone, Copy)]
+pub struct BandTolerances {
+    pub strict_bands: usize,
+    pub buffer_tolerance: f64,
+}
+
+#[derive(Clone, Copy)]
+struct SolveMode {
+    recurrence: bool,
+    contract_restart: bool,
+    certify: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -209,8 +238,101 @@ impl Davidson {
         recurrence: bool,
         contract_restart: bool,
     ) -> Result<EigenSolution, SolverError> {
+        self.solve_policy(
+            operator,
+            initial,
+            preconditioner,
+            SolveMode {
+                recurrence,
+                contract_restart,
+                certify: true,
+            },
+            BandTolerances {
+                strict_bands: self.bands,
+                buffer_tolerance: self.tolerance,
+            },
+        )
+    }
+
+    /// Strict prefix plus optional buffer. At the iteration limit, success still
+    /// requires a fresh true-residual certificate for every strict band.
+    pub fn solve_with_band_tolerances(
+        &self,
+        operator: &dyn LinearOperator,
+        initial: Option<&ComplexMatrix>,
+        preconditioner: Option<&dyn Preconditioner>,
+        policy: BandTolerances,
+    ) -> Result<EigenSolution, SolverError> {
+        self.solve_with_band_tolerances_and_certification(
+            operator,
+            initial,
+            preconditioner,
+            policy,
+            true,
+        )
+    }
+
+    /// With `certify=false`, ordinary successful returns may report recurrence
+    /// residuals. Intended only for intermediate SCF maps; final solves must
+    /// certify. An iteration-limit return always checks true residuals.
+    pub fn solve_with_band_tolerances_and_certification(
+        &self,
+        operator: &dyn LinearOperator,
+        initial: Option<&ComplexMatrix>,
+        preconditioner: Option<&dyn Preconditioner>,
+        policy: BandTolerances,
+        certify: bool,
+    ) -> Result<EigenSolution, SolverError> {
+        self.solve_policy(
+            operator,
+            initial,
+            preconditioner,
+            SolveMode {
+                recurrence: true,
+                contract_restart: true,
+                certify,
+            },
+            policy,
+        )
+    }
+
+    fn solve_policy(
+        &self,
+        operator: &dyn LinearOperator,
+        initial: Option<&ComplexMatrix>,
+        preconditioner: Option<&dyn Preconditioner>,
+        mode: SolveMode,
+        policy: BandTolerances,
+    ) -> Result<EigenSolution, SolverError> {
+        let SolveMode {
+            recurrence,
+            contract_restart,
+            certify,
+        } = mode;
         let n = operator.dimension();
         validate_bands(n, self.bands)?;
+        if policy.strict_bands == 0
+            || policy.strict_bands > self.bands
+            || !policy.buffer_tolerance.is_finite()
+            || policy.buffer_tolerance < self.tolerance
+        {
+            return Err(SolverError::InvalidParameter(
+                "invalid strict prefix or buffer tolerance",
+            ));
+        }
+        let threshold = |j: usize| {
+            if j < policy.strict_bands {
+                self.tolerance
+            } else {
+                policy.buffer_tolerance
+            }
+        };
+        let meets_policy = |rs: &[f64]| rs.iter().enumerate().all(|(j, &r)| r <= threshold(j));
+        let meets_strict = |rs: &[f64]| {
+            rs[..policy.strict_bands]
+                .iter()
+                .all(|&r| r <= self.tolerance)
+        };
         let capacity = self.max_subspace.min(n);
         if !self.tolerance.is_finite()
             || self.tolerance <= 0.0
@@ -279,19 +401,34 @@ impl Davidson {
                 residual(operator, &vectors, &values)?
             };
             let mut products_trusted = true;
-            if recurrence && residuals.iter().all(|&r| r <= self.tolerance) {
+            let mut residuals_certified = !recurrence;
+            if recurrence
+                && (certify || iteration == self.max_iterations)
+                && (meets_policy(&residuals)
+                    || (iteration == self.max_iterations && meets_strict(&residuals)))
+            {
                 operator_applications += self.bands;
                 (residual_block, residuals) = residual(operator, &vectors, &values)?;
-                products_trusted = residuals.iter().all(|&r| r <= self.tolerance);
+                residuals_certified = true;
+                products_trusted = meets_policy(&residuals);
                 // A failed certificate supplies actual correction directions and
                 // its actual maximum is recorded in this iteration's history.
             }
             let maximum = max_residual(&residuals);
             history.push(maximum);
-            if residuals.iter().all(|&r| r <= self.tolerance) {
+            if meets_policy(&residuals)
+                || (iteration == self.max_iterations && meets_strict(&residuals))
+            {
                 return Ok(EigenSolution {
                     eigenvalues: values,
                     eigenvectors: vectors,
+                    converged: residuals
+                        .iter()
+                        .enumerate()
+                        .map(|(j, &r)| r <= threshold(j))
+                        .collect(),
+                    residuals_certified,
+                    buffer: (0..self.bands).map(|j| j >= policy.strict_bands).collect(),
                     residuals,
                     iterations: iteration,
                     history,
@@ -308,7 +445,7 @@ impl Davidson {
             let selected: Vec<_> = residuals
                 .iter()
                 .enumerate()
-                .filter(|(_, r)| **r > self.tolerance)
+                .filter(|(j, r)| **r > threshold(*j))
                 .map(|(j, _)| j)
                 .take(self.block_size.min(capacity - self.bands))
                 .collect();

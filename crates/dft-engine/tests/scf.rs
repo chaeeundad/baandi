@@ -347,6 +347,19 @@ fn small_synthetic_fixed_point() {
         .unwrap();
     assert!(cert.density_residual <= options.density_tolerance);
     assert!(cert.occupied_eigenvalue_change <= 1e-7);
+    assert!(result.k_points[0].solution.residuals_certified);
+    assert_eq!(cert.strict_residuals_per_k.len(), 1);
+    assert_eq!(cert.strict_residuals_per_k[0].len(), 2);
+    assert_eq!(cert.buffer_residuals_per_k[0].len(), 3);
+    assert!(
+        cert.strict_residuals_per_k[0]
+            .iter()
+            .all(|&r| r <= 0.1 * options.eigen_tolerance)
+    );
+    assert_eq!(
+        result.k_points[0].solution.buffer,
+        [false, false, true, true, true]
+    );
 }
 
 #[test]

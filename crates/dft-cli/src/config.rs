@@ -1,4 +1,6 @@
 //! Strict TOML input; conversion to atomic units happens only at this boundary.
+#[path = "preflight.rs"]
+pub mod preflight;
 use dft_basis::{BasisError, FftGridSpec, PlaneWaveBasis};
 use dft_geometry::{Cell, CellError};
 use dft_units::{Angstrom, Bohr, Hartree, Rydberg};
@@ -23,6 +25,8 @@ pub enum ConfigError {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(skip)]
+    pub species_identity: BTreeMap<String, preflight::Identity>,
+    #[serde(skip)]
     pub input_expressions: Vec<InputExpression>,
     pub system: System,
     pub pseudopotentials: BTreeMap<String, PathBuf>,
@@ -30,6 +34,8 @@ pub struct Config {
     pub xc: Xc,
     pub scf: Option<Scf>,
     pub output: Option<Output>,
+    pub bands: Option<Bands>,
+    pub dos: Option<Dos>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -153,16 +159,107 @@ pub struct Scf {
     pub energy_tolerance_ha: Option<f64>,
     pub density_residual_tolerance: Option<f64>,
     pub mixing_beta: Option<f64>,
+    pub mixing_history: Option<usize>,
+    pub mixing_q0_inverse_bohr: Option<f64>,
     pub nbands: Option<usize>,
     pub extra_bands: Option<usize>,
     pub eigen_tolerance: Option<f64>,
     pub seed: Option<u64>,
+}
+impl Scf {
+    pub fn mixing_strategy(&self) -> Result<dft_engine::Mixing, ConfigError> {
+        let invalid = |message: &str| ConfigError::Invalid(message.into());
+        let beta = self.mixing_beta.unwrap_or(0.3);
+        let history = self.mixing_history.unwrap_or(6);
+        if !beta.is_finite() || beta <= 0.0 {
+            return Err(invalid("mixing_beta must be finite and positive"));
+        }
+        if history == 0 || history.checked_add(1).is_none() {
+            return Err(invalid("mixing_history must be positive and representable"));
+        }
+        let method = self.mixing.as_deref().unwrap_or("pulay");
+        if method != "kerker-pulay" && self.mixing_q0_inverse_bohr.is_some() {
+            return Err(invalid(
+                "mixing_q0_inverse_bohr requires mixing = 'kerker-pulay'",
+            ));
+        }
+        match method {
+            "linear" if self.mixing_history.is_none() => Ok(dft_engine::Mixing::Linear { beta }),
+            "linear" => Err(invalid("mixing_history does not apply to linear mixing")),
+            "pulay" => Ok(dft_engine::Mixing::Pulay { beta, history }),
+            "kerker-pulay" => {
+                let q0 = self.mixing_q0_inverse_bohr.ok_or_else(|| {
+                    invalid("kerker-pulay requires mixing_q0_inverse_bohr in Bohr^-1")
+                })?;
+                if !q0.is_finite() || q0 <= 0.0 || !(q0 * q0).is_finite() || q0 * q0 == 0.0 {
+                    return Err(invalid(
+                        "mixing_q0_inverse_bohr must be positive with finite nonzero square",
+                    ));
+                }
+                Ok(dft_engine::Mixing::KerkerPulay {
+                    beta,
+                    history,
+                    q0_inverse_bohr: q0,
+                })
+            }
+            _ => Err(invalid("mixing must be linear, pulay or kerker-pulay")),
+        }
+    }
 }
 /// Output paths resolve against the process working directory.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Output {
     pub directory: Option<String>,
+    pub volumetric: Option<Volumetric>,
+}
+
+/// Optional post-SCF scalar exports; one-based inclusive band selection.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Volumetric {
+    pub quantities: Vec<String>,
+    pub formats: Vec<String>,
+    pub kpoint: Option<usize>,
+    pub bands: Option<[usize; 2]>,
+}
+impl Volumetric {
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        let fail = |s: &str| ConfigError::Invalid(format!("output.volumetric: {s}"));
+        for (values, allowed) in [
+            (
+                &self.quantities,
+                &[
+                    "density",
+                    "elf",
+                    "hartree",
+                    "local_potential",
+                    "partial_charge",
+                ][..],
+            ),
+            (&self.formats, &["cube", "xsf", "vasp", "vti"][..]),
+        ] {
+            if values.is_empty() {
+                return Err(fail("quantities and formats must be nonempty"));
+            }
+            for (i, value) in values.iter().enumerate() {
+                if !allowed.contains(&value.as_str()) || values[..i].contains(value) {
+                    return Err(fail("unknown or duplicate quantity/format"));
+                }
+            }
+        }
+        if self.kpoint == Some(0) || self.bands.is_some_and(|[a, b]| a == 0 || a > b) {
+            return Err(fail(
+                "kpoint and inclusive bands must be positive and ordered",
+            ));
+        }
+        if (self.kpoint.is_some() || self.bands.is_some())
+            && !self.quantities.iter().any(|q| q == "partial_charge")
+        {
+            return Err(fail("band/k selection requires partial_charge"));
+        }
+        Ok(())
+    }
 }
 
 /// Original string and resolved boundary value (units follow the documented key).
@@ -260,9 +357,16 @@ fn normalize(
                 "energy_tolerance_ha",
                 "density_residual_tolerance",
                 "mixing_beta",
+                "mixing_q0_inverse_bohr",
                 "eigen_tolerance",
             ][..],
-            &["max_iterations", "nbands", "extra_bands", "seed"][..],
+            &[
+                "max_iterations",
+                "nbands",
+                "extra_bands",
+                "seed",
+                "mixing_history",
+            ][..],
         ),
     ] {
         if let Some(table) = value.get_mut(section).and_then(toml::Value::as_table_mut) {
@@ -393,8 +497,10 @@ impl Config {
         let mut value: toml::Value = toml::from_str(text)?;
         let mut records = Vec::new();
         normalize(&mut value, &mut records)?;
+        let identities = preflight::normalize(&mut value)?;
         let mut config: Self = value.try_into()?;
         config.input_expressions = records;
+        config.species_identity = identities;
         config.validate()?;
         Ok(config)
     }
@@ -417,6 +523,9 @@ impl Config {
             }
         }
         self.cell()?;
+        if let Some(v) = self.output.as_ref().and_then(|o| o.volumetric.as_ref()) {
+            v.validate()?;
+        }
         Ok(())
     }
     pub fn cell(&self) -> Result<Cell, ConfigError> {
@@ -531,6 +640,44 @@ mod tests {
         );
     }
     #[test]
+    fn mixing_strategy_parameters_and_expressions() {
+        let parse = |keys: &str| {
+            Config::parse(&format!("{EXAMPLE}\n[scf]\n{keys}\n"))
+                .unwrap()
+                .scf
+                .unwrap()
+        };
+        assert!(matches!(
+            parse("").mixing_strategy().unwrap(),
+            dft_engine::Mixing::Pulay {
+                beta: 0.3,
+                history: 6
+            }
+        ));
+        let keys = "mixing='kerker-pulay'\nmixing_beta='1/2'\nmixing_history='2*3'\nmixing_q0_inverse_bohr='1/2'";
+        assert!(matches!(
+            parse(keys).mixing_strategy().unwrap(),
+            dft_engine::Mixing::KerkerPulay {
+                beta: 0.5,
+                history: 6,
+                q0_inverse_bohr: 0.5
+            }
+        ));
+        for keys in [
+            "mixing='kerker-pulay'",
+            "mixing='unknown'",
+            "mixing_history=0",
+            "mixing='linear'\nmixing_history=2",
+            "mixing_q0_inverse_bohr=1.0",
+            "mixing_beta=nan",
+            "mixing='kerker-pulay'\nmixing_q0_inverse_bohr=0.0",
+            "mixing='kerker-pulay'\nmixing_q0_inverse_bohr=nan",
+            "mixing='kerker-pulay'\nmixing_q0_inverse_bohr=-1.0",
+        ] {
+            assert!(parse(keys).mixing_strategy().is_err(), "{keys}");
+        }
+    }
+    #[test]
     fn typed_optional_sections() {
         let optional = "\n[scf]\nmax_iterations = 80\nmixing = 'linear'\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-6\nmixing_beta = 0.3\n[output]\ndirectory = 'results'\n";
         assert!(Config::parse(&format!("{EXAMPLE}{optional}")).is_ok());
@@ -574,4 +721,36 @@ mod tests {
         }
         assert!(Config::parse(EXAMPLE).unwrap().scf.is_none());
     }
+}
+
+/// Optional fixed-density band path, with raw numeric values in the stated units.
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Bands {
+    pub preset: Option<String>,
+    pub points: Option<Vec<PathPoint>>,
+    pub points_per_segment: Option<usize>,
+    pub spacing_inv_bohr: Option<f64>,
+    pub nbands: Option<usize>,
+    pub eigen_tolerance_ha: Option<f64>,
+    pub max_iterations: Option<usize>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PathPoint {
+    pub label: String,
+    pub fractional: [f64; 3],
+    #[serde(default)]
+    pub break_before: bool,
+}
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Dos {
+    pub dos_kgrid: Option<[usize; 3]>,
+    pub sigma_ev: Option<f64>,
+    pub spacing_ev: Option<f64>,
+    pub window_ev: Option<[f64; 2]>,
+    pub nbands: Option<usize>,
+    pub eigen_tolerance_ha: Option<f64>,
+    pub max_iterations: Option<usize>,
 }

@@ -10,6 +10,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+exmex.workspace = true
 uom.workspace = true
 
 [build-dependencies]

@@ -539,6 +539,7 @@ dependencies = [
 name = "dft-units"
 version = "0.1.0"
 dependencies = [
+ "exmex",
  "uom",
 ]
 
@@ -708,6 +709,16 @@ name = "equivalent"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
+
+[[package]]
+name = "exmex"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9a53dccfc387af263e69c1eb53d13a4e9b26a7134ffdd38398a208374cbf851"
+dependencies = [
+ "regex",
+ "smallvec",
+]
 
 [[package]]
 name = "faer"

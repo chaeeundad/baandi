@@ -197,6 +197,18 @@ impl Davidson {
         preconditioner: Option<&dyn Preconditioner>,
         recurrence: bool,
     ) -> Result<EigenSolution, SolverError> {
+        self.solve_with_restart(operator, initial, preconditioner, recurrence, recurrence)
+    }
+
+    /// Retain the pre-contraction path as an arithmetic oracle.
+    pub fn solve_with_restart(
+        &self,
+        operator: &dyn LinearOperator,
+        initial: Option<&ComplexMatrix>,
+        preconditioner: Option<&dyn Preconditioner>,
+        recurrence: bool,
+        contract_restart: bool,
+    ) -> Result<EigenSolution, SolverError> {
         let n = operator.dimension();
         validate_bands(n, self.bands)?;
         let capacity = self.max_subspace.min(n);
@@ -246,8 +258,7 @@ impl Davidson {
             let h_basis = if cache_valid {
                 first_columns(&cached, basis.cols())?
             } else {
-                // Initial basis and every reorthonormalized restart are applied
-                // exactly as before; never rotate old products across a restart.
+                // Initial basis and fallback restarts need fresh products.
                 operator_applications += basis.cols();
                 let products = apply(operator, &basis)?;
                 for j in 0..basis.cols() {
@@ -267,9 +278,11 @@ impl Davidson {
                 operator_applications += self.bands;
                 residual(operator, &vectors, &values)?
             };
+            let mut products_trusted = true;
             if recurrence && residuals.iter().all(|&r| r <= self.tolerance) {
                 operator_applications += self.bands;
                 (residual_block, residuals) = residual(operator, &vectors, &values)?;
+                products_trusted = residuals.iter().all(|&r| r <= self.tolerance);
                 // A failed certificate supplies actual correction directions and
                 // its actual maximum is recorded in this iteration's history.
             }
@@ -316,9 +329,15 @@ impl Davidson {
                 output.validate_finite()?;
                 corrections = output;
             }
-            cache_valid = basis.cols() + corrections.cols() <= capacity;
+            cache_valid = products_trusted && basis.cols() + corrections.cols() <= capacity;
             if !cache_valid {
-                basis = orthonormalize(&vectors, None)?.vectors;
+                (basis, cache_valid) = restart(
+                    vectors,
+                    &h_basis,
+                    &coefficients,
+                    &mut cached,
+                    contract_restart && products_trusted,
+                )?;
             }
             let mut extra = orthonormalize(&corrections, Some(&basis))?.vectors;
             // A stalled direction can occur with an exact preconditioner or an invariant
@@ -436,3 +455,44 @@ mod tests;
 
 #[cfg(test)]
 mod legacy;
+
+// Maximum entrywise defect of V^H V from identity, without a Gram allocation.
+fn orthogonality_defect(v: &ComplexMatrix) -> f64 {
+    let mut maximum: f64 = 0.0;
+    for j in 0..v.cols() {
+        for k in 0..=j {
+            let dot: Complex64 = v
+                .column(k)
+                .iter()
+                .zip(v.column(j))
+                .map(|(a, b)| a.conj() * b)
+                .sum();
+            let defect = (dot - if j == k { 1.0 } else { 0.0 }).norm();
+            if !defect.is_finite() {
+                return f64::INFINITY;
+            }
+            maximum = maximum.max(defect);
+        }
+    }
+    maximum
+}
+
+// A valid cache means products may be reused and only appended columns need H.
+fn restart(
+    vectors: ComplexMatrix,
+    h_basis: &ComplexMatrix,
+    coefficients: &ComplexMatrix,
+    cached: &mut ComplexMatrix,
+    contract: bool,
+) -> Result<(ComplexMatrix, bool), SolverError> {
+    if contract && orthogonality_defect(&vectors) <= 1e-12 {
+        // Derived from study note section 1: H(V C) = (H V) C.
+        let products = gemm(h_basis, Identity, coefficients, Identity)?;
+        for j in 0..vectors.cols() {
+            cached.column_mut(j).copy_from_slice(products.column(j));
+        }
+        Ok((vectors, true))
+    } else {
+        Ok((orthonormalize(&vectors, None)?.vectors, false))
+    }
+}

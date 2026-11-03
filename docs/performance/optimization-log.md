@@ -844,3 +844,152 @@ explicit 0.5 weights fixed the test fixture. No production tolerance changed.
 CLI end-to-end coverage verifies absent/0/1/2/8 requests, Gamma capping,
 two-point capping, additive metadata and identical JSON numerical fields and
 density bytes. `git diff --check` exit 0. Changes remain uncommitted.
+
+## P7P7: Davidson hypotheses (2026-11-03)
+
+Starting commit 1decf9c. Pre-change profile supplied with the ticket: FFT about
+54%, orthonormalization about 8%, hypot about 12%, GEMM about 9%; approximately
+53 Davidson iterations per k point across SCF and 8.1 vector applications per
+iteration. This is existing measured evidence, not a fresh sampling claim.
+Only the prose/mathematics study note was read; no QE source was accessed.
+Stages below are derived from note sections 1/5 (restart and capacity), 2/5
+(preconditioner), and 1/5 (Ritz convergence). Shared-Mac timings are indicative;
+quiet dev08 remeasurement remains the reviewer's responsibility.
+
+### Measurements and decisions
+
+Raw medians, energies, density hashes, every SCF step's per-k-point Davidson
+iteration/application counts, certificate counts, final bands, and QE checks
+are stored in `crates/dft-solvers/benches/p7p7-evidence.json`. Counts in the
+following table sum SCF steps and k points, excluding the separately recorded
+certificate. Every stage starts from kept predecessors; S3/S4 use capacity 48.
+Times are median seconds, three repeats, ordered Gamma / k222s / k222.
+
+| Stage | Wall medians (s) | Davidson iterations | Vector applications | Max abs dE vs O2 (Ha) | Decision |
+| --- | --- | --- | --- | ---: | --- |
+| Before | 0.1404 / 0.4997 / 0.9269 | 43 / 212 / 422 | 373 / 1730 / 3398 | 0 | baseline |
+| S1 contraction | 0.1464 / 0.5076 / 1.0986 | 43 / 212 / 422 | 373 / 1730 / 3398 | 0 | retain for restart savings; default cases neutral |
+| S2 capacity 16 (2x) | 0.2430 / 0.5944 / 1.1100 | 62 / 340 / 667 | 452 / 2018 / 4076 | 1.19904e-13 | reject |
+| S2 capacity 24 (3x) | 0.1540 / 0.4926 / 0.9399 | 52 / 260 / 522 | 428 / 1791 / 3615 | 1.30562e-13 | reject |
+| S2 capacity 32 (4x) | 0.1400 / 0.4710 / 1.1011 | 46 / 202 / 447 | 381 / 1687 / 3408 | 3.46390e-14 | reject |
+| S3 full smooth diagonal | 0.1545 / 0.5328 / 0.9619 | 52 / 243 / 438 | 427 / 1799 / 3461 | 1.16351e-13 | reject: Gamma 11 SCF steps |
+| S4 Ritz selection + strict refinement | 0.1492 / 0.5218 / 0.9823 | 45 / 221 / 441 | 373 / 1731 / 3360 | 2.13163e-14 | reject: more iterations, slower |
+| Final (S1 only) | 0.1509 / 0.5030 / 0.9298 | 43 / 212 / 422 | 373 / 1730 / 3398 | 0 | verified, no default-case speedup |
+
+All stages except S3 Gamma have 10 SCF steps. No stage approaches the 5e-13 Ha
+stop threshold. Smaller subspaces do not consistently improve wall time and
+convergence together. The public `davidson_subspace` field remains unchanged.
+Final k444s: 3.71665 s (one benchmark sample), 10 SCF steps,
+-7.925976126648081 Ha; energy difference 0 Ha and density hash identical to O2.
+The other final energies are -7.295530468210772 / -7.919423412469067 /
+-7.831230057121145 Ha, also bit-identical energies and density hashes to O2.
+Shared-machine variability, especially S1/S2 k222, precludes a speedup claim.
+
+S1 is **derived from note section 1 (items 3/5), hypothesis H3 in section 5**.
+The guarded restart reuses H products, saving one H application per retained
+Ritz column at an accepted restart. Random n=18 and degenerate n=12 Hermitian
+oracle fixtures measure net applications 165 -> 114 and 92 -> 64 (51/28 saved),
+with unchanged iterations 47/21 respectively. Returned Gram defects are
+3.33067e-15 and 4.21885e-15. The 1e-12 guard is over 200 times these measured
+rounding defects; it is an accuracy ceiling, not a convergence tolerance.
+Tests explicitly exercise the Gram failure and untrusted-product fallback.
+An initial solver-test run exited 101: the existing deliberately stale operator
+fixture exposed the need to invalidate products after failed certification.
+That safeguard was added; the unchanged fixture now passes. The old recurrence
+path remains an oracle through `solve_with_restart(..., true, false)`, and the
+pre-O4 legacy oracle and its bitwise tests remain. S1 has zero application
+savings on the default SCF cases because those solves fit without restarting.
+
+S3 is **derived from note section 2, H5 in section 5**, rejected and removed.
+The trial engine wiring assembled kinetic + grid mean of the effective local
+potential + diag(B D B^H), including off-diagonal projector couplings using
+existing physics accessors. No physics-crate edit was needed. A separate
+preconditioner implemented the existing trait. The tested smoothing scale was
+one Hartree (the note's expression evaluated directly in internal energy units),
+which measurement rejected; this value is not adopted by the engine.
+For x=d-lambda and t=x-1, D=1+(t+sqrt(1+t^2))/2 is strictly greater than 1
+in exact arithmetic, hence has no finite zero/singularity. D/x tends to 1
+as x tends to positive infinity; D tends to 1 from above as x tends to negative
+infinity. For negative t, rationalization uses t+sqrt(1+t^2)=1/(sqrt(1+t^2)-t)
+to avoid cancellation. Tests covered monotonicity, agreement with the direct
+formula, finite extremes through +/-f64::MAX, asymptotes, output and invalid
+input. Fourteen solver tests passed; no production preconditioner change remains.
+
+S4 is **derived from note section 1 (item 4), H1 in section 5**, rejected and
+removed. The trial considered root j stationary when the absolute change of
+its sorted Ritz value between successive iterations was <= requested tolerance
+(in Ha). The first iteration had no converged roots. This is an energy-error
+estimator, not a rigorous error bound: for an isolated eigenpair near convergence,
+eigenvalue error scales roughly as residual squared divided by the spectral gap;
+small Ritz changes alone can also indicate stagnation. Once all roots were
+stationary the trial resumed residual-based correction selection. Every return
+still required a fresh true-residual certification with every band <= the
+original tolerance. The fixed-point certificate retained residual selection
+throughout; no empty-band exception or SCF threshold change was introduced.
+The deliberately clustered slow-band test passed with actual residual
+9.98312e-10 and eigenvalue error 1.13087e-12 (dimensionless), 90 iterations.
+Fourteen solver tests passed. The extra refinement erased the prospective
+iteration savings; k222 saved 38 applications but added 19 iterations. Rejected
+rather than weakening certification. No convergence-option change remains.
+
+S5 (optional H4) was not attempted: a generalized reduced solve would be a
+separate high-risk extension; the earlier trials supplied no demonstrated
+need to introduce it. No generalized solver/conditioning option is retained.
+H2 empty-band policy and the SCF threshold schedule were explicitly out of scope.
+
+### Final numerical/reference gates and reproduction
+
+QE comparison script PASS for k222, k222s, k444s using the stored real QE runs
+with unchanged tolerances, respectively:
+energy offsets 1.28143942746e-6 / 1.28126546661e-6 / 1.28167595959e-6 Ha/atom;
+maximum all-band eigenvalue offsets 1.99041970013e-6 / 1.77233410771e-6 /
+2.10013302574e-6 Ha. Compared directly with stored rust-dft reference results,
+maximum all-band changes are 3.37783961912e-9 / 5.21257520480e-9 /
+3.65524610579e-9 Ha; energy changes <=6.83898e-14 Ha. Both are below 1e-8 Ha.
+This reuses existing QE evidence, not a new QE run. Gap and fixed-point
+certificate code are untouched. The benchmark success alone does not assert
+iteration acceptance: S3's Gamma regression was checked separately and rejected.
+
+```sh
+cargo build --release -p dft-cli
+python3 -I scripts/bench_scf.py --binary target/release/dft-cli \
+  --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF \
+  --cases gamma,k222s,k222 --repeats 3 \
+  --baseline docs/performance/baseline-after-o2.json --record /tmp/p7p7-final.json
+# Final large case: --cases k444s --repeats 1 --record /tmp/p7p7-final-k444s.json
+python3 /tmp/p7p7-details.py final gamma,k222s,k222,k444s
+python3 -I scripts/compare_kpoints_qe.py --ours /tmp/p7p7/final/k222/out/results.json \
+  --qe-out tests/reference/kpoints/k222_c/qe.out
+# k222s uses k222s_c/qe.out; k444s uses --qe-summary k444s_c/qe_summary.json.
+scripts/check.sh
+cargo test --release --workspace -- --ignored
+cargo test --release -p dft-solvers -- --include-ignored --nocapture
+```
+
+The ephemeral detail helper uses bench_scf.py's unchanged TEMPLATE/CASES, runs
+`dft-cli run <input.toml> --output-dir <out>` once per case, and retains the
+results in /tmp/p7p7/<stage>/<case>/out. It does not copy the UPF. Permanent
+JSON evidence retains the required histories and bands if /tmp is cleared.
+Every completed release build, stage benchmark, detail helper and final QE
+comparison exited 0. S1's first test failure (101) is described above; after
+its correction S1/S3/S4 targeted release suites exited 0. The final workspace
+build/test/fmt/clippy gates all print PASS. Final test counts are recorded below.
+
+Acceptance limitation: the requested reduction of both applications and
+Davidson iterations on the default benchmark is **not achieved**. Only restart
+work is reduced on fixtures that actually restart. Rejected changes were removed;
+no claim of a complete performance win or quiet-host acceptance is made.
+README, artifacts, tickets, baselines, manifests, the parallel FFT work and all
+other crates remain untouched under the explicit ownership exclusions.
+Changes remain uncommitted for review.
+
+Final release validation: all 15 ignored workspace tests passed; the solver
+suite including ignored tests passed 15/15. Direct contraction product errors
+on random/degenerate fixtures are 3.66384e-16 / 9.30536e-16 (dimensionless),
+with measured restart Gram defects 8.88178e-16 / 4.44089e-16. Final complete
+workspace check prints PASS build, test, fmt and clippy. The shell sequence
+running that check, ignored workspace tests and complete solver tests exited 0;
+logs show no failed test. `git diff --check` exited 0.
+An initial evidence-assembly helper raised KeyError because Gamma has no
+`kpoints` object; optional Gamma handling fixed it and the corrected helper
+exited 0. This did not affect any numerical run.

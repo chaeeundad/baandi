@@ -170,3 +170,33 @@ reports vector-column `operator_applications`, including certification (dense
 solutions count unit-column construction and residual applications).
 Stage 2 is the default after passing the P7P3 SCF energy (1e-12 Ha), fixed-point
 certificate and workspace gates; stage 1 remains selectable with `false`.
+
+## P7P7 notes
+
+Derived from note section 1 of `docs/research/qe-study/davidson-and-scf-thresholds.md`
+(prose and mathematics only): restart contraction uses the engine's existing
+Ritz coefficients C for both V C and (H V) C. No reorthonormalization or new H
+application is needed on that path. The maximum entrywise defect of (V C)^H(V C)
+from identity must be <=1e-12 (dimensionless); nonfinite defects fail the guard.
+Random/degenerate restart tests measure returned Gram defects below 4.3e-15,
+so the bound leaves over two orders of magnitude of measured rounding margin
+while remaining at the existing numerical adapter's accuracy scale. A failed
+true-residual certificate invalidates stored products and forces the old
+reorthonormalize/reapply path even if the Gram guard passes.
+
+`solve_with_restart(..., recurrence, contract_restart)` is additive. Passing
+`true, false` preserves the previous recurrence algorithm for comparisons;
+`solve_with_recurrence(..., false)` retains its original arithmetic path.
+`solve` enables contraction. Neither Davidson's fields nor the meaning of
+EigenSolution.residuals changes: each returned entry is the 2-norm of
+H*x_j-lambda_j*x_j from a fresh operator application to the returned vectors,
+and every entry must satisfy the requested absolute residual tolerance. Failed
+certification continues iteration; a successful exit certifies all bands.
+
+Capacity sweeps (2/3/4/6 times eight bands) did not justify changing the default.
+The full-diagonal smooth preconditioner and Ritz-change selection were measured
+and rejected; there is no retained engine wiring or convergence option for
+them. The optional generalized reduced problem was not attempted. See the
+P7P7 optimization-log entry and stored evidence for measured limits. In
+particular, the default capacity-48 SCF cases do not restart and show no
+operator-application or iteration reduction from the retained change.

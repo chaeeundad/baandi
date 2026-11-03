@@ -382,3 +382,99 @@ fn dependent_corrections_and_shape_errors() {
 
 #[path = "product_tests.rs"]
 mod product_tests;
+
+#[test]
+fn contracted_restarts_match_oracle_and_degeneracies() {
+    for (name, matrix) in [
+        ("random", random_matrix(18, 83)),
+        (
+            "degenerate",
+            fourier(&[-1., -1., -1., 2., 3., 4., 5., 6., 7., 8., 9., 10.]),
+        ),
+    ] {
+        let op = MatrixOperator(matrix);
+        let v = orthonormalize(&SplitMix64(71).block(op.dimension(), 6).unwrap(), None)
+            .unwrap()
+            .vectors;
+        let hv = apply(&op, &v).unwrap();
+        let projected = gemm(&v, Adjoint, &hv, Identity).unwrap();
+        let (_, coefficients) = hermitian_eigh(&projected).unwrap();
+        let coefficients = first_columns(&coefficients, 3).unwrap();
+        let ritz = gemm(&v, Identity, &coefficients, Identity).unwrap();
+        let true_products = apply(&op, &ritz).unwrap();
+        let mut cached = ComplexMatrix::zeros(op.dimension(), 3).unwrap();
+        let gram = orthogonality_defect(&ritz);
+        let (_, valid) = restart(ritz, &hv, &coefficients, &mut cached, true).unwrap();
+        assert!(valid);
+        let error = cached
+            .as_slice()
+            .iter()
+            .zip(true_products.as_slice())
+            .map(|(a, b)| (a - b).norm())
+            .fold(0.0, f64::max);
+        assert!(error < 1e-14);
+        println!("contraction {name}: product error {error:e}, restart Gram defect {gram:e}");
+        let mut cfg = config(3, 9);
+        cfg.tolerance = 1e-10;
+        let old = cfg
+            .solve_with_restart(&op, None, None, true, false)
+            .unwrap();
+        let new = cfg.solve(&op, None, None).unwrap();
+        let dense = DenseEigensolver.solve(&op, 3).unwrap();
+        assess(name, &op, &new, &dense.eigenvalues, cfg.tolerance);
+        for (a, b) in old.eigenvalues.iter().zip(&new.eigenvalues) {
+            assert!((a - b).abs() < 1e-12);
+        }
+        let defect = orthogonality_defect(&new.eigenvectors);
+        assert!(defect < 1e-12);
+        println!(
+            "contraction {name}: applications {} -> {}, iterations {} -> {}, Gram defect {defect:e}",
+            old.operator_applications, new.operator_applications, old.iterations, new.iterations
+        );
+        assert!(new.operator_applications < old.operator_applications);
+    }
+}
+
+#[test]
+fn contraction_guard_detects_loss_of_orthogonality() {
+    let mut v = ComplexMatrix::zeros(4, 2).unwrap();
+    v[(0, 0)] = 1.0.into();
+    v[(1, 1)] = 1.0.into();
+    assert_eq!(orthogonality_defect(&v), 0.0);
+    v[(0, 1)] = 2e-12.into();
+    assert!(orthogonality_defect(&v) > 1e-12);
+    let mut coefficients = ComplexMatrix::zeros(2, 2).unwrap();
+    coefficients[(0, 0)] = 1.0.into();
+    coefficients[(1, 1)] = 1.0.into();
+    let products = v.clone();
+    let mut cache = ComplexMatrix::zeros(4, 2).unwrap();
+    let (repaired, valid) = restart(v.clone(), &products, &coefficients, &mut cache, true).unwrap();
+    assert!(!valid, "fallback must force a fresh application");
+    assert!(orthogonality_defect(&repaired) < 1e-15);
+    let (_, valid) = restart(
+        repaired.clone(),
+        &products,
+        &coefficients,
+        &mut cache,
+        false,
+    )
+    .unwrap();
+    assert!(!valid, "untrusted products must not be contracted");
+    let (_, valid) = restart(repaired, &products, &coefficients, &mut cache, true).unwrap();
+    assert!(valid);
+    assert_eq!(cache, products);
+    v[(0, 1)] = f64::NAN.into();
+    assert_eq!(orthogonality_defect(&v), f64::INFINITY);
+}
+
+#[test]
+fn subspace_multipliers_preserve_lowest_eigenpairs() {
+    let op = MatrixOperator(random_matrix(18, 73));
+    let dense = DenseEigensolver.solve(&op, 3).unwrap();
+    for multiplier in [2, 3, 4, 6] {
+        let mut cfg = config(3, 3 * multiplier);
+        cfg.tolerance = 1e-9;
+        let s = cfg.solve(&op, None, None).unwrap();
+        assess("capacity", &op, &s, &dense.eigenvalues, cfg.tolerance);
+    }
+}

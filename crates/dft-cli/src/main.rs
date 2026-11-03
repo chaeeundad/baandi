@@ -1,9 +1,6 @@
-<<<<<<< HEAD
-mod pseudo;
-=======
 mod bands;
 mod dos;
->>>>>>> main
+mod pseudo;
 use clap::{Parser, Subcommand};
 use dft_cli::{config::Config, grid_report};
 use std::{path::PathBuf, process::ExitCode};
@@ -50,7 +47,6 @@ enum Command {
         output_dir: Option<PathBuf>,
     },
     /// Inspect a UPF v2 NC pseudopotential and report strict support validation.
-<<<<<<< HEAD
     InspectUpf {
         file: PathBuf,
         #[arg(long)]
@@ -63,17 +59,12 @@ enum Command {
         #[command(subcommand)]
         command: pseudo::Command,
     },
-    /// Validate input and basis/grid settings; does not read UPF files.
-    Validate { input: PathBuf },
-=======
-    InspectUpf { file: PathBuf },
     /// Full preflight including UPF identity and SCF controls; no SCF execution.
     Validate {
         input: PathBuf,
         #[arg(long)]
         json: bool,
     },
->>>>>>> main
     /// Print cell, cutoff, basis counts and FFT dimensions.
     Grid { input: PathBuf },
 }

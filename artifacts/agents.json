@@ -20,15 +20,6 @@
   {
     "id": "A3",
     "agent": "Codex",
-    "role": "implementer",
-    "state": "active",
-    "task": "P7PC-BUFFER-BANDS: 버그 수정+성능: 8원자 셀 미수렴(맨 위 밴드가 축퇴에 걸림) 해결과 빈 밴드 허용오차",
-    "ref": "pid 86726, session no sessi, task/P7PC-BUFFER-BANDS",
-    "updated": "2026-11-03"
-  },
-  {
-    "id": "A4",
-    "agent": "Codex",
     "role": "reviewer",
     "state": "active",
     "task": "P8F-MASTER-FEATURE-MATRIX: 조사: VASP, QE 등 전체 기능 비교표와 마스터 개발 계획",
@@ -36,34 +27,34 @@
     "updated": "2026-11-03"
   },
   {
+    "id": "A4",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "active",
+    "task": "P10B-MKL-FFT: 성능: Intel MKL FFT/행렬곱 선택 백엔드 구현(컴파일 시점 선택, dev08에서 검증)",
+    "ref": "pid 20251, session no sessi, task/P10B-MKL-FFT",
+    "updated": "2026-11-03"
+  },
+  {
     "id": "A5",
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P8A-BANDS-DOS: 기능: 밴드 구조와 DOS 출력(CSV, SVG 그림, 표준 형식)",
-    "ref": "pid 5174, session no sessi, task/P8A-BANDS-DOS",
+    "task": "P10E-GPU-ARCH: 설계: GPU 실행 구조(CUDA/Metal 등 후보 비교, 단계별 로드맵)",
+    "ref": "pid 20750, session no sessi, task/P10E-GPU-ARCH",
     "updated": "2026-11-03"
   },
   {
     "id": "A6",
     "agent": "Codex",
-    "role": "reviewer",
+    "role": "implementer",
     "state": "active",
-    "task": "P9A-USER-INTERFACE-DESIGN: 설계: 사용자 인터페이스(표준 포맷/타 코드 입력, 자연어 요청, Materials Project 연동, 대화형 CLI, 링크 기반 시각화)",
-    "ref": "pid 12093, session no sessi, task/P9A-USER-INTERFACE-DESIGN",
+    "task": "P10G-GENERAL-BENCH: 기반: 실리콘에 치우치지 않는 범용 벤치마크/견고성 시험 모음",
+    "ref": "pid 20920, session no sessi, task/P10G-GENERAL-BENCH",
     "updated": "2026-11-03"
   },
   {
     "id": "A7",
-    "agent": "Codex",
-    "role": "implementer",
-    "state": "active",
-    "task": "P8G-INPUT-PREFLIGHT: 기능: 입력 사전 검사(원소/의사퍼텐셜 일치, SCF 설정, 평문 요약)",
-    "ref": "pid 12255, session no sessi, task/P8G-INPUT-PREFLIGHT",
-    "updated": "2026-11-03"
-  },
-  {
-    "id": "A8",
     "agent": "Codex",
     "role": "implementer (wrapper smoke test)",
     "state": "done",
@@ -72,7 +63,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A9",
+    "id": "A8",
     "agent": "Codex",
     "role": "implementer",
     "state": "blocked",
@@ -81,7 +72,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A10",
+    "id": "A9",
     "agent": "Codex",
     "role": "wrapper-test",
     "state": "done",
@@ -90,7 +81,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A11",
+    "id": "A10",
     "agent": "Codex",
     "role": "implementer (backend spike)",
     "state": "done",
@@ -99,7 +90,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A12",
+    "id": "A11",
     "agent": "Codex",
     "role": "implementer",
     "state": "killed",
@@ -108,7 +99,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A13",
+    "id": "A12",
     "agent": "Codex",
     "role": "implementer (P1A fix 1)",
     "state": "done",
@@ -117,7 +108,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A14",
+    "id": "A13",
     "agent": "Codex",
     "role": "implementer (P1B unblock)",
     "state": "done",
@@ -126,7 +117,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A15",
+    "id": "A14",
     "agent": "Codex",
     "role": "implementer (P4A eigensolver)",
     "state": "done",
@@ -135,7 +126,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A16",
+    "id": "A15",
     "agent": "Codex",
     "role": "implementer (P3A functionals)",
     "state": "done",
@@ -144,7 +135,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A17",
+    "id": "A16",
     "agent": "Codex",
     "role": "implementer (P2A UPF and radial)",
     "state": "done",
@@ -153,7 +144,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A18",
+    "id": "A17",
     "agent": "Codex",
     "role": "implementer (P2B fix 1)",
     "state": "done",
@@ -162,7 +153,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A19",
+    "id": "A18",
     "agent": "Codex",
     "role": "implementer (P5A retry 1)",
     "state": "done",
@@ -171,7 +162,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A20",
+    "id": "A19",
     "agent": "Codex",
     "role": "implementer (P5B CLI run)",
     "state": "done",
@@ -180,7 +171,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A21",
+    "id": "A20",
     "agent": "Codex",
     "role": "implementer (P2C real-world UPF)",
     "state": "done",
@@ -189,7 +180,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A22",
+    "id": "A21",
     "agent": "Codex",
     "role": "implementer (P5C functional string)",
     "state": "done",
@@ -198,7 +189,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A23",
+    "id": "A22",
     "agent": "Codex",
     "role": "implementer (P6A QE tooling)",
     "state": "done",
@@ -207,7 +198,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A24",
+    "id": "A23",
     "agent": "Codex",
     "role": "implementer (P6B verifier real format)",
     "state": "done",
@@ -216,7 +207,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A25",
+    "id": "A24",
     "agent": "Codex",
     "role": "implementer (P6D density compare)",
     "state": "done",
@@ -225,7 +216,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A26",
+    "id": "A25",
     "agent": "Codex",
     "role": "implementer (P6E docs refresh)",
     "state": "done",
@@ -234,7 +225,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A27",
+    "id": "A26",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -243,7 +234,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A28",
+    "id": "A27",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -252,7 +243,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A29",
+    "id": "A28",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -261,7 +252,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A30",
+    "id": "A29",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -270,7 +261,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A31",
+    "id": "A30",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -279,7 +270,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A32",
+    "id": "A31",
     "agent": "Codex",
     "role": "reviewer",
     "state": "done",
@@ -288,7 +279,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A33",
+    "id": "A32",
     "agent": "Codex",
     "role": "reviewer",
     "state": "done",
@@ -297,7 +288,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A34",
+    "id": "A33",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -306,7 +297,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A35",
+    "id": "A34",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -315,7 +306,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A36",
+    "id": "A35",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -324,7 +315,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A37",
+    "id": "A36",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -333,7 +324,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A38",
+    "id": "A37",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -342,7 +333,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A39",
+    "id": "A38",
     "agent": "Codex",
     "role": "implementer",
     "state": "blocked",
@@ -351,7 +342,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A40",
+    "id": "A39",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -360,7 +351,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A41",
+    "id": "A40",
     "agent": "Codex",
     "role": "implementer",
     "state": "failed",
@@ -369,7 +360,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A42",
+    "id": "A41",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -378,7 +369,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A43",
+    "id": "A42",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -387,12 +378,21 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A44",
+    "id": "A43",
     "agent": "Codex",
     "role": "implementer",
     "state": "blocked",
     "task": "P7PB-BAND-FFT-THREADS: 성능: k점 안에서 밴드별 병렬화",
     "ref": "pid 72451, session 01a1a03e, task/P7PB-BAND-FFT-THREADS",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A44",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7PC-BUFFER-BANDS: 버그 수정+성능: 8원자 셀 미수렴(맨 위 밴드가 축퇴에 걸림) 해결과 빈 밴드 허용오차",
+    "ref": "pid 86726, session 01a1a06f, task/P7PC-BUFFER-BANDS",
     "updated": "2026-11-03"
   },
   {
@@ -420,6 +420,69 @@
     "state": "done",
     "task": "P8B-VOLUMETRIC: 기능: 전자밀도, ELF 등 체적 데이터 출력(cube, XSF 등)",
     "ref": "pid 5055, session 01a1a071, task/P8B-VOLUMETRIC",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A48",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P8A-BANDS-DOS: 기능: 밴드 구조와 DOS 출력(CSV, SVG 그림, 표준 형식)",
+    "ref": "pid 5174, session 01a1a071, task/P8A-BANDS-DOS",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A49",
+    "agent": "Codex",
+    "role": "reviewer",
+    "state": "done",
+    "task": "P9A-USER-INTERFACE-DESIGN: 설계: 사용자 인터페이스(표준 포맷/타 코드 입력, 자연어 요청, Materials Project 연동, 대화형 CLI, 링크 기반 시각화)",
+    "ref": "pid 12093, session 01a1a088, task/P9A-USER-INTERFACE-DESIGN",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A50",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "blocked",
+    "task": "P8G-INPUT-PREFLIGHT: 기능: 입력 사전 검사(원소/의사퍼텐셜 일치, SCF 설정, 평문 요약)",
+    "ref": "pid 12255, session 01a1a088, task/P8G-INPUT-PREFLIGHT",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A51",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P9B-PSEUDO-REGISTRY: 기능+설계: 의사퍼텐셜 레지스트리와 공개 저장소 다운로드(라이선스, 해시 검증, 엔진 지원 여부 표시)",
+    "ref": "pid 15888, session 01a1a08a, task/P9B-PSEUDO-REGISTRY",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A52",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "blocked",
+    "task": "P10A-RMM-DIIS: 기능: RMM-DIIS 고유값 풀이기(밴드가 많은 큰 계용, 격리된 선택 모듈)",
+    "ref": "pid 20089, session 01a1a091, task/P10A-RMM-DIIS",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A53",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "blocked",
+    "task": "P10C-FUSED-FFT: 성능: FFT 호출 구조 개선(스틱 기반 융합 경로, 밀도 계산 가지치기, 배치 크기 시험)",
+    "ref": "pid 20414, session 01a1a092, task/P10C-FUSED-FFT",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A54",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "blocked",
+    "task": "P10D-SCF-MIXING: 기능: SCF 혼합 개선(Kerker 예조건 Pulay 등, 큰 셀 전하 슬로싱 대비)",
+    "ref": "pid 20579, session 01a1a092, task/P10D-SCF-MIXING",
     "updated": "2026-11-03"
   }
 ]

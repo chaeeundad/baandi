@@ -13,8 +13,9 @@ use dft_physics::{
     hartree, xc,
 };
 use dft_solvers::{
-    Davidson, DiagonalPreconditioner, EigenSolution,
-    mixing::{DensityMixer, LinearMixer, PulayMixer},
+    BandTolerances, Davidson, DiagonalPreconditioner, EigenSolution,
+    kerker::{Kerker, MixerHistory, PreconditionedPulay},
+    mixing::{LinearMixer, PulayMixer},
 };
 use dft_upf::Pseudopotential;
 use std::{
@@ -89,8 +90,19 @@ impl From<dft_solvers::SolverError> for ScfError {
 
 #[derive(Clone, Debug)]
 pub enum Mixing {
-    Linear { beta: f64 },
-    Pulay { beta: f64, history: usize },
+    Linear {
+        beta: f64,
+    },
+    Pulay {
+        beta: f64,
+        history: usize,
+    },
+    /// Optional filtering; q0 is a positive inverse screening length in Bohr^-1.
+    KerkerPulay {
+        beta: f64,
+        history: usize,
+        q0_inverse_bohr: f64,
+    },
 }
 impl Default for Mixing {
     fn default() -> Self {
@@ -124,6 +136,7 @@ pub struct ScfOptions {
     pub free_electron_initial_guess: bool,
     pub max_iterations: usize,
     pub davidson_max_iterations: usize,
+    /// Minimum working capacity; the engine also reserves six columns per band.
     pub davidson_subspace: usize,
     pub seed: u64,
     pub divergence_factor: f64,
@@ -183,11 +196,23 @@ pub struct IterationRecord {
     /// Pulay feasibility damping; one means the full proposal was accepted.
     pub mixing_fraction: f64,
     pub mixer_reset: bool,
+    /// Raw SCF residual ratio to the previous iteration; None initially/after zero.
+    pub density_contraction: Option<f64>,
+    /// Differences used by this proposal, or None if no mixing was needed.
+    pub mixing_history_used: Option<usize>,
+    /// Cumulative feasibility resets; excludes parameter-validation reset.
+    pub mixing_resets: usize,
+    /// New strategy only: a raw convex step rescued an infeasible first correction.
+    pub mixing_raw_recovery: bool,
     pub fixed_point_certificate: Option<FixedPointCertificate>,
     pub timings: PhaseTimings,
 }
 #[derive(Clone, Debug)]
 pub struct FixedPointCertificate {
+    /// True residuals (Ha) for the occupied bands and first empty band.
+    pub strict_residuals_per_k: Vec<Vec<f64>>,
+    /// Informational only: these higher empty bands are not certified.
+    pub buffer_residuals_per_k: Vec<Vec<f64>>,
     pub density_residual: f64,
     pub occupied_eigenvalue_change: f64,
     pub davidson_iterations: usize,
@@ -676,6 +701,16 @@ impl ScfProblem {
         initial: Option<&[ComplexMatrix]>,
         tolerance: f64,
     ) -> Result<ScfStep, ScfError> {
+        self.step_kpoints_with_certification(n, initial, tolerance, true)
+    }
+
+    fn step_kpoints_with_certification(
+        &mut self,
+        n: &Array3<f64>,
+        initial: Option<&[ComplexMatrix]>,
+        tolerance: f64,
+        certify: bool,
+    ) -> Result<ScfStep, ScfError> {
         if initial.is_some_and(|v| v.len() != self.states.len()) {
             return Err(ScfError::InvalidInput("one warm start required per k"));
         }
@@ -705,9 +740,19 @@ impl ScfProblem {
             bands: self.occupations.len(),
             tolerance,
             max_iterations: self.options.davidson_max_iterations,
-            max_subspace: self.options.davidson_subspace,
+            max_subspace: self
+                .options
+                .davidson_subspace
+                .max(6 * self.occupations.len()),
             block_size: self.occupations.len(),
             seed: self.options.seed,
+        };
+        // Occupied states determine density; the first empty state determines
+        // the sampled gap. Higher empty states are only subspace buffers.
+        let policy = BandTolerances {
+            strict_bands: (self.occupations.iter().filter(|&&f| f > 0.0).count() + 1)
+                .min(self.occupations.len()),
+            buffer_tolerance: tolerance.max(1e-5),
         };
         let k_points = if self.options.threads.max(1).min(self.states.len()) == 1 {
             let mut k_points = Vec::new();
@@ -725,10 +770,12 @@ impl ScfProblem {
                     None
                 };
                 let solution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    solver.solve(
+                    solver.solve_with_band_tolerances_and_certification(
                         &state.hamiltonian,
                         initial.map(|v| &v[i]).or(guess.as_ref()),
                         Some(&preconditioner),
+                        policy,
+                        certify,
                     )
                 }))
                 .map_err(|_| ScfError::Numerical(format!("k index {i}: solve panicked")))?
@@ -755,10 +802,12 @@ impl ScfProblem {
                 } else {
                     None
                 };
-                let solution = solver.solve(
+                let solution = solver.solve_with_band_tolerances_and_certification(
                     &state.hamiltonian,
                     initial.map(|v| &v[i]).or(guess.as_ref()),
                     Some(&preconditioner),
+                    policy,
+                    certify,
                 )?;
                 Ok(KPointSolution {
                     point: state.point,
@@ -863,9 +912,42 @@ impl ScfProblem {
     }
     fn run_impl(mut self, retain_last: bool) -> Result<ScfOutcome, ScfError> {
         let start = Instant::now();
-        let mut mixer: Box<dyn DensityMixer> = match self.options.mixing {
+        let mut mixer: Box<dyn MixerHistory> = match self.options.mixing {
             Mixing::Linear { beta } => Box::new(LinearMixer { beta }),
             Mixing::Pulay { beta, history } => Box::new(PulayMixer::new(beta, history)?),
+            Mixing::KerkerPulay {
+                beta,
+                history,
+                q0_inverse_bohr,
+            } => {
+                let dims = self.grid.dims();
+                let mut fft = FftPlan3d::new(dims)?;
+                let mut source = Array3::<Complex64>::zeros(dims);
+                let mut target = source.clone();
+                let transform = move |values: &mut [Complex64], inverse: bool| {
+                    source.as_slice_mut().unwrap().copy_from_slice(values);
+                    let result = if inverse {
+                        fft.to_real(&source, &mut target)
+                    } else {
+                        fft.to_reciprocal(&source, &mut target)
+                    };
+                    result.map_err(|e| dft_solvers::SolverError::Application(e.to_string()))?;
+                    values.copy_from_slice(target.as_slice().unwrap());
+                    Ok(())
+                };
+                let filter = Kerker::new(
+                    dims,
+                    self.cell.reciprocal_columns_inverse_bohr(),
+                    q0_inverse_bohr,
+                    transform,
+                )?;
+                Box::new(PreconditionedPulay::new(
+                    beta,
+                    history,
+                    dims.iter().product(),
+                    filter,
+                )?)
+            }
         };
         // Validate mixer parameters even if a future system converges immediately.
         let mut n = self.uniform_density();
@@ -880,6 +962,7 @@ impl ScfProblem {
         let weight = self.cell.volume_bohr3() / n.len() as f64;
         let mut best = f64::INFINITY;
         let mut growing = 0;
+        let mut mixing_resets = 0;
         for iteration in 1..=self.options.max_iterations {
             if n.iter()
                 .any(|n| !n.is_finite() || *n < -xc::NEGATIVE_ROUNDOFF)
@@ -906,7 +989,12 @@ impl ScfProblem {
                 .max(0.1 * self.options.eigen_tolerance)
             };
             let step = self
-                .step_kpoints(&n, previous.as_deref(), tolerance)
+                .step_kpoints_with_certification(
+                    &n,
+                    previous.as_deref(),
+                    tolerance,
+                    tolerance <= self.options.eigen_tolerance,
+                )
                 .map_err(|e| match e {
                     ScfError::NonFinite => ScfError::Diverged {
                         reason: "nonfinite SCF arithmetic".into(),
@@ -933,6 +1021,13 @@ impl ScfProblem {
                 fixed_point_certificate: None,
                 mixing_fraction: 1.0,
                 mixer_reset: false,
+                density_contraction: history
+                    .last()
+                    .filter(|r| r.density_residual > 0.0)
+                    .map(|r| residual / r.density_residual),
+                mixing_history_used: None,
+                mixing_resets,
+                mixing_raw_recovery: false,
                 iteration,
                 energy: step.energy.clone(),
                 energy_change,
@@ -1029,6 +1124,30 @@ impl ScfProblem {
                 let passed = density_residual <= self.options.density_tolerance
                     && occupied_eigenvalue_change <= 1e-7;
                 history.last_mut().unwrap().fixed_point_certificate = Some(FixedPointCertificate {
+                    strict_residuals_per_k: check
+                        .k_points
+                        .iter()
+                        .map(|k| {
+                            k.solution
+                                .residuals
+                                .iter()
+                                .zip(&k.solution.buffer)
+                                .filter_map(|(&r, &buffer)| (!buffer).then_some(r))
+                                .collect()
+                        })
+                        .collect(),
+                    buffer_residuals_per_k: check
+                        .k_points
+                        .iter()
+                        .map(|k| {
+                            k.solution
+                                .residuals
+                                .iter()
+                                .zip(&k.solution.buffer)
+                                .filter_map(|(&r, &buffer)| buffer.then_some(r))
+                                .collect()
+                        })
+                        .collect(),
                     density_residual,
                     occupied_eigenvalue_change,
                     davidson_iterations: check.k_points.iter().map(|k| k.solution.iterations).sum(),
@@ -1091,10 +1210,16 @@ impl ScfProblem {
                     reason: e.to_string(),
                     history: history.clone(),
                 })?;
+            history.last_mut().unwrap().mixing_history_used =
+                Some(mixer.history_len().saturating_sub(1));
+            history.last_mut().unwrap().mixing_raw_recovery = mixer.used_raw_recovery();
             // Anderson extrapolation is unconstrained. A convex step toward its
             // proposal preserves charge and Fourier support while keeping XC in
             // its density domain. Never clip individual spatial samples.
-            if matches!(self.options.mixing, Mixing::Pulay { .. }) {
+            if matches!(
+                self.options.mixing,
+                Mixing::Pulay { .. } | Mixing::KerkerPulay { .. }
+            ) {
                 let fraction = n
                     .iter()
                     .zip(&mixed)
@@ -1109,6 +1234,8 @@ impl ScfProblem {
                     let record = history.last_mut().unwrap();
                     record.mixing_fraction = fraction;
                     record.mixer_reset = true;
+                    mixing_resets += 1;
+                    record.mixing_resets = mixing_resets;
                 }
             }
             n.as_slice_mut().unwrap().copy_from_slice(&mixed);
@@ -1237,6 +1364,10 @@ mod tests {
             min_density: 1.0,
             mixing_fraction: 1.0,
             mixer_reset: false,
+            density_contraction: None,
+            mixing_history_used: None,
+            mixing_resets: 0,
+            mixing_raw_recovery: false,
             fixed_point_certificate: None,
             timings: PhaseTimings::default(),
         };

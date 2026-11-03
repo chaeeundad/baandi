@@ -347,8 +347,43 @@ fn subtract_projection(v: &mut [Complex64], q: &[Complex64]) {
 #[cfg(test)]
 mod tests;
 
+/// MKL variant of `gemm_into`: writes `op(a) * op(b)` into `output` (beta = 0).
+#[cfg(feature = "mkl")]
+pub fn gemm_into(
+    a: &ComplexMatrix,
+    op_a: MatrixOp,
+    b: &ComplexMatrix,
+    op_b: MatrixOp,
+    output: &mut ComplexMatrix,
+) -> Result<(), LinalgError> {
+    a.validate_finite()?;
+    b.validate_finite()?;
+    let adj_a = matches!(op_a, MatrixOp::Adjoint);
+    let adj_b = matches!(op_b, MatrixOp::Adjoint);
+    let (m, k) = if adj_a {
+        (a.cols, a.rows)
+    } else {
+        (a.rows, a.cols)
+    };
+    let (l, n) = if adj_b {
+        (b.cols, b.rows)
+    } else {
+        (b.rows, b.cols)
+    };
+    if k != l || output.rows != m || output.cols != n {
+        return Err(LinalgError::Dimension);
+    }
+    let ma =
+        dft_mkl::Matrix::new(a.as_slice(), a.rows, a.cols).map_err(|_| LinalgError::Dimension)?;
+    let mb =
+        dft_mkl::Matrix::new(b.as_slice(), b.rows, b.cols).map_err(|_| LinalgError::Dimension)?;
+    dft_mkl::gemm(ma, adj_a, mb, adj_b, &mut output.data).map_err(|_| LinalgError::Dimension)?;
+    output.validate_finite()
+}
+
 /// Allocation-free adapter into an existing column-major output. Uses sequential
 /// faer multiplication and borrowed views; operands must not alias the output.
+#[cfg(not(feature = "mkl"))]
 pub fn gemm_into(
     a: &ComplexMatrix,
     op_a: MatrixOp,

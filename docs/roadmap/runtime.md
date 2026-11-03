@@ -1,6 +1,6 @@
 # Agent-native runtime roadmap
 
-Status: design only; no implementation completion implied. [ADR 0026](../decisions/0026-agent-native-runtime.md) and [architecture](../architecture/agent-native-runtime.md) define the contract. All phases preserve existing numerical defaults unless a separate measured ticket authorizes changes.
+Status: design only; no implementation completion implied. [ADR 0028](../decisions/0028-agent-native-runtime.md) and [architecture](../architecture/agent-native-runtime.md) define the contract. All phases preserve existing numerical defaults unless a separate measured ticket authorizes changes.
 
 | Ticket/phase | Scope and existing seam | Dependency and exit gate |
 | --- | --- | --- |
@@ -23,7 +23,7 @@ A crate split requires a later ownership/ADR change, two independent consumers o
 
 ## Three-mode addendum ownership and sequencing
 
-The addendum was read from main `98f0b50`; this worktree's P11-COMMON predates it. New design entry point: [execution-modes.md](../architecture/execution-modes.md). ADR moved from draft 0020 to [0022](../decisions/0026-agent-native-runtime.md) after competing 0020 drafts were found in P10A/P10D and P11I created 0021 during this run. Integration must recheck numbering across active tasks.
+The addendum was read from main `98f0b50`; this worktree's P11-COMMON predates it. New design entry point: [execution-modes.md](../architecture/execution-modes.md). ADR moved from draft 0020 to [0022](../decisions/0028-agent-native-runtime.md) after competing 0020 drafts were found in P10A/P10D and P11I created 0021 during this run. Integration must recheck numbering across active tasks.
 
 | Ticket | Owns | Consumes from P11R; does not duplicate |
 | --- | --- | --- |

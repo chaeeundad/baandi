@@ -54,6 +54,6 @@ Conventions: docs are English; one fact lives in one place and others link to it
 | Runtime equivalence acceptance protocol | [validation/runtime-equivalence.md](validation/runtime-equivalence.md) |
 | Intervention threat model and safety gates | [validation/intervention-safety.md](validation/intervention-safety.md) |
 | Three-arm self-healing SCF demo protocol | [demos/self-healing-scf.md](demos/self-healing-scf.md) |
-| ADR 0026 agent-native runtime commitments | [decisions/0026-agent-native-runtime.md](decisions/0026-agent-native-runtime.md) |
+| ADR 0028 agent-native runtime commitments | [decisions/0028-agent-native-runtime.md](decisions/0028-agent-native-runtime.md) |
 | Runtime implementation sequencing and acceptance gates | [roadmap/runtime.md](roadmap/runtime.md) |
 | Classic, Observed and AgentControlled modes; switch rules and path separation | [architecture/execution-modes.md](architecture/execution-modes.md) |

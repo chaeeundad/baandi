@@ -435,3 +435,34 @@ units. All convergence criteria and the tighter independent certificate remain
 unchanged. Cold initial vectors select the lowest kinetic energies, with basis
 index breaking ties; Davidson performs its existing Rayleigh–Ritz procedure
 and seeded rank completion. Warm starts retain previous eigenvectors.
+
+### P7P6: deterministic k-point threads
+
+`[scf] threads = N` selects standard-library scoped workers for independent
+k-point Davidson solves. The default is 1; 0 also means 1. The key accepts a
+nonnegative TOML integer; negative, fractional, string, boolean and overflowing
+values are rejected. Actual workers are capped at the number of retained k
+points; Gamma always uses the original serial loop. No automatic core detection
+or nested parallelism is enabled: each worker uses sequential faer and serial FFT.
+
+Only independent solves run concurrently, including the fixed-point certificate
+solves. Density, energy, weights, mixing and certificate reductions retain their
+original sequential order. Numerical results are bit-identical across thread
+counts; elapsed times are naturally different. `diagonalization_s` measures wall
+time around the complete solve region, including worker startup and joins,
+rather than summed worker CPU time.
+
+`results.json.threading` retains `threads` (now the actual worker count) and
+`backend`, and adds `threads_requested` (raw input, default 1) and `threads_used`
+(`min(max(threads_requested, 1), number_of_k_points)`). `scf.threads` also records
+the requested value. The backend description identifies scoped k-point workers
+and sequential numerical backends.
+
+Every scoped worker is joined before a solve error is returned. The lowest
+zero-based failing k index wins, independent of completion order. Unwinding solve
+panics become indexed numerical errors; the standard panic hook may still print
+a diagnostic. Abort-mode panics and allocation/process failures cannot be caught.
+The serial path also converts Davidson panics into indexed errors.
+
+Benchmark inputs can opt in with `scripts/bench_scf.py --threads N`; omitting
+that option leaves the generated input unchanged.

@@ -40,3 +40,10 @@ residual and orthonormality checks; absolute tolerance 1e-12. See environment.md
 Use: title/number, date, task, status, context, decision, alternatives,
 consequences, validation, and superseding ADR if applicable. Record measured
 evidence separately from assumptions and outstanding questions.
+
+## P7P6 notes
+
+SCF orchestration may distribute disjoint mutable k states using
+`std::thread::scope`. Hamiltonians remain intentionally non-Sync; ownership
+transfer needs only their existing Send property. No numerical backend bounds,
+unsafe code, dependencies or nested backend parallelism are introduced.

@@ -62,12 +62,15 @@ def sha256(path):
     return h.hexdigest()
 
 
-def run_case(binary, upf, key, repeats):
+def run_case(binary, upf, key, repeats, threads=None):
     label, ecut, kblock = CASES[key]
     walls, last = [], None
     with tempfile.TemporaryDirectory() as td:
         toml = os.path.join(td, "input.toml")
-        open(toml, "w").write(TEMPLATE.format(upf=upf, ecut=ecut, kblock=kblock))
+        text = TEMPLATE.format(upf=upf, ecut=ecut, kblock=kblock)
+        if threads is not None:
+            text = text.replace("[scf]", f"[scf]\nthreads = {threads}")
+        open(toml, "w").write(text)
         for i in range(repeats):
             out = os.path.join(td, f"out{i}")
             t0 = time.perf_counter()
@@ -90,11 +93,14 @@ def main(argv):
     ap.add_argument("--upf", required=True)
     ap.add_argument("--cases", default="gamma,k222")
     ap.add_argument("--repeats", type=int, default=3)
+    ap.add_argument("--threads", type=int, help="k-point threads (0 means 1); omitted preserves the input default")
     ap.add_argument("--baseline")
     ap.add_argument("--record")
     ap.add_argument("--require-identical", action="store_true", help="fail unless the density is bit-identical to the baseline")
     ap.add_argument("--note", default="")
     a = ap.parse_args(argv)
+    if a.threads is not None and a.threads < 0:
+        ap.error("--threads must be nonnegative")
     keys = a.cases.split(",")
     if any(k not in CASES for k in keys) or a.repeats < 1:
         print("usage error: unknown case or repeats < 1")
@@ -107,7 +113,7 @@ def main(argv):
     print(f"{'case':8} {'wall med (s)':>13} {'engine (s)':>11} {'diag (s)':>9} {'iters':>5} {'dE vs base (Ha)':>16} {'density':>10} {'speedup':>8}")
     for k in keys:
         try:
-            r = run_case(a.binary, a.upf, k, a.repeats)
+            r = run_case(a.binary, a.upf, k, a.repeats, a.threads)
         except RuntimeError as e:
             print(e)
             return 3

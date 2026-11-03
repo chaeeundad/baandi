@@ -56,6 +56,7 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
         ..ScfOptions::default()
     };
     if let Some(s) = &config.scf {
+        o.threads = s.threads.unwrap_or(1);
         if let Some(n) = s.max_iterations {
             o.max_iterations =
                 usize::try_from(n).map_err(|_| error(1, "max_iterations must be positive"))?;
@@ -103,7 +104,7 @@ fn options_json(o: &ScfOptions) -> Value {
         Mixing::Linear { beta } => json!({"method":"linear","beta":beta}),
         Mixing::Pulay { beta, history } => json!({"method":"pulay","beta":beta,"history":history}),
     };
-    json!({"cutoff_hartree":o.cutoff_hartree,"nbands":o.bands,"extra_bands":o.extra_bands,"grid_override":o.grid_override,"mixing":mixing,
+    json!({"threads":o.threads,"cutoff_hartree":o.cutoff_hartree,"nbands":o.bands,"extra_bands":o.extra_bands,"grid_override":o.grid_override,"mixing":mixing,
         "density_residual_tolerance":o.density_tolerance,"energy_tolerance_ha":o.energy_tolerance,"eigen_tolerance":o.eigen_tolerance,
         "residual_eigen_schedule":o.residual_eigen_schedule,"free_electron_initial_guess":o.free_electron_initial_guess,"initial_eigen_tolerance":o.initial_eigen_tolerance,"eigen_tolerance_decay":o.eigen_tolerance_decay,"max_iterations":o.max_iterations,
         "davidson_max_iterations":o.davidson_max_iterations,"davidson_subspace":o.davidson_subspace,"seed":o.seed,
@@ -327,7 +328,7 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         "total_energy":{"ha":r.energy.total_hartree(),"ry":from_hartree(r.energy.total_hartree(), EnergyUnit::Rydberg),"ev":from_hartree(r.energy.total_hartree(), EnergyUnit::ElectronVolt)},
         "eigenvalues":{"ha":r.eigenvalues,"ev":r.eigenvalues.iter().map(|e|from_hartree(*e, EnergyUnit::ElectronVolt)).collect::<Vec<_>>()},
         "timings":{"phases":phase_json(&phases),"setup_s":setup,"engine_setup_s":r.setup_time.as_secs_f64(),"engine_total_s":r.total_time.as_secs_f64(),"total_s":total,"fft_hpsi":"included in enclosing phases; not separately measured"},
-        "threading":{"threads":dft_engine::EXECUTION_THREADS,"backend":"explicit sequential faer and serial FFT"},
+        "threading":{"threads":opts.threads.max(1).min(r.k_points.len()),"threads_requested":opts.threads,"threads_used":opts.threads.max(1).min(r.k_points.len()),"backend":"std::thread::scope over k points; sequential faer and serial FFT per worker"},
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
     // Preserve the legacy LDA schema unless an override was explicitly enabled.

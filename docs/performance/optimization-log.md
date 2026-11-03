@@ -566,3 +566,208 @@ Changes remain uncommitted for review. README, artifacts (including the session
 registry), tickets, manifests, baselines and all other crates remain untouched
 under the ticket's explicit exclusions. Final k444s count verification overlapped
 release tests; use the earlier isolated combined detail wall quoted above.
+
+## P7P6: deterministic threads over independent k-point solves (2026-11-03)
+
+Pre-change release build with debug symbols, commit 672d03f, shared Mac:
+`bench_scf.py --cases gamma,k222s,k222,k444s --repeats 1 --baseline
+docs/performance/baseline-after-o4c.json --require-identical` passed (exit 0).
+Wall / diagonalization seconds: Gamma 0.498 / 0.097, k222s 0.567 / 0.439,
+k222 1.093 / 0.866, k444s 4.314 / 3.556. The first three match the stored
+baseline energy and density exactly; that baseline has no k444s entry.
+The phase measurements locate 77–82% of multi-k wall time in diagonalization,
+consistent with the earlier sampling profiles in this log. A fresh `sample`
+attempt was denied by the sandbox (cannot examine the running process).
+`sysctl hw.perflevel0.logicalcpu` was also denied (Operation not permitted).
+Raw pre-change measurements are in ephemeral `/tmp/p7p6-before.json`.
+
+Implementation: balanced contiguous disjoint mutable k-state groups, scoped
+standard-library threads, ordered result collection after all joins. Only the
+Davidson solve and its per-k preconditioner/initial-guess preparation run in
+workers. The default serial loop retains the previous numerical operations.
+Panic conversion adds no floating-point operations. No Send/Sync changes were
+needed: Hamiltonian scratch remains private and non-Sync. All density, energy,
+weight, mixing and certificate reductions remain sequential. The final
+certificate calls the same threaded step. No unsafe or dependencies added.
+
+Rejected: parallel density/energy reductions (change summation order), nested
+FFT/faer parallelism (oversubscription and a different scope), defaulting to
+all cores (changes defaults), global mutex around Hamiltonians (serializes work).
+
+Final measurements use the release binary with debug symbols, with no concurrent
+build jobs launched by this task. The machine is shared, not quiet; these are
+indicative observed wall-time ratios, not accepted quiet-machine speedups.
+Claude must remeasure on dev08. An earlier sweep overlapping debug compilation
+was discarded for timing purposes. Gamma always uses one worker; its apparent
+speedup below measures machine noise, not a parallel benefit. Core count remains
+unavailable because the requested sysctl is sandbox-denied.
+
+| Case | Threads 1 wall (s) | Threads 2 wall (s) | Threads 4 wall (s) | 1/2 ratio | 1/4 ratio |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| gamma | 0.226836 | 0.157412 | 0.156562 | 1.441 | 1.449 |
+| k222s | 0.713213 | 0.357061 | 0.265382 | 1.997 | 2.687 |
+| k222 | 1.099054 | 0.674109 | 0.494169 | 1.630 | 2.224 |
+| k444s | 5.425408 | 2.717299 | 1.882429 | 1.997 | 2.882 |
+
+Gamma/k222s/k222: median of three wall samples per requested count. k444s:
+one final sample per count. Diagonalization is elapsed region wall time including
+spawn/join, not CPU time summed over workers. Energy differences are exactly
+0 Ha and density hashes identical across all requested counts. All runs took
+10 SCF iterations. Threads=1 also matches the unmodified starting binary;
+Gamma/k222s/k222 match baseline-after-o4c.json, while k444s uses the pre-change
+measurement because the immutable baseline contains no k444s entry.
+
+Stored numerical evidence (seconds, Ha; raw benchmark files also in /tmp):
+
+```json
+{
+  "gamma": {
+    "energy_ha": -7.295530468210769,
+    "density_sha256": "7a3cb36c709815636c659a2f88222c5de79a48a7d4e07e4213bd0e8697f99166",
+    "threads": {
+      "1": {
+        "wall_samples_s": [
+          0.28477916600000003,
+          0.219016,
+          0.22683616699999998
+        ],
+        "last_diagonalization_s": 0.14100746
+      },
+      "2": {
+        "wall_samples_s": [
+          0.172999167,
+          0.15741175000000002,
+          0.15667891699999997
+        ],
+        "last_diagonalization_s": 0.094446
+      },
+      "4": {
+        "wall_samples_s": [
+          0.16599124999999998,
+          0.15656245800000002,
+          0.15492520900000006
+        ],
+        "last_diagonalization_s": 0.094390377
+      }
+    }
+  },
+  "k222s": {
+    "energy_ha": -7.919423412469065,
+    "density_sha256": "ff47b9b53eed8c1fbf0b125186c652adff7f75770bd27c45ad164fa86776d61c",
+    "threads": {
+      "1": {
+        "wall_samples_s": [
+          0.723669875,
+          0.695584166,
+          0.7132131670000001
+        ],
+        "last_diagonalization_s": 0.553315667
+      },
+      "2": {
+        "wall_samples_s": [
+          0.357060917,
+          0.3562234999999999,
+          0.36276733400000016
+        ],
+        "last_diagonalization_s": 0.231115543
+      },
+      "4": {
+        "wall_samples_s": [
+          0.27199808299999995,
+          0.265065958,
+          0.26538183299999996
+        ],
+        "last_diagonalization_s": 0.135304458
+      }
+    }
+  },
+  "k222": {
+    "energy_ha": -7.83123005712114,
+    "density_sha256": "5d950d17264dab08a5e073667413a35d8e9bfacf5458b150d1a12800910f4c15",
+    "threads": {
+      "1": {
+        "wall_samples_s": [
+          1.1913966670000002,
+          1.0990541250000003,
+          1.0962359160000004
+        ],
+        "last_diagonalization_s": 0.86888554
+      },
+      "2": {
+        "wall_samples_s": [
+          0.6582013329999998,
+          0.6876955000000002,
+          0.6741085410000003
+        ],
+        "last_diagonalization_s": 0.451637457
+      },
+      "4": {
+        "wall_samples_s": [
+          0.4941693330000001,
+          0.5002586250000001,
+          0.48912695799999995
+        ],
+        "last_diagonalization_s": 0.266567333
+      }
+    }
+  },
+  "k444s": {
+    "energy_ha": -7.925976126648079,
+    "density_sha256": "d401e8861bbf4968c78c3e613874c89af212aaa90b3f74246dc264b62523738f",
+    "threads": {
+      "1": {
+        "wall_samples_s": [
+          5.425408417
+        ],
+        "last_diagonalization_s": 4.534472999
+      },
+      "2": {
+        "wall_samples_s": [
+          2.71729925
+        ],
+        "last_diagonalization_s": 1.9511803749999999
+      },
+      "4": {
+        "wall_samples_s": [
+          1.882429459
+        ],
+        "last_diagonalization_s": 1.071298748
+      }
+    }
+  }
+}
+```
+
+Reproduction (UPF is read-only; never copied):
+
+```sh
+export PATH=/opt/homebrew/opt/rustup/bin:$PATH
+CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release -p dft-cli
+python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222 --threads 1 --repeats 3 --baseline docs/performance/baseline-after-o4c.json --require-identical --record /tmp/p7p6-final-t1.json
+# Repeat with --threads 2 and 4, comparing against /tmp/p7p6-final-t1.json.
+# k444s: --cases k444s --repeats 1, first compare threads 1 with the pre-change
+# /tmp/p7p6-before.json, then compare threads 2 and 4 with threads 1.
+```
+
+All six final benchmark invocations printed OK; the benchmark sweep exited 0.
+The synthetic engine sweep compares every numerical result field (timings
+zeroed), untruncated density bits and every complex orbital component, across
+requests 0,1,2,3,4,8 and 1,2,5 k points, including converged certificates.
+Release energies: -0.62379772639925035, -0.59844111627273688,
+-0.45953915387519850 Ha respectively. Serial reference uses the retained
+pre-threading solve loop. Error injection checks failures at indices 2 and 3,
+delays index 2, and verifies that index 2 wins and every solve completes;
+a panic at index 2 becomes an indexed error. The normal debug sweep took
+1.23 s; no new slow ignored test is required.
+
+Scope exceptions: README, generated figures, artifacts and session registry
+were intentionally untouched as explicitly required by this ticket. The ADR
+0001 append uses its actual filename, 0001-numerical-backend-isolation.md.
+
+Final gates: `scripts/check.sh` exit 0 (build, tests, fmt, clippy all PASS).
+The first gate exited 1 because the new CLI test used unweighted explicit
+multi-k rows, which the existing input contract correctly rejects; adding
+explicit 0.5 weights fixed the test fixture. No production tolerance changed.
+CLI end-to-end coverage verifies absent/0/1/2/8 requests, Gamma capping,
+two-point capping, additive metadata and identical JSON numerical fields and
+density bytes. `git diff --check` exit 0. Changes remain uncommitted.

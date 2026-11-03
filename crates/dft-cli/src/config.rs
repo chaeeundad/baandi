@@ -147,6 +147,7 @@ impl Functional {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scf {
+    pub threads: Option<usize>,
     pub max_iterations: Option<i64>,
     pub mixing: Option<String>,
     pub energy_tolerance_ha: Option<f64>,
@@ -560,5 +561,17 @@ mod tests {
         ] {
             assert!(Config::parse(&format!("{EXAMPLE}\n{section}\n")).is_err());
         }
+    }
+    #[test]
+    fn threading_input() {
+        for threads in [0, 1, 2, 8] {
+            let config =
+                Config::parse(&format!("{EXAMPLE}\n[scf]\nthreads = {threads}\n")).unwrap();
+            assert_eq!(config.scf.unwrap().threads, Some(threads));
+        }
+        for invalid in ["-1", "1.5", "true", "'two'", "[2]", "9223372036854775808"] {
+            assert!(Config::parse(&format!("{EXAMPLE}\n[scf]\nthreads = {invalid}\n")).is_err());
+        }
+        assert!(Config::parse(EXAMPLE).unwrap().scf.is_none());
     }
 }

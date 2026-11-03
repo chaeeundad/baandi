@@ -24,3 +24,11 @@ Accelerate zgemm vs faer; zheevd/zheevr or threaded defaults; multithread scalin
 - Pin exact versions; faer and ndrustfft are 0.x, so wrap them in our traits to contain API churn.
 - Tests that take more than about 10 s in debug must be `#[ignore]` with a documented release command; `scripts/check.sh` must stay fast.
 - Crates are fetched and vendored by Claude (Codex sandbox has no network); only crates listed here may be used without a new ADR.
+
+## P7P6 notes
+
+Optional standard-library workers parallelize only independent k-point Davidson
+solves (including certificate solves). Each faer invocation remains `Par::Seq`
+and each FFT remains serial. All k reductions retain their original arithmetic
+order for bit identity. Default execution remains one thread; Gamma uses one
+thread regardless of the request. Diagonalization timings are region wall time.

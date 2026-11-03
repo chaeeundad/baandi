@@ -102,6 +102,8 @@ impl Default for Mixing {
 }
 #[derive(Clone, Debug)]
 pub struct ScfOptions {
+    /// Independent k-point workers; zero means one, capped at the k-point count.
+    pub threads: usize,
     pub functional: Functional,
     pub allow_functional_override: bool,
     pub cutoff_hartree: f64,
@@ -130,6 +132,7 @@ pub struct ScfOptions {
 impl Default for ScfOptions {
     fn default() -> Self {
         Self {
+            threads: 1,
             functional: Functional::LdaPz,
             allow_functional_override: false,
             cutoff_hartree: 5.0,
@@ -269,6 +272,62 @@ struct KState {
     grid: FftGridSpec,
     hamiltonian: Hamiltonian,
 }
+/// Disjoint state ownership needs Send, never Sync for Hamiltonian scratch.
+/// Join every worker before inspecting results in ascending k order. Catch each
+/// solve panic so later indices in the same group are still evaluated.
+fn ordered_solves<T: Send, R: Send>(
+    states: &mut [T],
+    requested: usize,
+    solve: impl Fn(usize, &mut T) -> Result<R, ScfError> + Sync,
+) -> Result<Vec<R>, ScfError> {
+    if states.is_empty() {
+        return Ok(Vec::new());
+    }
+    let workers = requested.max(1).min(states.len());
+    std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(workers);
+        let mut remaining = states;
+        let mut offset = 0;
+        for worker in 0..workers {
+            let count = remaining.len().div_ceil(workers - worker);
+            let (group, rest) = remaining.split_at_mut(count);
+            remaining = rest;
+            let start = offset;
+            offset += count;
+            let solve = &solve;
+            handles.push(scope.spawn(move || {
+                group
+                    .iter_mut()
+                    .enumerate()
+                    .map(|(local, state)| {
+                        let index = start + local;
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            solve(index, state)
+                        }))
+                        .unwrap_or_else(|_| {
+                            Err(ScfError::Numerical(format!(
+                                "k index {index}: solve panicked"
+                            )))
+                        })
+                        .map_err(|e| ScfError::Numerical(format!("k index {index}: {e}")))
+                    })
+                    .collect::<Vec<_>>()
+            }));
+        }
+        // Do not short circuit joins: scope must never rethrow an unjoined panic.
+        let joined: Vec<_> = handles.into_iter().map(|h| h.join()).collect();
+        let mut results = Vec::new();
+        for group in joined {
+            let group =
+                group.map_err(|_| ScfError::Numerical("k worker panicked outside solve".into()))?;
+            for result in group {
+                results.push(result?);
+            }
+        }
+        Ok(results)
+    })
+}
+
 /// Output-oriented completion, including a nonconverged final evaluated state.
 /// Numerical failures still return `ScfError`; this is not a convergence bypass.
 pub struct ScfOutcome {
@@ -579,28 +638,63 @@ impl ScfProblem {
             block_size: self.occupations.len(),
             seed: self.options.seed,
         };
-        let mut k_points = Vec::new();
-        for (i, state) in self.states.iter().enumerate() {
-            let preconditioner =
-                DiagonalPreconditioner::new(state.hamiltonian.kinetic_diagonal().to_vec(), 0.1)?;
-            let guess = if initial.is_none() && self.options.free_electron_initial_guess {
-                Some(free_electron_guess(
-                    state.hamiltonian.kinetic_diagonal(),
-                    self.occupations.len(),
-                )?)
-            } else {
-                None
-            };
-            let solution = solver.solve(
-                &state.hamiltonian,
-                initial.map(|v| &v[i]).or(guess.as_ref()),
-                Some(&preconditioner),
-            )?;
-            k_points.push(KPointSolution {
-                point: state.point,
-                solution,
-            });
-        }
+        let k_points = if self.options.threads.max(1).min(self.states.len()) == 1 {
+            let mut k_points = Vec::new();
+            for (i, state) in self.states.iter().enumerate() {
+                let preconditioner = DiagonalPreconditioner::new(
+                    state.hamiltonian.kinetic_diagonal().to_vec(),
+                    0.1,
+                )?;
+                let guess = if initial.is_none() && self.options.free_electron_initial_guess {
+                    Some(free_electron_guess(
+                        state.hamiltonian.kinetic_diagonal(),
+                        self.occupations.len(),
+                    )?)
+                } else {
+                    None
+                };
+                let solution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    solver.solve(
+                        &state.hamiltonian,
+                        initial.map(|v| &v[i]).or(guess.as_ref()),
+                        Some(&preconditioner),
+                    )
+                }))
+                .map_err(|_| ScfError::Numerical(format!("k index {i}: solve panicked")))?
+                .map_err(|e| ScfError::Numerical(format!("k index {i}: {e}")))?;
+                k_points.push(KPointSolution {
+                    point: state.point,
+                    solution,
+                });
+            }
+            k_points
+        } else {
+            let bands = self.occupations.len();
+            let free_guess = self.options.free_electron_initial_guess;
+            ordered_solves(&mut self.states, self.options.threads, |i, state| {
+                let preconditioner = DiagonalPreconditioner::new(
+                    state.hamiltonian.kinetic_diagonal().to_vec(),
+                    0.1,
+                )?;
+                let guess = if initial.is_none() && free_guess {
+                    Some(free_electron_guess(
+                        state.hamiltonian.kinetic_diagonal(),
+                        bands,
+                    )?)
+                } else {
+                    None
+                };
+                let solution = solver.solve(
+                    &state.hamiltonian,
+                    initial.map(|v| &v[i]).or(guess.as_ref()),
+                    Some(&preconditioner),
+                )?;
+                Ok(KPointSolution {
+                    point: state.point,
+                    solution,
+                })
+            })?
+        };
         timings.diagonalization = start.elapsed();
         let start = Instant::now();
         let orbitals: Vec<Vec<Vec<Complex64>>> = k_points
@@ -1074,5 +1168,45 @@ mod tests {
         let mut bad = good;
         bad.density_residual = f64::NAN;
         assert!(!converged(&bad, &o));
+    }
+}
+
+#[cfg(test)]
+mod threading_tests {
+    use super::*;
+
+    #[test]
+    fn ordered_errors_and_panics_join_every_solve() {
+        for threads in [1, 2, 3, 4, 8] {
+            for panic_at_two in [false, true] {
+                let mut visited = [false; 5];
+                let error = ordered_solves(&mut visited, threads, |i, visited| {
+                    *visited = true;
+                    if i == 2 {
+                        // Make the lower-index failure finish later than index 3.
+                        std::thread::sleep(Duration::from_millis(10));
+                        assert!(!panic_at_two, "injected solve panic");
+                        return Err(ScfError::Numerical("injected failure two".into()));
+                    }
+                    if i == 3 {
+                        return Err(ScfError::Numerical("injected failure three".into()));
+                    }
+                    Ok(i)
+                })
+                .unwrap_err();
+                assert!(error.to_string().contains("k index 2"), "{error}");
+                assert!(visited.into_iter().all(|v| v));
+            }
+            let mut states = [0; 5];
+            assert_eq!(
+                ordered_solves(&mut states, threads, |i, state| {
+                    *state = i;
+                    Ok(i)
+                })
+                .unwrap(),
+                vec![0, 1, 2, 3, 4]
+            );
+            assert_eq!(states, [0, 1, 2, 3, 4]);
+        }
     }
 }

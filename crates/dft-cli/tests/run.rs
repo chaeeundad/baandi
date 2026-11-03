@@ -716,3 +716,40 @@ fn pbe_selection_override_and_spin_rejection() {
     assert_eq!(r["functional_override_applied"], true);
     assert_eq!(r["xc"], "lda-pz");
 }
+
+#[test]
+fn threading_metadata_and_identical_outputs() {
+    for nk in [1, 2] {
+        let mut c = Case::new(false);
+        if nk == 2 {
+            c.text = c.text.replace(
+                "kpoints=[[0.0,0.0,0.0]]",
+                "kpoints=[[0.0,0.0,0.0,0.5],[0.05,0.0,0.0,0.5]]",
+            );
+        }
+        let mut reference = None;
+        for requested in [None, Some(0), Some(1), Some(2), Some(8)] {
+            let name = format!("threads-{requested:?}");
+            let suffix = requested.map_or(String::new(), |n| format!("\n[scf]\nthreads={n}"));
+            status(&c.run(&suffix, Some(Path::new(&name))), 0);
+            let mut json = c.json(&name, "results.json");
+            let requested = requested.unwrap_or(1);
+            assert_eq!(json["threading"]["threads_requested"], requested);
+            assert_eq!(json["threading"]["threads_used"], requested.max(1).min(nk));
+            assert_eq!(json["threading"]["threads"], requested.max(1).min(nk));
+            assert_eq!(json["scf"]["threads"], requested);
+            strip_times(&mut json);
+            let object = json.as_object_mut().unwrap();
+            object.remove("threading");
+            object.remove("input_sha256");
+            object["scf"].as_object_mut().unwrap().remove("threads");
+            let density = fs::read(c.dir.join(&name).join("density.bin")).unwrap();
+            if let Some((ref_json, ref_density)) = &reference {
+                assert_eq!(ref_json, &json);
+                assert_eq!(ref_density, &density);
+            } else {
+                reference = Some((json, density));
+            }
+        }
+    }
+}

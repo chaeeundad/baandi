@@ -25,18 +25,15 @@ The toolchain is Rust 1.99.1, edition 2024, workspace resolver 3.
 | toml | 1.1.8+spec-1.1.0 | MIT OR Apache-2.0 | dft-cli |
 | uom | 0.38.0 | Apache-2.0 OR MIT | dft-units (runtime and build) |
 | upf | 0.1.1 | MIT OR Apache-2.0 | dft-upf |
-
-## Direct external dev-dependencies
-
-| Package | Locked version | Declared license | Consumers |
-| --- | --- | --- | --- |
 | xcx | 0.3.1 | (MIT OR Apache-2.0) AND MPL-2.0 | dft-physics |
 
-`xcx` is test-only in `dft-physics`: it cross-checks LDA exchange and provides
-a loose PW92 correlation sanity check, not a PZ81 oracle. Its MPL-2.0 component
-is file-level copyleft derived from libxc; [ADR 0007](decisions/0007-xc-and-special-functions.md)
-requires review before production use and keeps it out of released binaries.
-Production LDA-PZ is implemented as physics glue in `dft-physics`.
+`xcx` 0.3.1 is a user-approved normal dependency of `dft-physics` for PBE.
+It also cross-checks LDA exchange and provides a loose PW92 correlation sanity
+check in tests, not a PZ81 oracle. Its MPL-2.0 component is file-level copyleft
+derived from libxc and is now linked into released binaries.
+[ADR 0018](decisions/0018-pbe-via-xcx.md) supersedes the dev-only restriction
+of ADR 0007. The production LDA-PZ path remains in-tree in `dft-physics`.
+There are no direct external dev-only packages.
 
 dft-units also uses uom as a build-dependency to preserve its public constant API.
 The CLI build script uses std only.
@@ -47,8 +44,8 @@ Workspace dev edges additionally include `dft-basis -> dft-numerics` and
 ## Transitive inventory and licenses
 
 The unfiltered offline metadata graph contains **343 external package/version
-entries** plus nine workspace crates: 16 direct production packages, one direct
-external dev package, and **326 additional transitive entries**. This includes
+entries** plus nine workspace crates: 17 direct production packages, no direct
+external dev-only package, and **326 additional transitive entries**. This includes
 development and target-specific resolution, not just libraries linked into a
 host release binary. Multiple versions of one crate count separately. In
 particular, direct nalgebra is 0.35.0 and direct thiserror is 2.0.21; older
@@ -63,7 +60,7 @@ copyleft-containing expressions is:
 
 | Package | Expression | Introduced through |
 | --- | --- | --- |
-| xcx 0.3.1 | `(MIT OR Apache-2.0) AND MPL-2.0` | dft-physics dev-dependency |
+| xcx 0.3.1 | `(MIT OR Apache-2.0) AND MPL-2.0` | dft-physics normal dependency |
 | r-efi 5.3.0 | `MIT OR Apache-2.0 OR LGPL-2.1-or-later` | dft-numerics -> faer 0.24.4 -> rand 0.9.5 -> rand_core 0.9.5 -> getrandom 0.3.4 -> r-efi |
 
 The r-efi expression offers permissive alternatives; it is not LGPL-only.
@@ -141,3 +138,13 @@ plans, scratch and a strided lane buffer. ndrustfft remains in the unchanged
 manifest and is used only by the historical FFT test oracle; moving it to a
 dev-dependency is a separate manifest decision for Claude. No dependency versions
 or features changed.
+
+### P7B linked PBE component
+
+Per accepted ADR 0018, xcx 0.3.1 is a normal dft-physics dependency, used in production
+behind the spin-unpolarized PBE grid adapter. License: `(MIT OR Apache-2.0)
+AND MPL-2.0`; linked releases must retain the MPL notices and source availability
+for the covered library files. No xcx source is modified. Pure Rust, edition
+2021, MSRV 1.87; no native/FFI dependency added by this ticket. The independent
+closed-form oracle and discrete variational tests constrain replacement of this
+young, single-author dependency. Existing LDA-PZ code is unchanged.

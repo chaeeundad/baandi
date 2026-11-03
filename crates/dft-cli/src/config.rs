@@ -125,11 +125,23 @@ impl Basis {
 #[serde(deny_unknown_fields)]
 pub struct Xc {
     pub functional: Functional,
+    #[serde(default)]
+    pub allow_functional_override: bool,
 }
 #[derive(Debug, Deserialize)]
 pub enum Functional {
     #[serde(rename = "lda-pz")]
     LdaPz,
+    #[serde(rename = "pbe")]
+    Pbe,
+}
+impl Functional {
+    pub fn engine(&self) -> dft_engine::Functional {
+        match self {
+            Self::LdaPz => dft_engine::Functional::LdaPz,
+            Self::Pbe => dft_engine::Functional::Pbe,
+        }
+    }
 }
 /// Optional SCF controls; omitted fields use engine defaults.
 #[derive(Debug, Deserialize)]
@@ -477,7 +489,7 @@ mod tests {
             ),
             ("kpoints = [[0.0, 0.0, 0.0]]", "kpoints = [[nan, 0.0, 0.0]]"),
             ("angstrom", "meter"),
-            ("lda-pz", "pbe"),
+            ("lda-pz", "unsupported-xc"),
             ("species = \"Si\"", "species = \"C\""),
             (
                 "fractional = [0.25, 0.25, 0.25]",

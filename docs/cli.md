@@ -389,3 +389,26 @@ Integer record values are f64 representations of accepted integers; typed
 integer controls retain their integer precision. The block is absent for
 plain-number inputs; schema version and all legacy output fields stay unchanged.
 No expression evaluation or provenance recording occurs inside numerical loops.
+
+### PBE selection and explicit pseudopotential override (P7B)
+
+The required `[xc] functional` accepts exactly `"lda-pz"` or `"pbe"`.
+PBE accepts UPF labels `PBE` and `SLA PW PBX PBC` (case/whitespace normalized).
+A mismatching label is rejected unless `[xc] allow_functional_override = true`.
+The default override is false. The original UPF label remains in species
+provenance; PBE and override-enabled results.json records `xc`, `allow_functional_override`, and
+`functional_override_applied`. Console output records the same selection and
+both override flags. Legacy LDA without override retains its existing JSON schema
+(absent flags mean false). This permits explicit code-to-code tests using an LDA
+pseudopotential with PBE; it does not establish physical transferability.
+Spin polarization remains unsupported: `nspin=2` is rejected as an unknown
+input field, as are all other spin controls. No functional is inferred from
+an unknown UPF label and no missing functional gets a silent TOML default.
+
+The QE input generator accepts PBE results with boolean
+`allow_functional_override` and `functional_override_applied` provenance.
+It checks these against the stored UPF label, emits `input_dft = 'pbe'`, and
+records the label and both flags in QE input comments. It reuses the same
+pseudopotential basename and SHA-256 without reading or modifying the UPF.
+Missing override permission for a mismatched label is an error. Legacy LDA
+QE input remains byte-identical to the stored golden file.

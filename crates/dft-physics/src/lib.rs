@@ -2,6 +2,7 @@
 pub mod data;
 pub mod density;
 pub mod ewald;
+pub mod gga;
 pub mod hamiltonian;
 pub mod hartree;
 pub mod kinetic;
@@ -12,6 +13,10 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum PhysicsError {
+    #[error("PBE density {0} must be finite and nonnegative")]
+    GgaDensity(f64),
+    #[error("XC library: {0}")]
+    Xc(String),
     #[error("invalid density {0}: must be finite and >= -1e-14 Bohr^-3")]
     Density(f64),
     #[error("volume must be finite and positive")]

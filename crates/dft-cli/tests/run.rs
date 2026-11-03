@@ -687,3 +687,32 @@ fn quantity_expression_energy_equivalence() {
     assert!(delta <= 1e-12);
     println!("quantity expression equivalence: total={energy:.17e} Ha, delta={delta:.3e} Ha");
 }
+
+#[test]
+fn pbe_selection_override_and_spin_rejection() {
+    let mut c = Case::new(false);
+    c.text = c.text.replace("functional='lda-pz'", "functional='pbe'");
+    status(&c.run("", None), 2);
+    let output = c.run("allow_functional_override=true\n", None);
+    status(&output, 0);
+    assert!(String::from_utf8_lossy(&output.stdout).contains("override_applied=true"));
+    let r = c.json("results", "results.json");
+    assert_eq!(r["xc"], "pbe");
+    assert_eq!(r["allow_functional_override"], true);
+    assert_eq!(r["functional_override_applied"], true);
+    fs::write(
+        c.dir.join("synthetic.xml"),
+        c.fixture.replace("SLA PZ", "PBE"),
+    )
+    .unwrap();
+    status(&c.run("", None), 0);
+    let r = c.json("results", "results.json");
+    assert_eq!(r["functional_override_applied"], false);
+    assert!(Config::parse(&format!("{}nspin=2\n", c.text)).is_err());
+    assert!(Config::parse(&c.text.replace("[system]", "[system]\nnspin=2")).is_err());
+    c.text = c.text.replace("functional='pbe'", "functional='lda-pz'");
+    status(&c.run("allow_functional_override=true\n", None), 0);
+    let r = c.json("results", "results.json");
+    assert_eq!(r["functional_override_applied"], true);
+    assert_eq!(r["xc"], "lda-pz");
+}

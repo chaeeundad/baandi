@@ -1,11 +1,28 @@
 #!/usr/bin/env python3
 """Emit complex-wavefunction QE SCF inputs; never inspect pseudopotential contents."""
 import sys
+import json
 import math
 from pathlib import Path
 # Explicit sibling import also works under python3 -I.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from qe_common import Error, Parser, fmt, positive, quoted, results, sha256, write_json
+
+
+def functional_input(r):
+    """Explicitly select PBE even when the pseudopotential was made with LDA."""
+    if r['xc'] == 'pbe':
+        return [
+            '! Requested XC: pbe; UPF functional: ' + json.dumps(r['species'][0]['functional'], ensure_ascii=True),
+            '! Explicit functional override: allow_functional_override=' +
+            str(r['allow_functional_override']).lower() + '; functional_override_applied=' +
+            str(r['functional_override_applied']).lower(),
+            "  input_dft = 'pbe',",
+        ]
+    if r['xc'] == 'lda-pz':
+        # Preserve legacy input unless the user explicitly overrode a UPF label.
+        return ["  input_dft = 'PZ',"] if r.get('allow_functional_override', False) else []
+    raise Error('unsupported XC functional')
 
 
 def kpoint_input(r):
@@ -99,6 +116,7 @@ def generate(results_path, pseudo_dir, upf_name, out, fft_grid='ours', ecut_ry=N
              f'  ecutwfc = {fmt(cutoff)},', f'  ecutrho = {fmt(4 * cutoff)},',
              f"  nbnd = {r['bands']},", "  occupations = 'fixed',",
              '  nosym = .true.,']
+    lines += functional_input(r)
     if 'kpoints' in r:
         lines[1] = '! Gamma-centered (m+s)/n grid; only requested time reversal, no space-group reduction.'
     if noinv:

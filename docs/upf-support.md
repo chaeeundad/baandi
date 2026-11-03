@@ -221,3 +221,14 @@ Cargo.lock, so it is restored afterward. The reviewer must include the
 one-line dependency entry when committing the manifest change. No dependency
 version changes are required. Artifact JSON/session registry files are outside
 this ticket's owned files and are left to the orchestrator.
+
+### P7B functional compatibility
+
+The engine selects LDA-PZ or PBE explicitly. PBE recognizes `PBE` and the
+four-token `SLA PW PBX PBC` label, normalized for whitespace and case.
+Other PBE-family labels (PBE0, PBEsol) are not PBE. LDA matching is unchanged.
+`xc.allow_functional_override = true` permits a mismatch and records both the
+requested functional and unchanged UPF header, plus the permission/applied
+flags in results.json and the console. It does not bypass any UPF structural
+restriction (NC, no NLCC, spin-unpolarized). Parser acceptance alone is not
+functional compatibility.

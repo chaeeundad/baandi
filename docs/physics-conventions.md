@@ -1101,3 +1101,43 @@ unchanged. Exmex powers associate left (`2^3^2 = 64`) and unary minus binds
 first (`-2^2 = 4`). ADR 0014 specifies the vocabulary, integer tolerance,
 unit-token rule, typed errors and resolved-value provenance. CLI/TOML wiring
 is deferred to P7E2; no engine input behavior changes in this ticket.
+
+## P7B spin-unpolarized PBE GGA
+
+`Functional::{LdaPz,Pbe}` selects both the Hamiltonian and output-density
+energy evaluation. PBE uses xcx 0.3.1 `GgaXPbe` + `GgaCPbe`, evaluated in
+one grid batch per component. Internal units remain Bohr and Hartree:
+`exc` is Ha/electron, `vrho` Ha, and `vsigma` Ha Bohr^5.
+
+For the discrete uniform-grid functional, D_a is the FFT multiplier i G_a.
+Each even-axis Nyquist Miller component is zeroed before multiplying by B;
+this applies separately to each reciprocal axis, including skew cells.
+Thus D maps real grids to real grids and D^T=-D under weight Omega/N.
+No radial filter is applied. Hartree's existing canonical Nyquist rule is
+unchanged; its kernel and the GGA derivative are different operators.
+
+```
+g_a = D_a n; sigma = sum_a g_a^2
+E_xc = (Omega/N) sum_r n(r) exc(n(r),sigma(r))
+V_xc = vrho - sum_a D_a[2 vsigma g_a]
+dE_xc = (Omega/N) sum_r V_xc(r) dn(r)
+```
+
+PBE rejects every negative or nonfinite density explicitly, including negative
+roundoff; it never clips mixer densities. The LDA density policy is unchanged.
+`gga::DENSITY_THRESHOLD = 1e-10 Bohr^-3`: the local energy and both local
+partials vanish at/below this value. It exceeds both xcx component screens
+(1e-15 exchange, 1e-12 correlation) and avoids singular vacuum arithmetic.
+The existing LDA threshold, also 1e-10, is the QE-comparison candidate; matching
+QE's effective density/gradient screens still requires the remote comparison.
+Gradients use the original nonnegative density, including subthreshold values;
+only the local functional is screened. Consequently the divergence may give
+nonzero potential at a screened point due to neighboring flux. The variational
+identity holds where perturbations do not cross the discontinuous screen.
+
+The section 23 exact remainder bound extends to GGA without a local Hessian:
+Q_xc=E_xc[y]-E_xc[x]-integral (y-x)V_xc[x], using the full GGA potential.
+The same algebra gives |E_direct-E_HF| <= |Q_H|+|Q_xc|+sum_kb w_k f_b r_kb.
+This is the reported `functional_difference_bound`; no universal quadratic
+local-density bound is claimed for PBE. Band-form and fresh fixed-point
+certification retain the existing tolerances and energy-accounting structure.

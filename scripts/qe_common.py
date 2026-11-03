@@ -62,11 +62,24 @@ def results(path):
         path /= 'results.json'
     data = read_json(path)
     try:
-        if data['schema_version'] != 1 or data['xc'] != 'lda-pz':
-            raise Error('expected results schema_version=1 and xc=lda-pz')
+        if data['schema_version'] != 1 or data['xc'] not in ('lda-pz', 'pbe'):
+            raise Error('expected results schema_version=1 and xc=lda-pz or pbe')
         if len(data['species']) != 1:
             raise Error('single-species protocol required')
         species = data['species'][0]
+        if data['xc'] == 'pbe':
+            allow = data['allow_functional_override']
+            applied = data['functional_override_applied']
+            if type(allow) is not bool or type(applied) is not bool:
+                raise Error('PBE functional override flags must be boolean')
+            label = species['functional']
+            if not isinstance(label, str):
+                raise Error('expected UPF functional label')
+            mismatch = ' '.join(label.upper().split()) not in ('PBE', 'SLA PW PBX PBC')
+            if mismatch and not allow:
+                raise Error('PBE UPF mismatch requires explicit allow_functional_override=true')
+            if applied != mismatch:
+                raise Error('functional_override_applied disagrees with UPF label')
         if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]*', species['name']):
             raise Error('invalid species label')
         if not re.fullmatch('[0-9a-f]{64}', species['sha256']):

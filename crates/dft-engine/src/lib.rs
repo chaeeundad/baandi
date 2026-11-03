@@ -11,3 +11,6 @@ pub mod input {
 }
 /// The backend explicitly selects sequential execution (no global thread pool).
 pub const EXECUTION_THREADS: usize = 1;
+
+pub mod functional;
+pub use functional::Functional;

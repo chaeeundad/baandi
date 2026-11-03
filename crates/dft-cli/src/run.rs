@@ -49,6 +49,8 @@ pub fn sha256(bytes: &[u8]) -> String {
 /// Resolve only user-exposed controls, preserving all other engine defaults.
 pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
     let mut o = ScfOptions {
+        functional: config.xc.functional.engine(),
+        allow_functional_override: config.xc.allow_functional_override,
         cutoff_hartree: config.basis.ecutwfc_ry / 2.,
         grid_override: config.basis.fft_grid,
         ..ScfOptions::default()
@@ -216,11 +218,20 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         let data = fs::read(&path).map_err(|e| error(5, format!("{}: {e}", path.display())))?;
         let p = parse_upf(std::str::from_utf8(&data).map_err(|e| error(2, e))?)
             .map_err(|e| error(2, format!("{}: {e}", path.display())))?;
-        if !dft_upf::functional_is_lda_pz(p.functional()) {
+        if !opts.functional.matches_upf(p.functional()) && !opts.allow_functional_override {
+            if opts.functional == dft_engine::Functional::LdaPz {
+                return Err(error(
+                    2,
+                    format!(
+                        "unsupported UPF functional {:?}: requires SLA PZ or SLA PZ NOGX NOGC",
+                        p.functional()
+                    ),
+                ));
+            }
             return Err(error(
                 2,
                 format!(
-                    "unsupported UPF functional {:?}: requires SLA PZ or SLA PZ NOGX NOGC",
+                    "UPF functional {:?} mismatches requested XC; xc.allow_functional_override = true required",
                     p.functional()
                 ),
             ));
@@ -230,6 +241,14 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         inputs.push(path);
         potentials.push((name.clone(), p));
     }
+    println!(
+        "XC: {}; allow_functional_override={}; override_applied={}",
+        opts.functional.name(),
+        opts.allow_functional_override,
+        potentials
+            .iter()
+            .any(|(_, p)| !opts.functional.matches_upf(p.functional()))
+    );
     let out = output_override.map(Path::to_owned).unwrap_or_else(|| {
         PathBuf::from(
             config
@@ -303,7 +322,7 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         "atoms":config.system.atoms.iter().map(|a|json!({"species":a.species,"fractional":a.fractional,"cartesian_bohr":prepared.cell.fractional_to_cartesian_bohr(a.fractional)})).collect::<Vec<_>>(),
         "cutoff":{"ecutwfc_ry":config.basis.ecutwfc_ry,"ecutwfc_ha":opts.cutoff_hartree},
         "basis":{"n_plane_waves":npw,"n_density_g":prepared.density.vectors().len(),"fft_grid":prepared.grid.dims(),"fft_grid_overridden":prepared.grid.overridden()},
-        "electrons":electrons,"bands":bands,"occupations":r.occupations,"xc":"lda-pz","scf":options_json(&opts),
+        "electrons":electrons,"bands":bands,"occupations":r.occupations,"xc":opts.functional.name(),"scf":options_json(&opts),
         "convergence":{"converged":outcome.converged,"iterations":r.history.len(),"last_iteration":last,"history":history},"energies":energies,
         "total_energy":{"ha":r.energy.total_hartree(),"ry":from_hartree(r.energy.total_hartree(), EnergyUnit::Rydberg),"ev":from_hartree(r.energy.total_hartree(), EnergyUnit::ElectronVolt)},
         "eigenvalues":{"ha":r.eigenvalues,"ev":r.eigenvalues.iter().map(|e|from_hartree(*e, EnergyUnit::ElectronVolt)).collect::<Vec<_>>()},
@@ -311,6 +330,15 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         "threading":{"threads":dft_engine::EXECUTION_THREADS,"backend":"explicit sequential faer and serial FFT"},
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
+    // Preserve the legacy LDA schema unless an override was explicitly enabled.
+    if opts.functional == dft_engine::Functional::Pbe || opts.allow_functional_override {
+        result["allow_functional_override"] = json!(opts.allow_functional_override);
+        result["functional_override_applied"] = json!(
+            potentials
+                .iter()
+                .any(|(_, p)| !opts.functional.matches_upf(p.functional()))
+        );
+    }
     if !config.input_expressions.is_empty() {
         result["input_expressions"] = json!(config.input_expressions);
     }

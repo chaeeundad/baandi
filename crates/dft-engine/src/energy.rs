@@ -1,5 +1,5 @@
 //! Direct orbital functional and input-density Harris-Foulkes audit, in Ha.
-use crate::ScfError;
+use crate::{Functional, ScfError};
 use dft_basis::{FftGridSpec, PlaneWaveBasis};
 use dft_geometry::Cell;
 use dft_physics::{data::*, hamiltonian::NonlocalOperator, hartree, kinetic, xc};
@@ -74,6 +74,13 @@ pub struct AuditInput<'a> {
     pub ewald: f64,
 }
 pub fn evaluate(a: AuditInput<'_>, fft: &mut FftPlan3d) -> Result<EnergyAudit, ScfError> {
+    evaluate_with_functional(a, fft, Functional::LdaPz)
+}
+pub fn evaluate_with_functional(
+    a: AuditInput<'_>,
+    fft: &mut FftPlan3d,
+    functional: Functional,
+) -> Result<EnergyAudit, ScfError> {
     let n = a.output_density;
     if a.orbitals.len() != a.occupations.len()
         || a.eigenvalues.len() != a.occupations.len()
@@ -97,7 +104,7 @@ pub fn evaluate(a: AuditInput<'_>, fft: &mut FftPlan3d) -> Result<EnergyAudit, S
     let volume = a.cell.volume_bohr3();
     let weight = volume / n.len() as f64;
     let h = hartree::evaluate(n, a.cell, fft)?;
-    let x = xc::evaluate(n, volume)?;
+    let x = functional.evaluate(n, a.cell, fft)?;
     let kinetic = kinetic::energy(a.basis, a.orbitals, a.occupations)?.0;
     let local = local_energy(n, a.ionic_g, volume, fft)?;
     let charge = n.sum() * weight;
@@ -123,6 +130,8 @@ pub fn evaluate(a: AuditInput<'_>, fft: &mut FftPlan3d) -> Result<EnergyAudit, S
         - a.input_xc.potential_integral.0
         + a.ewald;
     let band_form = band_sum - double_counting + h.energy.0 + x.energy.0 + a.ewald;
+    // Exact discrete functional remainders apply to LDA and GGA alike.
+    // No local-density Hessian or quadratic GGA bound is assumed.
     // Bregman remainders. Hartree is quadratic, so its remainder is >=0.
     let linear_h = weight
         * n.iter()

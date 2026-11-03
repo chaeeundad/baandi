@@ -1,3 +1,4 @@
+use crate::Functional;
 use crate::energy::{self, AuditInput, EnergyAudit};
 use dft_basis::{FftGridSpec, PlaneWaveBasis};
 use dft_geometry::{
@@ -101,6 +102,8 @@ impl Default for Mixing {
 }
 #[derive(Clone, Debug)]
 pub struct ScfOptions {
+    pub functional: Functional,
+    pub allow_functional_override: bool,
     pub cutoff_hartree: f64,
     pub bands: Option<usize>,
     pub extra_bands: usize,
@@ -122,6 +125,8 @@ pub struct ScfOptions {
 impl Default for ScfOptions {
     fn default() -> Self {
         Self {
+            functional: Functional::LdaPz,
+            allow_functional_override: false,
             cutoff_hartree: 5.0,
             bands: None,
             extra_bands: 4,
@@ -364,7 +369,14 @@ impl ScfProblem {
             if potentials[..i].iter().any(|p| p.label == s.label) {
                 return Err(ScfError::InvalidInput("duplicate species"));
             }
-            if !dft_upf::functional_is_lda_pz(s.potential.functional()) {
+            if !options.functional.matches_upf(s.potential.functional())
+                && !options.allow_functional_override
+            {
+                if options.functional == Functional::Pbe {
+                    return Err(ScfError::InvalidInput(
+                        "UPF label mismatches PBE; explicit allow_functional_override required",
+                    ));
+                }
                 return Err(ScfError::UnsupportedFunctional(
                     s.potential.functional().to_string(),
                 ));
@@ -528,7 +540,10 @@ impl ScfProblem {
         }
         let start = Instant::now();
         let h = hartree::evaluate(n, &self.cell, &mut self.fft)?;
-        let x = xc::evaluate(n, self.cell.volume_bohr3())?;
+        let x = self
+            .options
+            .functional
+            .evaluate(n, &self.cell, &mut self.fft)?;
         let mut effective = self.ionic_real.clone();
         for ((v, h), x) in effective.iter_mut().zip(&h.potential).zip(&x.potential) {
             *v += h.re + x;
@@ -590,7 +605,7 @@ impl ScfProblem {
         let start = Instant::now();
         let mut audits = Vec::new();
         for ((state, k), orbitals) in self.states.iter().zip(&k_points).zip(&orbitals) {
-            let audit = energy::evaluate(
+            let audit = energy::evaluate_with_functional(
                 AuditInput {
                     cell: &self.cell,
                     basis: &state.basis,
@@ -608,6 +623,7 @@ impl ScfProblem {
                     ewald: self.ewald.energy.0,
                 },
                 &mut self.fft,
+                self.options.functional,
             )?;
             audits.push((state.point.weight, audit));
         }

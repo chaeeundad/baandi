@@ -217,6 +217,14 @@ def block(rows, kruns, gamma, perf=None):
         for r in perf["rows"]:
             ts = [t for _, t in r["steps"]]
             lines.append(f"| {r['label']} ({r['nk']} k) | " + " | ".join(f"{t:.3g}" for t in ts) + f" | {r['qe1']:.3g} | {r['qe4']:.3g} | {ts[-1] / r['qe1']:.1f}x slower | {ts[0] / ts[-1]:.2f}x | {r['ours_it']} / {r['qe_it']} | {100 * r['diag_frac']:.0f}% |")
+        sw = load(os.path.join(REF, "perf", "dev08_baseline.json")).get("qe_convthr_sweep")
+        if sw:
+            lines += ["", "Equal-accuracy comparison: QE's reference runs above use `conv_thr` = 1e-12 Ry, tighter than needed; its total energy is already identical to the printed 8 decimals at `conv_thr` = 1e-8 (the rust-dft defaults reach an energy error of about 3e-14 Ha against a fully converged run). Latest rust-dft step against QE at several thresholds (QE 1 process, wall time):", "",
+                      "| Case | rust-dft latest (s) | QE conv_thr 1e-12 (s) | QE 1e-8 (s) | QE 1e-6 (s) | rust-dft slower than QE at 1e-12 | at 1e-8 | at 1e-6 |", "|---|---|---|---|---|---|---|---|"]
+            for key, r in zip(("gamma", "k444s"), perf["rows"]):
+                t = r["steps"][-1][1]
+                q = {row["conv_thr_ry"]: row["wall_np1_s"] for row in sw[key]}
+                lines.append(f"| {r['label']} | {t:.3g} | {q[1e-12]:.3g} | {q[1e-8]:.3g} | {q[1e-6]:.3g} | {t / q[1e-12]:.1f}x | {t / q[1e-8]:.1f}x | {t / q[1e-6]:.1f}x |")
         lines += ["", f"Cross-platform check: the total energy on this Linux x86 build differs from the macOS Apple Silicon build by {perf['xplat']['gamma']:+.2e} Ha (Gamma) and {perf['xplat']['k444s']:+.2e} Ha (4x4x4, shifted).", ""]
     lines += [
               "Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; "

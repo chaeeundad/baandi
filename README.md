@@ -105,6 +105,13 @@ Same node (Intel Xeon Gold 6230 @ 2.10 GHz, 2 sockets x 20 cores, SMT on (80 log
 | Gamma, 1 k point, 30 Ry (1 k) | 2.28 | 1.22 | 0.71 | 0.427 | 0.213 | 0.17 | 2.0x slower | 5.33x | 10 / 11 | 57% |
 | 4x4x4 shifted, 32 k points, 30 Ry (32 k) | 99 | 47 | 22.4 | 10.6 | 1.82 | 0.87 | 5.8x slower | 9.33x | 10 / 8 | 80% |
 
+Equal-accuracy comparison: QE's reference runs above use `conv_thr` = 1e-12 Ry, tighter than needed; its total energy is already identical to the printed 8 decimals at `conv_thr` = 1e-8 (the rust-dft defaults reach an energy error of about 3e-14 Ha against a fully converged run). Latest rust-dft step against QE at several thresholds (QE 1 process, wall time):
+
+| Case | rust-dft latest (s) | QE conv_thr 1e-12 (s) | QE 1e-8 (s) | QE 1e-6 (s) | rust-dft slower than QE at 1e-12 | at 1e-8 | at 1e-6 |
+|---|---|---|---|---|---|---|---|
+| Gamma, 1 k point, 30 Ry | 0.427 | 0.21 | 0.19 | 0.183 | 2.0x | 2.2x | 2.3x |
+| 4x4x4 shifted, 32 k points, 30 Ry | 10.6 | 1.81 | 1.31 | 1 | 5.8x | 8.1x | 10.6x |
+
 Cross-platform check: the total energy on this Linux x86 build differs from the macOS Apple Silicon build by +8.88e-15 Ha (Gamma) and +0.00e+00 Ha (4x4x4, shifted).
 
 Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; fast gates (`scripts/check.sh`) and the Python regression tests pass. Results are added here after each verified implementation.

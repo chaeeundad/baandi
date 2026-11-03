@@ -255,5 +255,68 @@
    "np1": 1.8167,
    "np4": 0.87
   }
+ },
+ "qe_convthr_sweep": {
+  "note": "QE 7.6 on dev08, fresh copies of the unedited inputs with only the conv_thr line changed (diff-verified), 3 runs each (mean wall seconds, /usr/bin/time), uptime 15:10:48 to 15:30:38 load 0.1 to 0.4. Energies are as printed by QE (8 decimals): from conv_thr 1e-8 on they are identical to the 1e-12 run to the printed digits; a difference below 5e-9 Ry cannot be resolved from this data. Relayed attestation; outputs stay on dev08 under ~/rustdft_p6/perf3/.",
+  "gamma": [
+   {
+    "conv_thr_ry": 1e-06,
+    "total_energy_ry": -14.59106603,
+    "iterations": 6,
+    "wall_np1_s": 0.1833,
+    "wall_np4_s": 0.1633
+   },
+   {
+    "conv_thr_ry": 1e-08,
+    "total_energy_ry": -14.59106606,
+    "iterations": 7,
+    "wall_np1_s": 0.19,
+    "wall_np4_s": 0.16
+   },
+   {
+    "conv_thr_ry": 1e-10,
+    "total_energy_ry": -14.59106606,
+    "iterations": 9,
+    "wall_np1_s": 0.2,
+    "wall_np4_s": 0.16
+   },
+   {
+    "conv_thr_ry": 1e-12,
+    "total_energy_ry": -14.59106606,
+    "iterations": 11,
+    "wall_np1_s": 0.21,
+    "wall_np4_s": 0.1833
+   }
+  ],
+  "k444s": [
+   {
+    "conv_thr_ry": 1e-06,
+    "total_energy_ry": -15.85195698,
+    "iterations": 4,
+    "wall_np1_s": 1.0033,
+    "wall_np4_s": 0.52
+   },
+   {
+    "conv_thr_ry": 1e-08,
+    "total_energy_ry": -15.85195738,
+    "iterations": 5,
+    "wall_np1_s": 1.3067,
+    "wall_np4_s": 0.65
+   },
+   {
+    "conv_thr_ry": 1e-10,
+    "total_energy_ry": -15.85195738,
+    "iterations": 6,
+    "wall_np1_s": 1.4633,
+    "wall_np4_s": 0.7933
+   },
+   {
+    "conv_thr_ry": 1e-12,
+    "total_energy_ry": -15.85195738,
+    "iterations": 8,
+    "wall_np1_s": 1.8133,
+    "wall_np4_s": 0.87
+   }
+  ]
  }
 }

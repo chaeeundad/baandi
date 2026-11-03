@@ -13,6 +13,11 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Evaluate a unitless expression (15 significant digits).
+    Eval {
+        #[arg(allow_hyphen_values = true)]
+        expression: String,
+    },
     /// Convert energy, length or pressure (15 significant digits).
     Convert {
         #[arg(allow_hyphen_values = true)]
@@ -69,7 +74,10 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
     let input = match &cli.command {
         Command::Validate { input } | Command::Grid { input } => input,
-        Command::InspectUpf { .. } | Command::Run { .. } | Command::Convert { .. } => {
+        Command::Eval { .. }
+        | Command::InspectUpf { .. }
+        | Command::Run { .. }
+        | Command::Convert { .. } => {
             unreachable!()
         }
     };
@@ -77,12 +85,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", input.display())))?;
     let config = Config::parse(&text)?;
     let prepared = config.prepare()?;
+    if matches!(cli.command, Command::Validate { .. }) {
+        for record in &config.input_expressions {
+            println!("{}: {:?} = {}", record.key_path, record.text, record.value);
+        }
+    }
     match cli.command {
         Command::Validate { .. } => println!(
             "Valid: {} (pseudopotential paths parsed; file existence not checked)",
             config.system.name
         ),
-        Command::InspectUpf { .. } | Command::Run { .. } | Command::Convert { .. } => {
+        Command::Eval { .. }
+        | Command::InspectUpf { .. }
+        | Command::Run { .. }
+        | Command::Convert { .. } => {
             unreachable!()
         }
         Command::Grid { .. } => print!("{}", grid_report(&config, &prepared)),
@@ -91,8 +107,15 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 }
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    if let Command::Convert { value, from, to } = &cli.command {
-        return match convert(value, from, to) {
+    let evaluation = match &cli.command {
+        Command::Convert { value, from, to } => Some(convert(value, from, to)),
+        Command::Eval { expression } => {
+            Some(dft_units::eval_expr(expression).map_err(|e| e.to_string()))
+        }
+        _ => None,
+    };
+    if let Some(result) = evaluation {
+        return match result {
             Ok(v) => {
                 println!("{v:.14e}");
                 ExitCode::SUCCESS
@@ -140,12 +163,7 @@ fn convert(value: &str, from: &str, to: &str) -> Result<f64, String> {
     use dft_units::*;
     let text = format!("{value} {from}");
     // Parsing the value separately prevents a unit embedded in the value argument.
-    let v: f64 = value
-        .parse()
-        .map_err(|_| format!("invalid value {value:?}"))?;
-    if !v.is_finite() {
-        return Err(format!("nonfinite value {value:?}"));
-    }
+    let v = eval_expr(value).map_err(|e| e.to_string())?;
     let result = if let Ok(unit) = from.parse::<EnergyUnit>() {
         convert_energy(v, unit, to.parse().map_err(|e: UnitError| e.to_string())?)
     } else if let Ok(unit) = from.parse::<LengthUnit>() {

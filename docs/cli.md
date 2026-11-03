@@ -326,3 +326,66 @@ or explicit crystal lists, with `expected_kpoints` in its metadata and an
 importable `compare_kpoints` helper for weighted-set verification. The existing
 Gamma-only verifier remains limited to Gamma. See
 [si_lda_kgrid.toml](../examples/si_lda_kgrid.toml) for an input template.
+
+## Expression inputs (P7E2)
+
+`Config::parse`, `validate`, `grid` and `run` accept expression strings in the
+following explicit fields. Arrays may mix TOML numbers and strings. Plain
+numbers retain their existing behavior; all existing physical constraints apply.
+
+| TOML key path (indices are zero-based) | String resolution / value unit |
+| --- | --- |
+| `system.lattice_vectors[i][j]` | float expression, `lattice_unit` |
+| `system.lattice_vectors_with_units[i][j]` | expression plus length unit, resolved Bohr; every entry requires a unit string |
+| `system.atoms[i].fractional[j]` | float expression, dimensionless |
+| `system.atoms[i].cartesian[j]` | float expression, `lattice_unit` (Bohr with unit-bearing lattice) |
+| `basis.ecutwfc_ry` | float expression, Ry |
+| `basis.cutoff` | expression plus energy unit, resolved Ry |
+| `basis.kshift[i]` | float expression, grid steps; still restricted to 0 or 0.5 |
+| `basis.kpoints[i][j]` | float expression, fractional coordinate or dimensionless weight |
+| `basis.kgrid[i]`, `basis.fft_grid[i]` | integer expression, count |
+| `scf.max_iterations`, `scf.nbands`, `scf.extra_bands`, `scf.seed` | integer expression, count/seed |
+| `scf.mixing_beta` | float expression, dimensionless |
+| `scf.density_residual_tolerance` | float expression, Bohr^(-3/2) |
+| `scf.energy_tolerance_ha`, `scf.eigen_tolerance` | float expression, Ha |
+| `scf.energy_tolerance`, `scf.eigen_tolerance_energy` | expression plus energy unit, resolved Ha |
+
+`cartesian` is an alternative to `fractional`; specifying both is an error.
+Names, species labels, paths, enums and booleans are not evaluated. Their existing
+validation remains in force; paths and descriptive names are literal strings.
+Integer expressions use `eval_expr_integer` from ADR 0014 (integrality tolerance
+`1e-12*abs(value)`, exact zero, i64 range), then existing consumer constraints;
+`"8/2"` is accepted, `"7/2"` is rejected. Numeric TOML integer ranges are unchanged.
+
+Expressions support `+ - * / ^`, parentheses, unary minus, constants `pi`, `e`,
+and `sqrt abs sin cos tan asin acos atan exp ln log10`. Trigonometric arguments
+are radians. Names such as `a` are unsupported: write `"5.43/2"`, not `"a/2"`.
+There is no implicit multiplication. Powers associate left (`2^3^2 = 64`),
+and unary minus binds tighter than power (`-2^2 = 4`). Nonfinite results fail.
+For quantity expressions, separate the final unit token with whitespace:
+`"0.5*30 Ry"`, `"5.43/2 Angstrom"`. Legacy `"30Ry"` still works.
+See [ADR 0014](decisions/0014-expression-inputs.md) for the evaluator contract and
+[si_lda_expr.toml](../examples/si_lda_expr.toml) for a complete template.
+
+```sh
+dft-cli eval 'atan(0.5*pi)'
+dft-cli eval '1/4'                  # 2.50000000000000e-1
+dft-cli convert '1/4*30' Ry Ha      # 3.75000000000000e0
+```
+
+`eval` requires no units and rejects unit tokens. `convert` requires source and
+target units even for expressions. Both print 15 significant digits in scientific
+notation, return 0 on success and 2 on expression/usage/conversion errors.
+Configuration evaluation errors retain status 1 and include the key path and
+quoted original string, for example `system.atoms[1].fractional[2]` and `"1/0"`.
+
+`validate` echoes every resolved string as `key_path: "original text" = value`.
+`results.json` optionally adds `input_expressions`, an array of
+`{"key_path":"system.atoms[1].fractional[0]","text":"1/4","value":0.25}`.
+All numeric-field strings are recorded, including legacy quantity strings and
+plain numeric strings; numeric TOML values are not recorded. Units follow the
+table above. Cartesian records precede conversion to fractional coordinates.
+Integer record values are f64 representations of accepted integers; typed
+integer controls retain their integer precision. The block is absent for
+plain-number inputs; schema version and all legacy output fields stay unchanged.
+No expression evaluation or provenance recording occurs inside numerical loops.

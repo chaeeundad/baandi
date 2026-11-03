@@ -369,6 +369,15 @@ fn unit_cutoff_preserves_scf_and_legacy_outputs() {
     status(&c.run("", None), 0);
     let mut units = c.json("results", "results.json");
     assert_ne!(legacy["input_sha256"], units["input_sha256"]);
+    assert!(legacy.get("input_expressions").is_none());
+    assert_eq!(
+        units
+            .as_object_mut()
+            .unwrap()
+            .remove("input_expressions")
+            .unwrap(),
+        serde_json::json!([{ "key_path": "basis.cutoff", "text": "3 Ry", "value": 3.0 }])
+    );
     for report in [&mut legacy, &mut units] {
         strip_times(report);
         report.as_object_mut().unwrap().remove("input_sha256");
@@ -543,4 +552,138 @@ fn kpoint_scf() {
     let message = String::from_utf8_lossy(&out.stderr);
     println!("gap-less sampling: {message}");
     assert!(message.contains("gap"));
+}
+
+#[test]
+fn expressions_preserve_energy_and_record_resolutions() {
+    let mut c = Case::new(false);
+    c.text = c.text.replace("0.13,0.21,0.32", "0.25,0.21,0.32");
+    status(&c.run("", Some(Path::new("plain"))), 0);
+    let plain = c.json("plain", "results.json");
+    let expected_keys = [
+        "schema_version",
+        "tool",
+        "timestamp",
+        "input_sha256",
+        "species",
+        "cell",
+        "atoms",
+        "cutoff",
+        "basis",
+        "electrons",
+        "bands",
+        "occupations",
+        "xc",
+        "scf",
+        "convergence",
+        "energies",
+        "total_energy",
+        "eigenvalues",
+        "timings",
+        "threading",
+        "memory_estimate",
+        "units",
+    ];
+    let keys: std::collections::BTreeSet<_> = plain
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(keys, expected_keys.into_iter().collect());
+    c.text = c
+        .text
+        .replace("4.0", "'8/2'")
+        .replace("0.25,0.21,0.32", "'1/4',0.21,0.32")
+        .replace("ecutwfc_ry=3.0", "cutoff='0.5*6 Ry'");
+    status(&c.run("", Some(Path::new("expr"))), 0);
+    let expr = c.json("expr", "results.json");
+    for key in [
+        "cell",
+        "atoms",
+        "cutoff",
+        "basis",
+        "scf",
+        "energies",
+        "eigenvalues",
+    ] {
+        assert_eq!(plain[key], expr[key], "{key}");
+    }
+    let energy = plain["total_energy"]["ha"].as_f64().unwrap();
+    let delta = (energy - expr["total_energy"]["ha"].as_f64().unwrap()).abs();
+    assert!(delta <= 1e-12);
+    let records = expr["input_expressions"].as_array().unwrap();
+    assert_eq!(records.len(), 5);
+    assert!(records.contains(
+        &serde_json::json!({"key_path":"system.atoms[0].fractional[0]", "text":"1/4", "value":0.25})
+    ));
+    assert!(
+        records.contains(
+            &serde_json::json!({"key_path":"basis.cutoff", "text":"0.5*6 Ry", "value":3.0})
+        )
+    );
+    let out = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+        .arg("validate")
+        .arg(c.dir.join("input.toml"))
+        .output()
+        .unwrap();
+    status(&out, 0);
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("system.atoms[0].fractional[0]: \"1/4\" = 0.25"));
+    println!(
+        "expression equivalence: total={energy:.17e} Ha, delta={delta:.3e} Ha, records={}",
+        records.len()
+    );
+
+    c.text = c.text.replace("'1/4'", "'1/0'");
+    let invalid = c.run("", Some(Path::new("invalid")));
+    status(&invalid, 1);
+    let stderr = String::from_utf8(invalid.stderr).unwrap();
+    assert!(stderr.contains("system.atoms[0].fractional[0]") && stderr.contains("\"1/0\""));
+    let invalid = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+        .arg("validate")
+        .arg(c.dir.join("input.toml"))
+        .output()
+        .unwrap();
+    status(&invalid, 1);
+
+    // The quantity expression is resolved identically to its numeric quantity.
+    let old = include_str!("../../../examples/si_lda.toml");
+    let unit = old.replace("lattice_unit = \"angstrom\"", "").replace("lattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]", "lattice_vectors_with_units = [['0 Bohr', '5.43/2 Angstrom', '5.43/2 Angstrom'], ['5.43/2 Angstrom', '0 Bohr', '5.43/2 Angstrom'], ['5.43/2 Angstrom', '5.43/2 Angstrom', '0 Bohr']]");
+    let a = Config::parse(&unit).unwrap();
+    let b = Config::parse(&unit.replace("5.43/2", "2.715")).unwrap();
+    assert_eq!(a.system.lattice_vectors, b.system.lattice_vectors);
+    println!(
+        "5.43/2 Angstrom = {:.17e} Bohr",
+        a.system.lattice_vectors[0][1]
+    );
+}
+
+#[test]
+fn quantity_expression_energy_equivalence() {
+    let mut c = Case::new(false);
+    let edge = dft_units::parse_length("2.715 Angstrom").unwrap();
+    c.text = c
+        .text
+        .replace("4.0", &format!("{edge:.17e}"))
+        .replace("0.13,0.21,0.32", "0.25,0.21,0.32");
+    status(&c.run("", Some(Path::new("numeric"))), 0);
+    let numeric = c.json("numeric", "results.json");
+    let lattice_line = c
+        .text
+        .lines()
+        .find(|line| line.starts_with("lattice_vectors="))
+        .unwrap()
+        .to_owned();
+    c.text = c.text.replace("lattice_unit='bohr'", "")
+        .replace(&lattice_line, "lattice_vectors_with_units=[['5.43/2 Angstrom','0 Bohr','0 Bohr'],['0 Bohr','5.43/2 Angstrom','0 Bohr'],['0 Bohr','0 Bohr','5.43/2 Angstrom']]")
+        .replace("0.25,0.21,0.32", "'1/4',0.21,0.32");
+    status(&c.run("", Some(Path::new("quantity"))), 0);
+    let quantity = c.json("quantity", "results.json");
+    assert_eq!(numeric["cell"], quantity["cell"]);
+    assert_eq!(numeric["atoms"], quantity["atoms"]);
+    let energy = numeric["total_energy"]["ha"].as_f64().unwrap();
+    let delta = (energy - quantity["total_energy"]["ha"].as_f64().unwrap()).abs();
+    assert!(delta <= 1e-12);
+    println!("quantity expression equivalence: total={energy:.17e} Ha, delta={delta:.3e} Ha");
 }

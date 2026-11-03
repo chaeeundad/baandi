@@ -311,6 +311,9 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         "threading":{"threads":dft_engine::EXECUTION_THREADS,"backend":"explicit sequential faer and serial FFT"},
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
+    if !config.input_expressions.is_empty() {
+        result["input_expressions"] = json!(config.input_expressions);
+    }
     if !config.basis.legacy_gamma() {
         result["kpoints"] = json!({
             "grid": config.basis.kgrid, "shift": config.basis.kgrid.map(|_| config.basis.kshift.unwrap_or([0.0;3])),

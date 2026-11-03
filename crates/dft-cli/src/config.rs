@@ -2,7 +2,7 @@
 use dft_basis::{BasisError, FftGridSpec, PlaneWaveBasis};
 use dft_geometry::{Cell, CellError};
 use dft_units::{Angstrom, Bohr, Hartree, Rydberg};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -22,6 +22,8 @@ pub enum ConfigError {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(skip)]
+    pub input_expressions: Vec<InputExpression>,
     pub system: System,
     pub pseudopotentials: BTreeMap<String, PathBuf>,
     pub basis: Basis,
@@ -43,6 +45,14 @@ pub struct System {
 pub enum LatticeUnit {
     Angstrom,
     Bohr,
+}
+impl LatticeUnit {
+    fn to_bohr(&self, value: f64) -> f64 {
+        match self {
+            Self::Angstrom => Bohr::from(Angstrom(value)).0,
+            Self::Bohr => value,
+        }
+    }
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -142,71 +152,219 @@ pub struct Output {
     pub directory: Option<String>,
 }
 
-// Resolve additive unit forms before deserializing the typed tables.
-fn normalize_units(value: &mut toml::Value) -> Result<(), ConfigError> {
-    let invalid = |message: String| ConfigError::Invalid(message);
-    for (section, alternate, legacy, target) in [
+/// Original string and resolved boundary value (units follow the documented key).
+#[derive(Debug, Serialize)]
+pub struct InputExpression {
+    pub key_path: String,
+    pub text: String,
+    pub value: f64,
+}
+
+#[derive(Clone, Copy)]
+enum Scalar {
+    Float,
+    Integer,
+    Energy(dft_units::EnergyUnit),
+    Length,
+}
+
+// Traverse only explicitly selected numeric fields; serde still checks shapes/types.
+fn resolve(
+    value: &mut toml::Value,
+    path: &str,
+    kind: Scalar,
+    records: &mut Vec<InputExpression>,
+) -> Result<(), ConfigError> {
+    if let Some(array) = value.as_array_mut() {
+        for (i, item) in array.iter_mut().enumerate() {
+            resolve(item, &format!("{path}[{i}]"), kind, records)?;
+        }
+    } else if let Some(text) = value.as_str() {
+        let fail = |e| ConfigError::Invalid(format!("{path}: {e}"));
+        let (resolved, replacement) = match kind {
+            Scalar::Integer => {
+                let n = dft_units::eval_expr_integer(text).map_err(fail)?;
+                if n < 0 && path != "scf.max_iterations" {
+                    return Err(ConfigError::Invalid(format!(
+                        "{path}: expression {text:?} must be nonnegative"
+                    )));
+                }
+                (n as f64, toml::Value::Integer(n))
+            }
+            _ => {
+                let n = match kind {
+                    Scalar::Float => dft_units::eval_expr(text).map_err(fail)?,
+                    Scalar::Energy(target) => {
+                        let (n, unit) =
+                            dft_units::parse_quantity_expr::<dft_units::EnergyUnit>(text)
+                                .map_err(fail)?;
+                        dft_units::from_hartree(dft_units::to_hartree(n, unit), target)
+                    }
+                    Scalar::Length => {
+                        let (n, unit) =
+                            dft_units::parse_quantity_expr::<dft_units::LengthUnit>(text)
+                                .map_err(fail)?;
+                        dft_units::to_bohr(n, unit)
+                    }
+                    Scalar::Integer => unreachable!(),
+                };
+                if !n.is_finite() {
+                    return Err(ConfigError::Invalid(format!(
+                        "{path}: expression {text:?} is not finite after conversion"
+                    )));
+                }
+                (n, toml::Value::Float(n))
+            }
+        };
+        records.push(InputExpression {
+            key_path: path.into(),
+            text: text.into(),
+            value: resolved,
+        });
+        *value = replacement;
+    } else if matches!(kind, Scalar::Energy(_) | Scalar::Length) {
+        return Err(ConfigError::Invalid(format!(
+            "{path} requires a unit string: {value}"
+        )));
+    }
+    Ok(())
+}
+
+fn normalize(
+    value: &mut toml::Value,
+    records: &mut Vec<InputExpression>,
+) -> Result<(), ConfigError> {
+    for (section, floats, integers) in [
+        ("system", &["lattice_vectors"][..], &[][..]),
+        (
+            "basis",
+            &["ecutwfc_ry", "kpoints", "kshift"][..],
+            &["kgrid", "fft_grid"][..],
+        ),
+        (
+            "scf",
+            &[
+                "energy_tolerance_ha",
+                "density_residual_tolerance",
+                "mixing_beta",
+                "eigen_tolerance",
+            ][..],
+            &["max_iterations", "nbands", "extra_bands", "seed"][..],
+        ),
+    ] {
+        if let Some(table) = value.get_mut(section).and_then(toml::Value::as_table_mut) {
+            for (keys, kind) in [(floats, Scalar::Float), (integers, Scalar::Integer)] {
+                for key in keys {
+                    if let Some(v) = table.get_mut(*key) {
+                        resolve(v, &format!("{section}.{key}"), kind, records)?;
+                    }
+                }
+            }
+        }
+    }
+    for (section, alternate, legacy, kind) in [
         (
             "basis",
             "cutoff",
             "ecutwfc_ry",
-            dft_units::EnergyUnit::Rydberg,
+            Scalar::Energy(dft_units::EnergyUnit::Rydberg),
         ),
         (
             "scf",
             "energy_tolerance",
             "energy_tolerance_ha",
-            dft_units::EnergyUnit::Hartree,
+            Scalar::Energy(dft_units::EnergyUnit::Hartree),
         ),
         (
             "scf",
             "eigen_tolerance_energy",
             "eigen_tolerance",
-            dft_units::EnergyUnit::Hartree,
+            Scalar::Energy(dft_units::EnergyUnit::Hartree),
+        ),
+        (
+            "system",
+            "lattice_vectors_with_units",
+            "lattice_vectors",
+            Scalar::Length,
         ),
     ] {
         if let Some(table) = value.get_mut(section).and_then(toml::Value::as_table_mut)
-            && let Some(input) = table.remove(alternate)
+            && let Some(mut input) = table.remove(alternate)
         {
-            if table.contains_key(legacy) {
-                return Err(invalid(format!(
-                    "{section}: cannot specify both {alternate} and {legacy}"
+            if table.contains_key(legacy)
+                || (section == "system" && table.contains_key("lattice_unit"))
+            {
+                return Err(ConfigError::Invalid(format!(
+                    "{section}.{alternate}: conflicts with {legacy} or lattice_unit"
                 )));
             }
-            let text = input.as_str().ok_or_else(|| {
-                invalid(format!(
-                    "{section}.{alternate} requires a unit string: {input}"
-                ))
-            })?;
-            let ha = dft_units::parse_energy(text).map_err(|e| invalid(e.to_string()))?;
-            let resolved = dft_units::from_hartree(ha, target);
-            if !resolved.is_finite() {
-                return Err(invalid(format!("nonfinite converted value: {text:?}")));
+            resolve(&mut input, &format!("{section}.{alternate}"), kind, records)?;
+            table.insert(legacy.into(), input);
+            if section == "system" {
+                table.insert("lattice_unit".into(), toml::Value::String("bohr".into()));
             }
-            table.insert(legacy.into(), toml::Value::Float(resolved));
         }
     }
-    if let Some(table) = value.get_mut("system").and_then(toml::Value::as_table_mut)
-        && let Some(input) = table.remove("lattice_vectors_with_units")
-    {
-        if table.contains_key("lattice_vectors") || table.contains_key("lattice_unit") {
-            return Err(invalid(
-                "lattice_vectors_with_units conflicts with lattice_vectors and lattice_unit".into(),
-            ));
-        }
-        let rows: [[String; 3]; 3] = input.try_into()?;
-        let mut converted = Vec::new();
-        for row in rows {
-            let mut values = Vec::new();
-            for text in row {
-                values.push(toml::Value::Float(
-                    dft_units::parse_length(&text).map_err(|e| invalid(e.to_string()))?,
-                ));
+    if let Some(system) = value.get_mut("system").and_then(toml::Value::as_table_mut) {
+        // Construct the cell lazily so legacy missing-field errors remain serde errors.
+        let cartesian_cell = if system
+            .get("atoms")
+            .and_then(toml::Value::as_array)
+            .is_some_and(|atoms| atoms.iter().any(|a| a.get("cartesian").is_some()))
+        {
+            let get = |key: &str| {
+                system
+                    .get(key)
+                    .cloned()
+                    .ok_or_else(|| ConfigError::Invalid(format!("system.{key} is required")))
+            };
+            let rows: [[f64; 3]; 3] = get("lattice_vectors")?.try_into()?;
+            let unit: LatticeUnit = get("lattice_unit")?.try_into()?;
+            Some((
+                Cell::from_user_rows_bohr(rows.map(|r| r.map(|x| unit.to_bohr(x))))?,
+                unit,
+            ))
+        } else {
+            None
+        };
+        if let Some(atoms) = system.get_mut("atoms").and_then(toml::Value::as_array_mut) {
+            for (i, atom) in atoms.iter_mut().enumerate() {
+                for key in ["fractional", "cartesian"] {
+                    if let Some(v) = atom.get_mut(key) {
+                        resolve(
+                            v,
+                            &format!("system.atoms[{i}].{key}"),
+                            Scalar::Float,
+                            records,
+                        )?;
+                    }
+                }
+                if let Some(table) = atom.as_table_mut()
+                    && let Some(v) = table.remove("cartesian")
+                {
+                    if table.contains_key("fractional") {
+                        return Err(ConfigError::Invalid(format!(
+                            "system.atoms[{i}].cartesian: conflicts with fractional"
+                        )));
+                    }
+                    let xyz: [f64; 3] = v.try_into()?;
+                    if !xyz.iter().all(|x| x.is_finite()) {
+                        return Err(ConfigError::Invalid(format!(
+                            "system.atoms[{i}].cartesian must be finite"
+                        )));
+                    }
+                    let (cell, unit) = cartesian_cell.as_ref().unwrap();
+                    let fractional =
+                        cell.cartesian_bohr_to_fractional(xyz.map(|x| unit.to_bohr(x)));
+                    table.insert(
+                        "fractional".into(),
+                        toml::Value::Array(
+                            fractional.into_iter().map(toml::Value::Float).collect(),
+                        ),
+                    );
+                }
             }
-            converted.push(toml::Value::Array(values));
         }
-        table.insert("lattice_vectors".into(), toml::Value::Array(converted));
-        table.insert("lattice_unit".into(), toml::Value::String("bohr".into()));
     }
     Ok(())
 }
@@ -220,8 +378,10 @@ pub struct PreparedInput {
 impl Config {
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
         let mut value: toml::Value = toml::from_str(text)?;
-        normalize_units(&mut value)?;
-        let config: Self = value.try_into()?;
+        let mut records = Vec::new();
+        normalize(&mut value, &mut records)?;
+        let mut config: Self = value.try_into()?;
+        config.input_expressions = records;
         config.validate()?;
         Ok(config)
     }
@@ -247,12 +407,10 @@ impl Config {
         Ok(())
     }
     pub fn cell(&self) -> Result<Cell, ConfigError> {
-        let rows = self.system.lattice_vectors.map(|row| {
-            row.map(|x| match self.system.lattice_unit {
-                LatticeUnit::Angstrom => Bohr::from(Angstrom(x)).0,
-                LatticeUnit::Bohr => x,
-            })
-        });
+        let rows = self
+            .system
+            .lattice_vectors
+            .map(|row| row.map(|x| self.system.lattice_unit.to_bohr(x)));
         Ok(Cell::from_user_rows_bohr(rows)?)
     }
     /// Both CLI commands prepare the grid, so validate also rejects small overrides.
@@ -365,7 +523,7 @@ mod tests {
         assert!(Config::parse(&format!("{EXAMPLE}{optional}")).is_ok());
         assert!(Config::parse(&format!("{EXAMPLE}\n[scf]\n[output]\n")).is_ok());
         for (from, to) in [
-            ("max_iterations = 80", "max_iterations = '80'"),
+            ("max_iterations = 80", "max_iterations = '7/2'"),
             ("mixing = 'linear'", "mixing = 1"),
             (
                 "energy_tolerance_ha = 1e-8",
@@ -375,7 +533,7 @@ mod tests {
                 "density_residual_tolerance = 1e-6",
                 "density_residual_tolerance = false",
             ),
-            ("mixing_beta = 0.3", "mixing_beta = '0.3'"),
+            ("mixing_beta = 0.3", "mixing_beta = '1/0'"),
             ("directory = 'results'", "directory = 1"),
         ] {
             assert!(Config::parse(&format!("{EXAMPLE}{}", optional.replace(from, to))).is_err());

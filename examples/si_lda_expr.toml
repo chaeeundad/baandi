@@ -1,0 +1,22 @@
+[system]
+name = "Si diamond"
+lattice_unit = "angstrom"
+lattice_vectors = [[0.0, "5.43/2", "5.43/2"], ["5.43/2", 0.0, "5.43/2"], ["5.43/2", "5.43/2", 0.0]]
+
+[[system.atoms]]
+species = "Si"
+fractional = [0.0, 0.0, 0.0]
+
+[[system.atoms]]
+species = "Si"
+fractional = ["1/4", 0.25, "1/4"]
+
+[pseudopotentials]
+Si = "/absolute/path/to/Si.UPF"
+
+[basis]
+cutoff = "0.5*60 Ry"
+kpoints = [[0.0, 0.0, 0.0]]
+
+[xc]
+functional = "lda-pz"

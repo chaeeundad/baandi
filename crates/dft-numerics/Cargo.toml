@@ -9,7 +9,12 @@ license.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+mkl = ["dep:dft-mkl", "dft-mkl/mkl"]
+
 [dependencies]
+dft-mkl = { path = "../dft-mkl", optional = true }
 ndarray.workspace = true
 num-complex.workspace = true
 rustfft.workspace = true

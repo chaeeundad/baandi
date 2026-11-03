@@ -499,11 +499,17 @@ dependencies = [
 [[package]]
 name = "dft-mkl"
 version = "0.1.0"
+dependencies = [
+ "dft-numerics",
+ "ndarray",
+ "num-complex",
+]
 
 [[package]]
 name = "dft-numerics"
 version = "0.1.0"
 dependencies = [
+ "dft-mkl",
  "faer",
  "ndarray",
  "ndrustfft",

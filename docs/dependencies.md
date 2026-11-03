@@ -146,3 +146,16 @@ for the covered library files. No xcx source is modified. Pure Rust, edition
 2021, MSRV 1.87; no native/FFI dependency added by this ticket. The independent
 closed-form oracle and discrete variational tests constrain replacement of this
 young, single-author dependency. Existing LDA-PZ code is unchanged.
+
+### P10B optional Intel oneMKL adapter
+
+Accepted by ADR 0019. oneMKL 2026.1 is a user-installed proprietary Intel library
+(Intel Simplified Software License), not a Cargo-fetched, vendored or redistributed
+component. Default builds retain only the existing Rust dependencies and require
+no Intel runtime. `dft-numerics/mkl` enables the local `dft-mkl` adapter, linked
+against LP64 and sequential libraries under MKLROOT. Supported execution target:
+Linux x86-64 (dev08); Apple Silicon supports declaration/type checking only.
+The repository's MIT license is unchanged. No third-party Rust dependency is
+introduced: num-complex and the benchmark's ndarray are existing approved crates.
+Maintenance is Intel's responsibility; compatibility is explicitly tested against
+2026.1 on dev08, pending the protocol in `docs/howto-mkl.md`.

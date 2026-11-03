@@ -70,5 +70,13 @@
     "gates_done": 0,
     "gates_total": 0,
     "note": "밴드/DOS 출력(P8A), 체적 데이터 출력(P8B), XC·다체물리 로드맵(P8D), 기능 격차 조사(P8E), VASP/QE 전체 기능 행렬과 마스터 계획(P8F)을 병렬 진행 중. 결과는 마스터 로드맵으로 통합 예정"
+  },
+  {
+    "id": "P10B",
+    "name": "Optional oneMKL FFT and GEMM backend",
+    "status": "in progress",
+    "gates_done": 2,
+    "gates_total": 7,
+    "note": "Local default verification and feature type/lint checks passed. Five remote acceptance groups remain: ABI/link, FFT/GEMM accuracy, thread identity, SCF/QE agreement, multi-system performance recommendation. Protocol: docs/howto-mkl.md. No native MKL results claimed."
   }
 ]

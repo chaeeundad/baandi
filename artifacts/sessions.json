@@ -1006,5 +1006,23 @@
     "ended_at": null,
     "exit_code": null,
     "note": ""
+  },
+  {
+    "run_id": "P10B-MKL-FFT#1",
+    "task_id": "P10B-MKL-FFT",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 20251,
+    "wrapper_pid": 20236,
+    "session_id": null,
+    "branch": "task/P10B-MKL-FFT",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P10B-MKL-FFT",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P10B-MKL-FFT.md",
+    "report": null,
+    "started_at": "2026-11-03T08:41:23Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

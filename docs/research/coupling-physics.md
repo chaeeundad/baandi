@@ -37,5 +37,15 @@ A periodic plane-wave code represents periodic scalar fields. It cannot honestly
 | time-dependent | changes between outer iterations | no single functional | forces only for the instantaneous frozen environment |
 Rule: an external contribution is reported as part of an energy only if a functional exists whose derivative produced the potential; otherwise it is reported as an unclassified external potential with no variational claim. Forces and stress are reported only when the corresponding derivative is implemented and validated; neither exists yet. Stress additionally needs the basis-set (Pulay) term at fixed cutoff.
 
-## 8. Limits stated up front
+## 8. Additions from the independent review (`coupling-codex-review.md`)
+- `V_eff` is not an electrostatic observable: it contains XC and pseudopotential short-range physics. In this convention the electronic electrostatic potential is `-V_H` (Hartree kernel is a repulsive electron potential energy); the ionic point-charge potential is not minus the whole local pseudopotential and nonlocal projectors have no scalar electrostatic equivalent. Valence-only versus reconstructed sources and core conventions must be defined before exporting a QM field to a solvent solver.
+- The Hartree routine accepts only the electron number density and removes its mean; it is not a signed-charge Poisson API. Put an external charge through a separate solve with `phi_G = 4 pi rho_ext,G / G^2`, `U_G = -phi_G`; the electron-source cross energy is `integral n U_ext` without a factor one half; source self energy and ion-source energy need explicit owners.
+- Point charges are not bandlimited (`rho_G = (1/Omega) sum_a q_a exp(-i G.R_a)`); a smearing or Ewald-type representation is required, and a bare attractive point can pull electrons into the classical region unless the model pseudizes it.
+- A periodic net charge has no unmodified periodic Poisson solution; a background and reference define a different model. The SCF fixes `N = sum Z_I` today, so charged-cell results cannot be advertised.
+- A density-dependent term needs a named functional `F_emb` with `U = delta F_emb / delta n`; `integral n U` is then generally not `F_emb` (a linear response gives a factor one half, a nonlinear reaction field does not). The band-form reconstruction becomes `- integral n_out U_emb[n_in] + F_emb[n_out]`.
+- Time-dependent terms add an explicit work term `integral n dU/dt`; a quasistatic instantaneous surface is the most that can be claimed.
+- Missing observables are typed unavailable, not zero. An empirical potential with no energy primitive can return electronic diagnostics and a partial frozen-field energy, nothing conservative.
+- Electron-only constant shift: eigenvalues `+U0`, energy `+N U0`, no factor one half; electrostatic reference shift `phi0`: electronic `-N phi0`, ionic `+sum Z_I phi0`, QM total `(sum Z_I - N) phi0` (zero for a neutral cell).
+
+## 9. Limits stated up front
 Spin-unpolarized insulating LDA only. A fixed-potential embedding of a molecule or defect is meaningful only inside the supported boundary conditions. A 0 K elastic tensor is not a finite-temperature constitutive law. Distinct electronic solutions at identical coordinates must keep their state labels in any exported training set (ESLE). The validation pseudopotential has unverified provenance (docs/mvp-review.md).

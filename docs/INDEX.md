@@ -22,6 +22,13 @@
 | ESLE: ElectronicState design, compatibility, interfaces | `architecture/electronic-state.md` |
 | ESLE roadmap and review checklist | `roadmap/esle.md` |
 | ESLE independent architecture review (Codex) | `research/esle-codex-review.md` |
+| Coupling directive record | `research/coupling-directive.md` |
+| Coupling physics: signs, energy accounting, boundaries, derivatives | `research/coupling-physics.md` |
+| Coupling independent review (Codex) | `research/coupling-codex-review.md` |
+| Scientific coupling architecture | `architecture/scientific-coupling.md` |
+| Coupling use cases A to G | `architecture/coupling-use-cases.md` |
+| Coupling roadmap | `roadmap/coupling.md` |
+| ADR 0017 coupling commitments | `decisions/0017-coupling-commitments.md` |
 | ADR 0016 ESLE layering | `decisions/0016-esle-layering.md` |
 | Validation evidence, QE comparison and convergence studies | [validation.md](validation.md) |
 | CLI commands, SCF controls, output schemas and exit codes | [cli.md](cli.md) |

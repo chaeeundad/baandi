@@ -51,8 +51,10 @@ TOML + user UPF files
 1. `dft_cli::config::Config::parse` rejects unknown structured fields;
    `Config::prepare` constructs `PreparedInput` with geometry, wavefunction and
    density bases and an FFT grid. Input lattice-vector rows become internal
-   columns; the input cutoff is converted from Ry to Ha. Only Gamma and `lda-pz`
-   are accepted. `validate` and `grid` stop without reading pseudopotentials.
+   columns; the input cutoff is converted from Ry to Ha. K points come from the
+   legacy Gamma list, a Monkhorst-Pack `kgrid` with `kshift`, or an explicit
+   weighted list ([CLI](cli.md), ADR 0013); numeric fields may be written as
+   expressions or unit strings (ADRs 0012, 0014, 0015). Only `lda-pz` is accepted. `validate` and `grid` stop without reading pseudopotentials.
 2. `dft_cli::run::execute` reads the supplied UPF bytes, records SHA-256 hashes,
    and parses through `dft_engine::input::parse_upf`. `dft-upf` wraps the `upf`
    reader with supported-feature validation and unit conversion. See
@@ -142,7 +144,7 @@ The Python suite covers interchange refusals and stored real-bundle regressions.
 Fourier-density evidence is sampled/aggregate only, and the comparison cannot
 assess orthogonality from the exported files.
 
-Later phases intend to add k-point support, a library-backed PBE functional
+Later phases intend to add a library-backed PBE functional (k-point sampling, units and expression inputs are implemented, see ADRs 0011 to 0015)
 ([ADR 0007](decisions/0007-xc-and-special-functions.md)), and GPU backends behind
 numerical interfaces ([ADR 0003](decisions/0003-prefer-general-purpose-libraries.md)).
 These are intentions requiring new implementation and validation, not current

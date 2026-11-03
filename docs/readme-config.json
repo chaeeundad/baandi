@@ -1,0 +1,4 @@
+{
+ "show_qe_performance": false,
+ "note": "The QE performance comparison is hidden from README.md until it is re-measured under matched conditions (docs/performance/final-measurement-protocol.md): the earlier comparison used QE with MKL against a pure Rust BAANDI build and a tighter QE convergence threshold. Set to true after the new measurement."
+}

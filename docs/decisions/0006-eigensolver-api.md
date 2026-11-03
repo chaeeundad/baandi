@@ -200,3 +200,25 @@ them. The optional generalized reduced problem was not attempted. See the
 P7P7 optimization-log entry and stored evidence for measured limits. In
 particular, the default capacity-48 SCF cases do not restart and show no
 operator-application or iteration reduction from the retained change.
+
+## P7PC notes
+
+`BandTolerances` and `Davidson::solve_with_band_tolerances` add an explicit
+strict prefix and buffer residual tolerance. Existing `solve`, recurrence and
+restart entry points still require all bands at the original tolerance. The
+strict prefix must be nonempty and no larger than the requested band count;
+the buffer tolerance must be finite and at least the strict tolerance.
+Selection and stopping use each band's threshold. At the iteration limit a
+true-residual check can return success with all strict bands converged even
+when buffers miss their target. Any unconverged strict band remains an error.
+`EigenSolution::converged` records each band's own target and `buffer` identifies
+the non-strict suffix; residuals remain available for every returned band.
+Dense-oracle flags mean successful dense decomposition (there is no requested
+residual threshold for that API). No spectral detection or tolerance relaxation
+of an occupied or lowest-empty state is introduced.
+
+The further additive `solve_with_band_tolerances_and_certification(..., false)`
+can return recurrence residuals at ordinary convergence, explicitly marked by
+`residuals_certified=false`. Its iteration-limit returns still recompute true
+residuals before accepting any strict band. Default entry points certify, and
+failed certification continues with true correction directions as before.

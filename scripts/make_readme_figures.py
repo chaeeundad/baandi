@@ -71,6 +71,8 @@ def perf_data():
     for key, label in (("gamma", "Gamma, 1 k point"), ("k444s", "4x4x4 shifted, 32 k points")):
         c = d["cases"][key]
         q1, q4 = mean(c["qe_np1"]["wall_s"]), mean(c["qe_np4"]["wall_s"])
+        if "qe_same_window" in d:
+            q1, q4 = d["qe_same_window"][key]["np1"], d["qe_same_window"][key]["np4"]
         last = steps[-1]["cases"][key]
         out.append({"label": label + ", 30 Ry", "nk": c["k_points"], "steps": [(st["label"], st["cases"][key]["wall_s"]) for st in steps],
                     "qe1": q1, "qe4": q4, "diag_frac": last["diag_s"] / last["engine_s"],

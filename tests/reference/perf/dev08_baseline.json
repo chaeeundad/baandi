@@ -210,6 +210,50 @@
      "iters": 11
     }
    }
+  },
+  {
+   "label": "+ O4c (SCF schedule)",
+   "commit": "ec77e7e",
+   "binary_sha256": "606fa756ff191e3ccf6632eed51e62a0dabb99ad7805b5dc5bc6512a5175be9c",
+   "identical_to_baseline": false,
+   "energy_difference_ha_max": 1.51e-13,
+   "cases": {
+    "gamma": {
+     "wall_s": 0.427,
+     "engine_s": 0.428,
+     "diag_s": 0.243,
+     "iters": 10
+    },
+    "k222s": {
+     "wall_s": 1.457,
+     "engine_s": 1.451,
+     "diag_s": 1.071,
+     "iters": 10
+    },
+    "k222": {
+     "wall_s": 2.666,
+     "engine_s": 2.659,
+     "diag_s": 2.027,
+     "iters": 10
+    },
+    "k444s": {
+     "wall_s": 10.606,
+     "engine_s": 10.594,
+     "diag_s": 8.423,
+     "iters": 10
+    }
+   }
   }
- ]
+ ],
+ "qe_same_window": {
+  "note": "QE 7.6 re-measured in the same dev08 batch as the O4c step (3 runs each, /usr/bin/time, fresh directories with unedited copies of the inputs), mean wall seconds; agrees with the earlier measurement within 1.7 percent.",
+  "gamma": {
+   "np1": 0.2133,
+   "np4": 0.17
+  },
+  "k444s": {
+   "np1": 1.8167,
+   "np4": 0.87
+  }
+ }
 }

@@ -700,5 +700,41 @@
     "ended_at": "2026-11-03T05:55:04Z",
     "exit_code": 0,
     "note": ""
+  },
+  {
+    "run_id": "P7P5-ORTHO-NORM#1",
+    "task_id": "P7P5-ORTHO-NORM",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 38474,
+    "wrapper_pid": 38446,
+    "session_id": null,
+    "branch": "task/P7P5-ORTHO-NORM",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P7P5-ORTHO-NORM",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P7P5-ORTHO-NORM.md",
+    "report": null,
+    "started_at": "2026-11-03T06:10:19Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
+  },
+  {
+    "run_id": "P7P6-KPOINT-THREADS#1",
+    "task_id": "P7P6-KPOINT-THREADS",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 38647,
+    "wrapper_pid": 38632,
+    "session_id": null,
+    "branch": "task/P7P6-KPOINT-THREADS",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P7P6-KPOINT-THREADS",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P7P6-KPOINT-THREADS.md",
+    "report": null,
+    "started_at": "2026-11-03T06:10:22Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

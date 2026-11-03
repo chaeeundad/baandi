@@ -96,14 +96,14 @@ Cutoff scan: 7 cutoffs from 20 to 80 Ry; the energy difference to QE is the same
 
 ### Performance (rust-dft optimization steps against QE 7.6, same node)
 
-Same node (Intel Xeon Gold 6230 @ 2.10 GHz, 2 sockets x 20 cores, SMT on (80 logical)), rust-dft on one thread (steps measured with `scripts/bench_scf.py`, median of 3, quiet node) against QE 7.6 on one and on four MPI processes (mean of 3); latest step: commit `3b94d53`. Relayed measurements, see [validation record](docs/validation.md) R7 and the [optimization log](docs/performance/optimization-log.md). QE converges to a much tighter threshold (1e-12) than the rust-dft defaults, so compare iterations and final energies as well as times.
+Same node (Intel Xeon Gold 6230 @ 2.10 GHz, 2 sockets x 20 cores, SMT on (80 logical)), rust-dft on one thread (steps measured with `scripts/bench_scf.py`, median of 3, quiet node) against QE 7.6 on one and on four MPI processes (mean of 3); latest step: commit `ec77e7e`. Relayed measurements, see [validation record](docs/validation.md) R7 and the [optimization log](docs/performance/optimization-log.md). QE converges to a much tighter threshold (1e-12) than the rust-dft defaults, so compare iterations and final energies as well as times.
 
 ![wall time](docs/img/performance.svg)
 
-| Case | before optimization (s) | O1 + O3 (FFT) (s) | + O4a/b (Davidson) (s) | QE 1 process (s) | QE 4 processes (s) | latest vs QE 1 process | speedup vs before | iterations rust-dft / QE | diagonalization share |
-|---|---|---|---|---|---|---|---|---|---|
-| Gamma, 1 k point, 30 Ry (1 k) | 2.28 | 1.22 | 0.71 | 0.217 | 0.173 | 3.3x slower | 3.21x | 11 / 11 | 74% |
-| 4x4x4 shifted, 32 k points, 30 Ry (32 k) | 99 | 47 | 22.4 | 1.82 | 0.88 | 12.3x slower | 4.42x | 11 / 8 | 90% |
+| Case | before optimization (s) | O1 + O3 (FFT) (s) | + O4a/b (Davidson) (s) | + O4c (SCF schedule) (s) | QE 1 process (s) | QE 4 processes (s) | latest vs QE 1 process | speedup vs before | iterations rust-dft / QE | diagonalization share |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Gamma, 1 k point, 30 Ry (1 k) | 2.28 | 1.22 | 0.71 | 0.427 | 0.213 | 0.17 | 2.0x slower | 5.33x | 10 / 11 | 57% |
+| 4x4x4 shifted, 32 k points, 30 Ry (32 k) | 99 | 47 | 22.4 | 10.6 | 1.82 | 0.87 | 5.8x slower | 9.33x | 10 / 8 | 80% |
 
 Cross-platform check: the total energy on this Linux x86 build differs from the macOS Apple Silicon build by +8.88e-15 Ha (Gamma) and +0.00e+00 Ha (4x4x4, shifted).
 

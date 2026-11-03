@@ -495,6 +495,165 @@ therefore this case currently reports failure, not an accepted SCF speedup.
 Benchmark records add `phase_medians_s` and `engine_total_median_s`; the older
 last-run fields and default case selection retain their meanings.
 
+## Pseudopotential registry (P9B)
+
+Offline commands use the embedded metadata-only registry:
+
+```sh
+dft-cli pseudo list [--element Si] [--supported]
+dft-cli pseudo show ID
+dft-cli pseudo verify /outside/file.upf [--id ID]
+dft-cli pseudo path
+dft-cli pseudo suggest SiO2
+dft-cli pseudo suggest Si O
+dft-cli pseudo fetch ID [--yes] [--offline]
+dft-cli inspect-upf /outside/file.upf --json
+```
+
+`pseudo --registry /outside/registry.json COMMAND` selects an explicitly trusted
+registry; validate it first with `python3 -I scripts/pseudo_registry_check.py`.
+Unknown/mismatching identities and fetch failures return nonzero. JSON inspection
+returns exit 0 for a completed report, with `supported_by_engine: false` and
+reasons for unsupported/invalid contents; I/O failures return nonzero. Existing
+text inspection behavior is unchanged. Suggestions require verified identity and
+engine support, rank ascending source wavefunction cutoff (Ry), unknown last, then
+ID; they print XC and reasons and do not select a potential for a calculation.
+
+Fetch accepts only verified, supported entries with verified licenses. It rehashes
+cache hits and checks provenance. Offline misses fail without network. Online
+misses require `--yes` and then fail with the deliberately unavailable P9A transport;
+the hash-verifying publication path is implemented and tested with synthetic data.
+`BAANDI_PSEUDO_DIR` overrides the platform cache; it must be absolute and fetch
+rejects repositories. The initial registry has no verified files. Input `registry:`
+resolution is a future P8G contract, not implemented config syntax.
+
+See [the user guide](howto-pseudopotentials.md) for platform cache paths and
+[source evidence, schema and fetch contracts](architecture/pseudopotential-registry.md).
+## Volumetric output (P8B)
+
+The optional `[output.volumetric]` table accepts required nonempty `quantities`
+(from `density`, `elf`, `hartree`, `local_potential`, `partial_charge`) and `formats`
+(from `cube`, `xsf`, `vasp`, `vti`). Duplicates and unknown keys/values are rejected. Optional
+`kpoint` (default 1) and inclusive `bands = [first,last]` (default `[1,1]`) are
+one-based and apply only to `partial_charge`. Partial charge is unweighted,
+with one unit of integrated probability per selected band. Files are named
+`<quantity>.<format>` in the normal output directory and cannot overwrite
+existing files/symlinks. Raw density output is unchanged.
+
+Normal `run` emits the requested files after the final SCF state is returned.
+The `vasp` format uses `<quantity>.CHGCAR` for density and partial charge,
+`<quantity>.LOCPOT` for the potentials, and `elf.ELFCAR` for ELF; other suffixes
+match the format name. VASP density is multiplied by cell volume, potentials are
+converted to eV, and ELF is dimensionless. VTI contains an Angstrom affine grid
+and explicitly named atomic-unit scalar arrays. Export failures use exit 5.
+The existing dft-physics dependency is now a runtime dependency (approved
+manifest exception); no new package was added.
+See [the viewer guide](howto-volumetric.md) for units, pseudopotential caveats,
+periodic endpoints and the independent Python validator, and
+[ADR 0021](decisions/0021-volumetric-output.md) for numerical and format contracts.
+## Fixed-density bands and DOS (P8A)
+
+```sh
+dft-cli bands input.toml [--output-dir DIR]
+dft-cli dos input.toml [--output-dir DIR]
+python3 -I scripts/plot_bands_dos.py DIR/bands.csv DIR/dos.csv -o DIR/figure.svg
+```
+
+Both commands run a certified SCF then a fixed-density NSCF. `[scf] threads`
+controls both stages. No change is made to `run` output behavior. The new
+commands produce their spectral files, not `run`'s density/restart outputs.
+`bands` requires Python 3 for its ready SVG; the plot script has no third-party
+dependencies. See the complete, non-programmer [guide and measured Si example](howto-bands-dos.md).
+
+Optional `[bands]` keys: exactly one of `preset = "fcc" | "bcc" | "sc"` or
+`points = [{label="Gamma", fractional=[0,0,0]}, ...]`; points may set
+`break_before=true`. Sampling is `points_per_segment` (default 20 **intervals**)
+or `spacing_inv_bohr`, mutually exclusive. Primitive preset geometry must
+match the documented ordered convention up to a proper rigid rotation.
+`nbands`, `eigen_tolerance_ha` (default 1e-8), and `max_iterations` (default 400)
+control the NSCF Davidson solve. At least occupied + 4 bands are required.
+All bands use the strict residual tolerance; degenerate top multiplets can
+need more bands/iterations. Nonconvergence identifies the k index.
+
+Optional `[dos]` keys: `dos_kgrid` (default twice SCF grid dimensions, or 2×2×2
+for legacy Gamma), `sigma_ev` (default 0.1 standard deviation), `spacing_ev`
+(default maximum spacing 0.01), `window_ev = [min,max]` relative to the sampled
+VBM (default spectrum extent plus 8 sigma tails), and the same `nbands`,
+`eigen_tolerance_ha`, `max_iterations` controls. Explicit non-Gamma SCF point
+lists require an explicit DOS grid. Time reversal is always used for DOS;
+weights sum to one and spin multiplicity two is included. New table numeric
+fields currently accept literal TOML numbers, not expression strings.
+
+Band outputs: `bands.csv`, `bands_labels.csv`, `bands.json`, `bands.dat`,
+`bands.dat.gnu`, `bands.agr`, `EIGENVAL`, `bands.svg`. DOS outputs: `dos.csv`,
+`dos.json`, `dos.dat`, `dos.agr`, `DOSCAR`, `dos.svg`. Units, column layouts,
+public format references, and format-specific limitations are in the guide.
+The VBM is the maximum occupied eigenvalue over the computed sampling; JSON
+stores its absolute Hartree offset. No Fermi energy is computed. DOSCAR's
+nominal Fermi slot is a documented VBM-zero placeholder. These are rust-dft
+exports, not calculations by the other codes. Output input-alias/symlink/hardlink
+checks occur before computing. Exit codes are 1 input, 2 UPF, 3 SCF exhaustion,
+4 numerical/noninsulating/NSCF failure, 5 I/O/plot failure. Writes are not a
+multi-file transaction; check exit status before using files.
+## Full input preflight (P8G)
+
+`dft-cli validate input.toml [--json]` now opens and validates the referenced
+UPF files, resolved relative to the input file. This supersedes earlier descriptions
+of `validate` as a geometry-only check. `grid` remains a geometry/grid inspection.
+`run` invokes the identical preflight before constructing an SCF problem or writing
+outputs. No density/checkpoint data is read and no SCF is performed by preflight;
+UPF radial arrays are parsed to establish that the potential is supported.
+
+Existing string entries remain supported. Custom species labels require an explicit
+chemical symbol; symbols are case-sensitive:
+
+```toml
+[pseudopotentials]
+Si = "Si.UPF"
+Si_up = { path = "Si.UPF", element = "Si" }
+# Deliberate identity-mismatch experiment only:
+Fe = { path = "Si.UPF", allow_element_mismatch = true }
+```
+
+The declared element (or chemical-symbol label) must match the UPF header element.
+An override does not change the potential or electron count. Overrides are printed
+and recorded, including permission enabled without a mismatch. Custom tags still
+need a valid explicit element even with the override. Functional compatibility uses
+the engine's existing label matcher and `xc.allow_functional_override` permission.
+
+Checks include cell/coordinates, k-point quadrature, supported UPF data, finite
+positive tolerances, positive iteration and thread counts, mixer name and beta in
+(0,1], positive integral even valence-electron count, occupied bands, and the
+basis/subspace capacity at every resolved k point. A successful preflight does not
+guarantee SCF convergence, a gap, numerical stability, or adequate physical accuracy.
+
+Cutoff rule: warn when a finite positive UPF `wfc_cutoff` (Ry) exceeds
+`basis.ecutwfc_ry`; zero/nonpositive/nonfinite metadata gives no recommendation.
+This is a minimal wavefunction-cutoff advisory, not a density-cutoff or convergence
+certification. The FFT grid and plane-wave counts are enumerated with the same
+basis APIs as the run. Memory is an array-payload estimate for orbitals at all k
+points plus one real and one complex grid, in bytes; scratch, projectors, basis
+storage and allocator overhead are excluded. It is not a peak-memory bound.
+
+Text output includes the UPF composition and labels, atoms, electrons, XC, requested
+k mesh/shift (or Gamma/explicit list) and resolved point count, cutoff in Ry, bands
+and threads. Overrides identify the actual UPF header material.
+Validation errors retain exit 1 (command-line syntax errors use clap exit 2);
+warnings do not change exit 0. JSON mode writes one JSON object to stdout on
+success; errors retain the ordinary stderr diagnostic and nonzero exit.
+
+The version-1 preflight JSON object has `schema_version`, `valid`, string arrays
+`warnings` and `overrides`, `summary`, integer `electrons` and `bands`, integer
+array `plane_waves_per_k`, three-integer `fft_grid`, integer
+`estimated_array_bytes`, and `memory_note`. Successful runs add this object under
+`results.json.preflight`, including runs that exhaust their iteration budget.
+
+Compatibility note: example inputs containing `/absolute/path/to/Si.UPF` require
+substitution of a local supported Si UPF. Tests use generated synthetic Si headers;
+the numerical fixture arrays are unchanged. Missing/unsupported UPFs and functional
+mismatches now fail run's preflight with exit 1, rather than the previous late-stage
+exit 5/2. Zero threads and mixing beta above one are rejected before solver setup.
+Output I/O failures still use exit 5; numerical failures still use exit 4.
 ### Optional Kerker–Pulay density mixing (P10D)
 
 The default remains `mixing = "pulay"`, beta 0.3, six history differences.

@@ -538,6 +538,9 @@ dependencies = [
 [[package]]
 name = "dft-units"
 version = "0.1.0"
+dependencies = [
+ "uom",
+]
 
 [[package]]
 name = "dft-upf"
@@ -2901,6 +2904,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75cd3fb03d5288b3ba9a1ee103ac7e9cbb59f0b03d64f8ddfcc04dd42758a85d"
 dependencies = [
  "tinyvec",
+]
+
+[[package]]
+name = "uom"
+version = "0.38.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a739f83872836c82a4f2527d4e54b37007b3de68cafe7edde95fd695968bf4b9"
+dependencies = [
+ "num-traits",
+ "typenum",
 ]
 
 [[package]]

@@ -30,6 +30,7 @@
 | Coupling use cases A to G | `architecture/coupling-use-cases.md` |
 | Coupling roadmap | `roadmap/coupling.md` |
 | ADR 0017 coupling commitments | `decisions/0017-coupling-commitments.md` |
+| ADR 0018 PBE through xcx (proposal) | `decisions/0018-pbe-via-xcx.md` |
 | ADR 0016 ESLE layering | `decisions/0016-esle-layering.md` |
 | Validation evidence, QE comparison and convergence studies | [validation.md](validation.md) |
 | CLI commands, SCF controls, output schemas and exit codes | [cli.md](cli.md) |

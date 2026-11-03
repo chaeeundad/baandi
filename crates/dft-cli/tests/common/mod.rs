@@ -40,7 +40,11 @@ fn array(v: &[f64]) -> String {
         .join(" ")
 }
 pub fn gaussian() -> String {
-    let (z, rc, nonlocal, points) = (4.0, 1.0, true, 1201);
+    gaussian_with(4.0, 1.0, true, 1201)
+}
+
+#[allow(dead_code)]
+pub fn gaussian_with(z: f64, rc: f64, nonlocal: bool, points: usize) -> String {
     let end = 12.0;
     let r0 = 0.02;
     let dx = (1.0_f64 + end / r0).ln() / (points - 1) as f64;

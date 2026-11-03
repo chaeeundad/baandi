@@ -251,8 +251,22 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         .iter()
         .map(|(label, potential)| SpeciesPotential { label, potential })
         .collect();
-    let problem =
-        ScfProblem::new(&prepared.cell, &atoms, &refs, opts.clone()).map_err(engine_error)?;
+    let points = config.basis.resolve_kpoints().map_err(|e| error(1, e))?;
+    let problem = if config.basis.legacy_gamma() {
+        ScfProblem::new(&prepared.cell, &atoms, &refs, opts.clone())
+    } else {
+        ScfProblem::with_kpoints(
+            &prepared.cell,
+            &atoms,
+            &refs,
+            opts.clone(),
+            &points,
+            dft_engine::OccupationPolicy::Insulator {
+                minimum_gap_hartree: 1e-7,
+            },
+        )
+    }
+    .map_err(engine_error)?;
     let electrons = problem.electron_count();
     let setup = start.elapsed().as_secs_f64();
     let outcome = problem.run_outcome().map_err(engine_error)?;
@@ -283,7 +297,7 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
     }
     let total = start.elapsed().as_secs_f64();
     let energies = energy_json(&r.energy);
-    let result = json!({"schema_version":1,"tool":{"name":"dft-cli","version":env!("CARGO_PKG_VERSION"),"git_commit":env!("DFT_GIT_COMMIT"),"rustc_version":env!("DFT_RUSTC_VERSION")},
+    let mut result = json!({"schema_version":1,"tool":{"name":"dft-cli","version":env!("CARGO_PKG_VERSION"),"git_commit":env!("DFT_GIT_COMMIT"),"rustc_version":env!("DFT_RUSTC_VERSION")},
         "timestamp":timestamp(SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|error(5,e))?.as_secs()),"input_sha256":sha256(&bytes),"species":species,
         "cell":{"lattice_columns_bohr":cell,"volume_bohr3":volume,"reciprocal_columns_inverse_bohr":prepared.cell.reciprocal_columns_inverse_bohr()},
         "atoms":config.system.atoms.iter().map(|a|json!({"species":a.species,"fractional":a.fractional,"cartesian_bohr":prepared.cell.fractional_to_cartesian_bohr(a.fractional)})).collect::<Vec<_>>(),
@@ -297,6 +311,17 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         "threading":{"threads":dft_engine::EXECUTION_THREADS,"backend":"explicit sequential faer and serial FFT"},
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
+    if !config.basis.legacy_gamma() {
+        result["kpoints"] = json!({
+            "grid": config.basis.kgrid, "shift": config.basis.kgrid.map(|_| config.basis.kshift.unwrap_or([0.0;3])),
+            "explicit": config.basis.kgrid.is_none(), "count": r.k_points.len(),
+            "time_reversal": config.basis.time_reversal(),
+            "points": r.k_points.iter().map(|k| json!({"fractional": k.point.fractional,
+                "weight": k.point.weight, "eigenvalues": {"ha": k.solution.eigenvalues,
+                "ev": k.solution.eigenvalues.iter().map(|e| from_hartree(*e, EnergyUnit::ElectronVolt)).collect::<Vec<_>>()},
+                "occupations": r.occupations})).collect::<Vec<_>>()
+        });
+    }
     let mut console = grid_report(&config, &prepared);
     writeln!(
         console,
@@ -335,25 +360,60 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         )
         .unwrap();
     }
-    for (b, (e, f)) in r.eigenvalues.iter().zip(&r.occupations).enumerate() {
+    let count = r.k_points.len();
+    for (i, k) in r.k_points.iter().enumerate() {
+        if count > 10 && i >= 3 && i < count - 3 {
+            if i == 3 {
+                writeln!(console, "... remaining k points: see results.json").unwrap();
+            }
+            continue;
+        }
         writeln!(
             console,
-            "band {}: {:.12} Ha = {:.12} eV; occupation {f}",
-            b + 1,
-            e,
-            from_hartree(*e, EnergyUnit::ElectronVolt)
+            "k{} {:?}; weight {:.12}",
+            i + 1,
+            k.point.fractional,
+            k.point.weight
         )
         .unwrap();
+        for (b, (e, f)) in k
+            .solution
+            .eigenvalues
+            .iter()
+            .zip(&r.occupations)
+            .enumerate()
+        {
+            writeln!(
+                console,
+                "band {}: {:.12} Ha = {:.12} eV; occupation {f}",
+                b + 1,
+                e,
+                from_hartree(*e, EnergyUnit::ElectronVolt)
+            )
+            .unwrap();
+        }
     }
     let occupied = r.occupations.iter().filter(|f| **f > 0.).count();
     if bands > occupied {
-        let gap = r.eigenvalues[occupied] - r.eigenvalues[occupied - 1];
-        writeln!(
-            console,
-            "HOMO/LUMO gap: {gap:.12} Ha = {:.12} eV",
-            from_hartree(gap, EnergyUnit::ElectronVolt)
-        )
-        .unwrap();
+        let mut homo = (0, f64::NEG_INFINITY);
+        let mut lumo = (0, f64::INFINITY);
+        let mut direct = (0, f64::INFINITY);
+        for (i, k) in r.k_points.iter().enumerate() {
+            let h = k.solution.eigenvalues[occupied - 1];
+            let l = k.solution.eigenvalues[occupied];
+            if h > homo.1 {
+                homo = (i + 1, h);
+            }
+            if l < lumo.1 {
+                lumo = (i + 1, l);
+            }
+            if l - h < direct.1 {
+                direct = (i + 1, l - h);
+            }
+        }
+        writeln!(console, "HOMO/LUMO gap: direct {:.12} Ha = {:.12} eV at k{}; indirect {:.12} Ha = {:.12} eV (HOMO k{}, LUMO k{})",
+            direct.1, from_hartree(direct.1, EnergyUnit::ElectronVolt), direct.0,
+            lumo.1-homo.1, from_hartree(lumo.1-homo.1, EnergyUnit::ElectronVolt), homo.0, lumo.0).unwrap();
     }
     writeln!(
         console,

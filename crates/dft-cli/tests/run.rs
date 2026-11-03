@@ -100,6 +100,9 @@ fn verify(large: bool) {
     let run = c.run("", None);
     status(&run, 0);
     let mut first = c.json("results", "results.json");
+    // Exact legacy top-level shape, checked on actual CLI output.
+    assert_eq!(first.as_object().unwrap().len(), 22);
+    assert!(first.get("kpoints").is_none());
     for key in [
         "schema_version",
         "tool",
@@ -381,4 +384,163 @@ fn unit_cutoff_preserves_scf_and_legacy_outputs() {
         .text
         .replace("cutoff='3 unknown'", "cutoff='3 Ry'\necutwfc_ry=3.0");
     status(&c.run("", None), 1);
+}
+
+#[test]
+fn kpoint_inputs_and_errors() {
+    let mut c = Case::new(false);
+    let original = c.text.clone();
+    for (input, message) in [
+        ("kgrid=[0,1,1]", "grid"),
+        ("kgrid=[2,1,1]\nkshift=[0.1,0.0,0.0]", "shift"),
+        ("kpoints=[[0.0,0.0,0.0,0.9]]", "weight"),
+        ("kpoints=[[nan,0.0,0.0,1.0]]", "finite"),
+        ("kpoints=[[0,0,0,inf]]", "weight"),
+        ("kpoints=[[0,0,0,-1]]", "weight"),
+        ("kpoints=[]", "empty"),
+        ("kgrid=[1,1,1]\nkshift=[nan,0,0]", "shift"),
+        ("kpoints=[[0.0,0.0,0.0,1.0]]\nkgrid=[1,1,1]", "both"),
+        ("kpoints=[[0,0,0]]\nkshift=[0,0,0]", "requires"),
+    ] {
+        c.text = original.replace("kpoints=[[0.0,0.0,0.0]]", input);
+        let out = c.run("", None);
+        status(&out, 1);
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains(message),
+            "{input}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let config = Config::parse(&original.replace(
+        "kpoints=[[0.0,0.0,0.0]]",
+        "kgrid=[2,2,2]\nkshift=[0.5,0.5,0.5]",
+    ))
+    .unwrap();
+    let points = config.basis.resolve_kpoints().unwrap();
+    assert_eq!(points.len(), 4);
+    assert!(points.iter().all(|k| k.fractional != [0.0; 3]));
+}
+
+#[test]
+#[ignore = "multiple SCF solves; cargo test --release -p dft-cli --test run kpoint_scf -- --ignored --nocapture"]
+fn kpoint_scf() {
+    let mut c = Case::new(false);
+    c.fixture = c.fixture.replace("z_valence=\"4\"", "z_valence=\"2\"");
+    fs::write(c.dir.join("synthetic.xml"), &c.fixture).unwrap();
+    let original = c.text.clone();
+    let controls = "\n[scf]\nnbands=3\ndensity_residual_tolerance=1e-12\nenergy_tolerance_ha=1e-13\neigen_tolerance=1e-12\nmax_iterations=300\n";
+    let forms = [
+        "kgrid=[2,1,1]\nkshift=[0.5,0,0]\nktime_reversal=false",
+        "kpoints=[[0.25,0,0,0.5],[-0.25,0,0,0.5]]",
+        "kgrid=[2,1,1]\nkshift=[0.5,0,0]",
+        "kpoints=[[0.25,0,0,0.5],[-0.25,0,0,0.5]]\nktime_reversal=true",
+    ];
+    let mut energies = Vec::new();
+    for (i, form) in forms.iter().enumerate() {
+        c.text = original.replace("kpoints=[[0.0,0.0,0.0]]", form);
+        let out = c.run(controls, None);
+        status(&out, 0);
+        let r = c.json("results", "results.json");
+        assert_eq!(r["kpoints"]["count"], if i < 2 { 2 } else { 1 });
+        assert!(String::from_utf8_lossy(&out.stdout).contains("indirect"));
+        let e = r["energies"]["total"]["ha"].as_f64().unwrap();
+        println!("k form {i}: E={e:.16e} Ha");
+        energies.push(e);
+    }
+    for e in &energies {
+        assert!((e - energies[0]).abs() < 1e-10);
+    }
+    c.text = original.clone();
+    status(&c.run("", None), 0);
+    let r = c.json("results", "results.json");
+    let mut keys: Vec<_> = r.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort();
+    let mut expected = vec![
+        "schema_version",
+        "tool",
+        "timestamp",
+        "input_sha256",
+        "species",
+        "cell",
+        "atoms",
+        "cutoff",
+        "basis",
+        "electrons",
+        "bands",
+        "occupations",
+        "xc",
+        "scf",
+        "convergence",
+        "energies",
+        "total_energy",
+        "eigenvalues",
+        "timings",
+        "threading",
+        "memory_estimate",
+        "units",
+    ];
+    expected.sort();
+    assert_eq!(keys, expected);
+    let legacy_energy = r["energies"]["total"]["ha"].as_f64().unwrap();
+    for form in [
+        "kgrid=[1,1,1]",
+        "kpoints=[[0,0,0,1]]",
+        "kpoints=[[0,0,0]]\nkgrid=[1,1,1]",
+    ] {
+        c.text = original.replace("kpoints=[[0.0,0.0,0.0]]", form);
+        status(&c.run("", None), 0);
+        let gamma = c.json("results", "results.json");
+        let energy = gamma["energies"]["total"]["ha"].as_f64().unwrap();
+        println!(
+            "Gamma legacy/new energy difference: {:.16e} Ha",
+            (energy - legacy_energy).abs()
+        );
+        assert_eq!(energy.to_bits(), legacy_energy.to_bits());
+        assert_eq!(gamma["kpoints"]["count"], 1);
+    }
+
+    c.text = original
+        .replace(
+            "kpoints=[[0.0,0.0,0.0]]",
+            "kgrid=[4,4,1]\nktime_reversal=false",
+        )
+        .replace("ecutwfc_ry=3.0", "ecutwfc_ry=5.0");
+    let out = c.run("\n[scf]\nnbands=3\nmax_iterations=1", None);
+    status(&out, 3);
+    let console = String::from_utf8_lossy(&out.stdout);
+    assert!(console.contains("remaining k points: see results.json"));
+    assert_eq!(
+        console
+            .lines()
+            .filter(|line| line.starts_with('k') && line.contains("weight"))
+            .count(),
+        6
+    );
+    assert_eq!(
+        c.json("results", "results.json")["kpoints"]["points"]
+            .as_array()
+            .unwrap()
+            .len(),
+        16
+    );
+    fs::write(
+        c.dir.join("a.xml"),
+        common::gaussian_with(1.0, 0.55, true, 401),
+    )
+    .unwrap();
+    fs::write(
+        c.dir.join("b.xml"),
+        common::gaussian_with(1.0, 1.15, true, 401),
+    )
+    .unwrap();
+    c.text = original.replace("species='Si'", "species='A'")
+        .replace("fractional=[0.13,0.21,0.32]", "fractional=[0.11,0.21,0.17]\n[[system.atoms]]\nspecies='B'\nfractional=[0.39,0.57,0.68]")
+        .replace("Si='synthetic.xml'", "A='a.xml'\nB='b.xml'")
+        .replace("ecutwfc_ry=3.0", "ecutwfc_ry=5.0")
+        .replace("kpoints=[[0.0,0.0,0.0]]", "kgrid=[3,1,1]");
+    let out = c.run(controls, None);
+    status(&out, 4);
+    let message = String::from_utf8_lossy(&out.stderr);
+    println!("gap-less sampling: {message}");
+    assert!(message.contains("gap"));
 }

@@ -54,8 +54,62 @@ pub struct Atom {
 #[serde(deny_unknown_fields)]
 pub struct Basis {
     pub ecutwfc_ry: f64,
-    pub kpoints: Vec<[f64; 3]>,
+    pub kpoints: Option<Vec<Vec<f64>>>,
+    pub kgrid: Option<[usize; 3]>,
+    pub kshift: Option<[f64; 3]>,
+    pub ktime_reversal: Option<bool>,
     pub fft_grid: Option<[usize; 3]>,
+}
+impl Basis {
+    pub fn legacy_gamma(&self) -> bool {
+        self.kgrid.is_none()
+            && self.ktime_reversal.is_none()
+            && self.kpoints.as_deref() == Some(&[vec![0.0, 0.0, 0.0]])
+    }
+    pub fn time_reversal(&self) -> bool {
+        self.ktime_reversal.unwrap_or(self.kgrid.is_some())
+    }
+    pub fn resolve_kpoints(&self) -> Result<Vec<dft_geometry::kpoints::KPoint>, ConfigError> {
+        use dft_geometry::kpoints::{KPoint, monkhorst_pack, reduce_time_reversal, validate};
+        let invalid = |s: String| ConfigError::Invalid(format!("basis k points: {s}"));
+        let gamma = self.kpoints.as_deref() == Some(&[vec![0.0, 0.0, 0.0]]);
+        let points = if let Some(grid) = self.kgrid {
+            if self.kpoints.is_some() && !gamma {
+                return Err(invalid(
+                    "cannot specify both kgrid and kpoints (except legacy Gamma placeholder)"
+                        .into(),
+                ));
+            }
+            monkhorst_pack(grid, self.kshift.unwrap_or([0.0; 3]))
+                .map_err(|e| invalid(e.to_string()))?
+        } else {
+            if self.kshift.is_some() {
+                return Err(invalid("kshift requires kgrid".into()));
+            }
+            if gamma {
+                vec![KPoint {
+                    fractional: [0.0; 3],
+                    weight: 1.0,
+                }]
+            } else {
+                self.kpoints.as_ref().ok_or_else(|| invalid("supply kgrid or kpoints".into()))?.iter().map(|row| {
+                    if row.len() != 4 {
+                        return Err(invalid("explicit kpoints rows require [kx, ky, kz, weight]; only [[0,0,0]] is legacy Gamma".into()));
+                    }
+                    Ok(KPoint { fractional: [row[0], row[1], row[2]], weight: row[3] })
+                }).collect::<Result<Vec<_>, _>>()?
+            }
+        };
+        if points.is_empty() {
+            return Err(invalid("explicit kpoints list must not be empty".into()));
+        }
+        validate(&points).map_err(|e| invalid(e.to_string()))?;
+        if self.time_reversal() {
+            reduce_time_reversal(&points).map_err(|e| invalid(e.to_string()))
+        } else {
+            Ok(points)
+        }
+    }
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -88,7 +142,7 @@ pub struct Output {
     pub directory: Option<String>,
 }
 
-// Resolve additive input forms before deserializing the unchanged public structs.
+// Resolve additive unit forms before deserializing the typed tables.
 fn normalize_units(value: &mut toml::Value) -> Result<(), ConfigError> {
     let invalid = |message: String| ConfigError::Invalid(message);
     for (section, alternate, legacy, target) in [
@@ -177,11 +231,7 @@ impl Config {
         if !self.basis.ecutwfc_ry.is_finite() || self.basis.ecutwfc_ry <= 0. {
             return Err(invalid("basis.ecutwfc_ry must be finite and positive"));
         }
-        if self.basis.kpoints != [[0., 0., 0.]] {
-            return Err(invalid(
-                "basis.kpoints must be exactly [[0.0, 0.0, 0.0]] (Gamma only)",
-            ));
-        }
+        self.basis.resolve_kpoints()?;
         for atom in &self.system.atoms {
             if !atom.fractional.iter().all(|x| x.is_finite()) {
                 return Err(invalid("atomic fractional coordinates must be finite"));
@@ -213,6 +263,8 @@ impl Config {
         let wavefunctions = PlaneWaveBasis::new(&cell, cutoff)?;
         let density = wavefunctions.density_basis(&cell)?;
         let grid = FftGridSpec::new(&wavefunctions, &density, self.basis.fft_grid)?;
+        let first = self.basis.resolve_kpoints()?[0].fractional;
+        let wavefunctions = PlaneWaveBasis::at_k(&cell, cutoff, first)?;
         Ok(PreparedInput {
             cell,
             wavefunctions,

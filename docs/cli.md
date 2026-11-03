@@ -5,9 +5,9 @@ cargo run --offline -p dft-cli -- run input.toml [--output-dir DIR]
 ```
 
 `validate`, `grid` and `inspect-upf` retain their existing behavior. `run` reads
-strict TOML, validates geometry and the Gamma basis, parses each UPF through the
+strict TOML, validates geometry and the basis, parses each UPF through the
 engine input facade, and runs the verified insulating, spin-unpolarized NC LDA-PZ
-engine. Only `kpoints = [[0.0, 0.0, 0.0]]`, `xc.functional = "lda-pz"` and UPF
+engine. The k-point forms below, `xc.functional = "lda-pz"` and UPF
 functional labels whose case-sensitive, ASCII-whitespace-separated tokens are
 exactly `SLA PZ` or `SLA PZ NOGX NOGC` are supported. `NOGX NOGC` explicitly
 specifies no exchange or correlation gradient correction. Leading, trailing and
@@ -280,3 +280,49 @@ The additive results.json schema-version-1 key `total_energy` contains
 same final Hartree total through dft-units. `energies.total` and every other old
 field remain. Energy conversion now uses uom's CODATA 2018 definitions; final
 roundoff of eV output can differ from the historical rounded constant.
+
+## K-point sampling (P7A2)
+
+Under `[basis]`, legacy `kpoints = [[0,0,0]]` keeps its existing engine behavior
+and exact JSON structure. New inputs use either:
+
+```toml
+kgrid = [2, 2, 2]
+kshift = [0.5, 0.5, 0.5] # default [0,0,0]; each 0 or 0.5 in grid steps
+ktime_reversal = true     # grid default
+```
+
+or:
+
+```toml
+kpoints = [[0.25, 0, 0, 0.5], [-0.25, 0, 0, 0.5]]
+ktime_reversal = false    # explicit-list default
+```
+
+Grid dimensions are positive integers. The Gamma-centered convention is
+`(m+s)/n` wrapped to `[-1/2,1/2)`; a half-shifted grid has no Gamma point.
+Weights must be positive, finite and sum to one within 1e-14; no normalization
+is performed. Explicit true applies time reversal to an explicit list. No space
+group is consulted. The only allowed list/grid combination is an exact legacy
+Gamma placeholder alongside a grid, which takes precedence. `kshift` requires a
+grid. Invalid shapes, nonfinite coordinates and ambiguous combinations fail.
+
+New forms require an empty band and the engine's sampled insulating gap
+certificate (minimum 1e-7 Ha and greater than twice eigen tolerance). Failure
+reports the engine cause with exit 4. Legacy Gamma keeps occupied-only support.
+
+New forms add a `kpoints` JSON block: `grid`, `shift` (null for explicit lists),
+`explicit`, `count`, `time_reversal`, and `points`. Each point contains
+`fractional`, `weight`, `eigenvalues: {ha, ev}`, and `occupations`. The old
+flat eigenvalue fields and basis plane-wave count describe the first k point.
+Memory estimates cover one orbital block. Density files are unchanged.
+Console tables show all k points up to 10, otherwise the first and last three;
+results.json always contains all points. Direct and indirect HOMO/LUMO gaps
+include k labels (one-based JSON order). Unconverged gaps are diagnostics.
+
+See [ADR 0013](decisions/0013-kpoint-input.md) for the full schema, compatibility
+rules and QE symmetry flags. `make_qe_input.py` emits automatic grid/shift cards
+or explicit crystal lists, with `expected_kpoints` in its metadata and an
+importable `compare_kpoints` helper for weighted-set verification. The existing
+Gamma-only verifier remains limited to Gamma. See
+[si_lda_kgrid.toml](../examples/si_lda_kgrid.toml) for an input template.

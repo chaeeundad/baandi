@@ -1,6 +1,6 @@
 # Scientific workflow API
 
-Status: **Designed**, P11I, 2026-11-03. Semantic schema v1.0, not executable Rust, Python or an ABI. No interface in this document is implemented. Existing building blocks are identified separately below. Extends [scientific coupling](scientific-coupling.md), [ADR 0016](../decisions/0016-esle-layering.md) and [ADR 0017](../decisions/0017-coupling-commitments.md); decision: [ADR 0021](../decisions/0021-coupling-api-split.md).
+Status: **Designed**, P11I, 2026-11-03. Semantic schema v1.0, not executable Rust, Python or an ABI. No interface in this document is implemented. Existing building blocks are identified separately below. Extends [scientific coupling](scientific-coupling.md), [ADR 0016](../decisions/0016-esle-layering.md) and [ADR 0017](../decisions/0017-coupling-commitments.md); decision: [ADR 0021](../decisions/0027-coupling-api-split.md).
 
 ## Relationship to P11R
 

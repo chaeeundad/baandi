@@ -1,4 +1,4 @@
-# ADR 0021: Split scientific workflows from numerical coupling
+# ADR 0027: Split scientific workflows from numerical coupling
 
 - Date: 2026-11-03
 - Status: proposed; **Designed**, no implementation authorization or completion claim.

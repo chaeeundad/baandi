@@ -88,7 +88,7 @@
    "status": "progress",
    "area": "Speed",
    "feature": "Optional Intel MKL backend for FFT and matrix products, chosen at compile time",
-   "note": "3.0 times faster 25^3 FFT and 2.5 to 4.2 times faster matrix products measured on the test server; default build stays pure Rust."
+   "note": "Selected at compile time; the default build stays pure Rust. Kernel-level measurements on the test server look promising; end-to-end numbers follow."
   },
   {
    "status": "progress",
@@ -177,5 +177,5 @@
   "Metals (no smearing), magnetic systems, most transition-metal oxides (they need nonlinear core correction, spin and often +U).",
   "Forces and relaxations, symmetry reduction, hybrid functionals."
  ],
- "speed": "On the same server and the same number of cores, BAANDI is about 2x slower than Quantum ESPRESSO for a single k point and about 5x slower for 32 k points on one core, and 1.8x slower at 16 cores for 32 k points (measured; see Performance below). These numbers are for the pure Rust build; a coherent re-measurement with the Intel MKL backend on the same server follows the P10 work (protocol: docs/performance/final-measurement-protocol.md)."
+ "speed": "Performance comparisons with other codes are being re-measured under matched conditions (same server, same numerical libraries, same accuracy class) and will be added here; no speed claim is made until then."
 }

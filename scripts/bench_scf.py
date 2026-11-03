@@ -63,29 +63,31 @@ def sha256(path):
     return h.hexdigest()
 
 
-def case_input(upf, key, threads=None):
+def case_input(upf, key, threads=None, extra_toml=()):
     _, ecut, kblock = CASES[key]
     text = TEMPLATE.format(upf=upf, ecut=ecut, kblock=kblock)
     if key == "si8":
         text = text.replace('Si diamond primitive', 'Si diamond conventional')
         text = text.replace('[[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]',
                             '[[5.43, 0.0, 0.0], [0.0, 5.43, 0.0], [0.0, 0.0, 5.43]]')
-        extra = ""
-        for site in [(0, .5, .5), (.5, 0, .5), (.5, .5, 0),
-                     (.25, .75, .75), (.75, .25, .75), (.75, .75, .25)]:
-            extra += f'[[system.atoms]]\nspecies = "Si"\nfractional = {list(site)}\n\n'
-        text = text.replace('[pseudopotentials]', extra + '[pseudopotentials]')
+        start = text.index('[[system.atoms]]')
+        end = text.index('[pseudopotentials]')
+        atoms = ""
+        for site in [(0, 0, 0), (0, .5, .5), (.5, 0, .5), (.5, .5, 0),
+                     (.25, .25, .25), (.25, .75, .75), (.75, .25, .75), (.75, .75, .25)]:
+            atoms += f'[[system.atoms]]\nspecies = "Si"\nfractional = {list(site)}\n\n'
+        text = text[:start] + atoms + text[end:]
     if threads is not None:
         text = text.replace("[scf]", f"[scf]\nthreads = {threads}")
-    return text
+    return text + "\n".join(extra_toml) + ("\n" if extra_toml else "")
 
 
-def run_case(binary, upf, key, repeats, threads=None):
+def run_case(binary, upf, key, repeats, threads=None, extra_toml=()):
     label, ecut, kblock = CASES[key]
     walls, phases, energies, hashes, engines, last = [], [], [], [], [], None
     with tempfile.TemporaryDirectory() as td:
         toml = os.path.join(td, "input.toml")
-        text = case_input(upf, key, threads)
+        text = case_input(upf, key, threads, extra_toml)
         open(toml, "w").write(text)
         for i in range(repeats):
             out = os.path.join(td, f"out{i}")
@@ -104,7 +106,14 @@ def run_case(binary, upf, key, repeats, threads=None):
             raise RuntimeError(f"{key}: repeated runs were not identical")
         r = json.load(open(os.path.join(last, "results.json")))
         ph = r["timings"]["phases"]
-        return {"label": label, "wall_s": walls, "wall_median_s": statistics.median(walls),
+        history = r["convergence"]["history"]
+        certificates = [h["fixed_point_certificate"] for h in history if h.get("fixed_point_certificate")]
+
+        return {"operator_applications": sum(h["operator_applications"] for h in history),
+                "davidson_iterations": sum(h["davidson_iterations"] for h in history),
+                "certificate_applications": sum(h["operator_applications"] for h in certificates),
+                "certificate_iterations": sum(h["davidson_iterations"] for h in certificates),
+                "label": label, "wall_s": walls, "wall_median_s": statistics.median(walls),
                 "engine_total_s": r["timings"]["engine_total_s"], "phases_s": ph,
                 "engine_total_median_s": statistics.median(engines),
                 "phase_medians_s": {key: statistics.median(p[key] for p in phases) for key in ph},
@@ -119,6 +128,7 @@ def main(argv):
     ap.add_argument("--cases", default="gamma,k222")
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--threads", type=int, help="total thread budget (0 means 1); omitted preserves the input default")
+    ap.add_argument("--extra-toml", action="append", default=[], help="append TOML lines (initially in [scf]); repeatable")
     ap.add_argument("--baseline")
     ap.add_argument("--record")
     ap.add_argument("--require-identical", action="store_true", help="fail unless the density is bit-identical to the baseline")
@@ -138,11 +148,13 @@ def main(argv):
     print(f"{'case':8} {'wall med (s)':>13} {'engine (s)':>11} {'diag (s)':>9} {'iters':>5} {'dE vs base (Ha)':>16} {'density':>10} {'speedup':>8}")
     for k in keys:
         try:
-            r = run_case(a.binary, a.upf, k, a.repeats, a.threads)
+            r = run_case(a.binary, a.upf, k, a.repeats, a.threads, a.extra_toml)
         except RuntimeError as e:
             print(e)
             return 3
         result[k] = r
+        if k == "si8" and abs(r["total_energy_ha"] - (-31.3218036010316)) > 1e-9:
+            status = 5
         b = base.get(k)
         de = abs(r["total_energy_ha"] - b["total_energy_ha"]) if b else None
         ident = (r["density_sha256"] == b["density_sha256"]) if b else None

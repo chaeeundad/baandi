@@ -478,3 +478,151 @@ fn subspace_multipliers_preserve_lowest_eigenpairs() {
         assess("capacity", &op, &s, &dense.eigenvalues, cfg.tolerance);
     }
 }
+
+#[test]
+fn degenerate_buffer_policy_and_iteration_limit() {
+    let n = 40;
+    let mut spectrum = vec![-3.0, -2.0, -1.0];
+    spectrum.extend((3..n).map(|i| {
+        if i < 9 {
+            1.0
+        } else {
+            1.0 + 10f64.powf((i - 9) as f64 / 7.0 - 6.0)
+        }
+    }));
+    let op = Diagonal(spectrum);
+    let mut initial = ComplexMatrix::zeros(n, 4).unwrap();
+    for j in 0..3 {
+        initial[(j, j)] = Complex64::new(1.0, 0.0);
+    }
+    initial[(3, 3)] = Complex64::new(1.0, 0.0);
+    for i in 4..n {
+        initial[(i, 3)] = Complex64::new(1e-6, 0.0);
+    }
+    let cfg = Davidson {
+        bands: 4,
+        tolerance: 1e-12,
+        max_iterations: 400,
+        max_subspace: 6,
+        block_size: 4,
+        seed: 1,
+    };
+    let old = cfg.solve(&op, Some(&initial), None);
+    println!(
+        "cluster old: {:?}",
+        old.as_ref().map(|s| (s.iterations, &s.residuals))
+    );
+    let new = cfg
+        .solve_with_band_tolerances(
+            &op,
+            Some(&initial),
+            None,
+            BandTolerances {
+                strict_bands: 3,
+                buffer_tolerance: 1e-5,
+            },
+        )
+        .unwrap();
+    println!("cluster new: {} {:?}", new.iterations, new.residuals);
+    assert!(matches!(
+        old,
+        Err(SolverError::NotConverged {
+            iterations: 400,
+            ..
+        })
+    ));
+    assert_eq!(new.buffer, [false, false, false, true]);
+    assert!(new.converged.iter().all(|&c| c));
+    assert!(new.residuals[..3].iter().all(|&r| r <= cfg.tolerance));
+    assert!(new.residuals[3] > cfg.tolerance && new.residuals[3] <= 1e-5);
+    let (_, actual) = residual(&op, &new.eigenvectors, &new.eigenvalues).unwrap();
+    assert_eq!(actual, new.residuals);
+    assert!(new.residuals_certified);
+    let intermediate = cfg
+        .solve_with_band_tolerances_and_certification(
+            &op,
+            Some(&initial),
+            None,
+            BandTolerances {
+                strict_bands: 3,
+                buffer_tolerance: 1e-5,
+            },
+            false,
+        )
+        .unwrap();
+    assert!(!intermediate.residuals_certified);
+    assert_eq!(intermediate.eigenvectors, new.eigenvectors);
+    assert_eq!(intermediate.eigenvalues, new.eigenvalues);
+    assert_eq!(
+        intermediate.operator_applications + cfg.bands,
+        new.operator_applications
+    );
+
+    let limited = Davidson {
+        max_iterations: 1,
+        ..cfg.clone()
+    };
+    let result = limited
+        .solve_with_band_tolerances(
+            &op,
+            Some(&initial),
+            None,
+            BandTolerances {
+                strict_bands: 3,
+                buffer_tolerance: cfg.tolerance,
+            },
+        )
+        .unwrap();
+    assert_eq!(result.converged, [true, true, true, false]);
+    assert_eq!(result.iterations, 1);
+    let limit_uncertified = limited
+        .solve_with_band_tolerances_and_certification(
+            &op,
+            Some(&initial),
+            None,
+            BandTolerances {
+                strict_bands: 3,
+                buffer_tolerance: cfg.tolerance,
+            },
+            false,
+        )
+        .unwrap();
+    assert!(limit_uncertified.residuals_certified);
+    assert_eq!(limit_uncertified, result);
+
+    assert!(matches!(
+        limited.solve_with_band_tolerances(
+            &op,
+            Some(&initial),
+            None,
+            BandTolerances {
+                strict_bands: 4,
+                buffer_tolerance: cfg.tolerance
+            }
+        ),
+        Err(SolverError::NotConverged { .. })
+    ));
+    for policy in [
+        BandTolerances {
+            strict_bands: 0,
+            buffer_tolerance: 1e-5,
+        },
+        BandTolerances {
+            strict_bands: 5,
+            buffer_tolerance: 1e-5,
+        },
+        BandTolerances {
+            strict_bands: 3,
+            buffer_tolerance: f64::NAN,
+        },
+        BandTolerances {
+            strict_bands: 3,
+            buffer_tolerance: 1e-14,
+        },
+    ] {
+        assert!(matches!(
+            cfg.solve_with_band_tolerances(&op, None, None, policy),
+            Err(SolverError::InvalidParameter(_))
+        ));
+    }
+}

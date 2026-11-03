@@ -45,3 +45,15 @@
 
 Conventions: docs are English; one fact lives in one place and others link to it; an ADR is never edited after acceptance, supersede it with a new one; numbers recorded as references must carry command, version, input and SHA-256.
 | Agent-Native runtime directive review and ticket mapping (P11 series) | `research/agent-native-directive-review.md`, `../tickets/P11-COMMON.md` |
+| Agent-native runtime placement, step semantics and overlap decisions | [architecture/agent-native-runtime.md](architecture/agent-native-runtime.md) |
+| Runtime snapshots, events and unified ESLE/checkpoint envelope | [architecture/scientific-state-api.md](architecture/scientific-state-api.md) |
+| Runtime lifecycle, policies, audit and determinism | [architecture/runtime-control.md](architecture/runtime-control.md) |
+| ASE, MLIP, provenance and workflow integration proposals | [architecture/scientific-integration.md](architecture/scientific-integration.md) |
+| Self-healing SCF diagnostic definitions | [research/self-healing-scf.md](research/self-healing-scf.md) |
+| External numerical solver contracts (design) | [research/external-solver-contracts.md](research/external-solver-contracts.md) |
+| Runtime equivalence acceptance protocol | [validation/runtime-equivalence.md](validation/runtime-equivalence.md) |
+| Intervention threat model and safety gates | [validation/intervention-safety.md](validation/intervention-safety.md) |
+| Three-arm self-healing SCF demo protocol | [demos/self-healing-scf.md](demos/self-healing-scf.md) |
+| ADR 0022 agent-native runtime commitments | [decisions/0022-agent-native-runtime.md](decisions/0022-agent-native-runtime.md) |
+| Runtime implementation sequencing and acceptance gates | [roadmap/runtime.md](roadmap/runtime.md) |
+| Classic, Observed and AgentControlled modes; switch rules and path separation | [architecture/execution-modes.md](architecture/execution-modes.md) |

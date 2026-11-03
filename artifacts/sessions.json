@@ -562,17 +562,17 @@
     "task_id": "P9R-COUPLING-REVIEW",
     "mode": "new",
     "role": "reviewer",
-    "status": "running",
+    "status": "done",
     "codex_pid": 95749,
     "wrapper_pid": 95734,
-    "session_id": null,
+    "session_id": "01a19fa7-952d-7232-acb5-85722bad77dd",
     "branch": "task/P9R-COUPLING-REVIEW",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P9R-COUPLING-REVIEW",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P9R-COUPLING-REVIEW.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P9R-COUPLING-REVIEW/report.json",
     "started_at": "2026-11-03T04:25:22Z",
-    "ended_at": null,
-    "exit_code": null,
+    "ended_at": "2026-11-03T04:31:47Z",
+    "exit_code": 0,
     "note": ""
   }
 ]

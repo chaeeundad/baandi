@@ -1,4 +1,6 @@
 //! Strict TOML input; conversion to atomic units happens only at this boundary.
+#[path = "preflight.rs"]
+pub mod preflight;
 use dft_basis::{BasisError, FftGridSpec, PlaneWaveBasis};
 use dft_geometry::{Cell, CellError};
 use dft_units::{Angstrom, Bohr, Hartree, Rydberg};
@@ -23,6 +25,8 @@ pub enum ConfigError {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(skip)]
+    pub species_identity: BTreeMap<String, preflight::Identity>,
+    #[serde(skip)]
     pub input_expressions: Vec<InputExpression>,
     pub system: System,
     pub pseudopotentials: BTreeMap<String, PathBuf>,
@@ -30,6 +34,8 @@ pub struct Config {
     pub xc: Xc,
     pub scf: Option<Scf>,
     pub output: Option<Output>,
+    pub bands: Option<Bands>,
+    pub dos: Option<Dos>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -491,8 +497,10 @@ impl Config {
         let mut value: toml::Value = toml::from_str(text)?;
         let mut records = Vec::new();
         normalize(&mut value, &mut records)?;
+        let identities = preflight::normalize(&mut value)?;
         let mut config: Self = value.try_into()?;
         config.input_expressions = records;
+        config.species_identity = identities;
         config.validate()?;
         Ok(config)
     }
@@ -713,4 +721,36 @@ mod tests {
         }
         assert!(Config::parse(EXAMPLE).unwrap().scf.is_none());
     }
+}
+
+/// Optional fixed-density band path, with raw numeric values in the stated units.
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Bands {
+    pub preset: Option<String>,
+    pub points: Option<Vec<PathPoint>>,
+    pub points_per_segment: Option<usize>,
+    pub spacing_inv_bohr: Option<f64>,
+    pub nbands: Option<usize>,
+    pub eigen_tolerance_ha: Option<f64>,
+    pub max_iterations: Option<usize>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PathPoint {
+    pub label: String,
+    pub fractional: [f64; 3],
+    #[serde(default)]
+    pub break_before: bool,
+}
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Dos {
+    pub dos_kgrid: Option<[usize; 3]>,
+    pub sigma_ev: Option<f64>,
+    pub spacing_ev: Option<f64>,
+    pub window_ev: Option<[f64; 2]>,
+    pub nbands: Option<usize>,
+    pub eigen_tolerance_ha: Option<f64>,
+    pub max_iterations: Option<usize>,
 }

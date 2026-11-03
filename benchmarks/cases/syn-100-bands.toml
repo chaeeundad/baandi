@@ -1,0 +1,16 @@
+# Flat TOML: one JSON-compatible value per line. Lengths in Bohr.
+id = "syn-100-bands"
+purpose = "16 Z=12 ions, 96 occupied plus 4 buffer bands; large nonlocal workload"
+system_class = "large-bands"
+tier = "long"
+potential = "synthetic"
+lattice = [[16, 0, 0], [0, 16, 0], [0, 0, 16]]
+atoms = [[0.05, 0.1, 0.075], [0.05, 0.1, 0.325], [0.05, 0.1, 0.575], [0.05, 0.1, 0.825], [0.05, 0.6, 0.075], [0.05, 0.6, 0.325], [0.05, 0.6, 0.575], [0.05, 0.6, 0.825], [0.55, 0.1, 0.075], [0.55, 0.1, 0.325], [0.55, 0.1, 0.575], [0.55, 0.1, 0.825], [0.55, 0.6, 0.075], [0.55, 0.6, 0.325], [0.55, 0.6, 0.575], [0.55, 0.6, 0.825]]
+cutoff_ry = 8
+timeout_s = 900
+deterministic = true
+valence = 12
+channels = [0, 1, 2]
+shape = "gaussian"
+radius = 0.8
+nbands = 100

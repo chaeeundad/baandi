@@ -16,3 +16,6 @@ pub mod functional;
 pub use functional::Functional;
 
 mod band_density;
+
+mod nscf;
+pub use nscf::*;

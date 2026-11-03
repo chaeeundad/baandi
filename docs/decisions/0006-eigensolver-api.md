@@ -153,3 +153,20 @@ cargo test --offline --release -p dft-solvers -- --ignored --nocapture
 Gate JSON and session registry files are outside this ticket's owned paths;
 the final structured report supplies measured evidence for the reviewer to
 reconcile. Changes remain uncommitted for Claude review.
+
+## P7P3 implementation notes
+
+Davidson now retains unchanged basis products and applies only appended columns.
+Reorthonormalized restarts invalidate the cache and receive a fresh block apply.
+Bitwise equivalence of this caching step requires column-independent rounding
+in `apply_block`, as in the default implementation and the Hamiltonian; a custom
+GEMM implementation may select different arithmetic for different block widths.
+The additive `solve_with_recurrence(..., bool)` separates cached true-residual
+and cached recurrence-residual modes without changing Davidson's fields or the
+existing solve signature. Recurrence convergence is always certified by one true
+block application; failed certification records the actual maximum in history
+and uses actual residual directions to continue. `EigenSolution` additionally
+reports vector-column `operator_applications`, including certification (dense
+solutions count unit-column construction and residual applications).
+Stage 2 is the default after passing the P7P3 SCF energy (1e-12 Ha), fixed-point
+certificate and workspace gates; stage 1 remains selectable with `false`.

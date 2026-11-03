@@ -96,6 +96,164 @@ The UPF was read only from the supplied external path, never copied or sent.
 These are rust-dft baseline comparisons, not new QE references. Changes are
 left uncommitted for Claude's review and acceptance.
 
+## 2026-11-03: P7P3 / O4a and O4b Davidson product reuse
+
+Pre-change evidence (recorded before implementation): the supplied post-O1
+profile above attributes 75.4% to FFTs and 4.8% to Hamiltonian/nonlocal work.
+The supplied application-count analysis identifies repeated whole-basis and
+Ritz applications. Starting worktree commit: `11cd2f1280cf402abc450bc86b31892ae389ce9b`.
+Use this existing profile, plus a fresh local pre-change benchmark below;
+no new sampling profile is claimed. Scope excludes FFT/Hamiltonian changes.
+
+Implementation: stage 1 preserves products of unchanged columns. A fixed-capacity
+cache and correction-output blocks of widths 1 through min(block_size,
+capacity-bands) are allocated once per solve. Cache extraction replaces the
+previous per-iteration application-result allocation; append application itself
+adds no allocations. Restart products are computed from the reorthonormalized
+basis, never rotated from old products. Existing allocation-owning GEMM, EVD,
+orthonormalization and residual APIs remain; this is not an allocation-free
+solver. Extra persistent storage is n*capacity plus n*b*(b+1)/2 complex entries.
+Custom operator implementations remain responsible for their own allocations.
+
+Stage 2 uses `(H V) C` for residuals, followed by a true block application when
+all recurrence norms pass. Failed certification replaces that history entry
+with the true maximum and continues with true residual corrections. The
+additive `solve_with_recurrence(..., false)` selects stage 1, while `true`
+selects stage 2. No Davidson fields, solver parameters or tolerances changed.
+The result's additive `operator_applications` counts vector columns, not block
+calls. No timers, logging or I/O remain in production solver code.
+
+Timing evidence: local release builds, sequential execution, same Apple Silicon
+host, three repeats per case. The pre-change local run and stage 1 both passed
+`--require-identical` against the immutable baseline. Stored data, wall samples,
+energies, hashes, UPF hash and detailed comparisons are in
+`crates/dft-solvers/benches/p7p3-evidence.json`. No UPF was copied. These are
+rust-dft comparisons, not QE reference measurements. Other jobs may share the
+machine; these observations are not quiet-machine speedup claims. The initial
+baseline run overlapped initial test compilation; acceptance timing must be
+remeasured by Claude on a quiet machine.
+
+| Stage 1 case | Local before wall median (s) | Stage 1 wall median (s) | Before engine / diag (s) | Stage 1 engine / diag (s) | SCF iterations | Energy delta vs baseline (Ha) | Density |
+| --- | ---: | ---: | --- | --- | --- | ---: | --- |
+| Gamma | 0.938335083 | 0.490146708 | 0.926858292 / 0.867829084 | 0.483907792 / 0.425435664 | 11 / 11 | 0 | identical |
+| k222s | 4.828421834 | 2.224247959 | 5.052977416 / 4.915385669 | 2.217291375 / 2.086770875 | 11 / 11 | 0 | identical |
+| k222 | 10.036017375 | 4.273151833 | 10.030164334 / 9.774817584 | 4.269255958 / 4.045469958 | 11 / 11 | 0 | identical |
+
+| Stage 2 case | Stage 1 wall median (s) | Stage 2 wall median (s) | Stage 2 engine / diag (s) | SCF iterations | Absolute energy delta vs stage 1 / baseline (Ha) | Density |
+| --- | ---: | ---: | --- | --- | ---: | --- |
+| Gamma | 0.490146708 | 0.338361042 | 0.333877416 / 0.275249874 | 11 / 11 | 7.993605777301127e-15 | differs |
+| k222s | 2.224247959 | 1.426848916 | 1.433234168 / 1.301882875 | 11 / 11 | 8.881784197001252e-16 | differs |
+| k222 | 4.273151833 | 2.733060250 | 2.712224958 / 2.488674375 | 11 / 11 | 8.881784197001252e-16 | differs |
+
+Engine/diagonalization times are the last repeat, per benchmark script behavior.
+Application counts include final fixed-point certification solves:
+
+| Case | Solves | Old applications | Stage 1 | Stage 2 | Old / stage 1 | Davidson iterations stage 1 / stage 2 |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Gamma | 12 | 3281 | 1497 | 833 | 2.19172 | 95 / 95 |
+| k222s | 48 | 17037 | 7351 | 3863 | 2.31764 | 484 / 484 |
+| k222 | 96 | 33490 | 14309 | 7437 | 2.34049 | 955 / 955 |
+
+SCF count collection used separate, disposable measurement builds: at each
+successful solve, emit the result counter; for stage 1 also sum
+`basis.cols() + bands` over iterations to reconstruct the old count. This sum
+is exact for the old implementation on the identical trajectory; it is not a
+separately instrumented pre-change SCF run. The test-only Counted wrapper
+independently verifies both old and new actual counts. Measurement logging was
+removed before final builds and is absent from all timing binaries. Detail
+runs confirmed the same energies and density hashes as the timing runs.
+
+| Stage 2 vs stage 1 | Max eigenvalue delta (Ha), all k points | Final max-residual delta (Ha) | Max pointwise density delta (electrons/Bohr^3) | Certificate density residual (Bohr^-3/2) | Certificate occupied eigenvalue change (Ha) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Gamma | 5.051514762044462e-15 | 2.4567275272909227e-14 | 1.27675647831893e-15 | 5.584022603033996e-10 | 6.126193441424732e-9 |
+| k222s | 2.3869795029440866e-15 | 1.612687882389246e-16 | 3.608224830031759e-16 | 2.422697054270338e-10 | 7.370652144178536e-10 |
+| k222 | 6.217248937900877e-15 | 1.7932287464015435e-15 | 2.914335439641036e-16 | 2.767961299901316e-10 | 1.1329614468813531e-9 |
+
+All three detail runs report converged and retain their fixed-point certificates.
+Synthetic oracle tests compare every floating-point bit of eigenvalues, vectors,
+residuals and histories, plus iteration counts, to the frozen old implementation:
+
+| Synthetic case (dimensionless) | Old / stage 1 / stage 2 applications | Stage 1 / stage 2 iterations | Stage 2 max eigenvalue delta vs stage 1 |
+| --- | --- | --- | ---: |
+| N=36 random dense, decaying diagonal | 216 / 72 / 40 | 9 / 9 | 6.21725e-15 |
+| N=18 restart, deficient guess, capacity 9 | 424 / 284 / 161 | 42 / 42 | 1.77636e-15 |
+| N=48 sparse kinetic, preconditioned | 280 / 128 / 72 | 15 / 15 | 1.21969e-13 |
+| N=8 threefold degeneracy | 26 / 17 / 11 | 3 / 3 | 1.11022e-15 |
+
+The stale-product mock first returns an identity product, then diag(2,3).
+A zero recurrence residual is rejected by a true residual of 1. With a one-step
+budget it returns NotConverged; with sufficient budget it converges at step 3,
+history `[1, 1, 2.220446049250313e-16]`, 7 applications. All returned stage 2
+synthetic eigenpairs are independently compared to dense solves and reapplied.
+
+Rejected ideas and limitations: deriving restart products by rotation changes
+rounding and was not used. A first oracle attempt using the existing test GEMM
+operator failed bitwise comparison: GEMM changes its kernel with block width.
+The bitwise oracle therefore uses genuinely column-independent dense products,
+as required by the ticket's premise; custom block implementations with
+width-dependent rounding cannot claim bitwise equivalence. Existing GEMM-based
+tests remain unchanged and test numerical accuracy. No full-workspace
+allocation rewrite, tolerance schedule, parameter, initial-guess or FFT change
+was attempted. README, artifact JSON, tickets and baseline are explicitly outside
+ownership and were not changed. Changes remain uncommitted.
+
+Acceptance: stage 2 is enabled by default. All three SCF energy differences are
+below 1e-12 Ha, certificates remain present, and all workspace convergence gates
+pass. Stage 1 remains explicitly selectable for bitwise comparisons.
+
+Verification commands and real exit codes:
+
+- `cargo build --release -p dft-cli`: 0 for pre-change, stage 1 and stage 2.
+- `cargo test -p dft-solvers product_tests -- --nocapture`: initially 101 for
+  the width-dependent GEMM oracle described above; corrected column-independent
+  oracle included in the following passing run.
+- `cargo test -p dft-solvers -- --nocapture`: 0, 10 passed / 2 ignored,
+  0.36 s test execution (stage 1 default at this point).
+- `cargo test --release -p dft-solvers product_tests -- --nocapture`: 0,
+  both oracle/certification tests pass (0.01 s, both stages explicitly selected).
+- `scripts/check.sh dft-solvers`: 0, build/test/fmt/clippy all PASS (stage 2).
+- `scripts/check.sh`: 0, build/test/fmt/clippy all PASS (stage 2).
+- `cargo test --release -p dft-solvers -- --ignored --nocapture`: 0, both
+  release numerical tests pass in 3.78 s (stage 2). N=200 max eigenvalue error
+  6.039613253960852e-14, residual 9.632521390673855e-11, 94 iterations.
+  N=300 preconditioned residual 1.4413223917690354e-11 / 52 iterations;
+  unpreconditioned residual 9.904873174714745e-10 / 2269 iterations.
+  Synthetic quantities are dimensionless.
+- `python3 /tmp/p7p3-details.py stage1 /tmp/p7p3-count-stage1-cli` and
+  corresponding `stage2 /tmp/p7p3-count-stage2-cli`: both 0; one independent
+  run per case retaining results/density for the detailed comparison above.
+  These are temporary measurement helpers, not repository entry points.
+- `git diff --check`: 0.
+
+Exact SCF benchmark invocation (run separately with pre-change, stage 1 and
+stage 2 default; all three exited 0):
+
+```sh
+python3 -I scripts/bench_scf.py \
+  --binary /Users/mino/Develop/rust-dft-wt/P7P3-DAVIDSON-HV/target/release/dft-cli \
+  --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF \
+  --cases gamma,k222s,k222 --repeats 3 \
+  --baseline docs/performance/baseline.json \
+  --require-identical --record /tmp/p7p3-stage1.json
+```
+
+For pre-change use `--record /tmp/p7p3-before.json`; for stage 2 remove
+`--require-identical` and use `--record /tmp/p7p3-stage2.json`. To reproduce
+stage 1 through the CLI, temporarily select `false` in the delegating `solve`
+method and rebuild; the retained default selects `true`. No CLI or engine
+source changes are necessary. The final release CLI is rebuilt without any
+measurement instrumentation. No new dependency or unsafe code was introduced.
+
+Final review reused the already-extracted Ritz coefficients for the residual
+GEMM, eliminating a duplicate coefficient-block allocation. After this cleanup,
+`scripts/check.sh`, the release product tests and the release CLI rebuild all
+again exited 0. A final three-repeat benchmark with the same command above,
+`--baseline /tmp/p7p3-stage2.json --require-identical --record
+/tmp/p7p3-final.json`, exited 0: all three energies and density hashes are exactly
+identical to the measured stage 2 run. Final medians were 0.345, 1.487 and
+2.736 s; the short release product-test build overlapped its first Gamma repeat.
+These final verification samples are also stored in the evidence JSON.
+
 ## 2026-11-03: O3 / P7P2-PRUNED-FFT — wavefunction lane pruning
 
 Pre-change evidence: supplied O1 profile (5020 samples) attributes 75.4% to

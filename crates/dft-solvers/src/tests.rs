@@ -379,3 +379,6 @@ fn dependent_corrections_and_shape_errors() {
     let result = config(1, 1).solve(&op, None, None).unwrap();
     assess("scalar", &op, &result, &[3.0], 1e-12);
 }
+
+#[path = "product_tests.rs"]
+mod product_tests;

@@ -1,0 +1,332 @@
+{
+  "start_commit": "11cd2f1280cf402abc450bc86b31892ae389ce9b",
+  "host": "macOS Apple Silicon; shared machine; release sequential",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "benchmarks": {
+    "before": {
+      "note": "",
+      "binary": "dft-cli",
+      "machine_note": "record host and commit in the note",
+      "energy_tolerance_ha": 1e-12,
+      "cases": {
+        "gamma": {
+          "label": "Gamma only, 30 Ry",
+          "wall_s": [
+            1.725337625,
+            0.9383350830000001,
+            0.9314505419999999
+          ],
+          "wall_median_s": 0.9383350830000001,
+          "engine_total_s": 0.926858292,
+          "phases_s": {
+            "density_s": 0.011852415,
+            "diagonalization_s": 0.867829084,
+            "mixing_s": 0.001430292,
+            "potential_s": 0.005157043,
+            "total_energy_s": 0.007946708
+          },
+          "iterations": 11,
+          "total_energy_ha": -7.295530468210927,
+          "density_sha256": "c4fde645365f4e7ed609486d76233335b3894540239b0443880351eea82257cd"
+        },
+        "k222s": {
+          "label": "2x2x2 shifted (4 k), 30 Ry",
+          "wall_s": [
+            4.740618749999999,
+            4.828421834,
+            5.057703792
+          ],
+          "wall_median_s": 4.828421834,
+          "engine_total_s": 5.052977416,
+          "phases_s": {
+            "density_s": 0.049245541,
+            "diagonalization_s": 4.915385669,
+            "mixing_s": 0.002956042,
+            "potential_s": 0.005901374,
+            "total_energy_s": 0.034378542
+          },
+          "iterations": 11,
+          "total_energy_ha": -7.9194234124690706,
+          "density_sha256": "7b7e9c5aaf457f4d6ca5de52c8f2bc9aca531e27c4f0cf7f334cad08e2515c72"
+        },
+        "k222": {
+          "label": "2x2x2 (8 k), 30 Ry",
+          "wall_s": [
+            8.855807332999998,
+            11.615955084,
+            10.036017375
+          ],
+          "wall_median_s": 10.036017375,
+          "engine_total_s": 10.030164334,
+          "phases_s": {
+            "density_s": 0.105685166,
+            "diagonalization_s": 9.774817584000001,
+            "mixing_s": 0.003012291,
+            "potential_s": 0.006196664,
+            "total_energy_s": 0.068131124
+          },
+          "iterations": 11,
+          "total_energy_ha": -7.8312300571210764,
+          "density_sha256": "a1ca9c0697400090be911e275e88ebe660c0416eb0eb6438d18ce68603910334"
+        }
+      }
+    },
+    "stage1": {
+      "note": "",
+      "binary": "dft-cli",
+      "machine_note": "record host and commit in the note",
+      "energy_tolerance_ha": 1e-12,
+      "cases": {
+        "gamma": {
+          "label": "Gamma only, 30 Ry",
+          "wall_s": [
+            0.8276740419999999,
+            0.49014670800000015,
+            0.48849137499999995
+          ],
+          "wall_median_s": 0.49014670800000015,
+          "engine_total_s": 0.483907792,
+          "phases_s": {
+            "density_s": 0.011630292,
+            "diagonalization_s": 0.425435664,
+            "mixing_s": 0.001408208,
+            "potential_s": 0.005079753,
+            "total_energy_s": 0.007840666
+          },
+          "iterations": 11,
+          "total_energy_ha": -7.295530468210927,
+          "density_sha256": "c4fde645365f4e7ed609486d76233335b3894540239b0443880351eea82257cd"
+        },
+        "k222s": {
+          "label": "2x2x2 shifted (4 k), 30 Ry",
+          "wall_s": [
+            2.2242479589999995,
+            2.2297541670000003,
+            2.2218799999999996
+          ],
+          "wall_median_s": 2.2242479589999995,
+          "engine_total_s": 2.217291375,
+          "phases_s": {
+            "density_s": 0.046628626,
+            "diagonalization_s": 2.086770875,
+            "mixing_s": 0.002808957,
+            "potential_s": 0.005279459,
+            "total_energy_s": 0.031264502
+          },
+          "iterations": 11,
+          "total_energy_ha": -7.9194234124690706,
+          "density_sha256": "7b7e9c5aaf457f4d6ca5de52c8f2bc9aca531e27c4f0cf7f334cad08e2515c72"
+        },
+        "k222": {
+          "label": "2x2x2 (8 k), 30 Ry",
+          "wall_s": [
+            4.272687083999999,
+            4.273151833,
+            4.273769957999999
+          ],
+          "wall_median_s": 4.273151833,
+          "engine_total_s": 4.2692559580000005,
+          "phases_s": {
+            "density_s": 0.092822543,
+            "diagonalization_s": 4.045469958,
+            "mixing_s": 0.002813458,
+            "potential_s": 0.005511877,
+            "total_energy_s": 0.062475792
+          },
+          "iterations": 11,
+          "total_energy_ha": -7.8312300571210764,
+          "density_sha256": "a1ca9c0697400090be911e275e88ebe660c0416eb0eb6438d18ce68603910334"
+        }
+      }
+    },
+    "stage2": {
+      "note": "",
+      "binary": "dft-cli",
+      "machine_note": "record host and commit in the note",
+      "energy_tolerance_ha": 1e-12,
+      "cases": {
+        "gamma": {
+          "label": "Gamma only, 30 Ry",
+          "wall_s": [
+            0.6713802090000001,
+            0.337762125,
+            0.33836104200000006
+          ],
+          "wall_median_s": 0.33836104200000006,
+          "engine_total_s": 0.333877416,
+          "phases_s": {
+            "density_s": 0.011644332,
+            "diagonalization_s": 0.275249874,
+            "mixing_s": 0.001409374,
+            "potential_s": 0.005084207,
+            "total_energy_s": 0.007876749
+          },
+          "iterations": 11,
+          "total_energy_ha": -7.295530468210919,
+          "density_sha256": "f96619f23aee67b9e034d1b59ced295bc7238a4bcd4935c203dba32db07ae2c1"
+        },
+        "k222s": {
+          "label": "2x2x2 shifted (4 k), 30 Ry",
+          "wall_s": [
+            1.4268489160000002,
+            1.4255361249999998,
+            1.4377600829999997
+          ],
+          "wall_median_s": 1.4268489160000002,
+          "engine_total_s": 1.433234168,
+          "phases_s": {
+            "density_s": 0.047252876,
+            "diagonalization_s": 1.301882875,
+            "mixing_s": 0.002785291,
+            "potential_s": 0.005293749,
+            "total_energy_s": 0.031504792
+          },
+          "iterations": 11,
+          "total_energy_ha": -7.919423412469071,
+          "density_sha256": "2779880cb25654d21e9cf56b3a5743fc109be8763d764d05b842a2e7ffe40cfb"
+        },
+        "k222": {
+          "label": "2x2x2 (8 k), 30 Ry",
+          "wall_s": [
+            2.7330602500000003,
+            2.7340613749999996,
+            2.71684675
+          ],
+          "wall_median_s": 2.7330602500000003,
+          "engine_total_s": 2.712224958,
+          "phases_s": {
+            "density_s": 0.092633749,
+            "diagonalization_s": 2.488674375,
+            "mixing_s": 0.002817919,
+            "potential_s": 0.005551583,
+            "total_energy_s": 0.06234479
+          },
+          "iterations": 11,
+          "total_energy_ha": -7.831230057121077,
+          "density_sha256": "fb0dea2697ec27ec2a34e0175e1759615d3b1a2291ab851df26ea02fbb430fc4"
+        }
+      }
+    },
+    "final_stage2_cleanup": {
+      "note": "",
+      "binary": "dft-cli",
+      "machine_note": "record host and commit in the note",
+      "energy_tolerance_ha": 1e-12,
+      "cases": {
+        "gamma": {
+          "label": "Gamma only, 30 Ry",
+          "wall_s": [
+            0.684540334,
+            0.33665350000000005,
+            0.344559375
+          ],
+          "wall_median_s": 0.344559375,
+          "engine_total_s": 0.340167918,
+          "phases_s": {
+            "density_s": 0.011978706,
+            "diagonalization_s": 0.280654877,
+            "mixing_s": 0.00144904,
+            "potential_s": 0.005211752,
+            "total_energy_s": 0.008027292
+          },
+          "iterations": 11,
+          "total_energy_ha": -7.295530468210919,
+          "density_sha256": "f96619f23aee67b9e034d1b59ced295bc7238a4bcd4935c203dba32db07ae2c1"
+        },
+        "k222s": {
+          "label": "2x2x2 shifted (4 k), 30 Ry",
+          "wall_s": [
+            1.501713791,
+            1.4474575,
+            1.487441875
+          ],
+          "wall_median_s": 1.487441875,
+          "engine_total_s": 1.482739625,
+          "phases_s": {
+            "density_s": 0.049244999,
+            "diagonalization_s": 1.345077873,
+            "mixing_s": 0.002798916,
+            "potential_s": 0.005497793,
+            "total_energy_s": 0.035542543
+          },
+          "iterations": 11,
+          "total_energy_ha": -7.919423412469071,
+          "density_sha256": "2779880cb25654d21e9cf56b3a5743fc109be8763d764d05b842a2e7ffe40cfb"
+        },
+        "k222": {
+          "label": "2x2x2 (8 k), 30 Ry",
+          "wall_s": [
+            2.7388281669999994,
+            2.7355637500000007,
+            2.7336877500000014
+          ],
+          "wall_median_s": 2.7355637500000007,
+          "engine_total_s": 2.728877416,
+          "phases_s": {
+            "density_s": 0.093392377,
+            "diagonalization_s": 2.50379221,
+            "mixing_s": 0.002816626,
+            "potential_s": 0.005580876,
+            "total_energy_s": 0.062661334
+          },
+          "iterations": 11,
+          "total_energy_ha": -7.831230057121077,
+          "density_sha256": "fb0dea2697ec27ec2a34e0175e1759615d3b1a2291ab851df26ea02fbb430fc4"
+        }
+      }
+    }
+  },
+  "details": {
+    "gamma": {
+      "operator_applications_before_reconstructed": 3281,
+      "operator_applications_stage1": 1497,
+      "operator_applications_stage2": 833,
+      "solves": 12,
+      "davidson_iterations_stage1": 95,
+      "davidson_iterations_stage2": 95,
+      "max_eigenvalue_difference_ha": 5.051514762044462e-15,
+      "max_density_difference_electrons_per_bohr3": 1.27675647831893e-15,
+      "last_max_eigen_residual_difference_ha": 2.4567275272909227e-14,
+      "stage2_converged": true,
+      "stage2_certificate": {
+        "davidson_iterations": 4,
+        "density_residual": 5.584022603033996e-10,
+        "occupied_eigenvalue_change_ha": 6.126193441424732e-09
+      }
+    },
+    "k222s": {
+      "operator_applications_before_reconstructed": 17037,
+      "operator_applications_stage1": 7351,
+      "operator_applications_stage2": 3863,
+      "solves": 48,
+      "davidson_iterations_stage1": 484,
+      "davidson_iterations_stage2": 484,
+      "max_eigenvalue_difference_ha": 2.3869795029440866e-15,
+      "max_density_difference_electrons_per_bohr3": 3.608224830031759e-16,
+      "last_max_eigen_residual_difference_ha": 1.612687882389246e-16,
+      "stage2_converged": true,
+      "stage2_certificate": {
+        "davidson_iterations": 23,
+        "density_residual": 2.422697054270338e-10,
+        "occupied_eigenvalue_change_ha": 7.370652144178536e-10
+      }
+    },
+    "k222": {
+      "operator_applications_before_reconstructed": 33490,
+      "operator_applications_stage1": 14309,
+      "operator_applications_stage2": 7437,
+      "solves": 96,
+      "davidson_iterations_stage1": 955,
+      "davidson_iterations_stage2": 955,
+      "max_eigenvalue_difference_ha": 6.217248937900877e-15,
+      "max_density_difference_electrons_per_bohr3": 2.914335439641036e-16,
+      "last_max_eigen_residual_difference_ha": 1.7932287464015435e-15,
+      "stage2_converged": true,
+      "stage2_certificate": {
+        "davidson_iterations": 35,
+        "density_residual": 2.767961299901316e-10,
+        "occupied_eigenvalue_change_ha": 1.1329614468813531e-09
+      }
+    }
+  }
+}

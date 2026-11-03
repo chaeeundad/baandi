@@ -119,8 +119,12 @@ pub struct EigenSolution {
     pub eigenvectors: ComplexMatrix,
     pub residuals: Vec<f64>,
     pub iterations: usize,
-    /// Maximum absolute residual 2-norm at each Rayleigh-Ritz iteration.
+    /// Maximum residual 2-norm at each Rayleigh-Ritz iteration. In recurrence
+    /// mode this is the recurrence norm, replaced by the true norm whenever
+    /// certification is attempted (including failed certification).
     pub history: Vec<f64>,
+    /// Number of vector columns passed to the operator (including certification).
+    pub operator_applications: usize,
 }
 
 /// Oracle only: rejects dimensions above 1024 before allocating or applying H.
@@ -157,6 +161,7 @@ impl DenseEigensolver {
             residuals,
             iterations: 1,
             history: vec![maximum],
+            operator_applications: n + bands,
         })
     }
 }
@@ -178,6 +183,19 @@ impl Davidson {
         operator: &dyn LinearOperator,
         initial: Option<&ComplexMatrix>,
         preconditioner: Option<&dyn Preconditioner>,
+    ) -> Result<EigenSolution, SolverError> {
+        self.solve_with_recurrence(operator, initial, preconditioner, true)
+    }
+
+    /// Select stored-product residuals, always certified with a true application.
+    /// `false` retains the bit-identical cached-basis algorithm for operators
+    /// with column-independent block rounding; `solve` uses `true`.
+    pub fn solve_with_recurrence(
+        &self,
+        operator: &dyn LinearOperator,
+        initial: Option<&ComplexMatrix>,
+        preconditioner: Option<&dyn Preconditioner>,
+        recurrence: bool,
     ) -> Result<EigenSolution, SolverError> {
         let n = operator.dimension();
         validate_bands(n, self.bands)?;
@@ -215,19 +233,46 @@ impl Davidson {
             basis = concatenate(&basis, &extra)?;
         }
         let mut history = Vec::new();
+        let mut operator_applications = 0;
+        // Fixed-capacity cache; only the first basis.cols() columns are live.
+        let mut cached = ComplexMatrix::zeros(n, capacity)?;
+        let mut cache_valid = false;
+        // ComplexMatrix has no mutable-width view. Preallocate each possible
+        // correction-block output, avoiding new allocation in the append path.
+        let mut outputs = (1..=self.block_size.min(capacity - self.bands))
+            .map(|width| ComplexMatrix::zeros(n, width))
+            .collect::<Result<Vec<_>, _>>()?;
         for iteration in 1..=self.max_iterations {
-            let h_basis = apply(operator, &basis)?;
+            let h_basis = if cache_valid {
+                first_columns(&cached, basis.cols())?
+            } else {
+                // Initial basis and every reorthonormalized restart are applied
+                // exactly as before; never rotate old products across a restart.
+                operator_applications += basis.cols();
+                let products = apply(operator, &basis)?;
+                for j in 0..basis.cols() {
+                    cached.column_mut(j).copy_from_slice(products.column(j));
+                }
+                products
+            };
             let projected = gemm(&basis, Adjoint, &h_basis, Identity)?;
             let (mut values, coefficients) = hermitian_eigh(&projected)?;
             values.truncate(self.bands);
-            let vectors = gemm(
-                &basis,
-                Identity,
-                &first_columns(&coefficients, self.bands)?,
-                Identity,
-            )?;
-            // Reapply H: convergence is based on actual operator residuals, not a recurrence.
-            let (residual_block, residuals) = residual(operator, &vectors, &values)?;
+            let coefficients = first_columns(&coefficients, self.bands)?;
+            let vectors = gemm(&basis, Identity, &coefficients, Identity)?;
+            let (mut residual_block, mut residuals) = if recurrence {
+                let products = gemm(&h_basis, Identity, &coefficients, Identity)?;
+                residual_from_products(products, &vectors, &values)?
+            } else {
+                operator_applications += self.bands;
+                residual(operator, &vectors, &values)?
+            };
+            if recurrence && residuals.iter().all(|&r| r <= self.tolerance) {
+                operator_applications += self.bands;
+                (residual_block, residuals) = residual(operator, &vectors, &values)?;
+                // A failed certificate supplies actual correction directions and
+                // its actual maximum is recorded in this iteration's history.
+            }
             let maximum = max_residual(&residuals);
             history.push(maximum);
             if residuals.iter().all(|&r| r <= self.tolerance) {
@@ -237,6 +282,7 @@ impl Davidson {
                     residuals,
                     iterations: iteration,
                     history,
+                    operator_applications,
                 });
             }
             if iteration == self.max_iterations {
@@ -270,7 +316,8 @@ impl Davidson {
                 output.validate_finite()?;
                 corrections = output;
             }
-            if basis.cols() + corrections.cols() > capacity {
+            cache_valid = basis.cols() + corrections.cols() <= capacity;
+            if !cache_valid {
                 basis = orthonormalize(&vectors, None)?.vectors;
             }
             let mut extra = orthonormalize(&corrections, Some(&basis))?.vectors;
@@ -287,6 +334,20 @@ impl Davidson {
                     max_residual: maximum,
                     residuals,
                 });
+            }
+            if cache_valid {
+                let products = &mut outputs[extra.cols() - 1];
+                operator.apply_block(&extra, products)?;
+                if products.rows() != n || products.cols() != extra.cols() {
+                    return Err(LinalgError::Dimension.into());
+                }
+                products.validate_finite()?;
+                operator_applications += extra.cols();
+                for j in 0..extra.cols() {
+                    cached
+                        .column_mut(basis.cols() + j)
+                        .copy_from_slice(products.column(j));
+                }
             }
             basis = concatenate(&basis, &extra)?;
         }
@@ -316,7 +377,13 @@ fn residual(
     vectors: &ComplexMatrix,
     values: &[f64],
 ) -> Result<(ComplexMatrix, Vec<f64>), SolverError> {
-    let mut r = apply(op, vectors)?;
+    residual_from_products(apply(op, vectors)?, vectors, values)
+}
+fn residual_from_products(
+    mut r: ComplexMatrix,
+    vectors: &ComplexMatrix,
+    values: &[f64],
+) -> Result<(ComplexMatrix, Vec<f64>), SolverError> {
     let mut norms = Vec::new();
     for (j, &lambda) in values.iter().enumerate() {
         for i in 0..r.rows() {
@@ -366,3 +433,6 @@ impl SplitMix64 {
 }
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod legacy;

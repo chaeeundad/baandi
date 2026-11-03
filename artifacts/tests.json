@@ -342,5 +342,13 @@
     "result": "pass",
     "detail": "32 k points T=16: 3.06 s to 1.23 s (80.7x vs pre-optimization), density hashes identical for T=1,4,8,16 and equal to the batch before P7PA; QE with same cores: 1.8x slower at 16. Relayed attestation.",
     "date": "2026-11-03"
+  },
+  {
+    "id": "T-P10B-LOCAL",
+    "check": "P10B optional MKL local build and declaration gates",
+    "phase": "P10B",
+    "result": "pass",
+    "detail": "Mac: scripts/check.sh build/test/fmt/clippy PASS (exit 0); MKL numerics check and workspace all-target check exit 0; feature-enabled clippy -D warnings exit 0; README generator and 2 consistency tests exit 0. Native MKL was not linked or executed. Claude re-verification remains required. Separate numerics run: 16 passed, 2 benchmarks ignored; maximum observed reciprocal round-trip error 1.7644611924521969e-15 and Parseval defect 3.5528748979513846e-15 (dimensionless, Rust only).",
+    "date": "2026-11-03"
   }
 ]

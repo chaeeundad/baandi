@@ -337,3 +337,119 @@ fn kernel_timing() {
         println!("{name}: {} s", t.elapsed().as_secs_f64());
     }
 }
+
+#[test]
+fn reusable_evd_gemm_and_rank_filter() {
+    let a = matrix(7, 7, |i, j| {
+        Complex64::new(
+            if i == j {
+                i as f64 + 1.0
+            } else {
+                0.03 * (i + j) as f64
+            },
+            0.02 * (i as f64 - j as f64),
+        )
+    });
+    let (expected, _) = hermitian_eigh(&a).unwrap();
+    let mut workspace = HermitianWorkspace::new(7).unwrap();
+    let mut values = vec![0.0; 7];
+    let mut vectors = ComplexMatrix::zeros(7, 7).unwrap();
+    let vector_pointer = vectors.data.as_ptr();
+    let diagonal_pointer = workspace.diagonal.as_ref().column_vector().as_ptr();
+    let mut product = ComplexMatrix::zeros(7, 7).unwrap();
+    for _ in 0..3 {
+        workspace.solve(&a, &mut values, &mut vectors).unwrap();
+        assert_eq!(values, expected);
+        assert_eq!(vectors.data.as_ptr(), vector_pointer);
+        assert_eq!(
+            workspace.diagonal.as_ref().column_vector().as_ptr(),
+            diagonal_pointer
+        );
+        for aa in [MatrixOp::Identity, MatrixOp::Adjoint] {
+            for bb in [MatrixOp::Identity, MatrixOp::Adjoint] {
+                gemm_into(&a, aa, &vectors, bb, &mut product).unwrap();
+                let expected = gemm(&a, aa, &vectors, bb).unwrap();
+                for (x, y) in product.as_slice().iter().zip(expected.as_slice()) {
+                    assert!((*x - *y).norm() < 1e-12);
+                }
+            }
+        }
+    }
+    let mut block = matrix(7, 4, |i, j| if i == j { 1.0.into() } else { 0.0.into() });
+    for i in 0..7 {
+        block[(i, 3)] = block[(i, 1)];
+    }
+    let oracle = orthonormalize(&block, None).unwrap();
+    let mut output = ComplexMatrix::zeros(7, 4).unwrap();
+    let mut scratch = vec![Complex64::default(); 7];
+    assert_eq!(
+        orthonormalize_into(&block, &mut output, &mut scratch).unwrap(),
+        3
+    );
+    for j in 0..3 {
+        assert_eq!(output.column(j), oracle.vectors.column(j));
+    }
+    assert!(output.column(3).iter().all(|z| *z == Complex64::default()));
+    let wrong = ComplexMatrix::zeros(6, 6).unwrap();
+    assert!(workspace.solve(&wrong, &mut values, &mut vectors).is_err());
+    let mut bad = a.clone();
+    bad[(0, 1)] += 1.0;
+    assert!(matches!(
+        workspace.solve(&bad, &mut values, &mut vectors),
+        Err(LinalgError::NotHermitian { .. })
+    ));
+    bad[(0, 0)] = f64::NAN.into();
+    assert!(matches!(
+        workspace.solve(&bad, &mut values, &mut vectors),
+        Err(LinalgError::NonFinite)
+    ));
+}
+
+#[test]
+fn reusable_adapters_rectangular_and_empty_shapes() {
+    for aa in [MatrixOp::Identity, MatrixOp::Adjoint] {
+        for bb in [MatrixOp::Identity, MatrixOp::Adjoint] {
+            let (ar, ac) = match aa {
+                MatrixOp::Identity => (2, 3),
+                MatrixOp::Adjoint => (3, 2),
+            };
+            let (br, bc) = match bb {
+                MatrixOp::Identity => (3, 4),
+                MatrixOp::Adjoint => (4, 3),
+            };
+            let a = matrix(ar, ac, |i, j| {
+                Complex64::new((i + 2 * j) as f64, 0.3 * (i as f64 - j as f64))
+            });
+            let b = matrix(br, bc, |i, j| {
+                Complex64::new((2 * i + j) as f64, 0.2 * (i as f64 + j as f64))
+            });
+            let mut c = ComplexMatrix::zeros(2, 4).unwrap();
+            gemm_into(&a, aa, &b, bb, &mut c).unwrap();
+            let oracle = gemm(&a, aa, &b, bb).unwrap();
+            for (v, w) in c.as_slice().iter().zip(oracle.as_slice()) {
+                assert!((*v - *w).norm() < 1e-12);
+            }
+            let mut bad = ComplexMatrix::zeros(4, 2).unwrap();
+            assert!(matches!(
+                gemm_into(&a, aa, &b, bb, &mut bad),
+                Err(LinalgError::Dimension)
+            ));
+        }
+    }
+    let mut workspace = HermitianWorkspace::new(0).unwrap();
+    let empty = ComplexMatrix::zeros(0, 0).unwrap();
+    let mut output = ComplexMatrix::zeros(0, 0).unwrap();
+    workspace.solve(&empty, &mut [], &mut output).unwrap();
+    gemm_into(
+        &empty,
+        MatrixOp::Identity,
+        &empty,
+        MatrixOp::Identity,
+        &mut output,
+    )
+    .unwrap();
+    assert_eq!(
+        orthonormalize_into(&empty, &mut output, &mut []).unwrap(),
+        0
+    );
+}

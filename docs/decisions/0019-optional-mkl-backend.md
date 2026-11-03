@@ -19,3 +19,24 @@
 
 ## Consequences
 New crate `dft-mkl`; a Cargo feature; documentation of the build; a benchmark protocol for the two backends (`tools/lib_bench`, `scripts/bench_scf.py`). Open: Accelerate for macOS, MKL for the eigensolver, call-structure changes that profit from batched transforms (ticket P7PD).
+
+## Implementation notes: P10B stage 1, 2026-11-03
+
+The optional adapter uses a plan-owned in-place buffer, forward descriptor scale
+1/N, sequential LP64 libraries, and typed DFTI status propagation. Default builds
+include no native link directives, including `cargo test --workspace` (the FFI
+crate has a separate empty-by-default `mkl` feature). With MKLROOT unset the
+feature can be type-checked but executing code requires a real MKL link; there
+is no silent fallback. The build script supports Linux x86-64 execution only.
+
+Full MKL transforms implement pruning initially: inverse returns the whole real
+field from supported input, forward zeros reciprocal output outside support.
+GEMM supports all four identity/adjoint combinations; faer still handles EVD.
+`RustFftPlan3d` remains explicitly available as a verification oracle.
+
+See [architecture](../architecture/fft-backends.md),
+[build and dev08 protocol](../howto-mkl.md), and
+[measurement status](../performance/fft-backend-comparison.md). This is implementation
+of the accepted optional backend, not an adoption decision based on new timing
+numbers. Automatic selection, default changes, batched pruning and fused stage 2
+remain unaccepted. No new performance improvement is claimed before dev08 runs.

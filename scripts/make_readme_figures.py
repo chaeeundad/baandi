@@ -88,13 +88,14 @@ def threads_data():
 
 def fig_threads(t):
     ours = t["threads"]["k444s"]
+    prev = t["threads_after_p7p6"]["k444s"]
     qe = t["qe_k444s_wall_s"]["conv_thr_1e-12"]
     ns = [1, 4, 8, 16]
-    w, h = 760, 70 + len(ns) * 54 + 60
+    w, h = 760, 70 + len(ns) * 76 + 60
     s = svg_open(w, h, "Thread scaling: 32 k points, rust-dft threads against QE MPI processes on the same node")
     s += txt(20, 24, "32 k points (Si, 30 Ry): rust-dft threads against QE MPI processes, same node", 14, weight="bold")
     x0, x1 = 170, 740
-    lo, hi = -0.2, 1.4
+    lo, hi = -0.2, 1.6
     def px(v): return x0 + (math.log10(v) - lo) / (hi - lo) * (x1 - x0)
     top = 50
     for k in (0.5, 1, 2, 5, 10):
@@ -102,9 +103,9 @@ def fig_threads(t):
         s += f'<line x1="{xx:.1f}" y1="{top}" x2="{xx:.1f}" y2="{h - 56}" stroke="{GRID}"/>' + txt(xx, h - 40, f"{k:g} s", 11, "middle", MUTED)
     s += txt((x0 + x1) / 2, h - 22, "wall time (log scale); QE with conv_thr 1e-12 (tighter than needed)", 12, "middle", MUTED)
     for i, n in enumerate(ns):
-        y = top + 12 + i * 54
+        y = top + 12 + i * 76
         s += txt(x0 - 12, y + 14, f"{n} thread(s) / process(es)", 12, "end", INK, "bold")
-        for j, (name, v, col) in enumerate((("rust-dft", ours[str(n)], C_OURS), ("QE 7.6", qe[f"np{n}"], C_QE))):
+        for j, (name, v, col) in enumerate((("rust-dft, k-point threads only", prev[str(n)], "#7fb2e5"), ("rust-dft, parallel phases", ours[str(n)], C_OURS), ("QE 7.6", qe[f"np{n}"], C_QE))):
             yy = y + j * 22
             s += f'<rect x="{x0}" y="{yy}" width="{px(v) - x0:.1f}" height="16" fill="{col}"/>' + txt(px(v) + 6, yy + 12, f"{v:.3g} s  {name}", 11)
     return s + "</svg>\n"
@@ -264,7 +265,7 @@ def block(rows, kruns, gamma, perf=None):
             lines.append(f"| {name} | {v['1']:.3g} | {v['4']:.3g} | {v['8']:.3g} | {v['16']:.3g} | {v['1'] / v['16']:.2f}x |")
         qe = td["qe_k444s_wall_s"]["conv_thr_1e-12"]
         o = ts["k444s"]
-        lines += ["", "32 k points against QE with the same number of cores: " + ", ".join(f"{n}: {o[str(n)] / qe['np' + str(n)]:.1f}x slower" for n in (1, 4, 8, 16)) + ". The diagonalization scales (7.2 s to 0.85 s from 1 to 16 threads) but about 2.2 s of the run (density accumulation, energy audit, setup) is still sequential, which limits the speedup; parallelizing it is the next step.", ""]
+        lines += ["", "32 k points against QE with the same number of cores: " + ", ".join(f"{n}: {o[str(n)] / qe['np' + str(n)]:.1f}x slower" for n in (1, 4, 8, 16)) + ". After the parallel setup, density, energy-audit and certificate phases the 32-k-point run takes 1.23 s on 16 threads (3.06 s with k-point threads only), of which the diagonalization is 0.84 s; with 4 and 8 k points the best thread count is 8 (there are few k points per thread). One k point (Gamma) is not parallelized yet.", ""]
         lines += ["", f"Cross-platform check: the total energy on this Linux x86 build differs from the macOS Apple Silicon build by {perf['xplat']['gamma']:+.2e} Ha (Gamma) and {perf['xplat']['k444s']:+.2e} Ha (4x4x4, shifted).", ""]
     lines += [
               "Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; "

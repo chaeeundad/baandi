@@ -300,9 +300,126 @@
     "id": "A34",
     "agent": "Codex",
     "role": "reviewer",
-    "state": "active",
+    "state": "done",
     "task": "P9R-COUPLING-REVIEW",
-    "ref": "pid 95749, session no sessi, task/P9R-COUPLING-REVIEW",
+    "ref": "pid 95749, session 01a19fa7, task/P9R-COUPLING-REVIEW",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A35",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "blocked",
+    "task": "P7B-PBE",
+    "ref": "pid 525, session 01a19fbd, task/P7B-PBE",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A36",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "killed",
+    "task": "P7B-PBE: stopped by Claude via delegate.sh stop",
+    "ref": "pid 725, session 01a19fbd, task/P7B-PBE",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A37",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7P1-FFT-ALLOC",
+    "ref": "pid 10022, session 01a19fc7, task/P7P1-FFT-ALLOC",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A38",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7B-PBE",
+    "ref": "pid 10240, session 01a19fbd, task/P7B-PBE",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A39",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7P2-PRUNED-FFT",
+    "ref": "pid 15448, session 01a19fcf, task/P7P2-PRUNED-FFT",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A40",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7P3-DAVIDSON-HV",
+    "ref": "pid 21266, session 01a19fd9, task/P7P3-DAVIDSON-HV",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A41",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7P4-SCF-DAVIDSON-SCHEDULE",
+    "ref": "pid 30877, session 01a19ff2, task/P7P4-SCF-DAVIDSON-SCHEDULE",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A42",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "blocked",
+    "task": "P7P5-ORTHO-NORM",
+    "ref": "pid 38474, session 01a1a007, task/P7P5-ORTHO-NORM",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A43",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7P6-KPOINT-THREADS",
+    "ref": "pid 38647, session 01a1a007, task/P7P6-KPOINT-THREADS",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A44",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "failed",
+    "task": "P7P7-DAVIDSON-QE-INFORMED",
+    "ref": "pid 51991, session 01a1a021, task/P7P7-DAVIDSON-QE-INFORMED",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A45",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7P9-FFT-LANE-LAYOUT",
+    "ref": "pid 52174, session 01a1a021, task/P7P9-FFT-LANE-LAYOUT",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A46",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7PA-PARALLEL-SEQUENTIAL-PHASES",
+    "ref": "pid 64667, session 01a1a031, task/P7PA-PARALLEL-SEQUENTIAL-PHASES",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A47",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "active",
+    "task": "P7PB-BAND-FFT-THREADS (estimate 50 to 70 min, started 2026-11-03 17:00 KST)",
+    "ref": "pid 72451, session no sessi, task/P7PB-BAND-FFT-THREADS",
     "updated": "2026-11-03"
   }
 ]

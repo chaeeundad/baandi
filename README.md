@@ -118,12 +118,12 @@ Deterministic k-point threads (`[scf] threads = N`, default 1): results are bit-
 
 | Case | T=1 | T=4 | T=8 | T=16 | speedup T=16 vs T=1 |
 |---|---|---|---|---|---|
-| Gamma (1 k) | 0.403 | 0.396 | 0.396 | 0.397 | 1.02x |
-| 2x2x2 shifted (4 k) | 1.31 | 0.702 | 0.711 | 0.713 | 1.83x |
-| 2x2x2 (8 k) | 2.37 | 1.19 | 1.02 | 1.05 | 2.26x |
-| 4x4x4 shifted (32 k) | 9.35 | 4.27 | 3.45 | 3.06 | 3.06x |
+| Gamma (1 k) | 0.398 | 0.392 | 0.392 | 0.395 | 1.01x |
+| 2x2x2 shifted (4 k) | 1.29 | 0.516 | 0.539 | 0.574 | 2.26x |
+| 2x2x2 (8 k) | 2.35 | 0.819 | 0.587 | 0.65 | 3.61x |
+| 4x4x4 shifted (32 k) | 9.27 | 2.86 | 1.75 | 1.23 | 7.56x |
 
-32 k points against QE with the same number of cores: 1: 5.2x slower, 4: 4.9x slower, 8: 4.1x slower, 16: 4.4x slower. The diagonalization scales (7.2 s to 0.85 s from 1 to 16 threads) but about 2.2 s of the run (density accumulation, energy audit, setup) is still sequential, which limits the speedup; parallelizing it is the next step.
+32 k points against QE with the same number of cores: 1: 5.1x slower, 4: 3.3x slower, 8: 2.1x slower, 16: 1.8x slower. After the parallel setup, density, energy-audit and certificate phases the 32-k-point run takes 1.23 s on 16 threads (3.06 s with k-point threads only), of which the diagonalization is 0.84 s; with 4 and 8 k points the best thread count is 8 (there are few k points per thread). One k point (Gamma) is not parallelized yet.
 
 
 Cross-platform check: the total energy on this Linux x86 build differs from the macOS Apple Silicon build by +8.88e-15 Ha (Gamma) and +0.00e+00 Ha (4x4x4, shifted).

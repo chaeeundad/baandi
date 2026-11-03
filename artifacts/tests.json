@@ -334,5 +334,13 @@
     "result": "pass",
     "detail": "Density hashes identical for every thread count in all four cases; 32 k points 9.35 s (T=1) to 3.06 s (T=16); diagonalization 7.24 s to 0.85 s; about 2.2 s sequential remains. QE same cores: 4.4x slower at 16. Relayed attestation.",
     "date": "2026-11-03"
+  },
+  {
+    "id": "T43",
+    "check": "P7PA parallel phases measured on dev08: bit-identical across T and across batches",
+    "phase": "P7",
+    "result": "pass",
+    "detail": "32 k points T=16: 3.06 s to 1.23 s (80.7x vs pre-optimization), density hashes identical for T=1,4,8,16 and equal to the batch before P7PA; QE with same cores: 1.8x slower at 16. Relayed attestation.",
+    "date": "2026-11-03"
   }
 ]

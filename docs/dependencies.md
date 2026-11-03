@@ -15,7 +15,7 @@ The toolchain is Rust 1.99.1, edition 2024, workspace resolver 3.
 | libm | 0.2.16 | MIT | dft-physics, dft-upf |
 | nalgebra | 0.35.0 | Apache-2.0 | dft-basis, dft-geometry, dft-physics |
 | ndarray | 0.17.2 | MIT OR Apache-2.0 | dft-basis, dft-numerics, dft-physics |
-| ndrustfft | 0.6.2 | MIT | dft-numerics |
+| ndrustfft | 0.6.2 | MIT | dft-numerics (dev-dependency, test oracle) |
 | num-complex | 0.4.6 | MIT OR Apache-2.0 | dft-basis, dft-numerics, dft-physics, dft-solvers |
 | rustfft | 6.4.1 | MIT OR Apache-2.0 | dft-numerics |
 | serde | 1.0.229 | MIT OR Apache-2.0 | dft-cli |
@@ -134,9 +134,7 @@ The supplied pure-Rust source builds offline on Apple Silicon without FFI.
 ADR 0014 records API restrictions, maintenance-review limits and validation.
 
 P7P1-FFT-ALLOC uses rustfft directly for production 3D axis passes with persistent
-plans, scratch and a strided lane buffer. ndrustfft remains in the unchanged
-manifest and is used only by the historical FFT test oracle; moving it to a
-dev-dependency is a separate manifest decision for Claude. No dependency versions
+plans, scratch and a strided lane buffer. ndrustfft is now a dev-dependency of dft-numerics (manifest changed by Claude after O1 merged) and is used only by the historical FFT test oracle. No dependency versions
 or features changed.
 
 ### P7B linked PBE component

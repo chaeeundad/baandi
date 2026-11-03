@@ -539,6 +539,65 @@ exports, not calculations by the other codes. Output input-alias/symlink/hardlin
 checks occur before computing. Exit codes are 1 input, 2 UPF, 3 SCF exhaustion,
 4 numerical/noninsulating/NSCF failure, 5 I/O/plot failure. Writes are not a
 multi-file transaction; check exit status before using files.
+## Full input preflight (P8G)
+
+`dft-cli validate input.toml [--json]` now opens and validates the referenced
+UPF files, resolved relative to the input file. This supersedes earlier descriptions
+of `validate` as a geometry-only check. `grid` remains a geometry/grid inspection.
+`run` invokes the identical preflight before constructing an SCF problem or writing
+outputs. No density/checkpoint data is read and no SCF is performed by preflight;
+UPF radial arrays are parsed to establish that the potential is supported.
+
+Existing string entries remain supported. Custom species labels require an explicit
+chemical symbol; symbols are case-sensitive:
+
+```toml
+[pseudopotentials]
+Si = "Si.UPF"
+Si_up = { path = "Si.UPF", element = "Si" }
+# Deliberate identity-mismatch experiment only:
+Fe = { path = "Si.UPF", allow_element_mismatch = true }
+```
+
+The declared element (or chemical-symbol label) must match the UPF header element.
+An override does not change the potential or electron count. Overrides are printed
+and recorded, including permission enabled without a mismatch. Custom tags still
+need a valid explicit element even with the override. Functional compatibility uses
+the engine's existing label matcher and `xc.allow_functional_override` permission.
+
+Checks include cell/coordinates, k-point quadrature, supported UPF data, finite
+positive tolerances, positive iteration and thread counts, mixer name and beta in
+(0,1], positive integral even valence-electron count, occupied bands, and the
+basis/subspace capacity at every resolved k point. A successful preflight does not
+guarantee SCF convergence, a gap, numerical stability, or adequate physical accuracy.
+
+Cutoff rule: warn when a finite positive UPF `wfc_cutoff` (Ry) exceeds
+`basis.ecutwfc_ry`; zero/nonpositive/nonfinite metadata gives no recommendation.
+This is a minimal wavefunction-cutoff advisory, not a density-cutoff or convergence
+certification. The FFT grid and plane-wave counts are enumerated with the same
+basis APIs as the run. Memory is an array-payload estimate for orbitals at all k
+points plus one real and one complex grid, in bytes; scratch, projectors, basis
+storage and allocator overhead are excluded. It is not a peak-memory bound.
+
+Text output includes the UPF composition and labels, atoms, electrons, XC, requested
+k mesh/shift (or Gamma/explicit list) and resolved point count, cutoff in Ry, bands
+and threads. Overrides identify the actual UPF header material.
+Validation errors retain exit 1 (command-line syntax errors use clap exit 2);
+warnings do not change exit 0. JSON mode writes one JSON object to stdout on
+success; errors retain the ordinary stderr diagnostic and nonzero exit.
+
+The version-1 preflight JSON object has `schema_version`, `valid`, string arrays
+`warnings` and `overrides`, `summary`, integer `electrons` and `bands`, integer
+array `plane_waves_per_k`, three-integer `fft_grid`, integer
+`estimated_array_bytes`, and `memory_note`. Successful runs add this object under
+`results.json.preflight`, including runs that exhaust their iteration budget.
+
+Compatibility note: example inputs containing `/absolute/path/to/Si.UPF` require
+substitution of a local supported Si UPF. Tests use generated synthetic Si headers;
+the numerical fixture arrays are unchanged. Missing/unsupported UPFs and functional
+mismatches now fail run's preflight with exit 1, rather than the previous late-stage
+exit 5/2. Zero threads and mixing beta above one are rejected before solver setup.
+Output I/O failures still use exit 5; numerical failures still use exit 4.
 ### Optional Kerker–Pulay density mixing (P10D)
 
 The default remains `mixing = "pulay"`, beta 0.3, six history differences.

@@ -208,6 +208,8 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
     let bytes = fs::read(input).map_err(|e| error(5, format!("{}: {e}", input.display())))?;
     let text = std::str::from_utf8(&bytes).map_err(|e| error(1, e))?;
     let config = Config::parse(text).map_err(|e| error(1, e))?;
+    let preflight = crate::config::preflight::check(&config, input).map_err(|e| error(1, e))?;
+    preflight.print();
     let prepared = config.prepare().map_err(|e| error(1, e))?;
     let opts = options(&config)?;
     let mut potentials = Vec::new();
@@ -316,7 +318,7 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
     }
     let total = start.elapsed().as_secs_f64();
     let energies = energy_json(&r.energy);
-    let mut result = json!({"schema_version":1,"tool":{"name":"dft-cli","version":env!("CARGO_PKG_VERSION"),"git_commit":env!("DFT_GIT_COMMIT"),"rustc_version":env!("DFT_RUSTC_VERSION")},
+    let mut result = json!({"preflight":preflight,"schema_version":1,"tool":{"name":"dft-cli","version":env!("CARGO_PKG_VERSION"),"git_commit":env!("DFT_GIT_COMMIT"),"rustc_version":env!("DFT_RUSTC_VERSION")},
         "timestamp":timestamp(SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|error(5,e))?.as_secs()),"input_sha256":sha256(&bytes),"species":species,
         "cell":{"lattice_columns_bohr":cell,"volume_bohr3":volume,"reciprocal_columns_inverse_bohr":prepared.cell.reciprocal_columns_inverse_bohr()},
         "atoms":config.system.atoms.iter().map(|a|json!({"species":a.species,"fractional":a.fractional,"cartesian_bohr":prepared.cell.fractional_to_cartesian_bohr(a.fractional)})).collect::<Vec<_>>(),

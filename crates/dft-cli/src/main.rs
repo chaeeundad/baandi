@@ -47,8 +47,12 @@ enum Command {
     },
     /// Inspect a UPF v2 NC pseudopotential and report strict support validation.
     InspectUpf { file: PathBuf },
-    /// Validate input and basis/grid settings; does not read UPF files.
-    Validate { input: PathBuf },
+    /// Full preflight including UPF identity and SCF controls; no SCF execution.
+    Validate {
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     /// Print cell, cutoff, basis counts and FFT dimensions.
     Grid { input: PathBuf },
 }
@@ -87,7 +91,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let input = match &cli.command {
-        Command::Validate { input } | Command::Grid { input } => input,
+        Command::Validate { input, .. } | Command::Grid { input } => input,
         Command::Eval { .. }
         | Command::InspectUpf { .. }
         | Command::Bands { .. }
@@ -100,17 +104,21 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let text = std::fs::read_to_string(input)
         .map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", input.display())))?;
     let config = Config::parse(&text)?;
-    let prepared = config.prepare()?;
-    if matches!(cli.command, Command::Validate { .. }) {
-        for record in &config.input_expressions {
-            println!("{}: {:?} = {}", record.key_path, record.text, record.value);
+    if let Command::Validate { json, .. } = &cli.command {
+        let report = dft_cli::config::preflight::check(&config, input)?;
+        if *json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            for record in &config.input_expressions {
+                println!("{}: {:?} = {}", record.key_path, record.text, record.value);
+            }
+            report.print();
         }
+        return Ok(());
     }
+    let prepared = config.prepare()?;
     match cli.command {
-        Command::Validate { .. } => println!(
-            "Valid: {} (pseudopotential paths parsed; file existence not checked)",
-            config.system.name
-        ),
+        Command::Validate { .. } => unreachable!(),
         Command::Eval { .. }
         | Command::InspectUpf { .. }
         | Command::Bands { .. }

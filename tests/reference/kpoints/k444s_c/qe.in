@@ -1,0 +1,43 @@
+! Generated from rust-dft results; lattice columns transposed to QE rows.
+! Gamma-centered (m+s)/n grid; only requested time reversal, no space-group reduction.
+&CONTROL
+  calculation = 'scf',
+  prefix = 'si_k444s_c',
+  pseudo_dir = '.',
+  outdir = './qe-work',
+  disk_io = 'low',
+  verbosity = 'high',
+  tprnfor = .false.,
+  tstress = .false.,
+/
+&SYSTEM
+  ibrav = 0,
+  nat = 2,
+  ntyp = 1,
+  ecutwfc = 30,
+  ecutrho = 120,
+  nbnd = 8,
+  occupations = 'fixed',
+  nosym = .true.,
+  nr1 = 25,
+  nr2 = 25,
+  nr3 = 25,
+/
+&ELECTRONS
+  diagonalization = 'david',
+  diago_full_acc = .true.,
+  conv_thr = 9.9999999999999998e-13,
+  mixing_beta = 0.69999999999999996,
+  electron_maxstep = 200,
+/
+ATOMIC_SPECIES
+Si 1.0 Si.pz-vbc.UPF
+CELL_PARAMETERS bohr
+0 5.1306064283589663 5.1306064283589663
+5.1306064283589663 0 5.1306064283589663
+5.1306064283589663 5.1306064283589663 0
+ATOMIC_POSITIONS crystal
+Si 0 0 0
+Si 0.25 0.25 0.25
+K_POINTS automatic
+4 4 4 1 1 1

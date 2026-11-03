@@ -1,6 +1,6 @@
 # Agent-native runtime
 
-Status: design only, P11R, 2026-11-03. Code inspected at `425b0f2984be0e05598e2cd6d67fa19394a33553`; no runtime interface described here is implemented. [ADR 0022](../decisions/0022-agent-native-runtime.md) records commitments; [roadmap](../roadmap/runtime.md) assigns gates.
+Status: design only, P11R, 2026-11-03. Code inspected at `425b0f2984be0e05598e2cd6d67fa19394a33553`; no runtime interface described here is implemented. [ADR 0026](../decisions/0026-agent-native-runtime.md) records commitments; [roadmap](../roadmap/runtime.md) assigns gates.
 
 ## Placement and resolved overlaps
 

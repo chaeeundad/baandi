@@ -1,6 +1,6 @@
 # Three execution modes over one SCF implementation
 
-Status: design, not implemented. Contract source: `tickets/P11-COMMON.md`, Addendum 2026-11-03, read from main at `98f0b50` because this worktree's ticket predates it. The addendum overrides the earlier draft where they differ. [ADR 0022](../decisions/0022-agent-native-runtime.md) commits the boundaries; [control](runtime-control.md) and [events](scientific-state-api.md) specify protocols.
+Status: design, not implemented. Contract source: `tickets/P11-COMMON.md`, Addendum 2026-11-03, read from main at `98f0b50` because this worktree's ticket predates it. The addendum overrides the earlier draft where they differ. [ADR 0026](../decisions/0026-agent-native-runtime.md) commits the boundaries; [control](runtime-control.md) and [events](scientific-state-api.md) specify protocols.
 
 ## One numerical implementation
 

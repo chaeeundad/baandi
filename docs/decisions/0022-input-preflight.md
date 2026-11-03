@@ -1,4 +1,4 @@
-# ADR 0022: Shared CLI input preflight
+# ADR 0026: Shared CLI input preflight
 
 Status: proposed implementation, pending review
 

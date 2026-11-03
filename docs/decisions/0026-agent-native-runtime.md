@@ -1,4 +1,4 @@
-# ADR 0022: Agent-native runtime boundaries and contracts
+# ADR 0026: Agent-native runtime boundaries and contracts
 
 - Date: 2026-11-03
 - Status: proposed; design commitments only, implementation and acceptance pending.

@@ -28,7 +28,7 @@ class ReadmeIsCurrent(unittest.TestCase):
         g = next(r for r in rows if r["ecut"] == 30.0)
         gamma = {"e": abs(g["ours"] - g["qe"]) / 2, "eig": g["eig"], "iters": g["iters"]}
         for name, svg in (("cutoff-scan.svg", m.fig_cutoff(rows)), ("kpoint-comparison.svg", m.fig_kpoints(gamma, kruns)),
-                          ("performance.svg", m.fig_perf(m.perf_data()))):
+                          ("performance.svg", m.fig_perf(m.perf_data())), ("thread-scaling.svg", m.fig_threads(m.threads_data()))):
             self.assertEqual(open(os.path.join(ROOT, "docs", "img", name)).read(), svg, name + " is stale")
         self.assertTrue(all(k["ok"] for k in kruns))
 

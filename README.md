@@ -112,6 +112,20 @@ Equal-accuracy comparison: QE's reference runs above use `conv_thr` = 1e-12 Ry, 
 | Gamma, 1 k point, 30 Ry | 0.427 | 0.21 | 0.19 | 0.183 | 2.0x | 2.2x | 2.3x |
 | 4x4x4 shifted, 32 k points, 30 Ry | 10.6 | 1.81 | 1.31 | 1 | 5.8x | 8.1x | 10.6x |
 
+Deterministic k-point threads (`[scf] threads = N`, default 1): results are bit-identical for every thread count (density file hashes equal for T = 1, 4, 8, 16 in all four cases). Wall time in seconds on dev08 (one socket, quiet node), rust-dft with T threads and QE 7.6 (`conv_thr` 1e-12) with the same number of MPI processes:
+
+![thread scaling](docs/img/thread-scaling.svg)
+
+| Case | T=1 | T=4 | T=8 | T=16 | speedup T=16 vs T=1 |
+|---|---|---|---|---|---|
+| Gamma (1 k) | 0.403 | 0.396 | 0.396 | 0.397 | 1.02x |
+| 2x2x2 shifted (4 k) | 1.31 | 0.702 | 0.711 | 0.713 | 1.83x |
+| 2x2x2 (8 k) | 2.37 | 1.19 | 1.02 | 1.05 | 2.26x |
+| 4x4x4 shifted (32 k) | 9.35 | 4.27 | 3.45 | 3.06 | 3.06x |
+
+32 k points against QE with the same number of cores: 1: 5.2x slower, 4: 4.9x slower, 8: 4.1x slower, 16: 4.4x slower. The diagonalization scales (7.2 s to 0.85 s from 1 to 16 threads) but about 2.2 s of the run (density accumulation, energy audit, setup) is still sequential, which limits the speedup; parallelizing it is the next step.
+
+
 Cross-platform check: the total energy on this Linux x86 build differs from the macOS Apple Silicon build by +8.88e-15 Ha (Gamma) and +0.00e+00 Ha (4x4x4, shifted).
 
 Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; fast gates (`scripts/check.sh`) and the Python regression tests pass. Results are added here after each verified implementation.

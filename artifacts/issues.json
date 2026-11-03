@@ -153,10 +153,10 @@
   },
   {
     "id": "I20",
-    "title": "rust-dft is 10 to 100 times slower than QE (not yet optimized)",
+    "title": "rust-dft is about 2x (Gamma) to 5x (32 k points) slower than QE on one core (was 10 to 100x)",
     "severity": "medium",
     "status": "open",
     "phase": "P7",
-    "detail": "Same node, single thread: 10.5x slower at Gamma (2.28 s vs 0.217 s) and 51.9x at 32 k points (94.3 s vs 1.82 s); diagonalization is 91% to 97% of the engine time. No profile yet, so the cause is not established. Performance work was out of scope before the MVP; it needs a prioritization decision."
+    "detail": "Same node, same accuracy class: after O1 to O4c and k-point threads rust-dft is 2.0x (Gamma) and 5.8x (32 k points) slower than QE with one process at conv_thr 1e-12, and 8x (32 k) at 1e-8; with equal cores 4.1 to 5.2x for 32 k points. Remaining: per-iteration FFT and linear algebra cost, Davidson iteration count (QE-informed tuning in progress: P7P7), about 2.2 s of sequential work around the solves (next ticket), FFT lane layout (P7P9)."
   }
 ]

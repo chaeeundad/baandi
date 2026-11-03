@@ -18,6 +18,7 @@
 | Build, run, example inputs, reproduce the QE comparisons | `getting-started.md` |
 | Performance rules for agents, benchmark, optimization log | `performance/README.md` |
 | QE source study notes (own words; policy in AGENTS.md) | `research/qe-study/README.md` |
+| Feature and workflow gap survey (usability, robustness findings) | `research/feature-gap-survey.md` |
 | MVP review: gates, evidence, what is not established, decisions for the user | `mvp-review.md` |
 | P7 plan: k-points, PBE through a library, GPU design note | `p7-plan.md` |
 | ESLE directive record (condensed) | `research/esle-directive.md` |

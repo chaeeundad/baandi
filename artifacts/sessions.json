@@ -916,5 +916,41 @@
     "ended_at": null,
     "exit_code": null,
     "note": ""
+  },
+  {
+    "run_id": "P8B-VOLUMETRIC#2",
+    "task_id": "P8B-VOLUMETRIC",
+    "mode": "resume",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 5055,
+    "wrapper_pid": 5043,
+    "session_id": null,
+    "branch": "task/P8B-VOLUMETRIC",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P8B-VOLUMETRIC",
+    "ticket": "/tmp/p8b_resume.md",
+    "report": null,
+    "started_at": "2026-11-03T08:21:02Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
+  },
+  {
+    "run_id": "P8A-BANDS-DOS#2",
+    "task_id": "P8A-BANDS-DOS",
+    "mode": "resume",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 5174,
+    "wrapper_pid": 5162,
+    "session_id": null,
+    "branch": "task/P8A-BANDS-DOS",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P8A-BANDS-DOS",
+    "ticket": "/tmp/p8a_resume.md",
+    "report": null,
+    "started_at": "2026-11-03T08:21:05Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

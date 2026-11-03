@@ -4,7 +4,7 @@ Status: implemented and verified; defaults unchanged. The new strategy is
 selectable in the library and CLI, with recorded parameters, raw-residual
 contraction, history usage, resets and boundary-recovery diagnostics.
 See [design and literature](../research/scf-mixing-strategies.md),
-[ADR 0020](../decisions/0020-preconditioned-density-mixing.md) and
+[ADR 0025](../decisions/0025-preconditioned-density-mixing.md) and
 [CLI keys](../cli.md#optional-kerkerpulay-density-mixing-p10d).
 
 ## Recommendation and limits of the result

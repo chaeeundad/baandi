@@ -1,4 +1,4 @@
-# ADR 0020: Fixed-density spectra and portable interchange
+# ADR 0024: Fixed-density spectra and portable interchange
 
 - Date: 2026-11-03
 - Task: P8A-BANDS-DOS

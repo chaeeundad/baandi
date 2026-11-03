@@ -142,7 +142,7 @@ propagate through the existing mixer-to-divergence path.
 The CLI accepts `mixing="kerker-pulay"`, required `mixing_q0_inverse_bohr`, and
 optional `mixing_history` (six by default). No global screening length is chosen
 silently. Effective parameters and diagnostics are included in results metadata.
-See [CLI documentation](../cli.md) and ADR 0020. The detailed material matrix is
+See [CLI documentation](../cli.md) and ADR 0025. The detailed material matrix is
 an ignored cross-layer process test, so the solver crate gains no engine, array
 or serialization dependency. Generated synthetic UPFs are temporary evidence,
 not committed data; real Si UPFs are read in place.

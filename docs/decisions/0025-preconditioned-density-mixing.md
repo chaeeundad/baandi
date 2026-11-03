@@ -1,4 +1,4 @@
-# ADR 0020: Composable residual preconditioning for density mixing
+# ADR 0025: Composable residual preconditioning for density mixing
 
 - Task: P10D-SCF-MIXING
 - Date: 2026-11-03

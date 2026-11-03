@@ -1,0 +1,15 @@
+# Flat TOML: one JSON-compatible value per line. Lengths in Bohr.
+id = "syn-cubic-degenerate"
+purpose = "Cubic single ion; symmetry produces degenerate excited multiplets"
+system_class = "synthetic-gap"
+tier = "default"
+potential = "synthetic"
+lattice = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]
+atoms = [[0.13, 0.21, 0.32]]
+cutoff_ry = 8
+timeout_s = 240
+deterministic = true
+valence = 4
+channels = [0]
+shape = "gaussian"
+nbands = 8

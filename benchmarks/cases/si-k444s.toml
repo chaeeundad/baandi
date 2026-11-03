@@ -1,0 +1,13 @@
+# Flat TOML: one JSON-compatible value per line. Lengths in Bohr.
+id = "si-k444s"
+purpose = "Existing shifted 4x4x4 mesh (32 retained k points)"
+system_class = "si-primitive"
+tier = "long"
+potential = "si"
+lattice = [[0, 5.130606428358966, 5.130606428358966], [5.130606428358966, 0, 5.130606428358966], [5.130606428358966, 5.130606428358966, 0]]
+atoms = [[0, 0, 0], [0.25, 0.25, 0.25]]
+cutoff_ry = 30
+timeout_s = 900
+deterministic = true
+kgrid = [4, 4, 4]
+kshift = [0.5, 0.5, 0.5]

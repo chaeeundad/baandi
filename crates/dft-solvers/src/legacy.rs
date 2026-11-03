@@ -64,6 +64,9 @@ impl Davidson {
                 return Ok(EigenSolution {
                     eigenvalues: values,
                     eigenvectors: vectors,
+                    converged: vec![true; self.bands],
+                    buffer: vec![false; self.bands],
+                    residuals_certified: true,
                     residuals,
                     iterations: iteration,
                     history,

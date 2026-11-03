@@ -10,14 +10,19 @@ use std::time::Instant;
 struct Lcg(u64);
 impl Lcg {
     fn next(&mut self) -> f64 {
-        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         ((self.0 >> 11) as f64) / ((1u64 << 53) as f64) - 0.5
     }
 }
 
 fn main() {
     let mut rng = Lcg(12345);
-    println!("kind size microseconds_per_op   (op = one complex 3D transform, forward or inverse, in place cost; one gemm; one eigendecomposition)");
+    println!(
+        "kind size microseconds_per_op   (op = one complex 3D transform, forward or inverse, in place cost; one gemm; one eigendecomposition)"
+    );
     for n in [24usize, 25, 27, 36, 48] {
         let mut plan = FftPlan3d::new([n, n, n]).unwrap();
         let mut a = Array3::<Complex64>::zeros((n, n, n));
@@ -60,7 +65,10 @@ fn main() {
         for _ in 0..reps {
             let _ = gemm(&a, MatrixOp::Adjoint, &b, MatrixOp::Identity).unwrap();
         }
-        println!("zgemm_CN {npw}x{m}^H * {npw}x8 {:.2}", t.elapsed().as_secs_f64() * 1e6 / reps as f64);
+        println!(
+            "zgemm_CN {npw}x{m}^H * {npw}x8 {:.2}",
+            t.elapsed().as_secs_f64() * 1e6 / reps as f64
+        );
     }
     for m in [16usize, 32, 48] {
         let mut h = ComplexMatrix::zeros(m, m).unwrap();
@@ -79,6 +87,9 @@ fn main() {
         for _ in 0..reps {
             let _ = hermitian_eigh(&h).unwrap();
         }
-        println!("zheev {m}x{m} {:.2}", t.elapsed().as_secs_f64() * 1e6 / reps as f64);
+        println!(
+            "zheev {m}x{m} {:.2}",
+            t.elapsed().as_secs_f64() * 1e6 / reps as f64
+        );
     }
 }

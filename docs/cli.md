@@ -494,3 +494,26 @@ The starting binary fails to converge its Davidson solve for this input;
 therefore this case currently reports failure, not an accepted SCF speedup.
 Benchmark records add `phase_medians_s` and `engine_total_median_s`; the older
 last-run fields and default case selection retain their meanings.
+
+## Volumetric output (P8B)
+
+The optional `[output.volumetric]` table accepts required nonempty `quantities`
+(from `density`, `elf`, `hartree`, `local_potential`, `partial_charge`) and `formats`
+(from `cube`, `xsf`, `vasp`, `vti`). Duplicates and unknown keys/values are rejected. Optional
+`kpoint` (default 1) and inclusive `bands = [first,last]` (default `[1,1]`) are
+one-based and apply only to `partial_charge`. Partial charge is unweighted,
+with one unit of integrated probability per selected band. Files are named
+`<quantity>.<format>` in the normal output directory and cannot overwrite
+existing files/symlinks. Raw density output is unchanged.
+
+Normal `run` emits the requested files after the final SCF state is returned.
+The `vasp` format uses `<quantity>.CHGCAR` for density and partial charge,
+`<quantity>.LOCPOT` for the potentials, and `elf.ELFCAR` for ELF; other suffixes
+match the format name. VASP density is multiplied by cell volume, potentials are
+converted to eV, and ELF is dimensionless. VTI contains an Angstrom affine grid
+and explicitly named atomic-unit scalar arrays. Export failures use exit 5.
+The existing dft-physics dependency is now a runtime dependency (approved
+manifest exception); no new package was added.
+See [the viewer guide](howto-volumetric.md) for units, pseudopotential caveats,
+periodic endpoints and the independent Python validator, and
+[ADR 0021](decisions/0021-volumetric-output.md) for numerical and format contracts.

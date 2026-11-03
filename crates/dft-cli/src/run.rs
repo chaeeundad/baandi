@@ -1,5 +1,7 @@
 //! File/console boundary for the sequential engine. No I/O occurs in SCF kernels.
 use crate::{config::Config, grid_report};
+#[path = "volumetric_out.rs"]
+pub mod volumetric_out;
 use dft_engine::{
     IterationRecord, Mixing, PhaseTimings, ScfError, ScfOptions, ScfProblem, SpeciesPotential,
     energy::EnergyAudit,
@@ -261,6 +263,7 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
     });
     fs::create_dir_all(&out)?;
     protect_outputs(&out, &inputs)?;
+    volumetric_out::preflight(&config, &out).map_err(|e| error(5, e))?;
     let atoms: Vec<_> = config
         .system
         .atoms
@@ -468,6 +471,7 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         "FFT/H psi included in enclosing phases; not separately measured."
     )
     .unwrap();
+    volumetric_out::write_outputs(&config, &prepared, &refs, &r, &out).map_err(|e| error(5, e))?;
     fs::write(out.join("density.bin"), density_bytes)?;
     write_json(&out.join("density.json"), &density_meta)?;
     write_json(&out.join("results.json"), &result)?;

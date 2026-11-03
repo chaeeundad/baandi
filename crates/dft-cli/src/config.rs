@@ -163,6 +163,55 @@ pub struct Scf {
 #[serde(deny_unknown_fields)]
 pub struct Output {
     pub directory: Option<String>,
+    pub volumetric: Option<Volumetric>,
+}
+
+/// Optional post-SCF scalar exports; one-based inclusive band selection.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Volumetric {
+    pub quantities: Vec<String>,
+    pub formats: Vec<String>,
+    pub kpoint: Option<usize>,
+    pub bands: Option<[usize; 2]>,
+}
+impl Volumetric {
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        let fail = |s: &str| ConfigError::Invalid(format!("output.volumetric: {s}"));
+        for (values, allowed) in [
+            (
+                &self.quantities,
+                &[
+                    "density",
+                    "elf",
+                    "hartree",
+                    "local_potential",
+                    "partial_charge",
+                ][..],
+            ),
+            (&self.formats, &["cube", "xsf", "vasp", "vti"][..]),
+        ] {
+            if values.is_empty() {
+                return Err(fail("quantities and formats must be nonempty"));
+            }
+            for (i, value) in values.iter().enumerate() {
+                if !allowed.contains(&value.as_str()) || values[..i].contains(value) {
+                    return Err(fail("unknown or duplicate quantity/format"));
+                }
+            }
+        }
+        if self.kpoint == Some(0) || self.bands.is_some_and(|[a, b]| a == 0 || a > b) {
+            return Err(fail(
+                "kpoint and inclusive bands must be positive and ordered",
+            ));
+        }
+        if (self.kpoint.is_some() || self.bands.is_some())
+            && !self.quantities.iter().any(|q| q == "partial_charge")
+        {
+            return Err(fail("band/k selection requires partial_charge"));
+        }
+        Ok(())
+    }
 }
 
 /// Original string and resolved boundary value (units follow the documented key).
@@ -417,6 +466,9 @@ impl Config {
             }
         }
         self.cell()?;
+        if let Some(v) = self.output.as_ref().and_then(|o| o.volumetric.as_ref()) {
+            v.validate()?;
+        }
         Ok(())
     }
     pub fn cell(&self) -> Result<Cell, ConfigError> {

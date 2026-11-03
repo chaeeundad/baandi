@@ -17,6 +17,11 @@
 | Physics conventions, units and normalization | `physics-conventions.md` |
 | MVP review: gates, evidence, what is not established, decisions for the user | `mvp-review.md` |
 | P7 plan: k-points, PBE through a library, GPU design note | `p7-plan.md` |
+| ESLE directive record (condensed) | `research/esle-directive.md` |
+| ESLE: motivation, formulation, hypotheses | `research/electronic-state-landscape.md` |
+| ESLE: ElectronicState design, compatibility, interfaces | `architecture/electronic-state.md` |
+| ESLE roadmap and review checklist | `roadmap/esle.md` |
+| ADR 0016 ESLE layering | `decisions/0016-esle-layering.md` |
 | Validation evidence, QE comparison and convergence studies | [validation.md](validation.md) |
 | CLI commands, SCF controls, output schemas and exit codes | [cli.md](cli.md) |
 | Supported UPF subset, normalization and parser restrictions | [upf-support.md](upf-support.md) |

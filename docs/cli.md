@@ -155,7 +155,7 @@ Bohr^(-3/2); `eigen_tolerance`, `initial_eigen_tolerance`, `cutoff_hartree` are
 Ha; `z_valence`, `electrons`, occupations and normalization integrals are electron
 counts; counts/indices/fractions, seed, relative errors, beta and decay factors
 are dimensionless. Timings are seconds; memory is bytes. Ha-to-eV uses the
-existing dft-units CODATA 2018 constant. Fractional coordinates are dimensionless.
+uom-derived dft-units CODATA 2018 factor. Fractional coordinates are dimensionless.
 
 Determinism comparisons remove `timestamp` and every `timings` object recursively
 (including last-iteration and certificate copies), then compare pretty-serialized
@@ -215,3 +215,68 @@ certified completion or exhausted budget. Existing `run()` retains its original
 success-only result/error behavior and existing mixing checks. The final state
 on budget exhaustion is returned before the unused final mixing proposal.
 No existing numerical algorithms, tolerances or public signatures were changed.
+
+## Explicit boundary units (P7U)
+
+All old numeric TOML fields remain valid. The unit-aware `Config::parse` entry
+point additionally accepts these alternatives (direct serde deserialization
+continues to use the legacy structs):
+
+| Section | Unit-string form | Legacy form it replaces |
+| --- | --- | --- |
+| `basis` | `cutoff = "30 Ry"` | `ecutwfc_ry = 30.0` |
+| `scf` | `energy_tolerance = "2e-8 Ry"` | `energy_tolerance_ha = 1e-8` |
+| `scf` | `eigen_tolerance_energy = "1e-8 Ha"` | `eigen_tolerance = 1e-8` |
+| `system` | `lattice_vectors_with_units` (3×3 strings, one vector per row) | both `lattice_vectors` and `lattice_unit` |
+
+For example, a general cell can use:
+
+```toml
+[system]
+name = "example"
+lattice_vectors_with_units = [
+  ["5.43 Angstrom", "0 Bohr", "0 Bohr"],
+  ["0 Bohr", "0.543 nm", "0 Bohr"],
+  ["0 Bohr", "0 Bohr", "543 pm"],
+]
+# Supply atoms and the other required tables as before.
+```
+
+Both forms together are rejected, even if equal; the lattice string matrix
+conflicts with either legacy lattice key. Cutoff and lattice remain required.
+Omitted tolerances retain their existing defaults; finite-positive validation
+is unchanged. Density residual tolerance keeps its existing Bohr^(-3/2) numeric
+form: it is neither an energy nor a length. Fractional coordinates are unchanged.
+
+The closed alias lists below are ASCII case-insensitive. No plurals or other
+spellings are inferred. In particular `meV` (including `MeV`) always means
+millielectronvolt; megaelectronvolt is unsupported.
+
+| Dimension | Accepted aliases, grouped by unit |
+| --- | --- |
+| Energy | `ha`, `hartree`; `ry`, `rydberg`; `ev`, `electronvolt`; `mev`, `millielectronvolt`; `j`, `joule` |
+| Length | `bohr`, `a0`; `angstrom`, `ang`, `a`; `nm`, `nanometer`; `pm`, `picometer`; `m`, `meter` |
+| Pressure | `ha/bohr^3`; `ry/bohr^3`; `ev/angstrom^3`; `gpa`; `kbar`; `pa` |
+
+Strings accept decimal/scientific numbers with or without whitespace before the
+unit (`30 Ry`, `30Ry`, `408.2 eV`). Empty input, missing/unknown units, NaN,
+infinity and extra tokens are errors that quote the offending input. Pressure
+is available for conversion only; this does not enable stress calculations.
+
+```sh
+cargo run --offline -p dft-cli -- convert 30 Ry Ha
+# 1.50000000000000e1
+cargo run --offline -p dft-cli -- convert 1 Ha/Bohr^3 GPa
+```
+
+`convert` prints one value in scientific notation with 15 significant digits.
+Success is exit 0; usage/conversion errors (including incompatible dimensions
+and nonfinite results) are exit 2. Unit-string TOML errors use the existing
+configuration error status 1. Tested normal-range round trips have relative
+error <1e-14; f64 underflow/overflow is outside that bound.
+
+The additive results.json schema-version-1 key `total_energy` contains
+`{ "ha": value, "ry": value, "ev": value }`, with all three derived from the
+same final Hartree total through dft-units. `energies.total` and every other old
+field remain. Energy conversion now uses uom's CODATA 2018 definitions; final
+roundoff of eV output can differ from the historical rounded constant.

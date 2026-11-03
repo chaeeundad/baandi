@@ -127,6 +127,18 @@ fn verify(large: bool) {
     }
     assert_eq!(first["convergence"]["converged"], true);
     let energy = first["energies"]["total"]["ha"].as_f64().unwrap();
+    assert_eq!(
+        first["total_energy"]["ha"],
+        first["energies"]["total"]["ha"]
+    );
+    assert_eq!(
+        first["total_energy"]["ry"],
+        first["energies"]["total"]["ry"]
+    );
+    assert_eq!(
+        first["total_energy"]["ev"].as_f64().unwrap(),
+        dft_units::from_hartree(energy, dft_units::EnergyUnit::ElectronVolt)
+    );
     let sum: f64 = ["kinetic", "local", "nonlocal", "hartree", "xc", "ewald"]
         .iter()
         .map(|t| first["energies"][t]["ha"].as_f64().unwrap())
@@ -342,4 +354,31 @@ fn functional_compatibility_and_original_label() {
             .contains("unsupported UPF functional \"SLA PW\": requires SLA PZ or SLA PZ NOGX NOGC"),
         "{stderr}"
     );
+}
+
+#[test]
+fn unit_cutoff_preserves_scf_and_legacy_outputs() {
+    let mut c = Case::new(false);
+    status(&c.run("", None), 0);
+    let mut legacy = c.json("results", "results.json");
+    let density = fs::read(c.dir.join("results/density.bin")).unwrap();
+    c.text = c.text.replace("ecutwfc_ry=3.0", "cutoff='3 Ry'");
+    status(&c.run("", None), 0);
+    let mut units = c.json("results", "results.json");
+    assert_ne!(legacy["input_sha256"], units["input_sha256"]);
+    for report in [&mut legacy, &mut units] {
+        strip_times(report);
+        report.as_object_mut().unwrap().remove("input_sha256");
+    }
+    assert_eq!(legacy, units); // All old and new numerical fields, exactly.
+    assert_eq!(
+        density,
+        fs::read(c.dir.join("results/density.bin")).unwrap()
+    );
+    c.text = c.text.replace("cutoff='3 Ry'", "cutoff='3 unknown'");
+    status(&c.run("", None), 1);
+    c.text = c
+        .text
+        .replace("cutoff='3 unknown'", "cutoff='3 Ry'\necutwfc_ry=3.0");
+    status(&c.run("", None), 1);
 }

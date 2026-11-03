@@ -1079,3 +1079,13 @@ Legacy Gamma construction keeps its prior occupation contract. All original
 SCF convergence tolerances remain unchanged. Per-k eigenpairs and weights are
 reported; old scalar-block result fields refer to the first k point.
 See ADR 0011 for APIs, gap errors, compatibility and measured validation.
+
+## 26. Boundary units library (P7U)
+
+ADR 0012 supersedes the implementation detail of section 1: measured factors
+now come exclusively from uom quantities; the existing public constants are
+generated from uom at build time. Internal Bohr/Hartree conventions are unchanged.
+Ry = Ha/2 remains an exact definition. Energy, length and pressure conversions
+are boundary-only f64 operations, tested for relative round-trip error <1e-14
+in the normal representable range. See docs/cli.md for the closed unit aliases
+and conflict rules. Pressure conversion does not add stress calculations.

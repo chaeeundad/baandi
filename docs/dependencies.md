@@ -22,6 +22,7 @@ The toolchain is Rust 1.99.1, edition 2024, workspace resolver 3.
 | sha2 | 0.10.9 | MIT OR Apache-2.0 | dft-cli |
 | thiserror | 2.0.21 | MIT OR Apache-2.0 | dft-basis, dft-cli, dft-geometry, dft-numerics, dft-physics, dft-solvers, dft-upf |
 | toml | 1.1.8+spec-1.1.0 | MIT OR Apache-2.0 | dft-cli |
+| uom | 0.38.0 | Apache-2.0 OR MIT | dft-units (runtime and build) |
 | upf | 0.1.1 | MIT OR Apache-2.0 | dft-upf |
 
 ## Direct external dev-dependencies
@@ -36,15 +37,16 @@ is file-level copyleft derived from libxc; [ADR 0007](decisions/0007-xc-and-spec
 requires review before production use and keeps it out of released binaries.
 Production LDA-PZ is implemented as physics glue in `dft-physics`.
 
-There are no declared build-dependencies. The CLI build script uses std only.
+dft-units also uses uom as a build-dependency to preserve its public constant API.
+The CLI build script uses std only.
 Workspace dev edges additionally include `dft-basis -> dft-numerics` and
 `dft-cli -> dft-physics`; all workspace edges are in
-[architecture](architecture.md). `dft-units` uses std only.
+[architecture](architecture.md). `dft-units` uses uom with default features disabled and `f64`, `si`, `std` enabled.
 
 ## Transitive inventory and licenses
 
-The unfiltered offline metadata graph contains **341 external package/version
-entries** plus nine workspace crates: 14 direct production packages, one direct
+The unfiltered offline metadata graph contains **342 external package/version
+entries** plus nine workspace crates: 15 direct production packages, one direct
 external dev package, and **326 additional transitive entries**. This includes
 development and target-specific resolution, not just libraries linked into a
 host release binary. Multiple versions of one crate count separately. In
@@ -101,3 +103,12 @@ The project's own license is MIT (see `LICENSE`; selected by the user on 2026-11
 
 P7A-KPOINTS (ADR 0011): no new dependencies or manifest changes. Bloch sampling
 and weighted SCF use the existing geometry, FFT, complex-array and Davidson APIs.
+
+
+P7U adds uom 0.38.0, already fetched and license-reviewed by Claude. Its enabled
+features are `f64`, `si`, `std` (no default features); no serialization or other
+storage types are enabled. Its transitive crates are num-traits 0.2.19 and
+typenum 1.20.1 (both MIT OR Apache-2.0), plus num-traits' build dependency
+autocfg 1.5.1 (MIT OR Apache-2.0). These transitive packages were already present.
+The pure-Rust implementation needs no system library or FFI; offline host gates
+exercise Apple Silicon support. See ADR 0012 for adoption and precision checks.

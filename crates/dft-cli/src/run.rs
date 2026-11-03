@@ -5,7 +5,7 @@ use dft_engine::{
     energy::EnergyAudit,
     input::{Atom, parse_upf},
 };
-use dft_units::HARTREE_IN_EV;
+use dft_units::{EnergyUnit, from_hartree};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -291,7 +291,8 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         "basis":{"n_plane_waves":npw,"n_density_g":prepared.density.vectors().len(),"fft_grid":prepared.grid.dims(),"fft_grid_overridden":prepared.grid.overridden()},
         "electrons":electrons,"bands":bands,"occupations":r.occupations,"xc":"lda-pz","scf":options_json(&opts),
         "convergence":{"converged":outcome.converged,"iterations":r.history.len(),"last_iteration":last,"history":history},"energies":energies,
-        "eigenvalues":{"ha":r.eigenvalues,"ev":r.eigenvalues.iter().map(|e|e*HARTREE_IN_EV).collect::<Vec<_>>()},
+        "total_energy":{"ha":r.energy.total_hartree(),"ry":from_hartree(r.energy.total_hartree(), EnergyUnit::Rydberg),"ev":from_hartree(r.energy.total_hartree(), EnergyUnit::ElectronVolt)},
+        "eigenvalues":{"ha":r.eigenvalues,"ev":r.eigenvalues.iter().map(|e|from_hartree(*e, EnergyUnit::ElectronVolt)).collect::<Vec<_>>()},
         "timings":{"phases":phase_json(&phases),"setup_s":setup,"engine_setup_s":r.setup_time.as_secs_f64(),"engine_total_s":r.total_time.as_secs_f64(),"total_s":total,"fft_hpsi":"included in enclosing phases; not separately measured"},
         "threading":{"threads":dft_engine::EXECUTION_THREADS,"backend":"explicit sequential faer and serial FFT"},
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
@@ -340,7 +341,7 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
             "band {}: {:.12} Ha = {:.12} eV; occupation {f}",
             b + 1,
             e,
-            e * HARTREE_IN_EV
+            from_hartree(*e, EnergyUnit::ElectronVolt)
         )
         .unwrap();
     }
@@ -350,7 +351,7 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         writeln!(
             console,
             "HOMO/LUMO gap: {gap:.12} Ha = {:.12} eV",
-            gap * HARTREE_IN_EV
+            from_hartree(gap, EnergyUnit::ElectronVolt)
         )
         .unwrap();
     }

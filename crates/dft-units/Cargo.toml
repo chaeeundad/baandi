@@ -11,3 +11,6 @@ workspace = true
 
 [dependencies]
 uom.workspace = true
+
+[build-dependencies]
+uom.workspace = true

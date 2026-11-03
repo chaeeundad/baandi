@@ -88,6 +88,75 @@ pub struct Output {
     pub directory: Option<String>,
 }
 
+// Resolve additive input forms before deserializing the unchanged public structs.
+fn normalize_units(value: &mut toml::Value) -> Result<(), ConfigError> {
+    let invalid = |message: String| ConfigError::Invalid(message);
+    for (section, alternate, legacy, target) in [
+        (
+            "basis",
+            "cutoff",
+            "ecutwfc_ry",
+            dft_units::EnergyUnit::Rydberg,
+        ),
+        (
+            "scf",
+            "energy_tolerance",
+            "energy_tolerance_ha",
+            dft_units::EnergyUnit::Hartree,
+        ),
+        (
+            "scf",
+            "eigen_tolerance_energy",
+            "eigen_tolerance",
+            dft_units::EnergyUnit::Hartree,
+        ),
+    ] {
+        if let Some(table) = value.get_mut(section).and_then(toml::Value::as_table_mut)
+            && let Some(input) = table.remove(alternate)
+        {
+            if table.contains_key(legacy) {
+                return Err(invalid(format!(
+                    "{section}: cannot specify both {alternate} and {legacy}"
+                )));
+            }
+            let text = input.as_str().ok_or_else(|| {
+                invalid(format!(
+                    "{section}.{alternate} requires a unit string: {input}"
+                ))
+            })?;
+            let ha = dft_units::parse_energy(text).map_err(|e| invalid(e.to_string()))?;
+            let resolved = dft_units::from_hartree(ha, target);
+            if !resolved.is_finite() {
+                return Err(invalid(format!("nonfinite converted value: {text:?}")));
+            }
+            table.insert(legacy.into(), toml::Value::Float(resolved));
+        }
+    }
+    if let Some(table) = value.get_mut("system").and_then(toml::Value::as_table_mut)
+        && let Some(input) = table.remove("lattice_vectors_with_units")
+    {
+        if table.contains_key("lattice_vectors") || table.contains_key("lattice_unit") {
+            return Err(invalid(
+                "lattice_vectors_with_units conflicts with lattice_vectors and lattice_unit".into(),
+            ));
+        }
+        let rows: [[String; 3]; 3] = input.try_into()?;
+        let mut converted = Vec::new();
+        for row in rows {
+            let mut values = Vec::new();
+            for text in row {
+                values.push(toml::Value::Float(
+                    dft_units::parse_length(&text).map_err(|e| invalid(e.to_string()))?,
+                ));
+            }
+            converted.push(toml::Value::Array(values));
+        }
+        table.insert("lattice_vectors".into(), toml::Value::Array(converted));
+        table.insert("lattice_unit".into(), toml::Value::String("bohr".into()));
+    }
+    Ok(())
+}
+
 pub struct PreparedInput {
     pub cell: Cell,
     pub wavefunctions: PlaneWaveBasis,
@@ -96,7 +165,9 @@ pub struct PreparedInput {
 }
 impl Config {
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
-        let config: Self = toml::from_str(text)?;
+        let mut value: toml::Value = toml::from_str(text)?;
+        normalize_units(&mut value)?;
+        let config: Self = value.try_into()?;
         config.validate()?;
         Ok(config)
     }

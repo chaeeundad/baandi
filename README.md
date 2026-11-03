@@ -96,19 +96,21 @@ Status as of 2026-11-03, written for people who run calculations. Source: `docs/
 | Output | results.json (energies, eigenvalues, convergence history, provenance) and the electron density (binary + metadata) | Every run records input and pseudopotential hashes. |
 | Speed | Threads over k points and over bands, bit-identical results for any thread count | `[scf] threads = N`; default is 1. |
 | Validation | Agrees with Quantum ESPRESSO 7.6 on silicon (energies, eigenvalues, k grids, PBE) | See the validation results below. One cell and one pseudopotential so far. |
+| Output | Band structures and density of states (CSV, SVG figure, QE-/VASP-style files) | `bands` and `dos` subcommands: CSV, SVG, QE- and VASP-style files. Fixed-density non-self-consistent calculation; checked by the repository tests. |
+| Output | Electron density, ELF and potentials as cube, XSF, CHGCAR and VTK files | Cube, XSF, CHGCAR and VTK writers; opens in VESTA, VMD, ParaView and similar viewers. Checked against format specifications in tests. |
+| Robustness | Convergence fix for larger cells (8-atom silicon cell stalled at the default settings) | Buffer bands: the highest requested bands are loosely converged; strict bands keep the full tolerance. The 8-atom silicon cell now converges. |
+| Usability | Input preflight check: element versus pseudopotential, SCF settings, plain-language summary of what will be computed | `validate` checks element versus pseudopotential and SCF settings and prints a plain-language summary; no SCF is run. |
+| Input | Offline pseudopotential registry with license and SHA-256 checks | `pseudo` subcommands; pseudopotential files are never shipped in the repository. |
 
 ### Being built now
 
 | Area | Feature | Notes |
 |---|---|---|
-| Output | Band structures and density of states (CSV, SVG figure, QE-/VASP-style files) | Plot-ready files for people who do not code. |
-| Output | Electron density, ELF and potentials as cube, XSF, CHGCAR and VTK files | Opens in VESTA, VMD, ParaView and similar viewers. |
-| Robustness | Convergence fix for larger cells (8-atom silicon cell stalled at the default settings) | Found by a stress test; the fix treats the highest requested bands as loosely converged buffer bands. |
-| Usability | Input preflight check: element versus pseudopotential, SCF settings, plain-language summary of what will be computed | Closes a gap where a wrong pseudopotential could run without a warning. |
-| Speed | Optional Intel MKL backend for FFT and matrix products, chosen at compile time | Selected at compile time; the default build stays pure Rust. Kernel-level measurements on the test server look promising; end-to-end numbers follow. |
-| Speed | Cheaper FFT call structure for the wavefunction path; RMM-DIIS eigensolver for large band counts; Kerker-preconditioned mixing for hard cases | Developed as switchable modules; defaults change only with evidence on several systems. |
+| Speed | Optional Intel MKL backend for FFT and matrix products, chosen at compile time | Merged behind a compile-time feature; the default build stays pure Rust. Kernel-level measurements on the test server look promising; end-to-end numbers follow. |
+| Speed | RMM-DIIS eigensolver for large band counts and Kerker-preconditioned mixing for hard cases (merged as switchable modules); cheaper FFT call structure (in progress) | Defaults are unchanged; a default changes only with evidence on several systems. |
 | Usability | Structure and input importers, Materials Project lookup, pseudopotential download with license and hash checks, a guided or natural-language style CLI | In design now. |
 | Infrastructure | General benchmark and robustness suite (not silicon-only) | Used to judge speed and defaults on many cell shapes, band counts and pseudopotentials. |
+| Runtime | Observable, controllable calculations for people and AI agents: step-by-step SCF, live events, safe-point policy changes, checkpoint/restart, self-healing SCF demo, MCP server, Python/ASE | Design in progress (docs/research/agent-native-directive-review.md); no runtime code yet. The numerical core stays free of LLM and network dependencies. |
 
 ### Planned, not available yet
 

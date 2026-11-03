@@ -755,3 +755,122 @@ fn pruned_apply_bitwise_gamma_and_shifted() {
         }
     }
 }
+
+#[test]
+fn band_workers_bitwise_and_ordered_errors() {
+    let (cell, _, pp, pos) = setup();
+    for k in [[0.; 3], [0.25, -0.25, 0.125]] {
+        let basis = PlaneWaveBasis::at_k(&cell, Hartree(3.), k).unwrap();
+        let grid = FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None).unwrap();
+        let potential = Array3::from_shape_vec(
+            grid.dims(),
+            random(grid.dims().iter().product(), 12)
+                .iter()
+                .map(|z| z.re)
+                .collect(),
+        )
+        .unwrap();
+        let n = basis.vectors().len();
+        let block = ComplexMatrix::new(n, 7, random(n * 7, 927)).unwrap();
+        let mut expected = ComplexMatrix::zeros(n, 7).unwrap();
+        let reference = Hamiltonian::new(
+            &cell,
+            &basis,
+            potential.clone(),
+            nl(&basis, &cell, &pp, &pos),
+        )
+        .unwrap();
+        reference.apply_block(&block, &mut expected).unwrap();
+        for threads in [1, 2, 3, 4, 8] {
+            let h = Hamiltonian::new(
+                &cell,
+                &basis,
+                potential.clone(),
+                nl(&basis, &cell, &pp, &pos),
+            )
+            .unwrap()
+            .with_band_threads(threads)
+            .unwrap();
+            let mut result = ComplexMatrix::zeros(n, 7).unwrap();
+            for _ in 0..3 {
+                h.apply_block(&block, &mut result).unwrap();
+                for (a, b) in result.as_slice().iter().zip(expected.as_slice()) {
+                    assert_eq!(
+                        (a.re.to_bits(), a.im.to_bits()),
+                        (b.re.to_bits(), b.im.to_bits())
+                    );
+                }
+            }
+            let mut bad = block.clone();
+            bad.column_mut(2)[0].re = f64::NAN;
+            bad.column_mut(5)[0].im = f64::INFINITY;
+            assert!(
+                h.apply_block(&bad, &mut result)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("band index 2:")
+            );
+            // All scopes have joined and released scratch even on failure.
+            h.apply_block(&block, &mut result).unwrap();
+            assert_eq!(result, expected);
+        }
+    }
+}
+
+#[test]
+#[ignore = "release microbenchmark: cargo test --release -p dft-physics --test hamiltonian conventional_cell_block_timing -- --ignored --nocapture"]
+fn conventional_cell_block_timing() {
+    // Synthetic potential on the requested conventional-cell geometry. This
+    // measures block application only, not a converged real-silicon SCF.
+    let a = Bohr::from(Angstrom(5.43)).0;
+    let cell = Cell::from_user_rows_bohr([[a, 0., 0.], [0., a, 0.], [0., 0., a]]).unwrap();
+    let basis = PlaneWaveBasis::new(&cell, Hartree(15.)).unwrap();
+    let grid = FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None).unwrap();
+    let potential =
+        Array3::from_shape_fn(grid.dims(), |(i, j, k)| ((i + 2 * j + 3 * k) as f64).sin());
+    let block = ComplexMatrix::new(
+        basis.vectors().len(),
+        20,
+        random(basis.vectors().len() * 20, 73),
+    )
+    .unwrap();
+    let mut expected = ComplexMatrix::zeros(block.rows(), block.cols()).unwrap();
+    for threads in [1, 2, 4, 8] {
+        let h = Hamiltonian::new(
+            &cell,
+            &basis,
+            potential.clone(),
+            NonlocalOperator::new(&basis, cell.volume_bohr3(), &[]).unwrap(),
+        )
+        .unwrap()
+        .with_band_threads(threads)
+        .unwrap();
+        let mut output = expected.clone();
+        h.apply_block(&block, &mut output).unwrap();
+        if threads == 1 {
+            expected = output.clone();
+        }
+        assert!(
+            output
+                .as_slice()
+                .iter()
+                .zip(expected.as_slice())
+                .all(|(a, b)| a.re.to_bits() == b.re.to_bits() && a.im.to_bits() == b.im.to_bits())
+        );
+        let mut samples = Vec::new();
+        for _ in 0..11 {
+            let start = std::time::Instant::now();
+            for _ in 0..10 {
+                h.apply_block(&block, &mut output).unwrap();
+            }
+            samples.push(start.elapsed().as_secs_f64() / 10.);
+        }
+        samples.sort_by(f64::total_cmp);
+        println!(
+            "synthetic conventional cell: grid={:?} npw={} bands=20 threads={threads} block_median_s={:.9} bit_identical=true",
+            grid.dims(),
+            block.rows(),
+            samples[5]
+        );
+    }
+}

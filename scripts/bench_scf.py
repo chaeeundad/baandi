@@ -46,6 +46,7 @@ energy_tolerance_ha = 1e-8
 density_residual_tolerance = 1e-7
 """
 CASES = {
+    "si8": ("8-atom conventional Gamma, 30 Ry", 30.0, "kpoints = [[0.0, 0.0, 0.0]]"),
     "gamma": ("Gamma only, 30 Ry", 30.0, "kpoints = [[0.0, 0.0, 0.0]]"),
     "k222s": ("2x2x2 shifted (4 k), 30 Ry", 30.0, "kgrid = [2, 2, 2]\nkshift = [0.5, 0.5, 0.5]"),
     "k222": ("2x2x2 (8 k), 30 Ry", 30.0, "kgrid = [2, 2, 2]\nkshift = [0.0, 0.0, 0.0]"),
@@ -62,14 +63,29 @@ def sha256(path):
     return h.hexdigest()
 
 
+def case_input(upf, key, threads=None):
+    _, ecut, kblock = CASES[key]
+    text = TEMPLATE.format(upf=upf, ecut=ecut, kblock=kblock)
+    if key == "si8":
+        text = text.replace('Si diamond primitive', 'Si diamond conventional')
+        text = text.replace('[[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]',
+                            '[[5.43, 0.0, 0.0], [0.0, 5.43, 0.0], [0.0, 0.0, 5.43]]')
+        extra = ""
+        for site in [(0, .5, .5), (.5, 0, .5), (.5, .5, 0),
+                     (.25, .75, .75), (.75, .25, .75), (.75, .75, .25)]:
+            extra += f'[[system.atoms]]\nspecies = "Si"\nfractional = {list(site)}\n\n'
+        text = text.replace('[pseudopotentials]', extra + '[pseudopotentials]')
+    if threads is not None:
+        text = text.replace("[scf]", f"[scf]\nthreads = {threads}")
+    return text
+
+
 def run_case(binary, upf, key, repeats, threads=None):
     label, ecut, kblock = CASES[key]
-    walls, last = [], None
+    walls, phases, energies, hashes, engines, last = [], [], [], [], [], None
     with tempfile.TemporaryDirectory() as td:
         toml = os.path.join(td, "input.toml")
-        text = TEMPLATE.format(upf=upf, ecut=ecut, kblock=kblock)
-        if threads is not None:
-            text = text.replace("[scf]", f"[scf]\nthreads = {threads}")
+        text = case_input(upf, key, threads)
         open(toml, "w").write(text)
         for i in range(repeats):
             out = os.path.join(td, f"out{i}")
@@ -79,10 +95,19 @@ def run_case(binary, upf, key, repeats, threads=None):
             if p.returncode != 0:
                 raise RuntimeError(f"{key}: dft-cli exit {p.returncode}\n{p.stderr[-400:]}")
             last = out
+            report = json.load(open(os.path.join(out, "results.json")))
+            phases.append(report["timings"]["phases"])
+            engines.append(report["timings"]["engine_total_s"])
+            energies.append(report["total_energy"]["ha"])
+            hashes.append(sha256(os.path.join(out, "density.bin")))
+        if len(set(energies)) != 1 or len(set(hashes)) != 1:
+            raise RuntimeError(f"{key}: repeated runs were not identical")
         r = json.load(open(os.path.join(last, "results.json")))
         ph = r["timings"]["phases"]
         return {"label": label, "wall_s": walls, "wall_median_s": statistics.median(walls),
                 "engine_total_s": r["timings"]["engine_total_s"], "phases_s": ph,
+                "engine_total_median_s": statistics.median(engines),
+                "phase_medians_s": {key: statistics.median(p[key] for p in phases) for key in ph},
                 "iterations": len(r["convergence"]["history"]), "total_energy_ha": r["total_energy"]["ha"],
                 "density_sha256": sha256(os.path.join(last, "density.bin"))}
 
@@ -93,7 +118,7 @@ def main(argv):
     ap.add_argument("--upf", required=True)
     ap.add_argument("--cases", default="gamma,k222")
     ap.add_argument("--repeats", type=int, default=3)
-    ap.add_argument("--threads", type=int, help="k-point threads (0 means 1); omitted preserves the input default")
+    ap.add_argument("--threads", type=int, help="total thread budget (0 means 1); omitted preserves the input default")
     ap.add_argument("--baseline")
     ap.add_argument("--record")
     ap.add_argument("--require-identical", action="store_true", help="fail unless the density is bit-identical to the baseline")

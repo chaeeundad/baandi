@@ -1152,3 +1152,228 @@ logs show no failed test. `git diff --check` exited 0.
 An initial evidence-assembly helper raised KeyError because Gamma has no
 `kpoints` object; optional Gamma handling fixed it and the corrected helper
 exited 0. This did not affect any numerical run.
+
+## P7PB — intra-k scoped band workers (2026-11-03)
+
+Starting commit: `20cb4168c4fea3c2886e23c0848e5d39a15d30a8`.
+Before code changes, built release with debug symbols in
+`/private/tmp/p7pb-before-target` (exit 0). Fresh k444s phase measurement:
+diagonalization 3.014673292 s, density 0.369364208 s, engine 3.788528583 s.
+`sample <owned-child-pid> 3 -file /private/tmp/p7pb-profile/sample.txt`
+failed with exit 255 (sandbox cannot examine process); no fresh sampling profile
+is claimed. The existing O1 profile above identifies FFTs as the dominant work;
+this fresh phase measurement supports distributing independent band transforms.
+Before medians (three runs, shared Apple Silicon Mac): Gamma 0.141 s,
+k222 0.930 s, k222s 0.500 s, k444s 3.727 s. Energies exactly match
+baseline-after-o2.json. The requested unmodified si8 input already fails in the
+BEFORE binary: Davidson 400 iterations, residual 1.90890249000622e-4 Ha.
+The combined benchmark exits 3 before writing its record. This is a pre-existing
+acceptance blocker; tolerances and defaults will not be changed to conceal it.
+
+### Implementation and invariants
+
+The total budget is split deterministically into outer=min(max(N,1),nk) and
+inner=max(1,max(N,1)/outer); unused remainders never become extra workers.
+Immutable Hamiltonian data is shared inside each scoped call; each worker owns
+FFT/grid/projector scratch and an output vector, allocated during construction.
+The existing matrix interface cannot split mutable column ranges, so a mutex
+protects only the completed-column copy. Recursion uses the calling thread as
+one leaf, with at most inner active numerical workers; no join-handle Vec is
+allocated. Scoped OS-thread bookkeeping still allocates; no numerical scratch
+allocation occurs per block call. Threads=1 retains the original arithmetic.
+Davidson already calls apply_block, so the solver file is unchanged.
+
+Density workers reuse FFT/grid storage and per-band real contribution arrays,
+then fold ascending bands and k points. Memory is O(inner*grid+bands*grid) per
+k state, separate from existing orbital copies. Inner=1 keeps the prior density
+function. Empty bands are not skipped. Errors are selected in ascending band
+or k order after joins. No tolerance, algorithm, manifest, lockfile or production
+FFT change; no unsafe, OpenMP, rayon calls or new dependency. This change is
+based on the repository's own implementation and measurements, not QE source.
+
+### Final paired measurements
+
+Shared 12-logical-CPU Apple Silicon Mac, release binaries; no task-local build
+or test ran concurrently with this matrix. Other users' jobs are uncontrolled,
+so these are indicative measurements, not quiet-node acceptance. Median of
+three full CLI runs per row. Both binaries use the starting checkout's same
+compiler/dependencies; BEFORE was built before edits with a separate target
+folder and `CARGO_PROFILE_RELEASE_DEBUG=true`; AFTER used the same profile.
+UPF was read in place, SHA-256:
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+Records, commands with exit codes and logs are in `/private/tmp/p7pb-evidence`;
+the tables below retain the key evidence if temporary files are cleared.
+B and A denote BEFORE and AFTER; phase entries are medians too, in seconds.
+Speedup B(N)/A(N) isolates the change at a fixed request; B(1)/A(N) also includes
+the existing k-point parallelism.
+
+| Case | N | B wall s | A wall s | B(N)/A(N) | B(1)/A(N) | B diag s | A diag s | B density s | A density s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| gamma | 1 | 0.139655 | 0.140629 | 0.993 | 0.993 | 0.079739 | 0.080354 | 0.010740 | 0.010858 |
+| gamma | 2 | 0.140236 | 0.107186 | 1.308 | 1.303 | 0.079949 | 0.051194 | 0.010760 | 0.006105 |
+| gamma | 4 | 0.140692 | 0.096700 | 1.455 | 1.444 | 0.080346 | 0.041663 | 0.010852 | 0.004531 |
+| gamma | 8 | 0.140021 | 0.094070 | 1.488 | 1.485 | 0.079639 | 0.038982 | 0.010711 | 0.003924 |
+| k222 | 1 | 0.924151 | 0.927180 | 0.997 | 0.997 | 0.707949 | 0.709786 | 0.086472 | 0.086747 |
+| k222 | 2 | 0.498396 | 0.506250 | 0.984 | 1.825 | 0.363297 | 0.369889 | 0.046846 | 0.046652 |
+| k222 | 4 | 0.324154 | 0.324703 | 0.998 | 2.846 | 0.220191 | 0.219915 | 0.030940 | 0.031256 |
+| k222 | 8 | 0.240648 | 0.242731 | 0.991 | 3.807 | 0.155027 | 0.156542 | 0.022385 | 0.022172 |
+| k222s | 1 | 0.498994 | 0.498479 | 1.001 | 1.001 | 0.370931 | 0.369851 | 0.043186 | 0.043422 |
+| k222s | 2 | 0.275705 | 0.280145 | 0.984 | 1.781 | 0.188461 | 0.192006 | 0.022912 | 0.023000 |
+| k222s | 4 | 0.190494 | 0.193798 | 0.983 | 2.575 | 0.118175 | 0.120059 | 0.015489 | 0.015453 |
+| k222s | 8 | 0.192605 | 0.159950 | 1.204 | 3.120 | 0.119218 | 0.089168 | 0.015576 | 0.011966 |
+| k444s | 1 | 3.701550 | 3.697095 | 1.001 | 1.001 | 2.954853 | 2.943547 | 0.346786 | 0.349675 |
+| k444s | 2 | 1.918251 | 1.969330 | 0.974 | 1.880 | 1.500144 | 1.543661 | 0.187539 | 0.188197 |
+| k444s | 4 | 1.181079 | 1.195208 | 0.988 | 3.097 | 0.890606 | 0.901763 | 0.125197 | 0.126499 |
+| k444s | 8 | 0.826387 | 0.836033 | 0.988 | 4.428 | 0.615397 | 0.617486 | 0.087001 | 0.088015 |
+
+All 96 successful CLI runs (2 binaries x 4 budgets x 4 cases x 3 repeats)
+have identical densities within each case. All four energies are exactly equal
+to baseline-after-o2.json (delta 0 Ha), with 10 SCF iterations in every run.
+
+| Case | Total energy Ha | Density SHA-256 |
+| --- | ---: | --- |
+| gamma | -7.2955304682107718 | `968fdd04bce7c2bfe30e227a9ea35e95a8971b203e20f18a412e552eff4454eb` |
+| k222 | -7.8312300571211448 | `402c5135f02d806c2420c5ef79260fbab09b90a8e103a581817a431b4f04112d` |
+| k222s | -7.919423412469067 | `40b373200b0be1668f781a809e81fb08fc50ded555948bf040742ea7b873874f` |
+| k444s | -7.9259761266480808 | `4d6a4b558a8fd82f8bdd854e16bacfcf3a3e4255bc4f09550408e99d95bfeaed` |
+
+### si8 acceptance blocker and supplementary measurement
+
+The added input has the conventional cubic lattice a=5.43 Angstrom and eight
+diamond sites; no band override (20 bands), cutoff 30 Ry. The actual automatically
+selected grid is 36^3, not the approximately 48^3 estimate in the ticket.
+BEFORE and every AFTER budget fail with CLI exit 4 at Davidson iteration 400,
+with the same maximum residual `1.90890249000622e-4` Ha. Three runs per row:
+
+| Binary | N | Median time to failure s | CLI exit |
+| --- | ---: | ---: | ---: |
+| before | 1 | 5.150228 | 4 |
+| after | 1 | 5.150535 | 4 |
+| after | 2 | 4.094765 | 4 |
+| after | 4 | 3.704369 | 4 |
+| after | 8 | 3.576224 | 4 |
+
+These are times to the same failure, **not** converged SCF speedups. There is
+no si8 density/hash, total energy or phase report; its requested gates cannot
+be certified. Changing solver defaults, subspace logic or tolerance to obtain
+a passing result would exceed this ticket. Full acceptance remains blocked
+on a separate investigation of the starting solver on this input.
+
+For diagnostic evidence only, the ignored `conventional_cell_block_timing`
+test uses the same cell/cutoff/grid (2969 plane waves, 20 random bands), a
+synthetic local potential and no nonlocal projectors. Its output is bit-identical
+across N=1,2,4,8. Median of 11 batches of ten block applications, seconds:
+
+| N | Block median s | Speedup vs N=1 |
+| ---: | ---: | ---: |
+| 1 | 0.007561308 | 1.000 |
+| 2 | 0.003976538 | 1.901 |
+| 4 | 0.002514742 | 3.007 |
+| 8 | 0.001662129 | 4.549 |
+
+This is not an si8 SCF or a QE comparison. The full real-UPF si8 failure above
+remains the acceptance result.
+
+### Optional FFT-lane decision and rejected ideas
+
+Rejected the packed-lane scoped-thread prototype; production FFTs stay serial
+at every size (no enabling threshold). The ignored `fft_lanes` test gathers
+independent lanes into reusable packed buffers, executes identical rustfft
+arithmetic in scoped threads, then scatters them in each pass. It compares
+full inverse transforms bitwise against the production plan before timing.
+Final measurements below ran without another task-local build/test; an earlier
+measurement overlapped check.sh and is excluded. Median of 11 batches of ten
+transforms; serial and lane times are seconds.
+
+| Grid | Lane threads | Serial s | Packed lanes s | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| 25^3 | 2 | 0.000111746 | 0.000144288 | 0.774 |
+| 25^3 | 4 | 0.000111746 | 0.000167379 | 0.668 |
+| 25^3 | 8 | 0.000111746 | 0.000255563 | 0.437 |
+| 36^3 | 2 | 0.000302187 | 0.000271279 | 1.114 |
+| 36^3 | 4 | 0.000302187 | 0.000316650 | 0.954 |
+| 36^3 | 8 | 0.000302187 | 0.000368675 | 0.820 |
+| 48^3 | 2 | 0.000808467 | 0.000829717 | 0.974 |
+| 48^3 | 4 | 0.000808467 | 0.000860388 | 0.940 |
+| 48^3 | 8 | 0.000808467 | 0.000853592 | 0.947 |
+
+25^3 and 48^3 show no benefit; the actual si8 36^3 grid improves only 1.114x
+with two lane threads and regresses with four/eight. This is less than the
+1.901x two-band-worker block throughput improvement. No useful threshold or
+additional benefit beyond band workers is established. Nested lanes would
+also need to consume the same budget, not multiply it; no integration is kept.
+Only the ignored reproducible experiment is retained, not a selectable backend.
+This rejects this particular packing/spawning strategy, not all possible FFT
+parallel implementations. Parallel small GEMM/orthonormalization was not added:
+the measured diagonalization gain already comes from independent vectors.
+A persistent custom executor was not introduced; scope lifetime and ownership
+remain explicit. No unsafe mutable-matrix slicing was used to avoid the copy
+mutex. Skipping empty density bands or re-associating sums was rejected because
+bit identity, including the original zero contributions, is the contract.
+
+### Reference and verification evidence
+
+Synthetic complete SCFs compare all recorded fields after removing timing,
+plus explicit bit checks of density, energies and eigenvectors; 1,2,3,5 k points,
+3 bands, thread requests 0,1,2,3,4,8. Random seven-column Hamiltonian blocks at
+Gamma and shifted k compare bitwise at 1,2,3,4,8 workers, including reuse after
+multiple failures. Unit tests verify pool pointer stability and lowest failing
+band 2 before band 5. Existing tests cover lowest failing k and panic joining.
+CLI tests verify both additive budget fields and outer*inner<=max(N,1).
+The 5 generated benchmark TOMLs validate (CLI exit 0); old default case inputs
+remain byte-identical. The benchmark now verifies every repeat's energy/hash,
+retains the old fields, and adds phase/engine medians.
+
+Fresh AFTER N=8 outputs compared with the stored real QE outputs at unchanged
+tolerances (not new QE runs):
+
+| Case | Energy difference Ha/atom | Max eigenvalue difference Ha | Exit |
+| --- | ---: | ---: | ---: |
+| k222 | 1.2814394274585084e-06 | 1.9904197001276118e-06 | 0 |
+| k222s | 1.2812654666127798e-06 | 1.772334107711065e-06 | 0 |
+| k444s | 1.2816759595857263e-06 | 2.1001330257428846e-06 | 0 |
+
+`check.sh` passed build, test, fmt and clippy (exit 0). Targeted physics/engine
+suites passed (exit 0). The first targeted run failed to compile a test-only
+`dft_units` import (101); using the existing physics data re-export fixed it
+without a dependency. An initial FFT test launch preceded creation of its test
+directory and exited 101; the corrected ignored test passed. A Python TOML
+probe exited 1 because system Python lacks tomllib; validation through the real
+CLI then passed for all five inputs. These were harness issues, not numerical
+mismatches. Every paired benchmark command exited 0; the initial benchmark
+including si8 exited 3, correctly reporting the CLI's exit 4. Profiling remains
+limited by sample's exit 255 permission failure, as recorded above.
+
+Reproduction (run from this worktree; preserve the starting binary before edits):
+
+```sh
+CARGO_TARGET_DIR=/private/tmp/p7pb-before-target CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release -p dft-cli --offline
+CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release -p dft-cli --offline
+python3 -I scripts/bench_scf.py --binary /private/tmp/p7pb-before-target/release/dft-cli \
+  --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF \
+  --cases gamma,k222,k222s,k444s --repeats 3 --threads 1 \
+  --baseline docs/performance/baseline-after-o2.json --require-identical \
+  --record /private/tmp/p7pb-evidence/before-1.json
+# Repeat for each binary with --threads 1,2,4,8 separately, using before-1.json
+# as the baseline and a separate record for each binary/budget.
+python3 -I scripts/bench_scf.py --binary target/release/dft-cli \
+  --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases si8 --threads 8
+cargo test --release --offline -p dft-physics --test hamiltonian conventional_cell_block_timing -- --ignored --nocapture
+cargo test --release --offline -p dft-numerics --test fft_lanes -- --ignored --nocapture
+python3 -I scripts/compare_kpoints_qe.py --ours /private/tmp/p7pb-evidence/k222/out/results.json --qe-out tests/reference/kpoints/k222_c/qe.out
+python3 -I scripts/compare_kpoints_qe.py --ours /private/tmp/p7pb-evidence/k222s/out/results.json --qe-out tests/reference/kpoints/k222s_c/qe.out
+python3 -I scripts/compare_kpoints_qe.py --ours /private/tmp/p7pb-evidence/k444s/out/results.json --qe-summary tests/reference/kpoints/k444s_c/qe_summary.json
+scripts/check.sh
+```
+
+The temporary detail helper generates retained inputs using `case_input` and
+runs `dft-cli run INPUT --output-dir OUT`. It records three direct si8 attempts
+per budget so failures are measured without disguising them as passing results.
+No remote actions, UPF copies, or writes to README, artifacts, tickets, baselines,
+manifests or lockfile were made under the explicit ticket exclusions. Changes
+remain uncommitted for review. Quiet-node remeasurement remains with Claude.
+
+Final release ignored-workspace suite: 17 tests passed, zero failures,
+`cargo test --release --offline --workspace -- --ignored` exit 0.
+`git diff --check` exit 0. Full acceptance status remains blocked by the requested real-UPF si8 SCF
+convergence/density gates. Quiet-host timing remains pending with Claude.

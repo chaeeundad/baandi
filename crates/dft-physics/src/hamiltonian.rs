@@ -252,6 +252,10 @@ pub fn truncate_to_density_sphere(
     fft.to_real(&reciprocal, &mut real)?;
     Ok(real.mapv(|z| z.re))
 }
+struct Worker {
+    scratch: Scratch,
+    output: Vec<Complex64>,
+}
 struct Scratch {
     fft: FftPlan3d,
     reciprocal: Array3<Complex64>,
@@ -261,12 +265,15 @@ struct Scratch {
 /// Immutable physical data with interior scratch reuse; intentionally not Sync.
 /// Local grid values are in Ha and must use the internally derived grid dimensions.
 pub struct Hamiltonian {
+    data: HamiltonianData,
+    scratch: RefCell<Vec<Worker>>,
+}
+struct HamiltonianData {
     grid: FftGridSpec,
     pattern: SpherePattern,
     kinetic: Vec<f64>,
     potential: Array3<f64>,
     nonlocal: NonlocalOperator,
-    scratch: RefCell<Scratch>,
 }
 impl Hamiltonian {
     /// Bloch Hamiltonian for the supplied basis: |k+G|^2/2 + V_local + V_NL(k).
@@ -289,45 +296,71 @@ impl Hamiltonian {
         if !potential.iter().all(|x| x.is_finite()) {
             return Err(HamiltonianError::NonFinite);
         }
-        let scratch = RefCell::new(Scratch {
-            fft: FftPlan3d::new(dims)?,
-            reciprocal: Array3::zeros(dims),
-            real: Array3::zeros(dims),
-            projections: vec![Complex64::default(); nonlocal.max_channels],
-        });
+        let scratch = RefCell::new(vec![Worker {
+            scratch: Scratch {
+                fft: FftPlan3d::new(dims)?,
+                reciprocal: Array3::zeros(dims),
+                real: Array3::zeros(dims),
+                projections: vec![Complex64::default(); nonlocal.max_channels],
+            },
+            output: vec![Complex64::default(); basis.vectors().len()],
+        }]);
         let pattern = SpherePattern::from_indices(dims, grid.g_to_fft())?;
         Ok(Self {
-            grid,
-            pattern,
-            kinetic: basis
-                .momenta()
-                .iter()
-                .map(|g| 0.5 * g.norm_squared)
-                .collect(),
-            potential,
-            nonlocal,
+            data: HamiltonianData {
+                grid,
+                pattern,
+                kinetic: basis
+                    .momenta()
+                    .iter()
+                    .map(|g| 0.5 * g.norm_squared)
+                    .collect(),
+                potential,
+                nonlocal,
+            },
             scratch,
         })
+    }
+    /// Set the intra-k budget once during construction. Zero means one.
+    /// Numerical buffers are reused; only scoped OS-thread bookkeeping is transient.
+    pub fn with_band_threads(mut self, threads: usize) -> Result<Self, HamiltonianError> {
+        let dims = self.data.grid.dims();
+        let pool = self.scratch.get_mut();
+        for _ in pool.len()..threads.max(1) {
+            pool.push(Worker {
+                scratch: Scratch {
+                    fft: FftPlan3d::new(dims)?,
+                    reciprocal: Array3::zeros(dims),
+                    real: Array3::zeros(dims),
+                    projections: vec![Complex64::default(); self.data.nonlocal.max_channels],
+                },
+                output: vec![Complex64::default(); self.data.kinetic.len()],
+            });
+        }
+        pool.truncate(threads.max(1));
+        Ok(self)
     }
     /// Replace only the effective local samples, retaining FFT and projector plans.
     /// Invalid input leaves the previous potential intact.
     pub fn set_local_potential(&mut self, potential: Array3<f64>) -> Result<(), HamiltonianError> {
-        if potential.shape() != self.potential.shape() {
+        if potential.shape() != self.data.potential.shape() {
             return Err(HamiltonianError::Shape);
         }
         if !potential.iter().all(|v| v.is_finite()) {
             return Err(HamiltonianError::NonFinite);
         }
-        self.potential = potential;
+        self.data.potential = potential;
         Ok(())
     }
     /// Read-only access for term-by-term orbital energy audits.
     pub fn nonlocal(&self) -> &NonlocalOperator {
-        &self.nonlocal
+        &self.data.nonlocal
     }
     pub fn kinetic_diagonal(&self) -> &[f64] {
-        &self.kinetic
+        &self.data.kinetic
     }
+}
+impl HamiltonianData {
     fn apply_with(
         &self,
         x: &[Complex64],
@@ -368,14 +401,16 @@ fn application(error: HamiltonianError) -> SolverError {
 }
 impl LinearOperator for Hamiltonian {
     fn dimension(&self) -> usize {
-        self.kinetic.len()
+        self.data.kinetic.len()
     }
     fn apply(&self, x: &[Complex64], y: &mut [Complex64]) -> Result<(), SolverError> {
         let mut scratch = self
             .scratch
             .try_borrow_mut()
             .map_err(|_| application(HamiltonianError::Busy))?;
-        self.apply_with(x, y, &mut scratch).map_err(application)
+        self.data
+            .apply_with(x, y, &mut scratch[0].scratch)
+            .map_err(application)
     }
     fn apply_block(&self, x: &ComplexMatrix, y: &mut ComplexMatrix) -> Result<(), SolverError> {
         if x.rows() != self.dimension() || y.rows() != x.rows() || y.cols() != x.cols() {
@@ -385,10 +420,102 @@ impl LinearOperator for Hamiltonian {
             .scratch
             .try_borrow_mut()
             .map_err(|_| application(HamiltonianError::Busy))?;
-        for j in 0..x.cols() {
-            self.apply_with(x.column(j), y.column_mut(j), &mut scratch)
-                .map_err(application)?;
+        if scratch.len() == 1 || x.cols() <= 1 {
+            for j in 0..x.cols() {
+                self.data
+                    .apply_with(x.column(j), y.column_mut(j), &mut scratch[0].scratch)
+                    .map_err(|e| SolverError::Application(format!("band index {j}: {e}")))?;
+            }
+            return Ok(());
         }
-        Ok(())
+        let workers = scratch.len().min(x.cols());
+        let output = std::sync::Mutex::new(y);
+        apply_workers(&self.data, &mut scratch[..workers], x, &output, 0, x.cols())
+    }
+}
+
+// Each recursion uses its caller as one worker, so at most pool.len() threads
+// execute numerical work. Joins precede error propagation in ascending band order.
+fn apply_workers(
+    data: &HamiltonianData,
+    workers: &mut [Worker],
+    x: &ComplexMatrix,
+    y: &std::sync::Mutex<&mut ComplexMatrix>,
+    first: usize,
+    end: usize,
+) -> Result<(), SolverError> {
+    if workers.len() == 1 {
+        let Worker { scratch, output } = &mut workers[0];
+        for j in first..end {
+            data.apply_with(x.column(j), output, scratch)
+                .map_err(|e| SolverError::Application(format!("band index {j}: {e}")))?;
+            // The lock covers only a copy into a disjoint column, never arithmetic.
+            y.lock()
+                .map_err(|_| SolverError::Application("block output poisoned".into()))?
+                .column_mut(j)
+                .copy_from_slice(output);
+        }
+        return Ok(());
+    }
+    let left_count = workers.len() / 2;
+    let middle = first + (end - first) * left_count / workers.len();
+    let (left, right) = workers.split_at_mut(left_count);
+    std::thread::scope(|scope| {
+        let handle = scope.spawn(|| apply_workers(data, left, x, y, first, middle));
+        let right = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            apply_workers(data, right, x, y, middle, end)
+        }));
+        let left = handle.join();
+        left.map_err(|_| {
+            SolverError::Application(format!("band index {first}: worker panicked"))
+        })??;
+        right.map_err(|_| {
+            SolverError::Application(format!("band index {middle}: worker panicked"))
+        })?
+    })
+}
+
+#[cfg(test)]
+mod pool_tests {
+    use super::*;
+    #[test]
+    fn scratch_addresses_survive_blocks_and_errors() {
+        let cell = Cell::from_user_rows_bohr([[4., 0., 0.], [0., 4., 0.], [0., 0., 4.]]).unwrap();
+        let basis = PlaneWaveBasis::new(&cell, dft_units::Hartree(2.5)).unwrap();
+        let grid = FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None).unwrap();
+        let h = Hamiltonian::new(
+            &cell,
+            &basis,
+            Array3::zeros(grid.dims()),
+            NonlocalOperator::new(&basis, cell.volume_bohr3(), &[]).unwrap(),
+        )
+        .unwrap()
+        .with_band_threads(3)
+        .unwrap();
+        let addresses = || {
+            h.scratch
+                .borrow()
+                .iter()
+                .map(|w| {
+                    (
+                        &w.scratch.fft as *const FftPlan3d as usize,
+                        w.scratch.real.as_ptr() as usize,
+                        w.scratch.reciprocal.as_ptr() as usize,
+                        w.scratch.projections.as_ptr() as usize,
+                        w.output.as_ptr() as usize,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        let before = addresses();
+        let mut x = ComplexMatrix::zeros(basis.vectors().len(), 5).unwrap();
+        let mut y = x.clone();
+        for _ in 0..3 {
+            h.apply_block(&x, &mut y).unwrap();
+            assert_eq!(before, addresses());
+        }
+        x.column_mut(1)[0].re = f64::NAN;
+        assert!(h.apply_block(&x, &mut y).is_err());
+        assert_eq!(before, addresses());
     }
 }

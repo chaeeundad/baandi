@@ -14,3 +14,5 @@ pub const EXECUTION_THREADS: usize = 1;
 
 pub mod functional;
 pub use functional::Functional;
+
+mod band_density;

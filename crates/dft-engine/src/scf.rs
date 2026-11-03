@@ -273,6 +273,7 @@ struct KState {
     basis: PlaneWaveBasis,
     grid: FftGridSpec,
     hamiltonian: Hamiltonian,
+    band_density: Option<crate::band_density::BandDensity>,
 }
 /// Disjoint state ownership needs Send, never Sync for Hamiltonian scratch.
 /// Join every worker before inspecting results in ascending k order. Catch each
@@ -581,6 +582,8 @@ impl ScfProblem {
             return Err(ScfError::Numerical("ionic imaginary potential".into()));
         }
         let ionic_real = ionic.mapv(|z| z.re);
+        let outer = options.threads.max(1).min(points.len());
+        let inner = (options.threads.max(1) / outer).max(1);
         let mut construction_points = points.to_vec();
         let states = ordered_solves(&mut construction_points, options.threads, |_, point| {
             let basis =
@@ -599,7 +602,15 @@ impl ScfProblem {
                 &basis,
                 ionic_real.clone(),
                 NonlocalOperator::new(&basis, cell.volume_bohr3(), &species)?,
-            )?;
+            )?
+            .with_band_threads(inner)?;
+            let band_density = if inner > 1 {
+                Some(crate::band_density::BandDensity::new(
+                    &k_grid, bands, inner,
+                )?)
+            } else {
+                None
+            };
             Ok(KState {
                 point: KPoint {
                     fractional: basis.k_fractional(),
@@ -608,6 +619,7 @@ impl ScfProblem {
                 basis,
                 grid: k_grid,
                 hamiltonian,
+                band_density,
             })
         })?;
         let worker_ffts = (0..options.threads.max(1).min(states.len()))
@@ -766,13 +778,22 @@ impl ScfProblem {
                 let orbitals: Vec<_> = (0..vectors.cols())
                     .map(|b| vectors.column(b).to_vec())
                     .collect();
-                let nk = density::from_orbitals(
-                    &orbitals,
-                    &self.occupations,
-                    &state.grid,
-                    self.cell.volume_bohr3(),
-                    fft,
-                )?;
+                let nk = if let Some(workspace) = &mut state.band_density {
+                    workspace.compute(
+                        &orbitals,
+                        &self.occupations,
+                        &state.grid,
+                        self.cell.volume_bohr3(),
+                    )?
+                } else {
+                    density::from_orbitals(
+                        &orbitals,
+                        &self.occupations,
+                        &state.grid,
+                        self.cell.volume_bohr3(),
+                        fft,
+                    )?
+                };
                 Ok((state.point.weight, nk, orbitals))
             },
             |(weight, nk, k_orbitals)| {

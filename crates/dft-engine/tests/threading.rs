@@ -60,7 +60,7 @@ fn scf_thread_counts_are_bit_identical() {
     }];
     let cell = Cell::from_user_rows_bohr([[4., 0., 0.], [0., 4., 0.], [0., 0., 4.]]).unwrap();
     let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
-    for nk in [1, 2, 5] {
+    for nk in [1, 2, 3, 5] {
         let points: Vec<_> = (0..nk)
             .map(|i| KPoint {
                 fractional: [0.025 * i as f64, 0.015 * i as f64, 0.0],

@@ -737,6 +737,11 @@ fn threading_metadata_and_identical_outputs() {
             assert_eq!(json["threading"]["threads_requested"], requested);
             assert_eq!(json["threading"]["threads_used"], requested.max(1).min(nk));
             assert_eq!(json["threading"]["threads"], requested.max(1).min(nk));
+            let outer = requested.max(1).min(nk);
+            let inner = requested.max(1) / outer;
+            assert_eq!(json["threading"]["outer_threads"], outer);
+            assert_eq!(json["threading"]["inner_threads"], inner);
+            assert!(outer * inner <= requested.max(1));
             assert_eq!(json["scf"]["threads"], requested);
             strip_times(&mut json);
             let object = json.as_object_mut().unwrap();

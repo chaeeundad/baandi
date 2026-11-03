@@ -466,3 +466,31 @@ The serial path also converts Davidson panics into indexed errors.
 
 Benchmark inputs can opt in with `scripts/bench_scf.py --threads N`; omitting
 that option leaves the generated input unchanged.
+
+### P7PB: total thread budget within and across k points
+
+`[scf] threads = N` remains a total budget (default 1; zero normalizes to 1).
+For `nk` points, `outer = min(max(N, 1), nk)` and
+`inner = max(1, max(N, 1) / outer)` using integer division. Thus
+`outer * inner <= max(N, 1)`; remainders are unused. For example, N=8 and
+nk=3 gives outer=3, inner=2; Gamma with N=4 gives outer=1, inner=4.
+
+The `results.json` `threading` object adds `outer_threads` and `inner_threads`.
+The existing `threads` and `threads_used` fields retain their historical
+meaning (outer k workers), and `threads_requested` retains the input value.
+Inner threads are a budget: a smaller block may use fewer workers. Timings
+include thread creation and joins. The backend description now mentions bands.
+
+Within a k point, Hamiltonian block vectors and density band transforms use
+scoped standard-library threads with persistent numerical scratch. Density
+contributions are reduced in ascending band order, then ascending k order.
+Each vector uses the existing FFT arithmetic. Single-thread runs spawn no inner
+threads; small matrix operations and individual FFT transforms remain serial.
+No numerical tolerance, occupation, default band count or SCF algorithm changes.
+
+`bench_scf.py --cases si8` adds the 8-atom conventional cubic Si cell at
+5.43 Angstrom and 30 Ry, with default bands and the supplied read-only UPF.
+The starting binary fails to converge its Davidson solve for this input;
+therefore this case currently reports failure, not an accepted SCF speedup.
+Benchmark records add `phase_medians_s` and `engine_total_median_s`; the older
+last-run fields and default case selection retain their meanings.

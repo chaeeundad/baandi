@@ -1,0 +1,80 @@
+{
+ "note": "State after O1, O3, O4a, O4b, O4c, O2 (commit bc2c00d) and k-point threads at default 1; macOS Apple Silicon; bit-identity baseline for later overhead-only steps; includes k444s",
+ "binary": "dft-cli",
+ "machine_note": "record host and commit in the note",
+ "energy_tolerance_ha": 1e-12,
+ "cases": {
+  "gamma": {
+   "label": "Gamma only, 30 Ry",
+   "wall_s": [
+    0.494096125
+   ],
+   "wall_median_s": 0.494096125,
+   "engine_total_s": 0.17510125,
+   "phases_s": {
+    "density_s": 0.011571625,
+    "diagonalization_s": 0.087253793,
+    "mixing_s": 0.001144208,
+    "potential_s": 0.005065376,
+    "total_energy_s": 0.007657001
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.295530468210772,
+   "density_sha256": "968fdd04bce7c2bfe30e227a9ea35e95a8971b203e20f18a412e552eff4454eb"
+  },
+  "k222s": {
+   "label": "2x2x2 shifted (4 k), 30 Ry",
+   "wall_s": [
+    0.506005708
+   ],
+   "wall_median_s": 0.506005708,
+   "engine_total_s": 0.501656875,
+   "phases_s": {
+    "density_s": 0.043754582,
+    "diagonalization_s": 0.376989251,
+    "mixing_s": 0.002341792,
+    "potential_s": 0.004890667,
+    "total_energy_s": 0.029038917
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.919423412469067,
+   "density_sha256": "40b373200b0be1668f781a809e81fb08fc50ded555948bf040742ea7b873874f"
+  },
+  "k222": {
+   "label": "2x2x2 (8 k), 30 Ry",
+   "wall_s": [
+    0.9317667079999998
+   ],
+   "wall_median_s": 0.9317667079999998,
+   "engine_total_s": 0.927152583,
+   "phases_s": {
+    "density_s": 0.086115833,
+    "diagonalization_s": 0.715179872,
+    "mixing_s": 0.002380253,
+    "potential_s": 0.005084167,
+    "total_energy_s": 0.058076417
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.831230057121145,
+   "density_sha256": "402c5135f02d806c2420c5ef79260fbab09b90a8e103a581817a431b4f04112d"
+  },
+  "k444s": {
+   "label": "4x4x4 shifted (32 k), 30 Ry",
+   "wall_s": [
+    3.8019115419999996
+   ],
+   "wall_median_s": 3.8019115419999996,
+   "engine_total_s": 3.796470082,
+   "phases_s": {
+    "density_s": 0.360781251,
+    "diagonalization_s": 3.031329501,
+    "mixing_s": 0.00242675,
+    "potential_s": 0.006621291,
+    "total_energy_s": 0.240048291
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.925976126648081,
+   "density_sha256": "4d6a4b558a8fd82f8bdd854e16bacfcf3a3e4255bc4f09550408e99d95bfeaed"
+  }
+ }
+}

@@ -517,3 +517,74 @@ manifest exception); no new package was added.
 See [the viewer guide](howto-volumetric.md) for units, pseudopotential caveats,
 periodic endpoints and the independent Python validator, and
 [ADR 0021](decisions/0021-volumetric-output.md) for numerical and format contracts.
+### Optional Kerker–Pulay density mixing (P10D)
+
+The default remains `mixing = "pulay"`, beta 0.3, six history differences.
+For an explicit reciprocal-space preconditioner:
+
+```toml
+[scf]
+mixing = "kerker-pulay"
+mixing_beta = 0.3
+mixing_history = 6
+mixing_q0_inverse_bohr = 1.0
+```
+
+`mixing_q0_inverse_bohr` is required for this strategy, in Bohr^-1 (not inverse
+Angstrom); there is no fitted/default screening length. It must be positive and
+finite with a representable nonzero square. The residual multiplier is
+|G|^2/(|G|^2+q0^2), with |G| from the cell's reciprocal basis; its G=0 coefficient
+is zero. A larger q0 damps more wavelengths and can slow insulating/vacuum
+regions. The example is illustrative, not a recommended universal parameter.
+The Pulay least-squares fit uses the filtered residual. Convergence and the
+fixed-point certificate always use the original, unfiltered density residual.
+
+`mixing_history` accepts a positive integer (number of differences), defaults
+to six for both Pulay strategies, and is rejected for `linear`. A q0 key is
+rejected for other strategies rather than ignored. Both new numeric keys
+support the existing expression-input mechanism. Effective method, beta,
+history and q0 are stored in run metadata. No beta/q0 fitting or silent SCF retry occurs. For Kerker–Pulay only, an
+infeasible proposal with no secant history uses one raw convex linear step with
+beta=min(requested beta,1). This deterministic positivity recovery prevents
+repeated filtering/damping from trapping density on the boundary. It keeps
+charge and the sampled history pair; it does not clip density. Remaining
+feasibility damping and divergence errors apply as before.
+
+Iteration records add `density_contraction` (raw SCF residual/current-to-previous
+ratio, null initially or after a zero residual), `mixing_history_used` (number
+of differences presented to a proposal, null when no proposal was made) and
+`mixing_resets` (cumulative feasibility resets, excluding initialization).
+`mixing_raw_recovery` records the raw convex recovery step described above.
+History size is not retained numerical rank. `mixing_history_used` describes
+the proposal before any feasibility reset; `mixer_reset` identifies that reset.
+A small filtered residual never proves convergence. Density samples are in
+electrons/Bohr^3; the existing normalized SCF residual is in Bohr^-3/2.
+No metallic convergence is supported or implied.
+### P7PC band accuracy fields
+
+`results.json.band_accuracy` describes the legacy first-k eigenvalue list.
+For explicit k-point output, each `kpoints.points[]` also has `band_accuracy`.
+Each entry contains `residual_ha` (residual vector 2-norm), `buffer` and
+`converged` (whether that band's requested residual target was met). Existing
+energy, eigenvalue and convergence fields retain their names and units.
+
+Occupied bands and the lowest empty band use the requested strict tolerance.
+Higher empty bands use `max(requested_tolerance, 1e-5)` Ha and are printed with
+`(buffer; less accurate)`. Their printed decimal places do not imply strict
+accuracy. At the solver iteration limit buffers can be returned with
+`converged=false`; all strict bands must still pass. A residual bounds distance
+to the spectrum, not the error in an individually indexed member of a cluster.
+
+Fixed-point history certificates add `strict_residuals_per_k_ha` and
+`buffer_residuals_per_k_ha`. Only the former belong to the eigenpair certificate;
+the latter are separate informational measurements. The sampled-gap test is
+unchanged and uses the strict lowest empty band. Eight bands for four occupied
+states means five strict bands and three buffers, not four buffers. Default
+`extra_bands=4` is unchanged. The engine uses at least six subspace columns per
+requested band; the configured `davidson_subspace` is a minimum working capacity.
+
+Intermediate SCF history eigen residuals may be recurrence residuals while the
+requested tolerance is above the final `eigen_tolerance`. Final-result band
+residuals and all fixed-point certificate arrays remain true operator residuals;
+final-accuracy maps always perform that check. This removes duplicate operator
+work without weakening the final acceptance tests.

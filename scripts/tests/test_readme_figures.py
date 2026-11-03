@@ -22,6 +22,12 @@ class ReadmeIsCurrent(unittest.TestCase):
         got = text[text.index(m.BEGIN): text.index(m.END) + len(m.END)]
         self.assertEqual(got, expected, "README validation block is stale: run python3 -I scripts/make_readme_figures.py")
 
+    def test_status_block_is_current(self):
+        m = load()
+        text = open(os.path.join(ROOT, "README.md")).read()
+        got = text[text.index(m.STATUS_BEGIN): text.index(m.STATUS_END) + len(m.STATUS_END)]
+        self.assertEqual(got, m.status_block(), "README status block is stale: run python3 -I scripts/make_readme_figures.py")
+
     def test_figures_match_the_evidence_and_all_runs_pass(self):
         m = load()
         rows, kruns = m.cutoff_data(), m.kpoint_data()

@@ -18,6 +18,7 @@
 | Build, run, example inputs, reproduce the QE comparisons | `getting-started.md` |
 | Performance rules for agents, benchmark, optimization log | `performance/README.md` |
 | QE source study notes (own words; policy in AGENTS.md) | `research/qe-study/README.md` |
+| Feature and workflow gap survey (usability, robustness findings) | `research/feature-gap-survey.md` |
 | MVP review: gates, evidence, what is not established, decisions for the user | `mvp-review.md` |
 | P7 plan: k-points, PBE through a library, GPU design note | `p7-plan.md` |
 | ESLE directive record (condensed) | `research/esle-directive.md` |
@@ -43,3 +44,4 @@
 | Status datasets and dashboard conventions | [artifacts/README.md](../artifacts/README.md) |
 
 Conventions: docs are English; one fact lives in one place and others link to it; an ADR is never edited after acceptance, supersede it with a new one; numbers recorded as references must carry command, version, input and SHA-256.
+| Agent-Native runtime directive review and ticket mapping (P11 series) | `research/agent-native-directive-review.md`, `../tickets/P11-COMMON.md` |

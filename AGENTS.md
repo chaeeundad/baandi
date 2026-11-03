@@ -37,6 +37,7 @@ All agent-facing artifacts (docs, tickets, reports, code comments, commit messag
 
 ## Reporting rules to the user (user rule, 2026-11-03, apply for the whole session)
 The user reads Korean; these rules govern the final messages of the orchestrating agent. Silence from the user means "carry on": a task is considered in progress until reported otherwise, and nobody should ask whether it is still running.
+0. (added 2026-11-03) Every report shows the tasks in progress at the very top (after a `[승인필요]` line if there is one), each with its ID and a plain Korean description of what it does (descriptions live in `artifacts/task_titles.json`; add an entry whenever a task is created), and every report is accompanied by an update of the dashboard artifact (`scripts/gen_agents_json.py`, then upload the four `artifacts/*.json` files and update the datasets).
 1. A decision needed from the user starts the message with `[승인필요]` in the first one or two lines, with the options and ONE recommendation. Nothing else is asked of the user.
 2. Every other report is per milestone and has three lines: done / in progress / next.
 3. A task expected to take more than 30 minutes gets an estimated duration when it starts, and its progress is updated on the dashboard.
@@ -53,6 +54,21 @@ The original rule "never copy QE (GPL) source" stays. On 2026-11-03 the user als
 - Every change derived from a note is marked in `docs/performance/optimization-log.md` ("derived from note X") and is implemented against the engine's own design, validated by its own tests and by the existing QE output comparisons. Numerical choices (thresholds, subspace sizes) are justified by measurement on our code, not by "QE does it".
 - Evidence independence: the QE comparisons recorded before this date (R1 to R8, README) were produced by an engine written without reading QE source and stay valid as independent evidence; statements in the docs that the QE source was not read are historical and are annotated, not deleted. Results of code changed after a note are still compared against QE outputs, and the notes list what was learned so that the influence is visible.
 - If a note would require reproducing non-obvious expression from QE (for example a specific table or formula layout) it is not written: describe the principle instead.
+
+## Generality rule (user, 2026-11-03)
+BAANDI is a general-purpose engine, not a silicon code. Performance changes, default parameters (tolerances, schedules, subspace sizes, thresholds, mixing parameters) and algorithm choices must not be tuned or accepted on silicon alone. Evidence for adopting a default or an optimization must come from a set of different systems: cell shapes (cubic, skewed, elongated, slab-like), atom counts, k meshes and Gamma, band counts (small and large), pseudopotentials with different projector structures (synthetic fixtures when real files are missing), insulating gaps from small to large. A result that holds on silicon only is recorded as such and the default stays unchanged. Algorithms that matter for larger or different systems (for example RMM-DIIS, preconditioned mixing) are developed as isolated, switchable modules even when they do not pay off on the small benchmark cases. The benchmark set lives in ticket P10G and `docs/performance/`.
+
+## Disk hygiene (user request, 2026-11-03)
+Each task worktree builds its own `target/` (1 to 6 GB; the worktree folder had grown to 79 GB and filled the disk). After a task is merged or rejected run `python3 -I scripts/wt_cleanup.py` (it removes `../rust-dft-wt/<TASK>/target` only for tasks whose latest run is not running; `--dry-run` lists first). Never delete anything else in `rust-dft-wt` (vendor, pseudo, qe-src, runs) without the user's say.
+
+## Output formats policy (user rule, 2026-11-03)
+Scientific outputs are written in standard, widely readable formats first, and in the established codes' formats where a de-facto convention exists, so that existing tools and workflows work without conversion; the project's own JSON/CSV is the complete record, not the only format. Priorities:
+- Volumetric data (density, ELF, potentials, partial charge): Gaussian cube and XSF first; VASP CHGCAR/LOCPOT style and VTK image data (`.vti`, ParaView) as additional writers; raw binary only as an internal exchange.
+- Band structures and DOS: CSV with a documented header and plain `.dat` columns readable by gnuplot, xmgrace `.agr`, a QE-style `bands.dat.gnu` / `dos.dat` layout, and a VASP-style `EIGENVAL` / `DOSCAR` layout; JSON metadata always; an SVG figure for people who do not code.
+- Structures: POSCAR, CIF, XYZ/extxyz, XSF for input and output when structure files are added.
+- Every writer is validated by an independent reader or a documented format specification test (not only by the writer's own reader), states units and conventions (energy reference, origin, ordering, atomic numbers), and never invents data a format cannot carry (the document says what is lost).
+- Writers live in the CLI/adapter layer; the numerical core does not know file formats (ADR 0017).
+Formats of other codes are written from public format documentation only; no source of those codes is copied.
 
 ## Performance work (user rule, 2026-11-03)
 Read `docs/performance/README.md` before changing any hot path (Hamiltonian apply, eigensolver, FFT, density). Measure and profile first, prove equivalence with `scripts/bench_scf.py` against `docs/performance/baseline.json` (energy within 1e-12 Ha; bit-identical density for overhead-only changes), keep allocation and logging out of hot loops, and record every accepted optimization (profile, change, before and after numbers, rejected ideas) in `docs/performance/optimization-log.md`. New code on the hot path is written to those rules from the start.

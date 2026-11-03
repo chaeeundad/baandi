@@ -153,10 +153,52 @@ pub struct Scf {
     pub energy_tolerance_ha: Option<f64>,
     pub density_residual_tolerance: Option<f64>,
     pub mixing_beta: Option<f64>,
+    pub mixing_history: Option<usize>,
+    pub mixing_q0_inverse_bohr: Option<f64>,
     pub nbands: Option<usize>,
     pub extra_bands: Option<usize>,
     pub eigen_tolerance: Option<f64>,
     pub seed: Option<u64>,
+}
+impl Scf {
+    pub fn mixing_strategy(&self) -> Result<dft_engine::Mixing, ConfigError> {
+        let invalid = |message: &str| ConfigError::Invalid(message.into());
+        let beta = self.mixing_beta.unwrap_or(0.3);
+        let history = self.mixing_history.unwrap_or(6);
+        if !beta.is_finite() || beta <= 0.0 {
+            return Err(invalid("mixing_beta must be finite and positive"));
+        }
+        if history == 0 || history.checked_add(1).is_none() {
+            return Err(invalid("mixing_history must be positive and representable"));
+        }
+        let method = self.mixing.as_deref().unwrap_or("pulay");
+        if method != "kerker-pulay" && self.mixing_q0_inverse_bohr.is_some() {
+            return Err(invalid(
+                "mixing_q0_inverse_bohr requires mixing = 'kerker-pulay'",
+            ));
+        }
+        match method {
+            "linear" if self.mixing_history.is_none() => Ok(dft_engine::Mixing::Linear { beta }),
+            "linear" => Err(invalid("mixing_history does not apply to linear mixing")),
+            "pulay" => Ok(dft_engine::Mixing::Pulay { beta, history }),
+            "kerker-pulay" => {
+                let q0 = self.mixing_q0_inverse_bohr.ok_or_else(|| {
+                    invalid("kerker-pulay requires mixing_q0_inverse_bohr in Bohr^-1")
+                })?;
+                if !q0.is_finite() || q0 <= 0.0 || !(q0 * q0).is_finite() || q0 * q0 == 0.0 {
+                    return Err(invalid(
+                        "mixing_q0_inverse_bohr must be positive with finite nonzero square",
+                    ));
+                }
+                Ok(dft_engine::Mixing::KerkerPulay {
+                    beta,
+                    history,
+                    q0_inverse_bohr: q0,
+                })
+            }
+            _ => Err(invalid("mixing must be linear, pulay or kerker-pulay")),
+        }
+    }
 }
 /// Output paths resolve against the process working directory.
 #[derive(Debug, Deserialize)]
@@ -309,9 +351,16 @@ fn normalize(
                 "energy_tolerance_ha",
                 "density_residual_tolerance",
                 "mixing_beta",
+                "mixing_q0_inverse_bohr",
                 "eigen_tolerance",
             ][..],
-            &["max_iterations", "nbands", "extra_bands", "seed"][..],
+            &[
+                "max_iterations",
+                "nbands",
+                "extra_bands",
+                "seed",
+                "mixing_history",
+            ][..],
         ),
     ] {
         if let Some(table) = value.get_mut(section).and_then(toml::Value::as_table_mut) {
@@ -581,6 +630,44 @@ mod tests {
         assert!(
             Config::parse(&EXAMPLE.replace("Si = \"/absolute/path/to/Si.UPF\"", "Si = 1")).is_err()
         );
+    }
+    #[test]
+    fn mixing_strategy_parameters_and_expressions() {
+        let parse = |keys: &str| {
+            Config::parse(&format!("{EXAMPLE}\n[scf]\n{keys}\n"))
+                .unwrap()
+                .scf
+                .unwrap()
+        };
+        assert!(matches!(
+            parse("").mixing_strategy().unwrap(),
+            dft_engine::Mixing::Pulay {
+                beta: 0.3,
+                history: 6
+            }
+        ));
+        let keys = "mixing='kerker-pulay'\nmixing_beta='1/2'\nmixing_history='2*3'\nmixing_q0_inverse_bohr='1/2'";
+        assert!(matches!(
+            parse(keys).mixing_strategy().unwrap(),
+            dft_engine::Mixing::KerkerPulay {
+                beta: 0.5,
+                history: 6,
+                q0_inverse_bohr: 0.5
+            }
+        ));
+        for keys in [
+            "mixing='kerker-pulay'",
+            "mixing='unknown'",
+            "mixing_history=0",
+            "mixing='linear'\nmixing_history=2",
+            "mixing_q0_inverse_bohr=1.0",
+            "mixing_beta=nan",
+            "mixing='kerker-pulay'\nmixing_q0_inverse_bohr=0.0",
+            "mixing='kerker-pulay'\nmixing_q0_inverse_bohr=nan",
+            "mixing='kerker-pulay'\nmixing_q0_inverse_bohr=-1.0",
+        ] {
+            assert!(parse(keys).mixing_strategy().is_err(), "{keys}");
+        }
     }
     #[test]
     fn typed_optional_sections() {

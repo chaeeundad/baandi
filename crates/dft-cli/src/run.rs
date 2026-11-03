@@ -79,15 +79,7 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
         if let Some(x) = s.seed {
             o.seed = x;
         }
-        let beta = s.mixing_beta.unwrap_or(0.3);
-        if !beta.is_finite() || beta <= 0. {
-            return Err(error(1, "mixing_beta must be finite and positive"));
-        }
-        o.mixing = match s.mixing.as_deref().unwrap_or("pulay") {
-            "linear" => Mixing::Linear { beta },
-            "pulay" => Mixing::Pulay { beta, history: 6 },
-            _ => return Err(error(1, "mixing must be linear or pulay")),
-        };
+        o.mixing = s.mixing_strategy().map_err(|e| error(1, e.to_string()))?;
     }
     if o.max_iterations == 0
         || [o.energy_tolerance, o.density_tolerance, o.eigen_tolerance]
@@ -105,11 +97,18 @@ fn options_json(o: &ScfOptions) -> Value {
     let mixing = match o.mixing {
         Mixing::Linear { beta } => json!({"method":"linear","beta":beta}),
         Mixing::Pulay { beta, history } => json!({"method":"pulay","beta":beta,"history":history}),
+        Mixing::KerkerPulay {
+            beta,
+            history,
+            q0_inverse_bohr,
+        } => {
+            json!({"method":"kerker-pulay","beta":beta,"history":history,"q0_inverse_bohr":q0_inverse_bohr})
+        }
     };
     json!({"threads":o.threads,"cutoff_hartree":o.cutoff_hartree,"nbands":o.bands,"extra_bands":o.extra_bands,"grid_override":o.grid_override,"mixing":mixing,
         "density_residual_tolerance":o.density_tolerance,"energy_tolerance_ha":o.energy_tolerance,"eigen_tolerance":o.eigen_tolerance,
         "residual_eigen_schedule":o.residual_eigen_schedule,"free_electron_initial_guess":o.free_electron_initial_guess,"initial_eigen_tolerance":o.initial_eigen_tolerance,"eigen_tolerance_decay":o.eigen_tolerance_decay,"max_iterations":o.max_iterations,
-        "davidson_max_iterations":o.davidson_max_iterations,"davidson_subspace":o.davidson_subspace,"seed":o.seed,
+        "davidson_max_iterations":o.davidson_max_iterations,"davidson_subspace":o.davidson_subspace,"davidson_subspace_min_per_band":6,"seed":o.seed,
         "divergence_factor":o.divergence_factor,"divergence_patience":o.divergence_patience})
 }
 fn energy_json(e: &EnergyAudit) -> Value {
@@ -143,8 +142,8 @@ fn history_json(r: &IterationRecord) -> Value {
     json!({"iteration":r.iteration,"energies":energy_json(&r.energy),"delta_energy_ha":r.energy_change,"density_residual":r.density_residual,
         "max_eigen_residual_ha":r.max_eigen_residual,"requested_eigen_tolerance_ha":r.requested_eigen_tolerance,"davidson_iterations":r.davidson_iterations,"operator_applications":r.operator_applications,"davidson_iterations_per_k":r.davidson_iterations_per_k,"operator_applications_per_k":r.operator_applications_per_k,
         "relative_charge_error":r.charge_error,"relative_input_charge_error":r.input_charge_error,"min_density_electrons_per_bohr3":r.min_density,
-        "mixing_fraction":r.mixing_fraction,"mixer_reset":r.mixer_reset,"timings":phase_json(&r.timings),
-        "fixed_point_certificate":r.fixed_point_certificate.as_ref().map(|c| json!({"density_residual":c.density_residual,"occupied_eigenvalue_change_ha":c.occupied_eigenvalue_change,"davidson_iterations":c.davidson_iterations,"operator_applications":c.operator_applications,"davidson_iterations_per_k":c.davidson_iterations_per_k,"operator_applications_per_k":c.operator_applications_per_k,"timings":phase_json(&c.timings)}))})
+        "mixing_fraction":r.mixing_fraction,"mixer_reset":r.mixer_reset,"density_contraction":r.density_contraction,"mixing_history_used":r.mixing_history_used,"mixing_resets":r.mixing_resets,"mixing_raw_recovery":r.mixing_raw_recovery,"timings":phase_json(&r.timings),
+        "fixed_point_certificate":r.fixed_point_certificate.as_ref().map(|c| json!({"strict_residuals_per_k_ha":c.strict_residuals_per_k,"buffer_residuals_per_k_ha":c.buffer_residuals_per_k,"density_residual":c.density_residual,"occupied_eigenvalue_change_ha":c.occupied_eigenvalue_change,"davidson_iterations":c.davidson_iterations,"operator_applications":c.operator_applications,"davidson_iterations_per_k":c.davidson_iterations_per_k,"operator_applications_per_k":c.operator_applications_per_k,"timings":phase_json(&c.timings)}))})
 }
 /// Gregorian UTC conversion from nonnegative Unix seconds, including leap years.
 pub fn timestamp(seconds: u64) -> String {
@@ -334,6 +333,10 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         "threading":{"threads":opts.threads.max(1).min(r.k_points.len()),"threads_requested":opts.threads,"threads_used":opts.threads.max(1).min(r.k_points.len()),"outer_threads":opts.threads.max(1).min(r.k_points.len()),"inner_threads":opts.threads.max(1) / opts.threads.max(1).min(r.k_points.len()),"backend":"std::thread::scope over k points and bands; sequential faer and serial FFT per worker"},
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
+    result["band_accuracy"] = json!(r.k_points[0].solution.residuals.iter()
+        .zip(&r.k_points[0].solution.buffer).zip(&r.k_points[0].solution.converged)
+        .map(|((&residual, &buffer), &converged)| json!({"residual_ha":residual,"buffer":buffer,"converged":converged}))
+        .collect::<Vec<_>>());
     // Preserve the legacy LDA schema unless an override was explicitly enabled.
     if opts.functional == dft_engine::Functional::Pbe || opts.allow_functional_override {
         result["allow_functional_override"] = json!(opts.allow_functional_override);
@@ -354,7 +357,10 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
             "points": r.k_points.iter().map(|k| json!({"fractional": k.point.fractional,
                 "weight": k.point.weight, "eigenvalues": {"ha": k.solution.eigenvalues,
                 "ev": k.solution.eigenvalues.iter().map(|e| from_hartree(*e, EnergyUnit::ElectronVolt)).collect::<Vec<_>>()},
-                "occupations": r.occupations})).collect::<Vec<_>>()
+                "occupations": r.occupations,
+                "band_accuracy": k.solution.residuals.iter().zip(&k.solution.buffer).zip(&k.solution.converged)
+                    .map(|((&residual, &buffer), &converged)| json!({"residual_ha":residual,"buffer":buffer,"converged":converged})).collect::<Vec<_>>()
+                })).collect::<Vec<_>>()
         });
     }
     let mut console = grid_report(&config, &prepared);
@@ -420,10 +426,15 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         {
             writeln!(
                 console,
-                "band {}: {:.12} Ha = {:.12} eV; occupation {f}",
+                "band {}: {:.12} Ha = {:.12} eV; occupation {f}{}",
                 b + 1,
                 e,
-                from_hartree(*e, EnergyUnit::ElectronVolt)
+                from_hartree(*e, EnergyUnit::ElectronVolt),
+                if k.solution.buffer[b] {
+                    " (buffer; less accurate)"
+                } else {
+                    ""
+                }
             )
             .unwrap();
         }

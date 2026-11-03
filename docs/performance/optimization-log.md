@@ -7,6 +7,9 @@ Top of stack by category: FFT in `ndrustfft` lane transforms 48.0 percent; alloc
 Baseline (commit `6049217`, release, 1 thread): see baseline.json: Gamma 1.30 s, 4 k points 6.55 s, 8 k points 12.1 s (median of 3).
 Planned steps (each gated by `bench_scf.py --require-identical` unless it changes the algorithm): O1 allocation-free FFT plan (preallocated scratch, `process_with_scratch`); O2 Hamiltonian apply without per-call temporaries and without `hypot`; O3 pruned FFT that skips lanes that are exactly zero for the wavefunction sphere (about 40 percent fewer lane transforms, bit-identical); O4 Davidson work: fewer Hamiltonian applications (tolerance schedule, subspace, restarts) only with the energy and certificate gates and measured equivalence; then re-profile.
 
+## 2026-11-03: re-profile after O1 (merged as 78de2eb; same method, 5020 samples)
+FFT lane transforms and butterflies 75.4 percent; Hamiltonian apply and nonlocal 4.8 percent; orthonormalization 2.6 percent; malloc, free, memset and copies 2.5 percent (was about 30); hypot 2.5 percent; GEMM 2.1 percent. Allocation overhead is gone; the FFT now dominates, so the next step is O3 (pruned FFT, ticket P7P2) and, after it, a batching of strided lanes if the profile still shows cache misses; O2 (hypot, temporaries) is small now (about 5 percent together).
+
 ## 2026-11-03: O1 / P7P1-FFT-ALLOC — persistent FFT scratch
 
 Starting evidence: the pre-change profile above (6445 samples, 8 s) attributes

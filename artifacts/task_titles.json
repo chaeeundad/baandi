@@ -39,5 +39,7 @@
  "P8E-FEATURE-GAPS": "조사: 사용성, 워크플로, 견고성 격차와 실제 입력 실험",
  "P8F-MASTER-FEATURE-MATRIX": "조사: VASP, QE 등 전체 기능 비교표와 마스터 개발 계획",
  "P9R-COUPLING-REVIEW": "검토: 외부 환경 결합(QM/MM, 용매 등) 설계 독립 검토",
- "P8R-ESLE-REVIEW": "검토: 전자 상태 탐색(ESLE) 설계 독립 검토"
+ "P8R-ESLE-REVIEW": "검토: 전자 상태 탐색(ESLE) 설계 독립 검토",
+ "P9A-USER-INTERFACE-DESIGN": "설계: 사용자 인터페이스(표준 포맷/타 코드 입력, 자연어 요청, Materials Project 연동, 대화형 CLI, 링크 기반 시각화)",
+ "P8G-INPUT-PREFLIGHT": "기능: 입력 사전 검사(원소/의사퍼텐셜 일치, SCF 설정, 평문 요약)"
 }

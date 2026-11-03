@@ -49,10 +49,12 @@ def kpoint_data():
     spec = importlib.util.spec_from_file_location("ck", os.path.join(ROOT, "scripts", "compare_kpoints_qe.py"))
     ck = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(ck)
-    runs = [("2x2x2", "k222_c", "qe.out"), ("2x2x2, shifted", "k222s_c", "qe.out"), ("4x4x4, shifted", "k444s_c", "qe_summary.json")]
+    runs = [("LDA 2x2x2", "kpoints/k222_c", "qe.out"), ("LDA 2x2x2, shifted", "kpoints/k222s_c", "qe.out"),
+            ("LDA 4x4x4, shifted", "kpoints/k444s_c", "qe_summary.json"),
+            ("PBE Gamma (override)", "pbe/gamma", "qe_summary.json"), ("PBE 2x2x2, shifted (override)", "pbe/k222s", "qe_summary.json")]
     out = []
     for label, d, qf in runs:
-        base = os.path.join(REF, "kpoints", d)
+        base = os.path.join(REF, d)
         ours = load(os.path.join(base, "ours_results.json"))
         qe = ck.parse_qe_out(os.path.join(base, qf)) if qf.endswith(".out") else load(os.path.join(base, qf))
         ok, res = ck.compare(ours, qe, ck.DEFAULTS, 2)
@@ -132,7 +134,7 @@ def fig_cutoff(rows):
 
 
 def fig_kpoints(gamma, kruns):
-    items = [{"label": "Gamma only, 30 Ry", "e": gamma["e"], "eig": gamma["eig"], "nk": 1}] + kruns
+    items = [{"label": "LDA Gamma, 30 Ry", "e": gamma["e"], "eig": gamma["eig"], "nk": 1}] + kruns
     w, h = 760, 70 + 62 * len(items) + 70
     s = svg_open(w, h, "Si k-point comparison with Quantum ESPRESSO 7.6: energy and eigenvalue differences versus tolerance")
     s += txt(20, 24, "Differences from QE 7.6 (Si, 30 Ry) against the acceptance tolerances", 14, weight="bold")
@@ -185,16 +187,16 @@ def block(rows, kruns, gamma, perf=None):
              "Reference: Quantum ESPRESSO 7.6 run on a remote server (see [validation record](docs/validation.md)). "
              "Evidence covers one cell (Si diamond) and one pseudopotential of unverified provenance; it is not a statement about general material accuracy.", "",
              "![Total energy versus cutoff](docs/img/cutoff-scan.svg)", "",
-             "| Check (Si, LDA-PZ, 30 Ry unless stated) | k points | QE iterations | energy difference (Ha/atom) | largest eigenvalue difference (Ha) | tolerance (energy / eigenvalue) | status |",
+             "| Check (Si, 30 Ry, same pseudopotential for both codes) | k points | QE iterations | energy difference (Ha/atom) | largest eigenvalue difference (Ha) | tolerance (energy / eigenvalue) | status |",
              "|---|---|---|---|---|---|---|",
-             f"| Gamma only | 1 | {gamma['iters']} | {gamma['e']:.2e} | {gamma['eig']:.2e} | 1e-4 / 1e-3 | pass |"]
+             f"| LDA Gamma only | 1 | {gamma['iters']} | {gamma['e']:.2e} | {gamma['eig']:.2e} | 1e-4 / 1e-3 | pass |"]
     for k in kruns:
-        lines.append(f"| {k['label']} grid | {k['nk']} | {k['iters']} | {k['e']:.2e} | {k['eig']:.2e} | 1e-4 / 1e-3 | {'pass' if k['ok'] else 'FAIL'} |")
+        lines.append(f"| {k['label']} | {k['nk']} | {k['iters']} | {k['e']:.2e} | {k['eig']:.2e} | 1e-4 / 1e-3 | {'pass' if k['ok'] else 'FAIL'} |")
     lines += ["", "![k-point comparison](docs/img/kpoint-comparison.svg)", "",
               f"Cutoff scan: {len(rows)} cutoffs from {rows[0]['ecut']:g} to {rows[-1]['ecut']:g} Ry; the energy difference to QE is the same at every cutoff "
               f"({min((r['ours'] - r['qe']) for r in rows) * 1e6:.2f} to {max((r['ours'] - r['qe']) for r in rows) * 1e6:.2f} micro-Ha per cell), "
               "a constant offset explained by the G=0 local-potential integral convention (validation record R4). "
-              "The 4x4x4 evidence is a relayed text summary; the other runs are whole-file, hash-verified outputs.", "",
+              "The 4x4x4 and PBE evidence are relayed text summaries; the other LDA runs are whole-file, hash-verified outputs. The PBE rows use QE's `input_dft = 'pbe'` override on the LDA pseudopotential: a code-to-code consistency test of the PBE implementation, not a physically meaningful PBE result for this pseudopotential.", "",
               ]
     if perf:
         lines += ["### Performance baseline (not optimized)", "",
@@ -208,7 +210,7 @@ def block(rows, kruns, gamma, perf=None):
             lines.append(f"| {r['label']} ({r['nk']} k) | {r['ours']:.3g} | {r['qe1']:.3g} | {r['qe4']:.3g} | {r['ours'] / r['qe1']:.1f}x | {r['ours_it']} / {r['qe_it']} | {100 * r['diag_frac']:.0f}% |")
         lines += ["", f"Cross-platform check: the total energy on this Linux x86 build differs from the macOS Apple Silicon build by {perf['xplat']['gamma']:+.2e} Ha (Gamma) and {perf['xplat']['k444s']:+.2e} Ha (4x4x4, shifted).", ""]
     lines += [
-              "Other verified results: k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; "
+              "Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; "
               "fast gates (`scripts/check.sh`) and the Python regression tests pass. Results are added here after each verified implementation.", "", END]
     return "\n".join(lines)
 

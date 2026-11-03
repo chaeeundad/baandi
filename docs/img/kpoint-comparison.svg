@@ -1,30 +1,38 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="760" height="388" viewBox="0 0 760 388" role="img" aria-label="Si k-point comparison with Quantum ESPRESSO 7.6: energy and eigenvalue differences versus tolerance" font-family="Helvetica, Arial, sans-serif" font-size="12">
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="512" viewBox="0 0 760 512" role="img" aria-label="Si k-point comparison with Quantum ESPRESSO 7.6: energy and eigenvalue differences versus tolerance" font-family="Helvetica, Arial, sans-serif" font-size="12">
 <title>Si k-point comparison with Quantum ESPRESSO 7.6: energy and eigenvalue differences versus tolerance</title>
-<rect width="760" height="388" fill="#ffffff"/>
+<rect width="760" height="512" fill="#ffffff"/>
 <text x="20.0" y="24.0" font-size="14" text-anchor="start" fill="#1f2328" font-weight="bold">Differences from QE 7.6 (Si, 30 Ry) against the acceptance tolerances</text>
-<line x1="210.0" y1="62" x2="210.0" y2="332" stroke="#d1d9e0"/><text x="210.0" y="348.0" font-size="11" text-anchor="middle" fill="#59636e" font-weight="normal">1e-8</text>
-<line x1="304.5" y1="62" x2="304.5" y2="332" stroke="#d1d9e0"/><text x="304.5" y="348.0" font-size="11" text-anchor="middle" fill="#59636e" font-weight="normal">1e-7</text>
-<line x1="399.1" y1="62" x2="399.1" y2="332" stroke="#d1d9e0"/><text x="399.1" y="348.0" font-size="11" text-anchor="middle" fill="#59636e" font-weight="normal">1e-6</text>
-<line x1="493.6" y1="62" x2="493.6" y2="332" stroke="#d1d9e0"/><text x="493.6" y="348.0" font-size="11" text-anchor="middle" fill="#59636e" font-weight="normal">1e-5</text>
-<line x1="588.2" y1="62" x2="588.2" y2="332" stroke="#d1d9e0"/><text x="588.2" y="348.0" font-size="11" text-anchor="middle" fill="#59636e" font-weight="normal">1e-4</text>
-<line x1="682.7" y1="62" x2="682.7" y2="332" stroke="#d1d9e0"/><text x="682.7" y="348.0" font-size="11" text-anchor="middle" fill="#59636e" font-weight="normal">1e-3</text>
-<text x="470.0" y="366.0" font-size="12" text-anchor="middle" fill="#59636e" font-weight="normal">absolute difference (Ha per atom for energy, Ha for eigenvalues; log scale)</text>
-<text x="198.0" y="92.0" font-size="12" text-anchor="end" fill="#1f2328" font-weight="bold">Gamma only, 30 Ry</text>
+<line x1="210.0" y1="62" x2="210.0" y2="456" stroke="#d1d9e0"/><text x="210.0" y="472.0" font-size="11" text-anchor="middle" fill="#59636e" font-weight="normal">1e-8</text>
+<line x1="304.5" y1="62" x2="304.5" y2="456" stroke="#d1d9e0"/><text x="304.5" y="472.0" font-size="11" text-anchor="middle" fill="#59636e" font-weight="normal">1e-7</text>
+<line x1="399.1" y1="62" x2="399.1" y2="456" stroke="#d1d9e0"/><text x="399.1" y="472.0" font-size="11" text-anchor="middle" fill="#59636e" font-weight="normal">1e-6</text>
+<line x1="493.6" y1="62" x2="493.6" y2="456" stroke="#d1d9e0"/><text x="493.6" y="472.0" font-size="11" text-anchor="middle" fill="#59636e" font-weight="normal">1e-5</text>
+<line x1="588.2" y1="62" x2="588.2" y2="456" stroke="#d1d9e0"/><text x="588.2" y="472.0" font-size="11" text-anchor="middle" fill="#59636e" font-weight="normal">1e-4</text>
+<line x1="682.7" y1="62" x2="682.7" y2="456" stroke="#d1d9e0"/><text x="682.7" y="472.0" font-size="11" text-anchor="middle" fill="#59636e" font-weight="normal">1e-3</text>
+<text x="470.0" y="490.0" font-size="12" text-anchor="middle" fill="#59636e" font-weight="normal">absolute difference (Ha per atom for energy, Ha for eigenvalues; log scale)</text>
+<text x="198.0" y="92.0" font-size="12" text-anchor="end" fill="#1f2328" font-weight="bold">LDA Gamma, 30 Ry</text>
 <text x="198.0" y="108.0" font-size="11" text-anchor="end" fill="#59636e" font-weight="normal">1 k point(s)</text>
 <rect x="210" y="78" width="199.3" height="14" fill="#0b6bcb"/><text x="415.3" y="89.0" font-size="11" text-anchor="start" fill="#1f2328" font-weight="normal">1.28e-06  total energy</text>
 <rect x="210" y="98" width="199.0" height="14" fill="#c2410c"/><text x="415.0" y="109.0" font-size="11" text-anchor="start" fill="#1f2328" font-weight="normal">1.27e-06  max eigenvalue</text>
-<text x="198.0" y="154.0" font-size="12" text-anchor="end" fill="#1f2328" font-weight="bold">2x2x2</text>
+<text x="198.0" y="154.0" font-size="12" text-anchor="end" fill="#1f2328" font-weight="bold">LDA 2x2x2</text>
 <text x="198.0" y="170.0" font-size="11" text-anchor="end" fill="#59636e" font-weight="normal">8 k point(s)</text>
 <rect x="210" y="140" width="199.3" height="14" fill="#0b6bcb"/><text x="415.3" y="151.0" font-size="11" text-anchor="start" fill="#1f2328" font-weight="normal">1.28e-06  total energy</text>
 <rect x="210" y="160" width="217.3" height="14" fill="#c2410c"/><text x="433.3" y="171.0" font-size="11" text-anchor="start" fill="#1f2328" font-weight="normal">1.99e-06  max eigenvalue</text>
-<text x="198.0" y="216.0" font-size="12" text-anchor="end" fill="#1f2328" font-weight="bold">2x2x2, shifted</text>
+<text x="198.0" y="216.0" font-size="12" text-anchor="end" fill="#1f2328" font-weight="bold">LDA 2x2x2, shifted</text>
 <text x="198.0" y="232.0" font-size="11" text-anchor="end" fill="#59636e" font-weight="normal">4 k point(s)</text>
 <rect x="210" y="202" width="199.3" height="14" fill="#0b6bcb"/><text x="415.3" y="213.0" font-size="11" text-anchor="start" fill="#1f2328" font-weight="normal">1.28e-06  total energy</text>
 <rect x="210" y="222" width="212.6" height="14" fill="#c2410c"/><text x="428.6" y="233.0" font-size="11" text-anchor="start" fill="#1f2328" font-weight="normal">1.77e-06  max eigenvalue</text>
-<text x="198.0" y="278.0" font-size="12" text-anchor="end" fill="#1f2328" font-weight="bold">4x4x4, shifted</text>
+<text x="198.0" y="278.0" font-size="12" text-anchor="end" fill="#1f2328" font-weight="bold">LDA 4x4x4, shifted</text>
 <text x="198.0" y="294.0" font-size="11" text-anchor="end" fill="#59636e" font-weight="normal">32 k point(s)</text>
 <rect x="210" y="264" width="199.3" height="14" fill="#0b6bcb"/><text x="415.3" y="275.0" font-size="11" text-anchor="start" fill="#1f2328" font-weight="normal">1.28e-06  total energy</text>
 <rect x="210" y="284" width="219.6" height="14" fill="#c2410c"/><text x="435.6" y="295.0" font-size="11" text-anchor="start" fill="#1f2328" font-weight="normal">2.10e-06  max eigenvalue</text>
-<line x1="588.2" y1="46" x2="588.2" y2="332" stroke="#9a3412" stroke-width="1.5" stroke-dasharray="5 3"/><text x="584.2" y="42.0" font-size="11" text-anchor="end" fill="#9a3412" font-weight="normal">energy tolerance 1e-4</text>
-<line x1="682.7" y1="60" x2="682.7" y2="332" stroke="#9a3412" stroke-width="1.5" stroke-dasharray="5 3"/><text x="678.7" y="56.0" font-size="11" text-anchor="end" fill="#9a3412" font-weight="normal">eigenvalue tolerance 1e-3</text>
+<text x="198.0" y="340.0" font-size="12" text-anchor="end" fill="#1f2328" font-weight="bold">PBE Gamma (override)</text>
+<text x="198.0" y="356.0" font-size="11" text-anchor="end" fill="#59636e" font-weight="normal">1 k point(s)</text>
+<rect x="210" y="326" width="210.8" height="14" fill="#0b6bcb"/><text x="426.8" y="337.0" font-size="11" text-anchor="start" fill="#1f2328" font-weight="normal">1.70e-06  total energy</text>
+<rect x="210" y="346" width="199.0" height="14" fill="#c2410c"/><text x="415.0" y="357.0" font-size="11" text-anchor="start" fill="#1f2328" font-weight="normal">1.27e-06  max eigenvalue</text>
+<text x="198.0" y="402.0" font-size="12" text-anchor="end" fill="#1f2328" font-weight="bold">PBE 2x2x2, shifted (override)</text>
+<text x="198.0" y="418.0" font-size="11" text-anchor="end" fill="#59636e" font-weight="normal">4 k point(s)</text>
+<rect x="210" y="388" width="210.5" height="14" fill="#0b6bcb"/><text x="426.5" y="399.0" font-size="11" text-anchor="start" fill="#1f2328" font-weight="normal">1.69e-06  total energy</text>
+<rect x="210" y="408" width="213.7" height="14" fill="#c2410c"/><text x="429.7" y="419.0" font-size="11" text-anchor="start" fill="#1f2328" font-weight="normal">1.82e-06  max eigenvalue</text>
+<line x1="588.2" y1="46" x2="588.2" y2="456" stroke="#9a3412" stroke-width="1.5" stroke-dasharray="5 3"/><text x="584.2" y="42.0" font-size="11" text-anchor="end" fill="#9a3412" font-weight="normal">energy tolerance 1e-4</text>
+<line x1="682.7" y1="60" x2="682.7" y2="456" stroke="#9a3412" stroke-width="1.5" stroke-dasharray="5 3"/><text x="678.7" y="56.0" font-size="11" text-anchor="end" fill="#9a3412" font-weight="normal">eigenvalue tolerance 1e-3</text>
 </svg>

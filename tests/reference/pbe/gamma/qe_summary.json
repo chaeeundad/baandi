@@ -1,0 +1,39 @@
+{
+ "_note": "Relayed plain-text summary of a QE 7.6 pw.x run (MPI x4, dev08, input_dft='pbe' override of the LDA functional of the UPF; code-to-code consistency test, not a physically meaningful PBE for this pseudopotential). Values transcribed from plain-text blocks sent by the dft5090 session; block sha256 given by the sender are listed below and were not re-verified (the blocks were not stored verbatim). Full qe.out stays on dev08 under ~/rustdft_p6/pbe.",
+ "qe_out_sha256": "18297ba2c2654634ba9110e2487e88e074d0d98de0be83384c1a0dba03e577e6",
+ "blocks_sha256": {
+  "A_119_124": "965852de4086ece6b6aa044418f144c7dc96fc279393cd97bc7dcd342e3e194d",
+  "B_356_365": "752bdc130611e1ad3dd6d9a66ad8303d40c49071fd855855f3f04cb5a2bf33a9"
+ },
+ "functional_note": "QE printed: IMPORTANT: XC functional enforced from input: Exchange-correlation= PBE (1 4 3 4 0 0 0); any further DFT definition will be discarded",
+ "energy_ry": -14.64608787,
+ "one_electron_ry": 5.55395912,
+ "hartree_ry": 1.72936483,
+ "xc_ry": -5.13046805,
+ "ewald_ry": -16.79894377,
+ "nk": 1,
+ "iterations": 12,
+ "pwscf_wall_s": 0.09,
+ "kpoints_cryst": [
+  [
+   0.0,
+   0.0,
+   0.0,
+   2.0
+  ]
+ ],
+ "bands_ev": [
+  [
+   -5.0309,
+   7.019,
+   7.019,
+   7.019,
+   9.4114,
+   9.4114,
+   9.4114,
+   10.519
+  ]
+ ],
+ "homo_ev": 7.019,
+ "lumo_ev": 9.4114
+}

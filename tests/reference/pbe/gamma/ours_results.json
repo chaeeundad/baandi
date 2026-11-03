@@ -1,0 +1,1174 @@
+{
+  "allow_functional_override": true,
+  "atoms": [
+    {
+      "cartesian_bohr": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "fractional": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "species": "Si"
+    },
+    {
+      "cartesian_bohr": [
+        2.565303214179483,
+        2.565303214179483,
+        2.565303214179483
+      ],
+      "fractional": [
+        0.25,
+        0.25,
+        0.25
+      ],
+      "species": "Si"
+    }
+  ],
+  "bands": 8,
+  "basis": {
+    "fft_grid": [
+      25,
+      25,
+      25
+    ],
+    "fft_grid_overridden": false,
+    "n_density_g": 5985,
+    "n_plane_waves": 749
+  },
+  "cell": {
+    "lattice_columns_bohr": [
+      [
+        0.0,
+        5.130606428358966,
+        5.130606428358966
+      ],
+      [
+        5.130606428358966,
+        0.0,
+        5.130606428358966
+      ],
+      [
+        5.130606428358966,
+        5.130606428358966,
+        0.0
+      ]
+    ],
+    "reciprocal_columns_inverse_bohr": [
+      [
+        -0.612323844648251,
+        0.612323844648251,
+        0.612323844648251
+      ],
+      [
+        0.612323844648251,
+        -0.612323844648251,
+        0.612323844648251
+      ],
+      [
+        0.612323844648251,
+        0.612323844648251,
+        -0.612323844648251
+      ]
+    ],
+    "volume_bohr3": 270.10716120683634
+  },
+  "convergence": {
+    "converged": true,
+    "history": [
+      {
+        "davidson_iterations": 28,
+        "delta_energy_ha": null,
+        "density_residual": 0.06838634002132193,
+        "energies": {
+          "band_form": {
+            "ha": -7.216663950720166,
+            "ry": -14.433327901440332
+          },
+          "band_sum": {
+            "ha": -0.17642760683562508,
+            "ry": -0.35285521367125017
+          },
+          "double_counting": {
+            "ha": -2.84893557041224,
+            "ry": -5.69787114082448
+          },
+          "ewald": {
+            "ha": -8.399471866509632,
+            "ry": -16.798943733019264
+          },
+          "functional_difference_bound": {
+            "ha": 1.763589740569913,
+            "ry": 3.527179481139826
+          },
+          "harris_foulkes": {
+            "ha": -7.9127054964103305,
+            "ry": -15.825410992820661
+          },
+          "hartree": {
+            "ha": 1.2298033146290344,
+            "ry": 2.4596066292580687
+          },
+          "kinetic": {
+            "ha": 4.594910433412611,
+            "ry": 9.189820866825222
+          },
+          "local": {
+            "ha": -3.9828424836805487,
+            "ry": -7.965684967361097
+          },
+          "local_zero_mode": {
+            "ha": -0.14562432607066284,
+            "ry": -0.29124865214132567
+          },
+          "nonlocal": {
+            "ha": 2.060440013844494,
+            "ry": 4.120880027688988
+          },
+          "total": {
+            "ha": -7.216663950720225,
+            "ry": -14.43332790144045
+          },
+          "xc": {
+            "ha": -2.7195033624161833,
+            "ry": -5.439006724832367
+          }
+        },
+        "fixed_point_certificate": null,
+        "iteration": 1,
+        "max_eigen_residual_ha": 4.122789272478402e-6,
+        "min_density_electrons_per_bohr3": 0.0005289907030812989,
+        "mixer_reset": false,
+        "mixing_fraction": 1.0,
+        "relative_charge_error": 1.2212453270876722e-15,
+        "relative_input_charge_error": 1.9539925233402755e-14,
+        "requested_eigen_tolerance_ha": 0.00001,
+        "timings": {
+          "density_s": 0.000973416,
+          "diagonalization_s": 0.287713375,
+          "mixing_s": 0.000040333,
+          "potential_s": 0.004083083,
+          "total_energy_s": 0.003943792
+        }
+      },
+      {
+        "davidson_iterations": 9,
+        "delta_energy_ha": -0.08631023031158769,
+        "density_residual": 0.028088545104706694,
+        "energies": {
+          "band_form": {
+            "ha": -7.30297418103174,
+            "ry": -14.60594836206348
+          },
+          "band_sum": {
+            "ha": 0.6026965969936341,
+            "ry": 1.2053931939872682
+          },
+          "double_counting": {
+            "ha": -2.104719419585893,
+            "ry": -4.209438839171786
+          },
+          "ewald": {
+            "ha": -8.399471866509632,
+            "ry": -16.798943733019264
+          },
+          "functional_difference_bound": {
+            "ha": 0.31420802861799296,
+            "ry": 0.6284160572359859
+          },
+          "harris_foulkes": {
+            "ha": -7.404702406186752,
+            "ry": -14.809404812373504
+          },
+          "hartree": {
+            "ha": 1.0191852476437668,
+            "ry": 2.0383704952875337
+          },
+          "kinetic": {
+            "ha": 4.346806610765534,
+            "ry": 8.693613221531068
+          },
+          "local": {
+            "ha": -3.4055248719512834,
+            "ry": -6.811049743902567
+          },
+          "local_zero_mode": {
+            "ha": -0.14562432607066308,
+            "ry": -0.29124865214132617
+          },
+          "nonlocal": {
+            "ha": 1.7661342777652034,
+            "ry": 3.5322685555304068
+          },
+          "total": {
+            "ha": -7.3029741810318125,
+            "ry": -14.605948362063625
+          },
+          "xc": {
+            "ha": -2.630103578745401,
+            "ry": -5.260207157490802
+          }
+        },
+        "fixed_point_certificate": null,
+        "iteration": 2,
+        "max_eigen_residual_ha": 3.0647365119371865e-6,
+        "min_density_electrons_per_bohr3": 0.00009324300412169532,
+        "mixer_reset": false,
+        "mixing_fraction": 1.0,
+        "relative_charge_error": 6.661338147750939e-16,
+        "relative_input_charge_error": 3.3306690738754696e-16,
+        "requested_eigen_tolerance_ha": 5e-6,
+        "timings": {
+          "density_s": 0.000980917,
+          "diagonalization_s": 0.080313208,
+          "mixing_s": 0.00007225,
+          "potential_s": 0.003621958,
+          "total_energy_s": 0.003908917
+        }
+      },
+      {
+        "davidson_iterations": 8,
+        "delta_energy_ha": -0.019890423592901385,
+        "density_residual": 0.0036503685641321422,
+        "energies": {
+          "band_form": {
+            "ha": -7.322864604624771,
+            "ry": -14.645729209249541
+          },
+          "band_sum": {
+            "ha": 1.1888245470049434,
+            "ry": 2.377649094009887
+          },
+          "double_counting": {
+            "ha": -1.5931163623026041,
+            "ry": -3.1862327246052082
+          },
+          "ewald": {
+            "ha": -8.399471866509632,
+            "ry": -16.798943733019264
+          },
+          "functional_difference_bound": {
+            "ha": 0.003787976616737372,
+            "ry": 0.007575953233474744
+          },
+          "harris_foulkes": {
+            "ha": -7.321986838812489,
+            "ry": -14.643973677624977
+          },
+          "hartree": {
+            "ha": 0.8557657249031388,
+            "ry": 1.7115314498062777
+          },
+          "kinetic": {
+            "ha": 4.172275509472252,
+            "ry": 8.344551018944504
+          },
+          "local": {
+            "ha": -2.964611714030315,
+            "ry": -5.92922342806063
+          },
+          "local_zero_mode": {
+            "ha": -0.14562432607066356,
+            "ry": -0.2912486521413271
+          },
+          "nonlocal": {
+            "ha": 1.574277113865668,
+            "ry": 3.148554227731336
+          },
+          "total": {
+            "ha": -7.322864604624714,
+            "ry": -14.645729209249428
+          },
+          "xc": {
+            "ha": -2.5610993723258253,
+            "ry": -5.122198744651651
+          }
+        },
+        "fixed_point_certificate": null,
+        "iteration": 3,
+        "max_eigen_residual_ha": 1.1252925304374994e-6,
+        "min_density_electrons_per_bohr3": 9.092818627474177e-7,
+        "mixer_reset": false,
+        "mixing_fraction": 1.0,
+        "relative_charge_error": 3.774758283725532e-15,
+        "relative_input_charge_error": 1.7763568394002505e-15,
+        "requested_eigen_tolerance_ha": 2.5e-6,
+        "timings": {
+          "density_s": 0.000983625,
+          "diagonalization_s": 0.071617542,
+          "mixing_s": 0.000115833,
+          "potential_s": 0.00366125,
+          "total_energy_s": 0.0039155
+        }
+      },
+      {
+        "davidson_iterations": 8,
+        "delta_energy_ha": -0.00012258584500912661,
+        "density_residual": 0.0014743797272780438,
+        "energies": {
+          "band_form": {
+            "ha": -7.322987190469748,
+            "ry": -14.645974380939496
+          },
+          "band_sum": {
+            "ha": 1.1440635989172008,
+            "ry": 2.2881271978344015
+          },
+          "double_counting": {
+            "ha": -1.6291803621192462,
+            "ry": -3.2583607242384924
+          },
+          "ewald": {
+            "ha": -8.399471866509632,
+            "ry": -16.798943733019264
+          },
+          "functional_difference_bound": {
+            "ha": 0.0010582737313599515,
+            "ry": 0.002116547462719903
+          },
+          "harris_foulkes": {
+            "ha": -7.3231113170437565,
+            "ry": -14.646222634087513
+          },
+          "hartree": {
+            "ha": 0.8710989575769831,
+            "ry": 1.7421979151539662
+          },
+          "kinetic": {
+            "ha": 4.188874775048042,
+            "ry": 8.377749550096084
+          },
+          "local": {
+            "ha": -3.003504673920757,
+            "ry": -6.007009347841514
+          },
+          "local_zero_mode": {
+            "ha": -0.14562432607066306,
+            "ry": -0.2912486521413261
+          },
+          "nonlocal": {
+            "ha": 1.587873859909187,
+            "ry": 3.175747719818374
+          },
+          "total": {
+            "ha": -7.322987190469723,
+            "ry": -14.645974380939446
+          },
+          "xc": {
+            "ha": -2.567858242573546,
+            "ry": -5.135716485147092
+          }
+        },
+        "fixed_point_certificate": null,
+        "iteration": 4,
+        "max_eigen_residual_ha": 3.851765686784976e-7,
+        "min_density_electrons_per_bohr3": 1.9003770016410934e-6,
+        "mixer_reset": true,
+        "mixing_fraction": 0.7772322980548441,
+        "relative_charge_error": 4.440892098500626e-16,
+        "relative_input_charge_error": 3.774758283725532e-15,
+        "requested_eigen_tolerance_ha": 1.25e-6,
+        "timings": {
+          "density_s": 0.000978041,
+          "diagonalization_s": 0.069318333,
+          "mixing_s": 0.000180666,
+          "potential_s": 0.003665459,
+          "total_energy_s": 0.003902167
+        }
+      },
+      {
+        "davidson_iterations": 7,
+        "delta_energy_ha": -0.00005034301663719987,
+        "density_residual": 0.00029033116901451615,
+        "energies": {
+          "band_form": {
+            "ha": -7.323037533486412,
+            "ry": -14.646075066972823
+          },
+          "band_sum": {
+            "ha": 1.1707191902758936,
+            "ry": 2.341438380551787
+          },
+          "double_counting": {
+            "ha": -1.6055359746775664,
+            "ry": -3.2110719493551327
+          },
+          "ewald": {
+            "ha": -8.399471866509632,
+            "ry": -16.798943733019264
+          },
+          "functional_difference_bound": {
+            "ha": 0.000055608369497988847,
+            "ry": 0.00011121673899597769
+          },
+          "harris_foulkes": {
+            "ha": -7.323036045564565,
+            "ry": -14.64607209112913
+          },
+          "hartree": {
+            "ha": 0.8658979620374667,
+            "ry": 1.7317959240749334
+          },
+          "kinetic": {
+            "ha": 4.183020999128642,
+            "ry": 8.366041998257284
+          },
+          "local": {
+            "ha": -2.9883781749256757,
+            "ry": -5.976756349851351
+          },
+          "local_zero_mode": {
+            "ha": -0.14562432607066322,
+            "ry": -0.29124865214132645
+          },
+          "nonlocal": {
+            "ha": 1.581612340750544,
+            "ry": 3.163224681501088
+          },
+          "total": {
+            "ha": -7.32303753348636,
+            "ry": -14.64607506697272
+          },
+          "xc": {
+            "ha": -2.5657187939677057,
+            "ry": -5.1314375879354115
+          }
+        },
+        "fixed_point_certificate": null,
+        "iteration": 5,
+        "max_eigen_residual_ha": 3.127579972322757e-7,
+        "min_density_electrons_per_bohr3": 1.5597322213703139e-6,
+        "mixer_reset": false,
+        "mixing_fraction": 1.0,
+        "relative_charge_error": 1.5543122344752192e-15,
+        "relative_input_charge_error": 6.661338147750939e-16,
+        "requested_eigen_tolerance_ha": 6.25e-7,
+        "timings": {
+          "density_s": 0.000985875,
+          "diagonalization_s": 0.063065209,
+          "mixing_s": 0.000040125,
+          "potential_s": 0.003671834,
+          "total_energy_s": 0.003916334
+        }
+      },
+      {
+        "davidson_iterations": 7,
+        "delta_energy_ha": -2.316368130195201e-6,
+        "density_residual": 0.00012290784847720468,
+        "energies": {
+          "band_form": {
+            "ha": -7.323039849854523,
+            "ry": -14.646079699709047
+          },
+          "band_sum": {
+            "ha": 1.1748511769787997,
+            "ry": 2.3497023539575994
+          },
+          "double_counting": {
+            "ha": -1.6018580045608417,
+            "ry": -3.2037160091216834
+          },
+          "ewald": {
+            "ha": -8.399471866509632,
+            "ry": -16.798943733019264
+          },
+          "functional_difference_bound": {
+            "ha": 0.000013747324810306061,
+            "ry": 0.000027494649620612123
+          },
+          "harris_foulkes": {
+            "ha": -7.323037902385767,
+            "ry": -14.646075804771534
+          },
+          "hartree": {
+            "ha": 0.8651295947840861,
+            "ry": 1.7302591895681723
+          },
+          "kinetic": {
+            "ha": 4.182138123303091,
+            "ry": 8.364276246606183
+          },
+          "local": {
+            "ha": -2.9860568112161467,
+            "ry": -5.9721136224322935
+          },
+          "local_zero_mode": {
+            "ha": -0.14562432607066342,
+            "ry": -0.29124865214132684
+          },
+          "nonlocal": {
+            "ha": 1.5806278694527298,
+            "ry": 3.1612557389054596
+          },
+          "total": {
+            "ha": -7.32303984985449,
+            "ry": -14.64607969970898
+          },
+          "xc": {
+            "ha": -2.5654067596686185,
+            "ry": -5.130813519337237
+          }
+        },
+        "fixed_point_certificate": null,
+        "iteration": 6,
+        "max_eigen_residual_ha": 3.0279436312654294e-7,
+        "min_density_electrons_per_bohr3": 1.4993023560113162e-6,
+        "mixer_reset": false,
+        "mixing_fraction": 1.0,
+        "relative_charge_error": 2.886579864025407e-15,
+        "relative_input_charge_error": 6.661338147750939e-16,
+        "requested_eigen_tolerance_ha": 3.125e-7,
+        "timings": {
+          "density_s": 0.000980709,
+          "diagonalization_s": 0.061003584,
+          "mixing_s": 0.000070709,
+          "potential_s": 0.003680917,
+          "total_energy_s": 0.003918375
+        }
+      },
+      {
+        "davidson_iterations": 7,
+        "delta_energy_ha": -6.545964179593966e-7,
+        "density_residual": 0.000026970105807233662,
+        "energies": {
+          "band_form": {
+            "ha": -7.323040504450895,
+            "ry": -14.64608100890179
+          },
+          "band_sum": {
+            "ha": 1.1776980612513706,
+            "ry": 2.355396122502741
+          },
+          "double_counting": {
+            "ha": -1.5992945005359211,
+            "ry": -3.1985890010718423
+          },
+          "ewald": {
+            "ha": -8.399471866509632,
+            "ry": -16.798943733019264
+          },
+          "functional_difference_bound": {
+            "ha": 7.055061980744405e-7,
+            "ry": 1.411012396148881e-6
+          },
+          "harris_foulkes": {
+            "ha": -7.323040255569382,
+            "ry": -14.646080511138765
+          },
+          "hartree": {
+            "ha": 0.8646577342349173,
+            "ry": 1.7293154684698346
+          },
+          "kinetic": {
+            "ha": 4.181580628933192,
+            "ry": 8.363161257866384
+          },
+          "local": {
+            "ha": -2.9845697353736607,
+            "ry": -5.969139470747321
+          },
+          "local_zero_mode": {
+            "ha": -0.14562432607066328,
+            "ry": -0.29124865214132656
+          },
+          "nonlocal": {
+            "ha": 1.579981668227747,
+            "ry": 3.159963336455494
+          },
+          "total": {
+            "ha": -7.323040504450908,
+            "ry": -14.646081008901817
+          },
+          "xc": {
+            "ha": -2.5652189339634717,
+            "ry": -5.130437867926943
+          }
+        },
+        "fixed_point_certificate": null,
+        "iteration": 7,
+        "max_eigen_residual_ha": 3.690690204008503e-8,
+        "min_density_electrons_per_bohr3": 1.4633054536288676e-6,
+        "mixer_reset": false,
+        "mixing_fraction": 1.0,
+        "relative_charge_error": 1.9984014443252818e-15,
+        "relative_input_charge_error": 1.7763568394002505e-15,
+        "requested_eigen_tolerance_ha": 1.5625e-7,
+        "timings": {
+          "density_s": 0.000973625,
+          "diagonalization_s": 0.063065625,
+          "mixing_s": 0.000115625,
+          "potential_s": 0.003654625,
+          "total_energy_s": 0.003923459
+        }
+      },
+      {
+        "davidson_iterations": 7,
+        "delta_energy_ha": -3.410781879154001e-8,
+        "density_residual": 6.853611657985673e-7,
+        "energies": {
+          "band_form": {
+            "ha": -7.323040538558743,
+            "ry": -14.646081077117486
+          },
+          "band_sum": {
+            "ha": 1.1779062927787225,
+            "ry": 2.355812585557445
+          },
+          "double_counting": {
+            "ha": -1.5990761951869958,
+            "ry": -3.1981523903739917
+          },
+          "ewald": {
+            "ha": -8.399471866509632,
+            "ry": -16.798943733019264
+          },
+          "functional_difference_bound": {
+            "ha": 2.036339367218301e-7,
+            "ry": 4.072678734436602e-7
+          },
+          "harris_foulkes": {
+            "ha": -7.323040538262112,
+            "ry": -14.646081076524224
+          },
+          "hartree": {
+            "ha": 0.8646818347211622,
+            "ry": 1.7293636694423244
+          },
+          "kinetic": {
+            "ha": 4.181589908155606,
+            "ry": 8.363179816311211
+          },
+          "local": {
+            "ha": -2.9845738089103406,
+            "ry": -5.969147617820681
+          },
+          "local_zero_mode": {
+            "ha": -0.14562432607066286,
+            "ry": -0.2912486521413257
+          },
+          "nonlocal": {
+            "ha": 1.5799663887204698,
+            "ry": 3.1599327774409396
+          },
+          "total": {
+            "ha": -7.323040538558727,
+            "ry": -14.646081077117454
+          },
+          "xc": {
+            "ha": -2.5652329947359918,
+            "ry": -5.1304659894719835
+          }
+        },
+        "fixed_point_certificate": null,
+        "iteration": 8,
+        "max_eigen_residual_ha": 2.9555381067263232e-8,
+        "min_density_electrons_per_bohr3": 1.4658592682779904e-6,
+        "mixer_reset": false,
+        "mixing_fraction": 1.0,
+        "relative_charge_error": 9.992007221626409e-16,
+        "relative_input_charge_error": 1.6653345369377348e-15,
+        "requested_eigen_tolerance_ha": 7.8125e-8,
+        "timings": {
+          "density_s": 0.00097775,
+          "diagonalization_s": 0.061038917,
+          "mixing_s": 0.00017725,
+          "potential_s": 0.003696375,
+          "total_energy_s": 0.003880208
+        }
+      },
+      {
+        "davidson_iterations": 6,
+        "delta_energy_ha": -3.5139890997015755e-11,
+        "density_residual": 2.5029173572524596e-7,
+        "energies": {
+          "band_form": {
+            "ha": -7.323040538593881,
+            "ry": -14.646081077187763
+          },
+          "band_sum": {
+            "ha": 1.1779005650974765,
+            "ry": 2.355801130194953
+          },
+          "double_counting": {
+            "ha": -1.5990812468090636,
+            "ry": -3.198162493618127
+          },
+          "ewald": {
+            "ha": -8.399471866509632,
+            "ry": -16.798943733019264
+          },
+          "functional_difference_bound": {
+            "ha": 1.1595525556821575e-7,
+            "ry": 2.319105111364315e-7
+          },
+          "harris_foulkes": {
+            "ha": -7.323040538577193,
+            "ry": -14.646081077154387
+          },
+          "hartree": {
+            "ha": 0.8646829096154984,
+            "ry": 1.7293658192309969
+          },
+          "kinetic": {
+            "ha": 4.181590582889274,
+            "ry": 8.363181165778547
+          },
+          "local": {
+            "ha": -2.984577134385445,
+            "ry": -5.96915426877089
+          },
+          "local_zero_mode": {
+            "ha": -0.1456243260706632,
+            "ry": -0.2912486521413264
+          },
+          "nonlocal": {
+            "ha": 1.5799683634027255,
+            "ry": 3.159936726805451
+          },
+          "total": {
+            "ha": -7.323040538593867,
+            "ry": -14.646081077187734
+          },
+          "xc": {
+            "ha": -2.5652333936062885,
+            "ry": -5.130466787212577
+          }
+        },
+        "fixed_point_certificate": null,
+        "iteration": 9,
+        "max_eigen_residual_ha": 1.7439354792858148e-8,
+        "min_density_electrons_per_bohr3": 1.4659811883741228e-6,
+        "mixer_reset": false,
+        "mixing_fraction": 1.0,
+        "relative_charge_error": 1.3322676295501878e-15,
+        "relative_input_charge_error": 6.439293542825908e-15,
+        "requested_eigen_tolerance_ha": 3.90625e-8,
+        "timings": {
+          "density_s": 0.000986959,
+          "diagonalization_s": 0.050025834,
+          "mixing_s": 0.000250625,
+          "potential_s": 0.003692875,
+          "total_energy_s": 0.003918083
+        }
+      },
+      {
+        "davidson_iterations": 5,
+        "delta_energy_ha": -7.698730541960686e-12,
+        "density_residual": 6.296089333587114e-8,
+        "energies": {
+          "band_form": {
+            "ha": -7.323040538601566,
+            "ry": -14.646081077203132
+          },
+          "band_sum": {
+            "ha": 1.177902312420777,
+            "ry": 2.355804624841554
+          },
+          "double_counting": {
+            "ha": -1.5990796617247658,
+            "ry": -3.1981593234495316
+          },
+          "ewald": {
+            "ha": -8.399471866509632,
+            "ry": -16.798943733019264
+          },
+          "functional_difference_bound": {
+            "ha": 6.741530122632882e-8,
+            "ry": 1.3483060245265765e-7
+          },
+          "harris_foulkes": {
+            "ha": -7.323040538600507,
+            "ry": -14.646081077201014
+          },
+          "hartree": {
+            "ha": 0.8646826264609173,
+            "ry": 1.7293652529218346
+          },
+          "kinetic": {
+            "ha": 4.181590117041187,
+            "ry": 8.363180234082375
+          },
+          "local": {
+            "ha": -2.9845762412549925,
+            "ry": -5.969152482509985
+          },
+          "local_zero_mode": {
+            "ha": -0.14562432607066297,
+            "ry": -0.29124865214132595
+          },
+          "nonlocal": {
+            "ha": 1.5799680983593474,
+            "ry": 3.1599361967186947
+          },
+          "total": {
+            "ha": -7.323040538601566,
+            "ry": -14.646081077203132
+          },
+          "xc": {
+            "ha": -2.5652332726983933,
+            "ry": -5.130466545396787
+          }
+        },
+        "fixed_point_certificate": null,
+        "iteration": 10,
+        "max_eigen_residual_ha": 9.558388742021047e-9,
+        "min_density_electrons_per_bohr3": 1.4660622058245468e-6,
+        "mixer_reset": false,
+        "mixing_fraction": 1.0,
+        "relative_charge_error": 1.1102230246251565e-16,
+        "relative_input_charge_error": 1.2212453270876722e-15,
+        "requested_eigen_tolerance_ha": 1.953125e-8,
+        "timings": {
+          "density_s": 0.000986541,
+          "diagonalization_s": 0.039516042,
+          "mixing_s": 0.000341792,
+          "potential_s": 0.003678291,
+          "total_energy_s": 0.003921083
+        }
+      },
+      {
+        "davidson_iterations": 4,
+        "delta_energy_ha": -2.398081733190338e-13,
+        "density_residual": 9.547978210119222e-9,
+        "energies": {
+          "band_form": {
+            "ha": -7.323040538601843,
+            "ry": -14.646081077203686
+          },
+          "band_sum": {
+            "ha": 1.1779036951025617,
+            "ry": 2.3558073902051233
+          },
+          "double_counting": {
+            "ha": -1.5990784168495082,
+            "ry": -3.1981568336990165
+          },
+          "ewald": {
+            "ha": -8.399471866509632,
+            "ry": -16.798943733019264
+          },
+          "functional_difference_bound": {
+            "ha": 6.900655359540115e-8,
+            "ry": 1.380131071908023e-7
+          },
+          "harris_foulkes": {
+            "ha": -7.323040538601749,
+            "ry": -14.646081077203498
+          },
+          "hartree": {
+            "ha": 0.8646823960935104,
+            "ry": 1.7293647921870208
+          },
+          "kinetic": {
+            "ha": 4.181589838912499,
+            "ry": 8.363179677824998
+          },
+          "local": {
+            "ha": -2.9845755253760657,
+            "ry": -5.9691510507521315
+          },
+          "local_zero_mode": {
+            "ha": -0.14562432607066275,
+            "ry": -0.2912486521413255
+          },
+          "nonlocal": {
+            "ha": 1.5799677984156735,
+            "ry": 3.159935596831347
+          },
+          "total": {
+            "ha": -7.323040538601806,
+            "ry": -14.646081077203611
+          },
+          "xc": {
+            "ha": -2.5652331801377914,
+            "ry": -5.130466360275583
+          }
+        },
+        "fixed_point_certificate": {
+          "davidson_iterations": 5,
+          "density_residual": 2.0685069731930812e-9,
+          "occupied_eigenvalue_change_ha": 1.9757433022959958e-8,
+          "timings": {
+            "density_s": 0.000978209,
+            "diagonalization_s": 0.039553625,
+            "mixing_s": 0.0,
+            "potential_s": 0.003682666,
+            "total_energy_s": 0.003909208
+          }
+        },
+        "iteration": 11,
+        "max_eigen_residual_ha": 9.039112367022011e-9,
+        "min_density_electrons_per_bohr3": 1.4660440634502409e-6,
+        "mixer_reset": false,
+        "mixing_fraction": 1.0,
+        "relative_charge_error": 1.6653345369377348e-15,
+        "relative_input_charge_error": 2.6645352591003757e-15,
+        "requested_eigen_tolerance_ha": 9.765625e-9,
+        "timings": {
+          "density_s": 0.000980708,
+          "diagonalization_s": 0.027074291,
+          "mixing_s": 0.0,
+          "potential_s": 0.003642167,
+          "total_energy_s": 0.003914
+        }
+      }
+    ],
+    "iterations": 11,
+    "last_iteration": {
+      "davidson_iterations": 4,
+      "delta_energy_ha": -2.398081733190338e-13,
+      "density_residual": 9.547978210119222e-9,
+      "energies": {
+        "band_form": {
+          "ha": -7.323040538601843,
+          "ry": -14.646081077203686
+        },
+        "band_sum": {
+          "ha": 1.1779036951025617,
+          "ry": 2.3558073902051233
+        },
+        "double_counting": {
+          "ha": -1.5990784168495082,
+          "ry": -3.1981568336990165
+        },
+        "ewald": {
+          "ha": -8.399471866509632,
+          "ry": -16.798943733019264
+        },
+        "functional_difference_bound": {
+          "ha": 6.900655359540115e-8,
+          "ry": 1.380131071908023e-7
+        },
+        "harris_foulkes": {
+          "ha": -7.323040538601749,
+          "ry": -14.646081077203498
+        },
+        "hartree": {
+          "ha": 0.8646823960935104,
+          "ry": 1.7293647921870208
+        },
+        "kinetic": {
+          "ha": 4.181589838912499,
+          "ry": 8.363179677824998
+        },
+        "local": {
+          "ha": -2.9845755253760657,
+          "ry": -5.9691510507521315
+        },
+        "local_zero_mode": {
+          "ha": -0.14562432607066275,
+          "ry": -0.2912486521413255
+        },
+        "nonlocal": {
+          "ha": 1.5799677984156735,
+          "ry": 3.159935596831347
+        },
+        "total": {
+          "ha": -7.323040538601806,
+          "ry": -14.646081077203611
+        },
+        "xc": {
+          "ha": -2.5652331801377914,
+          "ry": -5.130466360275583
+        }
+      },
+      "fixed_point_certificate": {
+        "davidson_iterations": 5,
+        "density_residual": 2.0685069731930812e-9,
+        "occupied_eigenvalue_change_ha": 1.9757433022959958e-8,
+        "timings": {
+          "density_s": 0.000978209,
+          "diagonalization_s": 0.039553625,
+          "mixing_s": 0.0,
+          "potential_s": 0.003682666,
+          "total_energy_s": 0.003909208
+        }
+      },
+      "iteration": 11,
+      "max_eigen_residual_ha": 9.039112367022011e-9,
+      "min_density_electrons_per_bohr3": 1.4660440634502409e-6,
+      "mixer_reset": false,
+      "mixing_fraction": 1.0,
+      "relative_charge_error": 1.6653345369377348e-15,
+      "relative_input_charge_error": 2.6645352591003757e-15,
+      "requested_eigen_tolerance_ha": 9.765625e-9,
+      "timings": {
+        "density_s": 0.000980708,
+        "diagonalization_s": 0.027074291,
+        "mixing_s": 0.0,
+        "potential_s": 0.003642167,
+        "total_energy_s": 0.003914
+      }
+    }
+  },
+  "cutoff": {
+    "ecutwfc_ha": 15.0,
+    "ecutwfc_ry": 30.0
+  },
+  "eigenvalues": {
+    "ev": [
+      -5.030894229324658,
+      7.019030144419244,
+      7.019030144451352,
+      7.019030144460225,
+      9.411405277138488,
+      9.411405277142233,
+      9.411405277154353,
+      10.51903467046687
+    ],
+    "ha": [
+      -0.18488195286509515,
+      0.25794460013789666,
+      0.2579446001390766,
+      0.2579446001394027,
+      0.3458627646552214,
+      0.34586276465535903,
+      0.34586276465580446,
+      0.3865673940818713
+    ]
+  },
+  "electrons": 8.0,
+  "energies": {
+    "band_form": {
+      "ha": -7.323040538601843,
+      "ry": -14.646081077203686
+    },
+    "band_sum": {
+      "ha": 1.1779036951025617,
+      "ry": 2.3558073902051233
+    },
+    "double_counting": {
+      "ha": -1.5990784168495082,
+      "ry": -3.1981568336990165
+    },
+    "ewald": {
+      "ha": -8.399471866509632,
+      "ry": -16.798943733019264
+    },
+    "functional_difference_bound": {
+      "ha": 6.900655359540115e-8,
+      "ry": 1.380131071908023e-7
+    },
+    "harris_foulkes": {
+      "ha": -7.323040538601749,
+      "ry": -14.646081077203498
+    },
+    "hartree": {
+      "ha": 0.8646823960935104,
+      "ry": 1.7293647921870208
+    },
+    "kinetic": {
+      "ha": 4.181589838912499,
+      "ry": 8.363179677824998
+    },
+    "local": {
+      "ha": -2.9845755253760657,
+      "ry": -5.9691510507521315
+    },
+    "local_zero_mode": {
+      "ha": -0.14562432607066275,
+      "ry": -0.2912486521413255
+    },
+    "nonlocal": {
+      "ha": 1.5799677984156735,
+      "ry": 3.159935596831347
+    },
+    "total": {
+      "ha": -7.323040538601806,
+      "ry": -14.646081077203611
+    },
+    "xc": {
+      "ha": -2.5652331801377914,
+      "ry": -5.130466360275583
+    }
+  },
+  "functional_override_applied": true,
+  "input_sha256": "5bc9aa0cbc39da58fc074a632f52ea81c37b9f40bca15701f1b122da61af05e1",
+  "memory_estimate": {
+    "basis_bytes": 35952,
+    "density_basis_bytes": 287280,
+    "density_grid_bytes": 125000,
+    "note": "array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process",
+    "one_complex_grid_bytes": 250000,
+    "orbital_bytes": 95872,
+    "peak_rss_bytes": null
+  },
+  "occupations": [
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "scf": {
+    "cutoff_hartree": 15.0,
+    "davidson_max_iterations": 400,
+    "davidson_subspace": 48,
+    "density_residual_tolerance": 1e-7,
+    "divergence_factor": 20.0,
+    "divergence_patience": 3,
+    "eigen_tolerance": 1e-8,
+    "eigen_tolerance_decay": 0.5,
+    "energy_tolerance_ha": 1e-8,
+    "extra_bands": 4,
+    "grid_override": null,
+    "initial_eigen_tolerance": 0.00001,
+    "max_iterations": 100,
+    "mixing": {
+      "beta": 0.5,
+      "history": 6,
+      "method": "pulay"
+    },
+    "nbands": null,
+    "seed": 2026
+  },
+  "schema_version": 1,
+  "species": [
+    {
+      "functional": " SLA  PZ   NOGX NOGC",
+      "n_projectors": 2,
+      "name": "Si",
+      "path": "/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+      "sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+      "z_valence": 4.0
+    }
+  ],
+  "threading": {
+    "backend": "explicit sequential faer and serial FFT",
+    "threads": 1
+  },
+  "timestamp": "2026-11-03T05:18:55Z",
+  "timings": {
+    "engine_setup_s": 0.049171625,
+    "engine_total_s": 1.067344292,
+    "fft_hpsi": "included in enclosing phases; not separately measured",
+    "phases": {
+      "density_s": 0.011766375,
+      "diagonalization_s": 0.913305585,
+      "mixing_s": 0.001405208,
+      "potential_s": 0.0444315,
+      "total_energy_s": 0.046971126
+    },
+    "setup_s": 0.050853916,
+    "total_s": 1.069341125
+  },
+  "tool": {
+    "git_commit": "47b2e899061a48dcdb307022e3f39a731c2f7fc1",
+    "name": "dft-cli",
+    "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "version": "0.1.0"
+  },
+  "total_energy": {
+    "ev": -199.27008459092198,
+    "ha": -7.323040538601806,
+    "ry": -14.646081077203611
+  },
+  "units": "Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md",
+  "xc": "pbe"
+}

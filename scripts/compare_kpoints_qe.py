@@ -51,8 +51,13 @@ def same_k(a, b, sign):
 
 
 def compare(ours, qe, tol, natoms):
-    pts = ours["kpoints"]["points"]
-    if ours["kpoints"]["count"] != qe["nk"] or len(pts) != qe["nk"]:
+    if "kpoints" in ours:
+        pts, count = ours["kpoints"]["points"], ours["kpoints"]["count"]
+    else:
+        # legacy Gamma-only results.json has no k-point block: one Gamma point of weight 1
+        pts = [{"fractional": [0.0, 0.0, 0.0], "weight": 1.0, "eigenvalues": ours["eigenvalues"]}]
+        count = 1
+    if count != qe["nk"] or len(pts) != qe["nk"]:
         raise Inconsistent(f"k count differs: ours {len(pts)} QE {qe['nk']}")
     if len(qe["bands_ev"]) != qe["nk"] or len(qe["kpoints_cryst"]) != qe["nk"]:
         raise Inconsistent("QE summary lengths inconsistent")

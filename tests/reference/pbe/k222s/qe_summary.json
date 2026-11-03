@@ -1,0 +1,87 @@
+{
+ "_note": "Relayed plain-text summary of a QE 7.6 pw.x run (MPI x4, dev08, input_dft='pbe' override of the LDA functional of the UPF; code-to-code consistency test, not a physically meaningful PBE for this pseudopotential). Values transcribed from plain-text blocks sent by the dft5090 session; block sha256 given by the sender are listed below and were not re-verified (the blocks were not stored verbatim). Full qe.out stays on dev08 under ~/rustdft_p6/pbe.",
+ "qe_out_sha256": "0c5fbee5b4aba235644a2c3569e080cce118b32c47b3d9b2a15add13d8a9479e",
+ "blocks_sha256": {
+  "A_119_130": "12a315e74228e24d002536d86b779f2a2d11499219f26f16bc19ef307465fb53",
+  "B_323_353": "548a4b548f2896ab6d611a62c2a1d8a374f7c2592666aaf3769b28aaa0f09dd1"
+ },
+ "functional_note": "same override message as the Gamma run",
+ "energy_ry": -15.8656339,
+ "one_electron_ry": 4.63243895,
+ "hartree_ry": 1.15397278,
+ "xc_ry": -4.85310186,
+ "ewald_ry": -16.79894377,
+ "nk": 4,
+ "iterations": 9,
+ "pwscf_wall_s": 0.15,
+ "kpoints_cryst": [
+  [
+   0.25,
+   0.25,
+   0.25,
+   0.5
+  ],
+  [
+   0.25,
+   0.25,
+   -0.25,
+   0.5
+  ],
+  [
+   0.25,
+   -0.25,
+   0.25,
+   0.5
+  ],
+  [
+   0.25,
+   -0.25,
+   -0.25,
+   0.5
+  ]
+ ],
+ "bands_ev": [
+  [
+   -5.0231,
+   2.2317,
+   5.3068,
+   5.3068,
+   8.1002,
+   9.6057,
+   9.6057,
+   12.9814
+  ],
+  [
+   -3.1045,
+   -0.2876,
+   2.6274,
+   3.8732,
+   7.6766,
+   10.6142,
+   11.8476,
+   12.062
+  ],
+  [
+   -3.1045,
+   -0.2876,
+   2.6274,
+   3.8732,
+   7.6766,
+   10.6142,
+   11.8476,
+   12.062
+  ],
+  [
+   -3.1045,
+   -0.2876,
+   2.6274,
+   3.8732,
+   7.6766,
+   10.6142,
+   11.8476,
+   12.062
+  ]
+ ],
+ "homo_ev": 5.3068,
+ "lumo_ev": 7.6766
+}

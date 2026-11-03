@@ -286,5 +286,21 @@
     "result": "pass",
     "detail": "Measured, not a pass/fail gate: Gamma 2.28 s vs QE 0.217 s (1 process); 4x4x4 94.3 s vs 1.82 s. Total energy Linux vs macOS: +8.9e-15 Ha (Gamma), bit-identical (4x4x4). Relayed attestation.",
     "date": "2026-11-03"
+  },
+  {
+    "id": "T37",
+    "check": "PBE (xcx) vs QE 7.6, code-to-code with the LDA pseudopotential: Gamma and 2x2x2 shifted",
+    "phase": "P7",
+    "result": "pass",
+    "detail": "Energy diff 1.70e-6 and 1.69e-6 Ha/atom (tol 1e-4); max eigenvalue diff 1.27e-6 and 1.82e-6 Ha (tol 1e-3). XC term differs by 8.4e-7 Ha, unexplained and small. xcx matches published closed forms to 2.2e-16 Ha. Relayed text evidence.",
+    "date": "2026-11-03"
+  },
+  {
+    "id": "T38",
+    "check": "Optimization O1 (allocation-free FFT) and O3 (pruned FFT): bit-identical density, speed vs baseline",
+    "phase": "P7",
+    "result": "pass",
+    "detail": "Density identical and energy diff 0 on Gamma, 4 k, 8 k. Wall time vs baseline: Gamma 1.30 s to 0.66 s, 8 k 12.1 s to 5.9 s (about 2x) on a shared machine; final measurement after the next steps.",
+    "date": "2026-11-03"
   }
 ]

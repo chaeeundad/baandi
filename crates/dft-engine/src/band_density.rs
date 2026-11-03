@@ -2,15 +2,14 @@
 use crate::scf::ScfError;
 use dft_basis::FftGridSpec;
 use dft_physics::data::*;
+use dft_physics::density::{FusedOperator, FusedPlan};
 
 pub(crate) struct BandDensity {
     workers: Vec<Worker>,
 }
 struct Worker {
     first: usize,
-    fft: FftPlan3d,
-    reciprocal: Array3<Complex64>,
-    real: Array3<Complex64>,
+    fft: FusedPlan,
     contributions: Vec<Array3<f64>>,
 }
 impl BandDensity {
@@ -22,9 +21,7 @@ impl BandDensity {
             let end = bands * (i + 1) / count;
             workers.push(Worker {
                 first,
-                fft: FftPlan3d::new(grid.dims())?,
-                reciprocal: Array3::zeros(grid.dims()),
-                real: Array3::zeros(grid.dims()),
+                fft: FusedPlan::new(grid.dims(), grid.g_to_fft())?,
                 contributions: (first..end).map(|_| Array3::zeros(grid.dims())).collect(),
             });
         }
@@ -69,14 +66,13 @@ fn transform(
                     "band index {band}: invalid coefficients"
                 )));
             }
-            worker.reciprocal.fill(Complex64::default());
-            for (&index, &value) in grid.g_to_fft().iter().zip(c) {
-                worker.reciprocal[index] = value;
-            }
-            worker.fft.to_real(&worker.reciprocal, &mut worker.real)?;
-            contribution.zip_mut_with(&worker.real, |n, z| {
-                *n = occupations[band] * z.norm_sqr() / volume;
-            });
+            contribution.fill(0.0);
+            worker.fft.accumulate_density(
+                c,
+                occupations[band],
+                volume,
+                contribution.as_slice_mut().unwrap(),
+            )?;
         }
         return Ok(());
     }
@@ -131,6 +127,15 @@ mod tests {
             &mut FftPlan3d::new(grid.dims()).unwrap(),
         )
         .unwrap();
+        let fused = dft_physics::density::from_orbitals_fused(
+            &coefficients,
+            &occupations,
+            &grid,
+            cell.volume_bohr3(),
+            &mut FusedPlan::new(grid.dims(), grid.g_to_fft()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(expected, fused);
         for threads in [1, 2, 3, 4, 8] {
             let mut pool = BandDensity::new(&grid, 7, threads).unwrap();
             let addresses = |p: &BandDensity| {
@@ -138,8 +143,7 @@ mod tests {
                     .iter()
                     .map(|w| {
                         (
-                            w.real.as_ptr() as usize,
-                            w.reciprocal.as_ptr() as usize,
+                            &w.fft as *const FusedPlan as usize,
                             w.contributions
                                 .iter()
                                 .map(|c| c.as_ptr() as usize)

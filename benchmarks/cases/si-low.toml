@@ -1,0 +1,11 @@
+# Flat TOML: one JSON-compatible value per line. Lengths in Bohr.
+id = "si-low"
+purpose = "Low cutoff sensitivity, not a converged physical cutoff"
+system_class = "si-cutoff"
+tier = "default"
+potential = "si"
+lattice = [[0, 5.130606428358966, 5.130606428358966], [5.130606428358966, 0, 5.130606428358966], [5.130606428358966, 5.130606428358966, 0]]
+atoms = [[0, 0, 0], [0.25, 0.25, 0.25]]
+cutoff_ry = 8
+timeout_s = 240
+deterministic = true

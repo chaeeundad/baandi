@@ -1,7 +1,9 @@
 //! Validated UPF v2 NC data and radial transforms in Hartree atomic units.
 mod parser;
 pub mod radial;
-pub use parser::{Projector, Pseudopotential, UpfError, from_file, parse_upf};
+pub use parser::{
+    HeaderFacts, Projector, Pseudopotential, UpfError, from_file, header_facts, parse_upf,
+};
 
 /// Whether a UPF label explicitly specifies Slater exchange and PZ correlation
 /// with no gradient corrections. Matching is case-sensitive and ignores only

@@ -44,3 +44,4 @@
 | Status datasets and dashboard conventions | [artifacts/README.md](../artifacts/README.md) |
 
 Conventions: docs are English; one fact lives in one place and others link to it; an ADR is never edited after acceptance, supersede it with a new one; numbers recorded as references must carry command, version, input and SHA-256.
+| Agent-Native runtime directive review and ticket mapping (P11 series) | `research/agent-native-directive-review.md`, `../tickets/P11-COMMON.md` |

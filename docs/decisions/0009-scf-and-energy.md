@@ -318,3 +318,40 @@ The required final requested tolerance remains <= eigen_tolerance. Additive
 in-memory application/per-k counters separate main and certificate work.
 Measurements, rejected parameter settings and limitations are in the P7P4 entry
 of `docs/performance/optimization-log.md`.
+
+## P7PC notes
+
+SCF uses a strict prefix of occupied bands plus the first empty band, capped
+at the number of bands. Only occupied states enter the zero-temperature density
+and energy; the lowest empty state is additionally needed by the unchanged
+sampled-gap test. Higher empty states are subspace buffers. The engine's buffer
+residual target is `max(requested_tolerance, 1e-5)` Ha. This measured local
+choice is derived from study-note hypothesis H2, not copied from QE; the
+suggested 100-times factor increased Gamma and si8 SCF iterations and was
+rejected. There are three buffers in an eight-band/four-occupied calculation:
+the fourth empty band count includes the strict lowest empty band.
+
+A fixed-point certificate still solves the strict prefix at
+`0.1 * eigen_tolerance` and retains the density and occupied-eigenvalue-change
+tests. It records strict and buffer residual arrays separately per k point.
+Buffer residuals are informational and are not certificate claims. The gap
+criterion is unchanged. The default number of extra bands remains four.
+
+Tolerance splitting alone did not fix si8: later SCF iterates stalled in the
+strict lowest-empty member of the near-degenerate cluster. Engine working
+capacity is therefore `max(davidson_subspace, 6 * bands)`, capped at dimension
+by Davidson. The engine option now supplies a minimum capacity; the standalone
+Davidson `max_subspace` contract is unchanged. This preserves the 48-dimensional
+eight-band benchmark space and gives si8 120 dimensions. A 60-dimensional
+trial converged but required 701 iterations versus 311 for 120 with the same
+100-times policy; the final floor-only policy further reduced si8 to 283.
+See the optimization log for timings, rejected trials and verification.
+
+After the buffer policy passed energy and QE gates, intermediate SCF maps were
+measured without the extra final Davidson true-residual block application.
+This applies only while the scheduled tolerance is greater than
+`eigen_tolerance`. Public `step`/`step_kpoints`, all final-accuracy maps and every
+fixed-point certificate continue to recompute true residuals. Iteration-limit
+acceptance also always recomputes them. The measured experiment preserves the
+floor-policy density hashes and energies while saving 72/288/576/280 vector
+applications on Gamma/k222s/k222/si8. No certificate work is skipped.

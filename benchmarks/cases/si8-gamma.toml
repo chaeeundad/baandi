@@ -1,0 +1,12 @@
+# Flat TOML: one JSON-compatible value per line. Lengths in Bohr.
+id = "si8-gamma"
+purpose = "P7PC top-band degeneracy/stagnation regression; default bands"
+system_class = "si-conventional"
+tier = "default"
+potential = "si"
+lattice = [[10.261212856717933, 0, 0], [0, 10.261212856717933, 0], [0, 0, 10.261212856717933]]
+atoms = [[0, 0, 0], [0, 0.5, 0.5], [0.5, 0, 0.5], [0.5, 0.5, 0], [0.25, 0.25, 0.25], [0.25, 0.75, 0.75], [0.75, 0.25, 0.75], [0.75, 0.75, 0.25]]
+cutoff_ry = 30
+timeout_s = 240
+deterministic = true
+expected_error = "not converged after 400 iterations"

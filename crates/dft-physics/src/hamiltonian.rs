@@ -1,7 +1,11 @@
 //! Ionic and Kleinman–Bylander terms, and a reusable Bloch Hamiltonian.
 use dft_basis::{FftGridSpec, GVector, PlaneWaveBasis};
 use dft_geometry::Cell;
-use dft_numerics::{Fft3d, FftPlan3d, SpherePattern, linalg::ComplexMatrix};
+use dft_numerics::{
+    Fft3d, FftPlan3d,
+    fused::{FusedOperator, FusedPlan},
+    linalg::ComplexMatrix,
+};
 use dft_solvers::{LinearOperator, SolverError};
 use dft_upf::{Pseudopotential, radial::real_spherical_harmonic};
 use ndarray::Array3;
@@ -257,9 +261,7 @@ struct Worker {
     output: Vec<Complex64>,
 }
 struct Scratch {
-    fft: FftPlan3d,
-    reciprocal: Array3<Complex64>,
-    real: Array3<Complex64>,
+    fft: FusedPlan,
     projections: Vec<Complex64>,
 }
 /// Immutable physical data with interior scratch reuse; intentionally not Sync.
@@ -270,7 +272,6 @@ pub struct Hamiltonian {
 }
 struct HamiltonianData {
     grid: FftGridSpec,
-    pattern: SpherePattern,
     kinetic: Vec<f64>,
     potential: Array3<f64>,
     nonlocal: NonlocalOperator,
@@ -298,24 +299,24 @@ impl Hamiltonian {
         }
         let scratch = RefCell::new(vec![Worker {
             scratch: Scratch {
-                fft: FftPlan3d::new(dims)?,
-                reciprocal: Array3::zeros(dims),
-                real: Array3::zeros(dims),
+                fft: FusedPlan::new(dims, grid.g_to_fft())?,
                 projections: vec![Complex64::default(); nonlocal.max_channels],
             },
             output: vec![Complex64::default(); basis.vectors().len()],
         }]);
-        let pattern = SpherePattern::from_indices(dims, grid.g_to_fft())?;
         Ok(Self {
             data: HamiltonianData {
                 grid,
-                pattern,
                 kinetic: basis
                     .momenta()
                     .iter()
                     .map(|g| 0.5 * g.norm_squared)
                     .collect(),
-                potential,
+                potential: if potential.is_standard_layout() {
+                    potential
+                } else {
+                    potential.as_standard_layout().into_owned()
+                },
                 nonlocal,
             },
             scratch,
@@ -329,9 +330,7 @@ impl Hamiltonian {
         for _ in pool.len()..threads.max(1) {
             pool.push(Worker {
                 scratch: Scratch {
-                    fft: FftPlan3d::new(dims)?,
-                    reciprocal: Array3::zeros(dims),
-                    real: Array3::zeros(dims),
+                    fft: FusedPlan::new(dims, self.data.grid.g_to_fft())?,
                     projections: vec![Complex64::default(); self.data.nonlocal.max_channels],
                 },
                 output: vec![Complex64::default(); self.data.kinetic.len()],
@@ -349,7 +348,11 @@ impl Hamiltonian {
         if !potential.iter().all(|v| v.is_finite()) {
             return Err(HamiltonianError::NonFinite);
         }
-        self.data.potential = potential;
+        self.data.potential = if potential.is_standard_layout() {
+            potential
+        } else {
+            potential.as_standard_layout().into_owned()
+        };
         Ok(())
     }
     /// Read-only access for term-by-term orbital energy audits.
@@ -373,21 +376,13 @@ impl HamiltonianData {
         if !x.iter().all(finite) {
             return Err(HamiltonianError::NonFinite);
         }
-        scratch.reciprocal.fill(Complex64::default());
-        for (&idx, &z) in self.grid.g_to_fft().iter().zip(x) {
-            scratch.reciprocal[idx] = z;
-        }
-        scratch
-            .fft
-            .to_real_pruned(&scratch.reciprocal, &self.pattern, &mut scratch.real)?;
-        for (z, v) in scratch.real.iter_mut().zip(self.potential.iter()) {
-            *z *= v;
-        }
-        scratch
-            .fft
-            .to_reciprocal_pruned(&scratch.real, &self.pattern, &mut scratch.reciprocal)?;
-        for (i, &idx) in self.grid.g_to_fft().iter().enumerate() {
-            y[i] = scratch.reciprocal[idx] + self.kinetic[i] * x[i];
+        scratch.fft.apply_local(
+            x,
+            self.potential.as_slice().ok_or(HamiltonianError::Shape)?,
+            y,
+        )?;
+        for (i, value) in y.iter_mut().enumerate() {
+            *value += self.kinetic[i] * x[i];
         }
         self.nonlocal.add(x, y, &mut scratch.projections);
         if !y.iter().all(finite) {
@@ -498,9 +493,7 @@ mod pool_tests {
                 .iter()
                 .map(|w| {
                     (
-                        &w.scratch.fft as *const FftPlan3d as usize,
-                        w.scratch.real.as_ptr() as usize,
-                        w.scratch.reciprocal.as_ptr() as usize,
+                        &w.scratch.fft as *const FusedPlan as usize,
                         w.scratch.projections.as_ptr() as usize,
                         w.output.as_ptr() as usize,
                     )
@@ -517,5 +510,223 @@ mod pool_tests {
         x.column_mut(1)[0].re = f64::NAN;
         assert!(h.apply_block(&x, &mut y).is_err());
         assert_eq!(before, addresses());
+    }
+}
+
+#[cfg(test)]
+mod fused_tests {
+    use super::*;
+    use dft_numerics::SpherePattern;
+    use std::{hint::black_box, time::Instant};
+    struct Legacy {
+        fft: FftPlan3d,
+        pattern: SpherePattern,
+        reciprocal: Array3<Complex64>,
+        real: Array3<Complex64>,
+        projections: Vec<Complex64>,
+    }
+    impl Legacy {
+        fn new(h: &Hamiltonian) -> Self {
+            let dims = h.data.grid.dims();
+            Self {
+                fft: FftPlan3d::new(dims).unwrap(),
+                pattern: SpherePattern::from_indices(dims, h.data.grid.g_to_fft()).unwrap(),
+                reciprocal: Array3::zeros(dims),
+                real: Array3::zeros(dims),
+                projections: vec![Complex64::default(); h.data.nonlocal.max_channels],
+            }
+        }
+        fn apply(&mut self, h: &Hamiltonian, x: &[Complex64], y: &mut [Complex64]) {
+            assert!(x.iter().all(finite));
+            self.reciprocal.fill(Complex64::default());
+            for (&i, &z) in h.data.grid.g_to_fft().iter().zip(x) {
+                self.reciprocal[i] = z;
+            }
+            self.fft
+                .to_real_pruned(&self.reciprocal, &self.pattern, &mut self.real)
+                .unwrap();
+            for (z, &v) in self.real.iter_mut().zip(&h.data.potential) {
+                *z *= v;
+            }
+            self.fft
+                .to_reciprocal_pruned(&self.real, &self.pattern, &mut self.reciprocal)
+                .unwrap();
+            for (i, &idx) in h.data.grid.g_to_fft().iter().enumerate() {
+                y[i] = self.reciprocal[idx] + h.data.kinetic[i] * x[i];
+            }
+            h.data.nonlocal.add(x, y, &mut self.projections);
+            assert!(y.iter().all(finite));
+        }
+    }
+    fn vector(n: usize, seed: usize) -> Vec<Complex64> {
+        (0..n)
+            .map(|i| {
+                Complex64::new(
+                    ((i * 17 + seed) as f64).sin(),
+                    ((i * 31 + seed) as f64).cos(),
+                )
+            })
+            .collect()
+    }
+    fn bits(v: &[Complex64]) -> Vec<(u64, u64)> {
+        v.iter().map(|z| (z.re.to_bits(), z.im.to_bits())).collect()
+    }
+    fn synthetic(shape: [usize; 3], k: [f64; 3], channels: usize) -> Hamiltonian {
+        let cell =
+            Cell::from_user_rows_bohr([[5., 0., 0.], [0.7, 6., 0.], [0.2, 0.3, 7.]]).unwrap();
+        let basis = PlaneWaveBasis::at_k(&cell, dft_units::Hartree(2.), k).unwrap();
+        let nonlocal = NonlocalOperator {
+            basis: basis.momenta().to_vec(),
+            max_channels: channels,
+            atoms: vec![AtomProjectors {
+                columns: (0..channels)
+                    .map(|i| vector(basis.vectors().len(), i))
+                    .collect(),
+                coupling: (0..channels * channels)
+                    .map(|i| {
+                        if i / channels == i % channels {
+                            0.03
+                        } else {
+                            0.01
+                        }
+                    })
+                    .collect(),
+            }],
+        };
+        let potential = Array3::from_shape_vec(
+            shape,
+            vector(shape.iter().product(), 4)
+                .iter()
+                .map(|z| z.re)
+                .collect(),
+        )
+        .unwrap();
+        Hamiltonian::new(&cell, &basis, potential, nonlocal).unwrap()
+    }
+    #[test]
+    fn ordered_complete_hamiltonian_shapes_and_projectors() {
+        for shape in [
+            [24, 24, 24],
+            [25, 25, 25],
+            [27, 27, 27],
+            [36, 36, 36],
+            [15, 20, 24],
+            [15, 17, 19],
+        ] {
+            for (k, channels) in [([0.; 3], 0), ([0.25, -0.25, 0.125], 3), ([0.125; 3], 5)] {
+                let h = synthetic(shape, k, channels);
+                let mut old = Legacy::new(&h);
+                let x = vector(h.dimension(), 12);
+                let mut expected = x.clone();
+                let mut actual = x.clone();
+                old.apply(&h, &x, &mut expected);
+                h.apply(&x, &mut actual).unwrap();
+                assert_eq!(bits(&actual), bits(&expected));
+            }
+        }
+    }
+    #[test]
+    #[ignore = "P10C_SI_UPF=/external/Si.upf cargo test --release -p dft-physics complete_hamiltonian_timing -- --ignored --nocapture"]
+    fn complete_hamiltonian_timing() {
+        let pp =
+            dft_upf::from_file(std::env::var("P10C_SI_UPF").expect("external Si UPF required"))
+                .unwrap();
+        let a = 10.261212856717933;
+        let primitive = Cell::from_user_rows_bohr([
+            [0., a / 2., a / 2.],
+            [a / 2., 0., a / 2.],
+            [a / 2., a / 2., 0.],
+        ])
+        .unwrap();
+        let conventional =
+            Cell::from_user_rows_bohr([[a, 0., 0.], [0., a, 0.], [0., 0., a]]).unwrap();
+        let mut cases = Vec::new();
+        for (label, cell, sites, k) in [
+            (
+                "Si-Gamma",
+                primitive.clone(),
+                vec![[0.; 3], [0.25; 3]],
+                [0.; 3],
+            ),
+            ("Si-shifted", primitive, vec![[0.; 3], [0.25; 3]], [0.25; 3]),
+            (
+                "Si8",
+                conventional,
+                vec![
+                    [0.; 3],
+                    [0.25; 3],
+                    [0., 0.5, 0.5],
+                    [0.5, 0., 0.5],
+                    [0.5, 0.5, 0.],
+                    [0.25, 0.75, 0.75],
+                    [0.75, 0.25, 0.75],
+                    [0.75, 0.75, 0.25],
+                ],
+                [0.; 3],
+            ),
+        ] {
+            let basis = PlaneWaveBasis::at_k(&cell, dft_units::Hartree(15.), k).unwrap();
+            let grid =
+                FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None).unwrap();
+            let positions: Vec<_> = sites
+                .iter()
+                .map(|&r| cell.fractional_to_cartesian_bohr(r))
+                .collect();
+            let nonlocal = NonlocalOperator::new(
+                &basis,
+                cell.volume_bohr3(),
+                &[Species {
+                    potential: &pp,
+                    positions_bohr: &positions,
+                }],
+            )
+            .unwrap();
+            let potential = Array3::from_shape_vec(
+                grid.dims(),
+                vector(grid.dims().iter().product(), 4)
+                    .iter()
+                    .map(|z| z.re)
+                    .collect(),
+            )
+            .unwrap();
+            cases.push((
+                label,
+                Hamiltonian::new(&cell, &basis, potential, nonlocal).unwrap(),
+            ));
+        }
+        cases.push((
+            "synthetic-skew-3-projectors",
+            synthetic([15, 20, 24], [0.25, -0.25, 0.125], 3),
+        ));
+        for (label, h) in cases {
+            let mut old = Legacy::new(&h);
+            let x = vector(h.dimension(), 17);
+            let mut out = x.clone();
+            let mut expected = x.clone();
+            old.apply(&h, &x, &mut expected);
+            h.apply(&x, &mut out).unwrap();
+            assert_eq!(bits(&expected), bits(&out));
+            let mut before = Vec::new();
+            let mut after = Vec::new();
+            for _ in 0..5 {
+                let t = Instant::now();
+                for _ in 0..128 {
+                    old.apply(&h, black_box(&x), &mut out);
+                    black_box(&out);
+                }
+                before.push(t.elapsed().as_secs_f64() * 1e6 / 128.);
+                let t = Instant::now();
+                for _ in 0..128 {
+                    h.apply(black_box(&x), &mut out).unwrap();
+                    black_box(&out);
+                }
+                after.push(t.elapsed().as_secs_f64() * 1e6 / 128.);
+            }
+            println!(
+                "{label} shape={:?} npw={} before_us={before:?} after_us={after:?}",
+                h.data.grid.dims(),
+                h.dimension()
+            );
+        }
     }
 }

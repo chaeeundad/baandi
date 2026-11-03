@@ -1,0 +1,14 @@
+# Flat TOML: one JSON-compatible value per line. Lengths in Bohr.
+id = "syn-spd"
+purpose = "One projector each in s,p,d channels"
+system_class = "synthetic-projectors"
+tier = "default"
+potential = "synthetic"
+lattice = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]
+atoms = [[0.13, 0.21, 0.32]]
+cutoff_ry = 3
+timeout_s = 240
+deterministic = true
+valence = 4
+channels = [0, 1, 2]
+shape = "soft"

@@ -1,0 +1,193 @@
+{
+ "updated": "2026-11-03",
+ "legend": {
+  "done": "Works today",
+  "progress": "Being built now",
+  "planned": "Planned or researched, not available yet"
+ },
+ "items": [
+  {
+   "status": "done",
+   "area": "Physics",
+   "feature": "Kohn-Sham DFT with plane waves",
+   "note": "Periodic cells, norm-conserving pseudopotentials (UPF v2 subset), spin-unpolarized."
+  },
+  {
+   "status": "done",
+   "area": "Physics",
+   "feature": "LDA (Perdew-Zunger) and PBE (GGA)",
+   "note": "PBE comes from the xcx library; tested against QE on the same pseudopotential."
+  },
+  {
+   "status": "done",
+   "area": "Physics",
+   "feature": "Insulators with fixed occupations",
+   "note": "The sampled band gap is checked; partial occupations are refused on purpose (no smearing yet)."
+  },
+  {
+   "status": "done",
+   "area": "k points",
+   "feature": "Gamma, Monkhorst-Pack grids (shifted or not), explicit k lists",
+   "note": "Time-reversal reduction only; no space-group symmetry reduction yet."
+  },
+  {
+   "status": "done",
+   "area": "SCF",
+   "feature": "Pulay and linear density mixing, block Davidson eigensolver",
+   "note": "Every run ends with a fixed-point certificate and a term-by-term energy audit."
+  },
+  {
+   "status": "done",
+   "area": "Input",
+   "feature": "One TOML file; units (Ha, Ry, eV, Angstrom, Bohr, ...) and expressions such as 1/4 or 5.43/2 Angstrom",
+   "note": "Wrong inputs are rejected with the key path of the problem."
+  },
+  {
+   "status": "done",
+   "area": "Output",
+   "feature": "results.json (energies, eigenvalues, convergence history, provenance) and the electron density (binary + metadata)",
+   "note": "Every run records input and pseudopotential hashes."
+  },
+  {
+   "status": "done",
+   "area": "Speed",
+   "feature": "Threads over k points and over bands, bit-identical results for any thread count",
+   "note": "`[scf] threads = N`; default is 1."
+  },
+  {
+   "status": "done",
+   "area": "Validation",
+   "feature": "Agrees with Quantum ESPRESSO 7.6 on silicon (energies, eigenvalues, k grids, PBE)",
+   "note": "See the validation results below. One cell and one pseudopotential so far."
+  },
+  {
+   "status": "done",
+   "area": "Output",
+   "feature": "Band structures and density of states (CSV, SVG figure, QE-/VASP-style files)",
+   "note": "`bands` and `dos` subcommands: CSV, SVG, QE- and VASP-style files. Fixed-density non-self-consistent calculation; checked by the repository tests."
+  },
+  {
+   "status": "done",
+   "area": "Output",
+   "feature": "Electron density, ELF and potentials as cube, XSF, CHGCAR and VTK files",
+   "note": "Cube, XSF, CHGCAR and VTK writers; opens in VESTA, VMD, ParaView and similar viewers. Checked against format specifications in tests."
+  },
+  {
+   "status": "done",
+   "area": "Robustness",
+   "feature": "Convergence fix for larger cells (8-atom silicon cell stalled at the default settings)",
+   "note": "Buffer bands: the highest requested bands are loosely converged; strict bands keep the full tolerance. The 8-atom silicon cell now converges."
+  },
+  {
+   "status": "done",
+   "area": "Usability",
+   "feature": "Input preflight check: element versus pseudopotential, SCF settings, plain-language summary of what will be computed",
+   "note": "`validate` checks element versus pseudopotential and SCF settings and prints a plain-language summary; no SCF is run."
+  },
+  {
+   "status": "progress",
+   "area": "Speed",
+   "feature": "Optional Intel MKL backend for FFT and matrix products, chosen at compile time",
+   "note": "Merged behind a compile-time feature; the default build stays pure Rust. Kernel-level measurements on the test server look promising; end-to-end numbers follow."
+  },
+  {
+   "status": "progress",
+   "area": "Speed",
+   "feature": "RMM-DIIS eigensolver for large band counts and Kerker-preconditioned mixing for hard cases (merged as switchable modules); cheaper FFT call structure (in progress)",
+   "note": "Defaults are unchanged; a default changes only with evidence on several systems."
+  },
+  {
+   "status": "progress",
+   "area": "Usability",
+   "feature": "Structure and input importers, Materials Project lookup, pseudopotential download with license and hash checks, a guided or natural-language style CLI",
+   "note": "In design now."
+  },
+  {
+   "status": "progress",
+   "area": "Infrastructure",
+   "feature": "General benchmark and robustness suite (not silicon-only)",
+   "note": "Used to judge speed and defaults on many cell shapes, band counts and pseudopotentials."
+  },
+  {
+   "status": "progress",
+   "area": "Runtime",
+   "feature": "Observable, controllable calculations for people and AI agents: step-by-step SCF, live events, safe-point policy changes, checkpoint/restart, self-healing SCF demo, MCP server, Python/ASE",
+   "note": "Design in progress (docs/research/agent-native-directive-review.md); no runtime code yet. The numerical core stays free of LLM and network dependencies."
+  },
+  {
+   "status": "done",
+   "area": "Input",
+   "feature": "Offline pseudopotential registry with license and SHA-256 checks",
+   "note": "`pseudo` subcommands; pseudopotential files are never shipped in the repository."
+  },
+  {
+   "status": "planned",
+   "area": "Physics",
+   "feature": "Metals: smearing, Fermi level",
+   "note": "Needed for aluminum, iron and most alloys."
+  },
+  {
+   "status": "planned",
+   "area": "Physics",
+   "feature": "Magnetism: spin-polarized LSDA and spin GGA, then noncollinear and spin-orbit",
+   "note": "Needed for transition-metal oxides and cathodes."
+  },
+  {
+   "status": "planned",
+   "area": "Physics",
+   "feature": "DFT+U, meta-GGA, hybrid functionals, dispersion corrections",
+   "note": "Roadmap and validation oracles are in docs/research/xc-and-manybody-roadmap.md."
+  },
+  {
+   "status": "planned",
+   "area": "Physics",
+   "feature": "Nonlinear core correction, ultrasoft and PAW pseudopotentials",
+   "note": "Most transition-metal pseudopotentials need at least nonlinear core correction."
+  },
+  {
+   "status": "planned",
+   "area": "Physics",
+   "feature": "Forces, stress, structure relaxation, molecular dynamics, phonons",
+   "note": "Hellmann-Feynman forces come first."
+  },
+  {
+   "status": "planned",
+   "area": "Physics",
+   "feature": "Space-group symmetry (k-point reduction, density symmetrization)",
+   "note": "Large speedup for crystals with many k points."
+  },
+  {
+   "status": "planned",
+   "area": "Physics",
+   "feature": "RPA and cRPA correlation (research stage)",
+   "note": "Design only; no implementation yet."
+  },
+  {
+   "status": "planned",
+   "area": "Method",
+   "feature": "Electronic-state landscape exploration: several self-consistent solutions, state comparison, branch tracking",
+   "note": "Design in docs/roadmap/esle.md; starts after the baseline is complete."
+  },
+  {
+   "status": "planned",
+   "area": "Method",
+   "feature": "Coupling to outside environments (embedding, solvent, QM/MM, applied electric fields) through typed interfaces",
+   "note": "Design in docs/architecture/scientific-coupling.md."
+  },
+  {
+   "status": "planned",
+   "area": "Speed",
+   "feature": "GPU backends and MPI",
+   "note": "Design study in progress; the CPU path stays the reference."
+  }
+ ],
+ "can_today": [
+  "Total energy, eigenvalues and electron density of insulating periodic systems with LDA or PBE, on Gamma or a k mesh.",
+  "Reproducible runs: the result files carry hashes, options and the energy audit."
+ ],
+ "not_yet": [
+  "Metals (no smearing), magnetic systems, most transition-metal oxides (they need nonlinear core correction, spin and often +U).",
+  "Forces and relaxations, symmetry reduction, hybrid functionals."
+ ],
+ "speed": "Performance comparisons with other codes are being re-measured under matched conditions (same server, same numerical libraries, same accuracy class) and will be added here; no speed claim is made until then."
+}

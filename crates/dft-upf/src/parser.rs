@@ -125,6 +125,9 @@ fn decode_attribute(mut text: &str) -> Result<String, UpfError> {
     Ok(result)
 }
 fn tags(text: &str) -> Result<Vec<Tag>, UpfError> {
+    scan_tags(text, false)
+}
+fn scan_tags(text: &str, inspection: bool) -> Result<Vec<Tag>, UpfError> {
     let mut rest = text;
     let mut stack: Vec<String> = Vec::new();
     let mut out = Vec::new();
@@ -223,6 +226,7 @@ fn tags(text: &str) -> Result<Vec<Tag>, UpfError> {
                 "PP_CHI.1" | "PP_CHI.2" | "PP_CHI.3" => Some("PP_PSWFC"),
                 "PP_INFO" | "PP_HEADER" | "PP_MESH" | "PP_LOCAL" | "PP_NONLOCAL" | "PP_RHOATOM"
                 | "PP_PSWFC" => Some("UPF"),
+                _ if inspection => stack.last().map(String::as_str),
                 _ => return Err(UpfError::Unsupported(name.into())),
             };
             if stack.last().map(String::as_str) != expected {
@@ -261,6 +265,36 @@ fn flag(s: &str) -> Option<bool> {
         "f" | ".f." | "false" | ".false." | "0" => Some(false),
         _ => None,
     }
+}
+/// Header facts for inspection only, including unsupported files. These facts do
+/// not validate numerical arrays and must never authorize an engine calculation.
+#[derive(Debug)]
+pub struct HeaderFacts {
+    pub version: String,
+    pub attributes: BTreeMap<String, String>,
+    pub projector_counts: BTreeMap<usize, usize>,
+}
+pub fn header_facts(text: &str) -> Result<HeaderFacts, UpfError> {
+    let metadata = scan_tags(text, true)?;
+    let headers: Vec<_> = metadata.iter().filter(|t| t.name == "PP_HEADER").collect();
+    if headers.len() != 1 {
+        return Err(invalid("PP_HEADER", "expected exactly one header"));
+    }
+    let root = metadata
+        .first()
+        .ok_or_else(|| UpfError::Missing("UPF".into()))?;
+    let mut projector_counts = BTreeMap::new();
+    for tag in metadata.iter().filter(|t| t.name.starts_with("PP_BETA.")) {
+        let l: usize = attr(tag, "angular_momentum")?
+            .parse()
+            .map_err(|_| invalid("angular_momentum", "not an integer"))?;
+        *projector_counts.entry(l).or_insert(0) += 1;
+    }
+    Ok(HeaderFacts {
+        version: attr(root, "version")?.into(),
+        attributes: headers[0].attrs.clone(),
+        projector_counts,
+    })
 }
 pub fn from_file(path: impl AsRef<Path>) -> Result<Pseudopotential, UpfError> {
     parse_upf(&std::fs::read_to_string(path)?)

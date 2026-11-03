@@ -1,5 +1,7 @@
 //! Dense backend boundary; all matrices are column-major and backend independent.
-use faer::{Accum, Mat, Par, linalg::matmul::matmul};
+#[cfg(not(feature = "mkl"))]
+use faer::{Accum, linalg::matmul::matmul};
+use faer::{Mat, Par};
 use num_complex::Complex64;
 use std::ops::{Index, IndexMut};
 use thiserror::Error;
@@ -158,6 +160,7 @@ pub enum MatrixOp {
     Adjoint,
 }
 /// Returns op(a)*op(b); backend GEMM is explicitly sequential.
+#[cfg(not(feature = "mkl"))]
 pub fn gemm(
     a: &ComplexMatrix,
     op_a: MatrixOp,
@@ -201,6 +204,41 @@ pub fn gemm(
         ),
     }
     owned(c.as_ref())
+}
+
+/// MKL LP64 GEMM; eigendecomposition remains on faer.
+#[cfg(feature = "mkl")]
+pub fn gemm(
+    a: &ComplexMatrix,
+    op_a: MatrixOp,
+    b: &ComplexMatrix,
+    op_b: MatrixOp,
+) -> Result<ComplexMatrix, LinalgError> {
+    a.validate_finite()?;
+    b.validate_finite()?;
+    let adj_a = matches!(op_a, MatrixOp::Adjoint);
+    let adj_b = matches!(op_b, MatrixOp::Adjoint);
+    let (m, k) = if adj_a {
+        (a.cols, a.rows)
+    } else {
+        (a.rows, a.cols)
+    };
+    let (l, n) = if adj_b {
+        (b.cols, b.rows)
+    } else {
+        (b.rows, b.cols)
+    };
+    if k != l {
+        return Err(LinalgError::Dimension);
+    }
+    let ma =
+        dft_mkl::Matrix::new(a.as_slice(), a.rows, a.cols).map_err(|_| LinalgError::Dimension)?;
+    let mb =
+        dft_mkl::Matrix::new(b.as_slice(), b.rows, b.cols).map_err(|_| LinalgError::Dimension)?;
+    let mut result = ComplexMatrix::zeros(m, n)?;
+    dft_mkl::gemm(ma, adj_a, mb, adj_b, &mut result.data).map_err(|_| LinalgError::Dimension)?;
+    result.validate_finite()?;
+    Ok(result)
 }
 
 #[derive(Debug)]
@@ -308,3 +346,182 @@ fn subtract_projection(v: &mut [Complex64], q: &[Complex64]) {
 
 #[cfg(test)]
 mod tests;
+
+/// Allocation-free adapter into an existing column-major output. Uses sequential
+/// faer multiplication and borrowed views; operands must not alias the output.
+pub fn gemm_into(
+    a: &ComplexMatrix,
+    op_a: MatrixOp,
+    b: &ComplexMatrix,
+    op_b: MatrixOp,
+    output: &mut ComplexMatrix,
+) -> Result<(), LinalgError> {
+    a.validate_finite()?;
+    b.validate_finite()?;
+    let a = faer::MatRef::from_column_major_slice(&a.data, a.rows, a.cols);
+    let b = faer::MatRef::from_column_major_slice(&b.data, b.rows, b.cols);
+    let (m, k) = match op_a {
+        MatrixOp::Identity => (a.nrows(), a.ncols()),
+        MatrixOp::Adjoint => (a.ncols(), a.nrows()),
+    };
+    let (l, n) = match op_b {
+        MatrixOp::Identity => (b.nrows(), b.ncols()),
+        MatrixOp::Adjoint => (b.ncols(), b.nrows()),
+    };
+    if k != l || output.rows != m || output.cols != n {
+        return Err(LinalgError::Dimension);
+    }
+    let mut c = faer::MatMut::from_column_major_slice_mut(&mut output.data, m, n);
+    let one = Complex64::new(1.0, 0.0);
+    match (op_a, op_b) {
+        (MatrixOp::Identity, MatrixOp::Identity) => {
+            matmul(&mut c, Accum::Replace, a, b, one, Par::Seq)
+        }
+        (MatrixOp::Adjoint, MatrixOp::Identity) => {
+            matmul(&mut c, Accum::Replace, a.adjoint(), b, one, Par::Seq)
+        }
+        (MatrixOp::Identity, MatrixOp::Adjoint) => {
+            matmul(&mut c, Accum::Replace, a, b.adjoint(), one, Par::Seq)
+        }
+        (MatrixOp::Adjoint, MatrixOp::Adjoint) => matmul(
+            &mut c,
+            Accum::Replace,
+            a.adjoint(),
+            b.adjoint(),
+            one,
+            Par::Seq,
+        ),
+    }
+    output.validate_finite()
+}
+
+/// Fixed-size sequential Hermitian eigensolve with persistent backend scratch.
+/// Construction allocates; `solve` borrows all inputs and outputs.
+pub struct HermitianWorkspace {
+    dimension: usize,
+    diagonal: faer::diag::Diag<Complex64>,
+    scratch: faer::dyn_stack::MemBuffer,
+}
+impl HermitianWorkspace {
+    pub fn new(dimension: usize) -> Result<Self, LinalgError> {
+        // Validate sizes before asking the backend to size its scratch.
+        dimension
+            .checked_mul(dimension)
+            .filter(|n| *n <= isize::MAX as usize / size_of::<Complex64>())
+            .ok_or(LinalgError::Dimension)?;
+        // The backend scratch query assumes n >= 1; preserve empty-matrix
+        // semantics without calling it for zero dimensions.
+        let scratch = if dimension == 0 {
+            faer::dyn_stack::StackReq::EMPTY
+        } else {
+            faer::linalg::evd::self_adjoint_evd_scratch::<Complex64>(
+                dimension,
+                faer::linalg::evd::ComputeEigenvectors::Yes,
+                Par::Seq,
+                Default::default(),
+            )
+        };
+        Ok(Self {
+            dimension,
+            diagonal: faer::diag::Diag::zeros(dimension),
+            scratch: faer::dyn_stack::MemBuffer::new(scratch),
+        })
+    }
+    pub fn solve(
+        &mut self,
+        a: &ComplexMatrix,
+        values: &mut [f64],
+        vectors: &mut ComplexMatrix,
+    ) -> Result<(), LinalgError> {
+        let n = self.dimension;
+        if a.rows != n || a.cols != n || values.len() != n || vectors.rows != n || vectors.cols != n
+        {
+            return Err(LinalgError::Dimension);
+        }
+        a.validate_finite()?;
+        let scale = a.data.iter().map(|z| z.norm()).fold(1.0, f64::max);
+        let allowed = HERMITIAN_TOLERANCE * scale;
+        let mut defect: f64 = 0.0;
+        for j in 0..n {
+            for i in 0..=j {
+                defect = defect.max((a[(i, j)] - a[(j, i)].conj()).norm());
+            }
+        }
+        if !scale.is_finite() || !defect.is_finite() {
+            return Err(LinalgError::NonFinite);
+        }
+        if defect > allowed {
+            return Err(LinalgError::NotHermitian { defect, allowed });
+        }
+        if n == 0 {
+            return Ok(());
+        }
+        faer::linalg::evd::self_adjoint_evd(
+            faer::MatRef::from_column_major_slice(&a.data, n, n),
+            self.diagonal.as_mut(),
+            Some(faer::MatMut::from_column_major_slice_mut(
+                &mut vectors.data,
+                n,
+                n,
+            )),
+            Par::Seq,
+            faer::dyn_stack::MemStack::new(&mut self.scratch),
+            Default::default(),
+        )
+        .map_err(|_| LinalgError::Decomposition)?;
+        for (i, value) in values.iter_mut().enumerate() {
+            *value = self.diagonal[i].re;
+        }
+        if values.iter().any(|v| !v.is_finite()) {
+            return Err(LinalgError::NonFinite);
+        }
+        vectors.validate_finite()
+    }
+}
+
+/// Two-pass MGS into preallocated storage, returning retained rank. Trailing
+/// columns are zeroed. `scratch` has exactly block.rows() entries. Same relative
+/// rank policy and projection arithmetic as `orthonormalize`.
+pub fn orthonormalize_into(
+    block: &ComplexMatrix,
+    output: &mut ComplexMatrix,
+    scratch: &mut [Complex64],
+) -> Result<usize, LinalgError> {
+    if block.rows != output.rows || block.cols != output.cols || scratch.len() != block.rows {
+        return Err(LinalgError::Dimension);
+    }
+    block.validate_finite()?;
+    let mut count = 0;
+    for j in 0..block.cols {
+        scratch.copy_from_slice(block.column(j));
+        let original = norm(scratch);
+        if !original.is_finite() {
+            return Err(LinalgError::NonFinite);
+        }
+        if original == 0.0 {
+            continue;
+        }
+        for z in scratch.iter_mut() {
+            *z /= original;
+        }
+        for _ in 0..2 {
+            for k in 0..count {
+                subtract_projection(scratch, output.column(k));
+            }
+        }
+        let remaining = norm(scratch);
+        if !remaining.is_finite() {
+            return Err(LinalgError::NonFinite);
+        }
+        if remaining > DEPENDENCE_TOLERANCE {
+            for (z, v) in output.column_mut(count).iter_mut().zip(scratch.iter()) {
+                *z = *v / remaining;
+            }
+            count += 1;
+        }
+    }
+    for j in count..output.cols {
+        output.column_mut(j).fill(Complex64::default());
+    }
+    Ok(count)
+}

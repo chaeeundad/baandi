@@ -1,0 +1,11 @@
+# Flat TOML: one JSON-compatible value per line. Lengths in Bohr.
+id = "si-slab"
+purpose = "Two bilayers; 12 Angstrom vacuum between outer layers across boundary"
+system_class = "slab"
+tier = "long"
+potential = "si"
+lattice = [[8, 0, 0], [0, 8, 0], [0, 0, 30.67671349550924]]
+atoms = [[0, 0, 0], [0.5, 0.5, 0.065196032172507], [0, 0, 0.195588096517521], [0.5, 0.5, 0.260784128690028]]
+cutoff_ry = 8
+timeout_s = 900
+deterministic = true

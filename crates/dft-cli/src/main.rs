@@ -1,3 +1,6 @@
+mod bands;
+mod dos;
+mod pseudo;
 use clap::{Parser, Subcommand};
 use dft_cli::{config::Config, grid_report};
 use std::{path::PathBuf, process::ExitCode};
@@ -13,6 +16,18 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// SCF followed by a fixed-density band path and portable plotting files.
+    Bands {
+        input: PathBuf,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+    },
+    /// SCF followed by a weighted fixed-density Gaussian density of states.
+    Dos {
+        input: PathBuf,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+    },
     /// Evaluate a unitless expression (15 significant digits).
     Eval {
         #[arg(allow_hyphen_values = true)]
@@ -32,14 +47,35 @@ enum Command {
         output_dir: Option<PathBuf>,
     },
     /// Inspect a UPF v2 NC pseudopotential and report strict support validation.
-    InspectUpf { file: PathBuf },
-    /// Validate input and basis/grid settings; does not read UPF files.
-    Validate { input: PathBuf },
+    InspectUpf {
+        file: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Offline pseudopotential registry and verified cache.
+    Pseudo {
+        #[arg(long)]
+        registry: Option<PathBuf>,
+        #[command(subcommand)]
+        command: pseudo::Command,
+    },
+    /// Full preflight including UPF identity and SCF controls; no SCF execution.
+    Validate {
+        input: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
     /// Print cell, cutoff, basis counts and FFT dimensions.
     Grid { input: PathBuf },
 }
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    if let Command::InspectUpf { file } = &cli.command {
+    if let Command::Pseudo { command, registry } = &cli.command {
+        return pseudo::execute(command, registry.as_deref());
+    }
+    if let Command::InspectUpf { file, json } = &cli.command {
+        if *json {
+            return pseudo::inspect_json(file);
+        }
         let p = dft_upf::from_file(file)
             .map_err(|e| format!("{}: UNSUPPORTED or INVALID: {e}", file.display()))?;
         println!(
@@ -73,9 +109,12 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let input = match &cli.command {
-        Command::Validate { input } | Command::Grid { input } => input,
+        Command::Validate { input, .. } | Command::Grid { input } => input,
         Command::Eval { .. }
+        | Command::Pseudo { .. }
         | Command::InspectUpf { .. }
+        | Command::Bands { .. }
+        | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Convert { .. } => {
             unreachable!()
@@ -84,19 +123,26 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let text = std::fs::read_to_string(input)
         .map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", input.display())))?;
     let config = Config::parse(&text)?;
-    let prepared = config.prepare()?;
-    if matches!(cli.command, Command::Validate { .. }) {
-        for record in &config.input_expressions {
-            println!("{}: {:?} = {}", record.key_path, record.text, record.value);
+    if let Command::Validate { json, .. } = &cli.command {
+        let report = dft_cli::config::preflight::check(&config, input)?;
+        if *json {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        } else {
+            for record in &config.input_expressions {
+                println!("{}: {:?} = {}", record.key_path, record.text, record.value);
+            }
+            report.print();
         }
+        return Ok(());
     }
+    let prepared = config.prepare()?;
     match cli.command {
-        Command::Validate { .. } => println!(
-            "Valid: {} (pseudopotential paths parsed; file existence not checked)",
-            config.system.name
-        ),
+        Command::Validate { .. } => unreachable!(),
         Command::Eval { .. }
+        | Command::Pseudo { .. }
         | Command::InspectUpf { .. }
+        | Command::Bands { .. }
+        | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Convert { .. } => {
             unreachable!()
@@ -107,6 +153,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 }
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let post = match &cli.command {
+        Command::Bands { input, output_dir } => Some(bands::execute(input, output_dir.as_deref())),
+        Command::Dos { input, output_dir } => Some(dos::execute(input, output_dir.as_deref())),
+        _ => None,
+    };
+    if let Some(result) = post {
+        return match result {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e}");
+                ExitCode::from(e.code)
+            }
+        };
+    }
     let evaluation = match &cli.command {
         Command::Convert { value, from, to } => Some(convert(value, from, to)),
         Command::Eval { expression } => {

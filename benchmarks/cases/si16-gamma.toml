@@ -1,0 +1,11 @@
+# Flat TOML: one JSON-compatible value per line. Lengths in Bohr.
+id = "si16-gamma"
+purpose = "1x1x2 conventional supercell, 16 atoms"
+system_class = "si-supercell"
+tier = "long"
+potential = "si"
+lattice = [[10.261212856717933, 0, 0], [0, 10.261212856717933, 0], [0, 0, 20.522425713435865]]
+atoms = [[0, 0, 0.0], [0, 0.5, 0.25], [0.5, 0, 0.25], [0.5, 0.5, 0.0], [0.25, 0.25, 0.125], [0.25, 0.75, 0.375], [0.75, 0.25, 0.375], [0.75, 0.75, 0.125], [0, 0, 0.5], [0, 0.5, 0.75], [0.5, 0, 0.75], [0.5, 0.5, 0.5], [0.25, 0.25, 0.625], [0.25, 0.75, 0.875], [0.75, 0.25, 0.875], [0.75, 0.75, 0.625]]
+cutoff_ry = 30
+timeout_s = 900
+deterministic = true

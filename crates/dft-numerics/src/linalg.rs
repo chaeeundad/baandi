@@ -1,5 +1,7 @@
 //! Dense backend boundary; all matrices are column-major and backend independent.
-use faer::{Accum, Mat, Par, linalg::matmul::matmul};
+#[cfg(not(feature = "mkl"))]
+use faer::{Accum, linalg::matmul::matmul};
+use faer::{Mat, Par};
 use num_complex::Complex64;
 use std::ops::{Index, IndexMut};
 use thiserror::Error;
@@ -158,6 +160,7 @@ pub enum MatrixOp {
     Adjoint,
 }
 /// Returns op(a)*op(b); backend GEMM is explicitly sequential.
+#[cfg(not(feature = "mkl"))]
 pub fn gemm(
     a: &ComplexMatrix,
     op_a: MatrixOp,
@@ -201,6 +204,41 @@ pub fn gemm(
         ),
     }
     owned(c.as_ref())
+}
+
+/// MKL LP64 GEMM; eigendecomposition remains on faer.
+#[cfg(feature = "mkl")]
+pub fn gemm(
+    a: &ComplexMatrix,
+    op_a: MatrixOp,
+    b: &ComplexMatrix,
+    op_b: MatrixOp,
+) -> Result<ComplexMatrix, LinalgError> {
+    a.validate_finite()?;
+    b.validate_finite()?;
+    let adj_a = matches!(op_a, MatrixOp::Adjoint);
+    let adj_b = matches!(op_b, MatrixOp::Adjoint);
+    let (m, k) = if adj_a {
+        (a.cols, a.rows)
+    } else {
+        (a.rows, a.cols)
+    };
+    let (l, n) = if adj_b {
+        (b.cols, b.rows)
+    } else {
+        (b.rows, b.cols)
+    };
+    if k != l {
+        return Err(LinalgError::Dimension);
+    }
+    let ma =
+        dft_mkl::Matrix::new(a.as_slice(), a.rows, a.cols).map_err(|_| LinalgError::Dimension)?;
+    let mb =
+        dft_mkl::Matrix::new(b.as_slice(), b.rows, b.cols).map_err(|_| LinalgError::Dimension)?;
+    let mut result = ComplexMatrix::zeros(m, n)?;
+    dft_mkl::gemm(ma, adj_a, mb, adj_b, &mut result.data).map_err(|_| LinalgError::Dimension)?;
+    result.validate_finite()?;
+    Ok(result)
 }
 
 #[derive(Debug)]

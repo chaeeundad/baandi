@@ -1,0 +1,16 @@
+# Flat TOML: one JSON-compatible value per line. Lengths in Bohr.
+id = "syn-z14"
+purpose = "Heavy-looking Z=14, narrow local core, 12 bands"
+system_class = "synthetic-valence"
+tier = "default"
+potential = "synthetic"
+lattice = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]
+atoms = [[0.13, 0.21, 0.32]]
+cutoff_ry = 12
+timeout_s = 240
+deterministic = true
+valence = 14
+channels = [0, 1, 2]
+shape = "gaussian"
+radius = 0.5
+nbands = 12

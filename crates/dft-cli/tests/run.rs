@@ -12,6 +12,10 @@ use std::{
     process::{Command, Output},
     sync::atomic::{AtomicUsize, Ordering},
 };
+// Change only the identity metadata; the synthetic radial arrays remain unchanged.
+fn silicon_fixture() -> String {
+    common::fixture().replace("element=\"Xx\"", "element=\"Si\"")
+}
 static SERIAL: AtomicUsize = AtomicUsize::new(0);
 struct Case {
     dir: PathBuf,
@@ -27,9 +31,9 @@ impl Case {
         ));
         fs::create_dir_all(&dir).unwrap();
         let fixture = if large {
-            common::gaussian()
+            common::gaussian().replace("element=\"Xx\"", "element=\"Si\"")
         } else {
-            common::fixture()
+            silicon_fixture()
         };
         fs::write(dir.join("synthetic.xml"), &fixture).unwrap();
         let text = if large {
@@ -100,10 +104,12 @@ fn verify(large: bool) {
     let run = c.run("", None);
     status(&run, 0);
     let mut first = c.json("results", "results.json");
-    // Exact legacy top-level shape, checked on actual CLI output.
-    assert_eq!(first.as_object().unwrap().len(), 22);
+    // Legacy fields plus the additive preflight report, checked on CLI output.
+    // Legacy fields plus additive per-band accuracy, checked on actual output.
+    assert_eq!(first.as_object().unwrap().len(), 24);
     assert!(first.get("kpoints").is_none());
     for key in [
+        "preflight",
         "schema_version",
         "tool",
         "timestamp",
@@ -129,6 +135,22 @@ fn verify(large: bool) {
         assert!(!first[key].is_null(), "{key}");
     }
     assert_eq!(first["convergence"]["converged"], true);
+    let occupied = first["occupations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f.as_f64().unwrap() > 0.0)
+        .count();
+    let accuracy = first["band_accuracy"].as_array().unwrap();
+    assert_eq!(accuracy.len(), first["bands"].as_u64().unwrap() as usize);
+    for (j, band) in accuracy.iter().enumerate() {
+        assert_eq!(band["buffer"], j > occupied);
+        assert!(band["residual_ha"].as_f64().unwrap().is_finite());
+        if j <= occupied {
+            assert_eq!(band["converged"], true);
+        }
+    }
+
     let energy = first["energies"]["total"]["ha"].as_f64().unwrap();
     assert_eq!(
         first["total_energy"]["ha"],
@@ -264,7 +286,7 @@ fn failures_and_paths() {
     assert!(!String::from_utf8_lossy(&o.stdout).contains("converged"));
     status(
         &c.run("\n[scf]\nmixing='linear'\nmixing_beta=100.0", None),
-        4,
+        1, // Invalid beta now fails preflight instead of diverging in the solver.
     );
     status(&c.run("\n[scf]\ntypo=1", None), 1);
     c.text = c
@@ -281,14 +303,14 @@ fn failures_and_paths() {
     ] {
         fs::write(
             c.dir.join("synthetic.xml"),
-            common::fixture().replace(from, to),
+            silicon_fixture().replace(from, to),
         )
         .unwrap();
-        status(&c.run("", None), 2);
+        status(&c.run("", None), 1);
     }
     fs::remove_file(c.dir.join("synthetic.xml")).unwrap();
-    status(&c.run("", None), 5);
-    fs::write(c.dir.join("synthetic.xml"), common::fixture()).unwrap();
+    status(&c.run("", None), 1);
+    fs::write(c.dir.join("synthetic.xml"), silicon_fixture()).unwrap();
     status(&c.run("\n[output]\ndirectory='relative/nested'", None), 0);
     assert!(c.dir.join("relative/nested/results.json").exists());
     let configured_absolute = c.dir.join("configured-absolute");
@@ -324,7 +346,7 @@ fn protects_inputs() {
         status(&c.run("", Some(Path::new("out"))), 5);
         assert_eq!(
             fs::read_to_string(c.dir.join("synthetic.xml")).unwrap(),
-            common::fixture()
+            silicon_fixture()
         );
         fs::remove_file(dest).unwrap();
     }
@@ -350,13 +372,16 @@ fn functional_compatibility_and_original_label() {
     )
     .unwrap();
     let output = c.run("", None);
-    status(&output, 2);
+    status(&output, 1);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr
-            .contains("unsupported UPF functional \"SLA PW\": requires SLA PZ or SLA PZ NOGX NOGC"),
-        "{stderr}"
-    );
+    for message in [
+        "xc.functional",
+        "SLA PW",
+        "lda-pz",
+        "select a matching UPF/functional",
+    ] {
+        assert!(stderr.contains(message), "{stderr}");
+    }
 }
 
 #[test]
@@ -465,6 +490,8 @@ fn kpoint_scf() {
     let mut keys: Vec<_> = r.as_object().unwrap().keys().map(String::as_str).collect();
     keys.sort();
     let mut expected = vec![
+        "band_accuracy",
+        "preflight",
         "schema_version",
         "tool",
         "timestamp",
@@ -534,17 +561,17 @@ fn kpoint_scf() {
     );
     fs::write(
         c.dir.join("a.xml"),
-        common::gaussian_with(1.0, 0.55, true, 401),
+        common::gaussian_with(1.0, 0.55, true, 401).replace("element=\"Xx\"", "element=\"H\""),
     )
     .unwrap();
     fs::write(
         c.dir.join("b.xml"),
-        common::gaussian_with(1.0, 1.15, true, 401),
+        common::gaussian_with(1.0, 1.15, true, 401).replace("element=\"Xx\"", "element=\"H\""),
     )
     .unwrap();
     c.text = original.replace("species='Si'", "species='A'")
         .replace("fractional=[0.13,0.21,0.32]", "fractional=[0.11,0.21,0.17]\n[[system.atoms]]\nspecies='B'\nfractional=[0.39,0.57,0.68]")
-        .replace("Si='synthetic.xml'", "A='a.xml'\nB='b.xml'")
+        .replace("Si='synthetic.xml'", "A={path='a.xml', element='H'}\nB={path='b.xml', element='H'}")
         .replace("ecutwfc_ry=3.0", "ecutwfc_ry=5.0")
         .replace("kpoints=[[0.0,0.0,0.0]]", "kgrid=[3,1,1]");
     let out = c.run(controls, None);
@@ -561,6 +588,8 @@ fn expressions_preserve_energy_and_record_resolutions() {
     status(&c.run("", Some(Path::new("plain"))), 0);
     let plain = c.json("plain", "results.json");
     let expected_keys = [
+        "band_accuracy",
+        "preflight",
         "schema_version",
         "tool",
         "timestamp",
@@ -692,7 +721,7 @@ fn quantity_expression_energy_equivalence() {
 fn pbe_selection_override_and_spin_rejection() {
     let mut c = Case::new(false);
     c.text = c.text.replace("functional='lda-pz'", "functional='pbe'");
-    status(&c.run("", None), 2);
+    status(&c.run("", None), 1);
     let output = c.run("allow_functional_override=true\n", None);
     status(&output, 0);
     assert!(String::from_utf8_lossy(&output.stdout).contains("override_applied=true"));
@@ -731,7 +760,15 @@ fn threading_metadata_and_identical_outputs() {
         for requested in [None, Some(0), Some(1), Some(2), Some(8)] {
             let name = format!("threads-{requested:?}");
             let suffix = requested.map_or(String::new(), |n| format!("\n[scf]\nthreads={n}"));
-            status(&c.run(&suffix, Some(Path::new(&name))), 0);
+            let output = c.run(&suffix, Some(Path::new(&name)));
+            if requested == Some(0) {
+                // Zero is now an invalid request, not silently normalized to one.
+                status(&output, 1);
+                assert!(String::from_utf8_lossy(&output.stderr).contains("scf.threads"));
+                assert!(!c.dir.join(&name).exists());
+                continue;
+            }
+            status(&output, 0);
             let mut json = c.json(&name, "results.json");
             let requested = requested.unwrap_or(1);
             assert_eq!(json["threading"]["threads_requested"], requested);
@@ -745,6 +782,14 @@ fn threading_metadata_and_identical_outputs() {
             assert_eq!(json["scf"]["threads"], requested);
             strip_times(&mut json);
             let object = json.as_object_mut().unwrap();
+            // The summary describes the requested threads; compare its other
+            // preflight fields as well as every numerical result below.
+            let summary = object["preflight"]["summary"].as_str().unwrap();
+            assert!(summary.contains(&format!("{requested} threads")));
+            object["preflight"]
+                .as_object_mut()
+                .unwrap()
+                .remove("summary");
             object.remove("threading");
             object.remove("input_sha256");
             object["scf"].as_object_mut().unwrap().remove("threads");

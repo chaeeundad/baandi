@@ -157,6 +157,13 @@ impl RmmDiis {
                     Some(Box::new(EigenSolution {
                         eigenvalues: safe_values,
                         eigenvectors: safe_x,
+                        converged: safe_residuals
+                            .iter()
+                            .zip(tolerances)
+                            .map(|(r, t)| r <= t)
+                            .collect(),
+                        buffer: vec![false; m],
+                        residuals_certified: true,
                         residuals: safe_residuals,
                         iterations: sweep - 1,
                         history,
@@ -196,6 +203,13 @@ impl RmmDiis {
                     Some(Box::new(EigenSolution {
                         eigenvalues: safe_values,
                         eigenvectors: safe_x,
+                        converged: safe_residuals
+                            .iter()
+                            .zip(tolerances)
+                            .map(|(r, t)| r <= t)
+                            .collect(),
+                        buffer: vec![false; m],
+                        residuals_certified: true,
                         residuals: safe_residuals,
                         iterations: sweep - 1,
                         history,
@@ -211,6 +225,9 @@ impl RmmDiis {
                 return Ok(EigenSolution {
                     eigenvalues: values,
                     eigenvectors: x,
+                    converged: vec![true; m],
+                    buffer: vec![false; m],
+                    residuals_certified: true,
                     residuals,
                     iterations: sweep,
                     history,
@@ -234,6 +251,13 @@ impl RmmDiis {
                     last: Some(Box::new(EigenSolution {
                         eigenvalues: values,
                         eigenvectors: x,
+                        converged: residuals
+                            .iter()
+                            .zip(tolerances)
+                            .map(|(r, t)| r <= t)
+                            .collect(),
+                        buffer: vec![false; m],
+                        residuals_certified: true,
                         residuals,
                         iterations: sweep,
                         history,
@@ -525,6 +549,39 @@ pub enum SolverChoice {
     Hybrid(HybridRmm),
 }
 impl SolverChoice {
+    /// SCF entry point. Davidson keeps the exact band-tolerance/certification
+    /// path (default behavior unchanged); the hybrid policy receives the strict
+    /// prefix tolerances and falls back to Davidson itself.
+    pub fn solve_with_band_tolerances_and_certification(
+        &self,
+        davidson: &Davidson,
+        operator: &dyn LinearOperator,
+        initial: Option<&ComplexMatrix>,
+        preconditioner: Option<&dyn Preconditioner>,
+        policy: BandTolerances,
+        certify: bool,
+    ) -> Result<EigenSolution, SolverError> {
+        match self {
+            Self::Davidson => davidson.solve_with_band_tolerances_and_certification(
+                operator,
+                initial,
+                preconditioner,
+                policy,
+                certify,
+            ),
+            // The hybrid path has no buffer-band policy: with buffer bands the
+            // exact band-tolerance Davidson path (P7PC) is used instead.
+            Self::Hybrid(_) if policy.strict_bands < davidson.bands => davidson
+                .solve_with_band_tolerances_and_certification(
+                    operator,
+                    initial,
+                    preconditioner,
+                    policy,
+                    certify,
+                ),
+            Self::Hybrid(_) => self.solve(davidson, operator, initial, preconditioner),
+        }
+    }
     pub fn solve(
         &self,
         davidson: &Davidson,

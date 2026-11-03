@@ -83,7 +83,7 @@ Status as of 2026-11-03, written for people who run calculations. Source: `docs/
 
 **Not available yet:** Metals (no smearing), magnetic systems, most transition-metal oxides (they need nonlinear core correction, spin and often +U). Forces and relaxations, symmetry reduction, hybrid functionals.
 
-**Speed:** On the same server and the same number of cores, BAANDI is about 2x slower than Quantum ESPRESSO for a single k point and about 5x slower for 32 k points on one core, and 1.8x slower at 16 cores for 32 k points (measured; see Performance below).
+**Speed:** On the same server and the same number of cores, BAANDI is about 2x slower than Quantum ESPRESSO for a single k point and about 5x slower for 32 k points on one core, and 1.8x slower at 16 cores for 32 k points (measured; see Performance below). These numbers are for the pure Rust build; a coherent re-measurement with the Intel MKL backend on the same server follows the P10 work (protocol: docs/performance/final-measurement-protocol.md).
 
 ### Works today
 

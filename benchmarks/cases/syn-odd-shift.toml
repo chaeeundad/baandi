@@ -1,0 +1,16 @@
+# Flat TOML: one JSON-compatible value per line. Lengths in Bohr.
+id = "syn-odd-shift"
+purpose = "Odd 3x1x1 mesh with half shift; sampled-gap rejection probe"
+system_class = "synthetic-mesh"
+tier = "default"
+potential = "synthetic"
+lattice = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]
+atoms = [[0.13, 0.21, 0.32]]
+cutoff_ry = 8
+timeout_s = 240
+deterministic = true
+valence = 4
+channels = [0]
+shape = "soft"
+kgrid = [3, 1, 1]
+kshift = [0.5, 0, 0]

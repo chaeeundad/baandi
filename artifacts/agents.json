@@ -417,9 +417,18 @@
     "id": "A47",
     "agent": "Codex",
     "role": "implementer",
+    "state": "blocked",
+    "task": "P7PB-BAND-FFT-THREADS",
+    "ref": "pid 72451, session 01a1a03e, task/P7PB-BAND-FFT-THREADS",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A48",
+    "agent": "Codex",
+    "role": "implementer",
     "state": "active",
-    "task": "P7PB-BAND-FFT-THREADS (estimate 50 to 70 min, started 2026-11-03 17:00 KST)",
-    "ref": "pid 72451, session no sessi, task/P7PB-BAND-FFT-THREADS",
+    "task": "P7PC-BUFFER-BANDS (estimate 40 to 60 min, started 2026-11-03 17:25 KST)",
+    "ref": "pid 86726, session no sessi, task/P7PC-BUFFER-BANDS",
     "updated": "2026-11-03"
   }
 ]

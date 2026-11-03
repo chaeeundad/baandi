@@ -1,3 +1,5 @@
+mod bands;
+mod dos;
 use clap::{Parser, Subcommand};
 use dft_cli::{config::Config, grid_report};
 use std::{path::PathBuf, process::ExitCode};
@@ -13,6 +15,18 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// SCF followed by a fixed-density band path and portable plotting files.
+    Bands {
+        input: PathBuf,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+    },
+    /// SCF followed by a weighted fixed-density Gaussian density of states.
+    Dos {
+        input: PathBuf,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+    },
     /// Evaluate a unitless expression (15 significant digits).
     Eval {
         #[arg(allow_hyphen_values = true)]
@@ -76,6 +90,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Command::Validate { input } | Command::Grid { input } => input,
         Command::Eval { .. }
         | Command::InspectUpf { .. }
+        | Command::Bands { .. }
+        | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Convert { .. } => {
             unreachable!()
@@ -97,6 +113,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         ),
         Command::Eval { .. }
         | Command::InspectUpf { .. }
+        | Command::Bands { .. }
+        | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Convert { .. } => {
             unreachable!()
@@ -107,6 +125,20 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 }
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    let post = match &cli.command {
+        Command::Bands { input, output_dir } => Some(bands::execute(input, output_dir.as_deref())),
+        Command::Dos { input, output_dir } => Some(dos::execute(input, output_dir.as_deref())),
+        _ => None,
+    };
+    if let Some(result) = post {
+        return match result {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("error: {e}");
+                ExitCode::from(e.code)
+            }
+        };
+    }
     let evaluation = match &cli.command {
         Command::Convert { value, from, to } => Some(convert(value, from, to)),
         Command::Eval { expression } => {

@@ -30,6 +30,8 @@ pub struct Config {
     pub xc: Xc,
     pub scf: Option<Scf>,
     pub output: Option<Output>,
+    pub bands: Option<Bands>,
+    pub dos: Option<Dos>,
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -574,4 +576,36 @@ mod tests {
         }
         assert!(Config::parse(EXAMPLE).unwrap().scf.is_none());
     }
+}
+
+/// Optional fixed-density band path, with raw numeric values in the stated units.
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Bands {
+    pub preset: Option<String>,
+    pub points: Option<Vec<PathPoint>>,
+    pub points_per_segment: Option<usize>,
+    pub spacing_inv_bohr: Option<f64>,
+    pub nbands: Option<usize>,
+    pub eigen_tolerance_ha: Option<f64>,
+    pub max_iterations: Option<usize>,
+}
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PathPoint {
+    pub label: String,
+    pub fractional: [f64; 3],
+    #[serde(default)]
+    pub break_before: bool,
+}
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Dos {
+    pub dos_kgrid: Option<[usize; 3]>,
+    pub sigma_ev: Option<f64>,
+    pub spacing_ev: Option<f64>,
+    pub window_ev: Option<[f64; 2]>,
+    pub nbands: Option<usize>,
+    pub eigen_tolerance_ha: Option<f64>,
+    pub max_iterations: Option<usize>,
 }

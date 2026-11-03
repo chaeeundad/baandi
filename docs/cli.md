@@ -494,3 +494,48 @@ The starting binary fails to converge its Davidson solve for this input;
 therefore this case currently reports failure, not an accepted SCF speedup.
 Benchmark records add `phase_medians_s` and `engine_total_median_s`; the older
 last-run fields and default case selection retain their meanings.
+
+## Fixed-density bands and DOS (P8A)
+
+```sh
+dft-cli bands input.toml [--output-dir DIR]
+dft-cli dos input.toml [--output-dir DIR]
+python3 -I scripts/plot_bands_dos.py DIR/bands.csv DIR/dos.csv -o DIR/figure.svg
+```
+
+Both commands run a certified SCF then a fixed-density NSCF. `[scf] threads`
+controls both stages. No change is made to `run` output behavior. The new
+commands produce their spectral files, not `run`'s density/restart outputs.
+`bands` requires Python 3 for its ready SVG; the plot script has no third-party
+dependencies. See the complete, non-programmer [guide and measured Si example](howto-bands-dos.md).
+
+Optional `[bands]` keys: exactly one of `preset = "fcc" | "bcc" | "sc"` or
+`points = [{label="Gamma", fractional=[0,0,0]}, ...]`; points may set
+`break_before=true`. Sampling is `points_per_segment` (default 20 **intervals**)
+or `spacing_inv_bohr`, mutually exclusive. Primitive preset geometry must
+match the documented ordered convention up to a proper rigid rotation.
+`nbands`, `eigen_tolerance_ha` (default 1e-8), and `max_iterations` (default 400)
+control the NSCF Davidson solve. At least occupied + 4 bands are required.
+All bands use the strict residual tolerance; degenerate top multiplets can
+need more bands/iterations. Nonconvergence identifies the k index.
+
+Optional `[dos]` keys: `dos_kgrid` (default twice SCF grid dimensions, or 2×2×2
+for legacy Gamma), `sigma_ev` (default 0.1 standard deviation), `spacing_ev`
+(default maximum spacing 0.01), `window_ev = [min,max]` relative to the sampled
+VBM (default spectrum extent plus 8 sigma tails), and the same `nbands`,
+`eigen_tolerance_ha`, `max_iterations` controls. Explicit non-Gamma SCF point
+lists require an explicit DOS grid. Time reversal is always used for DOS;
+weights sum to one and spin multiplicity two is included. New table numeric
+fields currently accept literal TOML numbers, not expression strings.
+
+Band outputs: `bands.csv`, `bands_labels.csv`, `bands.json`, `bands.dat`,
+`bands.dat.gnu`, `bands.agr`, `EIGENVAL`, `bands.svg`. DOS outputs: `dos.csv`,
+`dos.json`, `dos.dat`, `dos.agr`, `DOSCAR`, `dos.svg`. Units, column layouts,
+public format references, and format-specific limitations are in the guide.
+The VBM is the maximum occupied eigenvalue over the computed sampling; JSON
+stores its absolute Hartree offset. No Fermi energy is computed. DOSCAR's
+nominal Fermi slot is a documented VBM-zero placeholder. These are rust-dft
+exports, not calculations by the other codes. Output input-alias/symlink/hardlink
+checks occur before computing. Exit codes are 1 input, 2 UPF, 3 SCF exhaustion,
+4 numerical/noninsulating/NSCF failure, 5 I/O/plot failure. Writes are not a
+multi-file transaction; check exit status before using files.

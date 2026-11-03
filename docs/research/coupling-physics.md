@@ -1,0 +1,41 @@
+# Coupling physics: signs, energy accounting, boundary conditions, derivatives
+
+Status: design document; nothing here is implemented. Directive record: [coupling-directive.md](coupling-directive.md). Facts about the code are marked "verified" with a file; derivations are marked "derived" and must be turned into tests before any feature (see the test plan in [../architecture/scientific-coupling.md](../architecture/scientific-coupling.md)).
+
+## 1. Where an external term would enter today (verified)
+- The local potential of one SCF step is assembled on the density FFT grid as `ionic_real + V_H[n_in] + V_xc[n_in]` and handed to the Hamiltonian by `set_local_potential` (`crates/dft-engine/src/scf.rs`, step function around line 532). `ionic_real` is the ionic local pseudopotential (G=0 term from `alpha_z`) computed once at setup.
+- `EnergyAudit` holds `kinetic, local, local_zero_mode, nonlocal, hartree, xc, ewald` plus diagnostics (`band_sum`, `double_counting`, `band_form`, `harris_foulkes`, `functional_difference_bound`); the total is the sum of the six physical terms (`crates/dft-engine/src/energy.rs`). `EnergyAudit` and `ScfResult` are public structs with public fields, so adding a field is a breaking change for code that builds them with struct literals.
+- There are no forces and no stress anywhere in the workspace (searched `crates/*/src`).
+- The engine is spin-unpolarized, norm-conserving LDA-PZ, Bloch-sampled, insulating only; the Hartree solve treats the electron density alone with the G=0 term dropped, and the divergent G=0 pieces of Hartree, local pseudopotential and Ewald are combined through the alpha-Z term (`docs/physics-conventions.md`, local transform and Ewald sections).
+
+## 2. Sign and unit contract (derived)
+- Hartree atomic units: charge e = 1, an electron has charge -1, a nucleus of valence Z has charge +Z.
+- Two different objects must never share a type: the electrostatic potential `phi(r)` (energy per unit positive charge, Hartree per e) and the electron potential energy `U(r) = -phi(r)` (Hartree). The engine's `V_eff` is a potential energy for electrons. An external electrostatic potential `phi_ext` enters as `U_ext = -phi_ext`; an external potential given as an energy in eV or Ry is converted to Hartree at the boundary (`dft-units`, ADR 0012), and a potential given in volts is converted as `phi[Ha/e] = phi[V] / (Ha in eV per e)` with the reference stated.
+- External charge density `rho_ext(r)` (positive means positive charge, e/Bohr^3) produces `phi_ext` by `nabla^2 phi_ext = -4 pi rho_ext`; in a periodic cell this is solved in reciprocal space and needs a reference for G=0 (section 4).
+
+## 3. Energy accounting for a fixed external potential (derived)
+For a potential energy `U_ext(r)` acting on electrons and the same physical environment acting on the ion cores as classical charges,
+`E_tot = E_KS[n] + integral n(r) U_ext(r) d^3r + sum_I Z_I phi_ext(R_I) + E_env`
+where `E_env` is the environment's own energy (a constant for a fixed environment; not reported as part of the QM energy unless the driver asks). The eigenvalues of `H = H_KS + U_ext` include `U_ext`; the band-sum form of the energy then gives the electron-external term automatically and it must not be added a second time: `E = E_band - integral n (V_H + V_xc) + E_H + E_xc + E_ewald + E_ion-ext` with `E_band` containing `integral n U_ext`. Reporting an external contribution without stating whether it is inside `E_band` is the double-counting error to test for.
+Which environment terms are part of the reported "DFT energy" is a policy that every result must state: (a) electron-external only, (b) plus ion-external, (c) plus environment self-energy. Ranking states of different environments by (a) or (b) is not a physical comparison unless the environment free energies are included (directive section 7).
+
+## 4. Constant shift and the periodic reference (derived, an analytically solvable test)
+For a constant `U0` acting on the N electrons only: every eigenvalue shifts by `+U0`, the density is unchanged, and `E` shifts by `+N U0`. For the physical constant potential `phi0 = -U0` acting on the electrons and the ions, a neutral cell has ion-external energy `sum_I Z_I phi0 = -N_ion U0` with `N_ion = sum Z_I = N` for a neutral cell, so the total energy is unchanged (a constant potential has no physical effect on a neutral system) while the eigenvalues still shift: eigenvalues are reference dependent, energies of neutral cells are not. In a charged cell (N different from `sum Z_I`) the energy shifts by `(N - sum Z_I) U0` and the result depends on the arbitrary periodic zero. Therefore a periodic external potential must carry an explicit reference (its mean value `phi(G=0)` or a vacuum level), charged cells need an explicit neutralization convention, and a result must report the reference it used. The current Hartree solve drops G=0 for the electrons alone and the Ewald term assumes neutrality; adding external charge changes the neutrality bookkeeping and has to be designed together with these terms.
+
+## 5. External charges and Poisson solves
+Point charges, Gaussian-smeared charges and gridded charge densities are different inputs: a point charge in a periodic cell needs a smearing (Ewald-type) to avoid the reciprocal-space divergence, gridded charge is band-limited on the FFT grid, and a continuous density needs its normalization checked. The solve belongs in the driver or an adapter when the environment is external; the engine only needs the resulting `U_ext` on its density grid (and optionally `phi_ext` at the ion positions). Aliasing: `U_ext` must be representable on the engine's FFT grid or explicitly resampled with a reported loss; the local potential acts on the wavefunction cutoff while the grid holds the density cutoff (4 times Ecut), so a potential with Fourier content above the grid is aliased.
+
+## 6. Boundary conditions
+A periodic plane-wave code represents periodic scalar fields. It cannot honestly claim: isolated molecules or charged defects without a correction scheme; a uniform electric field (the potential `-E.r` is not periodic: it needs the modern theory of polarization (Berry phase) or a sawtooth potential in a slab or vacuum geometry with a dipole correction); open boundary conditions. The contract must list boundary conditions as capabilities and reject unsupported requests, not approximate them silently. An arbitrary periodic scalar field is not a uniform field.
+
+## 7. Consistency classes and derivatives (derived)
+| Class | Definition | Energy functional | Hellmann-Feynman force |
+|---|---|---|---|
+| fixed | `U_ext(r)` given, independent of n and R | `E[n] + integral n U_ext + E_ion-ext` | electronic part as for the field-free system plus `-Z_I grad phi_ext(R_I)` (plus the field-free ionic and Ewald terms) |
+| geometry-dependent | environment moves with the ions | same functional with `U_ext(r; R)` | extra term `-integral n dU_ext/dR` that must be supplied by the driver |
+| density-dependent | environment responds to n (polarizable embedding, implicit solvent) | requires a coupled functional `E[n, env]` | `v_ext = delta E_env/delta n` must be consistent with the reported energy; free energy versus total energy must be labeled |
+| time-dependent | changes between outer iterations | no single functional | forces only for the instantaneous frozen environment |
+Rule: an external contribution is reported as part of an energy only if a functional exists whose derivative produced the potential; otherwise it is reported as an unclassified external potential with no variational claim. Forces and stress are reported only when the corresponding derivative is implemented and validated; neither exists yet. Stress additionally needs the basis-set (Pulay) term at fixed cutoff.
+
+## 8. Limits stated up front
+Spin-unpolarized insulating LDA only. A fixed-potential embedding of a molecule or defect is meaningful only inside the supported boundary conditions. A 0 K elastic tensor is not a finite-temperature constitutive law. Distinct electronic solutions at identical coordinates must keep their state labels in any exported training set (ESLE). The validation pseudopotential has unverified provenance (docs/mvp-review.md).

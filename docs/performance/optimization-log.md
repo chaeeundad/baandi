@@ -1377,3 +1377,206 @@ Final release ignored-workspace suite: 17 tests passed, zero failures,
 `cargo test --release --offline --workspace -- --ignored` exit 0.
 `git diff --check` exit 0. Full acceptance status remains blocked by the requested real-UPF si8 SCF
 convergence/density gates. Quiet-host timing remains pending with Claude.
+
+## P7PC: buffer-band diagnosis (2026-11-03)
+
+Starting commit 18a55472d7c74518d9bef0b6a038764466d32a85. Derived from
+`docs/research/qe-study/davidson-and-scf-thresholds.md`, H2; only the note was
+read, never QE source. The policy thresholds below are local experimental
+choices, not copied reference-code parameters. Existing P7P7 profile identifies
+FFT 54%, orthonormalization 8%, hypot 12%, GEMM 9%; fresh sampling is attempted
+separately. No timing claim uses instrumentation.
+
+Unmodified release reproduces the supplied si8 input exactly: exit 4, iteration
+400, maximum residual 4.238824601895987e-6 Ha. Temporary in-memory diagnostic
+arrays (removed before implementation) record Ritz values and per-band residuals;
+printing occurs after the solver loop. At failing SCF solve the tolerance is
+2.285479797266155e-6 Ha. Iterations 1/10/50/100/200/400 have maximum residuals
+8.214317027772144e-5 / 3.497194079315726e-5 / 9.263035888829632e-5 /
+1.64303119215965e-5 / 1.33699801659869e-5 / 4.238824601895987e-6 Ha;
+maximum bands (one-based) are 20/15/17/20/20/20. At iteration 400 the first
+17 bands have maximum 9.060650089045546e-7 Ha, below the requested tolerance.
+Thus strict bands have converged at the failure; buffer work blocks success.
+
+Re-solving the SAME Hamiltonian with 24 bands and otherwise identical settings
+converges. Bands 17--22 are 0.2507886854604968, 0.250791994322361,
+0.250793791719534, 0.2507952913561576, 0.250796940751843,
+0.250800679419172 Ha. Band 20 cuts a near-degenerate six-member cluster;
+its lower/upper gaps are 1.4996366236e-6 / 1.6493956854e-6 Ha. Band 23 is
+0.32277088203316945 Ha. The failed 20-band Ritz value is
+0.2507968838486795 Ha, displaced within that cluster. This supports the
+multiplet-cut hypothesis, without claiming a general theorem about stagnation.
+The unconverged projected upper Ritz value (0.3214663826599302 Ha) was NOT a
+reliable estimate of the missing neighbor; the expanded solve is necessary.
+
+QE comparison inputs explicitly specify nbnd=8. The benchmark CLI template does
+NOT explicitly specify the band count: it depends on the default extra_bands=4.
+The default must therefore remain unchanged for this ticket.
+
+Fresh `sample PID 1 -file /private/tmp/p7pc/profile.txt` exited 255: the sandbox
+could not examine the process. The sampled unmodified CLI separately exited 4.
+No privilege escalation was attempted. Profiling is therefore limited to the
+previous measured profile and the new solver application/iteration counters.
+
+Rejected trials (all preserve strict residual tolerances):
+- `max(100*tolerance,1e-5)` with the original 48-dimensional space fails later
+  on si8 (exit 4, max residual 1.215557559625791e-7 Ha).
+- Correcting buffers down to the strict tolerance despite their loose stopping
+  rule also fails (exit 4, max 9.786814290123058e-6 Ha); band 17 residual
+  5.864361458095459e-6 exceeds the request 2.2939918872732104e-6 Ha.
+- Floor-only `max(tolerance,1e-5)` at capacity 48 also fails: with strict
+  correction selection max 1.548021051664704e-4 Ha; with per-band selection max
+  1.3251144170067985e-5 Ha, strict band 17 at 4.411086909297155e-6 Ha versus
+  request 6.37614022741499e-7 Ha. Loosening only the buffers cannot certify this.
+- Capacity 60 plus the 100-times policy converges: -31.32180360103162 Ha,
+  17 SCF steps, 701 Davidson iterations, 3195 main vector applications.
+- Capacity 120 plus the 100-times policy converges: -31.32180360103174 Ha,
+  17 SCF steps, 311 Davidson iterations, 2307 main vector applications.
+- Capacity 120 plus floor-only policy converges: -31.321803601031377 Ha,
+  15 SCF steps, 283 Davidson iterations, 2340 main vector applications.
+
+Keep the floor-only target and six columns per band (minimum configured capacity
+48). This is a measured extension needed beyond the initial tolerance-only
+hypothesis, not a change to the requested number of bands. Existing eight-band
+cases retain their capacity. The larger factor saved more applications in the
+k cases but increased Gamma SCF steps 10->11 and si8 steps 15->17, so it was
+rejected in favor of the more conservative threshold. All these numerical
+choices were measured on rust-dft. No QE source was opened.
+
+### Final policy, measurements and evidence
+
+Raw diagnosis histories, complete final band residuals/certificates, benchmark
+repeats/counts/hashes and comparison metrics are stored in
+`crates/dft-solvers/benches/p7pc-evidence.json`. Release on the shared Apple
+Silicon Mac, one thread, starting commit stated above, three repeats. Retained
+final timing series did not overlap this task's builds/tests/other benchmarks;
+other users' workloads are uncontrolled. Timings are indicative, not quiet-host
+speedup claims. No remote server was modified; Claude remeasures on dev08.
+
+Main-solve counts sum all SCF iterations and k points. Certificate applications
+are separate; add both columns for total solver applications. SCF iteration
+count differs from Davidson iterations.
+
+| Case | Main applications before -> after | Certificate applications before -> after | Davidson iterations before -> after | SCF steps before -> after | Wall median before -> after (s) | Final energy (Ha) | abs dE vs O2 (Ha) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| gamma | 373 -> 281 | 49 -> 38 | 43 -> 41 | 10 -> 10 | 0.140166 -> 0.123313 | -7.2955304682107691 | 2.664535e-15 |
+| k222s | 1730 -> 1266 | 153 -> 113 | 212 -> 204 | 10 -> 10 | 0.500443 -> 0.409511 | -7.919423412469083 | 1.598721e-14 |
+| k222 | 3398 -> 2543 | 263 -> 208 | 422 -> 408 | 10 -> 10 | 0.935331 -> 0.787666 | -7.8312300571211368 | 7.993606e-15 |
+| si8 | unavailable (failure) -> 2060 | unavailable -> 217 | failing solve 400 -> 283 total | unavailable -> 15 | failure 6.020170 -> 4.630403 | -31.321803601031377 | no O2 entry |
+
+Every before-si8 repeat exits 4 with the reproduced residual. Its time is time
+to failure, not converged SCF time; the old error exposes neither cumulative
+application/SCF counters nor an energy, and these are recorded as null rather
+than fabricated. The final si8 energy differs from the supplied
+-31.3218036010316 Ha by 2.23821e-13 Ha (gate 1e-9 Ha). Seeds 1 and 7 at
+threads 1 and 4 all produce -31.32180360103137673 Ha and 15 SCF steps;
+the density files are bit-identical between thread counts for each seed.
+The regression uses the full 30 Ry case (ignored in debug with its release
+command), not an easier surrogate.
+
+The floor-policy-only stage has main application counts 353/1554/3119/2340
+and the final stage 281/1266/2543/2060 (Gamma/k222s/k222/si8). Skipping the
+intermediate true-residual block therefore saves 72/288/576/280 applications,
+with bit-identical energies and density hashes relative to that policy stage.
+Only scheduled tolerances above the final eigen_tolerance use recurrence-only
+acceptance. Final-accuracy maps, public fixed-point maps, fixed-point
+certificates and all iteration-limit acceptance keep true residual checks.
+The standalone solver reports whether residuals are certified.
+
+The final si8 median was 4.630 s versus 3.724 s in the earlier skip trial;
+a subsequent retained detail run was 3.724 s with identical energy/counts.
+This observed shared-host variability is why no quiet-host speedup is claimed.
+
+### Extra-band experiment (final policy, three repeats)
+
+| Case | Extra bands | Main applications | Certificate applications | Davidson iterations | SCF steps | Median wall (s) | Energy (Ha) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| gamma | 1 | 236 | 65 | 59 | 11 | 0.119001 | -7.2955304682109068 |
+| gamma | 2 | 245 | 37 | 54 | 10 | 0.118190 | -7.2955304682108348 |
+| gamma | 4 | 281 | 38 | 41 | 10 | 0.123313 | -7.2955304682107691 |
+| k222s | 1 | 905 | 96 | 214 | 10 | 0.300858 | -7.9194234124690688 |
+| k222s | 2 | 1034 | 104 | 222 | 10 | 0.342279 | -7.9194234124690759 |
+| k222s | 4 | 1266 | 113 | 204 | 10 | 0.409511 | -7.919423412469083 |
+| k222 | 1 | 1766 | 212 | 463 | 10 | 0.577861 | -7.8312300571211413 |
+| k222 | 2 | 1964 | 197 | 401 | 10 | 0.609176 | -7.8312300571211466 |
+| k222 | 4 | 2543 | 208 | 408 | 10 | 0.787666 | -7.8312300571211368 |
+| si8 | 1 | 2198 | 291 | 782 | 15 | 5.597247 | -31.321803601031441 |
+| si8 | 2 | 2567 | 543 | 641 | 17 | 6.461023 | -31.321803601031618 |
+| si8 | 4 | 2060 | 217 | 283 | 15 | 4.630403 | -31.321803601031377 |
+
+Keep extra_bands=4. One/two extras reduce small-cell costs, but are slower on
+si8 and one extra adds a Gamma SCF step. The QE inputs explicitly use nbnd=8;
+the benchmark CLI template relies on the default instead of setting nbands.
+`--extra-toml 'extra_bands = N'` appends an explicit override without changing
+other default benchmark inputs. The existing si8 generator now preserves the
+supplied input's atom order; the earlier generator's different atom order had
+a different floating-point SCF trajectory. All one/two-extra small-cell energy
+differences stay below 1.36e-13 Ha against O2; every si8 variant passes 1e-9 Ha.
+
+### Reference and accuracy gates
+
+No new QE runs: these are comparisons against the existing stored QE 7.6 runs,
+using the unchanged comparison script/tolerances. One-based bands 1--5 are
+strict and 6--8 are buffers; the ticket's four highest bands include strict
+band 5, so both the three-buffer and four-empty maxima are reported.
+
+| Case | Energy difference vs QE (Ha/atom) | Strict eigenvalue difference vs QE (Ha) | Buffer difference vs QE (Ha) | Four-empty difference vs QE (Ha) | Strict change vs stored rust-dft (Ha) | Script exit |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| k222 | 1.281439431455e-06 | 1.301039467504e-06 | 1.989492584469e-06 | 1.989492584469e-06 | 4.207432124925e-09 | 0 |
+| k222s | 1.281265458619e-06 | 1.772201724705e-06 | 1.551901905068e-06 | 1.551901905068e-06 | 5.348791964899e-09 | 0 |
+| k444s | 1.281675954257e-06 | 2.100463423490e-06 | 2.060307613584e-06 | 2.100463423490e-06 | 4.195325031819e-09 | 0 |
+
+All buffer comparisons are below the stated 1e-5 Ha accuracy scale. This is an
+observed comparison, not a theorem that residual norm bounds an indexed
+cluster eigenvalue. The unchanged script also passes its original 1e-3 Ha
+all-band eigenvalue gate. All strict changes are below 1e-8 Ha. k444s total
+energy is -7.9259761266480915 Ha, 1.06581e-14 Ha from O2. No tested default or
+extra-band result exceeds the 5e-13 Ha small-cell stop threshold.
+
+The synthetic diagonal Hermitian fixture cuts an exactly degenerate multiplet
+and has nearby levels. All-strict fails at 400 iterations (last maximum
+1.4170027203180743e-11, requested 1e-12, dimensionless); buffer policy returns
+in one iteration with strict residuals zero and buffer residual
+2.7807830091299275e-8. Tests also require true residual recomputation, per-band
+flags, iteration-limit acceptance with a failed buffer, rejection of a failed
+strict band, invalid policies, and four saved applications for recurrence-only
+intermediate acceptance. The small engine fixture verifies the strict/buffer
+certificate partition and true final residuals. CLI tests verify additive
+fields and preserve all existing keys.
+
+### Verification and reproduction
+
+`check.sh` passed build/test/fmt/clippy. The release ignored workspace suite
+passed all 18 tests, including the four real-UPF si8 runs. Initial failures
+were recorded and fixed: debug and ignored CLI exact-key assertions needed the
+additive band_accuracy key (check exit 1, ignored suite exit 101); the first
+external regression fixture omitted mandatory system.name (test exit 101).
+None was a numerical tolerance failure. No tolerance was loosened to pass a
+test. No dependencies, unsafe, physics/FFT/Hamiltonian code, baseline, ticket,
+README or artifacts changes were made. An unrelated .DS_Store change appeared
+during the run and was not edited or reverted by this task. Task changes remain
+uncommitted under the worktree restriction.
+
+```sh
+cargo build --release --offline -p dft-cli
+python3 -I scripts/bench_scf.py --binary target/release/dft-cli \
+  --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF \
+  --cases gamma,k222s,k222,si8 --repeats 3 \
+  --baseline docs/performance/baseline-after-o2.json --record /private/tmp/p7pc/final.json
+# Repeat with --extra-toml 'extra_bands = 1' or 2 and a different --record path.
+DFT_SI_UPF=/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF \
+  cargo test --release --offline --workspace -- --ignored --nocapture
+cargo test --release --offline -p dft-solvers degenerate_buffer_policy_and_iteration_limit -- --nocapture
+scripts/check.sh
+python3 -I scripts/compare_kpoints_qe.py \
+  --ours /private/tmp/p7pc/final/k222/out/results.json \
+  --qe-out tests/reference/kpoints/k222_c/qe.out
+# k222s: corresponding k222s paths; k444s: --qe-summary tests/reference/kpoints/k444s_c/qe_summary.json.
+```
+
+For retained comparison outputs, generate TOML using `case_input` from
+`scripts/bench_scf.py`, then run `dft-cli run INPUT --output-dir OUT`; this is
+what the temporary detail helper did. The evidence JSON preserves those final
+bands and certificates when temporary paths are cleared. The UPF was only read,
+never copied. Session/dashboard/README updates are excluded by this ticket's
+explicit ownership and left to the orchestrator.

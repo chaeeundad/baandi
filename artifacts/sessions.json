@@ -988,5 +988,23 @@
     "ended_at": null,
     "exit_code": null,
     "note": ""
+  },
+  {
+    "run_id": "P9B-PSEUDO-REGISTRY#1",
+    "task_id": "P9B-PSEUDO-REGISTRY",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 15888,
+    "wrapper_pid": 15868,
+    "session_id": null,
+    "branch": "task/P9B-PSEUDO-REGISTRY",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P9B-PSEUDO-REGISTRY",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P9B-PSEUDO-REGISTRY.md",
+    "report": null,
+    "started_at": "2026-11-03T08:33:26Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

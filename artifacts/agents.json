@@ -65,6 +65,15 @@
   {
     "id": "A8",
     "agent": "Codex",
+    "role": "implementer",
+    "state": "active",
+    "task": "P9B-PSEUDO-REGISTRY: 기능+설계: 의사퍼텐셜 레지스트리와 공개 저장소 다운로드(라이선스, 해시 검증, 엔진 지원 여부 표시)",
+    "ref": "pid 15888, session no sessi, task/P9B-PSEUDO-REGISTRY",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A9",
+    "agent": "Codex",
     "role": "implementer (wrapper smoke test)",
     "state": "done",
     "task": "SMOKE: Backfilled before registry existed: PID not recorded",
@@ -72,7 +81,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A9",
+    "id": "A10",
     "agent": "Codex",
     "role": "implementer",
     "state": "blocked",
@@ -81,7 +90,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A10",
+    "id": "A11",
     "agent": "Codex",
     "role": "wrapper-test",
     "state": "done",
@@ -90,7 +99,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A11",
+    "id": "A12",
     "agent": "Codex",
     "role": "implementer (backend spike)",
     "state": "done",
@@ -99,7 +108,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A12",
+    "id": "A13",
     "agent": "Codex",
     "role": "implementer",
     "state": "killed",
@@ -108,7 +117,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A13",
+    "id": "A14",
     "agent": "Codex",
     "role": "implementer (P1A fix 1)",
     "state": "done",
@@ -117,7 +126,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A14",
+    "id": "A15",
     "agent": "Codex",
     "role": "implementer (P1B unblock)",
     "state": "done",
@@ -126,7 +135,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A15",
+    "id": "A16",
     "agent": "Codex",
     "role": "implementer (P4A eigensolver)",
     "state": "done",
@@ -135,7 +144,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A16",
+    "id": "A17",
     "agent": "Codex",
     "role": "implementer (P3A functionals)",
     "state": "done",
@@ -144,7 +153,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A17",
+    "id": "A18",
     "agent": "Codex",
     "role": "implementer (P2A UPF and radial)",
     "state": "done",
@@ -153,7 +162,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A18",
+    "id": "A19",
     "agent": "Codex",
     "role": "implementer (P2B fix 1)",
     "state": "done",
@@ -162,7 +171,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A19",
+    "id": "A20",
     "agent": "Codex",
     "role": "implementer (P5A retry 1)",
     "state": "done",
@@ -171,7 +180,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A20",
+    "id": "A21",
     "agent": "Codex",
     "role": "implementer (P5B CLI run)",
     "state": "done",
@@ -180,7 +189,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A21",
+    "id": "A22",
     "agent": "Codex",
     "role": "implementer (P2C real-world UPF)",
     "state": "done",
@@ -189,7 +198,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A22",
+    "id": "A23",
     "agent": "Codex",
     "role": "implementer (P5C functional string)",
     "state": "done",
@@ -198,7 +207,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A23",
+    "id": "A24",
     "agent": "Codex",
     "role": "implementer (P6A QE tooling)",
     "state": "done",
@@ -207,7 +216,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A24",
+    "id": "A25",
     "agent": "Codex",
     "role": "implementer (P6B verifier real format)",
     "state": "done",
@@ -216,7 +225,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A25",
+    "id": "A26",
     "agent": "Codex",
     "role": "implementer (P6D density compare)",
     "state": "done",
@@ -225,7 +234,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A26",
+    "id": "A27",
     "agent": "Codex",
     "role": "implementer (P6E docs refresh)",
     "state": "done",
@@ -234,7 +243,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A27",
+    "id": "A28",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -243,7 +252,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A28",
+    "id": "A29",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -252,7 +261,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A29",
+    "id": "A30",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -261,7 +270,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A30",
+    "id": "A31",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -270,7 +279,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A31",
+    "id": "A32",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -279,7 +288,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A32",
+    "id": "A33",
     "agent": "Codex",
     "role": "reviewer",
     "state": "done",
@@ -288,7 +297,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A33",
+    "id": "A34",
     "agent": "Codex",
     "role": "reviewer",
     "state": "done",
@@ -297,7 +306,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A34",
+    "id": "A35",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -306,7 +315,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A35",
+    "id": "A36",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -315,7 +324,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A36",
+    "id": "A37",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -324,7 +333,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A37",
+    "id": "A38",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -333,7 +342,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A38",
+    "id": "A39",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -342,7 +351,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A39",
+    "id": "A40",
     "agent": "Codex",
     "role": "implementer",
     "state": "blocked",
@@ -351,7 +360,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A40",
+    "id": "A41",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -360,7 +369,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A41",
+    "id": "A42",
     "agent": "Codex",
     "role": "implementer",
     "state": "failed",
@@ -369,7 +378,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A42",
+    "id": "A43",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -378,7 +387,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A43",
+    "id": "A44",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -387,7 +396,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A44",
+    "id": "A45",
     "agent": "Codex",
     "role": "implementer",
     "state": "blocked",
@@ -396,7 +405,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A45",
+    "id": "A46",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -405,7 +414,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A46",
+    "id": "A47",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -414,7 +423,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A47",
+    "id": "A48",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",

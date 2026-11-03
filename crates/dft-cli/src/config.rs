@@ -1,4 +1,6 @@
 //! Strict TOML input; conversion to atomic units happens only at this boundary.
+#[path = "preflight.rs"]
+pub mod preflight;
 use dft_basis::{BasisError, FftGridSpec, PlaneWaveBasis};
 use dft_geometry::{Cell, CellError};
 use dft_units::{Angstrom, Bohr, Hartree, Rydberg};
@@ -22,6 +24,8 @@ pub enum ConfigError {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(skip)]
+    pub species_identity: BTreeMap<String, preflight::Identity>,
     #[serde(skip)]
     pub input_expressions: Vec<InputExpression>,
     pub system: System,
@@ -442,8 +446,10 @@ impl Config {
         let mut value: toml::Value = toml::from_str(text)?;
         let mut records = Vec::new();
         normalize(&mut value, &mut records)?;
+        let identities = preflight::normalize(&mut value)?;
         let mut config: Self = value.try_into()?;
         config.input_expressions = records;
+        config.species_identity = identities;
         config.validate()?;
         Ok(config)
     }

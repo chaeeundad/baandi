@@ -1,5 +1,7 @@
 //! Exercise the public process boundary: output and nonzero error exits.
-use std::{path::PathBuf, process::Command};
+#[allow(dead_code)]
+mod common;
+use std::{fs, path::PathBuf, process::Command};
 
 fn example() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/si_lda.toml")
@@ -7,10 +9,25 @@ fn example() -> PathBuf {
 
 #[test]
 fn example_commands_and_failures() {
+    let dir = std::env::temp_dir().join(format!("dft-example-preflight-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("synthetic.xml"),
+        common::fixture().replace("element=\"Xx\"", "element=\"Si\""),
+    )
+    .unwrap();
+    let input = dir.join("example.toml");
+    fs::write(
+        &input,
+        fs::read_to_string(example())
+            .unwrap()
+            .replace("/absolute/path/to/Si.UPF", "synthetic.xml"),
+    )
+    .unwrap();
     for command in ["validate", "grid"] {
         let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
             .arg(command)
-            .arg(example())
+            .arg(&input)
             .output()
             .unwrap();
         assert!(
@@ -21,7 +38,8 @@ fn example_commands_and_failures() {
         let text = String::from_utf8(output.stdout).unwrap();
         if command == "validate" {
             assert!(text.contains("Valid: Si diamond"));
-            assert!(text.contains("file existence not checked"));
+            assert!(text.contains("UPF composition Si:2"));
+            assert!(text.contains("8 electrons"));
         } else {
             for label in [
                 "Bohr^3",
@@ -37,6 +55,17 @@ fn example_commands_and_failures() {
             }
         }
     }
+    // Unlike grid inspection, full validation requires the potential to exist.
+    fs::remove_file(dir.join("synthetic.xml")).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+        .arg("validate")
+        .arg(&input)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("pseudopotentials.Si") && error.contains("synthetic.xml"));
+    fs::remove_dir_all(&dir).unwrap();
     let missing = example().with_file_name("does-not-exist.toml");
     let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
         .arg("validate")

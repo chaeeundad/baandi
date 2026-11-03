@@ -71,6 +71,8 @@ The project should not currently be used for scientific conclusions or productio
 
 Implementation progress and supported features will be documented as they become available.
 
+Build instructions, example inputs, how to run the CLI and how the Quantum ESPRESSO comparisons are reproduced are in [docs/getting-started.md](docs/getting-started.md); the full documentation map is [docs/INDEX.md](docs/INDEX.md).
+
 ## Architecture Philosophy
 
 BAANDI follows a few guiding rules:
@@ -129,7 +131,7 @@ Contribution guidelines, development documentation, and validation procedures wi
 
 ## License
 
-License information will be added once the project's distribution policy has been finalized.
+BAANDI is released under the [MIT License](LICENSE). The silicon pseudopotential used for internal validation is not part of the repository and is not covered by this license.
 
 ---
 

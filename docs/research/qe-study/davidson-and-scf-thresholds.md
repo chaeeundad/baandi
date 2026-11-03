@@ -45,3 +45,14 @@ H6. Drive the SCF threshold by an energy-weighted estimate of the SCF error (a H
 H7. Measure the effect of the number of extra bands (8 versus 5 versus 4 bands) on time; the default is not changed by this note (validation inputs use 8 bands to match the QE comparison), but the cost is reported.
 H8 (FFT, from the stick layout): QE transforms whole sets of 1D columns contiguously (many 1D FFTs per call along the contiguous axis, with the other directions done on columns that exist) which corresponds to the pruning already done in O3; the remaining difference is the memory layout: contiguous batches of lanes instead of one strided lane at a time. Test lane batching and a transposed layout for the strided axes (bit-identical).
 Order by risk: H2, H3 (contraction, then multiplier), H5, H1, H6, H8, H4 last.
+
+## 6. Measured outcomes on rust-dft (2026-11-03, ticket P7P7 and P7P9; numbers in docs/performance/optimization-log.md)
+Hypotheses are not adopted because the reference code does it; this is what measurement on our code showed.
+- H3a (restart by contraction of the stored products): kept. Zero change for the default benchmark cases (they converge before the first restart: capacity 48 for 8 bands), bit-identical density, and on test problems that restart the operator applications fall from 165 to 114 and from 92 to 64. Expected to matter for larger systems with more bands.
+- H3b (smaller subspace capacity, 2, 3, 4 times the band count instead of 6): rejected. Capacity 2 times: more applications (452 against 373 on Gamma) and slower; 3 and 4 times: no gain or a loss. With corrections appended after orthonormalization in our solver, the larger subspace converges in fewer total applications.
+- H5 (fuller diagonal preconditioner): rejected. The Gamma case needed 11 SCF steps instead of 10 and the iteration counts did not drop.
+- H1 (Ritz-value-change convergence with strict refinement): rejected. More solver iterations and slower on the benchmark cases.
+- H4 (generalized non-orthonormal reduced problem): not attempted, because the stages that it builds on were negative and it carries the highest numerical risk.
+- H8 (FFT lane batching with four adjacent lanes, bit-identical): measured, small gain: 1 to 4 percent for the transform alone on production-size grids, no measurable gain end to end (1.00 to 1.02 times in an alternating A/B comparison), losses on tiny grids. Not merged.
+- H2 (looser threshold for empty bands), H6 (energy-weighted SCF estimate with the first-iteration safeguard), H7 (number of extra bands): not yet tested; they act at the SCF level and are the next candidates.
+Reading: where our solver differs from the reference by design (orthonormalized basis, capacity 6 times the band count) the reference's parameter choices do not transfer; the transferable idea so far is the restart contraction.

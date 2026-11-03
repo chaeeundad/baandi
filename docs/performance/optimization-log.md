@@ -336,6 +336,9 @@ Comparisons are against rust-dft, not new QE references. Baseline, manifests,
 lockfile and other ticket-owned files were not modified. Changes are left
 uncommitted for Claude review.
 
+## 2026-11-03: P7P9 FFT lane batching (H8): measured and NOT merged
+Four adjacent strided lanes gathered into one staging block (W = 4; W = 8 and 16 measured and worse or not better), per-lane arithmetic unchanged, bit-identical to the current transform on all test shapes. Transform alone (Mac, shared): 24^3 1.02 times, 25^3 1.03, 27^3 1.01, 36^3 1.02, 15x20x24 1.04 (inverse; the forward transform 1.02 to 1.03); tiny grids 0.85 to 0.96. End to end on the 8-k-point case, alternating A/B of five runs each on the same machine: minimum 1.023 s against 1.019 s, median 1.069 s against 1.051 s (1.00 to 1.02 times). The gain is within the run-to-run noise and the added code (a staging path plus an oracle) is not worth it; the branch is kept in the worktree history of the task only. Reconsider if the FFT becomes dominant again or on a CPU where the strided gather is much more expensive (the dev08 x86 test was not run because the effect on the Mac is already negligible).
+
 ## 2026-11-03: P7P4 / O4c SCF schedule and initial subspace
 
 Pre-change evidence: the supplied post-O1 sampling profile attributes 75.4% to

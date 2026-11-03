@@ -222,5 +222,61 @@
     "result": "pass",
     "detail": "rho(0) identical, sum |rho|^2 relative 1.1e-8 (tolerance 1e-6), largest coefficient difference 4.0e-9 e/Bohr^3 (tolerance 1e-7); QE's own symmetry spread 6.8e-9 vs ours 2.1e-11. Summary mode; full-file mode tested on synthetic files only. 90 Python tests pass",
     "date": "2026-11-03"
+  },
+  {
+    "id": "T29",
+    "check": "Real Si, k-point engine at Gamma: density bit-identical to the pre-P7 run",
+    "phase": "P7",
+    "result": "pass",
+    "detail": "density.bin cmp identical; results fields unchanged",
+    "date": "2026-11-03"
+  },
+  {
+    "id": "T30",
+    "check": "QE 7.6 k-points 2x2x2 unshifted (8 k): energy, eigenvalues, weights",
+    "phase": "P7",
+    "result": "pass",
+    "detail": "total energy diff 1.2814e-6 Ha/atom (tol 1e-4); max eigenvalue diff 1.99e-6 Ha (tol 1e-3); QE 9 iterations; full qe.out hash-verified",
+    "date": "2026-11-03"
+  },
+  {
+    "id": "T31",
+    "check": "QE 7.6 k-points 2x2x2 half-step shift (4 k)",
+    "phase": "P7",
+    "result": "pass",
+    "detail": "1.2813e-6 Ha/atom; 1.77e-6 Ha; full qe.out hash-verified",
+    "date": "2026-11-03"
+  },
+  {
+    "id": "T32",
+    "check": "QE 7.6 k-points 4x4x4 half-step shift (32 k)",
+    "phase": "P7",
+    "result": "pass",
+    "detail": "1.2817e-6 Ha/atom; 2.10e-6 Ha; relayed text summary, full qe.out kept on dev08 (not re-verifiable here)",
+    "date": "2026-11-03"
+  },
+  {
+    "id": "T33",
+    "check": "Units via uom: Ha, Ry, eV, Bohr, Angstrom, pressure; hardcode guard",
+    "phase": "P7",
+    "result": "pass",
+    "detail": "Real Si density unchanged; guard test finds no conversion literals outside dft-units",
+    "date": "2026-11-03"
+  },
+  {
+    "id": "T34",
+    "check": "Expression inputs (1/4, atan(0.5*pi), 60/2 Ry) in TOML",
+    "phase": "P7",
+    "result": "pass",
+    "detail": "Real Si with expression input gives a byte-identical density; non-finite and unknown names rejected with key path",
+    "date": "2026-11-03"
+  },
+  {
+    "id": "T35",
+    "check": "ESLE design reviewed independently by Codex",
+    "phase": "P7",
+    "result": "pass",
+    "detail": "Design only; main corrections recorded in docs/research/electronic-state-landscape.md section 7",
+    "date": "2026-11-03"
   }
 ]

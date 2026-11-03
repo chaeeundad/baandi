@@ -126,5 +126,29 @@
     "status": "mitigated",
     "phase": "P6",
     "detail": "Offset is cutoff independent (2.545 to 2.565e-6 Ha over 20 to 80 Ry). Matches the mesh-origin segment omitted by a direct Coulomb-subtracted integral of the local potential: 8*2*4*pi*Z*r0^2/(2*Omega) = 2.548e-6 Ha. Our erf-subtracted route is the more accurate. QE internals not inspected, so stated as consistent with. See docs/validation.md R4."
+  },
+  {
+    "id": "I17",
+    "title": "QE k-point evidence for 4x4x4 is a relayed text summary",
+    "severity": "low",
+    "status": "open",
+    "phase": "P7",
+    "detail": "The full 27 kB qe.out stayed on dev08 (sha256 c93d458b...); only the k list and eigenvalue blocks were relayed as text. The two smaller runs were transferred whole and hash-verified."
+  },
+  {
+    "id": "I18",
+    "title": "Public repository push needs exposure review",
+    "severity": "medium",
+    "status": "needs decision",
+    "phase": "P7",
+    "detail": "Local main is 86+ commits ahead of the public origin. The tree and history contain the internal address of dev08 (192.168.0.228, in tests/reference/reports), host names dev08 and dft5090, a local-hostname author email, and numbers derived from a UPF of unverified license (the UPF itself is not committed). Waiting for the user's decision."
+  },
+  {
+    "id": "I19",
+    "title": "Performance comparison with QE needs a Rust toolchain on dev08",
+    "severity": "low",
+    "status": "needs decision",
+    "phase": "P7",
+    "detail": "dev08 has no rustc or cargo and 16 GB free disk. Installing a toolchain there needs the user's approval; the comparison is only meaningful on the same machine with matched threading."
   }
 ]

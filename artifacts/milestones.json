@@ -57,10 +57,10 @@
   },
   {
     "id": "P7",
-    "name": "GPU, k-points, PBE, AI hooks",
-    "status": "out of scope",
+    "name": "k-points, units, expressions, PBE, GPU design",
+    "status": "in progress",
     "gates_done": 0,
     "gates_total": 0,
-    "note": "Not allowed before P6 approval"
+    "note": "Done and verified: P7A k-points (QE 7.6 comparison on 3 grids), P7A2 CLI k-point input, P7U units (uom), P7E and P7E2 expression inputs. Pending: P7B PBE via a library, P7C GPU design note. ESLE and coupling architecture are design-only (no implementation)"
   }
 ]

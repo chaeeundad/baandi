@@ -241,5 +241,68 @@
     "task": "P6E-DOCS-REFRESH",
     "ref": "pid 41429, session 01a19cd0, task/P6E-DOCS-REFRESH",
     "updated": "2026-11-02"
+  },
+  {
+    "id": "A28",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7A-KPOINTS",
+    "ref": "pid 59488, session 01a19e90, task/P7A-KPOINTS",
+    "updated": "2026-11-02"
+  },
+  {
+    "id": "A29",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7U-UNITS",
+    "ref": "pid 69481, session 01a19f1e, task/P7U-UNITS",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A30",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7A2-KPOINTS-CLI",
+    "ref": "pid 79599, session 01a19f83, task/P7A2-KPOINTS-CLI",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A31",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7E-EXPR",
+    "ref": "pid 83190, session 01a19f86, task/P7E-EXPR",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A32",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P7E2-EXPR-CLI",
+    "ref": "pid 88620, session 01a19f90, task/P7E2-EXPR-CLI",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A33",
+    "agent": "Codex",
+    "role": "reviewer",
+    "state": "done",
+    "task": "P8R-ESLE-REVIEW",
+    "ref": "pid 92546, session 01a19f9a, task/P8R-ESLE-REVIEW",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A34",
+    "agent": "Codex",
+    "role": "reviewer",
+    "state": "active",
+    "task": "P9R-COUPLING-REVIEW",
+    "ref": "pid 95749, session no sessi, task/P9R-COUPLING-REVIEW",
+    "updated": "2026-11-03"
   }
 ]

@@ -1,0 +1,16 @@
+# Performance: rules, measurements and the optimization log
+
+Read this before touching a hot path (anything on the Hamiltonian apply, the eigensolver, FFTs, density accumulation). Physics correctness always comes first; a change that is faster but not equivalent is a bug.
+
+## Rules for every agent
+1. Measure first. Profile with `sample` (macOS) or `perf` (Linux) on a release build with debug symbols (`CARGO_PROFILE_RELEASE_DEBUG=true`), read the time at the top of the stack, and write the finding into [optimization-log.md](optimization-log.md) before changing code. No optimization on a guess.
+2. Prove equivalence. Use `scripts/bench_scf.py` against [baseline.json](baseline.json) (Si Gamma and k-point cases): the total energy must stay within 1e-12 Ha, and a change that only removes overhead (allocation, copies, skipped zero work) must keep the density file bit-identical (`--require-identical`). A change that alters the algorithm (tolerances, subspace, number of iterations) must say so, keep every convergence gate and the fixed-point certificate, and give the measured energy difference.
+3. No allocation inside the per-band or per-iteration loops: allocate work arrays once (the plan, the Hamiltonian, the solver workspace) and reuse them. No logging, I/O or timers in numerical hot loops (macOS `free` and `malloc` even call the timer internally, which shows up as `mach_absolute_time` in profiles).
+4. Skip work that is exactly zero (zero lanes in a pruned FFT, empty projector blocks): this is bit-identical and the safest speedup. Prefer general-purpose libraries (faer, rustfft, ndarray) used with their allocation-free entry points (`process_with_scratch`, preallocated buffers).
+5. Keep the physics-facing API stable; optimize behind it. A speedup that needs an API change gets an ADR.
+6. Record every accepted optimization in [optimization-log.md](optimization-log.md): what the profile showed, what changed, before and after numbers from `scripts/bench_scf.py` on the same machine, equivalence evidence, and what was tried and rejected. Update `baseline.json` only through the decision recorded in the log (never to hide a regression).
+7. Report speedups only from measured runs on a quiet machine, with the machine and commit stated; the cross-machine comparison with QE is in `docs/validation.md` R7 and README.
+
+## Tools
+- `scripts/bench_scf.py` (standard library only): runs the release `dft-cli` on fixed Si cases (`gamma`, `k222s`, `k222`, `k444s`), reports median wall time, engine and diagonalization time, iterations, energy and the density hash, and compares with the baseline. The pseudopotential path is passed with `--upf` (the file is not in the repository).
+- Baseline (macOS Apple Silicon, release, 1 thread, before any optimization): see [baseline.json](baseline.json).

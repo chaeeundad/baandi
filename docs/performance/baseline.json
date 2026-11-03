@@ -1,0 +1,68 @@
+{
+ "note": "Baseline before optimization: commit 6049217, macOS Apple Silicon (Mac mini), release build, 1 thread",
+ "binary": "dft-cli",
+ "machine_note": "record host and commit in the note",
+ "energy_tolerance_ha": 1e-12,
+ "cases": {
+  "gamma": {
+   "label": "Gamma only, 30 Ry",
+   "wall_s": [
+    1.583527583,
+    1.304109792,
+    1.2824978339999995
+   ],
+   "wall_median_s": 1.304109792,
+   "engine_total_s": 1.2781775419999999,
+   "phases_s": {
+    "density_s": 0.017548711,
+    "diagonalization_s": 1.207626833,
+    "mixing_s": 0.001568708,
+    "potential_s": 0.006571999,
+    "total_energy_s": 0.010243377
+   },
+   "iterations": 11,
+   "total_energy_ha": -7.295530468210927,
+   "density_sha256": "c4fde645365f4e7ed609486d76233335b3894540239b0443880351eea82257cd"
+  },
+  "k222s": {
+   "label": "2x2x2 shifted (4 k), 30 Ry",
+   "wall_s": [
+    6.4392415000000005,
+    6.548742542000001,
+    6.764605292000002
+   ],
+   "wall_median_s": 6.548742542000001,
+   "engine_total_s": 6.759375458,
+   "phases_s": {
+    "density_s": 0.072522793,
+    "diagonalization_s": 6.588469207,
+    "mixing_s": 0.003049625,
+    "potential_s": 0.006951208,
+    "total_energy_s": 0.041453043
+   },
+   "iterations": 11,
+   "total_energy_ha": -7.9194234124690706,
+   "density_sha256": "7b7e9c5aaf457f4d6ca5de52c8f2bc9aca531e27c4f0cf7f334cad08e2515c72"
+  },
+  "k222": {
+   "label": "2x2x2 (8 k), 30 Ry",
+   "wall_s": [
+    12.818812541999996,
+    11.967904209000004,
+    12.080713459000002
+   ],
+   "wall_median_s": 12.080713459000002,
+   "engine_total_s": 12.075397833,
+   "phases_s": {
+    "density_s": 0.130224459,
+    "diagonalization_s": 11.798643291,
+    "mixing_s": 0.002866,
+    "potential_s": 0.006757208,
+    "total_energy_s": 0.076110791
+   },
+   "iterations": 11,
+   "total_energy_ha": -7.8312300571210764,
+   "density_sha256": "a1ca9c0697400090be911e275e88ebe660c0416eb0eb6438d18ce68603910334"
+  }
+ }
+}

@@ -54,6 +54,15 @@ The original rule "never copy QE (GPL) source" stays. On 2026-11-03 the user als
 - Evidence independence: the QE comparisons recorded before this date (R1 to R8, README) were produced by an engine written without reading QE source and stay valid as independent evidence; statements in the docs that the QE source was not read are historical and are annotated, not deleted. Results of code changed after a note are still compared against QE outputs, and the notes list what was learned so that the influence is visible.
 - If a note would require reproducing non-obvious expression from QE (for example a specific table or formula layout) it is not written: describe the principle instead.
 
+## Output formats policy (user rule, 2026-11-03)
+Scientific outputs are written in standard, widely readable formats first, and in the established codes' formats where a de-facto convention exists, so that existing tools and workflows work without conversion; the project's own JSON/CSV is the complete record, not the only format. Priorities:
+- Volumetric data (density, ELF, potentials, partial charge): Gaussian cube and XSF first; VASP CHGCAR/LOCPOT style and VTK image data (`.vti`, ParaView) as additional writers; raw binary only as an internal exchange.
+- Band structures and DOS: CSV with a documented header and plain `.dat` columns readable by gnuplot, xmgrace `.agr`, a QE-style `bands.dat.gnu` / `dos.dat` layout, and a VASP-style `EIGENVAL` / `DOSCAR` layout; JSON metadata always; an SVG figure for people who do not code.
+- Structures: POSCAR, CIF, XYZ/extxyz, XSF for input and output when structure files are added.
+- Every writer is validated by an independent reader or a documented format specification test (not only by the writer's own reader), states units and conventions (energy reference, origin, ordering, atomic numbers), and never invents data a format cannot carry (the document says what is lost).
+- Writers live in the CLI/adapter layer; the numerical core does not know file formats (ADR 0017).
+Formats of other codes are written from public format documentation only; no source of those codes is copied.
+
 ## Performance work (user rule, 2026-11-03)
 Read `docs/performance/README.md` before changing any hot path (Hamiltonian apply, eigensolver, FFT, density). Measure and profile first, prove equivalence with `scripts/bench_scf.py` against `docs/performance/baseline.json` (energy within 1e-12 Ha; bit-identical density for overhead-only changes), keep allocation and logging out of hot loops, and record every accepted optimization (profile, change, before and after numbers, rejected ideas) in `docs/performance/optimization-log.md`. New code on the hot path is written to those rules from the start.
 

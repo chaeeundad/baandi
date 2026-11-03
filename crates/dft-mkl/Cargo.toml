@@ -1,0 +1,17 @@
+[package]
+name = "dft-mkl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+description = "Optional Intel MKL adapter (FFT and GEMM) for dft-numerics; the only place with FFI for MKL. Not linked unless dft-numerics enables its mkl feature."
+
+# This crate is the FFI adapter: unsafe is allowed here only, every unsafe block documents its preconditions.
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "deny"

@@ -10,6 +10,7 @@ members = [
     "crates/dft-solvers",
     "crates/dft-engine",
     "crates/dft-cli",
+    "crates/dft-mkl",
 ]
 
 [workspace.package]

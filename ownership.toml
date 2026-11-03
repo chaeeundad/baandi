@@ -8,7 +8,10 @@ gates = "scripts/check.sh"
 deps = []
 [crates.dft-geometry]   # cell, atoms, reciprocal lattice
 deps = ["dft-units"]
-[crates.dft-numerics]   # the only place with unsafe/FFI: BLAS/LAPACK/FFT adapters
+[crates.dft-numerics]   # numerical adapters; unsafe/FFI lives here and in dft-mkl
+deps = ["dft-mkl"]   # optional, feature `mkl` only
+unsafe_allowed = true
+[crates.dft-mkl]       # optional MKL FFI adapter (ADR 0019); linked only through the dft-numerics `mkl` feature
 deps = []
 unsafe_allowed = true
 [crates.dft-basis]      # G-vectors, cutoff, FFT index mapping

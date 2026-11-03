@@ -1,7 +1,7 @@
 # ADR 0018: PBE through xcx (proposal, awaiting approval to promote the dependency)
 
 - Date: 2026-11-03
-- Status: proposed. The only part that needs the user's approval is moving `xcx` from a dev-dependency to a normal dependency of `dft-physics` (it brings a file-level MPL-2.0 component into linked binaries).
+- Status: accepted 2026-11-03. The user approved moving `xcx` from a dev-dependency to a normal dependency of `dft-physics` (it brings a file-level MPL-2.0 component into linked binaries). Manifest changed by Claude; the PBE implementation is ticket P7B.
 - Applies ADR 0003 (prefer general-purpose libraries) and supersedes the "re-review before it moves" note of ADR 0007.
 
 ## Decision

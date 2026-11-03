@@ -135,3 +135,9 @@ exmex transitive. All six versions above were already in the parent lockfile
 before adoption commit 7ba4c04; only exmex itself was added by that commit.
 The supplied pure-Rust source builds offline on Apple Silicon without FFI.
 ADR 0014 records API restrictions, maintenance-review limits and validation.
+
+P7P1-FFT-ALLOC uses rustfft directly for production 3D axis passes with persistent
+plans, scratch and a strided lane buffer. ndrustfft remains in the unchanged
+manifest and is used only by the historical FFT test oracle; moving it to a
+dev-dependency is a separate manifest decision for Claude. No dependency versions
+or features changed.

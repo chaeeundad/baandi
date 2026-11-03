@@ -2,8 +2,9 @@
 pub mod linalg;
 
 use ndarray::Array3;
-use ndrustfft::{FftHandler, ndfft, ndifft};
 use num_complex::Complex64;
+use rustfft::{Fft, FftPlanner};
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -31,13 +32,16 @@ pub trait Fft3d {
     ) -> Result<(), FftError>;
 }
 
-/// Three persistent handlers and two persistent full-grid scratch buffers.
-/// ndrustfft may still allocate internal lane scratch; this is not allocation-free.
+/// Persistent rustfft plans, shared scratch, and one reusable strided lane.
+/// After construction, transforms only copy slices, gather/scatter lanes, scale,
+/// and call rustfft's allocation-free `process_with_scratch`. No buffers grow.
+/// Scratch requirements are checked before every axis pass in debug builds.
 pub struct FftPlan3d {
     shape: [usize; 3],
-    handlers: [FftHandler<f64>; 3],
-    first: Array3<Complex64>,
-    second: Array3<Complex64>,
+    forward: [Arc<dyn Fft<f64>>; 3],
+    inverse: [Arc<dyn Fft<f64>>; 3],
+    scratch: Vec<Complex64>,
+    lane: Vec<Complex64>,
     size: f64,
 }
 impl FftPlan3d {
@@ -49,12 +53,21 @@ impl FftPlan3d {
         if n == 0 || n > isize::MAX as usize / std::mem::size_of::<Complex64>() {
             return Err(FftError::InvalidGrid);
         }
-        let dims = (shape[0], shape[1], shape[2]);
+        let mut planner = FftPlanner::new();
+        let forward = shape.map(|n| planner.plan_fft_forward(n));
+        let inverse = shape.map(|n| planner.plan_fft_inverse(n));
+        let scratch_len = forward
+            .iter()
+            .chain(&inverse)
+            .map(|plan| plan.get_inplace_scratch_len())
+            .max()
+            .unwrap();
         Ok(Self {
             shape,
-            handlers: shape.map(FftHandler::new),
-            first: Array3::zeros(dims),
-            second: Array3::zeros(dims),
+            forward,
+            inverse,
+            scratch: vec![Complex64::default(); scratch_len],
+            lane: vec![Complex64::default(); *shape.iter().max().unwrap()],
             size: n as f64,
         })
     }
@@ -71,17 +84,51 @@ impl FftPlan3d {
         {
             return Err(FftError::IncompatibleArray);
         }
-        // Measured ndrustfft default: forward unscaled, inverse divided by N.
-        if inverse {
-            ndifft(input, &mut self.first, &self.handlers[0], 0);
-            ndifft(&self.first, &mut self.second, &self.handlers[1], 1);
-            ndifft(&self.second, output, &self.handlers[2], 2);
-            output.mapv_inplace(|z| z * self.size);
+        let data = output.as_slice_mut().unwrap();
+        data.copy_from_slice(input.as_slice().unwrap());
+        let plans = if inverse {
+            &self.inverse
         } else {
-            ndfft(input, &mut self.first, &self.handlers[0], 0);
-            ndfft(&self.first, &mut self.second, &self.handlers[1], 1);
-            ndfft(&self.second, output, &self.handlers[2], 2);
-            output.mapv_inplace(|z| z / self.size);
+            &self.forward
+        };
+        for (axis, plan) in plans.iter().enumerate() {
+            let len = self.shape[axis];
+            let stride: usize = self.shape[axis + 1..].iter().product();
+            debug_assert!(self.scratch.len() >= plan.get_inplace_scratch_len());
+            debug_assert!(self.lane.len() >= len);
+            let scale = 1.0 / len as f64;
+            for block in data.chunks_exact_mut(len * stride) {
+                for offset in 0..stride {
+                    // The last axis is already contiguous; other axes reuse one lane.
+                    let lane = if stride == 1 {
+                        &mut *block
+                    } else {
+                        for (i, z) in self.lane[..len].iter_mut().enumerate() {
+                            *z = block[i * stride + offset];
+                        }
+                        &mut self.lane[..len]
+                    };
+                    plan.process_with_scratch(lane, &mut self.scratch);
+                    if inverse {
+                        // Match ndrustfft's per-axis multiplication exactly.
+                        for z in lane.iter_mut() {
+                            *z *= scale;
+                        }
+                    }
+                    if stride != 1 {
+                        for (i, z) in self.lane[..len].iter().enumerate() {
+                            block[i * stride + offset] = *z;
+                        }
+                    }
+                }
+            }
+        }
+        for z in data {
+            if inverse {
+                *z *= self.size;
+            } else {
+                *z /= self.size;
+            }
         }
         Ok(())
     }

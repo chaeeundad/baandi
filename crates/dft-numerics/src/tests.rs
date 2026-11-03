@@ -201,3 +201,87 @@ fn grid_layout_and_errors() {
     single.to_reciprocal(&input, &mut out).unwrap();
     assert_eq!(out, input);
 }
+
+// Historical implementation retained as a normalization and operation-order oracle.
+fn legacy_transform(input: &Array3<Complex64>, inverse: bool) -> Array3<Complex64> {
+    use ndrustfft::{FftHandler, ndfft, ndifft};
+    let handlers = [0, 1, 2].map(|axis| FftHandler::new(input.shape()[axis]));
+    let mut first = Array3::zeros(input.raw_dim());
+    let mut second = first.clone();
+    let mut output = first.clone();
+    if inverse {
+        ndifft(input, &mut first, &handlers[0], 0);
+        ndifft(&first, &mut second, &handlers[1], 1);
+        ndifft(&second, &mut output, &handlers[2], 2);
+        output.mapv_inplace(|z| z * input.len() as f64);
+    } else {
+        ndfft(input, &mut first, &handlers[0], 0);
+        ndfft(&first, &mut second, &handlers[1], 1);
+        ndfft(&second, &mut output, &handlers[2], 2);
+        output.mapv_inplace(|z| z / input.len() as f64);
+    }
+    output
+}
+
+#[test]
+fn legacy_bitwise_equivalence_and_workspace_reuse() {
+    for shape in [
+        [1, 1, 1],
+        [1, 3, 5],
+        [3, 1, 5],
+        [3, 5, 1],
+        [7, 9, 11],
+        [13, 5, 17],
+        [15, 20, 24],
+        [24, 24, 24],
+        [25, 25, 25],
+        [27, 27, 27],
+        [36, 36, 36],
+    ] {
+        let mut plan = FftPlan3d::new(shape).unwrap();
+        let scratch = (
+            plan.scratch.as_ptr(),
+            plan.scratch.len(),
+            plan.scratch.capacity(),
+        );
+        let lane = (plan.lane.as_ptr(), plan.lane.len(), plan.lane.capacity());
+        let mut state = 0x1234_5678_9abc_def0_u64;
+        let mut random = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1_u64 << 53) as f64 - 0.5
+        };
+        let input = Array3::from_shape_simple_fn(shape, || Complex64::new(random(), random()));
+        let mut output = Array3::zeros(shape);
+        for inverse in [false, true, false, true] {
+            let expected = legacy_transform(&input, inverse);
+            plan.transform(&input, &mut output, inverse).unwrap();
+            for (actual, expected) in output.iter().zip(&expected) {
+                assert_eq!(
+                    actual.re.to_bits(),
+                    expected.re.to_bits(),
+                    "{shape:?} inverse={inverse}"
+                );
+                assert_eq!(
+                    actual.im.to_bits(),
+                    expected.im.to_bits(),
+                    "{shape:?} inverse={inverse}"
+                );
+            }
+            assert_eq!(
+                scratch,
+                (
+                    plan.scratch.as_ptr(),
+                    plan.scratch.len(),
+                    plan.scratch.capacity()
+                )
+            );
+            assert_eq!(
+                lane,
+                (plan.lane.as_ptr(), plan.lane.len(), plan.lane.capacity())
+            );
+        }
+        println!("legacy FFT {shape:?}: both directions bit-identical; workspace unchanged");
+    }
+}

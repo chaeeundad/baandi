@@ -100,8 +100,8 @@ fn verify(large: bool) {
     let run = c.run("", None);
     status(&run, 0);
     let mut first = c.json("results", "results.json");
-    // Exact legacy top-level shape, checked on actual CLI output.
-    assert_eq!(first.as_object().unwrap().len(), 22);
+    // Legacy fields plus additive per-band accuracy, checked on actual output.
+    assert_eq!(first.as_object().unwrap().len(), 23);
     assert!(first.get("kpoints").is_none());
     for key in [
         "schema_version",
@@ -129,6 +129,22 @@ fn verify(large: bool) {
         assert!(!first[key].is_null(), "{key}");
     }
     assert_eq!(first["convergence"]["converged"], true);
+    let occupied = first["occupations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f.as_f64().unwrap() > 0.0)
+        .count();
+    let accuracy = first["band_accuracy"].as_array().unwrap();
+    assert_eq!(accuracy.len(), first["bands"].as_u64().unwrap() as usize);
+    for (j, band) in accuracy.iter().enumerate() {
+        assert_eq!(band["buffer"], j > occupied);
+        assert!(band["residual_ha"].as_f64().unwrap().is_finite());
+        if j <= occupied {
+            assert_eq!(band["converged"], true);
+        }
+    }
+
     let energy = first["energies"]["total"]["ha"].as_f64().unwrap();
     assert_eq!(
         first["total_energy"]["ha"],
@@ -465,6 +481,7 @@ fn kpoint_scf() {
     let mut keys: Vec<_> = r.as_object().unwrap().keys().map(String::as_str).collect();
     keys.sort();
     let mut expected = vec![
+        "band_accuracy",
         "schema_version",
         "tool",
         "timestamp",
@@ -561,6 +578,7 @@ fn expressions_preserve_energy_and_record_resolutions() {
     status(&c.run("", Some(Path::new("plain"))), 0);
     let plain = c.json("plain", "results.json");
     let expected_keys = [
+        "band_accuracy",
         "schema_version",
         "tool",
         "timestamp",

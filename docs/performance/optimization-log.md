@@ -1682,3 +1682,111 @@ speedup is asserted. Shared-host samples are indicative and quiet-node profiling
 remains with the orchestrator. Raw samples, hashes, exact commands, input
 adaptation for the new preflight rules and remaining limitations are in the
 latest section of `batched-fft-study.md`. The prior ownership blocker is resolved.
+
+### P11A: incremental SCF, no numerical or measured performance regression
+
+Base: main/task HEAD `9495d9fbaaf0e0bf6bf141ea61675e1d803eeeec`,
+2026-11-03, arm64 macOS 27.0.1, rustc 1.99.1, default Rust backend.
+No algorithm, numerical default, tolerance, reduction order or solver/mixer
+implementation changed. The original loop body now advances a persistent
+`ScfSession` once. Classic constructs no events/queue/timestamps; observation
+publishes bounded scalar records at completed boundaries. Strict versus retained
+budget termination preserves the original final-mixing difference. No speedup
+or new scientific accuracy claim is made.
+
+Before editing, built `cargo build --release -p dft-cli` (exit 0), saved the
+binary as `/tmp/p11-before`, and recorded Gamma/k222s with
+`python3 -I scripts/bench_scf.py --binary /tmp/p11-before --upf
+/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s
+--repeats 5 --record /tmp/p11-baseline.json` (exit 0). A subsequent attempt to
+profile the preserved baseline k444s process with `sample <pid> 1 -file
+/tmp/p11-profile.txt` was denied by the sandbox (exit 255); the SCF itself exited
+0. Thus no new stack-profile evidence is claimed. This is state extraction,
+not a profile-derived kernel optimization.
+
+Independent equivalence: temporarily compiled the original HEAD `scf.rs` and
+`lib.rs` against the new test's identical synthetic fixture generator, captured
+scientific fingerprints, then restored the final source. The temporary oracle
+runner `/tmp/p11-oracle.py` and its release test exited 0. The final 18/18
+fingerprints match the old loop. They cover three fixtures, three mixers and
+threads 1/4. Both thread counts give the following same FNV-1a fingerprints of
+normalized Debug scalars/history/certificates plus explicit complete density and
+orbital bits (durations excluded):
+
+| Fixture | Linear | Pulay | KerkerPulay |
+| --- | --- | --- | --- |
+| Cubic Gamma, nonlocal ion | b98923c3dfc5550f | d5725b937b95e719 | b1fba17f7710cadb |
+| Cubic four k points | eaff564979a8d804 | 202f52bf37064600 | 1202a2f23a08e261 |
+| Skew two species, local + nonlocal | b6c6edacfbc8454c | de548bc4df3e32ef | 5db516b4353c01aa |
+
+The permanent release matrix additionally compares each of these 18 cases in
+Classic, Observed and AgentControlled (54 comparisons) to the conventional
+API, checking scientific records and each array element. Example Pulay energies:
+-0.62379772639925168, -0.51412521505579167, -1.52491411485654815 Ha,
+respectively; 11, 18, 13 steps. No inter-machine hash portability is claimed.
+
+`cargo test --release -p dft-engine --test stepwise_equivalence --
+--include-ignored --nocapture --test-threads=1` exited 0: seven tests passed,
+including the matrix, retained/strict exhaustion, divergence, invalid mixer
+initialization, slow-consumer loss accounting and critical-capacity exhaustion
+before numerical work. A failed step and its events use one committed version;
+terminal/repeated calls cannot advance it. The core has no durable journal:
+critical events remain in bounded memory and resource exhaustion is explicit.
+AgentControlled without intervention is measured; intervention/checkpoint work
+is outside P11A.
+
+Final `bench_scf.py --cases gamma,k222s --repeats 5 --baseline
+/tmp/p11-baseline.json --require-identical --record /tmp/p11-after.json` exited
+0: energy differences **0 Ha**, identical density SHA-256, ten steps each.
+Gamma: -7.295530468210769 Ha,
+`74963159f8eb058d58220f3bbde70a806a3622ca3c568b7d7d1ef068207610b0`.
+Four k points: -7.919423412469083 Ha,
+`c1de1d09cb8dc2c53500b10ce90e7ee8dc1bf692e1a87e2f2fec59cc64315617`.
+These are internal before/after comparisons, not new QE reference runs.
+Both old and new binaries also ran against `docs/performance/baseline.json`:
+both strict comparisons exit 5 because historical density hashes already
+changed on main; energy differences remain 1.58e-13 and 1.24e-14 Ha, within
+1e-12 Ha. The historical baseline was not overwritten.
+
+Timing: the first five-run measurement overlapped workspace compilation
+(k222s wall median 0.490 s) and is not used for a performance conclusion.
+After compilation completed, `/tmp/p11-paired-bench.py` called the repository
+benchmark's `run_case` with alternating old/new order, one warmup pair and eight
+measured pairs per case (exit 0; all energies and hashes identical):
+
+| Case | Old/new wall median (s) | Change | Old/new engine median (s) |
+| --- | --- | --- | --- |
+| Gamma | 0.112248480 / 0.111934146 | -0.280% | 0.107682229 / 0.107233709 |
+| Four k points | 0.359220604 / 0.359966521 | +0.208% | 0.354042292 / 0.354897500 |
+
+Wall ranges overlap: Gamma old [0.111012125, 0.113199125] s, new
+[0.111467375, 0.113269167] s; four-k old [0.357676541, 0.360752250] s,
+new [0.357610583, 0.362651917] s. Engine median changes are -0.417%/+0.242%.
+No measurable regression is resolved by these samples.
+
+For a short synthetic Gamma workload, the release `mode_timings` test rotates
+mode order, uses ten warmup rounds and 101 measured rounds, and includes
+read-only snapshot assertions and explicit queue consumption. Median
+Classic/Observed/AgentControlled times: 0.000375250 / 0.000375709 /
+0.000375500 s; observed overhead versus Classic +0.122%/+0.067%. Ranges:
+[0.000358000,0.000401916], [0.000358000,0.000390125],
+[0.000357583,0.000420500] s. These agree within shared-host noise; they do not
+establish universal sub-percent overhead or replace quiet-node P11J measurements.
+
+Evidence logs and raw samples are temporary files `/tmp/p11-oracle.log`,
+`/tmp/p11-tests-final.log`, `/tmp/p11-paired-bench.json`. The fixture/matrix and
+interleaved mode timing command are retained in `stepwise_equivalence.rs`.
+No new result dataset was added outside ticket ownership. Running
+`python3 -I scripts/make_readme_figures.py` exited 0 and left generated README
+and figures unchanged. No new README accuracy claim is warranted by this
+behavior-preserving extraction. No default or optimization was selected on Si
+alone, no kernel was modified, and no rejected numerical alternative was tried.
+
+Verification gates: `scripts/check.sh dft-engine` and `scripts/check.sh` both
+exit 0 (build/test/fmt/clippy PASS). Final engine check after adding snapshot
+metadata and failure/queue tests also exits 0. README generator consistency:
+`python3 -I scripts/tests/test_readme_figures.py` exits 0, three tests passed
+(existing ResourceWarnings only). `git diff --check` exits 0. Main and task HEAD
+remain identical at `9495d9f`; no rebase is necessary and all changes are left
+uncommitted as required. Session/dashboard JSON and dataset publication are
+outside this ticket's OWNED_FILES and remain with the orchestrator.

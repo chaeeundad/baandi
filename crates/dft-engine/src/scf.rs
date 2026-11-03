@@ -1,3 +1,5 @@
+#[path = "session.rs"]
+pub mod session;
 use crate::Functional;
 use crate::energy::{self, AuditInput, EnergyAudit};
 use dft_basis::{FftGridSpec, PlaneWaveBasis};
@@ -18,6 +20,7 @@ use dft_solvers::{
     mixing::{LinearMixer, PulayMixer},
 };
 use dft_upf::Pseudopotential;
+use session::{CompletionMode, ScfSession, StepStatus};
 use std::{
     fmt,
     time::{Duration, Instant},
@@ -39,6 +42,8 @@ pub enum ScfError {
     },
     Numerical(String),
     NonFinite,
+    /// Bounded observation storage cannot reserve another complete step.
+    TelemetryExhausted,
     NotConverged {
         history: Vec<IterationRecord>,
     },
@@ -916,344 +921,24 @@ impl ScfProblem {
     pub fn run_outcome(self) -> Result<ScfOutcome, ScfError> {
         self.run_impl(true)
     }
-    fn run_impl(mut self, retain_last: bool) -> Result<ScfOutcome, ScfError> {
-        let start = Instant::now();
-        let mut mixer: Box<dyn MixerHistory> = match self.options.mixing {
-            Mixing::Linear { beta } => Box::new(LinearMixer { beta }),
-            Mixing::Pulay { beta, history } => Box::new(PulayMixer::new(beta, history)?),
-            Mixing::KerkerPulay {
-                beta,
-                history,
-                q0_inverse_bohr,
-            } => {
-                let dims = self.grid.dims();
-                let mut fft = FftPlan3d::new(dims)?;
-                let mut source = Array3::<Complex64>::zeros(dims);
-                let mut target = source.clone();
-                let transform = move |values: &mut [Complex64], inverse: bool| {
-                    source.as_slice_mut().unwrap().copy_from_slice(values);
-                    let result = if inverse {
-                        fft.to_real(&source, &mut target)
-                    } else {
-                        fft.to_reciprocal(&source, &mut target)
-                    };
-                    result.map_err(|e| dft_solvers::SolverError::Application(e.to_string()))?;
-                    values.copy_from_slice(target.as_slice().unwrap());
-                    Ok(())
-                };
-                let filter = Kerker::new(
-                    dims,
-                    self.cell.reciprocal_columns_inverse_bohr(),
-                    q0_inverse_bohr,
-                    transform,
-                )?;
-                Box::new(PreconditionedPulay::new(
-                    beta,
-                    history,
-                    dims.iter().product(),
-                    filter,
-                )?)
-            }
+    fn run_impl(self, retain_last: bool) -> Result<ScfOutcome, ScfError> {
+        let completion = if retain_last {
+            CompletionMode::RetainLast
+        } else {
+            CompletionMode::Strict
         };
-        // Validate mixer parameters even if a future system converges immediately.
-        let mut n = self.uniform_density();
-        mixer.mix(
-            n.as_slice().unwrap(),
-            n.as_slice().unwrap(),
-            self.electrons / self.cell.volume_bohr3(),
-        )?;
-        mixer.reset();
-        let mut history: Vec<IterationRecord> = Vec::new();
-        let mut previous: Option<Vec<ComplexMatrix>> = None;
-        let weight = self.cell.volume_bohr3() / n.len() as f64;
-        let mut best = f64::INFINITY;
-        let mut growing = 0;
-        let mut mixing_resets = 0;
-        for iteration in 1..=self.options.max_iterations {
-            if n.iter()
-                .any(|n| !n.is_finite() || *n < -xc::NEGATIVE_ROUNDOFF)
-            {
-                return Err(ScfError::Diverged {
-                    reason: "mixed density is nonfinite or negative beyond 1e-14 Bohr^-3".into(),
-                    history,
-                });
-            }
-            let tolerance = if self.options.residual_eigen_schedule {
-                // Residual is the normalized density L2 norm in atomic units.
-                // 0.1 is an empirical scheduling coefficient in atomic units.
-                history
-                    .last()
-                    .map_or(1e-2, |r| 0.1 * r.density_residual)
-                    .min(1e-2)
-                    .max(0.1 * self.options.eigen_tolerance)
-            } else {
-                (self.options.initial_eigen_tolerance
-                    * self
-                        .options
-                        .eigen_tolerance_decay
-                        .powf((iteration - 1) as f64))
-                .max(0.1 * self.options.eigen_tolerance)
-            };
-            let step = self
-                .step_kpoints_with_certification(
-                    &n,
-                    previous.as_deref(),
-                    tolerance,
-                    tolerance <= self.options.eigen_tolerance,
-                )
-                .map_err(|e| match e {
-                    ScfError::NonFinite => ScfError::Diverged {
-                        reason: "nonfinite SCF arithmetic".into(),
-                        history: history.clone(),
-                    },
-                    other => other,
-                })?;
-            let residual =
-                density_distance(&step.density, &n, self.cell.volume_bohr3(), self.electrons);
-            let charge = step.density.sum() * weight;
-            let charge_error = (charge - self.electrons).abs() / self.electrons;
-            let input_charge_error = (n.sum() * weight - self.electrons).abs() / self.electrons;
-            let energy_change = history
-                .last()
-                .map(|r| step.energy.total_hartree() - r.energy.total_hartree());
-            let max_eigen_residual = step
-                .k_points
-                .iter()
-                .flat_map(|k| k.solution.residuals.iter().zip(&self.occupations))
-                .filter(|(_, f)| **f > 0.0)
-                .map(|(r, _)| *r)
-                .fold(0.0, f64::max);
-            let record = IterationRecord {
-                fixed_point_certificate: None,
-                mixing_fraction: 1.0,
-                mixer_reset: false,
-                density_contraction: history
-                    .last()
-                    .filter(|r| r.density_residual > 0.0)
-                    .map(|r| residual / r.density_residual),
-                mixing_history_used: None,
-                mixing_resets,
-                mixing_raw_recovery: false,
-                iteration,
-                energy: step.energy.clone(),
-                energy_change,
-                density_residual: residual,
-                max_eigen_residual,
-                requested_eigen_tolerance: tolerance,
-                davidson_iterations: step.k_points.iter().map(|k| k.solution.iterations).sum(),
-                operator_applications: step
-                    .k_points
-                    .iter()
-                    .map(|k| k.solution.operator_applications)
-                    .sum(),
-                davidson_iterations_per_k: step
-                    .k_points
-                    .iter()
-                    .map(|k| k.solution.iterations)
-                    .collect(),
-                operator_applications_per_k: step
-                    .k_points
-                    .iter()
-                    .map(|k| k.solution.operator_applications)
-                    .collect(),
-                charge_error,
-                input_charge_error,
-                min_density: step.density.iter().copied().fold(f64::INFINITY, f64::min),
-                timings: step.timings,
-            };
-            let converged = converged(&record, &self.options);
-            history.push(record);
-            if !residual.is_finite()
-                || !step.energy.total_hartree().is_finite()
-                || !charge_error.is_finite()
-                || !max_eigen_residual.is_finite()
-            {
-                return Err(ScfError::Diverged {
-                    reason: "nonfinite SCF observable".into(),
-                    history,
-                });
-            }
-            if residual > self.options.divergence_factor * best.max(self.options.density_tolerance)
-            {
-                growing += 1;
-            } else {
-                growing = 0;
-            }
-            best = best.min(residual);
-            if growing >= self.options.divergence_patience {
-                return Err(ScfError::Diverged {
-                    reason: "density residual exceeded growth limit".into(),
-                    history,
-                });
-            }
-            // Certify the returned output density itself, not just the input
-            // fixed-point residual. A small-gap response can amplify that residual.
-            let certified = if converged {
-                let warm: Vec<_> = step
-                    .k_points
-                    .iter()
-                    .map(|k| k.solution.eigenvectors.clone())
-                    .collect();
-                let check = self
-                    .step_kpoints(
-                        &step.density,
-                        Some(&warm),
-                        0.1 * self.options.eigen_tolerance,
-                    )
-                    .map_err(|e| match e {
-                        ScfError::NonFinite => ScfError::Diverged {
-                            reason: "nonfinite certification arithmetic".into(),
-                            history: history.clone(),
-                        },
-                        other => other,
-                    })?;
-                let density_residual = density_distance(
-                    &check.density,
-                    &step.density,
-                    self.cell.volume_bohr3(),
-                    self.electrons,
-                );
-                let occupied_eigenvalue_change = check
-                    .k_points
-                    .iter()
-                    .zip(&step.k_points)
-                    .flat_map(|(a, b)| {
-                        a.solution
-                            .eigenvalues
-                            .iter()
-                            .zip(&b.solution.eigenvalues)
-                            .zip(&self.occupations)
-                    })
-                    .filter(|(_, f)| **f > 0.0)
-                    .map(|((a, b), _)| (a - b).abs())
-                    .fold(0.0, f64::max);
-                let passed = density_residual <= self.options.density_tolerance
-                    && occupied_eigenvalue_change <= 1e-7;
-                history.last_mut().unwrap().fixed_point_certificate = Some(FixedPointCertificate {
-                    strict_residuals_per_k: check
-                        .k_points
-                        .iter()
-                        .map(|k| {
-                            k.solution
-                                .residuals
-                                .iter()
-                                .zip(&k.solution.buffer)
-                                .filter_map(|(&r, &buffer)| (!buffer).then_some(r))
-                                .collect()
-                        })
-                        .collect(),
-                    buffer_residuals_per_k: check
-                        .k_points
-                        .iter()
-                        .map(|k| {
-                            k.solution
-                                .residuals
-                                .iter()
-                                .zip(&k.solution.buffer)
-                                .filter_map(|(&r, &buffer)| buffer.then_some(r))
-                                .collect()
-                        })
-                        .collect(),
-                    density_residual,
-                    occupied_eigenvalue_change,
-                    davidson_iterations: check.k_points.iter().map(|k| k.solution.iterations).sum(),
-                    operator_applications: check
-                        .k_points
-                        .iter()
-                        .map(|k| k.solution.operator_applications)
-                        .sum(),
-                    davidson_iterations_per_k: check
-                        .k_points
-                        .iter()
-                        .map(|k| k.solution.iterations)
-                        .collect(),
-                    operator_applications_per_k: check
-                        .k_points
-                        .iter()
-                        .map(|k| k.solution.operator_applications)
-                        .collect(),
-                    timings: check.timings,
-                });
-                if passed {
-                    self.check_gap(&check.k_points)?;
-                }
-                passed
-            } else {
-                false
-            };
-            if certified || (retain_last && iteration == self.options.max_iterations) {
-                let gap_hartree = if certified {
-                    self.check_gap(&step.k_points)?
-                } else {
-                    self.minimum_gap.map(|_| self.sampled_gap(&step.k_points))
-                };
-                return Ok(ScfOutcome {
-                    converged: certified,
-                    result: ScfResult {
-                        k_points: step.k_points,
-                        gap_hartree,
-                        energy: step.energy,
-                        eigenvalues: step.solution.eigenvalues,
-                        occupations: self.occupations,
-                        orbitals: step.solution.eigenvectors,
-                        density: step.density,
-                        charge,
-                        history,
-                        ewald_breakdown: self.ewald,
-                        setup_time: self.setup_time,
-                        total_time: start.elapsed() + self.setup_time,
-                    },
-                });
-            }
-            let mix_start = Instant::now();
-            let mut mixed = mixer
-                .mix(
-                    n.as_slice().unwrap(),
-                    step.density.as_slice().unwrap(),
-                    self.electrons / self.cell.volume_bohr3(),
-                )
-                .map_err(|e| ScfError::Diverged {
-                    reason: e.to_string(),
-                    history: history.clone(),
-                })?;
-            history.last_mut().unwrap().mixing_history_used =
-                Some(mixer.history_len().saturating_sub(1));
-            history.last_mut().unwrap().mixing_raw_recovery = mixer.used_raw_recovery();
-            // Anderson extrapolation is unconstrained. A convex step toward its
-            // proposal preserves charge and Fourier support while keeping XC in
-            // its density domain. Never clip individual spatial samples.
-            if matches!(
-                self.options.mixing,
-                Mixing::Pulay { .. } | Mixing::KerkerPulay { .. }
-            ) {
-                let fraction = n
-                    .iter()
-                    .zip(&mixed)
-                    .filter(|(_, b)| **b < 0.0)
-                    .map(|(a, b)| 0.9 * a / (a - b))
-                    .fold(1.0, f64::min);
-                if fraction < 1.0 {
-                    for (b, a) in mixed.iter_mut().zip(&n) {
-                        *b = a + fraction * (*b - a);
-                    }
-                    mixer.reset();
-                    let record = history.last_mut().unwrap();
-                    record.mixing_fraction = fraction;
-                    record.mixer_reset = true;
-                    mixing_resets += 1;
-                    record.mixing_resets = mixing_resets;
-                }
-            }
-            n.as_slice_mut().unwrap().copy_from_slice(&mixed);
-            history.last_mut().unwrap().timings.mixing = mix_start.elapsed();
-            previous = Some(
-                step.k_points
-                    .into_iter()
-                    .map(|k| k.solution.eigenvectors)
-                    .collect(),
-            );
+        let mut session =
+            ScfSession::new(self, completion, crate::events::ExecutionConfig::default())?;
+        session.initialize()?;
+        while session.step()?.status == StepStatus::Ready {}
+        if !retain_last && session.result().is_none() {
+            return Err(ScfError::NotConverged {
+                history: session.history().to_vec(),
+            });
         }
-        Err(ScfError::NotConverged { history })
+        session
+            .into_result()
+            .ok_or(ScfError::InvalidInput("result unavailable"))
     }
     fn sampled_gap(&self, points: &[KPointSolution]) -> f64 {
         let occupied = self.occupations.iter().filter(|f| **f > 0.0).count();

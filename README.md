@@ -2,6 +2,8 @@
 
 **A modern, state-aware density functional theory engine for materials research.**
 
+*BAANDI* stands for **B**ridging **A**gents **A**nd **N**umerical **D**ensity-functional **I**nterfaces.
+
 BAANDI is an experimental, open-source electronic structure engine written in Rust. It is being developed to explore new approaches to density functional theory (DFT), electronic-state exploration, and interoperability across computational scales.
 
 The project begins with a plane-wave Kohn–Sham DFT implementation, with an emphasis on numerical correctness, modular architecture, and reproducible scientific computing.

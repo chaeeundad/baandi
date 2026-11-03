@@ -494,3 +494,32 @@ The starting binary fails to converge its Davidson solve for this input;
 therefore this case currently reports failure, not an accepted SCF speedup.
 Benchmark records add `phase_medians_s` and `engine_total_median_s`; the older
 last-run fields and default case selection retain their meanings.
+
+### P7PC band accuracy fields
+
+`results.json.band_accuracy` describes the legacy first-k eigenvalue list.
+For explicit k-point output, each `kpoints.points[]` also has `band_accuracy`.
+Each entry contains `residual_ha` (residual vector 2-norm), `buffer` and
+`converged` (whether that band's requested residual target was met). Existing
+energy, eigenvalue and convergence fields retain their names and units.
+
+Occupied bands and the lowest empty band use the requested strict tolerance.
+Higher empty bands use `max(requested_tolerance, 1e-5)` Ha and are printed with
+`(buffer; less accurate)`. Their printed decimal places do not imply strict
+accuracy. At the solver iteration limit buffers can be returned with
+`converged=false`; all strict bands must still pass. A residual bounds distance
+to the spectrum, not the error in an individually indexed member of a cluster.
+
+Fixed-point history certificates add `strict_residuals_per_k_ha` and
+`buffer_residuals_per_k_ha`. Only the former belong to the eigenpair certificate;
+the latter are separate informational measurements. The sampled-gap test is
+unchanged and uses the strict lowest empty band. Eight bands for four occupied
+states means five strict bands and three buffers, not four buffers. Default
+`extra_bands=4` is unchanged. The engine uses at least six subspace columns per
+requested band; the configured `davidson_subspace` is a minimum working capacity.
+
+Intermediate SCF history eigen residuals may be recurrence residuals while the
+requested tolerance is above the final `eigen_tolerance`. Final-result band
+residuals and all fixed-point certificate arrays remain true operator residuals;
+final-accuracy maps always perform that check. This removes duplicate operator
+work without weakening the final acceptance tests.

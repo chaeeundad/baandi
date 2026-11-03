@@ -177,6 +177,39 @@
      "iters": 11
     }
    }
+  },
+  {
+   "label": "+ O4a/b (Davidson)",
+   "commit": "3b94d53",
+   "binary_sha256": "7013b0ff72d74e53758192bd68e9a2ad382d0b3bbecd1ad86d345c07b1c7f70b",
+   "identical_to_baseline": false,
+   "energy_difference_ha_max": 5.33e-15,
+   "cases": {
+    "gamma": {
+     "wall_s": 0.71,
+     "engine_s": 0.704,
+     "diag_s": 0.521,
+     "iters": 11
+    },
+    "k222s": {
+     "wall_s": 2.808,
+     "engine_s": 2.81,
+     "diag_s": 2.428,
+     "iters": 11
+    },
+    "k222": {
+     "wall_s": 5.341,
+     "engine_s": 5.335,
+     "diag_s": 4.641,
+     "iters": 11
+    },
+    "k444s": {
+     "wall_s": 22.409,
+     "engine_s": 22.401,
+     "diag_s": 20.158,
+     "iters": 11
+    }
+   }
   }
  ]
 }

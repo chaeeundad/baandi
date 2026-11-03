@@ -302,5 +302,21 @@
     "result": "pass",
     "detail": "Density identical and energy diff 0 on Gamma, 4 k, 8 k. Wall time vs baseline: Gamma 1.30 s to 0.66 s, 8 k 12.1 s to 5.9 s (about 2x) on a shared machine; final measurement after the next steps.",
     "date": "2026-11-03"
+  },
+  {
+    "id": "T39",
+    "check": "Optimization O4a/b (Davidson product reuse) measured on quiet dev08, energy gate 1e-12 Ha",
+    "phase": "P7",
+    "result": "pass",
+    "detail": "Cumulative speedup vs before optimization: Gamma 3.21x, 4 k 3.91x, 8 k 3.98x, 32 k 4.42x; energy difference at most 5.3e-15 Ha; SCF iterations 11 unchanged. Relayed attestation.",
+    "date": "2026-11-03"
+  },
+  {
+    "id": "T40",
+    "check": "Optimization O4c (residual-driven eigen tolerance, free-electron start): QE agreement unchanged, speed (Mac, indicative)",
+    "phase": "P7",
+    "result": "pass",
+    "detail": "Energy difference to the previous state at most 1.6e-13 Ha; QE comparison on 2x2x2, shifted 2x2x2 and 4x4x4 unchanged (1.28e-6 Ha/atom, eigenvalues at most 2.1e-6 Ha); SCF iterations 11 to 10; Mac speedup vs O4a/b 1.7 to 2.0x, vs original baseline 8.5 to 11.8x. dev08 measurement pending.",
+    "date": "2026-11-03"
   }
 ]

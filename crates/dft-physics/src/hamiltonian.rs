@@ -1,7 +1,7 @@
 //! Ionic and Kleinman–Bylander terms, and a reusable Bloch Hamiltonian.
 use dft_basis::{FftGridSpec, GVector, PlaneWaveBasis};
 use dft_geometry::Cell;
-use dft_numerics::{Fft3d, FftPlan3d, linalg::ComplexMatrix};
+use dft_numerics::{Fft3d, FftPlan3d, SpherePattern, linalg::ComplexMatrix};
 use dft_solvers::{LinearOperator, SolverError};
 use dft_upf::{Pseudopotential, radial::real_spherical_harmonic};
 use ndarray::Array3;
@@ -262,6 +262,7 @@ struct Scratch {
 /// Local grid values are in Ha and must use the internally derived grid dimensions.
 pub struct Hamiltonian {
     grid: FftGridSpec,
+    pattern: SpherePattern,
     kinetic: Vec<f64>,
     potential: Array3<f64>,
     nonlocal: NonlocalOperator,
@@ -294,8 +295,10 @@ impl Hamiltonian {
             real: Array3::zeros(dims),
             projections: vec![Complex64::default(); nonlocal.max_channels],
         });
+        let pattern = SpherePattern::from_indices(dims, grid.g_to_fft())?;
         Ok(Self {
             grid,
+            pattern,
             kinetic: basis
                 .momenta()
                 .iter()
@@ -343,13 +346,13 @@ impl Hamiltonian {
         }
         scratch
             .fft
-            .to_real(&scratch.reciprocal, &mut scratch.real)?;
+            .to_real_pruned(&scratch.reciprocal, &self.pattern, &mut scratch.real)?;
         for (z, v) in scratch.real.iter_mut().zip(self.potential.iter()) {
             *z *= v;
         }
         scratch
             .fft
-            .to_reciprocal(&scratch.real, &mut scratch.reciprocal)?;
+            .to_reciprocal_pruned(&scratch.real, &self.pattern, &mut scratch.reciprocal)?;
         for (i, &idx) in self.grid.g_to_fft().iter().enumerate() {
             y[i] = scratch.reciprocal[idx] + self.kinetic[i] * x[i];
         }

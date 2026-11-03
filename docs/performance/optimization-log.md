@@ -95,3 +95,85 @@ Final energies (Ha): Gamma `-7.295530468210927`, shifted
 The UPF was read only from the supplied external path, never copied or sent.
 These are rust-dft baseline comparisons, not new QE references. Changes are
 left uncommitted for Claude's review and acceptance.
+
+## 2026-11-03: O3 / P7P2-PRUNED-FFT — wavefunction lane pruning
+
+Pre-change evidence: supplied O1 profile (5020 samples) attributes 75.4% to
+FFT lanes/butterflies. Starting commit: `6fcbfe8a26d24fc399209bd213d9951fdd04a759`.
+This task uses that measured profile, not a fresh sampling claim. A local
+pre-change release benchmark is collected before modifying the implementation.
+
+Implementation: `SpherePattern` precomputes C-layout lane starts for both
+axis-0/1/2 passes and a support mask. Hamiltonian construction creates it from
+`g_to_fft`; only the two wavefunction transforms in `apply_with` change.
+Inverse skips absent (j,k) lanes and then absent k planes; forward skips
+unrequested i planes and then unrequested (i,j) lanes. Dependencies cannot
+cross those coordinates in subsequent passes. Forward entries outside support
+are explicitly zero, not equal to full-transform coefficients. Inverse input
+outside support must be canonical (+0,+0), matching scatter/fill; debug
+assertions are fused into the required copy, with no separate scan. Empty
+support tests verify that skipping zero lanes matches full FFT output bits.
+No hot-loop allocation, logging, timers, unsafe, new dependencies, axis-order
+changes or normalization changes. Full-grid methods and the Fft3d trait are
+unchanged; density (including its wavefunction transform), Hartree, XC and ionic
+paths are untouched under the ticket's explicit exclusions.
+
+Bitwise tests: seeded random complex coefficients on radius sweeps
+(empty, 0, 1, 3.5, 6, full grid), shapes 24^3, 25^3, 27^3, 15x20x24, 7x9x11,
+and 1^3, twice per direction with scratch reuse. All inverse entries and all
+requested forward entries match to_bits (including zero signs); forward
+non-support entries are canonical zero. The Gamma and shifted-k synthetic
+Hamiltonian tests retain the pre-O3 full FFT apply sequence as an oracle,
+including nonlocal accumulation, and compare three seeded random vectors each.
+Debug FFT tests took 0.89 s, Hamiltonian test 0.06 s; no new heavy test requires
+ignoring. Release FFT tests took 0.04 s. Test-only counters increment at actual
+pruned rustfft calls: on 24^3 radius 6, inverse and forward each execute
+1001 of the full transform's 1728 lanes (576 per axis), ratio 0.579282407,
+a 42.0717593% reduction. Counters are absent in production builds.
+
+Rejected/deferred ideas: changing normalization or axis order would change
+rounding and was rejected. Optional adjacent-lane batching was not implemented
+or benchmarked; its cache benefit is unestablished and remains a separate
+experiment. No batching performance claim is made. README generation and
+artifact/session updates are excluded by this ticket's owned-file restrictions.
+
+Benchmark environment: macOS 27.0.1 arm64, release, same worktree and host
+as the local pre-change run, no threading changes. Other jobs may share the
+machine; the final pre-change k222 repeat overlapped local test compilation.
+The after run started after build/check jobs finished. Claude re-measures on
+a quiet machine at acceptance. These are observed ratios, not controlled
+speedup claims. Engine/diagonalization times are the final repeat, not medians.
+
+| Case (30 Ry) | Stored baseline wall (s) | Local before wall median (s) | After wall median (s) | Before engine / diag (s) | After engine / diag (s) | Iterations before / after | dE vs baseline (Ha) | Density | Local before / after |
+| --- | ---: | ---: | ---: | --- | --- | --- | ---: | --- | ---: |
+| gamma | 1.304109792 | 0.907344667 | 0.643498083 | 0.902268791 / 0.843729832 | 0.638620542 / 0.577091207 | 11 / 11 | 0 | identical | 1.410x |
+| k222s | 6.548742542 | 4.498554500 | 3.006559750 | 4.487862834 / 4.357106377 | 3.000548250 / 2.866770332 | 11 / 11 | 0 | identical | 1.496x |
+| k222 | 12.080713459 | 8.870671458 | 5.798963250 | 12.010770708 / 11.752801791 | 5.793543875 / 5.564493375 | 11 / 11 | 0 | identical | 1.530x |
+
+Stored raw measurements (wall samples in seconds, energies in Ha):
+
+- gamma: before `[1.248156333, 0.907344667, 0.9067223329999998]`; after `[0.958626375, 0.6270296660000001, 0.6434980829999999]`;
+  energy `-7.295530468210927`; density SHA-256 `c4fde645365f4e7ed609486d76233335b3894540239b0443880351eea82257cd`.
+- k222s: before `[4.499430542, 4.498554500000001, 4.492647792]`; after `[3.082523917, 2.998330083999999, 3.006559749999999]`;
+  energy `-7.9194234124690706`; density SHA-256 `7b7e9c5aaf457f4d6ca5de52c8f2bc9aca531e27c4f0cf7f334cad08e2515c72`.
+- k222: before `[8.870671458, 8.793498875000001, 12.015688333]`; after `[5.841755833000001, 5.795453083000002, 5.79896325]`;
+  energy `-7.8312300571210764`; density SHA-256 `a1ca9c0697400090be911e275e88ebe660c0416eb0eb6438d18ce68603910334`.
+
+Verification commands (each exited 0):
+
+```sh
+export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
+cargo build --release -p dft-cli # before and after implementation
+cargo test -p dft-numerics pruned -- --nocapture
+cargo test --release -p dft-numerics pruned -- --nocapture
+cargo test -p dft-physics --test hamiltonian pruned_apply -- --nocapture
+scripts/check.sh # PASS build, test, fmt, clippy
+git diff --check
+python3 -I scripts/bench_scf.py --binary /Users/mino/Develop/rust-dft-wt/P7P2-PRUNED-FFT/target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222 --repeats 3 --baseline docs/performance/baseline.json --require-identical --record /tmp/P7P2-before.json
+python3 -I scripts/bench_scf.py --binary /Users/mino/Develop/rust-dft-wt/P7P2-PRUNED-FFT/target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222 --repeats 3 --baseline docs/performance/baseline.json --require-identical --record /tmp/P7P2-after.json
+```
+
+The UPF was read only at the supplied external path, never copied or committed.
+Comparisons are against rust-dft, not new QE references. Baseline, manifests,
+lockfile and other ticket-owned files were not modified. Changes are left
+uncommitted for Claude review.

@@ -285,3 +285,103 @@ fn legacy_bitwise_equivalence_and_workspace_reuse() {
         println!("legacy FFT {shape:?}: both directions bit-identical; workspace unchanged");
     }
 }
+
+fn assert_bits(a: Complex64, b: Complex64) {
+    assert_eq!(
+        (a.re.to_bits(), a.im.to_bits()),
+        (b.re.to_bits(), b.im.to_bits())
+    );
+}
+
+#[test]
+fn pruned_spheres_bitwise_and_lane_counts() {
+    let mut seed = 42_u64;
+    let mut next = || {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        (seed >> 11) as f64 / (1_u64 << 53) as f64 - 0.5
+    };
+    for shape in [[24; 3], [25; 3], [27; 3], [15, 20, 24], [7, 9, 11], [1; 3]] {
+        let mut fft = FftPlan3d::new(shape).unwrap();
+        let real = Array3::from_shape_fn(shape, |_| Complex64::new(next(), next()));
+        let mut full = Array3::zeros(shape);
+        let mut pruned = full.clone();
+        for radius in [-1.0, 0.0, 1.0, 3.5, 6.0, 100.0] {
+            let indices: Vec<_> = real
+                .indexed_iter()
+                .filter_map(|((i, j, k), _)| {
+                    let q = [i, j, k];
+                    let r2: usize = q.iter().zip(shape).map(|(&x, n)| x.min(n - x).pow(2)).sum();
+                    (radius >= 0.0 && r2 as f64 <= radius * radius).then_some(q)
+                })
+                .collect();
+            let pattern = SpherePattern::from_indices(shape, &indices).unwrap();
+            let mut reciprocal = Array3::zeros(shape);
+            for &idx in &indices {
+                reciprocal[idx] = Complex64::new(next(), next());
+            }
+            // Repeat after a different transform to exercise persistent scratch reuse.
+            for _ in 0..2 {
+                fft.to_real(&reciprocal, &mut full).unwrap();
+                fft.pruned_lane_count = 0;
+                fft.to_real_pruned(&reciprocal, &pattern, &mut pruned)
+                    .unwrap();
+                for (&a, &b) in full.iter().zip(&pruned) {
+                    assert_bits(a, b);
+                }
+                let inverse_count = fft.pruned_lane_count;
+                fft.to_reciprocal(&real, &mut full).unwrap();
+                fft.pruned_lane_count = 0;
+                fft.to_reciprocal_pruned(&real, &pattern, &mut pruned)
+                    .unwrap();
+                for (q, (&a, &b)) in full.iter().zip(&pruned).enumerate() {
+                    assert_bits(
+                        if pattern.present[q] {
+                            a
+                        } else {
+                            Complex64::default()
+                        },
+                        b,
+                    );
+                }
+                let full_count = shape[0] * shape[1] + shape[0] * shape[2] + shape[1] * shape[2];
+                if shape == [24; 3] && radius == 6.0 {
+                    assert!(inverse_count < full_count);
+                    assert!(fft.pruned_lane_count < full_count);
+                    println!(
+                        "sphere 24^3 radius 6: inverse {inverse_count}/{full_count}, forward {}/{full_count}, ratio {:.9}",
+                        fft.pruned_lane_count,
+                        (inverse_count + fft.pruned_lane_count) as f64 / (2 * full_count) as f64
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn pruned_validation() {
+    assert!(SpherePattern::from_indices([0, 1, 1], &[]).is_err());
+    assert!(SpherePattern::from_indices([usize::MAX; 3], &[]).is_err());
+    assert!(SpherePattern::from_indices([2; 3], &[[2, 0, 0]]).is_err());
+    let pattern = SpherePattern::from_indices([2; 3], &[[0; 3], [0; 3]]).unwrap();
+    let mut fft = FftPlan3d::new([3; 3]).unwrap();
+    let input = Array3::zeros([3; 3]);
+    let mut out = input.clone();
+    assert!(fft.to_real_pruned(&input, &pattern, &mut out).is_err());
+    assert!(
+        fft.to_reciprocal_pruned(&input, &pattern, &mut out)
+            .is_err()
+    );
+}
+
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "inverse input outside pattern")]
+fn pruned_rejects_nonzero_outside_support() {
+    let mut fft = FftPlan3d::new([2; 3]).unwrap();
+    let pattern = SpherePattern::from_indices([2; 3], &[]).unwrap();
+    let mut input = Array3::zeros([2; 3]);
+    input[[1; 3]] = Complex64::new(1.0, 0.0);
+    fft.to_real_pruned(&input, &pattern, &mut input.clone())
+        .unwrap();
+}

@@ -679,3 +679,79 @@ fn projector_norm_isolation_and_images() {
         }
     }
 }
+
+// Pre-O3 apply oracle: preserve scatter, full FFTs, potential multiplication,
+// gather-plus-kinetic and nonlocal accumulation order exactly.
+fn full_fft_apply_oracle(
+    h: &Hamiltonian,
+    grid: &FftGridSpec,
+    potential: &Array3<f64>,
+    x: &[C],
+) -> Vec<C> {
+    let mut fft = FftPlan3d::new(grid.dims()).unwrap();
+    let mut reciprocal = grid.scatter(x).unwrap();
+    let mut real = Array3::zeros(grid.dims());
+    fft.to_real(&reciprocal, &mut real).unwrap();
+    for (z, v) in real.iter_mut().zip(potential.iter()) {
+        *z *= v;
+    }
+    fft.to_reciprocal(&real, &mut reciprocal).unwrap();
+    let mut y: Vec<_> = grid
+        .g_to_fft()
+        .iter()
+        .enumerate()
+        .map(|(i, &idx)| reciprocal[idx] + h.kinetic_diagonal()[i] * x[i])
+        .collect();
+    for atom in h.nonlocal().atoms() {
+        let projections: Vec<C> = atom
+            .columns()
+            .iter()
+            .map(|col| col.iter().zip(x).map(|(b, c)| b.conj() * c).sum())
+            .collect();
+        let nc = projections.len();
+        for (i, col) in atom.columns().iter().enumerate() {
+            let weight: C = (0..nc)
+                .map(|j| atom.coupling_hartree()[i * nc + j] * projections[j])
+                .sum();
+            for (out, b) in y.iter_mut().zip(col) {
+                *out += b * weight;
+            }
+        }
+    }
+    y
+}
+
+#[test]
+fn pruned_apply_bitwise_gamma_and_shifted() {
+    let (cell, _, pp, pos) = setup();
+    for k in [[0.; 3], [0.25, -0.25, 0.125]] {
+        let basis = PlaneWaveBasis::at_k(&cell, Hartree(3.), k).unwrap();
+        let grid = FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None).unwrap();
+        let potential = Array3::from_shape_vec(
+            grid.dims(),
+            random(grid.dims().iter().product(), 12)
+                .iter()
+                .map(|z| z.re)
+                .collect(),
+        )
+        .unwrap();
+        let h = Hamiltonian::new(
+            &cell,
+            &basis,
+            potential.clone(),
+            nl(&basis, &cell, &pp, &pos),
+        )
+        .unwrap();
+        for seed in [1, 42, 765] {
+            let x = random(basis.vectors().len(), seed);
+            let expected = full_fft_apply_oracle(&h, &grid, &potential, &x);
+            let actual = apply(&h, &x);
+            for (a, b) in actual.iter().zip(expected) {
+                assert_eq!(
+                    (a.re.to_bits(), a.im.to_bits()),
+                    (b.re.to_bits(), b.im.to_bits())
+                );
+            }
+        }
+    }
+}

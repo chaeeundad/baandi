@@ -1,0 +1,68 @@
+{
+ "note": "State after O1, O3, O4a, O4b (commit 262a985), macOS Apple Silicon, shared machine; use for bit-identity checks of later overhead-only steps; timings are indicative only (final timings are measured on dev08)",
+ "binary": "dft-cli",
+ "machine_note": "record host and commit in the note",
+ "energy_tolerance_ha": 1e-12,
+ "cases": {
+  "gamma": {
+   "label": "Gamma only, 30 Ry",
+   "wall_s": [
+    0.6245222909999999,
+    0.263469709,
+    0.2635500420000001
+   ],
+   "wall_median_s": 0.2635500420000001,
+   "engine_total_s": 0.259400083,
+   "phases_s": {
+    "density_s": 0.011757709,
+    "diagonalization_s": 0.20084646,
+    "mixing_s": 0.001388959,
+    "potential_s": 0.0050785,
+    "total_energy_s": 0.007814332
+   },
+   "iterations": 11,
+   "total_energy_ha": -7.295530468210919,
+   "density_sha256": "f96619f23aee67b9e034d1b59ced295bc7238a4bcd4935c203dba32db07ae2c1"
+  },
+  "k222s": {
+   "label": "2x2x2 shifted (4 k), 30 Ry",
+   "wall_s": [
+    1.0896721249999999,
+    1.0890662079999998,
+    1.0902868749999999
+   ],
+   "wall_median_s": 1.0896721249999999,
+   "engine_total_s": 1.085936542,
+   "phases_s": {
+    "density_s": 0.046940626,
+    "diagonalization_s": 0.954933916,
+    "mixing_s": 0.002793584,
+    "potential_s": 0.005353919,
+    "total_energy_s": 0.031422249
+   },
+   "iterations": 11,
+   "total_energy_ha": -7.919423412469071,
+   "density_sha256": "2779880cb25654d21e9cf56b3a5743fc109be8763d764d05b842a2e7ffe40cfb"
+  },
+  "k222": {
+   "label": "2x2x2 (8 k), 30 Ry",
+   "wall_s": [
+    2.0589984159999997,
+    2.0608148340000003,
+    2.0634849170000003
+   ],
+   "wall_median_s": 2.0608148340000003,
+   "engine_total_s": 2.05890525,
+   "phases_s": {
+    "density_s": 0.094317292,
+    "diagonalization_s": 1.833201206,
+    "mixing_s": 0.00276679,
+    "potential_s": 0.005507416,
+    "total_energy_s": 0.06309946
+   },
+   "iterations": 11,
+   "total_energy_ha": -7.831230057121077,
+   "density_sha256": "fb0dea2697ec27ec2a34e0175e1759615d3b1a2291ab851df26ea02fbb430fc4"
+  }
+ }
+}

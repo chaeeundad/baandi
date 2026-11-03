@@ -13,4 +13,4 @@ Read this before touching a hot path (anything on the Hamiltonian apply, the eig
 
 ## Tools
 - `scripts/bench_scf.py` (standard library only): runs the release `dft-cli` on fixed Si cases (`gamma`, `k222s`, `k222`, `k444s`), reports median wall time, engine and diagonalization time, iterations, energy and the density hash, and compares with the baseline. The pseudopotential path is passed with `--upf` (the file is not in the repository).
-- Baseline (macOS Apple Silicon, release, 1 thread, before any optimization): see [baseline.json](baseline.json).
+- Baselines: [baseline.json](baseline.json) is the state before any optimization (macOS Apple Silicon, release, 1 thread); [baseline-after-o4.json](baseline-after-o4.json) is the state after the Davidson product-reuse change (O4b changed the arithmetic of the residual, so density files differ bit-wise from the first baseline while the energy agrees to 8e-15 Ha): use it for `--require-identical` checks of later overhead-only steps. Timings on the shared Mac are indicative; accepted timings come from the quiet dev08 node (docs/validation.md R7 describes it).

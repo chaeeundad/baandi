@@ -8,3 +8,4 @@ ACCEPTANCE_CRITERIA: transactional rejection proven; audit complete; result reco
 NON_GOALS: diagnostics, MCP, agents.
 GIT: branch task/P11B-RUNTIME-POLICY, uncommitted
 RETURN_FORMAT: docs/schemas/report.schema.json
+ADDENDUM (three modes, see P11-COMMON addendum): ControlRequest carries calc id, observed state_version, action, parameters, preconditions, expiry; stale requests are rejected or revalidated; accepted/rejected/applied are separate events; approval gates (Supervised) vs policy-bounded autonomous allow-list; deterministic fallback when the agent is silent; mode-switch validity rules enforced; intervention set limited to the P11-COMMON list and uses mixers/eigensolvers as merged by P10D/P10A/P7PC.

@@ -9,3 +9,4 @@ ACCEPTANCE_CRITERIA: bit-identical equivalence as above; observer off adds no me
 NON_GOALS: policy changes, state machine, checkpoint, MCP.
 GIT: branch task/P11A-STEPWISE-SCF, uncommitted
 RETURN_FORMAT: docs/schemas/report.schema.json
+ADDENDUM (three modes, see P11-COMMON addendum): also implement the typed `ExecutionMode {Classic, Observed, AgentControlled}` config, the bounded non-blocking event queue with documented drop/coalesce rules and dropped-count events, `state_version` on events and snapshots, and the zero-cost Classic path (no event construction at all). Bit-identity and overhead gates apply to all three modes.

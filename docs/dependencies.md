@@ -10,6 +10,7 @@ The toolchain is Rust 1.99.1, edition 2024, workspace resolver 3.
 | Package | Locked version | Declared license | Consumers |
 | --- | --- | --- | --- |
 | clap | 4.6.7 | MIT OR Apache-2.0 | dft-cli |
+| exmex | 0.21.0 | MIT OR Apache-2.0 | dft-units (all features off) |
 | faer | 0.24.4 | MIT | dft-numerics |
 | libm | 0.2.16 | MIT | dft-physics, dft-upf |
 | nalgebra | 0.35.0 | Apache-2.0 | dft-basis, dft-geometry, dft-physics |
@@ -45,8 +46,8 @@ Workspace dev edges additionally include `dft-basis -> dft-numerics` and
 
 ## Transitive inventory and licenses
 
-The unfiltered offline metadata graph contains **342 external package/version
-entries** plus nine workspace crates: 15 direct production packages, one direct
+The unfiltered offline metadata graph contains **343 external package/version
+entries** plus nine workspace crates: 16 direct production packages, one direct
 external dev package, and **326 additional transitive entries**. This includes
 development and target-specific resolution, not just libraries linked into a
 host release binary. Multiple versions of one crate count separately. In
@@ -112,3 +113,25 @@ typenum 1.20.1 (both MIT OR Apache-2.0), plus num-traits' build dependency
 autocfg 1.5.1 (MIT OR Apache-2.0). These transitive packages were already present.
 The pure-Rust implementation needs no system library or FFI; offline host gates
 exercise Apple Silicon support. See ADR 0012 for adoption and precision checks.
+
+
+P7E adds exmex 0.21.0 with default features disabled and no optional features;
+`cargo metadata --offline --format-version 1` confirms its resolved feature list
+is empty. The regex dependencies retain their own features. License declarations
+and versions below come from that metadata and agree with Cargo.lock:
+
+| Transitive package | Version | License | Present before exmex adoption |
+| --- | --- | --- | --- |
+| regex | 1.13.1 | MIT OR Apache-2.0 | yes |
+| regex-automata | 0.4.18 | MIT OR Apache-2.0 | yes |
+| regex-syntax | 0.8.11 | MIT OR Apache-2.0 | yes |
+| aho-corasick | 1.1.5 | Unlicense OR MIT | yes |
+| memchr | 2.8.3 | Unlicense OR MIT | yes |
+| smallvec | 1.16.4 | MIT OR Apache-2.0 | yes |
+
+The exmex direct edges are regex and smallvec; the remaining packages are regex
+transitives. The older regex-syntax 0.6.29 elsewhere in the graph is not an
+exmex transitive. All six versions above were already in the parent lockfile
+before adoption commit 7ba4c04; only exmex itself was added by that commit.
+The supplied pure-Rust source builds offline on Apple Silicon without FFI.
+ADR 0014 records API restrictions, maintenance-review limits and validation.

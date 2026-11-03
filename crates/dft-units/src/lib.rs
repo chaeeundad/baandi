@@ -1,5 +1,11 @@
 //! Explicit unit wrappers; internal lengths and energies use Bohr and Hartree.
 
+pub mod expr;
+pub use expr::{
+    ExprError, ExprErrorKind, ResolvedExpression, eval_expr, eval_expr_integer,
+    parse_quantity_expr, resolve_expr,
+};
+
 include!(concat!(env!("OUT_DIR"), "/factors.rs"));
 /// Exact definition of the Rydberg energy unit.
 pub const RYDBERG_PER_HARTREE: f64 = 2.0;

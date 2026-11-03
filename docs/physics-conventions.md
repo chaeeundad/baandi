@@ -1089,3 +1089,15 @@ Ry = Ha/2 remains an exact definition. Energy, length and pressure conversions
 are boundary-only f64 operations, tested for relative round-trip error <1e-14
 in the normal representable range. See docs/cli.md for the closed unit aliases
 and conflict rules. Pressure conversion does not add stress calculations.
+
+## 27. Expression inputs (P7E library API)
+
+At the input boundary, dft-units can evaluate finite f64 arithmetic with `pi`
+and `e` from std, and parse an expression followed by one whitespace-separated
+unit token. The resolved value retains that unit until existing conversion
+functions convert it to atomic units: `0.5*30 Ry = 15 Ry = 7.5 Ha`.
+`5.43/2 Angstrom` resolves to 2.715 Angstrom. Legacy numeric unit strings are
+unchanged. Exmex powers associate left (`2^3^2 = 64`) and unary minus binds
+first (`-2^2 = 4`). ADR 0014 specifies the vocabulary, integer tolerance,
+unit-token rule, typed errors and resolved-value provenance. CLI/TOML wiring
+is deferred to P7E2; no engine input behavior changes in this ticket.

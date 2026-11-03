@@ -848,6 +848,162 @@ CLI end-to-end coverage verifies absent/0/1/2/8 requests, Gamma capping,
 two-point capping, additive metadata and identical JSON numerical fields and
 density bytes. `git diff --check` exit 0. Changes remain uncommitted.
 
+
+## P7PA: deterministic per-k sequential phases (2026-11-03)
+
+Step 0, before implementation: commit `66fbaaab55d5b3424994c484afdc8868d597e24a`,
+shared macOS Apple Silicon host, 12 logical CPUs reported by Python. Release
+build with `CARGO_PROFILE_RELEASE_DEBUG=true`. These are indicative timings,
+not quiet-node speedup claims. `sample <pid> 1` could not examine the process
+under the sandbox; profiling by stack sampling is unavailable. Existing phase
+boundary timers identify setup, density and energy as the remaining large costs.
+Certificate phases are included in phase totals; the certificate column below
+is their sum, not an additional cost. Mixing is a shared-grid operation.
+
+Commands: `python3 -I /tmp/p7pa-evidence/measure.py before T gamma,k222s,k222,k444s 3`
+for T=1,8 (both exit 0). This temporary wrapper invokes `bench_scf.py.main`
+with the requested binary, UPF, `--threads`, repeats and baseline; it preserves
+results.json before benchmark temporary directories disappear. All four cases
+have zero energy difference and identical density hashes against
+`baseline-after-o2.json`, with 10 SCF iterations. Evidence is under
+`/tmp/p7pa-evidence/before/` (temporary local evidence).
+
+| case | threads | engine s | setup s | diagonalization s | density s | energy s | potential s | mixing s | certificate s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| gamma | 1 | 0.137509 | 0.032735 | 0.080739 | 0.010742 | 0.007213 | 0.004707 | 0.001105 | 0.012708 |
+| k222s | 1 | 0.516830 | 0.045352 | 0.390881 | 0.043455 | 0.029407 | 0.004946 | 0.002490 | 0.039487 |
+| k222 | 1 | 0.975471 | 0.061845 | 0.755646 | 0.089469 | 0.060210 | 0.005360 | 0.002619 | 0.060935 |
+| k444s | 1 | 3.911493 | 0.165713 | 3.117550 | 0.370894 | 0.247211 | 0.007006 | 0.002603 | 0.277586 |
+| gamma | 8 | 0.139885 | 0.032369 | 0.082943 | 0.010935 | 0.007392 | 0.004867 | 0.001105 | 0.015489 |
+| k222s | 8 | 0.255730 | 0.046011 | 0.126373 | 0.044319 | 0.030774 | 0.005240 | 0.002676 | 0.017129 |
+| k222 | 8 | 0.376302 | 0.061207 | 0.157528 | 0.090035 | 0.059665 | 0.005099 | 0.002442 | 0.024326 |
+| k444s | 8 | 1.394210 | 0.172382 | 0.611530 | 0.366458 | 0.234029 | 0.006838 | 0.002486 | 0.101098 |
+
+Source inspection: density already forms per-k partials and folds them in k
+order; this task need not change its arithmetic association. Certificate solves
+already call the threaded iteration step. Preserve the Davidson call sites.
+
+Implementation: scoped workers construct disjoint k states (basis, Hamiltonian,
+projector tables), update per-k local potentials, extract orbitals and build
+per-k densities, and evaluate per-k energy audits. Certificate work inherits
+all these changes through its existing `step_kpoints` call. No Davidson call
+site, solver option, physics API or backend implementation changed. No new
+Send/Sync bound on a physics type, dependency or unsafe code was necessary.
+
+One-thread/default execution spawns no worker. All counts use the same
+ascending-k density and weighted energy folds. Workers return independent
+partials; thread completion order never enters either sum. This preserves the
+pre-change floating-point association: contrary to the ticket's initial
+assumption, the merged code already used per-k partial density arrays.
+
+Memory bound: W = min(max(threads, 1), nk). At most W partial density arrays,
+each Ngrid f64 values (8 * W * Ngrid bytes), plus the single output array.
+Each chunk is joined and folded before the next starts. W FFT plans are built
+once and reused across density/audit phases and SCF/certificate steps; their
+scratch and the per-worker audit/FFT temporaries add O(W * Ngrid) storage.
+Existing per-k Hamiltonians and orbital copies remain O(nk). No new allocation,
+logging or timer was introduced inside a per-band numerical loop; existing
+physics routines retain their allocation behavior. Worker orchestration and
+partial allocation occur at phase/k boundaries as required by the ticket.
+
+Final release measurements below use three repeats for gamma,k222s,k222 and
+one for k444s at T=1,4,8. Phase/engine values are from the last repeat (the
+benchmark's convention), while wall values are medians. Builds/tests were not
+running concurrently with this final sweep. Sixteen threads were omitted:
+this host reports only 12 logical CPUs. Claude must measure the quiet dev08
+node separately. Evidence: `/tmp/p7pa-evidence/after/t{1,2,3,4,8}/`.
+
+| case | threads | wall median s | engine s | setup s | diagonalization s | density s | energy s | potential s | mixing s | certificate s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| gamma | 1 | 0.140649 | 0.136564 | 0.032210 | 0.080262 | 0.010843 | 0.007216 | 0.004671 | 0.001097 | 0.012619 |
+| k222s | 1 | 0.496518 | 0.492212 | 0.044398 | 0.368701 | 0.042912 | 0.028660 | 0.004841 | 0.002420 | 0.036831 |
+| k222 | 1 | 0.926564 | 0.920209 | 0.059671 | 0.707968 | 0.087097 | 0.057617 | 0.005119 | 0.002439 | 0.060348 |
+| k444s | 1 | 3.813364 | 3.807423 | 0.157285 | 3.010818 | 0.388579 | 0.240652 | 0.007016 | 0.002561 | 0.269538 |
+| gamma | 4 | 0.141299 | 0.137272 | 0.032274 | 0.080614 | 0.010978 | 0.007326 | 0.004705 | 0.001103 | 0.012756 |
+| k222s | 4 | 0.190203 | 0.185620 | 0.033581 | 0.118531 | 0.015471 | 0.010158 | 0.005143 | 0.002450 | 0.012588 |
+| k222 | 4 | 0.319258 | 0.314982 | 0.038663 | 0.217621 | 0.030571 | 0.020210 | 0.005159 | 0.002453 | 0.020114 |
+| k444s | 4 | 1.157091 | 1.151026 | 0.066341 | 0.870511 | 0.124302 | 0.081245 | 0.005725 | 0.002469 | 0.088866 |
+| gamma | 8 | 0.142938 | 0.136663 | 0.032322 | 0.080186 | 0.010857 | 0.007252 | 0.004676 | 0.001103 | 0.012626 |
+| k222s | 8 | 0.190885 | 0.186234 | 0.033583 | 0.119407 | 0.015198 | 0.010127 | 0.005169 | 0.002462 | 0.012592 |
+| k222 | 8 | 0.237410 | 0.232455 | 0.035668 | 0.152525 | 0.022133 | 0.013794 | 0.005468 | 0.002515 | 0.013772 |
+| k444s | 8 | 0.821099 | 0.814546 | 0.056650 | 0.605931 | 0.088522 | 0.054464 | 0.005977 | 0.002504 | 0.058581 |
+
+At T=8, before/after time outside diagonalization (engine minus diagonalization;
+includes setup, mixing and orchestration) is:
+
+| case | before s | after s | reduction |
+|---|---:|---:|---:|
+| gamma | 0.056942 | 0.056477 | 0.82% |
+| k222s | 0.129357 | 0.066827 | 48.34% |
+| k222 | 0.218774 | 0.079930 | 63.46% |
+| k444s | 0.782680 | 0.208615 | 73.35% |
+
+Validation on the final binary:
+
+- `CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release -p dft-cli`: exit 0.
+- `scripts/check.sh dft-engine`: exit 0 (initial implementation).
+- `scripts/check.sh`: exit 0 on the final code; build, tests, fmt and Clippy
+  with warnings denied all PASS.
+- `cargo test -p dft-engine --test threading -- --nocapture`: exit 0, 1.06 s
+  debug runtime. Synthetic nk=1,2,5 problems agree bit-for-bit for T=0,1,2,3,4,8
+  in densities, energies, complete numerical histories and certificate data.
+  Energies: -0.62379772639925035, -0.59844111627273666,
+  -0.45953915387519950 Ha respectively. Timings are intentionally excluded.
+- Added an order-sensitive fold test using [1e16, -1e16, 1, 2, 4]: every
+  T=1,2,3,4,8 returns exactly 7.0 in global k order, including odd chunks and
+  nk < threads. It also checks global k error indices in later chunks.
+- Final benchmark wrapper invocations: `measure.py after T gamma,k222s,k222 3`
+  and `measure.py after T k444s 1`, T=1,4,8; plus
+  `measure.py after T gamma,k222s,k222,k444s 1`, T=2,3. All exit 0.
+  Each invokes `bench_scf.py.main` with `--threads T --baseline
+  docs/performance/baseline-after-o2.json`, worktree release binary and the
+  read-only external Si UPF. No UPF was copied. Temporary wrapper only adds
+  retention of results.json and benchmark JSON.
+- `python3 -I /tmp/p7pa-evidence/verify.py`: exit 0. Across all four benchmark
+  cases and T=1,2,3,4,8, maximum baseline energy difference is **0 Ha**,
+  density hashes match each other AND the baseline, all iteration counts stay
+  at 10, and complete numerical histories and energy records match T=1.
+
+| case | energy Ha | density SHA-256 (all five thread counts) |
+|---|---:|---|
+| gamma | -7.2955304682107718 | `968fdd04bce7c2bfe30e227a9ea35e95a8971b203e20f18a412e552eff4454eb` |
+| k222s | -7.919423412469067 | `40b373200b0be1668f781a809e81fb08fc50ded555948bf040742ea7b873874f` |
+| k222 | -7.8312300571211448 | `402c5135f02d806c2420c5ef79260fbab09b90a8e103a581817a431b4f04112d` |
+| k444s | -7.9259761266480808 | `4d6a4b558a8fd82f8bdd854e16bacfcf3a3e4255bc4f09550408e99d95bfeaed` |
+
+QE comparisons use existing real-run evidence only, without reading QE source
+or making a new QE reference claim. Commands all exit 0 and print PASS:
+`python3 -I scripts/compare_kpoints_qe.py --ours
+/tmp/p7pa-evidence/after/t8/CASE-results.json --qe-out
+ tests/reference/kpoints/CASE_c/qe.out` for k222,k222s;
+for k444s use `--qe-summary tests/reference/kpoints/k444s_c/qe_summary.json`.
+Default tolerances were unchanged.
+
+| case | energy difference Ha/atom | maximum eigenvalue difference Ha | largest change from stored comparison (Ha or Ha/atom) |
+|---|---:|---:|---:|
+| k222 | 1.2814394274585084e-6 | 1.990419700127612e-6 | 2.9275148293630678e-9 |
+| k222s | 1.2812654666127798e-6 | 1.772334107711065e-6 | 5.197538273549009e-10 |
+| k444s | 1.2816759595857263e-6 | 2.1001330257428846e-6 | 1.0373617408751258e-10 |
+
+All comparison changes are below 1e-8 Ha, and all k weights match exactly.
+
+Rejected/deferred ideas: completion-order sums and thread-group reductions
+would break bit identity; retaining all nk density arrays would violate the
+memory bound; nested FFT/solver threading is out of scope. Hoisting common
+full-grid terms out of the per-k audit could remove additional redundant work,
+but is deferred to keep this change to independent execution of the existing
+validated audit. Shared-grid mixing has no independent k dimension and remains
+sequential (about milliseconds here); no new mixing algorithm was introduced.
+A thread pool could reduce spawn overhead but is outside the requested scoped
+thread design. No QE study note was used.
+
+Limitations: shared-host timings are indicative and peak RSS was not measured;
+the memory bound above is structural, not an RSS claim. Stack sampling was
+blocked by the sandbox. Raw local evidence under /tmp is temporary; the tables
+and numerical checks above are the durable record. README, artifacts, manifests,
+baselines, tickets and other tickets' source files were deliberately left
+untouched under this ticket's explicit ownership. Changes are uncommitted.
+
 ## P7P7: Davidson hypotheses (2026-11-03)
 
 Starting commit 1decf9c. Pre-change profile supplied with the ticket: FFT about

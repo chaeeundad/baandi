@@ -259,6 +259,8 @@ pub struct ScfProblem {
     ionic_g: Array3<Complex64>,
     ionic_real: Array3<f64>,
     fft: FftPlan3d,
+    // One reusable FFT workspace per active k worker, shared across phases.
+    worker_ffts: Vec<FftPlan3d>,
     ewald: ewald::EwaldEnergy,
     occupations: Vec<f64>,
     electrons: f64,
@@ -280,14 +282,42 @@ fn ordered_solves<T: Send, R: Send>(
     requested: usize,
     solve: impl Fn(usize, &mut T) -> Result<R, ScfError> + Sync,
 ) -> Result<Vec<R>, ScfError> {
+    ordered_solves_at(states, requested, 0, solve)
+}
+
+fn ordered_solves_at<T: Send, R: Send>(
+    states: &mut [T],
+    requested: usize,
+    first: usize,
+    solve: impl Fn(usize, &mut T) -> Result<R, ScfError> + Sync,
+) -> Result<Vec<R>, ScfError> {
     if states.is_empty() {
         return Ok(Vec::new());
     }
     let workers = requested.max(1).min(states.len());
+    if workers == 1 {
+        // Evaluate every item before propagating the first error, like the
+        // scoped path. Default execution creates no operating-system thread.
+        let results: Vec<_> = states
+            .iter_mut()
+            .enumerate()
+            .map(|(index, state)| {
+                let index = first + index;
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| solve(index, state)))
+                    .unwrap_or_else(|_| {
+                        Err(ScfError::Numerical(format!(
+                            "k index {index}: solve panicked"
+                        )))
+                    })
+                    .map_err(|e| ScfError::Numerical(format!("k index {index}: {e}")))
+            })
+            .collect();
+        return results.into_iter().collect();
+    }
     std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(workers);
         let mut remaining = states;
-        let mut offset = 0;
+        let mut offset = first;
         for worker in 0..workers {
             let count = remaining.len().div_ceil(workers - worker);
             let (group, rest) = remaining.split_at_mut(count);
@@ -326,6 +356,30 @@ fn ordered_solves<T: Send, R: Send>(
         }
         Ok(results)
     })
+}
+
+/// Bound live partial results by the workspace count. Fold each completed
+/// chunk in ascending global k order before starting the next chunk; neither
+/// chunk boundaries nor completion order can change floating-point association.
+fn ordered_chunks<T: Send, W: Send, R: Send>(
+    states: &mut [T],
+    workspaces: &mut [W],
+    work: impl Fn(usize, &mut T, &mut W) -> Result<R, ScfError> + Sync,
+    mut fold: impl FnMut(R),
+) -> Result<(), ScfError> {
+    assert!(!workspaces.is_empty());
+    let width = workspaces.len();
+    for (chunk, states) in states.chunks_mut(width).enumerate() {
+        let mut jobs: Vec<_> = states.iter_mut().zip(workspaces.iter_mut()).collect();
+        let partials =
+            ordered_solves_at(&mut jobs, width, chunk * width, |i, (state, workspace)| {
+                work(i, state, workspace)
+            })?;
+        for partial in partials {
+            fold(partial);
+        }
+    }
+    Ok(())
 }
 
 /// Output-oriented completion, including a nonconverged final evaluated state.
@@ -527,8 +581,8 @@ impl ScfProblem {
             return Err(ScfError::Numerical("ionic imaginary potential".into()));
         }
         let ionic_real = ionic.mapv(|z| z.re);
-        let mut states = Vec::new();
-        for point in points {
+        let mut construction_points = points.to_vec();
+        let states = ordered_solves(&mut construction_points, options.threads, |_, point| {
             let basis =
                 PlaneWaveBasis::at_k(cell, Hartree(options.cutoff_hartree), point.fractional)?;
             if bands > basis.vectors().len()
@@ -546,7 +600,7 @@ impl ScfProblem {
                 ionic_real.clone(),
                 NonlocalOperator::new(&basis, cell.volume_bohr3(), &species)?,
             )?;
-            states.push(KState {
+            Ok(KState {
                 point: KPoint {
                     fractional: basis.k_fractional(),
                     weight: point.weight,
@@ -554,8 +608,11 @@ impl ScfProblem {
                 basis,
                 grid: k_grid,
                 hamiltonian,
-            });
-        }
+            })
+        })?;
+        let worker_ffts = (0..options.threads.max(1).min(states.len()))
+            .map(|_| FftPlan3d::new(grid.dims()))
+            .collect::<Result<Vec<_>, _>>()?;
         let ewald = ewald::energy(cell, &ions, EwaldOptions::default())?;
         let occupations = (0..bands)
             .map(|b| if b < occupied { 2.0 } else { 0.0 })
@@ -567,6 +624,7 @@ impl ScfProblem {
             ionic_g,
             ionic_real,
             fft,
+            worker_ffts,
             ewald,
             occupations,
             electrons,
@@ -622,9 +680,10 @@ impl ScfProblem {
         for ((v, h), x) in effective.iter_mut().zip(&h.potential).zip(&x.potential) {
             *v += h.re + x;
         }
-        for state in &mut self.states {
+        ordered_solves(&mut self.states, self.options.threads, |_, state| {
             state.hamiltonian.set_local_potential(effective.clone())?;
-        }
+            Ok(())
+        })?;
         let mut timings = PhaseTimings {
             potential: start.elapsed(),
             ..Default::default()
@@ -697,53 +756,64 @@ impl ScfProblem {
         };
         timings.diagonalization = start.elapsed();
         let start = Instant::now();
-        let orbitals: Vec<Vec<Vec<Complex64>>> = k_points
-            .iter()
-            .map(|k| {
-                (0..k.solution.eigenvectors.cols())
-                    .map(|b| k.solution.eigenvectors.column(b).to_vec())
-                    .collect()
-            })
-            .collect();
+        let mut orbitals = Vec::with_capacity(k_points.len());
         let mut output = Array3::zeros(self.grid.dims());
-        for (state, orbitals) in self.states.iter().zip(&orbitals) {
-            let nk = density::from_orbitals(
-                orbitals,
-                &self.occupations,
-                &state.grid,
-                self.cell.volume_bohr3(),
-                &mut self.fft,
-            )?;
-            for (out, n) in output.iter_mut().zip(nk) {
-                *out += state.point.weight * n;
-            }
-        }
+        ordered_chunks(
+            &mut self.states,
+            &mut self.worker_ffts,
+            |i, state, fft| {
+                let vectors = &k_points[i].solution.eigenvectors;
+                let orbitals: Vec<_> = (0..vectors.cols())
+                    .map(|b| vectors.column(b).to_vec())
+                    .collect();
+                let nk = density::from_orbitals(
+                    &orbitals,
+                    &self.occupations,
+                    &state.grid,
+                    self.cell.volume_bohr3(),
+                    fft,
+                )?;
+                Ok((state.point.weight, nk, orbitals))
+            },
+            |(weight, nk, k_orbitals)| {
+                for (out, n) in output.iter_mut().zip(nk) {
+                    *out += weight * n;
+                }
+                orbitals.push(k_orbitals);
+            },
+        )?;
         timings.density = start.elapsed();
         let start = Instant::now();
         let mut audits = Vec::new();
-        for ((state, k), orbitals) in self.states.iter().zip(&k_points).zip(&orbitals) {
-            let audit = energy::evaluate_with_functional(
-                AuditInput {
-                    cell: &self.cell,
-                    basis: &state.basis,
-                    grid: &state.grid,
-                    ionic_g: &self.ionic_g,
-                    nonlocal: state.hamiltonian.nonlocal(),
-                    orbitals,
-                    occupations: &self.occupations,
-                    eigenvalues: &k.solution.eigenvalues,
-                    eigen_residuals: &k.solution.residuals,
-                    input_density: n,
-                    output_density: &output,
-                    input_hartree: &h,
-                    input_xc: &x,
-                    ewald: self.ewald.energy.0,
-                },
-                &mut self.fft,
-                self.options.functional,
-            )?;
-            audits.push((state.point.weight, audit));
-        }
+        ordered_chunks(
+            &mut self.states,
+            &mut self.worker_ffts,
+            |i, state, fft| {
+                let k = &k_points[i];
+                let audit = energy::evaluate_with_functional(
+                    AuditInput {
+                        cell: &self.cell,
+                        basis: &state.basis,
+                        grid: &state.grid,
+                        ionic_g: &self.ionic_g,
+                        nonlocal: state.hamiltonian.nonlocal(),
+                        orbitals: &orbitals[i],
+                        occupations: &self.occupations,
+                        eigenvalues: &k.solution.eigenvalues,
+                        eigen_residuals: &k.solution.residuals,
+                        input_density: n,
+                        output_density: &output,
+                        input_hartree: &h,
+                        input_xc: &x,
+                        ewald: self.ewald.energy.0,
+                    },
+                    fft,
+                    self.options.functional,
+                )?;
+                Ok((state.point.weight, audit))
+            },
+            |audit| audits.push(audit),
+        )?;
         let energy = energy::weighted_audits(&audits);
         timings.energy = start.elapsed();
         Ok(ScfStep {
@@ -1174,6 +1244,46 @@ mod tests {
 #[cfg(test)]
 mod threading_tests {
     use super::*;
+
+    #[test]
+    fn chunked_reduction_preserves_global_k_order() {
+        // Regrouping the first three terms gives 0 instead of 1. Include an
+        // incomplete chunk and more workers than k points.
+        let values = [1e16_f64, -1e16, 1.0, 2.0, 4.0];
+        let expected = values.iter().fold(0.0_f64, |sum, value| sum + value);
+        assert_eq!(expected, 7.0);
+        for threads in [1, 2, 3, 4, 8] {
+            let mut states = values;
+            let mut workspaces = vec![(); threads.min(states.len())];
+            let mut sum = 0.0_f64;
+            let mut indices = Vec::new();
+            ordered_chunks(
+                &mut states,
+                &mut workspaces,
+                |i, value, _| Ok((i, *value)),
+                |(i, value)| {
+                    indices.push(i);
+                    sum += value;
+                },
+            )
+            .unwrap();
+            assert_eq!(indices, vec![0, 1, 2, 3, 4]);
+            assert_eq!(sum.to_bits(), expected.to_bits());
+            let error = ordered_chunks(
+                &mut states,
+                &mut workspaces,
+                |i, _, _| {
+                    if i == 4 {
+                        return Err(ScfError::InvalidInput("injected chunk failure"));
+                    }
+                    Ok(())
+                },
+                |_| {},
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("k index 4"), "{error}");
+        }
+    }
 
     #[test]
     fn ordered_errors_and_panics_join_every_solve() {

@@ -47,3 +47,26 @@ SCF orchestration may distribute disjoint mutable k states using
 `std::thread::scope`. Hamiltonians remain intentionally non-Sync; ownership
 transfer needs only their existing Send property. No numerical backend bounds,
 unsafe code, dependencies or nested backend parallelism are introduced.
+
+## P7PA notes
+
+The same scoped ownership model also covers per-k construction, local-potential
+updates, orbital extraction, density transforms and energy audits. Certificate
+work continues through the existing threaded SCF step; Davidson call sites and
+backend thread settings are unchanged. Construction needs no physics API or
+Send/Sync changes.
+
+Density and audit workers reuse one independent FFT plan per active worker.
+Process at most `min(max(threads, 1), nk)` k points in a chunk, join it, then fold
+partials sequentially in ascending global k order before starting the next
+chunk. The one-thread path uses the same reduction and spawns no worker thread.
+At most that many grid-sized partial density arrays are live, plus one output
+array; FFT scratch is also bounded by the active worker count. Existing
+per-k Hamiltonian storage and orbital copies are separate from this bound.
+
+Inspection of the merged P7P6 implementation showed that it already computed
+per-k density arrays before the ascending-k fold. Thus P7PA preserves its
+floating-point association, including the existing weighted energy-audit fold.
+No unsafe code, dependency, numerical backend change or nested FFT threading
+is needed. Measurements and exact-equivalence evidence are recorded in the
+P7PA entry of `docs/performance/optimization-log.md`.

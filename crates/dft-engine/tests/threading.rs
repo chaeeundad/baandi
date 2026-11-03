@@ -22,6 +22,14 @@ fn normalized(mut r: ScfResult) -> ScfResult {
 }
 fn assert_identical(a: &ScfResult, b: &ScfResult) {
     assert_eq!(format!("{a:?}"), format!("{b:?}"));
+    assert_eq!(a.total_hartree().to_bits(), b.total_hartree().to_bits());
+    for (x, y) in a.history.iter().zip(&b.history) {
+        assert_eq!(
+            x.energy.total_hartree().to_bits(),
+            y.energy.total_hartree().to_bits()
+        );
+        assert_eq!(x.density_residual.to_bits(), y.density_residual.to_bits());
+    }
     assert_eq!(a.density.shape(), b.density.shape());
     for (x, y) in a.density.iter().zip(&b.density) {
         assert_eq!(x.to_bits(), y.to_bits());
@@ -81,7 +89,9 @@ fn scf_thread_counts_are_bit_identical() {
                 .unwrap(),
             )
         };
-        // threads=1 executes the retained pre-threading serial solve loop.
+        // Covers threaded construction, potential updates, density and audit
+        // chunks, iteration solves and certificate solves. The one-thread
+        // path performs the same ascending-k reductions without spawning.
         let reference = run(1);
         assert!(
             reference

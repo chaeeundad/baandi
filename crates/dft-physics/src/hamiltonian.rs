@@ -395,6 +395,9 @@ fn application(error: HamiltonianError) -> SolverError {
     SolverError::Application(error.to_string())
 }
 impl LinearOperator for Hamiltonian {
+    fn inner_threads(&self) -> usize {
+        self.scratch.borrow().len()
+    }
     fn dimension(&self) -> usize {
         self.data.kinetic.len()
     }

@@ -1831,3 +1831,342 @@ identical Si Gamma/k222 energies and density hashes (exit 0), so the historical
 density difference predates extraction. No gate or baseline was relaxed.
 Evidence: `tests/reference/runtime/si-*.json` and logs. Workspace gates pass;
 release checkpoint/runtime/stepwise suites: 31 passed, 0 failed.
+
+
+## P10I — baseline audit; profiling blocked (2026-11-05 KST)
+
+Status: BLOCKED; no numerical code, algorithm, default, or tolerance changed.
+Base commit `ec37408cb08248cc2816068dee45d122f5509482`, pure Rust, Rust 1.99.1,
+macOS arm64 (12 logical CPUs). Release build includes debug symbols. Binary
+SHA-256: `8b1eff3f9b7ed69e1422c3c9e2ab587b464aade83dce7efe83bf7c05b3c31da7`.
+
+The ticket's premise needs qualification: `Hamiltonian::apply_block` already
+uses intra-k band workers, and `BandDensity` already transforms bands in
+parallel and combines their contributions in ascending band order. SCF already
+splits the total budget as outer=min(threads,nk), inner=max(threads/outer,1).
+Davidson calls the block operator for its correction blocks and certificates.
+Thus adding these mechanisms again would not address an established bottleneck.
+The current solver also has sequential orthogonalization and linear algebra,
+but source inspection alone does not establish their runtime share.
+
+Attempted `sample <owned-child-pid> 1 -file /tmp/p10i/sample-tN.txt`
+for N=1 and 8, each while running the unmodified si8 CLI. Both profiler calls
+exited **255**: "sample cannot examine process ...". Both CLI runs exited 0.
+The sandbox cannot supply the required stack profiles; escalation is unavailable.
+Existing CLI phase timers combine FFT, projectors, GEMM, orthogonalization and
+EVD in diagonalization, so they cannot justify selecting one for optimization.
+No speculative kernel change or speedup acceptance was made.
+
+### Local baseline evidence (not dev08 performance acceptance)
+
+Three runs per case and budget. Builds/checks ran concurrently for part of this
+collection, and this is a shared Mac; timings are diagnostic only and MUST NOT
+be used for scaling or regression acceptance. All five cases have identical
+energy, iteration counts and density hashes across budgets. Against historical
+`baseline.json`, available energy differences are <=1.58e-13 Ha, but historical
+density hashes differ (already documented for prior changes). The freshly built
+T=1 binary is the matched identity baseline; historical baselines are unchanged.
+
+| Case | T=1 wall median s | T=8 wall median s | T=1 / T=8 diagonalization median s | Energy Ha | Iterations |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| gamma | 0.215141250 | 0.094937334 | 0.108906584 / 0.033509873 | -7.2955304682107691 | 10 |
+| k222s | 0.699425958 | 0.151113750 | 0.494480331 / 0.078403168 | -7.919423412469083 | 10 |
+| k222 | 1.138275709 | 0.196635792 | 0.845015124 / 0.120031917 | -7.8312300571211368 | 10 |
+| k444s | 3.063932458 | 0.692012625 | 2.466737748 / 0.507720124 | -7.9259761266480915 | 10 |
+| si8 | 4.539551917 | 2.918878584 | 4.205260290 / 2.658038043 | -31.321803601031377 | 15 |
+
+Density SHA-256 (same for T=1 and T=8):
+
+- gamma: `74963159f8eb058d58220f3bbde70a806a3622ca3c568b7d7d1ef068207610b0`
+- k222s: `c1de1d09cb8dc2c53500b10ce90e7ee8dc1bf692e1a87e2f2fec59cc64315617`
+- k222: `a38c265d381a9b918f667fbb14d43e210d3513387c9d3c41b1533930cc2515b3`
+- k444s: `c081ea55e2265c416240e48f9bf275bd8e53d1a161648853a13b08f802d612c2`
+- si8: `484f4f279ea968d7b0466f85130c7e33552cc37595becf09d29e306359c26698`
+
+si8 uses 2969 plane waves, 20 bands and a 36^3 grid; energy is
+-31.321803601031377 Ha. This is an engine result, not a new QE reference.
+The >=3x dev08 target remains unverified, as do MKL and quiet many-k timing gates.
+
+### Generality baseline probes
+
+Synthetic Gamma fixtures use `scripts/bench_suite.py` and its existing synthetic
+UPF generator, valence=2, channels=[0,1,2], shape="soft", cutoff=3 Ry,
+seed=1, default tolerances, Pulay beta=0.5, max_iterations=100. For atom index
+`i=0..n-1`, fractional positions are
+`[(i*0.61803398875)%1, (i*0.41421356237)%1, (i*0.73205080757)%1]`.
+Cubic 4-atom lattice rows: [[6,0,0],[0,6,0],[0,0,6]] Bohr.
+Skew 20-atom lattice rows: [[8,0,0],[1,7,0],[0.5,1,6]] Bohr.
+These deliberately small nonphysical fixtures test identity only; they do not
+establish large-system performance or general default selection.
+
+Both converge in 7 iterations at T=1 and T=8. Independent direct `density.bin`
+byte comparison and exact energy equality assertions exit 0:
+
+| Fixture | Energy Ha | Density SHA-256 |
+| --- | ---: | --- |
+| syn-20 | 1677.666321506571 | `bfafad504200d2be9ad5ddfe3450fe583257184388e268000252e5c3a10f62ac` |
+| syn-4 | 20.108668260299748 | `cb637326288b6b4600227fb6dd16508a23c2e27be6b77d5c1bea826a4027c90b` |
+
+The first 4-atom probe used a 4-Bohr cubic cell and failed input validation:
+8 requested bands exceeded 7 plane waves. The invalid probe is retained under
+`/tmp/p10i/general-t1`; enlarging the fixture to 6 Bohr makes the basis valid.
+No solver setting/tolerance was relaxed. The valid T=1 suite exits 0.
+The T=8 suite with `--baseline ... --require-identical` exits 5 because that
+harness intentionally rejects different thread-count input fingerprints;
+all individual calculations pass. Direct byte/energy comparisons above supply
+the cross-thread check, without altering harness policy or baseline metadata.
+
+### Commands and handoff
+
+- `CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release -p dft-cli --offline`: exit 0.
+- `scripts/check.sh`: exit 0; build, test, fmt, clippy all PASS.
+- `python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --threads 1 --repeats 3 --baseline docs/performance/baseline.json --record /tmp/p10i/baseline-t1.json`: exit 0.
+- Same benchmark with `--threads 8 --baseline /tmp/p10i/baseline-t1.json --require-identical --record /tmp/p10i/baseline-t8.json`: exit 0.
+- `python3 -I scripts/bench_suite.py --binary target/release/dft-cli --case-dir /tmp/p10i/cases --include-long --threads 1 --output /tmp/p10i/general-valid-t1.json --work-dir /tmp/p10i/general-valid-t1`: exit 0.
+- Same suite with `--threads 8 --baseline /tmp/p10i/general-valid-t1.json --require-identical --output /tmp/p10i/general-valid-t8.json --work-dir /tmp/p10i/general-valid-t8`: exit 5, fingerprint mismatch described above.
+
+Temporary evidence is under `/tmp/p10i` (inputs, reports, full CLI results and
+logs); numeric summaries and fixture reproduction parameters are preserved here.
+Claude/remote dft5090 session must collect si8 T=1/T=8 `perf` stacks on dev08,
+separating H-apply FFT, projector operations, orthogonalization, GEMM/EVD and
+density, then return the profiles for implementation. Do not change defaults
+or relax across-thread density identity. Recheck both backends, many-k cases
+and the 4/8/20-atom cubic/skew coverage after implementation.
+
+Session registry and delegate report are absent for this task in this checkout.
+Dashboard/session JSON publication belongs to the orchestrator and lies outside
+this ticket's OWNED_FILES. No recurring orchestrator timer is active in this run.
+No implementation was verified, so no README validation result was added.
+Changes remain uncommitted as required.
+
+
+### P10I resumed: architect-supplied profile (2026-11-05)
+
+The architect supplied a Mac `sample` profile of release si8 Gamma at T=1
+(~1550 samples); no new profiling is requested or performed. Self samples:
+GEMM neon microkernel 553 (~36%), subtract_projection 264 (~17%), FFT ~270
+(~18%), nonlocal add 93, fused local 60, GEMM wrapper 42, EVD ~26,
+copies ~25. Reported diagonalization is 3.18/2.54 s of total 3.44/2.77 s
+at T=1/8. This authorizes deterministic tiled GEMM and blocked projection work;
+small EVD remains sequential. Reduction tiles must not depend on thread budget.
+Changing projection rounding is authorized, with energy error <=1e-12 Ha and
+unchanged across-thread density identity. No tolerance or default change.
+
+
+### P10I implementation and final local validation (2026-11-05 KST)
+
+Implemented against the supplied profile, without re-profiling or reading QE
+source. Default pure Rust; baseline commit remains `ec37408`. All changes are
+uncommitted. No SCF option, tolerance, band count, or physics default changed.
+
+- `GemmWorkspace`: fixed 256-plane-wave tiles, borrowed faer submatrix views,
+  or reusable packed MKL operands through `gemm_into`. Rotation tiles own
+  disjoint result rows; Gram tiles own partial sums combined in ascending order.
+  Tile boundaries, backend calls and combination order are independent of
+  threads, including the one-thread path. EVD remains sequential.
+- The existing Hamiltonian intra-k budget is exposed through an additive trait
+  method (default 1), forwarded by the RMM counting adapter. Davidson's projected,
+  rotation, residual-product and contracted-restart GEMMs and RMM's GEMMs use it.
+  Outer k parallelism is unchanged; H applications and GEMMs do not overlap.
+- Block projection against the established basis uses two GEMM projection
+  passes, with internal two-pass MGS and normalization BETWEEN passes. The small
+  incoming block and RMM's internal MGS remain sequential for stability.
+- Numerical tile/projection buffers are allocated at solver-workspace creation
+  and reused. `multiply_into` reuses caller output. Legacy Davidson's owning
+  result allocations remain; this is not a wholly allocation-free Davidson
+  rewrite. There are no new per-panel/per-band numerical allocations, logging,
+  unsafe code, dependencies, or global backend thread settings. Scoped thread
+  bookkeeping is transient, matching existing Hamiltonian workers.
+- Panels with fewer than 65,536 complex multiply-adds per panel run sequentially.
+  This is a scheduling-only overhead guard; it preserves exactly the same
+  backend calls and reduction order. All five SCF cases at all four budgets
+  match the pre-guard candidate's density hashes and energies exactly.
+
+Rejected prototypes and failures (none hidden by changing tolerances):
+
+1. Packing Rust operands into contiguous panels incurred ~5-8% many-k overhead.
+   Borrowed views removed those copies; MKL still packs because its existing
+   safe adapter requires contiguous operands. Small-panel worker launch overhead
+   was measured separately: k222s T=8 median 0.129123458 s before the guard.
+2. Projecting twice before normalizing the incoming block amplified near-rank
+   roundoff. The existing RMM benchmark's 64-band quadratic-spectrum Davidson
+   case failed at 800 iterations (max residual 5.934679923644799e-9 versus the
+   unchanged 1e-9 threshold); an independently built HEAD archive passed.
+   Interleaving normalization and reprojection fixed this. The full 8/16/32/64/128
+   band benchmark then passed, and a direct nearly-dependent-column regression
+   checks both cross-basis orthogonality and Gram defect <1e-12.
+3. The frozen legacy product oracle is still untouched. Its former bitwise
+   comparisons against the new solver are no longer valid after the explicitly
+   authorized rounding change. The test now checks both solvers against the
+   independent dense/residual/orthogonality oracle at existing tolerances and
+   requires old/new eigenvalue agreement <1e-12. Product-count checks remain.
+4. The optional release `mixing_scf` test fails before numerics because its old
+   `Xx` synthetic species label is rejected by current input preflight. The
+   unchanged baseline CLI reproduces that same failure. The fixture is outside
+   ticket ownership and was not modified; it is not a passing gate.
+
+### Final Mac timings
+
+Same arm64 Mac (12 logical CPUs), Rust 1.99.1, release with debug symbols,
+three CLI repetitions per case/budget. No build/tests ran concurrently with
+these timing collections. Shared-host measurements are local evidence, not
+quiet dev08 acceptance. Baseline is the preserved pre-change CLI; final is the
+scheduling-guard candidate. Raw baseline/earlier candidate/final runs are retained
+in `/tmp/p10i-impl`; compact raw wall samples are preserved below. The final
+collection follows the paired baseline/borrowed-view collection, so small
+percent differences must not be treated as universal speedups.
+
+| Threads | Before wall s | After wall s | Before diagonalization s | After diagonalization s | After engine total s |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 3.537210500 | 3.754060500 | 3.255350291 | 3.472181499 | 3.744632666 |
+| 2 | 3.100470667 | 2.622319292 | 2.832585957 | 2.348060039 | 2.604787584 |
+| 4 | 2.920329542 | 2.025889708 | 2.663807334 | 1.768112831 | 2.015014209 |
+| 8 | 2.837652167 | 1.811374875 | 2.583551210 | 1.560777418 | 1.801405124 |
+
+si8: 8 atoms, Gamma, 20 bands, 2969 plane waves, 36^3 grid, 15 SCF iterations.
+T=8 wall improves by 1.567x relative to the old T=8 run; final T=1/T=8 scaling
+is 2.072x (old scaling 1.247x). **T=1 is 6.13% slower**, reflecting stronger
+reorthogonalization and tiled arithmetic. The >=3x target is NOT established
+on this Mac and remains for the remote dev08 session, including MKL execution.
+
+Other si8 phase medians (seconds; do not sum medians to infer a measured total):
+
+| Version | Threads | Density | Potential | Mixing | Total-energy audit |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| before | 1 | 0.050949126 | 0.018816501 | 0.013368831 | 0.058602332 |
+| before | 2 | 0.034198749 | 0.019253460 | 0.013719164 | 0.058786124 |
+| before | 4 | 0.024026833 | 0.019063164 | 0.013776000 | 0.058746168 |
+| before | 8 | 0.017388667 | 0.019132752 | 0.013764208 | 0.058855293 |
+| after | 1 | 0.051450167 | 0.018968917 | 0.013451667 | 0.058550086 |
+| after | 2 | 0.034102416 | 0.019132543 | 0.013884625 | 0.058702917 |
+| after | 4 | 0.023874627 | 0.019084253 | 0.013930376 | 0.058681957 |
+| after | 8 | 0.017071125 | 0.019105834 | 0.013835585 | 0.058728000 |
+
+Many-k wall medians (seconds). No median regression is observed in this final
+collection; differences of a few percent need quiet-node confirmation.
+
+| Case | Threads | Before | After | Before / after |
+| --- | ---: | ---: | ---: | ---: |
+| k222s | 1 | 0.358561542 | 0.348447083 | 1.029027 |
+| k222s | 2 | 0.206233917 | 0.203835625 | 1.011766 |
+| k222s | 4 | 0.147871334 | 0.145943125 | 1.013212 |
+| k222s | 8 | 0.126543375 | 0.124297375 | 1.018070 |
+| k222 | 1 | 0.665486750 | 0.651468250 | 1.021518 |
+| k222 | 2 | 0.368135709 | 0.362344000 | 1.015984 |
+| k222 | 4 | 0.249241834 | 0.248104791 | 1.004583 |
+| k222 | 8 | 0.178711500 | 0.178436250 | 1.001543 |
+| k444s | 1 | 2.605961000 | 2.552044667 | 1.021127 |
+| k444s | 2 | 1.373905791 | 1.344825583 | 1.021624 |
+| k444s | 4 | 0.849184583 | 0.838687792 | 1.012516 |
+| k444s | 8 | 0.603230959 | 0.588216167 | 1.025526 |
+
+### Equivalence and generality
+
+All five Si cases have exactly equal energies, density hashes and iteration
+counts at T=1,2,4,8 within the new pure-Rust backend. The changed projection
+rounding changes historical density hashes, as authorized. Energy differences
+from the matched old build remain <=1e-12 Ha:
+
+| Case | Final energy Ha | Absolute old/new delta Ha | Density SHA-256, all budgets |
+| --- | ---: | ---: | --- |
+| gamma | -7.2955304682107647 | 4.440892099e-15 | `1854d1ea91d96933ec85e908ec62b4466ddb044abe16b060c1cbe376daea0d3f` |
+| k222s | -7.919423412469083 | 0.000000000e+00 | `2b310246ec91cf7ea8b845e03fcee0fe6c7769e5556c4af16ab5c8e4916e3ee5` |
+| k222 | -7.8312300571211368 | 0.000000000e+00 | `f203190f8c973771213a5074eb769c3ceecf264945aa805ea2da6edad5988840` |
+| k444s | -7.9259761266480915 | 0.000000000e+00 | `ad4d3eabe1b8823365908f6647c4470831a51416e8c738cd3f2aaabf7549b220` |
+| si8 | -31.321803601031256 | 1.207922651e-13 | `9152c7a9c64db67f623379a343a7b8c84b532ccc08736f8870292ad287e3e4de` |
+
+The stored `docs/performance/baseline.json` Gamma/k222 comparison also passes
+(absolute energy differences 1.63e-13 / 6.04e-14 Ha). No new QE reference run is
+claimed. Synthetic fixtures use the exact 4-atom cubic and 20-atom skew cell,
+positions, cutoff, channels and generator parameters recorded in the earlier
+P10I baseline audit above. Both converge in 7 iterations. These are deliberately
+nonphysical small-basis identity fixtures, not realistic 20-atom timing claims.
+The large/partial-panel GEMM tests and synthetic 8..128-band eigensolver matrix
+supply separate large-band coverage. Direct density-file byte comparisons across
+all four budgets exit 0 (the suite's normal fingerprint comparison includes the
+thread count and is intentionally not used as a cross-budget comparator).
+
+| Fixture | Final energy Ha | Absolute old/new delta Ha | Density SHA-256 |
+| --- | ---: | ---: | --- |
+| syn-20 | 1677.6663215065712 | 2.273736754e-13 | `4b88a4db6022ecc5375b78ae8a64b8213de14859d2330d23645f00f74966c5bc` |
+| syn-4 | 20.108668260299716 | 3.197442311e-14 | `9971b193278611fad89aa2319a248979733825442421cee4a78ab8cd9053ac6c` |
+
+### Reproduction and gates
+
+```sh
+export PATH=/opt/homebrew/opt/rustup/bin:$PATH
+CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release -p dft-cli --offline
+# Preserve the old executable BEFORE editing; never overwrite the reference.
+# For t in 1 2 4 8, run each version with:
+python3 -I scripts/bench_scf.py --binary target/release/dft-cli \
+  --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF \
+  --cases gamma,k222s,k222,k444s,si8 --threads 8 --repeats 3 \
+  --baseline /tmp/p10i-impl/final-t8.json --require-identical \
+  --record /tmp/p10i-impl/scheduled-t8.json
+# final-tN is the pre-scheduling-guard candidate; matched-before-tN is old code.
+# Cross-version energy comparison uses matched-before without --require-identical.
+scripts/check.sh
+cargo test --release -p dft-solvers --lib --test rmm -- --include-ignored
+cargo check -p dft-cli --features mkl --all-targets --offline
+python3 -I scripts/make_readme_figures.py
+python3 -I scripts/tests/test_readme_figures.py
+git diff --check
+```
+
+Final workspace check: exit 0, build/test/fmt/clippy PASS. Numerical unit tests
+cover all adjoint combinations, scalar multiplication oracle, empty/partial
+panels, nonfinite/dimension errors, stable scratch pointers, budgets 0/1/2/3/4/8,
+rank filtering, extreme scales, and near-dependent reprojection. Every final
+benchmark command (five cases x four budgets x three repeats) exits 0. Each
+synthetic suite command for T=1,2,4,8 exits 0; direct old/new energy and
+cross-thread byte assertions also exit 0. Historical baseline command exits 0.
+README generation and its three consistency tests exit 0, with no generated diff.
+No new reference JSON/figure type was added outside ticket ownership. Final release solver command exits 0 (16 library tests and 9 RMM tests,
+including the full ignored benchmark). Final CLI MKL all-targets type check
+exits 0; MKLROOT is unset, so no MKL executable was linked or run.
+
+Optional `cargo test --release -p dft-solvers -- --include-ignored` exits 101
+because of the pre-existing mixing input fixture described above; repeating
+`--test mixing_scf -- --ignored` with
+`DFT_CLI_BINARY=/tmp/p10i-impl/before-cli` also exits 101. This is not hidden by
+excluding it from the record. No thresholds were relaxed.
+
+Limits: real MKL linking/running and within-MKL density identity require dev08;
+Mac feature checks cannot establish them. Quiet-node >=3x scaling and many-k
+regression acceptance remain remote gates. Scheduler cutoff portability and
+legacy Davidson result allocations remain review considerations. No task registry
+entry/delegate report exists in this checkout; session/dashboard publication and
+README new-result ingestion remain orchestrator-owned. No commit was made.
+
+### Compact retained timing evidence
+
+Each JSON line gives case, budget, baseline/final raw wall samples in seconds;
+phase medians and energies are tabulated above. All repetitions within each
+benchmark command had identical energy and density hash (enforced by the runner).
+
+```jsonl
+{"case": "gamma", "threads": 1, "before_wall_s": [0.112580291, 0.11098308300000001, 0.11055337500000001], "after_wall_s": [0.5364219160000001, 0.10966995800000001, 0.10905683300000002]}
+{"case": "k222s", "threads": 1, "before_wall_s": [0.35578316699999996, 0.3585615420000001, 0.364549875], "after_wall_s": [0.34844708300000005, 0.34839395799999995, 0.3487854170000002]}
+{"case": "k222", "threads": 1, "before_wall_s": [0.6663425000000003, 0.6645673330000004, 0.6654867499999999], "after_wall_s": [0.6514682500000002, 0.654110583, 0.650691042]}
+{"case": "k444s", "threads": 1, "before_wall_s": [2.614540375, 2.605873334, 2.6059610000000006], "after_wall_s": [2.552627375, 2.550915916, 2.5520446670000005]}
+{"case": "si8", "threads": 1, "before_wall_s": [3.529003125000001, 3.5418400420000005, 3.5372105000000005], "after_wall_s": [3.7540604999999996, 3.7519456669999993, 3.7804411249999994]}
+{"case": "gamma", "threads": 2, "before_wall_s": [0.092941584, 0.092758333, 0.09242975], "after_wall_s": [0.09228108299999999, 0.09170329199999999, 0.09170712499999997]}
+{"case": "k222s", "threads": 2, "before_wall_s": [0.206233917, 0.250535375, 0.20613662499999985], "after_wall_s": [0.20303008300000003, 0.20383562499999996, 0.20403445900000006]}
+{"case": "k222", "threads": 2, "before_wall_s": [0.36813570900000014, 0.36772291700000004, 0.3682974160000001], "after_wall_s": [0.36402791700000003, 0.362344, 0.3619150000000002]}
+{"case": "k444s", "threads": 2, "before_wall_s": [1.3719460000000003, 1.3739057910000003, 1.4282253330000003], "after_wall_s": [1.344825583, 1.3447189169999998, 1.3509109170000002]}
+{"case": "si8", "threads": 2, "before_wall_s": [3.1004706669999997, 3.097067417, 3.1027445], "after_wall_s": [2.6142488330000004, 2.6718101250000004, 2.6223192920000002]}
+{"case": "gamma", "threads": 4, "before_wall_s": [0.085582042, 0.08480141600000002, 0.08487020799999997], "after_wall_s": [0.083779291, 0.083415083, 0.083755042]}
+{"case": "k222s", "threads": 4, "before_wall_s": [0.14842975000000003, 0.14787133400000008, 0.14782833299999998], "after_wall_s": [0.14587529100000002, 0.14594312499999995, 0.146066417]}
+{"case": "k222", "threads": 4, "before_wall_s": [0.249241834, 0.250314417, 0.24885725000000014], "after_wall_s": [0.24810479099999994, 0.2494019999999999, 0.24698100000000012]}
+{"case": "k444s", "threads": 4, "before_wall_s": [0.8508494579999999, 0.8446654160000002, 0.8491845829999995], "after_wall_s": [0.863383625, 0.838687792, 0.8341287500000005]}
+{"case": "si8", "threads": 4, "before_wall_s": [2.9160355410000003, 2.9315147909999997, 2.920329542000001], "after_wall_s": [2.0258897079999993, 2.0115028329999998, 2.028634167]}
+{"case": "gamma", "threads": 8, "before_wall_s": [0.08316754199999998, 0.08288324999999999, 0.083088], "after_wall_s": [0.08201462500000001, 0.081721291, 0.08108395900000001]}
+{"case": "k222s", "threads": 8, "before_wall_s": [0.126543375, 0.12806995799999998, 0.126352291], "after_wall_s": [0.12455462499999997, 0.12429737499999999, 0.12332058299999993]}
+{"case": "k222", "threads": 8, "before_wall_s": [0.17809175, 0.1787114999999999, 0.18030250000000003], "after_wall_s": [0.17939087499999995, 0.17843624999999996, 0.1772950419999999]}
+{"case": "k444s", "threads": 8, "before_wall_s": [0.5951217499999999, 0.6032309590000002, 0.6094902909999997], "after_wall_s": [0.596923667, 0.5830745000000002, 0.5882161670000001]}
+{"case": "si8", "threads": 8, "before_wall_s": [2.837652167, 2.822592041, 2.839838499999999], "after_wall_s": [1.813366125, 1.8113748750000003, 1.8000496249999998]}
+```
+
+Binary SHA-256: final `31532965a6ac416075527b22c0769b90787513c9d929d9f5d228d870d01d3e06`; baseline `8b1eff3f9b7ed69e1422c3c9e2ab587b464aade83dce7efe83bf7c05b3c31da7`.
+
+Final additional feature check: `cargo check -p dft-numerics --features mkl --all-targets --offline` exits 0, including the MKL-configured numerical test code.

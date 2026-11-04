@@ -404,7 +404,8 @@ fn contracted_restarts_match_oracle_and_degeneracies() {
         let true_products = apply(&op, &ritz).unwrap();
         let mut cached = ComplexMatrix::zeros(op.dimension(), 3).unwrap();
         let gram = orthogonality_defect(&ritz);
-        let (_, valid) = restart(ritz, &hv, &coefficients, &mut cached, true).unwrap();
+        let mut work = GemmWorkspace::new(op.dimension(), 6, 1).unwrap();
+        let (_, valid) = restart(ritz, &hv, &coefficients, &mut cached, true, &mut work).unwrap();
         assert!(valid);
         let error = cached
             .as_slice()
@@ -447,8 +448,17 @@ fn contraction_guard_detects_loss_of_orthogonality() {
     coefficients[(0, 0)] = 1.0.into();
     coefficients[(1, 1)] = 1.0.into();
     let products = v.clone();
+    let mut work = GemmWorkspace::new(4, 2, 1).unwrap();
     let mut cache = ComplexMatrix::zeros(4, 2).unwrap();
-    let (repaired, valid) = restart(v.clone(), &products, &coefficients, &mut cache, true).unwrap();
+    let (repaired, valid) = restart(
+        v.clone(),
+        &products,
+        &coefficients,
+        &mut cache,
+        true,
+        &mut work,
+    )
+    .unwrap();
     assert!(!valid, "fallback must force a fresh application");
     assert!(orthogonality_defect(&repaired) < 1e-15);
     let (_, valid) = restart(
@@ -457,10 +467,19 @@ fn contraction_guard_detects_loss_of_orthogonality() {
         &coefficients,
         &mut cache,
         false,
+        &mut work,
     )
     .unwrap();
     assert!(!valid, "untrusted products must not be contracted");
-    let (_, valid) = restart(repaired, &products, &coefficients, &mut cache, true).unwrap();
+    let (_, valid) = restart(
+        repaired,
+        &products,
+        &coefficients,
+        &mut cache,
+        true,
+        &mut work,
+    )
+    .unwrap();
     assert!(valid);
     assert_eq!(cache, products);
     v[(0, 1)] = f64::NAN.into();

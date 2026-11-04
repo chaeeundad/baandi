@@ -8,9 +8,9 @@ pub use rmm::{
 };
 
 use dft_numerics::linalg::{
-    ComplexMatrix, LinalgError,
+    ComplexMatrix, GemmWorkspace, LinalgError,
     MatrixOp::{Adjoint, Identity},
-    gemm, hermitian_eigh, norm, orthonormalize,
+    ProjectionWorkspace, hermitian_eigh, norm, orthonormalize,
 };
 use num_complex::Complex64;
 use thiserror::Error;
@@ -37,6 +37,10 @@ pub enum SolverError {
 /// Both slices have length dimension(); errors must be returned, not hidden.
 pub trait LinearOperator {
     fn dimension(&self) -> usize;
+    /// Available intra-k workers; implementations must not exceed the total budget.
+    fn inner_threads(&self) -> usize {
+        1
+    }
     fn apply(&self, x: &[Complex64], y: &mut [Complex64]) -> Result<(), SolverError>;
     fn apply_block(&self, x: &ComplexMatrix, y: &mut ComplexMatrix) -> Result<(), SolverError> {
         if x.rows() != self.dimension() || y.rows() != x.rows() || y.cols() != x.cols() {
@@ -345,12 +349,16 @@ impl Davidson {
                 "positive tolerance/iterations/block size and subspace larger than bands required (unless bands=n)",
             ));
         }
+        let mut gemm_work = GemmWorkspace::new(n, capacity, operator.inner_threads())?;
+        let mut projection = ProjectionWorkspace::new(n, capacity)?;
         let mut rng = SplitMix64(self.seed);
         let mut basis = if let Some(initial) = initial {
             if initial.rows() != n || initial.cols() > capacity {
                 return Err(LinalgError::Dimension.into());
             }
-            orthonormalize(initial, None)?.vectors
+            projection
+                .orthonormalize(initial, None, &mut gemm_work)?
+                .vectors
         } else {
             ComplexMatrix::zeros(n, 0)?
         };
@@ -358,7 +366,9 @@ impl Davidson {
         // Fill missing rank with independent seeded columns, including deficient user guesses.
         while basis.cols() < initial_width {
             let random = rng.block(n, initial_width - basis.cols())?;
-            let extra = orthonormalize(&random, Some(&basis))?.vectors;
+            let extra = projection
+                .orthonormalize(&random, Some(&basis), &mut gemm_work)?
+                .vectors;
             if extra.cols() == 0 {
                 return Err(SolverError::InvalidParameter(
                     "unable to complete initial basis",
@@ -388,13 +398,13 @@ impl Davidson {
                 }
                 products
             };
-            let projected = gemm(&basis, Adjoint, &h_basis, Identity)?;
+            let projected = gemm_work.multiply(&basis, Adjoint, &h_basis, Identity)?;
             let (mut values, coefficients) = hermitian_eigh(&projected)?;
             values.truncate(self.bands);
             let coefficients = first_columns(&coefficients, self.bands)?;
-            let vectors = gemm(&basis, Identity, &coefficients, Identity)?;
+            let vectors = gemm_work.multiply(&basis, Identity, &coefficients, Identity)?;
             let (mut residual_block, mut residuals) = if recurrence {
-                let products = gemm(&h_basis, Identity, &coefficients, Identity)?;
+                let products = gemm_work.multiply(&h_basis, Identity, &coefficients, Identity)?;
                 residual_from_products(products, &vectors, &values)?
             } else {
                 operator_applications += self.bands;
@@ -474,15 +484,20 @@ impl Davidson {
                     &coefficients,
                     &mut cached,
                     contract_restart && products_trusted,
+                    &mut gemm_work,
                 )?;
             }
-            let mut extra = orthonormalize(&corrections, Some(&basis))?.vectors;
+            let mut extra = projection
+                .orthonormalize(&corrections, Some(&basis), &mut gemm_work)?
+                .vectors;
             // A stalled direction can occur with an exact preconditioner or an invariant
             // initial space. Try fresh independent directions, never infer convergence.
             if extra.cols() == 0 {
                 let width = self.block_size.min(capacity - basis.cols());
                 let random = rng.block(n, width)?;
-                extra = orthonormalize(&random, Some(&basis))?.vectors;
+                extra = projection
+                    .orthonormalize(&random, Some(&basis), &mut gemm_work)?
+                    .vectors;
             }
             if extra.cols() == 0 {
                 return Err(SolverError::NotConverged {
@@ -621,10 +636,11 @@ fn restart(
     coefficients: &ComplexMatrix,
     cached: &mut ComplexMatrix,
     contract: bool,
+    gemm_work: &mut GemmWorkspace,
 ) -> Result<(ComplexMatrix, bool), SolverError> {
     if contract && orthogonality_defect(&vectors) <= 1e-12 {
         // Derived from study note section 1: H(V C) = (H V) C.
-        let products = gemm(h_basis, Identity, coefficients, Identity)?;
+        let products = gemm_work.multiply(h_basis, Identity, coefficients, Identity)?;
         for j in 0..vectors.cols() {
             cached.column_mut(j).copy_from_slice(products.column(j));
         }
@@ -633,3 +649,6 @@ fn restart(
         Ok((orthonormalize(&vectors, None)?.vectors, false))
     }
 }
+
+#[cfg(test)]
+use dft_numerics::linalg::gemm;

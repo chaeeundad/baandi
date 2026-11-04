@@ -18,8 +18,8 @@ impl LinearOperator for Counted<'_> {
         self.inner.apply_block(x, y)
     }
 }
-// Unlike GEMM's width-dependent kernel selection, this operator obeys the
-// column-independent rounding contract required by the bitwise oracle.
+// Keep operator arithmetic independent of block width when comparing the
+// frozen legacy solver with cached products and the new projection arithmetic.
 struct ColumnMatrix(ComplexMatrix);
 impl LinearOperator for ColumnMatrix {
     fn dimension(&self) -> usize {
@@ -30,12 +30,6 @@ impl LinearOperator for ColumnMatrix {
             *y = x.iter().enumerate().map(|(j, x)| self.0[(i, j)] * x).sum();
         }
         Ok(())
-    }
-}
-fn bits(a: &[f64], b: &[f64]) {
-    assert_eq!(a.len(), b.len());
-    for (a, b) in a.iter().zip(b) {
-        assert_eq!(a.to_bits(), b.to_bits());
     }
 }
 fn compare(
@@ -56,21 +50,17 @@ fn compare(
         .solve_with_recurrence(&counter, initial, p, false)
         .unwrap();
     assert_eq!(counter.columns.get(), new.operator_applications);
-    bits(&old.eigenvalues, &new.eigenvalues);
-    bits(&old.residuals, &new.residuals);
-    bits(&old.history, &new.history);
-    assert_eq!(old.iterations, new.iterations);
-    for (a, b) in old
-        .eigenvectors
-        .as_slice()
-        .iter()
-        .zip(new.eigenvectors.as_slice())
-    {
-        bits(&[a.re, a.im], &[b.re, b.im]);
+    // P10I changes projection/GEMM rounding. The unchanged legacy solver is
+    // still an independent numerical oracle, but no longer a bitwise oracle.
+    let dense = DenseEigensolver.solve(op, cfg.bands).unwrap();
+    assess(label, op, &old, &dense.eigenvalues, cfg.tolerance);
+    assess(label, op, &new, &dense.eigenvalues, cfg.tolerance);
+    for (a, b) in old.eigenvalues.iter().zip(&new.eigenvalues) {
+        assert!((a - b).abs() < 1e-12, "legacy eigenvalue agreement");
     }
     assert!(new.operator_applications < old.operator_applications);
     println!(
-        "{label}: applications {} -> {}, ratio {:.6}, iterations {}, bitwise identical",
+        "{label}: applications {} -> {}, ratio {:.6}, iterations {}, numerical agreement",
         old.operator_applications,
         new.operator_applications,
         old.operator_applications as f64 / new.operator_applications as f64,

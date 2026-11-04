@@ -1,7 +1,7 @@
 //! Blocked residual minimization with independent, short per-band DIIS histories.
 //! See docs/research/rmm-diis-design.md for choices and limitations.
 use super::*;
-use dft_numerics::linalg::{HermitianWorkspace, gemm_into, orthonormalize_into};
+use dft_numerics::linalg::{HermitianWorkspace, orthonormalize_into};
 use std::cell::Cell;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -131,6 +131,7 @@ impl RmmDiis {
         let mut history_r = ComplexMatrix::zeros(n, mh)?;
         let mut small = ComplexMatrix::zeros(m, m)?;
         let mut rotation = ComplexMatrix::zeros(m, m)?;
+        let mut gemm_work = GemmWorkspace::new(n, m, operator.inner_threads())?;
         let mut rr = HermitianWorkspace::new(m)?;
         let mut metric = ComplexMatrix::zeros(h, h)?;
         let mut metric_vectors = ComplexMatrix::zeros(h, h)?;
@@ -178,9 +179,9 @@ impl RmmDiis {
             std::mem::swap(&mut x, &mut work);
             checked_apply(operator, &x, &mut hx)?;
             applications += m;
-            gemm_into(&x, Adjoint, &hx, Identity, &mut small)?;
+            gemm_work.multiply_into(&x, Adjoint, &hx, Identity, &mut small)?;
             rr.solve(&small, &mut values, &mut rotation)?;
-            gemm_into(&x, Identity, &rotation, Identity, &mut work)?;
+            gemm_work.multiply_into(&x, Identity, &rotation, Identity, &mut work)?;
             std::mem::swap(&mut x, &mut work);
             // True certification, not a recurrence residual.
             checked_apply(operator, &x, &mut hx)?;
@@ -427,6 +428,9 @@ struct Counted<'a> {
     count: Cell<usize>,
 }
 impl LinearOperator for Counted<'_> {
+    fn inner_threads(&self) -> usize {
+        self.op.inner_threads()
+    }
     fn dimension(&self) -> usize {
         self.op.dimension()
     }

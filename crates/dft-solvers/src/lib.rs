@@ -38,6 +38,9 @@ pub enum SolverError {
 pub trait LinearOperator {
     fn dimension(&self) -> usize;
     /// Available intra-k workers; implementations must not exceed the total budget.
+    fn worker_pool(&self) -> Option<std::sync::Arc<dft_numerics::pool::WorkerPool>> {
+        None
+    }
     fn inner_threads(&self) -> usize {
         1
     }
@@ -349,7 +352,10 @@ impl Davidson {
                 "positive tolerance/iterations/block size and subspace larger than bands required (unless bands=n)",
             ));
         }
-        let mut gemm_work = GemmWorkspace::new(n, capacity, operator.inner_threads())?;
+        let mut gemm_work = match operator.worker_pool() {
+            Some(pool) => GemmWorkspace::with_pool(n, capacity, operator.inner_threads(), pool)?,
+            None => GemmWorkspace::new(n, capacity, operator.inner_threads())?,
+        };
         let mut projection = ProjectionWorkspace::new(n, capacity)?;
         let mut rng = SplitMix64(self.seed);
         let mut basis = if let Some(initial) = initial {

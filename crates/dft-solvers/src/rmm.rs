@@ -131,7 +131,10 @@ impl RmmDiis {
         let mut history_r = ComplexMatrix::zeros(n, mh)?;
         let mut small = ComplexMatrix::zeros(m, m)?;
         let mut rotation = ComplexMatrix::zeros(m, m)?;
-        let mut gemm_work = GemmWorkspace::new(n, m, operator.inner_threads())?;
+        let mut gemm_work = match operator.worker_pool() {
+            Some(pool) => GemmWorkspace::with_pool(n, m, operator.inner_threads(), pool)?,
+            None => GemmWorkspace::new(n, m, operator.inner_threads())?,
+        };
         let mut rr = HermitianWorkspace::new(m)?;
         let mut metric = ComplexMatrix::zeros(h, h)?;
         let mut metric_vectors = ComplexMatrix::zeros(h, h)?;
@@ -428,6 +431,9 @@ struct Counted<'a> {
     count: Cell<usize>,
 }
 impl LinearOperator for Counted<'_> {
+    fn worker_pool(&self) -> Option<std::sync::Arc<dft_numerics::pool::WorkerPool>> {
+        self.op.worker_pool()
+    }
     fn inner_threads(&self) -> usize {
         self.op.inner_threads()
     }

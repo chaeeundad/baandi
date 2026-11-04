@@ -4,6 +4,7 @@
 pub use dft_numerics::{
     Fft3d, FftError, FftPlan3d,
     linalg::{ComplexMatrix, LinalgError},
+    pool::WorkerPool,
 };
 pub use dft_units::Hartree;
 pub use ndarray::Array3;

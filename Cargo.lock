@@ -533,6 +533,7 @@ dependencies = [
  "ndarray",
  "ndrustfft",
  "num-complex",
+ "rayon",
  "rustfft",
  "thiserror 2.0.21",
 ]

@@ -3,9 +3,12 @@ use crate::scf::ScfError;
 use dft_basis::FftGridSpec;
 use dft_physics::data::*;
 use dft_physics::density::{FusedOperator, FusedPlan};
+use std::sync::Arc;
 
 pub(crate) struct BandDensity {
     workers: Vec<Worker>,
+    pool: Arc<WorkerPool>,
+    density: Array3<f64>,
 }
 struct Worker {
     first: usize,
@@ -13,7 +16,12 @@ struct Worker {
     contributions: Vec<Array3<f64>>,
 }
 impl BandDensity {
-    pub(crate) fn new(grid: &FftGridSpec, bands: usize, threads: usize) -> Result<Self, ScfError> {
+    pub(crate) fn new(
+        grid: &FftGridSpec,
+        bands: usize,
+        threads: usize,
+        pool: Arc<WorkerPool>,
+    ) -> Result<Self, ScfError> {
         let count = threads.max(1).min(bands);
         let mut workers = Vec::with_capacity(count);
         for i in 0..count {
@@ -25,7 +33,11 @@ impl BandDensity {
                 contributions: (first..end).map(|_| Array3::zeros(grid.dims())).collect(),
             });
         }
-        Ok(Self { workers })
+        Ok(Self {
+            workers,
+            pool,
+            density: Array3::zeros(grid.dims()),
+        })
     }
     pub(crate) fn compute(
         &mut self,
@@ -33,9 +45,16 @@ impl BandDensity {
         occupations: &[f64],
         grid: &FftGridSpec,
         volume: f64,
-    ) -> Result<Array3<f64>, ScfError> {
-        transform(&mut self.workers, coefficients, occupations, grid, volume)?;
-        let mut density = Array3::zeros(grid.dims());
+    ) -> Result<&Array3<f64>, ScfError> {
+        let workers = &mut self.workers;
+        if workers.len() == 1 {
+            transform(workers, coefficients, occupations, grid, volume)?;
+        } else {
+            self.pool
+                .install(|| transform(workers, coefficients, occupations, grid, volume))?;
+        }
+        let density = &mut self.density;
+        density.fill(0.0);
         for worker in &self.workers {
             for contribution in &worker.contributions {
                 density.zip_mut_with(contribution, |n, c| *n += c);
@@ -45,6 +64,9 @@ impl BandDensity {
             return Err(ScfError::NonFinite);
         }
         Ok(density)
+    }
+    pub(crate) fn density(&self) -> &Array3<f64> {
+        &self.density
     }
 }
 fn transform(
@@ -80,19 +102,24 @@ fn transform(
     let (left, right) = workers.split_at_mut(middle);
     let first_left = left[0].first;
     let first_right = right[0].first;
-    std::thread::scope(|scope| {
-        let handle = scope.spawn(|| transform(left, coefficients, occupations, grid, volume));
-        let right = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            transform(right, coefficients, occupations, grid, volume)
-        }));
-        let left = handle.join();
-        left.map_err(|_| {
-            ScfError::Numerical(format!("band index {first_left}: density worker panicked"))
-        })??;
-        right.map_err(|_| {
-            ScfError::Numerical(format!("band index {first_right}: density worker panicked"))
-        })?
-    })
+    let (left, right) = WorkerPool::join(
+        || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                transform(left, coefficients, occupations, grid, volume)
+            }))
+        },
+        || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                transform(right, coefficients, occupations, grid, volume)
+            }))
+        },
+    );
+    left.map_err(|_| {
+        ScfError::Numerical(format!("band index {first_left}: density worker panicked"))
+    })??;
+    right.map_err(|_| {
+        ScfError::Numerical(format!("band index {first_right}: density worker panicked"))
+    })?
 }
 
 #[cfg(test)]
@@ -136,8 +163,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(expected, fused);
-        for threads in [1, 2, 3, 4, 8] {
-            let mut pool = BandDensity::new(&grid, 7, threads).unwrap();
+        for threads in [1, 2, 3, 4, 8, 16] {
+            let mut pool =
+                BandDensity::new(&grid, 7, threads, WorkerPool::new(threads).unwrap()).unwrap();
             let addresses = |p: &BandDensity| {
                 p.workers
                     .iter()
@@ -153,6 +181,7 @@ mod tests {
                     .collect::<Vec<_>>()
             };
             let before = addresses(&pool);
+            let density_ptr = pool.density.as_ptr();
             for _ in 0..3 {
                 let actual = pool
                     .compute(&coefficients, &occupations, &grid, cell.volume_bohr3())
@@ -162,6 +191,7 @@ mod tests {
                     expected.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
                 );
                 assert_eq!(before, addresses(&pool));
+                assert_eq!(pool.density.as_ptr(), density_ptr);
             }
             let mut bad = coefficients.clone();
             bad[2][0].re = f64::NAN;
@@ -176,7 +206,7 @@ mod tests {
             assert_eq!(
                 pool.compute(&coefficients, &occupations, &grid, cell.volume_bohr3())
                     .unwrap(),
-                expected
+                &expected
             );
         }
     }

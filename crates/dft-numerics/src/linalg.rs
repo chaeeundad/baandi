@@ -57,6 +57,10 @@ impl ComplexMatrix {
     pub fn as_slice(&self) -> &[Complex64] {
         &self.data
     }
+    /// Mutable column-major storage; dimensions and allocation remain unchanged.
+    pub fn as_mut_slice(&mut self) -> &mut [Complex64] {
+        &mut self.data
+    }
     pub fn column(&self, j: usize) -> &[Complex64] {
         assert!(j < self.cols);
         &self.data[j * self.rows..(j + 1) * self.rows]

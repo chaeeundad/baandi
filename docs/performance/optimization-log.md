@@ -2170,3 +2170,556 @@ benchmark command had identical energy and density hash (enforced by the runner)
 Binary SHA-256: final `31532965a6ac416075527b22c0769b90787513c9d929d9f5d228d870d01d3e06`; baseline `8b1eff3f9b7ed69e1422c3c9e2ab587b464aade83dce7efe83bf7c05b3c31da7`.
 
 Final additional feature check: `cargo check -p dft-numerics --features mkl --all-targets --offline` exits 0, including the MKL-configured numerical test code.
+
+## P10J: persistent workers and MKL logical products (2026-11-05)
+
+Pre-change evidence supplied in the ticket: dev08 P10I `494bece`, si8 pure
+T=1/4/8/16 wall 6.89/6.20/7.61/10.15 s; 10/22 T=8 samples stop in
+`tiled::run -> std::thread::scope -> pthread_clockjoin`. T=16 has 12/29
+samples with only one live thread. Diagonalization alone increases beyond T=4.
+Source inspection confirms recursive OS thread creation for every dispatched
+GEMM and Hamiltonian band block. MKL additionally packs both operands for every
+256-element panel and calls sequential BLAS separately for each panel, then
+copies/sums outputs. These are measured scheduling evidence and a source-based
+MKL regression hypothesis, respectively; Mac cannot establish MKL timings.
+The implementation will retain pure-Rust panel arithmetic and use a single
+sequential MKL call per logical GEMM (a fixed decomposition at all budgets).
+The latter changes historical MKL rounding and requires remote energy validation.
+
+Additional architect-supplied dev08 MKL T=1 profile: tile glue grows from
+0.325 to 3.874 s, memcpy/memset from 0.433 to 1.107 s, while MKL kernel
+samples fall from 1.137 to 0.664 s. Projection improves from 1.354 to 0.443 s;
+blocked projection is therefore retained. Nonlocal samples grow from 0.325
+to 0.885 s. `git diff fe0492b 494bece -- crates/dft-physics/src/hamiltonian.rs`
+shows only the `inner_threads` accessor was added: NonlocalOperator arithmetic
+is identical in those commits. Local si8 application counts rise 2060 -> 2212
+(7.38%), insufficient to explain a 2.7x attribution increase. Symbol attribution,
+inlining/cache effects, and remote per-call timing remain distinct from a
+verified source-level root cause. A cache-local output traversal is being
+measured against an independent copy of the old traversal; every output keeps
+its original atom/channel arithmetic order and scratch is reserved once.
+
+Implementation: an SCF-owned Rayon pool is shared by k solves, GEMMs,
+projection and Hamiltonian band tasks, including nested calls. No global pool
+configuration and no unsafe lifetime erasure. The T=1 executor creates zero
+workers and does not enter Rayon. A startup counter records actual workers;
+it is written only on worker startup, never during submission. Existing ordered
+error/panic handling is retained and both branches finish before propagation.
+The ticket explicitly offers Rayon; after the architect's continuation direction,
+the existing vendored dependency is promoted with the minimum numerics manifest
+and lockfile changes. No workspace manifest or new package is introduced.
+
+Pure rotations write fixed 256-row panels directly through disjoint strided
+output views. Gram products keep the original 256-plane-wave partial matrices
+and ascending accumulation; removing those partials would change arithmetic.
+All input operands remain borrowed views. MKL instead uses one sequential
+logical product at every budget, without panel scratch, operand packing,
+assembly, or per-panel finite scans/anchor reads. This trades intra-GEMM MKL
+parallelism for efficient fixed-backend arithmetic; MKL still parallelizes
+independent k solves and Hamiltonian band batches. No tolerances change.
+
+### P10J local verification and acceptance limits
+
+Mac macOS 27.0.1 arm64, 12 logical CPUs, Rust 1.99.1. Shared host: these are
+local measurements, not quiet-dev08 acceptance. The final benchmark driver ran
+commands sequentially, without overlapping its own builds/tests and measurements.
+Baseline HEAD `c943279` has no crate-source diff from P10I `494bece`. No QE
+source was read. No new QE reference is claimed. Three wall samples per entry;
+the same five-case protocol and UPF were used before/after.
+
+Binary SHA-256 before: `1a479abe5c71defa99f52237fe027fe3c8d7299106672dd91108d276a3cf7283`;
+final: `42bdc235ccbcad279ab4c45d14110a97495f6d85a4ecb0fbd84f9c2af857ebf7`.
+UPF SHA-256: `e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+
+| Case | T | Before wall s | After wall s | Before/after |
+| --- | ---: | ---: | ---: | ---: |
+| si8 | 1 | 3.773557417 | 3.744093500 | 1.007869 |
+| si8 | 2 | 2.574230791 | 2.489679959 | 1.033961 |
+| si8 | 4 | 2.035547625 | 1.975378750 | 1.030459 |
+| si8 | 8 | 1.773360875 | 1.857173167 | 0.954871 |
+| si8 | 12 | 1.739875000 | 1.737495458 | 1.001370 |
+| gamma | 1 | 0.110252667 | 0.110652833 | 0.996384 |
+| gamma | 2 | 0.091013959 | 0.091617791 | 0.993409 |
+| gamma | 4 | 0.083401333 | 0.084285042 | 0.989515 |
+| gamma | 8 | 0.079923750 | 0.082358625 | 0.970436 |
+| gamma | 12 | 0.080952083 | 0.083011000 | 0.975197 |
+| k222s | 1 | 0.361803458 | 0.352917833 | 1.025178 |
+| k222s | 2 | 0.203144417 | 0.203048500 | 1.000472 |
+| k222s | 4 | 0.146064875 | 0.149054333 | 0.979944 |
+| k222s | 8 | 0.125120958 | 0.126042500 | 0.992689 |
+| k222s | 12 | 0.123187625 | 0.123380916 | 0.998433 |
+| k222 | 1 | 0.654386750 | 0.658657750 | 0.993516 |
+| k222 | 2 | 0.362499959 | 0.366410792 | 0.989327 |
+| k222 | 4 | 0.246409333 | 0.246600125 | 0.999226 |
+| k222 | 8 | 0.193606334 | 0.178503375 | 1.084609 |
+| k222 | 12 | 0.181971541 | 0.180408500 | 1.008664 |
+| k444s | 1 | 2.557629000 | 2.577893875 | 0.992139 |
+| k444s | 2 | 1.347024666 | 1.371418375 | 0.982213 |
+| k444s | 4 | 0.834103291 | 0.830045292 | 1.004889 |
+| k444s | 8 | 0.596984125 | 0.590573375 | 1.010855 |
+| k444s | 12 | 0.502824334 | 0.519489916 | 0.967919 |
+
+Final si8 T=8 speedup over final T=1 is **2.016x**, below 3x.
+The T=8 before/after regression and smaller timing regressions above are not
+hidden or accepted as wins. T=1 differences on the five cases range from about
+-2.5% to +0.8%; strict no-regression acceptance is not established on this shared
+host. k444s T=8 improves, but not every budget improves. The dev08 3x target,
+MKL old/new >=0.98 on every protocol combination, and return of si8 MKL T=1
+to ~6.3 s all remain **unverified remote gates**.
+
+Intra-k density is deliberately serial in this review version to eliminate the
+remaining per-batch scoped thread creation without editing outside the ticket.
+It remains parallel across k points on the SCF pool. In si8 T=8, density time
+changes from 0.016815 to 0.051618 s (about 0.035 s added); diagonalization changes
+from 1.522996 to 1.571365 s. This fallback is not a claim of density acceleration.
+The architect can authorize the small `band_density.rs` pool-handle change to
+restore intra-k density parallelism. That file has not been edited.
+
+### Numerical equivalence
+
+All five cases, all measured T=1/2/4/8/12: absolute energy delta from P10I is
+**0 Ha**, iteration counts and density SHA-256 are identical. Each of the ten
+final before/after `bench_scf.py` invocations passed `--require-identical`.
+The historical `docs/performance/baseline.json` gamma/k222 comparison also
+passes (1.63e-13 / 6.04e-14 Ha); historical density differs as it already did in P10I.
+
+| Case | Final energy Ha | Iterations | Density SHA-256 |
+| --- | ---: | ---: | --- |
+| gamma | -7.2955304682107647 | 10 | `1854d1ea91d96933ec85e908ec62b4466ddb044abe16b060c1cbe376daea0d3f` |
+| k222s | -7.919423412469083 | 10 | `2b310246ec91cf7ea8b845e03fcee0fe6c7769e5556c4af16ab5c8e4916e3ee5` |
+| k222 | -7.8312300571211368 | 10 | `f203190f8c973771213a5074eb769c3ceecf264945aa805ea2da6edad5988840` |
+| k444s | -7.9259761266480915 | 10 | `ad4d3eabe1b8823365908f6647c4470831a51416e8c738cd3f2aaabf7549b220` |
+| si8 | -31.321803601031256 | 15 | `9152c7a9c64db67f623379a343a7b8c84b532ccc08736f8870292ad287e3e4de` |
+
+Six nonphysical synthetic Gamma fixtures also pass direct energy and density.bin
+byte comparisons against the old executable at T=1/2/4/8 (24 comparisons).
+Cubic cell rows are [[8,0,0],[0,8,0],[0,0,8]] Bohr; skew rows are
+[[8,0,0],[1,7,0],[0.5,1,6]] Bohr. For N=4,8,20, atom i=0..N-1 is at
+[(i*0.61803398875)%1,(i*0.41421356237)%1,(i*0.73205080757)%1].
+Use bench_suite.py synthetic valence=2, channels=[0,1,2], radius=1, shape="soft",
+cutoff_ry=3, tier="long", timeout_s=120, deterministic=true, seed=1. The suite
+uses a Si label only for input identity validation: these are not silicon data
+or realistic large-system performance evidence. Exact inputs and results are
+in `/tmp/p10j/general-{before,final}-t*/`; no UPF is committed.
+
+| Fixture | Energy Ha | Iterations | Density SHA-256 |
+| --- | ---: | ---: | --- |
+| syn-20-cubic | 1208.5691875011141 | 7 | `9548037d81e930094440aa4822869d7ee52ed964179c76167ad180a49eb27c00` |
+| syn-20-skew | 1677.6663215065712 | 7 | `4b88a4db6022ecc5375b78ae8a64b8213de14859d2330d23645f00f74966c5bc` |
+| syn-4-cubic | -0.31779893646649704 | 9 | `183bdb1387c1ca3b359d1c36d5b2b4bac29fbda171bbc6023955d52754036bc1` |
+| syn-4-skew | 2.9423497853369449 | 9 | `a79d14e927db5a366b1351cc7b4d87b37f06c52df6920ecbf453521ce2321d79` |
+| syn-8-cubic | 46.806203281047821 | 7 | `8f383670ad613439dcd37f02e3d4c42f425e4dbac010b57da78cd2482a20c162` |
+| syn-8-skew | 77.082482692123506 | 7 | `26142b6bcfecafa3a5b7934e4f62f3bb634dcaba635770dfd30b7114de372e3d` |
+
+### Granularity experiment
+
+Gram products of rows x width matrices; five batches of 50 repetitions per
+mode, median microseconds per call, same fixed decomposition and ordered sum.
+The pool mode forces dispatch to expose the crossover; it is not the production
+threshold path. Inputs cover multiple band counts and long/short dimensions.
+
+| Rows | Width | Complex multiply-adds | Inline us | Pool T=8 us |
+| ---: | ---: | ---: | ---: | ---: |
+| 257 | 8 | 16448 | 14.561 | 20.222 |
+| 257 | 16 | 65792 | 31.728 | 32.276 |
+| 257 | 32 | 263168 | 88.862 | 68.238 |
+| 257 | 64 | 1052672 | 172.687 | 175.646 |
+| 1025 | 8 | 65600 | 14.903 | 20.942 |
+| 1025 | 16 | 262400 | 52.940 | 31.163 |
+| 1025 | 32 | 1049600 | 180.514 | 72.098 |
+| 1025 | 64 | 4198400 | 684.451 | 229.558 |
+| 4097 | 8 | 262208 | 59.841 | 41.023 |
+| 4097 | 16 | 1048832 | 211.115 | 84.810 |
+| 4097 | 32 | 4195328 | 719.628 | 219.471 |
+| 4097 | 64 | 16781312 | 2726.339 | 609.138 |
+
+Selected conservative dispatch guard: at least 262,144 complex multiply-adds
+(2,097,152 real flops) AND at least four panels. The guard depends on shape,
+never T. Small 257-row cases can contain one full panel and a one-row tail;
+keeping them inline avoids dispatch with essentially no parallel work. This is
+a Mac measurement, not a claim of a portable optimum.
+
+### Nonlocal traversal experiment
+
+Five batches of 50 repetitions, median us; same compiler and independent old
+traversal in the test. All output bits match, including nonzero initial output.
+Weights use reusable scratch. Only traversal changes: atom and channel sums
+for each output coefficient stay in the old order.
+
+| Atoms | Rows | Channels/atom | Old us | Candidate us |
+| ---: | ---: | ---: | ---: | ---: |
+| 4 | 257 | 1 | 4.985 | 5.045 |
+| 8 | 4097 | 3 | 197.409 | 117.521 |
+| 20 | 16385 | 9 | 2883.383 | 2925.173 |
+
+The 8-atom synthetic shape improves substantially, while the other shapes are
+roughly neutral/slightly slower. This is a review candidate, not evidence that
+the dev08 2.7x profile attribution has been recovered. Remote measurement and
+generality review are still required; no universal nonlocal speedup is claimed.
+
+### Commands and worker lifetime
+
+All final commands in `/tmp/p10j/commands.json` exit 0, including:
+
+```sh
+cargo build --release -p dft-cli --offline
+cargo test --release -p dft-numerics --lib granularity_table -- --ignored --nocapture
+cargo test --release -p dft-physics --lib nonlocal_traversal -- --include-ignored --nocapture
+scripts/check.sh
+cargo check -p dft-cli --features mkl --all-targets --offline
+cargo clippy -p dft-numerics --features mkl --all-targets --offline -- -D warnings
+cargo test -p dft-engine --lib scf_reuses_workers -- --nocapture
+```
+
+Benchmark invocation template (T=1,2,4,8,12; binaries before-cli and final):
+
+```sh
+python3 -I scripts/bench_scf.py --binary target/release/dft-cli \
+  --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF \
+  --cases gamma,k222s,k222,k444s,si8 --repeats 3 --threads 8 \
+  --baseline /tmp/p10j/before-t1.json --require-identical --record /tmp/p10j/final-t8.json
+python3 -I scripts/bench_suite.py --binary target/release/dft-cli \
+  --case-dir /tmp/p10j/cases --include-long --threads 8 \
+  --output /tmp/p10j/general-final-t8.json --work-dir /tmp/p10j/general-final-t8
+```
+
+The complete-SCF startup-counter test runs 11 iterations: T=1 creates 0 workers,
+T=4 creates 4 workers; counts stay unchanged through completion. The executor
+test also reuses four workers over 100 nested regions and recovers after a
+worker panic. The SCF production path no longer calls std::thread::scope; the
+legacy density helper still contains that code for its existing tests, but SCF
+constructs it with one worker. Pure matrix tests include budgets 0/1/2/3/4/8/16,
+partial panels, all adjoints, scalar oracle, stable scratch, and rank tests.
+
+Initial MKL Clippy found a needless return (101); corrected and final feature
+Clippy passes. An intermediate workspace check found an unused test import (1);
+removed and final workspace build/test/fmt/clippy all PASS (0). An initial
+benchmark with a relative UPF path failed (3); all retained measurements use
+the absolute path. A recursive closure-reference type caused a release build
+failure (101); passing a shared reference without adding reference levels
+resolved it. These failures are not reported as successful gates.
+
+README figure regeneration and its three specification tests exit 0, with no
+generated diff. New reference ingestion/dashboard JSON publication remain
+outside this ticket ownership; the authoritative external delegate registry
+records this task, while the checkout registry lacks it. CLI threading metadata
+still names scoped threads (an out-of-scope hard-coded label); actual execution
+is as described here. MKL was type-checked only, never linked/run on this Mac.
+No remote server changes, no numerical tolerance/default changes, no commit.
+
+### Retained raw wall samples (seconds)
+
+```jsonl
+{"case": "gamma", "threads": 1, "before_wall_s": [0.12100762500000001, 0.11009787500000001, 0.11025266699999997], "after_wall_s": [0.46546025, 0.11054066699999998, 0.11065283299999995]}
+{"case": "k222s", "threads": 1, "before_wall_s": [0.36334587500000004, 0.3537758750000001, 0.361803458], "after_wall_s": [0.35171025, 0.352917833, 0.35405395900000003]}
+{"case": "k222", "threads": 1, "before_wall_s": [0.6553941250000002, 0.65438675, 0.6533040420000003], "after_wall_s": [0.6604214160000001, 0.658069459, 0.6586577500000002]}
+{"case": "k444s", "threads": 1, "before_wall_s": [2.55627625, 2.5576289999999995, 2.5654136670000014], "after_wall_s": [2.5967527079999995, 2.5762810420000006, 2.577893874999999]}
+{"case": "si8", "threads": 1, "before_wall_s": [3.773557417000001, 3.7810254590000003, 3.7537350829999987], "after_wall_s": [3.7336026669999995, 3.7440935000000017, 3.7525112500000013]}
+{"case": "gamma", "threads": 2, "before_wall_s": [0.091535125, 0.091004417, 0.09101395899999998], "after_wall_s": [0.09197733400000002, 0.09082537499999999, 0.09161779099999998]}
+{"case": "k222s", "threads": 2, "before_wall_s": [0.20314441700000002, 0.2029570420000001, 0.20339029200000003], "after_wall_s": [0.20304850000000008, 0.20401195800000005, 0.20259024999999997]}
+{"case": "k222", "threads": 2, "before_wall_s": [0.362499959, 0.36239287500000006, 0.3627051250000002], "after_wall_s": [0.36525675000000013, 0.36641079199999993, 0.4352149169999999]}
+{"case": "k444s", "threads": 2, "before_wall_s": [1.3466667500000002, 1.3470246659999998, 1.3510660420000002], "after_wall_s": [1.374684916, 1.3691084589999996, 1.3714183750000002]}
+{"case": "si8", "threads": 2, "before_wall_s": [2.5501285830000002, 2.608148625, 2.5742307909999997], "after_wall_s": [2.488680208, 2.4914503749999994, 2.489679959]}
+{"case": "gamma", "threads": 4, "before_wall_s": [0.0840775, 0.0833045, 0.08340133300000002], "after_wall_s": [0.08475608300000001, 0.084151958, 0.084285042]}
+{"case": "k222s", "threads": 4, "before_wall_s": [0.14641983400000003, 0.14606487499999998, 0.145532333], "after_wall_s": [0.146772042, 0.14905433299999993, 0.14939816699999997]}
+{"case": "k222", "threads": 4, "before_wall_s": [0.24881366700000007, 0.24460108299999983, 0.24640933300000012], "after_wall_s": [0.24660012500000006, 0.24276020900000006, 0.2511605830000001]}
+{"case": "k444s", "threads": 4, "before_wall_s": [0.8341032910000001, 0.8357893750000001, 0.8300177079999997], "after_wall_s": [0.8374634159999998, 0.8274792500000001, 0.8300452920000003]}
+{"case": "si8", "threads": 4, "before_wall_s": [2.0441743750000003, 2.0179336250000004, 2.0355476249999995], "after_wall_s": [1.9746299159999996, 1.9773984169999999, 1.9753787500000008]}
+{"case": "gamma", "threads": 8, "before_wall_s": [0.07973770799999999, 0.07992375000000002, 0.08147412499999998], "after_wall_s": [0.08294599999999999, 0.08235862499999999, 0.08230633299999998]}
+{"case": "k222s", "threads": 8, "before_wall_s": [0.12518666700000003, 0.12512095800000006, 0.12400866700000002], "after_wall_s": [0.1260425, 0.12572470800000002, 0.12660233399999998]}
+{"case": "k222", "threads": 8, "before_wall_s": [0.1794037919999999, 0.19360633399999994, 0.204145625], "after_wall_s": [0.17936050000000003, 0.17646687500000002, 0.17850337500000002]}
+{"case": "k444s", "threads": 8, "before_wall_s": [0.5972275, 0.593997041, 0.5969841250000001], "after_wall_s": [0.5889834170000001, 0.590573375, 0.5942791669999998]}
+{"case": "si8", "threads": 8, "before_wall_s": [1.7653575829999997, 1.7733608749999998, 1.8090862910000007], "after_wall_s": [1.8588701250000002, 1.857173167, 1.8423446660000007]}
+{"case": "gamma", "threads": 12, "before_wall_s": [0.08074712499999999, 0.08095208300000001, 0.08251716599999998], "after_wall_s": [0.083281416, 0.082665917, 0.08301099999999997]}
+{"case": "k222s", "threads": 12, "before_wall_s": [0.11830174999999998, 0.12318762500000002, 0.132602542], "after_wall_s": [0.12322725000000001, 0.12338091600000001, 0.12354158300000007]}
+{"case": "k222", "threads": 12, "before_wall_s": [0.204564458, 0.1819715409999999, 0.17983700000000002], "after_wall_s": [0.17990887499999997, 0.18227279200000002, 0.18040849999999997]}
+{"case": "k444s", "threads": 12, "before_wall_s": [0.502824334, 0.5152213749999999, 0.4999750829999998], "after_wall_s": [0.5194899159999999, 0.532255792, 0.5170357910000001]}
+{"case": "si8", "threads": 12, "before_wall_s": [1.7380063750000003, 1.7398750000000005, 1.7491301669999997], "after_wall_s": [1.7374954579999997, 1.7331418750000003, 1.737531166000001]}
+```
+
+### P10J resumed after architect decisions (2026-11-05)
+
+The preceding local verification is retained as the rejected/intermediate
+version, not the final acceptance result. The architect authorized
+`band_density.rs` integration and accepted pinned Rayon 1.12.0. Intra-k density
+is now parallel on the SCF's existing pool; each band retains its own independent
+contribution and the reduction order is unchanged. The density result is now a
+reused plan-owned array, avoiding a new partial array per call. SCF folds those
+completed arrays in ascending k order. No new pool is constructed by density.
+
+The Hamiltonian output mutex and copy were also removed: recursive tasks receive
+disjoint mutable column-major output slices and write their bands directly.
+No thread spawn, std thread scope, or Mutex remains in numerics/solvers/physics/
+engine source. Scratch/pool allocation occurs at construction. `GemmWorkspace::multiply_into`,
+Hamiltonian apply_block and BandDensity::compute allocate no task or numerical
+buffer on successful repeated calls in our code; errors may format messages.
+Legacy solver result ownership (`multiply`, orthonormalized result matrices,
+SCF orbital/result vectors) still allocates as before and is not misrepresented
+as an allocation-free complete solver.
+
+Source audit of vendored rayon-core 1.13.0 confirms `join` uses StackJob and
+SpinLatch, while ThreadPool::install's same-registry path invokes its closure
+inline. An external installation uses a reusable thread-local LockLatch. K-solve
+regions are now installed once at their outer boundary, including Gamma, so
+repeated GEMM/band tasks stay resident instead of repeatedly entering from the
+external caller. No task boxing or global pool configuration is used. Dependency
+queue growth/backend-internal allocation is not independently instrumented; our
+reused-buffer tests and source audit establish the stated adapter boundary.
+
+An initial seven-pair alternating si8 T=8 comparison after density restoration
+still showed 1.800989 s before vs 1.822750 s after (1.21% regression).
+Density was restored to 0.017271 s vs 0.017021 s before; remaining diagonalization
+was 1.571341 vs 1.550524 s. The macOS sample attempts on both binaries exited
+255 (cannot examine process; sandbox/process attachment permission), so no
+new profile is claimed. Numerical CLI runs used for sampling both exited 0.
+
+The next controlled scheduling change replaced worker-sized groups of fixed
+GEMM tiles with one leaf job per fixed tile. The old scheduling exposed only
+T chunks and could not steal the remaining tile from a busy chunk; the new tree
+exposes all independent tiles to the existing workers. Arithmetic and summation
+are unchanged, and the tree itself no longer depends on T. A five-run pilot
+si8 T=8 fell to 1.724437708 s (see exact final measurements below); the final matrix
+and alternating comparison, rather than this pilot, determine acceptance.
+
+### Final P10J review version: resident phases and individual tile jobs
+
+The final energy-audit loop is installed once for the entire bounded chunk
+sequence, rather than once per chunk. This is the same single-boundary strategy
+used for diagonalization and density. A targeted k444s T=2 experiment reduced
+audit time from 0.150048 to 0.116903 s and wall time from 1.372 to 1.334 s.
+The earlier 1.4% k444s T=2 regression was therefore investigated, not accepted.
+An alternative small-column Nonlocal streaming branch did not reduce that audit
+time and was removed. The final production kernel retains the measured fixed
+256-row output traversal, original atom/channel arithmetic, and reusable weights.
+
+Final production binary SHA-256: `231358500a3e030d4c1cbb8aef2c15d3d6aab4708330ae5b883220aa03b5f56c`.
+Baseline remains `1a479abe5c71defa99f52237fe027fe3c8d7299106672dd91108d276a3cf7283`
+(P10I source). Host/compiler/UPF and synthetic fixture recipes are unchanged
+from the preceding record. Tables below supersede the intermediate timing tables.
+Commands were run sequentially without overlapping our own builds and timings;
+the Mac is still a shared host, not a quiet-node acceptance environment.
+
+| Case | T | Before median s | Final median s | Before/final |
+| --- | ---: | ---: | ---: | ---: |
+| si8 | 1 | 3.783201750 | 3.743456375 | 1.010617 |
+| si8 | 2 | 2.556416625 | 2.471017500 | 1.034560 |
+| si8 | 4 | 2.032091875 | 1.942979208 | 1.045864 |
+| si8 | 8 | 1.825680708 | 1.770901167 | 1.030933 |
+| si8 | 12 | 1.747488000 | 1.712823875 | 1.020238 |
+| gamma | 1 | 0.110966583 | 0.111276208 | 0.997218 |
+| gamma | 2 | 0.091486458 | 0.091299750 | 1.002045 |
+| gamma | 4 | 0.084447667 | 0.083732167 | 1.008545 |
+| gamma | 8 | 0.081330291 | 0.081284250 | 1.000566 |
+| gamma | 12 | 0.081662250 | 0.080821584 | 1.010402 |
+| k222s | 1 | 0.355575250 | 0.359573042 | 0.988882 |
+| k222s | 2 | 0.209448708 | 0.203619625 | 1.028627 |
+| k222s | 4 | 0.150472458 | 0.149502375 | 1.006489 |
+| k222s | 8 | 0.124470500 | 0.125272125 | 0.993601 |
+| k222s | 12 | 0.118810084 | 0.121759208 | 0.975779 |
+| k222 | 1 | 0.656463166 | 0.653020375 | 1.005272 |
+| k222 | 2 | 0.363295334 | 0.363720209 | 0.998832 |
+| k222 | 4 | 0.247602458 | 0.248784209 | 0.995250 |
+| k222 | 8 | 0.179291542 | 0.187391292 | 0.956776 |
+| k222 | 12 | 0.180120083 | 0.178490250 | 1.009131 |
+| k444s | 1 | 2.571535542 | 2.560646750 | 1.004252 |
+| k444s | 2 | 1.354912541 | 1.339387792 | 1.011591 |
+| k444s | 4 | 0.837692583 | 0.823189125 | 1.017619 |
+| k444s | 8 | 0.613585416 | 0.581817250 | 1.054602 |
+| k444s | 12 | 0.526887958 | 0.504945333 | 1.043455 |
+
+Independent alternating-order seven-pair si8 T=8 check: before 1.830482375 s,
+final 1.761006167 s (medians); 3.796% less wall time. Final is faster
+in 7/7 pairs. The original Mac 4.7% regression is no longer present.
+Final T=1/T=8 scaling from the three-sample table is 2.114x; this is
+reported as a Mac result, not the dev08 >=3x gate.
+
+### Dispatch latency and fixed threshold
+
+Nine batches of 1000 iterations, median us/region, after 100 warmups. Ingress
+is empty install; external region is install plus a binary join tree with T
+empty leaves; resident region runs that same tree already inside the pool.
+Empty leaves may execute on the submitting worker; this is dispatch overhead,
+not a forced all-worker wakeup/barrier latency or a cold-pool benchmark.
+
+| T | Empty ingress us | External empty region us | Resident empty region us |
+| ---: | ---: | ---: | ---: |
+| 1 | 0.002 | 0.004 | 0.003 |
+| 2 | 6.111 | 4.365 | 0.017 |
+| 4 | 4.213 | 4.309 | 0.035 |
+| 8 | 6.687 | 7.172 | 0.266 |
+| 12 | 8.452 | 9.753 | 0.699 |
+| 16 | 8.601 | 10.155 | 1.632 |
+
+Work threshold remains **262,144 complex multiply-adds = 2,097,152 real flops**
+and at least four fixed panels, independent of T. Below it, identical panels
+run inline. Above it, each fixed panel is independently stealable. The final
+size sweep below uses the same operation and reduction in both modes (five
+batches x 50 repetitions, median us); forced pool mode includes external
+ingress and does not apply the production scheduling guard.
+
+| Rows | Width | Complex multiply-adds | Inline us | Forced pool T=8 us |
+| ---: | ---: | ---: | ---: | ---: |
+| 257 | 8 | 16448 | 3.328 | 11.422 |
+| 257 | 16 | 65792 | 13.408 | 23.483 |
+| 257 | 32 | 263168 | 45.921 | 53.000 |
+| 257 | 64 | 1052672 | 174.184 | 180.572 |
+| 1025 | 8 | 65600 | 14.906 | 21.476 |
+| 1025 | 16 | 262400 | 53.406 | 31.644 |
+| 1025 | 32 | 1049600 | 182.070 | 72.266 |
+| 1025 | 64 | 4198400 | 692.085 | 243.684 |
+| 4097 | 8 | 262208 | 61.002 | 36.858 |
+| 4097 | 16 | 1048832 | 214.539 | 72.207 |
+| 4097 | 32 | 4195328 | 730.856 | 186.652 |
+| 4097 | 64 | 16781312 | 2755.042 | 575.781 |
+
+### Nonlocal evidence and limits
+
+Independent old traversal versus the final cache-blocked traversal; median us
+over five batches of 50, exact output-bit assertions. Production source is the
+same for both numerical backends. No native MKL execution is involved here.
+
+| Atoms | Rows | Channels | Old us | Final us |
+| ---: | ---: | ---: | ---: | ---: |
+| 4 | 257 | 1 | 5.926 | 5.047 |
+| 2 | 769 | 4 | 21.317 | 21.565 |
+| 4 | 1025 | 4 | 39.358 | 35.554 |
+| 4 | 4097 | 4 | 109.922 | 81.107 |
+| 8 | 2969 | 4 | 93.032 | 94.478 |
+| 8 | 4097 | 3 | 96.534 | 97.305 |
+| 20 | 16385 | 9 | 2892.298 | 2924.296 |
+
+These timings establish behavior over different projector counts and working
+sets, not a universal speedup. Small changes in the standalone benchmark case
+list changed compiler-generated benchmark timings while the CLI executable was
+byte-identical (verified SHA-256 after reverting the streaming experiment).
+Consequently the dev08 Nonlocal 2.7x sample attribution is not declared recovered
+from these microbenchmarks. The final candidate improves locality without
+changing sums; remote per-call/SCF measurement must decide its platform benefit.
+
+### Final correctness and checks
+
+For gamma/k222s/k222/k444s/si8 at T=1/2/4/8/12/16, all final bench_scf.py
+commands exit 0 with --require-identical: energy delta **0 Ha**, same density
+SHA-256 and iteration counts as P10I. The six 4/8/20-atom cubic/skew fixtures
+also have exact energy and density.bin bytes at T=1/2/4/8 (24 comparisons).
+The earlier tables give the identical energies/hashes and fixture recipe.
+No tolerance, occupation, band policy, or numerical default changed.
+
+The complete-SCF lifetime test still reports T=1: 0 workers, T=4: 4 workers,
+11 iterations each, with no additional starts before completion. Density
+checks cover T=1/2/3/4/8/16, stable output and scratch addresses, indexed errors
+and reuse after failure. Hamiltonian output now uses safe disjoint slices;
+there is no output mutex/copy. No thread::scope, spawn call, or Mutex remains
+in the numerics/solvers/physics/engine source. Local joins are stack/spin work
+stealing; one external installation/completion occurs per logical phase.
+
+Final verification driver: `python3 /tmp/p10j-final/verify.py` (exit 0). Its
+`commands.json` records exact arguments and all exit codes, including workspace
+build/test/fmt/clippy, MKL all-targets type check and Clippy, microbenchmarks,
+SCF protocol matrix, synthetic suite, and startup-counter test. The MKL code was
+not linked or run on this Mac. Final README generation/specification checks
+are recorded separately below. Raw measured wall samples are retained here
+so the evidence survives removal of temporary logs.
+
+Outstanding remote acceptance: dev08 pure si8 >=3x at T=8; MKL T=1 old/new
+>=0.98 for every protocol case and si8 near 6.3 s; within-MKL thread identity
+and cross-backend energy; Nonlocal platform benefit. These are unverified, not
+claimed passes. The Mac thread-creation mechanism and T=8 regression are fixed.
+CLI backend/thread-count metadata still has the pre-existing scoped-thread
+label outside ticket ownership; actual engine execution and measured requested
+budgets are described above. Dashboard publication/new README result ingestion
+remain orchestrator-owned. No commit or remote server change was made.
+
+### Final retained raw wall samples (seconds)
+
+```jsonl
+{"case": "gamma", "threads": 1, "before_wall_s": [0.14096162499999998, 0.11096658299999998, 0.11079783400000004], "final_wall_s": [0.28231775, 0.11094362500000005, 0.11127620799999999]}
+{"case": "k222s", "threads": 1, "before_wall_s": [0.35557524999999995, 0.35697424999999994, 0.3540107909999999], "final_wall_s": [0.35957304199999995, 0.36537991700000005, 0.350715417]}
+{"case": "k222", "threads": 1, "before_wall_s": [0.6564631660000002, 0.6591534169999997, 0.6560864999999998], "final_wall_s": [0.6536765, 0.6524307500000002, 0.6530203749999997]}
+{"case": "k444s", "threads": 1, "before_wall_s": [2.5715355420000003, 2.5684963329999997, 2.5733644160000004], "final_wall_s": [2.56064675, 2.5645413329999993, 2.550131792]}
+{"case": "si8", "threads": 1, "before_wall_s": [3.7845609999999983, 3.773529667, 3.78320175], "final_wall_s": [3.747937875, 3.743456375000001, 3.742245624999999]}
+{"case": "gamma", "threads": 2, "before_wall_s": [0.091118041, 0.09148645799999999, 0.09779854100000002], "final_wall_s": [0.091864667, 0.09115737500000001, 0.09129974999999999]}
+{"case": "k222s", "threads": 2, "before_wall_s": [0.24953941699999999, 0.20944870800000004, 0.20374308400000007], "final_wall_s": [0.20307754200000006, 0.20361962499999997, 0.204605417]}
+{"case": "k222", "threads": 2, "before_wall_s": [0.363295334, 0.3630570000000002, 0.36481641600000003], "final_wall_s": [0.365686583, 0.363720209, 0.36317850000000007]}
+{"case": "k444s", "threads": 2, "before_wall_s": [1.3569943330000003, 1.354912541, 1.3540071669999998], "final_wall_s": [1.4454587080000003, 1.3393877919999997, 1.338081291]}
+{"case": "si8", "threads": 2, "before_wall_s": [2.560337874999999, 2.551449917000001, 2.556416624999999], "final_wall_s": [2.5312980420000004, 2.4709661250000003, 2.4710174999999985]}
+{"case": "gamma", "threads": 4, "before_wall_s": [0.084202, 0.08461395800000002, 0.08444766700000003], "final_wall_s": [0.084082, 0.083732167, 0.08310945900000002]}
+{"case": "k222s", "threads": 4, "before_wall_s": [0.15047245800000003, 0.14688524999999997, 0.150534041], "final_wall_s": [0.146827667, 0.14950237500000002, 0.15311079100000002]}
+{"case": "k222", "threads": 4, "before_wall_s": [0.24845675, 0.24760245800000003, 0.245195834], "final_wall_s": [0.24738654199999988, 0.24878420899999987, 0.250806667]}
+{"case": "k444s", "threads": 4, "before_wall_s": [0.8377554999999999, 0.8358927500000002, 0.8376925829999999], "final_wall_s": [0.8281713329999998, 0.8215156669999999, 0.8231891249999999]}
+{"case": "si8", "threads": 4, "before_wall_s": [2.0320918750000008, 2.036958041000001, 2.018762584000001], "final_wall_s": [1.9434200000000001, 1.9429792080000006, 1.9389556250000002]}
+{"case": "gamma", "threads": 8, "before_wall_s": [0.081330291, 0.08090641699999998, 0.08165158399999997], "final_wall_s": [0.08128425, 0.080797167, 0.082610708]}
+{"case": "k222s", "threads": 8, "before_wall_s": [0.12447049999999998, 0.12451329200000005, 0.12425345899999996], "final_wall_s": [0.12363383300000003, 0.12527212499999996, 0.1256085]}
+{"case": "k222", "threads": 8, "before_wall_s": [0.17997462500000005, 0.17875400000000008, 0.17929154200000008], "final_wall_s": [0.17701608299999994, 0.18739129200000004, 0.20016316599999984]}
+{"case": "k444s", "threads": 8, "before_wall_s": [0.5938195, 0.613585416, 0.627432292], "final_wall_s": [0.5818172500000001, 0.589766375, 0.5761040829999997]}
+{"case": "si8", "threads": 8, "before_wall_s": [1.8256807080000002, 1.7933995829999994, 1.8287805830000003], "final_wall_s": [1.7709011670000003, 1.752785125, 1.7726685420000008]}
+{"case": "gamma", "threads": 12, "before_wall_s": [0.08247112499999998, 0.08166224999999999, 0.08108516699999999], "final_wall_s": [0.080949125, 0.080821584, 0.08040820900000001]}
+{"case": "k222s", "threads": 12, "before_wall_s": [0.11881008399999998, 0.11913895900000004, 0.1181693330000001], "final_wall_s": [0.120459708, 0.12175920799999995, 0.12304704199999994]}
+{"case": "k222", "threads": 12, "before_wall_s": [0.18035829199999998, 0.18012008300000004, 0.17861574999999985], "final_wall_s": [0.17997275000000001, 0.17849024999999985, 0.17739883300000003]}
+{"case": "k444s", "threads": 12, "before_wall_s": [0.5049285000000001, 0.5346220830000001, 0.5268879580000001], "final_wall_s": [0.49927966700000015, 0.504945333, 0.5074201249999999]}
+{"case": "si8", "threads": 12, "before_wall_s": [1.7496089159999997, 1.7382919590000006, 1.7474879999999997], "final_wall_s": [1.7128238750000002, 1.7292924579999998, 1.6958403329999996]}
+{"case": "si8", "threads": 8, "paired_check": 0, "before": 1.832585249999994, "after": 1.7544765000000098}
+{"case": "si8", "threads": 8, "paired_check": 1, "after": 1.7610061669999766, "before": 1.8402260840000224}
+{"case": "si8", "threads": 8, "paired_check": 2, "before": 1.845558249999982, "after": 1.7751604579999878}
+{"case": "si8", "threads": 8, "paired_check": 3, "after": 1.7394630840000218, "before": 1.8171394170000212}
+{"case": "si8", "threads": 8, "paired_check": 4, "before": 1.7937623340000073, "after": 1.7641034170000012}
+{"case": "si8", "threads": 8, "paired_check": 5, "after": 1.7448447499999702, "before": 1.8304823749999741}
+{"case": "si8", "threads": 8, "paired_check": 6, "before": 1.806771000000026, "after": 1.7612048749999758}
+```
+
+Final short-case T=1 cross-check (nine alternating-order pairs, same executable):
+| Case | Before median s | Final median s | Change |
+| --- | ---: | ---: | ---: |
+| gamma | 0.106985708 | 0.107269042 | +0.265% |
+| k222s | 0.345119250 | 0.343244750 | -0.543% |
+
+Gamma differs by less than 0.3 ms; these sub-percent short-run changes are
+reported rather than claimed as a universal zero-cost guarantee. k222s reverses
+the small apparent regression of its three-sample table under alternating order.
+Both retain exact P10I energy/density hashes in every run. The requested si8
+T=8 paired comparison remains faster in all seven pairs; k444s is faster at
+all five measured budgets in the final matrix. Quiet dev08 measurements remain
+the performance acceptance source.
+
+Final README/figure regeneration and its three specification tests exit 0;
+README.md and docs/img have no generated diff. Final git diff --check exits 0.
+All code changes remain uncommitted on task/P10J-PERSISTENT-POOL.
+
+```jsonl
+{"case": "gamma", "threads": 1, "pair": 0, "version": "before", "wall_s": 0.10918866599999999}
+{"case": "gamma", "threads": 1, "pair": 0, "version": "after", "wall_s": 0.10997512500000003}
+{"case": "gamma", "threads": 1, "pair": 1, "version": "after", "wall_s": 0.11191879200000004}
+{"case": "gamma", "threads": 1, "pair": 1, "version": "before", "wall_s": 0.109778875}
+{"case": "gamma", "threads": 1, "pair": 2, "version": "before", "wall_s": 0.10700658299999993}
+{"case": "gamma", "threads": 1, "pair": 2, "version": "after", "wall_s": 0.10801120799999997}
+{"case": "gamma", "threads": 1, "pair": 3, "version": "after", "wall_s": 0.10874258299999995}
+{"case": "gamma", "threads": 1, "pair": 3, "version": "before", "wall_s": 0.10698570800000007}
+{"case": "gamma", "threads": 1, "pair": 4, "version": "before", "wall_s": 0.10656266700000006}
+{"case": "gamma", "threads": 1, "pair": 4, "version": "after", "wall_s": 0.10726904199999998}
+{"case": "gamma", "threads": 1, "pair": 5, "version": "after", "wall_s": 0.10698300000000005}
+{"case": "gamma", "threads": 1, "pair": 5, "version": "before", "wall_s": 0.10677875000000014}
+{"case": "gamma", "threads": 1, "pair": 6, "version": "before", "wall_s": 0.10635745800000018}
+{"case": "gamma", "threads": 1, "pair": 6, "version": "after", "wall_s": 0.10685845800000005}
+{"case": "gamma", "threads": 1, "pair": 7, "version": "after", "wall_s": 0.10630841599999985}
+{"case": "gamma", "threads": 1, "pair": 7, "version": "before", "wall_s": 0.10704599999999997}
+{"case": "gamma", "threads": 1, "pair": 8, "version": "before", "wall_s": 0.106514}
+{"case": "gamma", "threads": 1, "pair": 8, "version": "after", "wall_s": 0.10653591600000012}
+{"case": "k222s", "threads": 1, "pair": 0, "version": "before", "wall_s": 0.3420332500000003}
+{"case": "k222s", "threads": 1, "pair": 0, "version": "after", "wall_s": 0.34176075000000017}
+{"case": "k222s", "threads": 1, "pair": 1, "version": "after", "wall_s": 0.341950416}
+{"case": "k222s", "threads": 1, "pair": 1, "version": "before", "wall_s": 0.3432762079999998}
+{"case": "k222s", "threads": 1, "pair": 2, "version": "before", "wall_s": 0.34178700000000006}
+{"case": "k222s", "threads": 1, "pair": 2, "version": "after", "wall_s": 0.3399159169999999}
+{"case": "k222s", "threads": 1, "pair": 3, "version": "after", "wall_s": 0.3414910830000002}
+{"case": "k222s", "threads": 1, "pair": 3, "version": "before", "wall_s": 0.3448559170000003}
+{"case": "k222s", "threads": 1, "pair": 4, "version": "before", "wall_s": 0.34517016599999994}
+{"case": "k222s", "threads": 1, "pair": 4, "version": "after", "wall_s": 0.3432447500000002}
+{"case": "k222s", "threads": 1, "pair": 5, "version": "after", "wall_s": 0.3476579590000002}
+{"case": "k222s", "threads": 1, "pair": 5, "version": "before", "wall_s": 0.34901445900000017}
+{"case": "k222s", "threads": 1, "pair": 6, "version": "before", "wall_s": 0.34693754200000004}
+{"case": "k222s", "threads": 1, "pair": 6, "version": "after", "wall_s": 0.35830987500000067}
+{"case": "k222s", "threads": 1, "pair": 7, "version": "after", "wall_s": 0.3470639999999996}
+{"case": "k222s", "threads": 1, "pair": 7, "version": "before", "wall_s": 0.346961125}
+{"case": "k222s", "threads": 1, "pair": 8, "version": "before", "wall_s": 0.34511924999999977}
+{"case": "k222s", "threads": 1, "pair": 8, "version": "after", "wall_s": 0.3488626669999997}
+```

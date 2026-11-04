@@ -744,3 +744,30 @@ provenance contract are specified in [agent preflight](architecture/agent-prefli
 Proposal validation, applying approved diffs and writing decision sidecars are
 not implemented. Agent advice cannot change a deterministic verdict or modify
 input automatically.
+
+## Completed optional preflight review (P11K)
+
+This section supersedes the earlier partial-implementation description above.
+
+`dft-cli check INPUT --json` is an alias for `validate` and emits deterministic
+findings on success and failure (exit 0 valid, 1 invalid). `check INPUT --explain`
+prints the findings and authority explanation without an agent. Successful reports
+retain legacy fields and add `findings_schema_version: 1`, typed findings and a
+read-only structure summary. Failure reports identify stopped coverage rather
+than inventing unavailable metrics. Runs use the same deterministic rules.
+
+Optional `[preflight]` thresholds enable warnings for minimum periodic distance,
+cell volume/skew, explicit slab vacuum and reciprocal k-mesh spacing. Overlapping
+atoms and invalid cells fail. Cutoff suggestions, electron parity and species
+identity remain deterministic. All units, codes and policy fields are documented
+in [agent preflight](architecture/agent-preflight.md).
+
+`dft-cli preflight-review INPUT PROPOSAL.json` validates and displays a proposed
+diff without changing input or recording approval. Add `--decision approved`
+(or `rejected`), `--actor NAME`, `--reason TEXT`, and `--output-dir RESULTS` to
+record an explicit decision beside `results.json`. Approval requires a valid
+candidate and fresh source, UPF and findings hashes. The immutable review sidecar
+contains proposal, decision, candidate and recheck; existing results are untouched.
+Even approved proposals are never applied by this CLI. There are no network calls,
+UPF downloads or mandatory agent dependencies. See the linked contract for the
+strict full-file unified-diff subset and versioned proposal fields.

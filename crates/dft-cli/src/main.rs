@@ -20,6 +20,19 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Validate a proposal and record an explicit review; never edits the input.
+    PreflightReview {
+        input: PathBuf,
+        proposal: PathBuf,
+        #[arg(long)]
+        output_dir: Option<PathBuf>,
+        #[arg(long, value_enum, requires_all = ["output_dir", "actor", "reason"])]
+        decision: Option<dft_cli::config::preflight::proposal::Decision>,
+        #[arg(long, requires = "decision")]
+        actor: Option<String>,
+        #[arg(long, requires = "decision")]
+        reason: Option<String>,
+    },
     /// Save an iteration boundary or an evaluated result in checkpoint v1 format.
     Checkpoint {
         input: PathBuf,
@@ -96,16 +109,46 @@ enum Command {
         command: pseudo::Command,
     },
     /// Full preflight including UPF identity and SCF controls; no SCF execution.
+    #[command(alias = "check")]
     Validate {
         input: PathBuf,
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        explain: bool,
     },
     /// Print cell, cutoff, basis counts and FFT dimensions.
     Grid { input: PathBuf },
 }
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match &cli.command {
+        Command::Validate {
+            input,
+            json,
+            explain,
+        } => return dft_cli::config::preflight::cli_check(input, *json, *explain),
+        Command::PreflightReview {
+            input,
+            proposal,
+            output_dir,
+            decision,
+            actor,
+            reason,
+        } => {
+            if let Some(decision) = decision {
+                let path = dft_cli::config::preflight::proposal::record(
+                    input,
+                    proposal,
+                    output_dir.as_deref().expect("clap requires output"),
+                    *decision,
+                    actor.as_deref().expect("clap requires actor"),
+                    reason.as_deref().expect("clap requires reason"),
+                )?;
+                println!("Recorded {}; input unchanged", path.display());
+                return Ok(());
+            }
+            return dft_cli::config::preflight::proposal::preview(input, proposal);
+        }
         Command::Status { calc } => return dft_cli::inspect::status(calc),
         Command::Explain { source } => return dft_cli::inspect::explain(source),
         Command::Checkpoint {
@@ -164,6 +207,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let input = match &cli.command {
         Command::Validate { input, .. } | Command::Grid { input } => input,
         Command::Status { .. }
+        | Command::PreflightReview { .. }
         | Command::Explain { .. }
         | Command::Checkpoint { .. }
         | Command::Restart { .. }
@@ -180,22 +224,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let text = std::fs::read_to_string(input)
         .map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", input.display())))?;
     let config = Config::parse(&text)?;
-    if let Command::Validate { json, .. } = &cli.command {
-        let report = dft_cli::config::preflight::check(&config, input)?;
-        if *json {
-            println!("{}", serde_json::to_string_pretty(&report)?);
-        } else {
-            for record in &config.input_expressions {
-                println!("{}: {:?} = {}", record.key_path, record.text, record.value);
-            }
-            report.print();
-        }
-        return Ok(());
-    }
     let prepared = config.prepare()?;
     match cli.command {
         Command::Validate { .. } => unreachable!(),
         Command::Status { .. }
+        | Command::PreflightReview { .. }
         | Command::Explain { .. }
         | Command::Checkpoint { .. }
         | Command::Restart { .. }

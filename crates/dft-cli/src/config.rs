@@ -11,6 +11,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
+    #[error("{0}")]
+    Preflight(Box<preflight::Finding>),
     #[error("invalid TOML input: {0}")]
     Parse(#[from] toml::de::Error),
     #[error("invalid configuration: {0}")]
@@ -24,6 +26,8 @@ pub enum ConfigError {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(default)]
+    pub preflight: preflight::structure::Policy,
     #[serde(skip)]
     pub species_identity: BTreeMap<String, preflight::Identity>,
     #[serde(skip)]
@@ -494,6 +498,12 @@ pub struct PreparedInput {
 }
 impl Config {
     pub fn parse(text: &str) -> Result<Self, ConfigError> {
+        let config = Self::parse_unvalidated(text)?;
+        config.validate()?;
+        Ok(config)
+    }
+    /// Parse for diagnostic reporting before geometry validation. Never run unchecked.
+    pub fn parse_unvalidated(text: &str) -> Result<Self, ConfigError> {
         let mut value: toml::Value = toml::from_str(text)?;
         let mut records = Vec::new();
         normalize(&mut value, &mut records)?;
@@ -501,7 +511,6 @@ impl Config {
         let mut config: Self = value.try_into()?;
         config.input_expressions = records;
         config.species_identity = identities;
-        config.validate()?;
         Ok(config)
     }
     /// Validate active physical settings and cell geometry. SCF/output are type-checked only.

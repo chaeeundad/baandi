@@ -108,7 +108,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reference-revision', default='9495d9fbaaf0e0bf6bf141ea61675e1d803eeeec')
     parser.add_argument('--output', type=Path, default=ROOT / 'tests/reference/runtime/benchmark.json')
-    parser.add_argument('--repeats', type=int, default=20)
+    parser.add_argument('--repeats', type=int, default=100)
     parser.add_argument('--warmups', type=int, default=3)
     parser.add_argument('--threads', type=int, default=1)
     parser.add_argument('--seed', type=int, default=20261104)

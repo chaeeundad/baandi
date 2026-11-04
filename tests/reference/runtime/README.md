@@ -8,7 +8,7 @@ python3 -I tests/reference/runtime/test_bench_runtime.py
 scripts/check.sh
 ```
 
-The default is three warm-ups and 20 measured pairs for each of six cases and
+The default is three warm-ups and 100 measured pairs (20 pairs gave 95 percent intervals up to 3.9 points wide and could not resolve the 0.5 and 1.0 percent targets, dev08 2026-11-04; the sufficiency rule below still requires at least 20) for each of six cases and
 three modes, plus 20 repetitions of each separate probe on the three full cases.
 `--threads 2` and `--threads 4` select additional same-thread comparisons;
 `--output PATH` preserves each independent report. The default output is

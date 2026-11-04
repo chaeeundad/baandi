@@ -1,0 +1,124 @@
+   Compiling serde_json v1.0.154
+   Compiling anstream v1.0.0
+   Compiling env_logger v0.11.11
+   Compiling validify v2.0.0
+   Compiling upf v0.1.1
+   Compiling dft-upf v0.1.0 (/Users/mino/Develop/rust-dft-wt/P11J-RUNTIME-BENCH/crates/dft-upf)
+   Compiling dft-physics v0.1.0 (/Users/mino/Develop/rust-dft-wt/P11J-RUNTIME-BENCH/crates/dft-physics)
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P11J-RUNTIME-BENCH/crates/dft-engine)
+    Finished `release` profile [optimized] target(s) in 3.86s
+     Running tests/checkpoint.rs (target/release/deps/checkpoint-50768e7f40c653e7)
+
+running 6 tests
+test exact_continuation_matrix ... exact kind=0 threads=1 mixing=Linear { beta: 0.3 } energy=-0.62379772639924791 Ha iterations=41
+exact kind=0 threads=1 mixing=Pulay { beta: 0.3, history: 6 } energy=-0.62379772639925168 Ha iterations=11
+exact kind=0 threads=1 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } energy=-0.62379772639925068 Ha iterations=14
+exact kind=0 threads=4 mixing=Linear { beta: 0.3 } energy=-0.62379772639924791 Ha iterations=41
+exact kind=0 threads=4 mixing=Pulay { beta: 0.3, history: 6 } energy=-0.62379772639925168 Ha iterations=11
+exact kind=0 threads=4 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } energy=-0.62379772639925068 Ha iterations=14
+exact kind=1 threads=1 mixing=Linear { beta: 0.3 } energy=-0.51412521505578990 Ha iterations=40
+exact kind=1 threads=1 mixing=Pulay { beta: 0.3, history: 6 } energy=-0.51412521505579167 Ha iterations=18
+exact kind=1 threads=1 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } energy=-0.51412521505579134 Ha iterations=14
+exact kind=1 threads=4 mixing=Linear { beta: 0.3 } energy=-0.51412521505578990 Ha iterations=40
+exact kind=1 threads=4 mixing=Pulay { beta: 0.3, history: 6 } energy=-0.51412521505579167 Ha iterations=18
+exact kind=1 threads=4 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } energy=-0.51412521505579134 Ha iterations=14
+exact kind=2 threads=1 mixing=Linear { beta: 0.3 } energy=-1.52491411485654194 Ha iterations=40
+exact kind=2 threads=1 mixing=Pulay { beta: 0.3, history: 6 } energy=-1.52491411485654815 Ha iterations=13
+exact kind=2 threads=1 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } energy=-1.52491411485654393 Ha iterations=13
+exact kind=2 threads=4 mixing=Linear { beta: 0.3 } energy=-1.52491411485654194 Ha iterations=40
+exact kind=2 threads=4 mixing=Pulay { beta: 0.3, history: 6 } energy=-1.52491411485654815 Ha iterations=13
+exact kind=2 threads=4 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } energy=-1.52491411485654393 Ha iterations=13
+ok
+test invalid_state_rejected_without_touching_source ... ok
+test mixer_memory_is_validated_before_restore ... ok
+test named_compatibility_rejections ... ok
+test runtime_boundaries_and_consumed_autonomy_survive ... ok
+test warm_start_different_mixing ... warm kind=0 threads=1 delta=1.77635683940025046e-15 Ha
+warm kind=0 threads=4 delta=1.77635683940025046e-15 Ha
+warm kind=1 threads=1 delta=1.11022302462515654e-16 Ha
+warm kind=1 threads=4 delta=1.11022302462515654e-16 Ha
+warm kind=2 threads=1 delta=8.21565038222615840e-15 Ha
+warm kind=2 threads=4 delta=8.21565038222615840e-15 Ha
+ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.33s
+
+     Running tests/runtime_policy.rs (target/release/deps/runtime_policy-1d589817f29e3b7a)
+
+running 18 tests
+test autonomous_allowlist_counts_ranges_cooldown_and_revocation ... ok
+test boundary_schema_approval_and_audit_contracts ... ok
+test certificate_completion_wins_over_pending_cancel ... ok
+test complete_transition_table ... ok
+test idempotency_quota_and_failed_journal_do_not_commit ... ok
+test mode_switches_preserve_numerics_and_revoke_pending_controls ... ok
+test pause_cancel_and_terminal_precedence ... ok
+test quotas_noops_and_ambiguous_batches_reject ... ok
+test recorded_interventions_replay_bit_identically_and_certify ... runtime replay fixture=0: energy=-0.62379772639925046 Ha; iterations=14; certificate density=1.614491029e-9 Bohr^-3/2; eigenvalue change=1.383107906e-9 Ha; policy_changes=3; full bits identical
+runtime replay fixture=1: energy=-0.51412521505579167 Ha; iterations=14; certificate density=4.017338130e-10 Bohr^-3/2; eigenvalue change=2.841891056e-9 Ha; policy_changes=3; full bits identical
+runtime replay fixture=2: energy=-1.52491411485654660 Ha; iterations=15; certificate density=3.049026055e-9 Bohr^-3/2; eigenvalue change=9.491289278e-9 Ha; policy_changes=3; full bits identical
+ok
+test rejected_batch_does_not_modify_input ... ok
+test replay_preserves_autonomous_quotas_and_empty_log_runs ... ok
+test reset_semantics_and_merged_mixers ... ok
+test same_mode_is_an_audited_idempotent_response ... ok
+test silent_supervised_agent_and_classic_wrapper_match_the_existing_session ... ok
+test solver_tolerance_and_mode_log_replay_without_clock_dependency ... ok
+test stale_expiry_preconditions_and_approval_are_enforced ... ok
+test tolerance_metadata_and_certificate_ceiling_are_required ... ok
+test transactional_rejection_preserves_hidden_continuation ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running tests/stepwise_equivalence.rs (target/release/deps/stepwise_equivalence-0b670d8d854ba12f)
+
+running 7 tests
+test divergence_is_terminal_and_observable ... ok
+test invalid_mixer_initialization_emits_failure_without_a_record ... ok
+test mode_timings ... Classic: median=0.000379417 s min=0.000360792 s max=0.000424333 s
+Observed: median=0.00038 s min=0.000359084 s max=0.000426042 s
+AgentControlled: median=0.000379791 s min=0.000371667 s max=0.000400417 s
+ok
+test modes_mixers_threads_and_species_are_bit_identical ... CURRENT 0 Linear { beta: 0.3 } 1 b98923c3dfc5550f
+fixture=0 mixing=Linear { beta: 0.3 } threads=1: all modes bit-identical; E=-0.62379772639924791 Ha; steps=41
+CURRENT 0 Linear { beta: 0.3 } 4 b98923c3dfc5550f
+fixture=0 mixing=Linear { beta: 0.3 } threads=4: all modes bit-identical; E=-0.62379772639924791 Ha; steps=41
+CURRENT 0 Pulay { beta: 0.3, history: 6 } 1 d5725b937b95e719
+fixture=0 mixing=Pulay { beta: 0.3, history: 6 } threads=1: all modes bit-identical; E=-0.62379772639925168 Ha; steps=11
+CURRENT 0 Pulay { beta: 0.3, history: 6 } 4 d5725b937b95e719
+fixture=0 mixing=Pulay { beta: 0.3, history: 6 } threads=4: all modes bit-identical; E=-0.62379772639925168 Ha; steps=11
+CURRENT 0 KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } 1 b1fba17f7710cadb
+fixture=0 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } threads=1: all modes bit-identical; E=-0.62379772639925068 Ha; steps=14
+CURRENT 0 KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } 4 b1fba17f7710cadb
+fixture=0 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } threads=4: all modes bit-identical; E=-0.62379772639925068 Ha; steps=14
+CURRENT 1 Linear { beta: 0.3 } 1 eaff564979a8d804
+fixture=1 mixing=Linear { beta: 0.3 } threads=1: all modes bit-identical; E=-0.51412521505578990 Ha; steps=40
+CURRENT 1 Linear { beta: 0.3 } 4 eaff564979a8d804
+fixture=1 mixing=Linear { beta: 0.3 } threads=4: all modes bit-identical; E=-0.51412521505578990 Ha; steps=40
+CURRENT 1 Pulay { beta: 0.3, history: 6 } 1 202f52bf37064600
+fixture=1 mixing=Pulay { beta: 0.3, history: 6 } threads=1: all modes bit-identical; E=-0.51412521505579167 Ha; steps=18
+CURRENT 1 Pulay { beta: 0.3, history: 6 } 4 202f52bf37064600
+fixture=1 mixing=Pulay { beta: 0.3, history: 6 } threads=4: all modes bit-identical; E=-0.51412521505579167 Ha; steps=18
+CURRENT 1 KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } 1 1202a2f23a08e261
+fixture=1 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } threads=1: all modes bit-identical; E=-0.51412521505579134 Ha; steps=14
+CURRENT 1 KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } 4 1202a2f23a08e261
+fixture=1 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } threads=4: all modes bit-identical; E=-0.51412521505579134 Ha; steps=14
+CURRENT 2 Linear { beta: 0.3 } 1 b6c6edacfbc8454c
+fixture=2 mixing=Linear { beta: 0.3 } threads=1: all modes bit-identical; E=-1.52491411485654194 Ha; steps=40
+CURRENT 2 Linear { beta: 0.3 } 4 b6c6edacfbc8454c
+fixture=2 mixing=Linear { beta: 0.3 } threads=4: all modes bit-identical; E=-1.52491411485654194 Ha; steps=40
+CURRENT 2 Pulay { beta: 0.3, history: 6 } 1 de548bc4df3e32ef
+fixture=2 mixing=Pulay { beta: 0.3, history: 6 } threads=1: all modes bit-identical; E=-1.52491411485654815 Ha; steps=13
+CURRENT 2 Pulay { beta: 0.3, history: 6 } 4 de548bc4df3e32ef
+fixture=2 mixing=Pulay { beta: 0.3, history: 6 } threads=4: all modes bit-identical; E=-1.52491411485654815 Ha; steps=13
+CURRENT 2 KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } 1 5db516b4353c01aa
+fixture=2 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } threads=1: all modes bit-identical; E=-1.52491411485654393 Ha; steps=13
+CURRENT 2 KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } 4 5db516b4353c01aa
+fixture=2 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } threads=4: all modes bit-identical; E=-1.52491411485654393 Ha; steps=13
+ok
+test retained_and_strict_budget_semantics ... ok
+test routine_loss_is_reported_and_critical_exhaustion_prevents_work ... ok
+test slow_consumer_preserves_certificates_and_reports_all_routine_loss ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+

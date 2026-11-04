@@ -1,6 +1,6 @@
 # Runtime equivalence acceptance protocol
 
-Status: acceptance protocol with the executed P11E budget-recovery slice below; the broader mode/performance matrix remains future work. The P11R docs-only check does not establish runtime equivalence. Grounding: `ScfProblem::run/run_outcome/run_impl`, `step_kpoints`, `IterationRecord`, `FixedPointCertificate`; existing `crates/dft-engine/tests/{scf,kpoints,threading,pbe}.rs` and `docs/performance/baseline*.json`.
+Status: acceptance protocol with executed P11E recovery and P11J local benchmark slices below; broader performance acceptance remains pending. The P11R docs-only check does not establish runtime equivalence. Grounding: `ScfProblem::run/run_outcome/run_impl`, `step_kpoints`, `IterationRecord`, `FixedPointCertificate`; existing `crates/dft-engine/tests/{scf,kpoints,threading,pbe}.rs` and `docs/performance/baseline*.json`.
 
 ## Controlled comparisons
 
@@ -59,7 +59,7 @@ Instrumentation belongs in the benchmark/driver, not new timers/logging in numer
 - Crash between audit intent/commit/application and between checkpoint payload/manifest writes; verify exactly-once accepted commits or discarded uncommitted intent, never an unaudited policy mutation. Atomicity fault injection belongs to runtime implementation tests, not this docs task.
 - Requests for unmerged Kerker/hybrid or incompatible strict/buffer policies reject. After merge, test compatible selection using P10D/P10A/P7PC's own numerical tests, plus state reset/replay and fixed-point certification.
 
-P11J overhead measurement status: NOT RUN. No target is marked achieved by P11R's repository build/test/fmt/clippy gates, which check existing code rather than an unimplemented runtime.
+P11J overhead measurement status: local matched measurements are recorded below; quiet-host acceptance remains pending. P11R's historical build/test/fmt/clippy gates did not establish any overhead target.
 
 ## P11E measured budget-recovery equivalence (2026-11-04)
 
@@ -89,3 +89,102 @@ This is budget repair at the initial safe point, not a demonstrated cure for
 physical instability. No hot path or default is changed. Cross-mode,
 pre-refactor overhead, cross-thread/platform, large-band and physical recovery
 claims remain outside this result; no P11J performance target is marked met.
+
+## P11J local matched measurements (2026-11-04)
+
+Status: local collection and equivalence pass; full acceptance **BLOCKED**, pending quiet-dev08 remeasurement and the unmeasured metrics below. No numerical code or default changed. Evidence: [benchmark.json](../../tests/reference/runtime/benchmark.json); reproduction and exact measurement boundaries: [runtime README](../../tests/reference/runtime/README.md).
+
+Command: `python3 -I scripts/bench_runtime.py` (exit 0). Candidate `43868d9`, independent pre-extraction reference `9495d9fbaaf0e0bf6bf141ea61675e1d803eeeec` (parent of P11A), Rust 1.99.1, release, macOS 27.0.1 arm64, one requested/effective engine thread. CPU-brand/affinity inspection was unavailable in the sandbox. Backend is the repository default CPU/faer/rustfft stack. Same synthetic fixtures, compiler and machine for every pair. Three warm-ups and 20 measured pairs per case/mode; alternating order, no exclusions; bootstrap seed 20261104, 10,000 resamples. The host was **not quiet**: 1-minute load rose from 11.64 to 14.50. The first pilot overlapped workspace checks; this final collection followed their completion. These shared-host measurements remain provisional and are not accepted speedups.
+
+### Targets and total wall time
+
+External wall time includes process launch, full computation/drain, identity hashing, output and teardown. Internal total time includes setup and the completed driver/drain, excluding fingerprinting. The table reports both to expose launch/instrumentation noise on short workloads. A local per-cell statistical pass does not establish overall acceptance: all required cases, equivalence and quiet-host confirmation are required. Refer to each local statistical status below; no mode may be accepted without the quiet-host confirmation and the outstanding metrics.
+
+| Fixture / budget | Mode (target) | Internal total median (ms) | External wall median (ms) | External paired overhead median % [95% CI]; local status | Internal paired overhead median % [95% CI]; local status |
+| --- | --- | ---: | ---: | --- | --- |
+| 0 / 1 | classic (<0.5%) | 1.699 | 3.574 | 1.166 [-0.389, 4.480]; inconclusive | 1.333 [0.605, 2.167]; not_met |
+| 0 / 1 | observed (<1.0%) | 1.691 | 3.491 | 1.266 [-0.236, 4.513]; inconclusive | 1.878 [0.784, 3.047]; inconclusive |
+| 0 / 1 | agent (<1.0%) | 1.701 | 3.535 | 3.718 [1.860, 6.038]; not_met | 2.168 [1.778, 3.454]; not_met |
+| 0 / 200 | classic (<0.5%) | 2.102 | 4.017 | 2.844 [1.538, 5.500]; not_met | 2.491 [1.804, 2.848]; not_met |
+| 0 / 200 | observed (<1.0%) | 2.109 | 4.048 | 2.563 [-0.251, 4.995]; inconclusive | 2.145 [1.269, 3.336]; not_met |
+| 0 / 200 | agent (<1.0%) | 2.100 | 3.994 | 0.934 [-0.179, 4.391]; inconclusive | 2.506 [1.222, 2.959]; not_met |
+| 1 / 1 | classic (<0.5%) | 2.214 | 4.137 | 0.714 [-1.077, 2.752]; inconclusive | 1.511 [0.927, 1.797]; not_met |
+| 1 / 1 | observed (<1.0%) | 2.222 | 4.157 | 3.400 [2.776, 5.080]; not_met | 1.669 [0.575, 2.362]; inconclusive |
+| 1 / 1 | agent (<1.0%) | 2.199 | 4.093 | 2.789 [-1.203, 4.053]; inconclusive | 1.356 [0.477, 2.209]; inconclusive |
+| 1 / 200 | classic (<0.5%) | 3.846 | 5.837 | 1.723 [-0.178, 2.859]; inconclusive | 0.738 [-0.033, 1.684]; inconclusive |
+| 1 / 200 | observed (<1.0%) | 3.845 | 5.806 | 0.691 [0.067, 1.629]; inconclusive | 0.620 [-0.149, 1.247]; inconclusive |
+| 1 / 200 | agent (<1.0%) | 3.868 | 5.858 | 1.228 [0.732, 3.274]; inconclusive | 1.165 [0.494, 1.635]; inconclusive |
+| 2 / 1 | classic (<0.5%) | 3.624 | 5.592 | 2.629 [0.359, 3.454]; inconclusive | 2.350 [0.848, 2.999]; not_met |
+| 2 / 1 | observed (<1.0%) | 3.599 | 5.605 | 2.174 [0.605, 3.396]; inconclusive | 1.545 [0.547, 2.040]; inconclusive |
+| 2 / 1 | agent (<1.0%) | 3.621 | 5.523 | 1.492 [-2.130, 2.000]; inconclusive | 1.177 [0.023, 2.147]; inconclusive |
+| 2 / 200 | classic (<0.5%) | 4.746 | 6.719 | -1.501 [-2.337, 0.253]; met | -0.821 [-1.645, -0.174]; met |
+| 2 / 200 | observed (<1.0%) | 4.742 | 6.700 | 0.833 [-1.640, 3.172]; inconclusive | -0.073 [-0.567, 1.318]; inconclusive |
+| 2 / 200 | agent (<1.0%) | 4.714 | 6.584 | -0.221 [-1.766, 1.307]; inconclusive | 1.032 [0.411, 1.848]; inconclusive |
+
+Fixture 0: cubic Gamma/nonlocal, three bands. Fixture 1: four k points/nonlocal, three bands. Fixture 2: skew/two species, local plus three-projector nonlocal, four bands. Budget 1 is deliberately unconverged; budget 200 converges. The stored JSON contains every reference/candidate sample, absolute RSS and paired deltas, CPU time, p5/p95 and confidence intervals. Historical Si timings are never used as the denominator of a synthetic run.
+
+### Equivalence, SCF iteration cost and memory
+
+All 360 measured pairs (720 processes) and all 240 separate probe runs match the independent reference. Every full density, eigenvalue and complex orbital bit is hashed; complete normalized result/history/certificate hashes also match. Only timing fields are normalized. Warm-ups are excluded from this count. Full runs finish in 11/18/13 ordinary iterations for fixtures 0/1/2. This is same-platform evidence, not a cross-platform promise or a QE comparison.
+
+| Full fixture | Energy (Ha) | Certificates | Classic SCF ns/ordinary iteration | Observed SCF ns/ordinary iteration | Agent SCF ns/ordinary iteration | Paired RSS delta medians C/O/A (bytes) |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| 0 | -0.62379772639925168 | 1 | 43136.3 | 43784.1 | 43365.5 | [196608.0, 286720.0, 278528.0] |
+| 1 | -0.51412521505579167 | 1 | 101243.1 | 101597.2 | 101905.1 | [163840.0, 237568.0, 245760.0] |
+| 2 | -1.5249141148565482 | 1 | 101081.7 | 101444.0 | 101152.2 | [172032.0, 204800.0, 253952.0] |
+
+SCF time per ordinary iteration includes initialization, result extraction, typed drain and nested certificates. It is **not** isolated boundary overhead. Whole-step samples are available for instrumented probes; separate certificate/noncertificate boundary timing and observer allocation counts/bytes remain unmeasured. RSS includes setup, allocator behavior and fingerprint buffers; negative paired differences are noise, not saved observer allocations.
+
+### Event, checkpoint, control and saturation probes
+
+20 repetitions per full fixture, separate from normal-mode timing. One synchronous typed consumer, no agent/LLM wait. Event probe serializes with the production CLI schema; normal timing drains typed events without serialization. Checkpoint exact continuation captures after iteration one, round-trips the production atomic file writer, restores and completes with identical output.
+
+| Fixture | Typed construction ns/event | JSON encoding ns/event | Delivery p50/p95 ns | Exact capture median ns | Exact payload median bytes | Sync persistence median ms | Pause/resume receipt-to-applied median ns | Stalled queue delivered/dropped/high-water |
+| --- | ---: | ---: | --- | ---: | ---: | ---: | --- | --- |
+| 0 | 16.21 | 1747.3 | 0/76000 | 2250 | 7407 | 7.525 | 2833/875 | 8/10/8 |
+| 1 | 16.50 | 1498.1 | 0/6000 | 3125 | 9726 | 7.394 | 2334/958 | 6/17/6 |
+| 2 | 16.41 | 1825.5 | 0/161000 | 2562 | 13952 | 6.689 | 2334/917 | 6/12/6 |
+
+Construction is a 10,000-event aggregate of typed construction/Arc clone/SystemTime, not internal enqueue cost. Timer-pair medians are approximately 28–30 ns; a 16–17 ns construction average is batch throughput, not resolution of an individually timed event. Delivery uses event wall timestamps and may include previous event serialization. Critical events remain retained in the tested routine-saturation runs; missing sequence intervals are stored. There is no slow-subscriber reconnect journal in this measurement.
+
+Persistence is synchronous encoding plus production atomic write/fsync on local temporary storage, not asynchronous service latency. Payload size varies slightly with timestamp encoding. Restore/setup times and encoding times are stored. Pause/resume is already approved; zero approval wait and zero crossed boundaries are intentional, not latency claims for external agents.
+
+### Outstanding acceptance work
+
+- Claude must repeat on quiet dev08 through dft5090. The Mac run does not establish the 0.5%/1%/1% targets.
+- Allocation traces (including disabled-event Classic), isolated generation/enqueue and boundary cost, separately timed validation/application, stale/rejected request latency, warm/export and incremental checkpoint memory, async persistence, producer/consumer rates, critical-storage exhaustion and reconnect/replay remain unmeasured.
+- Expand slab/elongated, larger band counts and gap-range fixtures; repeat same-thread runs at 2/4 threads. No default or optimization is accepted on this limited matrix.
+- Dashboard upload/registry, new README-generator result support and remote measurements are outside this ticket ownership. README regeneration and its existing tests pass with no generated diff.
+
+### Historical Si baseline regression and independent extraction check
+
+`bench_scf.py --cases gamma,k222 --repeats 3 --threads 1 --baseline
+docs/performance/baseline-after-o4c.json --require-identical` exits **5**:
+energy differences are 0 Ha (Gamma) and 3.552713678800501e-15 Ha (k222), both
+within 1e-12 Ha, but both historical density-file hashes differ. This failure is
+retained in `tests/reference/runtime/si-baseline-comparison.{json,log}`; the gate
+was not relaxed and the baseline was not rewritten.
+
+An independently archived/built pre-P11A CLI (`9495d9f`) run on the same Si inputs
+matches the current CLI (`43868d9`) **exactly** in energy and density-file hash for
+both cases (exit 0). Gamma is -7.295530468210769 Ha; k222 is
+-7.831230057121137 Ha; both use 10 ordinary iterations. Thus the density difference
+against the older O4c baseline predates runtime extraction, rather than being
+introduced by this benchmark or the extraction. No claim is made about which
+intervening change first produced it. Evidence: `si-pre-refactor.json`,
+`si-provenance.json` (actual UPF/executable hashes and command), and
+`si-pre-refactor.log`; reproduction helper: `compare_si_pre_refactor.py`, all in
+`tests/reference/runtime/`. These are engine regressions, not newly produced QE
+references. Historical/shared-host speedup columns are not acceptance evidence.
+
+Validation: `scripts/check.sh` exits 0 (build/test/fmt/clippy); release checkpoint,
+runtime-policy and stepwise suites total **31 passed, 0 failed**, including ignored
+release tests; three Python statistics regressions pass. Commands and exits are
+recorded in `tests/reference/runtime/p11j-checks.json`. No baseline or numerical
+threshold was changed. The standalone Rust driver also passes explicit rustfmt.
+
+The final measurement uses a corrected normal driver without probe-statistics
+initialization inside the timed region. The complete first pilot and intermediate
+invalid-provenance collection remain archived; see the runtime README's pilot
+audit trail. No individual sample was removed. Final source hashes match the
+current working-tree sources.

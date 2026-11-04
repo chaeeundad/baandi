@@ -1,0 +1,72 @@
+{
+ "note": "P11J candidate 43868d9; shared macOS arm64; historical scientific comparison, not matched timing acceptance",
+ "binary": "dft-cli",
+ "machine_note": "record host and commit in the note",
+ "energy_tolerance_ha": 1e-12,
+ "cases": {
+  "gamma": {
+   "operator_applications": 281,
+   "davidson_iterations": 41,
+   "certificate_applications": 38,
+   "certificate_iterations": 8,
+   "label": "Gamma only, 30 Ry",
+   "wall_s": [
+    0.49069750000000006,
+    0.131308333,
+    0.13507470899999996
+   ],
+   "wall_median_s": 0.13507470899999996,
+   "engine_total_s": 0.129596709,
+   "phases_s": {
+    "density_s": 0.004227291,
+    "diagonalization_s": 0.069977751,
+    "mixing_s": 0.00116375,
+    "potential_s": 0.005771751,
+    "total_energy_s": 0.008118124
+   },
+   "engine_total_median_s": 0.126143249,
+   "phase_medians_s": {
+    "density_s": 0.004265749,
+    "diagonalization_s": 0.068589082,
+    "mixing_s": 0.00116375,
+    "potential_s": 0.005430666,
+    "total_energy_s": 0.008118124
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.295530468210769,
+   "density_sha256": "74963159f8eb058d58220f3bbde70a806a3622ca3c568b7d7d1ef068207610b0"
+  },
+  "k222": {
+   "operator_applications": 2543,
+   "davidson_iterations": 408,
+   "certificate_applications": 208,
+   "certificate_iterations": 24,
+   "label": "2x2x2 (8 k), 30 Ry",
+   "wall_s": [
+    0.750973875,
+    0.9752042090000002,
+    1.0492121659999998
+   ],
+   "wall_median_s": 0.9752042090000002,
+   "engine_total_s": 1.004036167,
+   "phases_s": {
+    "density_s": 0.044919333,
+    "diagonalization_s": 0.790225875,
+    "mixing_s": 0.002918668,
+    "potential_s": 0.006715833,
+    "total_energy_s": 0.080025873
+   },
+   "engine_total_median_s": 0.965139542,
+   "phase_medians_s": {
+    "density_s": 0.037811334,
+    "diagonalization_s": 0.739731168,
+    "mixing_s": 0.002646833,
+    "potential_s": 0.006715833,
+    "total_energy_s": 0.080025873
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.831230057121137,
+   "density_sha256": "a38c265d381a9b918f667fbb14d43e210d3513387c9d3c41b1533930cc2515b3"
+  }
+ }
+}

@@ -1,0 +1,5 @@
+case      wall med (s)  engine (s)  diag (s) iters  dE vs base (Ha)    density  speedup
+gamma            0.135       0.130     0.070    10         0.00e+00    differs    1.14x
+k222             0.975       1.004     0.790    10         3.55e-15    differs    1.07x
+recorded tests/reference/runtime/si-baseline-comparison.json
+FAIL: energy outside 1e-12 Ha or density not identical

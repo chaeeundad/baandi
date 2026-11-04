@@ -1,0 +1,4 @@
+PASS build
+PASS test
+PASS fmt
+PASS clippy

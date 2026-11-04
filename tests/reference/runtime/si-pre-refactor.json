@@ -1,0 +1,72 @@
+{
+ "note": "P11J independent pre-refactor 9495d9f on same shared macOS host; compare to current 43868d9",
+ "binary": "pre-refactor-cli",
+ "machine_note": "record host and commit in the note",
+ "energy_tolerance_ha": 1e-12,
+ "cases": {
+  "gamma": {
+   "operator_applications": 281,
+   "davidson_iterations": 41,
+   "certificate_applications": 38,
+   "certificate_iterations": 8,
+   "label": "Gamma only, 30 Ry",
+   "wall_s": [
+    0.476183125,
+    0.11373412500000002,
+    0.11357679099999995
+   ],
+   "wall_median_s": 0.11373412500000002,
+   "engine_total_s": 0.1088795,
+   "phases_s": {
+    "density_s": 0.003687624,
+    "diagonalization_s": 0.05916704,
+    "mixing_s": 0.001081124,
+    "potential_s": 0.004713542,
+    "total_energy_s": 0.007337791
+   },
+   "engine_total_median_s": 0.1088795,
+   "phase_medians_s": {
+    "density_s": 0.003690916,
+    "diagonalization_s": 0.05916704,
+    "mixing_s": 0.001081124,
+    "potential_s": 0.004717207,
+    "total_energy_s": 0.007306919
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.295530468210769,
+   "density_sha256": "74963159f8eb058d58220f3bbde70a806a3622ca3c568b7d7d1ef068207610b0"
+  },
+  "k222": {
+   "operator_applications": 2543,
+   "davidson_iterations": 408,
+   "certificate_applications": 208,
+   "certificate_iterations": 24,
+   "label": "2x2x2 (8 k), 30 Ry",
+   "wall_s": [
+    0.6777998749999999,
+    0.6771834579999998,
+    0.677486209
+   ],
+   "wall_median_s": 0.677486209,
+   "engine_total_s": 0.672193041,
+   "phases_s": {
+    "density_s": 0.029124961,
+    "diagonalization_s": 0.516892291,
+    "mixing_s": 0.002376418,
+    "potential_s": 0.005105293,
+    "total_energy_s": 0.058025749
+   },
+   "engine_total_median_s": 0.672193041,
+   "phase_medians_s": {
+    "density_s": 0.02908275,
+    "diagonalization_s": 0.516892291,
+    "mixing_s": 0.002376418,
+    "potential_s": 0.005121042,
+    "total_energy_s": 0.058025749
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.831230057121137,
+   "density_sha256": "a38c265d381a9b918f667fbb14d43e210d3513387c9d3c41b1533930cc2515b3"
+  }
+ }
+}

@@ -1,0 +1,59 @@
+{
+  "task_id": "P11J-RUNTIME-BENCH",
+  "commands": [
+    {
+      "command": "python3 -I scripts/bench_runtime.py --repeats 1 --warmups 0 --output /tmp/runtime-smoke.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_runtime.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/runtime/test_bench_runtime.py",
+      "exit_code": 0
+    },
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --offline --release -p dft-engine --test runtime_policy --test stepwise_equivalence --test checkpoint -- --include-ignored --nocapture --test-threads=1",
+      "exit_code": 0
+    },
+    {
+      "command": "rustfmt --edition 2024 --check tests/reference/runtime/bench_driver.rs",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222 --repeats 3 --threads 1 --baseline docs/performance/baseline-after-o4c.json --require-identical --record tests/reference/runtime/si-baseline-comparison.json",
+      "exit_code": 5
+    },
+    {
+      "command": "python3 -I tests/reference/runtime/compare_si_pre_refactor.py",
+      "exit_code": 0
+    }
+  ],
+  "notes": [
+    "Historical density hashes differ; energy tolerance passes.",
+    "No target or scientific default changed.",
+    "Standalone benchmark Rust file is checked explicitly with rustfmt; workspace gates do not discover it.",
+    "First timing collection superseded after removing probe-statistics initialization from normal-mode timing; transitional collection invalidated for source edit during build. Both raw collections retained."
+  ],
+  "final_benchmark": {
+    "source_hashes_verified": true,
+    "normal_probe_reports_empty": true,
+    "matched_pairs": 360,
+    "separate_probe_runs": 240,
+    "all_bit_identity_checks_pass": true,
+    "performance_acceptance": "blocked: quiet dev08 and remaining metric coverage required"
+  }
+}

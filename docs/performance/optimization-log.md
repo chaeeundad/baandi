@@ -1790,3 +1790,44 @@ metadata and failure/queue tests also exits 0. README generator consistency:
 remain identical at `9495d9f`; no rebase is necessary and all changes are left
 uncommitted as required. Session/dashboard JSON and dataset publication are
 outside this ticket's OWNED_FILES and remain with the orchestrator.
+
+## P11J — matched runtime benchmark, local evidence only (2026-11-04)
+
+No optimization or default change is adopted. Added an offline standalone driver
+and paired Python harness, independently building pre-P11A `9495d9f` and candidate
+`43868d9` with Rust 1.99.1/release on the same arm64 Mac. Three synthetic fixtures,
+one-step exhausted and complete SCF, three modes, three warm-ups and 20 pairs:
+360 measured pairs and 240 separate event/control/checkpoint/saturation probes.
+All arrays and normalized scientific results match the pre-extraction reference.
+
+The final collection's 1-minute load was 11.64 -> 14.50.
+Across 18 mode/case cells, internal total timing yields {'not_met': 7, 'inconclusive': 10, 'met': 1};
+external process wall timing yields {'inconclusive': 14, 'not_met': 3, 'met': 1}.
+A local cell pass does not establish the target across cases or quiet-host
+acceptance. No mode passes all required cases. Exact capture medians range
+2.25–3.12 microseconds; synchronous persistence medians
+6.69–7.53 milliseconds. Routine queue saturation and exact
+checkpoint restoration preserve final numerical identity.
+
+A first pilot unnecessarily initialized probe statistics inside normal timing.
+That fixed adapter cost was removed before the final full collection. Complete
+pilot data is retained, as is an intermediate collection explicitly invalidated
+for editing its driver during build. Final source hashes are stable and verified;
+no individual sample is excluded and physics/run counts/thresholds are unchanged.
+
+Rejected inference: historical Si times cannot be denominators for synthetic
+inputs or different hardware. Historical baseline JSON is embedded for provenance;
+independent builds supply the matched denominator. Subtracting RSS does not prove
+zero Classic allocations, and an entire step does not isolate enqueue/boundary
+cost. These remain separate tracing requirements. No kernel was changed, no
+profile-driven optimization is claimed, and no QE source or study note was used.
+Detailed metrics and gaps: [validation results](../validation/runtime-equivalence.md#p11j-local-matched-measurements-2026-11-04)
+and `tests/reference/runtime/benchmark.json`. Claude must remeasure on quiet dev08
+via dft5090; full P11J acceptance remains blocked.
+
+Historical Si follow-up: strict O4c density comparison exits 5 despite energy
+errors 0 and 3.55e-15 Ha. Independently rebuilt pre-P11A and current CLIs have
+identical Si Gamma/k222 energies and density hashes (exit 0), so the historical
+density difference predates extraction. No gate or baseline was relaxed.
+Evidence: `tests/reference/runtime/si-*.json` and logs. Workspace gates pass;
+release checkpoint/runtime/stepwise suites: 31 passed, 0 failed.

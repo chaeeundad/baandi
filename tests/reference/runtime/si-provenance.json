@@ -1,0 +1,29 @@
+{
+  "reference_revision": "9495d9fbaaf0e0bf6bf141ea61675e1d803eeeec",
+  "candidate_revision": "43868d9",
+  "reference_cli_sha256": "45b2c44aa49b9a373a5d112a26f6d5b70f69bbd8e6deb78841c8f6433593098f",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "command": [
+    "python3",
+    "-I",
+    "scripts/bench_scf.py",
+    "--binary",
+    "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-pre-si-j4kw4wgt/pre-refactor-cli",
+    "--upf",
+    "/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+    "--cases",
+    "gamma,k222",
+    "--repeats",
+    "3",
+    "--threads",
+    "1",
+    "--baseline",
+    "tests/reference/runtime/si-baseline-comparison.json",
+    "--require-identical",
+    "--record",
+    "tests/reference/runtime/si-pre-refactor.json",
+    "--note",
+    "P11J independent pre-refactor 9495d9f on same shared macOS host; compare to current 43868d9"
+  ],
+  "exit_code": 0
+}

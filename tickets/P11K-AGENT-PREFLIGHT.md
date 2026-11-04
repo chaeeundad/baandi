@@ -13,3 +13,5 @@ ACCEPTANCE_CRITERIA: findings are machine-readable and deterministic, an agent-f
 NON_GOALS: natural-language input (P9A), automatic fixing, pseudopotential download.
 GIT: branch task/P11K-AGENT-PREFLIGHT, uncommitted
 RETURN_FORMAT: docs/schemas/report.schema.json
+EXTENDED 2026-11-04 by architect: OWNED_FILES also include crates/dft-cli/src/{config.rs,run.rs,main.rs,lib.rs} (minimal wiring, list the lines changed), crates/dft-cli/tests/*, docs/user/cli-modes.md, results.json additive preflight field. Implement the deterministic structure rules, findings JSON on failure, `check --explain`/`validate --json` wiring, proposal validation and provenance. Valid inputs must produce unchanged numerical results.
+

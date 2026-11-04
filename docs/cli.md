@@ -725,3 +725,49 @@ requested tolerance is above the final `eigen_tolerance`. Final-result band
 residuals and all fixed-point certificate arrays remain true operator residuals;
 final-accuracy maps always perform that check. This removes duplicate operator
 work without weakening the final acceptance tests.
+
+## Optional agent preflight findings (P11K, partial implementation)
+
+`dft-cli validate INPUT --json` adds `findings_schema_version: 1`, typed `findings`
+and a read-only `structure` summary to successful reports. Codes currently cover
+cutoff suggestions and explicit element/functional overrides; each carries a
+severity, TOML key path, typed evidence and fix hint. Structure vectors are rows
+in Bohr and atom positions are fractional. Legacy text warnings, verdicts, exit
+codes and `results.json.preflight` persistence are preserved; no agent is required
+and the CLI makes no network call. Failed validation still returns stderr text
+and a nonzero exit, not a findings JSON envelope.
+
+Use the existing `explain INPUT` for human explanation. `baandi check --explain`
+is not currently a supported command. The external advisory/patch workflow,
+restricted-field approval rules, proposed additional structure checks and additive
+provenance contract are specified in [agent preflight](architecture/agent-preflight.md).
+Proposal validation, applying approved diffs and writing decision sidecars are
+not implemented. Agent advice cannot change a deterministic verdict or modify
+input automatically.
+
+## Completed optional preflight review (P11K)
+
+This section supersedes the earlier partial-implementation description above.
+
+`dft-cli check INPUT --json` is an alias for `validate` and emits deterministic
+findings on success and failure (exit 0 valid, 1 invalid). `check INPUT --explain`
+prints the findings and authority explanation without an agent. Successful reports
+retain legacy fields and add `findings_schema_version: 1`, typed findings and a
+read-only structure summary. Failure reports identify stopped coverage rather
+than inventing unavailable metrics. Runs use the same deterministic rules.
+
+Optional `[preflight]` thresholds enable warnings for minimum periodic distance,
+cell volume/skew, explicit slab vacuum and reciprocal k-mesh spacing. Overlapping
+atoms and invalid cells fail. Cutoff suggestions, electron parity and species
+identity remain deterministic. All units, codes and policy fields are documented
+in [agent preflight](architecture/agent-preflight.md).
+
+`dft-cli preflight-review INPUT PROPOSAL.json` validates and displays a proposed
+diff without changing input or recording approval. Add `--decision approved`
+(or `rejected`), `--actor NAME`, `--reason TEXT`, and `--output-dir RESULTS` to
+record an explicit decision beside `results.json`. Approval requires a valid
+candidate and fresh source, UPF and findings hashes. The immutable review sidecar
+contains proposal, decision, candidate and recheck; existing results are untouched.
+Even approved proposals are never applied by this CLI. There are no network calls,
+UPF downloads or mandatory agent dependencies. See the linked contract for the
+strict full-file unified-diff subset and versioned proposal fields.

@@ -485,6 +485,7 @@ dependencies = [
  "dft-basis",
  "dft-engine",
  "dft-geometry",
+ "dft-numerics",
  "dft-physics",
  "dft-units",
  "dft-upf",

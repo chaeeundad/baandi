@@ -42,8 +42,70 @@ fn chemical(s: &str) -> bool {
     "H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf Db Sg Bh Hs Mt Ds Rg Cn Nh Fl Mc Lv Ts Og".split_whitespace().any(|x| x == s)
 }
 
+/// Version of the additive findings contract, independent of the legacy report.
+pub const FINDINGS_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    Warning,
+    Info,
+}
+
+/// Code and evidence are one typed variant, so they cannot disagree.
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "code", content = "evidence", deny_unknown_fields)]
+pub enum FindingData {
+    #[serde(rename = "PF_CUTOFF_BELOW_SUGGESTED")]
+    CutoffBelowSuggested {
+        species: String,
+        cutoff_ry: f64,
+        suggested_cutoff_ry: f64,
+    },
+    #[serde(rename = "PF_ELEMENT_OVERRIDE")]
+    ElementOverride {
+        species: String,
+        declared_element: String,
+        upf_element: String,
+        mismatch: bool,
+    },
+    #[serde(rename = "PF_FUNCTIONAL_OVERRIDE")]
+    FunctionalOverride {
+        requested_functional: String,
+        upf_functional: String,
+        species: String,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct Finding {
+    pub severity: Severity,
+    /// TOML path; dynamic species labels are quoted, including labels with dots.
+    pub key_path: String,
+    #[serde(flatten)]
+    pub data: FindingData,
+    pub fix_hint: String,
+}
+
+/// Read-only input geometry, with unit conversion only at the CLI boundary.
+#[derive(Debug, Serialize)]
+pub struct StructureSummary {
+    /// Each row is a lattice vector, matching the input file convention.
+    pub lattice_vectors_bohr: [[f64; 3]; 3],
+    pub atoms: Vec<StructureAtom>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StructureAtom {
+    pub species: String,
+    pub fractional: [f64; 3],
+}
+
 #[derive(Debug, Serialize)]
 pub struct Report {
+    pub findings_schema_version: u32,
+    pub findings: Vec<Finding>,
+    pub structure: StructureSummary,
     pub schema_version: u32,
     pub valid: bool,
     pub warnings: Vec<String>,
@@ -124,6 +186,7 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
     }
     let options =
         crate::run::options(config).map_err(|e| fail("scf", e, "correct the SCF controls"))?;
+    let mut findings = Vec::new();
     let mut warnings = Vec::new();
     let mut overrides = Vec::new();
     let mut charges = BTreeMap::new();
@@ -167,6 +230,19 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
                 "{key}.allow_element_mismatch = true (permission enabled; no mismatch)"
             ));
         }
+        if identity.is_some_and(|i| i.allow_element_mismatch) {
+            findings.push(Finding {
+                severity: Severity::Info,
+                key_path: format!("pseudopotentials.{}.allow_element_mismatch", toml::Value::String(label.clone())),
+                data: FindingData::ElementOverride {
+                    species: label.clone(),
+                    declared_element: element.to_owned(),
+                    upf_element: p.element().trim().to_owned(),
+                    mismatch: element != p.element().trim(),
+                },
+                fix_hint: "Review the intended species and UPF identity; remove the override unless deliberate.".into(),
+            });
+        }
         if !options.functional.matches_upf(p.functional()) {
             let message = format!(
                 "xc.functional: requested {}, {} has UPF functional {:?}",
@@ -175,6 +251,16 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
                 p.functional()
             );
             if options.allow_functional_override {
+                findings.push(Finding {
+                    severity: Severity::Info,
+                    key_path: "xc.allow_functional_override".into(),
+                    data: FindingData::FunctionalOverride {
+                        requested_functional: options.functional.name().to_owned(),
+                        upf_functional: p.functional().to_owned(),
+                        species: label.clone(),
+                    },
+                    fix_hint: "Review the functional and UPF compatibility; select matching inputs unless the override is deliberate.".into(),
+                });
                 overrides.push(format!("{message}; xc.allow_functional_override = true"));
             } else {
                 return Err(fail(
@@ -186,6 +272,16 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         }
         let suggested = p.raw().header.wfc_cutoff;
         if suggested.is_finite() && suggested > 0. && config.basis.ecutwfc_ry < suggested {
+            findings.push(Finding {
+                severity: Severity::Warning,
+                key_path: "basis.ecutwfc_ry".into(),
+                data: FindingData::CutoffBelowSuggested {
+                    species: label.clone(),
+                    cutoff_ry: config.basis.ecutwfc_ry,
+                    suggested_cutoff_ry: suggested,
+                },
+                fix_hint: "Increase cutoff and test convergence; the UPF suggestion is not a convergence certificate.".into(),
+            });
             warnings.push(format!("basis.ecutwfc_ry: {} Ry is below {} suggested wfc_cutoff = {suggested} Ry; increase cutoff and test convergence", config.basis.ecutwfc_ry, path.display()));
         }
         elements.insert(label, p.element().trim().to_owned());
@@ -320,6 +416,23 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         .sum::<u128>()
         + fft_grid.iter().map(|&n| n as u128).product::<u128>() * 24;
     Ok(Report {
+        findings_schema_version: FINDINGS_SCHEMA_VERSION,
+        findings,
+        structure: StructureSummary {
+            lattice_vectors_bohr: config
+                .system
+                .lattice_vectors
+                .map(|v| v.map(|x| config.system.lattice_unit.to_bohr(x))),
+            atoms: config
+                .system
+                .atoms
+                .iter()
+                .map(|atom| StructureAtom {
+                    species: atom.species.clone(),
+                    fractional: atom.fractional,
+                })
+                .collect(),
+        },
         schema_version: 1,
         valid: true,
         warnings,

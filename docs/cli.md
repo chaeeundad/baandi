@@ -725,3 +725,22 @@ requested tolerance is above the final `eigen_tolerance`. Final-result band
 residuals and all fixed-point certificate arrays remain true operator residuals;
 final-accuracy maps always perform that check. This removes duplicate operator
 work without weakening the final acceptance tests.
+
+## Optional agent preflight findings (P11K, partial implementation)
+
+`dft-cli validate INPUT --json` adds `findings_schema_version: 1`, typed `findings`
+and a read-only `structure` summary to successful reports. Codes currently cover
+cutoff suggestions and explicit element/functional overrides; each carries a
+severity, TOML key path, typed evidence and fix hint. Structure vectors are rows
+in Bohr and atom positions are fractional. Legacy text warnings, verdicts, exit
+codes and `results.json.preflight` persistence are preserved; no agent is required
+and the CLI makes no network call. Failed validation still returns stderr text
+and a nonzero exit, not a findings JSON envelope.
+
+Use the existing `explain INPUT` for human explanation. `baandi check --explain`
+is not currently a supported command. The external advisory/patch workflow,
+restricted-field approval rules, proposed additional structure checks and additive
+provenance contract are specified in [agent preflight](architecture/agent-preflight.md).
+Proposal validation, applying approved diffs and writing decision sidecars are
+not implemented. Agent advice cannot change a deterministic verdict or modify
+input automatically.

@@ -1600,5 +1600,23 @@
     "ended_at": "2026-11-04T14:55:31Z",
     "exit_code": 0,
     "note": "merged; MLIP loop and low-level coupling cases pending implementation"
+  },
+  {
+    "run_id": "P10I-SINGLE-KPOINT-SCALING#1",
+    "task_id": "P10I-SINGLE-KPOINT-SCALING",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 48685,
+    "wrapper_pid": 48658,
+    "session_id": null,
+    "branch": "task/P10I-SINGLE-KPOINT-SCALING",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P10I-SINGLE-KPOINT-SCALING",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P10I-SINGLE-KPOINT-SCALING.md",
+    "report": null,
+    "started_at": "2026-11-04T15:38:14Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

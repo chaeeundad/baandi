@@ -84,16 +84,16 @@
     "name": "성능 고도화: RMM-DIIS, 밀도 혼합, FFT 융합, GPU 설계, 범용 벤치(MKL 제외)",
     "status": "in progress",
     "gates_done": 5,
-    "gates_total": 6,
-    "note": "RMM-DIIS, 혼합기, FFT 융합, GPU 설계, 범용 벤치 완료. 남은 것: MKL 호출 경로 오버헤드(P10H) (작업 단위 5/6)"
+    "gates_total": 7,
+    "note": "RMM-DIIS, 혼합기, FFT 융합, GPU 설계, 범용 벤치 완료. 진행: 단일 k점 스레드 확장(P10I: 8원자 Gamma 16스레드에서도 1.04배). 남은 것: MKL 호출 경로(P10H)"
   },
   {
     "id": "P10B",
     "name": "Optional oneMKL FFT and GEMM backend",
     "status": "in progress",
-    "gates_done": 2,
+    "gates_done": 5,
     "gates_total": 7,
-    "note": "피처 연결과 링크 수정(앵커 심볼) 푸시 완료, dev08 재빌드·런타임 확인 대기. 이후 정확도 게이트(1e-12 Ha)와 전체 측정"
+    "note": "dev08(Xeon 6230, MKL 2026.1)에서 MKL 빌드 성공, 정확도 게이트 통과(에너지 차 최대 4.6e-13 Ha, 스레드 간 밀도 해시 동일). MKL이 순수 Rust보다 1.04~1.62배 빠름(8원자 셀이 가장 큼). QE 7.6 대비 BAANDI는 k점 많은 경우 약 2.2배, 8원자 Gamma는 최대 27배 느림. 남은 것: README 성능 갱신, 측정 정리(5퍼센트 초과 QE 6건 표시)"
   },
   {
     "id": "P11",

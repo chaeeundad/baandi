@@ -5,17 +5,19 @@
 //! called: only the addresses are stored, signatures are irrelevant.
 
 unsafe extern "C" {
-    // Public service function exported by libmkl_core.
-    fn MKL_Get_Version_String();
-    // BLAS driver of the sequential threading layer (the symbol the loader reported
-    // missing when the layer was dropped).
+    // Exported by libmkl_core only (checked with `nm -D` on MKL 2026.1: absent from
+    // libmkl_intel_lp64 and libmkl_sequential). Not public API: if a future MKL
+    // renames it the link fails loudly with an undefined symbol, never silently.
+    fn mkl_serv_allocate();
+    // BLAS driver of the sequential threading layer. Also defined in libmkl_core; the
+    // linker binds the first library listed (mkl_sequential), which is the one we need.
     fn mkl_blas_dgemm();
 }
 
 type Anchor = unsafe extern "C" fn();
 
 #[used]
-static KEEP_MKL_CORE: Anchor = MKL_Get_Version_String;
+static KEEP_MKL_CORE: Anchor = mkl_serv_allocate;
 #[used]
 static KEEP_MKL_SEQUENTIAL: Anchor = mkl_blas_dgemm;
 

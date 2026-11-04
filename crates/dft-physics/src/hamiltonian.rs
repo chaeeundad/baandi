@@ -2,6 +2,7 @@
 use dft_basis::{FftGridSpec, GVector, PlaneWaveBasis};
 use dft_geometry::Cell;
 use dft_numerics::pool::WorkerPool;
+use dft_numerics::pool::analysis::{Piece, Span};
 use dft_numerics::{
     Fft3d, FftPlan3d,
     fused::{FusedOperator, FusedPlan},
@@ -271,7 +272,7 @@ pub fn truncate_to_density_sphere(
     Ok(real.mapv(|z| z.re))
 }
 struct Worker {
-    scratch: Scratch,
+    scratch: std::sync::Mutex<Scratch>,
 }
 struct Scratch {
     fft: FusedPlan,
@@ -312,10 +313,10 @@ impl Hamiltonian {
             return Err(HamiltonianError::NonFinite);
         }
         let scratch = RefCell::new(vec![Worker {
-            scratch: Scratch {
+            scratch: std::sync::Mutex::new(Scratch {
                 fft: FusedPlan::new(dims, grid.g_to_fft())?,
                 projections: vec![Complex64::default(); 2 * nonlocal.max_channels],
-            },
+            }),
         }]);
         Ok(Self {
             data: HamiltonianData {
@@ -353,10 +354,10 @@ impl Hamiltonian {
         let pool = self.scratch.get_mut();
         for _ in pool.len()..threads.max(1) {
             pool.push(Worker {
-                scratch: Scratch {
+                scratch: std::sync::Mutex::new(Scratch {
                     fft: FusedPlan::new(dims, self.data.grid.g_to_fft())?,
                     projections: vec![Complex64::default(); 2 * self.data.nonlocal.max_channels],
-                },
+                }),
             });
         }
         pool.truncate(threads.max(1));
@@ -433,7 +434,14 @@ impl LinearOperator for Hamiltonian {
             .try_borrow_mut()
             .map_err(|_| application(HamiltonianError::Busy))?;
         self.data
-            .apply_with(x, y, &mut scratch[0].scratch)
+            .apply_with(
+                x,
+                y,
+                scratch[0]
+                    .scratch
+                    .get_mut()
+                    .map_err(|_| application(HamiltonianError::Busy))?,
+            )
             .map_err(application)
     }
     fn apply_block(&self, x: &ComplexMatrix, y: &mut ComplexMatrix) -> Result<(), SolverError> {
@@ -444,17 +452,36 @@ impl LinearOperator for Hamiltonian {
             .scratch
             .try_borrow_mut()
             .map_err(|_| application(HamiltonianError::Busy))?;
+        let _region = Span::region("hamiltonian", scratch.len().min(x.cols()).max(1));
         if scratch.len() == 1 || x.cols() <= 1 {
             for j in 0..x.cols() {
+                let _piece = Piece::new();
                 self.data
-                    .apply_with(x.column(j), y.column_mut(j), &mut scratch[0].scratch)
+                    .apply_with(
+                        x.column(j),
+                        y.column_mut(j),
+                        scratch[0]
+                            .scratch
+                            .get_mut()
+                            .map_err(|_| application(HamiltonianError::Busy))?,
+                    )
                     .map_err(|e| SolverError::Application(format!("band index {j}: {e}")))?;
             }
             return Ok(());
         }
-        let workers = scratch.len().min(x.cols());
         let output = y.as_mut_slice();
-        let scratch = &mut scratch[..workers];
+        if scratch.len() < self.pool.workers_created() || x.cols() <= scratch.len() {
+            // With outer k parallelism, use disjoint static scratch. A modulo
+            // mapping of the entire pool onto a smaller inner budget causes
+            // lock collisions even when another scratch slot is free.
+            let count = scratch.len().min(x.cols());
+            let data = &self.data;
+            let scratch = &mut scratch[..count];
+            return self
+                .pool
+                .install(|| apply_static_workers(data, scratch, x, output, 0, x.cols()));
+        }
+        let scratch = &scratch[..];
         let data = &self.data;
         self.pool
             .install(|| apply_workers(data, scratch, x, output, 0, x.cols()))
@@ -465,6 +492,46 @@ impl LinearOperator for Hamiltonian {
 // Joins precede error propagation in ascending band order.
 fn apply_workers(
     data: &HamiltonianData,
+    workers: &[Worker],
+    x: &ComplexMatrix,
+    y: &mut [Complex64],
+    first: usize,
+    end: usize,
+) -> Result<(), SolverError> {
+    // One fixed band per piece. Scratch belongs to a worker slot and is
+    // allocated at Hamiltonian construction, never per band. No nested work
+    // runs while holding a slot. Modulo bounds concurrency under outer-k work.
+    if end - first == 1 {
+        let slot = WorkerPool::current_worker_index().unwrap_or(0) % workers.len();
+        let mut scratch = workers[slot]
+            .scratch
+            .lock()
+            .map_err(|_| application(HamiltonianError::Busy))?;
+        let _piece = Piece::new();
+        return data
+            .apply_with(x.column(first), y, &mut scratch)
+            .map_err(|e| SolverError::Application(format!("band index {first}: {e}")));
+    }
+    let middle = first + (end - first) / 2;
+    let (left_output, right_output) = y.split_at_mut((middle - first) * x.rows());
+    let (left, right) = WorkerPool::join(
+        || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                apply_workers(data, workers, x, left_output, first, middle)
+            }))
+        },
+        || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                apply_workers(data, workers, x, right_output, middle, end)
+            }))
+        },
+    );
+    left.map_err(|_| SolverError::Application(format!("band index {first}: worker panicked")))??;
+    right.map_err(|_| SolverError::Application(format!("band index {middle}: worker panicked")))?
+}
+
+fn apply_static_workers(
+    data: &HamiltonianData,
     workers: &mut [Worker],
     x: &ComplexMatrix,
     y: &mut [Complex64],
@@ -472,7 +539,11 @@ fn apply_workers(
     end: usize,
 ) -> Result<(), SolverError> {
     if workers.len() == 1 {
-        let scratch = &mut workers[0].scratch;
+        let _piece = Piece::new();
+        let scratch = workers[0]
+            .scratch
+            .get_mut()
+            .map_err(|_| application(HamiltonianError::Busy))?;
         for j in first..end {
             let offset = (j - first) * x.rows();
             data.apply_with(x.column(j), &mut y[offset..offset + x.rows()], scratch)
@@ -487,12 +558,12 @@ fn apply_workers(
     let (left, right) = WorkerPool::join(
         || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                apply_workers(data, left, x, left_output, first, middle)
+                apply_static_workers(data, left, x, left_output, first, middle)
             }))
         },
         || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                apply_workers(data, right, x, right_output, middle, end)
+                apply_static_workers(data, right, x, right_output, middle, end)
             }))
         },
     );
@@ -522,9 +593,10 @@ mod pool_tests {
                 .borrow()
                 .iter()
                 .map(|w| {
+                    let scratch = w.scratch.lock().unwrap();
                     (
-                        &w.scratch.fft as *const FusedPlan as usize,
-                        w.scratch.projections.as_ptr() as usize,
+                        &scratch.fft as *const FusedPlan as usize,
+                        scratch.projections.as_ptr() as usize,
                     )
                 })
                 .collect::<Vec<_>>()

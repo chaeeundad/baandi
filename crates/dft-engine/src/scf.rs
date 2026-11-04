@@ -910,6 +910,7 @@ impl ScfProblem {
         self.run_impl(true)
     }
     fn run_impl(self, retain_last: bool) -> Result<ScfOutcome, ScfError> {
+        let _analysis = dft_solvers::analysis::Span::new("scf");
         let completion = if retain_last {
             CompletionMode::RetainLast
         } else {
@@ -999,6 +1000,68 @@ mod pool_fixture;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Bounded-work shape/projector benchmark, not a converged material reference.
+    /// cargo test --release -p dft-engine worker_utilization_synthetic_twenty -- --ignored --nocapture --test-threads=1
+    #[test]
+    #[ignore]
+    fn worker_utilization_synthetic_twenty() {
+        let cell =
+            Cell::from_user_rows_bohr([[16.0, 0.0, 0.0], [1.5, 12.0, 0.0], [0.5, 0.7, 10.0]])
+                .unwrap();
+        let atoms: Vec<_> = (0..20)
+            .map(|i| {
+                Atom::new(
+                    "Xx",
+                    [
+                        (i % 4) as f64 / 4.0 + 0.07,
+                        (i / 4) as f64 / 5.0 + 0.03,
+                        if i % 2 == 0 { 0.35 } else { 0.65 },
+                    ],
+                )
+            })
+            .collect();
+        for nonlocal in [false, true] {
+            let potential = pool_fixture::potential(2.0, 1.0, nonlocal, 101);
+            let mut reference = None;
+            for threads in [1, 2, 4, 8, 12] {
+                let start = std::time::Instant::now();
+                let outcome = ScfProblem::new(
+                    &cell,
+                    &atoms,
+                    &[SpeciesPotential {
+                        label: "Xx",
+                        potential: &potential,
+                    }],
+                    ScfOptions {
+                        threads,
+                        cutoff_hartree: 10.0,
+                        bands: Some(24),
+                        max_iterations: 6,
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+                .run_outcome()
+                .unwrap();
+                let elapsed = start.elapsed().as_secs_f64();
+                let result = outcome.result;
+                let bits: Vec<_> = result.density.iter().map(|x| x.to_bits()).collect();
+                let values = (result.total_hartree().to_bits(), bits);
+                if let Some(expected) = &reference {
+                    assert_eq!(&values, expected);
+                } else {
+                    reference = Some(values);
+                }
+                println!(
+                    "synthetic20 nonlocal={nonlocal} T={threads} wall_s={elapsed:.9} energy_ha={:.17} iterations={} converged={}",
+                    result.total_hartree(),
+                    result.history.len(),
+                    outcome.converged
+                );
+            }
+        }
+    }
 
     #[test]
     fn scf_reuses_workers_across_iterations() {

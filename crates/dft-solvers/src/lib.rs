@@ -3,6 +3,8 @@
 pub mod kerker;
 pub mod mixing;
 pub mod rmm;
+#[doc(hidden)]
+pub use dft_numerics::pool::analysis;
 pub use rmm::{
     HybridPhase, HybridRmm, HybridSolution, RmmDiis, RmmError, RmmFailureReason, SolverChoice,
 };
@@ -311,6 +313,7 @@ impl Davidson {
         mode: SolveMode,
         policy: BandTolerances,
     ) -> Result<EigenSolution, SolverError> {
+        let _phase = dft_numerics::pool::analysis::Span::new("davidson");
         let SolveMode {
             recurrence,
             contract_restart,
@@ -393,6 +396,7 @@ impl Davidson {
             .map(|width| ComplexMatrix::zeros(n, width))
             .collect::<Result<Vec<_>, _>>()?;
         for iteration in 1..=self.max_iterations {
+            let _iteration = dft_numerics::pool::analysis::Span::new("iteration");
             let h_basis = if cache_valid {
                 first_columns(&cached, basis.cols())?
             } else {
@@ -405,7 +409,10 @@ impl Davidson {
                 products
             };
             let projected = gemm_work.multiply(&basis, Adjoint, &h_basis, Identity)?;
-            let (mut values, coefficients) = hermitian_eigh(&projected)?;
+            let (mut values, coefficients) = {
+                let _phase = dft_numerics::pool::analysis::Span::serial("evd");
+                hermitian_eigh(&projected)?
+            };
             values.truncate(self.bands);
             let coefficients = first_columns(&coefficients, self.bands)?;
             let (vectors, products) = if recurrence {
@@ -482,7 +489,10 @@ impl Davidson {
             }
             if let Some(p) = preconditioner {
                 let mut output = ComplexMatrix::zeros(n, corrections.cols())?;
-                p.apply(&shifts, &corrections, &mut output)?;
+                {
+                    let _phase = dft_numerics::pool::analysis::Span::serial("preconditioner");
+                    p.apply(&shifts, &corrections, &mut output)?;
+                }
                 if output.rows() != n || output.cols() != corrections.cols() {
                     return Err(LinalgError::Dimension.into());
                 }
@@ -568,6 +578,7 @@ fn residual_from_products(
     vectors: &ComplexMatrix,
     values: &[f64],
 ) -> Result<(ComplexMatrix, Vec<f64>), SolverError> {
+    let _phase = dft_numerics::pool::analysis::Span::serial("residual_norms");
     let mut norms = Vec::new();
     for (j, &lambda) in values.iter().enumerate() {
         for i in 0..r.rows() {
@@ -585,13 +596,16 @@ fn max_residual(r: &[f64]) -> f64 {
     r.iter().copied().fold(0.0, f64::max)
 }
 fn first_columns(a: &ComplexMatrix, count: usize) -> Result<ComplexMatrix, LinalgError> {
+    let _phase = dft_numerics::pool::analysis::Span::serial("first_columns");
     ComplexMatrix::new(a.rows(), count, a.as_slice()[..a.rows() * count].to_vec())
 }
 fn concatenate(a: &ComplexMatrix, b: &ComplexMatrix) -> Result<ComplexMatrix, LinalgError> {
+    let _phase = dft_numerics::pool::analysis::Span::serial("concatenate");
     if a.rows() != b.rows() {
         return Err(LinalgError::Dimension);
     }
-    let mut data = a.as_slice().to_vec();
+    let mut data = Vec::with_capacity(a.as_slice().len() + b.as_slice().len());
+    data.extend_from_slice(a.as_slice());
     data.extend_from_slice(b.as_slice());
     ComplexMatrix::new(a.rows(), a.cols() + b.cols(), data)
 }

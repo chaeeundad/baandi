@@ -3050,3 +3050,385 @@ energy differences 1.63e-13 / 6.04e-14 Ha. Historical density differs, as it
 already did in P10J; this is separate from exact P10J density preservation.
 `git diff --check` exits 0. Final source changes are restricted to the ticket's
 owned files. All changes remain uncommitted for architect review.
+
+## P10L initial measurement (2026-11-05; before optimization)
+
+Architect-provided dev08 evidence: si8 pure T=8, 12 merged eu-stack runs,
+293 samples, code equal to main. Outside-pool main-thread time 6.5%
+(0.312/4.805 s), worker utilization 19.5%, busy-worker distribution 0/1/2/3/4
+= 9.2/39.6/38.2/11.9/1.0%, no samples with >=5 busy workers. Per-run
+max/mean 1.76--3.20. Supplied ideal estimate 1.27 s (5.04x), target utilization
+33% for 2x and 55% for 3x. These are supplied remote observations, not runs
+performed by this implementer. Pool residency includes serial Davidson work;
+it must not be equated with the parallelizable fraction in Amdahl's law.
+
+Source-only `worker-analysis` cfg was enabled without changing numerical
+operations. Mac measurements below are single instrumented runs, not quiet-node
+acceptance or uninstrumented performance claims. Build: `RUSTFLAGS='--cfg
+feature="worker-analysis"' cargo build --release -p dft-cli`. Raw traces, exact
+inputs, results and density files: `/tmp/p10l-before/{si8,skew4}-{T}/`;
+summary `/tmp/p10l-before/summary.json`. The skew4 fixture doubles the first
+primitive silicon lattice vector, with fractional sites (0,0,0), (.125,.25,.25),
+(.5,0,0), (.625,.25,.25), same 30 Ry cutoff and UPF as si8.
+
+| Case | T | SCF s | Logical kernel regions s | Measured leaf busy / (T * SCF) |
+|---|---:|---:|---:|---:|
+| si8 | 1 | 3.491367417 | 2.795968472 | .792 |
+| si8 | 2 | 2.2463 | 1.5640 | .637 |
+| si8 | 4 | 1.7026 | 1.0313 | .470 |
+| si8 | 8 | 1.511036166 | .834697366 | .304 |
+| si8 | 12 | 1.4375 | .7595 | .236 |
+| skew4 | 1 | .301098625 | .220706908 | .728 |
+| skew4 | 2 | .2006 | .1223 | .560 |
+| skew4 | 4 | .1641 | .0888 | .389 |
+| skew4 | 8 | .147450542 | .073735711 | .247 |
+| skew4 | 12 | .1408 | .0671 | .193 |
+
+At si8 T=8: 1192 Gram regions each contain 12 reduction panels, 798 single
+rotations and 408 paired rotations each contain 12 panels; 410 Hamiltonian
+regions have 1--8 static groups. Aggregate per-phase max/mean worker times:
+Gram 1.21, rotation 1.41, paired rotation 1.03, Hamiltonian 1.29. These aggregate
+ratios can hide severe individual-region imbalance and are NOT an acceptance
+claim of per-region imbalance <1.5. Projection consumes .3051 s (inclusive),
+EVD .1417 s, concatenate .0360 s, first_columns .0221 s, residual norms .0399 s,
+preconditioner .0137 s. Pool installs cover 1.4939 s but logical kernel regions
+cover only .8347 s: residence in the pool does not imply useful parallel work.
+Outside logical kernels at T=1 is .6954 s (19.92%); treating that as fixed
+serial work gives ideal T=8 time 1.0449 s and speedup 3.34x. This is only a
+Mac decomposition: not evidence that dev08 cannot reach 3x.
+
+Inspection confirms an internal two-pass MGS chain, even though projection
+against the established basis already uses blocked GEMM. First-pass projections
+onto each newly finalized vector can be distributed over future columns while
+preserving each column's original arithmetic order; its second pass and rank
+normalization remain dependent. Trial this before changing numerical methods.
+
+### P10L experiments and retained candidate
+
+The source retains only arithmetic-preserving scheduling and copy changes:
+
+- First-pass internal MGS work is right-looking for tall blocks (>=2048 rows),
+  with fixed one-column pieces. Each column retains the original scalar dot
+  grouping and ascending projection order. For >=16384 future complex elements,
+  the next column's dependent second pass runs alongside first-pass work on
+  later columns. The next normalized basis vector is appended only after both
+  branches finish. Small blocks keep the original two-pass loop; changing their
+  traversal provided no reliable benefit in the small-cell measurements.
+- Gamma/single-inner-pool Hamiltonian calls with more bands than workers use
+  one dynamically stealable piece per band, with preallocated scratch slots.
+  Scratch acquisition precedes measured piece time. Outer-k calls retain static
+  disjoint groups; the first modulo-scratch prototype regressed k222s by causing
+  collisions when the inner budget was smaller than the whole pool.
+- Concatenation reserves the combined capacity before copying either operand.
+  The profile measured this copy phase (.036 s at si8 T=8); this removes an
+  avoidable growth/reallocation without changing the output or reduction order.
+
+No thread, tolerance, band, mixing, iteration-limit or numerical-method default
+changed. No new dependency or unsafe code was introduced. The dimensional guards
+are scheduling choices; small and large/partial dimensions, deficient columns,
+zero columns, duplicate columns, and 1e-200/1e200 scales are tested against the
+original scalar MGS bit patterns. Generality evidence also includes a twenty-atom
+skew/slab-like fixture with local-only and multi-projector potentials below.
+
+Rejected experiments (raw inputs/results/traces retained under `/tmp/p10l-*`):
+
+1. Four-column Gram subtiles and 64-row rotations (`fine`, `band`): retained
+   256-term Gram reductions, but faer's smaller calls changed rounding. All five
+   benchmark energies stayed within 1e-12 Ha and densities were identical across
+   T. However si8 main/certificate Davidson counts changed from 340+68=408 to
+   293+69=362 (SCF count stayed 15). The apparent 1.659 -> 1.518 s T=8 improvement
+   therefore mixes scheduling with a different workload. T=1 regressed from
+   3.679 to 3.820 s. This is not a justified replacement for the P10K arithmetic.
+2. Eight-column subtiles (`wide`): si8 retained 408 Davidson iterations but
+   instrumented T=8 improvement was only about 2%, with T=1/small-cell losses.
+3. Finer decomposition only above 2048 rows (`guard`): small-cell arithmetic
+   became identical again, but si8 still changed iteration count. Rejected for
+   the same attribution/generality reason; the final code has **no** finer GEMM
+   arithmetic and keeps P10K's 256-element panels.
+4. Lower GEMM scheduling cutoff 262144 -> 65536 complex products (`cutoff`):
+   exact P10K results, but gains/losses varied with T and shape; cutoff unchanged.
+5. Unconditional dynamic Hamiltonian pieces under outer-k parallelism: rejected
+   in favor of static groups for that case, as described above.
+
+The retained pipeline preserves all 408 Davidson iterations, 15 SCF iterations,
+and every benchmark energy/density bit. The exact three-arm rotating-order
+measurement (`/tmp/p10l-paired.json`, five repeats at T=8, three at T=1) separates
+this result from the discarded smaller-matrix rounding effects:
+
+| Case | T | P10K wall median s | First-pass/band/copy changes s | With dependent-pass overlap s |
+|---|---:|---:|---:|---:|
+| si8 | 8 | 1.663557583 | 1.622848667 | 1.579725125 |
+| k444s | 8 | .577412750 | .577696000 | .571007958 |
+| si8 | 1 | 3.687254375 | 3.684710584 | 3.667978458 |
+
+This is a 5.0% si8 T=8 wall reduction (1.053x relative improvement), not a 2x
+improvement over P10K. T=1/T=8 speedup for the retained candidate is 2.322x on
+this Mac; the supplied dev08 baseline is different and remains to be measured.
+The paired k444s result shows no regression; shared-host timings remain indicative.
+
+### Final uninstrumented equivalence matrix
+
+`/tmp/p10l-base-{T}.json` and `/tmp/p10l-final-{T}.json`, median of three runs;
+commands use `scripts/bench_scf.py`, all five cases, the absolute UPF path,
+`--threads T --repeats 3 --baseline /tmp/p10l-base-T.json --require-identical`.
+All five final commands exited 0. Every case has exactly one energy bit pattern
+and one density hash across T=1,2,4,8,12, identical to P10K. No tolerance exception
+was needed for the retained code.
+
+| T | si8 P10K s | si8 final s | k444s P10K s | k444s final s |
+|---:|---:|---:|---:|---:|
+| 1 | 3.679080500 | 3.637859209 | 2.555586083 | 2.523534042 |
+| 2 | 2.468224792 | 2.369165000 | 1.341805625 | 1.327141208 |
+| 4 | 1.845511500 | 1.777932167 | 0.817114000 | 0.812098792 |
+| 8 | 1.659135666 | 1.577597542 | 0.585230458 | 0.576186375 |
+| 12 | 1.593232750 | 1.524704083 | 0.502583084 | 0.495796084 |
+
+| Case | Final energy Ha | SCF iterations | Density SHA-256 |
+|---|---:|---:|---|
+| gamma | -7.2955304682107647 | 10 | `1854d1ea91d96933ec85e908ec62b4466ddb044abe16b060c1cbe376daea0d3f` |
+| k222s | -7.919423412469083 | 10 | `2b310246ec91cf7ea8b845e03fcee0fe6c7769e5556c4af16ab5c8e4916e3ee5` |
+| k222 | -7.8312300571211368 | 10 | `f203190f8c973771213a5074eb769c3ceecf264945aa805ea2da6edad5988840` |
+| k444s | -7.9259761266480915 | 10 | `ad4d3eabe1b8823365908f6647c4470831a51416e8c738cd3f2aaabf7549b220` |
+| si8 | -31.321803601031256 | 15 | `9152c7a9c64db67f623379a343a7b8c84b532ccc08736f8870292ad287e3e4de` |
+
+### Nonlocal and memset investigation; MKL limits
+
+The existing independent `nonlocal_traversal` release microbenchmark compares
+fe0492b's channel-major traversal against the current cache-blocked traversal.
+It exited 0 and preserved bits on every fixture. Measured Mac old/current us:
+
+| Atoms | PW rows | Channels | Historical us | Current us |
+|---:|---:|---:|---:|---:|
+| 4 | 257 | 1 | 4.993 | 3.670 |
+| 2 | 769 | 4 | 21.348 | 18.500 |
+| 4 | 1025 | 4 | 39.243 | 36.188 |
+| 4 | 4097 | 4 | 103.207 | 76.707 |
+| 8 | 2969 | 4 | 91.582 | 89.639 |
+| 8 | 4097 | 3 | 92.493 | 93.428 |
+| 20 | 16385 | 9 | 2834.007 | 2829.397 |
+
+Thus a universal restoration is not supported by this machine's multi-shape
+measurements. No Nonlocal arithmetic/traversal change is retained. This does
+not explain away the supplied dev08 MKL regression (0.98 versus 0.323 s): the
+native host needs the same isolated comparison and matching compiler/binary
+provenance. A per-block BLAS rewrite would change scalar association and needs
+its own measured benefit and numerical validation; it was not silently adopted.
+
+A definite per-call full-grid clear exists in `GridFusedPlan::inverse`:
+`reciprocal.fill(0)` precedes scatter. It is **not redundant in the present
+layout**: `apply_local` reuses that array for the dense forward FFT output.
+Removing the clear would leak coefficients outside the input sphere into the
+next inverse. Eliminating it safely would require a separate persistent sparse
+input and dense forward-output buffer (an extra 16*Ngrid bytes per worker), or
+a measured backend-specific gather interface. Matrix result zero-initialization
+and grow/reshape fills are other possible memset callers. The supplied aggregate
+0.382 s cannot identify one of them without caller stacks. No unsafe uninitialized
+buffer or speculative zero-fill removal is retained.
+
+Source provenance matters: in this worktree `FusedPlan` selects
+`OrderedFusedPlan` for pure and `GridFusedPlan<FftPlan3d>` for MKL. The latter is
+also a generic test adapter for Rust. Remote frames named GridFusedPlan should
+therefore be checked against the actual selected backend/build before attributing
+them to this pure production path.
+
+MKL's 16 versus historical 15 SCF iterations remains **unresolved**, not asserted
+to be a rounding-only effect. The rejected pure four-column experiment shows
+that backend call shape alone can change Davidson stopping trajectories while
+energy remains within 1e-12 Ha, but it is not proof of the MKL cause. Required
+remote ablations remain separate restoration of historical established-basis
+projection and historical MKL Gram grouping, with full residual/certificate
+histories and the first differing stopping decision. Final retained pure code
+is bit-identical to P10K; it does not purport to recover MKL's historical path.
+No native MKL or dev08 executable was run by this implementer.
+
+### Twenty-atom generality fixture
+
+Six retained iterations, not converged/QE reference values. Skew lattice rows
+(16,0,0), (1.5,12,0), (.5,.7,10) Bohr; 4x5 fractional xy sites, alternating
+z=.35/.65; 20 Gaussian synthetic ions, valence 2, rc=1, 101 radial points,
+cutoff 10 Ha, 24 bands. Local-only and s/s/p projector fixtures use the existing
+test generator. Full density and energy bits agree across all five budgets.
+Single-run wall times include construction; before/after isolates the dependent
+MGS overlap from the otherwise identical retained scheduling/copy candidate.
+
+| Nonlocal | T | Without overlap s | With overlap s | Energy Ha |
+|---|---:|---:|---:|---:|
+| false | 1 | 0.805417500 | 0.810090250 | -23.44535292535889681 |
+| false | 2 | 0.494505792 | 0.490638708 | -23.44535292535889681 |
+| false | 4 | 0.370452875 | 0.365748292 | -23.44535292535889681 |
+| false | 8 | 0.331065542 | 0.314533167 | -23.44535292535889681 |
+| false | 12 | 0.333021917 | 0.308875667 | -23.44535292535889681 |
+| true | 1 | 3.377506458 | 3.426797042 | 6.23449291357981039 |
+| true | 2 | 2.083691959 | 2.067152333 | 6.23449291357981039 |
+| true | 4 | 1.480985542 | 1.460948584 | 6.23449291357981039 |
+| true | 8 | 1.268658958 | 1.197445334 | 6.23449291357981039 |
+| true | 12 | 1.219533333 | 1.167459084 | 6.23449291357981039 |
+
+T=8 wall reductions are 5.0% (local-only) and 5.6% (multi-projector);
+these bounded-work measurements support the scheduling change beyond silicon,
+but do not establish convergence, a universal default speedup, or dev08 targets.
+
+### Final counters and the unmet utilization goal
+
+Single analysis runs, `/tmp/p10l-final-analysis-3/summary.json`, with complete
+per-region rows in each `regions.csv`. SCF scope excludes initial construction.
+Inline logical kernels are distinguished from scheduled parallel regions.
+Region busy time includes timed serial work *inside* a parallel region; nested
+serial events carry a flag so the per-worker SCF total counts that time once.
+The baseline did not time internal MGS pieces/serial subphases separately;
+aggregate busy fractions before/after are not a like-for-like CPU-usage
+comparison. Acceptance speedups come from uninstrumented equal-work runs above.
+
+| Case | T | SCF s | Scheduled parallel regions s | Between logical regions s |
+|---|---:|---:|---:|---:|
+| si8 | 1 | 3.424605542 | 0.000000000 | 0.605520507 |
+| si8 | 2 | 2.230545667 | 1.557531814 | 0.569535877 |
+| si8 | 4 | 1.641624208 | 0.983106487 | 0.556465733 |
+| si8 | 8 | 1.411440416 | 0.752220099 | 0.555594001 |
+| si8 | 12 | 1.395442709 | 0.726998972 | 0.563300710 |
+| skew4 | 1 | 0.294820666 | 0.000000000 | 0.078859974 |
+| skew4 | 2 | 0.197661208 | 0.112450328 | 0.076868960 |
+| skew4 | 4 | 0.159526125 | 0.077134459 | 0.074173957 |
+| skew4 | 8 | 0.141163125 | 0.059721708 | 0.073172412 |
+| skew4 | 12 | 0.152169417 | 0.065534954 | 0.077949078 |
+
+si8 T=8 measured busy fractions by physical pool worker (includes explicit
+serial phases but excludes unclassified glue): 0.685466, 0.334529, 0.350771, 0.324671, 0.315340, 0.305952, 0.297281, 0.280141.
+Pool residency covers 1.377504749 s, but scheduled
+parallel kernels cover 0.752220099 s of 1.411440416 s.
+Serial Davidson work inside the resident pool is real; the supplied 6.5%
+outside-pool sample fraction does not by itself measure Amdahl's serial fraction.
+
+| si8 T=8 phase | Inclusive wall s | Intersecting scheduled parallel s |
+|---|---:|---:|
+| projection | 0.260345453 | 0.133919039 |
+| mgs_second_pass | 0.073817513 | 0.036319305 |
+| mgs_first_pass | 0.062500011 | 0.050539807 |
+| evd | 0.138514276 | 0.000000000 |
+| hamiltonian | 0.310303127 | 0.248703837 |
+| gram | 0.288288724 | 0.270342651 |
+| gram_assembly | 0.012495899 | 0.012427814 |
+| rotation_pair | 0.139588301 | 0.139588301 |
+
+Projection spends 51.4% of its wall interval inside scheduled parallel regions.
+49.2% of the dependent MGS phase overlaps such regions; this is elapsed
+interval overlap, not an assertion that the dependent dot products are parallel.
+
+Qualifying scheduled regions with more than eight pieces; denominator is all
+eight workers, including idle ones. Report maxima as well as medians:
+
+| Phase | Regions | Median max/mean | Worst max/mean | Fraction below 1.5 |
+|---|---:|---:|---:|---:|
+| mgs_first_pass | 1352 | 2.242879 | 5.548690 | 0.179734 |
+| hamiltonian | 85 | 1.202447 | 1.410508 | 1.000000 |
+| gram | 888 | 1.287531 | 2.698167 | 0.870495 |
+| rotation_pair | 408 | 1.329977 | 1.541656 | 0.995098 |
+| rotation | 494 | 1.338344 | 2.946802 | 0.759109 |
+
+Hamiltonian now has up to 20 pieces instead of at most eight static groups;
+all 85 qualifying large regions meet 1.5. Gram/rotation panels remain 12 for
+si8 and six for skew4. Internal MGS has at most 19 future-column pieces and
+a genuine dependency chain. Thus the requested 32--64 pieces and max/mean
+below 1.5 in every phase are **not achieved**. Single/few-band correction calls
+remain intrinsically short; inflating their work merely to populate workers
+would not be an optimization. Refining GEMM reduced imbalance but changed
+backend rounding and workload; it was rejected, not concealed.
+
+For final si8 T=8, the 1.301732290 s Davidson wall interval decomposes as:
+
+- 0.549512191 s outside scheduled parallel kernel regions (including inline
+  kernels, copies, validation and EVD).
+- 0.459437420 s sum of per-region measured worker-time means.
+- 0.200245089 s sum of per-region max-minus-mean measured worker time.
+- 0.092537590 s region wall time not accounted for by the busiest measured
+  worker (scheduling, waits and unclassified glue; not all pure scheduler cost).
+
+These four terms sum to Davidson wall time. The max-minus-mean term includes
+serial dependency work inside a parallel region, not just unequal independent
+pieces. Counter coverage and waiting prevent interpreting it as a CPU-sample
+histogram. About 42.2% of *T=8* Davidson wall time is outside scheduled regions;
+this is not a 42.2% T=1 immutable serial fraction.
+
+The initial T=1 partition has .6954 s outside logical kernels and 2.7960 s
+in them. If the former remains fixed, perfect eight-way kernel scaling gives
+1.0449 s (3.34x SCF speedup); actual initial T=8 is 1.5110 s. Kernel time
+.8347 s exceeds the ideal .3495 s by .4852 s, with .0191 s less nonkernel time.
+This excess combines imbalance, scheduling, reduction/assembly and cache effects.
+The outside-kernel remainder includes uninstrumented non-Davidson work and is
+a conditional model, not a proof that it can never be parallelized. Including
+setup reduces whole-process ideal scaling further. Neither this Mac model nor
+the supplied dev08 ideal 5.04x establishes that 3x is structurally impossible
+on dev08. The retained patch supplies a measured ~5% same-work improvement,
+not evidence that dev08 >=2x/3x or MKL <=6.5 s targets have been reached.
+
+### Gate record, provenance, and handoff
+
+- `scripts/check.sh`: exit 0; build, test, fmt and clippy all PASS. Final log:
+  `/tmp/p10l-check-complete.log`.
+- `cargo check --features mkl --all-targets`: exit 0; type checking only,
+  `/tmp/p10l-mkl-complete.log`.
+- Analysis-feature context/attribution test: exit 0, one selected test passed.
+  It checks stolen-work attribution, nested serial charging without increasing
+  piece count, and restoration after panic. Log: `/tmp/p10l-analysis-nested-test.log`.
+- Analysis-feature clippy for numerics/solvers/physics/engine, all targets and
+  `-D warnings`: exit 0, `/tmp/p10l-analysis-nested-clippy.log`.
+- Original scalar-MGS bit-pattern oracle and synthetic20 release test: exit 0.
+  Full ordinary tests also pass through `scripts/check.sh`; synthetic20 is ignored
+  in debug and its release command is documented in code and the performance README.
+- Nonlocal multi-shape release benchmark: exit 0, `/tmp/p10l-nonlocal.log`.
+- README regeneration: exit 0, generated files unchanged. README specification
+  tests: exit 0, three passed; existing unclosed-file ResourceWarnings remain.
+- `git diff --check`: exit 0. No commit created; branch remains
+  `task/P10L-WORKER-UTILIZATION`, based on `2e12ab95acd5b4f8245733aaf1635f35b1b08e40`.
+
+Early checks caught no-op guard `drop_non_drop`, two analysis-only clippy issues,
+and exporter division by zero for clock-resolution-zero empty regions. These
+were fixed and rechecked; undefined zero-duration busy fractions are now empty
+CSV fields. The final counter adds Gram assembly and nested dependent-pass work
+to region busy time, and explicitly avoids double-counting nested serial events
+in SCF totals. Earlier `/tmp/p10l-final-analysis*` runs are superseded by `-3`.
+
+The k222s T=2 three-run table contained a timing outlier. Seven rotating-order
+paired checks resolve it: P10K .201413875 s, final .201784000 s (0.18% difference),
+`/tmp/p10l-k222s-paired.json`; no numerical difference. No further scheduling
+threshold was tuned to this noise.
+
+Binary/UPF SHA-256:
+
+- P10K `/tmp/p10k-final`:
+  `fe04f720a3fd7f46c1f26f7192d09d5b12e872158519fedc54ce7e3fcf221c47`.
+- Retained pipeline binary used for paired and three-repeat tables:
+  `a3f02fe0973496e5749dec72aa2d0a6a3168a61bdfdfd8069810c02ea349b637`.
+- Final rebuilt production binary after adding the disabled-by-default Gram
+  assembly diagnostic scope:
+  `123b01cc810e53a59d911497b5bb271d999e66987a654e95689868a597fd77a3`.
+- Si UPF, external and not committed:
+  `e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+
+Production binaries do not contain the `P10L,` trace marker. The final added
+scope compiles to a zero-sized no-op; it does not change numerical work. Timing
+claims above identify the measured binary rather than conflating binary hashes.
+
+Remote acceptance remains blocked: no dev08 access/native MKL runtime in this
+implementer environment, no >=2x dev08 result, no MKL <=6.5 s result, no resolved
+16-versus-15 iteration cause, and no all-phase imbalance <1.5 result. The next
+remote measurement should preserve full histories and caller-resolved memset/
+Nonlocal profiles, not infer a cause from aggregate sample labels. The retained
+code is a locally verified ~5% improvement and reproducible diagnostic apparatus,
+not completion of all P10L targets.
+
+Dashboard generation was prepared in `/tmp/p10l-dashboard` using a copy of
+`scripts/gen_agents_json.py` and the authoritative parent registry (73 rows).
+The four dashboard JSON datasets are present there, but private Claude Artifact
+upload/dataset updates and authoritative session completion require the
+orchestrator. Those files and new README reference-data types are outside this
+ticket's owned files. No new scientific reference or fabricated dashboard
+completion was written. The regular scheduled-report timer was not active;
+progress updates were sent during this run. All changes remain uncommitted.
+
+Final rebuilt production binary recheck: all five `bench_scf.py` commands
+(T=1,2,4,8,12, one repeat each, `--require-identical`) exited 0;
+`/tmp/p10l-current-{T}.json`. All energies and density hashes remain identical
+to P10K and across budgets. This recheck follows the final diagnostic-only
+scope addition; the three-repeat and paired timing tables retain their stated
+binary provenance.

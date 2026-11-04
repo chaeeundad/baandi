@@ -1,6 +1,7 @@
 //! Fixed backend decomposition, independent of the requested thread budget.
 use super::*;
 use crate::pool::WorkerPool;
+use crate::pool::analysis::{Piece, Span};
 use std::sync::Arc;
 
 // A cache-sized plane-wave panel, independent of machine and worker count.
@@ -20,9 +21,7 @@ pub struct GemmWorkspace {
     tiles: Vec<Tile>,
     long: usize,
     short: usize,
-    #[cfg(not(feature = "mkl"))]
     threads: usize,
-    #[cfg(not(feature = "mkl"))]
     pool: Arc<WorkerPool>,
 }
 impl GemmWorkspace {
@@ -48,16 +47,12 @@ impl GemmWorkspace {
             }
             tiles
         };
-        #[cfg(feature = "mkl")]
-        let _ = (threads, pool);
         Ok(Self {
             #[cfg(not(feature = "mkl"))]
             tiles,
             long,
             short,
-            #[cfg(not(feature = "mkl"))]
             threads: threads.max(1),
-            #[cfg(not(feature = "mkl"))]
             pool,
         })
     }
@@ -121,6 +116,7 @@ impl GemmWorkspace {
             };
             let output = faer::MatMut::from_column_major_slice_mut(&mut out.data, m, n);
             let houtput = faer::MatMut::from_column_major_slice_mut(&mut hout.data, m, n);
+            let _region = Span::region("rotation_pair", threads);
             if threads <= 1 {
                 rotate_pair(output, houtput, 0, 1, &job, &hjob);
             } else {
@@ -203,6 +199,7 @@ impl GemmWorkspace {
             } else {
                 self.threads.min(count)
             };
+            let _region = Span::region(if reduce { "gram" } else { "rotation" }, threads);
             if !reduce {
                 let output = faer::MatMut::from_column_major_slice_mut(&mut out.data, m, n);
                 if threads <= 1 {
@@ -218,6 +215,7 @@ impl GemmWorkspace {
                 self.pool
                     .install(|| run(&mut self.tiles[..count], 0, threads, &job))?;
             }
+            let _assembly = Span::serial("gram_assembly");
             out.data.fill(Complex64::default());
             for tile in &self.tiles[..count] {
                 for (y, x) in out.data.iter_mut().zip(&tile.c.data) {
@@ -262,6 +260,7 @@ struct Job<'a> {
 fn run(tiles: &mut [Tile], first: usize, threads: usize, job: &Job<'_>) -> Result<(), LinalgError> {
     if threads <= 1 || tiles.len() == 1 {
         for (offset, tile) in tiles.iter_mut().enumerate() {
+            let _piece = Piece::new();
             let start = (first + offset) * PANEL;
             let (rows, inner) = if job.reduce {
                 (job.m, (job.k - start).min(PANEL))
@@ -297,6 +296,7 @@ fn rotate(mut out: faer::MatMut<'_, Complex64>, first: usize, threads: usize, jo
     if threads <= 1 || out.nrows() <= PANEL {
         let mut start = first;
         while out.nrows() > 0 {
+            let _piece = Piece::new();
             let rows = out.nrows().min(PANEL);
             let (panel, rest) = out.split_at_row_mut(rows);
             borrowed_product(job, start, rows, job.k, panel);
@@ -326,6 +326,7 @@ fn rotate_pair(
     if threads <= 1 || out.nrows() <= PANEL {
         let mut start = first;
         while out.nrows() > 0 {
+            let _piece = Piece::new();
             let rows = out.nrows().min(PANEL);
             let (panel, rest) = out.split_at_row_mut(rows);
             let (hpanel, hrest) = hout.split_at_row_mut(rows);
@@ -415,6 +416,8 @@ impl ProjectionWorkspace {
         against: Option<&ComplexMatrix>,
         gemm: &mut GemmWorkspace,
     ) -> Result<Orthonormalized, LinalgError> {
+        let _phase = Span::new("projection");
+        let prepare = Span::serial("projection_prepare");
         block.validate_finite()?;
         if block.rows != self.column.len() || block.data.len() > self.normalized.data.capacity() {
             return Err(LinalgError::Dimension);
@@ -444,6 +447,7 @@ impl ProjectionWorkspace {
                 };
             }
         }
+        drop(prepare);
         // Interleave projection and normalization: a nearly dependent incoming
         // block can amplify roundoff during its internal orthogonalization.
         // Reprojecting the normalized block prevents that amplification from
@@ -480,23 +484,33 @@ impl ProjectionWorkspace {
                     MatrixOp::Identity,
                     &mut self.projected,
                 )?;
+                let _update = Span::serial("projection_update");
                 for (y, p) in self.normalized.data.iter_mut().zip(&self.projected.data) {
                     *y -= p;
                 }
             }
             data.clear();
             count = 0;
+            let mut prepared = None;
             for j in 0..self.normalized.cols {
-                self.column.copy_from_slice(self.normalized.column(j));
-                for _ in 0..2 {
-                    for k in 0..count {
-                        subtract_projection(
-                            &mut self.column,
-                            &data[k * block.rows..(k + 1) * block.rows],
-                        );
+                let second = Span::serial("mgs_second_pass");
+                let remaining = if let Some(remaining) = prepared.take() {
+                    remaining
+                } else {
+                    self.column.copy_from_slice(self.normalized.column(j));
+                    // Tall blocks receive the first pass as earlier vectors are
+                    // finalized. Small blocks retain the original two-pass loop.
+                    for _ in 0..if block.rows >= 2048 { 1 } else { 2 } {
+                        for k in 0..count {
+                            subtract_projection(
+                                &mut self.column,
+                                &data[k * block.rows..(k + 1) * block.rows],
+                            );
+                        }
                     }
-                }
-                let remaining = norm(&self.column);
+                    norm(&self.column)
+                };
+                drop(second);
                 if !remaining.is_finite() {
                     return Err(LinalgError::NonFinite);
                 }
@@ -506,6 +520,45 @@ impl ProjectionWorkspace {
                     data.extend(self.column.iter().map(|x| x / remaining));
                     self.indices[count] = self.indices[j];
                     count += 1;
+                    if block.rows < 2048 {
+                        continue;
+                    }
+                    let q = &data[(count - 1) * block.rows..count * block.rows];
+                    let future = &mut self.normalized.data[(j + 1) * block.rows..];
+                    let threads = if future.len() >= 16_384 {
+                        gemm.threads
+                    } else {
+                        1
+                    };
+                    let _region = Span::region("mgs_first_pass", threads);
+                    if threads > 1 {
+                        let (next, rest) = future.split_at_mut(block.rows);
+                        let column = &mut self.column;
+                        // The next column's dependent pass overlaps independent
+                        // first-pass work on later columns. No basis entry is
+                        // appended until both branches finish. Every column sees
+                        // exactly the historical ascending projection sequence.
+                        let (remaining, ()) = gemm.pool.install(|| {
+                            WorkerPool::join(
+                                || {
+                                    column.copy_from_slice(next);
+                                    {
+                                        let _piece = Piece::new();
+                                        subtract_projection(column, q);
+                                    }
+                                    let _second = Span::serial("mgs_second_pass");
+                                    for basis in data.chunks_exact(block.rows) {
+                                        subtract_projection(column, basis);
+                                    }
+                                    norm(column)
+                                },
+                                || project_columns(rest, block.rows, q, threads),
+                            )
+                        });
+                        prepared = Some(remaining);
+                    } else {
+                        project_columns(future, block.rows, q, 1);
+                    }
                 }
             }
             self.indices.truncate(count);
@@ -515,6 +568,24 @@ impl ProjectionWorkspace {
             vectors: ComplexMatrix::new(block.rows, count, data)?,
             dropped,
         })
+    }
+}
+
+// Fixed one-column pieces, recursively stealable; each dot/update uses the
+// unchanged scalar kernel and ascending basis order.
+fn project_columns(columns: &mut [Complex64], rows: usize, q: &[Complex64], threads: usize) {
+    let count = columns.len() / rows;
+    if threads <= 1 || count <= 1 {
+        for column in columns.chunks_exact_mut(rows) {
+            let _piece = Piece::new();
+            subtract_projection(column, q);
+        }
+    } else {
+        let (left, right) = columns.split_at_mut(count / 2 * rows);
+        WorkerPool::join(
+            || project_columns(left, rows, q, threads),
+            || project_columns(right, rows, q, threads),
+        );
     }
 }
 
@@ -635,6 +706,31 @@ mod tests {
                 } else {
                     first = Some((actual, hactual));
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn right_looking_first_pass_matches_scalar_two_pass_mgs_bits() {
+        for (rows, width) in [(257, 9), (2053, 17)] {
+            let mut block = matrix(rows, width);
+            block.column_mut(1).fill(Complex64::default());
+            for i in 0..rows {
+                block[(i, 3)] = block[(i, 2)];
+            }
+            for z in block.column_mut(4) {
+                *z *= 1e-200;
+            }
+            for z in block.column_mut(5) {
+                *z *= 1e200;
+            }
+            let expected = orthonormalize(&block, None).unwrap();
+            for threads in [1, 2, 4, 8] {
+                let mut gemm = GemmWorkspace::new(rows, width, threads).unwrap();
+                let mut projection = ProjectionWorkspace::new(rows, width).unwrap();
+                let actual = projection.orthonormalize(&block, None, &mut gemm).unwrap();
+                assert_eq!(expected.dropped, actual.dropped);
+                bits(&expected.vectors, &actual.vectors);
             }
         }
     }

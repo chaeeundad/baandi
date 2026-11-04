@@ -2,6 +2,12 @@
 //! No global Rayon configuration; the one-thread path never creates a worker.
 use std::sync::Arc;
 
+// Analysis builds opt in with RUSTFLAGS='--cfg feature="worker-analysis"'.
+// Kept source-only because this ticket does not own Cargo manifests.
+#[allow(unexpected_cfgs)]
+#[doc(hidden)]
+pub mod analysis;
+
 pub struct WorkerPool {
     pool: Option<rayon::ThreadPool>,
     created: Arc<std::sync::atomic::AtomicUsize>,
@@ -35,10 +41,18 @@ impl WorkerPool {
     /// Install only at a parallel region boundary. Nested joins use this same
     /// executor, so outer k and inner band/tile tasks share one thread budget.
     pub fn install<R: Send>(&self, work: impl FnOnce() -> R + Send) -> R {
+        let _span = analysis::Span::new("pool_install");
+        let context = analysis::context();
+        let work = || analysis::with_context(context, work);
         match &self.pool {
             Some(pool) => pool.install(work),
             None => work(),
         }
+    }
+
+    /// Index in the currently executing pool, for bounded reusable scratch.
+    pub fn current_worker_index() -> Option<usize> {
+        rayon::current_thread_index()
     }
 
     /// Call inside `install`. Both branches finish before returning or unwinding.
@@ -46,6 +60,10 @@ impl WorkerPool {
         left: impl FnOnce() -> A + Send,
         right: impl FnOnce() -> B + Send,
     ) -> (A, B) {
+        let context = analysis::context();
+        let other = context.clone();
+        let left = || analysis::with_context(context, left);
+        let right = || analysis::with_context(other, right);
         if rayon::current_thread_index().is_some() {
             rayon::join(left, right)
         } else {

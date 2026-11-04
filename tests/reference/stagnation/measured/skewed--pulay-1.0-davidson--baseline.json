@@ -1,0 +1,116 @@
+{
+  "audit": [],
+  "certified_energy_hartree": -0.6441418148101787,
+  "charge_sloshing_hint": "not_computed",
+  "converged": true,
+  "error": null,
+  "expanded_options_debug": "ScfOptions { eigensolver: Davidson, threads: 1, functional: LdaPz, allow_functional_override: false, cutoff_hartree: 2.0, bands: Some(6), extra_bands: 4, grid_override: None, mixing: Pulay { beta: 1.0, history: 6 }, density_tolerance: 1e-7, energy_tolerance: 1e-8, eigen_tolerance: 1e-8, initial_eigen_tolerance: 1e-5, eigen_tolerance_decay: 0.5, residual_eigen_schedule: true, free_electron_initial_guess: true, max_iterations: 200, davidson_max_iterations: 400, davidson_subspace: 48, seed: 2026, divergence_factor: 20.0, divergence_patience: 3 }",
+  "final_residual": 1.446898660867456e-08,
+  "findings": [],
+  "gap_from_converged_state": true,
+  "history": [
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.6395040029767238,
+      "iteration": 1,
+      "residual": 0.04808428296692624,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.6433215032718447,
+      "iteration": 2,
+      "residual": 0.009898698057687718,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.6431657715783052,
+      "iteration": 3,
+      "residual": 0.008244371662784628,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.6440510131763963,
+      "iteration": 4,
+      "residual": 0.0022921554272085057,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.6441415419859604,
+      "iteration": 5,
+      "residual": 0.000191385351632163,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.6441418089839781,
+      "iteration": 6,
+      "residual": 2.8837222254340876e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.6441418145851396,
+      "iteration": 7,
+      "residual": 3.6311795287982963e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.6441418147172118,
+      "iteration": 8,
+      "residual": 1.983888601428025e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.6441418148096623,
+      "iteration": 9,
+      "residual": 1.8963509212030394e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.6441418148101512,
+      "iteration": 10,
+      "residual": 4.715229594364285e-08,
+      "revision": 0
+    },
+    {
+      "certificate_debug": "FixedPointCertificate { strict_residuals_per_k: [[4.02526631409152e-10, 3.1024589279982153e-10, 4.960375352152945e-10]], buffer_residuals_per_k: [[1.1859533962772973e-6, 1.2911536875827615e-6, 2.885603157858352e-6]], density_residual: 1.7085889695157438e-8, occupied_eigenvalue_change: 6.369658134275369e-10, davidson_iterations: 6, operator_applications: 26, davidson_iterations_per_k: [6], operator_applications_per_k: [26], timings: PhaseTimings { potential: 11.125\u00b5s, diagonalization: 167\u00b5s, density: 5.917\u00b5s, energy: 17.458\u00b5s, mixing: 0ns } }",
+      "energy_hartree": -0.6441418148101787,
+      "iteration": 11,
+      "residual": 1.446898660867456e-08,
+      "revision": 0
+    }
+  ],
+  "insulating_gap_gate": false,
+  "intervention_applied": false,
+  "iterations": 11,
+  "sampled_gap_hartree": 0.02437590963216274,
+  "state": "Converged",
+  "terminal_evidence": null,
+  "wall_seconds": 0.007616083,
+  "process_exit_code": 0,
+  "stderr": "",
+  "model": "skewed",
+  "policy": "pulay-1.0-davidson",
+  "arm": "baseline",
+  "input_sha256": "02f40852510d48194066014cd23a5eb74449be478004bfe5bc85357d8702ed69",
+  "upf_sha256": "6341f64ea11bf08825a351e7bb6dbba974e888b58a1de2c79a54dfdab76c441e",
+  "generator": {
+    "valence": 2,
+    "channels": [
+      0,
+      0,
+      1
+    ],
+    "radius": 1,
+    "shape": "gaussian",
+    "points": 801
+  },
+  "elapsed_seconds": 0.01198466599999981
+}

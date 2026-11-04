@@ -1,0 +1,251 @@
+{
+  "audit": [],
+  "certified_energy_hartree": null,
+  "charge_sloshing_hint": "not_computed",
+  "converged": false,
+  "error": "Scf(NonInsulating { gap_hartree: -0.08669121300579169, required_hartree: 1e-6 })",
+  "expanded_options_debug": "ScfOptions { eigensolver: Davidson, threads: 1, functional: LdaPz, allow_functional_override: false, cutoff_hartree: 2.0, bands: Some(4), extra_bands: 4, grid_override: None, mixing: KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 }, density_tolerance: 1e-7, energy_tolerance: 1e-8, eigen_tolerance: 1e-8, initial_eigen_tolerance: 1e-5, eigen_tolerance_decay: 0.5, residual_eigen_schedule: true, free_electron_initial_guess: true, max_iterations: 200, davidson_max_iterations: 400, davidson_subspace: 48, seed: 2026, divergence_factor: 20.0, divergence_patience: 3 }",
+  "final_residual": 2.082164533293832e-08,
+  "findings": [],
+  "gap_from_converged_state": false,
+  "history": [
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.3515243597831084,
+      "iteration": 1,
+      "residual": 0.017391429349821467,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.35166659429128805,
+      "iteration": 2,
+      "residual": 0.015681560853518073,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.3518473363800959,
+      "iteration": 3,
+      "residual": 0.012137643055750104,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.35347073687731423,
+      "iteration": 4,
+      "residual": 0.009870807829892273,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.35359327238324795,
+      "iteration": 5,
+      "residual": 0.008871642726464362,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.35358109496823653,
+      "iteration": 6,
+      "residual": 0.008415835948120745,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.35363993263724447,
+      "iteration": 7,
+      "residual": 0.00690806910549013,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.3538015505839725,
+      "iteration": 8,
+      "residual": 0.0022251875072998484,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.35385328529701654,
+      "iteration": 9,
+      "residual": 0.0013223530621822382,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.35385812765301916,
+      "iteration": 10,
+      "residual": 0.0007971613403131539,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.3538622762238957,
+      "iteration": 11,
+      "residual": 0.0006133567030279883,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.3538669658501885,
+      "iteration": 12,
+      "residual": 0.00022610382918979158,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.3538674710901939,
+      "iteration": 13,
+      "residual": 0.0001373359063995826,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.35386753262201975,
+      "iteration": 14,
+      "residual": 0.00011863375876362233,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.3538677333859049,
+      "iteration": 15,
+      "residual": 3.240625653867731e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.3538677459316535,
+      "iteration": 16,
+      "residual": 1.902700192791947e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.35386774811531174,
+      "iteration": 17,
+      "residual": 1.714789688750067e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.3538677531766516,
+      "iteration": 18,
+      "residual": 1.1893175426521347e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.3538677537174917,
+      "iteration": 19,
+      "residual": 1.0468698135466663e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.3538677542341724,
+      "iteration": 20,
+      "residual": 8.485858887437943e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.3538677548450637,
+      "iteration": 21,
+      "residual": 3.2739926058889175e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.3538677549245175,
+      "iteration": 22,
+      "residual": 1.1274447347909355e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.35386775493441613,
+      "iteration": 23,
+      "residual": 6.676014267731127e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.35386775493608846,
+      "iteration": 24,
+      "residual": 5.108052070663388e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.35386775493641276,
+      "iteration": 25,
+      "residual": 3.627668891069806e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.35386775493677514,
+      "iteration": 26,
+      "residual": 1.9394838852408723e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.35386775493720957,
+      "iteration": 27,
+      "residual": 1.238917063782159e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.3538677549372746,
+      "iteration": 28,
+      "residual": 9.147789975151738e-08,
+      "revision": 0
+    },
+    {
+      "certificate_debug": "FixedPointCertificate { strict_residuals_per_k: [[8.535125434277003e-11, 9.606484789477045e-10], [1.5301361527380546e-10, 1.2472057070201786e-10], [1.550187663882079e-10, 1.0662114676852169e-10], [4.7332631502215497e-11, 5.326769649554853e-11], [1.1739986873235594e-10, 8.598966084251987e-11], [5.4814261645021974e-11, 5.925171695333315e-11], [5.733610503886914e-11, 7.450469954327042e-11], [1.0498736902970487e-10, 6.663664858785396e-10]], buffer_residuals_per_k: [[1.7810299342028436e-6, 6.562878074650384e-6], [4.589855861246316e-6, 8.381067118718708e-6], [3.6966092843178962e-6, 4.8213967885580515e-6], [9.932980681263097e-6, 9.051358084828074e-6], [6.786784219282021e-6, 7.781343873922608e-6], [6.386109436790809e-7, 3.310383119435081e-6], [6.809686875342874e-7, 3.848448120761616e-6], [6.190719757450176e-8, 8.322185625116052e-6]], density_residual: 1.4626229783680048e-7, occupied_eigenvalue_change: 1.5309250950279463e-8, davidson_iterations: 29, operator_applications: 103, davidson_iterations_per_k: [5, 3, 3, 3, 3, 3, 3, 6], operator_applications_per_k: [14, 13, 12, 12, 12, 12, 12, 16], timings: PhaseTimings { potential: 72.208\u00b5s, diagonalization: 1.825333ms, density: 135.792\u00b5s, energy: 763.75\u00b5s, mixing: 0ns } }",
+      "energy_hartree": -0.3538677549372847,
+      "iteration": 29,
+      "residual": 6.756711579522304e-08,
+      "revision": 0
+    },
+    {
+      "certificate_debug": "FixedPointCertificate { strict_residuals_per_k: [[3.831687871665925e-11, 4.6134537724154216e-11], [5.122283299475716e-11, 4.23302111458351e-10], [4.806518124921675e-11, 3.39288232372616e-10], [3.7018231948600403e-10, 4.041545038857366e-10], [3.924883452584792e-11, 5.725482656944797e-10], [5.347744329481246e-10, 4.219117502673547e-10], [3.559704597047538e-10, 6.484606084117824e-10], [4.195194798759937e-10, 2.4456022339900625e-10]], buffer_residuals_per_k: [[6.38184118311526e-6, 1.8735405854742172e-6], [5.626076796383888e-6, 8.971859924497528e-6], [4.3634081349331945e-6, 4.229517570015022e-6], [9.948068022906708e-6, 9.079020297468183e-6], [7.071341678537544e-6, 7.9585152344921e-6], [6.430002300533889e-7, 3.323218890170558e-6], [6.89029608177734e-7, 3.871306115065738e-6], [1.1251320713372571e-8, 8.227884390915135e-6]], density_residual: 5.538775869894054e-8, occupied_eigenvalue_change: 4.921198906715496e-9, davidson_iterations: 26, operator_applications: 93, davidson_iterations_per_k: [6, 3, 3, 2, 3, 2, 2, 5], operator_applications_per_k: [15, 12, 11, 10, 11, 10, 10, 14], timings: PhaseTimings { potential: 72.833\u00b5s, diagonalization: 1.542ms, density: 140.167\u00b5s, energy: 723.333\u00b5s, mixing: 0ns } }",
+      "energy_hartree": -0.3538677549373229,
+      "iteration": 30,
+      "residual": 2.082164533293832e-08,
+      "revision": 0
+    }
+  ],
+  "insulating_gap_gate": true,
+  "intervention_applied": false,
+  "iterations": 30,
+  "sampled_gap_hartree": null,
+  "state": "Failed",
+  "terminal_evidence": {
+    "code": "NonInsulating",
+    "gap_hartree": -0.08669121300579169,
+    "required_hartree": 1e-06
+  },
+  "wall_seconds": 0.093131125,
+  "process_exit_code": 0,
+  "stderr": "",
+  "model": "near-metal",
+  "policy": "kerker-0.3-davidson",
+  "arm": "baseline",
+  "input_sha256": "bc1840e35cdac56e483a06d2bd82949c56980f413ac7c2aad8538f7b5a10d145",
+  "upf_sha256": "99077caffbc0dff33ba5b571b0b6ac57657f6eeb0fc6ea32c18b981e388ed454",
+  "generator": {
+    "valence": 2,
+    "channels": [
+      0
+    ],
+    "radius": 5.0,
+    "shape": "gaussian",
+    "points": 801
+  },
+  "elapsed_seconds": 0.09697949999999977
+}

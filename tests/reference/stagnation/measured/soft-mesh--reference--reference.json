@@ -1,0 +1,135 @@
+{
+  "audit": [],
+  "certified_energy_hartree": -0.7090135061199141,
+  "charge_sloshing_hint": "not_computed",
+  "converged": true,
+  "error": null,
+  "expanded_options_debug": "ScfOptions { eigensolver: Davidson, threads: 1, functional: LdaPz, allow_functional_override: false, cutoff_hartree: 2.0, bands: Some(4), extra_bands: 4, grid_override: None, mixing: Pulay { beta: 0.1, history: 6 }, density_tolerance: 1e-7, energy_tolerance: 1e-8, eigen_tolerance: 1e-8, initial_eigen_tolerance: 1e-5, eigen_tolerance_decay: 0.5, residual_eigen_schedule: true, free_electron_initial_guess: true, max_iterations: 1000, davidson_max_iterations: 400, davidson_subspace: 48, seed: 2026, divergence_factor: 20.0, divergence_patience: 3 }",
+  "final_residual": 3.6752377987742618e-09,
+  "findings": [],
+  "gap_from_converged_state": true,
+  "history": [
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7087519594419145,
+      "iteration": 1,
+      "residual": 0.021378313843104874,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7087753730283479,
+      "iteration": 2,
+      "residual": 0.01916798852627581,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7090125759990693,
+      "iteration": 3,
+      "residual": 0.0009703635698454785,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7090132717277902,
+      "iteration": 4,
+      "residual": 0.0006484513777271823,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7090133431490919,
+      "iteration": 5,
+      "residual": 0.0004904140778708111,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7090135046429296,
+      "iteration": 6,
+      "residual": 6.513867477028357e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7090135054427388,
+      "iteration": 7,
+      "residual": 4.16200289460216e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7090135059486641,
+      "iteration": 8,
+      "residual": 2.1327060193614264e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7090135061177854,
+      "iteration": 9,
+      "residual": 1.7849714723747438e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7090135061190266,
+      "iteration": 10,
+      "residual": 1.1599096348660312e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7090135061199017,
+      "iteration": 11,
+      "residual": 1.6650293260064891e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7090135061198799,
+      "iteration": 12,
+      "residual": 2.078762699533883e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7090135061199152,
+      "iteration": 13,
+      "residual": 8.149551008227718e-09,
+      "revision": 0
+    },
+    {
+      "certificate_debug": "FixedPointCertificate { strict_residuals_per_k: [[8.743538013687286e-11, 7.688850557441682e-10], [8.793713714268081e-11, 5.32378272628671e-11]], buffer_residuals_per_k: [[6.79398519033847e-6, 6.910880541671577e-6], [4.70205119841318e-6, 8.688682222141673e-6]], density_residual: 3.624051821746831e-10, occupied_eigenvalue_change: 8.644088222986568e-10, davidson_iterations: 4, operator_applications: 19, davidson_iterations_per_k: [2, 2], operator_applications_per_k: [9, 10], timings: PhaseTimings { potential: 14.334\u00b5s, diagonalization: 81.333\u00b5s, density: 9.208\u00b5s, energy: 39.083\u00b5s, mixing: 0ns } }",
+      "energy_hartree": -0.7090135061199141,
+      "iteration": 14,
+      "residual": 3.6752377987742618e-09,
+      "revision": 0
+    }
+  ],
+  "insulating_gap_gate": true,
+  "intervention_applied": false,
+  "iterations": 14,
+  "sampled_gap_hartree": 0.004163613860241472,
+  "state": "Converged",
+  "terminal_evidence": null,
+  "wall_seconds": 0.007563333,
+  "process_exit_code": 0,
+  "stderr": "",
+  "model": "soft-mesh",
+  "policy": "reference",
+  "arm": "reference",
+  "input_sha256": "c845aabe472629befa81ffb65ba18981e96d20d688eecaa3180ba1f9decc8b43",
+  "upf_sha256": "59228deff957391c27af59118450fe51a87bdd4b11e92baf218c35436b66549a",
+  "generator": {
+    "valence": 2,
+    "channels": [
+      0
+    ],
+    "radius": 3,
+    "shape": "gaussian",
+    "points": 801
+  },
+  "elapsed_seconds": 0.010790207999999968
+}

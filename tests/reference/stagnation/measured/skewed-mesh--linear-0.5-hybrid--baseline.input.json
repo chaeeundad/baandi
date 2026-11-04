@@ -1,0 +1,44 @@
+{
+  "id": "skewed-mesh--linear-0.5-hybrid--baseline",
+  "lattice_bohr": [
+    [
+      6,
+      0,
+      0
+    ],
+    [
+      1,
+      6,
+      0
+    ],
+    [
+      0.5,
+      1,
+      7
+    ]
+  ],
+  "atoms_fractional": [
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0.31,
+      0.27,
+      0.29
+    ]
+  ],
+  "kgrid": [
+    2,
+    2,
+    1
+  ],
+  "bands": 6,
+  "cutoff_hartree": 2.0,
+  "mixer": "linear",
+  "beta": 0.5,
+  "solver": "hybrid",
+  "max_iterations": 200,
+  "intervention": false
+}

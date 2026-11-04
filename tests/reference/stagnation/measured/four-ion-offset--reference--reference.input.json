@@ -1,0 +1,54 @@
+{
+  "id": "four-ion-offset--reference--reference",
+  "lattice_bohr": [
+    [
+      7,
+      0,
+      0
+    ],
+    [
+      0,
+      7,
+      0
+    ],
+    [
+      0,
+      0,
+      9
+    ]
+  ],
+  "atoms_fractional": [
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0.41,
+      0.53,
+      0.03
+    ],
+    [
+      0.49,
+      0.03,
+      0.51
+    ],
+    [
+      0.04,
+      0.48,
+      0.47
+    ]
+  ],
+  "kgrid": [
+    1,
+    1,
+    1
+  ],
+  "bands": 16,
+  "cutoff_hartree": 2.0,
+  "mixer": "pulay",
+  "beta": 0.1,
+  "solver": "davidson",
+  "max_iterations": 1000,
+  "intervention": false
+}

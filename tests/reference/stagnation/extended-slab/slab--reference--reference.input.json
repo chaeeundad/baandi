@@ -1,0 +1,44 @@
+{
+  "id": "slab--reference--reference",
+  "lattice_bohr": [
+    [
+      6,
+      0,
+      0
+    ],
+    [
+      0,
+      6,
+      0
+    ],
+    [
+      0,
+      0,
+      18
+    ]
+  ],
+  "atoms_fractional": [
+    [
+      0,
+      0,
+      0.45
+    ],
+    [
+      0.5,
+      0.5,
+      0.55
+    ]
+  ],
+  "kgrid": [
+    1,
+    1,
+    1
+  ],
+  "bands": 6,
+  "cutoff_hartree": 2.0,
+  "mixer": "pulay",
+  "beta": 0.1,
+  "solver": "davidson",
+  "max_iterations": 1000,
+  "intervention": false
+}

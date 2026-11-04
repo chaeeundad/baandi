@@ -1,0 +1,106 @@
+{
+  "audit": [],
+  "certified_energy_hartree": null,
+  "charge_sloshing_hint": "not_computed",
+  "converged": false,
+  "error": "Scf(NonInsulating { gap_hartree: -0.054841333719671814, required_hartree: 1e-6 })",
+  "expanded_options_debug": "ScfOptions { eigensolver: Davidson, threads: 1, functional: LdaPz, allow_functional_override: false, cutoff_hartree: 2.0, bands: Some(6), extra_bands: 4, grid_override: None, mixing: Pulay { beta: 1.0, history: 6 }, density_tolerance: 1e-7, energy_tolerance: 1e-8, eigen_tolerance: 1e-8, initial_eigen_tolerance: 1e-5, eigen_tolerance_decay: 0.5, residual_eigen_schedule: true, free_electron_initial_guess: true, max_iterations: 200, davidson_max_iterations: 400, davidson_subspace: 48, seed: 2026, divergence_factor: 20.0, divergence_patience: 3 }",
+  "final_residual": 6.36832298997869e-09,
+  "findings": [],
+  "gap_from_converged_state": false,
+  "history": [
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4196761149594668,
+      "iteration": 1,
+      "residual": 0.02888205000073661,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4203402418106783,
+      "iteration": 2,
+      "residual": 0.006156575299896052,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42075027570879575,
+      "iteration": 3,
+      "residual": 0.004014349772302973,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112268520495144,
+      "iteration": 4,
+      "residual": 0.00016340790122692023,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233088563282,
+      "iteration": 5,
+      "residual": 2.0032676761490236e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233122883562,
+      "iteration": 6,
+      "residual": 2.409167482535988e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123335607,
+      "iteration": 7,
+      "residual": 2.44269264564798e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331233457123,
+      "iteration": 8,
+      "residual": 1.6435006751996393e-08,
+      "revision": 0
+    },
+    {
+      "certificate_debug": "FixedPointCertificate { strict_residuals_per_k: [[9.107408668479815e-11, 8.331263676825414e-10, 3.9753144702674284e-10], [7.158719457153753e-10, 1.406333609827294e-10, 1.9084567702596396e-10], [3.2366736715511013e-10, 5.311298503815239e-10, 7.967340842759448e-10], [3.4588550786244855e-10, 4.1715841142332935e-10, 2.156462058039893e-10]], buffer_residuals_per_k: [[3.051044621469791e-6, 6.497263644308065e-6, 2.7925017303287196e-6], [1.3230225277940887e-6, 4.339669106199946e-6, 1.4743290077849786e-6], [2.5627786547728084e-6, 1.1634988891407276e-6, 2.706812749431463e-6], [1.450336847649792e-6, 2.0229357862494403e-6, 5.160320467422826e-6]], density_residual: 3.971014672901563e-9, occupied_eigenvalue_change: 1.8896811893043264e-10, davidson_iterations: 23, operator_applications: 98, davidson_iterations_per_k: [6, 5, 6, 6], operator_applications_per_k: [25, 24, 23, 26], timings: PhaseTimings { potential: 11.667\u00b5s, diagonalization: 611.417\u00b5s, density: 24.458\u00b5s, energy: 70.416\u00b5s, mixing: 0ns } }",
+      "energy_hartree": -0.42112331233457434,
+      "iteration": 9,
+      "residual": 6.36832298997869e-09,
+      "revision": 0
+    }
+  ],
+  "insulating_gap_gate": true,
+  "intervention_applied": false,
+  "iterations": 9,
+  "sampled_gap_hartree": null,
+  "state": "Failed",
+  "terminal_evidence": {
+    "code": "NonInsulating",
+    "gap_hartree": -0.054841333719671814,
+    "required_hartree": 1e-06
+  },
+  "wall_seconds": 0.014574084,
+  "process_exit_code": 0,
+  "stderr": "",
+  "model": "skewed-mesh",
+  "policy": "pulay-1.0-davidson",
+  "arm": "baseline",
+  "input_sha256": "5d23b170f1f3b07a46fb10a0af705c96c4c0395570e708745f157621cec44bc8",
+  "upf_sha256": "6341f64ea11bf08825a351e7bb6dbba974e888b58a1de2c79a54dfdab76c441e",
+  "generator": {
+    "valence": 2,
+    "channels": [
+      0,
+      0,
+      1
+    ],
+    "radius": 1,
+    "shape": "gaussian",
+    "points": 801
+  },
+  "elapsed_seconds": 0.01776037499999994
+}

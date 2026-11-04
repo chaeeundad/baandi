@@ -1,0 +1,177 @@
+{
+  "audit": [],
+  "certified_energy_hartree": -1.4073901394454906,
+  "charge_sloshing_hint": "not_computed",
+  "converged": true,
+  "error": null,
+  "expanded_options_debug": "ScfOptions { eigensolver: Davidson, threads: 1, functional: LdaPz, allow_functional_override: false, cutoff_hartree: 2.0, bands: Some(4), extra_bands: 4, grid_override: None, mixing: Pulay { beta: 0.1, history: 6 }, density_tolerance: 1e-7, energy_tolerance: 1e-8, eigen_tolerance: 1e-8, initial_eigen_tolerance: 1e-5, eigen_tolerance_decay: 0.5, residual_eigen_schedule: true, free_electron_initial_guess: true, max_iterations: 1000, davidson_max_iterations: 400, davidson_subspace: 48, seed: 2026, divergence_factor: 20.0, divergence_patience: 3 }",
+  "final_residual": 7.54749250509965e-11,
+  "findings": [],
+  "gap_from_converged_state": true,
+  "history": [
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4017922222774075,
+      "iteration": 1,
+      "residual": 0.072197023918742,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4023556398406993,
+      "iteration": 2,
+      "residual": 0.06436311089657121,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.407298670662173,
+      "iteration": 3,
+      "residual": 0.008308262319404658,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4071147406532138,
+      "iteration": 4,
+      "residual": 0.014134282336890642,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4061256754729805,
+      "iteration": 5,
+      "residual": 0.03100447144912027,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073823313413993,
+      "iteration": 6,
+      "residual": 0.002388007708048595,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073841460289729,
+      "iteration": 7,
+      "residual": 0.002077955375473383,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073837287927633,
+      "iteration": 8,
+      "residual": 0.0021526014678880053,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.407389927011484,
+      "iteration": 9,
+      "residual": 0.00036446447839820565,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073900667693953,
+      "iteration": 10,
+      "residual": 0.0002897742901539439,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.407390125448557,
+      "iteration": 11,
+      "residual": 0.00017693868146056375,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073901251308727,
+      "iteration": 12,
+      "residual": 0.00018088725452419796,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073901194323737,
+      "iteration": 13,
+      "residual": 0.00018858451560957473,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.407390139397029,
+      "iteration": 14,
+      "residual": 9.270589105196153e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073901394359418,
+      "iteration": 15,
+      "residual": 3.805113258277615e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073901394443835,
+      "iteration": 16,
+      "residual": 1.3663861560177942e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.407390139445492,
+      "iteration": 17,
+      "residual": 2.4196512882747878e-08,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073901394454567,
+      "iteration": 18,
+      "residual": 2.4447740511704686e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.407390139445494,
+      "iteration": 19,
+      "residual": 4.415583146727448e-09,
+      "revision": 0
+    },
+    {
+      "certificate_debug": "FixedPointCertificate { strict_residuals_per_k: [[2.6657050483399663e-11, 8.381814230443164e-11]], buffer_residuals_per_k: [[7.819040198924646e-6, 7.991120268976407e-6]], density_residual: 9.525462975614208e-12, occupied_eigenvalue_change: 2.1004753492093187e-11, davidson_iterations: 1, operator_applications: 8, davidson_iterations_per_k: [1], operator_applications_per_k: [8], timings: PhaseTimings { potential: 9.625\u00b5s, diagonalization: 22.125\u00b5s, density: 3.583\u00b5s, energy: 13.417\u00b5s, mixing: 0ns } }",
+      "energy_hartree": -1.4073901394454906,
+      "iteration": 20,
+      "residual": 7.54749250509965e-11,
+      "revision": 0
+    }
+  ],
+  "insulating_gap_gate": false,
+  "intervention_applied": false,
+  "iterations": 20,
+  "sampled_gap_hartree": 0.4963928002684176,
+  "state": "Converged",
+  "terminal_evidence": null,
+  "wall_seconds": 0.005438334,
+  "process_exit_code": 0,
+  "stderr": "",
+  "model": "cubic",
+  "policy": "reference",
+  "arm": "reference",
+  "input_sha256": "be621a5eea6538d9c193882a6e817275d9025f24a08a6317443d07b9c61fcbfc",
+  "upf_sha256": "71bbf95dd35653e778cd9b5493f952ae1471754028cde3fc68f3642fe9ceed22",
+  "generator": {
+    "valence": 2,
+    "channels": [
+      0
+    ],
+    "radius": 1,
+    "shape": "gaussian",
+    "points": 801
+  },
+  "elapsed_seconds": 0.33315820799999996
+}

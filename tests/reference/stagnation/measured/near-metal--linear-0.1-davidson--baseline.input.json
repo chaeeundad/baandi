@@ -1,0 +1,39 @@
+{
+  "id": "near-metal--linear-0.1-davidson--baseline",
+  "lattice_bohr": [
+    [
+      10,
+      0,
+      0
+    ],
+    [
+      0,
+      10,
+      0
+    ],
+    [
+      0,
+      0,
+      10
+    ]
+  ],
+  "atoms_fractional": [
+    [
+      0,
+      0,
+      0
+    ]
+  ],
+  "kgrid": [
+    2,
+    2,
+    2
+  ],
+  "bands": 4,
+  "cutoff_hartree": 2.0,
+  "mixer": "linear",
+  "beta": 0.1,
+  "solver": "davidson",
+  "max_iterations": 200,
+  "intervention": false
+}

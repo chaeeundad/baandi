@@ -1,0 +1,206 @@
+{
+  "audit": [],
+  "certified_energy_hartree": -2.825226251949232,
+  "charge_sloshing_hint": "not_computed",
+  "converged": true,
+  "error": null,
+  "expanded_options_debug": "ScfOptions { eigensolver: Davidson, threads: 1, functional: LdaPz, allow_functional_override: false, cutoff_hartree: 2.0, bands: Some(6), extra_bands: 4, grid_override: None, mixing: KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 }, density_tolerance: 1e-7, energy_tolerance: 1e-8, eigen_tolerance: 1e-8, initial_eigen_tolerance: 1e-5, eigen_tolerance_decay: 0.5, residual_eigen_schedule: true, free_electron_initial_guess: true, max_iterations: 200, davidson_max_iterations: 400, davidson_subspace: 48, seed: 2026, divergence_factor: 20.0, divergence_patience: 3 }",
+  "final_residual": 7.293031856885013e-08,
+  "findings": [],
+  "gap_from_converged_state": true,
+  "history": [
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.653989545921452,
+      "iteration": 1,
+      "residual": 0.06383080715906436,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.66962407817552,
+      "iteration": 2,
+      "residual": 0.05607409457681029,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.74219996393912,
+      "iteration": 3,
+      "residual": 0.030447017258129948,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.746212222269872,
+      "iteration": 4,
+      "residual": 0.029089113264147266,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.806160384930589,
+      "iteration": 5,
+      "residual": 0.013341127878686224,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8103882936683147,
+      "iteration": 6,
+      "residual": 0.011830966155892924,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.824730543650089,
+      "iteration": 7,
+      "residual": 0.0033419479348649533,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8248543164002067,
+      "iteration": 8,
+      "residual": 0.0029834445501550695,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.825168246737196,
+      "iteration": 9,
+      "residual": 0.0008978092426145951,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.825219273331572,
+      "iteration": 10,
+      "residual": 0.00025268388053369557,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8252258057142394,
+      "iteration": 11,
+      "residual": 8.518853852016261e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.825226236511967,
+      "iteration": 12,
+      "residual": 3.0554766911283345e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.825226171782614,
+      "iteration": 13,
+      "residual": 2.5694143288698186e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8252262496082756,
+      "iteration": 14,
+      "residual": 4.480354499785729e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.825226251921323,
+      "iteration": 15,
+      "residual": 1.1672193166947978e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.825226251841784,
+      "iteration": 16,
+      "residual": 1.2683270516219077e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8252262518446294,
+      "iteration": 17,
+      "residual": 1.050023391749872e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8252262519112383,
+      "iteration": 18,
+      "residual": 6.610716528066767e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8252262519366846,
+      "iteration": 19,
+      "residual": 4.19477524336756e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.825226251936149,
+      "iteration": 20,
+      "residual": 3.5950943826440117e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8252262519432927,
+      "iteration": 21,
+      "residual": 2.428919413797085e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8252262519460887,
+      "iteration": 22,
+      "residual": 1.8904577463720222e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8252262519489224,
+      "iteration": 23,
+      "residual": 9.381047497197642e-08,
+      "revision": 0
+    },
+    {
+      "certificate_debug": "FixedPointCertificate { strict_residuals_per_k: [[2.600019186014646e-10, 7.351126471349308e-10, 1.7817136159188337e-10]], buffer_residuals_per_k: [[2.218390959954485e-6, 2.3108530408343678e-6, 8.27544520593005e-6]], density_residual: 3.698997065546196e-8, occupied_eigenvalue_change: 2.6485381665608543e-8, davidson_iterations: 5, operator_applications: 22, davidson_iterations_per_k: [5], operator_applications_per_k: [22], timings: PhaseTimings { potential: 24.917\u00b5s, diagonalization: 219.75\u00b5s, density: 11.584\u00b5s, energy: 37.917\u00b5s, mixing: 0ns } }",
+      "energy_hartree": -2.825226251949232,
+      "iteration": 24,
+      "residual": 7.293031856885013e-08,
+      "revision": 0
+    }
+  ],
+  "insulating_gap_gate": false,
+  "intervention_applied": false,
+  "iterations": 24,
+  "sampled_gap_hartree": 0.29616803665577157,
+  "state": "Converged",
+  "terminal_evidence": null,
+  "wall_seconds": 0.014452417,
+  "process_exit_code": 0,
+  "stderr": "",
+  "model": "elongated-offset",
+  "policy": "kerker-0.3-davidson",
+  "arm": "baseline",
+  "input_sha256": "9e09273e0a50571509cb611d06ae63f330b6daba30be44dde25f4036ffc1d2f4",
+  "upf_sha256": "9689fdf49cb5e65cbc72512838147d2cbafdff2ab9714fe2ccc0b84b57667a7c",
+  "generator": {
+    "valence": 2,
+    "channels": [
+      0,
+      1
+    ],
+    "radius": 1,
+    "shape": "gaussian",
+    "points": 801
+  },
+  "elapsed_seconds": 0.017685082999999935
+}

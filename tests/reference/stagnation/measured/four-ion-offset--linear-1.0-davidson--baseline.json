@@ -1,0 +1,130 @@
+{
+  "audit": [],
+  "certified_energy_hartree": -3.8236467235906058,
+  "charge_sloshing_hint": "not_computed",
+  "converged": true,
+  "error": null,
+  "expanded_options_debug": "ScfOptions { eigensolver: Davidson, threads: 1, functional: LdaPz, allow_functional_override: false, cutoff_hartree: 2.0, bands: Some(16), extra_bands: 4, grid_override: None, mixing: Linear { beta: 1.0 }, density_tolerance: 1e-7, energy_tolerance: 1e-8, eigen_tolerance: 1e-8, initial_eigen_tolerance: 1e-5, eigen_tolerance_decay: 0.5, residual_eigen_schedule: true, free_electron_initial_guess: true, max_iterations: 200, davidson_max_iterations: 400, davidson_subspace: 48, seed: 2026, divergence_factor: 20.0, divergence_patience: 3 }",
+  "final_residual": 3.12613892762473e-08,
+  "findings": [],
+  "gap_from_converged_state": true,
+  "history": [
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.8055946681891726,
+      "iteration": 1,
+      "residual": 0.06043746986338124,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.8231525055488684,
+      "iteration": 2,
+      "residual": 0.004542877913839653,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.8236055807410603,
+      "iteration": 3,
+      "residual": 0.0007808809926803553,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.823642275093503,
+      "iteration": 4,
+      "residual": 0.0002303318878703684,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.8236461926731744,
+      "iteration": 5,
+      "residual": 7.908320879607329e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.823646656800893,
+      "iteration": 6,
+      "residual": 2.8651358043459e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.823646714893566,
+      "iteration": 7,
+      "residual": 1.0639882997490002e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.8236467224337716,
+      "iteration": 8,
+      "residual": 3.9976587499205055e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.8236467234336247,
+      "iteration": 9,
+      "residual": 1.5096192226129662e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.823646723569054,
+      "iteration": 10,
+      "residual": 5.722142054622209e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.823646723587663,
+      "iteration": 11,
+      "residual": 2.1719842887897324e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.823646723590245,
+      "iteration": 12,
+      "residual": 8.241608272512318e-08,
+      "revision": 0
+    },
+    {
+      "certificate_debug": "FixedPointCertificate { strict_residuals_per_k: [[3.559717120321131e-10, 4.802403438186171e-10, 1.3155284069893733e-10, 3.958062385265706e-10, 4.5979746721036007e-10]], buffer_residuals_per_k: [[7.770801047227414e-7, 2.0997259545293515e-6, 1.665092681473983e-6, 1.299391705552259e-6, 1.324729160279329e-6, 1.1797891325356578e-6, 2.888072281987698e-6, 1.9792762315804434e-6, 2.6793136997896555e-6, 2.229552215300364e-6, 2.5347509925259697e-6]], density_residual: 1.1856732364462316e-8, occupied_eigenvalue_change: 2.258556769385578e-8, davidson_iterations: 8, operator_applications: 64, davidson_iterations_per_k: [8], operator_applications_per_k: [64], timings: PhaseTimings { potential: 18.75\u00b5s, diagonalization: 1.194875ms, density: 16.958\u00b5s, energy: 58.834\u00b5s, mixing: 0ns } }",
+      "energy_hartree": -3.8236467235906058,
+      "iteration": 13,
+      "residual": 3.12613892762473e-08,
+      "revision": 0
+    }
+  ],
+  "insulating_gap_gate": false,
+  "intervention_applied": false,
+  "iterations": 13,
+  "sampled_gap_hartree": 0.3213402740851299,
+  "state": "Converged",
+  "terminal_evidence": null,
+  "wall_seconds": 0.030821709,
+  "process_exit_code": 0,
+  "stderr": "",
+  "model": "four-ion-offset",
+  "policy": "linear-1.0-davidson",
+  "arm": "baseline",
+  "input_sha256": "df28c003f618d2e1b0391e6ea2cc1202b15ade400a3b0b2991421ba6661b8a98",
+  "upf_sha256": "6c9cf6e7aa2607d5633ceccd625dcdbc6adf320770011499e8548d1f93e407ba",
+  "generator": {
+    "valence": 2,
+    "channels": [
+      0,
+      1,
+      2
+    ],
+    "radius": 1,
+    "shape": "gaussian",
+    "points": 801
+  },
+  "elapsed_seconds": 0.03462733299999954
+}

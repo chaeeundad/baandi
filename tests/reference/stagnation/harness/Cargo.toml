@@ -1,0 +1,15 @@
+[package]
+name = "stagnation-harness"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+dft-engine = { path = "../../../../crates/dft-engine" }
+dft-geometry = { path = "../../../../crates/dft-geometry" }
+dft-upf = { path = "../../../../crates/dft-upf" }
+dft-solvers = { path = "../../../../crates/dft-solvers" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }

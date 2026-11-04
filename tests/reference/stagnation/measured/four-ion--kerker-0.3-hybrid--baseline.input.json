@@ -1,0 +1,54 @@
+{
+  "id": "four-ion--kerker-0.3-hybrid--baseline",
+  "lattice_bohr": [
+    [
+      7,
+      0,
+      0
+    ],
+    [
+      0,
+      7,
+      0
+    ],
+    [
+      0,
+      0,
+      9
+    ]
+  ],
+  "atoms_fractional": [
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      0.5,
+      0.5,
+      0
+    ],
+    [
+      0.5,
+      0,
+      0.5
+    ],
+    [
+      0,
+      0.5,
+      0.5
+    ]
+  ],
+  "kgrid": [
+    1,
+    1,
+    1
+  ],
+  "bands": 16,
+  "cutoff_hartree": 2.0,
+  "mixer": "kerker",
+  "beta": 0.3,
+  "solver": "hybrid",
+  "max_iterations": 200,
+  "intervention": false
+}

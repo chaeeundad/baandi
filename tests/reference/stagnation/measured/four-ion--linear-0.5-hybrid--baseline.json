@@ -1,0 +1,186 @@
+{
+  "audit": [],
+  "certified_energy_hartree": -3.918891285312466,
+  "charge_sloshing_hint": "not_computed",
+  "converged": true,
+  "error": null,
+  "expanded_options_debug": "ScfOptions { eigensolver: Hybrid(HybridRmm { refinement: RmmDiis { max_sweeps: 80, history_size: 4, stagnation_sweeps: 10 }, warmup_tolerance: 0.001 }), threads: 1, functional: LdaPz, allow_functional_override: false, cutoff_hartree: 2.0, bands: Some(16), extra_bands: 4, grid_override: None, mixing: Linear { beta: 0.5 }, density_tolerance: 1e-7, energy_tolerance: 1e-8, eigen_tolerance: 1e-8, initial_eigen_tolerance: 1e-5, eigen_tolerance_decay: 0.5, residual_eigen_schedule: true, free_electron_initial_guess: true, max_iterations: 200, davidson_max_iterations: 400, davidson_subspace: 48, seed: 2026, divergence_factor: 20.0, divergence_patience: 3 }",
+  "final_residual": 2.8035132412744347e-08,
+  "findings": [],
+  "gap_from_converged_state": true,
+  "history": [
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.9094356249128297,
+      "iteration": 1,
+      "residual": 0.061075464218553595,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.9159190983025414,
+      "iteration": 2,
+      "residual": 0.029377955673793362,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.91827026747566,
+      "iteration": 3,
+      "residual": 0.01389919361247971,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.91876167504722,
+      "iteration": 4,
+      "residual": 0.006593022945008809,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.918863451215942,
+      "iteration": 5,
+      "residual": 0.0031397408365181592,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.9188851263195654,
+      "iteration": 6,
+      "residual": 0.001500088661009875,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.918889896565355,
+      "iteration": 7,
+      "residual": 0.0007183888570770532,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.9188909686462603,
+      "iteration": 8,
+      "residual": 0.0003446338058348417,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.918891212623855,
+      "iteration": 9,
+      "residual": 0.0001655621650997811,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.918891268551619,
+      "iteration": 10,
+      "residual": 7.963810003914653e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.9188912814333206,
+      "iteration": 11,
+      "residual": 3.835625666048942e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.91889128441084,
+      "iteration": 12,
+      "residual": 1.8497450382524873e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.9188912851029456,
+      "iteration": 13,
+      "residual": 8.932230942208067e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.9188912852634026,
+      "iteration": 14,
+      "residual": 4.319885558153791e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.9188912853008575,
+      "iteration": 15,
+      "residual": 2.092451266692018e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.91889128530976,
+      "iteration": 16,
+      "residual": 1.0151977230362894e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.918891285311836,
+      "iteration": 17,
+      "residual": 4.933782952646693e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.918891285312317,
+      "iteration": 18,
+      "residual": 2.402106992280588e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.91889128531244,
+      "iteration": 19,
+      "residual": 1.1718771525758917e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.91889128531246,
+      "iteration": 20,
+      "residual": 5.72438948833998e-08,
+      "revision": 0
+    },
+    {
+      "certificate_debug": "FixedPointCertificate { strict_residuals_per_k: [[9.552410251658172e-11, 1.0479827867301816e-10, 1.505800961720837e-10, 2.0321191866655692e-10, 8.093133943110476e-10]], buffer_residuals_per_k: [[4.3280178499123e-8, 7.312756822480313e-7, 1.7295366769711637e-6, 1.0608569864633608e-6, 1.1742823019127985e-6, 1.4310416314976446e-6, 4.481794762420022e-7, 3.096444001727449e-6, 4.71509966920826e-6, 8.799873624129728e-7, 1.4520122994437246e-6]], density_residual: 1.0436383393517762e-9, occupied_eigenvalue_change: 5.801874161659448e-8, davidson_iterations: 15, operator_applications: 64, davidson_iterations_per_k: [15], operator_applications_per_k: [64], timings: PhaseTimings { potential: 18.834\u00b5s, diagonalization: 2.044042ms, density: 17.25\u00b5s, energy: 59.042\u00b5s, mixing: 0ns } }",
+      "energy_hartree": -3.918891285312466,
+      "iteration": 21,
+      "residual": 2.8035132412744347e-08,
+      "revision": 0
+    }
+  ],
+  "insulating_gap_gate": false,
+  "intervention_applied": false,
+  "iterations": 21,
+  "sampled_gap_hartree": 0.320439426279745,
+  "state": "Converged",
+  "terminal_evidence": null,
+  "wall_seconds": 0.031301791,
+  "process_exit_code": 0,
+  "stderr": "",
+  "model": "four-ion",
+  "policy": "linear-0.5-hybrid",
+  "arm": "baseline",
+  "input_sha256": "9439e0709454c152092d876050a9b82a0a476f3071feaab9c0bbaa776ecfa06f",
+  "upf_sha256": "6c9cf6e7aa2607d5633ceccd625dcdbc6adf320770011499e8548d1f93e407ba",
+  "generator": {
+    "valence": 2,
+    "channels": [
+      0,
+      1,
+      2
+    ],
+    "radius": 1,
+    "shape": "gaussian",
+    "points": 801
+  },
+  "elapsed_seconds": 0.03460870799999993
+}

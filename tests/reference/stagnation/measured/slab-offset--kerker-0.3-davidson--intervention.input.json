@@ -1,0 +1,44 @@
+{
+  "id": "slab-offset--kerker-0.3-davidson--intervention",
+  "lattice_bohr": [
+    [
+      6,
+      0,
+      0
+    ],
+    [
+      0,
+      6,
+      0
+    ],
+    [
+      0,
+      0,
+      18
+    ]
+  ],
+  "atoms_fractional": [
+    [
+      0,
+      0,
+      0.45
+    ],
+    [
+      0.37,
+      0.29,
+      0.55
+    ]
+  ],
+  "kgrid": [
+    1,
+    1,
+    1
+  ],
+  "bands": 6,
+  "cutoff_hartree": 2.0,
+  "mixer": "kerker",
+  "beta": 0.3,
+  "solver": "davidson",
+  "max_iterations": 200,
+  "intervention": true
+}

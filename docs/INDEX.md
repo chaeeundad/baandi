@@ -62,3 +62,5 @@ Conventions: docs are English; one fact lives in one place and others link to it
 - `docs/research/dft-feature-matrix.md`: feature matrix of 11 DFT codes from public documentation (P8F; weak-evidence items marked).
 - `docs/roadmap/master-plan-proposal.md`: proposed master roadmap and first 20 tickets with prerequisites (P8F; proposal, user approval pending).
 - [Optional agent preflight](architecture/agent-preflight.md): deterministic structure findings, failure JSON, proposal validation and explicit decision provenance (P11K).
+
+- [Measured SCF stagnation cases](validation/scf-stagnation-cases.md): synthetic multi-system sweep, P11D evidence, P11B interventions, negative results and reproducers (P11M).

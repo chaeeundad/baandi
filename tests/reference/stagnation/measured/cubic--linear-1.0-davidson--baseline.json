@@ -1,0 +1,121 @@
+{
+  "audit": [],
+  "certified_energy_hartree": -1.4073901394454928,
+  "charge_sloshing_hint": "not_computed",
+  "converged": true,
+  "error": null,
+  "expanded_options_debug": "ScfOptions { eigensolver: Davidson, threads: 1, functional: LdaPz, allow_functional_override: false, cutoff_hartree: 2.0, bands: Some(4), extra_bands: 4, grid_override: None, mixing: Linear { beta: 1.0 }, density_tolerance: 1e-7, energy_tolerance: 1e-8, eigen_tolerance: 1e-8, initial_eigen_tolerance: 1e-5, eigen_tolerance_decay: 0.5, residual_eigen_schedule: true, free_electron_initial_guess: true, max_iterations: 200, davidson_max_iterations: 400, davidson_subspace: 48, seed: 2026, divergence_factor: 20.0, divergence_patience: 3 }",
+  "final_residual": 1.0322437225174038e-08,
+  "findings": [],
+  "gap_from_converged_state": true,
+  "history": [
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4017922222774075,
+      "iteration": 1,
+      "residual": 0.072197023918742,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4070680364102495,
+      "iteration": 2,
+      "residual": 0.015271168218622554,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.407371469109808,
+      "iteration": 3,
+      "residual": 0.003694726707456348,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073890486980543,
+      "iteration": 4,
+      "residual": 0.0008883629971737172,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073900757927387,
+      "iteration": 5,
+      "residual": 0.00021486660571306957,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073901357297172,
+      "iteration": 6,
+      "residual": 5.189607831851625e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073901392285975,
+      "iteration": 7,
+      "residual": 1.2539309537643663e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073901394328325,
+      "iteration": 8,
+      "residual": 3.029476006248266e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073901394447548,
+      "iteration": 9,
+      "residual": 7.319359937833989e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073901394454504,
+      "iteration": 10,
+      "residual": 1.7683804967327253e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -1.4073901394454884,
+      "iteration": 11,
+      "residual": 4.2724705512343206e-08,
+      "revision": 0
+    },
+    {
+      "certificate_debug": "FixedPointCertificate { strict_residuals_per_k: [[1.4521770062446142e-16, 2.524425009788383e-16]], buffer_residuals_per_k: [[3.6189094050484866e-6, 8.538067723629974e-6]], density_residual: 2.493936849911264e-9, occupied_eigenvalue_change: 8.695773490163816e-9, davidson_iterations: 2, operator_applications: 10, davidson_iterations_per_k: [2], operator_applications_per_k: [10], timings: PhaseTimings { potential: 14.833\u00b5s, diagonalization: 41.708\u00b5s, density: 4.334\u00b5s, energy: 19.709\u00b5s, mixing: 0ns } }",
+      "energy_hartree": -1.4073901394454928,
+      "iteration": 12,
+      "residual": 1.0322437225174038e-08,
+      "revision": 0
+    }
+  ],
+  "insulating_gap_gate": false,
+  "intervention_applied": false,
+  "iterations": 12,
+  "sampled_gap_hartree": 0.49639279912058143,
+  "state": "Converged",
+  "terminal_evidence": null,
+  "wall_seconds": 0.005578708,
+  "process_exit_code": 0,
+  "stderr": "",
+  "model": "cubic",
+  "policy": "linear-1.0-davidson",
+  "arm": "baseline",
+  "input_sha256": "980c4df2cd87a4830b643292a71675acffea6bb5f853c0cc1aa8919f3b18a8c6",
+  "upf_sha256": "71bbf95dd35653e778cd9b5493f952ae1471754028cde3fc68f3642fe9ceed22",
+  "generator": {
+    "valence": 2,
+    "channels": [
+      0
+    ],
+    "radius": 1,
+    "shape": "gaussian",
+    "points": 801
+  },
+  "elapsed_seconds": 0.008817249999999888
+}

@@ -1,0 +1,143 @@
+{
+  "audit": [],
+  "certified_energy_hartree": -2.873808223242774,
+  "charge_sloshing_hint": "not_computed",
+  "converged": true,
+  "error": null,
+  "expanded_options_debug": "ScfOptions { eigensolver: Davidson, threads: 1, functional: LdaPz, allow_functional_override: false, cutoff_hartree: 2.0, bands: Some(6), extra_bands: 4, grid_override: None, mixing: Pulay { beta: 0.1, history: 6 }, density_tolerance: 1e-7, energy_tolerance: 1e-8, eigen_tolerance: 1e-8, initial_eigen_tolerance: 1e-5, eigen_tolerance_decay: 0.5, residual_eigen_schedule: true, free_electron_initial_guess: true, max_iterations: 1000, davidson_max_iterations: 400, davidson_subspace: 48, seed: 2026, divergence_factor: 20.0, divergence_patience: 3 }",
+  "final_residual": 3.270324073359441e-08,
+  "findings": [],
+  "gap_from_converged_state": true,
+  "history": [
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.852533482225531,
+      "iteration": 1,
+      "residual": 0.05975609308257545,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.854955023865486,
+      "iteration": 2,
+      "residual": 0.05330839380981467,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8736104731062175,
+      "iteration": 3,
+      "residual": 0.006741998704386661,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.873587412273106,
+      "iteration": 4,
+      "residual": 0.007100399875366999,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.873577538974728,
+      "iteration": 5,
+      "residual": 0.007271449868888567,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8737830506216584,
+      "iteration": 6,
+      "residual": 0.002457282644226231,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.873794036256017,
+      "iteration": 7,
+      "residual": 0.0018566222003396204,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8738076718128553,
+      "iteration": 8,
+      "residual": 0.00035578761264099825,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8738082222130936,
+      "iteration": 9,
+      "residual": 1.7311214157993647e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.873808222445403,
+      "iteration": 10,
+      "residual": 1.4794116481446493e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8738082232104385,
+      "iteration": 11,
+      "residual": 2.7362136219845444e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.873808223241468,
+      "iteration": 12,
+      "residual": 8.780548584185478e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8738082232426754,
+      "iteration": 13,
+      "residual": 2.516457211709366e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -2.8738082232427713,
+      "iteration": 14,
+      "residual": 6.83117367658616e-08,
+      "revision": 0
+    },
+    {
+      "certificate_debug": "FixedPointCertificate { strict_residuals_per_k: [[5.125196772856153e-10, 6.209154831562141e-10, 7.259420752725896e-11]], buffer_residuals_per_k: [[1.3205593850288348e-6, 2.62723350164244e-6, 2.790542713216768e-6]], density_residual: 1.4918399764323768e-9, occupied_eigenvalue_change: 1.6053714829711296e-8, davidson_iterations: 3, operator_applications: 16, davidson_iterations_per_k: [3], operator_applications_per_k: [16], timings: PhaseTimings { potential: 24.916\u00b5s, diagonalization: 129.834\u00b5s, density: 11.541\u00b5s, energy: 39.5\u00b5s, mixing: 0ns } }",
+      "energy_hartree": -2.873808223242774,
+      "iteration": 15,
+      "residual": 3.270324073359441e-08,
+      "revision": 0
+    }
+  ],
+  "insulating_gap_gate": false,
+  "intervention_applied": false,
+  "iterations": 15,
+  "sampled_gap_hartree": 0.3637878479983832,
+  "state": "Converged",
+  "terminal_evidence": null,
+  "wall_seconds": 0.008806667,
+  "process_exit_code": 0,
+  "stderr": "",
+  "model": "elongated",
+  "policy": "reference",
+  "arm": "reference",
+  "input_sha256": "1867d15bcd8d426e8c09817d35330802a6130300f1946ba8703fd94701268041",
+  "upf_sha256": "9689fdf49cb5e65cbc72512838147d2cbafdff2ab9714fe2ccc0b84b57667a7c",
+  "generator": {
+    "valence": 2,
+    "channels": [
+      0,
+      1
+    ],
+    "radius": 1,
+    "shape": "gaussian",
+    "points": 801
+  },
+  "elapsed_seconds": 0.011877333999999795
+}

@@ -1,0 +1,595 @@
+{
+  "models": [
+    {
+      "id": "cubic",
+      "lattice_bohr": [
+        [
+          6,
+          0,
+          0
+        ],
+        [
+          0,
+          6,
+          0
+        ],
+        [
+          0,
+          0,
+          6
+        ]
+      ],
+      "atoms_fractional": [
+        [
+          0,
+          0,
+          0
+        ]
+      ],
+      "kgrid": [
+        1,
+        1,
+        1
+      ],
+      "bands": 4,
+      "cutoff_hartree": 2.0,
+      "generator": {
+        "valence": 2,
+        "channels": [
+          0
+        ],
+        "radius": 1,
+        "shape": "gaussian",
+        "points": 801
+      }
+    },
+    {
+      "id": "skewed",
+      "lattice_bohr": [
+        [
+          6,
+          0,
+          0
+        ],
+        [
+          1,
+          6,
+          0
+        ],
+        [
+          0.5,
+          1,
+          7
+        ]
+      ],
+      "atoms_fractional": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0.31,
+          0.27,
+          0.29
+        ]
+      ],
+      "kgrid": [
+        1,
+        1,
+        1
+      ],
+      "bands": 6,
+      "cutoff_hartree": 2.0,
+      "generator": {
+        "valence": 2,
+        "channels": [
+          0,
+          0,
+          1
+        ],
+        "radius": 1,
+        "shape": "gaussian",
+        "points": 801
+      }
+    },
+    {
+      "id": "elongated",
+      "lattice_bohr": [
+        [
+          5,
+          0,
+          0
+        ],
+        [
+          0,
+          5,
+          0
+        ],
+        [
+          0,
+          0,
+          14
+        ]
+      ],
+      "atoms_fractional": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0.5,
+          0.5,
+          0.5
+        ]
+      ],
+      "kgrid": [
+        1,
+        1,
+        1
+      ],
+      "bands": 6,
+      "cutoff_hartree": 2.0,
+      "generator": {
+        "valence": 2,
+        "channels": [
+          0,
+          1
+        ],
+        "radius": 1,
+        "shape": "gaussian",
+        "points": 801
+      }
+    },
+    {
+      "id": "slab",
+      "lattice_bohr": [
+        [
+          6,
+          0,
+          0
+        ],
+        [
+          0,
+          6,
+          0
+        ],
+        [
+          0,
+          0,
+          18
+        ]
+      ],
+      "atoms_fractional": [
+        [
+          0,
+          0,
+          0.45
+        ],
+        [
+          0.5,
+          0.5,
+          0.55
+        ]
+      ],
+      "kgrid": [
+        1,
+        1,
+        1
+      ],
+      "bands": 6,
+      "cutoff_hartree": 2.0,
+      "generator": {
+        "valence": 2,
+        "channels": [
+          0,
+          0,
+          1
+        ],
+        "radius": 1,
+        "shape": "gaussian",
+        "points": 801
+      }
+    },
+    {
+      "id": "four-ion",
+      "lattice_bohr": [
+        [
+          7,
+          0,
+          0
+        ],
+        [
+          0,
+          7,
+          0
+        ],
+        [
+          0,
+          0,
+          9
+        ]
+      ],
+      "atoms_fractional": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0.5,
+          0.5,
+          0
+        ],
+        [
+          0.5,
+          0,
+          0.5
+        ],
+        [
+          0,
+          0.5,
+          0.5
+        ]
+      ],
+      "kgrid": [
+        1,
+        1,
+        1
+      ],
+      "bands": 16,
+      "cutoff_hartree": 2.0,
+      "generator": {
+        "valence": 2,
+        "channels": [
+          0,
+          1,
+          2
+        ],
+        "radius": 1,
+        "shape": "gaussian",
+        "points": 801
+      }
+    },
+    {
+      "id": "soft-mesh",
+      "lattice_bohr": [
+        [
+          7,
+          0,
+          0
+        ],
+        [
+          0,
+          7,
+          0
+        ],
+        [
+          0,
+          0,
+          7
+        ]
+      ],
+      "atoms_fractional": [
+        [
+          0,
+          0,
+          0
+        ]
+      ],
+      "kgrid": [
+        2,
+        1,
+        1
+      ],
+      "bands": 4,
+      "cutoff_hartree": 2.0,
+      "generator": {
+        "valence": 2,
+        "channels": [
+          0
+        ],
+        "radius": 3,
+        "shape": "gaussian",
+        "points": 801
+      }
+    },
+    {
+      "id": "elongated-offset",
+      "lattice_bohr": [
+        [
+          5,
+          0,
+          0
+        ],
+        [
+          0,
+          5,
+          0
+        ],
+        [
+          0,
+          0,
+          14
+        ]
+      ],
+      "atoms_fractional": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0.37,
+          0.29,
+          0.31
+        ]
+      ],
+      "kgrid": [
+        1,
+        1,
+        1
+      ],
+      "bands": 6,
+      "cutoff_hartree": 2.0,
+      "generator": {
+        "valence": 2,
+        "channels": [
+          0,
+          1
+        ],
+        "radius": 1,
+        "shape": "gaussian",
+        "points": 801
+      }
+    },
+    {
+      "id": "slab-offset",
+      "lattice_bohr": [
+        [
+          6,
+          0,
+          0
+        ],
+        [
+          0,
+          6,
+          0
+        ],
+        [
+          0,
+          0,
+          18
+        ]
+      ],
+      "atoms_fractional": [
+        [
+          0,
+          0,
+          0.45
+        ],
+        [
+          0.37,
+          0.29,
+          0.55
+        ]
+      ],
+      "kgrid": [
+        1,
+        1,
+        1
+      ],
+      "bands": 6,
+      "cutoff_hartree": 2.0,
+      "generator": {
+        "valence": 2,
+        "channels": [
+          0,
+          0,
+          1
+        ],
+        "radius": 1,
+        "shape": "gaussian",
+        "points": 801
+      }
+    },
+    {
+      "id": "skewed-mesh",
+      "lattice_bohr": [
+        [
+          6,
+          0,
+          0
+        ],
+        [
+          1,
+          6,
+          0
+        ],
+        [
+          0.5,
+          1,
+          7
+        ]
+      ],
+      "atoms_fractional": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0.31,
+          0.27,
+          0.29
+        ]
+      ],
+      "kgrid": [
+        2,
+        2,
+        1
+      ],
+      "bands": 6,
+      "cutoff_hartree": 2.0,
+      "generator": {
+        "valence": 2,
+        "channels": [
+          0,
+          0,
+          1
+        ],
+        "radius": 1,
+        "shape": "gaussian",
+        "points": 801
+      }
+    },
+    {
+      "id": "four-ion-offset",
+      "lattice_bohr": [
+        [
+          7,
+          0,
+          0
+        ],
+        [
+          0,
+          7,
+          0
+        ],
+        [
+          0,
+          0,
+          9
+        ]
+      ],
+      "atoms_fractional": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0.41,
+          0.53,
+          0.03
+        ],
+        [
+          0.49,
+          0.03,
+          0.51
+        ],
+        [
+          0.04,
+          0.48,
+          0.47
+        ]
+      ],
+      "kgrid": [
+        1,
+        1,
+        1
+      ],
+      "bands": 16,
+      "cutoff_hartree": 2.0,
+      "generator": {
+        "valence": 2,
+        "channels": [
+          0,
+          1,
+          2
+        ],
+        "radius": 1,
+        "shape": "gaussian",
+        "points": 801
+      }
+    },
+    {
+      "id": "near-metal",
+      "lattice_bohr": [
+        [
+          10,
+          0,
+          0
+        ],
+        [
+          0,
+          10,
+          0
+        ],
+        [
+          0,
+          0,
+          10
+        ]
+      ],
+      "atoms_fractional": [
+        [
+          0,
+          0,
+          0
+        ]
+      ],
+      "kgrid": [
+        2,
+        2,
+        2
+      ],
+      "bands": 4,
+      "cutoff_hartree": 2.0,
+      "generator": {
+        "valence": 2,
+        "channels": [
+          0
+        ],
+        "radius": 5.0,
+        "shape": "gaussian",
+        "points": 801
+      }
+    }
+  ],
+  "policies": [
+    {
+      "id": "pulay-0.3-davidson",
+      "mixer": "pulay",
+      "beta": 0.3,
+      "solver": "davidson"
+    },
+    {
+      "id": "linear-1.0-davidson",
+      "mixer": "linear",
+      "beta": 1.0,
+      "solver": "davidson"
+    },
+    {
+      "id": "linear-0.1-davidson",
+      "mixer": "linear",
+      "beta": 0.1,
+      "solver": "davidson"
+    },
+    {
+      "id": "pulay-1.0-davidson",
+      "mixer": "pulay",
+      "beta": 1.0,
+      "solver": "davidson"
+    },
+    {
+      "id": "kerker-0.3-davidson",
+      "mixer": "kerker",
+      "beta": 0.3,
+      "solver": "davidson"
+    },
+    {
+      "id": "linear-0.5-hybrid",
+      "mixer": "linear",
+      "beta": 0.5,
+      "solver": "hybrid"
+    },
+    {
+      "id": "kerker-0.3-hybrid",
+      "mixer": "kerker",
+      "beta": 0.3,
+      "solver": "hybrid"
+    }
+  ]
+}

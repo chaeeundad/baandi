@@ -1,0 +1,918 @@
+{
+  "audit": [],
+  "certified_energy_hartree": null,
+  "charge_sloshing_hint": "not_computed",
+  "converged": false,
+  "error": "Scf(NonInsulating { gap_hartree: -0.054841334898610705, required_hartree: 1e-6 })",
+  "expanded_options_debug": "ScfOptions { eigensolver: Davidson, threads: 1, functional: LdaPz, allow_functional_override: false, cutoff_hartree: 2.0, bands: Some(6), extra_bands: 4, grid_override: None, mixing: Linear { beta: 0.1 }, density_tolerance: 1e-7, energy_tolerance: 1e-8, eigen_tolerance: 1e-8, initial_eigen_tolerance: 1e-5, eigen_tolerance_decay: 0.5, residual_eigen_schedule: true, free_electron_initial_guess: true, max_iterations: 200, davidson_max_iterations: 400, davidson_subspace: 48, seed: 2026, divergence_factor: 20.0, divergence_patience: 3 }",
+  "final_residual": 8.683718036023274e-08,
+  "findings": [],
+  "gap_from_converged_state": false,
+  "history": [
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4196761149594668,
+      "iteration": 1,
+      "residual": 0.02888205000073661,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4200586699611961,
+      "iteration": 2,
+      "residual": 0.02587086018699327,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42032311228610464,
+      "iteration": 3,
+      "residual": 0.023217591513231925,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4205622677027254,
+      "iteration": 4,
+      "residual": 0.020825626386299492,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42072084693497835,
+      "iteration": 5,
+      "residual": 0.018693131210521692,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4208253958252799,
+      "iteration": 6,
+      "residual": 0.01677981404903549,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4209002752636142,
+      "iteration": 7,
+      "residual": 0.015075025507602719,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42096507027343666,
+      "iteration": 8,
+      "residual": 0.0135250692769046,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4210021605848926,
+      "iteration": 9,
+      "residual": 0.012149817604706997,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4210228447335054,
+      "iteration": 10,
+      "residual": 0.01092972717889978,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4210534977833533,
+      "iteration": 11,
+      "residual": 0.009809275671573482,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42106852086060576,
+      "iteration": 12,
+      "residual": 0.00882070205169139,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4210794074550277,
+      "iteration": 13,
+      "residual": 0.00793000532660862,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42108990806158353,
+      "iteration": 14,
+      "residual": 0.007129102003770008,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42109334981433966,
+      "iteration": 15,
+      "residual": 0.00641594623783398,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42109787374454255,
+      "iteration": 16,
+      "residual": 0.00576990109410693,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42110536518334185,
+      "iteration": 17,
+      "residual": 0.005190952395446448,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42110809121696513,
+      "iteration": 18,
+      "residual": 0.004673978032610528,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211100161389132,
+      "iteration": 19,
+      "residual": 0.004208463542163665,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42111291890240254,
+      "iteration": 20,
+      "residual": 0.0037905324689709997,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211147613672559,
+      "iteration": 21,
+      "residual": 0.0034128600909965837,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211155710493104,
+      "iteration": 22,
+      "residual": 0.0030730239193200457,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42111759483406175,
+      "iteration": 23,
+      "residual": 0.0027704164876255163,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42111826117724327,
+      "iteration": 24,
+      "residual": 0.0024963954537442616,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211191707916786,
+      "iteration": 25,
+      "residual": 0.00225184610202525,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112013022438566,
+      "iteration": 26,
+      "residual": 0.002027676694625735,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211205234282398,
+      "iteration": 27,
+      "residual": 0.0018277158145337253,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112104357423896,
+      "iteration": 28,
+      "residual": 0.0016494878658823613,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.421121461870821,
+      "iteration": 29,
+      "residual": 0.0014867613019551341,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211217441210877,
+      "iteration": 30,
+      "residual": 0.001340010897620824,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112199593594957,
+      "iteration": 31,
+      "residual": 0.0012088326284603493,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112226433384015,
+      "iteration": 32,
+      "residual": 0.0010918524290057352,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112247717027307,
+      "iteration": 33,
+      "residual": 0.0009831191607338854,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211226011209648,
+      "iteration": 34,
+      "residual": 0.0008870687868889559,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211227280990104,
+      "iteration": 35,
+      "residual": 0.0008004030843621703,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112283418747465,
+      "iteration": 36,
+      "residual": 0.0007226709339497341,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211229105458194,
+      "iteration": 37,
+      "residual": 0.0006506819172416565,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112300179396067,
+      "iteration": 38,
+      "residual": 0.0005880363340181609,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211230282501732,
+      "iteration": 39,
+      "residual": 0.0005302325914402524,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211231015561203,
+      "iteration": 40,
+      "residual": 0.0004786340974009851,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112313519726374,
+      "iteration": 41,
+      "residual": 0.0004317174242950826,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211231677823064,
+      "iteration": 42,
+      "residual": 0.0003897927291730618,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112319244937524,
+      "iteration": 43,
+      "residual": 0.00035145637388154,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211232149130879,
+      "iteration": 44,
+      "residual": 0.0003174109783012579,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112323101390237,
+      "iteration": 45,
+      "residual": 0.0002866250058393034,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211232433552128,
+      "iteration": 46,
+      "residual": 0.00025846417607773976,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112325951070195,
+      "iteration": 47,
+      "residual": 0.00023344260384556537,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211232682669843,
+      "iteration": 48,
+      "residual": 0.00021060622803325394,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211232744151321,
+      "iteration": 49,
+      "residual": 0.00019005519555297484,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112328154060474,
+      "iteration": 50,
+      "residual": 0.00017178198024891337,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211232877990927,
+      "iteration": 51,
+      "residual": 0.00015493743531748002,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112329186313,
+      "iteration": 52,
+      "residual": 0.00013994761122776558,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211232959426241,
+      "iteration": 53,
+      "residual": 0.00012636298166650707,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112329812473837,
+      "iteration": 54,
+      "residual": 0.00011410417597982302,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112330152182276,
+      "iteration": 55,
+      "residual": 0.00010295546731668464,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233032763104,
+      "iteration": 56,
+      "residual": 9.299335306887086e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233045124876,
+      "iteration": 57,
+      "residual": 8.396910387806753e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112330639208007,
+      "iteration": 58,
+      "residual": 7.584843901849331e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112330722581826,
+      "iteration": 59,
+      "residual": 6.846812472123979e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112330828622735,
+      "iteration": 60,
+      "residual": 6.186560284871137e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233088488928,
+      "iteration": 61,
+      "residual": 5.5836202170704025e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112330965705813,
+      "iteration": 62,
+      "residual": 5.039756124758334e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233100440941,
+      "iteration": 63,
+      "residual": 4.5512131165584146e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331044759244,
+      "iteration": 64,
+      "residual": 4.11300534311729e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233107460881,
+      "iteration": 65,
+      "residual": 3.714640535599444e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331108986045,
+      "iteration": 66,
+      "residual": 3.3548778122029116e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233113304398,
+      "iteration": 67,
+      "residual": 3.0305742380368685e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331145988247,
+      "iteration": 68,
+      "residual": 2.737465195363903e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233116471318,
+      "iteration": 69,
+      "residual": 2.4741460269794828e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233117575024,
+      "iteration": 70,
+      "residual": 2.2323432560096875e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233118594324,
+      "iteration": 71,
+      "residual": 2.0186507324320167e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331192509034,
+      "iteration": 72,
+      "residual": 1.8210554038386143e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331204214337,
+      "iteration": 73,
+      "residual": 1.6486112097601954e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331207064146,
+      "iteration": 74,
+      "residual": 1.4875830813035406e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.421123312128443,
+      "iteration": 75,
+      "residual": 1.3447765859530811e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233121542266,
+      "iteration": 76,
+      "residual": 1.2149629591172196e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331218870436,
+      "iteration": 77,
+      "residual": 1.0968732984790052e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331222062793,
+      "iteration": 78,
+      "residual": 9.923901436483912e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233122360971,
+      "iteration": 79,
+      "residual": 8.960945687046263e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233122555109,
+      "iteration": 80,
+      "residual": 8.09686216358075e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331227319877,
+      "iteration": 81,
+      "residual": 7.323273786844935e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331228052335,
+      "iteration": 82,
+      "residual": 6.610652585767311e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233122931155,
+      "iteration": 83,
+      "residual": 5.9833707119440965e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331229832733,
+      "iteration": 84,
+      "residual": 5.396444136548335e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331230721045,
+      "iteration": 85,
+      "residual": 4.886458737751333e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123101479,
+      "iteration": 86,
+      "residual": 4.409692129453293e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331231600564,
+      "iteration": 87,
+      "residual": 3.99044029203171e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331231819056,
+      "iteration": 88,
+      "residual": 3.6020511305441824e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123220903,
+      "iteration": 89,
+      "residual": 3.2607520508714268e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123239191,
+      "iteration": 90,
+      "residual": 2.9442839353843596e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331232560396,
+      "iteration": 91,
+      "residual": 2.6605429486518377e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123273752,
+      "iteration": 92,
+      "residual": 2.4054787588627894e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123286604,
+      "iteration": 93,
+      "residual": 2.1742344766820652e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331232974975,
+      "iteration": 94,
+      "residual": 1.965957735346975e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331233051714,
+      "iteration": 95,
+      "residual": 1.7765651457946814e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123313016,
+      "iteration": 96,
+      "residual": 1.6057958970186739e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123319862,
+      "iteration": 97,
+      "residual": 1.4534259810789789e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123323015,
+      "iteration": 98,
+      "residual": 1.3123746790117186e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123328517,
+      "iteration": 99,
+      "residual": 1.1875804943350232e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123330955,
+      "iteration": 100,
+      "residual": 1.0729504577025686e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123333322,
+      "iteration": 101,
+      "residual": 9.696702215490585e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123335829,
+      "iteration": 102,
+      "residual": 8.77061300911408e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123337832,
+      "iteration": 103,
+      "residual": 7.933674842196048e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331233391087,
+      "iteration": 104,
+      "residual": 7.168724756749765e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.421123312334033,
+      "iteration": 105,
+      "residual": 6.484503363682276e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123341347,
+      "iteration": 106,
+      "residual": 5.865492733256781e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331233419864,
+      "iteration": 107,
+      "residual": 5.299365325360926e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123342979,
+      "iteration": 108,
+      "residual": 4.802601245257971e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331233431144,
+      "iteration": 109,
+      "residual": 4.331978727761598e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123343834,
+      "iteration": 110,
+      "residual": 3.9244367041837653e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123344127,
+      "iteration": 111,
+      "residual": 3.5468351775122674e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123344389,
+      "iteration": 112,
+      "residual": 3.2063381487756705e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331233446376,
+      "iteration": 113,
+      "residual": 2.9011957421618213e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331233448463,
+      "iteration": 114,
+      "residual": 2.6226521698224666e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123345046,
+      "iteration": 115,
+      "residual": 2.3726861960706142e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123345153,
+      "iteration": 116,
+      "residual": 2.1447374558251408e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331233452416,
+      "iteration": 117,
+      "residual": 1.940046785224451e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123345335,
+      "iteration": 118,
+      "residual": 1.754631765770832e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123345406,
+      "iteration": 119,
+      "residual": 1.5864542349424298e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331233454725,
+      "iteration": 120,
+      "residual": 1.435682015677492e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.421123312334553,
+      "iteration": 121,
+      "residual": 1.2983102525854506e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331233455724,
+      "iteration": 122,
+      "residual": 1.1749634511826399e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.4211233123345599,
+      "iteration": 123,
+      "residual": 1.0620221288097589e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.42112331233456235,
+      "iteration": 124,
+      "residual": 9.609320854937915e-08,
+      "revision": 0
+    },
+    {
+      "certificate_debug": "FixedPointCertificate { strict_residuals_per_k: [[3.295367954086835e-10, 1.1506222726138204e-10, 6.508670355274834e-10], [7.990568032808485e-10, 2.5823976665711886e-10, 4.230116332717199e-10], [9.5522304620058e-11, 1.2235395906843326e-10, 6.925481175446651e-10], [8.251277845508395e-10, 2.761525780882711e-10, 4.77384470197163e-10]], buffer_residuals_per_k: [[5.858978959439757e-6, 6.332593371466841e-6, 6.44212437065118e-6], [1.266727440517135e-6, 6.885933088759114e-6, 9.376650071502894e-6], [7.279044790835012e-6, 3.2198256736870885e-6, 5.869864490138862e-6], [5.206904719416441e-6, 8.76004613344007e-6, 7.22925803558517e-6]], density_residual: 5.029320847043687e-9, occupied_eigenvalue_change: 3.6186197760468275e-8, davidson_iterations: 26, operator_applications: 110, davidson_iterations_per_k: [6, 6, 7, 7], operator_applications_per_k: [27, 27, 27, 29], timings: PhaseTimings { potential: 11.625\u00b5s, diagonalization: 791.25\u00b5s, density: 24.334\u00b5s, energy: 68.959\u00b5s, mixing: 0ns } }",
+      "energy_hartree": -0.4211233123345639,
+      "iteration": 125,
+      "residual": 8.683718036023274e-08,
+      "revision": 0
+    }
+  ],
+  "insulating_gap_gate": true,
+  "intervention_applied": false,
+  "iterations": 125,
+  "sampled_gap_hartree": null,
+  "state": "Failed",
+  "terminal_evidence": {
+    "code": "NonInsulating",
+    "gap_hartree": -0.054841334898610705,
+    "required_hartree": 1e-06
+  },
+  "wall_seconds": 0.0671275,
+  "process_exit_code": 0,
+  "stderr": "",
+  "model": "skewed-mesh",
+  "policy": "linear-0.1-davidson",
+  "arm": "baseline",
+  "input_sha256": "7c0a00db51169ff1f41f96f29efd0250d6b29e488deed2af021e3b4d09f1e138",
+  "upf_sha256": "6341f64ea11bf08825a351e7bb6dbba974e888b58a1de2c79a54dfdab76c441e",
+  "generator": {
+    "valence": 2,
+    "channels": [
+      0,
+      0,
+      1
+    ],
+    "radius": 1,
+    "shape": "gaussian",
+    "points": 801
+  },
+  "elapsed_seconds": 0.07077974999999981
+}

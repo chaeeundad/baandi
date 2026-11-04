@@ -1,0 +1,81 @@
+{
+  "task_id": "P11M-STAGNATION-CASES",
+  "commands": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0,
+      "observation": "PASS build, test, fmt, clippy; workspace gates"
+    },
+    {
+      "command": "cargo build --offline --locked --release --manifest-path tests/reference/stagnation/harness/Cargo.toml --target-dir target",
+      "exit_code": 0,
+      "observation": "Release harness built by every sweep command"
+    },
+    {
+      "command": "cargo fmt --manifest-path tests/reference/stagnation/harness/Cargo.toml --check",
+      "exit_code": 0,
+      "observation": "Separate harness formatting"
+    },
+    {
+      "command": "cargo clippy --offline --locked --manifest-path tests/reference/stagnation/harness/Cargo.toml --target-dir target -- -D warnings",
+      "exit_code": 0,
+      "observation": "Separate harness lint"
+    },
+    {
+      "command": "python3 -I scripts/find_stagnation.py --output tests/reference/stagnation/measured",
+      "exit_code": 0,
+      "observation": "100 measured runs; exit 0 is experiment completion, not convergence"
+    },
+    {
+      "command": "python3 -I scripts/find_stagnation.py --output /tmp/p11m-repeat-final",
+      "exit_code": 0,
+      "observation": "100 repeat runs"
+    },
+    {
+      "command": "python3 -I tests/reference/stagnation/validate.py tests/reference/stagnation/measured --repeat /tmp/p11m-repeat-final --record tests/reference/stagnation/verification.json",
+      "exit_code": 0,
+      "observation": "100 normalized exact matches, 91 source identities, 5 validated interventions"
+    },
+    {
+      "command": "python3 -I scripts/find_stagnation.py --case skewed --policy linear-1.0-davidson --iterations 1000 --output tests/reference/stagnation/extended-skewed",
+      "exit_code": 0,
+      "observation": "Three 1000-budget control/reference/intervention runs"
+    },
+    {
+      "command": "python3 -I scripts/find_stagnation.py --case slab-offset --policy linear-1.0-davidson --iterations 1000 --output tests/reference/stagnation/extended-slab-offset",
+      "exit_code": 0,
+      "observation": "Three 1000-budget control/reference/intervention runs"
+    },
+    {
+      "command": "python3 -I scripts/find_stagnation.py --case slab --policy pulay-0.3-davidson --iterations 1000 --output tests/reference/stagnation/extended-slab",
+      "exit_code": 0,
+      "observation": "Three 1000-budget control/reference/intervention runs; no recovery"
+    },
+    {
+      "command": "python3 -I tests/reference/stagnation/test_evidence.py",
+      "exit_code": 0,
+      "observation": "2 tests passed: all four bundles and standard CSV, tampered recovery rejection"
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0,
+      "observation": "No tracked output changes; stagnation result integration is outside owned paths"
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0,
+      "observation": "3 tests passed; existing unclosed-file ResourceWarnings"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "observation": "No whitespace errors in tracked diff"
+    }
+  ],
+  "limitations": [
+    "Workspace check excludes standalone harness; separate gates above cover it.",
+    "Initial harness build failed with error conversion and gap field compile errors; fixed before measurement.",
+    "Initial repeat comparison included certificate wall timers and failed; validator now excludes only explicit timer fields.",
+    "No dashboard upload/session registry modification; outside ticket ownership."
+  ]
+}

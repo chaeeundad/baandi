@@ -1,0 +1,109 @@
+{
+  "audit": [],
+  "certified_energy_hartree": -3.918891285312473,
+  "charge_sloshing_hint": "not_computed",
+  "converged": true,
+  "error": null,
+  "expanded_options_debug": "ScfOptions { eigensolver: Davidson, threads: 1, functional: LdaPz, allow_functional_override: false, cutoff_hartree: 2.0, bands: Some(16), extra_bands: 4, grid_override: None, mixing: Pulay { beta: 0.3, history: 6 }, density_tolerance: 1e-7, energy_tolerance: 1e-8, eigen_tolerance: 1e-8, initial_eigen_tolerance: 1e-5, eigen_tolerance_decay: 0.5, residual_eigen_schedule: true, free_electron_initial_guess: true, max_iterations: 200, davidson_max_iterations: 400, davidson_subspace: 48, seed: 2026, divergence_factor: 20.0, divergence_patience: 3 }",
+  "final_residual": 1.407258823447631e-09,
+  "findings": [],
+  "gap_from_converged_state": true,
+  "history": [
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.9094356249128297,
+      "iteration": 1,
+      "residual": 0.061075464218553595,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.912980612233772,
+      "iteration": 2,
+      "residual": 0.0421987653010614,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.918888546507253,
+      "iteration": 3,
+      "residual": 0.0010358379827948357,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.9188811057595685,
+      "iteration": 4,
+      "residual": 0.0019850553464627186,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.9188912764022534,
+      "iteration": 5,
+      "residual": 5.675059606279501e-05,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.918891285231832,
+      "iteration": 6,
+      "residual": 5.587044094318536e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.918891285305035,
+      "iteration": 7,
+      "residual": 1.630729976464889e-06,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.9188912853124225,
+      "iteration": 8,
+      "residual": 1.0957782705277067e-07,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -3.9188912853124656,
+      "iteration": 9,
+      "residual": 1.6822115613032512e-08,
+      "revision": 0
+    },
+    {
+      "certificate_debug": "FixedPointCertificate { strict_residuals_per_k: [[4.2903504397215473e-10, 3.321275608192971e-10, 2.974493825822949e-10, 3.838089619318956e-10, 8.712941998956393e-10]], buffer_residuals_per_k: [[8.278477980724628e-8, 1.7362571144336283e-7, 2.1464667641011704e-7, 6.637570721995326e-7, 2.2777074928153961e-7, 8.479826891929878e-7, 2.9726473794841066e-6, 9.247409127640793e-7, 9.739933923446258e-7, 3.089833518534971e-7, 3.589008505050427e-7]], density_residual: 1.7318091704398902e-10, occupied_eigenvalue_change: 6.800184026989342e-10, davidson_iterations: 12, operator_applications: 55, davidson_iterations_per_k: [12], operator_applications_per_k: [55], timings: PhaseTimings { potential: 18.208\u00b5s, diagonalization: 1.26425ms, density: 18.125\u00b5s, energy: 57.875\u00b5s, mixing: 0ns } }",
+      "energy_hartree": -3.918891285312473,
+      "iteration": 10,
+      "residual": 1.407258823447631e-09,
+      "revision": 0
+    }
+  ],
+  "insulating_gap_gate": false,
+  "intervention_applied": false,
+  "iterations": 10,
+  "sampled_gap_hartree": 0.32043942904218914,
+  "state": "Converged",
+  "terminal_evidence": null,
+  "wall_seconds": 0.019464417,
+  "process_exit_code": 0,
+  "stderr": "",
+  "model": "four-ion",
+  "policy": "pulay-0.3-davidson",
+  "arm": "baseline",
+  "input_sha256": "e727a9b50625fd7c5ea12b00d7b5c3db47668d28d6c5e8dfc892ad91bdeca7a5",
+  "upf_sha256": "6c9cf6e7aa2607d5633ceccd625dcdbc6adf320770011499e8548d1f93e407ba",
+  "generator": {
+    "valence": 2,
+    "channels": [
+      0,
+      1,
+      2
+    ],
+    "radius": 1,
+    "shape": "gaussian",
+    "points": 801
+  },
+  "elapsed_seconds": 0.022452084000000205
+}

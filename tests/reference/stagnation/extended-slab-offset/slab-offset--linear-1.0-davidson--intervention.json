@@ -1,0 +1,284 @@
+{
+  "audit": [
+    {
+      "after_revision": 0,
+      "before_revision": 0,
+      "history_reset": false,
+      "iteration": 6,
+      "outcome": "Accepted",
+      "request_debug": "ControlRequest { schema_version: 1, calc_id: \"slab-offset--linear-1.0-davidson--intervention\", id: \"switch-pulay-01\", observed_state_version: 7, observed_policy_revision: 0, action: Policy([Mixing(Pulay { beta: 0.1, history: 6 }), ResetHistory]), preconditions: [PolicyRevision(0), Mode(AgentControlled)], expiry: Expiry { max_iteration: Some(6), deadline: None }, stale_policy: Reject, reason: \"P11D triggered stagnation or oscillation; switch to Pulay beta=0.1 and reset\" }"
+    },
+    {
+      "after_revision": 1,
+      "before_revision": 0,
+      "history_reset": true,
+      "iteration": 6,
+      "outcome": "Applied",
+      "request_debug": "ControlRequest { schema_version: 1, calc_id: \"slab-offset--linear-1.0-davidson--intervention\", id: \"switch-pulay-01\", observed_state_version: 7, observed_policy_revision: 0, action: Policy([Mixing(Pulay { beta: 0.1, history: 6 }), ResetHistory]), preconditions: [PolicyRevision(0), Mode(AgentControlled)], expiry: Expiry { max_iteration: Some(6), deadline: None }, stale_policy: Reject, reason: \"P11D triggered stagnation or oscillation; switch to Pulay beta=0.1 and reset\" }"
+    }
+  ],
+  "certified_energy_hartree": -0.7215584248160892,
+  "charge_sloshing_hint": "not_computed",
+  "converged": true,
+  "error": null,
+  "expanded_options_debug": "ScfOptions { eigensolver: Davidson, threads: 1, functional: LdaPz, allow_functional_override: false, cutoff_hartree: 2.0, bands: Some(6), extra_bands: 4, grid_override: None, mixing: Linear { beta: 1.0 }, density_tolerance: 1e-7, energy_tolerance: 1e-8, eigen_tolerance: 1e-8, initial_eigen_tolerance: 1e-5, eigen_tolerance_decay: 0.5, residual_eigen_schedule: true, free_electron_initial_guess: true, max_iterations: 1000, davidson_max_iterations: 400, davidson_subspace: 48, seed: 2026, divergence_factor: 20.0, divergence_patience: 3 }",
+  "final_residual": 2.1375552115903586e-08,
+  "findings": [
+    {
+      "evidence_debug": "Stagnation { residuals: [0.08751676162694545, 0.08771137995457541, 0.08860770121191763, 0.08874169994946378, 0.08876454704290328, 0.08876847667102815], range_ratio: 1.0143025749675054, endpoint_ratio: 1.0143025749675054 }",
+      "first": 1,
+      "last": 6,
+      "revision": 0,
+      "rule": "Stagnation",
+      "version": "1.0"
+    }
+  ],
+  "gap_from_converged_state": true,
+  "history": [
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.31197036652627863,
+      "iteration": 1,
+      "residual": 0.08751676162694545,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": 0.6197255151658952,
+      "iteration": 2,
+      "residual": 0.08771137995457541,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.30006108049799407,
+      "iteration": 3,
+      "residual": 0.08860770121191763,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": 0.629503827368384,
+      "iteration": 4,
+      "residual": 0.08874169994946378,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.2996019143389762,
+      "iteration": 5,
+      "residual": 0.08876454704290328,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": 0.62975222941856,
+      "iteration": 6,
+      "residual": 0.08876847667102815,
+      "revision": 0
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.29953645491490277,
+      "iteration": 7,
+      "residual": 0.08877227114215196,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.33349250827474564,
+      "iteration": 8,
+      "residual": 0.07820143190633368,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.22510343907569286,
+      "iteration": 9,
+      "residual": 0.07019358914600143,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.5777849215780481,
+      "iteration": 10,
+      "residual": 0.05048278746698934,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.5031729337030358,
+      "iteration": 11,
+      "residual": 0.05663313859293743,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.47948032234937055,
+      "iteration": 12,
+      "residual": 0.05947371809583185,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.5063577145882687,
+      "iteration": 13,
+      "residual": 0.0506387971066919,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.5885204353388916,
+      "iteration": 14,
+      "residual": 0.03557463006942412,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.6864306121450965,
+      "iteration": 15,
+      "residual": 0.02155291748594642,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7060060516645931,
+      "iteration": 16,
+      "residual": 0.009695586368914317,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7200639193542159,
+      "iteration": 17,
+      "residual": 0.008857273258338788,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7213200708629649,
+      "iteration": 18,
+      "residual": 0.0015362152670430132,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7215513585644825,
+      "iteration": 19,
+      "residual": 0.0011390988064588093,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.721548737271349,
+      "iteration": 20,
+      "residual": 0.0004154184079260206,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7215213103320223,
+      "iteration": 21,
+      "residual": 0.0005192129925382558,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7215579194004763,
+      "iteration": 22,
+      "residual": 0.00011437000575632599,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7215583937007376,
+      "iteration": 23,
+      "residual": 7.712211258879449e-05,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7215583940787956,
+      "iteration": 24,
+      "residual": 4.928029968005069e-05,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7215584241219318,
+      "iteration": 25,
+      "residual": 8.345821735227583e-06,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7215584243411509,
+      "iteration": 26,
+      "residual": 7.2537519451363735e-06,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7215584247949604,
+      "iteration": 27,
+      "residual": 1.5495440573877014e-06,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7215584247995873,
+      "iteration": 28,
+      "residual": 1.197205204174175e-06,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.721558424815853,
+      "iteration": 29,
+      "residual": 1.2936104552066106e-07,
+      "revision": 1
+    },
+    {
+      "certificate_debug": null,
+      "energy_hartree": -0.7215584248160102,
+      "iteration": 30,
+      "residual": 8.954765635549674e-08,
+      "revision": 1
+    },
+    {
+      "certificate_debug": "FixedPointCertificate { strict_residuals_per_k: [[3.3546981247443725e-10, 7.355152574456806e-10, 5.816225501629956e-10]], buffer_residuals_per_k: [[3.3544460539280937e-6, 5.112618121856586e-6, 3.5701382002123016e-6]], density_residual: 2.2709319033504108e-8, occupied_eigenvalue_change: 1.6958229792640722e-8, davidson_iterations: 9, operator_applications: 30, davidson_iterations_per_k: [9], operator_applications_per_k: [30], timings: PhaseTimings { potential: 29.541\u00b5s, diagonalization: 503\u00b5s, density: 11.834\u00b5s, energy: 45.166\u00b5s, mixing: 0ns } }",
+      "energy_hartree": -0.7215584248160892,
+      "iteration": 31,
+      "residual": 2.1375552115903586e-08,
+      "revision": 1
+    }
+  ],
+  "insulating_gap_gate": false,
+  "intervention_applied": true,
+  "iterations": 31,
+  "sampled_gap_hartree": 0.03815640113315731,
+  "state": "Converged",
+  "terminal_evidence": null,
+  "wall_seconds": 0.035440458,
+  "process_exit_code": 0,
+  "stderr": "",
+  "model": "slab-offset",
+  "policy": "linear-1.0-davidson",
+  "arm": "intervention",
+  "input_sha256": "dfcf10882019bfe90b00f4e8f57bb55fb05b0fe9fedb05d669186012016f4c7c",
+  "upf_sha256": "6341f64ea11bf08825a351e7bb6dbba974e888b58a1de2c79a54dfdab76c441e",
+  "generator": {
+    "valence": 2,
+    "channels": [
+      0,
+      0,
+      1
+    ],
+    "radius": 1,
+    "shape": "gaussian",
+    "points": 801
+  },
+  "elapsed_seconds": 0.038507791999999874,
+  "energy_error_hartree": 1.8207657603852567e-14,
+  "recovery_validated": true
+}

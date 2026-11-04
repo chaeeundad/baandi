@@ -20,14 +20,18 @@ fn main() {
         .find(|p| p.join("libmkl_core.so").exists())
         .expect("MKLROOT must contain lib[/intel64]/libmkl_core.so");
     println!("cargo:rustc-link-search=native={}", lib.display());
-    // The MKL layers resolve each other's symbols at load time, so Rust objects
-    // never reference mkl_sequential/mkl_core directly. The default linker
-    // --as-needed would drop them and the loader fails with "undefined symbol:
-    // mkl_blas_dgemm". Keep them with the `-as-needed` link modifier.
-    for name in ["mkl_intel_lp64", "mkl_sequential", "mkl_core"] {
-        println!("cargo:rustc-link-lib=dylib:-as-needed={name}");
-    }
-    for name in ["pthread", "m", "dl"] {
+    // The MKL layers resolve each other's symbols at load time. The default
+    // linker --as-needed drops mkl_sequential and mkl_core unless a Rust object
+    // references one of their symbols; `src/keep.rs` does that on purpose (the
+    // `-as-needed` link modifier is nightly-only).
+    for name in [
+        "mkl_intel_lp64",
+        "mkl_sequential",
+        "mkl_core",
+        "pthread",
+        "m",
+        "dl",
+    ] {
         println!("cargo:rustc-link-lib=dylib={name}");
     }
     println!("cargo:rustc-cfg=mkl_linked");

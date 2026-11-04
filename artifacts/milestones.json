@@ -82,10 +82,10 @@
   {
     "id": "P10",
     "name": "성능 고도화: RMM-DIIS, 밀도 혼합, FFT 융합, GPU 설계, 범용 벤치(MKL 제외)",
-    "status": "done",
+    "status": "in progress",
     "gates_done": 5,
-    "gates_total": 5,
-    "note": "RMM-DIIS(P10A), 혼합기(P10D), FFT 융합(P10C), GPU 설계(P10E), 범용 벤치(P10G) 모두 완료 (작업 단위 5/5). MKL은 P10B에서 별도 진행"
+    "gates_total": 6,
+    "note": "RMM-DIIS, 혼합기, FFT 융합, GPU 설계, 범용 벤치 완료. 남은 것: MKL 호출 경로 오버헤드(P10H) (작업 단위 5/6)"
   },
   {
     "id": "P10B",
@@ -93,14 +93,14 @@
     "status": "in progress",
     "gates_done": 2,
     "gates_total": 7,
-    "note": "Local default verification and feature type/lint checks passed. Five remote acceptance groups remain: ABI/link, FFT/GEMM accuracy, thread identity, SCF/QE agreement, multi-system performance recommendation. Protocol: docs/howto-mkl.md. No native MKL results claimed."
+    "note": "피처 연결과 링크 수정(앵커 심볼) 푸시 완료, dev08 재빌드·런타임 확인 대기. 이후 정확도 게이트(1e-12 Ha)와 전체 측정"
   },
   {
     "id": "P11",
     "name": "에이전트 네이티브 런타임: 3개 모드, 단계 실행 세션, 정책 변경, 체크포인트, 진단, 자가 복구 시연, MCP, Python/ASE, CLI, 결합 API, 사례 연구",
-    "status": "in progress",
-    "gates_done": 12,
+    "status": "done",
+    "gates_done": 14,
     "gates_total": 14,
-    "note": "병합: 설계, 결합 명세, 단계 세션, 정책 변경, 진단, 중간 저장, CLI, 자가 복구 시연(합성 모델 1종), MCP 서버, 런타임 벤치 도구(조용한 서버 재측정 대기), 입력 검토 에이전트, Python/ASE(P11G, ASE 에너지와 CLI 비트 동일). 진행: 실제 정체 사례 탐색(P11M), 사례 연구(P11L) (작업 단위 12/14)"
+    "note": "전부 병합: 설계, 결합 명세, 단계 세션, 정책 변경, 진단, 중간 저장, CLI, 자가 복구 시연, MCP 서버, 런타임 벤치 도구, 입력 검토 에이전트, Python/ASE, 실제 정체 사례 탐색(P11M: 합성 계 3종에서 1000회에도 미수렴, 복구 확인, 대칭 슬랩은 미복구), 사례 연구(P11L: MLIP 루프와 저수준 결합은 미구현이라 제외). 남은 것: 조용한 서버에서 오버헤드 판정(P11J 재측정, 현재 노이즈가 0.5퍼센트 목표보다 큼) (작업 단위 14/14)"
   }
 ]

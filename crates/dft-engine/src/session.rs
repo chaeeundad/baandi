@@ -1,7 +1,21 @@
 //! Incremental execution of the existing SCF iteration, with immutable boundaries.
 use super::*;
 use crate::events::{EventKind, EventQueue, ExecutionConfig, ExecutionMode, FailureCode};
+use crate::policy::{PolicyChange, ToleranceFloors, prepare_policy};
+use crate::runtime::ControlError;
 use crate::state_view::StateSnapshot;
+
+/// Prepared under the runtime's exclusive session ownership. All fallible work
+/// precedes journal publication; commit performs only owned replacements.
+pub(crate) struct BoundaryPolicy {
+    options: ScfOptions,
+    mixer: Option<Box<dyn MixerHistory>>,
+}
+pub(crate) struct BoundaryMode {
+    mode: ExecutionMode,
+    events: Option<EventQueue>,
+    replace_events: bool,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CompletionMode {
@@ -35,7 +49,7 @@ struct Continuation {
     start: Instant,
 }
 /// Owns all continuation state. No background worker or hidden SCF loop.
-/// AgentControlled currently supplies observation only; policy control is P11B.
+/// Use `runtime::Runtime` for audited control; direct sessions retain the lean driver.
 pub struct ScfSession {
     problem: ScfProblem,
     completion: CompletionMode,
@@ -49,6 +63,99 @@ pub struct ScfSession {
     certificate_attempted: bool,
 }
 impl ScfSession {
+    pub(crate) fn prepare_boundary_policy(
+        &self,
+        changes: &[PolicyChange],
+        floors: Option<ToleranceFloors>,
+    ) -> Result<BoundaryPolicy, ControlError> {
+        if self.status != StepStatus::Ready || self.config.mode != ExecutionMode::AgentControlled {
+            return Err(ControlError::ModeDisallowsControl);
+        }
+        self.check_control_version()?;
+        let prepared = prepare_policy(&self.problem.options, self.iteration, floors, changes)
+            .map_err(ControlError::Policy)?;
+        let mixer = if prepared.resets_history() {
+            let c = self
+                .continuation
+                .as_ref()
+                .ok_or(ControlError::PrepareFailed)?;
+            if c.mixing_resets == usize::MAX {
+                return Err(ControlError::Capacity);
+            }
+            let mut mixer = self
+                .make_mixer(&prepared.options().mixing)
+                .map_err(|_| ControlError::PrepareFailed)?;
+            mixer
+                .mix(
+                    c.n.as_slice().unwrap(),
+                    c.n.as_slice().unwrap(),
+                    self.problem.electrons / self.problem.cell.volume_bohr3(),
+                )
+                .map_err(|_| ControlError::PrepareFailed)?;
+            mixer.reset();
+            Some(mixer)
+        } else {
+            None
+        };
+        Ok(BoundaryPolicy {
+            options: prepared.options().clone(),
+            mixer,
+        })
+    }
+    pub(crate) fn commit_boundary_policy(&mut self, prepared: BoundaryPolicy) {
+        self.problem.options = prepared.options;
+        if let Some(mixer) = prepared.mixer {
+            let c = self.continuation.as_mut().expect("prepared continuation");
+            c.mixer = mixer;
+            c.mixing_resets += 1;
+        }
+        self.commit_control_version();
+    }
+    pub(crate) fn check_control_version(&self) -> Result<(), ControlError> {
+        if self.state_version >= u64::MAX - 1 {
+            Err(ControlError::Capacity)
+        } else {
+            Ok(())
+        }
+    }
+    pub(crate) fn commit_control_version(&mut self) {
+        self.state_version += 1;
+    }
+    pub(crate) fn prepare_boundary_mode(
+        &self,
+        mode: ExecutionMode,
+    ) -> Result<BoundaryMode, ControlError> {
+        self.check_control_version()?;
+        if self.status != StepStatus::Created && self.status != StepStatus::Ready {
+            return Err(ControlError::Terminal);
+        }
+        if mode == self.config.mode {
+            return Err(ControlError::NoChange);
+        }
+        let created = self.status == StepStatus::Created;
+        if !created
+            && (mode == ExecutionMode::Classic || self.config.mode == ExecutionMode::Classic)
+        {
+            return Err(ControlError::ModeUnavailableAfterStart);
+        }
+        let events = if created && mode != ExecutionMode::Classic {
+            Some(EventQueue::new(&self.config))
+        } else {
+            None
+        };
+        Ok(BoundaryMode {
+            mode,
+            events,
+            replace_events: created,
+        })
+    }
+    pub(crate) fn commit_boundary_mode(&mut self, prepared: BoundaryMode) {
+        self.config.mode = prepared.mode;
+        if prepared.replace_events {
+            self.events = prepared.events;
+        }
+        self.commit_control_version();
+    }
     pub fn new(
         problem: ScfProblem,
         completion: CompletionMode,
@@ -77,7 +184,7 @@ impl ScfSession {
         }
         match self.initialize_inner() {
             Ok(()) => {
-                self.state_version = 1;
+                self.state_version += 1;
                 self.status = StepStatus::Ready;
                 if self.events.is_some() {
                     self.emit(EventKind::Initialized);
@@ -90,9 +197,8 @@ impl ScfSession {
             }
         }
     }
-    fn initialize_inner(&mut self) -> Result<(), ScfError> {
-        let start = Instant::now();
-        let mut mixer: Box<dyn MixerHistory> = match self.problem.options.mixing {
+    fn make_mixer(&self, mixing: &Mixing) -> Result<Box<dyn MixerHistory>, ScfError> {
+        let mixer: Box<dyn MixerHistory> = match *mixing {
             Mixing::Linear { beta } => Box::new(LinearMixer { beta }),
             Mixing::Pulay { beta, history } => Box::new(PulayMixer::new(beta, history)?),
             Mixing::KerkerPulay {
@@ -129,6 +235,11 @@ impl ScfSession {
                 )?)
             }
         };
+        Ok(mixer)
+    }
+    fn initialize_inner(&mut self) -> Result<(), ScfError> {
+        let start = Instant::now();
+        let mut mixer = self.make_mixer(&self.problem.options.mixing)?;
         // Validate mixer parameters even if a future system converges immediately.
         let n = self.problem.uniform_density();
         mixer.mix(

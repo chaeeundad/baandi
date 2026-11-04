@@ -3432,3 +3432,6 @@ Final rebuilt production binary recheck: all five `bench_scf.py` commands
 to P10K and across budgets. This recheck follows the final diagnostic-only
 scope addition; the three-repeat and paired timing tables retain their stated
 binary provenance.
+
+### Correction, 2026-11-04: NonlocalOperator::add comparison value
+Commit 9fcb356 ("restore original NonlocalOperator::add loop, blocked traversal measured 2.9x slower on dev08") rests on a wrong reference value. The remote measurement session corrected it: fe0492b `NonlocalOperator::add` is 0.474 s (7.5 percent, 17 of 227 samples, 6 runs) on dev08 MKL T=1 si8, not 0.323 s (6 of 117 samples, a count too small for the stated precision). The P10I regression is about 2.0x, not 2.9x. The revert of 9fcb356 is bit-identical and reduced the function from 0.929 s to 0.800 s (239 samples) but the wall time did not move beyond noise (mkl T1 6.612 to 6.589 s, pure T8 4.567 to 4.540 s). The remaining MKL T=1 gap to fe0492b (6.589 versus 6.334 s) is spread: MKL zgemm kernel +0.512 s, memcpy +0.494 s, NonlocalOperator::add +0.325 s, tile multiply_into +0.221 s, apply_local +0.219 s, concatenate +0.192 s, offset by subtract_projection -1.398 s and old gemm -0.307 s. Rule applied from now on: never quote a profile-derived ratio as a firm number when the counts are below about 30 samples.

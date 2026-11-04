@@ -65,3 +65,4 @@ Conventions: docs are English; one fact lives in one place and others link to it
 
 - [Measured SCF stagnation cases](validation/scf-stagnation-cases.md): synthetic multi-system sweep, P11D evidence, P11B interventions, negative results and reproducers (P11M).
 - [External-control case studies](case-studies/README.md): freshly executed Python/ASE, preflight and budget-recovery evidence; MCP contract checks; explicit MLIP/coupling implementation gaps (P11L, partial).
+- `docs/validation/scf-fixed-point-multiplicity.md`: syn-s2 backend difference explained as SCF fixed-point multiplicity (1e-14 perturbation flips the solution); cross-backend gate scope.

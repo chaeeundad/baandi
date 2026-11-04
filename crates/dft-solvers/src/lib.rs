@@ -371,6 +371,7 @@ impl Davidson {
         } else {
             ComplexMatrix::zeros(n, 0)?
         };
+        basis.reserve_columns(capacity)?;
         let initial_width = self.bands.max(self.block_size).min(capacity);
         // Fill missing rank with independent seeded columns, including deficient user guesses.
         while basis.cols() < initial_width {
@@ -383,40 +384,46 @@ impl Davidson {
                     "unable to complete initial basis",
                 ));
             }
-            basis = concatenate(&basis, &extra)?;
+            basis.append_columns(&extra)?;
         }
         let mut history = Vec::new();
         let mut operator_applications = 0;
         // Fixed-capacity cache; only the first basis.cols() columns are live.
-        let mut cached = ComplexMatrix::zeros(n, capacity)?;
+        let mut cached = ComplexMatrix::zeros(n, 0)?;
+        cached.reserve_columns(capacity)?;
         let mut cache_valid = false;
-        // ComplexMatrix has no mutable-width view. Preallocate each possible
-        // correction-block output, avoiding new allocation in the append path.
-        let mut outputs = (1..=self.block_size.min(capacity - self.bands))
-            .map(|width| ComplexMatrix::zeros(n, width))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut restart_cache = ComplexMatrix::zeros(n, 0)?;
+        restart_cache.reserve_columns(capacity)?;
+        // The operator API still owns a contiguous output block. Reuse one
+        // narrow buffer for new columns; no full-subspace packing is needed.
+        let mut appended_products = ComplexMatrix::zeros(n, 0)?;
+        appended_products.reserve_columns(self.block_size.min(capacity - self.bands))?;
         for iteration in 1..=self.max_iterations {
             let _iteration = dft_numerics::pool::analysis::Span::new("iteration");
-            let h_basis = if cache_valid {
-                first_columns(&cached, basis.cols())?
-            } else {
-                // Initial basis and fallback restarts need fresh products.
+            cached.resize_columns(basis.cols())?;
+            if !cache_valid {
                 operator_applications += basis.cols();
-                let products = apply(operator, &basis)?;
-                for j in 0..basis.cols() {
-                    cached.column_mut(j).copy_from_slice(products.column(j));
+                operator.apply_block(&basis, &mut cached)?;
+                if cached.rows() != n || cached.cols() != basis.cols() {
+                    return Err(LinalgError::Dimension.into());
                 }
-                products
-            };
-            let projected = gemm_work.multiply(&basis, Adjoint, &h_basis, Identity)?;
-            let (mut values, coefficients) = {
+                cached.validate_finite()?;
+                // Third-party operators may replace the output allocation.
+                // The Hamiltonian preserves it, so this is normally a no-op.
+                cached.reserve_columns(capacity)?;
+            }
+            // Borrow the live prefix directly; the backend sees its original
+            // column stride and no first_columns allocation or copy.
+            let h_basis = &cached;
+            let projected = gemm_work.multiply(&basis, Adjoint, h_basis, Identity)?;
+            let (mut values, mut coefficients) = {
                 let _phase = dft_numerics::pool::analysis::Span::serial("evd");
                 hermitian_eigh(&projected)?
             };
             values.truncate(self.bands);
-            let coefficients = first_columns(&coefficients, self.bands)?;
+            coefficients.resize_columns(self.bands)?;
             let (vectors, products) = if recurrence {
-                let (vectors, products) = gemm_work.rotate_pair(&basis, &h_basis, &coefficients)?;
+                let (vectors, products) = gemm_work.rotate_pair(&basis, h_basis, &coefficients)?;
                 (vectors, Some(products))
             } else {
                 (
@@ -424,7 +431,17 @@ impl Davidson {
                     None,
                 )
             };
+            // A contracted restart repeats exactly this H-basis rotation.
+            // Preserve its result before residual formation only when the
+            // current basis can overflow; no extra allocation or arithmetic.
+            let mut restart_products_saved = false;
             let (mut residual_block, mut residuals) = if let Some(products) = products {
+                if contract_restart
+                    && basis.cols() + self.block_size.min(capacity - self.bands) > capacity
+                {
+                    restart_cache.replace_columns(&products)?;
+                    restart_products_saved = true;
+                }
                 residual_from_products(products, &vectors, &values)?
             } else {
                 operator_applications += self.bands;
@@ -481,6 +498,7 @@ impl Davidson {
                 .collect();
             let mut corrections = ComplexMatrix::zeros(n, selected.len())?;
             let mut shifts = Vec::new();
+            dft_numerics::pool::analysis::copied(n * selected.len() * size_of::<Complex64>());
             for (k, &j) in selected.iter().enumerate() {
                 corrections
                     .column_mut(k)
@@ -501,14 +519,24 @@ impl Davidson {
             }
             cache_valid = products_trusted && basis.cols() + corrections.cols() <= capacity;
             if !cache_valid {
-                (basis, cache_valid) = restart(
-                    vectors,
-                    &h_basis,
-                    &coefficients,
-                    &mut cached,
-                    contract_restart && products_trusted,
-                    &mut gemm_work,
-                )?;
+                let (restarted, valid) = if restart_products_saved
+                    && products_trusted
+                    && orthogonality_defect(&vectors) <= 1e-12
+                {
+                    (vectors, true)
+                } else {
+                    restart(
+                        vectors,
+                        h_basis,
+                        &coefficients,
+                        &mut restart_cache,
+                        contract_restart && products_trusted,
+                        &mut gemm_work,
+                    )?
+                };
+                basis.replace_columns(&restarted)?;
+                cache_valid = valid;
+                std::mem::swap(&mut cached, &mut restart_cache);
             }
             let mut extra = projection
                 .orthonormalize(&corrections, Some(&basis), &mut gemm_work)?
@@ -530,20 +558,26 @@ impl Davidson {
                 });
             }
             if cache_valid {
-                let products = &mut outputs[extra.cols() - 1];
+                appended_products.resize_columns(extra.cols())?;
+                let products = &mut appended_products;
                 operator.apply_block(&extra, products)?;
                 if products.rows() != n || products.cols() != extra.cols() {
                     return Err(LinalgError::Dimension.into());
                 }
                 products.validate_finite()?;
+                products.reserve_columns(self.block_size.min(capacity - self.bands))?;
                 operator_applications += extra.cols();
+                dft_numerics::pool::analysis::copied(
+                    extra.rows() * extra.cols() * size_of::<Complex64>(),
+                );
+                cached.resize_columns(basis.cols() + extra.cols())?;
                 for j in 0..extra.cols() {
                     cached
                         .column_mut(basis.cols() + j)
                         .copy_from_slice(products.column(j));
                 }
             }
-            basis = concatenate(&basis, &extra)?;
+            basis.append_columns(&extra)?;
         }
         unreachable!("positive iteration limit validated above")
     }
@@ -597,13 +631,18 @@ fn max_residual(r: &[f64]) -> f64 {
 }
 fn first_columns(a: &ComplexMatrix, count: usize) -> Result<ComplexMatrix, LinalgError> {
     let _phase = dft_numerics::pool::analysis::Span::serial("first_columns");
+    dft_numerics::pool::analysis::copied(a.rows() * count * size_of::<Complex64>());
     ComplexMatrix::new(a.rows(), count, a.as_slice()[..a.rows() * count].to_vec())
 }
+#[cfg(test)]
 fn concatenate(a: &ComplexMatrix, b: &ComplexMatrix) -> Result<ComplexMatrix, LinalgError> {
     let _phase = dft_numerics::pool::analysis::Span::serial("concatenate");
     if a.rows() != b.rows() {
         return Err(LinalgError::Dimension);
     }
+    dft_numerics::pool::analysis::copied(
+        (a.as_slice().len() + b.as_slice().len()) * size_of::<Complex64>(),
+    );
     let mut data = Vec::with_capacity(a.as_slice().len() + b.as_slice().len());
     data.extend_from_slice(a.as_slice());
     data.extend_from_slice(b.as_slice());
@@ -667,10 +706,8 @@ fn restart(
 ) -> Result<(ComplexMatrix, bool), SolverError> {
     if contract && orthogonality_defect(&vectors) <= 1e-12 {
         // Derived from study note section 1: H(V C) = (H V) C.
-        let products = gemm_work.multiply(h_basis, Identity, coefficients, Identity)?;
-        for j in 0..vectors.cols() {
-            cached.column_mut(j).copy_from_slice(products.column(j));
-        }
+        cached.resize_columns(vectors.cols())?;
+        gemm_work.multiply_into(h_basis, Identity, coefficients, Identity, cached)?;
         Ok((vectors, true))
     } else {
         Ok((orthonormalize(&vectors, None)?.vectors, false))

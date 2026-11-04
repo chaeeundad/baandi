@@ -48,6 +48,65 @@ impl ComplexMatrix {
             .ok_or(LinalgError::Dimension)?;
         Self::new(rows, cols, vec![Complex64::new(0.0, 0.0); len])
     }
+    /// Reserve a fixed column capacity during workspace construction. Live
+    /// columns remain contiguous with leading dimension `rows`; spare columns
+    /// are not visible to validation or backend matrix views.
+    pub fn reserve_columns(&mut self, capacity: usize) -> Result<(), LinalgError> {
+        let len = self
+            .rows
+            .checked_mul(capacity)
+            .filter(|&n| n <= isize::MAX as usize / size_of::<Complex64>())
+            .ok_or(LinalgError::Dimension)?;
+        if capacity < self.cols {
+            return Err(LinalgError::Dimension);
+        }
+        self.data.reserve_exact(len.saturating_sub(self.data.len()));
+        Ok(())
+    }
+
+    /// Change the live prefix without allocation. New columns are zeroed;
+    /// shrinking never copies retained columns or releases their capacity.
+    pub fn resize_columns(&mut self, cols: usize) -> Result<(), LinalgError> {
+        let len = self.rows.checked_mul(cols).ok_or(LinalgError::Dimension)?;
+        if len > self.data.capacity() {
+            return Err(LinalgError::Dimension);
+        }
+        self.data.resize(len, Complex64::default());
+        self.cols = cols;
+        Ok(())
+    }
+
+    /// Append only the new column range into reserved subspace storage.
+    pub fn append_columns(&mut self, extra: &Self) -> Result<(), LinalgError> {
+        if self.rows != extra.rows {
+            return Err(LinalgError::Dimension);
+        }
+        let cols = self
+            .cols
+            .checked_add(extra.cols)
+            .ok_or(LinalgError::Dimension)?;
+        let len = self.rows.checked_mul(cols).ok_or(LinalgError::Dimension)?;
+        if len > self.data.capacity() {
+            return Err(LinalgError::Dimension);
+        }
+        crate::pool::analysis::copied(extra.data.len() * size_of::<Complex64>());
+        self.data.extend_from_slice(&extra.data);
+        self.cols = cols;
+        Ok(())
+    }
+
+    /// Replace a live prefix while retaining the workspace allocation.
+    pub fn replace_columns(&mut self, source: &Self) -> Result<(), LinalgError> {
+        if self.rows != source.rows || source.data.len() > self.data.capacity() {
+            return Err(LinalgError::Dimension);
+        }
+        crate::pool::analysis::copied(source.data.len() * size_of::<Complex64>());
+        self.data.clear();
+        self.data.extend_from_slice(&source.data);
+        self.cols = source.cols;
+        Ok(())
+    }
+
     pub fn rows(&self) -> usize {
         self.rows
     }
@@ -96,9 +155,11 @@ impl IndexMut<(usize, usize)> for ComplexMatrix {
     }
 }
 fn backend(a: &ComplexMatrix) -> Mat<Complex64> {
+    crate::pool::analysis::copied(a.data.len() * size_of::<Complex64>());
     Mat::from_fn(a.rows, a.cols, |i, j| a[(i, j)])
 }
 fn owned(a: faer::MatRef<'_, Complex64>) -> Result<ComplexMatrix, LinalgError> {
+    crate::pool::analysis::copied(a.nrows() * a.ncols() * size_of::<Complex64>());
     let mut result = ComplexMatrix::zeros(a.nrows(), a.ncols())?;
     for j in 0..a.ncols() {
         for i in 0..a.nrows() {
@@ -581,3 +642,30 @@ pub fn orthonormalize_into(
 
 mod tiled;
 pub use tiled::{GemmWorkspace, ProjectionWorkspace};
+
+#[cfg(test)]
+mod column_storage_tests {
+    use super::*;
+    #[test]
+    fn live_column_ranges_preserve_storage_and_reject_overflow() {
+        let mut a = ComplexMatrix::zeros(3, 1).unwrap();
+        a[(1, 0)] = Complex64::new(2.0, -3.0);
+        a.reserve_columns(4).unwrap();
+        let address = a.as_slice().as_ptr();
+        let b = a.clone();
+        a.append_columns(&b).unwrap();
+        assert_eq!(a.column(0), a.column(1));
+        a.resize_columns(1).unwrap();
+        a.resize_columns(4).unwrap();
+        assert_eq!(a.column(0), b.column(0));
+        assert!(a.as_slice()[3..].iter().all(|z| *z == Complex64::default()));
+        assert_eq!(a.as_slice().as_ptr(), address);
+        let before = a.clone();
+        assert_eq!(a.resize_columns(5), Err(LinalgError::Dimension));
+        assert_eq!(a.append_columns(&b), Err(LinalgError::Dimension));
+        assert_eq!(a, before);
+        a.replace_columns(&b).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(a.as_slice().as_ptr(), address);
+    }
+}

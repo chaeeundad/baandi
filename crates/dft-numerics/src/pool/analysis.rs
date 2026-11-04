@@ -2,6 +2,12 @@
 //! Records are buffered and printed only when the outer SCF scope finishes.
 #[cfg(not(feature = "worker-analysis"))]
 mod implementation {
+    #[inline(always)]
+    pub fn copied(_: usize) {}
+    #[inline(always)]
+    pub fn logical_gemm(_: usize, _: usize, _: usize) {}
+    #[inline(always)]
+    pub fn executed_gemm(_: usize, _: usize, _: usize) {}
     #[derive(Clone)]
     pub struct Context;
     pub struct Span;
@@ -60,7 +66,30 @@ mod implementation {
         pieces: AtomicU64,
     }
     #[derive(Clone, Default)]
-    pub struct Context(Option<Arc<Work>>);
+    pub struct Context(Option<Arc<Work>>, Option<Arc<Cost>>);
+    #[derive(Default)]
+    struct Cost {
+        copied: AtomicU64,
+        logical: AtomicU64,
+        executed: AtomicU64,
+    }
+    pub fn copied(bytes: usize) {
+        if let Some(cost) = context().1 {
+            cost.copied.fetch_add(bytes as u64, Ordering::Relaxed);
+        }
+    }
+    pub fn logical_gemm(m: usize, n: usize, k: usize) {
+        if let Some(cost) = context().1 {
+            cost.logical
+                .fetch_add(2 * m as u64 * n as u64 * k as u64, Ordering::Relaxed);
+        }
+    }
+    pub fn executed_gemm(m: usize, n: usize, k: usize) {
+        if let Some(cost) = context().1 {
+            cost.executed
+                .fetch_add(2 * m as u64 * n as u64 * k as u64, Ordering::Relaxed);
+        }
+    }
     thread_local! { static CURRENT: RefCell<Context> = RefCell::new(Context::default()); }
     static EPOCH: OnceLock<Instant> = OnceLock::new();
     static EVENTS: Mutex<Vec<Event>> = Mutex::new(Vec::new());
@@ -89,6 +118,7 @@ mod implementation {
         pieces: u64,
         busy: Vec<u64>,
         nested_busy: bool,
+        cost: Option<[u64; 3]>,
     }
     pub struct Span {
         name: &'static str,
@@ -98,6 +128,7 @@ mod implementation {
         previous: Option<Context>,
         serial_slot: Option<usize>,
         serial_context: Option<Context>,
+        cost: Option<(Arc<Cost>, Context)>,
     }
     impl Span {
         pub fn new(name: &'static str) -> Self {
@@ -108,6 +139,18 @@ mod implementation {
                 );
                 EVENTS.lock().unwrap().clear();
             }
+            let cost = if name == "iteration" {
+                let cost = Arc::new(Cost::default());
+                let previous = CURRENT.with(|c| {
+                    let mut current = c.borrow_mut();
+                    let old = current.clone();
+                    current.1 = Some(cost.clone());
+                    old
+                });
+                Some((cost, previous))
+            } else {
+                None
+            };
             Self {
                 name,
                 start: now(),
@@ -116,6 +159,7 @@ mod implementation {
                 previous: None,
                 serial_slot: None,
                 serial_context: None,
+                cost,
             }
         }
         pub fn serial(name: &'static str) -> Self {
@@ -130,7 +174,10 @@ mod implementation {
                 busy: std::array::from_fn(|_| AtomicU64::new(0)),
                 pieces: AtomicU64::new(0),
             });
-            let previous = CURRENT.with(|c| c.replace(Context(Some(work.clone()))));
+            let previous = CURRENT.with(|c| {
+                let inherited_cost = c.borrow().1.clone();
+                c.replace(Context(Some(work.clone()), inherited_cost))
+            });
             Self {
                 name,
                 start: now(),
@@ -139,6 +186,7 @@ mod implementation {
                 previous: Some(previous),
                 serial_slot: None,
                 serial_context: None,
+                cost: None,
             }
         }
     }
@@ -167,6 +215,14 @@ mod implementation {
                     }
                 }
             };
+            let cost = self.cost.take().map(|(cost, previous)| {
+                CURRENT.with(|c| *c.borrow_mut() = previous);
+                [
+                    cost.logical.load(Ordering::Relaxed),
+                    cost.executed.load(Ordering::Relaxed),
+                    cost.copied.load(Ordering::Relaxed),
+                ]
+            });
             let mut events = EVENTS.lock().unwrap();
             events.push(Event {
                 name: self.name,
@@ -176,11 +232,18 @@ mod implementation {
                 pieces,
                 busy,
                 nested_busy: parent.is_some(),
+                cost,
             });
             if self.name == "scf" {
                 ACTIVE_SCF.store(false, Ordering::SeqCst);
                 // Diagnostic build only: no output inside a numerical loop.
                 for e in events.drain(..) {
+                    if let Some([logical, executed, copied]) = e.cost {
+                        eprintln!(
+                            "P10M_COST,{},{},{},{},{}",
+                            e.start, e.end, logical, executed, copied
+                        );
+                    }
                     eprintln!(
                         "P10L,{},{},{},{},{},{},{}",
                         e.name,
@@ -230,6 +293,32 @@ mod implementation {
     #[cfg(test)]
     mod tests {
         use super::*;
+        #[test]
+        fn iteration_costs_follow_workers_without_counting_nested_regions_twice() {
+            let pool = crate::pool::WorkerPool::new(4).unwrap();
+            let iteration = Span::new("iteration");
+            let cost = context().1.unwrap();
+            logical_gemm(13, 7, 65);
+            pool.install(|| {
+                let _region = Span::region("test_cost", 4);
+                crate::pool::WorkerPool::join(
+                    || {
+                        executed_gemm(13, 7, 32);
+                        copied(1024);
+                    },
+                    || {
+                        executed_gemm(13, 7, 33);
+                        copied(2048);
+                    },
+                );
+            });
+            assert_eq!(cost.logical.load(Ordering::Relaxed), 2 * 13 * 7 * 65);
+            assert_eq!(cost.executed.load(Ordering::Relaxed), 2 * 13 * 7 * 65);
+            assert_eq!(cost.copied.load(Ordering::Relaxed), 3072);
+            drop(iteration);
+            assert!(context().1.is_none());
+        }
+
         #[test]
         fn context_follows_stolen_work_and_restores_after_panic() {
             let pool = crate::pool::WorkerPool::new(4).unwrap();

@@ -4,3 +4,5 @@
 mod adapter;
 #[cfg(feature = "mkl")]
 pub use adapter::*;
+#[cfg(feature = "mkl")]
+mod keep;

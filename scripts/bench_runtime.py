@@ -154,7 +154,9 @@ def main():
             target = ROOT / 'target'
             print('Building candidate and independent pre-extraction driver', flush=True)
             evidence['candidate_build'] = build(ROOT, tmp / 'candidate', False, env, target)
-            evidence['reference_build'] = build(reference, tmp / 'reference-driver', True, env, target)
+            # The reference revision must not share the candidate's target directory: both
+            # build package `dft-cli` and overwrite each other's artifacts across runs.
+            evidence['reference_build'] = build(reference, tmp / 'reference-driver', True, env, ROOT / 'target' / 'bench-reference')
             all_identical = True
             for kind in range(3):
                 for budget in [1, 200]:

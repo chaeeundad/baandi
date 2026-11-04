@@ -25,7 +25,7 @@ deps = ["dft-numerics"]
 [crates.dft-engine]     # orchestration and energy audit
 deps = ["dft-physics", "dft-solvers", "dft-basis", "dft-geometry", "dft-upf"]
 [crates.dft-cli]        # I/O only, no numerics
-deps = ["dft-engine", "dft-units", "dft-geometry", "dft-basis", "dft-upf", "dft-physics", "dft-solvers"]   # direct deps on lower crates allowed until dft-engine exists
+deps = ["dft-engine", "dft-units", "dft-geometry", "dft-basis", "dft-upf", "dft-physics", "dft-solvers", "dft-numerics"]   # direct deps on lower crates allowed until dft-engine exists
 [crates.baandi-mcp]    # MCP stdio adapter (ADRs 0028, 0029); serde/serde_json only, no SDK or async runtime
 deps = ["dft-engine"]
 [crates.baandi-py]     # PyO3 binding and ASE calculator (agent/workflow path, ADR 0030); nothing in the core depends on it

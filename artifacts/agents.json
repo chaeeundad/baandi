@@ -22,8 +22,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P10I-SINGLE-KPOINT-SCALING: k점이 1개뿐인 큰 셀(8원자 Gamma)도 스레드를 늘리면 빨라지게 밴드 방향 병렬화(현재 스레드 16개에서도 1.04배)",
-    "ref": "pid 54114, session no sessi, task/P10I-SINGLE-KPOINT-SCALING",
+    "task": "P10H-MKL-CALL-PATH: MKL 경로 호출 오버헤드 제거(zgemm 1.6배→C 수준 4배, FFT, 고유값 풀이를 MKL로 연결)",
+    "ref": "pid 65623, session no sessi, task/P10H-MKL-CALL-PATH",
     "updated": "2026-11-04"
   },
   {
@@ -621,12 +621,12 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A72",
+    "id": "A70",
     "agent": "Codex",
     "role": "implementer",
-    "state": "planned",
-    "task": "P10H-MKL-CALL-PATH: MKL 경로 호출 오버헤드 제거(zgemm 1.6배→C 수준 4배, FFT, 고유값 풀이를 MKL로 연결)",
-    "ref": "not started",
-    "updated": ""
+    "state": "done",
+    "task": "P10I-SINGLE-KPOINT-SCALING: k점이 1개뿐인 큰 셀(8원자 Gamma)도 스레드를 늘리면 빨라지게 밴드 방향 병렬화(현재 스레드 16개에서도 1.04배)",
+    "ref": "pid 54114, session 01a1a735, task/P10I-SINGLE-KPOINT-SCALING",
+    "updated": "2026-11-04"
   }
 ]

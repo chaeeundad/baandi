@@ -187,4 +187,9 @@ kind budget mode     target median                 ci_lo                  ci_hi 
 2 200 observed 1.0  0.3225982244043246    0.09014495429795488  0.5013047593399822  met
 ```
 
-(Runs a, b, c with 20 pairs follow when received.)
+Runs a, b and c (20 pairs each, same fe0492b build, load at start [0.04, 0.41, 0.92], [0.27, 1.42, 1.38], [0.27, 1.21, 1.31]) were also received as full per-combination tables in a later message but are not transcribed here: they carry no verdict weight, because with 20 pairs the 95 percent intervals reach 3.9 percentage points and the null control (classic) was inconclusive in 11 of 18 combinations in every one of the three runs. Verdict counts per run (met / inconclusive over 18 combinations): a 8 / 10, b 10 / 8, c 9 / 9. Their numbers remain on dev08 (`~/rustdft_p6/perf8/`, raw files sha256 given in the transfer messages: run_a 82205e29de6ef7f4..., run_b 94e5ea1bb967c69b..., run_c 164b944eb6e88768...).
+
+## Reading
+- Overhead verdict (P11J, provisional because relayed): with 300 pairs all 18 combinations meet their targets (classic below 0.5 percent, observed and agent below 1.0 percent); medians span classic -0.207 to +0.214, observed -0.048 to +0.388, agent +0.012 to +0.552 percent. With 100 pairs 15 of 18 met, with 20 pairs the interval is too wide to judge. The default of `scripts/bench_runtime.py` is now 100 pairs.
+- The classic null control is not exactly zero in some combinations (CI excluding zero by up to 0.2 percent) with signs that differ between kinds; no systematic regression is claimed.
+- MKL and QE: see parts 1 and 2. Syn-s2 backend differences are explained in `docs/validation/scf-fixed-point-multiplicity.md`.

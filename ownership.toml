@@ -29,4 +29,4 @@ deps = ["dft-engine", "dft-units", "dft-geometry", "dft-basis", "dft-upf", "dft-
 [crates.baandi-mcp]    # MCP stdio adapter (ADRs 0028, 0029); serde/serde_json only, no SDK or async runtime
 deps = ["dft-engine"]
 [crates.baandi-py]     # PyO3 binding and ASE calculator (agent/workflow path, ADR 0030); nothing in the core depends on it
-deps = ["dft-engine"]
+deps = ["dft-engine", "dft-units"]

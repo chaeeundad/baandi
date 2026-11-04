@@ -16,3 +16,4 @@ workspace = true
 [dependencies]
 pyo3 = "0.30.1"
 dft-engine = { path = "../dft-engine" }
+dft-units = { path = "../dft-units" }

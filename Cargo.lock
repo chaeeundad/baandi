@@ -124,6 +124,7 @@ name = "baandi-py"
 version = "0.1.0"
 dependencies = [
  "dft-engine",
+ "dft-units",
  "pyo3",
 ]
 

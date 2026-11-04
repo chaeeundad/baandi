@@ -9,7 +9,6 @@ use dft_geometry::{
 };
 use dft_physics::{
     data::*,
-    density,
     ewald::{self, EwaldOptions, Ion},
     hamiltonian::{self, Hamiltonian, NonlocalOperator, Species},
     hartree, xc,
@@ -294,6 +293,7 @@ pub struct ScfProblem {
     fft: FftPlan3d,
     // One reusable FFT workspace per active k worker, shared across phases.
     worker_ffts: Vec<FftPlan3d>,
+    pool: std::sync::Arc<WorkerPool>,
     ewald: ewald::EwaldEnergy,
     occupations: Vec<f64>,
     electrons: f64,
@@ -306,7 +306,7 @@ struct KState {
     basis: PlaneWaveBasis,
     grid: FftGridSpec,
     hamiltonian: Hamiltonian,
-    band_density: Option<crate::band_density::BandDensity>,
+    band_density: crate::band_density::BandDensity,
 }
 /// Disjoint state ownership needs Send, never Sync for Hamiltonian scratch.
 /// Join every worker before inspecting results in ascending k order. Catch each
@@ -314,16 +314,18 @@ struct KState {
 fn ordered_solves<T: Send, R: Send>(
     states: &mut [T],
     requested: usize,
+    pool: &WorkerPool,
     solve: impl Fn(usize, &mut T) -> Result<R, ScfError> + Sync,
 ) -> Result<Vec<R>, ScfError> {
-    ordered_solves_at(states, requested, 0, solve)
+    let solve = &solve;
+    pool.install(|| ordered_solves_at(states, requested, 0, solve))
 }
 
 fn ordered_solves_at<T: Send, R: Send>(
     states: &mut [T],
     requested: usize,
     first: usize,
-    solve: impl Fn(usize, &mut T) -> Result<R, ScfError> + Sync,
+    solve: &(impl Fn(usize, &mut T) -> Result<R, ScfError> + Sync),
 ) -> Result<Vec<R>, ScfError> {
     if states.is_empty() {
         return Ok(Vec::new());
@@ -348,48 +350,17 @@ fn ordered_solves_at<T: Send, R: Send>(
             .collect();
         return results.into_iter().collect();
     }
-    std::thread::scope(|scope| {
-        let mut handles = Vec::with_capacity(workers);
-        let mut remaining = states;
-        let mut offset = first;
-        for worker in 0..workers {
-            let count = remaining.len().div_ceil(workers - worker);
-            let (group, rest) = remaining.split_at_mut(count);
-            remaining = rest;
-            let start = offset;
-            offset += count;
-            let solve = &solve;
-            handles.push(scope.spawn(move || {
-                group
-                    .iter_mut()
-                    .enumerate()
-                    .map(|(local, state)| {
-                        let index = start + local;
-                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            solve(index, state)
-                        }))
-                        .unwrap_or_else(|_| {
-                            Err(ScfError::Numerical(format!(
-                                "k index {index}: solve panicked"
-                            )))
-                        })
-                        .map_err(|e| ScfError::Numerical(format!("k index {index}: {e}")))
-                    })
-                    .collect::<Vec<_>>()
-            }));
-        }
-        // Do not short circuit joins: scope must never rethrow an unjoined panic.
-        let joined: Vec<_> = handles.into_iter().map(|h| h.join()).collect();
-        let mut results = Vec::new();
-        for group in joined {
-            let group =
-                group.map_err(|_| ScfError::Numerical("k worker panicked outside solve".into()))?;
-            for result in group {
-                results.push(result?);
-            }
-        }
-        Ok(results)
-    })
+    let left_workers = workers / 2;
+    let middle = states.len() * left_workers / workers;
+    let (left, right) = states.split_at_mut(middle);
+    let (left, right) = WorkerPool::join(
+        || ordered_solves_at(left, left_workers, first, solve),
+        || ordered_solves_at(right, workers - left_workers, first + middle, solve),
+    );
+    // Both halves have completed before the earliest indexed error is selected.
+    let mut results = left?;
+    results.extend(right?);
+    Ok(results)
 }
 
 /// Bound live partial results by the workspace count. Fold each completed
@@ -398,22 +369,28 @@ fn ordered_solves_at<T: Send, R: Send>(
 fn ordered_chunks<T: Send, W: Send, R: Send>(
     states: &mut [T],
     workspaces: &mut [W],
+    pool: &WorkerPool,
     work: impl Fn(usize, &mut T, &mut W) -> Result<R, ScfError> + Sync,
-    mut fold: impl FnMut(R),
+    mut fold: impl FnMut(R) + Send,
 ) -> Result<(), ScfError> {
     assert!(!workspaces.is_empty());
     let width = workspaces.len();
-    for (chunk, states) in states.chunks_mut(width).enumerate() {
-        let mut jobs: Vec<_> = states.iter_mut().zip(workspaces.iter_mut()).collect();
-        let partials =
-            ordered_solves_at(&mut jobs, width, chunk * width, |i, (state, workspace)| {
-                work(i, state, workspace)
-            })?;
-        for partial in partials {
-            fold(partial);
+    let work = &work;
+    // Keep the bounded chunk loop resident too: one external synchronization
+    // for the phase, rather than waking the pool again for every k chunk.
+    pool.install(|| {
+        for (chunk, states) in states.chunks_mut(width).enumerate() {
+            let mut jobs: Vec<_> = states.iter_mut().zip(workspaces.iter_mut()).collect();
+            let partials =
+                ordered_solves_at(&mut jobs, width, chunk * width, &|i, (state, workspace)| {
+                    work(i, state, workspace)
+                })?;
+            for partial in partials {
+                fold(partial);
+            }
         }
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Output-oriented completion, including a nonconverged final evaluated state.
@@ -615,42 +592,48 @@ impl ScfProblem {
             return Err(ScfError::Numerical("ionic imaginary potential".into()));
         }
         let ionic_real = ionic.mapv(|z| z.re);
+        let pool =
+            WorkerPool::new(options.threads).map_err(|e| ScfError::Numerical(e.to_string()))?;
         let outer = options.threads.max(1).min(points.len());
         let inner = (options.threads.max(1) / outer).max(1);
         let mut construction_points = points.to_vec();
-        let states = ordered_solves(&mut construction_points, options.threads, |_, point| {
-            let basis =
-                PlaneWaveBasis::at_k(cell, Hartree(options.cutoff_hartree), point.fractional)?;
-            if bands > basis.vectors().len()
-                || (options.davidson_subspace.min(basis.vectors().len()) <= bands
-                    && bands != basis.vectors().len())
-            {
-                return Err(ScfError::InvalidInput(
-                    "bands/subspace incompatible with k basis",
-                ));
-            }
-            let k_grid = FftGridSpec::new(&basis, &density_basis, Some(grid.dims()))?;
-            let hamiltonian = Hamiltonian::new(
-                cell,
-                &basis,
-                ionic_real.clone(),
-                NonlocalOperator::new(&basis, cell.volume_bohr3(), &species)?,
-            )?
-            .with_band_threads(inner)?;
-            let band_density = Some(crate::band_density::BandDensity::new(
-                &k_grid, bands, inner,
-            )?);
-            Ok(KState {
-                point: KPoint {
-                    fractional: basis.k_fractional(),
-                    weight: point.weight,
-                },
-                basis,
-                grid: k_grid,
-                hamiltonian,
-                band_density,
-            })
-        })?;
+        let states = ordered_solves(
+            &mut construction_points,
+            options.threads,
+            &pool,
+            |_, point| {
+                let basis =
+                    PlaneWaveBasis::at_k(cell, Hartree(options.cutoff_hartree), point.fractional)?;
+                if bands > basis.vectors().len()
+                    || (options.davidson_subspace.min(basis.vectors().len()) <= bands
+                        && bands != basis.vectors().len())
+                {
+                    return Err(ScfError::InvalidInput(
+                        "bands/subspace incompatible with k basis",
+                    ));
+                }
+                let k_grid = FftGridSpec::new(&basis, &density_basis, Some(grid.dims()))?;
+                let hamiltonian = Hamiltonian::new(
+                    cell,
+                    &basis,
+                    ionic_real.clone(),
+                    NonlocalOperator::new(&basis, cell.volume_bohr3(), &species)?,
+                )?
+                .with_band_pool(inner, pool.clone())?;
+                let band_density =
+                    crate::band_density::BandDensity::new(&k_grid, bands, inner, pool.clone())?;
+                Ok(KState {
+                    point: KPoint {
+                        fractional: basis.k_fractional(),
+                        weight: point.weight,
+                    },
+                    basis,
+                    grid: k_grid,
+                    hamiltonian,
+                    band_density,
+                })
+            },
+        )?;
         let worker_ffts = (0..options.threads.max(1).min(states.len()))
             .map(|_| FftPlan3d::new(grid.dims()))
             .collect::<Result<Vec<_>, _>>()?;
@@ -666,6 +649,7 @@ impl ScfProblem {
             ionic_real,
             fft,
             worker_ffts,
+            pool,
             ewald,
             occupations,
             electrons,
@@ -731,10 +715,15 @@ impl ScfProblem {
         for ((v, h), x) in effective.iter_mut().zip(&h.potential).zip(&x.potential) {
             *v += h.re + x;
         }
-        ordered_solves(&mut self.states, self.options.threads, |_, state| {
-            state.hamiltonian.set_local_potential(effective.clone())?;
-            Ok(())
-        })?;
+        ordered_solves(
+            &mut self.states,
+            self.options.threads,
+            &self.pool,
+            |_, state| {
+                state.hamiltonian.set_local_potential(effective.clone())?;
+                Ok(())
+            },
+        )?;
         let mut timings = PhaseTimings {
             potential: start.elapsed(),
             ..Default::default()
@@ -796,79 +785,75 @@ impl ScfProblem {
         } else {
             let bands = self.occupations.len();
             let free_guess = self.options.free_electron_initial_guess;
-            ordered_solves(&mut self.states, self.options.threads, |i, state| {
-                let preconditioner = DiagonalPreconditioner::new(
-                    state.hamiltonian.kinetic_diagonal().to_vec(),
-                    0.1,
-                )?;
-                let guess = if initial.is_none() && free_guess {
-                    Some(free_electron_guess(
-                        state.hamiltonian.kinetic_diagonal(),
-                        bands,
-                    )?)
-                } else {
-                    None
-                };
-                let solution = self
-                    .options
-                    .eigensolver
-                    .solve_with_band_tolerances_and_certification(
-                        &solver,
-                        &state.hamiltonian,
-                        initial.map(|v| &v[i]).or(guess.as_ref()),
-                        Some(&preconditioner),
-                        policy,
-                        certify,
+            ordered_solves(
+                &mut self.states,
+                self.options.threads,
+                &self.pool,
+                |i, state| {
+                    let preconditioner = DiagonalPreconditioner::new(
+                        state.hamiltonian.kinetic_diagonal().to_vec(),
+                        0.1,
                     )?;
-                Ok(KPointSolution {
-                    point: state.point,
-                    solution,
-                })
-            })?
+                    let guess = if initial.is_none() && free_guess {
+                        Some(free_electron_guess(
+                            state.hamiltonian.kinetic_diagonal(),
+                            bands,
+                        )?)
+                    } else {
+                        None
+                    };
+                    let solution = self
+                        .options
+                        .eigensolver
+                        .solve_with_band_tolerances_and_certification(
+                            &solver,
+                            &state.hamiltonian,
+                            initial.map(|v| &v[i]).or(guess.as_ref()),
+                            Some(&preconditioner),
+                            policy,
+                            certify,
+                        )?;
+                    Ok(KPointSolution {
+                        point: state.point,
+                        solution,
+                    })
+                },
+            )?
         };
         timings.diagonalization = start.elapsed();
         let start = Instant::now();
-        let mut orbitals = Vec::with_capacity(k_points.len());
-        let mut output = Array3::zeros(self.grid.dims());
-        ordered_chunks(
+        let occupations = &self.occupations;
+        let volume = self.cell.volume_bohr3();
+        let orbitals = ordered_solves(
             &mut self.states,
-            &mut self.worker_ffts,
-            |i, state, fft| {
+            self.options.threads,
+            &self.pool,
+            |i, state| {
                 let vectors = &k_points[i].solution.eigenvectors;
                 let orbitals: Vec<_> = (0..vectors.cols())
                     .map(|b| vectors.column(b).to_vec())
                     .collect();
-                let nk = if let Some(workspace) = &mut state.band_density {
-                    workspace.compute(
-                        &orbitals,
-                        &self.occupations,
-                        &state.grid,
-                        self.cell.volume_bohr3(),
-                    )?
-                } else {
-                    density::from_orbitals(
-                        &orbitals,
-                        &self.occupations,
-                        &state.grid,
-                        self.cell.volume_bohr3(),
-                        fft,
-                    )?
-                };
-                Ok((state.point.weight, nk, orbitals))
-            },
-            |(weight, nk, k_orbitals)| {
-                for (out, n) in output.iter_mut().zip(nk) {
-                    *out += weight * n;
-                }
-                orbitals.push(k_orbitals);
+                state
+                    .band_density
+                    .compute(&orbitals, occupations, &state.grid, volume)?;
+                Ok(orbitals)
             },
         )?;
+        let mut output = Array3::zeros(self.grid.dims());
+        // Every k workspace owns its density output. Fold in fixed k order after
+        // all jobs finish; no allocated partial arrays or worker locks.
+        for state in &self.states {
+            for (out, n) in output.iter_mut().zip(state.band_density.density()) {
+                *out += state.point.weight * n;
+            }
+        }
         timings.density = start.elapsed();
         let start = Instant::now();
         let mut audits = Vec::new();
         ordered_chunks(
             &mut self.states,
             &mut self.worker_ffts,
+            &self.pool,
             |i, state, fft| {
                 let k = &k_points[i];
                 let audit = energy::evaluate_with_functional(
@@ -1004,8 +989,46 @@ fn converged(r: &IterationRecord, o: &ScfOptions) -> bool {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
+#[path = "../tests/common/mod.rs"]
+mod pool_fixture;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scf_reuses_workers_across_iterations() {
+        let potential = pool_fixture::potential(2.0, 1.0, true, 101);
+        let cell = Cell::from_user_rows_bohr([[4., 0., 0.], [0., 4., 0.], [0., 0., 4.]]).unwrap();
+        for threads in [1, 4] {
+            let problem = ScfProblem::new(
+                &cell,
+                &[Atom::new("Xx", [0.13, 0.21, 0.32])],
+                &[SpeciesPotential {
+                    label: "Xx",
+                    potential: &potential,
+                }],
+                ScfOptions {
+                    threads,
+                    cutoff_hartree: 2.5,
+                    bands: Some(3),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let pool = problem.pool.clone();
+            let expected = if threads == 1 { 0 } else { threads };
+            assert_eq!(pool.workers_created(), expected);
+            let result = problem.run().unwrap();
+            assert!(result.history.len() > 1);
+            assert_eq!(pool.workers_created(), expected);
+            println!(
+                "SCF T={threads}: workers created={expected}, iterations={}",
+                result.history.len()
+            );
+        }
+    }
 
     #[test]
     fn free_electron_order_and_determinism() {
@@ -1103,6 +1126,7 @@ mod threading_tests {
             ordered_chunks(
                 &mut states,
                 &mut workspaces,
+                &WorkerPool::new(threads).unwrap(),
                 |i, value, _| Ok((i, *value)),
                 |(i, value)| {
                     indices.push(i);
@@ -1115,6 +1139,7 @@ mod threading_tests {
             let error = ordered_chunks(
                 &mut states,
                 &mut workspaces,
+                &WorkerPool::new(threads).unwrap(),
                 |i, _, _| {
                     if i == 4 {
                         return Err(ScfError::InvalidInput("injected chunk failure"));
@@ -1133,29 +1158,39 @@ mod threading_tests {
         for threads in [1, 2, 3, 4, 8] {
             for panic_at_two in [false, true] {
                 let mut visited = [false; 5];
-                let error = ordered_solves(&mut visited, threads, |i, visited| {
-                    *visited = true;
-                    if i == 2 {
-                        // Make the lower-index failure finish later than index 3.
-                        std::thread::sleep(Duration::from_millis(10));
-                        assert!(!panic_at_two, "injected solve panic");
-                        return Err(ScfError::Numerical("injected failure two".into()));
-                    }
-                    if i == 3 {
-                        return Err(ScfError::Numerical("injected failure three".into()));
-                    }
-                    Ok(i)
-                })
+                let error = ordered_solves(
+                    &mut visited,
+                    threads,
+                    &WorkerPool::new(threads).unwrap(),
+                    |i, visited| {
+                        *visited = true;
+                        if i == 2 {
+                            // Make the lower-index failure finish later than index 3.
+                            std::thread::sleep(Duration::from_millis(10));
+                            assert!(!panic_at_two, "injected solve panic");
+                            return Err(ScfError::Numerical("injected failure two".into()));
+                        }
+                        if i == 3 {
+                            return Err(ScfError::Numerical("injected failure three".into()));
+                        }
+                        Ok(i)
+                    },
+                )
                 .unwrap_err();
                 assert!(error.to_string().contains("k index 2"), "{error}");
                 assert!(visited.into_iter().all(|v| v));
             }
             let mut states = [0; 5];
             assert_eq!(
-                ordered_solves(&mut states, threads, |i, state| {
-                    *state = i;
-                    Ok(i)
-                })
+                ordered_solves(
+                    &mut states,
+                    threads,
+                    &WorkerPool::new(threads).unwrap(),
+                    |i, state| {
+                        *state = i;
+                        Ok(i)
+                    }
+                )
                 .unwrap(),
                 vec![0, 1, 2, 3, 4]
             );

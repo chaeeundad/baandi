@@ -3,6 +3,7 @@ pub mod fused;
 pub mod linalg;
 #[cfg(feature = "mkl")]
 pub mod mkl_backend;
+pub mod pool;
 #[cfg(not(feature = "mkl"))]
 pub use RustFftPlan3d as FftPlan3d;
 #[cfg(feature = "mkl")]

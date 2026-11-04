@@ -1,6 +1,7 @@
 //! Ionic and Kleinman–Bylander terms, and a reusable Bloch Hamiltonian.
 use dft_basis::{FftGridSpec, GVector, PlaneWaveBasis};
 use dft_geometry::Cell;
+use dft_numerics::pool::WorkerPool;
 use dft_numerics::{
     Fft3d, FftPlan3d,
     fused::{FusedOperator, FusedPlan},
@@ -11,6 +12,7 @@ use dft_upf::{Pseudopotential, radial::real_spherical_harmonic};
 use ndarray::Array3;
 use num_complex::Complex64;
 use std::cell::RefCell;
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -201,18 +203,30 @@ impl NonlocalOperator {
     pub fn atoms(&self) -> &[AtomProjectors] {
         &self.atoms
     }
-    fn add(&self, x: &[Complex64], y: &mut [Complex64], projections: &mut [Complex64]) {
+    fn add(&self, x: &[Complex64], y: &mut [Complex64], scratch: &mut [Complex64]) {
+        let (projections, weights) = scratch.split_at_mut(self.max_channels);
         for atom in &self.atoms {
             let nc = atom.columns.len();
+            if nc == 0 {
+                continue;
+            }
             for (p, col) in projections.iter_mut().zip(&atom.columns) {
                 *p = col.iter().zip(x).map(|(b, c)| b.conj() * c).sum();
             }
-            for (i, col) in atom.columns.iter().enumerate() {
-                let weight: Complex64 = (0..nc)
+            for (i, weight) in weights[..nc].iter_mut().enumerate() {
+                *weight = (0..nc)
                     .map(|j| atom.coupling[i * nc + j] * projections[j])
                     .sum();
-                for (out, b) in y.iter_mut().zip(col) {
-                    *out += b * weight;
+            }
+            // Keep output in L1 while visiting projector channels in their
+            // original order. This changes traversal only, never association.
+            for (block, output) in y.chunks_mut(256).enumerate() {
+                let start = block * 256;
+                let len = output.len();
+                for (col, &weight) in atom.columns.iter().zip(&weights[..nc]) {
+                    for (out, b) in output.iter_mut().zip(&col[start..start + len]) {
+                        *out += b * weight;
+                    }
                 }
             }
         }
@@ -225,7 +239,7 @@ impl NonlocalOperator {
             return Err(HamiltonianError::NonFinite);
         }
         y.fill(Complex64::default());
-        self.add(x, y, &mut vec![Complex64::default(); self.max_channels]);
+        self.add(x, y, &mut vec![Complex64::default(); 2 * self.max_channels]);
         if !y.iter().all(finite) {
             return Err(HamiltonianError::NonFinite);
         }
@@ -258,7 +272,6 @@ pub fn truncate_to_density_sphere(
 }
 struct Worker {
     scratch: Scratch,
-    output: Vec<Complex64>,
 }
 struct Scratch {
     fft: FusedPlan,
@@ -269,6 +282,7 @@ struct Scratch {
 pub struct Hamiltonian {
     data: HamiltonianData,
     scratch: RefCell<Vec<Worker>>,
+    pool: Arc<WorkerPool>,
 }
 struct HamiltonianData {
     grid: FftGridSpec,
@@ -300,9 +314,8 @@ impl Hamiltonian {
         let scratch = RefCell::new(vec![Worker {
             scratch: Scratch {
                 fft: FusedPlan::new(dims, grid.g_to_fft())?,
-                projections: vec![Complex64::default(); nonlocal.max_channels],
+                projections: vec![Complex64::default(); 2 * nonlocal.max_channels],
             },
-            output: vec![Complex64::default(); basis.vectors().len()],
         }]);
         Ok(Self {
             data: HamiltonianData {
@@ -320,20 +333,30 @@ impl Hamiltonian {
                 nonlocal,
             },
             scratch,
+            pool: WorkerPool::new(1).map_err(|_| HamiltonianError::Busy)?,
         })
     }
     /// Set the intra-k budget once during construction. Zero means one.
-    /// Numerical buffers are reused; only scoped OS-thread bookkeeping is transient.
-    pub fn with_band_threads(mut self, threads: usize) -> Result<Self, HamiltonianError> {
+    /// Numerical buffers and persistent workers are reused.
+    pub fn with_band_threads(self, threads: usize) -> Result<Self, HamiltonianError> {
+        let pool = WorkerPool::new(threads).map_err(|_| HamiltonianError::Busy)?;
+        self.with_band_pool(threads, pool)
+    }
+    /// Share the SCF executor; the band budget limits tasks, not pool size.
+    pub fn with_band_pool(
+        mut self,
+        threads: usize,
+        executor: Arc<WorkerPool>,
+    ) -> Result<Self, HamiltonianError> {
+        self.pool = executor;
         let dims = self.data.grid.dims();
         let pool = self.scratch.get_mut();
         for _ in pool.len()..threads.max(1) {
             pool.push(Worker {
                 scratch: Scratch {
                     fft: FusedPlan::new(dims, self.data.grid.g_to_fft())?,
-                    projections: vec![Complex64::default(); self.data.nonlocal.max_channels],
+                    projections: vec![Complex64::default(); 2 * self.data.nonlocal.max_channels],
                 },
-                output: vec![Complex64::default(); self.data.kinetic.len()],
             });
         }
         pool.truncate(threads.max(1));
@@ -395,6 +418,9 @@ fn application(error: HamiltonianError) -> SolverError {
     SolverError::Application(error.to_string())
 }
 impl LinearOperator for Hamiltonian {
+    fn worker_pool(&self) -> Option<Arc<WorkerPool>> {
+        Some(self.pool.clone())
+    }
     fn inner_threads(&self) -> usize {
         self.scratch.borrow().len()
     }
@@ -427,50 +453,51 @@ impl LinearOperator for Hamiltonian {
             return Ok(());
         }
         let workers = scratch.len().min(x.cols());
-        let output = std::sync::Mutex::new(y);
-        apply_workers(&self.data, &mut scratch[..workers], x, &output, 0, x.cols())
+        let output = y.as_mut_slice();
+        let scratch = &mut scratch[..workers];
+        let data = &self.data;
+        self.pool
+            .install(|| apply_workers(data, scratch, x, output, 0, x.cols()))
     }
 }
 
-// Each recursion uses its caller as one worker, so at most pool.len() threads
-// execute numerical work. Joins precede error propagation in ascending band order.
+// Disjoint column-major output slices need neither a mutex nor a copy.
+// Joins precede error propagation in ascending band order.
 fn apply_workers(
     data: &HamiltonianData,
     workers: &mut [Worker],
     x: &ComplexMatrix,
-    y: &std::sync::Mutex<&mut ComplexMatrix>,
+    y: &mut [Complex64],
     first: usize,
     end: usize,
 ) -> Result<(), SolverError> {
     if workers.len() == 1 {
-        let Worker { scratch, output } = &mut workers[0];
+        let scratch = &mut workers[0].scratch;
         for j in first..end {
-            data.apply_with(x.column(j), output, scratch)
+            let offset = (j - first) * x.rows();
+            data.apply_with(x.column(j), &mut y[offset..offset + x.rows()], scratch)
                 .map_err(|e| SolverError::Application(format!("band index {j}: {e}")))?;
-            // The lock covers only a copy into a disjoint column, never arithmetic.
-            y.lock()
-                .map_err(|_| SolverError::Application("block output poisoned".into()))?
-                .column_mut(j)
-                .copy_from_slice(output);
         }
         return Ok(());
     }
     let left_count = workers.len() / 2;
     let middle = first + (end - first) * left_count / workers.len();
     let (left, right) = workers.split_at_mut(left_count);
-    std::thread::scope(|scope| {
-        let handle = scope.spawn(|| apply_workers(data, left, x, y, first, middle));
-        let right = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            apply_workers(data, right, x, y, middle, end)
-        }));
-        let left = handle.join();
-        left.map_err(|_| {
-            SolverError::Application(format!("band index {first}: worker panicked"))
-        })??;
-        right.map_err(|_| {
-            SolverError::Application(format!("band index {middle}: worker panicked"))
-        })?
-    })
+    let (left_output, right_output) = y.split_at_mut((middle - first) * x.rows());
+    let (left, right) = WorkerPool::join(
+        || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                apply_workers(data, left, x, left_output, first, middle)
+            }))
+        },
+        || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                apply_workers(data, right, x, right_output, middle, end)
+            }))
+        },
+    );
+    left.map_err(|_| SolverError::Application(format!("band index {first}: worker panicked")))??;
+    right.map_err(|_| SolverError::Application(format!("band index {middle}: worker panicked")))?
 }
 
 #[cfg(test)]
@@ -498,7 +525,6 @@ mod pool_tests {
                     (
                         &w.scratch.fft as *const FusedPlan as usize,
                         w.scratch.projections.as_ptr() as usize,
-                        w.output.as_ptr() as usize,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -536,7 +562,7 @@ mod fused_tests {
                 pattern: SpherePattern::from_indices(dims, h.data.grid.g_to_fft()).unwrap(),
                 reciprocal: Array3::zeros(dims),
                 real: Array3::zeros(dims),
-                projections: vec![Complex64::default(); h.data.nonlocal.max_channels],
+                projections: vec![Complex64::default(); 2 * h.data.nonlocal.max_channels],
             }
         }
         fn apply(&mut self, h: &Hamiltonian, x: &[Complex64], y: &mut [Complex64]) {
@@ -606,6 +632,108 @@ mod fused_tests {
         .unwrap();
         Hamiltonian::new(&cell, &basis, potential, nonlocal).unwrap()
     }
+    // Independent pre-P10J traversal oracle, retained for bitwise comparison.
+    fn legacy_nonlocal(
+        op: &NonlocalOperator,
+        x: &[Complex64],
+        y: &mut [Complex64],
+        p: &mut [Complex64],
+    ) {
+        for atom in &op.atoms {
+            let nc = atom.columns.len();
+            for (p, col) in p.iter_mut().zip(&atom.columns) {
+                *p = col.iter().zip(x).map(|(b, c)| b.conj() * c).sum();
+            }
+            for (i, col) in atom.columns.iter().enumerate() {
+                let weight: Complex64 = (0..nc).map(|j| atom.coupling[i * nc + j] * p[j]).sum();
+                for (out, b) in y.iter_mut().zip(col) {
+                    *out += b * weight;
+                }
+            }
+        }
+    }
+
+    fn nonlocal_fixture(atoms: usize, rows: usize, channels: usize) -> NonlocalOperator {
+        NonlocalOperator {
+            basis: Vec::new(),
+            max_channels: channels,
+            atoms: (0..atoms)
+                .map(|a| AtomProjectors {
+                    columns: (0..channels)
+                        .map(|c| vector(rows, a * channels + c))
+                        .collect(),
+                    coupling: (0..channels * channels)
+                        .map(|i| if i % (channels + 1) == 0 { 0.7 } else { 0.03 })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn nonlocal_traversal_preserves_bits() {
+        for (atoms, rows, channels) in [
+            (4, 257, 1),
+            (8, 513, 3),
+            (8, 1537, 4),
+            (20, 769, 9),
+            (3, 259, 0),
+        ] {
+            let op = nonlocal_fixture(atoms, rows, channels);
+            let x = vector(rows, 71);
+            let mut a = vector(rows, 31);
+            let mut b = a.clone();
+            let mut scratch = vec![Complex64::default(); 2 * channels];
+            legacy_nonlocal(&op, &x, &mut a, &mut scratch);
+            op.add(&x, &mut b, &mut scratch);
+            assert_eq!(bits(&a), bits(&b));
+        }
+    }
+
+    #[test]
+    #[ignore] // cargo test --release -p dft-physics nonlocal_traversal -- --ignored --nocapture
+    fn nonlocal_traversal() {
+        println!("atoms,rows,channels,old_us,new_us");
+        for (atoms, rows, channels) in [
+            (4, 257, 1),
+            (2, 769, 4),
+            (4, 1025, 4),
+            (4, 4097, 4),
+            (8, 2969, 4),
+            (8, 4097, 3),
+            (20, 16385, 9),
+        ] {
+            let op = nonlocal_fixture(atoms, rows, channels);
+            let x = vector(rows, 71);
+            let mut a = vector(rows, 31);
+            let mut b = a.clone();
+            let mut scratch = vec![Complex64::default(); 2 * channels];
+            legacy_nonlocal(&op, &x, &mut a, &mut scratch);
+            op.add(&x, &mut b, &mut scratch);
+            assert_eq!(bits(&a), bits(&b));
+            let mut times = [0.0; 2];
+            for (mode, time) in times.iter_mut().enumerate() {
+                let mut samples = Vec::new();
+                for _ in 0..5 {
+                    let start = Instant::now();
+                    for _ in 0..50 {
+                        b.fill(Complex64::default());
+                        if mode == 0 {
+                            legacy_nonlocal(black_box(&op), &x, &mut b, &mut scratch);
+                        } else {
+                            black_box(&op).add(&x, &mut b, &mut scratch);
+                        }
+                        black_box(&b);
+                    }
+                    samples.push(start.elapsed().as_secs_f64() * 1e6 / 50.0);
+                }
+                samples.sort_by(f64::total_cmp);
+                *time = samples[2];
+            }
+            println!("{atoms},{rows},{channels},{:.3},{:.3}", times[0], times[1]);
+        }
+    }
+
     #[test]
     fn ordered_complete_hamiltonian_shapes_and_projectors() {
         for shape in [

@@ -17,6 +17,8 @@ Read this before touching a hot path (anything on the Hamiltonian apply, the eig
 
 ## P10I deterministic intra-k linear algebra
 
+Historical implementation; P10J below supersedes its worker scheduling and MKL path.
+
 The eigensolver obtains the existing intra-k budget from
 `LinearOperator::inner_threads()` (default 1); Hamiltonian reports its band-worker
 budget and the hybrid counting adapter forwards it. The outer/inner SCF split
@@ -49,3 +51,47 @@ new result matrices and vectors each iteration, as before this change; this is
 not a claim of a wholly allocation-free Davidson solver. RMM reuses its existing
 outputs. See the P10I entry in [optimization-log.md](optimization-log.md) for
 measurements, rejected prototypes, test commands and remote acceptance limits.
+
+## P10J executor and backend-specific decomposition
+
+`ScfProblem` owns an explicit Rayon executor, shared through Hamiltonian and
+`LinearOperator::worker_pool()` with both eigensolvers. T=1 runs inline without
+creating an OS worker. Nested k, Hamiltonian and GEMM tasks share the total
+budget; the global Rayon executor is never configured. Pool construction
+counts worker startups once; submission does not update the counter.
+
+Pure Rust retains the P10I fixed 256-plane-wave Gram partials and ordered sum.
+Rotation panels write directly through output views. Calls below 262,144 complex
+multiply-adds (2,097,152 real flops), or with fewer than four panels, run inline;
+the criteria do not depend on requested threads. MKL uses one sequential BLAS
+call per logical product at every thread budget, avoiding panel copies and
+assembly. Thus bit identity is required across budgets within a backend, while
+changed MKL historical rounding still needs the remote energy gate.
+
+Density uses the same SCF pool across k points and bands. Each band's
+contribution is independent of scheduling; contributions are reduced in ascending
+band order, then k densities in ascending k order. Its output array is reserved
+at construction and reused. Hamiltonian tasks split the column-major output
+slice directly, removing the old per-band output mutex and copy.
+
+Each complete k-solve or energy-audit phase is installed once in the executor,
+including single-k calculations and the entire bounded k-chunk loop. Nested GEMM and band jobs then remain resident in that
+pool rather than synchronizing with the external calling thread for each call.
+Parallel GEMMs schedule individual fixed tiles instead of tying a multi-tile
+chunk to each worker; work stealing can balance uneven completion times without
+changing any tile or reduction boundary. No new unsafe code or boxed task is
+introduced. Legacy allocating matrix/result ownership APIs remain outside the
+allocation-free `multiply_into`, Hamiltonian batch and density transform paths.
+
+Release-only scheduling and traversal experiments:
+
+```
+cargo test --release -p dft-numerics dispatch_latency -- --ignored --nocapture
+cargo test --release -p dft-numerics granularity_table -- --ignored --nocapture
+cargo test --release -p dft-physics nonlocal_traversal -- --ignored --nocapture
+cargo test -p dft-engine --lib scf_reuses_workers -- --nocapture
+```
+
+The last test runs complete synthetic SCFs and checks executor startup counts
+before and after all iterations. See [optimization-log.md](optimization-log.md)
+for measured timings, equivalence, outstanding dev08 gates and limitations.

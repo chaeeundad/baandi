@@ -17,6 +17,7 @@ The toolchain is Rust 1.99.1, edition 2024, workspace resolver 3.
 | ndarray | 0.17.2 | MIT OR Apache-2.0 | dft-basis, dft-numerics, dft-physics |
 | ndrustfft | 0.6.2 | MIT | dft-numerics (dev-dependency, test oracle) |
 | num-complex | 0.4.6 | MIT OR Apache-2.0 | dft-basis, dft-numerics, dft-physics, dft-solvers |
+| rayon | 1.12.0 | MIT OR Apache-2.0 | dft-numerics (P10J promotion from transitive) |
 | rustfft | 6.4.1 | MIT OR Apache-2.0 | dft-numerics |
 | serde | 1.0.229 | MIT OR Apache-2.0 | dft-cli |
 | serde_json | 1.0.154 | MIT OR Apache-2.0 | dft-cli |
@@ -176,3 +177,27 @@ validation record. See ADR 0029 for scope and deferred SDK adoption.
 ### P11G PyO3 (decision by architect, 2026-11-04)
 
 `baandi-py` adds `pyo3` 0.30.1 (crates.io, published 2026-10-14; license MIT OR Apache-2.0; MSRV 1.85, workspace uses 1.99; supports CPython 3.9 and later; about 1.3 million downloads; actively maintained). It is used only in the new `baandi-py` crate, outside the numerical core; nothing in `dft-*` depends on it. Build and wheel packaging use `maturin` 1.16.0 (Python build tool, not a Rust dependency); ASE 3.26.0 is an optional Python dependency, never required by the Rust build. Apple Silicon: host build, test, fmt and clippy gates pass on this Mac (aarch64); `scripts/check.sh baandi-py` run by the architect before the ticket. `unsafe` stays inside PyO3's generated code; any own `unsafe` in the adapter needs documented preconditions and tests (workspace lint `undocumented_unsafe_blocks = deny`). See ADR 0030.
+
+## P10J persistent executor
+
+Rayon 1.12.0 is now a direct dependency of dft-numerics (already present in
+Cargo.lock and the offline vendor tree via faer). The vendored manifest declares
+MIT OR Apache-2.0, Rust >=1.80, and rayon-core 1.13.0. No new package is fetched.
+This is the ticket-authorized library choice: owned ThreadPool, scoped join,
+and panic-safe borrowed jobs avoid custom unsafe lifetime erasure or a bespoke
+condition-variable scheduler. Local build/test evidence checks Apple Silicon
+support; online release/download statistics were not re-audited in this offline
+run. The manifest and lockfile change only promote the existing dependency;
+workspace versions and default numerical backends are unchanged.
+
+Architect acceptance (2026-11-05): Rayon is pinned to `=1.12.0` in
+`dft-numerics/Cargo.toml`; both Rayon and rayon-core were already in the lockfile
+before this ticket. Maintenance evidence available offline: vendored
+`rayon/RELEASES.md` records Rayon 1.12.0 on 2026-04-13 (bug fix and new slice API),
+and Rayon 1.11.0 / rayon-core 1.13.0 on 2025-08-12. This establishes recent
+maintenance from the supplied package, without inventing download statistics.
+License is MIT OR Apache-2.0. The arm64 macOS build, tests and Clippy passed;
+no native runtime or platform-specific binding is required. All executor,
+borrowed output splitting and pool integration code written here is safe Rust;
+no `unsafe` block is introduced in our code. Unsafe implementation details stay
+inside the existing reviewed dependencies.

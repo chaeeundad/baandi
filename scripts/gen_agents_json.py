@@ -23,6 +23,16 @@ for i, r in enumerate(order, start=3):
     rows.append({"id": f"A{i}", "agent": "Codex", "role": r["role"], "state": state.get(r["status"], r["status"]),
                  "task": f"{r['task_id']}: {titles.get(r['task_id'], note or r['task_id'])}",
                  "ref": f"{pid}, session {sid}, {r['branch']}", "updated": (r.get("ended_at") or r["started_at"])[:10]})
+# tickets that never ran appear as "planned" so the dashboard can count progress over ALL work items
+tdir = os.path.join(root, "..", "tickets")
+n = len(rows) + 3
+for f in sorted(os.listdir(tdir)):
+    tid = f[:-3]
+    if not f.endswith(".md") or tid in latest or tid.endswith("-COMMON") or tid == "TEMPLATE":
+        continue
+    rows.append({"id": f"A{n}", "agent": "Codex", "role": "implementer", "state": "planned",
+                 "task": f"{tid}: {titles.get(tid, tid)}", "ref": "not started", "updated": ""})
+    n += 1
 json.dump(rows, open(os.path.join(root, "agents.json"), "w"), indent=2, ensure_ascii=False)
 open(os.path.join(root, "agents.json"), "a").write("\n")
 print(len(rows), "agent rows")

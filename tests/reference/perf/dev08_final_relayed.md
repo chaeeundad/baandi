@@ -193,3 +193,26 @@ Runs a, b and c (20 pairs each, same fe0492b build, load at start [0.04, 0.41, 0
 - Overhead verdict (P11J, provisional because relayed): with 300 pairs all 18 combinations meet their targets (classic below 0.5 percent, observed and agent below 1.0 percent); medians span classic -0.207 to +0.214, observed -0.048 to +0.388, agent +0.012 to +0.552 percent. With 100 pairs 15 of 18 met, with 20 pairs the interval is too wide to judge. The default of `scripts/bench_runtime.py` is now 100 pairs.
 - The classic null control is not exactly zero in some combinations (CI excluding zero by up to 0.2 percent) with signs that differ between kinds; no systematic regression is claimed.
 - MKL and QE: see parts 1 and 2. Syn-s2 backend differences are explained in `docs/validation/scf-fixed-point-multiplicity.md`.
+
+## Part 4: fresh BAANDI and QE measurement on main fdce016 (after P10M), relayed 2026-11-05
+
+Same session, same idle node, same pw.x and input hashes as part 2. BAANDI 5-run median, QE 5-run mean. Ratio = BAANDI over QE internal time (above 1: BAANDI slower). Builds: pure sha256 `f5803c7a1004c7aa465ab8f6f9849d808d415d57df7cd09f00bf7f7c7d550e19`, mkl sha256 `41da71e9dbbd9df470f4e1458d4a5358739794211511d4262901bec621d7db6e`. Uptime/load: BAANDI before 08:34:12 load 0.29, after 08:38:00 load 1.44; QE before 08:39:36 load 0.29, after 08:40:24 load 2.80. BAANDI spread at most 2.7 percent, QE spread at most 5.9 percent (k444s 1e-8 N1). QE total energies unchanged (k444s -15.85195738 Ry, si8 -62.64362757 Ry). `*`: QE internal time below 0.3 s, not valid for the README (resolution 0.01 s).
+
+```
+case   conv     N   QE int(s)  spr%   pure(s)   mkl(s)  pure/QE  mkl/QE  QE iters
+k444s  1e-8     1     1.2040    5.9     6.127    5.034     5.09    4.18     5
+k444s  1e-8     8     0.5300    0.0     1.173    1.053     2.21    1.99     5
+k444s  1e-8    16     0.3840    2.6     0.834    0.788     2.17    2.05     5
+k444s  1e-12    1     1.7000    0.0     6.127    5.034     3.60    2.96     8
+k444s  1e-12    8     0.7300    0.0     1.173    1.053     1.61    1.44     8
+k444s  1e-12   16     0.5320    1.9     0.834    0.788     1.57    1.48     8
+si8    1e-8     1     0.6840    2.9     5.801    6.016     8.48    8.80    14
+si8    1e-8     8     0.2100*   0.0     4.151    4.809    19.77   22.90    13
+si8    1e-8    16     0.2300*   0.0     4.568    4.998    19.86   21.73    13
+si8    1e-12    1     0.9120    1.1     5.801    6.016     6.36    6.60    20
+si8    1e-12    8     0.2900*   0.0     4.151    4.809    14.31   16.58    21
+si8    1e-12   16     0.3000    1.0     4.568    4.998    15.23   16.66    19
+```
+
+Worker utilization si8 pure T=8 (12 runs, 250 samples): busy workers 0: 9.6 percent, 1: 29.6, 2: 34.8, 3: 20.4, 4: 4.4, 5: 1.2, 6 or more: 0.0; mean 1.84 of 8 (23.0 percent; P10L 22.5 percent); max/mean imbalance 3.01 (P10L 3.29). Amdahl: serial 9.2 percent (0.382 s), parallel region 3.769 s with worker utilization 26.2 percent; at 100 percent utilization 1.369 s (4.24x); actual 4.151 s (1.40x). si8 pure T=1 5.801 s to T=8 4.151 s is 1.40x.
+

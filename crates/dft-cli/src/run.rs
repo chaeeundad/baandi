@@ -34,7 +34,7 @@ impl From<io::Error> for RunError {
         error(5, e)
     }
 }
-fn engine_error(e: ScfError) -> RunError {
+pub(crate) fn engine_error(e: ScfError) -> RunError {
     let code = match e {
         ScfError::InvalidInput(_)
         | ScfError::OddElectronCount(_)
@@ -206,12 +206,35 @@ fn write_json(path: &Path, value: &Value) -> Result<(), RunError> {
 }
 
 pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport, RunError> {
+    execute_mode(
+        input,
+        output_override,
+        &crate::telemetry::RunMode::default(),
+    )
+}
+
+pub fn execute_mode(
+    input: &Path,
+    output_override: Option<&Path>,
+    mode: &crate::telemetry::RunMode,
+) -> Result<RunReport, RunError> {
+    mode.validate()?;
     let start = Instant::now();
     let bytes = fs::read(input).map_err(|e| error(5, format!("{}: {e}", input.display())))?;
     let text = std::str::from_utf8(&bytes).map_err(|e| error(1, e))?;
     let config = Config::parse(text).map_err(|e| error(1, e))?;
     let preflight = crate::config::preflight::check(&config, input).map_err(|e| error(1, e))?;
-    preflight.print();
+    if mode.events.as_deref() == Some("-") {
+        eprintln!("{}", preflight.summary);
+        for warning in &preflight.warnings {
+            eprintln!("warning: {warning}");
+        }
+        for item in &preflight.overrides {
+            eprintln!("override: {item}");
+        }
+    } else {
+        preflight.print();
+    }
     let prepared = config.prepare().map_err(|e| error(1, e))?;
     let opts = options(&config)?;
     let mut potentials = Vec::new();
@@ -245,7 +268,7 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
         inputs.push(path);
         potentials.push((name.clone(), p));
     }
-    println!(
+    let xc_message = format!(
         "XC: {}; allow_functional_override={}; override_applied={}",
         opts.functional.name(),
         opts.allow_functional_override,
@@ -253,6 +276,11 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
             .iter()
             .any(|(_, p)| !opts.functional.matches_upf(p.functional()))
     );
+    if mode.events.as_deref() == Some("-") {
+        eprintln!("{xc_message}");
+    } else {
+        println!("{xc_message}");
+    }
     let out = output_override.map(Path::to_owned).unwrap_or_else(|| {
         PathBuf::from(
             config
@@ -293,7 +321,11 @@ pub fn execute(input: &Path, output_override: Option<&Path>) -> Result<RunReport
     .map_err(engine_error)?;
     let electrons = problem.electron_count();
     let setup = start.elapsed().as_secs_f64();
-    let outcome = problem.run_outcome().map_err(engine_error)?;
+    let outcome = if mode.observe || mode.agent {
+        crate::telemetry::drive(problem, mode, &out)?
+    } else {
+        problem.run_outcome().map_err(engine_error)?
+    };
     let r = outcome.result;
     let ngrid = r.density.len();
     let bands = r.occupations.len();

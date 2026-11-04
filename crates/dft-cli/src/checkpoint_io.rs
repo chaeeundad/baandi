@@ -1482,7 +1482,7 @@ pub enum Kind {
 fn context(
     input: &Path,
 ) -> Result<(dft_engine::ScfProblem, ModelIdentity, ExecutionIdentity), Error> {
-    use dft_cli::{
+    use crate::{
         config::Config,
         run::{options, sha256},
     };

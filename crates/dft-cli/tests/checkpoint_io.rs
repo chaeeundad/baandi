@@ -4,9 +4,7 @@ mod common;
 #[allow(dead_code)]
 #[path = "../../dft-engine/tests/common/checkpoint.rs"]
 mod fixture;
-#[allow(dead_code)]
-#[path = "../src/checkpoint_io.rs"]
-mod io;
+use dft_cli::checkpoint_io as io;
 use dft_engine::{checkpoint::*, *};
 use fixture::*;
 use sha2::{Digest, Sha256};

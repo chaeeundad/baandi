@@ -1,0 +1,7 @@
+#!/bin/sh
+# Compatibility launcher: install alongside dft-cli, or put dft-cli on PATH.
+launcher_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || exit 1
+if [ -x "$launcher_dir/dft-cli" ]; then
+    exec "$launcher_dir/dft-cli" "$@"
+fi
+exec dft-cli "$@"

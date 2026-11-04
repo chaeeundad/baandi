@@ -24,3 +24,5 @@ pub mod events;
 pub mod state_view;
 pub use events::{ExecutionConfig, ExecutionMode};
 pub use session::{CompletionMode, ScfSession, StepReport, StepStatus};
+
+pub mod diagnostics;

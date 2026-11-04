@@ -159,3 +159,16 @@ The repository's MIT license is unchanged. No third-party Rust dependency is
 introduced: num-complex and the benchmark's ndarray are existing approved crates.
 Maintenance is Intel's responsibility; compatibility is explicitly tested against
 2026.1 on dev08, pending the protocol in `docs/howto-mkl.md`.
+
+### P11F minimal MCP adapter
+
+`baandi-mcp` uses only `dft-engine`, serde 1.0.229 and serde_json 1.0.154.
+Both external crates are already adopted, license MIT OR Apache-2.0; no new
+third-party package or feature is introduced. The unused skeleton thiserror edge
+was removed. Per the architect's 2026-11-04 decision, no MCP SDK or async runtime
+is adopted. The adapter adds only standard-library I/O and synchronous ownership;
+no new native ABI or platform library is required. Existing vendored serialization
+versions are reused; no independent current upstream-maintenance claim is made.
+The project owns protocol maintenance and tests. Apple Silicon support is checked
+by the host build/test/fmt/clippy gates, with actual outcomes in the crate's
+validation record. See ADR 0029 for scope and deferred SDK adoption.

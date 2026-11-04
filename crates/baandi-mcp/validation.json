@@ -1,0 +1,88 @@
+{
+  "task_id": "P11F-MCP-SERVER",
+  "status": "DONE",
+  "changed_files": [
+    "Cargo.lock",
+    "ownership.toml",
+    "docs/dependencies.md",
+    "docs/decisions/0029-minimal-mcp-stdio.md",
+    "artifacts/tests.json",
+    "crates/baandi-mcp/Cargo.toml",
+    "crates/baandi-mcp/AGENTS.md",
+    "crates/baandi-mcp/README.md",
+    "crates/baandi-mcp/src/lib.rs",
+    "crates/baandi-mcp/src/schema.rs",
+    "crates/baandi-mcp/src/transport.rs",
+    "crates/baandi-mcp/src/event.rs",
+    "crates/baandi-mcp/examples/tool_schemas.rs",
+    "crates/baandi-mcp/schemas/tools.json",
+    "crates/baandi-mcp/tests/server.rs",
+    "crates/baandi-mcp/validation.json"
+  ],
+  "design_choices": [
+    "Minimal synchronous MCP 2025-06-18 stdio JSON-RPC; serde/serde_json only alongside dft-engine. No SDK, async runtime, shell or network.",
+    "Host registers validated single-use ScfProblem inputs. No tool filesystem access; terminal scalar JSON/CSV exports are inline.",
+    "Observe and Supervised only. Runtime owns all intervention validation and audit; only the authenticated embedding host can approve or deny. Autonomous remains deferred.",
+    "11 typed tool schemas generated from shared declarations, committed as JSON and tested. Requests, frame size, resident calculations and total iteration attempts are bounded."
+  ],
+  "commands": [
+    {
+      "command": "cargo check --offline -p baandi-mcp",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo run --offline -p baandi-mcp --example tool_schemas > crates/baandi-mcp/schemas/tools.json",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --offline -p baandi-mcp --test server (final run)",
+      "exit_code": 0
+    },
+    {
+      "command": "scripts/check.sh baandi-mcp",
+      "exit_code": 0
+    },
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/gen_agents_json.py",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo metadata --offline --no-deps --format-version 1; inspect server and reverse dependencies",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "9 integration tests passed; 0 failed; final test duration 0.04 s on arm64.",
+    "11 tool schemas; 0 reverse workspace dependencies on baandi-mcp.",
+    "Unsafe mixing beta = 100 (dimensionless): library-equivalent Policy rejection; state version and options unchanged.",
+    "README/figure consistency: 3 tests passed; regeneration produced no diff."
+  ],
+  "reference_comparison": "Unsafe policy request, outcome, sequence, requester and before/after state versions compared with direct Runtime invocation. Synthetic in-memory local-potential tests only; no new QE reference, scientific accuracy or performance claim. Numerical core files unchanged.",
+  "limitations": [
+    "Embeddable server with serve_stdio/serve/handle entry points; no standalone TOML/UPF loading executable or operator UI. P9A/CLI host supplies validated inputs and authenticated approvals.",
+    "Initial numerical intervention is mixing beta only. Export is terminal scalar JSON/CSV, not density/orbitals or exact restart.",
+    "Audit is bounded in memory, not durable. Wire audit includes full Rust Debug text for diagnostic detail, not a stable replay serialization.",
+    "Synchronous iterations cannot be interrupted mid-solve. Host must preflight problem resource costs and enforce process time/memory limits.",
+    "No HTTP, resources, prompts, batching, progress, subscriptions or transport cancellation. These capabilities are not advertised.",
+    "Local tests dashboard artifact updated and generator run. External Claude dashboard upload/dataset tools are unavailable; orchestrator must publish. Central delegate registry already records this run; worktree registry is a stale snapshot. No recurring report timer is active.",
+    "Initial development tests failed on incomplete synthetic UPF header and schema-generation race; both repaired before final passing gates."
+  ],
+  "open_questions": [],
+  "commit": "Uncommitted as requested; architect review and commit required."
+}

@@ -358,5 +358,13 @@
     "result": "pass",
     "detail": "Implementer verification: scripts/check.sh and scripts/check.sh dft-cli exit 0 (build/test/fmt/clippy). scripts/demo_self_healing.sh exit 0: four arms repeated twice, baseline exhausted at 1 iteration, rules and recorded agent certified at 30; energy -4.684561184277879 Ha, reference error 0 Ha (limit 1e-10 Ha). Complete normalized result and final array bits identical on replay; beta=1.1 rejected without mutation. README consistency: 3 tests pass. Synthetic Gamma budget repair only; no instability healing or overhead claim. Claude re-verification remains required. Evidence: tests/reference/runtime/generated/results.json.",
     "date": "2026-11-04"
+  },
+  {
+    "id": "T-P11F-LOCAL",
+    "check": "P11F stdio MCP adapter, runtime authority and schema contracts",
+    "phase": "P11F",
+    "result": "pass",
+    "detail": "Implementer verification on arm64: scripts/check.sh baandi-mcp and scripts/check.sh exit 0 (build/test/fmt/clippy); 9 integration tests passed, 0 failed. 11 generated tool schemas match the committed document. Unsafe beta rejection matches direct Runtime audit and leaves options/state version unchanged. Observe denial, stale requests, host-only approval/denial, lifecycle, quotas, framing and scalar export tested. Offline metadata: only dft-engine, serde, serde_json; zero reverse workspace dependencies. No new scientific reference or performance claim. Claude re-verification remains required.",
+    "date": "2026-11-04"
   }
 ]

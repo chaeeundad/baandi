@@ -1,0 +1,362 @@
+[
+  {
+    "description": "Consume a host-validated input ID",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        },
+        "input_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "observe",
+            "supervised"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "input_id",
+        "calc_id",
+        "mode"
+      ],
+      "type": "object"
+    },
+    "name": "create_calculation"
+  },
+  {
+    "description": "Advance one complete SCF iteration",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "calc_id"
+      ],
+      "type": "object"
+    },
+    "name": "step"
+  },
+  {
+    "description": "Advance a bounded number of complete iterations",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        },
+        "steps": {
+          "maximum": 100,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "calc_id",
+        "steps"
+      ],
+      "type": "object"
+    },
+    "name": "run"
+  },
+  {
+    "description": "Read lifecycle and boundary versions",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "calc_id"
+      ],
+      "type": "object"
+    },
+    "name": "status"
+  },
+  {
+    "description": "Read scalar scientific state with units",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "calc_id"
+      ],
+      "type": "object"
+    },
+    "name": "get_snapshot"
+  },
+  {
+    "description": "Drain bounded telemetry and read the control audit",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        },
+        "limit": {
+          "maximum": 256,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "calc_id",
+        "limit"
+      ],
+      "type": "object"
+    },
+    "name": "get_events"
+  },
+  {
+    "description": "Propose mixing beta; requires separate host approval",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        },
+        "max_iteration": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mixing_beta": {
+          "type": "number"
+        },
+        "observed_policy_revision": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed_state_version": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "maxLength": 512,
+          "type": "string"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "calc_id",
+        "request_id",
+        "observed_state_version",
+        "observed_policy_revision",
+        "max_iteration",
+        "reason",
+        "mixing_beta"
+      ],
+      "type": "object"
+    },
+    "name": "propose_policy_change"
+  },
+  {
+    "description": "Propose pause; requires host approval",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        },
+        "max_iteration": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed_policy_revision": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed_state_version": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "maxLength": 512,
+          "type": "string"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "calc_id",
+        "request_id",
+        "observed_state_version",
+        "observed_policy_revision",
+        "max_iteration",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "name": "pause"
+  },
+  {
+    "description": "Propose resume; requires host approval",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        },
+        "max_iteration": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed_policy_revision": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed_state_version": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "maxLength": 512,
+          "type": "string"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "calc_id",
+        "request_id",
+        "observed_state_version",
+        "observed_policy_revision",
+        "max_iteration",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "name": "resume"
+  },
+  {
+    "description": "Propose cancellation; requires host approval",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        },
+        "max_iteration": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed_policy_revision": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed_state_version": {
+          "maximum": 18446744073709551615,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reason": {
+          "maxLength": 512,
+          "type": "string"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "calc_id",
+        "request_id",
+        "observed_state_version",
+        "observed_policy_revision",
+        "max_iteration",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "name": "cancel"
+  },
+  {
+    "description": "Return terminal scalar result as JSON and CSV, without writing files",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "calc_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[!-~]+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "calc_id"
+      ],
+      "type": "object"
+    },
+    "name": "export_result"
+  }
+]

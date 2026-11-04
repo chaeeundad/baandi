@@ -20,19 +20,19 @@
   {
     "id": "A3",
     "agent": "Codex",
-    "role": "reviewer",
+    "role": "implementer",
     "state": "active",
     "task": "P8F-MASTER-FEATURE-MATRIX: 조사: VASP, QE 등 전체 기능 비교표와 마스터 개발 계획",
-    "ref": "pid 90251, session no sessi, task/P8F-MASTER-FEATURE-MATRIX",
-    "updated": "2026-11-03"
+    "ref": "pid 60605, session no sessi, task/P8F-MASTER-FEATURE-MATRIX",
+    "updated": "2026-11-04"
   },
   {
     "id": "A4",
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P11C-CHECKPOINT: 기능: 체크포인트/재시작(정확 이어하기, 웜스타트, 결과 내보내기)",
-    "ref": "pid 49462, session no sessi, task/P11C-CHECKPOINT",
+    "task": "P11H-CLI-UX: 기능: baandi run/--observe/--agent, status, explain 명령(세 가지 실행 모드 사용자 경험)",
+    "ref": "pid 61995, session no sessi, task/P11H-CLI-UX",
     "updated": "2026-11-04"
   },
   {
@@ -543,9 +543,9 @@
     "id": "A61",
     "agent": "Codex",
     "role": "implementer",
-    "state": "blocked",
-    "task": "P11H-CLI-UX: 기능: baandi run/--observe/--agent, status, explain 명령(세 가지 실행 모드 사용자 경험)",
-    "ref": "pid 40134, session 01a1a569, task/P11H-CLI-UX",
+    "state": "done",
+    "task": "P11C-CHECKPOINT: 기능: 체크포인트/재시작(정확 이어하기, 웜스타트, 결과 내보내기)",
+    "ref": "pid 49462, session 01a1a569, task/P11C-CHECKPOINT",
     "updated": "2026-11-04"
   },
   {

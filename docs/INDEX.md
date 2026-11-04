@@ -59,3 +59,5 @@ Conventions: docs are English; one fact lives in one place and others link to it
 | Classic, Observed and AgentControlled modes; switch rules and path separation | [architecture/execution-modes.md](architecture/execution-modes.md) |
 | Scientific integration specs (P11I): workflow API, low-level coupling API, active-learning contract | `architecture/workflow-api.md`, `architecture/coupling-api-lowlevel.md`, `architecture/active-learning-contract.md`, `research/external-coupling-efficiency.md`, ADR 0027 |
 | Three execution modes (Classic, Observed, AgentControlled) | `architecture/execution-modes.md`, `architecture/runtime-control.md`, `architecture/scientific-state-api.md`, ADR 0028 |
+- `docs/research/dft-feature-matrix.md`: feature matrix of 11 DFT codes from public documentation (P8F; weak-evidence items marked).
+- `docs/roadmap/master-plan-proposal.md`: proposed master roadmap and first 20 tickets with prerequisites (P8F; proposal, user approval pending).

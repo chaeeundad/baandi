@@ -1300,7 +1300,7 @@
     "task_id": "P11D-SCF-DIAGNOSTICS",
     "mode": "new",
     "role": "implementer",
-    "status": "blocked",
+    "status": "done",
     "codex_pid": 88770,
     "wrapper_pid": 88755,
     "session_id": "01a1a12b-a316-7031-838e-d46bdf043841",
@@ -1311,7 +1311,7 @@
     "started_at": "2026-11-03T11:29:13Z",
     "ended_at": "2026-11-03T11:35:39Z",
     "exit_code": 0,
-    "note": ""
+    "note": "merged 2026-11-04 after P11B"
   },
   {
     "run_id": "P11B-RUNTIME-POLICY#2",
@@ -1365,6 +1365,24 @@
     "started_at": "2026-11-04T07:15:09Z",
     "ended_at": "2026-11-04T07:18:24Z",
     "exit_code": 0,
+    "note": ""
+  },
+  {
+    "run_id": "P11C-CHECKPOINT#2",
+    "task_id": "P11C-CHECKPOINT",
+    "mode": "resume",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 49462,
+    "wrapper_pid": 49450,
+    "session_id": null,
+    "branch": "task/P11C-CHECKPOINT",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P11C-CHECKPOINT",
+    "ticket": "/Users/mino/Develop/rust-dft/.delegate/P11C-CHECKPOINT/resume1.md",
+    "report": null,
+    "started_at": "2026-11-04T07:41:58Z",
+    "ended_at": null,
+    "exit_code": null,
     "note": ""
   }
 ]

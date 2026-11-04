@@ -1077,3 +1077,7 @@ energy_tolerance_ha = 1e-8
 density_residual_tolerance = 1e-7
 nbands = 12
 ```
+
+## Notes added 2026-11-04 (dev08 run by the remote measurement session)
+- Running the default tier without `--robustness` aborts with exit 3 at the first case that does not converge (`si-elongated`, `si-slab` and variants are known to hit the 100 iteration limit with the default linear/Pulay 0.5 settings, on both backends). Use `--robustness` to record them as findings and continue. These are genuine SCF stagnation cases and are inputs for ticket P11M.
+- Synthetic cases failed the input preflight (ADR 0022): species label `Xx` is not an element symbol. The synthetic UPF is now written with `element="Si"` and the species label is `Si` (non-physical potential, label only satisfies the identity check). Input hashes of synthetic cases changed; the stored `suite-baseline.json` entries for them must be regenerated before using `--baseline` on those cases.

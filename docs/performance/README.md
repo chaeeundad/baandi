@@ -123,3 +123,83 @@ See the P10K entry in [optimization-log.md](optimization-log.md) for the measure
 Mac matrix, instrumented ingress/region counts, rejected candidates and remote
 acceptance limits. Instrumentation was confined to temporary benchmark builds;
 production hot loops contain no new counters, clocks or logging.
+
+## P10L worker analysis and dependency overlap
+
+The production Gram and rotation decomposition remains the P10K 256-row/pw
+partition. Finer 64-row rotations and four/eight-column Gram subtiles were
+measured and rejected: they changed backend rounding and, for si8, the amount
+of Davidson work. Their apparent speedup is not accepted as a scheduling win.
+
+For projection blocks with at least 2048 rows, the first MGS pass updates
+independent future columns as each accepted basis vector becomes available.
+Each column still receives the same ascending sequence of two-pass scalar
+projections. When future work contains at least 16384 complex elements, the
+next column's dependent second pass overlaps first-pass updates on later
+columns. Small blocks retain the original left-looking loop. Rank decisions,
+normalization, tolerances, correction widths and certificates are unchanged.
+These are scheduling/copy changes, not a new orthogonalization method.
+
+Hamiltonian application uses one stealable piece per band when the inner
+budget owns the whole pool and there are more bands than scratch slots.
+Per-worker FFT/nonlocal scratch is preallocated; a slot mutex protects reuse,
+with no nested scheduling while held. Outer-k and small-band cases retain
+static disjoint groups: mapping a larger pool onto a smaller scratch budget
+with modulo alone caused contention in the experiment. T=1 accesses scratch
+exclusively without locking. Concatenation reserves its final capacity before
+copying, avoiding a reallocating second copy.
+
+### Reproducible analysis build
+
+The ticket owns source directories but not Cargo manifests. This source-only
+analysis feature is enabled via rustc cfg, **not** `cargo --features`. Default
+builds compile only inline zero-sized no-ops: no clocks, TLS, atomics, trace
+allocation or output. Analysis builds allocate/buffer records and perturb
+scheduling; use a separate uninstrumented binary for acceptance timings.
+
+```sh
+RUSTFLAGS='--cfg feature="worker-analysis"' cargo build --release -p dft-cli
+cp target/release/dft-cli /tmp/p10l-analysis
+python3 -I crates/dft-numerics/src/pool/measure.py \
+  /tmp/p10l-analysis /tmp/p10l-analysis-results /absolute/path/Si.pz-vbc.UPF
+RUSTFLAGS='--cfg feature="worker-analysis"' cargo test -p dft-numerics \
+  context_follows_stolen_work_and_restores_after_panic
+cargo test --release -p dft-engine worker_utilization_synthetic_twenty \
+  -- --ignored --nocapture --test-threads=1
+```
+
+Run the Python driver from the repository root and select a fresh output
+folder. It measures si8 and a skew four-atom cell at T=1,2,4,8,12 and retains
+inputs, raw traces, results and density files. `summary.json` reports per-phase
+wall/parallel/between-region times and measured worker busy fractions.
+`regions.csv` preserves every region's piece count, scheduled slots, individual
+worker busy fractions and max/mean ratio (mean includes idle pool workers).
+No polling-based busy-worker distribution is inferred from these counters.
+
+Raw `P10L` CSV fields are label, start ns, end ns, scheduled slots, completed
+pieces, 256 semicolon-separated worker busy times in ns (empty for plain
+inclusive spans), and a nested-busy flag (0/1). The flag marks a serial phase
+already charged to its enclosing region; the summary counts it only once. Slot 255 is the external caller, slots 0--254 are Rayon
+indices. T=1 therefore reports external-caller activity. `workers=0` denotes a
+phase span, not a dispatch region. Regions with one scheduled slot are inline;
+`parallel_regions_s` excludes these. Logical regions include both parallel and
+inline kernels. Piece timing excludes scratch-lock acquisition and scheduler
+waits. Region busy time also includes explicitly timed serial work inside the
+region (such as Gram assembly and the overlapping dependent MGS pass). Explicit serial phases cover EVD, residual norms, preconditioning, copies,
+projection preparation/update, Gram assembly/validation and dependent MGS. Unclassified glue remains
+unmeasured busy time, so busy fractions are lower bounds, not CPU utilization.
+Phase spans are inclusive and must not be summed. Region intersections use
+interval unions to avoid double-counting nested scopes.
+
+Only one active SCF per process and at most 255 workers are supported by the
+analysis feature. Classic `run`/`run_outcome` flushes at the end, including error
+returns; direct incremental sessions need their own outer analysis scope.
+The SCF scope starts after `ScfProblem` construction and excludes initial setup
+and CLI I/O. Whole-pool residency includes serial Davidson code and must not be
+substituted for the useful parallel fraction in Amdahl's law.
+
+The synthetic twenty-atom test exercises a skew/slab-like arrangement and both
+local-only and multi-projector potentials, comparing full density and energy
+bits across thread counts. It deliberately retains six iterations, and is
+**not** a converged material calculation or a QE reference. See the optimization
+log for retained/rejected experiments, actual gates, and unresolved dev08 goals.

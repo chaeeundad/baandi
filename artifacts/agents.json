@@ -29,33 +29,6 @@
   {
     "id": "A4",
     "agent": "Codex",
-    "role": "implementer",
-    "state": "active",
-    "task": "P10B-MKL-FFT: 성능: Intel MKL FFT/행렬곱 선택 백엔드 구현(컴파일 시점 선택, dev08에서 검증)",
-    "ref": "pid 20251, session no sessi, task/P10B-MKL-FFT",
-    "updated": "2026-11-03"
-  },
-  {
-    "id": "A5",
-    "agent": "Codex",
-    "role": "implementer",
-    "state": "active",
-    "task": "P10E-GPU-ARCH: 설계: GPU 실행 구조(CUDA/Metal 등 후보 비교, 단계별 로드맵)",
-    "ref": "pid 20750, session no sessi, task/P10E-GPU-ARCH",
-    "updated": "2026-11-03"
-  },
-  {
-    "id": "A6",
-    "agent": "Codex",
-    "role": "implementer",
-    "state": "active",
-    "task": "P10G-GENERAL-BENCH: 기반: 실리콘에 치우치지 않는 범용 벤치마크/견고성 시험 모음",
-    "ref": "pid 20920, session no sessi, task/P10G-GENERAL-BENCH",
-    "updated": "2026-11-03"
-  },
-  {
-    "id": "A7",
-    "agent": "Codex",
     "role": "implementer (wrapper smoke test)",
     "state": "done",
     "task": "SMOKE: Backfilled before registry existed: PID not recorded",
@@ -63,7 +36,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A8",
+    "id": "A5",
     "agent": "Codex",
     "role": "implementer",
     "state": "blocked",
@@ -72,7 +45,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A9",
+    "id": "A6",
     "agent": "Codex",
     "role": "wrapper-test",
     "state": "done",
@@ -81,7 +54,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A10",
+    "id": "A7",
     "agent": "Codex",
     "role": "implementer (backend spike)",
     "state": "done",
@@ -90,7 +63,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A11",
+    "id": "A8",
     "agent": "Codex",
     "role": "implementer",
     "state": "killed",
@@ -99,7 +72,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A12",
+    "id": "A9",
     "agent": "Codex",
     "role": "implementer (P1A fix 1)",
     "state": "done",
@@ -108,7 +81,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A13",
+    "id": "A10",
     "agent": "Codex",
     "role": "implementer (P1B unblock)",
     "state": "done",
@@ -117,7 +90,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A14",
+    "id": "A11",
     "agent": "Codex",
     "role": "implementer (P4A eigensolver)",
     "state": "done",
@@ -126,7 +99,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A15",
+    "id": "A12",
     "agent": "Codex",
     "role": "implementer (P3A functionals)",
     "state": "done",
@@ -135,7 +108,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A16",
+    "id": "A13",
     "agent": "Codex",
     "role": "implementer (P2A UPF and radial)",
     "state": "done",
@@ -144,7 +117,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A17",
+    "id": "A14",
     "agent": "Codex",
     "role": "implementer (P2B fix 1)",
     "state": "done",
@@ -153,7 +126,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A18",
+    "id": "A15",
     "agent": "Codex",
     "role": "implementer (P5A retry 1)",
     "state": "done",
@@ -162,7 +135,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A19",
+    "id": "A16",
     "agent": "Codex",
     "role": "implementer (P5B CLI run)",
     "state": "done",
@@ -171,7 +144,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A20",
+    "id": "A17",
     "agent": "Codex",
     "role": "implementer (P2C real-world UPF)",
     "state": "done",
@@ -180,7 +153,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A21",
+    "id": "A18",
     "agent": "Codex",
     "role": "implementer (P5C functional string)",
     "state": "done",
@@ -189,7 +162,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A22",
+    "id": "A19",
     "agent": "Codex",
     "role": "implementer (P6A QE tooling)",
     "state": "done",
@@ -198,7 +171,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A23",
+    "id": "A20",
     "agent": "Codex",
     "role": "implementer (P6B verifier real format)",
     "state": "done",
@@ -207,7 +180,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A24",
+    "id": "A21",
     "agent": "Codex",
     "role": "implementer (P6D density compare)",
     "state": "done",
@@ -216,7 +189,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A25",
+    "id": "A22",
     "agent": "Codex",
     "role": "implementer (P6E docs refresh)",
     "state": "done",
@@ -225,7 +198,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A26",
+    "id": "A23",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -234,7 +207,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A27",
+    "id": "A24",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -243,7 +216,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A28",
+    "id": "A25",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -252,7 +225,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A29",
+    "id": "A26",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -261,7 +234,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A30",
+    "id": "A27",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -270,7 +243,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A31",
+    "id": "A28",
     "agent": "Codex",
     "role": "reviewer",
     "state": "done",
@@ -279,7 +252,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A32",
+    "id": "A29",
     "agent": "Codex",
     "role": "reviewer",
     "state": "done",
@@ -288,7 +261,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A33",
+    "id": "A30",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -297,7 +270,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A34",
+    "id": "A31",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -306,7 +279,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A35",
+    "id": "A32",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -315,7 +288,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A36",
+    "id": "A33",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -324,7 +297,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A37",
+    "id": "A34",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -333,7 +306,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A38",
+    "id": "A35",
     "agent": "Codex",
     "role": "implementer",
     "state": "blocked",
@@ -342,7 +315,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A39",
+    "id": "A36",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -351,7 +324,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A40",
+    "id": "A37",
     "agent": "Codex",
     "role": "implementer",
     "state": "failed",
@@ -360,7 +333,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A41",
+    "id": "A38",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -369,7 +342,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A42",
+    "id": "A39",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -378,7 +351,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A43",
+    "id": "A40",
     "agent": "Codex",
     "role": "implementer",
     "state": "blocked",
@@ -387,7 +360,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A44",
+    "id": "A41",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -396,7 +369,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A45",
+    "id": "A42",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -405,7 +378,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A46",
+    "id": "A43",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -414,7 +387,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A47",
+    "id": "A44",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -423,7 +396,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A48",
+    "id": "A45",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -432,7 +405,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A49",
+    "id": "A46",
     "agent": "Codex",
     "role": "reviewer",
     "state": "done",
@@ -441,16 +414,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A50",
-    "agent": "Codex",
-    "role": "implementer",
-    "state": "blocked",
-    "task": "P8G-INPUT-PREFLIGHT: 기능: 입력 사전 검사(원소/의사퍼텐셜 일치, SCF 설정, 평문 요약)",
-    "ref": "pid 12255, session 01a1a088, task/P8G-INPUT-PREFLIGHT",
-    "updated": "2026-11-03"
-  },
-  {
-    "id": "A51",
+    "id": "A47",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -459,30 +423,165 @@
     "updated": "2026-11-03"
   },
   {
+    "id": "A48",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P10B-MKL-FFT: 성능: Intel MKL FFT/행렬곱 선택 백엔드 구현(컴파일 시점 선택, dev08에서 검증)",
+    "ref": "pid 20251, session 01a1a091, task/P10B-MKL-FFT",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A49",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P10E-GPU-ARCH: 설계: GPU 실행 구조(CUDA/Metal 등 후보 비교, 단계별 로드맵)",
+    "ref": "pid 20750, session 01a1a092, task/P10E-GPU-ARCH",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A50",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P10G-GENERAL-BENCH: 기반: 실리콘에 치우치지 않는 범용 벤치마크/견고성 시험 모음",
+    "ref": "pid 20920, session 01a1a092, task/P10G-GENERAL-BENCH",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A51",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P10A-RMM-DIIS: 기능: RMM-DIIS 고유값 풀이기(밴드가 많은 큰 계용, 격리된 선택 모듈)",
+    "ref": "pid 43855, session 01a1a091, task/P10A-RMM-DIIS",
+    "updated": "2026-11-03"
+  },
+  {
     "id": "A52",
     "agent": "Codex",
     "role": "implementer",
-    "state": "blocked",
-    "task": "P10A-RMM-DIIS: 기능: RMM-DIIS 고유값 풀이기(밴드가 많은 큰 계용, 격리된 선택 모듈)",
-    "ref": "pid 20089, session 01a1a091, task/P10A-RMM-DIIS",
+    "state": "done",
+    "task": "P10D-SCF-MIXING: 기능: SCF 혼합 개선(Kerker 예조건 Pulay 등, 큰 셀 전하 슬로싱 대비)",
+    "ref": "pid 44112, session 01a1a092, task/P10D-SCF-MIXING",
     "updated": "2026-11-03"
   },
   {
     "id": "A53",
     "agent": "Codex",
     "role": "implementer",
-    "state": "blocked",
-    "task": "P10C-FUSED-FFT: 성능: FFT 호출 구조 개선(스틱 기반 융합 경로, 밀도 계산 가지치기, 배치 크기 시험)",
-    "ref": "pid 20414, session 01a1a092, task/P10C-FUSED-FFT",
+    "state": "done",
+    "task": "P8G-INPUT-PREFLIGHT: 기능: 입력 사전 검사(원소/의사퍼텐셜 일치, SCF 설정, 평문 요약)",
+    "ref": "pid 44237, session 01a1a088, task/P8G-INPUT-PREFLIGHT",
     "updated": "2026-11-03"
   },
   {
     "id": "A54",
     "agent": "Codex",
     "role": "implementer",
-    "state": "blocked",
-    "task": "P10D-SCF-MIXING: 기능: SCF 혼합 개선(Kerker 예조건 Pulay 등, 큰 셀 전하 슬로싱 대비)",
-    "ref": "pid 20579, session 01a1a092, task/P10D-SCF-MIXING",
+    "state": "done",
+    "task": "P11R-RUNTIME-ARCH-DOCS: 설계: 에이전트 제어형 계산 런타임 구조 문서와 ADR(사건 스키마, 정책 변경, 안전, 체크포인트)",
+    "ref": "pid 61235, session 01a1a0ac, task/P11R-RUNTIME-ARCH-DOCS",
     "updated": "2026-11-03"
+  },
+  {
+    "id": "A55",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P11I-COUPLING-API-SPEC: 설계: 외부 결합 인터페이스(고수준 워크플로 API, 저수준 결합 API, 능동학습 계약)",
+    "ref": "pid 61362, session 01a1a0b9, task/P11I-COUPLING-API-SPEC",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A56",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P10C-FUSED-FFT: 성능: FFT 호출 구조 개선(스틱 기반 융합 경로, 밀도 계산 가지치기, 배치 크기 시험)",
+    "ref": "pid 71549, session 01a1a092, task/P10C-FUSED-FFT",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A57",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P11A-STEPWISE-SCF: 기능: SCF를 한 반복씩 실행하는 세션 + 이벤트 + 상태 조회(기존 결과와 비트 동일)",
+    "ref": "pid 80621, session 01a1a0f4, task/P11A-STEPWISE-SCF",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A58",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "blocked",
+    "task": "P11D-SCF-DIAGNOSTICS: 기능: SCF 정체/진동/발산 자동 진단(근거와 가설 구분)",
+    "ref": "pid 88770, session 01a1a12b, task/P11D-SCF-DIAGNOSTICS",
+    "updated": "2026-11-03"
+  },
+  {
+    "id": "A59",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P11B-RUNTIME-POLICY: 기능: 상태 기계와 안전 지점 정책 변경(검증, 거부, 감사 기록)",
+    "ref": "pid 24770, session 01a1a12b, task/P11B-RUNTIME-POLICY",
+    "updated": "2026-11-04"
+  },
+  {
+    "id": "A60",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "blocked",
+    "task": "P11H-CLI-UX: 기능: baandi run/--observe/--agent, status, explain 명령(세 가지 실행 모드 사용자 경험)",
+    "ref": "pid 40134, session 01a1a569, task/P11H-CLI-UX",
+    "updated": "2026-11-04"
+  },
+  {
+    "id": "A61",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "blocked",
+    "task": "P11C-CHECKPOINT: 기능: 체크포인트/재시작(정확 이어하기, 웜스타트, 결과 내보내기)",
+    "ref": "pid 40136, session 01a1a569, task/P11C-CHECKPOINT",
+    "updated": "2026-11-04"
+  },
+  {
+    "id": "A64",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "planned",
+    "task": "P11E-SELF-HEALING-DEMO: 시연: 스스로 복구하는 SCF 전체 흐름(기준/규칙 복구/에이전트 감독 비교)",
+    "ref": "not started",
+    "updated": ""
+  },
+  {
+    "id": "A65",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "planned",
+    "task": "P11F-MCP-SERVER: 기능: 에이전트용 MCP 서버(관찰/감독 모드, 감사 기록)",
+    "ref": "not started",
+    "updated": ""
+  },
+  {
+    "id": "A66",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "planned",
+    "task": "P11G-PYTHON-ASE: 기능: Python/ASE 계산기 연동(힘/응력은 미구현 오류로 처리)",
+    "ref": "not started",
+    "updated": ""
+  },
+  {
+    "id": "A67",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "planned",
+    "task": "P11J-RUNTIME-BENCH: 측정: 세 실행 모드의 오버헤드와 재현성 비교 보고서",
+    "ref": "not started",
+    "updated": ""
   }
 ]

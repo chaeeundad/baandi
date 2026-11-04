@@ -219,15 +219,12 @@ impl NonlocalOperator {
                     .map(|j| atom.coupling[i * nc + j] * projections[j])
                     .sum();
             }
-            // Keep output in L1 while visiting projector channels in their
-            // original order. This changes traversal only, never association.
-            for (block, output) in y.chunks_mut(256).enumerate() {
-                let start = block * 256;
-                let len = output.len();
-                for (col, &weight) in atom.columns.iter().zip(&weights[..nc]) {
-                    for (out, b) in output.iter_mut().zip(&col[start..start + len]) {
-                        *out += b * weight;
-                    }
+            // Original loop structure (one pass over y per projector channel).
+            // A 256-element blocked traversal (P10I) was measured 2.9x slower in
+            // this function on dev08 (0.929 s versus 0.323 s, MKL T=1 si8).
+            for (col, &weight) in atom.columns.iter().zip(&weights[..nc]) {
+                for (out, b) in y.iter_mut().zip(col) {
+                    *out += b * weight;
                 }
             }
         }

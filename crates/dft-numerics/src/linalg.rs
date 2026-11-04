@@ -70,11 +70,12 @@ impl ComplexMatrix {
         &mut self.data[j * self.rows..(j + 1) * self.rows]
     }
     pub fn validate_finite(&self) -> Result<(), LinalgError> {
-        if self
-            .data
-            .iter()
-            .all(|z| z.re.is_finite() && z.im.is_finite())
-        {
+        // Reduce without an early-exit branch per element, permitting SIMD.
+        // Preserve rejection of either nonfinite component, including NaNs.
+        let finite = self.data.iter().fold(true, |finite, z| {
+            finite & z.re.is_finite() & z.im.is_finite()
+        });
+        if finite {
             Ok(())
         } else {
             Err(LinalgError::NonFinite)
@@ -362,6 +363,19 @@ pub fn gemm_into(
 ) -> Result<(), LinalgError> {
     a.validate_finite()?;
     b.validate_finite()?;
+    gemm_into_finite_inputs(a, op_a, b, op_b, output)
+}
+
+// Internal boundary: callers have checked both inputs since their last mutation.
+// Dimensions and output finiteness are still checked here.
+#[cfg(feature = "mkl")]
+fn gemm_into_finite_inputs(
+    a: &ComplexMatrix,
+    op_a: MatrixOp,
+    b: &ComplexMatrix,
+    op_b: MatrixOp,
+    output: &mut ComplexMatrix,
+) -> Result<(), LinalgError> {
     let adj_a = matches!(op_a, MatrixOp::Adjoint);
     let adj_b = matches!(op_b, MatrixOp::Adjoint);
     let (m, k) = if adj_a {

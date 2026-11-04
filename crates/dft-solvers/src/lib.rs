@@ -408,9 +408,16 @@ impl Davidson {
             let (mut values, coefficients) = hermitian_eigh(&projected)?;
             values.truncate(self.bands);
             let coefficients = first_columns(&coefficients, self.bands)?;
-            let vectors = gemm_work.multiply(&basis, Identity, &coefficients, Identity)?;
-            let (mut residual_block, mut residuals) = if recurrence {
-                let products = gemm_work.multiply(&h_basis, Identity, &coefficients, Identity)?;
+            let (vectors, products) = if recurrence {
+                let (vectors, products) = gemm_work.rotate_pair(&basis, &h_basis, &coefficients)?;
+                (vectors, Some(products))
+            } else {
+                (
+                    gemm_work.multiply(&basis, Identity, &coefficients, Identity)?,
+                    None,
+                )
+            };
+            let (mut residual_block, mut residuals) = if let Some(products) = products {
                 residual_from_products(products, &vectors, &values)?
             } else {
                 operator_applications += self.bands;

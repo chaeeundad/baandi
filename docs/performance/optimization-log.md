@@ -3433,5 +3433,372 @@ to P10K and across budgets. This recheck follows the final diagnostic-only
 scope addition; the three-repeat and paired timing tables retain their stated
 binary provenance.
 
+## P10M investigation (2026-11-05; copy changes verified, QR acceptance blocked)
+
+Base: `3e1c350a00aa5d67d3ddd07ad1a2bf2d36f80939`. The supplied dev08
+profile attributes 233 idle-worker samples and 59 busy samples to scalar
+`subtract_projection` called by internal orthonormalization. Source inspection
+confirms a column dependency: a new normalized column must be finalized before
+its first-pass updates to later columns, and the next column's second pass
+visits all accepted columns sequentially. Each scalar projection reduces four
+lanes on one worker, then updates the vector on that worker. This is not a
+projector-block loop. Existing external-basis projection already uses two GEMMs.
+
+P10L stored Mac evidence reports 0.260345453 s inclusive projection wall,
+0.133919039 s overlapping scheduled parallel regions (51.4%), and first-pass
+max/mean worker busy imbalance median 2.242879, worst 5.548690. These are prior
+measurements, not newly measured P10M results. First-pass pieces peak at 19;
+2969 plane waves produce only 12 fixed 256-row GEMM panels. The planned trial
+uses CholeskyQR2 for internal full-rank blocks and fixed 64-plane-wave projection
+panels (47 pieces for 2969 rows), retaining an ordered partial sum and the
+historical rank-revealing path when Gram conditioning is unsuitable. Rank
+thresholds and solver policies must remain unchanged. Acceptance is pending
+fresh SCF energy, iteration-count and timing gates.
+
+Fresh baseline `scripts/check.sh` passed all four gates. A release-with-symbols
+`sample PID 1 -file /tmp/p10m-base.sample` attempt exited 255: macOS refused
+process inspection in the sandbox; no sampled profile was produced. Use the
+supplied profile plus the compile-time P10L counter build below, without
+requesting elevated access. Fresh five-case T=1 baseline is stored at
+`/tmp/p10m-base-1.json`; raw reference binary is `/tmp/p10m-base`.
+
+### Current disposition and new dev08 evidence
+
+The architect supplied six dev08 MKL T=1 runs with approximately 230 samples
+per run, comparing main `9fcb356` and `fe0492b`: subtract_projection self time
+0.276 vs 1.674 s, zgemm kernels 1.516 vs 1.005 s, memcpy 0.662 vs 0.167 s,
+and wall 6.589 vs 6.334 s. These are supplied remote measurements, not Mac
+measurements or a new QE reference. `9fcb356` is already an ancestor of this
+worktree's base `3e1c350`; no Hamiltonian edits were made here. Main subsequently
+advanced through `3715d13` and `cfe298b` (dashboard and log correction). Git
+metadata is read-only to the implementer: the architect must merge current
+main before accepting the branch; the numerical revert is already present.
+
+The default retained change is storage-only: one reserved live-prefix basis,
+borrowed live H basis, in-place coefficient truncation, new-column-only append,
+and direct contracted-restart output into an alternate H cache. The operator
+API still requires owned contiguous blocks, so a single reusable narrow product
+buffer remains for appended columns. No full-subspace concatenate or cached
+first_columns copy remains in production Davidson. The legacy concatenate is
+compiled only for the independent test oracle. All physical defaults and the
+P10L orthogonalization schedule are retained. No new dependency or unsafe code.
+
+The QR candidate uses reusable Gram/inverse/rollback buffers and faer's Cholesky
+factor and triangular solver. The `sqrt(epsilon)*max(diag(Gram))` squared-pivot
+check only rejects an unsuitable Cholesky trial; it does not change the MGS rank
+threshold. CholeskyQR2 is interleaved with the existing two established-basis
+projection passes. It preserves column order and was checked against scalar
+MGS, including zero/duplicate/extreme-scale/nearly-dependent inputs. Pure Rust
+projection pieces are fixed at 64 rows independent of T; 2969 rows yield 47.
+MKL retains one unpadded sequential call per logical GEMM. CholeskyQR2 with
+256-row panels was also measured to isolate QR from panel refinement.
+
+The QR experiment is disabled through a compile-time constant unless
+`RUSTFLAGS='--cfg feature="block-qr"'` is explicitly supplied. Default builds
+reserve no QR-specific numerical buffers and retain 256-row GEMM storage.
+It is not accepted: the six-step 20-atom skew synthetic iteration count rises
+233 -> 329 (64-row panels), or 233 -> 311 (256-row panels). Neither variant is
+an acceptable general default. No tolerance, SCF policy, eigensolver policy,
+or system-specific predicate was adjusted to conceal the failed gate.
+
+### Numerical gates and iteration counts
+
+Default storage changes: five actual inputs at T=1,2,4,8,12 have exactly the
+baseline energy, density SHA-256, main Davidson count and certificate count.
+Baseline binary: `/tmp/p10m-base`; final storage binary: `/tmp/p10m-copy-final`.
+The baseline is current-main numerical state (including `9fcb356`). Evidence:
+`/tmp/p10m-base-1.json`, `/tmp/p10m-copy-{1,2,4,8,12}.json` and their logs.
+
+| Case | Energy Ha (baseline = storage change) | Main Davidson | Certificate Davidson | SCF steps |
+|---|---:|---:|---:|---:|
+| gamma | -7.2955304682107647 | 41 | 8 | 10 |
+| k222s | -7.919423412469083 | 204 | 21 | 10 |
+| k222 | -7.8312300571211368 | 408 | 24 | 10 |
+| k444s | -7.9259761266480915 | 1686 | 141 | 10 |
+| si8 | -31.321803601031256 | 340 | 68 | 15 |
+
+The QR64 trial's five-case maximum energy difference was 2.415845301584341e-13
+Ha (si8). Four small cases retained their counts; si8 changed from main/cert
+340/68 to 308/66. The final experimental switch preserves the baseline small
+case path below 2048 rows because the all-size QR trial was slower there in
+exploratory measurements. No firm timing ratio is inferred from those three-run
+samples. Cross-T density identity held for QR in its diagnostic Si/skew runs.
+
+The reproducible synthetic driver generates nonphysical fixtures with valence
+2, one s projector (cubic) or two s plus one p projector (skew), 101 radial
+points, 20 Ry, n+4 bands, and six SCF steps at T=1,2,4,8. These are bounded
+nonconverged outcomes (CLI exit 3), not converged energy certificates. All 24
+storage-change outcomes are bit-identical to baseline; reference and final
+summaries are `/tmp/p10m-synthetic-base/summary.json` and
+`/tmp/p10m-synthetic-copy/summary.json`. The checked-in driver reproduced them
+at `/tmp/p10m-synthetic-reproduce/summary.json` with assertions. Certificates
+are absent in these bounded runs.
+
+| Synthetic case | Baseline/main Davidson | Storage change | QR64 | QR256 |
+|---|---:|---:|---:|---:|
+| syn4-cubic | 30 | 30 | 30 | 30 |
+| syn4-skew | 91 | 91 | 91 | 91 |
+| syn8-cubic | 34 | 34 | 34 | 34 |
+| syn8-skew | 126 | 126 | 126 | 126 |
+| syn20-cubic | 40 | 40 | 40 | 40 |
+| syn20-skew | 233 | 233 | 329 | 311 |
+
+QR64 synthetic20 cubic/skew six-step energy changes were -3.3707786713e-6 /
++2.0423614069e-4 Ha; those unfinished SCFs are not covered by the five converged
+Si energy claim. Both variants still had identical outputs across their own
+thread budgets. This distinguishes deterministic rounding from unchanged
+nonlinear SCF/Davidson behavior.
+
+### Exact work and explicit copy accounting
+
+The iteration-local counter uses Arc context propagated with pool tasks;
+it does not subtract process-global snapshots across concurrently running k
+solves. The unit test checks inherited nested work and exact summation.
+Production builds inline the counter calls to no-ops.
+
+| si8 T=1 or 8 | Iterations | Logical 2mnk | Backend-call 2mnk | Explicit copied bytes | Mean copied bytes/iteration |
+|---|---:|---:|---:|---:|---:|
+| copy_before | 408 | 21834221954 | 21834221954 | 3083884288 | 7558539.922 |
+| copy_after | 408 | 21834221954 | 21834221954 | 666653344 | 1633954.275 |
+| qr_cost | 374 | 21107612646 | 21107612646 | 1194068784 | 3192697.283 |
+
+The executed/logical GEMM ratio is exactly 1 for every counted iteration, not
+an estimate from timing samples. The retained default has identical GEMM work
+and 2,417,230,944 fewer explicit copy bytes over 408 iterations. Count evidence:
+`/tmp/p10m-copy-{before,after}-counters/*/trace.csv`; complete per-iteration
+records remain in P10M_COST lines. The QR-cost trial includes the copy changes
+and has a different iteration count; its lower total GEMM count is not a
+same-work kernel comparison and does not waive the synthetic failure.
+
+No panel is padded at the adapter boundary, no plane-wave range is repeated,
+and MKL has one direct full-shape call per logical product. Pure Rust reduces
+in fixed ascending panel order, including the short tail. Extra Gram assembly
+adds, scalar projections, factorization and opaque backend padding are excluded
+from the 2mnk count. Copy counters include the instrumented EVD/orthogonalization and
+Davidson sites; unmodified Hamiltonian/FFT copies are outside their scope.
+GEMM counters cover GemmWorkspace products. The counters exclude zero filling
+and backend-internal traffic, and count
+bytes copied once (not read+write bytes). See README for exact definitions.
+These structural checks satisfy the measurable MKL T=1 no-more-GEMM-work /
+no-more-explicit-copy constraint for the default change, not a remote wall-time
+guarantee. Shape-dependent MKL efficiency remains a remote profiling question.
+
+### Projection-only worker counters (exploratory diagnostic runs)
+
+These instrumented runs are not thirty independent SCF timing samples; do not
+interpret their wall ratios as accepted speedups. Individual-region imbalance
+summaries below each contain over 1400 regions, and still describe these runs
+only. Idle-or-unmeasured mass = T*projection wall - instrumented worker busy
+seconds, excluding nested serial records already charged to a region. It is
+not a CPU-sample idle histogram. Concurrent builds affected some later counter
+runs; only exact operation/byte counts from them are used for acceptance.
+
+| Variant | Projection wall s | Idle-or-unmeasured worker s | Max pieces | Qualifying regions | Median max/mean | Worst max/mean |
+|---|---:|---:|---:|---:|---:|---:|
+| baseline | 0.267038538 | 1.539600755 | 19 | 2312 | 1.673728 | 5.509513 |
+| qr256 | 0.214251005 | 1.154498498 | 12 | 1452 | 1.305537 | 3.270874 |
+| qr64 | 0.227786746 | 1.192473612 | 47 | 1564 | 1.225035 | 2.605039 |
+| copy_after | 0.282241040 | 1.633152970 | 19 | 2312 | 1.679886 | 8.000000 |
+
+Per-worker busy seconds for the projection phase at T=8 (worker indices 0..7):
+
+- baseline: 0.210527978, 0.056795983, 0.056569124, 0.055686320, 0.055976937, 0.053715539, 0.055420143, 0.052015525.
+- qr256: 0.137545460, 0.060708678, 0.062058267, 0.061325070, 0.061337260, 0.061081930, 0.059573135, 0.055879742.
+- qr64: 0.157963224, 0.067609208, 0.067961451, 0.067348098, 0.067835294, 0.066219513, 0.067589752, 0.067293816.
+
+Fresh P10L-style baseline projection covered 0.137422054 s of scheduled
+parallel work in 0.267038538 s inclusive wall. QR64 covered 0.124120132 s in
+0.227786746 s. The latter has more finely divided work but also different
+Davidson work and extra Gram/rotation boundaries. Merely obtaining 47 pieces
+does not establish all-worker utilization or the dev08 2x target.
+
+The pre-copy QR64 prototype also had the following **exploratory three-run**
+Mac medians. They are preserved for experiment provenance, not firm speedup
+ratios or acceptance evidence. Binaries: `/tmp/p10m-base`, `/tmp/p10m-qr64`;
+raw samples: `/tmp/p10m-paired.json`. QR changed si8 Davidson work (408 -> 374).
+
+| T | Baseline si8 s (3 runs) | QR64 si8 s (3 runs) |
+|---|---:|---:|
+| 1 | 3.681320250 | 3.464171167 |
+| 2 | 2.369899125 | 2.195221750 |
+| 4 | 1.761237042 | 1.638604750 |
+| 8 | 1.574253167 | 1.446550917 |
+| 12 | 1.530826542 | 1.416553500 |
+
+The all-size QR trial's k444s medians increased in this exploratory sweep;
+small blocks were restored to the existing MGS path before further experiments.
+That guard is a data-size boundary already present in P10L, not a silicon label
+or thread-count-dependent numerical choice. The separate 20-atom failure still
+prevents enabling the tall-block candidate by default.
+
+### Thirty-sample Mac timing: first storage version (superseded below)
+
+Uninstrumented alternating before/after pairs; one warmup per binary/budget
+was discarded, followed by 30 samples of each. No concurrent build or benchmark
+was launched by this session. This is the shared Apple Silicon Mac, not quiet
+dev08 acceptance. Raw data: `/tmp/p10m-times-30.json`; driver is checked in at
+`crates/dft-numerics/src/pool/orthonormalize_bench.py`. Every one of the 720
+measured SCFs matched baseline energy, density hash and both Davidson counts.
+Ratios below use 30 samples per condition, unlike the earlier QR explorations.
+
+| si8 T | Before median s | After median s | Before / after |
+|---|---:|---:|---:|
+| 1 | 3.673281958 | 3.697323437 | 0.993498 |
+| 2 | 2.339866562 | 2.303031667 | 1.015994 |
+| 3 | 1.974924750 | 1.932406208 | 1.022003 |
+| 4 | 1.795078771 | 1.750488480 | 1.025473 |
+| 5 | 1.710852270 | 1.672836020 | 1.022726 |
+| 6 | 1.601592292 | 1.564837229 | 1.023488 |
+| 7 | 1.619370397 | 1.587577063 | 1.020026 |
+| 8 | 1.624617397 | 1.592291104 | 1.020302 |
+| 9 | 1.610427000 | 1.577656375 | 1.020772 |
+| 10 | 1.582111188 | 1.544229146 | 1.024531 |
+| 11 | 1.584237833 | 1.545799604 | 1.024866 |
+| 12 | 1.582336479 | 1.541288542 | 1.026632 |
+
+The retained change is a small multithread wall improvement on this Mac, not
+the requested orthogonalization redesign. T=1 median is slightly slower despite
+the explicit copy reduction; no T=1 wall-time win is claimed. The structural
+MKL gate is equal backend-call work and fewer explicit copy bytes, not an
+inference from Mac wall time. The dev08 utilization and >=2x target remain
+unverified. Thirty repeated samples improve this local comparison's evidence;
+they do not eliminate shared-machine load, thermal or cross-budget effects.
+
+### Follow-up: k444s regression and eliminating redundant restart work
+
+The first storage version's 30-pair k444s gate did **not** pass at T=1:
+median 2.548991146 -> 2.569225875 s; 28 of 30 paired samples were slower.
+Raw data: `/tmp/p10m-k444-times-30.json`. T=8 medians were
+0.597748395 -> 0.598572187 s and T=12 0.509781667 -> 0.507254771 s.
+Thus the preceding si8 table is an intermediate version, not acceptance of
+that version. The initial T=1 regression was not dismissed as noise.
+
+Two further storage changes address unnecessary work. Empty live-prefix H
+buffers now reserve capacity without zeroing unused columns, and replacement
+copies extend directly into reserved storage without a preceding zero fill.
+A contracted restart formerly recomputed the exact H-basis/coefficient product
+already produced by the paired rotation. When the basis can overflow, that
+product is saved in the reserved restart buffer before residual formation and
+reused if the existing product-trust and orthogonality guards permit it. The
+same backend result, shapes and floating-point order are preserved; no H action,
+residual, tolerance, restart criterion or solver algorithm is changed. The
+fallback still recomputes into reserved output. This is reuse of an existing
+engine result; no new reference-code source was consulted.
+
+The final candidate binary is `/tmp/p10m-final2`. All five real cases at
+T=1,2,4,8,12 and all 24 bounded synthetic cases again match baseline energy,
+density and Davidson/certificate counts exactly. Logs:
+`/tmp/p10m-final2-gates.log`, `/tmp/p10m-synthetic-final2.log`.
+Fresh final counters: `/tmp/p10m-final2-counters/*/trace.csv`.
+
+Over 408 si8 iterations, backend-call and logical 2mnk both fall from
+21834221954 to 21636961594;
+14 duplicate restart GEMMs are removed. Explicit copy bytes are
+736959264 total (1806272.706 bytes/iteration),
+versus 3083884288 baseline (7558539.922 bytes/iteration).
+The intermediate copy-only version copied fewer bytes but performed more GEMM
+work; the final candidate trades a narrow saved-product copy for removal of
+identical recomputation. Each individual iteration still has executed/logical
+GEMM count exactly one.
+
+Final-candidate k444s remeasurement, 30 alternating pairs at each budget,
+after discarded warmups and with no concurrent local build/benchmark:
+
+| k444s T | Before median s | Final median s | Before / final |
+|---|---:|---:|---:|
+| 1 | 2.536909562 | 2.532314750 | 1.001814 |
+| 8 | 0.586903520 | 0.584165750 | 1.004687 |
+| 12 | 0.506513229 | 0.501538563 | 1.009919 |
+
+All three medians are no slower in this remeasurement; the previous T=1
+regression is resolved in these observations. This is a small effect on a
+shared Mac, not a large or cross-machine speedup claim. Raw paired samples,
+phases and equality checks: `/tmp/p10m-final2-k444-30.json`.
+
+A per-call executed/logical ratio of one does not detect duplicate *requests*
+from a caller. The removed 14 restart requests account for 197,260,360 units
+of 2mnk. The iteration trace comparison, together with unchanged density and
+iteration counts, detects that solver-level redundancy separately from tile
+padding/recomputation within one request. No claim is made about the theoretical
+minimum total work or MKL's internal instruction count.
+
+### Final verification commands and scope
+
+All commands below were actually executed. Logs are local diagnostic evidence;
+source, reproducer commands and summarized numbers are retained in this entry.
+
+| Command | Exit | Evidence |
+|---|---:|---|
+| `scripts/check.sh` | 0 | `/tmp/p10m-final2-check.log`: build/test/fmt/clippy PASS |
+| `cargo check --features mkl --all-targets` | 0 | `/tmp/p10m-final2-mkl.log`; compile only, no MKL runtime on Mac |
+| `cargo test --release -p dft-numerics block_qr_si8_shapes -- --ignored --nocapture` | 0 | `/tmp/p10m-final-shapes.log`: one selected test passed; 2969 rows, widths 20/40/60, T=1/2/4/8/12 |
+| `RUSTFLAGS='--cfg feature="worker-analysis"' cargo test -p dft-numerics iteration_costs_follow_workers -- --nocapture` | 0 | `/tmp/p10m-cost-test.log`: exact nested worker cost aggregation test passed |
+| `RUSTFLAGS='--cfg feature="worker-analysis"' cargo clippy -p dft-numerics -p dft-solvers --all-targets -- -D warnings` | 0 | `/tmp/p10m-analysis-clippy.log` |
+| `python3 -I /tmp/p10m_final2_gates.py` | 0 | `/tmp/p10m-final2-gates.log`: bench_scf.py, five cases, five budgets, baseline identity and iteration assertions |
+| `python3 -I crates/dft-numerics/src/pool/orthonormalize_synthetic.py /tmp/p10m-final2 /tmp/p10m-synthetic-final2 /tmp/p10m-synthetic-base/summary.json` | 0 | 24 matched bounded outcomes; individual CLI exits are 3 (nonconverged), not falsely reported as converged |
+| `python3 -I scripts/make_readme_figures.py` | 0 | Regenerated validation block/figures; no content changes |
+| `python3 -I scripts/tests/test_readme_figures.py` | 0 | Three tests passed; existing ResourceWarnings about open files were emitted |
+
+The paired timing commands are reproduced in the README and their JSON keeps
+all 30 samples, phase timings, energies, hashes and iteration counts per binary
+and budget. The debug guards for matrix prefix capacity and the production
+solver's original numerical/certification tests are included in check.sh.
+Analysis counters do not exist in ordinary builds. Explicit copy-site totals
+exclude unmodified Hamiltonian/FFT sites and opaque library copies; they are
+not interposed libc memcpy measurements.
+
+The full P10M goal remains **BLOCKED**: CholeskyQR2 failed the bounded 20-atom
+skew iteration regression, so the 47-piece orthogonalization path is opt-in
+only and the default dependency chain remains. The default storage/reuse change
+preserves numerical behavior and reduces measured work/copies, but it does not
+establish dev08 >=2x/3x scaling or remote MKL wall time. Synthetic runs are six
+steps, not convergence certificates. The architect must merge current main and
+review/commit the uncommitted owned-file changes; git metadata is read-only in
+this worktree. Session/dashboard files and reference datasets were not edited
+outside ticket ownership. No UPF, QE source, manifest, tolerance, physics default
+or nonlocal-Hamiltonian change is included.
+
+### Final retained candidate: complete si8 T=1..12 timing
+
+Thirty alternating pairs per budget, discarded warmups, uninstrumented
+`/tmp/p10m-base` versus `/tmp/p10m-final2`. No local build or other benchmark ran
+concurrently. All 720 measured runs passed energy/density/Davidson-count
+identity assertions. Raw data: `/tmp/p10m-final2-si8-30.json` (driver exit 0).
+This table supersedes the intermediate storage-only timing table above.
+
+| T | Baseline median s | Final median s | Baseline / final |
+|---|---:|---:|---:|
+| 1 | 3.667245479 | 3.603509583 | 1.017687 |
+| 2 | 2.338728145 | 2.317020833 | 1.009369 |
+| 3 | 1.983455000 | 1.938644042 | 1.023115 |
+| 4 | 1.795927646 | 1.762801312 | 1.018792 |
+| 5 | 1.711750876 | 1.670288354 | 1.024824 |
+| 6 | 1.598668833 | 1.565457459 | 1.021215 |
+| 7 | 1.615405833 | 1.581073000 | 1.021715 |
+| 8 | 1.626799208 | 1.585099250 | 1.026307 |
+| 9 | 1.608345000 | 1.569704000 | 1.024617 |
+| 10 | 1.580744979 | 1.542475771 | 1.024810 |
+| 11 | 1.584643791 | 1.542218229 | 1.027509 |
+| 12 | 1.580154188 | 1.539370937 | 1.026493 |
+
+The final candidate has lower observed medians at all twelve si8 budgets and
+at k444s T=1,8,12 in the separate 30-pair sweep (180 more measured runs, driver
+exit 0). These are local observations; they do not establish dev08 scaling or
+MKL runtime. The failed QR prototype remains disabled. The full ticket status
+is BLOCKED, even though the retained default's numerical, iteration, operation
+count, copy-count and sampled Mac no-regression checks pass.
+
+Reproduction commands for the final paired sweeps:
+
+```sh
+python3 -I crates/dft-numerics/src/pool/orthonormalize_bench.py   /tmp/p10m-base /tmp/p10m-final2 /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF   /tmp/p10m-final2-si8-30.json --cases si8 --repeats 30
+python3 -I crates/dft-numerics/src/pool/orthonormalize_bench.py   /tmp/p10m-base /tmp/p10m-final2 /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF   /tmp/p10m-final2-k444-30.json --cases k444s --threads 1,8,12 --repeats 30
+```
+
+SHA-256 provenance (binaries built with `CARGO_PROFILE_RELEASE_DEBUG=true`):
+
+- `/tmp/p10m-base`: `0a53062534cfd52090387e7206514985cb24924dc80709ee7c8c7d8d8c093d4e`.
+- `/tmp/p10m-final2`: `292185da8edb6a938bbdc1d1c6eba4680ee887a1b5eb259f6ce98f395e085abc`.
+- `/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF`: `e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
 ### Correction, 2026-11-04: NonlocalOperator::add comparison value
 Commit 9fcb356 ("restore original NonlocalOperator::add loop, blocked traversal measured 2.9x slower on dev08") rests on a wrong reference value. The remote measurement session corrected it: fe0492b `NonlocalOperator::add` is 0.474 s (7.5 percent, 17 of 227 samples, 6 runs) on dev08 MKL T=1 si8, not 0.323 s (6 of 117 samples, a count too small for the stated precision). The P10I regression is about 2.0x, not 2.9x. The revert of 9fcb356 is bit-identical and reduced the function from 0.929 s to 0.800 s (239 samples) but the wall time did not move beyond noise (mkl T1 6.612 to 6.589 s, pure T8 4.567 to 4.540 s). The remaining MKL T=1 gap to fe0492b (6.589 versus 6.334 s) is spread: MKL zgemm kernel +0.512 s, memcpy +0.494 s, NonlocalOperator::add +0.325 s, tile multiply_into +0.221 s, apply_local +0.219 s, concatenate +0.192 s, offset by subtract_projection -1.398 s and old gemm -0.307 s. Rule applied from now on: never quote a profile-derived ratio as a firm number when the counts are below about 30 samples.

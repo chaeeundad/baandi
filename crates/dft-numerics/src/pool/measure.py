@@ -5,7 +5,7 @@ Each child performs one SCF, preserving input, trace, result and density evidenc
 Phases are inclusive; their times must not be added. Busy time covers instrumented
 leaf kernels only, not all main-thread work. Imbalance includes idle pool workers.
 """
-import importlib.util,pathlib,subprocess,json,hashlib,time,collections,sys,csv
+import importlib.util,pathlib,subprocess,json,hashlib,time,collections,sys,csv,statistics
 root=pathlib.Path.cwd(); spec=importlib.util.spec_from_file_location('bench',root/'scripts/bench_scf.py'); b=importlib.util.module_from_spec(spec);spec.loader.exec_module(b)
 binary,tag,upf=sys.argv[1:];binary=str(pathlib.Path(binary).resolve());upf=str(pathlib.Path(upf).resolve());base=pathlib.Path(tag).resolve();base.mkdir(exist_ok=True)
 def union(spans):
@@ -42,8 +42,11 @@ for case in ['si8','skew4']:
     with (d/'trace.csv').open('w') as err:
         p=subprocess.run([binary,'run',str(inp),'--output-dir',str(d/'out')],stdout=subprocess.DEVNULL,stderr=err)
     assert p.returncode==0,(case,t,(d/'trace.csv').read_text()[-1000:])
+    costs=[]
     events=[]
     for line in (d/'trace.csv').read_text().splitlines():
+        if line.startswith('P10M_COST,'):
+            costs.append(list(map(int, line.split(',')[1:])))
         if not line.startswith('P10L,'):continue
         fields=line.split(',');_,name,a,z,w,n,busy=fields[:7];events.append(dict(name=name,a=int(a),z=int(z),w=int(w),n=int(n),busy=list(map(int,busy.split(';'))) if busy else [],nested_busy=len(fields)>7 and fields[7]=='1'))
     result=json.loads((d/'out/results.json').read_text());span=next(e for e in events if e['name']=='scf');regions=[e for e in events if e['w']]
@@ -68,7 +71,33 @@ for case in ['si8','skew4']:
         phases[name]['between_logical_regions_s']=wall-overlap(merged((e['a'],e['z']) for e in ev),logical)
     wall=(span['z']-span['a'])/1e9;inside=union((max(e['a'],span['a']),min(e['z'],span['z'])) for e in regions if e['z']>span['a'] and e['a']<span['z'])
     row=dict(case=case,threads=t,scf_s=wall,regions_s=inside,between_s=wall-inside,busy_s=sum(sum(e['busy']) for e in regions)/1e9,phases=phases,energy=result['total_energy']['ha'],iterations=len(result['convergence']['history']),density=hashlib.sha256((d/'out/density.bin').read_bytes()).hexdigest())
+    row['davidson_costs'] = dict(
+        iterations=len(costs),
+        logical_2mnk=sum(c[2] for c in costs),
+        executed_2mnk=sum(c[3] for c in costs),
+        explicit_copy_bytes=sum(c[4] for c in costs),
+        copy_bytes_per_iteration=[c[4] for c in costs])
     row['parallel_regions_s']=union(parallel)
     row['observed_busy_fraction_by_worker']=[sum(e['busy'][i] for e in events if e['busy'] and not e['nested_busy'])/1e9/wall for i in range(t)]
     row['observed_external_busy_fraction']=sum(e['busy'][255] for e in events if e['busy'] and not e['nested_busy'])/1e9/wall
+    # P10M: phase-local worker accounting, without double-counting serial
+    # work already charged to a region. Uninstrumented glue is unobserved,
+    # so the complement is an idle-or-unmeasured mass, not sampled CPU idle.
+    projections = merged((e['a'], e['z']) for e in events if e['name'] == 'projection')
+    scoped = [e for e in events if e['busy'] and not e['nested_busy']
+              and any(a <= e['a'] and e['z'] <= z for a, z in projections)]
+    worker_s = [sum(e['busy'][i] for e in scoped) / 1e9 for i in range(256)]
+    projection_wall = union(projections)
+    qualifying = [e for e in scoped if e['w'] > 1 and e['n'] > t and sum(e['busy'])]
+    imbalance = [max(e['busy']) * t / sum(e['busy']) for e in qualifying]
+    row['projection_metrics'] = dict(
+        wall_s=projection_wall,
+        scheduled_parallel_fraction=overlap(projections, parallel) / projection_wall if projection_wall else 0,
+        busy_s_by_worker=worker_s[:t], external_busy_s=worker_s[255],
+        observed_busy_fraction=sum(worker_s) / (t * projection_wall) if projection_wall else 0,
+        idle_or_unmeasured_worker_s=t * projection_wall - sum(worker_s),
+        qualifying_regions=len(imbalance),
+        median_max_over_mean=statistics.median(imbalance) if imbalance else None,
+        worst_max_over_mean=max(imbalance) if imbalance else None,
+        pieces_max=max((e['n'] for e in scoped), default=0))
     rows.append(row);(base/'summary.json').write_text(json.dumps(rows,indent=2));print(case,t,round(wall,4),round(inside,4),round(row['busy_s']/wall/t,3),flush=True)

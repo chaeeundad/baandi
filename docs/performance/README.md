@@ -203,3 +203,71 @@ local-only and multi-projector potentials, comparing full density and energy
 bits across thread counts. It deliberately retains six iterations, and is
 **not** a converged material calculation or a QE reference. See the optimization
 log for retained/rejected experiments, actual gates, and unresolved dev08 goals.
+
+## P10M: retained storage changes and rejected block-QR default
+
+Davidson reserves one live-prefix subspace matrix, two alternating H-subspace
+buffers and one correction-product buffer. Appending copies only new columns;
+reading the cached H basis borrows its live prefix with the original column
+stride. Truncating the owned Ritz-coefficient matrix changes its live width
+without copying. A potentially overflowing basis preserves the already computed H rotation
+before residual formation; a valid contracted restart reuses that buffer.
+The fallback restart GEMM writes directly to the alternate reserved H buffer.
+Unused capacity is reserved without initializing columns that will not be read. The accepted default keeps P10L orthogonalization and all
+arithmetic/reduction boundaries. An external operator that replaces its output
+allocation can force capacity restoration; the engine Hamiltonian preserves it.
+This is not a claim that all legacy Davidson allocations have been removed.
+
+The CholeskyQR2 prototype is retained **disabled by default**. To reproduce the
+experiment, use `RUSTFLAGS='--cfg feature="block-qr"' cargo build --release -p
+dft-cli` (a source-only experiment, not a Cargo feature or SCF default). It uses
+faer's sequential Cholesky/triangular solve for the small factor and two Gram /
+rotation passes, with persistent scratch. Projection-only 64-row/pw panels give
+47 pieces at 2969 plane waves; partials are assembled in ascending panel order.
+Small matrices below the existing 2048-row boundary retain MGS. If normal-equation
+conditioning is unsuitable, the input is restored and existing MGS decides rank
+with the unchanged dependence tolerance. This experiment failed the synthetic
+20-atom skew-cell Davidson-iteration gate, despite passing the five Si energy
+checks. It must not be enabled as a general default on the Si result alone.
+
+`worker-analysis` now also emits `P10M_COST,start_ns,end_ns,logical_2mnk,
+executed_2mnk,explicit_copy_bytes` once per Davidson iteration, at the outer SCF
+flush. The iteration context follows stolen/nested work and is distinct from
+phase timing, so concurrent k solves do not share a global difference counter.
+The FLOP convention here is the requested `2*m*n*k` (complex multiply/add
+counting convention; conventional real FLOPs are four times this number).
+Executed counts use actual backend-call dimensions, including partial tails;
+logical counts use complete requested products. These counters exclude Gram
+assembly additions (`panels*m*n` complex adds per Gram), finite checks, scalar
+MGS, factorization, and opaque backend microkernel padding/packing. Explicit
+copy bytes count source elements copied once, not combined read+write traffic;
+they include EVD adapter copies, projection copies, cache/append/restart and
+coefficient copies. Scope is the owned numerical/solver copy sites; unmodified
+Hamiltonian/FFT copy sites are not instrumented. GEMM counts cover
+`GemmWorkspace`, not every GEMM elsewhere in the engine. They exclude memset/zero initialization, implicit allocator
+traffic, compiler-generated copies and library-internal memcpy. Thus a ratio of
+one rules out extra GEMM dimensions at this adapter boundary, not hidden MKL
+implementation work or shape-dependent kernel efficiency.
+
+Reproducible bounded synthetic and paired timing drivers (run from repo root):
+
+```sh
+python3 -I crates/dft-numerics/src/pool/orthonormalize_synthetic.py \
+  /tmp/before /tmp/new-synthetic-before
+python3 -I crates/dft-numerics/src/pool/orthonormalize_synthetic.py \
+  /tmp/after /tmp/new-synthetic-after /tmp/new-synthetic-before/summary.json
+python3 -I crates/dft-numerics/src/pool/orthonormalize_bench.py \
+  /tmp/before /tmp/after /absolute/path/Si.pz-vbc.UPF /tmp/times.json \
+  --cases si8 --repeats 30
+cargo test --release -p dft-numerics block_qr_si8_shapes -- --ignored --nocapture
+RUSTFLAGS='--cfg feature="worker-analysis"' cargo test -p dft-numerics \
+  iteration_costs_follow_workers -- --nocapture
+```
+
+The synthetic driver exercises 4/8/20 atoms, cubic/skew cells, one/three
+projectors, and T=1,2,4,8. Its six-step outcomes deliberately remain unconverged;
+they test arithmetic/thread identity and iteration cost, not physical accuracy
+or convergence. Timings use alternating pairs after discarded warmups; thirty
+samples per binary/budget are required for reported performance ratios. See the
+P10M optimization-log entry for the failed candidate, exact counts, gate commands
+and remaining remote acceptance work.

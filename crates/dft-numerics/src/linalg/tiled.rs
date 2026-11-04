@@ -8,6 +8,13 @@ use std::sync::Arc;
 #[cfg(not(feature = "mkl"))]
 const PANEL: usize = 256;
 
+// Projection-only partition: 2969 rows yield 47 independent pieces at every T.
+const PROJECTION_PANEL: usize = 64;
+// The candidate failed the multi-system iteration gate. Preserve it for
+// controlled experiments without changing the accepted default or MKL work.
+#[allow(unexpected_cfgs)]
+const BLOCK_QR: bool = cfg!(feature = "block-qr");
+
 #[cfg(not(feature = "mkl"))]
 struct Tile {
     c: ComplexMatrix,
@@ -39,8 +46,22 @@ impl GemmWorkspace {
         #[cfg(not(feature = "mkl"))]
         let tiles = {
             let size = short;
-            let mut tiles = Vec::with_capacity(long.div_ceil(PANEL).max(1));
-            for _ in 0..long.div_ceil(PANEL).max(1) {
+            let mut tiles = Vec::with_capacity(
+                long.div_ceil(if BLOCK_QR || cfg!(test) {
+                    PROJECTION_PANEL
+                } else {
+                    PANEL
+                })
+                .max(1),
+            );
+            for _ in 0..long
+                .div_ceil(if BLOCK_QR || cfg!(test) {
+                    PROJECTION_PANEL
+                } else {
+                    PANEL
+                })
+                .max(1)
+            {
                 tiles.push(Tile {
                     c: ComplexMatrix::zeros(size, short)?,
                 });
@@ -105,6 +126,7 @@ impl GemmWorkspace {
                 k,
                 n,
                 reduce: false,
+                panel: PANEL,
             };
             let hjob = Job { a: h, ..job };
             let count = m.div_ceil(PANEL).max(1);
@@ -114,6 +136,8 @@ impl GemmWorkspace {
             } else {
                 self.threads.min(count)
             };
+            crate::pool::analysis::logical_gemm(m, n, k);
+            crate::pool::analysis::logical_gemm(m, n, k);
             let output = faer::MatMut::from_column_major_slice_mut(&mut out.data, m, n);
             let houtput = faer::MatMut::from_column_major_slice_mut(&mut hout.data, m, n);
             let _region = Span::region("rotation_pair", threads);
@@ -161,6 +185,21 @@ impl GemmWorkspace {
         ob: MatrixOp,
         out: &mut ComplexMatrix,
     ) -> Result<(), LinalgError> {
+        self.multiply_panels(a, oa, b, ob, out, 256)
+    }
+
+    #[allow(clippy::too_many_arguments)] // GEMM operands plus a fixed data partition.
+    fn multiply_panels(
+        &mut self,
+        a: &ComplexMatrix,
+        oa: MatrixOp,
+        b: &ComplexMatrix,
+        ob: MatrixOp,
+        out: &mut ComplexMatrix,
+        _panel: usize,
+    ) -> Result<(), LinalgError> {
+        #[cfg(not(feature = "mkl"))]
+        let panel = _panel;
         let (m, k) = shape(a, oa);
         let (l, n) = shape(b, ob);
         if k != l
@@ -172,14 +211,16 @@ impl GemmWorkspace {
         {
             return Err(LinalgError::Dimension);
         }
+        crate::pool::analysis::logical_gemm(m, n, k);
         #[cfg(feature = "mkl")]
         {
+            crate::pool::analysis::executed_gemm(m, n, k);
             gemm_into_finite_inputs(a, oa, b, ob, out)
         }
         #[cfg(not(feature = "mkl"))]
         {
             let reduce = k > m;
-            let count = if reduce { k } else { m }.div_ceil(PANEL).max(1);
+            let count = if reduce { k } else { m }.div_ceil(panel).max(1);
             let job = Job {
                 a,
                 oa,
@@ -189,6 +230,7 @@ impl GemmWorkspace {
                 k,
                 n,
                 reduce,
+                panel,
             };
             // Fixed 2,097,152-real-flop cutoff (8 flops per complex multiply-add).
             // Require four panels to avoid a single full panel plus a tiny tail.
@@ -255,17 +297,18 @@ struct Job<'a> {
     k: usize,
     n: usize,
     reduce: bool,
+    panel: usize,
 }
 #[cfg(not(feature = "mkl"))]
 fn run(tiles: &mut [Tile], first: usize, threads: usize, job: &Job<'_>) -> Result<(), LinalgError> {
     if threads <= 1 || tiles.len() == 1 {
         for (offset, tile) in tiles.iter_mut().enumerate() {
             let _piece = Piece::new();
-            let start = (first + offset) * PANEL;
+            let start = (first + offset) * job.panel;
             let (rows, inner) = if job.reduce {
-                (job.m, (job.k - start).min(PANEL))
+                (job.m, (job.k - start).min(job.panel))
             } else {
-                ((job.m - start).min(PANEL), job.k)
+                ((job.m - start).min(job.panel), job.k)
             };
             reshape(&mut tile.c, rows, job.n);
             #[cfg(not(feature = "mkl"))]
@@ -293,11 +336,11 @@ fn run(tiles: &mut [Tile], first: usize, threads: usize, job: &Job<'_>) -> Resul
 // directly into the caller's matrix; there is no rotation packing/assembly.
 #[cfg(not(feature = "mkl"))]
 fn rotate(mut out: faer::MatMut<'_, Complex64>, first: usize, threads: usize, job: &Job<'_>) {
-    if threads <= 1 || out.nrows() <= PANEL {
+    if threads <= 1 || out.nrows() <= job.panel {
         let mut start = first;
         while out.nrows() > 0 {
             let _piece = Piece::new();
-            let rows = out.nrows().min(PANEL);
+            let rows = out.nrows().min(job.panel);
             let (panel, rest) = out.split_at_row_mut(rows);
             borrowed_product(job, start, rows, job.k, panel);
             start += rows;
@@ -305,8 +348,8 @@ fn rotate(mut out: faer::MatMut<'_, Complex64>, first: usize, threads: usize, jo
         }
         return;
     }
-    let panels = out.nrows().div_ceil(PANEL);
-    let middle = panels / 2 * PANEL;
+    let panels = out.nrows().div_ceil(job.panel);
+    let middle = panels / 2 * job.panel;
     let (left, right) = out.split_at_row_mut(middle);
     WorkerPool::join(
         || rotate(left, first, threads, job),
@@ -323,11 +366,11 @@ fn rotate_pair(
     job: &Job<'_>,
     hjob: &Job<'_>,
 ) {
-    if threads <= 1 || out.nrows() <= PANEL {
+    if threads <= 1 || out.nrows() <= job.panel {
         let mut start = first;
         while out.nrows() > 0 {
             let _piece = Piece::new();
-            let rows = out.nrows().min(PANEL);
+            let rows = out.nrows().min(job.panel);
             let (panel, rest) = out.split_at_row_mut(rows);
             let (hpanel, hrest) = hout.split_at_row_mut(rows);
             borrowed_product(job, start, rows, job.k, panel);
@@ -338,8 +381,8 @@ fn rotate_pair(
         }
         return;
     }
-    let panels = out.nrows().div_ceil(PANEL);
-    let middle = panels / 2 * PANEL;
+    let panels = out.nrows().div_ceil(job.panel);
+    let middle = panels / 2 * job.panel;
     let (left, right) = out.split_at_row_mut(middle);
     let (hleft, hright) = hout.split_at_row_mut(middle);
     WorkerPool::join(
@@ -356,6 +399,7 @@ fn borrowed_product(
     inner: usize,
     mut c: faer::MatMut<'_, Complex64>,
 ) {
+    crate::pool::analysis::executed_gemm(rows, job.n, inner);
     let row = if job.reduce { 0 } else { start };
     let reduction = if job.reduce { start } else { 0 };
     let a = faer::MatRef::from_column_major_slice(&job.a.data, job.a.rows, job.a.cols);
@@ -390,8 +434,9 @@ fn borrowed_product(
     }
 }
 
-/// Block CGS2 against the established basis, interleaved with two-pass MGS
-/// within the small incoming block. Rank decisions remain relative to original norms.
+/// Block CGS2 against the established basis, interleaved with CholeskyQR2
+/// inside the incoming block. Ill-conditioned blocks retain two-pass MGS and
+/// its rank decisions relative to original norms.
 /// All projection buffers are reserved once, outside Davidson iterations.
 pub struct ProjectionWorkspace {
     normalized: ComplexMatrix,
@@ -399,17 +444,105 @@ pub struct ProjectionWorkspace {
     projected: ComplexMatrix,
     column: Vec<Complex64>,
     indices: Vec<usize>,
+    gram: ComplexMatrix,
+    inverse: ComplexMatrix,
+    backup: ComplexMatrix,
+    cholesky_scratch: faer::dyn_stack::MemBuffer,
 }
 impl ProjectionWorkspace {
     pub fn new(rows: usize, capacity: usize) -> Result<Self, LinalgError> {
+        let qr_capacity = if BLOCK_QR || cfg!(test) { capacity } else { 0 };
         Ok(Self {
             normalized: ComplexMatrix::zeros(rows, capacity)?,
             coefficients: ComplexMatrix::zeros(capacity, capacity)?,
             projected: ComplexMatrix::zeros(rows, capacity)?,
             column: vec![Complex64::default(); rows],
             indices: Vec::with_capacity(capacity),
+            gram: ComplexMatrix::zeros(qr_capacity, qr_capacity)?,
+            inverse: ComplexMatrix::zeros(qr_capacity, qr_capacity)?,
+            backup: ComplexMatrix::zeros(rows, qr_capacity)?,
+            cholesky_scratch: faer::dyn_stack::MemBuffer::new(
+                faer::linalg::cholesky::llt::factor::cholesky_in_place_scratch::<Complex64>(
+                    qr_capacity,
+                    Par::Seq,
+                    Default::default(),
+                ),
+            ),
         })
     }
+    // Gram conditioning is a suitability check, not a rank decision. If the
+    // normal equations lose too much accuracy, restore the input and use the
+    // existing relative-norm rank policy. All buffers and backend scratch are
+    // reserved at construction, including the rollback copy.
+    fn try_cholesky_qr(&mut self, gemm: &mut GemmWorkspace) -> Result<bool, LinalgError> {
+        let (rows, n) = (self.normalized.rows, self.normalized.cols);
+        if n < 2 {
+            return Ok(false);
+        }
+        reshape(&mut self.backup, rows, n);
+        crate::pool::analysis::copied(self.normalized.data.len() * size_of::<Complex64>());
+        self.backup.data.copy_from_slice(&self.normalized.data);
+        reshape(&mut self.gram, n, n);
+        reshape(&mut self.inverse, n, n);
+        reshape(&mut self.projected, rows, n);
+        let _phase = Span::new("block_qr");
+        for _ in 0..2 {
+            gemm.multiply_panels(
+                &self.normalized,
+                MatrixOp::Adjoint,
+                &self.normalized,
+                MatrixOp::Identity,
+                &mut self.gram,
+                PROJECTION_PANEL,
+            )?;
+            let factor = Span::serial("block_qr_factor");
+            let scale = (0..n).map(|j| self.gram[(j, j)].re).fold(0.0, f64::max);
+            let ok = faer::linalg::cholesky::llt::factor::cholesky_in_place(
+                faer::MatMut::from_column_major_slice_mut(&mut self.gram.data, n, n),
+                Default::default(),
+                Par::Seq,
+                faer::dyn_stack::MemStack::new(&mut self.cholesky_scratch),
+                Default::default(),
+            )
+            .is_ok();
+            if !ok
+                || (0..n).any(|j| {
+                    let pivot = self.gram[(j, j)].re;
+                    !pivot.is_finite()
+                        || pivot <= DEPENDENCE_TOLERANCE
+                        || pivot * pivot <= f64::EPSILON.sqrt() * scale
+                })
+            {
+                crate::pool::analysis::copied(self.normalized.data.len() * size_of::<Complex64>());
+                self.normalized.data.copy_from_slice(&self.backup.data);
+                return Ok(false);
+            }
+            // Invert only the small triangular factor through the library;
+            // the tall update X L^{-H} is a row-partitioned GEMM.
+            self.inverse.data.fill(Complex64::default());
+            for j in 0..n {
+                self.inverse[(j, j)] = Complex64::new(1.0, 0.0);
+            }
+            faer::linalg::triangular_solve::solve_lower_triangular_in_place(
+                faer::MatRef::from_column_major_slice(&self.gram.data, n, n),
+                faer::MatMut::from_column_major_slice_mut(&mut self.inverse.data, n, n),
+                Par::Seq,
+            );
+            drop(factor);
+            gemm.multiply_panels(
+                &self.normalized,
+                MatrixOp::Identity,
+                &self.inverse,
+                MatrixOp::Adjoint,
+                &mut self.projected,
+                PROJECTION_PANEL,
+            )?;
+            crate::pool::analysis::copied(self.normalized.data.len() * size_of::<Complex64>());
+            self.normalized.data.copy_from_slice(&self.projected.data);
+        }
+        Ok(true)
+    }
+
     pub fn orthonormalize(
         &mut self,
         block: &ComplexMatrix,
@@ -461,6 +594,7 @@ impl ProjectionWorkspace {
         for pass in 0..if against.is_some() { 2 } else { 1 } {
             if pass > 0 {
                 reshape(&mut self.normalized, block.rows, count);
+                crate::pool::analysis::copied(self.normalized.data.len() * size_of::<Complex64>());
                 self.normalized.data.copy_from_slice(&data);
             }
             if let Some(q) = against {
@@ -470,19 +604,29 @@ impl ProjectionWorkspace {
                 // the preceding MGS pass) changed the incoming block; check it
                 // once. The first product checks coefficients on output.
                 self.normalized.validate_finite()?;
-                gemm.multiply_into_finite_inputs(
+                gemm.multiply_panels(
                     q,
                     MatrixOp::Adjoint,
                     &self.normalized,
                     MatrixOp::Identity,
                     &mut self.coefficients,
+                    if BLOCK_QR && block.rows >= 2048 {
+                        PROJECTION_PANEL
+                    } else {
+                        256
+                    },
                 )?;
-                gemm.multiply_into_finite_inputs(
+                gemm.multiply_panels(
                     q,
                     MatrixOp::Identity,
                     &self.coefficients,
                     MatrixOp::Identity,
                     &mut self.projected,
+                    if BLOCK_QR && block.rows >= 2048 {
+                        PROJECTION_PANEL
+                    } else {
+                        256
+                    },
                 )?;
                 let _update = Span::serial("projection_update");
                 for (y, p) in self.normalized.data.iter_mut().zip(&self.projected.data) {
@@ -490,6 +634,11 @@ impl ProjectionWorkspace {
                 }
             }
             data.clear();
+            if BLOCK_QR && block.rows >= 2048 && self.try_cholesky_qr(gemm)? {
+                crate::pool::analysis::copied(self.normalized.data.len() * size_of::<Complex64>());
+                data.extend_from_slice(&self.normalized.data);
+                continue;
+            }
             count = 0;
             let mut prepared = None;
             for j in 0..self.normalized.cols {
@@ -497,6 +646,7 @@ impl ProjectionWorkspace {
                 let remaining = if let Some(remaining) = prepared.take() {
                     remaining
                 } else {
+                    crate::pool::analysis::copied(block.rows * size_of::<Complex64>());
                     self.column.copy_from_slice(self.normalized.column(j));
                     // Tall blocks receive the first pass as earlier vectors are
                     // finalized. Small blocks retain the original two-pass loop.
@@ -541,6 +691,9 @@ impl ProjectionWorkspace {
                         let (remaining, ()) = gemm.pool.install(|| {
                             WorkerPool::join(
                                 || {
+                                    crate::pool::analysis::copied(
+                                        block.rows * size_of::<Complex64>(),
+                                    );
                                     column.copy_from_slice(next);
                                     {
                                         let _piece = Piece::new();
@@ -735,6 +888,61 @@ mod tests {
         }
     }
 
+    fn check_block_qr(rows: usize, width: usize) {
+        let block = matrix(rows, width);
+        let mut first = None;
+        for threads in [1, 2, 4, 8, 12] {
+            let mut work = GemmWorkspace::new(rows, width, threads).unwrap();
+            let mut projection = ProjectionWorkspace::new(rows, width).unwrap();
+            reshape(&mut projection.normalized, rows, width);
+            projection.normalized.data.copy_from_slice(&block.data);
+            assert!(projection.try_cholesky_qr(&mut work).unwrap());
+            let q = &projection.normalized;
+            let gram = gemm(q, MatrixOp::Adjoint, q, MatrixOp::Identity).unwrap();
+            let mut defect = 0.0_f64;
+            for j in 0..width {
+                for i in 0..width {
+                    defect = defect.max(
+                        (gram[(i, j)] - Complex64::new(if i == j { 1.0 } else { 0.0 }, 0.0)).norm(),
+                    );
+                }
+            }
+            assert!(
+                defect < 1e-12,
+                "dimensionless orthogonality defect {defect}"
+            );
+            // A positive triangular QR factor preserves the ordered column
+            // span: compare against independently accumulated scalar MGS.
+            let scalar = orthonormalize(&block, None).unwrap().vectors;
+            assert!(
+                q.data
+                    .iter()
+                    .zip(&scalar.data)
+                    .all(|(a, b)| (*a - *b).norm() < 1e-12)
+            );
+            if let Some(previous) = &first {
+                bits(previous, q);
+            } else {
+                first = Some(q.clone());
+            }
+        }
+    }
+
+    #[test]
+    fn block_cholesky_qr_preserves_span_and_thread_identity() {
+        check_block_qr(257, 7);
+    }
+
+    /// cargo test --release -p dft-numerics block_qr_si8_shapes -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn block_qr_si8_shapes() {
+        assert!(2969_usize.div_ceil(PROJECTION_PANEL) >= 4 * 8);
+        for width in [20, 40, 60] {
+            check_block_qr(2969, width);
+        }
+    }
+
     #[test]
     fn blocked_projection_rank_scale_orthogonality_and_identity() {
         let rows = 517;
@@ -856,6 +1064,7 @@ mod tests {
                     k: rows,
                     n: width,
                     reduce: true,
+                    panel: PANEL,
                 };
                 let count = rows.div_ceil(PANEL);
                 let mut times = [0.0; 2];

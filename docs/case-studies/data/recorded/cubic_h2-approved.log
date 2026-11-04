@@ -1,0 +1,48 @@
+Review the deliberately oversized distance warning threshold; no physical convergence claim.
+--- a/input.toml
++++ b/input.toml
+@@ -1,21 +1,21 @@
+-[system]
+-name="cubic_h2"
+-lattice_unit="bohr"
+-lattice_vectors=[[4.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 4.0]]
+-[[system.atoms]]
+-species="H"
+-fractional=[0.0, 0.0, 0.0]
+-[[system.atoms]]
+-species="H"
+-fractional=[0.5, 0.5, 0.5]
+-[pseudopotentials]
+-H="/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p11l-pseudo-lznjgmca/synthetic.upf"
+-[basis]
+-ecutwfc_ry=8.0
+-kpoints=[[0.0,0.0,0.0]]
+-[xc]
+-functional="lda-pz"
+-[scf]
+-nbands=4
+-[preflight]
+-minimum_distance_bohr=100.0
++[system]
++name="cubic_h2"
++lattice_unit="bohr"
++lattice_vectors=[[4.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 4.0]]
++[[system.atoms]]
++species="H"
++fractional=[0.0, 0.0, 0.0]
++[[system.atoms]]
++species="H"
++fractional=[0.5, 0.5, 0.5]
++[pseudopotentials]
++H="/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p11l-pseudo-lznjgmca/synthetic.upf"
++[basis]
++ecutwfc_ry=8.0
++kpoints=[[0.0,0.0,0.0]]
++[xc]
++functional="lda-pz"
++[scf]
++nbands=4
++[preflight]
++minimum_distance_bohr=0.1
+
+Recorded /private/tmp/p11l-final2/cubic_h2/approved/preflight-review-fd025aab35ec84246b3da032b19e4389d1f8ee2f94f2e699bdfc8c5b851a1ae3.json; input unchanged

@@ -1,0 +1,32 @@
+{
+  "certificate_density_residual_bohr_neg_3_over_2": 4.551166513318054e-9,
+  "certificate_occupied_eigenvalue_change_hartree": 2.7803310209684184e-8,
+  "certificate_solves": 3,
+  "certified_energy_hartree": -4.684561184277879,
+  "charge_error_relative": 4.440892098500626e-16,
+  "converged": true,
+  "density_residual_bohr_neg_3_over_2": 1.07646190254784e-8,
+  "energy_hartree": -4.684561184277879,
+  "events_dropped": 0,
+  "grant_debug": "Some(AutonomyPolicy { max_applied_total: 1, rules: [AutonomyRule { action: ExtendBudget { maximum: 200 }, max_count: 1, cooldown_iterations: 0, max_version_lag: 0, allow_revalidation: false }] })",
+  "grant_sha256": "d5f4d144fb3908fa9c7a3bffec79462672e1469b134625918dac63233f86d531",
+  "initial": {
+    "expanded_options_debug": "ScfOptions { eigensolver: Davidson, threads: 1, functional: LdaPz, allow_functional_override: false, cutoff_hartree: 5.0, bands: None, extra_bands: 4, grid_override: None, mixing: Pulay { beta: 0.3, history: 6 }, density_tolerance: 1e-7, energy_tolerance: 1e-8, eigen_tolerance: 1e-8, initial_eigen_tolerance: 1e-5, eigen_tolerance_decay: 0.5, residual_eigen_schedule: true, free_electron_initial_guess: true, max_iterations: 1, davidson_max_iterations: 400, davidson_subspace: 48, seed: 2026, divergence_factor: 20.0, divergence_patience: 3 }",
+    "iteration": 0,
+    "max_iterations": 1,
+    "mode": "AgentControlled",
+    "policy_revision": 0,
+    "state": "Initialized",
+    "state_version": 1
+  },
+  "initial_density_sha256": "e383318ee26a426b92e5137aab1b69ef78ce3427c52f515098614801d1351b75",
+  "input_charge_error_relative": 7.771561172376096e-16,
+  "iterations": 30,
+  "min_density_bohr_neg_3": 0.006408851615255322,
+  "observer_overhead": null,
+  "operator_applications_including_certificates": 951,
+  "policy_changes": 1,
+  "rejected": 1,
+  "state": "Converged",
+  "wall_seconds": 0.041498916
+}

@@ -1,0 +1,1 @@
+The first paired preflight run read convergence from the wrong JSON object (`scf` instead of `convergence`). It failed with KeyError, exit 1. No numerical assertion was relaxed. The runner was corrected and all selected paths were rerun successfully in `../recorded/`.

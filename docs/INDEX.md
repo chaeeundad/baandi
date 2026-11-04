@@ -64,3 +64,4 @@ Conventions: docs are English; one fact lives in one place and others link to it
 - [Optional agent preflight](architecture/agent-preflight.md): deterministic structure findings, failure JSON, proposal validation and explicit decision provenance (P11K).
 
 - [Measured SCF stagnation cases](validation/scf-stagnation-cases.md): synthetic multi-system sweep, P11D evidence, P11B interventions, negative results and reproducers (P11M).
+- [External-control case studies](case-studies/README.md): freshly executed Python/ASE, preflight and budget-recovery evidence; MCP contract checks; explicit MLIP/coupling implementation gaps (P11L, partial).

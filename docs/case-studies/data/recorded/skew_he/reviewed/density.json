@@ -1,0 +1,35 @@
+{
+  "dtype": "f64",
+  "endianness": "little",
+  "fft_grid": [
+    8,
+    8,
+    9
+  ],
+  "lattice_columns_bohr": [
+    [
+      4.0,
+      0.5,
+      0.0
+    ],
+    [
+      0.0,
+      4.0,
+      0.5
+    ],
+    [
+      0.0,
+      0.0,
+      5.0
+    ]
+  ],
+  "normalization": {
+    "expected_electrons": 2.0,
+    "integral_electrons": 2.0000000000000004
+  },
+  "ordering": "C: (i*n2+j)*n3+k; k fastest",
+  "schema_version": 1,
+  "sha256": "215a0e8f6e703f3ace32dbd412cf9151c3f95ad676685053dcc0e4bf8561d3e5",
+  "units": "electrons per Bohr^3",
+  "volume_bohr3": 80.00000000000001
+}

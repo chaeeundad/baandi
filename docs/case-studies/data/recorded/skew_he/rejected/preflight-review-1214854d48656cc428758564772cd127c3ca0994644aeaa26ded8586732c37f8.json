@@ -1,0 +1,103 @@
+{
+  "applied": false,
+  "candidate_input": "[system]\nname=\"skew_he\"\nlattice_unit=\"bohr\"\nlattice_vectors=[[4.0, 0.0, 0.0], [0.5, 4.0, 0.0], [0.0, 0.5, 5.0]]\n[[system.atoms]]\nspecies=\"He\"\nfractional=[0.0, 0.0, 0.0]\n[pseudopotentials]\nHe=\"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p11l-pseudo-imcvvsbm/synthetic.upf\"\n[basis]\necutwfc_ry=8.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional=\"lda-pz\"\n[scf]\nnbands=4\n[preflight]\nminimum_distance_bohr=0.1\n",
+  "candidate_preflight": {
+    "bands": 4,
+    "electrons": 2,
+    "estimated_array_bytes": 15680,
+    "fft_grid": [
+      8,
+      8,
+      9
+    ],
+    "findings": [],
+    "findings_schema_version": 1,
+    "memory_note": "orbital plus one real and one complex grid payload only; excludes scratch, projectors, allocator overhead; not peak RSS",
+    "overrides": [],
+    "plane_waves_per_k": [
+      29
+    ],
+    "schema_version": 1,
+    "structure": {
+      "atoms": [
+        {
+          "fractional": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "species": "He"
+        }
+      ],
+      "lattice_vectors_bohr": [
+        [
+          4.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.5,
+          4.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.5,
+          5.0
+        ]
+      ],
+      "review": {
+        "k_spacing_inverse_bohr": null,
+        "minimum_distance_bohr": 4.0,
+        "nearest_atoms": [
+          0,
+          0
+        ],
+        "vacuum_gap_bohr": null,
+        "volume_bohr3": 80.00000000000001,
+        "volume_ratio": 0.9873533903527021
+      }
+    },
+    "summary": "Valid: skew_he. Will compute spin-unpolarized lda-pz SCF for UPF composition He:1 (labels He:1; 1 atoms, 2 electrons), k mesh Gamma only (1 resolved points), cutoff 8 Ry, 4 bands, 1 threads.",
+    "valid": true,
+    "warnings": []
+  },
+  "decision": {
+    "actor": "P11L-scripted-operator",
+    "reason": "Frozen review-only fixture; never apply candidate",
+    "unix_time_ns": "1793803732329142000",
+    "value": "rejected"
+  },
+  "proposal": {
+    "advisory": "Review the deliberately oversized distance warning threshold; no physical convergence claim.",
+    "agent": "P11L scripted optional adviser; no LLM",
+    "candidate_input_sha256": "c891fb43bca3a81e353c8d0bfb66c6e8eb4d271ad87b5e711572e014f263b8a0",
+    "candidate_pseudopotentials": {
+      "He": "4e5cef44d898b66d711867e207207ff58fbe4b92786da38dfbb00d2e324b667e"
+    },
+    "diff": "--- a/input.toml\n+++ b/input.toml\n@@ -1,18 +1,18 @@\n-[system]\n-name=\"skew_he\"\n-lattice_unit=\"bohr\"\n-lattice_vectors=[[4.0, 0.0, 0.0], [0.5, 4.0, 0.0], [0.0, 0.5, 5.0]]\n-[[system.atoms]]\n-species=\"He\"\n-fractional=[0.0, 0.0, 0.0]\n-[pseudopotentials]\n-He=\"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p11l-pseudo-imcvvsbm/synthetic.upf\"\n-[basis]\n-ecutwfc_ry=8.0\n-kpoints=[[0.0,0.0,0.0]]\n-[xc]\n-functional=\"lda-pz\"\n-[scf]\n-nbands=4\n-[preflight]\n-minimum_distance_bohr=100.0\n+[system]\n+name=\"skew_he\"\n+lattice_unit=\"bohr\"\n+lattice_vectors=[[4.0, 0.0, 0.0], [0.5, 4.0, 0.0], [0.0, 0.5, 5.0]]\n+[[system.atoms]]\n+species=\"He\"\n+fractional=[0.0, 0.0, 0.0]\n+[pseudopotentials]\n+He=\"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p11l-pseudo-imcvvsbm/synthetic.upf\"\n+[basis]\n+ecutwfc_ry=8.0\n+kpoints=[[0.0,0.0,0.0]]\n+[xc]\n+functional=\"lda-pz\"\n+[scf]\n+nbands=4\n+[preflight]\n+minimum_distance_bohr=0.1\n",
+    "edits": [
+      {
+        "after": 0.1,
+        "before": 100.0,
+        "finding_codes": [
+          "PF_MIN_DISTANCE"
+        ],
+        "key_path": [
+          "preflight",
+          "minimum_distance_bohr"
+        ],
+        "reason": "Explicit fixture review policy only"
+      }
+    ],
+    "findings_sha256": "fb83714504fef48b446b1b2efebcfeb0322e6e05417c54b1dec436deef3d871e",
+    "input_sha256": "c4f85232572f4ee326bcf2abbaadb33ede0a66dec152a30101abd5b79b6d88fd",
+    "pseudopotentials": {
+      "He": "4e5cef44d898b66d711867e207207ff58fbe4b92786da38dfbb00d2e324b667e"
+    },
+    "schema_version": 1
+  },
+  "proposal_sha256": "1214854d48656cc428758564772cd127c3ca0994644aeaa26ded8586732c37f8",
+  "proposal_source": "{\n  \"schema_version\": 1,\n  \"input_sha256\": \"c4f85232572f4ee326bcf2abbaadb33ede0a66dec152a30101abd5b79b6d88fd\",\n  \"findings_sha256\": \"fb83714504fef48b446b1b2efebcfeb0322e6e05417c54b1dec436deef3d871e\",\n  \"pseudopotentials\": {\n    \"He\": \"4e5cef44d898b66d711867e207207ff58fbe4b92786da38dfbb00d2e324b667e\"\n  },\n  \"candidate_pseudopotentials\": {\n    \"He\": \"4e5cef44d898b66d711867e207207ff58fbe4b92786da38dfbb00d2e324b667e\"\n  },\n  \"advisory\": \"Review the deliberately oversized distance warning threshold; no physical convergence claim.\",\n  \"agent\": \"P11L scripted optional adviser; no LLM\",\n  \"diff\": \"--- a/input.toml\\n+++ b/input.toml\\n@@ -1,18 +1,18 @@\\n-[system]\\n-name=\\\"skew_he\\\"\\n-lattice_unit=\\\"bohr\\\"\\n-lattice_vectors=[[4.0, 0.0, 0.0], [0.5, 4.0, 0.0], [0.0, 0.5, 5.0]]\\n-[[system.atoms]]\\n-species=\\\"He\\\"\\n-fractional=[0.0, 0.0, 0.0]\\n-[pseudopotentials]\\n-He=\\\"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p11l-pseudo-imcvvsbm/synthetic.upf\\\"\\n-[basis]\\n-ecutwfc_ry=8.0\\n-kpoints=[[0.0,0.0,0.0]]\\n-[xc]\\n-functional=\\\"lda-pz\\\"\\n-[scf]\\n-nbands=4\\n-[preflight]\\n-minimum_distance_bohr=100.0\\n+[system]\\n+name=\\\"skew_he\\\"\\n+lattice_unit=\\\"bohr\\\"\\n+lattice_vectors=[[4.0, 0.0, 0.0], [0.5, 4.0, 0.0], [0.0, 0.5, 5.0]]\\n+[[system.atoms]]\\n+species=\\\"He\\\"\\n+fractional=[0.0, 0.0, 0.0]\\n+[pseudopotentials]\\n+He=\\\"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p11l-pseudo-imcvvsbm/synthetic.upf\\\"\\n+[basis]\\n+ecutwfc_ry=8.0\\n+kpoints=[[0.0,0.0,0.0]]\\n+[xc]\\n+functional=\\\"lda-pz\\\"\\n+[scf]\\n+nbands=4\\n+[preflight]\\n+minimum_distance_bohr=0.1\\n\",\n  \"edits\": [\n    {\n      \"key_path\": [\n        \"preflight\",\n        \"minimum_distance_bohr\"\n      ],\n      \"before\": 100.0,\n      \"after\": 0.1,\n      \"reason\": \"Explicit fixture review policy only\",\n      \"finding_codes\": [\n        \"PF_MIN_DISTANCE\"\n      ]\n    }\n  ],\n  \"candidate_input_sha256\": \"c891fb43bca3a81e353c8d0bfb66c6e8eb4d271ad87b5e711572e014f263b8a0\"\n}\n",
+  "schema_version": 1
+}

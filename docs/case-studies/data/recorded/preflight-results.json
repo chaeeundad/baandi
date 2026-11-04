@@ -1,0 +1,28 @@
+[
+  {
+    "system": "cubic_h2",
+    "upf_sha256": "464c85cd83368fea50f88e8eb07eea03b638d8e7b1d96d176a4ec4efcd8c9ebf",
+    "energy_hartree": -0.9291990923945251,
+    "iterations": 12,
+    "energy_difference_hartree": 0.0,
+    "classic_wall_seconds": 0.520103542,
+    "reviewed_run_wall_seconds": 0.0737670829999999,
+    "review_wall_seconds": 0.09047795900000022,
+    "workflow_overhead_seconds": -0.35585849999999986,
+    "timing_scope": "single sequential CLI process runs, includes I/O; review includes preview and both decisions; excludes stale negative control",
+    "reference": "same-build Classic, identical input bytes; candidate never applied"
+  },
+  {
+    "system": "skew_he",
+    "upf_sha256": "4e5cef44d898b66d711867e207207ff58fbe4b92786da38dfbb00d2e324b667e",
+    "energy_hartree": -1.4687372786010826,
+    "iterations": 9,
+    "energy_difference_hartree": 0.0,
+    "classic_wall_seconds": 0.07949191699999991,
+    "reviewed_run_wall_seconds": 0.07953566700000003,
+    "review_wall_seconds": 0.10064299999999982,
+    "workflow_overhead_seconds": 0.10068674999999994,
+    "timing_scope": "single sequential CLI process runs, includes I/O; review includes preview and both decisions; excludes stale negative control",
+    "reference": "same-build Classic, identical input bytes; candidate never applied"
+  }
+]

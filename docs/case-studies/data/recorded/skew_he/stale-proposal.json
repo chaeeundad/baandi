@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "input_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "findings_sha256": "fb83714504fef48b446b1b2efebcfeb0322e6e05417c54b1dec436deef3d871e",
+  "pseudopotentials": {
+    "He": "4e5cef44d898b66d711867e207207ff58fbe4b92786da38dfbb00d2e324b667e"
+  },
+  "candidate_pseudopotentials": {
+    "He": "4e5cef44d898b66d711867e207207ff58fbe4b92786da38dfbb00d2e324b667e"
+  },
+  "advisory": "Review the deliberately oversized distance warning threshold; no physical convergence claim.",
+  "agent": "P11L scripted optional adviser; no LLM",
+  "diff": "--- a/input.toml\n+++ b/input.toml\n@@ -1,18 +1,18 @@\n-[system]\n-name=\"skew_he\"\n-lattice_unit=\"bohr\"\n-lattice_vectors=[[4.0, 0.0, 0.0], [0.5, 4.0, 0.0], [0.0, 0.5, 5.0]]\n-[[system.atoms]]\n-species=\"He\"\n-fractional=[0.0, 0.0, 0.0]\n-[pseudopotentials]\n-He=\"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p11l-pseudo-imcvvsbm/synthetic.upf\"\n-[basis]\n-ecutwfc_ry=8.0\n-kpoints=[[0.0,0.0,0.0]]\n-[xc]\n-functional=\"lda-pz\"\n-[scf]\n-nbands=4\n-[preflight]\n-minimum_distance_bohr=100.0\n+[system]\n+name=\"skew_he\"\n+lattice_unit=\"bohr\"\n+lattice_vectors=[[4.0, 0.0, 0.0], [0.5, 4.0, 0.0], [0.0, 0.5, 5.0]]\n+[[system.atoms]]\n+species=\"He\"\n+fractional=[0.0, 0.0, 0.0]\n+[pseudopotentials]\n+He=\"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p11l-pseudo-imcvvsbm/synthetic.upf\"\n+[basis]\n+ecutwfc_ry=8.0\n+kpoints=[[0.0,0.0,0.0]]\n+[xc]\n+functional=\"lda-pz\"\n+[scf]\n+nbands=4\n+[preflight]\n+minimum_distance_bohr=0.1\n",
+  "edits": [
+    {
+      "key_path": [
+        "preflight",
+        "minimum_distance_bohr"
+      ],
+      "before": 100.0,
+      "after": 0.1,
+      "reason": "Explicit fixture review policy only",
+      "finding_codes": [
+        "PF_MIN_DISTANCE"
+      ]
+    }
+  ],
+  "candidate_input_sha256": "c891fb43bca3a81e353c8d0bfb66c6e8eb4d271ad87b5e711572e014f263b8a0"
+}

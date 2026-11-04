@@ -1,0 +1,11 @@
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+binary: rustc
+commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+commit-date: 2026-10-13
+host: aarch64-apple-darwin
+release: 1.99.1
+LLVM version: 23.1.1
+cargo 1.99.1 (5f94df478 2026-08-27)
+Darwin arm64
+3de2e41cf7168f83c9d7c4528b3a88f0ee1f136b
+?? scripts/run_case_studies.py

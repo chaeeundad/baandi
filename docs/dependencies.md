@@ -172,3 +172,7 @@ versions are reused; no independent current upstream-maintenance claim is made.
 The project owns protocol maintenance and tests. Apple Silicon support is checked
 by the host build/test/fmt/clippy gates, with actual outcomes in the crate's
 validation record. See ADR 0029 for scope and deferred SDK adoption.
+
+### P11G PyO3 (decision by architect, 2026-11-04)
+
+`baandi-py` adds `pyo3` 0.30.1 (crates.io, published 2026-10-14; license MIT OR Apache-2.0; MSRV 1.85, workspace uses 1.99; supports CPython 3.9 and later; about 1.3 million downloads; actively maintained). It is used only in the new `baandi-py` crate, outside the numerical core; nothing in `dft-*` depends on it. Build and wheel packaging use `maturin` 1.16.0 (Python build tool, not a Rust dependency); ASE 3.26.0 is an optional Python dependency, never required by the Rust build. Apple Silicon: host build, test, fmt and clippy gates pass on this Mac (aarch64); `scripts/check.sh baandi-py` run by the architect before the ticket. `unsafe` stays inside PyO3's generated code; any own `unsafe` in the adapter needs documented preconditions and tests (workspace lint `undocumented_unsafe_blocks = deny`). See ADR 0030.

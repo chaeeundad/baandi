@@ -1,0 +1,32 @@
+[
+  {
+    "system": "cubic_h2",
+    "energy_ha": -0.9291990923945251,
+    "energy_hex_ha": "-0x1.dbbffbc29d5f5p-1",
+    "cli_energy_hex_ha": "-0x1.dbbffbc29d5f5p-1",
+    "iterations": 12,
+    "eigenvalues_ha": [
+      -0.09393371634808471,
+      1.0641148847328712,
+      1.0641148847328719,
+      1.064114884732872
+    ],
+    "charge_electrons": 1.9999999999999991,
+    "reference": "same-build BAANDI CLI; synthetic NC-format fixture, not QE"
+  },
+  {
+    "system": "skew_he",
+    "energy_ha": -1.4687372786010826,
+    "energy_hex_ha": "-0x1.77ff2a9201f80p+0",
+    "cli_energy_hex_ha": "-0x1.77ff2a9201f80p+0",
+    "iterations": 9,
+    "eigenvalues_ha": [
+      -0.1617064784526357,
+      0.6373791033012355,
+      1.0631955705131804,
+      1.0805273129977475
+    ],
+    "charge_electrons": 2.0000000000000004,
+    "reference": "same-build BAANDI CLI; synthetic NC-format fixture, not QE"
+  }
+]

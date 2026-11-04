@@ -26,3 +26,85 @@ Integration invariants retained here, not competing schemas:
 Execution wraps session creation and results; independent ready nodes may run only under host resource limits. Repeated request id plus equal canonical payload deduplicates; differing payload conflicts. Retries have new attempt ids and lineage, preserve failures, and cannot silently change model/policy. Inner SCF certification is separate from workflow success and outer coupled convergence. DAG caching needs matching full model/execution requirements; an old unconverged result never satisfies a certified dependency. No scheduler currently exists.
 
 External numerical solver D3 uses the separate [contract](../research/external-solver-contracts.md). These adapter proposals refine ADR 0017's deferred runtime without authorizing field insertion or new physical models.
+
+## Python usage (P11G implementation)
+
+The separate `baandi-py` crate wraps the engine's Gamma-only LDA session.
+The native binding and ARM64 CPython 3.9 wheel have been exercised. **ASE energy
+is pending the `dft-units` dependency approval**: the proposed bridge is in
+`crates/baandi-py/units-integration.patch`. Until applied, `Baandi` rejects
+unsupported properties but cannot calculate energy. This does not implement
+the full P11I workflow schema or audited policy intervention API.
+
+Build from `python/baandi` (do not pass `--manifest-path`, which changes maturin's
+Python project discovery). ASE remains an optional extra:
+
+```sh
+cd python/baandi
+PYO3_PYTHON=/Users/mino/Develop/rust-dft-wt/pyenv/bin/python maturin build --offline --locked
+# Install the resulting wheel with pip; request baandi[ase] for the ASE adapter.
+```
+
+The current shared vendor directory lacks PyO3 despite its presence in the local
+Cargo registry cache. An offline Cargo invocation from outside the worktree,
+with an absolute manifest path, uses that cache. See the crate validation note
+for the tested local wrapper and the Python framework link workaround. No new
+packages were downloaded.
+
+```python
+from pathlib import Path
+from baandi import Options, Session
+
+options = Options()
+options.cutoff_hartree = 5.0
+session = Session(
+    cell_rows_bohr=[[8., 0., 0.], [0., 8., 0.], [0., 0., 8.]],
+    species=["He"], positions_fractional=[[0., 0., 0.]],
+    pseudopotentials={"He": Path("He.UPF").read_text()}, options=options,
+)
+session.initialize()
+while session.status == "Ready":
+    session.step()  # exactly one full SCF iteration, with engine certification
+result = session.result()  # terminal output, including an exhausted attempt
+if not result.converged:
+    raise RuntimeError("SCF exhausted; result is uncertified")
+print(result.energy_hartree, result.eigenvalues_hartree)
+print(session.density_summary())
+```
+
+`run()` initializes a Created session and steps until terminal; it also resumes
+an initialized session. Status values are Created, Ready, Converged,
+NotConverged and Failed. Results are owned copies; eigenvalues are Gamma-only
+in Ha. Density summary returns `(shape, min, max, mean, integrated_electrons)`;
+the density values are Bohr^-3. At an active boundary it summarizes the next
+input density; at termination it summarizes the evaluated output. No full
+orbital or density arrays are exported. No background SCF runs between calls.
+
+Options are copied on construction and retain engine defaults except explicitly
+set cutoff, band counts, iteration limit, tolerances, seed and Pulay settings.
+Changing a Python Options object afterwards never mutates a live calculation.
+No alternate policy setter is exposed. The engine's non-Send mixer remains on
+one dedicated worker thread per session; only owned data crosses channels.
+Waiting for setup and numerical steps releases the GIL. Dropping the session
+closes the command channel and the worker releases the engine. There is no
+handwritten unsafe code or Python callback inside the numerical loop.
+
+After the proposed units bridge is approved and applied:
+
+```python
+from ase import Atoms
+from baandi.ase import Baandi
+atoms = Atoms("He", cell=[4., 4., 4.], pbc=True)  # Angstrom, row vectors
+atoms.calc = Baandi(pseudopotentials={"He": Path("He.UPF").read_text()})
+energy_ev = atoms.get_potential_energy()
+```
+
+ASE requires a fully periodic cell and rejects initial charge or magnetic
+moments. It copies UPF text/settings at construction and disables energy caching
+until complete model-identity caching is available. Forces, stress, free energy
+and every other unsupported property raise `NotImplementedError`, including
+force-consistent energy requests; they never return zero. An exhausted SCF
+raises `ConvergenceError`, leaves `results` empty and retains its session for
+uncertified diagnostics. The intended conversion uses exactly `dft-units`, not
+ASE's different CODATA constants. The CLI comparison test checks hexadecimal
+float equality in Ha and eV with the same settings and represented geometry.

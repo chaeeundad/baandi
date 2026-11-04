@@ -1,0 +1,19 @@
+[build-system]
+requires = ["maturin>=1.16,<2"]
+build-backend = "maturin"
+
+[project]
+name = "baandi"
+version = "0.1.0"
+requires-python = ">=3.9"
+description = "BAANDI plane-wave DFT Python and optional ASE adapter"
+license = "MIT"
+
+[project.optional-dependencies]
+ase = ["ase>=3.26,<4"]
+
+[tool.maturin]
+manifest-path = "../../crates/baandi-py/Cargo.toml"
+python-source = ".."
+module-name = "baandi._baandi"
+python-packages = ["baandi"]

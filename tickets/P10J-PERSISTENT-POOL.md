@@ -13,3 +13,5 @@ GENERALITY: also report gamma with 4, 8, 20 atoms (synthetic where needed), cubi
 NON_GOALS: MPI, GPU, new numerical methods, changing tolerances or defaults.
 GIT: branch task/P10J-PERSISTENT-POOL, uncommitted
 RETURN_FORMAT: docs/schemas/report.schema.json
+EXTENDED 2026-11-04 by architect: also crates/dft-engine/src/band_density.rs (minimal pool wiring to restore intra-k density parallelism). rayon 1.12.0 as a direct dependency of dft-numerics is accepted (already vendored, MIT OR Apache-2.0); add the review entry to docs/dependencies.md.
+

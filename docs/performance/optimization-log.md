@@ -2723,3 +2723,330 @@ All code changes remain uncommitted on task/P10J-PERSISTENT-POOL.
 {"case": "k222s", "threads": 1, "pair": 8, "version": "before", "wall_s": 0.34511924999999977}
 {"case": "k222s", "threads": 1, "pair": 8, "version": "after", "wall_s": 0.3488626669999997}
 ```
+
+## P10K investigation (2026-11-05)
+
+Starting source: `0cdcf41` (P10J implementation merged at `7224a0f`).
+The ticket supplies the dev08 sample: pure si8 T=8 main-thread latch wait
+32%, multiply_into 18.8%, subtract_projection 13.8%; MKL gemm_into self
+1.299 s versus old gemm 0.323 s, and NonlocalOperator::add 0.487 versus
+0.323 s. These are supplied remote measurements, not new local measurements.
+
+Source inspection before changes rejects repeated **per-tile** validation:
+pure inputs are checked once before scheduling and output once after reduction;
+MKL already performs one borrowed, sequential BLAS product. Matrix::new checks
+only dimensions. The three finite scans still short-circuit per complex value,
+which can inhibit SIMD; an equivalent Boolean reduction is worth measuring.
+There is no MKL tile assembly to remove. Projection and legacy Davidson still
+copy workspace/result vectors. The fixed-panel recursion passes its full budget
+to both children (intentionally individually stealable panels in P10J); a bounded
+leaf experiment must be compared, not presumed faster. P10J already installs
+whole solve/audit phases, so nested install is not external pool ingress.
+
+The Nonlocal diff against fe0492b replaces channel-major streaming with fixed
+256-row blocks and precomputed weights; its per-element arithmetic order is
+unchanged. Existing independent legacy traversal tests cover this comparison.
+No MKL runtime is available on this Apple Silicon host; attributing the extra
+SCF iteration to blocked projection requires a remote controlled ablation.
+
+New dev08 evidence supplied during this run: 8,044 main-thread FUTEX_WAKE calls,
+1,686 blocking waits, 15 SCF / 290 Davidson iterations / 2,070 operator
+applications. Of sampled latch waits: Hamiltonian 34.8%, multiply 25.0%,
+ordered_chunks 15.2%, construct 13.0%, projection 10.9%. The supplied 184 us
+per wake and 879 us per blocking wait describe attributed wait time, not the
+wall duration of every logical region. Futex wakes and pool installations are
+separate observables and are counted separately in the local experiment.
+
+**Correction to the preceding inspection and historical P10J claim:**
+`ScfProblem::step` has a separate serial-k branch selected by
+`min(threads, states.len()) == 1`. Gamma takes that branch even at T>1, bypassing
+`ordered_solves` and its resident pool installation. Therefore its Hamiltonian
+and GEMM phases really do enter the pool externally. Select that branch only
+for a total budget <=1; a threaded Gamma solve now uses the existing ordered
+path with exclusive mutable KState ownership. No Sync requirement is added to
+the operator, no unsafe reference transfer, and no thread budget is enlarged.
+This directly addresses the supplied call-site evidence. Construction already
+uses one outer region for all k states; the master waits for actual setup work,
+not one dispatch per atom/shell.
+
+### Local hypotheses and rejected prototypes
+
+Host: Apple Silicon arm64, rustc 1.99.1 (58cf8f9c3 2026-10-13), release,
+shared Mac. `sample <own-child-pid> 1 1 -file ...` returned 255 (sandbox
+cannot examine the process); no local sampling profile is claimed. Initial
+`scripts/check.sh` and `cargo check --features mkl --all-targets` both exited 0.
+
+- Finite Boolean reduction microbenchmark (median of nine batches of 100,
+  microseconds, old early-exit / reduction): 1024 elements 0.328/0.321;
+  16384 5.393/5.362; 131072 42.963/42.902; 524288 176.470/171.810.
+  This is at most 2.6% here and does not explain the remote 0.976 s gap.
+  More useful: projection validates immutable q at entry; each of two passes
+  formerly rescanned q twice. Private finite-input entry points reuse that
+  validation, scan each newly normalized block once, and retain every product's
+  output/shape checks. Coefficients checked on output need no immediate rescan.
+  Public GEMM entry points still reject nonfinite inputs. No unsafe code added.
+- Rotation products for basis and H*basis share a fixed-panel task tree. Each
+  panel computes the same separate products, with no fused arithmetic or changed
+  reduction. MKL and T=1 use the separate-call path. No GEMM packing introduced.
+- Limiting recursive leaves to min(T, panels) was rejected: combined prototype
+  si8 T=8 wall median 1.815 s versus baseline 1.727 s (roughly 5% slower).
+  Independent fixed panels remain stealable. Bounding pieces to workers worsens
+  tails; it does not guarantee that Rayon's other workers remain asleep.
+- Existing Nonlocal old-streaming/blocked benchmark (us; independent bit checks):
+  (atoms,rows,channels)=(4,257,1): 3.626/3.681; (2,769,4): 21.289/17.229;
+  (4,1025,4): 36.220/36.519; (4,4097,4): 100.875/76.404;
+  (8,2969,4): 93.159/94.031; (8,4097,3): 96.598/97.767;
+  (20,16385,9): 2895.517/2902.473. No general Mac regression justifies
+  restoring streaming globally. Leave production Nonlocal unchanged pending
+  dev08 measurement, where the supplied 0.164 s loss remains unexplained.
+- No spin policy change: supplied sched_yield counts and tail waits do not
+  justify burning additional cores. Pool ingress reduction is addressed first.
+
+### Mac production comparison
+
+Three runs per case/budget, median wall seconds. Uninstrumented executables;
+no builds or other task benchmarks overlapped these runs. Shared-host timing
+noise remains. Before is HEAD/P10J; after includes validation reuse, paired
+rotations and the single-k resident branch. No arithmetic/default changes.
+
+| Case | T | Before s | After s | Before/after |
+| --- | ---: | ---: | ---: | ---: |
+| si8 | 1 | 3.774887584 | 3.666024542 | 1.029695 |
+| si8 | 2 | 2.494354667 | 2.445633250 | 1.019922 |
+| si8 | 4 | 1.935665875 | 1.844976292 | 1.049155 |
+| si8 | 8 | 1.726885541 | 1.647487750 | 1.048193 |
+| si8 | 12 | 1.706870500 | 1.590182250 | 1.073380 |
+| gamma | 1 | 0.110782209 | 0.109270167 | 1.013838 |
+| gamma | 2 | 0.090828583 | 0.090389500 | 1.004858 |
+| gamma | 4 | 0.083097250 | 0.083152708 | 0.999333 |
+| gamma | 8 | 0.080732625 | 0.080689250 | 1.000538 |
+| gamma | 12 | 0.086510667 | 0.080824791 | 1.070348 |
+| k222s | 1 | 0.351281167 | 0.348871250 | 1.006908 |
+| k222s | 2 | 0.201997375 | 0.201806000 | 1.000948 |
+| k222s | 4 | 0.150384750 | 0.146936125 | 1.023470 |
+| k222s | 8 | 0.124678584 | 0.124057000 | 1.005010 |
+| k222s | 12 | 0.121810583 | 0.119047459 | 1.023210 |
+| k222 | 1 | 0.652517417 | 0.650152500 | 1.003637 |
+| k222 | 2 | 0.364066875 | 0.361900584 | 1.005986 |
+| k222 | 4 | 0.246716750 | 0.241078083 | 1.023389 |
+| k222 | 8 | 0.178062375 | 0.177101166 | 1.005427 |
+| k222 | 12 | 0.176486625 | 0.173612583 | 1.016554 |
+| k444s | 1 | 2.551488417 | 2.535976833 | 1.006117 |
+| k444s | 2 | 1.337836500 | 1.352080875 | 0.989465 |
+| k444s | 4 | 0.825829583 | 0.813585125 | 1.015050 |
+| k444s | 8 | 0.626953042 | 0.569873500 | 1.100162 |
+| k444s | 12 | 0.513669833 | 0.495419625 | 1.036838 |
+
+All 25 after case/budget comparisons to the independently executed before T=1
+record pass `bench_scf.py --require-identical`: energy difference 0 Ha, identical
+density SHA-256 and iteration counts. Pure si8 remains 15 SCF iterations.
+The after T=1/T=8 wall speedup is **2.225x**, below 3x on this Mac.
+
+| Case | Energy Ha | Iterations | Density SHA-256 |
+| --- | ---: | ---: | --- |
+| gamma | -7.2955304682107647 | 10 | `1854d1ea91d96933ec85e908ec62b4466ddb044abe16b060c1cbe376daea0d3f` |
+| k222s | -7.919423412469083 | 10 | `2b310246ec91cf7ea8b845e03fcee0fe6c7769e5556c4af16ab5c8e4916e3ee5` |
+| k222 | -7.8312300571211368 | 10 | `f203190f8c973771213a5074eb769c3ceecf264945aa805ea2da6edad5988840` |
+| k444s | -7.9259761266480915 | 10 | `ad4d3eabe1b8823365908f6647c4470831a51416e8c738cd3f2aaabf7549b220` |
+| si8 | -31.321803601031256 | 15 | `9152c7a9c64db67f623379a343a7b8c84b532ccc08736f8870292ad287e3e4de` |
+
+The initial k444s T=2 table has a 1.1% slowdown. Seven alternating-order
+pairs resolve this as noise here: before median 1.355740417 s, after 1.346649333 s
+(1.006751x). One after outlier was 1.413047459 s; it was retained.
+
+### Controlled change ablations (Mac)
+
+Three repetitions, wall median s, executed sequentially. These small
+differences are not additive causal attributions or predictions for dev08.
+
+| Variant | T=1 s | T=8 s |
+| --- | ---: | ---: |
+| before | 3.771342416 | 1.708182542 |
+| validation | 3.724640583 | 1.681641916 |
+| resident | 3.765390209 | 1.765678625 |
+| both | 3.697109291 | 1.677927750 |
+| final | 3.704783375 | 1.669834500 |
+
+validation = finite scan/reuse only; resident = only the SCF branch fix;
+both = those two; final adds paired rotations. Resident alone does not show
+a Mac wall-time win in this batch despite removing external ingress.
+Validation alone saves about 0.047 s at T=1 / 0.027 s at T=8; pairing on top
+of both saves about 0.008 s at T=8, within shared-host noise. No hypothesis
+is claimed to explain a measured number of remote seconds without rerunning
+dev08. All ablations retained the same energies and density hashes.
+
+### Generality
+
+The six existing P10J synthetic recipes above (4/8/20 atoms, cubic/skew,
+channels [0,1,2]) were rerun using the before binary at T=1 and after at
+T=1/2/4/8. All 24 comparisons have exact energy, iteration count and density
+SHA-256 equality. These small-basis, nonphysical fixtures establish identity,
+not broad realistic-system scaling. Large/partial-panel and adjoint-shape
+numerics tests additionally cover different widths and thread budgets.
+The suite comparison at T=2 initially returned 5 because its input fingerprint
+includes threads; all six runs themselves passed. Cross-thread equality was
+then checked explicitly; T=4/8 suite commands exit 0 without that incompatible
+input comparison. No tolerance or fingerprint rule was relaxed.
+
+### Test-counter region measurements
+
+Temporary instrumented release builds of HEAD and the final source counted
+`WorkerPool::install` at entry/exit and `WorkerPool::join`. Each pool owned four
+AtomicU64 values: external count/ns and resident count/ns (Relaxed); residence
+was `rayon::current_thread_index().is_some()` before installation. One global
+Relaxed counter counted join calls. A temporary RAII probe around
+`Davidson::solve_policy` captured differences for each solve. Counters printed
+only at probe/pool destruction. Timers and atomics affect timings; these are
+diagnostic builds, not the production table. All instrumentation was removed.
+The exact temporary patch generator and logs are `/tmp/p10k_instrument.py`,
+`/tmp/p10k-counts.log`, `/tmp/p10k-solver-{before,after}.log`; production source
+contains neither P10K_METRICS nor P10K_SOLVER.
+
+The current Mac case has **340 main + 68 certificate = 408 Davidson iterations**,
+16 solve calls and 15 SCF iterations, unchanged before/after. This differs from
+the supplied dev08 290-iteration workload; do not mix their denominators.
+
+| Solver-only quantity | Before | After |
+| --- | ---: | ---: |
+| Installed GEMM/band regions | 2463.000000 | 2055.000000 |
+| Regions / Davidson iteration | 6.036765 | 5.036765 |
+| Regions / SCF iteration | 164.200000 | 137.000000 |
+| Mean installed region duration, us | 294.187353 | 327.391934 |
+| External ingress inside solve | 2463.000000 | 0.000000 |
+| Join calls | 25313.000000 | 20825.000000 |
+
+The fused rotation saves exactly one region per Davidson iteration (408 total).
+The outer SCF adds 16 resident whole-solve boundaries instead of 2,463
+external entries from inside those solves. Whole-process counts (separate
+instrumented execution) are 2,512 external + 16 resident installs before,
+65 external + 2,071 resident after; joins 25,425 -> 20,937. The 65 final
+external regions include setup, potential updates, whole solves, density and
+energy audits. Setup has one installation covering all k states; Nonlocal
+construction and worker FFT-plan allocation run inside it, with no pool
+installation per atom or shell. The supplied 0.19 s setup latch attribution
+therefore includes real setup computation, not 0.19 s empty dispatch.
+
+Whole-process external mean duration: 323.505 us before versus 24,788.548 us
+after; the increase is expected because a region now includes a complete solve.
+The inline T=1 path has zero join calls and zero parallel regions (49 no-pool
+install calls simply execute closures). These counts are logical regions, not
+futex syscalls. Rayons internal stealing/wake policy may issue multiple wakes
+per tree. No syscall count or worker-wakeup count is inferred from them.
+
+Dispatch microbenchmark, median of nine batches of 1000 after 100 warmups,
+unchanged WorkerPool implementation; empty tasks need not wake every worker:
+
+| T | Empty ingress us | External tree us | Resident tree us |
+| ---: | ---: | ---: | ---: |
+| 1 | 0.000 | 0.001 | 0.001 |
+| 2 | 3.779 | 3.683 | 0.011 |
+| 4 | 4.160 | 4.193 | 0.030 |
+| 8 | 6.827 | 7.291 | 0.188 |
+| 12 | 8.529 | 9.985 | 0.674 |
+| 16 | 9.119 | 10.709 | 1.146 |
+
+An extra master spin was not tested or adopted. Rayon offers no per-install
+worker-parking cap here; the number of useful fixed pieces limits work, but
+this is not a guarantee that other pool workers never wake. The rejected
+bounded-leaf prototype and lack of a universal wakeup cap remain explicit.
+
+### MKL iteration count and outstanding remote checks
+
+No native MKL is linked/executed on Apple Silicon. The supplied dev08 result
+**16 SCF iterations versus the historical 15** is not resolved or hidden.
+These changes do not change MKL's BLAS decomposition or projection arithmetic;
+validation reuse only removes read-only scans, and paired rotation falls back
+to the original two calls for MKL. Therefore this patch is not expected to
+restore 15 iterations by itself. The P10I blocked projection and P10J logical
+MKL Gram product both changed rounding relative to fe0492b; the observation
+alone cannot identify which caused a convergence-boundary crossing.
+
+The remote session should retain the exact same UPF SHA, input, BLAS thread
+settings and binary provenance and compare P10J versus this patch first:
+energies within 1e-12 Ha, within-backend density identity across T, full residual
+history and fixed-point certificate, pure T=8 >=3x, MKL T=1 <=6.5 s. To attribute
+16 vs 15, use separate temporary ablations of established-basis projection
+(legacy two-pass MGS versus blocked projection) and Gram decomposition; do not
+change both at once, tolerances, defaults or mixing. Compare the first differing
+residual/history point and stopping conditions; do not accept a historical
+iteration count as a correctness criterion. Any ablation that changes arithmetic
+must still meet the energy/certificate gates. Do not merge those ablations as
+part of this patch. The 0.976 s GEMM and 0.164 s Nonlocal remote gaps cannot be
+quantitatively declared recovered from Mac timing or static reasoning.
+
+### Reproduction and gate record
+
+Production benchmark command (T=1,2,4,8,12; before/final executables saved under
+`/tmp/p10k-{before,final}`), absolute UPF path required because inputs are created
+in a temporary directory:
+
+```sh
+python3 -I scripts/bench_scf.py --binary /tmp/p10k-final \
+  --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF \
+  --cases gamma,k222s,k222,k444s,si8 --repeats 3 --threads 8 \
+  --baseline /tmp/p10k-before-1.json --require-identical \
+  --record /tmp/p10k-final-8.json
+```
+
+All five final commands exited 0. The early trial using a relative UPF path
+exited 3; it was corrected to the absolute path, not counted as passing.
+`scripts/check.sh`: build/test/fmt/clippy PASS, exit 0 after final code changes.
+`cargo check --features mkl --all-targets`: exit 0 (type checking only).
+`python3 -I scripts/make_readme_figures.py`: exit 0, generated README/figures
+unchanged because existing reference evidence is unchanged.
+`python3 -I scripts/tests/test_readme_figures.py`: exit 0, 3 tests passed;
+pre-existing Python unclosed-file ResourceWarnings remain.
+
+The task's owned-file list excludes dashboard state, reference datasets and
+figure-generator changes. No new scientific/QE reference numbers were invented
+or added to those files. The authoritative parent run registry (outside this
+worktree) records P10K#2 running; the checked-in worktree registry predates this
+run. Dashboard upload/registry completion remains with the orchestrator. No
+remote host was changed; no commit was created.
+
+Executable/input provenance SHA-256:
+
+- `/tmp/p10k-before`: `2b5bdc7b5f28bb421aa832eb3b29962c02c27a96d3e3c13f9c32028f5f67ae51`
+- `/tmp/p10k-final`: `fe04f720a3fd7f46c1f26f7192d09d5b12e872158519fedc54ce7e3fcf221c47`
+- `/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF`: `e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`
+
+Raw production wall-time samples (s), retained for audit:
+
+```json
+{"case": "gamma", "threads": 1, "before_wall_s": [0.48323425, 0.11078220900000002, 0.11020425], "after_wall_s": [0.49267112499999993, 0.10927016699999992, 0.10913333300000005]}
+{"case": "k222s", "threads": 1, "before_wall_s": [0.3515085, 0.351281167, 0.35116141700000014], "after_wall_s": [0.3488712500000001, 0.3489778749999999, 0.3488233329999999]}
+{"case": "k222", "threads": 1, "before_wall_s": [0.6525699580000002, 0.6519921660000003, 0.6525174169999999], "after_wall_s": [0.6509671669999999, 0.6483848329999997, 0.6501524999999999]}
+{"case": "k444s", "threads": 1, "before_wall_s": [2.551763541, 2.5501540840000008, 2.551488417], "after_wall_s": [2.535976833, 2.537482292, 2.5303685410000014]}
+{"case": "si8", "threads": 1, "before_wall_s": [3.774887584, 3.753132375, 3.7824475], "after_wall_s": [3.671732125, 3.6660245420000006, 3.650778457999998]}
+{"case": "gamma", "threads": 2, "before_wall_s": [0.091345041, 0.09082858300000002, 0.09080170800000001], "after_wall_s": [0.09080120800000002, 0.09038949999999998, 0.09038354099999998]}
+{"case": "k222s", "threads": 2, "before_wall_s": [0.20247670799999995, 0.201689958, 0.20199737500000003], "after_wall_s": [0.20124779200000004, 0.20323629199999993, 0.20180599999999993]}
+{"case": "k222", "threads": 2, "before_wall_s": [0.3684926249999999, 0.361383958, 0.364066875], "after_wall_s": [0.3604152920000001, 0.36193633300000005, 0.36190058400000025]}
+{"case": "k444s", "threads": 2, "before_wall_s": [1.3504679579999999, 1.3378364999999999, 1.3369852909999995], "after_wall_s": [1.5056060839999996, 1.352080875, 1.3323814160000005]}
+{"case": "si8", "threads": 2, "before_wall_s": [2.552047375000001, 2.473412167000001, 2.4943546669999996], "after_wall_s": [2.47867675, 2.417811624999999, 2.44563325]}
+{"case": "gamma", "threads": 4, "before_wall_s": [0.08368479199999998, 0.08309725000000001, 0.082921875], "after_wall_s": [0.08346283400000001, 0.08315270800000002, 0.082957417]}
+{"case": "k222s", "threads": 4, "before_wall_s": [0.15123837499999998, 0.15038474999999996, 0.14942408299999999], "after_wall_s": [0.145409458, 0.15383629100000001, 0.14693612499999997]}
+{"case": "k222", "threads": 4, "before_wall_s": [0.253353959, 0.24671675000000004, 0.245226041], "after_wall_s": [0.2410780829999999, 0.23919241599999985, 0.24155266600000003]}
+{"case": "k444s", "threads": 4, "before_wall_s": [0.8258295829999998, 0.8303068329999999, 0.823436708], "after_wall_s": [0.8217623329999999, 0.8107909580000001, 0.8135851249999999]}
+{"case": "si8", "threads": 4, "before_wall_s": [1.933264958, 1.9366081669999993, 1.9356658750000006], "after_wall_s": [1.8864376249999997, 1.8448487919999996, 1.8449762919999992]}
+{"case": "gamma", "threads": 8, "before_wall_s": [0.08072358300000002, 0.080746542, 0.08073262499999997], "after_wall_s": [0.08068924999999999, 0.080690292, 0.07958854199999998]}
+{"case": "k222s", "threads": 8, "before_wall_s": [0.12476654200000004, 0.12333475000000005, 0.12467858399999998], "after_wall_s": [0.12326958300000002, 0.12405700000000003, 0.13051558399999996]}
+{"case": "k222", "threads": 8, "before_wall_s": [0.17821545800000005, 0.17718687500000008, 0.17806237499999988], "after_wall_s": [0.19541254200000002, 0.17464899999999994, 0.17710116599999992]}
+{"case": "k444s", "threads": 8, "before_wall_s": [0.6397413750000001, 0.626953042, 0.590805875], "after_wall_s": [0.5789400409999998, 0.5636456669999999, 0.5698734999999999]}
+{"case": "si8", "threads": 8, "before_wall_s": [1.7408905419999998, 1.7268855409999997, 1.7217335829999998], "after_wall_s": [1.6583395410000001, 1.6474877500000007, 1.6364545000000001]}
+{"case": "gamma", "threads": 12, "before_wall_s": [0.08656325000000001, 0.08651066699999999, 0.08498775000000003], "after_wall_s": [0.08082479099999999, 0.08026370900000002, 0.08179245799999998]}
+{"case": "k222s", "threads": 12, "before_wall_s": [0.12209637500000003, 0.12181058300000003, 0.12180170800000001], "after_wall_s": [0.11904745899999997, 0.11885908299999998, 0.11933204100000006]}
+{"case": "k222", "threads": 12, "before_wall_s": [0.176486625, 0.17621529199999997, 0.1797105000000001], "after_wall_s": [0.17261666600000003, 0.17361258299999993, 0.17600962500000006]}
+{"case": "k444s", "threads": 12, "before_wall_s": [0.513669833, 0.5118042500000002, 0.5208842090000001], "after_wall_s": [0.49366829199999995, 0.5021435840000001, 0.4954196249999998]}
+{"case": "si8", "threads": 12, "before_wall_s": [1.7043947499999996, 1.7088302079999993, 1.7068705], "after_wall_s": [1.579857916, 1.599937208, 1.5901822499999998]}
+```
+
+Final additional checks: `cargo test --release -p dft-numerics --lib` exit 0
+(28 passed, 5 ignored); `cargo test --release -p dft-engine --test
+stepwise_equivalence -- --include-ignored --nocapture --test-threads=1` exit 0
+(7 passed, including the execution-mode replay matrix). The final uninstrumented
+`target/release/dft-cli` is byte-identical to the measured `/tmp/p10k-final`.
+A fresh historical baseline.json gamma/k222 comparison exited 0: absolute
+energy differences 1.63e-13 / 6.04e-14 Ha. Historical density differs, as it
+already did in P10J; this is separate from exact P10J density preservation.
+`git diff --check` exits 0. Final source changes are restricted to the ticket's
+owned files. All changes remain uncommitted for architect review.

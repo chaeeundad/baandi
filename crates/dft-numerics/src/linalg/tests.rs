@@ -453,3 +453,51 @@ fn reusable_adapters_rectangular_and_empty_shapes() {
         0
     );
 }
+
+#[test]
+fn finite_scan_checks_both_components_and_tail() {
+    for len in [0, 1, 3, 17, 1025] {
+        let mut a = ComplexMatrix::zeros(len, 1).unwrap();
+        assert!(a.validate_finite().is_ok());
+        for index in 0..len {
+            for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                for value in [Complex64::new(invalid, 0.0), Complex64::new(0.0, invalid)] {
+                    a.data[index] = value;
+                    assert!(matches!(a.validate_finite(), Err(LinalgError::NonFinite)));
+                    a.data[index] = Complex64::default();
+                }
+            }
+        }
+    }
+}
+
+/// cargo test --release -p dft-numerics finite_scan_timing -- --ignored --nocapture
+#[test]
+#[ignore]
+fn finite_scan_timing() {
+    use std::{hint::black_box, time::Instant};
+    println!("elements,short_circuit_us,reduction_us");
+    for len in [1024, 16384, 131072, 524288] {
+        let a = ComplexMatrix::zeros(len, 1).unwrap();
+        let mut times = [0.0; 2];
+        for (mode, time) in times.iter_mut().enumerate() {
+            let mut samples = Vec::new();
+            for _ in 0..9 {
+                let start = Instant::now();
+                for _ in 0..100 {
+                    let a = black_box(&a);
+                    let valid = if mode == 0 {
+                        a.data.iter().all(|z| z.re.is_finite() && z.im.is_finite())
+                    } else {
+                        a.validate_finite().is_ok()
+                    };
+                    assert!(black_box(valid));
+                }
+                samples.push(start.elapsed().as_secs_f64() * 1e4);
+            }
+            samples.sort_by(f64::total_cmp);
+            *time = samples[4];
+        }
+        println!("{len},{:.3},{:.3}", times[0], times[1]);
+    }
+}

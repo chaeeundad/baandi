@@ -747,7 +747,10 @@ impl ScfProblem {
                 .min(self.occupations.len()),
             buffer_tolerance: tolerance.max(1e-5),
         };
-        let k_points = if self.options.threads.max(1).min(self.states.len()) == 1 {
+        // A single k point still has an intra-k budget. Keep its complete solve
+        // resident on that pool, so each band/GEMM phase does not enter from
+        // the external caller and wait on a LockLatch again.
+        let k_points = if self.options.threads <= 1 {
             let mut k_points = Vec::new();
             for (i, state) in self.states.iter().enumerate() {
                 let preconditioner = DiagonalPreconditioner::new(

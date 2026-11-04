@@ -95,3 +95,31 @@ cargo test -p dft-engine --lib scf_reuses_workers -- --nocapture
 The last test runs complete synthetic SCFs and checks executor startup counts
 before and after all iterations. See [optimization-log.md](optimization-log.md)
 for measured timings, equivalence, outstanding dev08 gates and limitations.
+
+## P10K synchronization and validation glue
+
+The single-k SCF branch now selects serial execution from the **total** thread
+budget (`threads <= 1`), not the outer k-point count. With an intra-k budget,
+Gamma uses the same resident ordered-solve path as multiple k points. P10J's
+claim above that every complete solve was resident did not hold for its separate
+single-k branch; that omission is corrected here.
+
+Davidson recurrence rotates the basis and Hamiltonian image through one shared
+fixed-panel task tree. Each panel retains the original separate sequential
+products; the Gram reduction and all panel boundaries remain unchanged. MKL and
+T=1 retain separate rotation calls. Projection reuses the entry validation of
+its immutable basis and the output validation of coefficients. Public GEMM still
+checks both operands, dimensions and output; newly normalized projection inputs
+are checked before use. No unsafe entry point, output-only public validation,
+new tolerance, spin policy or thread-dependent arithmetic was introduced.
+
+Panels remain individually stealable. A prototype with only T groups regressed
+si8 on the Mac and was removed; a task count cap is not a promise that unused
+Rayon workers never wake. Hamiltonian already applies all supplied bands in one
+region, splitting them evenly (at most one band difference); setup already has
+one region covering k-state construction. Their kernels remain unchanged.
+
+See the P10K entry in [optimization-log.md](optimization-log.md) for the measured
+Mac matrix, instrumented ingress/region counts, rejected candidates and remote
+acceptance limits. Instrumentation was confined to temporary benchmark builds;
+production hot loops contain no new counters, clocks or logging.

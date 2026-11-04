@@ -78,12 +78,86 @@ impl GemmWorkspace {
         Ok(out)
     }
 
+    /// Rotate a basis and its Hamiltonian image in one scheduling region.
+    /// Each fixed panel still performs the same two sequential backend products.
+    /// Result allocation matches the two legacy allocating multiply calls.
+    pub fn rotate_pair(
+        &mut self,
+        a: &ComplexMatrix,
+        h: &ComplexMatrix,
+        b: &ComplexMatrix,
+    ) -> Result<(ComplexMatrix, ComplexMatrix), LinalgError> {
+        if a.rows != h.rows || a.cols != h.cols {
+            return Err(LinalgError::Dimension);
+        }
+        #[cfg(not(feature = "mkl"))]
+        if self.threads > 1 && a.rows >= a.cols {
+            let (m, k, n) = (a.rows, a.cols, b.cols);
+            if k != b.rows || m > self.long || k.max(n) > self.short {
+                return Err(LinalgError::Dimension);
+            }
+            a.validate_finite()?;
+            h.validate_finite()?;
+            b.validate_finite()?;
+            let mut out = ComplexMatrix::zeros(m, n)?;
+            let mut hout = ComplexMatrix::zeros(m, n)?;
+            let job = Job {
+                a,
+                oa: MatrixOp::Identity,
+                b,
+                ob: MatrixOp::Identity,
+                m,
+                k,
+                n,
+                reduce: false,
+            };
+            let hjob = Job { a: h, ..job };
+            let count = m.div_ceil(PANEL).max(1);
+            // Keep the existing scheduling threshold for each logical product.
+            let threads = if m.saturating_mul(n).saturating_mul(k) < 262_144 || count < 4 {
+                1
+            } else {
+                self.threads.min(count)
+            };
+            let output = faer::MatMut::from_column_major_slice_mut(&mut out.data, m, n);
+            let houtput = faer::MatMut::from_column_major_slice_mut(&mut hout.data, m, n);
+            if threads <= 1 {
+                rotate_pair(output, houtput, 0, 1, &job, &hjob);
+            } else {
+                self.pool
+                    .install(|| rotate_pair(output, houtput, 0, threads, &job, &hjob));
+            }
+            out.validate_finite()?;
+            hout.validate_finite()?;
+            return Ok((out, hout));
+        }
+        Ok((
+            self.multiply(a, MatrixOp::Identity, b, MatrixOp::Identity)?,
+            self.multiply(h, MatrixOp::Identity, b, MatrixOp::Identity)?,
+        ))
+    }
+
     /// Pure Rust uses fixed 256-row panels for rotations, or 256-plane-wave partial
     /// products for Gram matrices. Partial products are summed in panel order.
     /// Identical tile shapes and backend calls are used even with one worker.
     /// MKL uses one sequential call for the entire logical product at every
     /// budget, avoiding packed operand copies and small BLAS calls.
     pub fn multiply_into(
+        &mut self,
+        a: &ComplexMatrix,
+        oa: MatrixOp,
+        b: &ComplexMatrix,
+        ob: MatrixOp,
+        out: &mut ComplexMatrix,
+    ) -> Result<(), LinalgError> {
+        a.validate_finite()?;
+        b.validate_finite()?;
+        self.multiply_into_finite_inputs(a, oa, b, ob, out)
+    }
+
+    // Both operands must have been checked since their last mutation. Private
+    // so only the projection workspace can reuse its validation of the basis.
+    fn multiply_into_finite_inputs(
         &mut self,
         a: &ComplexMatrix,
         oa: MatrixOp,
@@ -104,12 +178,10 @@ impl GemmWorkspace {
         }
         #[cfg(feature = "mkl")]
         {
-            gemm_into(a, oa, b, ob, out)
+            gemm_into_finite_inputs(a, oa, b, ob, out)
         }
         #[cfg(not(feature = "mkl"))]
         {
-            a.validate_finite()?;
-            b.validate_finite()?;
             let reduce = k > m;
             let count = if reduce { k } else { m }.div_ceil(PANEL).max(1);
             let job = Job {
@@ -243,6 +315,39 @@ fn rotate(mut out: faer::MatMut<'_, Complex64>, first: usize, threads: usize, jo
 }
 
 #[cfg(not(feature = "mkl"))]
+fn rotate_pair(
+    mut out: faer::MatMut<'_, Complex64>,
+    mut hout: faer::MatMut<'_, Complex64>,
+    first: usize,
+    threads: usize,
+    job: &Job<'_>,
+    hjob: &Job<'_>,
+) {
+    if threads <= 1 || out.nrows() <= PANEL {
+        let mut start = first;
+        while out.nrows() > 0 {
+            let rows = out.nrows().min(PANEL);
+            let (panel, rest) = out.split_at_row_mut(rows);
+            let (hpanel, hrest) = hout.split_at_row_mut(rows);
+            borrowed_product(job, start, rows, job.k, panel);
+            borrowed_product(hjob, start, rows, hjob.k, hpanel);
+            start += rows;
+            out = rest;
+            hout = hrest;
+        }
+        return;
+    }
+    let panels = out.nrows().div_ceil(PANEL);
+    let middle = panels / 2 * PANEL;
+    let (left, right) = out.split_at_row_mut(middle);
+    let (hleft, hright) = hout.split_at_row_mut(middle);
+    WorkerPool::join(
+        || rotate_pair(left, hleft, first, threads, job, hjob),
+        || rotate_pair(right, hright, first + middle, threads, job, hjob),
+    );
+}
+
+#[cfg(not(feature = "mkl"))]
 fn borrowed_product(
     job: &Job<'_>,
     start: usize,
@@ -357,14 +462,18 @@ impl ProjectionWorkspace {
             if let Some(q) = against {
                 reshape(&mut self.coefficients, q.cols, count);
                 reshape(&mut self.projected, block.rows, count);
-                gemm.multiply_into(
+                // q was checked at entry and is immutable. Normalization (or
+                // the preceding MGS pass) changed the incoming block; check it
+                // once. The first product checks coefficients on output.
+                self.normalized.validate_finite()?;
+                gemm.multiply_into_finite_inputs(
                     q,
                     MatrixOp::Adjoint,
                     &self.normalized,
                     MatrixOp::Identity,
                     &mut self.coefficients,
                 )?;
-                gemm.multiply_into(
+                gemm.multiply_into_finite_inputs(
                     q,
                     MatrixOp::Identity,
                     &self.coefficients,
@@ -499,6 +608,37 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn paired_rotation_matches_separate_products() {
+        for (m, k, n) in [(0, 0, 0), (7, 11, 3), (513, 11, 7), (4097, 41, 33)] {
+            let a = matrix(m, k);
+            let mut h = matrix(m, k);
+            for z in &mut h.data {
+                *z *= Complex64::new(0.7, -0.2);
+            }
+            let b = matrix(k, n);
+            let mut first = None;
+            for threads in [1, 2, 3, 4, 8, 12] {
+                let mut work = GemmWorkspace::new(m.max(k), k.max(n), threads).unwrap();
+                let expected = work
+                    .multiply(&a, MatrixOp::Identity, &b, MatrixOp::Identity)
+                    .unwrap();
+                let hexpected = work
+                    .multiply(&h, MatrixOp::Identity, &b, MatrixOp::Identity)
+                    .unwrap();
+                let (actual, hactual) = work.rotate_pair(&a, &h, &b).unwrap();
+                bits(&expected, &actual);
+                bits(&hexpected, &hactual);
+                if let Some((a, h)) = &first {
+                    bits(a, &actual);
+                    bits(h, &hactual);
+                } else {
+                    first = Some((actual, hactual));
+                }
+            }
+        }
+    }
+
     #[test]
     fn blocked_projection_rank_scale_orthogonality_and_identity() {
         let rows = 517;
@@ -657,6 +797,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn projection_revalidates_mutated_inputs_and_rejects_overflow() {
+        let mut work = GemmWorkspace::new(517, 8, 4).unwrap();
+        let mut projection = ProjectionWorkspace::new(517, 8).unwrap();
+        let block = matrix(517, 2);
+        let mut q = matrix(517, 3);
+        projection
+            .orthonormalize(&block, Some(&q), &mut work)
+            .unwrap();
+        q[(516, 2)] = Complex64::new(0.0, f64::NAN);
+        assert!(matches!(
+            projection.orthonormalize(&block, Some(&q), &mut work),
+            Err(LinalgError::NonFinite)
+        ));
+        q.data.fill(Complex64::new(f64::MAX, 0.0));
+        let mut block = block;
+        block.data.fill(Complex64::new(1.0, 0.0));
+        assert!(matches!(
+            projection.orthonormalize(&block, Some(&q), &mut work),
+            Err(LinalgError::NonFinite)
+        ));
     }
 
     #[test]

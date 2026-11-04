@@ -11,6 +11,7 @@ members = [
     "crates/dft-engine",
     "crates/dft-cli",
     "crates/dft-mkl",
+    "crates/baandi-mcp",
 ]
 
 [workspace.package]

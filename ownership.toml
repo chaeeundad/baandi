@@ -26,3 +26,5 @@ deps = ["dft-numerics"]
 deps = ["dft-physics", "dft-solvers", "dft-basis", "dft-geometry", "dft-upf"]
 [crates.dft-cli]        # I/O only, no numerics
 deps = ["dft-engine", "dft-units", "dft-geometry", "dft-basis", "dft-upf", "dft-physics", "dft-solvers"]   # direct deps on lower crates allowed until dft-engine exists
+[crates.baandi-mcp]    # MCP server (agent path, ADR 0028); nothing in the core depends on it
+deps = ["dft-engine"]

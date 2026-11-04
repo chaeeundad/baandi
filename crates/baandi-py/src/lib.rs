@@ -1,5 +1,9 @@
 //! Owned Python boundary objects; no Python callbacks enter numerical kernels.
 //! PyO3 owns generated FFI and reference lifetimes. No handwritten unsafe code.
+//! Enable `python-extension` through maturin to build the Python module.
+//! Interpreter-dependent tests run against the installed wheel, not a Rust harness.
+#![cfg(all(feature = "python-extension", not(test)))]
+
 use dft_engine::{
     CompletionMode, ExecutionConfig, Mixing, ScfOptions, ScfProblem, ScfSession, SpeciesPotential,
     StepStatus,
@@ -263,8 +267,21 @@ impl Session {
     }
 }
 
+/// Use precisely the CLI's conversion operation, not ASE's CODATA constants.
+#[pyfunction]
+fn hartree_to_ev(value: f64) -> f64 {
+    dft_units::from_hartree(value, dft_units::EnergyUnit::ElectronVolt)
+}
+
+#[pyfunction]
+fn angstrom_to_bohr(value: f64) -> f64 {
+    dft_units::Bohr::from(dft_units::Angstrom(value)).0
+}
+
 #[pymodule]
 fn _baandi(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(hartree_to_ev, m)?)?;
+    m.add_function(wrap_pyfunction!(angstrom_to_bohr, m)?)?;
     m.add_class::<Options>()?;
     m.add_class::<Session>()?;
     m.add_class::<ResultView>()?;

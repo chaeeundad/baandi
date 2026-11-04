@@ -13,6 +13,7 @@ license = "MIT"
 ase = ["ase>=3.26,<4"]
 
 [tool.maturin]
+features = ["python-extension"]
 manifest-path = "../../crates/baandi-py/Cargo.toml"
 python-source = ".."
 module-name = "baandi._baandi"

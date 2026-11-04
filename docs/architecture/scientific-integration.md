@@ -30,11 +30,17 @@ External numerical solver D3 uses the separate [contract](../research/external-s
 ## Python usage (P11G implementation)
 
 The separate `baandi-py` crate wraps the engine's Gamma-only LDA session.
-The native binding and ARM64 CPython 3.9 wheel have been exercised. **ASE energy
-is pending the `dft-units` dependency approval**: the proposed bridge is in
-`crates/baandi-py/units-integration.patch`. Until applied, `Baandi` rejects
-unsupported properties but cannot calculate energy. This does not implement
-the full P11I workflow schema or audited policy intervention API.
+The native binding, optional ASE energy calculator and ARM64 CPython 3.9 wheel
+use the shared `dft-units` conversions. Forces and stress remain unavailable.
+This does not implement the full P11I workflow schema or audited policy
+intervention API.
+
+The default workspace build does not enable the Python ABI and requires no
+Python development library. Maturin enables the `python-extension` feature from
+`pyproject.toml`, which activates PyO3's extension-module linkage. On macOS the
+cdylib resolves Python symbols from the loading interpreter; it does not link
+libpython. Interpreter-dependent validation lives in the installed-wheel Python
+tests; the default Rust crate artifact is not a usable Python extension.
 
 Build from `python/baandi` (do not pass `--manifest-path`, which changes maturin's
 Python project discovery). ASE remains an optional extra:
@@ -45,11 +51,6 @@ PYO3_PYTHON=/Users/mino/Develop/rust-dft-wt/pyenv/bin/python maturin build --off
 # Install the resulting wheel with pip; request baandi[ase] for the ASE adapter.
 ```
 
-The current shared vendor directory lacks PyO3 despite its presence in the local
-Cargo registry cache. An offline Cargo invocation from outside the worktree,
-with an absolute manifest path, uses that cache. See the crate validation note
-for the tested local wrapper and the Python framework link workaround. No new
-packages were downloaded.
 
 ```python
 from pathlib import Path
@@ -89,7 +90,7 @@ Waiting for setup and numerical steps releases the GIL. Dropping the session
 closes the command channel and the worker releases the engine. There is no
 handwritten unsafe code or Python callback inside the numerical loop.
 
-After the proposed units bridge is approved and applied:
+ASE usage (cell rows and Cartesian positions in Angstrom; energy in eV):
 
 ```python
 from ase import Atoms
@@ -105,6 +106,6 @@ until complete model-identity caching is available. Forces, stress, free energy
 and every other unsupported property raise `NotImplementedError`, including
 force-consistent energy requests; they never return zero. An exhausted SCF
 raises `ConvergenceError`, leaves `results` empty and retains its session for
-uncertified diagnostics. The intended conversion uses exactly `dft-units`, not
+uncertified diagnostics. The conversion uses exactly `dft-units`, not
 ASE's different CODATA constants. The CLI comparison test checks hexadecimal
 float equality in Ha and eV with the same settings and represented geometry.

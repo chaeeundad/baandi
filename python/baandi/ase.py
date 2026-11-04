@@ -52,13 +52,7 @@ class Baandi(Calculator):
             raise NotImplementedError("BAANDI supports only spin-unpolarized calculations")
         if self.atoms.get_initial_charges().any():
             raise NotImplementedError("BAANDI does not support charged ASE atoms")
-        try:
-            from ._baandi import angstrom_to_bohr, hartree_to_ev
-        except ImportError as exc:
-            raise NotImplementedError(
-                "ASE energy requires the pending dft-units conversion bridge; "
-                "use the native Session API in Hartree/Bohr until it is enabled."
-            ) from exc
+        from ._baandi import angstrom_to_bohr, hartree_to_ev
         rows = [[angstrom_to_bohr(float(x)) for x in row] for row in self.atoms.cell]
         self.session = Session(
             rows, self.atoms.get_chemical_symbols(),

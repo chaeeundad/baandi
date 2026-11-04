@@ -83,9 +83,9 @@
     "id": "P10",
     "name": "성능 고도화: RMM-DIIS, 밀도 혼합, FFT 융합, GPU 설계, 범용 벤치(MKL 제외)",
     "status": "in progress",
-    "gates_done": 6,
-    "gates_total": 7,
-    "note": "RMM-DIIS, 혼합기, FFT 융합, GPU 설계, 범용 벤치, 단일 k점 스레드 확장(P10I: 8원자 Mac 8스레드 약 2.0배, 단일 스레드 6퍼센트 느려짐, dev08 재측정 대기, 목표 3배) 완료. 진행: MKL 호출 경로(P10H) (작업 단위 6/7) / P10J(상시 스레드 풀, MKL 회귀 복구): 구현과 Mac 검증 완료, 브랜치 푸시, dev08 재측정 후 병합"
+    "gates_done": 8,
+    "gates_total": 9,
+    "note": "완료: RMM-DIIS, 혼합기, FFT 융합, GPU 설계, 범용 벤치, 단일 k점 스레드 확장(P10I), 상시 스레드 풀(P10J, 스레드 생성 비용 제거, MKL 회귀 해소). dev08 8원자 셀 순수 Rust T=8 1.30배(목표 3배), MKL T=1 7.38초(목표 6.3초). 진행: 동기화 대기와 행렬곱 래퍼 제거(P10K) (작업 단위 8/9)"
   },
   {
     "id": "P10B",

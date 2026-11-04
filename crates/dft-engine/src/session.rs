@@ -745,3 +745,339 @@ impl ScfSession {
         }
     }
 }
+
+// Persistence is opt-in at completed boundaries. No call or branch is added to
+// initialize/advance/step, including the Classic execution path.
+impl ScfSession {
+    fn check_checkpoint_model(
+        &self,
+        model: &crate::checkpoint::ModelIdentity,
+    ) -> Result<(), crate::checkpoint::Rejection> {
+        use crate::checkpoint::Rejection as R;
+        model.validate()?;
+        if model.cell_bohr != self.problem.cell.lattice_columns_bohr() {
+            return Err(R::Cell);
+        }
+        if model.cutoff_hartree.to_bits() != self.problem.options.cutoff_hartree.to_bits() {
+            return Err(R::Cutoff);
+        }
+        if model.electrons.to_bits() != self.problem.electrons.to_bits() {
+            return Err(R::ElectronCount);
+        }
+        if model.xc != self.problem.options.functional.name() {
+            return Err(R::Xc);
+        }
+        if model.spin != "unpolarized" {
+            return Err(R::Spin);
+        }
+        let points: Vec<_> = self
+            .problem
+            .states
+            .iter()
+            .map(|s| {
+                let k = s.point;
+                [k.fractional[0], k.fractional[1], k.fractional[2], k.weight]
+            })
+            .collect();
+        if model.kpoints != points {
+            return Err(R::KMesh);
+        }
+        Ok(())
+    }
+    pub fn checkpoint(
+        &self,
+        kind: crate::checkpoint::CheckpointKind,
+        model: crate::checkpoint::ModelIdentity,
+        execution: crate::checkpoint::ExecutionIdentity,
+    ) -> Result<crate::checkpoint::Checkpoint, crate::checkpoint::Rejection> {
+        use crate::checkpoint::*;
+        self.check_checkpoint_model(&model)?;
+        if execution.threads != self.problem.options.threads || !is_digest(&execution.build_sha256)
+        {
+            return Err(Rejection::Identity);
+        }
+        let orbitals = |m: &ComplexMatrix| Orbitals {
+            rows: m.rows(),
+            cols: m.cols(),
+            coefficients: m.as_slice().iter().flat_map(|z| [z.re, z.im]).collect(),
+        };
+        let density = self.density().ok_or(Rejection::Boundary)?;
+        let previous = if let Some(o) = &self.outcome {
+            o.result
+                .k_points
+                .iter()
+                .map(|k| orbitals(&k.solution.eigenvectors))
+                .collect()
+        } else {
+            self.continuation
+                .as_ref()
+                .and_then(|c| c.previous.as_ref())
+                .map(|v| v.iter().map(orbitals).collect())
+                .unwrap_or_default()
+        };
+        let sequence = if kind == CheckpointKind::ExactContinuation {
+            self.events
+                .as_ref()
+                .map(EventQueue::checkpoint_sequence)
+                .transpose()?
+                .unwrap_or(0)
+        } else {
+            self.snapshot().sequence
+        };
+        let continuation = if kind == CheckpointKind::ExactContinuation {
+            if self.status != StepStatus::Ready {
+                return Err(Rejection::Boundary);
+            }
+            let c = self.continuation.as_ref().ok_or(Rejection::Boundary)?;
+            Some(ContinuationState {
+                options: self.problem.options.clone(),
+                completion: self.completion,
+                config: self.config.clone(),
+                iteration: self.iteration,
+                state_version: self.state_version,
+                sequence,
+                mixer: c.mixer.checkpoint().map_err(|_| Rejection::Mixer)?,
+                history: c.history.clone(),
+                best: c.best.is_finite().then_some(c.best),
+                growing: c.growing,
+                mixing_resets: c.mixing_resets,
+                minimum_gap: self.problem.minimum_gap,
+            })
+        } else {
+            None
+        };
+        let result = if kind == CheckpointKind::ResultExport {
+            let o = self.outcome.as_ref().ok_or(Rejection::Boundary)?;
+            let r = &o.result;
+            Some(ExportResult {
+                converged: o.converged,
+                energy: r.energy.clone(),
+                charge: r.charge,
+                gap_hartree: r.gap_hartree,
+                eigenvalues: r
+                    .k_points
+                    .iter()
+                    .map(|k| k.solution.eigenvalues.clone())
+                    .collect(),
+                residuals: r
+                    .k_points
+                    .iter()
+                    .map(|k| k.solution.residuals.clone())
+                    .collect(),
+                history: r.history.clone(),
+            })
+        } else {
+            None
+        };
+        Ok(Checkpoint {
+            schema_version: SCHEMA_VERSION,
+            kind,
+            calc_id: self.config.calc_id.clone(),
+            sequence,
+            timestamp: std::time::SystemTime::now(),
+            model,
+            execution,
+            electronic_state: ElectronicState {
+                grid: self.problem.grid.dims(),
+                density: density.iter().copied().collect(),
+                orbitals: previous,
+                occupations: self.problem.occupations.clone(),
+            },
+            continuation,
+            runtime: None,
+            result,
+        })
+    }
+    fn import_electronic(
+        &mut self,
+        state: &crate::checkpoint::ElectronicState,
+    ) -> Result<(), crate::checkpoint::Rejection> {
+        use crate::checkpoint::Rejection as R;
+        let dims = self.problem.grid.dims();
+        if state.grid != dims || state.density.len() != dims.iter().product::<usize>() {
+            return Err(R::Grid);
+        }
+        if state.occupations != self.problem.occupations {
+            return Err(R::Occupations);
+        }
+        if state
+            .density
+            .iter()
+            .any(|n| !n.is_finite() || *n < -xc::NEGATIVE_ROUNDOFF)
+        {
+            return Err(R::Density);
+        }
+        let n = Array3::from_shape_vec(dims, state.density.clone()).map_err(|_| R::Grid)?;
+        let charge = n.sum() * (self.problem.cell.volume_bohr3() / n.len() as f64);
+        if (charge - self.problem.electrons).abs() / self.problem.electrons > 1e-8 {
+            return Err(R::Density);
+        }
+        let previous = if state.orbitals.is_empty() {
+            None
+        } else {
+            if state.orbitals.len() != self.problem.states.len() {
+                return Err(R::Orbitals);
+            }
+            let mut previous = Vec::new();
+            for (o, k) in state.orbitals.iter().zip(&self.problem.states) {
+                if o.rows != k.basis.vectors().len()
+                    || o.cols != self.problem.occupations.len()
+                    || o.rows.checked_mul(o.cols).and_then(|n| n.checked_mul(2))
+                        != Some(o.coefficients.len())
+                    || o.coefficients.iter().any(|x| !x.is_finite())
+                {
+                    return Err(R::Orbitals);
+                }
+                let m = ComplexMatrix::new(
+                    o.rows,
+                    o.cols,
+                    o.coefficients
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|z| Complex64::new(z[0], z[1]))
+                        .collect(),
+                )
+                .map_err(|_| R::Orbitals)?;
+                for j in 0..m.cols() {
+                    for i in 0..=j {
+                        let overlap: Complex64 = m
+                            .column(i)
+                            .iter()
+                            .zip(m.column(j))
+                            .map(|(a, b)| a.conj() * b)
+                            .sum();
+                        if (overlap - Complex64::new(if i == j { 1.0 } else { 0.0 }, 0.0)).norm()
+                            > 1e-8
+                        {
+                            return Err(R::Orbitals);
+                        }
+                    }
+                }
+                previous.push(m);
+            }
+            Some(previous)
+        };
+        let c = self.continuation.as_mut().ok_or(R::Boundary)?;
+        c.n = n;
+        c.previous = previous;
+        Ok(())
+    }
+    pub fn restore_exact(
+        problem: ScfProblem,
+        checkpoint: &crate::checkpoint::Checkpoint,
+        model: &crate::checkpoint::ModelIdentity,
+        execution: &crate::checkpoint::ExecutionIdentity,
+    ) -> Result<Self, crate::checkpoint::Rejection> {
+        use crate::checkpoint::*;
+        if checkpoint.runtime.is_some() {
+            return Err(Rejection::Runtime);
+        }
+        Self::restore_exact_inner(problem, checkpoint, model, execution)
+    }
+    pub(crate) fn restore_exact_inner(
+        problem: ScfProblem,
+        checkpoint: &crate::checkpoint::Checkpoint,
+        model: &crate::checkpoint::ModelIdentity,
+        execution: &crate::checkpoint::ExecutionIdentity,
+    ) -> Result<Self, crate::checkpoint::Rejection> {
+        use crate::checkpoint::*;
+        checkpoint.compatible(CheckpointKind::ExactContinuation, model, execution)?;
+        let c = checkpoint.continuation.as_ref().ok_or(Rejection::Kind)?;
+        if checkpoint.result.is_some() {
+            return Err(Rejection::Kind);
+        }
+        if !options_identical(&problem.options, &c.options) || problem.minimum_gap != c.minimum_gap
+        {
+            return Err(Rejection::Options);
+        }
+        if c.config.calc_id != checkpoint.calc_id
+            || c.sequence != checkpoint.sequence
+            || c.iteration
+                .checked_add(1)
+                .is_none_or(|n| c.state_version < n as u64)
+            || c.state_version >= u64::MAX - 1
+            || c.sequence >= u64::MAX - 16
+            || execution.threads != c.options.threads
+        {
+            return Err(Rejection::Identity);
+        }
+        if c.iteration >= c.options.max_iterations
+            || c.history.len() != c.iteration
+            || c.history.iter().enumerate().any(|(i, r)| {
+                r.iteration != i + 1
+                    || !r.energy.total_hartree().is_finite()
+                    || !r.density_residual.is_finite()
+            })
+            || (c.iteration > 0 && checkpoint.electronic_state.orbitals.is_empty())
+            || c.best.is_some_and(|v| !v.is_finite() || v < 0.0)
+            || (c.iteration > 0 && c.best.is_none())
+            || c.growing > c.iteration
+            || c.growing >= c.options.divergence_patience
+            || c.mixing_resets as u64 > c.state_version
+            || c.best.map(f64::to_bits)
+                != c.history
+                    .iter()
+                    .map(|r| r.density_residual)
+                    .reduce(f64::min)
+                    .map(f64::to_bits)
+        {
+            return Err(Rejection::History);
+        }
+        if let MixerState::Kerker { diagnostics, .. } = &c.mixer
+            && (diagnostics.raw_recoveries > c.iteration
+                || diagnostics.resets as u64 > c.state_version)
+        {
+            return Err(Rejection::Mixer);
+        }
+        let mut session =
+            Self::new(problem, c.completion, c.config.clone()).map_err(|_| Rejection::Options)?;
+        session.check_checkpoint_model(model)?;
+        session.initialize().map_err(|_| Rejection::Mixer)?;
+        session.import_electronic(&checkpoint.electronic_state)?;
+        let state = session.continuation.as_mut().unwrap();
+        state
+            .mixer
+            .restore(&c.mixer, state.n.len())
+            .map_err(|_| Rejection::Mixer)?;
+        state.history = c.history.clone();
+        state.best = c.best.unwrap_or(f64::INFINITY);
+        state.growing = c.growing;
+        state.mixing_resets = c.mixing_resets;
+        session.iteration = c.iteration;
+        session.state_version = c.state_version;
+        // initialize emitted an event; restored streams start after the saved,
+        // durably drained cursor and must not fabricate a second initialization.
+        session.events =
+            (c.config.mode != ExecutionMode::Classic).then(|| EventQueue::new(&c.config));
+        if let Some(q) = &mut session.events {
+            q.restore_sequence(c.sequence);
+        }
+        Ok(session)
+    }
+    pub fn warm_start(
+        problem: ScfProblem,
+        checkpoint: &crate::checkpoint::Checkpoint,
+        model: &crate::checkpoint::ModelIdentity,
+        execution: &crate::checkpoint::ExecutionIdentity,
+        completion: CompletionMode,
+        config: ExecutionConfig,
+    ) -> Result<Self, crate::checkpoint::Rejection> {
+        use crate::checkpoint::*;
+        checkpoint.compatible(CheckpointKind::WarmStart, model, execution)?;
+        if checkpoint.continuation.is_some()
+            || checkpoint.runtime.is_some()
+            || checkpoint.result.is_some()
+        {
+            return Err(Rejection::Kind);
+        }
+        if config.calc_id == checkpoint.calc_id {
+            return Err(Rejection::Identity);
+        }
+        let mut session = Self::new(problem, completion, config).map_err(|_| Rejection::Options)?;
+        session.check_checkpoint_model(model)?;
+        session.initialize().map_err(|_| Rejection::Mixer)?;
+        session.import_electronic(&checkpoint.electronic_state)?;
+        Ok(session)
+    }
+}

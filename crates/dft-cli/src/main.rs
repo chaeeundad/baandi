@@ -1,4 +1,5 @@
 mod bands;
+mod checkpoint_io;
 mod dos;
 mod pseudo;
 use clap::{Parser, Subcommand};
@@ -16,6 +17,24 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Save an iteration boundary or an evaluated result in checkpoint v1 format.
+    Checkpoint {
+        input: PathBuf,
+        output: PathBuf,
+        #[arg(long, default_value_t = 3)]
+        iteration: usize,
+        #[arg(long, value_enum, default_value_t = checkpoint_io::Kind::Exact)]
+        kind: checkpoint_io::Kind,
+    },
+    /// Resume an exact checkpoint, or explicitly consume a warm-start artifact.
+    Restart {
+        input: PathBuf,
+        checkpoint: PathBuf,
+        output: PathBuf,
+        #[arg(long)]
+        warm: bool,
+    },
+
     /// SCF followed by a fixed-density band path and portable plotting files.
     Bands {
         input: PathBuf,
@@ -69,6 +88,21 @@ enum Command {
     Grid { input: PathBuf },
 }
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    match &cli.command {
+        Command::Checkpoint {
+            input,
+            output,
+            iteration,
+            kind,
+        } => return checkpoint_io::create(input, output, *iteration, *kind),
+        Command::Restart {
+            input,
+            checkpoint,
+            output,
+            warm,
+        } => return checkpoint_io::restart(input, checkpoint, output, *warm),
+        _ => {}
+    }
     if let Command::Pseudo { command, registry } = &cli.command {
         return pseudo::execute(command, registry.as_deref());
     }
@@ -110,7 +144,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
     let input = match &cli.command {
         Command::Validate { input, .. } | Command::Grid { input } => input,
-        Command::Eval { .. }
+        Command::Checkpoint { .. }
+        | Command::Restart { .. }
+        | Command::Eval { .. }
         | Command::Pseudo { .. }
         | Command::InspectUpf { .. }
         | Command::Bands { .. }
@@ -138,7 +174,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let prepared = config.prepare()?;
     match cli.command {
         Command::Validate { .. } => unreachable!(),
-        Command::Eval { .. }
+        Command::Checkpoint { .. }
+        | Command::Restart { .. }
+        | Command::Eval { .. }
         | Command::Pseudo { .. }
         | Command::InspectUpf { .. }
         | Command::Bands { .. }

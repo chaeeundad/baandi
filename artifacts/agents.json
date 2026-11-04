@@ -23,7 +23,7 @@
     "role": "implementer",
     "state": "active",
     "task": "P10I-SINGLE-KPOINT-SCALING: k점이 1개뿐인 큰 셀(8원자 Gamma)도 스레드를 늘리면 빨라지게 밴드 방향 병렬화(현재 스레드 16개에서도 1.04배)",
-    "ref": "pid 48685, session no sessi, task/P10I-SINGLE-KPOINT-SCALING",
+    "ref": "pid 54114, session no sessi, task/P10I-SINGLE-KPOINT-SCALING",
     "updated": "2026-11-04"
   },
   {

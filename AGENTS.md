@@ -42,6 +42,7 @@ The user reads Korean; these rules govern the final messages of the orchestratin
 2. Every other report is per milestone and has three lines: done / in progress / next.
 3. A task expected to take more than 30 minutes gets an estimated duration when it starts, and its progress is updated on the dashboard.
 4. Every report ends with `지금 내가 할 일: 없음` or `지금 내가 할 일: 있음 (what)`.
+5. (added 2026-11-04, periodic reporting) While any task is running the orchestrating agent reports on a fixed rhythm without being asked: (a) at least every 30 minutes, (b) immediately when a task finishes, is blocked, or fails, (c) at the start of every session or when the user returns. Before each report it reads `artifacts/sessions.json` and the task's `.delegate/<TASK>/report.json` and the worktree status; a task is called "in progress" only if its registry status is `running`. A `blocked` or `failed` run is reported at once with the reason and either the fix already applied or a `[승인필요]`. The orchestrator keeps a recurring session timer for this and says so if the timer is not active. Each periodic report is the normal short report (rule 0 to 4) and updates the dashboard.
 Keep reports short; put detail in the repository documents and link them.
 
 ## README results (user rule, 2026-11-03)

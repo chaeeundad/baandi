@@ -273,6 +273,21 @@ def block(rows, kruns, gamma, perf=None):
         o = ts["k444s"]
         lines += ["", "32 k points against QE with the same number of cores: " + ", ".join(f"{n}: {o[str(n)] / qe['np' + str(n)]:.1f}x slower" for n in (1, 4, 8, 16)) + ". After the parallel setup, density, energy-audit and certificate phases the 32-k-point run takes 1.23 s on 16 threads (3.06 s with k-point threads only), of which the diagonalization is 0.84 s; with 4 and 8 k points the best thread count is 8 (there are few k points per thread). One k point (Gamma) is not parallelized yet.", ""]
         lines += ["", f"Cross-platform check: the total energy on this Linux x86 build differs from the macOS Apple Silicon build by {perf['xplat']['gamma']:+.2e} Ha (Gamma) and {perf['xplat']['k444s']:+.2e} Ha (4x4x4, shifted).", ""]
+    checkpoint = load(os.path.join(REF, "checkpoint", "results.json"))
+    lines += ["### Checkpoint/restart equivalence (synthetic fixtures)", "",
+              f"Reference: the uninterrupted BAANDI engine in the same build. "
+              f"{checkpoint['memory_exact_comparisons']} memory restart comparisons and "
+              f"{checkpoint['file_exact_comparisons']} binary-file restart comparisons preserve energy, density, orbitals, "
+              "scientific iteration history and certificates bit for bit (wall timings excluded). "
+              f"The fixtures cover cubic Gamma, four k points, and a skew two-species cell; "
+              f"Linear/Pulay/KerkerPulay; requested threads {checkpoint['threads']}. "
+              f"Different-mixer warm starts have maximum energy difference "
+              f"{checkpoint['warm_max_energy_difference_ha']:.2e} Ha (acceptance: "
+              f"{checkpoint['warm_tolerance_ha']:.0e} Ha). "
+              "Paused runtime/audit restoration and cross-process CLI restart also pass. "
+              "These are self-equivalence checks, not QE comparisons or a cross-build restart promise. "
+              "See [format, commands and limits](docs/checkpoint-format.md) and "
+              "[stored evidence](tests/reference/checkpoint/results.json).", ""]
     lines += [
               "Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; "
               "fast gates (`scripts/check.sh`) and the Python regression tests pass. Results are added here after each verified implementation.", "", END]

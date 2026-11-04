@@ -1,0 +1,43 @@
+{
+  "task_id": "P11L-CASE-STUDIES",
+  "status": "BLOCKED",
+  "recorded_utc": "2026-11-04T14:55:04.155807+00:00",
+  "checks": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0,
+      "gates": [
+        "build",
+        "test",
+        "fmt",
+        "clippy"
+      ]
+    },
+    {
+      "command": "python3 -I scripts/run_case_studies.py all --output /private/tmp/p11l-final2 --python /Users/mino/Develop/rust-dft-wt/pyenv/bin/python",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/run_case_studies.py all --verify --output /private/tmp/p11l-verify --python /Users/mino/Develop/rust-dft-wt/pyenv/bin/python",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0,
+      "tests": 3
+    }
+  ],
+  "archive_checks": {
+    "sha256_files_verified": 111,
+    "markdown_links_exist": true,
+    "upf_files_present": false,
+    "runner_syntax_valid": true
+  },
+  "limitations": [
+    "MCP has integration checks, not a persisted matched scientific case.",
+    "Self-healing has one system and no Classic comparator.",
+    "MLIP and low-level coupling implementations are absent.",
+    "README and dashboard integration are outside ticket ownership."
+  ],
+  "commit": "Uncommitted by instruction; branch task/P11L-CASE-STUDIES"
+}

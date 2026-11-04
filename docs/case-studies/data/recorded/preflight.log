@@ -1,0 +1,158 @@
+    Finished `release` profile [optimized] target(s) in 0.08s
+     Running tests/preflight_findings.rs (target/release/deps/preflight_findings-955d18ca83bb90d1)
+
+running 11 tests
+test cutoff_code_boundaries_schema_and_determinism ... ok
+test explicit_review_is_additive_durable_and_never_applies_edits ... Review cutoff and test convergence.
+--- a/input.toml
++++ b/input.toml
+@@ -1,15 +1,15 @@
+-[system]
+-name='synthetic'
+-lattice_unit='bohr'
+-lattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]
+-[[system.atoms]]
+-species='site.1'
+-fractional=[0.0,0.0,0.0]
+-[pseudopotentials]
+-'site.1'={path='synthetic.xml', element='Si', allow_element_mismatch=false}
+-[basis]
+-ecutwfc_ry=3.0
+-kpoints=[[0.0,0.0,0.0]]
+-[xc]
+-functional='lda-pz'
+-allow_functional_override=false
++[system]
++name='synthetic'
++lattice_unit='bohr'
++lattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]
++[[system.atoms]]
++species='site.1'
++fractional=[0.0,0.0,0.0]
++[pseudopotentials]
++'site.1'={path='synthetic.xml', element='Si', allow_element_mismatch=false}
++[basis]
++ecutwfc_ry=4.0
++kpoints=[[0.0,0.0,0.0]]
++[xc]
++functional='lda-pz'
++allow_functional_override=false
+
+Review cutoff and test convergence.
+--- a/input.toml
++++ b/input.toml
+@@ -1,15 +1,15 @@
+-[system]
+-name='synthetic'
+-lattice_unit='bohr'
+-lattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]
+-[[system.atoms]]
+-species='site.1'
+-fractional=[0.0,0.0,0.0]
+-[pseudopotentials]
+-'site.1'={path='synthetic.xml', element='Si', allow_element_mismatch=false}
+-[basis]
+-ecutwfc_ry=3.0
+-kpoints=[[0.0,0.0,0.0]]
+-[xc]
+-functional='lda-pz'
+-allow_functional_override=false
++[system]
++name='synthetic'
++lattice_unit='bohr'
++lattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]
++[[system.atoms]]
++species='site.1'
++fractional=[0.0,0.0,0.0]
++[pseudopotentials]
++'site.1'={path='synthetic.xml', element='Si', allow_element_mismatch=false}
++[basis]
++ecutwfc_ry=4.0
++kpoints=[[0.0,0.0,0.0]]
++[xc]
++functional='lda-pz'
++allow_functional_override=false
+
+Review cutoff and test convergence.
+--- a/input.toml
++++ b/input.toml
+@@ -1,15 +1,15 @@
+-[system]
+-name='synthetic'
+-lattice_unit='bohr'
+-lattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]
+-[[system.atoms]]
+-species='site.1'
+-fractional=[0.0,0.0,0.0]
+-[pseudopotentials]
+-'site.1'={path='synthetic.xml', element='Si', allow_element_mismatch=false}
+-[basis]
+-ecutwfc_ry=3.0
+-kpoints=[[0.0,0.0,0.0]]
+-[xc]
+-functional='lda-pz'
+-allow_functional_override=false
++[system]
++name='synthetic'
++lattice_unit='bohr'
++lattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]
++[[system.atoms]]
++species='site.1'
++fractional=[0.0,0.0,0.0]
++[pseudopotentials]
++'site.1'={path='synthetic.xml', element='Si', allow_element_mismatch=false}
++[basis]
++ecutwfc_ry=0.0
++kpoints=[[0.0,0.0,0.0]]
++[xc]
++functional='lda-pz'
++allow_functional_override=false
+
+ok
+test external_client_receives_findings_without_agent_or_input_mutation ... ok
+test failures_are_typed_json_with_unchanged_exit_status ... ok
+test geometry_policies_positive_negative_and_boundaries ... ok
+test invalid_review_policy_and_search_limits_fail_explicitly ... ok
+test override_codes_have_positive_and_negative_fixtures ... ok
+test periodic_minimum_matches_independent_brute_force_for_skew_and_slab ... ok
+test proposal_validation_rejects_stale_undeclared_and_malformed_edits ... ok
+test review_cli_requires_explicit_decision_and_rejects_symlink_destination ... Review cutoff and test convergence.
+--- a/input.toml
++++ b/input.toml
+@@ -1,15 +1,15 @@
+-[system]
+-name='synthetic'
+-lattice_unit='bohr'
+-lattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]
+-[[system.atoms]]
+-species='site.1'
+-fractional=[0.0,0.0,0.0]
+-[pseudopotentials]
+-'site.1'={path='synthetic.xml', element='Si', allow_element_mismatch=false}
+-[basis]
+-ecutwfc_ry=3.0
+-kpoints=[[0.0,0.0,0.0]]
+-[xc]
+-functional='lda-pz'
+-allow_functional_override=false
++[system]
++name='synthetic'
++lattice_unit='bohr'
++lattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]
++[[system.atoms]]
++species='site.1'
++fractional=[0.0,0.0,0.0]
++[pseudopotentials]
++'site.1'={path='synthetic.xml', element='Si', allow_element_mismatch=false}
++[basis]
++ecutwfc_ry=4.0
++kpoints=[[0.0,0.0,0.0]]
++[xc]
++functional='lda-pz'
++allow_functional_override=false
+
+ok
+test structure_unit_conversion_preserves_input_order_and_skew ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+

@@ -1,0 +1,42 @@
+[
+  {
+    "system": "cubic_h2",
+    "command": [
+      "/Users/mino/Develop/rust-dft-wt/P11L-CASE-STUDIES/target/debug/dft-cli",
+      "run",
+      "/private/tmp/p11l-final2/ase-cubic_h2/input.toml",
+      "--output-dir",
+      "/private/tmp/p11l-final2/ase-cubic_h2/classic"
+    ],
+    "exit_code": 0,
+    "energy_hartree": -0.9120966424598976,
+    "energy_ev": -24.819414031645124,
+    "iterations": 12,
+    "classic_iterations": 12,
+    "energy_difference_hartree": 0.0,
+    "classic_wall_seconds": 0.06853012500000011,
+    "ase_wall_seconds": 0.05763895800000007,
+    "workflow_overhead_seconds": -0.010891167000000035,
+    "timing_scope": "one sequential pair; CLI process includes file I/O, ASE in-process includes calculator construction; no isolated adapter-overhead claim"
+  },
+  {
+    "system": "skew_he",
+    "command": [
+      "/Users/mino/Develop/rust-dft-wt/P11L-CASE-STUDIES/target/debug/dft-cli",
+      "run",
+      "/private/tmp/p11l-final2/ase-skew_he/input.toml",
+      "--output-dir",
+      "/private/tmp/p11l-final2/ase-skew_he/classic"
+    ],
+    "exit_code": 0,
+    "energy_hartree": -1.4971019807693309,
+    "energy_ev": -40.738220248348014,
+    "iterations": 8,
+    "classic_iterations": 8,
+    "energy_difference_hartree": 0.0,
+    "classic_wall_seconds": 0.07332274999999999,
+    "ase_wall_seconds": 0.06197662500000023,
+    "workflow_overhead_seconds": -0.011346124999999763,
+    "timing_scope": "one sequential pair; CLI process includes file I/O, ASE in-process includes calculator construction; no isolated adapter-overhead claim"
+  }
+]

@@ -1,0 +1,10 @@
+test_ase_unsupported_properties (binding_cases.BindingTests) ... ok
+test_cli_and_ase_bitwise (binding_cases.BindingTests) ... ok
+test_invalid_inputs_and_exhaustion (binding_cases.BindingTests) ... ok
+test_native_cli_bitwise (binding_cases.BindingTests) ... ok
+test_two_systems_stepwise_and_owned_results (binding_cases.BindingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 1.468s
+
+OK

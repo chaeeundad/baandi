@@ -1,0 +1,84 @@
+{
+  "bands": 4,
+  "electrons": 2,
+  "estimated_array_bytes": 14016,
+  "fft_grid": [
+    8,
+    8,
+    8
+  ],
+  "findings": [
+    {
+      "code": "PF_MIN_DISTANCE",
+      "evidence": {
+        "atoms": [
+          0,
+          1
+        ],
+        "distance_bohr": 3.464101615137755,
+        "minimum_bohr": 100.0
+      },
+      "fix_hint": "Review coordinates, units and bonding; no atom is moved automatically.",
+      "key_path": "system.atoms",
+      "severity": "warning"
+    }
+  ],
+  "findings_schema_version": 1,
+  "memory_note": "orbital plus one real and one complex grid payload only; excludes scratch, projectors, allocator overhead; not peak RSS",
+  "overrides": [],
+  "plane_waves_per_k": [
+    27
+  ],
+  "schema_version": 1,
+  "structure": {
+    "atoms": [
+      {
+        "fractional": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "species": "H"
+      },
+      {
+        "fractional": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "species": "H"
+      }
+    ],
+    "lattice_vectors_bohr": [
+      [
+        4.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        4.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        4.0
+      ]
+    ],
+    "review": {
+      "k_spacing_inverse_bohr": null,
+      "minimum_distance_bohr": 3.464101615137755,
+      "nearest_atoms": [
+        0,
+        1
+      ],
+      "vacuum_gap_bohr": null,
+      "volume_bohr3": 64.0,
+      "volume_ratio": 1.0
+    }
+  },
+  "summary": "Valid: cubic_h2. Will compute spin-unpolarized lda-pz SCF for UPF composition H:2 (labels H:2; 2 atoms, 2 electrons), k mesh Gamma only (1 resolved points), cutoff 8 Ry, 4 bands, 1 threads.",
+  "valid": true,
+  "warnings": []
+}

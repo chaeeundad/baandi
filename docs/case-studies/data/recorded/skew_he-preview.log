@@ -1,0 +1,43 @@
+Proposal SHA-256: 1214854d48656cc428758564772cd127c3ca0994644aeaa26ded8586732c37f8
+Review the deliberately oversized distance warning threshold; no physical convergence claim.
+--- a/input.toml
++++ b/input.toml
+@@ -1,18 +1,18 @@
+-[system]
+-name="skew_he"
+-lattice_unit="bohr"
+-lattice_vectors=[[4.0, 0.0, 0.0], [0.5, 4.0, 0.0], [0.0, 0.5, 5.0]]
+-[[system.atoms]]
+-species="He"
+-fractional=[0.0, 0.0, 0.0]
+-[pseudopotentials]
+-He="/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p11l-pseudo-imcvvsbm/synthetic.upf"
+-[basis]
+-ecutwfc_ry=8.0
+-kpoints=[[0.0,0.0,0.0]]
+-[xc]
+-functional="lda-pz"
+-[scf]
+-nbands=4
+-[preflight]
+-minimum_distance_bohr=100.0
++[system]
++name="skew_he"
++lattice_unit="bohr"
++lattice_vectors=[[4.0, 0.0, 0.0], [0.5, 4.0, 0.0], [0.0, 0.5, 5.0]]
++[[system.atoms]]
++species="He"
++fractional=[0.0, 0.0, 0.0]
++[pseudopotentials]
++He="/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p11l-pseudo-imcvvsbm/synthetic.upf"
++[basis]
++ecutwfc_ry=8.0
++kpoints=[[0.0,0.0,0.0]]
++[xc]
++functional="lda-pz"
++[scf]
++nbands=4
++[preflight]
++minimum_distance_bohr=0.1
+
+Candidate valid: true; no decision recorded, input unchanged

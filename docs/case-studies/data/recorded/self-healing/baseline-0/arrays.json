@@ -1,0 +1,10 @@
+{
+  "bytes": 44600,
+  "density_shape": [
+    15,
+    15,
+    15
+  ],
+  "encoding": "little-endian f64 bits: density iterator, then each k eigenvalues and column-major complex (re,im)",
+  "sha256": "73c4175ea3adefea46edc8094a611b21d5d14d77167617810f7ed4c9eea09a19"
+}

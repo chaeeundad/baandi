@@ -1,0 +1,76 @@
+{
+  "bands": 4,
+  "electrons": 2,
+  "estimated_array_bytes": 15680,
+  "fft_grid": [
+    8,
+    8,
+    9
+  ],
+  "findings": [
+    {
+      "code": "PF_MIN_DISTANCE",
+      "evidence": {
+        "atoms": [
+          0,
+          0
+        ],
+        "distance_bohr": 4.0,
+        "minimum_bohr": 100.0
+      },
+      "fix_hint": "Review coordinates, units and bonding; no atom is moved automatically.",
+      "key_path": "system.atoms",
+      "severity": "warning"
+    }
+  ],
+  "findings_schema_version": 1,
+  "memory_note": "orbital plus one real and one complex grid payload only; excludes scratch, projectors, allocator overhead; not peak RSS",
+  "overrides": [],
+  "plane_waves_per_k": [
+    29
+  ],
+  "schema_version": 1,
+  "structure": {
+    "atoms": [
+      {
+        "fractional": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "species": "He"
+      }
+    ],
+    "lattice_vectors_bohr": [
+      [
+        4.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.5,
+        4.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.5,
+        5.0
+      ]
+    ],
+    "review": {
+      "k_spacing_inverse_bohr": null,
+      "minimum_distance_bohr": 4.0,
+      "nearest_atoms": [
+        0,
+        0
+      ],
+      "vacuum_gap_bohr": null,
+      "volume_bohr3": 80.00000000000001,
+      "volume_ratio": 0.9873533903527021
+    }
+  },
+  "summary": "Valid: skew_he. Will compute spin-unpolarized lda-pz SCF for UPF composition He:1 (labels He:1; 1 atoms, 2 electrons), k mesh Gamma only (1 resolved points), cutoff 8 Ry, 4 bands, 1 threads.",
+  "valid": true,
+  "warnings": []
+}

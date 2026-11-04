@@ -62,3 +62,5 @@ Conventions: docs are English; one fact lives in one place and others link to it
 - `docs/research/dft-feature-matrix.md`: feature matrix of 11 DFT codes from public documentation (P8F; weak-evidence items marked).
 - `docs/roadmap/master-plan-proposal.md`: proposed master roadmap and first 20 tickets with prerequisites (P8F; proposal, user approval pending).
 - [Optional agent preflight](architecture/agent-preflight.md): deterministic structure findings, failure JSON, proposal validation and explicit decision provenance (P11K).
+
+- [External-control case studies](case-studies/README.md): freshly executed Python/ASE, preflight and budget-recovery evidence; MCP contract checks; explicit MLIP/coupling implementation gaps (P11L, partial).

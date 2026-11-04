@@ -1,0 +1,21 @@
+[system]
+name="cubic_h2"
+lattice_unit="bohr"
+lattice_vectors=[[4.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 4.0]]
+[[system.atoms]]
+species="H"
+fractional=[0.0, 0.0, 0.0]
+[[system.atoms]]
+species="H"
+fractional=[0.5, 0.5, 0.5]
+[pseudopotentials]
+H="/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p11l-pseudo-lznjgmca/synthetic.upf"
+[basis]
+ecutwfc_ry=8.0
+kpoints=[[0.0,0.0,0.0]]
+[xc]
+functional="lda-pz"
+[scf]
+nbands=4
+[preflight]
+minimum_distance_bohr=100.0

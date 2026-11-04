@@ -1,0 +1,19 @@
+[system]
+name="cubic_h2"
+lattice_unit="angstrom"
+lattice_vectors=[[2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 2.0]]
+[[system.atoms]]
+species="H"
+fractional=[0.0, 0.0, 0.0]
+[[system.atoms]]
+species="H"
+fractional=[0.5, 0.5, 0.5]
+[pseudopotentials]
+H="/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p11l-ase-ixbi6da7/synthetic.upf"
+[basis]
+ecutwfc_ry=8.0
+kpoints=[[0.0,0.0,0.0]]
+[xc]
+functional="lda-pz"
+[scf]
+nbands=4

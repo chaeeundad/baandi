@@ -1,0 +1,16 @@
+    Finished `release` profile [optimized] target(s) in 0.08s
+     Running tests/self_healing.rs (target/release/deps/self_healing-6d4d9cc321cc3078)
+
+running 1 test
+test three_arm_demo ... reference-0: converged=true iterations=30 energy=-4.68456118427787871 Ha delta=0.000e0 Ha
+baseline-0: converged=false iterations=1 energy=-4.26763916041179847 Ha delta=4.169e-1 Ha
+rules-0: converged=true iterations=30 energy=-4.68456118427787871 Ha delta=0.000e0 Ha
+agent-0: converged=true iterations=30 energy=-4.68456118427787871 Ha delta=0.000e0 Ha
+reference-1: converged=true iterations=30 energy=-4.68456118427787871 Ha delta=0.000e0 Ha
+baseline-1: converged=false iterations=1 energy=-4.26763916041179847 Ha delta=4.169e-1 Ha
+rules-1: converged=true iterations=30 energy=-4.68456118427787871 Ha delta=0.000e0 Ha
+agent-1: converged=true iterations=30 energy=-4.68456118427787871 Ha delta=0.000e0 Ha
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.39s
+

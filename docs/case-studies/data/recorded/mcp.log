@@ -1,0 +1,16 @@
+    Finished `release` profile [optimized] target(s) in 0.07s
+     Running tests/server.rs (target/release/deps/server-d8bd4ab79dff1e2f)
+
+running 9 tests
+test bounded_run_events_and_scalar_result ... ok
+test calculation_and_iteration_quotas_prevent_work ... ok
+test observed_denies_control_and_stale_supervised_request_rejects ... ok
+test protocol_and_authority_fail_closed ... ok
+test schema_documents_match_discovery_and_types ... ok
+test stdio_frames_notifications_and_quotas ... ok
+test supervised_lifecycle_and_export ... ok
+test unsafe_policy_matches_library_audit_and_preserves_state ... ok
+test valid_policy_and_denial_are_host_bound ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

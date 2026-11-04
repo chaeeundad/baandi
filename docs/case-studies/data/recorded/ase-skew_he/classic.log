@@ -1,0 +1,45 @@
+Valid: skew_he. Will compute spin-unpolarized lda-pz SCF for UPF composition He:1 (labels He:1; 1 atoms, 2 electrons), k mesh Gamma only (1 resolved points), cutoff 8 Ry, 4 bands, 1 threads.
+Plane waves per k: [27]; FFT grid: [8, 8, 9]; estimated array payload: 15552 bytes (orbital plus one real and one complex grid payload only; excludes scratch, projectors, allocator overhead; not peak RSS)
+XC: lda-pz; allow_functional_override=false; override_applied=false
+System: skew_he
+Cell volume: 67.483344946004 Bohr^3
+Reciprocal lattice vectors (Bohr^-1):
+  b1 = [1.662459238220, -0.207807404778, 0.020780740478]
+  b2 = [-0.000000000000, 1.662459238220, -0.166245923822]
+  b3 = [0.000000000000, 0.000000000000, 1.329967390576]
+Ecut: 8.000000000000 Ry = 4.000000000000 Ha
+Plane-wave count: 27
+Density-sphere count: 207
+FFT dims: 8 x 8 x 9 (automatic)
+Electrons: 2; bands: 4; mixing: Pulay { beta: 0.3, history: 6 }
+iter E_total(Ha) E_total(Ry) delta_E(Ha) density_residual(Bohr^-3/2) max_eigen_residual(Ha) Davidson phase_wall(s)
+1 -1.496329838475380 -2.992659676950760 n/a 2.552134e-2 1.357124e-3 5 0.007765
+2 -1.496789856814752 -2.993579713629504 -4.600183e-4 1.624040e-2 1.413051e-3 2 0.003106
+3 -1.497101926873886 -2.994203853747772 -3.120701e-4 6.687170e-4 7.942198e-5 2 0.003258
+4 -1.497101979224100 -2.994203958448201 -5.235021e-8 9.045926e-5 8.173885e-6 3 0.005027
+5 -1.497101980739839 -2.994203961479678 -1.515738e-9 1.785167e-5 8.572688e-7 2 0.003424
+6 -1.497101980769235 -2.994203961538471 -2.939649e-11 3.824347e-7 2.533399e-7 3 0.003975
+7 -1.497101980769331 -2.994203961538663 -9.592327e-14 6.243850e-8 2.423075e-9 4 0.004780
+8 -1.497101980769331 -2.994203961538662 4.440892e-16 1.415624e-8 3.310592e-10 2 0.008055
+band_form: -1.497101980769331 Ha = -2.994203961538662 Ry
+band_sum: -0.286775448089139 Ha = -0.573550896178277 Ry
+double_counting: -0.704982767321018 Ha = -1.409965534642037 Ry
+ewald: -1.370999309549366 Ha = -2.741998619098732 Ry
+functional_difference_bound: 0.000000000662120 Ha = 0.000000001324240 Ry
+harris_foulkes: -1.497101980769331 Ha = -2.994203961538663 Ry
+hartree: 0.006162486362269 Ha = 0.012324972724538 Ry
+kinetic: 0.013949792191799 Ha = 0.027899584383599 Ry
+local: 0.317560498537101 Ha = 0.635120997074203 Ry
+local_zero_mode: 0.364980224733243 Ha = 0.729960449466487 Ry
+nonlocal: 0.086697028502979 Ha = 0.173394057005959 Ry
+total: -1.497101980769331 Ha = -2.994203961538662 Ry
+xc: -0.550472476814114 Ha = -1.100944953628228 Ry
+k1 [0.0, 0.0, 0.0]; weight 1.000000000000
+band 1: -0.143387724045 Ha = -3.901778741910 eV; occupation 2
+band 2: 0.743704893445 Ha = 20.237241108566 eV; occupation 0
+band 3: 1.222762421111 Ha = 33.273060527933 eV; occupation 0 (buffer; less accurate)
+band 4: 1.245664731654 Ha = 33.896264146032 eV; occupation 0 (buffer; less accurate)
+HOMO/LUMO gap: direct 0.887092617490 Ha = 24.139019850476 eV at k1; indirect 0.887092617490 Ha = 24.139019850476 eV (HOMO k1, LUMO k1)
+converged
+Total wall: 0.068333 s; setup: 0.028280 s; phases: {"density_s":0.001260291,"diagonalization_s":0.026651251,"mixing_s":0.001526416,"potential_s":0.003960499,"total_energy_s":0.005991791}
+FFT/H psi included in enclosing phases; not separately measured.

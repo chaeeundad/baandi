@@ -1,0 +1,9 @@
+    Finished `release` profile [optimized] target(s) in 0.07s
+     Running tests/self_healing.rs (target/release/deps/self_healing-6d4d9cc321cc3078)
+
+running 2 tests
+test recorded_schema_rejects_unknown_authority_and_missing_version ... ok
+test recorded_stale_or_future_observations_cannot_mutate_policy ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.03s
+

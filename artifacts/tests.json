@@ -350,5 +350,13 @@
     "result": "pass",
     "detail": "Mac: scripts/check.sh build/test/fmt/clippy PASS (exit 0); MKL numerics check and workspace all-target check exit 0; feature-enabled clippy -D warnings exit 0; README generator and 2 consistency tests exit 0. Native MKL was not linked or executed. Claude re-verification remains required. Separate numerics run: 16 passed, 2 benchmarks ignored; maximum observed reciprocal round-trip error 1.7644611924521969e-15 and Parseval defect 3.5528748979513846e-15 (dimensionless, Rust only).",
     "date": "2026-11-03"
+  },
+  {
+    "id": "T-P11E-LOCAL",
+    "check": "P11E offline three-arm SCF budget recovery and policy safety",
+    "phase": "P11E",
+    "result": "pass",
+    "detail": "Implementer verification: scripts/check.sh and scripts/check.sh dft-cli exit 0 (build/test/fmt/clippy). scripts/demo_self_healing.sh exit 0: four arms repeated twice, baseline exhausted at 1 iteration, rules and recorded agent certified at 30; energy -4.684561184277879 Ha, reference error 0 Ha (limit 1e-10 Ha). Complete normalized result and final array bits identical on replay; beta=1.1 rejected without mutation. README consistency: 3 tests pass. Synthetic Gamma budget repair only; no instability healing or overhead claim. Claude re-verification remains required. Evidence: tests/reference/runtime/generated/results.json.",
+    "date": "2026-11-04"
   }
 ]

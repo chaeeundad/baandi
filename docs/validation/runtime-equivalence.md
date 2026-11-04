@@ -1,6 +1,6 @@
 # Runtime equivalence acceptance protocol
 
-Status: future implementation gate, not results. The P11R docs-only check does not establish runtime equivalence. Grounding: `ScfProblem::run/run_outcome/run_impl`, `step_kpoints`, `IterationRecord`, `FixedPointCertificate`; existing `crates/dft-engine/tests/{scf,kpoints,threading,pbe}.rs` and `docs/performance/baseline*.json`.
+Status: acceptance protocol with the executed P11E budget-recovery slice below; the broader mode/performance matrix remains future work. The P11R docs-only check does not establish runtime equivalence. Grounding: `ScfProblem::run/run_outcome/run_impl`, `step_kpoints`, `IterationRecord`, `FixedPointCertificate`; existing `crates/dft-engine/tests/{scf,kpoints,threading,pbe}.rs` and `docs/performance/baseline*.json`.
 
 ## Controlled comparisons
 
@@ -59,4 +59,33 @@ Instrumentation belongs in the benchmark/driver, not new timers/logging in numer
 - Crash between audit intent/commit/application and between checkpoint payload/manifest writes; verify exactly-once accepted commits or discarded uncommitted intent, never an unaudited policy mutation. Atomicity fault injection belongs to runtime implementation tests, not this docs task.
 - Requests for unmerged Kerker/hybrid or incompatible strict/buffer policies reject. After merge, test compatible selection using P10D/P10A/P7PC's own numerical tests, plus state reset/replay and fixed-point certification.
 
-Current measurement status: NOT RUN. No target is marked achieved by P11R's repository build/test/fmt/clippy gates, which check existing code rather than an unimplemented runtime.
+P11J overhead measurement status: NOT RUN. No target is marked achieved by P11R's repository build/test/fmt/clippy gates, which check existing code rather than an unimplemented runtime.
+
+## P11E measured budget-recovery equivalence (2026-11-04)
+
+Command: `scripts/demo_self_healing.sh`. Evidence:
+`tests/reference/runtime/generated/results.json` and each arm's event/audit,
+array manifest and normalized complete result. The two-ion synthetic Gamma
+fixture uses the same build, seed 2026, one thread and RetainLast in
+AgentControlled for all runs. Each of baseline, rules, recorded agent and fresh
+1000-step reference is run twice. All initial density hashes agree.
+
+Baseline exhausts after one ordinary solve (43 operator applications) without
+a certificate. Both recovery arms converge in 30 ordinary iterations with
+three certificate solves and 951 total operator applications. Their energy is
+-4.684561184277879 Ha: absolute error 0 Ha versus the fully converged reference,
+within 1e-10 Ha. Every final density/orbital IEEE bit, eigenvalue, complete
+normalized history and certificate agrees across repeat runs and between
+rules, agent and reference. Timers are excluded from identity. The rejected
+beta=1.1 request in the agent arm has no effect on this trajectory.
+
+Final certificate density residual: 4.551166513318054e-9 Bohr^-3/2;
+occupied eigenvalue change: 2.7803310209684184e-8 Ha; relative charge error:
+4.440892098500626e-16. There are zero dropped events. Operator totals include
+certificate work once. Retained baseline energy is not a certified reference
+comparison, and its certified energy/error fields are null.
+
+This is budget repair at the initial safe point, not a demonstrated cure for
+physical instability. No hot path or default is changed. Cross-mode,
+pre-refactor overhead, cross-thread/platform, large-band and physical recovery
+claims remain outside this result; no P11J performance target is marked met.

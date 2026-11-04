@@ -1,0 +1,19 @@
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+binary: rustc
+commit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67
+commit-date: 2026-10-13
+host: aarch64-apple-darwin
+release: 1.99.1
+LLVM version: 23.1.1
+cargo 1.99.1 (5f94df478 2026-08-27)
+Darwin arm64
+a53cf0238c0a80319a3fa80819acb42d07af5d67
+ M README.md
+ M docs/demos/self-healing-scf.md
+ M docs/validation/intervention-safety.md
+ M docs/validation/runtime-equivalence.md
+ M scripts/make_readme_figures.py
+?? crates/dft-cli/src/heal.rs
+?? crates/dft-cli/tests/self_healing.rs
+?? scripts/demo_self_healing.sh
+?? tests/reference/runtime/

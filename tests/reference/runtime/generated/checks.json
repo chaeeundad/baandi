@@ -1,0 +1,22 @@
+{
+  "task_id": "P11E-SELF-HEALING-DEMO",
+  "commands": [
+    {
+      "command": "scripts/check.sh dft-cli",
+      "exit_code": 0
+    },
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "scripts/demo_self_healing.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    }
+  ],
+  "scope": "Local implementer verification; architect re-verification pending"
+}

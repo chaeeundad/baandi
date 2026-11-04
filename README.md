@@ -154,6 +154,19 @@ Cutoff scan: 7 cutoffs from 20 to 80 Ry; the energy difference to QE is the same
 
 Reference: the uninterrupted BAANDI engine in the same build. 162 memory restart comparisons and 18 binary-file restart comparisons preserve energy, density, orbitals, scientific iteration history and certificates bit for bit (wall timings excluded). The fixtures cover cubic Gamma, four k points, and a skew two-species cell; Linear/Pulay/KerkerPulay; requested threads [1, 4]. Different-mixer warm starts have maximum energy difference 8.22e-15 Ha (acceptance: 1e-10 Ha). Paused runtime/audit restoration and cross-process CLI restart also pass. These are self-equivalence checks, not QE comparisons or a cross-build restart promise. See [format, commands and limits](docs/checkpoint-format.md) and [stored evidence](tests/reference/checkpoint/results.json).
 
+### Self-healing SCF: offline budget recovery
+
+Synthetic two-ion Gamma fixture; reference is a fresh, certified BAANDI run with a 1000-iteration budget in the same build (not QE). All four runs were repeated twice; normalized numerical results and every final density/orbital array bit match on replay. Rules and recorded-agent recovery also match the reference bit for bit. No network or LLM is needed.
+
+| Arm | Converged | Iterations | Certified energy (Ha) | Error vs reference (Ha) | Applied / rejected |
+|---|---|---|---|---|---|
+| reference | True | 30 | -4.684561184277879 | 0.0e+00 | 0 / 0 |
+| baseline | False | 1 | — | — | 0 / 0 |
+| rules | True | 30 | -4.684561184277879 | 0.0e+00 | 1 / 0 |
+| agent | True | 30 | -4.684561184277879 | 0.0e+00 | 1 / 1 |
+
+Acceptance is 1e-10 Ha; the invalid beta=1.1 request is rejected without changing state. This proves initial budget repair and deterministic control, not numerical instability healing, speedup, general recovery defaults or a global ground state. [Reproduce and inspect provenance](docs/demos/self-healing-scf.md#executed-p11e-demo) with `scripts/demo_self_healing.sh`.
+
 Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; fast gates (`scripts/check.sh`) and the Python regression tests pass. Results are added here after each verified implementation.
 
 <!-- validation:end -->

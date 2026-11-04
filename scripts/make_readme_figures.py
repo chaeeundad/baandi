@@ -288,6 +288,30 @@ def block(rows, kruns, gamma, perf=None):
               "These are self-equivalence checks, not QE comparisons or a cross-build restart promise. "
               "See [format, commands and limits](docs/checkpoint-format.md) and "
               "[stored evidence](tests/reference/checkpoint/results.json).", ""]
+    healing = load(os.path.join(REF, "runtime", "generated", "results.json"))
+    hruns = healing["runs"]
+    assert len(hruns) == 8 and healing["full_result_and_array_identity"]
+    for r in hruns:
+        assert r["converged"] == (r["arm"] != "baseline")
+        if r["converged"]:
+            assert r["energy_error_hartree"] <= healing["energy_tolerance_hartree"]
+    lines += ["### Self-healing SCF: offline budget recovery", "",
+              "Synthetic two-ion Gamma fixture; reference is a fresh, certified BAANDI run "
+              "with a 1000-iteration budget in the same build (not QE). "
+              "All four runs were repeated twice; normalized numerical results and every final "
+              "density/orbital array bit match on replay. Rules and recorded-agent recovery also "
+              "match the reference bit for bit. No network or LLM is needed.", "",
+              "| Arm | Converged | Iterations | Certified energy (Ha) | Error vs reference (Ha) | Applied / rejected |",
+              "|---|---|---|---|---|---|"]
+    for r in hruns[:4]:
+        energy = f"{r['certified_energy_hartree']:.15f}" if r["converged"] else "—"
+        error = f"{r['energy_error_hartree']:.1e}" if r["converged"] else "—"
+        lines.append(f"| {r['arm']} | {r['converged']} | {r['iterations']} | {energy} | {error} | {r['policy_changes']} / {r['rejected']} |")
+    lines += ["", "Acceptance is 1e-10 Ha; the invalid beta=1.1 request is rejected without changing "
+              "state. This proves initial budget repair and deterministic control, not numerical "
+              "instability healing, speedup, general recovery defaults or a global ground state. "
+              "[Reproduce and inspect provenance](docs/demos/self-healing-scf.md#executed-p11e-demo) "
+              "with `scripts/demo_self_healing.sh`.", ""]
     lines += [
               "Other verified results: PBE (xcx) matches the published closed forms to 2e-16 Ha and the LDA path is unchanged bit for bit; k-point engine at Gamma reproduces the previous density bit for bit; unit conversion through `uom` and arithmetic input expressions leave the real-Si density bit-identical; "
               "fast gates (`scripts/check.sh`) and the Python regression tests pass. Results are added here after each verified implementation.", "", END]

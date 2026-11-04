@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "calc_id": "self-healing-demo",
+  "request_id": "demo-budget-1",
+  "observed_state_version": 1,
+  "observed_policy_revision": 0,
+  "apply_after_iteration": 0,
+  "max_iterations": 200
+}

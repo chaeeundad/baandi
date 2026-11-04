@@ -1,0 +1,15 @@
+[
+  {
+    "evidence": "first iteration has no energy change; cannot certify",
+    "hypothesis": null,
+    "iteration": 0,
+    "max_iterations": 1,
+    "rule": "budget_preflight_v1",
+    "triggered": true
+  },
+  {
+    "findings_debug": "[Finding { rule: NonFinite, rule_version: \"1.0\", status: Clear, iteration_first: 1, iteration_last: 1, policy_revision: 0, evidence: FiniteScalars { count: 3 }, hypothesis: None, candidates: [] }, Finding { rule: Divergence, rule_version: \"1.0\", status: InsufficientEvidence, iteration_first: 1, iteration_last: 1, policy_revision: 0, evidence: Unavailable, hypothesis: None, candidates: [] }, Finding { rule: Stagnation, rule_version: \"1.0\", status: InsufficientEvidence, iteration_first: 1, iteration_last: 1, policy_revision: 0, evidence: Unavailable, hypothesis: None, candidates: [] }, Finding { rule: Oscillation, rule_version: \"1.0\", status: InsufficientEvidence, iteration_first: 1, iteration_last: 1, policy_revision: 0, evidence: Unavailable, hypothesis: None, candidates: [] }, Finding { rule: ChargeSloshingHint, rule_version: \"1.0\", status: NotComputed, iteration_first: 1, iteration_last: 1, policy_revision: 0, evidence: Unavailable, hypothesis: None, candidates: [] }]",
+    "iteration": 1,
+    "policy_revision": 0
+  }
+]

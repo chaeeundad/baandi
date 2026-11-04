@@ -1,6 +1,6 @@
 # Intervention safety
 
-Status: design and test plan only. Enforcement wraps safe boundaries of `ScfProblem::run_impl`, validation of `ScfOptions`, `DensityMixer` reset/replacement, and read-only `ScfOutcome`; the agent never receives direct mutable numerical state. See [policy/audit schema](../architecture/runtime-control.md).
+Status: threat model and test plan, with the executed P11E rejection/replay slice below. Enforcement wraps safe boundaries of `ScfProblem::run_impl`, validation of `ScfOptions`, `DensityMixer` reset/replacement, and read-only `ScfOutcome`; the agent never receives direct mutable numerical state. See [policy/audit schema](../architecture/runtime-control.md).
 
 | Threat | Required mitigation | Acceptance test |
 | --- | --- | --- |
@@ -34,3 +34,28 @@ Trusted boundary: authenticated host driver and immutable model store. Untrusted
 Control requests admitted before a downgrade receive an explicit disposition; proposals received afterward reject `mode_disallows_control`. Observed read-only access is not authority to change settings or request large arbitrary allocations. Checkpoint generation and approved mode switches remain host-authorized operations. Revoking an agent connection does not cancel already committed transactions or erase their audit.
 
 Retain only typed enum/scalar evidence in machine-directed events, with full windows in bounded artifacts. An agent's explanation may contain instructions or misleading hypotheses; treat it as untrusted display text. Never turn it into a predicate, approval, fallback action or new allowed field. Escape displayed HTML/terminal controls in P11H, and preserve raw text only in a separately permissioned artifact if needed.
+
+## P11E executed slice (2026-11-04)
+
+`scripts/demo_self_healing.sh` executes real synthetic SCF with the merged runtime
+validator. Each recorded-agent repeat submits an operator-approved beta=1.1
+request at boundary zero. Both reject as `Policy(InvalidBeta)`; the boundary
+snapshot and initial density bits are unchanged. A subsequent bounded budget
+extension is separately accepted and applied (revision 0 to 1), preserving mixer
+history. The final result matches the no-intervention reference bit for bit,
+including all array elements and normalized history/certificates. This tests
+rejection's lack of numerical side effects through the subsequent calculation.
+
+The integration harness additionally rejects unknown decision fields, missing
+observation versions, stale observations and future observations. The replay
+file cannot set authority. The host installs one budget extension up to 200;
+physical model and convergence tolerances are never changed. Exact audit
+outcome order is asserted, and every audit hash-chain link is independently
+recomputed from the stored JSON. Evidence is under
+`tests/reference/runtime/generated/agent-{0,1}/audit.jsonl`.
+
+Scope is the trusted offline demo driver, not a deployed security boundary.
+The journal syncs and atomically publishes each batch before application but
+has no crash recovery loader; it is not the general checkpoint format. The
+broader quota, remote authentication, prompt-injection, resource-failure and
+stale-diagnostic threat matrix above is not certified by this demo.

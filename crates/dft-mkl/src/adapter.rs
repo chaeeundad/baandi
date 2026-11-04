@@ -86,6 +86,7 @@ pub struct Plan3d {
 unsafe impl Send for Plan3d {}
 impl Plan3d {
     pub fn new(shape: [usize; 3]) -> Result<Self, Error> {
+        let _ = crate::keep::anchor();
         let len = shape
             .iter()
             .try_fold(1usize, |n, &d| n.checked_mul(d))
@@ -182,6 +183,7 @@ pub fn gemm(
     adjoint_b: bool,
     c: &mut [Complex64],
 ) -> Result<(), Error> {
+    let _ = crate::keep::anchor();
     let (m, k) = if adjoint_a {
         (a.cols, a.rows)
     } else {

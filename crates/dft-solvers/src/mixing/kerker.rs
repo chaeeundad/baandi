@@ -24,6 +24,12 @@ where
 /// A switchable residual operation. The input is the *raw* output-input residual;
 /// the destination has identical length. Filtering must not decide convergence.
 pub trait ResidualPreconditioner {
+    /// True only when reconstruction from immutable settings captures all
+    /// arithmetic state. Arbitrary external preconditioners fail closed.
+    fn checkpoint_stateless(&self) -> bool {
+        false
+    }
+
     fn apply(&mut self, residual: &[f64], filtered: &mut [f64]) -> Result<(), SolverError>;
 }
 
@@ -127,6 +133,10 @@ impl<T: DensityTransform> Kerker<T> {
     }
 }
 impl<T: DensityTransform> ResidualPreconditioner for Kerker<T> {
+    fn checkpoint_stateless(&self) -> bool {
+        true
+    }
+
     fn apply(&mut self, residual: &[f64], filtered: &mut [f64]) -> Result<(), SolverError> {
         if residual.len() != self.weights.len()
             || filtered.len() != residual.len()
@@ -281,23 +291,112 @@ impl<P: ResidualPreconditioner> DensityMixer for PreconditionedPulay<P> {
 
 /// Read-only history introspection without changing the legacy mixer interface.
 /// A returned length counts stored input/residual pairs, not fitted rank.
+/// Version 1 continuation memory. FFT scratch is overwritten on every apply;
+/// the host reconstructs the identical Kerker filter from the model and options.
+#[derive(Clone, Debug)]
+pub enum MixerState {
+    Linear {
+        beta: f64,
+    },
+    Pulay(crate::mixing::PulayState),
+    Kerker {
+        pulay: crate::mixing::PulayState,
+        mean: Option<f64>,
+        previous: Option<f64>,
+        diagnostics: MixingDiagnostics,
+    },
+}
 pub trait MixerHistory: DensityMixer {
+    /// Custom stateful preconditioners must explicitly opt in; never silently
+    /// discard opaque memory when an exact continuation is requested.
+    fn checkpoint(&self) -> Result<MixerState, SolverError> {
+        Err(SolverError::InvalidParameter("opaque mixer state"))
+    }
+    fn restore(&mut self, _state: &MixerState, _size: usize) -> Result<(), SolverError> {
+        Err(SolverError::InvalidParameter("opaque mixer state"))
+    }
+
     fn history_len(&self) -> usize;
     fn used_raw_recovery(&self) -> bool {
         false
     }
 }
 impl MixerHistory for crate::mixing::LinearMixer {
+    fn checkpoint(&self) -> Result<MixerState, SolverError> {
+        Ok(MixerState::Linear { beta: self.beta })
+    }
+    fn restore(&mut self, state: &MixerState, _: usize) -> Result<(), SolverError> {
+        match state {
+            MixerState::Linear { beta } if beta.to_bits() == self.beta.to_bits() => Ok(()),
+            _ => Err(SolverError::InvalidParameter("mixer checkpoint mismatch")),
+        }
+    }
+
     fn history_len(&self) -> usize {
         0
     }
 }
 impl MixerHistory for PulayMixer {
+    fn checkpoint(&self) -> Result<MixerState, SolverError> {
+        Ok(MixerState::Pulay(self.checkpoint()))
+    }
+    fn restore(&mut self, state: &MixerState, size: usize) -> Result<(), SolverError> {
+        match state {
+            MixerState::Pulay(p) => self.restore(p, size),
+            _ => Err(SolverError::InvalidParameter("mixer checkpoint mismatch")),
+        }
+    }
+
     fn history_len(&self) -> usize {
         self.history_len()
     }
 }
 impl<P: ResidualPreconditioner> MixerHistory for PreconditionedPulay<P> {
+    fn checkpoint(&self) -> Result<MixerState, SolverError> {
+        if !self.preconditioner.checkpoint_stateless() {
+            return Err(SolverError::InvalidParameter("opaque preconditioner state"));
+        }
+        Ok(MixerState::Kerker {
+            pulay: self.pulay.checkpoint(),
+            mean: self.mean,
+            previous: self.previous,
+            diagnostics: self.diagnostics,
+        })
+    }
+    fn restore(&mut self, state: &MixerState, size: usize) -> Result<(), SolverError> {
+        let MixerState::Kerker {
+            pulay,
+            mean,
+            previous,
+            diagnostics,
+        } = state
+        else {
+            return Err(SolverError::InvalidParameter("mixer checkpoint mismatch"));
+        };
+        if !self.preconditioner.checkpoint_stateless()
+            || size != self.residual.len()
+            || mean.is_some_and(|v| !v.is_finite() || v <= 0.0)
+            || previous.is_some_and(|v| !v.is_finite() || v < 0.0)
+            || !diagnostics.residual_norm.is_finite()
+            || diagnostics.residual_norm < 0.0
+            || diagnostics
+                .contraction
+                .is_some_and(|v| !v.is_finite() || v < 0.0)
+            || mean != &pulay.mean
+            || mean.is_some() != previous.is_some()
+            || diagnostics.history_used > pulay.capacity
+            || diagnostics.resets == usize::MAX
+            || diagnostics.raw_recoveries == usize::MAX
+        {
+            return Err(SolverError::InvalidParameter("invalid Kerker checkpoint"));
+        }
+        self.pulay.restore(pulay, size)?;
+        self.mean = *mean;
+        self.previous = *previous;
+        self.diagnostics = *diagnostics;
+        Ok(())
+    }
+
     fn used_raw_recovery(&self) -> bool {
         self.diagnostics.used_raw_recovery
     }

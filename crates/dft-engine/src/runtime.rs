@@ -315,7 +315,19 @@ pub struct Runtime {
 }
 impl Runtime {
     pub fn new(session: ScfSession, config: RuntimeConfig) -> Result<Self, ControlError> {
-        if session.snapshot().status != StepStatus::Created
+        Self::new_inner(session, config, false)
+    }
+    fn new_inner(
+        session: ScfSession,
+        config: RuntimeConfig,
+        restoring: bool,
+    ) -> Result<Self, ControlError> {
+        if session.snapshot().status
+            != if restoring {
+                StepStatus::Ready
+            } else {
+                StepStatus::Created
+            }
             || config.max_pending == 0
             || config.max_pending > 16
             || config.max_audit_records < 2
@@ -1061,4 +1073,97 @@ fn monotonic_deadline(wall: SystemTime) -> Result<Instant, ControlError> {
     Instant::now()
         .checked_add(wall.duration_since(SystemTime::now()).unwrap_or_default())
         .ok_or(ControlError::InvalidSchema)
+}
+
+impl Runtime {
+    /// Trusted-host operation, not authority granted by an agent request. Drain
+    /// and persist events first. Pending approvals and external sinks are opaque
+    /// capabilities and cannot be carried across a process boundary.
+    pub fn checkpoint(
+        &self,
+        model: crate::checkpoint::ModelIdentity,
+        execution: crate::checkpoint::ExecutionIdentity,
+    ) -> Result<crate::checkpoint::Checkpoint, crate::checkpoint::Rejection> {
+        use crate::checkpoint::*;
+        if !matches!(self.state, RuntimeState::Initialized | RuntimeState::Paused)
+            || self.journal_failed
+        {
+            return Err(Rejection::Boundary);
+        }
+        if !self.pending.is_empty() {
+            return Err(Rejection::PendingControls);
+        }
+        if self.sink.is_some() {
+            return Err(Rejection::ExternalSink);
+        }
+        let mut cp =
+            self.session
+                .checkpoint(CheckpointKind::ExactContinuation, model, execution)?;
+        cp.runtime = Some(RuntimeCheckpoint {
+            state: self.state,
+            revision: self.revision,
+            config: self.config.clone(),
+            audit: self.audit.clone(),
+            autonomous_total: self.autonomous_total,
+            autonomy_enabled: self.autonomy_enabled,
+            last_policy_iteration: self.last_policy_iteration,
+            rule_counts: self.rule_counts.clone(),
+            rule_last_iteration: self.rule_last_iteration.clone(),
+        });
+        Ok(cp)
+    }
+    /// Import only authenticated local artifacts. A checksum detects corruption;
+    /// it does not authorize the saved autonomy policy or audit identities.
+    pub fn restore_exact(
+        problem: crate::ScfProblem,
+        checkpoint: &crate::checkpoint::Checkpoint,
+        model: &crate::checkpoint::ModelIdentity,
+        execution: &crate::checkpoint::ExecutionIdentity,
+    ) -> Result<Self, crate::checkpoint::Rejection> {
+        use crate::checkpoint::*;
+        let saved = checkpoint.runtime.as_ref().ok_or(Rejection::Runtime)?;
+        let session = ScfSession::restore_exact_inner(problem, checkpoint, model, execution)?;
+        let mut runtime =
+            Self::new_inner(session, saved.config.clone(), true).map_err(|_| Rejection::Runtime)?;
+        let count = saved.config.autonomy.as_ref().map_or(0, |a| a.rules.len());
+        if !matches!(
+            saved.state,
+            RuntimeState::Initialized | RuntimeState::Paused
+        ) || saved.rule_counts.len() != count
+            || saved.rule_last_iteration.len() != count
+            || saved.audit.len() > saved.config.max_audit_records
+            || saved.audit.iter().enumerate().any(|(i, a)| {
+                a.sequence != (i + 1) as u64
+                    || a.calc_id != checkpoint.calc_id
+                    || a.schema_version != 1
+            })
+            || saved
+                .last_policy_iteration
+                .is_some_and(|i| i > runtime.session.snapshot().iteration)
+            || saved
+                .rule_last_iteration
+                .iter()
+                .any(|i| i.is_some_and(|i| i > runtime.session.snapshot().iteration))
+            || saved.config.autonomy.as_ref().is_some_and(|a| {
+                saved.autonomous_total > a.max_applied_total
+                    || a.rules
+                        .iter()
+                        .zip(&saved.rule_counts)
+                        .any(|(r, n)| *n > r.max_count)
+            })
+            || (saved.config.autonomy.is_none()
+                && (saved.autonomy_enabled || saved.autonomous_total != 0))
+        {
+            return Err(Rejection::Runtime);
+        }
+        runtime.state = saved.state;
+        runtime.revision = saved.revision;
+        runtime.audit = saved.audit.clone();
+        runtime.autonomous_total = saved.autonomous_total;
+        runtime.autonomy_enabled = saved.autonomy_enabled;
+        runtime.last_policy_iteration = saved.last_policy_iteration;
+        runtime.rule_counts = saved.rule_counts.clone();
+        runtime.rule_last_iteration = saved.rule_last_iteration.clone();
+        Ok(runtime)
+    }
 }

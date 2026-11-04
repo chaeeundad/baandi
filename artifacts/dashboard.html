@@ -25,7 +25,7 @@
   .rd .st-in-progress { color: var(--color-fg); }
   .rd .a-active { color: var(--color-ok); }
   .rd .a-queued, .rd .a-done { color: var(--color-fg-muted); }
-  .rd .st-pending, .rd .r-pending, .rd .st-out-of-scope, .rd .i-open { color: var(--color-fg-muted); }
+  .rd .st-planned, .rd .st-pending, .rd .r-pending, .rd .st-out-of-scope, .rd .i-open { color: var(--color-fg-muted); }
   .rd .st-blocked, .rd .r-blocked, .rd .r-fail { color: var(--color-bad); }
   .rd .i-needs-decision, .rd .sv-high { color: var(--color-warn); }
   .rd .sv-high { font-weight: var(--cds-font-weight-medium); }
@@ -37,11 +37,11 @@
 <div class="rd">
   <header>
     <h1>rust-dft status</h1>
-    <p class="take"><b data-draw="done" data-source="summary" data-field="done">—</b> of <b data-draw="total" data-source="summary" data-field="total">—</b> gate checks for P0 to P6 are verified, <b data-draw="open" data-source="summary" data-field="open">—</b> issues are unresolved and <b data-draw="decide" data-source="summary" data-field="decide">—</b> of them wait for your decision.</p>
+    <p class="take"><b data-draw="done" data-source="summary" data-field="done">—</b> of <b data-draw="total" data-source="summary" data-field="total">—</b> work items (all tickets, not only the MVP) are done, <b data-draw="open" data-source="summary" data-field="open">—</b> issues are unresolved and <b data-draw="decide" data-source="summary" data-field="decide">—</b> of them wait for your decision.</p>
   </header>
 
   <section class="tiles" aria-label="Summary">
-    <div class="tile"><div class="k">MVP progress</div><div class="v" data-draw="pct" data-source="summary" data-field="pct">—</div><div class="s">verified gates, P0 to P6</div></div>
+    <div class="tile"><div class="k">Overall progress</div><div class="v" data-draw="pct" data-source="summary" data-field="pct">—</div><div class="s">done work items / all tickets</div></div>
     <div class="tile"><div class="k">Tests passed</div><div class="v" data-draw="pass" data-source="summary" data-field="pass">—</div><div class="s">logged checks</div></div>
     <div class="tile"><div class="k">Tests pending</div><div class="v" data-draw="pending" data-source="summary" data-field="pending">—</div><div class="s">not yet run or verified</div></div>
     <div class="tile"><div class="k">Failed or blocked</div><div class="v" data-draw="bad" data-source="summary" data-field="bad">—</div><div class="s">needs attention</div></div>
@@ -94,14 +94,15 @@
 </div>
 <script>
   dash.calc('summary', {
-    inputs: ['milestones', 'tests', 'issues'],
+    inputs: ['milestones', 'tests', 'issues', 'agents'],
     title: 'Overall summary',
-    description: 'Verified gates, test counts and unresolved issues.',
-    fn: (milestones, tests, issues) => {
+    description: 'Done work items over all tickets, test counts and unresolved issues.',
+    fn: (milestones, tests, issues, agents) => {
       const sum = (a, k) => a.reduce((s, r) => s + Number(r[k]), 0);
       const cnt = (a, k, v) => a.filter((r) => r[k] === v).length;
-      const done = sum(milestones, 'gates_done');
-      const total = sum(milestones, 'gates_total');
+      const work = agents.filter((r) => r.agent === 'Codex');
+      const done = cnt(work, 'state', 'done');
+      const total = work.length;
       return [{
         done, total, pct: total ? done / total : 0,
         pass: cnt(tests, 'result', 'pass'),

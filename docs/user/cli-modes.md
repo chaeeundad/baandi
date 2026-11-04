@@ -116,9 +116,11 @@ MCP access and durable replay are not advertised by this CLI adapter.
 baandi status observed
 baandi status observed/events.jsonl
 baandi status results/results.json
+baandi status boundary.cp
 baandi explain input.toml
 baandi explain observed
 baandi explain results/results.json
+baandi explain evaluated.cp
 ```
 
 Status prints structured evidence. Directories prefer events over final results
@@ -126,8 +128,33 @@ to avoid hiding an interrupted newer run behind an older result. The reader
 streams bounded records, checks schema/calculation/sequence consistency, ignores
 an incomplete final line with an explicit flag, and rejects malformed complete
 lines. A nonterminal record means **process liveness unknown**, not “running”.
-Final results report recorded convergence and energies. There is no merged P11C
-checkpoint reader in this checkout; unsupported checkpoint files fail explicitly.
+Final results report recorded convergence and energies.
+
+Checkpoint inspection uses the merged P11C `checkpoint_io::read` API and the
+[checkpoint v1 format](../checkpoint-format.md). Pass the file explicitly:
+`.cp` routes damaged files through that reader, and `BAANDICP` magic recognizes
+valid containers with any extension (including `.toml`). Directory lookup keeps
+its established event-log/results priority and never guesses which checkpoint
+belongs to a calculation. Schema, size limits, checksum and scalar/array decoding
+are checked before displaying any evidence. No density or orbital arrays are
+printed; the report gives dimensions/counts, model/execution identity and recorded
+scalar history with units.
+
+- `ExactContinuation`: saved iteration/state version/mode and latest recorded
+  energy/residuals; convergence is unknown. Runtime envelopes additionally report
+  saved runtime state, policy revision and audit count. Saved state is not proof
+  that a process is running or paused now.
+- `WarmStart`: an initial guess, with no fabricated iteration, convergence flag,
+  history or energy. Missing evidence is JSON null.
+- `ResultExport`: the recorded convergence flag (including false), final energy
+  in Ha, charge in electrons, gap in Ha and latest iteration diagnostics. This is
+  inspection evidence, not a restart capability.
+
+Inspection neither restores a session nor executes SCF, and requires no original
+input/UPF files. It does not establish restart compatibility, physical accuracy or
+source authenticity. Kind/payload contradictions fail explicitly. Explain labels
+these limits and reports that preflight was not rerun; only the original TOML
+configuration route performs P8G preflight.
 
 Explain runs the existing P8G preflight for TOML inputs without running SCF or
 creating output files. It reports geometry, basis/grid, XC, resolved numerical
@@ -193,5 +220,27 @@ Only ticket-owned files are changed. Session/dashboard JSON and publication are
 orchestrator integration work; this checkout does not contain a running P11H
 session record, and this task does not launch a nested delegate run. Adding this
 adapter evidence to the generated README requires an evidence/script extension
-outside this ticket's owned paths. Checkpoint inspection awaits the checkpoint
-adapter contract; there is no substitute checkpoint format here.
+outside this ticket's owned paths. After P11C integration, checkpoint inspection
+uses the shared adapter; there is no substitute checkpoint format here.
+
+### Checkpoint inspection follow-up
+
+`cargo test -p dft-cli --test checkpoint_inspect -- --nocapture` exercises all
+three checkpoint kinds, exact boundaries 0/1, converged and unconverged results,
+and checksum/schema/truncation/kind-payload failures through both CLI commands.
+Files remain byte-identical and inspection creates no outputs. Displayed scalar
+energy agrees with the decoded engine record within 1e-14 Ha; the JSON display
+is not a bitwise continuation format. Classic execution code is unchanged by this
+follow-up; `execution_modes` retains its exact density/numerical comparison.
+The main.rs merge resolution preserves both the checkpoint/restart commands and
+the status/explain commands.
+
+Follow-up verification: `scripts/check.sh dft-cli` and `scripts/check.sh` both
+exited 0 (build/test/fmt/clippy). The two checkpoint inspection tests passed in
+0.75 s; the Classic/launcher/Observed comparison again reported identical density
+bytes and numerical JSON across three iterations, energy difference 0 Ha.
+README generation and its three consistency tests exited 0 without additional
+generated changes. No new numerical reference or performance claim is made.
+Conflict markers were removed from main.rs; the Git index remains unmerged until
+the reviewing orchestrator stages that resolution (this worktree's Git metadata
+is read-only to the implementer). Incoming staged P11C changes are preserved.

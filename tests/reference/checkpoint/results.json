@@ -1,0 +1,226 @@
+{
+  "task_id": "P11C-CHECKPOINT",
+  "base_commit": "9e93d9392e80bc18a35c150789b647a51166bdf7",
+  "source_state": "uncommitted implementation",
+  "source_sha256": {
+    "crates/dft-cli/src/checkpoint_io.rs": "45e5eecf07721f84fd117cced5efa84160e0e8aaf4cdabf84b8e98b5841a9bd4",
+    "crates/dft-cli/src/main.rs": "3eef624193938a05acc0c7af1a00a496b5ad1f10392f75f9c689db36e4bcb166",
+    "crates/dft-cli/tests/checkpoint_io.rs": "f38b0cfcfddde96279198cb654a1219c007eec5d9b0ee7ece10cd6ff81e6f9c7",
+    "crates/dft-engine/src/checkpoint.rs": "85f04b52a82f10337bd0a9eea22330487d4be95ff78ee8155be2b089e4f0fd34",
+    "crates/dft-engine/src/events.rs": "03c6719edf7b5f09b8a526fc5959e2e52e0cdbc449370a01f194656411897d2c",
+    "crates/dft-engine/src/lib.rs": "cf5e07f39fe29f4d1709f8b267576f6ae903f6560c79ab05e5a972797e89e389",
+    "crates/dft-engine/src/runtime.rs": "6a35075acd7043e404629aa2618cebb6df06f41abbd2e1130facb4ddb3bb74cf",
+    "crates/dft-engine/src/session.rs": "f2afff731cfe01f5fa2b84f48c72f27cbdfe7c2f034dd7e3f2be3f42a9bcd55e",
+    "crates/dft-engine/tests/checkpoint.rs": "928e1c88cd98fbeca75198c1ff3b86683aff1cc05fc188e8b399af174c50fb3b",
+    "crates/dft-engine/tests/common/checkpoint.rs": "7b1b273cf5b87eacee299217aeff0a1ebc6600468a990ed775a5788bba107e33",
+    "crates/dft-solvers/src/mixing.rs": "f90220c6c55c622684157c6c7f97bdcfd9432ee2f9473848ec49e83186f0d69a",
+    "crates/dft-solvers/src/mixing/kerker.rs": "e8af24efdf0d64a243cc074266859a3d2eacef2513d2e6e503086f2695c891b8"
+  },
+  "reference": "Uninterrupted BAANDI with identical build, model, options and requested threads; synthetic fixtures, not QE.",
+  "threads": [
+    1,
+    4
+  ],
+  "modes": [
+    "Classic",
+    "Observed",
+    "AgentControlled"
+  ],
+  "memory_checkpoint_boundaries": [
+    0,
+    3,
+    8
+  ],
+  "memory_exact_comparisons": 162,
+  "file_checkpoint_boundary": 3,
+  "file_exact_comparisons": 18,
+  "runtime_file_comparisons": 2,
+  "runtime_scope": "Committed beta policy, complete audit, paused state and resume; separate consumed-autonomy and pending-control tests.",
+  "cross_process_cli": true,
+  "engine_release_tests_passed": 6,
+  "cli_release_tests_passed": 7,
+  "warm_tolerance_ha": 1e-10,
+  "warm_max_energy_difference_ha": 8.215650382226158e-15,
+  "exact_results": [
+    {
+      "fixture": 0,
+      "threads": 1,
+      "mixing": "Linear { beta: 0.3 }",
+      "energy_ha": -0.6237977263992479,
+      "iterations": 41
+    },
+    {
+      "fixture": 0,
+      "threads": 1,
+      "mixing": "Pulay { beta: 0.3, history: 6 }",
+      "energy_ha": -0.6237977263992517,
+      "iterations": 11
+    },
+    {
+      "fixture": 0,
+      "threads": 1,
+      "mixing": "KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 }",
+      "energy_ha": -0.6237977263992507,
+      "iterations": 14
+    },
+    {
+      "fixture": 0,
+      "threads": 4,
+      "mixing": "Linear { beta: 0.3 }",
+      "energy_ha": -0.6237977263992479,
+      "iterations": 41
+    },
+    {
+      "fixture": 0,
+      "threads": 4,
+      "mixing": "Pulay { beta: 0.3, history: 6 }",
+      "energy_ha": -0.6237977263992517,
+      "iterations": 11
+    },
+    {
+      "fixture": 0,
+      "threads": 4,
+      "mixing": "KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 }",
+      "energy_ha": -0.6237977263992507,
+      "iterations": 14
+    },
+    {
+      "fixture": 1,
+      "threads": 1,
+      "mixing": "Linear { beta: 0.3 }",
+      "energy_ha": -0.5141252150557899,
+      "iterations": 40
+    },
+    {
+      "fixture": 1,
+      "threads": 1,
+      "mixing": "Pulay { beta: 0.3, history: 6 }",
+      "energy_ha": -0.5141252150557917,
+      "iterations": 18
+    },
+    {
+      "fixture": 1,
+      "threads": 1,
+      "mixing": "KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 }",
+      "energy_ha": -0.5141252150557913,
+      "iterations": 14
+    },
+    {
+      "fixture": 1,
+      "threads": 4,
+      "mixing": "Linear { beta: 0.3 }",
+      "energy_ha": -0.5141252150557899,
+      "iterations": 40
+    },
+    {
+      "fixture": 1,
+      "threads": 4,
+      "mixing": "Pulay { beta: 0.3, history: 6 }",
+      "energy_ha": -0.5141252150557917,
+      "iterations": 18
+    },
+    {
+      "fixture": 1,
+      "threads": 4,
+      "mixing": "KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 }",
+      "energy_ha": -0.5141252150557913,
+      "iterations": 14
+    },
+    {
+      "fixture": 2,
+      "threads": 1,
+      "mixing": "Linear { beta: 0.3 }",
+      "energy_ha": -1.524914114856542,
+      "iterations": 40
+    },
+    {
+      "fixture": 2,
+      "threads": 1,
+      "mixing": "Pulay { beta: 0.3, history: 6 }",
+      "energy_ha": -1.5249141148565482,
+      "iterations": 13
+    },
+    {
+      "fixture": 2,
+      "threads": 1,
+      "mixing": "KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 }",
+      "energy_ha": -1.524914114856544,
+      "iterations": 13
+    },
+    {
+      "fixture": 2,
+      "threads": 4,
+      "mixing": "Linear { beta: 0.3 }",
+      "energy_ha": -1.524914114856542,
+      "iterations": 40
+    },
+    {
+      "fixture": 2,
+      "threads": 4,
+      "mixing": "Pulay { beta: 0.3, history: 6 }",
+      "energy_ha": -1.5249141148565482,
+      "iterations": 13
+    },
+    {
+      "fixture": 2,
+      "threads": 4,
+      "mixing": "KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 }",
+      "energy_ha": -1.524914114856544,
+      "iterations": 13
+    }
+  ],
+  "warm_results": [
+    {
+      "fixture": 0,
+      "threads": 1,
+      "energy_difference_ha": 1.7763568394002505e-15
+    },
+    {
+      "fixture": 0,
+      "threads": 4,
+      "energy_difference_ha": 1.7763568394002505e-15
+    },
+    {
+      "fixture": 1,
+      "threads": 1,
+      "energy_difference_ha": 1.1102230246251565e-16
+    },
+    {
+      "fixture": 1,
+      "threads": 4,
+      "energy_difference_ha": 1.1102230246251565e-16
+    },
+    {
+      "fixture": 2,
+      "threads": 1,
+      "energy_difference_ha": 8.215650382226158e-15
+    },
+    {
+      "fixture": 2,
+      "threads": 4,
+      "energy_difference_ha": 8.215650382226158e-15
+    }
+  ],
+  "classic_step_source_unchanged": true,
+  "classic_step_source_sha256": "f704a29b8add08ef4fc62d5e8fdcd2f8c67c4f269095e1c8d97e0a749fa17aaf",
+  "commands": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test checkpoint -- --include-ignored --nocapture --test-threads=1",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-cli --test checkpoint_io -- --include-ignored --nocapture --test-threads=1",
+      "exit_code": 0
+    }
+  ],
+  "limitations": [
+    "Wall-clock timings excluded from identity; no performance claim.",
+    "Pure engine model/build identity is supplied by a trusted host; CLI hashes actual UPF bytes and executable.",
+    "Exact runtime capture rejects pending controls, undrained telemetry and opaque external sinks.",
+    "No cross-build or grid/cell transfer promise; runtime control request dispatch remains unavailable."
+  ]
+}

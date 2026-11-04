@@ -194,3 +194,16 @@ impl EventQueue {
         }
     }
 }
+
+impl EventQueue {
+    /// The adapter must drain and durably publish telemetry before checkpointing.
+    pub(crate) fn checkpoint_sequence(&self) -> Result<u64, crate::checkpoint::Rejection> {
+        if !self.routine.is_empty() || !self.critical.is_empty() || self.dropped != 0 {
+            return Err(crate::checkpoint::Rejection::UndrainedEvents);
+        }
+        Ok(self.sequence)
+    }
+    pub(crate) fn restore_sequence(&mut self, sequence: u64) {
+        self.sequence = sequence;
+    }
+}

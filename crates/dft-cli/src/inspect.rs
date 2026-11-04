@@ -23,6 +23,9 @@ fn source(path: &Path) -> PathBuf {
 }
 fn evidence(path: &Path) -> Result<Value, Error> {
     let path = source(path);
+    if crate::checkpoint_inspect::recognizes(&path)? {
+        return crate::checkpoint_inspect::evidence(&path);
+    }
     if path.extension().is_some_and(|e| e == "jsonl") {
         let mut reader = BufReader::new(File::open(&path)?);
         let mut last = None;
@@ -126,7 +129,7 @@ fn evidence(path: &Path) -> Result<Value, Error> {
     } else {
         let value: Value = serde_json::from_reader(File::open(&path)?)?;
         if value["schema_version"] != 1 || !value["convergence"]["converged"].is_boolean() {
-            return Err("source: expected CLI results.json (schema_version=1) or events.jsonl; checkpoint inspection is not available in this adapter".into());
+            return Err("source: expected CLI results.json (schema_version=1), events.jsonl, or a BAANDICP checkpoint".into());
         }
         Ok(
             json!({"source":path,"state":if value["convergence"]["converged"]==true {"converged"} else {"not_converged"},
@@ -139,7 +142,9 @@ pub fn status(path: &Path) -> Result<(), Error> {
     Ok(())
 }
 pub fn explain(path: &Path) -> Result<(), Error> {
-    if path.extension().is_some_and(|e| e == "toml") {
+    if path.extension().is_some_and(|e| e == "toml")
+        && !crate::checkpoint_inspect::recognizes(path)?
+    {
         let config = Config::parse(&std::fs::read_to_string(path)?)?;
         let preflight = crate::config::preflight::check(&config, path)?;
         let prepared = config.prepare()?;

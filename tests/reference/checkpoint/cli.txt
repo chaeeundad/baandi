@@ -1,0 +1,40 @@
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P11C-CHECKPOINT/crates/dft-engine)
+   Compiling dft-cli v0.1.0 (/Users/mino/Develop/rust-dft-wt/P11C-CHECKPOINT/crates/dft-cli)
+    Finished `release` profile [optimized] target(s) in 5.40s
+     Running tests/checkpoint_io.rs (target/release/deps/checkpoint_io-8013b9954470bf2e)
+
+running 7 tests
+test atomic_no_clobber_publication ... ok
+test binary_roundtrip_restart ... file restart kind=0 threads=1 mixing=Linear { beta: 0.3 } bytes=7273 energy=-0.62379772639924791 Ha
+file restart kind=0 threads=1 mixing=Pulay { beta: 0.3, history: 6 } bytes=7334 energy=-0.62379772639925168 Ha
+file restart kind=0 threads=1 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } bytes=13787 energy=-0.62379772639925068 Ha
+file restart kind=0 threads=4 mixing=Linear { beta: 0.3 } bytes=7271 energy=-0.62379772639924791 Ha
+file restart kind=0 threads=4 mixing=Pulay { beta: 0.3, history: 6 } bytes=7335 energy=-0.62379772639925168 Ha
+file restart kind=0 threads=4 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } bytes=13788 energy=-0.62379772639925068 Ha
+file restart kind=1 threads=1 mixing=Linear { beta: 0.3 } bytes=9615 energy=-0.51412521505578990 Ha
+file restart kind=1 threads=1 mixing=Pulay { beta: 0.3, history: 6 } bytes=15860 energy=-0.51412521505579167 Ha
+file restart kind=1 threads=1 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } bytes=16151 energy=-0.51412521505579134 Ha
+file restart kind=1 threads=4 mixing=Linear { beta: 0.3 } bytes=9621 energy=-0.51412521505578990 Ha
+file restart kind=1 threads=4 mixing=Pulay { beta: 0.3, history: 6 } bytes=15865 energy=-0.51412521505579167 Ha
+file restart kind=1 threads=4 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } bytes=16156 energy=-0.51412521505579134 Ha
+file restart kind=2 threads=1 mixing=Linear { beta: 0.3 } bytes=10037 energy=-1.52491411485654194 Ha
+file restart kind=2 threads=1 mixing=Pulay { beta: 0.3, history: 6 } bytes=27589 energy=-1.52491411485654815 Ha
+file restart kind=2 threads=1 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } bytes=27857 energy=-1.52491411485654393 Ha
+file restart kind=2 threads=4 mixing=Linear { beta: 0.3 } bytes=10050 energy=-1.52491411485654194 Ha
+file restart kind=2 threads=4 mixing=Pulay { beta: 0.3, history: 6 } bytes=27593 energy=-1.52491411485654815 Ha
+file restart kind=2 threads=4 mixing=KerkerPulay { beta: 0.3, history: 6, q0_inverse_bohr: 1.0 } bytes=27867 energy=-1.52491411485654393 Ha
+ok
+test command_line_cross_process ... cross-process CLI energy=-0.72755186207151112 Ha
+ok
+test layout_checksum_and_strict_header ... ok
+test result_export_does_not_confer_restart_or_convergence ... ok
+test runtime_policy_roundtrip ... runtime file restart threads=1 audit_records=4 bytes=23267
+runtime file restart threads=4 audit_records=4 bytes=23273
+ok
+test warm_start_file ... warm file kind=0 threads=4 delta=1.77635683940025046e-15 Ha
+warm file kind=1 threads=4 delta=1.11022302462515654e-16 Ha
+warm file kind=2 threads=4 delta=8.21565038222615840e-15 Ha
+ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.72s
+

@@ -223,3 +223,49 @@ mod tests {
         assert!(p.mix(&[], &[], 1.0).is_err());
     }
 }
+
+/// Versioned, backend-independent Anderson memory. Extraction is explicit and
+/// never called by the ordinary mixing path. Pair order is oldest to newest.
+#[derive(Clone, Debug)]
+pub struct PulayState {
+    pub beta: f64,
+    pub capacity: usize,
+    pub inputs: Vec<Vec<f64>>,
+    pub residuals: Vec<Vec<f64>>,
+    pub mean: Option<f64>,
+}
+impl PulayMixer {
+    pub fn checkpoint(&self) -> PulayState {
+        PulayState {
+            beta: self.beta,
+            capacity: self.capacity,
+            inputs: self.pairs.iter().map(|p| p.0.clone()).collect(),
+            residuals: self.pairs.iter().map(|p| p.1.clone()).collect(),
+            mean: self.mean,
+        }
+    }
+    pub fn restore(&mut self, state: &PulayState, size: usize) -> Result<(), SolverError> {
+        if state.beta.to_bits() != self.beta.to_bits()
+            || state.capacity != self.capacity
+            || state.inputs.len() != state.residuals.len()
+            || state.inputs.len() > self.capacity.saturating_add(1)
+            || state.mean.is_some_and(|v| !v.is_finite() || v <= 0.0)
+            || (!state.inputs.is_empty() && state.mean.is_none())
+            || state
+                .inputs
+                .iter()
+                .chain(&state.residuals)
+                .any(|v| v.len() != size || v.iter().any(|x| !x.is_finite()))
+        {
+            return Err(SolverError::InvalidParameter("invalid Pulay checkpoint"));
+        }
+        self.pairs = state
+            .inputs
+            .iter()
+            .cloned()
+            .zip(state.residuals.iter().cloned())
+            .collect();
+        self.mean = state.mean;
+        Ok(())
+    }
+}

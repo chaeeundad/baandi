@@ -58,3 +58,6 @@ pub mod run;
 
 pub mod inspect;
 pub mod telemetry;
+
+mod checkpoint_inspect;
+pub mod checkpoint_io;

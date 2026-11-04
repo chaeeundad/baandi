@@ -803,3 +803,247 @@ fn threading_metadata_and_identical_outputs() {
         }
     }
 }
+
+fn baandi() -> Command {
+    let mut command = Command::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src/baandi"));
+    let bin_dir = Path::new(env!("CARGO_BIN_EXE_dft-cli")).parent().unwrap();
+    let mut paths = vec![bin_dir.to_path_buf()];
+    if let Some(path) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&path));
+    }
+    command.env("PATH", std::env::join_paths(paths).unwrap());
+    command
+}
+
+/// CLI modes reuse the same retained-result SCF: exact density bytes and all
+/// numerical JSON values must agree (zero tolerance, energies in Ha).
+#[test]
+fn execution_modes_are_bit_identical_and_alias_preserves_classic() {
+    compare_execution_modes(false);
+}
+
+#[test]
+#[ignore = "requires filesystem Unix socket binding; cargo test -p dft-cli --test run agent_socket_mode -- --ignored --nocapture"]
+fn agent_socket_mode() {
+    compare_execution_modes(true);
+}
+
+fn compare_execution_modes(include_agent: bool) {
+    let c = Case::new(false);
+    let suffix = "[scf]\nmax_iterations=3\n";
+    let classic = c.run(suffix, Some(&c.dir.join("classic")));
+    status(&classic, 3);
+    let mut expected = c.json("classic", "results.json");
+    strip_times(&mut expected);
+    for (name, flags) in [
+        ("alias", vec![]),
+        ("observed", vec!["--observe", "--events", "-"]),
+        ("agent", vec!["--agent"]),
+    ] {
+        if name == "agent" && !include_agent {
+            continue;
+        }
+        let out = c.dir.join(name);
+        fs::create_dir(&out).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&out, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let result = baandi()
+            .current_dir(&c.dir)
+            .args(["run", "input.toml", "--output-dir", name])
+            .args(flags)
+            .output()
+            .unwrap();
+        status(&result, 3);
+        assert_eq!(
+            hash(&out.join("density.bin")),
+            hash(&c.dir.join("classic/density.bin"))
+        );
+        let mut actual = c.json(name, "results.json");
+        strip_times(&mut actual);
+        assert_eq!(expected, actual, "mode {name}");
+        if name == "alias" {
+            let stable_console = |bytes: &[u8]| {
+                String::from_utf8_lossy(bytes)
+                    .lines()
+                    .filter(|line| !line.starts_with("Total wall:"))
+                    .map(|line| {
+                        if line
+                            .split_whitespace()
+                            .next()
+                            .is_some_and(|first| first.parse::<usize>().is_ok())
+                        {
+                            let (values, _) = line.rsplit_once(' ').unwrap();
+                            values.to_owned()
+                        } else {
+                            line.to_owned()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                stable_console(&classic.stdout),
+                stable_console(&result.stdout)
+            );
+            assert!(!out.join("events.jsonl").exists());
+        } else {
+            let log = fs::read_to_string(out.join("events.jsonl")).unwrap();
+            let events: Vec<Value> = log
+                .lines()
+                .map(|l| serde_json::from_str(l).unwrap())
+                .collect();
+            assert_eq!(events.first().unwrap()["type"], "initialized");
+            assert_eq!(events.last().unwrap()["type"], "not_converged");
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|v| v["type"] == "iteration_finished")
+                    .count(),
+                3
+            );
+            assert!(String::from_utf8_lossy(&result.stderr).contains("solver=iteration_completed"));
+            if name == "observed" {
+                assert_eq!(String::from_utf8(result.stdout).unwrap(), log);
+            }
+            let status = baandi().arg("status").arg(&out).output().unwrap();
+            assert!(status.status.success());
+            let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+            assert_eq!(status["state"], "not_converged");
+        }
+    }
+    println!(
+        "P11H synthetic fixture: Classic/alias/Observed (agent={include_agent}), 3 iterations; density bytes and numerical JSON identical (0 Ha energy difference)."
+    );
+}
+
+#[test]
+fn explain_and_status_report_evidence_and_reject_invalid_input() {
+    let c = Case::new(false);
+    fs::write(c.dir.join("input.toml"), &c.text).unwrap();
+    let explain = baandi()
+        .current_dir(&c.dir)
+        .args(["explain", "input.toml"])
+        .output()
+        .unwrap();
+    assert!(
+        explain.status.success(),
+        "{}",
+        String::from_utf8_lossy(&explain.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&explain.stdout)
+            .contains("does not establish numerical convergence")
+    );
+    assert!(!c.dir.join("results").exists());
+    fs::write(
+        c.dir.join("input.toml"),
+        format!("{}\n[scf]\nmixing_beta=2.0\n", c.text),
+    )
+    .unwrap();
+    let invalid = baandi()
+        .current_dir(&c.dir)
+        .args(["explain", "input.toml"])
+        .output()
+        .unwrap();
+    assert!(!invalid.status.success());
+    let message = String::from_utf8_lossy(&invalid.stderr);
+    assert!(
+        message.contains("scf.mixing_beta") && message.contains("(0, 1]"),
+        "{message}"
+    );
+    let path = c.dir.join("events.jsonl");
+    let event = r#"{"schema_version":"1.0","calc_id":"test","sequence":1,"iteration":1,"state_version":1,"type":"iteration_finished","data":{}}"#;
+    fs::write(&path, format!("{event}\n{{\"partial\":")).unwrap();
+    let out = baandi().arg("status").arg(&path).output().unwrap();
+    assert!(out.status.success());
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["partial_tail_ignored"], true);
+    assert_eq!(v["state"], "nonterminal: process liveness unknown");
+    fs::write(&path, format!("{event}\n{event}\n")).unwrap();
+    let out = baandi().arg("status").arg(&path).output().unwrap();
+    assert!(!out.status.success());
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "requires filesystem Unix socket binding; cargo test -p dft-cli --test run observed_socket -- --ignored --nocapture"]
+fn observed_socket_mirror_and_existing_log_protection() {
+    use std::os::unix::net::UnixDatagram;
+    let c = Case::new(false);
+    fs::write(
+        c.dir.join("input.toml"),
+        format!("{}\n[scf]\nmax_iterations=1\n", c.text),
+    )
+    .unwrap();
+    // Darwin socket paths are limited to 104 bytes; /tmp avoids long temp roots.
+    let socket_path = PathBuf::from(format!(
+        "/tmp/p11h-{}-{}.sock",
+        std::process::id(),
+        SERIAL.fetch_add(1, Ordering::SeqCst)
+    ));
+    let socket = UnixDatagram::bind(&socket_path).unwrap();
+    socket
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .unwrap();
+    let receiver = std::thread::spawn(move || {
+        let mut events = Vec::new();
+        let mut bytes = [0; 8192];
+        loop {
+            let n = socket.recv(&mut bytes).unwrap();
+            let v: Value = serde_json::from_slice(&bytes[..n]).unwrap();
+            let terminal = v["type"] == "not_converged";
+            events.push(v);
+            if terminal {
+                return events;
+            }
+        }
+    });
+    let mirror = format!("unix:{}", socket_path.display());
+    let mut command = baandi();
+    command
+        .current_dir(&c.dir)
+        .args(["run", "input.toml", "--observe", "--events", &mirror]);
+    let first = command.output().unwrap();
+    status(&first, 3);
+    let events = receiver.join().unwrap();
+    fs::remove_file(socket_path).unwrap();
+    assert_eq!(events.len(), 3);
+    let before = fs::read(c.dir.join("results/events.jsonl")).unwrap();
+    let repeat = command.output().unwrap();
+    status(&repeat, 5);
+    assert_eq!(
+        before,
+        fs::read(c.dir.join("results/events.jsonl")).unwrap()
+    );
+}
+
+#[test]
+fn observed_file_mirror_is_exact_and_logs_are_never_overwritten() {
+    let c = Case::new(false);
+    fs::write(
+        c.dir.join("input.toml"),
+        format!("{}\n[scf]\nmax_iterations=1\n", c.text),
+    )
+    .unwrap();
+    let mut command = baandi();
+    command.current_dir(&c.dir).args([
+        "run",
+        "input.toml",
+        "--observe",
+        "--events",
+        "mirror.jsonl",
+    ]);
+    let first = command.output().unwrap();
+    status(&first, 3);
+    let before = fs::read(c.dir.join("results/events.jsonl")).unwrap();
+    assert_eq!(before, fs::read(c.dir.join("mirror.jsonl")).unwrap());
+    let repeat = command.output().unwrap();
+    status(&repeat, 5);
+    assert_eq!(
+        before,
+        fs::read(c.dir.join("results/events.jsonl")).unwrap()
+    );
+    assert_eq!(before, fs::read(c.dir.join("mirror.jsonl")).unwrap());
+}

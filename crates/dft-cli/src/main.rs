@@ -1,5 +1,8 @@
+#[path = "bands.rs"]
 mod bands;
+#[path = "dos.rs"]
 mod dos;
+#[path = "pseudo.rs"]
 mod pseudo;
 use clap::{Parser, Subcommand};
 use dft_cli::{config::Config, grid_report};
@@ -40,12 +43,26 @@ enum Command {
         from: String,
         to: String,
     },
-    /// Run Gamma-only LDA-PZ SCF and write reproducible output files.
+    /// Run SCF and write reproducible output files (Classic by default).
     Run {
         input: PathBuf,
         #[arg(long)]
         output_dir: Option<PathBuf>,
+        #[arg(long, conflicts_with = "agent")]
+        observe: bool,
+        #[arg(long, conflicts_with = "observe")]
+        agent: bool,
+        /// JSONL mirror: '-' for stdout, or 'unix:/path' for a Unix datagram socket.
+        #[arg(long)]
+        events: Option<String>,
+        /// Local proposal socket; defaults to OUTPUT/control/control.sock in agent mode.
+        #[arg(long, requires = "agent")]
+        control_socket: Option<PathBuf>,
     },
+    /// Inspect the last durable event or the final results of a calculation.
+    Status { calc: PathBuf },
+    /// Explain a TOML configuration/preflight, or recorded calculation evidence.
+    Explain { source: PathBuf },
     /// Inspect a UPF v2 NC pseudopotential and report strict support validation.
     InspectUpf {
         file: PathBuf,
@@ -69,6 +86,11 @@ enum Command {
     Grid { input: PathBuf },
 }
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    match &cli.command {
+        Command::Status { calc } => return dft_cli::inspect::status(calc),
+        Command::Explain { source } => return dft_cli::inspect::explain(source),
+        _ => {}
+    }
     if let Command::Pseudo { command, registry } = &cli.command {
         return pseudo::execute(command, registry.as_deref());
     }
@@ -110,7 +132,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
     let input = match &cli.command {
         Command::Validate { input, .. } | Command::Grid { input } => input,
-        Command::Eval { .. }
+        Command::Status { .. }
+        | Command::Explain { .. }
+        | Command::Eval { .. }
         | Command::Pseudo { .. }
         | Command::InspectUpf { .. }
         | Command::Bands { .. }
@@ -138,7 +162,9 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let prepared = config.prepare()?;
     match cli.command {
         Command::Validate { .. } => unreachable!(),
-        Command::Eval { .. }
+        Command::Status { .. }
+        | Command::Explain { .. }
+        | Command::Eval { .. }
         | Command::Pseudo { .. }
         | Command::InspectUpf { .. }
         | Command::Bands { .. }
@@ -186,14 +212,34 @@ fn main() -> ExitCode {
             }
         };
     }
-    if let Command::Run { input, output_dir } = &cli.command {
-        return match dft_cli::run::execute(input, output_dir.as_deref()) {
+    if let Command::Run {
+        input,
+        output_dir,
+        observe,
+        agent,
+        events,
+        control_socket,
+    } = &cli.command
+    {
+        let mode = dft_cli::telemetry::RunMode {
+            observe: *observe,
+            agent: *agent,
+            events: events.clone(),
+            control_socket: control_socket.clone(),
+        };
+        return match dft_cli::run::execute_mode(input, output_dir.as_deref(), &mode) {
             Ok(report) => {
                 use std::io::Write;
-                if let Err(e) = std::io::stdout()
-                    .lock()
-                    .write_all(report.console.as_bytes())
-                {
+                let console_result = if mode.events.as_deref() == Some("-") {
+                    std::io::stderr()
+                        .lock()
+                        .write_all(report.console.as_bytes())
+                } else {
+                    std::io::stdout()
+                        .lock()
+                        .write_all(report.console.as_bytes())
+                };
+                if let Err(e) = console_result {
                     eprintln!("error: console I/O: {e}");
                     return ExitCode::from(5);
                 }

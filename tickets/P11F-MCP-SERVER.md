@@ -5,3 +5,4 @@ DEPENDENCIES: P11B, P11D merged; P9A design consulted (one MCP server, P9A consu
 ACCEPTANCE_CRITERIA: tool schemas generated and tested; unsafe policy rejected through the tool path with the same audit as the library; Autonomous mode not implemented (documented as later); core crates gain no dependency on the server crate.
 GIT: branch task/P11F-MCP-SERVER, uncommitted
 RETURN_FORMAT: docs/schemas/report.schema.json
+ARCHITECT DECISION 2026-11-04 (dependency review): no MCP SDK crate and no async runtime. Implement MCP over stdio as minimal JSON-RPC 2.0 with serde and serde_json only (already adopted); tool schemas are written as typed structs plus JSON Schema documents checked by tests. Reason: small audit surface, no tokio, deterministic, license-clean. A later ADR may adopt the official SDK if protocol coverage requires it. Add the crate to ownership.toml and docs/dependencies.md (no new third-party crate). Core crates must not depend on baandi-mcp.

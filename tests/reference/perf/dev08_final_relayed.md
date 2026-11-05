@@ -240,3 +240,5 @@ QE ratios (QE values from part 4; BAANDI/QE), P14B pure / mkl (fdce016 in bracke
 
 Measurement quality: residual spread above 5 percent after 9 repeats for four small-case entries (0.26 to 0.88 s) caused by single outliers; medians stable. mkl T=1 profile 169 samples: figures above 30 samples are firm, the others are directional only.
 
+Range statement for the README sentence "the k-point results did not change between the commits" (relaying session, 2026-11-05): for the four k-point cases (gamma, k222s, k222, k444s), both backends and T 1/4/8/16, the ratios between fdce016, 65036b7 and 7fe2e9a lie between 0.958 and 1.032, i.e. inside the measurement spread (several of the 0.26 to 0.88 s entries had single-outlier spreads above 5 percent after 9 repeats). "Did not change" therefore means "no change beyond measurement spread", not bit-identical timing.
+

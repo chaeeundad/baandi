@@ -69,6 +69,7 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
         o.standard = s.standard_profile().map_err(|e| error(1, e.to_string()))?;
         o.hartree_mixing = s.hartree_mixing().map_err(|e| error(1, e.to_string()))?;
         o.spectral_guard = s.spectral_guard().map_err(|e| error(1, e.to_string()))?;
+        o.locking = s.locking().map_err(|e| error(1, e.to_string()))?;
         o.threads = s.threads.unwrap_or(1);
         if let Some(n) = s.max_iterations {
             o.max_iterations =
@@ -121,6 +122,9 @@ fn options_json(o: &ScfOptions) -> Value {
         "residual_eigen_schedule":o.residual_eigen_schedule,"free_electron_initial_guess":o.free_electron_initial_guess,"initial_eigen_tolerance":o.initial_eigen_tolerance,"eigen_tolerance_decay":o.eigen_tolerance_decay,"max_iterations":o.max_iterations,
         "davidson_max_iterations":o.davidson_max_iterations,"davidson_subspace":o.davidson_subspace,"davidson_subspace_min_per_band":6,"seed":o.seed,
         "divergence_factor":o.divergence_factor,"divergence_patience":o.divergence_patience});
+    if o.locking == dft_engine::Locking::Auto {
+        result["locking"] = json!("auto");
+    }
     if let Some(p) = o.standard {
         result["convergence_profile"] = json!("standard");
         result["standard_threshold_ha"] = json!(p.threshold_ha);
@@ -507,7 +511,8 @@ pub fn execute_mode(
                 "block_calls":w.block_calls,"vector_applications":w.vector_applications,
                 "buffer_origin_applications":w.buffer_origin_applications,
                 "unattributed_applications":w.unattributed_applications,"restarts":w.restarts,
-                "first_below":w.first_below,"last_above":w.last_above,"returned":w.returned
+                "first_below":w.first_below,"last_above":w.last_above,"returned":w.returned,
+                "locking":w.locking.map(|r| json!({"locked_roots":r.locked_roots,"unlocks":r.unlocks,"failures":r.failures}))
             })
         })
         .collect();
@@ -547,6 +552,12 @@ pub fn execute_mode(
 
     if let Some(symmetry) = config.symmetry_json().map_err(|e| error(1, e))? {
         result["symmetry"] = symmetry;
+    }
+    if opts.locking == dft_engine::Locking::Auto {
+        result["locking"] = json!(r.k_points.iter().map(|k| k.solution.locking.as_ref().map(|r| json!({
+            "locked_roots":r.locked_roots, "unlocked_roots":r.unlocks,
+            "certificate_failures":r.failures.iter().map(|&(iteration,root,residual)| json!({"iteration":iteration,"root":root,"residual_ha":residual})).collect::<Vec<_>>()
+        }))).collect::<Vec<_>>());
     }
     result["band_accuracy"] = json!(r.k_points[0].solution.residuals.iter()
         .zip(&r.k_points[0].solution.buffer).zip(&r.k_points[0].solution.converged)

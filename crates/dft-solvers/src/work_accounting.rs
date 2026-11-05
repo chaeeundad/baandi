@@ -23,6 +23,7 @@ pub struct Record {
     pub first_below: Vec<usize>,
     pub last_above: Vec<usize>,
     pub returned: bool,
+    pub locking: Option<crate::locking::LockingReport>,
 }
 
 pub struct Trace(Option<Record>);
@@ -80,6 +81,13 @@ impl Trace {
         }
     }
 
+    /// Copy diagnostics only at the completed-solve reporting boundary.
+    pub fn locking(&mut self, report: &crate::locking::LockingReport) {
+        if let Some(r) = &mut self.0 {
+            r.locking = Some(report.clone());
+        }
+    }
+
     pub fn returned(&mut self) {
         if let Some(r) = &mut self.0 {
             r.returned = true;
@@ -105,6 +113,17 @@ pub fn take() -> Vec<Record> {
     crate::replay::drain();
     // The CLI calls this boundary after the complete SCF, outside numerical loops.
     for r in dft_numerics::linalg::accounting::take() {
+        eprintln!(
+            "P24A_GEMM,{},{},{},{},{},{},{},{}",
+            r.solve,
+            r.step,
+            r.site,
+            r.m,
+            r.n,
+            r.k,
+            r.calls,
+            r.flops / 2
+        );
         eprintln!(
             "P14B_GEMM,{},{},{},{},{},{},{},{},{}",
             r.solve, r.site, r.m, r.n, r.k, r.calls, r.flops, r.minimum, r.nanoseconds

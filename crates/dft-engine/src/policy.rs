@@ -93,6 +93,7 @@ pub enum PolicyError {
     CertificateThreshold,
     RestrictedSchedule,
     RestrictedDivergence,
+    LockingRequiresDavidson,
 }
 
 /// Prepared options are deliberately read-only. A session integration must
@@ -281,6 +282,9 @@ pub fn prepare_policy(
                 unreachable!()
             }
         }
+    }
+    if next.locking == crate::Locking::Auto && !matches!(next.eigensolver, SolverChoice::Davidson) {
+        return Err(PolicyError::LockingRequiresDavidson);
     }
     validate_mixing(&next.mixing)?;
     let mixing_changed = mixing_key(&next.mixing) != mixing_key(&current.mixing);

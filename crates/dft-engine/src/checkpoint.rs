@@ -317,6 +317,7 @@ pub(crate) fn options_identical(a: &ScfOptions, b: &ScfOptions) -> bool {
         && solver
         && eq!(
             spectral_guard,
+            locking,
             threads,
             functional,
             allow_functional_override,

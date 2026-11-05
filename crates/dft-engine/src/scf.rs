@@ -133,6 +133,7 @@ pub struct ScfOptions {
     pub standard: Option<StandardProfile>,
     pub hartree_mixing: bool,
     pub spectral_guard: crate::SpectralGuard,
+    pub locking: dft_solvers::locking::Locking,
     /// Experimental opt-in hybrid; Davidson remains the default.
     pub eigensolver: dft_solvers::SolverChoice,
     /// Independent k-point workers; zero means one, capped at the k-point count.
@@ -191,6 +192,7 @@ impl Default for ScfOptions {
             standard: None,
             hartree_mixing: false,
             spectral_guard: crate::SpectralGuard::Off,
+            locking: dft_solvers::locking::Locking::Off,
             eigensolver: dft_solvers::SolverChoice::default(),
             threads: 1,
             functional: Functional::LdaPz,
@@ -545,6 +547,12 @@ impl ScfProblem {
             && !matches!(options.eigensolver, dft_solvers::SolverChoice::Davidson)
         {
             return Err(ScfError::InvalidInput("standard profile requires Davidson"));
+        }
+        if options.locking == dft_solvers::locking::Locking::Auto
+            && (options.standard.is_some()
+                || !matches!(options.eigensolver, dft_solvers::SolverChoice::Davidson))
+        {
+            return Err(ScfError::InvalidInput("locking requires strict Davidson"));
         }
         kpoints::validate(points)
             .map_err(|_| ScfError::InvalidInput("invalid k-point quadrature"))?;
@@ -1000,6 +1008,13 @@ impl ScfProblem {
                             Some(&preconditioner),
                             policy,
                         )
+                    } else if self.options.locking == dft_solvers::locking::Locking::Auto {
+                        solver.solve_locked(
+                            &state.hamiltonian,
+                            initial.map(|v| &v[i]).or(guess.as_ref()),
+                            Some(&preconditioner),
+                            policy,
+                        )
                     } else {
                         self.options
                             .eigensolver
@@ -1043,6 +1058,13 @@ impl ScfProblem {
                     };
                     let solution = if self.options.standard.is_some() {
                         solver.solve_ritz_changes(
+                            &state.hamiltonian,
+                            initial.map(|v| &v[i]).or(guess.as_ref()),
+                            Some(&preconditioner),
+                            policy,
+                        )
+                    } else if self.options.locking == dft_solvers::locking::Locking::Auto {
+                        solver.solve_locked(
                             &state.hamiltonian,
                             initial.map(|v| &v[i]).or(guess.as_ref()),
                             Some(&preconditioner),

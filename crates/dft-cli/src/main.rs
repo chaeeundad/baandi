@@ -356,6 +356,9 @@ fn main() -> ExitCode {
                 }
             }
             Err(e) => {
+                // Drain source-only diagnostics even when SCF fails, so the
+                // failed iteration/root remains available to external oracles.
+                let _ = dft_engine::work_accounting::take();
                 eprintln!("error: {e}");
                 ExitCode::from(e.code)
             }

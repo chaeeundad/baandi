@@ -552,6 +552,40 @@ impl HermitianWorkspace {
         {
             return Err(LinalgError::Dimension);
         }
+        self.solve_prefix(a, values, vectors)
+    }
+
+    /// Variable-size solve into storage reserved for this workspace's maximum
+    /// dimension. Shapes change without allocation; the fixed-size API retains
+    /// its dimension checks.
+    pub fn solve_into(
+        &mut self,
+        a: &ComplexMatrix,
+        values: &mut Vec<f64>,
+        vectors: &mut ComplexMatrix,
+    ) -> Result<(), LinalgError> {
+        let n = a.rows;
+        if a.cols != n
+            || n > self.dimension
+            || values.capacity() < n
+            || vectors.data.capacity() < n * n
+        {
+            return Err(LinalgError::Dimension);
+        }
+        vectors.data.resize(n * n, Complex64::default());
+        vectors.rows = n;
+        vectors.cols = n;
+        values.resize(n, 0.0);
+        self.solve_prefix(a, values, vectors)
+    }
+
+    fn solve_prefix(
+        &mut self,
+        a: &ComplexMatrix,
+        values: &mut [f64],
+        vectors: &mut ComplexMatrix,
+    ) -> Result<(), LinalgError> {
+        let n = a.rows;
         a.validate_finite()?;
         let scale = a.data.iter().map(|z| z.norm()).fold(1.0, f64::max);
         let allowed = HERMITIAN_TOLERANCE * scale;
@@ -572,7 +606,11 @@ impl HermitianWorkspace {
         }
         faer::linalg::evd::self_adjoint_evd(
             faer::MatRef::from_column_major_slice(&a.data, n, n),
-            self.diagonal.as_mut(),
+            self.diagonal
+                .as_mut()
+                .column_vector_mut()
+                .subrows_mut(0, n)
+                .as_diagonal_mut(),
             Some(faer::MatMut::from_column_major_slice_mut(
                 &mut vectors.data,
                 n,

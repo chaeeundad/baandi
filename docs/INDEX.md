@@ -106,3 +106,5 @@ Conventions: docs are English; one fact lives in one place and others link to it
 - [Fixed-cell relaxation usage](user/relaxation.md) and [P21A validation](validation/relaxation.md): CLI BFGS/FIRE, Cartesian constraints, checked density transfer, atomic optimizer continuation, ASE comparison, synthetic/Si/MgO scope.
 - [NC stress and pressure (P22A)](validation/stress.md): analytic frozen-Miller derivatives, separate Pulay estimate, strict preconditions, symmetry, CLI/ASE, and independent strain oracles.
 - [Variable-cell relaxation usage](user/cell-relaxation.md) and [P23A validation](validation/cell-relaxation.md): enthalpy BFGS/FIRE, fractional/strain conjugacy, frozen Miller segments, final nominal-cutoff rebuild, affine warm transfer, symmetry and optimizer continuation.
+
+- [P24A hard-locking and one-rectangle experiment](research/qe-study/p24a-locking-results.md): default-off decision, per-step MAC accounting, auto-unlock, generality failures and dense/thread evidence.

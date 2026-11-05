@@ -20,6 +20,7 @@ static RECORDS: LazyLock<Mutex<Vec<Record>>> =
 
 pub struct Record {
     pub solve: usize,
+    pub step: usize,
     pub minimum: u64,
     pub site: &'static str,
     pub m: usize,
@@ -41,6 +42,7 @@ impl Span {
     #[inline]
     pub fn new(
         solve: usize,
+        step: usize,
         site: &'static str,
         shape: [usize; 3],
         calls: u64,
@@ -52,6 +54,7 @@ impl Span {
                 Instant::now(),
                 Record {
                     solve,
+                    step,
                     minimum,
                     site,
                     m,
@@ -71,8 +74,15 @@ impl Drop for Span {
             record.nanoseconds = start.elapsed().as_nanos();
             let mut records = RECORDS.lock().expect("GEMM accounting lock");
             if let Some(old) = records.iter_mut().find(|r| {
-                (r.solve, r.site, r.m, r.n, r.k)
-                    == (record.solve, record.site, record.m, record.n, record.k)
+                (r.solve, r.step, r.site, r.m, r.n, r.k)
+                    == (
+                        record.solve,
+                        record.step,
+                        record.site,
+                        record.m,
+                        record.n,
+                        record.k,
+                    )
             }) {
                 old.minimum += record.minimum;
                 old.calls += record.calls;

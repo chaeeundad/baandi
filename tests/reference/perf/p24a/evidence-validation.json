@@ -1,0 +1,17 @@
+{
+  "status": "passed",
+  "meaning": "Evidence is internally consistent; adoption gates intentionally fail.",
+  "deterministic_failures": [
+    {
+      "case": "syn16-k211",
+      "exit_code": 4,
+      "scientific_error_history_identical": true
+    },
+    {
+      "case": "syn20-skew",
+      "exit_code": 4,
+      "scientific_error_history_identical": true
+    }
+  ],
+  "thread_combinations": 88
+}

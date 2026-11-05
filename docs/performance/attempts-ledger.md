@@ -203,3 +203,17 @@ note S-E0–E2. Evidence: `tests/reference/perf/p15a/`,
 | P17A-4 | Standard generality stress fixtures | negative results retained | Elongated H 171->172; skew standard 100 SCF / 4168 H exhausted; slab 13 SCF / 297 H diverged; mesh16 100 SCF / 8182 H exhausted. | Three cases lack tight references: work-only, no delivered accuracy. Skew strict convergence is already spectrally suspect. |
 | P17A-5 | Independent Hartree Pulay metric, strict E4 | experimental switch, L2 default retained | H si8 2265->2190, k444s 11181->11206, MgO 12202->12382; MgO energy delta -1.40687e-12 Ha exceeds 1e-12 target. | Not a uniformly successful optimization. SCF counts unchanged on six reference cases; mesh16 strict/Hartree diverges. |
 | P17A-6 | Strict preservation, standard determinism and restart | verified | Five strict cases at T=1/T=8: 0 Ha delta and identical density versus pre-feature. Nine standard cases x two metrics: 18 T=1/T=8 pairs identical including failures. Exact restart density/orbital bytes match for both metrics. | Timers excluded; standard is never certified. Evidence: `perf/p17a/final-verification.json`, `thread-identity.json`. |
+
+
+## P24A locking and Hermitian fill (2026-11-06)
+
+Derived from `qe-solvers-and-subspace.md` hypotheses 2/5, notes only. Baseline
+46dfeddd370f5aaf37c898aca41735269c36cc05; uncommitted experiment. These rows
+change A56's unlocked-root premise, not the A08/A13/A15/A21 algorithms.
+[Full results and commands](../research/qe-study/p24a-locking-results.md).
+
+| ID | Experiment | Status | Measured effect | Lesson / limits |
+|---|---|---|---|---|
+| P24A-1 | Whole-cluster lowest-prefix hard locking, 1/sqrt(m) margin, final rotation/certificate and auto-unlock; one-rectangle reduced H | implemented, experimental default off | Si8 MAC 4,744,613,419 -> 4,459,794,280 (-6.00%), H 2265 -> 2809, steps 345 -> 386; k444s MAC 1,129,003,567 -> 987,797,005 (-12.51%), H 11181 -> 13500, steps 1827 -> 1861. Mean tail active widths 19.717/20 and 7.729/8. | Misses 25% MAC and <=2% H-increase targets. New lock contracts active space; all-root audits add work. No time acceptance. |
+| P24A-2 | Component and margin ablations | not adopted | Rectangle-only Si8 MAC 4,855,582,763, SCF 15 -> 16; locking/two-rectangle MAC 5,212,958,324; doubled margin divisor MAC 4,651,704,502 vs combined 4,459,794,280. k444s respectively 1,029,000,526 / 1,079,833,280 / 1,045,720,012 vs 987,797,005. | Reduced single-call work does not guarantee reduced trajectory work. Twice the margin does not fix syn-s2; keep exploratory 1/sqrt(m), default off. |
+| P24A-3 | Generality, final-state dense and thread oracles | adoption gates failed, negative evidence retained | Five Si energies within 1.14e-13 Ha and counts unchanged. Six Si/MgO energies within 8.25e-13 Ha, sampled dense roots pass; MgO60 SCF 19 -> 18 fails unchanged-count gate. Syn-s2 energy +0.004416513597413463 Ha; skew iteration 8 divergence/missing root 12; Si8 iteration 15 buffers 17/19 max error 3.72e-9 Ha versus 1e-9 cap. P15C detects/repairs Si8 at iteration 16. | 16/19 suite cases converge, but convergence alone is insufficient. Pure T=1,2,4,8 identical states; off is baseline-bit-identical. Existing slab/mesh failures are not equivalent final states. MKL execution/dev08 acceptance outstanding. |

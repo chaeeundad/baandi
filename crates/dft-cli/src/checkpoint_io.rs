@@ -197,13 +197,12 @@ pub fn encode(checkpoint: &Checkpoint) -> Result<Vec<u8>, Error> {
             "checkpoint v1 cannot preserve frozen-Miller strain reference",
         ));
     }
-    if checkpoint
-        .continuation
-        .as_ref()
-        .is_some_and(|c| c.options.spectral_guard == dft_engine::SpectralGuard::Final)
-    {
+    if checkpoint.continuation.as_ref().is_some_and(|c| {
+        c.options.spectral_guard == dft_engine::SpectralGuard::Final
+            || c.options.locking != dft_engine::Locking::Off
+    }) {
         return Err(invalid(
-            "checkpoint v1 cannot preserve scf.spectral_guard=final audit history",
+            "checkpoint v1 cannot preserve scf.spectral_guard=final audit history or scf.locking=auto policy",
         ));
     }
     let mut binary = Vec::new();
@@ -493,7 +492,7 @@ wire_struct!(ScfOptions, WScfOptions {
     seed: u64,
     divergence_factor: f64,
     divergence_patience: usize,
-} defaults { spectral_guard: dft_engine::SpectralGuard::Off, strain_reference: None, });
+} defaults { locking: dft_engine::Locking::Off, spectral_guard: dft_engine::SpectralGuard::Off, strain_reference: None, });
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 enum WSolverChoice {
@@ -1468,6 +1467,7 @@ enum WPolicyError {
     CertificateThreshold,
     RestrictedSchedule,
     RestrictedDivergence,
+    LockingRequiresDavidson,
 }
 impl Wire for PolicyError {
     type Repr = WPolicyError;
@@ -1490,6 +1490,7 @@ impl Wire for PolicyError {
             Self::CertificateThreshold => WPolicyError::CertificateThreshold,
             Self::RestrictedSchedule => WPolicyError::RestrictedSchedule,
             Self::RestrictedDivergence => WPolicyError::RestrictedDivergence,
+            Self::LockingRequiresDavidson => WPolicyError::LockingRequiresDavidson,
         })
     }
     fn decode(w: Self::Repr, _bytes: &[u8], _cursor: &mut usize) -> Result<Self, Error> {
@@ -1511,6 +1512,7 @@ impl Wire for PolicyError {
             WPolicyError::CertificateThreshold => Self::CertificateThreshold,
             WPolicyError::RestrictedSchedule => Self::RestrictedSchedule,
             WPolicyError::RestrictedDivergence => Self::RestrictedDivergence,
+            WPolicyError::LockingRequiresDavidson => Self::LockingRequiresDavidson,
         })
     }
 }

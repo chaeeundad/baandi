@@ -34,6 +34,7 @@ pub struct GemmWorkspace {
     reduced_scratch: Vec<Complex64>,
     site: &'static str,
     solve: usize,
+    step: usize,
     minimum: Option<u64>,
 }
 impl GemmWorkspace {
@@ -85,6 +86,7 @@ impl GemmWorkspace {
             reduced_scratch: vec![Complex64::default(); short * short],
             site: "other",
             solve: accounting::solve_id(),
+            step: 0,
             minimum: None,
         })
     }
@@ -95,6 +97,13 @@ impl GemmWorkspace {
         if accounting::ENABLED {
             self.site = site;
             self.minimum = None;
+        }
+    }
+
+    /// Source-only work attribution by Davidson iteration (zero is setup).
+    pub fn accounting_step(&mut self, step: usize) {
+        if accounting::ENABLED {
+            self.step = step;
         }
     }
 
@@ -123,6 +132,50 @@ impl GemmWorkspace {
         products: &ComplexMatrix,
         previous: Option<&ComplexMatrix>,
     ) -> Result<ComplexMatrix, LinalgError> {
+        self.reduced_hamiltonian_impl(basis, products, previous, false)
+    }
+
+    /// Hermitian-operator variant: evaluate new rows only and conjugate-fill
+    /// the old/new block. Callers must independently validate the operator;
+    /// Hermiticity of this constructed matrix is not an independent check.
+    pub fn reduced_hamiltonian_hermitian(
+        &mut self,
+        basis: &ComplexMatrix,
+        products: &ComplexMatrix,
+        previous: Option<&ComplexMatrix>,
+    ) -> Result<ComplexMatrix, LinalgError> {
+        self.reduced_hamiltonian_impl(basis, products, previous, true)
+    }
+
+    fn reduced_hamiltonian_impl(
+        &mut self,
+        basis: &ComplexMatrix,
+        products: &ComplexMatrix,
+        previous: Option<&ComplexMatrix>,
+        hermitian: bool,
+    ) -> Result<ComplexMatrix, LinalgError> {
+        let mut out = ComplexMatrix::zeros(basis.cols, basis.cols)?;
+        self.reduced_hamiltonian_into(basis, products, previous, hermitian, &mut out)?;
+        Ok(out)
+    }
+
+    /// Allocation-free extension into reserved small-matrix storage. `previous`
+    /// has the same immutable-prefix contract as `reduced_hamiltonian`.
+    pub fn reduced_hamiltonian_into(
+        &mut self,
+        basis: &ComplexMatrix,
+        products: &ComplexMatrix,
+        previous: Option<&ComplexMatrix>,
+        hermitian: bool,
+        out: &mut ComplexMatrix,
+    ) -> Result<(), LinalgError> {
+        if basis
+            .cols
+            .checked_mul(basis.cols)
+            .is_none_or(|n| n > out.data.capacity())
+        {
+            return Err(LinalgError::Dimension);
+        }
         self.accounting_site("reduced_hamiltonian");
         if let Some(previous) = previous {
             previous.validate_finite()?;
@@ -139,7 +192,8 @@ impl GemmWorkspace {
             {
                 return Err(LinalgError::Dimension);
             }
-            let mut out = ComplexMatrix::zeros(width, width)?;
+            reshape(out, width, width);
+            out.data.fill(Complex64::default());
             // Preserve both triangles, including their original roundoff.
             for j in 0..old {
                 out.column_mut(j)[..old].copy_from_slice(previous.column(j));
@@ -148,11 +202,12 @@ impl GemmWorkspace {
             #[cfg(not(feature = "mkl"))]
             let count = basis.rows.div_ceil(PANEL).max(1);
             for (row, col, m, n) in [(old, 0, width - old, width), (0, old, old, width - old)] {
-                if m == 0 || n == 0 {
+                if m == 0 || n == 0 || (hermitian && row == 0 && old > 0) {
                     continue;
                 }
                 let _measurement = accounting::Span::new(
                     self.solve,
+                    self.step,
                     "reduced_extension",
                     [m, n, basis.rows],
                     1,
@@ -215,10 +270,28 @@ impl GemmWorkspace {
                     }
                 }
             }
+            if hermitian {
+                for j in old..width {
+                    out[(j, j)].im = 0.0;
+                    for i in 0..j {
+                        out[(i, j)] = out[(j, i)].conj();
+                    }
+                }
+            }
             out.validate_finite()?;
-            return Ok(out);
+            return Ok(());
         }
-        self.multiply(basis, MatrixOp::Adjoint, products, MatrixOp::Identity)
+        reshape(out, basis.cols, basis.cols);
+        self.multiply_into(basis, MatrixOp::Adjoint, products, MatrixOp::Identity, out)?;
+        if hermitian {
+            for j in 0..out.cols() {
+                out[(j, j)].im = 0.0;
+                for i in 0..j {
+                    out[(i, j)] = out[(j, i)].conj();
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Rotate a basis and its Hamiltonian image in one scheduling region.
@@ -265,8 +338,14 @@ impl GemmWorkspace {
             } else {
                 self.threads.min(count)
             };
-            let _measurement =
-                accounting::Span::new(self.solve, self.site, [m, n, k], 2, (4 * m * n * k) as u64);
+            let _measurement = accounting::Span::new(
+                self.solve,
+                self.step,
+                self.site,
+                [m, n, k],
+                2,
+                (4 * m * n * k) as u64,
+            );
             crate::pool::analysis::logical_gemm(m, n, k);
             crate::pool::analysis::logical_gemm(m, n, k);
             let output = faer::MatMut::from_column_major_slice_mut(&mut out.data, m, n);
@@ -344,6 +423,7 @@ impl GemmWorkspace {
         }
         let _measurement = accounting::Span::new(
             self.solve,
+            self.step,
             self.site,
             [m, n, k],
             1,
@@ -695,6 +775,29 @@ impl ProjectionWorkspace {
         against: Option<&ComplexMatrix>,
         gemm: &mut GemmWorkspace,
     ) -> Result<Orthonormalized, LinalgError> {
+        let mut vectors = ComplexMatrix::zeros(block.rows, 0)?;
+        vectors.reserve_columns(block.cols)?;
+        let mut dropped = Vec::with_capacity(block.cols);
+        self.orthonormalize_into(block, against, gemm, &mut vectors, &mut dropped)?;
+        Ok(Orthonormalized { vectors, dropped })
+    }
+
+    /// Reuse caller-owned output and dropped-index storage. Both capacities
+    /// must cover the input block; no allocation is performed by this method.
+    pub fn orthonormalize_into(
+        &mut self,
+        block: &ComplexMatrix,
+        against: Option<&ComplexMatrix>,
+        gemm: &mut GemmWorkspace,
+        output: &mut ComplexMatrix,
+        dropped: &mut Vec<usize>,
+    ) -> Result<(), LinalgError> {
+        if output.rows != block.rows
+            || output.data.capacity() < block.data.len()
+            || dropped.capacity() < block.cols
+        {
+            return Err(LinalgError::Dimension);
+        }
         let _phase = Span::new("projection");
         let prepare = Span::serial("projection_prepare");
         block.validate_finite()?;
@@ -732,151 +835,159 @@ impl ProjectionWorkspace {
         // Reprojecting the normalized block prevents that amplification from
         // leaving a component in the established basis.
         let against = against.filter(|q| q.cols > 0);
-        let mut data = Vec::with_capacity(block.data.len());
-        let mut dropped = Vec::with_capacity(block.cols);
-        self.indices.clear();
-        self.indices.extend(0..block.cols);
-        let mut count = block.cols;
-        for pass in 0..if against.is_some() { 2 } else { 1 } {
-            if pass > 0 {
-                reshape(&mut self.normalized, block.rows, count);
-                crate::pool::analysis::copied(self.normalized.data.len() * size_of::<Complex64>());
-                self.normalized.data.copy_from_slice(&data);
-            }
-            if let Some(q) = against {
-                reshape(&mut self.coefficients, q.cols, count);
-                reshape(&mut self.projected, block.rows, count);
-                // q was checked at entry and is immutable. Normalization (or
-                // the preceding MGS pass) changed the incoming block; check it
-                // once. The first product checks coefficients on output.
-                self.normalized.validate_finite()?;
-                gemm.accounting_site(if pass == 0 {
-                    "projection_overlap_1"
-                } else {
-                    "projection_overlap_2"
-                });
-                gemm.multiply_panels(
-                    q,
-                    MatrixOp::Adjoint,
-                    &self.normalized,
-                    MatrixOp::Identity,
-                    &mut self.coefficients,
-                    if BLOCK_QR && block.rows >= 2048 {
-                        PROJECTION_PANEL
-                    } else {
-                        256
-                    },
-                )?;
-                gemm.accounting_site(if pass == 0 {
-                    "projection_subtract_1"
-                } else {
-                    "projection_subtract_2"
-                });
-                gemm.multiply_panels(
-                    q,
-                    MatrixOp::Identity,
-                    &self.coefficients,
-                    MatrixOp::Identity,
-                    &mut self.projected,
-                    if BLOCK_QR && block.rows >= 2048 {
-                        PROJECTION_PANEL
-                    } else {
-                        256
-                    },
-                )?;
-                let _update = Span::serial("projection_update");
-                for (y, p) in self.normalized.data.iter_mut().zip(&self.projected.data) {
-                    *y -= p;
+        let mut data = std::mem::take(&mut output.data);
+        data.clear();
+        let result = (|| -> Result<(), LinalgError> {
+            dropped.clear();
+            self.indices.clear();
+            self.indices.extend(0..block.cols);
+            let mut count = block.cols;
+            for pass in 0..if against.is_some() { 2 } else { 1 } {
+                if pass > 0 {
+                    reshape(&mut self.normalized, block.rows, count);
+                    crate::pool::analysis::copied(
+                        self.normalized.data.len() * size_of::<Complex64>(),
+                    );
+                    self.normalized.data.copy_from_slice(&data);
                 }
-            }
-            data.clear();
-            if BLOCK_QR && block.rows >= 2048 && self.try_cholesky_qr(gemm)? {
-                crate::pool::analysis::copied(self.normalized.data.len() * size_of::<Complex64>());
-                data.extend_from_slice(&self.normalized.data);
-                continue;
-            }
-            count = 0;
-            let mut prepared = None;
-            for j in 0..self.normalized.cols {
-                let second = Span::serial("mgs_second_pass");
-                let remaining = if let Some(remaining) = prepared.take() {
-                    remaining
-                } else {
-                    crate::pool::analysis::copied(block.rows * size_of::<Complex64>());
-                    self.column.copy_from_slice(self.normalized.column(j));
-                    // Tall blocks receive the first pass as earlier vectors are
-                    // finalized. Small blocks retain the original two-pass loop.
-                    for _ in 0..if block.rows >= 2048 { 1 } else { 2 } {
-                        for k in 0..count {
-                            subtract_projection(
-                                &mut self.column,
-                                &data[k * block.rows..(k + 1) * block.rows],
-                            );
+                if let Some(q) = against {
+                    reshape(&mut self.coefficients, q.cols, count);
+                    reshape(&mut self.projected, block.rows, count);
+                    // q was checked at entry and is immutable. Normalization (or
+                    // the preceding MGS pass) changed the incoming block; check it
+                    // once. The first product checks coefficients on output.
+                    self.normalized.validate_finite()?;
+                    gemm.accounting_site(if pass == 0 {
+                        "projection_overlap_1"
+                    } else {
+                        "projection_overlap_2"
+                    });
+                    gemm.multiply_panels(
+                        q,
+                        MatrixOp::Adjoint,
+                        &self.normalized,
+                        MatrixOp::Identity,
+                        &mut self.coefficients,
+                        if BLOCK_QR && block.rows >= 2048 {
+                            PROJECTION_PANEL
+                        } else {
+                            256
+                        },
+                    )?;
+                    gemm.accounting_site(if pass == 0 {
+                        "projection_subtract_1"
+                    } else {
+                        "projection_subtract_2"
+                    });
+                    gemm.multiply_panels(
+                        q,
+                        MatrixOp::Identity,
+                        &self.coefficients,
+                        MatrixOp::Identity,
+                        &mut self.projected,
+                        if BLOCK_QR && block.rows >= 2048 {
+                            PROJECTION_PANEL
+                        } else {
+                            256
+                        },
+                    )?;
+                    let _update = Span::serial("projection_update");
+                    for (y, p) in self.normalized.data.iter_mut().zip(&self.projected.data) {
+                        *y -= p;
+                    }
+                }
+                data.clear();
+                if BLOCK_QR && block.rows >= 2048 && self.try_cholesky_qr(gemm)? {
+                    crate::pool::analysis::copied(
+                        self.normalized.data.len() * size_of::<Complex64>(),
+                    );
+                    data.extend_from_slice(&self.normalized.data);
+                    continue;
+                }
+                count = 0;
+                let mut prepared = None;
+                for j in 0..self.normalized.cols {
+                    let second = Span::serial("mgs_second_pass");
+                    let remaining = if let Some(remaining) = prepared.take() {
+                        remaining
+                    } else {
+                        crate::pool::analysis::copied(block.rows * size_of::<Complex64>());
+                        self.column.copy_from_slice(self.normalized.column(j));
+                        // Tall blocks receive the first pass as earlier vectors are
+                        // finalized. Small blocks retain the original two-pass loop.
+                        for _ in 0..if block.rows >= 2048 { 1 } else { 2 } {
+                            for k in 0..count {
+                                subtract_projection(
+                                    &mut self.column,
+                                    &data[k * block.rows..(k + 1) * block.rows],
+                                );
+                            }
+                        }
+                        norm(&self.column)
+                    };
+                    drop(second);
+                    if !remaining.is_finite() {
+                        return Err(LinalgError::NonFinite);
+                    }
+                    if remaining <= DEPENDENCE_TOLERANCE {
+                        dropped.push(self.indices[j]);
+                    } else {
+                        data.extend(self.column.iter().map(|x| x / remaining));
+                        self.indices[count] = self.indices[j];
+                        count += 1;
+                        if block.rows < 2048 {
+                            continue;
+                        }
+                        let q = &data[(count - 1) * block.rows..count * block.rows];
+                        let future = &mut self.normalized.data[(j + 1) * block.rows..];
+                        let threads = if future.len() >= 16_384 {
+                            gemm.threads
+                        } else {
+                            1
+                        };
+                        let _region = Span::region("mgs_first_pass", threads);
+                        if threads > 1 {
+                            let (next, rest) = future.split_at_mut(block.rows);
+                            let column = &mut self.column;
+                            // The next column's dependent pass overlaps independent
+                            // first-pass work on later columns. No basis entry is
+                            // appended until both branches finish. Every column sees
+                            // exactly the historical ascending projection sequence.
+                            let (remaining, ()) = gemm.pool.install(|| {
+                                WorkerPool::join(
+                                    || {
+                                        crate::pool::analysis::copied(
+                                            block.rows * size_of::<Complex64>(),
+                                        );
+                                        column.copy_from_slice(next);
+                                        {
+                                            let _piece = Piece::new();
+                                            subtract_projection(column, q);
+                                        }
+                                        let _second = Span::serial("mgs_second_pass");
+                                        for basis in data.chunks_exact(block.rows) {
+                                            subtract_projection(column, basis);
+                                        }
+                                        norm(column)
+                                    },
+                                    || project_columns(rest, block.rows, q, threads),
+                                )
+                            });
+                            prepared = Some(remaining);
+                        } else {
+                            project_columns(future, block.rows, q, 1);
                         }
                     }
-                    norm(&self.column)
-                };
-                drop(second);
-                if !remaining.is_finite() {
-                    return Err(LinalgError::NonFinite);
                 }
-                if remaining <= DEPENDENCE_TOLERANCE {
-                    dropped.push(self.indices[j]);
-                } else {
-                    data.extend(self.column.iter().map(|x| x / remaining));
-                    self.indices[count] = self.indices[j];
-                    count += 1;
-                    if block.rows < 2048 {
-                        continue;
-                    }
-                    let q = &data[(count - 1) * block.rows..count * block.rows];
-                    let future = &mut self.normalized.data[(j + 1) * block.rows..];
-                    let threads = if future.len() >= 16_384 {
-                        gemm.threads
-                    } else {
-                        1
-                    };
-                    let _region = Span::region("mgs_first_pass", threads);
-                    if threads > 1 {
-                        let (next, rest) = future.split_at_mut(block.rows);
-                        let column = &mut self.column;
-                        // The next column's dependent pass overlaps independent
-                        // first-pass work on later columns. No basis entry is
-                        // appended until both branches finish. Every column sees
-                        // exactly the historical ascending projection sequence.
-                        let (remaining, ()) = gemm.pool.install(|| {
-                            WorkerPool::join(
-                                || {
-                                    crate::pool::analysis::copied(
-                                        block.rows * size_of::<Complex64>(),
-                                    );
-                                    column.copy_from_slice(next);
-                                    {
-                                        let _piece = Piece::new();
-                                        subtract_projection(column, q);
-                                    }
-                                    let _second = Span::serial("mgs_second_pass");
-                                    for basis in data.chunks_exact(block.rows) {
-                                        subtract_projection(column, basis);
-                                    }
-                                    norm(column)
-                                },
-                                || project_columns(rest, block.rows, q, threads),
-                            )
-                        });
-                        prepared = Some(remaining);
-                    } else {
-                        project_columns(future, block.rows, q, 1);
-                    }
-                }
+                self.indices.truncate(count);
             }
-            self.indices.truncate(count);
-        }
-        dropped.sort_unstable();
-        Ok(Orthonormalized {
-            vectors: ComplexMatrix::new(block.rows, count, data)?,
-            dropped,
-        })
+            dropped.sort_unstable();
+            Ok(())
+        })();
+        // Restore valid storage even if a backend/projection check failed.
+        output.cols = data.len().checked_div(block.rows).unwrap_or(0);
+        output.data = data;
+        result
     }
 }
 
@@ -925,6 +1036,49 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn hermitian_rectangle_matches_independent_full_product() {
+        for rows in [31, 513, 1025] {
+            let a = matrix(rows, 33);
+            let mut h = a.clone();
+            // A real diagonal Hermitian H, including negative eigenvalues.
+            for j in 0..33 {
+                for i in 0..rows {
+                    h[(i, j)] *= (i % 17) as f64 * 0.1 - 0.8;
+                }
+            }
+            let mut reference = Vec::new();
+            for threads in [1, 2, 4, 8] {
+                let mut work = GemmWorkspace::new(rows.max(33), 33, threads).unwrap();
+                let mut previous = None;
+                for (stage, width) in [7, 11, 19, 33, 33].into_iter().enumerate() {
+                    let mut aa = a.clone();
+                    aa.resize_columns(width).unwrap();
+                    let mut hh = h.clone();
+                    hh.resize_columns(width).unwrap();
+                    let result = work
+                        .reduced_hamiltonian_hermitian(&aa, &hh, previous.as_ref())
+                        .unwrap();
+                    let full = work
+                        .multiply(&aa, MatrixOp::Adjoint, &hh, MatrixOp::Identity)
+                        .unwrap();
+                    for j in 0..width {
+                        for i in 0..width {
+                            assert!((result[(i, j)] - full[(i, j)]).norm() < 2e-11);
+                            assert_eq!(result[(i, j)], result[(j, i)].conj());
+                        }
+                    }
+                    if threads == 1 {
+                        reference.push(result.clone());
+                    } else {
+                        bits(&result, &reference[stage]);
+                    }
+                    previous = Some(result);
+                }
+            }
+        }
+    }
+
     #[test]
     fn incremental_gram_prefix_scalar_oracle_and_threads() {
         // Non-Hermitian products ensure that neither triangle is inferred from the other.

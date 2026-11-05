@@ -62,6 +62,7 @@ impl Davidson {
             history.push(maximum);
             if residuals.iter().all(|&r| r <= self.tolerance) {
                 return Ok(EigenSolution {
+                    locking: None,
                     spectral_completeness: None,
                     eigenvalues: values,
                     eigenvectors: vectors,

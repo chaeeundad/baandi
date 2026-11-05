@@ -501,3 +501,33 @@ fn finite_scan_timing() {
         println!("{len},{:.3},{:.3}", times[0], times[1]);
     }
 }
+
+#[test]
+fn reusable_evd_matches_allocating_adapter_and_preserves_storage() {
+    let capacity = 24;
+    let mut work = HermitianWorkspace::new(capacity).unwrap();
+    let mut values = Vec::with_capacity(capacity);
+    let mut vectors = ComplexMatrix::zeros(capacity, capacity).unwrap();
+    let ptr = vectors.as_slice().as_ptr();
+    for n in [7, 19, 3, 24, 0, 11] {
+        let a = matrix(n, n, |i, j| {
+            if i == j {
+                Complex64::new(i as f64 - 4.0, 0.0)
+            } else {
+                Complex64::new(0.02 * (i + j) as f64, 0.01 * (i as f64 - j as f64))
+            }
+        });
+        let (expected, reference) = hermitian_eigh(&a).unwrap();
+        work.solve_into(&a, &mut values, &mut vectors).unwrap();
+        assert_eq!(values, expected);
+        assert_eq!(vectors, reference);
+        assert_eq!(vectors.as_slice().as_ptr(), ptr);
+    }
+    let a = matrix(2, 2, |i, j| {
+        Complex64::new(i as f64 + j as f64, if i == j { 1.0 } else { 0.0 })
+    });
+    assert!(matches!(
+        work.solve_into(&a, &mut values, &mut vectors),
+        Err(LinalgError::NotHermitian { .. })
+    ));
+}

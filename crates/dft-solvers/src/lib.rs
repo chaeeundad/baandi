@@ -1,6 +1,7 @@
 //! Backend-independent dense and matrix-free Hermitian eigensolvers.
 #[path = "mixing/kerker.rs"]
 pub mod kerker;
+pub mod locking;
 pub mod mixing;
 #[doc(hidden)]
 pub mod replay;
@@ -136,6 +137,7 @@ impl Preconditioner for DiagonalPreconditioner {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EigenSolution {
+    pub locking: Option<locking::LockingReport>,
     pub spectral_completeness: Option<SpectralCompleteness>,
     pub eigenvalues: Vec<f64>,
     pub eigenvectors: ComplexMatrix,
@@ -185,6 +187,7 @@ impl DenseEigensolver {
         let (_, residuals) = residual(operator, &vectors, &values)?;
         let maximum = max_residual(&residuals);
         Ok(EigenSolution {
+            locking: None,
             spectral_completeness: None,
             eigenvalues: values,
             eigenvectors: vectors,
@@ -628,6 +631,7 @@ impl Davidson {
         };
         let mut reduced_cache = None;
         for iteration in 1..=self.max_iterations {
+            gemm_work.accounting_step(iteration);
             let _iteration = dft_numerics::pool::analysis::Span::new("iteration");
             cached.resize_columns(basis.cols())?;
             if !cache_valid {
@@ -653,8 +657,11 @@ impl Davidson {
             // column stride and no first_columns allocation or copy.
             let h_basis = &cached;
             gemm_work.accounting_site("reduced_hamiltonian");
-            let projected =
-                gemm_work.reduced_hamiltonian(&basis, h_basis, reduced_cache.as_ref())?;
+            let projected = if option_env!("P24A_RECTANGLE_ONLY").is_some() {
+                gemm_work.reduced_hamiltonian_hermitian(&basis, h_basis, reduced_cache.as_ref())?
+            } else {
+                gemm_work.reduced_hamiltonian(&basis, h_basis, reduced_cache.as_ref())?
+            };
             let (mut values, mut coefficients) = {
                 let _phase = dft_numerics::pool::analysis::Span::serial("evd");
                 hermitian_eigh(&projected)?
@@ -750,6 +757,7 @@ impl Davidson {
             if finished {
                 work.returned();
                 return Ok(EigenSolution {
+                    locking: None,
                     spectral_completeness: None,
                     eigenvalues: values,
                     eigenvectors: vectors,

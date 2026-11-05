@@ -1,0 +1,158 @@
+{
+ "note": "",
+ "binary": "p24a-baseline-cli",
+ "machine_note": "record host and commit in the note",
+ "energy_tolerance_ha": 1e-12,
+ "cases": {
+  "gamma": {
+   "operator_applications": 281,
+   "davidson_iterations": 41,
+   "certificate_applications": 38,
+   "certificate_iterations": 8,
+   "label": "Gamma only, 30 Ry",
+   "wall_s": [
+    0.202818375
+   ],
+   "wall_median_s": 0.202818375,
+   "engine_total_s": 0.186250334,
+   "phases_s": {
+    "density_s": 0.00596079,
+    "diagonalization_s": 0.096744376,
+    "mixing_s": 0.001905915,
+    "potential_s": 0.008891123,
+    "total_energy_s": 0.014436458
+   },
+   "engine_total_median_s": 0.186250334,
+   "phase_medians_s": {
+    "density_s": 0.00596079,
+    "diagonalization_s": 0.096744376,
+    "mixing_s": 0.001905915,
+    "potential_s": 0.008891123,
+    "total_energy_s": 0.014436458
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.29553046821076,
+   "density_sha256": "6077d62f5ddcf7d003e61b29f12e83d73e0dc332a208097da0836dfb63ec1b26"
+  },
+  "k222s": {
+   "operator_applications": 1266,
+   "davidson_iterations": 204,
+   "certificate_applications": 113,
+   "certificate_iterations": 21,
+   "label": "2x2x2 shifted (4 k), 30 Ry",
+   "wall_s": [
+    0.595806375
+   ],
+   "wall_median_s": 0.595806375,
+   "engine_total_s": 0.587957126,
+   "phases_s": {
+    "density_s": 0.028002584,
+    "diagonalization_s": 0.429307541,
+    "mixing_s": 0.0037675,
+    "potential_s": 0.014028916,
+    "total_energy_s": 0.051781085
+   },
+   "engine_total_median_s": 0.587957126,
+   "phase_medians_s": {
+    "density_s": 0.028002584,
+    "diagonalization_s": 0.429307541,
+    "mixing_s": 0.0037675,
+    "potential_s": 0.014028916,
+    "total_energy_s": 0.051781085
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.9194234124690865,
+   "density_sha256": "9e311684370831efd1f4e5a3f3fd41479dcadfc4794b51e2db0183f05e7e9104"
+  },
+  "k222": {
+   "operator_applications": 2543,
+   "davidson_iterations": 408,
+   "certificate_applications": 208,
+   "certificate_iterations": 24,
+   "label": "2x2x2 (8 k), 30 Ry",
+   "wall_s": [
+    1.052902709
+   ],
+   "wall_median_s": 1.052902709,
+   "engine_total_s": 1.032785791,
+   "phases_s": {
+    "density_s": 0.045589876,
+    "diagonalization_s": 0.790960167,
+    "mixing_s": 0.002854416,
+    "potential_s": 0.007019002,
+    "total_energy_s": 0.084958834
+   },
+   "engine_total_median_s": 1.032785791,
+   "phase_medians_s": {
+    "density_s": 0.045589876,
+    "diagonalization_s": 0.790960167,
+    "mixing_s": 0.002854416,
+    "potential_s": 0.007019002,
+    "total_energy_s": 0.084958834
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.831230057121135,
+   "density_sha256": "21238c7026d96860233edfc427807389029229e7ce26162b5025d471e255bdbe"
+  },
+  "k444s": {
+   "operator_applications": 10290,
+   "davidson_iterations": 1686,
+   "certificate_applications": 891,
+   "certificate_iterations": 141,
+   "label": "4x4x4 shifted (32 k), 30 Ry",
+   "wall_s": [
+    4.037148666
+   ],
+   "wall_median_s": 4.037148666,
+   "engine_total_s": 4.021950167,
+   "phases_s": {
+    "density_s": 0.172859124,
+    "diagonalization_s": 3.153546041,
+    "mixing_s": 0.003263544,
+    "potential_s": 0.017354374,
+    "total_energy_s": 0.434091002
+   },
+   "engine_total_median_s": 4.021950167,
+   "phase_medians_s": {
+    "density_s": 0.172859124,
+    "diagonalization_s": 3.153546041,
+    "mixing_s": 0.003263544,
+    "potential_s": 0.017354374,
+    "total_energy_s": 0.434091002
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.9259761266480915,
+   "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660"
+  },
+  "si8": {
+   "operator_applications": 2063,
+   "davidson_iterations": 283,
+   "certificate_applications": 202,
+   "certificate_iterations": 62,
+   "label": "8-atom conventional Gamma, 30 Ry",
+   "wall_s": [
+    3.055783667000001
+   ],
+   "wall_median_s": 3.055783667000001,
+   "engine_total_s": 3.042838833,
+   "phases_s": {
+    "density_s": 0.062641917,
+    "diagonalization_s": 2.686099873,
+    "mixing_s": 0.015862541,
+    "potential_s": 0.022595456,
+    "total_energy_s": 0.071094124
+   },
+   "engine_total_median_s": 3.042838833,
+   "phase_medians_s": {
+    "density_s": 0.062641917,
+    "diagonalization_s": 2.686099873,
+    "mixing_s": 0.015862541,
+    "potential_s": 0.022595456,
+    "total_energy_s": 0.071094124
+   },
+   "iterations": 15,
+   "total_energy_ha": -31.32180360103127,
+   "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e"
+  }
+ }
+}

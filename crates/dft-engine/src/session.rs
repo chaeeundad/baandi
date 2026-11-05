@@ -985,9 +985,11 @@ impl ScfSession {
         if self.problem.symmetry.is_some() {
             return Err(R::Boundary);
         }
-        // Checkpoint v1 has no cumulative spectral audit record. Fail closed
-        // rather than silently dropping its policy or retry history.
-        if self.problem.options.spectral_guard == crate::SpectralGuard::Final {
+        // Checkpoint v1 has neither cumulative spectral audit records nor the
+        // locking policy. Fail closed instead of dropping either on resume.
+        if self.problem.options.spectral_guard == crate::SpectralGuard::Final
+            || self.problem.options.locking != dft_solvers::locking::Locking::Off
+        {
             return Err(R::Boundary);
         }
         if self.problem.core_density.is_some() || self.problem.density_floor.is_some() {

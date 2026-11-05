@@ -777,3 +777,97 @@ fn ritz_rule_requires_two_values_and_required_empty_root() {
         .unwrap();
     assert_eq!(r.iterations, 2);
 }
+
+#[test]
+fn hard_locking_certifies_all_roots_against_dense() {
+    let n = 40;
+    let mut diagonal: Vec<_> = (0..n).map(|i| i as f64 * 0.2).collect();
+    diagonal[0] = -2.0;
+    diagonal[2] = diagonal[1];
+    let op = Diagonal(diagonal.clone());
+    let mut guess = SplitMix64(31).block(n, 4).unwrap();
+    guess.column_mut(0).fill(Complex64::default());
+    guess[(0, 0)] = Complex64::new(1.0, 0.0);
+    let mut solver = config(4, n);
+    solver.max_subspace = 20;
+    solver.tolerance = 1e-9;
+    let solution = solver
+        .solve_locked(
+            &op,
+            Some(&guess),
+            None,
+            BandTolerances {
+                strict_bands: 4,
+                buffer_tolerance: solver.tolerance,
+            },
+        )
+        .unwrap();
+    assess("locked", &op, &solution, &diagonal[..4], 1e-8);
+    assert!(solution.residuals_certified);
+    assert!(solution.locking.as_ref().unwrap().locked_roots > 0);
+}
+
+#[test]
+fn hard_locking_unlocks_after_a_failed_true_residual_audit() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    // Fault injection: only the initial cached H product has a shifted first
+    // root. A true application is always the unshifted operator. This tests
+    // cache/certificate recovery, not a time-dependent physical Hamiltonian.
+    struct InitialCacheFault {
+        diagonal: Vec<f64>,
+        first: AtomicBool,
+    }
+    impl LinearOperator for InitialCacheFault {
+        fn dimension(&self) -> usize {
+            self.diagonal.len()
+        }
+        fn apply(&self, x: &[Complex64], y: &mut [Complex64]) -> Result<(), SolverError> {
+            for ((y, x), d) in y.iter_mut().zip(x).zip(&self.diagonal) {
+                *y = x * d;
+            }
+            Ok(())
+        }
+        fn apply_block(&self, x: &ComplexMatrix, y: &mut ComplexMatrix) -> Result<(), SolverError> {
+            let fault = self.first.swap(false, Ordering::Relaxed);
+            for j in 0..x.cols() {
+                self.apply(x.column(j), y.column_mut(j))?;
+                if fault {
+                    y[(0, j)] += 0.01 * x[(0, j)];
+                }
+            }
+            Ok(())
+        }
+    }
+    let n = 40;
+    let diagonal: Vec<_> = (0..n).map(|j| j as f64 * 0.2 - 2.0).collect();
+    let op = InitialCacheFault {
+        diagonal: diagonal.clone(),
+        first: AtomicBool::new(true),
+    };
+    let mut guess = SplitMix64(31).block(n, 4).unwrap();
+    guess.column_mut(0).fill(Complex64::default());
+    guess[(0, 0)] = Complex64::new(1.0, 0.0);
+    let mut solver = config(4, n);
+    solver.max_subspace = 20;
+    solver.tolerance = 1e-9;
+    let result = solver
+        .solve_locked(
+            &op,
+            Some(&guess),
+            None,
+            BandTolerances {
+                strict_bands: 4,
+                buffer_tolerance: solver.tolerance,
+            },
+        )
+        .unwrap();
+    assess("unlock", &op, &result, &diagonal[..4], 1e-8);
+    let report = result.locking.unwrap();
+    assert!(report.unlocks > 0);
+    assert!(
+        report
+            .failures
+            .iter()
+            .any(|&(_, root, residual)| root == 0 && residual > 0.009)
+    );
+}

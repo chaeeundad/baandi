@@ -422,6 +422,7 @@ pub struct Scf {
     pub standard_threshold_ha: Option<f64>,
     pub mixing_metric: Option<String>,
     pub spectral_guard: Option<String>,
+    pub locking: Option<String>,
     pub threads: Option<usize>,
     pub max_iterations: Option<i64>,
     pub mixing: Option<String>,
@@ -464,6 +465,16 @@ impl Scf {
             "hartree" => Ok(true),
             _ => Err(ConfigError::Invalid(
                 "scf.mixing_metric must be l2 or hartree".into(),
+            )),
+        }
+    }
+
+    pub fn locking(&self) -> Result<dft_engine::Locking, ConfigError> {
+        match self.locking.as_deref().unwrap_or("off") {
+            "off" => Ok(dft_engine::Locking::Off),
+            "auto" => Ok(dft_engine::Locking::Auto),
+            _ => Err(ConfigError::Invalid(
+                "scf.locking must be 'off' or 'auto'".into(),
             )),
         }
     }
@@ -863,6 +874,7 @@ impl Config {
         }
         if let Some(s) = &self.scf {
             s.spectral_guard()?;
+            s.locking()?;
             s.standard_profile()?;
             if s.standard_profile()?.is_some()
                 && self.output.as_ref().is_some_and(|o| o.forces || o.stress)

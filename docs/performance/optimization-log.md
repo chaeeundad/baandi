@@ -1,5 +1,45 @@
 # Optimization log (newest first)
 
+
+## P24A — hard locking and one-rectangle reduced H (2026-11-06)
+
+Derived from `qe-solvers-and-subspace.md`, hypotheses 2 and 5; notes only,
+no QE source. Baseline/current HEAD `46dfeddd370f5aaf37c898aca41735269c36cc05`;
+branch uncommitted. A56's unlocked-root premise is changed by explicit prefix
+locking with whole clusters, margin 1/sqrt(bands), an all-root final rotation,
+true residual audit and automatic unlock. No capacity or tolerance default
+changes. See [full design, failures and reproduction](../research/qe-study/p24a-locking-results.md)
+and [measured tables](../../tests/reference/perf/p24a/tables.md).
+
+**Default off; no optimization accepted.** Si8/k444s complex MACs decrease
+4,744,613,419 -> 4,459,794,280 (6.00%) and 1,129,003,567 -> 987,797,005
+(12.51%), but H columns rise 2265 -> 2809 and 11181 -> 13500. Si8 tail mean
+MACs rise 8,904,781 -> 10,665,880. Rare prefix locking and additional final
+certificates/restarts prevent the modeled 25% saving. Locking-only, rectangle-only
+and doubled-margin ablations are retained; rectangle-only raises Si8 SCF 15 -> 16.
+
+Five Si cases preserve auto/off SCF counts and meet 1e-12 Ha; off density bytes
+are baseline-identical at T=1,2,4,8. The 19-case suite remains 16 converged and
+3 exhausted, but converged syn-s2 changes energy by 0.004416513597413463 Ha
+(16 -> 14 SCF), failing the unchanged gate. Skew20 diverges at iteration 8
+with missing dense root 12; legacy already misses roots 2,10,11,12. Si8's
+iteration-15 ordinary buffer roots 17/19 exceed the 1e-9 Ha dense cap, maximum
+3.72180e-9 Ha; occupied roots agree. P15C final guard detects/repairs it and
+passes at iteration 16 with 2265 extra guard H columns. Six external Si/MgO
+fixtures have energy differences <=8.24230e-13 Ha and all requested
+sampled dense roots within cap; MgO 60 changes SCF 19 -> 18 (the other five
+retain counts), also failing the realistic unchanged-count gate. Complete failing trajectories and thread results
+are stored; no baseline or certificate was weakened.
+
+All numerical buffers are reserved for the new loop; independent full-product
+and reusable-EVD tests cover rounding and storage. Compile-time P14B accounting
+now includes iteration IDs. Tests exercise actual unlock after a cached-product
+fault. Gate commands and recovered failures are in `perf/p24a/final-gates/` and
+`perf/p24a/gates/`. MKL type-check is local; MKL numerical execution and dev08
+ordinary/native acceptance remain unmeasured. Wall values are concurrent Mac
+observations, not speedup evidence. README generation is unchanged; no performance
+claim is added. The full note supplies the dev08 request.
+
 ## P17A — additive standard profile and equal accuracy (2026-11-05)
 
 Derived from notes `qe-scf-cycle.md`, `qe-solvers-and-subspace.md` and P15A replay

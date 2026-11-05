@@ -41,3 +41,5 @@ mod force_identity;
 
 pub mod stress;
 pub use stress::{StressResult, StressState, stress};
+
+pub use dft_solvers::locking::Locking;

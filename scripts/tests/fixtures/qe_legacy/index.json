@@ -1,0 +1,50 @@
+[
+  {
+    "source": "tests/reference/scan_e20/ours/results.json",
+    "golden": "00.in"
+  },
+  {
+    "source": "tests/reference/scan_e25/ours/results.json",
+    "golden": "01.in"
+  },
+  {
+    "source": "tests/reference/scan_e40/ours/results.json",
+    "golden": "02.in"
+  },
+  {
+    "source": "tests/reference/scan_e50/ours/results.json",
+    "golden": "03.in"
+  },
+  {
+    "source": "tests/reference/scan_e60/ours/results.json",
+    "golden": "04.in"
+  },
+  {
+    "source": "tests/reference/scan_e80/ours/results.json",
+    "golden": "05.in"
+  },
+  {
+    "source": "tests/reference/si30_ours/ours/results.json",
+    "golden": "06.in"
+  },
+  {
+    "source": "tests/reference/kpoints/k222_c/ours_results.json",
+    "golden": "07.in"
+  },
+  {
+    "source": "tests/reference/kpoints/k222s_c/ours_results.json",
+    "golden": "08.in"
+  },
+  {
+    "source": "tests/reference/kpoints/k444s_c/ours_results.json",
+    "golden": "09.in"
+  },
+  {
+    "source": "tests/reference/pbe/gamma/ours_results.json",
+    "golden": "10.in"
+  },
+  {
+    "source": "tests/reference/pbe/k222s/ours_results.json",
+    "golden": "11.in"
+  }
+]

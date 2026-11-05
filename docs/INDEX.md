@@ -95,3 +95,5 @@ Conventions: docs are English; one fact lives in one place and others link to it
 
 - [Spectral completeness and final audit option (P15C)](validation/spectral-completeness.md): realistic final dense comparisons, cumulative fail-closed repair, skew dense-SCF diagnosis, and measured default-off decision.
 - [P15C dev08 measurement request](validation/spectral-dev08-request.md): final guard on/off H work and wall-time protocol for ordinary/native builds.
+- `docs/decisions/0035-standard-convergence-profile.md`: additive labelled QE-comparable convergence profile (accepted 2026-11-05; default unchanged).
+- [Reproducible material QE inputs and comparisons](validation/qe-materials-protocol.md): P16A manifest-only multi-species generation, unchanged legacy inputs, remote evidence protocol and reporting without acceptance caps.

@@ -1,0 +1,1805 @@
+{
+  "schema_version": 1,
+  "tool": {
+    "git_commit": "a3947c6e6499437837baf848d991c217ce533dd6",
+    "name": "dft-cli",
+    "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+    "version": "0.1.0"
+  },
+  "input_sha256": "43d1efefa948a4a70b63f80ae6063af3ddf1f7d7ab9ac785c3ed9823d49daf1b",
+  "species": [
+    {
+      "functional": "PBE",
+      "n_projectors": 4,
+      "name": "Mg",
+      "path": "/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Mg.upf",
+      "sha256": "15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14",
+      "z_valence": 10.0
+    },
+    {
+      "functional": "PBE",
+      "n_projectors": 5,
+      "name": "O",
+      "path": "/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/O.upf",
+      "sha256": "2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11",
+      "z_valence": 6.0
+    }
+  ],
+  "cell": {
+    "lattice_columns_bohr": [
+      [
+        0.0,
+        3.975,
+        3.975
+      ],
+      [
+        3.975,
+        0.0,
+        3.975
+      ],
+      [
+        3.975,
+        3.975,
+        0.0
+      ]
+    ],
+    "reciprocal_columns_inverse_bohr": [
+      [
+        -0.7903377744879982,
+        0.7903377744879982,
+        0.7903377744879982
+      ],
+      [
+        0.7903377744879982,
+        -0.7903377744879982,
+        0.7903377744879982
+      ],
+      [
+        0.7903377744879982,
+        0.7903377744879982,
+        -0.7903377744879982
+      ]
+    ],
+    "volume_bohr3": 125.61496875
+  },
+  "atoms": [
+    {
+      "cartesian_bohr": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "fractional": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "species": "Mg"
+    },
+    {
+      "cartesian_bohr": [
+        3.975,
+        3.975,
+        3.975
+      ],
+      "fractional": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "species": "O"
+    }
+  ],
+  "cutoff": {
+    "ecutwfc_ha": 40.0,
+    "ecutwfc_ry": 80.0
+  },
+  "basis": {
+    "fft_grid": [
+      36,
+      36,
+      36
+    ],
+    "fft_grid_overridden": false,
+    "n_density_g": 12051,
+    "n_plane_waves": 1495
+  },
+  "electrons": 16.0,
+  "bands": 12,
+  "occupations": [
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+    2.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "xc": "pbe",
+  "scf": {
+    "cutoff_hartree": 40.0,
+    "davidson_max_iterations": 400,
+    "davidson_subspace": 48,
+    "davidson_subspace_min_per_band": 6,
+    "density_residual_tolerance": 1e-07,
+    "divergence_factor": 20.0,
+    "divergence_patience": 3,
+    "eigen_tolerance": 1e-08,
+    "eigen_tolerance_decay": 0.5,
+    "energy_tolerance_ha": 1e-08,
+    "extra_bands": 4,
+    "free_electron_initial_guess": true,
+    "grid_override": null,
+    "initial_eigen_tolerance": 1e-05,
+    "max_iterations": 120,
+    "mixing": {
+      "beta": 0.3,
+      "history": 6,
+      "method": "kerker-pulay",
+      "q0_inverse_bohr": 1.0
+    },
+    "nbands": null,
+    "residual_eigen_schedule": true,
+    "seed": 2026,
+    "threads": 4
+  },
+  "allow_functional_override": false,
+  "functional_override_applied": false,
+  "eigenvalues": {
+    "ev": [
+      -64.24375408345192,
+      -31.0249163481256,
+      -30.99824280558133,
+      -30.998242805579064,
+      -8.814150112313888,
+      6.595699374844361,
+      7.930941137793116,
+      7.930941137798345,
+      14.314608249013858,
+      21.677473304272922,
+      24.63775643461157,
+      24.637756434615092
+    ],
+    "ha": [
+      -2.3609144165863225,
+      -1.1401446463500118,
+      -1.1391644117414863,
+      -1.139164411741403,
+      -0.32391404218200825,
+      0.24238748129992133,
+      0.29145671102891463,
+      0.29145671102910675,
+      0.5260521503612982,
+      0.7966324504128849,
+      0.9054208489008563,
+      0.9054208489009857
+    ]
+  },
+  "kpoints": {
+    "count": 14,
+    "explicit": false,
+    "grid": [
+      3,
+      3,
+      3
+    ],
+    "points": [
+      {
+        "band_accuracy": [
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.0194860712807711e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.3905558471131677e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.050179852837989e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.050183501762392e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 6.460319741299046e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.743878281139192e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.790478599001147e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.790468561337321e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 2.9964150863931266e-09
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 7.088259169576482e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 6.9660331441528105e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 6.966026843302273e-06
+          }
+        ],
+        "eigenvalues": {
+          "ev": [
+            -64.24375408345192,
+            -31.0249163481256,
+            -30.99824280558133,
+            -30.998242805579064,
+            -8.814150112313888,
+            6.595699374844361,
+            7.930941137793116,
+            7.930941137798345,
+            14.314608249013858,
+            21.677473304272922,
+            24.63775643461157,
+            24.637756434615092
+          ],
+          "ha": [
+            -2.3609144165863225,
+            -1.1401446463500118,
+            -1.1391644117414863,
+            -1.139164411741403,
+            -0.32391404218200825,
+            0.24238748129992133,
+            0.29145671102891463,
+            0.29145671102910675,
+            0.5260521503612982,
+            0.7966324504128849,
+            0.9054208489008563,
+            0.9054208489009857
+          ]
+        },
+        "fractional": [
+          0.16666666666666666,
+          0.16666666666666666,
+          0.16666666666666666
+        ],
+        "occupations": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weight": 0.07407407407407407
+      },
+      {
+        "band_accuracy": [
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 9.894335322093283e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.3092196732904256e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.033324084700331e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.9835180269783957e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 7.172726378278749e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 7.003556693104658e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.965627631670847e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.3891440491483705e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.2611515424596363e-09
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.254553581298789e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.7449004089303536e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.3135941302291055e-06
+          }
+        ],
+        "eigenvalues": {
+          "ev": [
+            -64.23717572501609,
+            -31.067756603752276,
+            -31.025348990604076,
+            -31.004970934872777,
+            -7.844037218674074,
+            4.222160730166784,
+            6.5590960457155605,
+            7.459823392169676,
+            17.131319978815537,
+            20.269063177150336,
+            22.655236291925213,
+            25.275367261443968
+          ],
+          "ha": [
+            -2.360672666372777,
+            -1.1417189967061239,
+            -1.14016054566784,
+            -1.1394116659324571,
+            -0.28826305090688187,
+            0.15516154495029766,
+            0.2410423337650655,
+            0.2741434532123306,
+            0.6295643971957263,
+            0.744874332895802,
+            0.8325645774575499,
+            0.9288526145988057
+          ]
+        },
+        "fractional": [
+          0.16666666666666666,
+          0.16666666666666666,
+          -0.5
+        ],
+        "occupations": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weight": 0.07407407407407407
+      },
+      {
+        "band_accuracy": [
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.2133251008812707e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.8350289929209745e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.181322125113156e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.2285825890645087e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 6.863449018993857e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 8.303159878225875e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.341437280052827e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.666778636493578e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 2.2801456747539598e-09
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 7.92797131541512e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.765848779874429e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 4.868632919762326e-06
+          }
+        ],
+        "eigenvalues": {
+          "ev": [
+            -64.23937301280556,
+            -31.0474378037665,
+            -31.01571410662336,
+            -31.009046347181584,
+            -8.209393300464257,
+            5.0342865319363765,
+            7.238193036477555,
+            7.393196228082601,
+            16.45890400528996,
+            19.730847462296598,
+            23.489501850250768,
+            25.39461076847145
+          ],
+          "ha": [
+            -2.360753415209665,
+            -1.1409722945792238,
+            -1.1398064702123076,
+            -1.1395614345723921,
+            -0.30168963926542425,
+            0.1850066176866905,
+            0.2659986878670958,
+            0.2716949500936444,
+            0.6048535659485783,
+            0.7250952701906415,
+            0.8632232712405083,
+            0.9332347326559136
+          ]
+        },
+        "fractional": [
+          0.16666666666666666,
+          0.16666666666666666,
+          -0.16666666666666663
+        ],
+        "occupations": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weight": 0.07407407407407407
+      },
+      {
+        "band_accuracy": [
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 9.894330435096786e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.3092154846111454e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.033311268287514e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.9835136416111737e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 7.172646346598077e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 7.003547837875979e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.96561055943628e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.389109404923521e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.261137582526891e-09
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.2545476694947955e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.7449119034637285e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.313587532348729e-06
+          }
+        ],
+        "eigenvalues": {
+          "ev": [
+            -64.23717572501606,
+            -31.067756603753402,
+            -31.025348990604318,
+            -31.004970934871235,
+            -7.844037218674032,
+            4.2221607301640445,
+            6.559096045718049,
+            7.459823392169732,
+            17.131319978816773,
+            20.269063177148407,
+            22.655236291928084,
+            25.275367261442987
+          ],
+          "ha": [
+            -2.360672666372776,
+            -1.1417189967061652,
+            -1.140160545667849,
+            -1.1394116659324005,
+            -0.2882630509068803,
+            0.155161544950197,
+            0.24104233376515696,
+            0.27414345321233263,
+            0.6295643971957718,
+            0.744874332895731,
+            0.8325645774576554,
+            0.9288526145987698
+          ]
+        },
+        "fractional": [
+          0.16666666666666666,
+          -0.5,
+          0.16666666666666666
+        ],
+        "occupations": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weight": 0.07407407407407407
+      },
+      {
+        "band_accuracy": [
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 9.29805447351733e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.3882873260072754e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.385261911166992e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.162475663378895e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 8.666540283161576e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 9.420372509822467e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.026893615108021e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.419835369774955e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.5681360897086913e-09
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.2188360748595184e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.4418406677338232e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.482391425512641e-06
+          }
+        ],
+        "eigenvalues": {
+          "ev": [
+            -64.23501385660893,
+            -31.067321888632424,
+            -31.032311462202696,
+            -31.019923610077477,
+            -7.6194726044430245,
+            4.342596797781878,
+            6.215228207740293,
+            6.924336578559978,
+            17.977617092189085,
+            18.96463364721285,
+            21.104910902203788,
+            26.48677230407638
+          ],
+          "ha": [
+            -2.360593219174181,
+            -1.1417030212201298,
+            -1.1404164117797566,
+            -1.1399611666109426,
+            -0.28001045354925336,
+            0.1595874888006537,
+            0.22840542380146647,
+            0.2544646757781729,
+            0.6606652424714177,
+            0.696937431844691,
+            0.7755911702335794,
+            0.9733709287957173
+          ]
+        },
+        "fractional": [
+          0.16666666666666666,
+          -0.5,
+          -0.5
+        ],
+        "occupations": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weight": 0.07407407407407407
+      },
+      {
+        "band_accuracy": [
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.383307364406808e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.6001612211202283e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.344176431232689e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.482216634792126e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.2859572324455835e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 6.834050150084289e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.722660533962956e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.131838910113414e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.3939149998738726e-09
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 4.6775426009090875e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 6.253262967891056e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.135989374445757e-06
+          }
+        ],
+        "eigenvalues": {
+          "ev": [
+            -64.23500201576734,
+            -31.061414992071327,
+            -31.036599742204803,
+            -31.02306404661017,
+            -7.567399773920712,
+            4.533018722888303,
+            5.655640075554552,
+            6.8401450301513975,
+            18.72588575176163,
+            20.104808603236354,
+            20.90725801406745,
+            24.6936542311274
+          ],
+          "ha": [
+            -2.3605927840312786,
+            -1.1414859467753478,
+            -1.1405740031631335,
+            -1.1400765755248548,
+            -0.27809681232379063,
+            0.1665853654756982,
+            0.2078409392460997,
+            0.2513706934412387,
+            0.6881636085159947,
+            0.738838088640212,
+            0.7683275605685086,
+            0.9074750550339257
+          ]
+        },
+        "fractional": [
+          0.16666666666666666,
+          -0.5,
+          -0.16666666666666663
+        ],
+        "occupations": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weight": 0.07407407407407407
+      },
+      {
+        "band_accuracy": [
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.2133280131809746e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.835034854092208e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.181323286187995e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.228572345472815e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 6.863382919902673e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 8.303198244573489e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.341441763684848e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.666743211381763e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 2.2801825445849025e-09
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 7.92798298957691e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.765871657874695e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 4.868629811920135e-06
+          }
+        ],
+        "eigenvalues": {
+          "ev": [
+            -64.23937301280563,
+            -31.04743780376831,
+            -31.015714106623285,
+            -31.009046347180025,
+            -8.209393300464182,
+            5.034286531935982,
+            7.238193036477197,
+            7.393196228082567,
+            16.458904005291522,
+            19.73084746229666,
+            23.489501850252807,
+            25.394610768470688
+          ],
+          "ha": [
+            -2.3607534152096674,
+            -1.1409722945792904,
+            -1.139806470212305,
+            -1.1395614345723348,
+            -0.30168963926542147,
+            0.185006617686676,
+            0.26599868786708264,
+            0.27169495009364314,
+            0.6048535659486357,
+            0.7250952701906437,
+            0.8632232712405833,
+            0.9332347326558856
+          ]
+        },
+        "fractional": [
+          0.16666666666666666,
+          -0.16666666666666663,
+          0.16666666666666666
+        ],
+        "occupations": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weight": 0.07407407407407407
+      },
+      {
+        "band_accuracy": [
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.3833168639707213e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.600153773128799e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.3441838493736276e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.482227368758068e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.2859400959695788e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 6.834043906768564e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.722661910415472e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.1318089678177545e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.39392266534996e-09
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 4.677526292424533e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 6.2532401571704565e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.1359814861312936e-06
+          }
+        ],
+        "eigenvalues": {
+          "ev": [
+            -64.23500201576722,
+            -31.061414992070173,
+            -31.036599742206484,
+            -31.023064046609875,
+            -7.567399773920806,
+            4.5330187228908185,
+            5.655640075553911,
+            6.840145030148856,
+            18.72588575176066,
+            20.104808603238883,
+            20.907258014067523,
+            24.693654231127148
+          ],
+          "ha": [
+            -2.3605927840312746,
+            -1.1414859467753053,
+            -1.1405740031631952,
+            -1.1400765755248439,
+            -0.2780968123237941,
+            0.16658536547579061,
+            0.20784093924607613,
+            0.2513706934411453,
+            0.688163608515959,
+            0.738838088640305,
+            0.7683275605685111,
+            0.9074750550339165
+          ]
+        },
+        "fractional": [
+          0.16666666666666666,
+          -0.16666666666666663,
+          -0.5
+        ],
+        "occupations": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weight": 0.07407407407407407
+      },
+      {
+        "band_accuracy": [
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.2133223656040373e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.8350317713330123e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.181311618179547e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.228591981974038e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 6.863391792335818e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 8.303182284739749e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.3414392318265846e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.666755799163953e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 2.280159603545025e-09
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 7.927919568821819e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.7659094945415854e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 4.868636757568527e-06
+          }
+        ],
+        "eigenvalues": {
+          "ev": [
+            -64.23937301280536,
+            -31.047437803768396,
+            -31.01571410662326,
+            -31.00904634717979,
+            -8.209393300464116,
+            5.034286531933617,
+            7.238193036477034,
+            7.393196228086305,
+            16.458904005291096,
+            19.730847462292694,
+            23.48950185025268,
+            25.394610768473882
+          ],
+          "ha": [
+            -2.3607534152096576,
+            -1.1409722945792935,
+            -1.139806470212304,
+            -1.1395614345723262,
+            -0.3016896392654191,
+            0.18500661768658908,
+            0.26599868786707664,
+            0.27169495009378053,
+            0.60485356594862,
+            0.7250952701904979,
+            0.8632232712405786,
+            0.9332347326560031
+          ]
+        },
+        "fractional": [
+          0.16666666666666666,
+          -0.16666666666666663,
+          -0.16666666666666663
+        ],
+        "occupations": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weight": 0.07407407407407407
+      },
+      {
+        "band_accuracy": [
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 9.894255092930303e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.3092044109542575e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.033312128550381e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.9835134162784616e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 7.172680768535842e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 7.003595054851034e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.965584268002313e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.389120183167874e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.261134021900025e-09
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.2545444408052037e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.7449269830537846e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.3135904452447725e-06
+          }
+        ],
+        "eigenvalues": {
+          "ev": [
+            -64.23717572501629,
+            -31.067756603755534,
+            -31.025348990602765,
+            -31.00497093487079,
+            -7.8440372186739244,
+            4.222160730160745,
+            6.559096045718521,
+            7.45982339217347,
+            17.13131997881694,
+            20.26906317714721,
+            22.65523629192652,
+            25.275367261445556
+          ],
+          "ha": [
+            -2.3606726663727846,
+            -1.1417189967062435,
+            -1.140160545667792,
+            -1.139411665932384,
+            -0.2882630509068764,
+            0.15516154495007572,
+            0.24104233376517428,
+            0.27414345321246997,
+            0.629564397195778,
+            0.7448743328956869,
+            0.8325645774575979,
+            0.9288526145988641
+          ]
+        },
+        "fractional": [
+          -0.5,
+          0.16666666666666666,
+          0.16666666666666666
+        ],
+        "occupations": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weight": 0.07407407407407407
+      },
+      {
+        "band_accuracy": [
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 9.298099820957864e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.3882866509254456e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.385257965728052e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.1624691250891454e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 8.666533827504412e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 9.420398800341939e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.0268946911143456e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.419826210973618e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.5681135233121625e-09
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.2189354004248085e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.4418575965377617e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.4823915082790055e-06
+          }
+        ],
+        "eigenvalues": {
+          "ev": [
+            -64.23501385660892,
+            -31.06732188863434,
+            -31.03231146220092,
+            -31.019923610077587,
+            -7.619472604442975,
+            4.342596797781277,
+            6.2152282077433405,
+            6.924336578556283,
+            17.977617092191192,
+            18.9646336472159,
+            21.104910902203777,
+            26.48677230407387
+          ],
+          "ha": [
+            -2.3605932191741807,
+            -1.1417030212202002,
+            -1.1404164117796913,
+            -1.1399611666109466,
+            -0.2800104535492515,
+            0.15958748880063162,
+            0.22840542380157847,
+            0.2544646757780371,
+            0.660665242471495,
+            0.6969374318448033,
+            0.775591170233579,
+            0.973370928795625
+          ]
+        },
+        "fractional": [
+          -0.5,
+          0.16666666666666666,
+          -0.5
+        ],
+        "occupations": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weight": 0.07407407407407407
+      },
+      {
+        "band_accuracy": [
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.3833276761953214e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.600157413131866e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.3441926010676585e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.4822223494875167e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.2859496189458636e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 6.834072128815264e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.722657684255365e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.131814019762619e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.3939142482809558e-09
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 4.677549589612391e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 6.253237046004701e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.1359886240359205e-06
+          }
+        ],
+        "eigenvalues": {
+          "ev": [
+            -64.23500201576721,
+            -31.061414992073466,
+            -31.03659974220431,
+            -31.023064046608667,
+            -7.567399773920652,
+            4.533018722884852,
+            5.655640075557429,
+            6.840145030151601,
+            18.72588575176354,
+            20.104808603234822,
+            20.907258014069534,
+            24.693654231128118
+          ],
+          "ha": [
+            -2.3605927840312737,
+            -1.1414859467754264,
+            -1.1405740031631153,
+            -1.1400765755247995,
+            -0.2780968123237884,
+            0.16658536547557132,
+            0.20784093924620542,
+            0.2513706934412462,
+            0.6881636085160647,
+            0.7388380886401558,
+            0.7683275605685851,
+            0.9074750550339521
+          ]
+        },
+        "fractional": [
+          -0.5,
+          0.16666666666666666,
+          -0.16666666666666663
+        ],
+        "occupations": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weight": 0.07407407407407407
+      },
+      {
+        "band_accuracy": [
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 9.298060719612773e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.388279261735433e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.385251956602909e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.162467018935454e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 8.666506717375193e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 9.420388712024449e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.0268933610585478e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.419855620223964e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.5681286008262653e-09
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.218938202684063e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.4418446816924456e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.4823777685680425e-06
+          }
+        ],
+        "eigenvalues": {
+          "ev": [
+            -64.23501385660886,
+            -31.067321888634094,
+            -31.03231146219978,
+            -31.019923610079235,
+            -7.619472604442944,
+            4.34259679777909,
+            6.215228207746658,
+            6.9243365785562725,
+            17.9776170921881,
+            18.964633647215997,
+            21.10491090220346,
+            26.486772304075895
+          ],
+          "ha": [
+            -2.3605932191741785,
+            -1.141703021220191,
+            -1.1404164117796494,
+            -1.1399611666110072,
+            -0.2800104535492504,
+            0.15958748880055126,
+            0.2284054238017004,
+            0.2544646757780367,
+            0.6606652424713815,
+            0.6969374318448067,
+            0.7755911702335674,
+            0.9733709287956995
+          ]
+        },
+        "fractional": [
+          -0.5,
+          -0.5,
+          0.16666666666666666
+        ],
+        "occupations": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weight": 0.07407407407407407
+      },
+      {
+        "band_accuracy": [
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.1106643114905244e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.1809790402682257e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.725828827620552e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 3.7258409231535706e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 5.213668407259546e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 9.544706329717227e-10
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.418441188009092e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 4.418433216637234e-09
+          },
+          {
+            "buffer": false,
+            "converged": true,
+            "residual_ha": 1.67097134455481e-09
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 1.5164078640995439e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.3883770430462864e-06
+          },
+          {
+            "buffer": true,
+            "converged": true,
+            "residual_ha": 3.3802189157596805e-06
+          }
+        ],
+        "eigenvalues": {
+          "ev": [
+            -64.237162704168,
+            -31.089571479293138,
+            -31.00487058010379,
+            -31.004870580101578,
+            -7.77978182008017,
+            3.4896312239448886,
+            7.459672414113745,
+            7.459672414119152,
+            16.06194931157642,
+            20.744906348095547,
+            24.495004199208775,
+            24.495004199212037
+          ],
+          "ha": [
+            -2.3606721878654358,
+            -1.1425206785955968,
+            -1.1394079779627198,
+            -1.1394079779626385,
+            -0.28590170856242936,
+            0.1282415821229758,
+            0.2741379048711117,
+            0.2741379048713104,
+            0.590265750020161,
+            0.7623612468899527,
+            0.900174801010744,
+            0.9001748010108639
+          ]
+        },
+        "fractional": [
+          -0.5,
+          -0.5,
+          -0.5
+        ],
+        "occupations": [
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          2.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "weight": 0.037037037037037035
+      }
+    ],
+    "shift": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "time_reversal": true
+  },
+  "total_energy": {
+    "ev": -2069.449893203513,
+    "ha": -76.05088085171062,
+    "ry": -152.10176170342123
+  },
+  "convergence": {
+    "converged": true,
+    "iterations": 18
+  }
+}

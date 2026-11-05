@@ -306,3 +306,41 @@ fn frozen_millers_preserve_order_under_strain_and_shell_crossing() {
         assert_eq!(base.vectors(), original.vectors());
     }
 }
+
+#[test]
+fn frozen_density_support_survives_expansion_shell_crossing() {
+    let reference = Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap();
+    let expanded = Cell::from_user_rows_bohr([[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]]).unwrap();
+    let basis = PlaneWaveBasis::at_k(&reference, Hartree(2.), [0.25; 3]).unwrap();
+    let density = basis.density_basis(&reference).unwrap();
+    let grid = FftGridSpec::new(&basis, &density, None).unwrap();
+    let plain = basis.in_cell(&expanded).unwrap();
+    assert!(
+        FftGridSpec::new(
+            &plain,
+            &plain.density_basis(&expanded).unwrap(),
+            Some(grid.dims())
+        )
+        .is_err()
+    );
+    let frozen = basis
+        .in_cell_with_frozen_density(&expanded, &reference)
+        .unwrap();
+    let moved = frozen.density_basis(&expanded).unwrap();
+    assert_eq!(
+        density
+            .vectors()
+            .iter()
+            .map(|g| g.miller)
+            .collect::<Vec<_>>(),
+        moved.vectors().iter().map(|g| g.miller).collect::<Vec<_>>()
+    );
+    assert!(FftGridSpec::new(&frozen, &moved, Some(grid.dims())).is_ok());
+    assert!(
+        moved
+            .vectors()
+            .iter()
+            .zip(density.vectors())
+            .any(|(a, b)| a.norm_squared != b.norm_squared)
+    );
+}

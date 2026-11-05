@@ -1,0 +1,3 @@
+warning: symmetry.mode=auto: 27 full k points -> 6 irreducible; 12 mesh-preserving spatial operations; tolerance=0.0000001 Bohr; magnetic spin swap/time reversal disabled without proof
+Valid: mgo bulk smoke, no accuracy claim. Will compute spin-unpolarized pbe SCF for UPF composition Mg:1, O:1 (labels Mg:1, O:1; 2 atoms, 16 electrons), k mesh [3, 3, 3], shift [0.5, 0.5, 0.5] (6 resolved points), cutoff 100 Ry, 12 bands, 4 threads.
+Plane waves per k: [1994, 1987, 2000, 2003, 1996, 2006]; FFT grid: [36, 36, 36]; estimated array payload: 3421056 bytes (orbital plus one real and one complex grid payload only; excludes scratch, projectors, allocator overhead; not peak RSS)

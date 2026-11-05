@@ -1,0 +1,11 @@
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P23A-CELL-RELAXATION/crates/dft-engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.68s
+     Running tests/density_transfer.rs (target/debug/deps/density_transfer-50ee9bba5a013ddf)
+
+running 3 tests
+test three_displaced_structures_match_fresh ... ignored, three tight fresh/warm SCF comparisons; run in release
+test affine_cell_transfer_preserves_charge_and_rejects_changed_support ... ok
+test rejects_invalid_density_and_changed_model_before_initialization ... ok
+
+test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.65s
+

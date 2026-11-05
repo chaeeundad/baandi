@@ -62,3 +62,25 @@ checksum, includes the next warm density and optimizer memory, and is not an
 exact electronic checkpoint. Commands, limits and measured evidence are in
 `docs/user/relaxation.md` and `docs/validation/relaxation.md`. Long CLI trajectory
 oracles are ignored in debug and must run with `--release`.
+
+## Variable-cell driver (P23A)
+
+`relax/cell.rs` owns the fixed reference fractional/strain coordinate chart,
+constraint/symmetry projection, enthalpy backtracking, segment rebuilds and cell
+optimizer persistence. Preserve the default ionic branch. Every frame retains
+its own cell and raw derivatives; final nominal-cutoff rebuilds are separately
+labelled. No electronic exact-continuation claim follows from optimizer resume.
+Read docs/user/cell-relaxation.md for conjugate gradients and rejected constraints.
+Run the ignored `cell_relaxation` CLI tests in release; the external-file oracle
+requires DFT_NC_DIR and reports Si/MgO cutoff dependence without reference claims.
+
+The P23A rebuild follow-up separates reporting from acceptance:
+`real_files_cutoff_report` retains frozen-only start/cutoff differences without
+asserting equal minima for different initial Miller sets. The ignored
+`real_files_rebuild_start_agreement` invokes the stdlib `rebuild_protocol.py`
+runner for N=3/5 and 2–3 fresh-reference polish cycles. Its acceptance uses final
+rebuilt pressure and the unchanged previously reported lattice tolerance bounds.
+Polish is a new optimizer calculation, never a renamed exact restart. Preserve
+all stage inputs, times and failures. `rebuilt_pressure_check` warns independently
+of the Pulay tensor-difference warning; frozen-only convergence must not imply
+nominal-cutoff equilibrium, and the default rebuild cadence remains zero.

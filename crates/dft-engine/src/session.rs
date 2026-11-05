@@ -208,10 +208,36 @@ impl ScfSession {
         source: &ScfProblem,
         density: &Array3<f64>,
     ) -> Result<(), ScfError> {
-        if !self
-            .problem
-            .force_model
-            .transfer_matches(&source.force_model)
+        self.initialize_transferred_density(source, density, false)
+    }
+    /// Affine cell warm transfer on the identical fractional FFT grid and frozen
+    /// Miller support. Samples scale by V_old/V_new, preserving quadrature charge.
+    /// No interpolation, orbitals, mixer history or certificate are transferred.
+    pub fn initialize_cell_density_transfer(
+        &mut self,
+        source: &ScfProblem,
+        density: &Array3<f64>,
+    ) -> Result<(), ScfError> {
+        let ratio = source.cell.volume_bohr3() / self.problem.cell.volume_bohr3();
+        let transferred = density.mapv(|v| v * ratio);
+        self.initialize_transferred_density(source, &transferred, true)
+    }
+    fn initialize_transferred_density(
+        &mut self,
+        source: &ScfProblem,
+        density: &Array3<f64>,
+        changed_cell: bool,
+    ) -> Result<(), ScfError> {
+        let matches = if changed_cell {
+            self.problem
+                .force_model
+                .cell_transfer_matches(&source.force_model)
+        } else {
+            self.problem
+                .force_model
+                .transfer_matches(&source.force_model)
+        };
+        if !matches
             || self.problem.occupations != source.occupations
             || self.problem.electrons.to_bits() != source.electrons.to_bits()
             || self.problem.minimum_gap != source.minimum_gap

@@ -1049,3 +1049,21 @@ Fixed unpolarized runs print a stress table; spin/FD write `stress.txt` as well
 as JSON. ASE `get_stress` uses tensile-positive eV/Angstrom^3 and order
 xx,yy,zz,yz,xz,xy for the existing Gamma/unpolarized adapter. See
 [conventions, equations, protocols and evidence](validation/stress.md).
+
+## Variable-cell relaxation (P23A)
+
+`dft-cli relax` accepts `relax.mode="ions"|"cell"|"ions_cell"` (default ions),
+`cell_dofs="full"|"isotropic"|"xyz_diagonal"`, Cartesian `fixed_axes`, external
+`pressure_ha_bohr3`, `stress_tol_ha_bohr3`, `rebuild_every`, and
+`pulay_warning_ha_bohr3`. Cell modes minimize E+PV on frozen Miller segments,
+then report a separate final nominal-cutoff single point. See
+[full conventions, restart and output semantics](user/cell-relaxation.md) and
+[measured validation and limits](validation/cell-relaxation.md).
+
+For nominal-cutoff material equilibrium, follow the periodic-rebuild and
+fresh-reference polish recipe in [cell relaxation](user/cell-relaxation.md#recommended-material-equilibrium-protocol).
+`relaxation.rebuilt_pressure_check` warns when the final rebuilt pressure misses
+the requested external pressure by at least `stress_tol_ha_bohr3`. This check is
+separate from the Pulay tensor-difference threshold; frozen-only convergence
+alone is not a nominal-cutoff equilibrium claim. The default `rebuild_every=0`
+remains unchanged.

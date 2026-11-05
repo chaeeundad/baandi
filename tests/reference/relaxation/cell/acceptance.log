@@ -1,0 +1,41 @@
+   Compiling dft-cli v0.1.0 (/Users/mino/Develop/rust-dft-wt/P23A-CELL-RELAXATION/crates/dft-cli)
+    Finished `release` profile [optimized] target(s) in 7.67s
+     Running tests/cell_relaxation.rs (target/release/deps/cell_relaxation-d844b8c6cfaa2a5f)
+
+running 5 tests
+coarse a=3 Bohr E=-0.8888986972425087 Ha
+coarse a=3.25 Bohr E=-0.9680823075064604 Ha
+coarse a=3.5 Bohr E=-1.0083497227591323 Ha
+coarse a=3.75 Bohr E=-1.0241170558354193 Ha
+coarse a=4 Bohr E=-1.0243352391647997 Ha
+coarse a=4.25 Bohr E=-1.0146975563802692 Ha
+coarse a=4.5 Bohr E=-0.9988954832765076 Ha
+coarse a=4.75 Bohr E=-0.9793574201635844 Ha
+combined SCF dH/dt analytic=5.574652799889139e-2 Ha FD=5.574652803153057e-2 Ha relative=5.854926610610747e-10
+test combined_scf_enthalpy_derivative ... ok
+coarse a=5 Bohr E=-0.9576970270092844 Ha
+coarse a=5.25 Bohr E=-0.9349924115112771 Ha
+coarse a=5.5 Bohr E=-0.9119640688073807 Ha
+coarse a=5.75 Bohr E=-0.8890913051922846 Ha
+coarse a=6 Bohr E=-0.8666889051538502 Ha
+coarse a=6.25 Bohr E=-0.8449590822840518 Ha
+coarse a=6.5 Bohr E=-0.8240266739213662 Ha
+coarse a=6.75 Bohr E=-0.8039633082308484 Ha
+coarse a=7 Bohr E=-0.7848044045239644 Ha
+step 2 E=-7.071868319172e-1 Ha maxF=1.454315e-2 Ha/Bohr displacement=1.975007e-1 Bohr SCF=10 running
+step 3 E=-7.181812389998e-1 Ha maxF=8.812803e-3 Ha/Bohr displacement=1.932945e-1 Bohr SCF=10 running
+step 4 E=-7.274097208137e-1 Ha maxF=5.279593e-3 Ha/Bohr displacement=1.884717e-1 Bohr SCF=10 unconverged
+step 4 E=-7.274097208137e-1 Ha maxF=5.279593e-3 Ha/Bohr displacement=1.884717e-1 Bohr SCF=10 unconverged
+error: variable-cell relaxation max_steps reached
+P=0 Ha/Bohr^3 start=3.802923664960581 Bohr relaxed=3.874724528300449 Bohr scan=3.874728107519194 Bohr relative=9.237341681964041e-7
+test periodic_rebuild_fixed_axes_and_fire ... ok
+test cell_resume_monotonicity_and_protocols ... ok
+tetragonal relaxed x=3.8747246912086153e0 Bohr z=3.874724123589415e0 Bohr relative=1.464927821516818e-7
+test tetragonal_shape_returns_to_cubic ... ok
+P=0 Ha/Bohr^3 start=3.958145039040605 Bohr relaxed=3.8747245283004728 Bohr scan=3.8747281075177424 Bohr relative=9.237337873420415e-7
+P=0.001 Ha/Bohr^3 start=3.6378680685974034 Bohr relaxed=3.696680484531137 Bohr scan=3.696683734661164 Bohr relative=8.792015385071203e-7
+P=0.001 Ha/Bohr^3 start=3.7863524795605628 Bohr relaxed=3.6966804845311345 Bohr scan=3.6966837346611356 Bohr relative=8.792015315394836e-7
+test cubic_scan_and_pressure ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 5.99s
+

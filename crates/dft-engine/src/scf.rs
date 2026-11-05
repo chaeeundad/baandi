@@ -178,8 +178,8 @@ impl ScfOptions {
             Hartree(scale * self.cutoff_hartree),
             k,
         )?;
-        if self.strain_reference.is_some() {
-            basis.in_cell(cell)
+        if let Some(reference) = &self.strain_reference {
+            basis.in_cell_with_frozen_density(cell, reference)
         } else {
             Ok(basis)
         }

@@ -77,6 +77,15 @@ impl ModelDescription {
         source.atoms.clone_from(&self.atoms);
         *self == source
     }
+    /// Changed-cell warm transfer retains the fractional grid and frozen basis.
+    pub(crate) fn cell_transfer_matches(&self, other: &Self) -> bool {
+        if self.strain_reference.is_none() || other.strain_reference.is_none() {
+            return false;
+        }
+        let mut source = other.clone();
+        source.cell = self.cell;
+        self.transfer_matches(&source)
+    }
     pub(crate) fn new(
         cell: &Cell,
         atoms: &[Atom],

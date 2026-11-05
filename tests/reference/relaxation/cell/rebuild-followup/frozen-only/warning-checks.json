@@ -1,0 +1,93 @@
+{
+  "cases": [
+    {
+      "case": "Si-30-0.98",
+      "warning": false,
+      "check": {
+        "message": "Rebuilt-basis pressure meets the requested stress tolerance.",
+        "residual_ha_bohr3": 3.7153203171977345e-08,
+        "target_pressure_ha_bohr3": 0.0,
+        "threshold_ha_bohr3": 1e-07,
+        "warning": false
+      }
+    },
+    {
+      "case": "Si-30-1.02",
+      "warning": false,
+      "check": {
+        "message": "Rebuilt-basis pressure meets the requested stress tolerance.",
+        "residual_ha_bohr3": 1.028274770886739e-08,
+        "target_pressure_ha_bohr3": 0.0,
+        "threshold_ha_bohr3": 1e-07,
+        "warning": false
+      }
+    },
+    {
+      "case": "Si-40-0.98",
+      "warning": false,
+      "check": {
+        "message": "Rebuilt-basis pressure meets the requested stress tolerance.",
+        "residual_ha_bohr3": 1.1299387596303926e-08,
+        "target_pressure_ha_bohr3": 0.0,
+        "threshold_ha_bohr3": 1e-07,
+        "warning": false
+      }
+    },
+    {
+      "case": "Si-40-1.02",
+      "warning": false,
+      "check": {
+        "message": "Rebuilt-basis pressure meets the requested stress tolerance.",
+        "residual_ha_bohr3": 9.359662457112764e-09,
+        "target_pressure_ha_bohr3": 0.0,
+        "threshold_ha_bohr3": 1e-07,
+        "warning": false
+      }
+    },
+    {
+      "case": "MgO-50-0.98",
+      "warning": true,
+      "check": {
+        "message": "Rebuilt-basis pressure exceeds the requested stress tolerance; frozen-basis convergence does not establish nominal-cutoff equilibrium. Use periodic rebuilds and a fresh-basis polish.",
+        "residual_ha_bohr3": 1.758221561306191e-07,
+        "target_pressure_ha_bohr3": 0.0,
+        "threshold_ha_bohr3": 1e-07,
+        "warning": true
+      }
+    },
+    {
+      "case": "MgO-50-1.02",
+      "warning": true,
+      "check": {
+        "message": "Rebuilt-basis pressure exceeds the requested stress tolerance; frozen-basis convergence does not establish nominal-cutoff equilibrium. Use periodic rebuilds and a fresh-basis polish.",
+        "residual_ha_bohr3": 1.1576835480068641e-07,
+        "target_pressure_ha_bohr3": 0.0,
+        "threshold_ha_bohr3": 1e-07,
+        "warning": true
+      }
+    },
+    {
+      "case": "MgO-60-0.98",
+      "warning": true,
+      "check": {
+        "message": "Rebuilt-basis pressure exceeds the requested stress tolerance; frozen-basis convergence does not establish nominal-cutoff equilibrium. Use periodic rebuilds and a fresh-basis polish.",
+        "residual_ha_bohr3": 2.2239377613549513e-07,
+        "target_pressure_ha_bohr3": 0.0,
+        "threshold_ha_bohr3": 1e-07,
+        "warning": true
+      }
+    },
+    {
+      "case": "MgO-60-1.02",
+      "warning": false,
+      "check": {
+        "message": "Rebuilt-basis pressure meets the requested stress tolerance.",
+        "residual_ha_bohr3": 2.479184669131514e-08,
+        "target_pressure_ha_bohr3": 0.0,
+        "threshold_ha_bohr3": 1e-07,
+        "warning": false
+      }
+    }
+  ],
+  "all_eight_original_lattices_and_rebuilt_pressures_identical": true
+}

@@ -1,0 +1,27 @@
+    Blocking waiting for file lock on build directory
+    Finished `release` profile [optimized] target(s) in 6.85s
+     Running tests/cell_relaxation.rs (target/release/deps/cell_relaxation-d844b8c6cfaa2a5f)
+
+running 1 test
+real-file artifacts: /tmp/p23-real-frozen-fixed
+START Si-30-0.98, nominal=10.26 Bohr, start=10.0548 Bohr
+test real_files_cutoff_report has been running for over 60 seconds
+RESULT Si-30-0.98: a=10.334460599298 Bohr frozen_pressure=1.830861272774283e-11 rebuilt_pressure=3.7153203171977345e-8 Ha/Bohr^3 elapsed=115.548 s
+START Si-30-1.02, nominal=10.26 Bohr, start=10.4652 Bohr
+RESULT Si-30-1.02: a=10.334514952422 Bohr frozen_pressure=6.34175524594216e-12 rebuilt_pressure=-1.028274770886739e-8 Ha/Bohr^3 elapsed=113.395 s
+START Si-40-0.98, nominal=10.26 Bohr, start=10.0548 Bohr
+RESULT Si-40-0.98: a=10.334354861162 Bohr frozen_pressure=1.836427306519302e-11 rebuilt_pressure=-1.1299387596303926e-8 Ha/Bohr^3 elapsed=171.004 s
+START Si-40-1.02, nominal=10.26 Bohr, start=10.4652 Bohr
+RESULT Si-40-1.02: a=10.334352638539 Bohr frozen_pressure=6.435082790708553e-12 rebuilt_pressure=-9.359662457112764e-9 Ha/Bohr^3 elapsed=180.640 s
+START MgO-50-0.98, nominal=7.95 Bohr, start=7.791 Bohr
+RESULT MgO-50-0.98: a=8.036842438247 Bohr frozen_pressure=1.2365423499952991e-11 rebuilt_pressure=1.758221561306191e-7 Ha/Bohr^3 elapsed=73.002 s
+START MgO-50-1.02, nominal=7.95 Bohr, start=8.109 Bohr
+RESULT MgO-50-1.02: a=8.036996494869 Bohr frozen_pressure=3.875580412149304e-12 rebuilt_pressure=-1.1576835480068641e-7 Ha/Bohr^3 elapsed=71.241 s
+START MgO-60-0.98, nominal=7.95 Bohr, start=7.791 Bohr
+RESULT MgO-60-0.98: a=8.037045644138 Bohr frozen_pressure=9.664112103161907e-12 rebuilt_pressure=-2.2239377613549513e-7 Ha/Bohr^3 elapsed=95.135 s
+START MgO-60-1.02, nominal=7.95 Bohr, start=8.109 Bohr
+RESULT MgO-60-1.02: a=8.036914908800 Bohr frozen_pressure=2.6718534792043633e-12 rebuilt_pressure=2.479184669131514e-8 Ha/Bohr^3 elapsed=91.944 s
+test real_files_cutoff_report ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 911.92s
+

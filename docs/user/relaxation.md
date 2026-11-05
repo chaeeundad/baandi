@@ -4,8 +4,8 @@
 forces to move atoms while retaining the input cell. This initial driver supports
 unpolarized, fixed insulating occupations, Gamma or the existing k meshes,
 LDA/PBE, NC nonlocal projectors, optional NLCC/density floor and auto symmetry.
-Collinear and finite-temperature drivers reject explicitly; stress/cell relaxation
-are not implemented. The ordinary `run` path is unchanged.
+Collinear and finite-temperature drivers reject explicitly. For cell modes, see
+[variable-cell relaxation](cell-relaxation.md). The ordinary `run` path is unchanged.
 
 ```toml
 [relax]

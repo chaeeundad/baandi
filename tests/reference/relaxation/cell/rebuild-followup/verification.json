@@ -1,0 +1,174 @@
+{
+  "task_id": "P23A-CELL-RELAXATION",
+  "status": "DONE",
+  "uncommitted": true,
+  "commands": [
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex DFT_CELL_REBUILD_WORK_DIR=/tmp/p23-rebuild-acceptance cargo test --release -p dft-cli --test cell_relaxation real_files_rebuild_start_agreement -- --ignored --nocapture",
+      "exit_code": 0,
+      "test_elapsed_s": 1971.94
+    },
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex DFT_CELL_RUN_DIR=/tmp/p23-frozen-rerun cargo test --release -p dft-cli --test cell_relaxation real_files_cutoff_report -- --ignored --nocapture",
+      "exit_code": 0,
+      "test_elapsed_s": 1019.21
+    },
+    {
+      "command": "cargo test --release -p dft-cli --test cell_relaxation -- --ignored --skip real_files --nocapture",
+      "exit_code": 0,
+      "test_elapsed_s": 5.87
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test stress synthetic_local_nonlocal -- --ignored --nocapture",
+      "exit_code": 0,
+      "test_elapsed_s": 3.27
+    },
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222,k222s,si8,k444s --repeats 1 --baseline tests/reference/relaxation/cell/scf-before.json --require-identical --record /tmp/p23-rebuild-scf-after.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/relaxation/cell/analyze_rebuild.py --run-dir /tmp/p23-rebuild-acceptance --output tests/reference/relaxation/cell/rebuild-followup",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/relaxation/cell/analyze_real.py --run-dir /tmp/p23-frozen-rerun --output tests/reference/relaxation/cell/rebuild-followup/frozen-only",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "source_sha256": {
+    "crates/dft-cli/src/relax/cell.rs": "7b4d42accca7dfebe3bef91c71425f4f739132ba642cb0d683e71f67f4de80db",
+    "crates/dft-cli/tests/cell_relaxation.rs": "f3a7e0c2b49a3018e59885991e9d4775ef382ff7878479f3d8f2b2596a8d4e6d",
+    "crates/dft-basis/src/lib.rs": "2a591e96009753d83685925aab3b5b34a6be30546716c9a98f603e48edc5e0ee",
+    "crates/dft-engine/src/scf.rs": "e9fbf68054757aa83c8c938ca8e5e5d64557abf3556d0b833c9ccf3bf4793214",
+    "tests/reference/relaxation/cell/rebuild_protocol.py": "7d4f6525e67c16cb5b61cf62bb47d87e364561a1c3e49cefb3d81336a21204da",
+    "tests/reference/relaxation/cell/analyze_rebuild.py": "f4af70764e39cadfcd8ed8f667c05e958fb9110d3f7781f0b3ce3022fd9fe839",
+    "tests/reference/relaxation/cell/analyze_real.py": "1a8ffb51fddb46a4dbae6b678d4367e95257cf7c4aaa7c3e8f4276d90a77081b"
+  },
+  "ignored_tests": [
+    "cell_resume_monotonicity_and_protocols",
+    "cubic_scan_and_pressure",
+    "combined_scf_enthalpy_derivative",
+    "tetragonal_shape_returns_to_cubic",
+    "periodic_rebuild_fixed_axes_and_fire",
+    "real_files_cutoff_report",
+    "real_files_rebuild_start_agreement",
+    "dft-engine::stress::synthetic_local_nonlocal"
+  ],
+  "rebuild_cases": 8,
+  "stage_executions": 24,
+  "start_pairs": [
+    {
+      "material": "MgO",
+      "cutoff_ha": 50,
+      "rebuild_every": 3,
+      "before_polish_difference_bohr": -1.4391297042948281e-08,
+      "before_polish_rebuilt_pressures_ha_bohr3": [
+        -3.663731355333747e-11,
+        -9.398741044700879e-12
+      ],
+      "final_difference_bohr": -1.2569689289421149e-08,
+      "unchanged_estimated_tolerance_bohr": 0.00010693530915697647,
+      "final_rebuilt_pressures_ha_bohr3": [
+        -3.300371087533449e-11,
+        -9.214240481725255e-12
+      ],
+      "pressure_threshold_ha_bohr3": 1e-07,
+      "start_agreement": true,
+      "pressure_agreement": true,
+      "passed": true
+    },
+    {
+      "material": "MgO",
+      "cutoff_ha": 50,
+      "rebuild_every": 5,
+      "before_polish_difference_bohr": 6.113997903689494e-05,
+      "before_polish_rebuilt_pressures_ha_bohr3": [
+        -5.460146686638486e-11,
+        -1.1576835480068641e-07
+      ],
+      "final_difference_bohr": 2.9191937755967956e-09,
+      "unchanged_estimated_tolerance_bohr": 0.00010693530915697647,
+      "final_rebuilt_pressures_ha_bohr3": [
+        -4.506886993234834e-11,
+        -5.0592474654109765e-11
+      ],
+      "pressure_threshold_ha_bohr3": 1e-07,
+      "start_agreement": true,
+      "pressure_agreement": true,
+      "passed": true
+    },
+    {
+      "material": "Si",
+      "cutoff_ha": 30,
+      "rebuild_every": 3,
+      "before_polish_difference_bohr": 1.3751116689775245e-07,
+      "before_polish_rebuilt_pressures_ha_bohr3": [
+        1.316210155912397e-10,
+        1.1612492796057397e-11
+      ],
+      "final_difference_bohr": 6.824946652272956e-08,
+      "unchanged_estimated_tolerance_bohr": 0.00023104117888738887,
+      "final_rebuilt_pressures_ha_bohr3": [
+        7.043153271250417e-11,
+        1.086925688342788e-11
+      ],
+      "pressure_threshold_ha_bohr3": 1e-07,
+      "start_agreement": true,
+      "pressure_agreement": true,
+      "passed": true
+    },
+    {
+      "material": "Si",
+      "cutoff_ha": 30,
+      "rebuild_every": 5,
+      "before_polish_difference_bohr": -3.0055243804838483e-07,
+      "before_polish_rebuilt_pressures_ha_bohr3": [
+        8.912012794404234e-11,
+        3.5141777971388805e-10
+      ],
+      "final_difference_bohr": -4.035785039491202e-08,
+      "unchanged_estimated_tolerance_bohr": 0.00023104117888738887,
+      "final_rebuilt_pressures_ha_bohr3": [
+        5.689787530016588e-11,
+        9.211935034225682e-11
+      ],
+      "pressure_threshold_ha_bohr3": 1e-07,
+      "start_agreement": true,
+      "pressure_agreement": true,
+      "passed": true
+    }
+  ],
+  "tolerances_unchanged": true,
+  "default_rebuild_every": 0,
+  "frozen_rerun": "All eight lattice constants and rebuilt pressures exactly reproduce original real-followup evidence; historical MgO start failures are preserved, not asserted as common-function minima.",
+  "warning_verification": "frozen-only/warning-checks.json; pressure warning present for both MgO 50 starts and compressed MgO 60; MgO 50 N5 expanded main stage warns before polish.",
+  "legacy_identity": {
+    "cases": 5,
+    "energy_difference_ha": 0.0,
+    "density_hashes_identical": true
+  },
+  "limitations": [
+    "Isotropic cell relaxation on the P13D shifted meshes; no experiment or other-code comparison or cutoff-convergence claim.",
+    "Shared Mac times, four SCF threads; frozen and rebuild series overlapped.",
+    "README generation deferred by ticket; external dashboard/session registry publication remains orchestrator-owned."
+  ],
+  "final_readme_freshness": {
+    "exit_code": 0,
+    "tests": 5,
+    "elapsed_s": 0.045,
+    "note": "Existing ResourceWarning in compare_kpoints_qe.py; all tests pass."
+  }
+}

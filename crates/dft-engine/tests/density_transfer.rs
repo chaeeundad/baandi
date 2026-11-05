@@ -212,3 +212,69 @@ fn three_displaced_structures_match_fresh() {
         assert!(delta <= 1e-10);
     }
 }
+
+#[test]
+fn affine_cell_transfer_preserves_charge_and_rejects_changed_support() {
+    let a = Cell::from_user_rows_bohr([[8., 0., 0.], [0., 8., 0.], [0., 0., 8.]]).unwrap();
+    let b = Cell::from_user_rows_bohr([[8.2, 0., 0.], [0., 7.9, 0.], [0., 0., 8.1]]).unwrap();
+    let pp = common::potential(1., 1.5, false, 401);
+    let refs = [SpeciesPotential {
+        label: "X",
+        potential: &pp,
+    }];
+    let atoms = [Atom::new("X", [0.; 3]), Atom::new("X", [0.27, 0.23, 0.19])];
+    let mut opts = ScfOptions {
+        cutoff_hartree: 1.5,
+        bands: Some(4),
+        ..Default::default()
+    };
+    let original = ScfProblem::new(&a, &atoms, &refs, opts.clone()).unwrap();
+    opts.grid_override = Some(original.grid_dimensions());
+    opts.strain_reference = Some(Box::new(a.clone()));
+    let source = ScfProblem::new(&a, &atoms, &refs, opts.clone()).unwrap();
+    let density = source.uniform_density();
+    let target = ScfProblem::new(&b, &atoms, &refs, opts.clone()).unwrap();
+    let mut session =
+        ScfSession::new(target, CompletionMode::Strict, ExecutionConfig::default()).unwrap();
+    assert!(
+        session
+            .initialize_density_transfer(&source, &density)
+            .is_err()
+    );
+    assert!(
+        session
+            .initialize_cell_density_transfer(&original, &density)
+            .is_err()
+    );
+    assert!(
+        session
+            .initialize_cell_density_transfer(&source, &(&density * 1.00001))
+            .is_err()
+    );
+    session
+        .initialize_cell_density_transfer(&source, &density)
+        .unwrap();
+    let transferred = session.density().unwrap();
+    assert!((transferred.sum() * b.volume_bohr3() / transferred.len() as f64 - 2.).abs() < 1e-12);
+    let ratio = a.volume_bohr3() / b.volume_bohr3();
+    for (actual, source) in transferred.iter().zip(&density) {
+        assert_eq!(actual.to_bits(), (source * ratio).to_bits());
+    }
+    let target = ScfProblem::new(
+        &b,
+        &atoms,
+        &refs,
+        ScfOptions {
+            cutoff_hartree: 1.4,
+            ..opts
+        },
+    )
+    .unwrap();
+    let mut session =
+        ScfSession::new(target, CompletionMode::Strict, ExecutionConfig::default()).unwrap();
+    assert!(
+        session
+            .initialize_cell_density_transfer(&source, &density)
+            .is_err()
+    );
+}

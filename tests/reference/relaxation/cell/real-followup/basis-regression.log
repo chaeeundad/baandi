@@ -1,0 +1,46 @@
+   Compiling syn v2.0.119
+   Compiling either v1.19.0
+   Compiling syn v3.0.9
+   Compiling once_cell v1.21.4
+   Compiling approx v0.5.1
+   Compiling smallvec v1.16.4
+   Compiling simba v0.10.2
+   Compiling rayon v1.12.0
+   Compiling exmex v0.21.0
+   Compiling dft-units v0.1.0 (/Users/mino/Develop/rust-dft-wt/P23A-CELL-RELAXATION/crates/dft-units)
+   Compiling pest_generator v2.9.5
+   Compiling thiserror-impl v2.0.21
+   Compiling pest_derive v2.9.5
+   Compiling thiserror-impl v1.0.69
+   Compiling enum-as-inner v0.6.1
+   Compiling equator-macro v0.4.2
+   Compiling equator-macro v0.2.1
+   Compiling nalgebra-macros v0.3.0
+   Compiling py_literal v0.4.0
+   Compiling thiserror v2.0.21
+   Compiling equator v0.2.2
+   Compiling equator v0.4.2
+   Compiling thiserror v1.0.69
+   Compiling nalgebra v0.35.0
+   Compiling nano-gemm v0.2.2
+   Compiling npyz v0.8.4
+   Compiling spindle v0.2.6
+   Compiling sysctl v0.6.0
+   Compiling gemm-common v0.19.0
+   Compiling gemm-f64 v0.19.0
+   Compiling gemm-c64 v0.19.0
+   Compiling gemm-f32 v0.19.0
+   Compiling gemm-c32 v0.19.0
+   Compiling gemm v0.19.0
+   Compiling faer v0.24.4
+   Compiling dft-geometry v0.1.0 (/Users/mino/Develop/rust-dft-wt/P23A-CELL-RELAXATION/crates/dft-geometry)
+   Compiling dft-numerics v0.1.0 (/Users/mino/Develop/rust-dft-wt/P23A-CELL-RELAXATION/crates/dft-numerics)
+   Compiling dft-basis v0.1.0 (/Users/mino/Develop/rust-dft-wt/P23A-CELL-RELAXATION/crates/dft-basis)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.49s
+     Running unittests src/lib.rs (target/debug/deps/dft_basis-26c372884e8b9fc2)
+
+running 1 test
+test tests::frozen_density_support_survives_expansion_shell_crossing ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+

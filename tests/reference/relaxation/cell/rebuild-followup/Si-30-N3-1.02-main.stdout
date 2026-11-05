@@ -1,0 +1,10 @@
+step 0 E=-8.461955407607e0 Ha maxF=3.446612e-4 Ha/Bohr displacement=0.000000e0 Bohr SCF=19 running
+step 1 E=-8.462015635532e0 Ha maxF=3.459969e-4 Ha/Bohr displacement=3.120496e-3 Bohr SCF=8 running
+step 2 E=-8.462525552202e0 Ha maxF=3.759228e-4 Ha/Bohr displacement=5.705100e-2 Bohr SCF=12 running
+step 4 E=-8.462527783109e0 Ha maxF=3.736172e-4 Ha/Bohr displacement=0.000000e0 Bohr SCF=20 running
+step 5 E=-8.462527784168e0 Ha maxF=3.736249e-4 Ha/Bohr displacement=1.311026e-5 Bohr SCF=5 running
+step 6 E=-8.462527792406e0 Ha maxF=3.737519e-4 Ha/Bohr displacement=2.104721e-4 Bohr SCF=7 running
+step 8 E=-8.462527792406e0 Ha maxF=3.737517e-4 Ha/Bohr displacement=0.000000e0 Bohr SCF=20 running
+step 9 E=-8.462527792406e0 Ha maxF=3.737515e-4 Ha/Bohr displacement=3.503053e-10 Bohr SCF=2 running
+step 10 E=-8.462527792406e0 Ha maxF=3.737516e-4 Ha/Bohr displacement=1.461167e-10 Bohr SCF=2 converged
+step 10 E=-8.462527792406e0 Ha maxF=3.737516e-4 Ha/Bohr displacement=1.461167e-10 Bohr SCF=2 converged

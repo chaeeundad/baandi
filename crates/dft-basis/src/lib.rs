@@ -46,6 +46,7 @@ pub struct PlaneWaveBasis {
     momenta: Vec<GVector>,
     k_fractional: [f64; 3],
     k_cartesian: [f64; 3],
+    density_reference: Option<Box<Cell>>,
 }
 
 fn bounding_box(cell: &Cell, cutoff: Hartree) -> Result<[i32; 3], BasisError> {
@@ -129,6 +130,7 @@ impl PlaneWaveBasis {
             momenta,
             k_fractional,
             k_cartesian,
+            density_reference: None,
         })
     }
     /// Deform the reciprocal metric while retaining the exact ordered Miller
@@ -166,7 +168,20 @@ impl PlaneWaveBasis {
             momenta,
             k_fractional: self.k_fractional,
             k_cartesian,
+            density_reference: self.density_reference.clone(),
         })
+    }
+    /// Deform wavefunctions and retain the supplied reference density sphere.
+    /// Hamiltonian setup must use the same frozen density support as the engine,
+    /// including when deformation crosses a nominal-cutoff Miller shell.
+    pub fn in_cell_with_frozen_density(
+        &self,
+        cell: &Cell,
+        density_reference: &Cell,
+    ) -> Result<Self, BasisError> {
+        let mut deformed = self.in_cell(cell)?;
+        deformed.density_reference = Some(Box::new(density_reference.clone()));
+        Ok(deformed)
     }
     /// Cartesian k+G and squared magnitude, in the same ordering as `vectors`.
     pub fn momenta(&self) -> &[GVector] {
@@ -189,7 +204,10 @@ impl PlaneWaveBasis {
     }
     /// Unshifted density sphere at four times Ecut, independent of k.
     pub fn density_basis(&self, cell: &Cell) -> Result<Self, BasisError> {
-        Self::new(cell, Hartree(4.0 * self.cutoff.0))
+        match &self.density_reference {
+            Some(reference) => Self::new(reference, Hartree(4.0 * self.cutoff.0))?.in_cell(cell),
+            None => Self::new(cell, Hartree(4.0 * self.cutoff.0)),
+        }
     }
 }
 

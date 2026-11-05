@@ -1,0 +1,63 @@
+   Compiling dft-cli v0.1.0 (/Users/mino/Develop/rust-dft-wt/P23A-CELL-RELAXATION/crates/dft-cli)
+    Finished `release` profile [optimized] target(s) in 1.04s
+     Running tests/cell_relaxation.rs (target/release/deps/cell_relaxation-d844b8c6cfaa2a5f)
+
+running 1 test
+START MgO-50-N3-0.98-main
+test real_files_rebuild_start_agreement has been running for over 60 seconds
+RESULT MgO-50-N3-0.98-main a=8.036935345399 Bohr Pf=3.621215365e-11 Pr=-3.663731355e-11 Ha/Bohr^3 t=122.220 s exit=0
+START MgO-50-N3-0.98-polish1
+RESULT MgO-50-N3-0.98-polish1 a=8.036935344377 Bohr Pf=3.881719945e-11 Pr=-3.470351321e-11 Ha/Bohr^3 t=54.713 s exit=0
+START MgO-50-N3-0.98-polish2
+RESULT MgO-50-N3-0.98-polish2 a=8.036935343480 Bohr Pf=4.084979577e-11 Pr=-3.300371088e-11 Ha/Bohr^3 t=50.961 s exit=0
+START MgO-50-N3-1.02-main
+RESULT MgO-50-N3-1.02-main a=8.036935331007 Bohr Pf=5.438753152e-11 Pr=-9.398741045e-12 Ha/Bohr^3 t=123.570 s exit=0
+START MgO-50-N3-1.02-polish1
+RESULT MgO-50-N3-1.02-polish1 a=8.036935330958 Bohr Pf=5.435319324e-11 Pr=-9.309289450e-12 Ha/Bohr^3 t=51.397 s exit=0
+START MgO-50-N3-1.02-polish2
+RESULT MgO-50-N3-1.02-polish2 a=8.036935330911 Bohr Pf=5.431186056e-11 Pr=-9.214240482e-12 Ha/Bohr^3 t=55.071 s exit=0
+START MgO-50-N5-0.98-main
+RESULT MgO-50-N5-0.98-main a=8.036935354890 Bohr Pf=-4.484982756e-11 Pr=-5.460146687e-11 Ha/Bohr^3 t=106.378 s exit=0
+START MgO-50-N5-0.98-polish1
+RESULT MgO-50-N5-0.98-polish1 a=8.036935352007 Bohr Pf=7.021378849e-12 Pr=-4.914567364e-11 Ha/Bohr^3 t=52.577 s exit=0
+START MgO-50-N5-0.98-polish2
+RESULT MgO-50-N5-0.98-polish2 a=8.036935349853 Bohr Pf=2.022115346e-11 Pr=-4.506886993e-11 Ha/Bohr^3 t=55.135 s exit=0
+START MgO-50-N5-1.02-main
+RESULT MgO-50-N5-1.02-main a=8.036996494869 Bohr Pf=3.875580412e-12 Pr=-1.157683548e-07 Ha/Bohr^3 t=79.243 s exit=0
+START MgO-50-N5-1.02-polish1
+RESULT MgO-50-N5-1.02-polish1 a=8.036935355979 Bohr Pf=7.487083638e-11 Pr=-5.666149031e-11 Ha/Bohr^3 t=59.064 s exit=0
+START MgO-50-N5-1.02-polish2
+RESULT MgO-50-N5-1.02-polish2 a=8.036935352772 Bohr Pf=2.280578504e-12 Pr=-5.059247465e-11 Ha/Bohr^3 t=52.173 s exit=0
+START Si-30-N3-0.98-main
+RESULT Si-30-N3-0.98-main a=10.334503019076 Bohr Pf=1.228653221e-10 Pr=1.316210156e-10 Ha/Bohr^3 t=174.794 s exit=0
+START Si-30-N3-0.98-polish1
+RESULT Si-30-N3-0.98-polish1 a=10.334503065508 Bohr Pf=8.650916037e-11 Pr=9.109887150e-11 Ha/Bohr^3 t=64.256 s exit=0
+START Si-30-N3-0.98-polish2
+RESULT Si-30-N3-0.98-polish2 a=10.334503089189 Bohr Pf=5.979020751e-11 Pr=7.043153271e-11 Ha/Bohr^3 t=63.830 s exit=0
+START Si-30-N3-1.02-main
+RESULT Si-30-N3-1.02-main a=10.334503156587 Bohr Pf=-4.162150370e-12 Pr=1.161249280e-11 Ha/Bohr^3 t=158.889 s exit=0
+START Si-30-N3-1.02-polish1
+RESULT Si-30-N3-1.02-polish1 a=10.334503157027 Bohr Pf=-4.545351942e-12 Pr=1.122858808e-11 Ha/Bohr^3 t=63.627 s exit=0
+START Si-30-N3-1.02-polish2
+RESULT Si-30-N3-1.02-polish2 a=10.334503157439 Bohr Pf=-4.903433562e-12 Pr=1.086925688e-11 Ha/Bohr^3 t=63.695 s exit=0
+START Si-30-N5-0.98-main
+RESULT Si-30-N5-0.98-main a=10.334503067776 Bohr Pf=8.157816205e-11 Pr=8.912012794e-11 Ha/Bohr^3 t=128.817 s exit=0
+START Si-30-N5-0.98-polish1
+RESULT Si-30-N5-0.98-polish1 a=10.334503090510 Bohr Pf=5.839146990e-11 Pr=6.927873668e-11 Ha/Bohr^3 t=63.921 s exit=0
+START Si-30-N5-0.98-polish2
+RESULT Si-30-N5-0.98-polish2 a=10.334503104697 Bohr Pf=4.383525950e-11 Pr=5.689787530e-11 Ha/Bohr^3 t=63.899 s exit=0
+START Si-30-N5-1.02-main
+RESULT Si-30-N5-1.02-main a=10.334502767223 Bohr Pf=3.323117591e-10 Pr=3.514177797e-10 Ha/Bohr^3 t=135.733 s exit=0
+START Si-30-N5-1.02-polish1
+RESULT Si-30-N5-1.02-polish1 a=10.334503016429 Bohr Pf=1.277436687e-10 Pr=1.339313729e-10 Ha/Bohr^3 t=64.041 s exit=0
+START Si-30-N5-1.02-polish2
+RESULT Si-30-N5-1.02-polish2 a=10.334503064339 Bohr Pf=8.793164750e-11 Pr=9.211935034e-11 Ha/Bohr^3 t=63.774 s exit=0
+PAIR {"material": "MgO", "cutoff_ha": 50, "rebuild_every": 3, "before_polish_difference_bohr": -1.4391297042948281e-08, "before_polish_rebuilt_pressures_ha_bohr3": [-3.663731355333747e-11, -9.398741044700879e-12], "final_difference_bohr": -1.2569689289421149e-08, "unchanged_estimated_tolerance_bohr": 0.00010693530915697647, "final_rebuilt_pressures_ha_bohr3": [-3.300371087533449e-11, -9.214240481725255e-12], "pressure_threshold_ha_bohr3": 1e-07, "start_agreement": true, "pressure_agreement": true, "passed": true}
+PAIR {"material": "MgO", "cutoff_ha": 50, "rebuild_every": 5, "before_polish_difference_bohr": 6.113997903689494e-05, "before_polish_rebuilt_pressures_ha_bohr3": [-5.460146686638486e-11, -1.1576835480068641e-07], "final_difference_bohr": 2.9191937755967956e-09, "unchanged_estimated_tolerance_bohr": 0.00010693530915697647, "final_rebuilt_pressures_ha_bohr3": [-4.506886993234834e-11, -5.0592474654109765e-11], "pressure_threshold_ha_bohr3": 1e-07, "start_agreement": true, "pressure_agreement": true, "passed": true}
+PAIR {"material": "Si", "cutoff_ha": 30, "rebuild_every": 3, "before_polish_difference_bohr": 1.3751116689775245e-07, "before_polish_rebuilt_pressures_ha_bohr3": [1.316210155912397e-10, 1.1612492796057397e-11], "final_difference_bohr": 6.824946652272956e-08, "unchanged_estimated_tolerance_bohr": 0.00023104117888738887, "final_rebuilt_pressures_ha_bohr3": [7.043153271250417e-11, 1.086925688342788e-11], "pressure_threshold_ha_bohr3": 1e-07, "start_agreement": true, "pressure_agreement": true, "passed": true}
+PAIR {"material": "Si", "cutoff_ha": 30, "rebuild_every": 5, "before_polish_difference_bohr": -3.0055243804838483e-07, "before_polish_rebuilt_pressures_ha_bohr3": [8.912012794404234e-11, 3.5141777971388805e-10], "final_difference_bohr": -4.035785039491202e-08, "unchanged_estimated_tolerance_bohr": 0.00023104117888738887, "final_rebuilt_pressures_ha_bohr3": [5.689787530016588e-11, 9.211935034225682e-11], "pressure_threshold_ha_bohr3": 1e-07, "start_agreement": true, "pressure_agreement": true, "passed": true}
+PASS rebuild start agreement and rebuilt pressure
+test real_files_rebuild_start_agreement ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 1971.94s
+

@@ -15,3 +15,10 @@ only the reciprocal metric. Cutoff metadata is a reference value, not a new
 sphere assertion. The engine freezes the density support separately; calling
 `density_basis` still builds its documented production cutoff sphere. Existing
 constructors remain unchanged. Strain oracles must freeze FFT dimensions too.
+
+P23A real-file follow-up: `in_cell_with_frozen_density` explicitly carries the
+reference cell for later `density_basis` requests, including Hamiltonian setup.
+The engine selects this opt-in path for `ScfOptions.strain_reference`; plain
+`in_cell` and all ordinary basis constructors retain their previous semantics.
+The shell-crossing regression rejects the old rebuilt-density/grid combination
+and checks exact frozen Miller ordering and changed reciprocal metrics.

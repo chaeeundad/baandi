@@ -1,0 +1,47 @@
+[basis]
+ecutwfc_ry = 80
+kgrid = [4, 4, 4]
+kshift = [0.5, 0.5, 0.5]
+
+[pseudopotentials]
+Si = "/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Si.upf"
+
+[scf]
+density_residual_tolerance = 0.000000001
+eigen_tolerance = 0.0000000001
+energy_tolerance_ha = 0.00000000001
+extra_bands = 4
+max_iterations = 300
+mixing = "kerker-pulay"
+mixing_beta = 0.3
+mixing_q0_inverse_bohr = 1.0
+threads = 4
+
+[spin]
+mode = "unpolarized"
+
+[system]
+lattice_unit = "bohr"
+lattice_vectors = [[0.0, 5.0274, 5.0274], [5.0274, 0.0, 5.0274], [5.0274, 5.0274, 0.0]]
+name = "si bulk smoke, no accuracy claim"
+
+[[system.atoms]]
+fractional = [0, 0, 0]
+species = "Si"
+
+[[system.atoms]]
+fractional = [0.25, 0.25, 0.25]
+species = "Si"
+
+[xc]
+density_floor = 0.0000000001
+functional = "pbe"
+
+[relax]
+mode='cell'
+cell_dofs='isotropic'
+max_steps=100
+stress_tol_ha_bohr3=1e-7
+energy_tol_ha=1e-9
+[symmetry]
+mode='auto'

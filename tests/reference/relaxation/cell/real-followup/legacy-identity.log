@@ -1,0 +1,8 @@
+case      wall med (s)  engine (s)  diag (s) iters  dE vs base (Ha)    density  speedup
+gamma            0.160       0.154     0.076    10         0.00e+00  identical    2.81x
+k222             1.016       1.005     0.779    10         0.00e+00  identical    0.71x
+k222s            1.402       1.381     1.137    10         0.00e+00  identical    0.26x
+si8              3.197       3.159     2.629    15         0.00e+00  identical    1.03x
+k444s            2.954       2.945     2.325    10         0.00e+00  identical    0.91x
+recorded /tmp/p23-review-scf-after.json
+OK

@@ -1,0 +1,370 @@
+[
+  {
+    "basis_rebuild_difference": {
+      "energy_ha": -7.623960431857313e-7,
+      "forces_ha_bohr": [
+        [
+          1.3181764284872066e-8,
+          1.3181764285793637e-8,
+          1.3181764284872066e-8
+        ],
+        [
+          -1.3181764285793637e-8,
+          -1.3181764284492595e-8,
+          -1.3181764285359956e-8
+        ]
+      ],
+      "maximum_stress_difference_ha_bohr3": 3.462317031688311e-8,
+      "pressure_ha_bohr3": 3.462317031456902e-8,
+      "scope": "finite-basis diagnostic, not cutoff convergence",
+      "stress_ha_bohr3": [
+        [
+          -3.462317031688311e-8,
+          -1.0395710528033394e-10,
+          -1.039571052871102e-10
+        ],
+        [
+          -1.0395710528033394e-10,
+          -3.4623170313413665e-8,
+          -1.0395710528033394e-10
+        ],
+        [
+          -1.039571052871102e-10,
+          -1.0395710528033394e-10,
+          -3.4623170313413665e-8
+        ]
+      ],
+      "warning": false,
+      "warning_threshold_ha_bohr3": 5e-6
+    },
+    "case": "Si-30-0.98",
+    "cutoff_ha": 30,
+    "elapsed_s": 77.128427709,
+    "exit_code": 4,
+    "failures": [
+      {
+        "attempt": 1,
+        "coordinates": [
+          0.0,
+          0.0,
+          0.0,
+          1.5835317715603714,
+          1.5835317715603714,
+          1.5835317715603714,
+          0.1739402181376694,
+          0.0,
+          0.0,
+          0.0,
+          0.1739402181376694,
+          0.0,
+          0.0,
+          0.0,
+          0.1739402181376694
+        ],
+        "reason": "Numerical(\"k index 0: Numerical(\\\"FFT override [36, 36, 36] is smaller than required [37, 37, 37]\\\")\")",
+        "step": 3
+      },
+      {
+        "attempt": 1,
+        "coordinates": [
+          0.0,
+          0.0,
+          0.0,
+          1.5835317715603714,
+          1.5835317715603714,
+          1.5835317715603714,
+          0.17601950887889733,
+          0.0,
+          0.0,
+          0.0,
+          0.17601950887889733,
+          0.0,
+          0.0,
+          0.0,
+          0.17601950887889733
+        ],
+        "reason": "Numerical(\"k index 0: Numerical(\\\"FFT override [36, 36, 36] is smaller than required [37, 37, 37]\\\")\")",
+        "step": 4
+      },
+      {
+        "attempt": 2,
+        "coordinates": [
+          0.0,
+          0.0,
+          0.0,
+          1.5835317715603714,
+          1.5835317715603714,
+          1.5835317715603714,
+          0.17071868499174586,
+          0.0,
+          0.0,
+          0.0,
+          0.17071868499174586,
+          0.0,
+          0.0,
+          0.0,
+          0.17071868499174586
+        ],
+        "reason": "Numerical(\"k index 0: Numerical(\\\"FFT override [36, 36, 36] is smaller than required [37, 37, 37]\\\")\")",
+        "step": 4
+      }
+    ],
+    "frozen_final": {
+      "basis_protocol": "frozen_miller_set",
+      "frame": {
+        "cell_columns_bohr": [
+          [
+            0.0,
+            5.1586922433658815,
+            5.1586922433658815
+          ],
+          [
+            5.1586922433658815,
+            0.0,
+            5.1586922433658815
+          ],
+          [
+            5.1586922433658815,
+            5.1586922433658815,
+            0.0
+          ]
+        ],
+        "energy_ha": -8.462516702587289,
+        "forces_ha_bohr": [
+          [
+            -0.0003783166870841813,
+            -0.00037831668708417955,
+            -0.00037831668708417955
+          ],
+          [
+            0.0003783166870841787,
+            0.00037831668708417955,
+            0.0003783166870841804
+          ]
+        ],
+        "fractional": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.25,
+            0.25,
+            0.25
+          ]
+        ],
+        "max_force_ha_bohr": 0.0003783166870841813,
+        "positions": [
+          0.0,
+          0.0,
+          0.0,
+          2.5793461216829408,
+          2.5793461216829408,
+          2.5793461216829408
+        ],
+        "provenance": "fresh",
+        "scf_iterations": 20,
+        "step_length_bohr": 0.005857968395226108,
+        "stress_ha_bohr3": [
+          [
+            -0.000015076025041041441,
+            0.00003385400501535017,
+            0.00003385400501535017
+          ],
+          [
+            0.00003385400501535017,
+            -0.000015076025041046645,
+            0.00003385400501535016
+          ],
+          [
+            0.00003385400501535017,
+            0.00003385400501535016,
+            -0.00001507602504104491
+          ]
+        ]
+      },
+      "pressure_ha_bohr3": 0.000015076025041044333
+    },
+    "input": {
+      "basis": {
+        "ecutwfc_ry": 60,
+        "kgrid": [
+          4,
+          4,
+          4
+        ],
+        "kshift": [
+          0.5,
+          0.5,
+          0.5
+        ]
+      },
+      "pseudopotentials": {
+        "Si": "/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Si.upf"
+      },
+      "scf": {
+        "density_residual_tolerance": 1e-9,
+        "eigen_tolerance": 1e-10,
+        "energy_tolerance_ha": 1e-11,
+        "extra_bands": 4,
+        "max_iterations": 300,
+        "mixing": "kerker-pulay",
+        "mixing_beta": 0.3,
+        "mixing_q0_inverse_bohr": 1.0,
+        "threads": 4
+      },
+      "spin": {
+        "mode": "unpolarized"
+      },
+      "system": {
+        "atoms": [
+          {
+            "fractional": [
+              0,
+              0,
+              0
+            ],
+            "species": "Si"
+          },
+          {
+            "fractional": [
+              0.25,
+              0.25,
+              0.25
+            ],
+            "species": "Si"
+          }
+        ],
+        "lattice_unit": "bohr",
+        "lattice_vectors": [
+          [
+            0.0,
+            5.0274,
+            5.0274
+          ],
+          [
+            5.0274,
+            0.0,
+            5.0274
+          ],
+          [
+            5.0274,
+            5.0274,
+            0.0
+          ]
+        ],
+        "name": "si bulk smoke, no accuracy claim"
+      },
+      "xc": {
+        "density_floor": 1e-10,
+        "functional": "pbe"
+      }
+    },
+    "lattice_bohr": 10.317384486731763,
+    "material": "Si",
+    "nominal_lattice_bohr": 10.26,
+    "provenance": {
+      "architecture": "aarch64",
+      "executable_sha256": "8a0fda73b559215813e5b03024f9330815fefe8551367b84fada10b0e163089a",
+      "input_sha256": "8a67a68e04afe17855793ff1d21e2932a8f8bb0b5ba00b12a060589aca1351bb",
+      "platform": "macos",
+      "pseudopotentials_sha256": {
+        "Si": "39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282"
+      }
+    },
+    "rebuilt_final": {
+      "basis_protocol": "nominal_cutoff_rebuilt",
+      "frame": {
+        "cell_columns_bohr": [
+          [
+            0.0,
+            5.1586922433658815,
+            5.1586922433658815
+          ],
+          [
+            5.1586922433658815,
+            0.0,
+            5.1586922433658815
+          ],
+          [
+            5.1586922433658815,
+            5.1586922433658815,
+            0.0
+          ]
+        ],
+        "energy_ha": -8.462517464983332,
+        "forces_ha_bohr": [
+          [
+            -0.0003783035053198964,
+            -0.00037830350531989376,
+            -0.0003783035053198947
+          ],
+          [
+            0.0003783035053198929,
+            0.00037830350531989506,
+            0.00037830350531989506
+          ]
+        ],
+        "fractional": [
+          [
+            0.0,
+            0.0,
+            0.0
+          ],
+          [
+            0.25,
+            0.25,
+            0.25
+          ]
+        ],
+        "max_force_ha_bohr": 0.0003783035053198964,
+        "positions": [
+          0.0,
+          0.0,
+          0.0,
+          2.5793461216829408,
+          2.5793461216829408,
+          2.5793461216829408
+        ],
+        "provenance": "fresh",
+        "pulay_assessment": {
+          "correction_ha_bohr3": -1.2211311977611195e-8,
+          "cutoff_steps_ha": [
+            1.5,
+            3.0
+          ],
+          "method": "isotropic_cutoff_derivative_5_10_percent",
+          "shells_resolved": true,
+          "uncertainty_ha_bohr3": 3.003224539493568e-10,
+          "warning": false
+        },
+        "scf_iterations": 20,
+        "step_length_bohr": 0.0,
+        "stress_ha_bohr3": [
+          [
+            -0.000015110648211358324,
+            0.000033853901058244886,
+            0.00003385390105824488
+          ],
+          [
+            0.000033853901058244886,
+            -0.000015110648211360059,
+            0.00003385390105824488
+          ],
+          [
+            0.00003385390105824488,
+            0.00003385390105824488,
+            -0.000015110648211358324
+          ]
+        ]
+      },
+      "pressure_ha_bohr3": 0.000015110648211358902
+    },
+    "space_group_operations": 48,
+    "start_factor": 0.98,
+    "start_lattice_bohr": 10.0548,
+    "status": "failed",
+    "steps": 3
+  }
+]

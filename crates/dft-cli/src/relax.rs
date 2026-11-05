@@ -1,4 +1,5 @@
 //! Fixed-cell ionic driver. SCF kernels and derivative ownership stay in engine.
+mod cell;
 pub mod optimizer;
 use crate::{
     config::Config,
@@ -35,6 +36,13 @@ fn all_components() -> [bool; 3] {
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
     pub method: Method,
+    pub mode: cell::Mode,
+    pub cell_dofs: cell::Dofs,
+    pub fixed_axes: [bool; 3],
+    pub pressure_ha_bohr3: f64,
+    pub stress_tol_ha_bohr3: f64,
+    pub pulay_warning_ha_bohr3: f64,
+    pub rebuild_every: usize,
     pub force_tol_ha_bohr: f64,
     pub energy_tol_ha: f64,
     pub max_steps: usize,
@@ -47,6 +55,13 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             method: Method::Bfgs,
+            mode: cell::Mode::Ions,
+            cell_dofs: cell::Dofs::Full,
+            fixed_axes: [false; 3],
+            pressure_ha_bohr3: 0.,
+            stress_tol_ha_bohr3: 1e-6,
+            pulay_warning_ha_bohr3: 5e-6,
+            rebuild_every: 0,
             force_tol_ha_bohr: 1e-3,
             energy_tol_ha: 1e-8,
             max_steps: 200,
@@ -67,12 +82,15 @@ impl Settings {
     pub(crate) fn validate(&self, n: usize) -> Result<(), RunError> {
         if [
             self.force_tol_ha_bohr,
+            self.stress_tol_ha_bohr3,
+            self.pulay_warning_ha_bohr3,
             self.energy_tol_ha,
             self.max_displacement_bohr,
             self.trust_radius_bohr,
         ]
         .iter()
         .any(|v| !v.is_finite() || *v <= 0.)
+            || !self.pressure_ha_bohr3.is_finite()
             || self.max_steps == 0
             || self.fixed.iter().any(|f| f.atom >= n)
         {
@@ -97,6 +115,12 @@ impl Settings {
 #[serde(deny_unknown_fields)]
 struct Frame {
     positions: Vec<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cell_columns_bohr: Option<[[f64; 3]; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stress_ha_bohr3: Option<[[f64; 3]; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pulay_assessment: Option<Value>,
     fractional: Vec<[f64; 3]>,
     energy_ha: f64,
     forces_ha_bohr: Vec<[f64; 3]>,
@@ -193,9 +217,12 @@ impl Context {
             for (d, v) in density.iter_mut().zip(values) {
                 *d = *v;
             }
-            session
-                .initialize_density_transfer(source, &density)
-                .map_err(|e| error(4, e))?;
+            if settings.mode == cell::Mode::Ions {
+                session.initialize_density_transfer(source, &density)
+            } else {
+                session.initialize_cell_density_transfer(source, &density)
+            }
+            .map_err(|e| error(4, e))?;
         } else {
             session.initialize().map_err(|e| error(4, e))?;
         }
@@ -229,7 +256,41 @@ impl Context {
         .map_err(|e| error(4, e))?;
         let mut projected: Vec<_> = forces.values.iter().flatten().copied().collect();
         settings.project(&mut projected);
+        let mut pulay_assessment = None;
+        let stress_ha_bohr3 = if settings.mode != cell::Mode::Ions {
+            let atoms = self.atoms();
+            let refs = self.refs();
+            let view = dft_engine::ForceState {
+                cell: &self.cell,
+                atoms: &atoms,
+                potentials: &refs,
+                options: &self.opts,
+                electronic: dft_engine::ElectronicState::Fixed(&state),
+                density_floor: self.config.xc.density_floor,
+                symmetry: &ops,
+            };
+            let stress = if self.opts.strain_reference.is_none() {
+                dft_engine::stress(&view)
+            } else {
+                dft_engine::stress::frozen_stress(&view)
+            }
+            .map_err(|e| error(4, e))?;
+            pulay_assessment = stress.pulay.map(|p| {
+                json!({
+                    "method":p.method, "correction_ha_bohr3":p.correction,
+                    "uncertainty_ha_bohr3":p.uncertainty, "cutoff_steps_ha":p.cutoff_steps_ha,
+                    "shells_resolved":p.shells_resolved, "warning":p.warning,
+                })
+            });
+            Some(stress.symmetric)
+        } else {
+            None
+        };
         let frame = Frame {
+            cell_columns_bohr: (settings.mode != cell::Mode::Ions)
+                .then(|| self.cell.lattice_columns_bohr()),
+            stress_ha_bohr3,
+            pulay_assessment,
             positions,
             fractional: self
                 .config
@@ -431,6 +492,7 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
         "restart.json",
         "trajectory.extxyz",
         "final.xyz",
+        "final.cif",
         "POSCAR",
         "final.toml",
         "results.json",
@@ -467,6 +529,9 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
         potentials,
         provenance: json!({"input_sha256":sha256(&bytes),"executable_sha256":build_sha256,"pseudopotentials_sha256":pp_hashes,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH}),
     };
+    if settings.mode != cell::Mode::Ions {
+        return cell::execute(ctx, settings, identity, out, resume);
+    }
     let n = ctx.config.system.atoms.len() * 3;
     let restart_path = out.join("restart.json");
     let mut state = if resume {
@@ -646,6 +711,7 @@ fn outputs(
         "step energy_Ha max_force_Ha_Bohr step_length_Bohr scf_iterations provenance\n",
     );
     for (i, frame) in state.frames.iter().enumerate() {
+        let lattice = frame.cell_columns_bohr.unwrap_or(lattice);
         writeln!(xyz, "{}", labels.len()).unwrap();
         write!(xyz, "Lattice=\"").unwrap();
         for j in 0..3 {

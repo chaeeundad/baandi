@@ -301,3 +301,16 @@ estimate. `frozen_stress` omits that estimate explicitly. Neither claims cutoff
 convergence. The opt-in boxed `ScfOptions.strain_reference` requires a fixed FFT
 grid and is part of derivative identity. Default None retains legacy setup.
 See `docs/validation/stress.md` and release oracles in `tests/stress.rs`.
+
+P23A adds `initialize_cell_density_transfer`: compare the setup model while
+allowing cell/ordered positions to differ, require identical nonempty frozen
+reference and fractional grid, scale samples by old/new volume, and retain all
+fixed-cell charge/feasibility/policy checks. No interpolation, orbitals, histories
+or certificate transfer. Ordinary initialization and numerical kernels are
+unchanged. `tests/density_transfer.rs` checks charge/scaling and rejection paths.
+
+P23A real-file follow-up: `ScfOptions::basis` must propagate the frozen density
+reference through the wavefunction basis into Hamiltonian construction. Freezing
+only the engine's density list is insufficient: the Hamiltonian also asks the
+basis for density support when validating its grid. Preserve the ordinary
+None-reference branch and verify legacy SCF identity after changes here.

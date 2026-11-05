@@ -1,0 +1,127 @@
+{
+  "task_id": "P23A-CELL-RELAXATION",
+  "baseline_commit": "1c1f670b2a0a57e77cac40e20d60fa5d9c9ca454",
+  "branch": "task/P23A-CELL-RELAXATION",
+  "uncommitted": true,
+  "source_sha256": {
+    "crates/dft-cli/src/relax.rs": "3b15d6f4ef46900d36e67e251b3cfcf8f04f0fbd8bfaac63689b1187c6e16bf6",
+    "crates/dft-cli/src/relax/cell.rs": "2176d6afa9bd22bd1e2a4cf01217b6db781a40409b45129b83d01cad24d50a91",
+    "crates/dft-cli/tests/cell_relaxation.rs": "59f29c8f29a4b231214716a7da5edd92d80c16ed5af6991e9ef1573b764ce6d2",
+    "crates/dft-cli/tests/common/mod.rs": "d3b7e4f858c5c122e0aa473f6cff7a070e29391b80c20aa42179ab15205dbefb",
+    "crates/dft-engine/src/session.rs": "23a4283bc6592fe0897debe75259ae68ee25b1cd003ab9c907034336e5a0e8af",
+    "crates/dft-engine/src/force_identity.rs": "4ccf89cdd22af4a6557efdce6a538d5b281f72a1725411cc8023966f213a0967",
+    "crates/dft-engine/tests/density_transfer.rs": "d65970f3b94f4a98c25e93da596551b533978f9f70a7e5b4fe2b0bdf7775a1a1"
+  },
+  "commands": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-cli --test cell_relaxation -- --ignored --skip real_files --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-engine --test density_transfer",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-cli --lib combined_enthalpy -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222,k222s,si8,k444s --repeats 1 --baseline tests/reference/relaxation/cell/scf-before.json --require-identical --record tests/reference/relaxation/cell/scf-after.json",
+      "exit_code": 0
+    }
+  ],
+  "synthetic_scans": [
+    {
+      "pressure_ha_bohr3": 0.0,
+      "start_bohr": 3.802923664960581,
+      "relaxed_bohr": 3.874724528300449,
+      "scan_minimum_bohr": 3.874728107519194,
+      "relative_error": 9.237341681964041e-07,
+      "volume_bohr3": 58.17313861792252
+    },
+    {
+      "pressure_ha_bohr3": 0.0,
+      "start_bohr": 3.958145039040605,
+      "relaxed_bohr": 3.8747245283004728,
+      "scan_minimum_bohr": 3.8747281075177424,
+      "relative_error": 9.237337873420415e-07,
+      "volume_bohr3": 58.1731386179236
+    },
+    {
+      "pressure_ha_bohr3": 0.001,
+      "start_bohr": 3.6378680685974034,
+      "relaxed_bohr": 3.696680484531137,
+      "scan_minimum_bohr": 3.696683734661164,
+      "relative_error": 8.792015385071203e-07,
+      "volume_bohr3": 50.51678977604618
+    },
+    {
+      "pressure_ha_bohr3": 0.001,
+      "start_bohr": 3.7863524795605628,
+      "relaxed_bohr": 3.6966804845311345,
+      "scan_minimum_bohr": 3.6966837346611356,
+      "relative_error": 8.792015315394836e-07,
+      "volume_bohr3": 50.51678977604607
+    }
+  ],
+  "combined_scf_directional_derivative": {
+    "analytic_ha": 0.05574652799889139,
+    "finite_difference_ha": 0.05574652803153057,
+    "relative_error": 5.854926610610747e-10
+  },
+  "tetragonal": {
+    "x_bohr": 3.8747246912086153,
+    "z_bohr": 3.874724123589415,
+    "relative_difference": 1.464927821516818e-07
+  },
+  "restart": "same-build output files byte identical; cell optimizer continuation, not electronic exact continuation",
+  "real_files": {
+    "executed": true,
+    "record": "real-followup/real-validation.json",
+    "verification": "real-followup/verification.json",
+    "status": "eight converged trajectories; both MgO start-agreement checks fail",
+    "cutoffs_ha": {
+      "Si": [
+        30,
+        40
+      ],
+      "MgO": [
+        50,
+        60
+      ]
+    }
+  },
+  "legacy_identity": {
+    "cases": 5,
+    "maximum_energy_difference_ha": 0.0,
+    "density_hashes_identical": true,
+    "baseline": "unmodified HEAD binary captured before editing; scf-before.json",
+    "timing_scope": "single Mac observations; no speedup claim"
+  },
+  "limitations": [
+    "No experiment or other-code agreement claimed",
+    "Cartesian fixed atom constraints reject in cell modes",
+    "xyz_diagonal does not preserve arbitrary skew lattice angles",
+    "README generation deferred by ticket; external dashboard and session registry publication are orchestrator-owned"
+  ],
+  "initial_real_files": {
+    "executed": false,
+    "reason": "DFT_NC_DIR unset",
+    "recipe": "real_files_cutoff_report ignored test; Si/MgO 30/40 Ha +/-2% starts"
+  },
+  "rebuild_protocol": {
+    "executed": true,
+    "status": "PASS",
+    "record": "rebuild-followup/validation.json",
+    "verification": "rebuild-followup/verification.json",
+    "note": "Original frozen-only failures above remain historical evidence; acceptance applies to rebuilt pressure and polished start agreement with unchanged tolerance estimates."
+  }
+}

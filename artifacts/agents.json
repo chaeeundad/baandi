@@ -22,8 +22,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P20A-FORCES: 원자에 작용하는 힘 계산(구조 최적화의 기초): 에너지를 원자 위치로 미분한 값과 대조해 검증, 힘이 계산 안 되는 경우는 0이 아니라 \"불가\"로 표시",
-    "ref": "pid 40553, session no sessi, task/P20A-FORCES",
+    "task": "P21A-RELAXATION: 원자 위치 구조 최적화: 힘을 따라 원자를 움직여 안정한 구조를 찾는 도구(고정 원자, 대칭 유지, 중단 후 재개, 이전 밀도로 빠른 재시작)",
+    "ref": "pid 61730, session no sessi, task/P21A-RELAXATION",
     "updated": "2026-11-05"
   },
   {
@@ -807,6 +807,15 @@
     "state": "done",
     "task": "P19A-SYMMETRY: 결정 대칭 활용: 대칭으로 같은 k점을 하나로 묶어 계산 수를 줄임(k점이 많은 계산에서 QE처럼 약 3배 이득 목표), 결과는 전체 계산과 같아야 함",
     "ref": "pid 26921, session 01a1ac28, task/P19A-SYMMETRY",
+    "updated": "2026-11-05"
+  },
+  {
+    "id": "A91",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P20A-FORCES: 원자에 작용하는 힘 계산(구조 최적화의 기초): 에너지를 원자 위치로 미분한 값과 대조해 검증, 힘이 계산 안 되는 경우는 0이 아니라 \"불가\"로 표시",
+    "ref": "pid 55364, session 01a1ac7a, task/P20A-FORCES",
     "updated": "2026-11-05"
   }
 ]

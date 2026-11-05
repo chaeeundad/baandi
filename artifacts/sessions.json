@@ -2248,5 +2248,23 @@
     "ended_at": "2026-11-05T17:33:21Z",
     "exit_code": 0,
     "note": ""
+  },
+  {
+    "run_id": "P21A-RELAXATION#1",
+    "task_id": "P21A-RELAXATION",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 61730,
+    "wrapper_pid": 61715,
+    "session_id": null,
+    "branch": "task/P21A-RELAXATION",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P21A-RELAXATION",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P21A-RELAXATION.md",
+    "report": null,
+    "started_at": "2026-11-05T17:45:07Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

@@ -263,3 +263,25 @@ si8 1e-8 N=1 call counts: h_psi 94 calls 0.18 s (complex 98 calls 0.36 s); vloc_
 
 Target baseline for "match and exceed QE at equal cores" on the 8-atom Gamma case: QE best configuration 0.366 s (1e-8) and 0.500 s (1e-12) on one core versus BAANDI main 5.463 s (pure) and 4.814 s (MKL): ratios 14.9 and 13.2 (1e-8), 10.9 and 9.6 (1e-12).
 
+## Part 7: build flags experiment on dev08 (target-cpu=native, LTO), relayed 2026-11-05
+
+Commit 84bfbf3, four builds in separate target dirs, build exit codes 0, pure and MKL each; binary sha256 (pure / mkl): (a) default `e32d1ac662d489d21e10074451b4f8bc31ff54c9418de92c90e819e193498467` / `344639c533042a48f982245d496cef120a4c5f6dfa6008c799c7fda796f405fb`; (b) `RUSTFLAGS="-C target-cpu=native"` `2f3d7a3873e2ad299169a9d2c9976a5e6044501d8ce516317d08984ae24d0c27` / `845df2bd937b46659ff17c91a3dee94e349299bba56647976fb4f8d2a1b0d222`; (c) `CARGO_PROFILE_RELEASE_LTO=fat`, codegen-units 1: `ae437ee4e759bac363ac8f3aab0acc93391eadb9c985dc569be378f1990de874` / `7d25a56a2b92d0da0333b198fd648095e952a2e09d1df88f4f772f1548b6c91e`; (d) native plus LTO `a7cccb0c82732a5e0dc8b824b6b290af77fbf822afad0b859771e893acf09675` / `0e32926126e3fa02c4ab34bda76f8db2ee7103b39d0051936bab760056bfa0ba`. All eight hashes differ. 3-run medians, one socket, spread above 5 percent in 0 of 32 combinations.
+
+Speed ratio versus (a) (above 1: faster):
+```
+case   backend  T   (a) s    (b) native  (c) LTO   (d) both
+si8    pure     1   5.423     1.316       1.008     1.315
+si8    pure     8   4.019     1.399       1.019     1.458
+si8    mkl      1   4.814     1.068       1.011     1.085
+si8    mkl      8   3.721     1.066       1.014     1.104
+k444s  pure     1   6.260     1.229       1.013     1.213
+k444s  pure     8   1.193     1.121       1.026     1.109
+k444s  mkl      1   5.050     1.051       1.024     1.080
+k444s  mkl      8   1.069     1.071       1.057     1.102
+```
+Numerics: total energy and density sha256 identical to (a) in all 24 comparisons (4 cases x 2 backends... 8 case/backend/thread combinations x 3 variants); SCF iterations, Davidson iterations and operator applications identical (k444s 10/1686/10290, si8 pure 15/279/2044, si8 mkl 15/302/2139).
+
+Profile, si8 pure T=1, (a) 198 samples 5.423 s versus (b) 147 samples 4.122 s (starred entries have fewer than 30 samples: directional only): subtract_projection 30 samples 0.822 s to 8* 0.224 s (-0.597 s, 46 percent of the total saving 1.301 s; the only entry above 30 samples); tiled helpers 0.602* to 0.196*; gemm microkernels 0.465* to 0.280*; apply_local 0.438* to 0.365*; rustfft butterflies 0.575* to 0.533* (already run-time dispatched); NonlocalOperator::add 0.603* to 0.645* (unchanged). Result: si8 pure T=1 4.122 s with native, faster than the default MKL build (4.814 s); at T=8 pure (d) 2.756 s beats mkl (d) 3.370 s.
+
+QE build for fairness: `~/fq/builds/orig-mpi-dfti/make.inc`: FFLAGS `-O3 -g -fallow-argument-mismatch -fopenmp`, CFLAGS `-O3`, MKL (gf_lp64, gnu_thread, core), DFTI FFT, no `-march=native`; AVX-512 only through MKL run-time dispatch. BAANDI on dev08 had never been built with RUSTFLAGS before this experiment. Ratio to QE best (real Gamma path 0.366 s) for si8 1e-8 one core with the native pure build: 4.122 / 0.366 = 11.3 (was 14.9 with the default pure build).
+

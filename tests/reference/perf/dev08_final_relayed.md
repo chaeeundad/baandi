@@ -216,3 +216,27 @@ si8    1e-12   16     0.3000    1.0     4.568    4.998    15.23   16.66    19
 
 Worker utilization si8 pure T=8 (12 runs, 250 samples): busy workers 0: 9.6 percent, 1: 29.6, 2: 34.8, 3: 20.4, 4: 4.4, 5: 1.2, 6 or more: 0.0; mean 1.84 of 8 (23.0 percent; P10L 22.5 percent); max/mean imbalance 3.01 (P10L 3.29). Amdahl: serial 9.2 percent (0.382 s), parallel region 3.769 s with worker utilization 26.2 percent; at 100 percent utilization 1.369 s (4.24x); actual 4.151 s (1.40x). si8 pure T=1 5.801 s to T=8 4.151 s is 1.40x.
 
+## Part 5: P14B (incremental Gram reduced Hamiltonian) measured on dev08, relayed 2026-11-05
+
+Three builds measured with the same protocol (5 cases x 2 backends x T 1/4/8/16, 3-run medians, one socket, load below 0.30 before each run, separate target dirs, build exit codes checked): fdce016, main 65036b7, and branch 7fe2e9a (P14B). Binary sha256 (pure/mkl): fdce016 `f5803c7a1004c7aa465ab8f6f9849d808d415d57df7cd09f00bf7f7c7d550e19` / `41da71e9dbbd9df470f4e1458d4a5358739794211511d4262901bec621d7db6e`; 65036b7 `df6176438865d1ac16fd115959180d6f29c7860b5ce3bb5cba8614403629b927` / `79714e61eaf57e5ee023d1563c7b8ca90b1717b53a703a6e00098259b7fe4d0d`; 7fe2e9a `6a563fda5dd1db2eef25aa7f455d46fa928d2ea7fcfc6c43616041d3f9b3706b` / `e384f4c1cd5aea9977e5a498f4121691d729a836be09bab08b2b18fa58627a40`. P14B's pure delta over main 65036b7 is five files (linalg.rs, linalg/accounting.rs, tiled.rs, dft-solvers lib.rs, work_accounting.rs); the 26 commits between fdce016 and 7fe2e9a had no performance effect.
+
+si8 wall time (s) and SCF iterations:
+```
+              T=1     T=4     T=8     T=16   | SCF iterations
+fdce016 pure  5.793   4.007   4.155   4.554  | 15
+65036b7 pure  5.800   4.010   4.135   4.578  | 15
+P14B    pure  5.463   3.877   4.026   4.510  | 15
+fdce016 mkl   6.031   4.843   4.834   5.031  | 16
+65036b7 mkl   6.044   4.794   4.798   4.984  | 16
+P14B    mkl   4.814   3.738   3.718   3.899  | 15
+```
+P14B versus main (above 1: P14B faster), pure T1/T4/T8/T16 and mkl T1/T4/T8/T16: gamma 0.998 0.991 1.019 0.995 / 1.020 0.992 0.999 1.006; k222s 0.966 0.991 1.008 0.992 / 1.021 1.025 1.023 1.004; k222 0.986 0.968 0.985 0.991 / 1.008 1.022 1.032 0.971; k444s 0.978 0.958 0.974 0.983 / 1.013 1.007 1.012 1.009; si8 1.062 1.034 1.027 1.015 / 1.255 1.283 1.290 1.278. The effect is confined to si8 with the MKL backend (1.26 to 1.29); the Mac observation of 1.42 for si8 pure at T=1 became 1.06 on dev08.
+
+Work: Davidson steps / operator applications at T=1, P14B versus main: si8 pure 279/2044 versus 290/2070, si8 mkl 302/2139 versus 338/2242; the four k-point cases identical (gamma 41/281, k222s 204/1266, k222 408/2543, k444s 1686/10290). The si8 MKL gain of 1.225 s (6.039 to 4.814 s) is mostly less work (one SCF iteration fewer, 36 Davidson steps fewer), not faster GEMM: MKL zgemm kernel samples 1.286 to 1.111 s (39 samples) saves 0.175 s.
+
+Accuracy: pure versus mkl at P14B gamma 6.2e-15, k222s 0.0, k222 1.8e-15, k444s 1.8e-15, si8 2.17e-13 Ha; P14B versus main 0.0 (k444s) to 1.8e-13 Ha; density hashes identical across threads in all 10 combinations; not bit identical to the previous state (rounding of the new GEMM shapes).
+
+QE ratios (QE values from part 4; BAANDI/QE), P14B pure / mkl (fdce016 in brackets): k444s unchanged (1e-8 N8: 2.25 / 1.99). si8 1e-8 N1: 7.99 / 7.04 (8.47 / 8.82); si8 1e-12 N1: 5.99 / 5.28 (6.35 / 6.61); si8 1e-12 N16 (QE 0.300 s, at the timer limit): 15.03 / 13.00 (15.18 / 16.77); other multi-core si8 entries are below QE's 0.3 s resolution and excluded.
+
+Measurement quality: residual spread above 5 percent after 9 repeats for four small-case entries (0.26 to 0.88 s) caused by single outliers; medians stable. mkl T=1 profile 169 samples: figures above 30 samples are firm, the others are directional only.
+

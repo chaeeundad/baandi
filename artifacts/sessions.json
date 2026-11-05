@@ -1822,17 +1822,17 @@
     "task_id": "P12A-STATUS-RECONCILIATION",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "done",
     "codex_pid": 48949,
     "wrapper_pid": 48922,
-    "session_id": null,
+    "session_id": "01a1a90b-c542-7030-a3e0-e32393bac0fc",
     "branch": "task/P12A-STATUS-RECONCILIATION",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P12A-STATUS-RECONCILIATION",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P12A-STATUS-RECONCILIATION.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P12A-STATUS-RECONCILIATION/report.json",
     "started_at": "2026-11-05T00:11:23Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-05T00:18:13Z",
+    "exit_code": 0,
+    "note": "merged; README/feature-status handled by architect"
   }
 ]

@@ -2211,24 +2211,42 @@
     "started_at": "2026-11-05T14:41:28Z",
     "ended_at": "2026-11-05T15:15:33Z",
     "exit_code": 0,
-    "note": ""
+    "note": "merged"
   },
   {
     "run_id": "P20A-FORCES#1",
     "task_id": "P20A-FORCES",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "blocked",
     "codex_pid": 40553,
     "wrapper_pid": 40525,
-    "session_id": null,
+    "session_id": "01a1ac7a-db4f-7491-a085-12cdfea63479",
     "branch": "task/P20A-FORCES",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P20A-FORCES",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P20A-FORCES.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P20A-FORCES/report.json",
     "started_at": "2026-11-05T16:11:34Z",
-    "ended_at": null,
-    "exit_code": null,
+    "ended_at": "2026-11-05T17:07:20Z",
+    "exit_code": 0,
+    "note": ""
+  },
+  {
+    "run_id": "P20A-FORCES#2",
+    "task_id": "P20A-FORCES",
+    "mode": "resume",
+    "role": "implementer",
+    "status": "done",
+    "codex_pid": 55364,
+    "wrapper_pid": 55352,
+    "session_id": "01a1ac7a-db4f-7491-a085-12cdfea63479",
+    "branch": "task/P20A-FORCES",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P20A-FORCES",
+    "ticket": "/Users/mino/Develop/rust-dft/.delegate/P20A-FORCES/resume1.md",
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P20A-FORCES/report.json",
+    "started_at": "2026-11-05T17:11:07Z",
+    "ended_at": "2026-11-05T17:33:21Z",
+    "exit_code": 0,
     "note": ""
   }
 ]

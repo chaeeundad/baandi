@@ -1,0 +1,40 @@
+   Compiling psm v0.1.24
+   Compiling stacker v0.1.25
+   Compiling pest_stack_guard v1.0.0
+   Compiling pest v2.9.5
+   Compiling pest_meta v2.9.5
+   Compiling pest_generator v2.9.5
+   Compiling pest_derive v2.9.5
+   Compiling py_literal v0.4.0
+   Compiling npyz v0.8.4
+   Compiling faer v0.24.4
+   Compiling dft-numerics v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15B-NONLOCAL-BLOCK/crates/dft-numerics)
+   Compiling dft-solvers v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15B-NONLOCAL-BLOCK/crates/dft-solvers)
+   Compiling dft-physics v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15B-NONLOCAL-BLOCK/crates/dft-physics)
+    Finished `release` profile [optimized] target(s) in 27.16s
+     Running unittests src/lib.rs (target/release/deps/dft_physics-262fa3c3a1ae1099)
+
+running 1 test
+atoms,rows,channels,g,us_per_vector,projector_bytes,projector_read_bytes_per_vector
+2,749,4,0,5.913406,95872,191744
+2,749,4,1,7.583008,95872,191744
+2,749,4,2,6.340492,95872,95872
+2,749,4,4,5.980469,95872,47936
+2,749,4,8,5.900391,95872,23968
+2,749,4,16,6.187500,95872,11984
+8,2969,4,0,96.038734,1520128,3040256
+8,2969,4,1,123.010094,1520128,3040256
+8,2969,4,2,100.009438,1520128,1520128
+8,2969,4,4,93.377930,1520128,760064
+8,2969,4,8,91.818039,1520128,380032
+8,2969,4,16,100.809242,1520128,190016
+20,8193,12,0,1978.520188,31461120,62922240
+20,8193,12,1,2534.578125,31461120,62922240
+20,8193,12,2,2040.271805,31461120,31461120
+20,8193,12,4,1810.301758,31461120,15730560
+20,8193,12,8,1812.373695,31461120,7865280
+20,8193,12,16,3015.901047,31461120,3932640
+test hamiltonian::fused_tests::band_block_microbenchmark ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 14 filtered out; finished in 55.48s
+

@@ -1,0 +1,23 @@
+{
+  "host": "macOS-27.0.1-arm64-arm-64bit",
+  "baseline_commit": "ce64b57437e2cb7b14804a4bdd15fb252dab6286",
+  "baseline_binary_sha256": "9062d86234d5a7a81c01b7d50123802fa777b6b011f4e04b798d6b6223baaee2",
+  "production_source_sha256": "2b082c6fab464f5218aa24d4c49c5cba214fed8ca1d5f2fa1a96d45b824d9aef",
+  "notes": [
+    "Microbenchmark values are observations on a loaded Mac; g=0 denotes the unchanged scalar path.",
+    "Initial generic one-band kernel was replaced by scalar fallback after its regression was measured.",
+    "Full SCF timing pairs use temporary instrumentation absent from production; no builds overlap those pairs.",
+    "Projector bytes count logical accesses, not hardware cache traffic.",
+    "Final uninstrumented candidate passes all five cases at T=1/8; energy floats, density hashes and work counts match baseline exactly.",
+    "Final candidate uses separate local and nonlocal phases for multiple workers; Mac si8 T=8 H remains slower, so dev08 acceptance is pending."
+  ],
+  "candidate_binary_sha256": "2088d6b9725468dd913b61b521a7d81fa60b5b82d97e009ad6f49b497966cfb2",
+  "gates": {
+    "scripts/check.sh": 0,
+    "cargo check --features mkl --all-targets": 0,
+    "bench_scf --require-identical T=1": 0,
+    "bench_scf --require-identical T=8": 0,
+    "30 alternating pairs per condition": 0,
+    "README regeneration and freshness": 0
+  }
+}

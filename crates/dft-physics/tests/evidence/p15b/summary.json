@@ -1,0 +1,114 @@
+[
+  {
+    "case": "si8",
+    "threads": 1,
+    "pairs": 30,
+    "baseline": {
+      "wall_s": 2.556281458000001,
+      "h_us_per_vector": 434.6360293598234,
+      "nl_us_per_vector": 93.13249574468085,
+      "h_vectors": 2265.0,
+      "vectors": 2585.0,
+      "projector_bytes": 7859061760.0,
+      "scalar_projector_bytes": 7859061760.0,
+      "energy_ha": -31.32180360103127,
+      "scf_iterations": 15.0
+    },
+    "candidate": {
+      "wall_s": 2.5498465620000133,
+      "h_us_per_vector": 430.6438077262693,
+      "nl_us_per_vector": 87.80789748549323,
+      "h_vectors": 2265.0,
+      "vectors": 2585.0,
+      "projector_bytes": 3131463680.0,
+      "scalar_projector_bytes": 7859061760.0,
+      "energy_ha": -31.32180360103127,
+      "scf_iterations": 15.0
+    },
+    "paired_h_ratio": 0.9901251795217179
+  },
+  {
+    "case": "si8",
+    "threads": 8,
+    "pairs": 30,
+    "baseline": {
+      "wall_s": 1.2543441875000028,
+      "h_us_per_vector": 128.30259337748345,
+      "nl_us_per_vector": 106.45293636363637,
+      "h_vectors": 2265.0,
+      "vectors": 2585.0,
+      "projector_bytes": 7859061760.0,
+      "scalar_projector_bytes": 7859061760.0,
+      "energy_ha": -31.32180360103127,
+      "scf_iterations": 15.0
+    },
+    "candidate": {
+      "wall_s": 1.300195771000002,
+      "h_us_per_vector": 147.22360838852097,
+      "nl_us_per_vector": 99.8826994197292,
+      "h_vectors": 2265.0,
+      "vectors": 2585.0,
+      "projector_bytes": 3131463680.0,
+      "scalar_projector_bytes": 7859061760.0,
+      "energy_ha": -31.32180360103127,
+      "scf_iterations": 15.0
+    },
+    "paired_h_ratio": 1.1458910333118482
+  },
+  {
+    "case": "k444s",
+    "threads": 1,
+    "pairs": 30,
+    "baseline": {
+      "wall_s": 2.4769130625000173,
+      "h_us_per_vector": 133.0195209283606,
+      "nl_us_per_vector": 5.891797563763664,
+      "h_vectors": 11181.0,
+      "vectors": 13997.0,
+      "projector_bytes": 2684762880.0,
+      "scalar_projector_bytes": 2684762880.0,
+      "energy_ha": -7.9259761266480915,
+      "scf_iterations": 10.0
+    },
+    "candidate": {
+      "wall_s": 2.4890201875000173,
+      "h_us_per_vector": 134.3543539933816,
+      "nl_us_per_vector": 5.746668821890405,
+      "h_vectors": 11181.0,
+      "vectors": 13997.0,
+      "projector_bytes": 1173515776.0,
+      "scalar_projector_bytes": 2684762880.0,
+      "energy_ha": -7.9259761266480915,
+      "scf_iterations": 10.0
+    },
+    "paired_h_ratio": 1.0102865157743919
+  },
+  {
+    "case": "k444s",
+    "threads": 8,
+    "pairs": 30,
+    "baseline": {
+      "wall_s": 0.5982541665000056,
+      "h_us_per_vector": 209.25697303461232,
+      "nl_us_per_vector": 8.002750267914553,
+      "h_vectors": 11181.0,
+      "vectors": 13997.0,
+      "projector_bytes": 2684762880.0,
+      "scalar_projector_bytes": 2684762880.0,
+      "energy_ha": -7.9259761266480915,
+      "scf_iterations": 10.0
+    },
+    "candidate": {
+      "wall_s": 0.6009779585000032,
+      "h_us_per_vector": 210.5962236830337,
+      "nl_us_per_vector": 8.47445281131671,
+      "h_vectors": 11181.0,
+      "vectors": 13997.0,
+      "projector_bytes": 1173515776.0,
+      "scalar_projector_bytes": 2684762880.0,
+      "energy_ha": -7.9259761266480915,
+      "scf_iterations": 10.0
+    },
+    "paired_h_ratio": 1.0061237059716386
+  }
+]

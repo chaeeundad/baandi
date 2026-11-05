@@ -1,0 +1,6615 @@
+{
+  "head": "ce64b57437e2cb7b14804a4bdd15fb252dab6286",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "binaries": {
+    "/tmp/p15b-phases/baseline-probe": "50827b956993d6dabf1a1fa8bd6f1dbd237f32d0fb8c6595b71c3d374c2f3975",
+    "/tmp/p15b-phases/candidate-probe": "ce979692b4ccb88ed7bd3a607f56e84da688618cb6b923e595ed9909045bb385"
+  },
+  "load_start": [
+    5.95849609375,
+    6.64697265625,
+    6.1650390625
+  ],
+  "samples": [
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 0,
+      "mode": 0,
+      "wall_s": 1.581792792,
+      "h_us_per_vector": 126.77822163355408,
+      "nl_us_per_vector": 105.29413036750483,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.12158203125,
+        6.66943359375,
+        6.17578125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 0,
+      "mode": 1,
+      "wall_s": 1.6227785410000002,
+      "h_us_per_vector": 147.8693545253863,
+      "nl_us_per_vector": 99.36605686653772,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.12158203125,
+        6.66943359375,
+        6.17578125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 1,
+      "mode": 1,
+      "wall_s": 1.2789009170000005,
+      "h_us_per_vector": 142.72833245033112,
+      "nl_us_per_vector": 98.5276510638298,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.12158203125,
+        6.66943359375,
+        6.17578125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 1,
+      "mode": 0,
+      "wall_s": 1.2344359169999999,
+      "h_us_per_vector": 127.73947682119206,
+      "nl_us_per_vector": 105.1370669245648,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.12158203125,
+        6.66943359375,
+        6.17578125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 2,
+      "mode": 0,
+      "wall_s": 1.2510424579999997,
+      "h_us_per_vector": 127.78353686534216,
+      "nl_us_per_vector": 105.38442282398452,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.95166015625,
+        6.625,
+        6.16259765625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 2,
+      "mode": 1,
+      "wall_s": 1.2765277500000005,
+      "h_us_per_vector": 142.48285474613687,
+      "nl_us_per_vector": 98.39369052224372,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.95166015625,
+        6.625,
+        6.16259765625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 3,
+      "mode": 1,
+      "wall_s": 1.2790775829999994,
+      "h_us_per_vector": 143.74788609271522,
+      "nl_us_per_vector": 98.91788007736943,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.95166015625,
+        6.625,
+        6.16259765625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 3,
+      "mode": 0,
+      "wall_s": 1.281492375000001,
+      "h_us_per_vector": 132.1906953642384,
+      "nl_us_per_vector": 109.33562437137331,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.794921875,
+        6.5810546875,
+        6.14990234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 4,
+      "mode": 0,
+      "wall_s": 1.2431492090000003,
+      "h_us_per_vector": 127.72564944812362,
+      "nl_us_per_vector": 104.95823094777563,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.794921875,
+        6.5810546875,
+        6.14990234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 4,
+      "mode": 1,
+      "wall_s": 1.2687250829999996,
+      "h_us_per_vector": 142.91133156732892,
+      "nl_us_per_vector": 98.98689787234044,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.794921875,
+        6.5810546875,
+        6.14990234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 5,
+      "mode": 1,
+      "wall_s": 1.2765622919999995,
+      "h_us_per_vector": 146.6455858719647,
+      "nl_us_per_vector": 98.16177137330754,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.794921875,
+        6.5810546875,
+        6.14990234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 5,
+      "mode": 0,
+      "wall_s": 1.2464396670000006,
+      "h_us_per_vector": 127.72880220750552,
+      "nl_us_per_vector": 105.14249013539653,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.13134765625,
+        6.6376953125,
+        6.17236328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 6,
+      "mode": 0,
+      "wall_s": 1.2351927499999995,
+      "h_us_per_vector": 123.13145562913908,
+      "nl_us_per_vector": 105.16970638297872,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.13134765625,
+        6.6376953125,
+        6.17236328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 6,
+      "mode": 1,
+      "wall_s": 1.2972874159999996,
+      "h_us_per_vector": 150.00886357615894,
+      "nl_us_per_vector": 98.30584294003869,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.13134765625,
+        6.6376953125,
+        6.17236328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 7,
+      "mode": 1,
+      "wall_s": 1.2823211670000028,
+      "h_us_per_vector": 143.66096423841057,
+      "nl_us_per_vector": 102.83901431334623,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.13134765625,
+        6.6376953125,
+        6.17236328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 7,
+      "mode": 0,
+      "wall_s": 1.236521542000002,
+      "h_us_per_vector": 123.24757174392937,
+      "nl_us_per_vector": 105.215449516441,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.96044921875,
+        6.59375,
+        6.1591796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 8,
+      "mode": 0,
+      "wall_s": 1.2521978750000002,
+      "h_us_per_vector": 127.46823222958058,
+      "nl_us_per_vector": 105.52708742746614,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.96044921875,
+        6.59375,
+        6.1591796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 8,
+      "mode": 1,
+      "wall_s": 1.3145028750000023,
+      "h_us_per_vector": 151.38068476821192,
+      "nl_us_per_vector": 103.25119497098646,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.96044921875,
+        6.59375,
+        6.1591796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 9,
+      "mode": 1,
+      "wall_s": 1.2768789170000012,
+      "h_us_per_vector": 142.63970198675494,
+      "nl_us_per_vector": 100.03423907156673,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.96044921875,
+        6.59375,
+        6.1591796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 9,
+      "mode": 0,
+      "wall_s": 1.2978788330000022,
+      "h_us_per_vector": 134.54384326710817,
+      "nl_us_per_vector": 109.20963907156674,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.36376953125,
+        6.66650390625,
+        6.1875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 10,
+      "mode": 0,
+      "wall_s": 1.3514930000000014,
+      "h_us_per_vector": 136.9642357615894,
+      "nl_us_per_vector": 117.05466305609285,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.36376953125,
+        6.66650390625,
+        6.1875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 10,
+      "mode": 1,
+      "wall_s": 1.289095500000002,
+      "h_us_per_vector": 147.75117395143488,
+      "nl_us_per_vector": 99.13302205029014,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.36376953125,
+        6.66650390625,
+        6.1875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 11,
+      "mode": 1,
+      "wall_s": 1.3079837089999984,
+      "h_us_per_vector": 150.50993289183222,
+      "nl_us_per_vector": 98.91646266924565,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.36376953125,
+        6.66650390625,
+        6.1875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 11,
+      "mode": 0,
+      "wall_s": 1.2435461249999982,
+      "h_us_per_vector": 123.2768582781457,
+      "nl_us_per_vector": 105.58413887814314,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.57470703125,
+        6.705078125,
+        6.20361328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 12,
+      "mode": 0,
+      "wall_s": 1.2520994170000002,
+      "h_us_per_vector": 128.73026534216336,
+      "nl_us_per_vector": 105.44048433268858,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.57470703125,
+        6.705078125,
+        6.20361328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 12,
+      "mode": 1,
+      "wall_s": 1.2914617089999965,
+      "h_us_per_vector": 144.33817306843267,
+      "nl_us_per_vector": 100.44430986460348,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.57470703125,
+        6.705078125,
+        6.20361328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 13,
+      "mode": 1,
+      "wall_s": 1.3055272080000009,
+      "h_us_per_vector": 150.88639602649005,
+      "nl_us_per_vector": 99.02129632495165,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.57470703125,
+        6.705078125,
+        6.20361328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 13,
+      "mode": 0,
+      "wall_s": 1.2540187920000037,
+      "h_us_per_vector": 127.1268604856512,
+      "nl_us_per_vector": 105.7228994197292,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.2880859375,
+        6.6435546875,
+        6.1845703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 14,
+      "mode": 0,
+      "wall_s": 1.2484346249999945,
+      "h_us_per_vector": 128.2578366445916,
+      "nl_us_per_vector": 105.76860386847196,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.2880859375,
+        6.6435546875,
+        6.1845703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 14,
+      "mode": 1,
+      "wall_s": 1.2927787499999965,
+      "h_us_per_vector": 143.8835770419426,
+      "nl_us_per_vector": 99.75951218568666,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.2880859375,
+        6.6435546875,
+        6.1845703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 15,
+      "mode": 1,
+      "wall_s": 1.3108012500000044,
+      "h_us_per_vector": 151.36411081677704,
+      "nl_us_per_vector": 99.24793926499034,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.2880859375,
+        6.6435546875,
+        6.1845703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 15,
+      "mode": 0,
+      "wall_s": 1.257694082999997,
+      "h_us_per_vector": 125.92746578366446,
+      "nl_us_per_vector": 106.76160657640233,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.6650390625,
+        6.7158203125,
+        6.21240234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 16,
+      "mode": 0,
+      "wall_s": 1.2992552500000016,
+      "h_us_per_vector": 135.91722030905078,
+      "nl_us_per_vector": 109.8629176015474,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.6650390625,
+        6.7158203125,
+        6.21240234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 16,
+      "mode": 1,
+      "wall_s": 1.3003273330000056,
+      "h_us_per_vector": 151.98489757174394,
+      "nl_us_per_vector": 99.57740618955513,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.6650390625,
+        6.7158203125,
+        6.21240234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 17,
+      "mode": 1,
+      "wall_s": 1.3014452090000006,
+      "h_us_per_vector": 152.86422075055188,
+      "nl_us_per_vector": 101.93788317214701,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.6650390625,
+        6.7158203125,
+        6.21240234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 17,
+      "mode": 0,
+      "wall_s": 1.252222708000005,
+      "h_us_per_vector": 132.09985209713022,
+      "nl_us_per_vector": 106.42709671179884,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.091796875,
+        6.80322265625,
+        6.24609375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 18,
+      "mode": 0,
+      "wall_s": 1.2518854579999967,
+      "h_us_per_vector": 128.3473501103753,
+      "nl_us_per_vector": 106.62666769825918,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.091796875,
+        6.80322265625,
+        6.24609375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 18,
+      "mode": 1,
+      "wall_s": 1.3118795410000033,
+      "h_us_per_vector": 152.2311417218543,
+      "nl_us_per_vector": 99.96557369439071,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.091796875,
+        6.80322265625,
+        6.24609375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 19,
+      "mode": 1,
+      "wall_s": 1.2821632499999964,
+      "h_us_per_vector": 143.65527947019868,
+      "nl_us_per_vector": 99.62549941972921,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.091796875,
+        6.80322265625,
+        6.24609375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 19,
+      "mode": 0,
+      "wall_s": 1.234811999999998,
+      "h_us_per_vector": 124.89346843267109,
+      "nl_us_per_vector": 106.42487543520309,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.32421875,
+        6.85595703125,
+        6.26806640625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 20,
+      "mode": 0,
+      "wall_s": 1.252009000000001,
+      "h_us_per_vector": 131.54155452538632,
+      "nl_us_per_vector": 106.2794421663443,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.32421875,
+        6.85595703125,
+        6.26806640625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 20,
+      "mode": 1,
+      "wall_s": 1.282707459000001,
+      "h_us_per_vector": 144.40585033112583,
+      "nl_us_per_vector": 99.7998251450677,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.32421875,
+        6.85595703125,
+        6.26806640625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 21,
+      "mode": 1,
+      "wall_s": 1.299196207999998,
+      "h_us_per_vector": 146.35246490066226,
+      "nl_us_per_vector": 100.1936077369439,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.32421875,
+        6.85595703125,
+        6.26806640625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 21,
+      "mode": 0,
+      "wall_s": 1.2546695830000019,
+      "h_us_per_vector": 127.96616953642383,
+      "nl_us_per_vector": 106.4787760154739,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.2177734375,
+        6.84130859375,
+        6.26611328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 22,
+      "mode": 0,
+      "wall_s": 1.2663668750000028,
+      "h_us_per_vector": 130.79574966887418,
+      "nl_us_per_vector": 106.937283172147,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.2177734375,
+        6.84130859375,
+        6.26611328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 22,
+      "mode": 1,
+      "wall_s": 1.3528510000000011,
+      "h_us_per_vector": 154.43037704194262,
+      "nl_us_per_vector": 105.55056324951644,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.2177734375,
+        6.84130859375,
+        6.26611328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 23,
+      "mode": 1,
+      "wall_s": 1.3233776249999991,
+      "h_us_per_vector": 152.54319028697572,
+      "nl_us_per_vector": 100.20546808510639,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.2177734375,
+        6.84130859375,
+        6.26611328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 23,
+      "mode": 0,
+      "wall_s": 1.2773093750000015,
+      "h_us_per_vector": 132.160080794702,
+      "nl_us_per_vector": 106.79001044487428,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.8798828125,
+        6.77734375,
+        6.24658203125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 24,
+      "mode": 0,
+      "wall_s": 1.3152599579999986,
+      "h_us_per_vector": 137.72181456953643,
+      "nl_us_per_vector": 110.39160386847195,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.8798828125,
+        6.77734375,
+        6.24658203125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 24,
+      "mode": 1,
+      "wall_s": 1.319163500000002,
+      "h_us_per_vector": 149.72230286975716,
+      "nl_us_per_vector": 101.18129864603482,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.8798828125,
+        6.77734375,
+        6.24658203125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 25,
+      "mode": 1,
+      "wall_s": 1.3000642089999985,
+      "h_us_per_vector": 146.00014657836644,
+      "nl_us_per_vector": 100.32478646034816,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.12939453125,
+        6.83056640625,
+        6.2685546875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 25,
+      "mode": 0,
+      "wall_s": 1.2776097919999927,
+      "h_us_per_vector": 132.51173421633555,
+      "nl_us_per_vector": 106.99332959381044,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.12939453125,
+        6.83056640625,
+        6.2685546875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 26,
+      "mode": 0,
+      "wall_s": 1.2677023340000062,
+      "h_us_per_vector": 128.94829094922738,
+      "nl_us_per_vector": 107.12600193423597,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.12939453125,
+        6.83056640625,
+        6.2685546875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 26,
+      "mode": 1,
+      "wall_s": 1.3082031659999984,
+      "h_us_per_vector": 146.69604282560707,
+      "nl_us_per_vector": 101.40415512572534,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.12939453125,
+        6.83056640625,
+        6.2685546875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 27,
+      "mode": 1,
+      "wall_s": 1.3017422079999932,
+      "h_us_per_vector": 145.68706754966885,
+      "nl_us_per_vector": 104.65072301740813,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.03857421875,
+        6.81640625,
+        6.2666015625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 27,
+      "mode": 0,
+      "wall_s": 1.256298375,
+      "h_us_per_vector": 124.83500573951436,
+      "nl_us_per_vector": 107.34592804642166,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.03857421875,
+        6.81640625,
+        6.2666015625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 28,
+      "mode": 0,
+      "wall_s": 1.2757059159999926,
+      "h_us_per_vector": 133.2904335540839,
+      "nl_us_per_vector": 107.21033694390715,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.03857421875,
+        6.81640625,
+        6.2666015625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 28,
+      "mode": 1,
+      "wall_s": 1.3183539160000066,
+      "h_us_per_vector": 148.43956688741721,
+      "nl_us_per_vector": 103.52990367504835,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.03857421875,
+        6.81640625,
+        6.2666015625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 29,
+      "mode": 1,
+      "wall_s": 1.353733958999996,
+      "h_us_per_vector": 150.404966004415,
+      "nl_us_per_vector": 105.74703133462282,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.71484375,
+        6.7529296875,
+        6.2470703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 8,
+      "pair": 29,
+      "mode": 0,
+      "wall_s": 1.2714714580000077,
+      "h_us_per_vector": 129.0794701986755,
+      "nl_us_per_vector": 107.35365261121856,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.71484375,
+        6.7529296875,
+        6.2470703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 0,
+      "mode": 0,
+      "wall_s": 0.5916919579999984,
+      "h_us_per_vector": 202.46970977551203,
+      "nl_us_per_vector": 7.840967278702579,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        6.71484375,
+        6.7529296875,
+        6.2470703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 0,
+      "mode": 1,
+      "wall_s": 0.5987089999999995,
+      "h_us_per_vector": 205.78875163223327,
+      "nl_us_per_vector": 8.60063485032507,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        6.71484375,
+        6.7529296875,
+        6.2470703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 1,
+      "mode": 1,
+      "wall_s": 0.6054894999999902,
+      "h_us_per_vector": 207.7563547983186,
+      "nl_us_per_vector": 8.363031078088161,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        6.71484375,
+        6.7529296875,
+        6.2470703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 1,
+      "mode": 0,
+      "wall_s": 0.5902143750000022,
+      "h_us_per_vector": 207.05720713710758,
+      "nl_us_per_vector": 7.966921554618847,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        6.71484375,
+        6.7529296875,
+        6.2470703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 2,
+      "mode": 0,
+      "wall_s": 0.5891257079999974,
+      "h_us_per_vector": 208.69154762543602,
+      "nl_us_per_vector": 7.936977780953061,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        6.71484375,
+        6.7529296875,
+        6.2470703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 2,
+      "mode": 1,
+      "wall_s": 0.595499832999991,
+      "h_us_per_vector": 210.18177229228155,
+      "nl_us_per_vector": 8.395581838965493,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.0576171875,
+        6.8232421875,
+        6.27490234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 3,
+      "mode": 1,
+      "wall_s": 0.5990693749999991,
+      "h_us_per_vector": 209.68473034612288,
+      "nl_us_per_vector": 8.549328784739588,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.0576171875,
+        6.8232421875,
+        6.27490234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 3,
+      "mode": 0,
+      "wall_s": 0.6014226670000085,
+      "h_us_per_vector": 209.18280010732494,
+      "nl_us_per_vector": 7.995268343216403,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.0576171875,
+        6.8232421875,
+        6.27490234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 4,
+      "mode": 0,
+      "wall_s": 0.597709583000011,
+      "h_us_per_vector": 209.34723486271352,
+      "nl_us_per_vector": 8.015268271772523,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.0576171875,
+        6.8232421875,
+        6.27490234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 4,
+      "mode": 1,
+      "wall_s": 0.6251655829999976,
+      "h_us_per_vector": 217.35580171719883,
+      "nl_us_per_vector": 8.770864542401943,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.0576171875,
+        6.8232421875,
+        6.27490234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 5,
+      "mode": 1,
+      "wall_s": 0.6040467090000021,
+      "h_us_per_vector": 211.95135157857078,
+      "nl_us_per_vector": 8.769176609273416,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.0576171875,
+        6.8232421875,
+        6.27490234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 5,
+      "mode": 0,
+      "wall_s": 0.6014587920000025,
+      "h_us_per_vector": 210.05499364994188,
+      "nl_us_per_vector": 7.98747938844038,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.0576171875,
+        6.8232421875,
+        6.27490234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 6,
+      "mode": 0,
+      "wall_s": 0.6056360420000004,
+      "h_us_per_vector": 209.38879760307665,
+      "nl_us_per_vector": 7.989793241408874,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.0576171875,
+        6.8232421875,
+        6.27490234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 6,
+      "mode": 1,
+      "wall_s": 0.6093857919999977,
+      "h_us_per_vector": 211.25351337089708,
+      "nl_us_per_vector": 8.428480745874117,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.29296875,
+        6.8759765625,
+        6.29638671875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 7,
+      "mode": 1,
+      "wall_s": 0.601639416999987,
+      "h_us_per_vector": 210.06772122350418,
+      "nl_us_per_vector": 8.395788383224977,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.29296875,
+        6.8759765625,
+        6.29638671875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 7,
+      "mode": 0,
+      "wall_s": 0.6051134580000053,
+      "h_us_per_vector": 209.0872023074859,
+      "nl_us_per_vector": 8.013244695291847,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.29296875,
+        6.8759765625,
+        6.29638671875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 8,
+      "mode": 0,
+      "wall_s": 0.603526708000004,
+      "h_us_per_vector": 209.33114596189967,
+      "nl_us_per_vector": 8.040598056726441,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.29296875,
+        6.8759765625,
+        6.29638671875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 8,
+      "mode": 1,
+      "wall_s": 0.601612750000001,
+      "h_us_per_vector": 210.85682613361953,
+      "nl_us_per_vector": 8.449729584911053,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.29296875,
+        6.8759765625,
+        6.29638671875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 9,
+      "mode": 1,
+      "wall_s": 0.5870999999999924,
+      "h_us_per_vector": 213.42242938914228,
+      "nl_us_per_vector": 8.501809101950418,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.29296875,
+        6.8759765625,
+        6.29638671875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 9,
+      "mode": 0,
+      "wall_s": 0.5949322910000063,
+      "h_us_per_vector": 210.45847160361325,
+      "nl_us_per_vector": 8.055986354218762,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.29296875,
+        6.8759765625,
+        6.29638671875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 10,
+      "mode": 0,
+      "wall_s": 0.5987987500000003,
+      "h_us_per_vector": 209.4329812181379,
+      "nl_us_per_vector": 7.9954897478031,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.29296875,
+        6.8759765625,
+        6.29638671875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 10,
+      "mode": 1,
+      "wall_s": 0.6041792909999941,
+      "h_us_per_vector": 211.36729165548698,
+      "nl_us_per_vector": 8.526074301636065,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.02880859375,
+        6.828125,
+        6.28271484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 11,
+      "mode": 1,
+      "wall_s": 0.6082084579999929,
+      "h_us_per_vector": 213.01523003309185,
+      "nl_us_per_vector": 8.543609344859613,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.02880859375,
+        6.828125,
+        6.28271484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 11,
+      "mode": 0,
+      "wall_s": 0.6545043750000019,
+      "h_us_per_vector": 223.47336329487524,
+      "nl_us_per_vector": 8.38761848967636,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.02880859375,
+        6.828125,
+        6.28271484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 12,
+      "mode": 0,
+      "wall_s": 0.6077377080000019,
+      "h_us_per_vector": 210.57463831499865,
+      "nl_us_per_vector": 8.059147245838394,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.02880859375,
+        6.828125,
+        6.28271484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 12,
+      "mode": 1,
+      "wall_s": 0.6038087919999953,
+      "h_us_per_vector": 210.42228915123872,
+      "nl_us_per_vector": 8.506143887975995,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.02880859375,
+        6.828125,
+        6.28271484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 13,
+      "mode": 1,
+      "wall_s": 0.6005667499999987,
+      "h_us_per_vector": 211.5663572131294,
+      "nl_us_per_vector": 8.478346431378153,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.02880859375,
+        6.828125,
+        6.28271484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 13,
+      "mode": 0,
+      "wall_s": 0.6016753749999992,
+      "h_us_per_vector": 210.11832591002596,
+      "nl_us_per_vector": 8.047916696434951,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.02880859375,
+        6.828125,
+        6.28271484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 14,
+      "mode": 0,
+      "wall_s": 0.5950533750000062,
+      "h_us_per_vector": 209.70349780878277,
+      "nl_us_per_vector": 8.03812459812817,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.02880859375,
+        6.828125,
+        6.28271484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 14,
+      "mode": 1,
+      "wall_s": 0.6129599580000047,
+      "h_us_per_vector": 210.77015821482874,
+      "nl_us_per_vector": 8.779707865971279,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.02880859375,
+        6.828125,
+        6.28271484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 15,
+      "mode": 1,
+      "wall_s": 0.5978463750000031,
+      "h_us_per_vector": 211.14537545836689,
+      "nl_us_per_vector": 8.470559191255267,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.2666015625,
+        6.88037109375,
+        6.30419921875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 15,
+      "mode": 0,
+      "wall_s": 0.5908495000000045,
+      "h_us_per_vector": 209.51988963420087,
+      "nl_us_per_vector": 8.024458026720012,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.2666015625,
+        6.88037109375,
+        6.30419921875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 16,
+      "mode": 0,
+      "wall_s": 0.5973600840000017,
+      "h_us_per_vector": 212.07568589571596,
+      "nl_us_per_vector": 8.041851825391156,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.2666015625,
+        6.88037109375,
+        6.30419921875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 16,
+      "mode": 1,
+      "wall_s": 0.6082867079999943,
+      "h_us_per_vector": 210.11943904838566,
+      "nl_us_per_vector": 8.369943059226976,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.2666015625,
+        6.88037109375,
+        6.30419921875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 17,
+      "mode": 1,
+      "wall_s": 0.609252749999996,
+      "h_us_per_vector": 211.4253824344871,
+      "nl_us_per_vector": 8.417743445023934,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.2666015625,
+        6.88037109375,
+        6.30419921875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 17,
+      "mode": 0,
+      "wall_s": 0.6034850830000096,
+      "h_us_per_vector": 208.3892533762633,
+      "nl_us_per_vector": 8.019670643709366,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.2666015625,
+        6.88037109375,
+        6.30419921875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 18,
+      "mode": 0,
+      "wall_s": 0.6032054169999981,
+      "h_us_per_vector": 213.02716474376174,
+      "nl_us_per_vector": 8.123942487675931,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.2666015625,
+        6.88037109375,
+        6.30419921875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 18,
+      "mode": 1,
+      "wall_s": 0.5921445000000034,
+      "h_us_per_vector": 210.930388337358,
+      "nl_us_per_vector": 8.585590412231193,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.2666015625,
+        6.88037109375,
+        6.30419921875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 19,
+      "mode": 1,
+      "wall_s": 0.6013891670000078,
+      "h_us_per_vector": 211.78178570789734,
+      "nl_us_per_vector": 8.505300564406658,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.4853515625,
+        6.93212890625,
+        6.32568359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 19,
+      "mode": 0,
+      "wall_s": 0.5973157919999892,
+      "h_us_per_vector": 208.57444888650392,
+      "nl_us_per_vector": 8.010156176323498,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.4853515625,
+        6.93212890625,
+        6.32568359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 20,
+      "mode": 0,
+      "wall_s": 0.589119249999996,
+      "h_us_per_vector": 210.34202727841873,
+      "nl_us_per_vector": 8.010010788026007,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.4853515625,
+        6.93212890625,
+        6.32568359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 20,
+      "mode": 1,
+      "wall_s": 0.5986354589999934,
+      "h_us_per_vector": 208.14399588587784,
+      "nl_us_per_vector": 8.33426727155819,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.4853515625,
+        6.93212890625,
+        6.32568359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 21,
+      "mode": 1,
+      "wall_s": 0.6317473749999891,
+      "h_us_per_vector": 219.68044915481622,
+      "nl_us_per_vector": 8.822341716082017,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.4853515625,
+        6.93212890625,
+        6.32568359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 21,
+      "mode": 0,
+      "wall_s": 0.595165166000001,
+      "h_us_per_vector": 208.24207324926215,
+      "nl_us_per_vector": 7.995211902550547,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.4853515625,
+        6.93212890625,
+        6.32568359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 22,
+      "mode": 0,
+      "wall_s": 0.6003842089999978,
+      "h_us_per_vector": 207.3560206600483,
+      "nl_us_per_vector": 7.937392155461884,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.4853515625,
+        6.93212890625,
+        6.32568359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 22,
+      "mode": 1,
+      "wall_s": 0.5948551250000094,
+      "h_us_per_vector": 207.99945908237189,
+      "nl_us_per_vector": 8.660002143316426,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.4853515625,
+        6.93212890625,
+        6.32568359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 23,
+      "mode": 1,
+      "wall_s": 0.5996416670000002,
+      "h_us_per_vector": 209.04582273499688,
+      "nl_us_per_vector": 8.303900478674002,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.6865234375,
+        6.98291015625,
+        6.34716796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 23,
+      "mode": 0,
+      "wall_s": 0.6019519580000008,
+      "h_us_per_vector": 208.4051275377873,
+      "nl_us_per_vector": 7.9857373722940626,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.6865234375,
+        6.98291015625,
+        6.34716796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 24,
+      "mode": 0,
+      "wall_s": 0.5956534170000083,
+      "h_us_per_vector": 208.81525525444954,
+      "nl_us_per_vector": 7.923066228477531,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.6865234375,
+        6.98291015625,
+        6.34716796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 24,
+      "mode": 1,
+      "wall_s": 0.5866872919999935,
+      "h_us_per_vector": 209.0655585368035,
+      "nl_us_per_vector": 8.39835057512324,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.6865234375,
+        6.98291015625,
+        6.34716796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 25,
+      "mode": 1,
+      "wall_s": 0.6111051249999946,
+      "h_us_per_vector": 213.413301851355,
+      "nl_us_per_vector": 8.784040508680432,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.6865234375,
+        6.98291015625,
+        6.34716796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 25,
+      "mode": 0,
+      "wall_s": 0.6458153340000052,
+      "h_us_per_vector": 218.0626444861819,
+      "nl_us_per_vector": 8.207842609130529,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.6865234375,
+        6.98291015625,
+        6.34716796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 26,
+      "mode": 0,
+      "wall_s": 0.5924910829999988,
+      "h_us_per_vector": 206.93139880153834,
+      "nl_us_per_vector": 7.859300207187254,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.6865234375,
+        6.98291015625,
+        6.34716796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 26,
+      "mode": 1,
+      "wall_s": 0.5911925000000053,
+      "h_us_per_vector": 207.4571818263125,
+      "nl_us_per_vector": 8.26287204400943,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.6865234375,
+        6.98291015625,
+        6.34716796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 27,
+      "mode": 1,
+      "wall_s": 0.5916458330000012,
+      "h_us_per_vector": 206.82379948126285,
+      "nl_us_per_vector": 8.292867328713296,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.6865234375,
+        6.98291015625,
+        6.34716796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 27,
+      "mode": 0,
+      "wall_s": 0.5895465000000115,
+      "h_us_per_vector": 205.72197155889455,
+      "nl_us_per_vector": 7.810633278559691,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.39111328125,
+        6.93310546875,
+        6.3330078125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 28,
+      "mode": 0,
+      "wall_s": 0.5989491250000043,
+      "h_us_per_vector": 204.26147643323495,
+      "nl_us_per_vector": 7.855382939201258,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.39111328125,
+        6.93310546875,
+        6.3330078125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 28,
+      "mode": 1,
+      "wall_s": 0.5934937499999933,
+      "h_us_per_vector": 205.7770373848493,
+      "nl_us_per_vector": 8.36825769807816,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.39111328125,
+        6.93310546875,
+        6.3330078125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 29,
+      "mode": 1,
+      "wall_s": 0.592712750000004,
+      "h_us_per_vector": 207.4281818263125,
+      "nl_us_per_vector": 8.200994641708938,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.39111328125,
+        6.93310546875,
+        6.3330078125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 8,
+      "pair": 29,
+      "mode": 0,
+      "wall_s": 0.5859285410000012,
+      "h_us_per_vector": 204.09436633574813,
+      "nl_us_per_vector": 7.818937415160391,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        7.39111328125,
+        6.93310546875,
+        6.3330078125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 0,
+      "mode": 0,
+      "wall_s": 2.5727207919999984,
+      "h_us_per_vector": 435.0308543046358,
+      "nl_us_per_vector": 93.55364255319148,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.119140625,
+        6.88427734375,
+        6.3193359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 0,
+      "mode": 1,
+      "wall_s": 2.5652473340000057,
+      "h_us_per_vector": 437.77363664459165,
+      "nl_us_per_vector": 93.85107543520309,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        7.119140625,
+        6.88427734375,
+        6.3193359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 1,
+      "mode": 1,
+      "wall_s": 2.5563962909999987,
+      "h_us_per_vector": 432.1068803532009,
+      "nl_us_per_vector": 87.54473849129594,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.708984375,
+        6.802734375,
+        6.2939453125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 1,
+      "mode": 0,
+      "wall_s": 2.5621932079999965,
+      "h_us_per_vector": 434.50709933774834,
+      "nl_us_per_vector": 93.41887311411992,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.708984375,
+        6.802734375,
+        6.2939453125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 2,
+      "mode": 0,
+      "wall_s": 2.5703817920000063,
+      "h_us_per_vector": 436.1911505518764,
+      "nl_us_per_vector": 93.48558916827852,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.41162109375,
+        6.7392578125,
+        6.2744140625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 2,
+      "mode": 1,
+      "wall_s": 2.5479039169999993,
+      "h_us_per_vector": 429.73047858719644,
+      "nl_us_per_vector": 87.21884371373308,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        6.41162109375,
+        6.7392578125,
+        6.2744140625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 3,
+      "mode": 1,
+      "wall_s": 2.5471356670000205,
+      "h_us_per_vector": 432.1996666666667,
+      "nl_us_per_vector": 89.96149284332688,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.97802734375,
+        6.6435546875,
+        6.2431640625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 3,
+      "mode": 0,
+      "wall_s": 2.547018749999978,
+      "h_us_per_vector": 432.7653028697572,
+      "nl_us_per_vector": 93.04429903288202,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.97802734375,
+        6.6435546875,
+        6.2431640625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 4,
+      "mode": 0,
+      "wall_s": 2.5471545409999976,
+      "h_us_per_vector": 432.4316931567329,
+      "nl_us_per_vector": 92.97568355899419,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.6591796875,
+        6.56640625,
+        6.21826171875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 4,
+      "mode": 1,
+      "wall_s": 2.549872166,
+      "h_us_per_vector": 433.71208432671085,
+      "nl_us_per_vector": 91.65136750483559,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.6591796875,
+        6.56640625,
+        6.21826171875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 5,
+      "mode": 1,
+      "wall_s": 2.5717465829999924,
+      "h_us_per_vector": 434.62672803532007,
+      "nl_us_per_vector": 87.89423249516442,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.28564453125,
+        6.4736328125,
+        6.1875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 5,
+      "mode": 0,
+      "wall_s": 2.598053499999992,
+      "h_us_per_vector": 435.9996304635762,
+      "nl_us_per_vector": 93.49156363636362,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        5.28564453125,
+        6.4736328125,
+        6.1875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 6,
+      "mode": 0,
+      "wall_s": 2.5523666249999906,
+      "h_us_per_vector": 434.76495938189845,
+      "nl_us_per_vector": 93.03435551257255,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        4.9423828125,
+        6.38232421875,
+        6.15673828125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 6,
+      "mode": 1,
+      "wall_s": 2.5498209580000264,
+      "h_us_per_vector": 433.5346445916115,
+      "nl_us_per_vector": 91.117883172147,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        4.9423828125,
+        6.38232421875,
+        6.15673828125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 7,
+      "mode": 1,
+      "wall_s": 2.540448375000011,
+      "h_us_per_vector": 430.031974392936,
+      "nl_us_per_vector": 87.85025918762089,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        4.62646484375,
+        6.29296875,
+        6.12646484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 7,
+      "mode": 0,
+      "wall_s": 2.554101000000003,
+      "h_us_per_vector": 434.47319381898456,
+      "nl_us_per_vector": 93.16597756286266,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        4.62646484375,
+        6.29296875,
+        6.12646484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 8,
+      "mode": 0,
+      "wall_s": 2.5471182080000005,
+      "h_us_per_vector": 432.1090737306844,
+      "nl_us_per_vector": 93.00209129593811,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        4.3359375,
+        6.205078125,
+        6.09619140625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 8,
+      "mode": 1,
+      "wall_s": 2.550830832999992,
+      "h_us_per_vector": 430.0780710816777,
+      "nl_us_per_vector": 87.08859767891684,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        4.3359375,
+        6.205078125,
+        6.09619140625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 9,
+      "mode": 1,
+      "wall_s": 2.540901292000001,
+      "h_us_per_vector": 429.0751090507726,
+      "nl_us_per_vector": 87.01577330754353,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        4.1484375,
+        6.13525390625,
+        6.07177734375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 9,
+      "mode": 0,
+      "wall_s": 2.5551063329999977,
+      "h_us_per_vector": 433.4235156732892,
+      "nl_us_per_vector": 93.15344603481626,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        4.1484375,
+        6.13525390625,
+        6.07177734375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 10,
+      "mode": 0,
+      "wall_s": 2.550789665999986,
+      "h_us_per_vector": 433.50328741721853,
+      "nl_us_per_vector": 93.01895628626693,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        4.13623046875,
+        6.099609375,
+        6.0595703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 10,
+      "mode": 1,
+      "wall_s": 2.555604332999991,
+      "h_us_per_vector": 432.7428763796909,
+      "nl_us_per_vector": 89.25959226305609,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        4.13623046875,
+        6.099609375,
+        6.0595703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 11,
+      "mode": 1,
+      "wall_s": 2.540321167000002,
+      "h_us_per_vector": 429.0811059602649,
+      "nl_us_per_vector": 87.12635783365572,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        4.125,
+        6.064453125,
+        6.04736328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 11,
+      "mode": 0,
+      "wall_s": 2.5595050000000015,
+      "h_us_per_vector": 434.415566004415,
+      "nl_us_per_vector": 93.57476595744681,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        4.125,
+        6.064453125,
+        6.04736328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 12,
+      "mode": 0,
+      "wall_s": 2.5684087500000032,
+      "h_us_per_vector": 435.66267108167773,
+      "nl_us_per_vector": 93.55313887814313,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        4.03466796875,
+        6.01318359375,
+        6.029296875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 12,
+      "mode": 1,
+      "wall_s": 2.553476125000003,
+      "h_us_per_vector": 430.6844353200883,
+      "nl_us_per_vector": 87.73386344294003,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        4.03466796875,
+        6.01318359375,
+        6.029296875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 13,
+      "mode": 1,
+      "wall_s": 2.5568449159999886,
+      "h_us_per_vector": 434.47262913907286,
+      "nl_us_per_vector": 91.31802243713733,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.95166015625,
+        5.962890625,
+        6.01123046875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 13,
+      "mode": 0,
+      "wall_s": 2.557456583000004,
+      "h_us_per_vector": 434.80809271523174,
+      "nl_us_per_vector": 93.11037524177951,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.95166015625,
+        5.962890625,
+        6.01123046875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 14,
+      "mode": 0,
+      "wall_s": 2.550525833999984,
+      "h_us_per_vector": 433.83230684326713,
+      "nl_us_per_vector": 93.05634003868472,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.71484375,
+        5.88037109375,
+        5.9814453125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 14,
+      "mode": 1,
+      "wall_s": 2.5360745830000155,
+      "h_us_per_vector": 428.55907152317883,
+      "nl_us_per_vector": 87.18688239845261,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.71484375,
+        5.88037109375,
+        5.9814453125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 15,
+      "mode": 1,
+      "wall_s": 2.551568459000009,
+      "h_us_per_vector": 430.5521169977925,
+      "nl_us_per_vector": 87.46286885880077,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.4970703125,
+        5.79931640625,
+        5.9521484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 15,
+      "mode": 0,
+      "wall_s": 2.5480667079999932,
+      "h_us_per_vector": 432.55209757174396,
+      "nl_us_per_vector": 92.9975334622824,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.4970703125,
+        5.79931640625,
+        5.9521484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 16,
+      "mode": 0,
+      "wall_s": 2.5543992090000245,
+      "h_us_per_vector": 435.5478653421634,
+      "nl_us_per_vector": 93.03887775628627,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.296875,
+        5.71923828125,
+        5.9228515625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 16,
+      "mode": 1,
+      "wall_s": 2.5378744999999867,
+      "h_us_per_vector": 428.99751479028697,
+      "nl_us_per_vector": 87.23193733075436,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.296875,
+        5.71923828125,
+        5.9228515625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 17,
+      "mode": 1,
+      "wall_s": 2.5436814579999805,
+      "h_us_per_vector": 432.0540799116998,
+      "nl_us_per_vector": 90.22591489361703,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.19287109375,
+        5.6572265625,
+        5.8994140625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 17,
+      "mode": 0,
+      "wall_s": 2.549303750000007,
+      "h_us_per_vector": 432.79363664459163,
+      "nl_us_per_vector": 93.11154545454545,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.19287109375,
+        5.6572265625,
+        5.8994140625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 18,
+      "mode": 0,
+      "wall_s": 2.5610322080000003,
+      "h_us_per_vector": 437.0160401766004,
+      "nl_us_per_vector": 93.03431373307544,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.97802734375,
+        5.77880859375,
+        5.94091796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 18,
+      "mode": 1,
+      "wall_s": 2.5535986669999886,
+      "h_us_per_vector": 430.6031801324503,
+      "nl_us_per_vector": 88.12690638297872,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.97802734375,
+        5.77880859375,
+        5.94091796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 19,
+      "mode": 1,
+      "wall_s": 2.5386250420000067,
+      "h_us_per_vector": 428.69309713024285,
+      "nl_us_per_vector": 87.29115744680851,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.8193359375,
+        5.7158203125,
+        5.91748046875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 19,
+      "mode": 0,
+      "wall_s": 2.5494124589999956,
+      "h_us_per_vector": 432.89955805739515,
+      "nl_us_per_vector": 93.04764796905222,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.8193359375,
+        5.7158203125,
+        5.91748046875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 20,
+      "mode": 0,
+      "wall_s": 2.549955874999995,
+      "h_us_per_vector": 433.7964309050773,
+      "nl_us_per_vector": 93.02840657640232,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.59326171875,
+        5.63720703125,
+        5.88818359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 20,
+      "mode": 1,
+      "wall_s": 2.5384488750000003,
+      "h_us_per_vector": 428.71155143487863,
+      "nl_us_per_vector": 86.80666731141199,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.59326171875,
+        5.63720703125,
+        5.88818359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 21,
+      "mode": 1,
+      "wall_s": 2.5624412919999884,
+      "h_us_per_vector": 434.4651938189846,
+      "nl_us_per_vector": 90.49963868471954,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.46533203125,
+        5.57666015625,
+        5.865234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 21,
+      "mode": 0,
+      "wall_s": 2.603038166999994,
+      "h_us_per_vector": 443.4263823399558,
+      "nl_us_per_vector": 94.02818220502901,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.46533203125,
+        5.57666015625,
+        5.865234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 22,
+      "mode": 0,
+      "wall_s": 2.5458485830000086,
+      "h_us_per_vector": 431.9809059602649,
+      "nl_us_per_vector": 92.97055473887814,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.34765625,
+        5.51708984375,
+        5.84228515625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 22,
+      "mode": 1,
+      "wall_s": 2.538224832999987,
+      "h_us_per_vector": 429.2105774834437,
+      "nl_us_per_vector": 87.60195164410058,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.34765625,
+        5.51708984375,
+        5.84228515625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 23,
+      "mode": 1,
+      "wall_s": 2.5383306669999968,
+      "h_us_per_vector": 429.3027196467991,
+      "nl_us_per_vector": 87.76570251450677,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        3.1591796875,
+        5.44189453125,
+        5.8134765625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 23,
+      "mode": 0,
+      "wall_s": 2.5507273749999797,
+      "h_us_per_vector": 433.6658260485651,
+      "nl_us_per_vector": 93.01523907156673,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        2.98583984375,
+        5.36767578125,
+        5.78515625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 24,
+      "mode": 0,
+      "wall_s": 2.617869500000012,
+      "h_us_per_vector": 444.2879527593819,
+      "nl_us_per_vector": 94.38678684719535,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        2.98583984375,
+        5.36767578125,
+        5.78515625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 24,
+      "mode": 1,
+      "wall_s": 2.559673083000007,
+      "h_us_per_vector": 432.63961589403976,
+      "nl_us_per_vector": 88.86177872340426,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        2.90673828125,
+        5.3115234375,
+        5.7626953125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 25,
+      "mode": 1,
+      "wall_s": 2.5658036659999937,
+      "h_us_per_vector": 431.93508476821194,
+      "nl_us_per_vector": 87.85009245647969,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        2.90673828125,
+        5.3115234375,
+        5.7626953125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 25,
+      "mode": 0,
+      "wall_s": 2.581650792000005,
+      "h_us_per_vector": 439.82958233995583,
+      "nl_us_per_vector": 93.86497678916827,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        2.833984375,
+        5.25634765625,
+        5.740234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 26,
+      "mode": 0,
+      "wall_s": 2.5682385420000173,
+      "h_us_per_vector": 435.2802472406181,
+      "nl_us_per_vector": 93.83189477756287,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        2.833984375,
+        5.25634765625,
+        5.740234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 26,
+      "mode": 1,
+      "wall_s": 2.5593067080000083,
+      "h_us_per_vector": 433.791119205298,
+      "nl_us_per_vector": 90.76080232108318,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        2.84716796875,
+        5.21875,
+        5.72412109375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 27,
+      "mode": 1,
+      "wall_s": 2.544980250000009,
+      "h_us_per_vector": 429.1978092715232,
+      "nl_us_per_vector": 87.05814042553192,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        2.84716796875,
+        5.21875,
+        5.72412109375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 27,
+      "mode": 0,
+      "wall_s": 2.5613747500000272,
+      "h_us_per_vector": 435.37366004415014,
+      "nl_us_per_vector": 93.50331837524178,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        2.939453125,
+        5.1982421875,
+        5.7138671875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 28,
+      "mode": 0,
+      "wall_s": 2.575154915999974,
+      "h_us_per_vector": 437.97130022075055,
+      "nl_us_per_vector": 93.59669555125726,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        2.939453125,
+        5.1982421875,
+        5.7138671875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 28,
+      "mode": 1,
+      "wall_s": 2.5450518339999917,
+      "h_us_per_vector": 429.2327077262693,
+      "nl_us_per_vector": 87.17418607350096,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        2.94384765625,
+        5.16162109375,
+        5.69775390625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 29,
+      "mode": 1,
+      "wall_s": 2.6768912500000397,
+      "h_us_per_vector": 459.0281668874172,
+      "nl_us_per_vector": 96.4640162475822,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 3131463680,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        2.94384765625,
+        5.16162109375,
+        5.69775390625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "si8",
+      "threads": 1,
+      "pair": 29,
+      "mode": 0,
+      "wall_s": 2.6373127079999676,
+      "h_us_per_vector": 446.6605554083885,
+      "nl_us_per_vector": 95.85703752417795,
+      "vectors": 2585,
+      "h_vectors": 2265,
+      "projector_bytes": 7859061760,
+      "scalar_projector_bytes": 7859061760,
+      "energy_ha": -31.32180360103127,
+      "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+      "scf_iterations": 15,
+      "load": [
+        2.8681640625,
+        5.10888671875,
+        5.67578125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 2969,8,32,1520128"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 0,
+      "mode": 0,
+      "wall_s": 2.5088279579999835,
+      "h_us_per_vector": 134.7050587603971,
+      "nl_us_per_vector": 5.9830812316925055,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        2.8681640625,
+        5.10888671875,
+        5.67578125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 0,
+      "mode": 1,
+      "wall_s": 2.62264916700002,
+      "h_us_per_vector": 142.36969358733566,
+      "nl_us_per_vector": 6.069457955276131,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        2.87841796875,
+        5.07373046875,
+        5.65966796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 1,
+      "mode": 1,
+      "wall_s": 2.5806134160000056,
+      "h_us_per_vector": 139.3229386459172,
+      "nl_us_per_vector": 5.734488033149961,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        2.87841796875,
+        5.07373046875,
+        5.65966796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 1,
+      "mode": 0,
+      "wall_s": 2.698589458000015,
+      "h_us_per_vector": 145.1269152133083,
+      "nl_us_per_vector": 6.259161963277846,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        2.9677734375,
+        5.0556640625,
+        5.64990234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 2,
+      "mode": 0,
+      "wall_s": 2.620535249999989,
+      "h_us_per_vector": 140.46004731240495,
+      "nl_us_per_vector": 6.181911838251054,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        2.9677734375,
+        5.0556640625,
+        5.64990234375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 2,
+      "mode": 1,
+      "wall_s": 2.7408337500000357,
+      "h_us_per_vector": 149.02275771397908,
+      "nl_us_per_vector": 6.234735657640923,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.21044921875,
+        5.0712890625,
+        5.65185546875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 3,
+      "mode": 1,
+      "wall_s": 2.78561958399996,
+      "h_us_per_vector": 151.12776272247564,
+      "nl_us_per_vector": 6.453999285561192,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.21044921875,
+        5.0712890625,
+        5.65185546875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 3,
+      "mode": 0,
+      "wall_s": 2.795784416999993,
+      "h_us_per_vector": 150.38983686611218,
+      "nl_us_per_vector": 6.498935700507252,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.59375,
+        5.11962890625,
+        5.66552734375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 4,
+      "mode": 0,
+      "wall_s": 2.7994067920000134,
+      "h_us_per_vector": 149.39131240497272,
+      "nl_us_per_vector": 6.48743209259127,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.1064453125,
+        5.2001953125,
+        5.69091796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 4,
+      "mode": 1,
+      "wall_s": 2.8742639580000287,
+      "h_us_per_vector": 152.53761541901437,
+      "nl_us_per_vector": 7.154960920197185,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.1064453125,
+        5.2001953125,
+        5.69091796875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 5,
+      "mode": 1,
+      "wall_s": 2.807772,
+      "h_us_per_vector": 152.359397102227,
+      "nl_us_per_vector": 6.257184182324784,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.578125,
+        5.27978515625,
+        5.7158203125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 5,
+      "mode": 0,
+      "wall_s": 2.798850375000029,
+      "h_us_per_vector": 150.91894714247383,
+      "nl_us_per_vector": 6.503916482103309,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.578125,
+        5.27978515625,
+        5.7158203125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 6,
+      "mode": 0,
+      "wall_s": 2.4954467919999956,
+      "h_us_per_vector": 132.71444513013148,
+      "nl_us_per_vector": 5.914192326927198,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.45166015625,
+        5.24169921875,
+        5.69970703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 6,
+      "mode": 1,
+      "wall_s": 2.489100375000021,
+      "h_us_per_vector": 134.6062218048475,
+      "nl_us_per_vector": 5.955678859755661,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.45166015625,
+        5.24169921875,
+        5.69970703125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 7,
+      "mode": 1,
+      "wall_s": 2.495083374999979,
+      "h_us_per_vector": 134.80843878007335,
+      "nl_us_per_vector": 5.681723869400585,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.3349609375,
+        5.2041015625,
+        5.68359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 7,
+      "mode": 0,
+      "wall_s": 2.4783254999999826,
+      "h_us_per_vector": 133.49059726321437,
+      "nl_us_per_vector": 5.891862756304922,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.3349609375,
+        5.2041015625,
+        5.68359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 8,
+      "mode": 0,
+      "wall_s": 2.4718454169999973,
+      "h_us_per_vector": 133.08503049816653,
+      "nl_us_per_vector": 5.889918053868686,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.14794921875,
+        5.15087890625,
+        5.66162109375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 8,
+      "mode": 1,
+      "wall_s": 2.4972072090000097,
+      "h_us_per_vector": 134.948862534657,
+      "nl_us_per_vector": 5.659269843537901,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.14794921875,
+        5.15087890625,
+        5.66162109375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 9,
+      "mode": 1,
+      "wall_s": 2.47387020900004,
+      "h_us_per_vector": 133.65997272158125,
+      "nl_us_per_vector": 5.794872901336,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        5.3369140625,
+        5.38037109375,
+        5.73974609375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 9,
+      "mode": 0,
+      "wall_s": 2.4669829999999706,
+      "h_us_per_vector": 132.79022404078347,
+      "nl_us_per_vector": 5.879014717439452,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        5.3369140625,
+        5.38037109375,
+        5.73974609375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 10,
+      "mode": 0,
+      "wall_s": 2.479470166999988,
+      "h_us_per_vector": 133.74681379125303,
+      "nl_us_per_vector": 5.881029077659498,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        5.1494140625,
+        5.3408203125,
+        5.7236328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 10,
+      "mode": 1,
+      "wall_s": 2.4761982499999817,
+      "h_us_per_vector": 133.5994143636526,
+      "nl_us_per_vector": 5.584358576837894,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        5.1494140625,
+        5.3408203125,
+        5.7236328125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 11,
+      "mode": 1,
+      "wall_s": 2.4813899580000225,
+      "h_us_per_vector": 133.88178087827563,
+      "nl_us_per_vector": 5.648232692719868,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.97705078125,
+        5.3017578125,
+        5.70751953125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 11,
+      "mode": 0,
+      "wall_s": 2.4603341250000312,
+      "h_us_per_vector": 132.15435810750378,
+      "nl_us_per_vector": 5.884850968064586,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.97705078125,
+        5.3017578125,
+        5.70751953125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 12,
+      "mode": 0,
+      "wall_s": 2.462699083000018,
+      "h_us_per_vector": 132.2245055898399,
+      "nl_us_per_vector": 5.883977352289777,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.8984375,
+        5.27978515625,
+        5.697265625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 12,
+      "mode": 1,
+      "wall_s": 2.4942305000000147,
+      "h_us_per_vector": 134.70154986137197,
+      "nl_us_per_vector": 5.656473101378867,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.8984375,
+        5.27978515625,
+        5.697265625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 13,
+      "mode": 1,
+      "wall_s": 2.4889400000000137,
+      "h_us_per_vector": 134.25381754762543,
+      "nl_us_per_vector": 5.567987854540259,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.5859375,
+        5.20849609375,
+        5.66943359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 13,
+      "mode": 0,
+      "wall_s": 2.470311542000047,
+      "h_us_per_vector": 132.8507397370539,
+      "nl_us_per_vector": 5.879981638922626,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.5859375,
+        5.20849609375,
+        5.66943359375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 14,
+      "mode": 0,
+      "wall_s": 2.4913488330000177,
+      "h_us_per_vector": 134.51108854306415,
+      "nl_us_per_vector": 5.880741087375866,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.45849609375,
+        5.17138671875,
+        5.6533203125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 14,
+      "mode": 1,
+      "wall_s": 2.457385790999979,
+      "h_us_per_vector": 132.41349995528128,
+      "nl_us_per_vector": 5.469359791383868,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.45849609375,
+        5.17138671875,
+        5.6533203125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 15,
+      "mode": 1,
+      "wall_s": 2.456625083000006,
+      "h_us_per_vector": 132.38017449244253,
+      "nl_us_per_vector": 5.529000500107166,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.42138671875,
+        5.15185546875,
+        5.6435546875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 15,
+      "mode": 0,
+      "wall_s": 2.4693643339999767,
+      "h_us_per_vector": 132.6376804400322,
+      "nl_us_per_vector": 5.912333142816317,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.42138671875,
+        5.15185546875,
+        5.6435546875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 16,
+      "mode": 0,
+      "wall_s": 2.4530572919999827,
+      "h_us_per_vector": 131.86586450228066,
+      "nl_us_per_vector": 5.872316210616561,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.30712890625,
+        5.11572265625,
+        5.6279296875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 16,
+      "mode": 1,
+      "wall_s": 2.4670785829999886,
+      "h_us_per_vector": 133.02789929344425,
+      "nl_us_per_vector": 5.63016667857398,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.30712890625,
+        5.11572265625,
+        5.6279296875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 17,
+      "mode": 1,
+      "wall_s": 2.4737645829999906,
+      "h_us_per_vector": 133.42021491816473,
+      "nl_us_per_vector": 5.855799671358148,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.2021484375,
+        5.08056640625,
+        5.6123046875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 17,
+      "mode": 0,
+      "wall_s": 2.4766352500000153,
+      "h_us_per_vector": 133.30376764153473,
+      "nl_us_per_vector": 5.8990577980995935,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.2021484375,
+        5.08056640625,
+        5.6123046875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 18,
+      "mode": 0,
+      "wall_s": 2.4614008330000274,
+      "h_us_per_vector": 132.5154382434487,
+      "nl_us_per_vector": 5.863158248196042,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.185546875,
+        5.0625,
+        5.6025390625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 18,
+      "mode": 1,
+      "wall_s": 2.4802080000000046,
+      "h_us_per_vector": 133.8630743225114,
+      "nl_us_per_vector": 5.768737157962421,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.185546875,
+        5.0625,
+        5.6025390625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 19,
+      "mode": 1,
+      "wall_s": 2.4701264169999604,
+      "h_us_per_vector": 133.23014131115283,
+      "nl_us_per_vector": 5.6776945774094445,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.17041015625,
+        5.04443359375,
+        5.5927734375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 19,
+      "mode": 0,
+      "wall_s": 2.4534551670000155,
+      "h_us_per_vector": 131.85836883999644,
+      "nl_us_per_vector": 5.86612109737801,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.17041015625,
+        5.04443359375,
+        5.5927734375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 20,
+      "mode": 0,
+      "wall_s": 2.456759874999989,
+      "h_us_per_vector": 132.0014904749128,
+      "nl_us_per_vector": 5.879272915624777,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.07666015625,
+        5.01025390625,
+        5.5771484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 20,
+      "mode": 1,
+      "wall_s": 2.5052177919999963,
+      "h_us_per_vector": 135.85595921652805,
+      "nl_us_per_vector": 5.748744088018862,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        4.07666015625,
+        5.01025390625,
+        5.5771484375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 21,
+      "mode": 1,
+      "wall_s": 2.5879855420000126,
+      "h_us_per_vector": 139.62981128700474,
+      "nl_us_per_vector": 5.93402057583768,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.990234375,
+        4.9765625,
+        5.56201171875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 21,
+      "mode": 0,
+      "wall_s": 2.490319999999997,
+      "h_us_per_vector": 134.1525190054557,
+      "nl_us_per_vector": 5.914986354218762,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.990234375,
+        4.9765625,
+        5.56201171875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 22,
+      "mode": 0,
+      "wall_s": 2.4829337499999724,
+      "h_us_per_vector": 133.75438914229497,
+      "nl_us_per_vector": 5.907062156176324,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.83056640625,
+        4.9267578125,
+        5.541015625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 22,
+      "mode": 1,
+      "wall_s": 2.5032043749999957,
+      "h_us_per_vector": 135.62440649315803,
+      "nl_us_per_vector": 6.3264784596699295,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.83056640625,
+        4.9267578125,
+        5.541015625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 23,
+      "mode": 1,
+      "wall_s": 2.490888916000017,
+      "h_us_per_vector": 134.40730712816384,
+      "nl_us_per_vector": 5.6282189754947485,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.763671875,
+        4.89453125,
+        5.52587890625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 23,
+      "mode": 0,
+      "wall_s": 2.466584375000025,
+      "h_us_per_vector": 132.5899019765674,
+      "nl_us_per_vector": 5.898304065156819,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.763671875,
+        4.89453125,
+        5.52587890625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 24,
+      "mode": 0,
+      "wall_s": 2.4573762499999816,
+      "h_us_per_vector": 131.98612297647796,
+      "nl_us_per_vector": 5.8744723154961775,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.7021484375,
+        4.86279296875,
+        5.5107421875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 24,
+      "mode": 1,
+      "wall_s": 2.477347875000021,
+      "h_us_per_vector": 133.71872497987658,
+      "nl_us_per_vector": 5.728964492391227,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.7021484375,
+        4.86279296875,
+        5.5107421875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 25,
+      "mode": 1,
+      "wall_s": 2.4844260419999955,
+      "h_us_per_vector": 134.3014008585994,
+      "nl_us_per_vector": 5.7445935557619485,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.6455078125,
+        4.83154296875,
+        5.49560546875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 25,
+      "mode": 0,
+      "wall_s": 2.466248667000002,
+      "h_us_per_vector": 132.36051238708524,
+      "nl_us_per_vector": 5.891732371222405,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.6455078125,
+        4.83154296875,
+        5.49560546875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 26,
+      "mode": 0,
+      "wall_s": 2.464537500000006,
+      "h_us_per_vector": 132.2091263751006,
+      "nl_us_per_vector": 5.895131028077445,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.673828125,
+        4.8173828125,
+        5.48681640625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 26,
+      "mode": 1,
+      "wall_s": 2.466665832999979,
+      "h_us_per_vector": 133.13644182094626,
+      "nl_us_per_vector": 6.318431592484104,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.673828125,
+        4.8173828125,
+        5.48681640625
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 27,
+      "mode": 1,
+      "wall_s": 2.4865171659999987,
+      "h_us_per_vector": 134.29190904212504,
+      "nl_us_per_vector": 6.301428377509466,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.77978515625,
+        4.8203125,
+        5.48388671875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 27,
+      "mode": 0,
+      "wall_s": 2.4771908750000193,
+      "h_us_per_vector": 132.95401135855468,
+      "nl_us_per_vector": 5.902775951989712,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.77978515625,
+        4.8203125,
+        5.48388671875
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 28,
+      "mode": 0,
+      "wall_s": 2.4969397079999567,
+      "h_us_per_vector": 134.69180055451213,
+      "nl_us_per_vector": 5.890931913981567,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.55712890625,
+        4.7568359375,
+        5.45751953125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 28,
+      "mode": 1,
+      "wall_s": 2.4724149999999554,
+      "h_us_per_vector": 133.34437268580626,
+      "nl_us_per_vector": 5.8007550189326285,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.55712890625,
+        4.7568359375,
+        5.45751953125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 29,
+      "mode": 1,
+      "wall_s": 2.498686207999981,
+      "h_us_per_vector": 134.7651235131026,
+      "nl_us_per_vector": 5.709813460027148,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 1173515776,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.55712890625,
+        4.7568359375,
+        5.45751953125
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    },
+    {
+      "case": "k444s",
+      "threads": 1,
+      "pair": 29,
+      "mode": 0,
+      "wall_s": 2.4799734169999965,
+      "h_us_per_vector": 133.6835300062606,
+      "nl_us_per_vector": 5.867835750517968,
+      "vectors": 13997,
+      "h_vectors": 11181,
+      "projector_bytes": 2684762880,
+      "scalar_projector_bytes": 2684762880,
+      "energy_ha": -7.9259761266480915,
+      "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+      "scf_iterations": 10,
+      "load": [
+        3.67236328125,
+        4.7607421875,
+        5.45458984375
+      ],
+      "projector_shapes": [
+        "P15B_SHAPE 743,2,8,95104",
+        "P15B_SHAPE 744,2,8,95232",
+        "P15B_SHAPE 747,2,8,95616",
+        "P15B_SHAPE 748,2,8,95744",
+        "P15B_SHAPE 751,2,8,96128",
+        "P15B_SHAPE 753,2,8,96384",
+        "P15B_SHAPE 757,2,8,96896",
+        "P15B_SHAPE 763,2,8,97664"
+      ]
+    }
+  ]
+}

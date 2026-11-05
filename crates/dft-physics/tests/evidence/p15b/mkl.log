@@ -1,0 +1,7 @@
+warning: dft-mkl@0.1.0: MKLROOT unset: type checking only; MKL executables cannot link
+    Checking dft-physics v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15B-NONLOCAL-BLOCK/crates/dft-physics)
+    Checking dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15B-NONLOCAL-BLOCK/crates/dft-engine)
+    Checking dft-cli v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15B-NONLOCAL-BLOCK/crates/dft-cli)
+    Checking baandi-mcp v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15B-NONLOCAL-BLOCK/crates/baandi-mcp)
+    Checking baandi-py v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15B-NONLOCAL-BLOCK/crates/baandi-py)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.54s

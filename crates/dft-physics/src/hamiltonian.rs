@@ -229,6 +229,53 @@ impl NonlocalOperator {
             }
         }
     }
+    // Column-major band slices. Each band's reduction is the scalar path's
+    // left fold starting at complex +0; no reassociation or fused multiply-add.
+    // Scratch is channel-major, with adjacent independent band accumulators.
+    fn add_block<const G: usize>(
+        &self,
+        x: &[Complex64],
+        y: &mut [Complex64],
+        rows: usize,
+        bands: usize,
+        scratch: &mut [Complex64],
+    ) {
+        debug_assert!(bands <= G);
+        // A one-band tail has no column reuse; retain the scalar traversal.
+        if bands == 1 {
+            self.add(x, y, scratch);
+            return;
+        }
+        let (projections, weights) = scratch.split_at_mut(self.max_channels * G);
+        for atom in &self.atoms {
+            let nc = atom.columns.len();
+            projections[..nc * G].fill(Complex64::default());
+            for (c, col) in atom.columns.iter().enumerate() {
+                let p = &mut projections[c * G..(c + 1) * G];
+                for (i, b) in col.iter().enumerate() {
+                    let conjugate = b.conj();
+                    for band in 0..bands {
+                        p[band] += conjugate * x[band * rows + i];
+                    }
+                }
+            }
+            for i in 0..nc {
+                for band in 0..bands {
+                    weights[i * G + band] = (0..nc)
+                        .map(|j| atom.coupling[i * nc + j] * projections[j * G + band])
+                        .sum();
+                }
+            }
+            for (c, col) in atom.columns.iter().enumerate() {
+                for (i, b) in col.iter().enumerate() {
+                    for band in 0..bands {
+                        y[band * rows + i] += b * weights[c * G + band];
+                    }
+                }
+            }
+        }
+    }
+
     /// Projection storage required by `apply_into`.
     pub fn scratch_len(&self) -> usize {
         2 * self.max_channels
@@ -293,6 +340,9 @@ pub fn truncate_to_density_sphere(
     fft.to_real(&reciprocal, &mut real)?;
     Ok(real.mapv(|z| z.re))
 }
+// Fixed independently of the thread budget; tails retain the same sum order.
+const NONLOCAL_BANDS: usize = 4;
+
 struct Worker {
     scratch: std::sync::Mutex<Scratch>,
 }
@@ -337,7 +387,7 @@ impl Hamiltonian {
         let scratch = RefCell::new(vec![Worker {
             scratch: std::sync::Mutex::new(Scratch {
                 fft: FusedPlan::new(dims, grid.g_to_fft())?,
-                projections: vec![Complex64::default(); 2 * nonlocal.max_channels],
+                projections: vec![Complex64::default(); 2 * nonlocal.max_channels * NONLOCAL_BANDS],
             }),
         }]);
         Ok(Self {
@@ -378,7 +428,10 @@ impl Hamiltonian {
             pool.push(Worker {
                 scratch: std::sync::Mutex::new(Scratch {
                     fft: FusedPlan::new(dims, self.data.grid.g_to_fft())?,
-                    projections: vec![Complex64::default(); 2 * self.data.nonlocal.max_channels],
+                    projections: vec![
+                        Complex64::default();
+                        2 * self.data.nonlocal.max_channels * NONLOCAL_BANDS
+                    ],
                 }),
             });
         }
@@ -424,7 +477,81 @@ impl Hamiltonian {
     }
 }
 impl HamiltonianData {
+    fn apply_group(
+        &self,
+        x: &ComplexMatrix,
+        y: &mut [Complex64],
+        first: usize,
+        end: usize,
+        scratch: &mut Scratch,
+    ) -> Result<(), SolverError> {
+        for j in first..end {
+            let out = &mut y[(j - first) * x.rows()..(j - first + 1) * x.rows()];
+            self.apply_local_with(x.column(j), out, scratch)
+                .map_err(|e| SolverError::Application(format!("band index {j}: {e}")))?;
+        }
+        self.apply_nonlocal_group(x, y, first, end, scratch)
+    }
+
+    fn apply_nonlocal_group(
+        &self,
+        x: &ComplexMatrix,
+        y: &mut [Complex64],
+        first: usize,
+        end: usize,
+        scratch: &mut Scratch,
+    ) -> Result<(), SolverError> {
+        self.nonlocal.add_block::<NONLOCAL_BANDS>(
+            &x.as_slice()[first * x.rows()..end * x.rows()],
+            y,
+            x.rows(),
+            end - first,
+            &mut scratch.projections,
+        );
+        if !y.iter().all(finite) {
+            return Err(application(HamiltonianError::NonFinite));
+        }
+        Ok(())
+    }
+
+    fn apply_piece(
+        &self,
+        x: &ComplexMatrix,
+        y: &mut [Complex64],
+        first: usize,
+        end: usize,
+        scratch: &mut Scratch,
+        local_only: bool,
+    ) -> Result<(), SolverError> {
+        if local_only {
+            for j in first..end {
+                self.apply_local_with(
+                    x.column(j),
+                    &mut y[(j - first) * x.rows()..(j - first + 1) * x.rows()],
+                    scratch,
+                )
+                .map_err(|e| SolverError::Application(format!("band index {j}: {e}")))?;
+            }
+            Ok(())
+        } else {
+            self.apply_nonlocal_group(x, y, first, end, scratch)
+        }
+    }
+
     fn apply_with(
+        &self,
+        x: &[Complex64],
+        y: &mut [Complex64],
+        scratch: &mut Scratch,
+    ) -> Result<(), HamiltonianError> {
+        self.apply_local_with(x, y, scratch)?;
+        self.nonlocal.add(x, y, &mut scratch.projections);
+        if !y.iter().all(finite) {
+            return Err(HamiltonianError::NonFinite);
+        }
+        Ok(())
+    }
+    fn apply_local_with(
         &self,
         x: &[Complex64],
         y: &mut [Complex64],
@@ -443,10 +570,6 @@ impl HamiltonianData {
         )?;
         for (i, value) in y.iter_mut().enumerate() {
             *value += self.kinetic[i] * x[i];
-        }
-        self.nonlocal.add(x, y, &mut scratch.projections);
-        if !y.iter().all(finite) {
-            return Err(HamiltonianError::NonFinite);
         }
         Ok(())
     }
@@ -489,38 +612,60 @@ impl LinearOperator for Hamiltonian {
             .try_borrow_mut()
             .map_err(|_| application(HamiltonianError::Busy))?;
         let _region = Span::region("hamiltonian", scratch.len().min(x.cols()).max(1));
+        if x.cols() == 0 {
+            return Ok(());
+        }
         if scratch.len() == 1 || x.cols() <= 1 {
-            for j in 0..x.cols() {
+            let scratch = scratch[0]
+                .scratch
+                .get_mut()
+                .map_err(|_| application(HamiltonianError::Busy))?;
+            for first in (0..x.cols()).step_by(NONLOCAL_BANDS) {
+                let end = (first + NONLOCAL_BANDS).min(x.cols());
                 let _piece = Piece::new();
-                self.data
-                    .apply_with(
-                        x.column(j),
-                        y.column_mut(j),
-                        scratch[0]
-                            .scratch
-                            .get_mut()
-                            .map_err(|_| application(HamiltonianError::Busy))?,
-                    )
-                    .map_err(|e| SolverError::Application(format!("band index {j}: {e}")))?;
+                self.data.apply_group(
+                    x,
+                    &mut y.as_mut_slice()[first * x.rows()..end * x.rows()],
+                    first,
+                    end,
+                    scratch,
+                )?;
             }
             return Ok(());
         }
-        let output = y.as_mut_slice();
-        if scratch.len() < self.pool.workers_created() || x.cols() <= scratch.len() {
-            // With outer k parallelism, use disjoint static scratch. A modulo
-            // mapping of the entire pool onto a smaller inner budget causes
-            // lock collisions even when another scratch slot is free.
-            let count = scratch.len().min(x.cols());
-            let data = &self.data;
-            let scratch = &mut scratch[..count];
-            return self
-                .pool
-                .install(|| apply_static_workers(data, scratch, x, output, 0, x.cols()));
+        // Preserve the FFT's individually stealable bands. Grouping expensive
+        // local work with nonlocal work reduced parallelism in the Mac trial.
+        // The join between phases completes local+kinetic before any NL update.
+        for local_only in [true, false] {
+            let width = if local_only { 1 } else { NONLOCAL_BANDS };
+            let output = y.as_mut_slice();
+            if !local_only && x.cols() <= NONLOCAL_BANDS {
+                self.data.apply_nonlocal_group(
+                    x,
+                    output,
+                    0,
+                    x.cols(),
+                    scratch[0]
+                        .scratch
+                        .get_mut()
+                        .map_err(|_| application(HamiltonianError::Busy))?,
+                )?;
+            } else if scratch.len() < self.pool.workers_created() || x.cols() <= scratch.len() {
+                // Outer-k parallelism uses disjoint static scratch, as before.
+                let count = scratch.len().min(x.cols().div_ceil(width));
+                let data = &self.data;
+                let workers = &mut scratch[..count];
+                self.pool.install(|| {
+                    apply_static_workers(data, workers, x, output, 0, x.cols(), local_only)
+                })?;
+            } else {
+                let workers = &scratch[..];
+                let data = &self.data;
+                self.pool
+                    .install(|| apply_workers(data, workers, x, output, 0, x.cols(), local_only))?;
+            }
         }
-        let scratch = &scratch[..];
-        let data = &self.data;
-        self.pool
-            .install(|| apply_workers(data, scratch, x, output, 0, x.cols()))
+        Ok(())
     }
 }
 
@@ -533,11 +678,13 @@ fn apply_workers(
     y: &mut [Complex64],
     first: usize,
     end: usize,
+    local_only: bool,
 ) -> Result<(), SolverError> {
-    // One fixed band per piece. Scratch belongs to a worker slot and is
+    let width = if local_only { 1 } else { NONLOCAL_BANDS };
+    // One local band or fixed nonlocal band group per piece. Scratch belongs to a worker slot and is
     // allocated at Hamiltonian construction, never per band. No nested work
     // runs while holding a slot. Modulo bounds concurrency under outer-k work.
-    if end - first == 1 {
+    if end - first <= width {
         let slot = WorkerPool::current_worker_index().unwrap_or(0) % workers.len();
         let mut scratch = workers[slot]
             .scratch
@@ -545,20 +692,20 @@ fn apply_workers(
             .map_err(|_| application(HamiltonianError::Busy))?;
         let _piece = Piece::new();
         return data
-            .apply_with(x.column(first), y, &mut scratch)
+            .apply_piece(x, y, first, end, &mut scratch, local_only)
             .map_err(|e| SolverError::Application(format!("band index {first}: {e}")));
     }
-    let middle = first + (end - first) / 2;
+    let middle = first + (end - first).div_ceil(width) / 2 * width;
     let (left_output, right_output) = y.split_at_mut((middle - first) * x.rows());
     let (left, right) = WorkerPool::join(
         || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                apply_workers(data, workers, x, left_output, first, middle)
+                apply_workers(data, workers, x, left_output, first, middle, local_only)
             }))
         },
         || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                apply_workers(data, workers, x, right_output, middle, end)
+                apply_workers(data, workers, x, right_output, middle, end, local_only)
             }))
         },
     );
@@ -573,33 +720,41 @@ fn apply_static_workers(
     y: &mut [Complex64],
     first: usize,
     end: usize,
+    local_only: bool,
 ) -> Result<(), SolverError> {
+    let width = if local_only { 1 } else { NONLOCAL_BANDS };
     if workers.len() == 1 {
         let _piece = Piece::new();
         let scratch = workers[0]
             .scratch
             .get_mut()
             .map_err(|_| application(HamiltonianError::Busy))?;
-        for j in first..end {
-            let offset = (j - first) * x.rows();
-            data.apply_with(x.column(j), &mut y[offset..offset + x.rows()], scratch)
-                .map_err(|e| SolverError::Application(format!("band index {j}: {e}")))?;
+        for begin in (first..end).step_by(width) {
+            let stop = (begin + width).min(end);
+            data.apply_piece(
+                x,
+                &mut y[(begin - first) * x.rows()..(stop - first) * x.rows()],
+                begin,
+                stop,
+                scratch,
+                local_only,
+            )?;
         }
         return Ok(());
     }
     let left_count = workers.len() / 2;
-    let middle = first + (end - first) * left_count / workers.len();
+    let middle = first + (end - first).div_ceil(width) * left_count / workers.len() * width;
     let (left, right) = workers.split_at_mut(left_count);
     let (left_output, right_output) = y.split_at_mut((middle - first) * x.rows());
     let (left, right) = WorkerPool::join(
         || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                apply_static_workers(data, left, x, left_output, first, middle)
+                apply_static_workers(data, left, x, left_output, first, middle, local_only)
             }))
         },
         || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                apply_static_workers(data, right, x, right_output, middle, end)
+                apply_static_workers(data, right, x, right_output, middle, end, local_only)
             }))
         },
     );
@@ -775,6 +930,129 @@ mod fused_tests {
                         .collect(),
                 })
                 .collect(),
+        }
+    }
+
+    fn blocked_bits<const G: usize>(op: &NonlocalOperator, rows: usize) {
+        for bands in 1..=G {
+            let x = vector(rows * bands, 71);
+            let mut expected = vector(rows * bands, 31);
+            let mut actual = expected.clone();
+            let mut scratch = vec![Complex64::default(); op.scratch_len() * G];
+            for b in 0..bands {
+                op.add(
+                    &x[b * rows..(b + 1) * rows],
+                    &mut expected[b * rows..(b + 1) * rows],
+                    &mut scratch,
+                );
+            }
+            op.add_block::<G>(&x, &mut actual, rows, bands, &mut scratch);
+            assert_eq!(bits(&expected), bits(&actual), "G={G}, bands={bands}");
+        }
+    }
+
+    #[test]
+    fn band_block_preserves_every_bit_and_tail() {
+        for (atoms, rows, channels) in [(2, 67, 4), (8, 129, 8), (20, 73, 12), (3, 71, 0)] {
+            let op = nonlocal_fixture(atoms, rows, channels);
+            blocked_bits::<1>(&op, rows);
+            blocked_bits::<2>(&op, rows);
+            blocked_bits::<4>(&op, rows);
+            blocked_bits::<8>(&op, rows);
+            blocked_bits::<16>(&op, rows);
+        }
+    }
+
+    fn block_measure<const G: usize>(op: &NonlocalOperator, rows: usize) {
+        let bands: usize = 32;
+        let x = vector(rows * bands, 71);
+        let mut y = vec![Complex64::default(); rows * bands];
+        let mut scratch = vec![Complex64::default(); op.scratch_len() * G.max(1)];
+        let mut samples = [0.0; 31];
+        for sample in &mut samples {
+            let start = Instant::now();
+            for _ in 0..4 {
+                y.fill(Complex64::default());
+                for first in (0..bands).step_by(G.max(1)) {
+                    let end = (first + G.max(1)).min(bands);
+                    if G == 0 {
+                        op.add(
+                            &x[first * rows..end * rows],
+                            &mut y[first * rows..end * rows],
+                            &mut scratch,
+                        );
+                    } else {
+                        op.add_block::<G>(
+                            black_box(&x[first * rows..end * rows]),
+                            &mut y[first * rows..end * rows],
+                            rows,
+                            end - first,
+                            &mut scratch,
+                        );
+                    }
+                }
+                black_box(&y);
+            }
+            *sample = start.elapsed().as_secs_f64() * 1e6 / (4 * bands) as f64;
+        }
+        samples.sort_by(f64::total_cmp);
+        let footprint: usize = op
+            .atoms
+            .iter()
+            .flat_map(|a| &a.columns)
+            .map(|c| c.len() * 16)
+            .sum();
+        println!(
+            "{},{rows},{},{G},{:.6},{footprint},{}",
+            op.atoms.len(),
+            op.max_channels,
+            samples[15],
+            2 * footprint * bands.div_ceil(G.max(1)) / bands
+        );
+    }
+
+    #[test]
+    #[ignore] // cargo test --release -p dft-physics band_block_microbenchmark -- --ignored --nocapture
+    fn band_block_microbenchmark() {
+        println!(
+            "atoms,rows,channels,g,us_per_vector,projector_bytes,projector_read_bytes_per_vector"
+        );
+        for (atoms, rows, channels) in [(2, 749, 4), (8, 2969, 4), (20, 8193, 12)] {
+            let op = nonlocal_fixture(atoms, rows, channels);
+            block_measure::<0>(&op, rows);
+            block_measure::<1>(&op, rows);
+            block_measure::<2>(&op, rows);
+            block_measure::<4>(&op, rows);
+            block_measure::<8>(&op, rows);
+            block_measure::<16>(&op, rows);
+        }
+    }
+
+    #[test]
+    fn grouped_hamiltonian_matches_scalar_across_workers() {
+        for channels in [0, 4, 8, 12] {
+            let h = synthetic([12, 12, 12], [0.13, 0.07, 0.11], channels);
+            let rows = h.dimension();
+            let x = ComplexMatrix::new(rows, 17, vector(rows * 17, 91)).unwrap();
+            let mut expected = x.clone();
+            for b in 0..x.cols() {
+                h.apply(x.column(b), expected.column_mut(b)).unwrap();
+            }
+            for threads in [1, 2, 3, 8] {
+                let h = synthetic([12, 12, 12], [0.13, 0.07, 0.11], channels)
+                    .with_band_threads(threads)
+                    .unwrap();
+                let mut actual = x.clone();
+                h.apply_block(&x, &mut actual).unwrap();
+                assert_eq!(bits(expected.as_slice()), bits(actual.as_slice()));
+            }
+            // Also exercise a bounded inner budget on a larger shared executor.
+            let h = synthetic([12, 12, 12], [0.13, 0.07, 0.11], channels)
+                .with_band_pool(3, WorkerPool::new(8).unwrap())
+                .unwrap();
+            let mut actual = x.clone();
+            h.apply_block(&x, &mut actual).unwrap();
+            assert_eq!(bits(expected.as_slice()), bits(actual.as_slice()));
         }
     }
 

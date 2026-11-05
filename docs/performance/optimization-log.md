@@ -1,5 +1,151 @@
 # Optimization log (newest first)
 
+## P15B — band-blocked nonlocal traversal (2026-11-05; dev08 pending)
+
+Derived from note [H, hypothesis 1](../research/qe-study/qe-hpsi-and-fft.md).
+No QE source was accessed. Baseline/current main is
+`ce64b57437e2cb7b14804a4bdd15fb252dab6286`; candidate is the uncommitted
+`task/P15B-NONLOCAL-BLOCK` diff. Motivation is the user-relayed dev08 A43/A48/A50
+profile: about 0.2 ms/nonlocal vector; sample count and binary provenance were
+not supplied anew. This is not a new reproduced dev08 result. A43 blocked output
+rows; this experiment instead shares projector elements across independent bands.
+
+The projection retains the exact sequential complex sum from +0, with no
+reassociation. D multiplication retains ascending channel order, and output
+updates retain atom/channel order. Groups are fixed at four bands, independent
+of threads, with aligned static and stealable worker partitions and odd tails.
+A one-band tail uses the unchanged scalar kernel (the initial generic one-band
+loop was slower). Local FFT arithmetic and scalar application are unchanged;
+T=1 processes local applications sequentially before each grouped nonlocal pass.
+At multiple workers, the local phase retains the old individually stealable band
+pieces; a join precedes the fixed-group nonlocal phase. No FFT kernel is changed.
+The initial combined local/nonlocal grouping was rejected: 30 alternating si8
+T=8 pairs gave H 129.128 -> 209.620 us/vector, despite nonlocal 105.922 -> 90.463
+us/vector. Raw `grouped-local-pairs.json` preserves this failed scheduling trial.
+The final two-phase candidate prevents FFT parallelism from being reduced by
+nonlocal grouping; remaining nonlocal parallelism loss is still a dev08 risk. Worker scratch is allocated at setup;
+no production clocks, counters, logging, allocation, unsafe, or feature-specific
+nonlocal path was introduced. MKL uses this same Rust kernel.
+
+Reproduction tools and evidence live under
+`crates/dft-physics/tests/evidence/p15b/` and
+`crates/dft-physics/tests/p15b_measure.py`. The script temporarily instruments
+baseline and candidate source, restores the source in `finally`, and writes
+separate measurement binaries outside the repository. It counts logical
+projector-element visits, not measured cache traffic. Counter/timer results are
+observations, not production timing acceptance. `h_us_per_vector` sums H call
+elapsed time (overlapping outer-k calls included); `nl_us_per_vector` sums
+nonlocal elapsed time, including scalar energy audits. Their vector denominators
+are recorded separately. No solver steps or tolerances are changed.
+
+The direct private-kernel microbenchmark is an ignored physics unit test instead
+of a numerics example: dft-numerics cannot depend on dft-physics without a cycle,
+and duplicating the kernel would fail to measure the production implementation.
+It covers g=1,2,4,8,16 plus the scalar oracle (g=0 in output), with 31 samples
+of 4 repetitions of 32 vectors. Each timing includes output clearing. Shapes
+are synthetic (2x749x4, 8x2969x4, 20x8193x12); real Si shape/column counts are
+also printed by the instrumented SCF's operator destructor. Four bands are a
+provisional candidate, not an adopted general default: g=8 offers little gain
+on small shapes and g=16 regresses on the large synthetic shape.
+
+Projector storage is 16*N_G*sum(atom channels) bytes; two passes per group read
+2*storage*ceil(bands/g) bytes, versus 2*storage*bands in the scalar path.
+Footprints are 95,872 B, 1,520,128 B and 31,461,120 B for the three synthetic
+shapes. The si8 surrogate exceeds dev08's user-reported 1 MiB L2; the 20-atom
+shape also stresses larger caches. This source-level model excludes coefficient,
+output, weight and cache-line traffic and makes no claim of hardware load counts.
+
+### Final Mac observations (30 alternating pairs per condition)
+
+Raw `pairs.json` / `pairs.csv` contain 240 complete SCFs (AB/BA alternating),
+binary/UPF SHA-256, load per run, shapes, counters, energies and density hashes.
+No builds overlapped these pairs. This is a loaded arm64 Mac, not dev08;
+instrumented wall times are secondary observations. A ratio above one is slower.
+
+| Case | T | Nonlocal us/vector, before -> after | H us/vector, before -> after | Median paired H ratio | Wall s, before -> after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| si8 | 1 | 93.132 -> 87.808 | 434.636 -> 430.644 | 0.9901 | 2.5563 -> 2.5498 |
+| si8 | 8 | 106.453 -> 99.883 | 128.303 -> 147.224 | 1.1459 | 1.2543 -> 1.3002 |
+| k444s | 1 | 5.892 -> 5.747 | 133.020 -> 134.354 | 1.0103 | 2.4769 -> 2.4890 |
+| k444s | 8 | 8.003 -> 8.474 | 209.257 -> 210.596 | 1.0061 | 0.5983 -> 0.6010 |
+
+The remaining si8 T=8 H regression is material (about 14.7% in the medians,
+3.7% wall); k444s nonlocal also regresses at T=8. This candidate is **not accepted
+as a performance default**. The nonlocal reuse benefit must outweigh reduced
+nonlocal parallelism on dev08 before merge. Splitting the local phase reduced
+the initial 62.3% H regression, but did not remove the whole tradeoff.
+
+Actual Si8 uses Si.pz-vbc.UPF (hash in raw evidence), 2,969 rows, 8 atoms, 32
+columns: 1,520,128 B. Each run has 2,265 H vectors plus 320 scalar nonlocal energy
+audit vectors. Total nonlocal logical reads are 7,859,061,760 -> 3,131,463,680 B.
+Subtracting those unchanged audits gives H reads 6,886,179,840 -> 2,158,581,760 B,
+or **3,040,256 -> 953,016.230 B per H vector**, identical at T=1/8. Remainders
+explain why the reduction is 68.65%, rather than 75%. For k444s, 11,181 H vectors
+and 13,997 total nonlocal vectors read 2,684,762,880 -> 1,173,515,776 B in total;
+the saved 1,511,247,104 B are entirely H-side (audit unchanged). Real k-dependent
+projector footprints range from 95,104 to 97,664 B (743 to 763 rows, 8 columns).
+
+Microbenchmark medians in us/vector (g=1 uses the original scalar kernel):
+
+| Atoms / rows / channels per atom | g=1 | g=2 | g=4 | g=8 | g=16 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 2 / 749 / 4 | 8.336 | 5.583 | 5.303 | 5.209 | 5.714 |
+| 8 / 2969 / 4 | 92.868 | 87.384 | 81.812 | 81.897 | 89.924 |
+| 20 / 8193 / 12 | 1940.204 | 1839.984 | 1804.863 | 2126.001 | 3136.312 |
+
+The first small-shape scalar timing differs from its mathematically identical
+g=1 repeat (11.402 vs 8.336 us), demonstrating startup/load noise; no small-shape
+speedup is claimed from that pair. g=4 and g=8 are close for Si-like shapes;
+g=4 is preferable for the 20-atom variant (g=8/16 regress), while retaining
+more independent work pieces. Final selection remains provisional on dev08.
+
+Final gates: `scripts/check.sh` exit 0 (all four gates),
+`cargo check --features mkl --all-targets` exit 0, both final five-case
+`bench_scf --require-identical` runs exit 0, and README generator/freshness tests
+exit 0. Final energy deltas are exactly 0 Ha and all ten density hashes match;
+ordinary/certificate Davidson and H-vector counts also match. Final paired
+measurement script exit 0; all 240 energies and hashes agree within each case.
+
+Correctness: all five bench_scf cases gamma/k222s/k222/k444s/si8 at T=1 and T=8
+have exactly equal serialized energy values, density SHA-256, SCF counts,
+Davidson counts and H-vector counts against the same-HEAD baseline. Tests also
+compare every complex component's bits for g=1,2,4,8,16 and all tails; empty
+channels, bounded inner budgets, nonzero initial outputs and 17-band blocks;
+constructed s/p projectors with 1/2/3 radial projectors per l on cubic/skewed/
+elongated cells with 2/8/20 atoms at nonzero k. Existing spin and NLCC tests run
+in the workspace gate. No cross-backend bit-identity claim is made.
+
+Commands (run from root; UPF is external and never committed):
+
+```sh
+cargo test --release -p dft-physics --lib band_block -- --include-ignored --nocapture
+python3 crates/dft-physics/tests/p15b_measure.py build --out /tmp/p15b-measure
+python3 crates/dft-physics/tests/p15b_measure.py measure --out /tmp/p15b-measure --upf /absolute/path/Si.pz-vbc.UPF --pairs 30
+python3 -I scripts/bench_scf.py --binary /tmp/p15b-baseline --upf /absolute/path/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --threads 1 --repeats 1 --record /tmp/p15b-baseline-t1.json
+# Repeat T=8; then run the candidate with --baseline and --require-identical.
+cargo check --features mkl --all-targets
+scripts/check.sh
+```
+
+Initial failures retained: relative UPF path failed because bench_scf changes the
+input directory (exit 3; corrected to absolute path); initial workspace clippy
+failed on a redundant test cast (exit 1; fixed). A measurement build temporarily
+replaced the source before an earlier microbenchmark compile finished: that
+binary selected zero tests and its result was discarded; the final benchmark
+is rebuilt from the restored candidate. Initial microtimings overlapping builds
+were discarded. README regeneration produces no changed output: no accepted
+performance claim is added while dev08 acceptance remains open. Dashboard/
+registry edits and remote uploads are outside this implementer's OWNED_FILES.
+
+Dev08 request: review/commit the candidate, then run same-HEAD baseline/candidate
+pure and MKL builds with hashes and flags, MKL_NUM_THREADS=1, the five exact-bit
+cases at T=1/8 (also T=4/16 per performance brief), and the microbenchmark.
+Collect at least 30 alternating si8/k444s pairs, H/nonlocal time per vector,
+logical read counters, load and >=30 nonlocal profile samples. Report any
+parallelism regression; do not accept based on the Mac or read-volume model.
+The historical pre-optimization baseline was not rebuilt here, only current
+main versus candidate. No remote changes were made.
+
 ## P14A — work accounting and rejected schedules (2026-11-05)
 
 Derived from study note 1 H2/H6/H7; existing notes and outputs only, no QE source.

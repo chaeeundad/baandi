@@ -36,6 +36,7 @@ pub struct Config {
     pub pseudopotentials: BTreeMap<String, PathBuf>,
     pub basis: Basis,
     pub xc: Xc,
+    pub spin: Option<SpinConfig>,
     pub scf: Option<Scf>,
     pub output: Option<Output>,
     pub bands: Option<Bands>,
@@ -142,6 +143,8 @@ pub struct Xc {
 pub enum Functional {
     #[serde(rename = "lda-pz")]
     LdaPz,
+    #[serde(rename = "lda-pw")]
+    LdaPw,
     #[serde(rename = "pbe")]
     Pbe,
 }
@@ -149,8 +152,112 @@ impl Functional {
     pub fn engine(&self) -> dft_engine::Functional {
         match self {
             Self::LdaPz => dft_engine::Functional::LdaPz,
+            Self::LdaPw => dft_engine::Functional::LdaPw,
             Self::Pbe => dft_engine::Functional::Pbe,
         }
+    }
+}
+/// Additive fixed-sector input; magnetic seeds are provenance only.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpinConfig {
+    pub mode: SpinMode,
+    pub n_up: Option<usize>,
+    pub n_down: Option<usize>,
+    pub total_moment: Option<f64>,
+    pub axis: Option<String>,
+    pub axis_cartesian: Option<[f64; 3]>,
+    pub initial_moment_seed: Option<f64>,
+}
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SpinMode {
+    Unpolarized,
+    Collinear,
+}
+impl Config {
+    pub fn collinear(&self) -> bool {
+        self.spin
+            .as_ref()
+            .is_some_and(|s| s.mode == SpinMode::Collinear)
+    }
+    pub fn spin_sector(
+        &self,
+        electrons: f64,
+    ) -> Result<Option<dft_engine::collinear::SpinSector>, ConfigError> {
+        let fail = |s: &str| ConfigError::Invalid(s.into());
+        let Some(s) = &self.spin else { return Ok(None) };
+        if s.mode == SpinMode::Unpolarized {
+            if s.n_up.is_some()
+                || s.n_down.is_some()
+                || s.total_moment.is_some()
+                || s.axis.is_some()
+                || s.axis_cartesian.is_some()
+                || s.initial_moment_seed.is_some()
+            {
+                return Err(fail(
+                    "spin.mode: unpolarized input cannot carry spin-channel controls; remove them or select collinear",
+                ));
+            }
+            return Ok(None);
+        }
+        if self.xc.functional.engine() == dft_engine::Functional::LdaPz {
+            return Err(fail(
+                "xc.spin: required polarized capability unavailable for lda-pz; select pbe or lda-pw",
+            ));
+        }
+        if self.basis.time_reversal() {
+            return Err(fail(
+                "symmetry.operations: reduction is not valid for this model; use the full mesh with basis.ktime_reversal = false",
+            ));
+        }
+        let (n_up, n_down) = match (s.n_up, s.n_down, s.total_moment) {
+            (Some(u), Some(d), None) => (u, d),
+            (None, None, Some(m)) => {
+                let up = (electrons + m) / 2.0;
+                let down = (electrons - m) / 2.0;
+                if !m.is_finite()
+                    || up < 0.0
+                    || down < 0.0
+                    || up >= usize::MAX as f64
+                    || down >= usize::MAX as f64
+                    || (up - up.round()).abs() > 1e-10
+                    || (down - down.round()).abs() > 1e-10
+                {
+                    return Err(fail(
+                        "spin.constraint: fixed occupations require integer channel counts within capacity; correct total_moment",
+                    ));
+                }
+                (up.round() as usize, down.round() as usize)
+            }
+            _ => {
+                return Err(fail(
+                    "spin.constraint: select exactly one fixed sector; supply both n_up/n_down or total_moment",
+                ));
+            }
+        };
+        if s.axis.is_some() && s.axis_cartesian.is_some() {
+            return Err(fail(
+                "spin.axis: competing axis definitions; supply axis or axis_cartesian",
+            ));
+        }
+        let axis_cartesian = match s.axis.as_deref() {
+            None => s.axis_cartesian.unwrap_or([0.0, 0.0, 1.0]),
+            Some("x") => [1.0, 0.0, 0.0],
+            Some("y") => [0.0, 1.0, 0.0],
+            Some("z") => [0.0, 0.0, 1.0],
+            _ => return Err(fail("spin.axis: unsupported label; select x, y or z")),
+        };
+        let sector = dft_engine::collinear::SpinSector {
+            n_up,
+            n_down,
+            axis_cartesian,
+            initial_moment_seed: s.initial_moment_seed,
+        };
+        sector
+            .validate(electrons)
+            .map_err(|e| fail(&e.to_string()))?;
+        Ok(Some(sector))
     }
 }
 /// Optional SCF controls; omitted fields use engine defaults.

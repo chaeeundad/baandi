@@ -229,10 +229,9 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
                 "set a positive integer",
             ));
         }
-        if s.mixing
-            .as_deref()
-            .is_some_and(|s| s != "linear" && s != "pulay")
-        {
+        if s.mixing.as_deref().is_some_and(|s| {
+            s != "linear" && s != "pulay" && !(config.collinear() && s == "kerker-pulay")
+        }) {
             return Err(fail("scf.mixing", "unknown mixer", "use linear or pulay"));
         }
     }
@@ -375,8 +374,26 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             "use potentials and composition giving a positive integral count",
         ));
     }
+    let sector = config.spin_sector(electrons)?;
+    if sector.is_some()
+        && (config.bands.is_some()
+            || config.dos.is_some()
+            || config
+                .output
+                .as_ref()
+                .is_some_and(|o| o.volumetric.is_some()))
+    {
+        return Err(fail(
+            "spin.outputs",
+            "legacy band/DOS/volumetric requests are not spin-resolved",
+            "remove these requests; spin runs write channel density cubes and JSON",
+        ));
+    }
+    let occupied = sector
+        .as_ref()
+        .map_or(electrons.round() as usize / 2, |s| s.n_up.max(s.n_down));
     let electrons = electrons.round() as usize;
-    if !electrons.is_multiple_of(2) {
+    if sector.is_none() && !electrons.is_multiple_of(2) {
         return Err(Finding::error(
             "system.atoms / pseudopotentials",
             FindingData::ElectronParity { electrons },
@@ -385,24 +402,29 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             ),
         ));
     }
-    let default_bands = (electrons / 2)
-        .checked_add(options.extra_bands)
-        .ok_or_else(|| {
-            fail(
-                "scf.extra_bands",
-                "band count overflow",
-                "reduce extra_bands",
-            )
-        })?;
+    let default_bands = occupied.checked_add(options.extra_bands).ok_or_else(|| {
+        fail(
+            "scf.extra_bands",
+            "band count overflow",
+            "reduce extra_bands",
+        )
+    })?;
     let bands = options.bands.unwrap_or(default_bands);
-    if bands < electrons / 2 {
+    if sector.is_some() && bands <= occupied {
+        return Err(fail(
+            "spin.constraint",
+            "fixed channels require an empty band",
+            "increase scf.nbands above max(n_up,n_down)",
+        ));
+    }
+    if bands < occupied {
         return Err(fail(
             "scf.nbands",
             "too few bands for occupied electron pairs",
             "set nbands >= electrons/2",
         ));
     }
-    if !config.basis.legacy_gamma() && bands <= electrons / 2 {
+    if !config.basis.legacy_gamma() && bands <= occupied {
         return Err(fail(
             "scf.nbands / scf.extra_bands",
             "k-point gap certification requires an empty band",
@@ -471,8 +493,13 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         format!("explicit {:?}", config.basis.kpoints)
     };
     let summary = format!(
-        "Valid: {}. Will compute spin-unpolarized {} SCF for UPF composition {} (labels {}; {} atoms, {electrons} electrons), k mesh {} ({} resolved points), cutoff {} Ry, {bands} bands, {} threads.",
+        "Valid: {}. Will compute {} {} SCF for UPF composition {} (labels {}; {} atoms, {electrons} electrons), k mesh {} ({} resolved points), cutoff {} Ry, {bands} bands, {} threads.",
         config.system.name,
+        if sector.is_some() {
+            "collinear fixed-sector"
+        } else {
+            "spin-unpolarized"
+        },
         options.functional.name(),
         material,
         composition,

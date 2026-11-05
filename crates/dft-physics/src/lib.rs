@@ -6,6 +6,7 @@ pub mod gga;
 pub mod hamiltonian;
 pub mod hartree;
 pub mod kinetic;
+pub mod spin;
 pub mod volumetric;
 pub mod xc;
 

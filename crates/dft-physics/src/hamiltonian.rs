@@ -229,6 +229,31 @@ impl NonlocalOperator {
             }
         }
     }
+    /// Projection storage required by `apply_into`.
+    pub fn scratch_len(&self) -> usize {
+        2 * self.max_channels
+    }
+    /// Caller-owned projection scratch; no allocation per orbital.
+    pub fn apply_into(
+        &self,
+        x: &[Complex64],
+        y: &mut [Complex64],
+        scratch: &mut [Complex64],
+    ) -> Result<(), HamiltonianError> {
+        if x.len() != self.basis.len() || y.len() != x.len() || scratch.len() != self.scratch_len()
+        {
+            return Err(HamiltonianError::Shape);
+        }
+        if !x.iter().all(finite) {
+            return Err(HamiltonianError::NonFinite);
+        }
+        y.fill(Complex64::default());
+        self.add(x, y, scratch);
+        if !y.iter().all(finite) {
+            return Err(HamiltonianError::NonFinite);
+        }
+        Ok(())
+    }
     pub fn apply(&self, x: &[Complex64], y: &mut [Complex64]) -> Result<(), HamiltonianError> {
         if x.len() != self.basis.len() || y.len() != x.len() {
             return Err(HamiltonianError::Shape);
@@ -374,6 +399,20 @@ impl Hamiltonian {
         } else {
             potential.as_standard_layout().into_owned()
         };
+        Ok(())
+    }
+    /// Copy local samples into retained storage, without replacing its allocation.
+    pub fn copy_local_potential(
+        &mut self,
+        potential: &Array3<f64>,
+    ) -> Result<(), HamiltonianError> {
+        if potential.shape() != self.data.potential.shape() {
+            return Err(HamiltonianError::Shape);
+        }
+        if potential.iter().any(|v| !v.is_finite()) {
+            return Err(HamiltonianError::NonFinite);
+        }
+        self.data.potential.assign(potential);
         Ok(())
     }
     /// Read-only access for term-by-term orbital energy audits.

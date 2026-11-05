@@ -771,3 +771,13 @@ contains proposal, decision, candidate and recheck; existing results are untouch
 Even approved proposals are never applied by this CLI. There are no network calls,
 UPF downloads or mandatory agent dependencies. See the linked contract for the
 strict full-file unified-diff subset and versioned proposal fields.
+
+## Collinear fixed integer spin (P13B / MF03)
+
+See [the collinear guide](user/collinear-spin.md) for `[spin]` keys, full-mesh
+requirements, fixed-sector interpretation, certificates, reproducible evidence
+and limits. Supported polarized XC choices are `pbe` and `lda-pw`; the latter
+also supports unpolarized runs. `lda-pz` remains unpolarized only. A collinear
+`run` writes the version 2 spin result profile and channel/total/magnetization
+cubes; omitted spin settings preserve version 1 output. `validate` and `run`
+share sector/parity/capacity, axis, unsupported-functional and symmetry checks.

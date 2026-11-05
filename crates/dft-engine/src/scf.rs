@@ -1,3 +1,5 @@
+#[path = "collinear.rs"]
+pub mod collinear;
 #[path = "session.rs"]
 pub mod session;
 use crate::Functional;
@@ -428,6 +430,7 @@ impl ScfProblem {
                 weight: 1.0,
             }],
             None,
+            None,
         )
     }
     /// Construct a weighted Bloch SCF problem. Coordinates are fractional
@@ -462,8 +465,10 @@ impl ScfProblem {
             options,
             points,
             Some(minimum_gap_hartree),
+            None,
         )
     }
+    #[allow(clippy::too_many_arguments)]
     fn construct(
         cell: &Cell,
         atoms: &[Atom],
@@ -471,6 +476,7 @@ impl ScfProblem {
         options: ScfOptions,
         points: &[KPoint],
         minimum_gap: Option<f64>,
+        channel: Option<usize>,
     ) -> Result<Self, ScfError> {
         kpoints::validate(points)
             .map_err(|_| ScfError::InvalidInput("invalid k-point quadrature"))?;
@@ -518,6 +524,11 @@ impl ScfProblem {
                         "UPF label mismatches PBE; explicit allow_functional_override required",
                     ));
                 }
+                if options.functional == Functional::LdaPw {
+                    return Err(ScfError::InvalidInput(
+                        "UPF label mismatches LDA-PW; explicit allow_functional_override required",
+                    ));
+                }
                 return Err(ScfError::UnsupportedFunctional(
                     s.potential.functional().to_string(),
                 ));
@@ -552,10 +563,10 @@ impl ScfProblem {
             ));
         }
         let count = electrons.round() as usize;
-        if !count.is_multiple_of(2) {
+        if channel.is_none() && !count.is_multiple_of(2) {
             return Err(ScfError::OddElectronCount(electrons));
         }
-        let occupied = count / 2;
+        let occupied = channel.unwrap_or(count / 2);
         let bands = options.bands.unwrap_or(
             occupied
                 .checked_add(options.extra_bands)
@@ -641,7 +652,13 @@ impl ScfProblem {
             .collect::<Result<Vec<_>, _>>()?;
         let ewald = ewald::energy(cell, &ions, EwaldOptions::default())?;
         let occupations = (0..bands)
-            .map(|b| if b < occupied { 2.0 } else { 0.0 })
+            .map(|b| {
+                if b < occupied {
+                    if channel.is_some() { 1.0 } else { 2.0 }
+                } else {
+                    0.0
+                }
+            })
             .collect();
         Ok(Self {
             cell: cell.clone(),

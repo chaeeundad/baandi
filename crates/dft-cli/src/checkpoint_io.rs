@@ -477,6 +477,7 @@ wire_struct!(
 #[serde(deny_unknown_fields)]
 enum WFunctional {
     LdaPz,
+    LdaPw,
     Pbe,
 }
 impl Wire for Functional {
@@ -484,12 +485,14 @@ impl Wire for Functional {
     fn encode(&self, _bytes: &mut Vec<u8>) -> Result<Self::Repr, Error> {
         Ok(match self {
             Self::LdaPz => WFunctional::LdaPz,
+            Self::LdaPw => WFunctional::LdaPw,
             Self::Pbe => WFunctional::Pbe,
         })
     }
     fn decode(w: Self::Repr, _bytes: &[u8], _cursor: &mut usize) -> Result<Self, Error> {
         Ok(match w {
             WFunctional::LdaPz => Self::LdaPz,
+            WFunctional::LdaPw => Self::LdaPw,
             WFunctional::Pbe => Self::Pbe,
         })
     }

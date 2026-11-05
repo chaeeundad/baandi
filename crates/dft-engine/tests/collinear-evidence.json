@@ -1,0 +1,573 @@
+{
+  "task_id": "P13B-COLLINEAR-SPIN",
+  "record_kind": "synthetic_validation_and_parent_equivalence",
+  "parent_commit": "fa5de50197a7a10a5abef37aa3914d8e3a681a6b",
+  "platform": {
+    "system": "Darwin",
+    "release": "27.0.0",
+    "machine": "arm64"
+  },
+  "source_sha256": {
+    "crates/dft-engine/tests/common/mod.rs": "603c0d743850e013e64dce2d567c074c84fcb338dc257db3e3744aafc57c6627",
+    "crates/dft-engine/tests/collinear.rs": "1ee917490935d3d40a7865b982bc2129ef893171774a717a09b1262f6bce6633",
+    "crates/dft-cli/tests/common/mod.rs": "d3b7e4f858c5c122e0aa473f6cff7a070e29391b80c20aa42179ab15205dbefb",
+    "crates/dft-cli/tests/spin.rs": "5b0d05158daf36c4ef12ebc3a418b7be665e4474a97234bf516211575a90c2cb",
+    "crates/dft-cli/tests/validate_spin_results.py": "44f1da64a5db24fbb3a1babf8d19ca577d5da151f69d484753402b8bc0a78395",
+    "crates/dft-physics/tests/spin_oracles.rs": "5d658695e4ac682e6530497b57075722e648a4e2f2b0034be1bfe22fc19061c1",
+    "crates/dft-physics/tests/spin_grid.rs": "738eac43df0aeee849bbfef9b58a27202bbc2b461f5a65338b57c94ec6d756e8",
+    "crates/dft-physics/src/spin.rs": "4c0650a732ff767f6f8b5c0f2dc8f957fac904b040741ae13285548d9d62681d",
+    "crates/dft-physics/src/hamiltonian.rs": "2b9a63dcc9f97a2fbcdc348620b08db507f6501e191a97277e9de3c5d902886f",
+    "crates/dft-engine/src/collinear.rs": "2fc11cb7702192cd13ebb533908e88f8e6b3f964628991b2851907f814327630",
+    "crates/dft-engine/src/scf.rs": "fe105082fe84b69d51bc5707d538927b92a47596464f13109492c20a65f922e4",
+    "crates/dft-engine/src/functional.rs": "e984af75d934ef3edb0822d97b3e8ed68b14eb2d20f1f641d11c1380668d20a3",
+    "crates/dft-cli/src/config.rs": "ae317b73aaa2f3ac876f24d9bb897b818ac1acdf50bdb9af96c315c875809404",
+    "crates/dft-cli/src/preflight.rs": "da755388864a134bd58b49eeec90226fc42af810e8a2109eef022c2c59c74757",
+    "crates/dft-cli/src/spin_run.rs": "08fb9eba402fa699c7be7f49c95d7f3248a42edd955e6211ddc2d8becb502259",
+    "crates/dft-cli/src/run.rs": "eb78885b0dbc4e6d40580d19ac01f70ac8d10564d3a76bb0fb530b802010cea4"
+  },
+  "frozen_caps": {
+    "uniform_energy_ha_per_electron": 1e-12,
+    "potential_relative": 1e-08,
+    "potential_near_zero_absolute_ha": 1e-10,
+    "zero_spin_energy_ha": 1e-10,
+    "zero_spin_density_bohr_minus_3_over_2": 1e-09,
+    "iteration_difference": 1,
+    "number_moment_electrons": "1e-10 * max(1,N)"
+  },
+  "matrix": [
+    {
+      "geometry_index": 0,
+      "mesh_index": 0,
+      "functional": "LdaPw",
+      "status": "certified_reduction",
+      "energy_difference_ha": 8.881784197001252e-16,
+      "density_distance_bohr_minus_3_over_2": 8.634551330978483e-17,
+      "spin_iterations": 17,
+      "unpolarized_iterations": 17
+    },
+    {
+      "geometry_index": 0,
+      "mesh_index": 0,
+      "functional": "Pbe",
+      "status": "certified_reduction",
+      "energy_difference_ha": 1.5543122344752192e-15,
+      "density_distance_bohr_minus_3_over_2": 5.614908954266079e-17,
+      "spin_iterations": 20,
+      "unpolarized_iterations": 20
+    },
+    {
+      "geometry_index": 0,
+      "mesh_index": 1,
+      "functional": "LdaPw",
+      "status": "certified_reduction",
+      "energy_difference_ha": 0.0,
+      "density_distance_bohr_minus_3_over_2": 1.637700816541878e-17,
+      "spin_iterations": 18,
+      "unpolarized_iterations": 18
+    },
+    {
+      "geometry_index": 0,
+      "mesh_index": 1,
+      "functional": "Pbe",
+      "status": "certified_reduction",
+      "energy_difference_ha": 2.6645352591003757e-15,
+      "density_distance_bohr_minus_3_over_2": 4.2924710797369207e-17,
+      "spin_iterations": 21,
+      "unpolarized_iterations": 21
+    },
+    {
+      "geometry_index": 0,
+      "mesh_index": 2,
+      "functional": "LdaPw",
+      "status": "certified_reduction",
+      "energy_difference_ha": 7.771561172376096e-16,
+      "density_distance_bohr_minus_3_over_2": 1.8153064001064372e-17,
+      "spin_iterations": 18,
+      "unpolarized_iterations": 18
+    },
+    {
+      "geometry_index": 0,
+      "mesh_index": 2,
+      "functional": "Pbe",
+      "status": "certified_reduction",
+      "energy_difference_ha": 2.220446049250313e-16,
+      "density_distance_bohr_minus_3_over_2": 2.606714053358476e-17,
+      "spin_iterations": 18,
+      "unpolarized_iterations": 18
+    },
+    {
+      "geometry_index": 1,
+      "mesh_index": 0,
+      "functional": "LdaPw",
+      "status": "certified_reduction",
+      "energy_difference_ha": 1.4432899320127035e-15,
+      "density_distance_bohr_minus_3_over_2": 7.725604165256558e-16,
+      "spin_iterations": 16,
+      "unpolarized_iterations": 16
+    },
+    {
+      "geometry_index": 1,
+      "mesh_index": 0,
+      "functional": "Pbe",
+      "status": "certified_reduction",
+      "energy_difference_ha": 6.661338147750939e-16,
+      "density_distance_bohr_minus_3_over_2": 1.4304492453607805e-15,
+      "spin_iterations": 19,
+      "unpolarized_iterations": 19
+    },
+    {
+      "geometry_index": 1,
+      "mesh_index": 1,
+      "functional": "LdaPw",
+      "status": "certified_reduction",
+      "energy_difference_ha": 1.1102230246251565e-16,
+      "density_distance_bohr_minus_3_over_2": 3.3603616948335954e-16,
+      "spin_iterations": 15,
+      "unpolarized_iterations": 15
+    },
+    {
+      "geometry_index": 1,
+      "mesh_index": 1,
+      "functional": "Pbe",
+      "status": "certified_reduction",
+      "energy_difference_ha": 4.440892098500626e-16,
+      "density_distance_bohr_minus_3_over_2": 2.0487009459715215e-16,
+      "spin_iterations": 16,
+      "unpolarized_iterations": 16
+    },
+    {
+      "geometry_index": 1,
+      "mesh_index": 2,
+      "functional": "LdaPw",
+      "status": "matched_noninsulating_rejection",
+      "spin_gap_ha": -0.0004909216171712083,
+      "unpolarized_gap_ha": -0.0004909216171736785
+    },
+    {
+      "geometry_index": 1,
+      "mesh_index": 2,
+      "functional": "Pbe",
+      "status": "certified_reduction",
+      "energy_difference_ha": 8.881784197001252e-16,
+      "density_distance_bohr_minus_3_over_2": 4.976644186366507e-15,
+      "spin_iterations": 23,
+      "unpolarized_iterations": 23
+    },
+    {
+      "geometry_index": 2,
+      "mesh_index": 0,
+      "functional": "LdaPw",
+      "status": "certified_reduction",
+      "energy_difference_ha": 0.0,
+      "density_distance_bohr_minus_3_over_2": 7.234717888039307e-17,
+      "spin_iterations": 15,
+      "unpolarized_iterations": 15
+    },
+    {
+      "geometry_index": 2,
+      "mesh_index": 0,
+      "functional": "Pbe",
+      "status": "certified_reduction",
+      "energy_difference_ha": 1.7763568394002505e-15,
+      "density_distance_bohr_minus_3_over_2": 2.0860629083630372e-16,
+      "spin_iterations": 19,
+      "unpolarized_iterations": 19
+    },
+    {
+      "geometry_index": 2,
+      "mesh_index": 1,
+      "functional": "LdaPw",
+      "status": "certified_reduction",
+      "energy_difference_ha": 4.440892098500626e-16,
+      "density_distance_bohr_minus_3_over_2": 4.5939231253915934e-17,
+      "spin_iterations": 16,
+      "unpolarized_iterations": 16
+    },
+    {
+      "geometry_index": 2,
+      "mesh_index": 1,
+      "functional": "Pbe",
+      "status": "certified_reduction",
+      "energy_difference_ha": 1.7763568394002505e-15,
+      "density_distance_bohr_minus_3_over_2": 6.532140925488482e-17,
+      "spin_iterations": 17,
+      "unpolarized_iterations": 17
+    },
+    {
+      "geometry_index": 2,
+      "mesh_index": 2,
+      "functional": "LdaPw",
+      "status": "certified_reduction",
+      "energy_difference_ha": 4.440892098500626e-16,
+      "density_distance_bohr_minus_3_over_2": 6.934542178098181e-17,
+      "spin_iterations": 15,
+      "unpolarized_iterations": 15
+    },
+    {
+      "geometry_index": 2,
+      "mesh_index": 2,
+      "functional": "Pbe",
+      "status": "certified_reduction",
+      "energy_difference_ha": 4.440892098500626e-16,
+      "density_distance_bohr_minus_3_over_2": 1.0651873567387391e-16,
+      "spin_iterations": 18,
+      "unpolarized_iterations": 18
+    },
+    {
+      "geometry_index": 3,
+      "mesh_index": 0,
+      "functional": "LdaPw",
+      "status": "certified_reduction",
+      "energy_difference_ha": 3.552713678800501e-15,
+      "density_distance_bohr_minus_3_over_2": 1.6639053509439758e-14,
+      "spin_iterations": 15,
+      "unpolarized_iterations": 15
+    },
+    {
+      "geometry_index": 3,
+      "mesh_index": 0,
+      "functional": "Pbe",
+      "status": "certified_reduction",
+      "energy_difference_ha": 8.881784197001252e-16,
+      "density_distance_bohr_minus_3_over_2": 2.6207471328755334e-14,
+      "spin_iterations": 15,
+      "unpolarized_iterations": 15
+    },
+    {
+      "geometry_index": 3,
+      "mesh_index": 1,
+      "functional": "LdaPw",
+      "status": "certified_reduction",
+      "energy_difference_ha": 8.881784197001252e-16,
+      "density_distance_bohr_minus_3_over_2": 6.039264068731985e-14,
+      "spin_iterations": 15,
+      "unpolarized_iterations": 15
+    },
+    {
+      "geometry_index": 3,
+      "mesh_index": 1,
+      "functional": "Pbe",
+      "status": "certified_reduction",
+      "energy_difference_ha": 6.661338147750939e-15,
+      "density_distance_bohr_minus_3_over_2": 1.5720546252879856e-14,
+      "spin_iterations": 15,
+      "unpolarized_iterations": 15
+    },
+    {
+      "geometry_index": 3,
+      "mesh_index": 2,
+      "functional": "LdaPw",
+      "status": "certified_reduction",
+      "energy_difference_ha": 8.881784197001252e-16,
+      "density_distance_bohr_minus_3_over_2": 1.994940407821175e-14,
+      "spin_iterations": 14,
+      "unpolarized_iterations": 14
+    },
+    {
+      "geometry_index": 3,
+      "mesh_index": 2,
+      "functional": "Pbe",
+      "status": "certified_reduction",
+      "energy_difference_ha": 5.773159728050814e-15,
+      "density_distance_bohr_minus_3_over_2": 3.776123598488748e-14,
+      "spin_iterations": 15,
+      "unpolarized_iterations": 15
+    }
+  ],
+  "commands": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-physics --test spin_oracles --test spin_grid -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test collinear -- --include-ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-cli --test spin -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s --repeats 1 --baseline /tmp/p13b-before.json --require-identical --record /tmp/p13b-after.json",
+      "exit_code": 0
+    }
+  ],
+  "raw_output": {
+    "physics": "    Blocking waiting for file lock on build directory\n   Compiling dft-physics v0.1.0 (/Users/mino/Develop/rust-dft-wt/P13B-COLLINEAR-SPIN/crates/dft-physics)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.56s\n     Running tests/spin_grid.rs (target/debug/deps/spin_grid-7933f35ec0926314)\n\nrunning 2 tests\ntest grid_zero_spin_reduction_and_density_tag ... ok\nLdaPw [12, 14, 16]: grid directional derivative error=4.117192697883354e-12 Ha\nPbe [12, 14, 16]: grid directional derivative error=6.5800906390300895e-12 Ha\nLdaPw [15, 12, 10]: grid directional derivative error=4.395830921488653e-12 Ha\nPbe [15, 12, 10]: grid directional derivative error=1.6645365641387855e-12 Ha\ntest discrete_spin_functional_derivative_and_workspace_reuse ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.66s\n\n     Running tests/spin_oracles.rs (target/debug/deps/spin_oracles-da9e3cc1aeac1e5d)\n\nrunning 3 tests\nPW92+X maximum energy error=7.07712968089913e-15 Ha/electron; interior potential error=1.3881562566098182e-11 Ha\ntest uniform_exchange_and_independent_pw92 ... ok\nspin swap maximum potential error=0e0 Ha; LDA/PBE uniform-polarization zero-spin reduction passed\ntest spin_swap_and_unpolarized_reduction ... ok\nPBE exchange scaling error=2.0122792321330962e-14 Ha/electron; density derivative error=5.2889137514000595e-11 Ha; sigma derivative error=8.586198418925051e-10 Ha Bohr^5\ntest pbe_exchange_scaling_and_polarized_derivatives ... ok\n\ntest result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n\n",
+    "engine_release": "   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P13B-COLLINEAR-SPIN/crates/dft-engine)\n    Finished `release` profile [optimized] target(s) in 0.90s\n     Running tests/collinear.rs (target/release/deps/collinear-ae3d19886bc28c5e)\n\nrunning 5 tests\ntest sector_validation ... ok\nE=-9.1551991304348557e-1 Ha, M=0.000000000000, iterations=14, certificate charge=2.601e-12, spin=0.000e0, gaps=[Some(0.5377561156421828), Some(0.5377561156421828)]\nzero moment LdaPw: dE=2.220446049250313e-16 Ha, dn=6.784380976194266e-17, iterations spin=14 unpolarized=14\nE=-4.8409468993977545e-1 Ha, M=1.000000000000, iterations=12, certificate charge=1.031e-15, spin=1.031e-15, gaps=[Some(0.7333477275842073), None]\nE=-4.8409468993977545e-1 Ha, M=-1.000000000000, iterations=12, certificate charge=1.031e-15, spin=1.031e-15, gaps=[None, Some(0.7333477275842073)]\nmatrix geometry=0 mesh=0 xc=LdaPw\nE=-1.7058042036322070e0 Ha, M=1.000000000000, iterations=93, certificate charge=1.497e-11, spin=3.077e-11, gaps=[Some(0.09540251565138425), Some(0.4257116443896221)]\nE=-9.1863072269888635e-1 Ha, M=0.000000000000, iterations=16, certificate charge=2.191e-12, spin=0.000e0, gaps=[Some(0.5374404442053161), Some(0.5374404442053161)]\nzero moment Pbe: dE=6.661338147750939e-16 Ha, dn=8.253891301523251e-17, iterations spin=16 unpolarized=16\ntest zero_moment_reduces_to_same_unpolarized_functional ... ok\nE=-4.8439633882319222e-1 Ha, M=1.000000000000, iterations=12, certificate charge=8.283e-14, spin=8.283e-14, gaps=[Some(0.7317262151247401), None]\nE=-4.8439633882319222e-1 Ha, M=-1.000000000000, iterations=12, certificate charge=8.283e-14, spin=8.283e-14, gaps=[None, Some(0.7317262151247401)]\ntest odd_electron_certificate_and_swap ... ok\nE=-7.9135127177011810e-1 Ha, M=0.000000000000, iterations=17, certificate charge=1.986e-12, spin=0.000e0, gaps=[Some(0.2532979705184118), Some(0.2532979705184118)]\nmatrix reduction dE=8.881784197001252e-16 Ha dn=8.634551330978483e-17 iterations=17/17\nE=-1.7058042036322068e0 Ha, M=1.000000000000, iterations=72, certificate charge=1.487e-11, spin=2.777e-11, gaps=[Some(0.09540251563188212), Some(0.4257116443854858)]\nE=-1.7058042036322074e0 Ha, M=1.000000000000, iterations=106, certificate charge=2.482e-11, spin=3.273e-11, gaps=[Some(0.09540251565176566), Some(0.4257116443886387)]\ntest occupied_channels_and_existing_mixers ... ok\nmatrix geometry=0 mesh=0 xc=Pbe\nE=-7.9483316128002701e-1 Ha, M=0.000000000000, iterations=20, certificate charge=3.774e-12, spin=0.000e0, gaps=[Some(0.251031463613285), Some(0.251031463613285)]\nmatrix reduction dE=1.5543122344752192e-15 Ha dn=5.614908954266079e-17 iterations=20/20\nmatrix geometry=0 mesh=1 xc=LdaPw\nE=-7.1593742553905582e-1 Ha, M=0.000000000000, iterations=18, certificate charge=7.533e-13, spin=0.000e0, gaps=[Some(0.1412899199723147), Some(0.1412899199723147)]\nmatrix reduction dE=0e0 Ha dn=1.637700816541878e-17 iterations=18/18\nmatrix geometry=0 mesh=1 xc=Pbe\nE=-7.2221659505528146e-1 Ha, M=0.000000000000, iterations=21, certificate charge=4.554e-12, spin=0.000e0, gaps=[Some(0.14363645514609694), Some(0.14363645514609694)]\nmatrix reduction dE=2.6645352591003757e-15 Ha dn=4.2924710797369207e-17 iterations=21/21\nmatrix geometry=0 mesh=2 xc=LdaPw\nE=-7.7916954162610819e-1 Ha, M=0.000000000000, iterations=18, certificate charge=7.375e-12, spin=0.000e0, gaps=[Some(0.21470542670734705), Some(0.21470542670734705)]\nmatrix reduction dE=7.771561172376096e-16 Ha dn=1.8153064001064372e-17 iterations=18/18\nmatrix geometry=0 mesh=2 xc=Pbe\nE=-7.8293958738526337e-1 Ha, M=0.000000000000, iterations=18, certificate charge=5.303e-12, spin=0.000e0, gaps=[Some(0.21438898392185546), Some(0.21438898392185546)]\nmatrix reduction dE=2.220446049250313e-16 Ha dn=2.606714053358476e-17 iterations=18/18\nmatrix geometry=1 mesh=0 xc=LdaPw\nE=-9.3333024833408174e-1 Ha, M=0.000000000000, iterations=16, certificate charge=1.424e-11, spin=0.000e0, gaps=[Some(0.05669263315609105), Some(0.05669263315609105)]\nmatrix reduction dE=1.4432899320127035e-15 Ha dn=7.725604165256558e-16 iterations=16/16\nmatrix geometry=1 mesh=0 xc=Pbe\nE=-9.4086142417217378e-1 Ha, M=0.000000000000, iterations=19, certificate charge=1.588e-11, spin=0.000e0, gaps=[Some(0.06456237579838703), Some(0.06456237579838703)]\nmatrix reduction dE=6.661338147750939e-16 Ha dn=1.4304492453607805e-15 iterations=19/19\nmatrix geometry=1 mesh=1 xc=LdaPw\nE=-7.8434910704664684e-1 Ha, M=0.000000000000, iterations=15, certificate charge=2.065e-11, spin=0.000e0, gaps=[Some(0.015094631730455665), Some(0.015094631730455665)]\nmatrix reduction dE=1.1102230246251565e-16 Ha dn=3.3603616948335954e-16 iterations=15/15\nmatrix geometry=1 mesh=1 xc=Pbe\nE=-7.8630020149760449e-1 Ha, M=0.000000000000, iterations=16, certificate charge=5.636e-11, spin=0.000e0, gaps=[Some(0.01462436727867164), Some(0.01462436727867164)]\nmatrix reduction dE=4.440892098500626e-16 Ha dn=2.0487009459715215e-16 iterations=16/16\nmatrix geometry=1 mesh=2 xc=LdaPw\nmatched noninsulating rejection spin_gap=-4.909216171712083e-4 Ha legacy_gap=-4.909216171736785e-4 Ha\nmatrix geometry=1 mesh=2 xc=Pbe\nE=-9.1299621886198168e-1 Ha, M=0.000000000000, iterations=23, certificate charge=3.804e-11, spin=0.000e0, gaps=[Some(0.0020272038944722515), Some(0.0020272038944722515)]\nmatrix reduction dE=8.881784197001252e-16 Ha dn=4.976644186366507e-15 iterations=23/23\nmatrix geometry=2 mesh=0 xc=LdaPw\nE=-1.6716715680534517e0 Ha, M=0.000000000000, iterations=15, certificate charge=3.862e-11, spin=0.000e0, gaps=[Some(0.04921748503047749), Some(0.04921748503047749)]\nmatrix reduction dE=0e0 Ha dn=7.234717888039307e-17 iterations=15/15\nmatrix geometry=2 mesh=0 xc=Pbe\nE=-1.6746725758768783e0 Ha, M=0.000000000000, iterations=19, certificate charge=9.188e-11, spin=0.000e0, gaps=[Some(0.05279941753727446), Some(0.05279941753727446)]\nmatrix reduction dE=1.7763568394002505e-15 Ha dn=2.0860629083630372e-16 iterations=19/19\nmatrix geometry=2 mesh=1 xc=LdaPw\nE=-1.4381935820571672e0 Ha, M=0.000000000000, iterations=16, certificate charge=3.434e-12, spin=0.000e0, gaps=[Some(0.07020748857655937), Some(0.07020748857655937)]\nmatrix reduction dE=4.440892098500626e-16 Ha dn=4.5939231253915934e-17 iterations=16/16\nmatrix geometry=2 mesh=1 xc=Pbe\nE=-1.4420129707766893e0 Ha, M=0.000000000000, iterations=17, certificate charge=9.943e-11, spin=0.000e0, gaps=[Some(0.07094624177108622), Some(0.07094624177108622)]\nmatrix reduction dE=1.7763568394002505e-15 Ha dn=6.532140925488482e-17 iterations=17/17\nmatrix geometry=2 mesh=2 xc=LdaPw\nE=-1.6302807870684672e0 Ha, M=0.000000000000, iterations=15, certificate charge=1.389e-11, spin=0.000e0, gaps=[Some(0.03749812807053779), Some(0.03749812807053779)]\nmatrix reduction dE=4.440892098500626e-16 Ha dn=6.934542178098181e-17 iterations=15/15\nmatrix geometry=2 mesh=2 xc=Pbe\nE=-1.6333064815745086e0 Ha, M=0.000000000000, iterations=18, certificate charge=3.102e-11, spin=0.000e0, gaps=[Some(0.0406386023145022), Some(0.0406386023145022)]\nmatrix reduction dE=4.440892098500626e-16 Ha dn=1.0651873567387391e-16 iterations=18/18\nmatrix geometry=3 mesh=0 xc=LdaPw\nE=-2.8651378162344274e0 Ha, M=0.000000000000, iterations=15, certificate charge=1.125e-12, spin=0.000e0, gaps=[Some(0.09787894094759808), Some(0.09787894094759808)]\nmatrix reduction dE=3.552713678800501e-15 Ha dn=1.6639053509439758e-14 iterations=15/15\nmatrix geometry=3 mesh=0 xc=Pbe\nE=-2.8693129337316989e0 Ha, M=0.000000000000, iterations=15, certificate charge=5.175e-12, spin=0.000e0, gaps=[Some(0.10012720045212492), Some(0.10012720045212492)]\nmatrix reduction dE=8.881784197001252e-16 Ha dn=2.6207471328755334e-14 iterations=15/15\nmatrix geometry=3 mesh=1 xc=LdaPw\nE=-2.4319505956232437e0 Ha, M=0.000000000000, iterations=15, certificate charge=2.811e-11, spin=0.000e0, gaps=[Some(0.03522113890222625), Some(0.03522113890222625)]\nmatrix reduction dE=8.881784197001252e-16 Ha dn=6.039264068731985e-14 iterations=15/15\nmatrix geometry=3 mesh=1 xc=Pbe\nE=-2.4347881983179782e0 Ha, M=0.000000000000, iterations=15, certificate charge=1.297e-11, spin=0.000e0, gaps=[Some(0.03573108141008452), Some(0.03573108141008452)]\nmatrix reduction dE=6.661338147750939e-15 Ha dn=1.5720546252879856e-14 iterations=15/15\nmatrix geometry=3 mesh=2 xc=LdaPw\nE=-2.7881675252039475e0 Ha, M=0.000000000000, iterations=14, certificate charge=1.355e-11, spin=0.000e0, gaps=[Some(0.08498620648580403), Some(0.08498620648580403)]\nmatrix reduction dE=8.881784197001252e-16 Ha dn=1.994940407821175e-14 iterations=14/14\nmatrix geometry=3 mesh=2 xc=Pbe\nE=-2.7919902609391509e0 Ha, M=0.000000000000, iterations=15, certificate charge=3.415e-12, spin=0.000e0, gaps=[Some(0.08662483034623615), Some(0.08662483034623615)]\nmatrix reduction dE=5.773159728050814e-15 Ha dn=3.776123598488748e-14 iterations=15/15\ntest mf03_synthetic_matrix ... ok\n\ntest result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.50s\n\n",
+    "cli": "   Compiling dft-cli v0.1.0 (/Users/mino/Develop/rust-dft-wt/P13B-COLLINEAR-SPIN/crates/dft-cli)\n    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.52s\n     Running tests/spin.rs (target/debug/deps/spin-7eea84ac7365b620)\n\nrunning 2 tests\ntest spin_preflight_rejections ... ok\nMF03 result proposal schemas, N/M sums and independent cube reader: PASS\ntest collinear_cli_certificate_schemas_and_cubes ... ok\n\ntest result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.12s\n\n",
+    "check": "PASS build\nPASS test\nPASS fmt\nPASS clippy\n"
+  },
+  "unpolarized_parent_equivalence": {
+    "before_command": "python3 -I scripts/bench_scf.py --binary /tmp/p13b-before-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s --repeats 1 --record /tmp/p13b-before.json",
+    "before_binary_sha256": "55793b700b4cb11f233e3ffd2bcef820537387612e2a35899a44f3fab2dcaa72",
+    "after_binary_sha256": "62b25eeed4705f37fc648e10ed1a1def17ceb2434447360ac82bbbb46c8f44af",
+    "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+    "before": {
+      "note": "",
+      "binary": "p13b-before-cli",
+      "machine_note": "record host and commit in the note",
+      "energy_tolerance_ha": 1e-12,
+      "cases": {
+        "gamma": {
+          "operator_applications": 281,
+          "davidson_iterations": 41,
+          "certificate_applications": 38,
+          "certificate_iterations": 8,
+          "label": "Gamma only, 30 Ry",
+          "wall_s": [
+            0.11322187499999999
+          ],
+          "wall_median_s": 0.11322187499999999,
+          "engine_total_s": 0.105547917,
+          "phases_s": {
+            "density_s": 0.003618624,
+            "diagonalization_s": 0.057521373,
+            "mixing_s": 0.001048416,
+            "potential_s": 0.004714335,
+            "total_energy_s": 0.007247876
+          },
+          "engine_total_median_s": 0.105547917,
+          "phase_medians_s": {
+            "density_s": 0.003618624,
+            "diagonalization_s": 0.057521373,
+            "mixing_s": 0.001048416,
+            "potential_s": 0.004714335,
+            "total_energy_s": 0.007247876
+          },
+          "iterations": 10,
+          "total_energy_ha": -7.295530468210765,
+          "density_sha256": "1854d1ea91d96933ec85e908ec62b4466ddb044abe16b060c1cbe376daea0d3f"
+        },
+        "k222s": {
+          "operator_applications": 1266,
+          "davidson_iterations": 204,
+          "certificate_applications": 113,
+          "certificate_iterations": 21,
+          "label": "2x2x2 shifted (4 k), 30 Ry",
+          "wall_s": [
+            0.3533107080000001
+          ],
+          "wall_median_s": 0.3533107080000001,
+          "engine_total_s": 0.348288042,
+          "phases_s": {
+            "density_s": 0.014770167,
+            "diagonalization_s": 0.254372499,
+            "mixing_s": 0.002257792,
+            "potential_s": 0.004880667,
+            "total_energy_s": 0.02899121
+          },
+          "engine_total_median_s": 0.348288042,
+          "phase_medians_s": {
+            "density_s": 0.014770167,
+            "diagonalization_s": 0.254372499,
+            "mixing_s": 0.002257792,
+            "potential_s": 0.004880667,
+            "total_energy_s": 0.02899121
+          },
+          "iterations": 10,
+          "total_energy_ha": -7.919423412469083,
+          "density_sha256": "2b310246ec91cf7ea8b845e03fcee0fe6c7769e5556c4af16ab5c8e4916e3ee5"
+        },
+        "k222": {
+          "operator_applications": 2543,
+          "davidson_iterations": 408,
+          "certificate_applications": 208,
+          "certificate_iterations": 24,
+          "label": "2x2x2 (8 k), 30 Ry",
+          "wall_s": [
+            0.6669112500000001
+          ],
+          "wall_median_s": 0.6669112500000001,
+          "engine_total_s": 0.661268584,
+          "phases_s": {
+            "density_s": 0.029387665,
+            "diagonalization_s": 0.504727832,
+            "mixing_s": 0.002289085,
+            "potential_s": 0.005178334,
+            "total_energy_s": 0.059316458
+          },
+          "engine_total_median_s": 0.661268584,
+          "phase_medians_s": {
+            "density_s": 0.029387665,
+            "diagonalization_s": 0.504727832,
+            "mixing_s": 0.002289085,
+            "potential_s": 0.005178334,
+            "total_energy_s": 0.059316458
+          },
+          "iterations": 10,
+          "total_energy_ha": -7.831230057121137,
+          "density_sha256": "f203190f8c973771213a5074eb769c3ceecf264945aa805ea2da6edad5988840"
+        },
+        "k444s": {
+          "operator_applications": 10290,
+          "davidson_iterations": 1686,
+          "certificate_applications": 891,
+          "certificate_iterations": 141,
+          "label": "4x4x4 shifted (32 k), 30 Ry",
+          "wall_s": [
+            2.610827542
+          ],
+          "wall_median_s": 2.610827542,
+          "engine_total_s": 2.601362834,
+          "phases_s": {
+            "density_s": 0.118931542,
+            "diagonalization_s": 2.083628833,
+            "mixing_s": 0.002329292,
+            "potential_s": 0.006617209,
+            "total_energy_s": 0.235523503
+          },
+          "engine_total_median_s": 2.601362834,
+          "phase_medians_s": {
+            "density_s": 0.118931542,
+            "diagonalization_s": 2.083628833,
+            "mixing_s": 0.002329292,
+            "potential_s": 0.006617209,
+            "total_energy_s": 0.235523503
+          },
+          "iterations": 10,
+          "total_energy_ha": -7.9259761266480915,
+          "density_sha256": "ad4d3eabe1b8823365908f6647c4470831a51416e8c738cd3f2aaabf7549b220"
+        }
+      }
+    },
+    "after": {
+      "note": "",
+      "binary": "dft-cli",
+      "machine_note": "record host and commit in the note",
+      "energy_tolerance_ha": 1e-12,
+      "cases": {
+        "gamma": {
+          "operator_applications": 281,
+          "davidson_iterations": 41,
+          "certificate_applications": 38,
+          "certificate_iterations": 8,
+          "label": "Gamma only, 30 Ry",
+          "wall_s": [
+            0.531237833
+          ],
+          "wall_median_s": 0.531237833,
+          "engine_total_s": 0.110464542,
+          "phases_s": {
+            "density_s": 0.003632625,
+            "diagonalization_s": 0.057678205,
+            "mixing_s": 0.001067001,
+            "potential_s": 0.0047885,
+            "total_energy_s": 0.007295874
+          },
+          "engine_total_median_s": 0.110464542,
+          "phase_medians_s": {
+            "density_s": 0.003632625,
+            "diagonalization_s": 0.057678205,
+            "mixing_s": 0.001067001,
+            "potential_s": 0.0047885,
+            "total_energy_s": 0.007295874
+          },
+          "iterations": 10,
+          "total_energy_ha": -7.295530468210765,
+          "density_sha256": "1854d1ea91d96933ec85e908ec62b4466ddb044abe16b060c1cbe376daea0d3f"
+        },
+        "k222s": {
+          "operator_applications": 1266,
+          "davidson_iterations": 204,
+          "certificate_applications": 113,
+          "certificate_iterations": 21,
+          "label": "2x2x2 shifted (4 k), 30 Ry",
+          "wall_s": [
+            0.3494745
+          ],
+          "wall_median_s": 0.3494745,
+          "engine_total_s": 0.343961251,
+          "phases_s": {
+            "density_s": 0.014095542,
+            "diagonalization_s": 0.248290749,
+            "mixing_s": 0.002328752,
+            "potential_s": 0.004849333,
+            "total_energy_s": 0.028781125
+          },
+          "engine_total_median_s": 0.343961251,
+          "phase_medians_s": {
+            "density_s": 0.014095542,
+            "diagonalization_s": 0.248290749,
+            "mixing_s": 0.002328752,
+            "potential_s": 0.004849333,
+            "total_energy_s": 0.028781125
+          },
+          "iterations": 10,
+          "total_energy_ha": -7.919423412469083,
+          "density_sha256": "2b310246ec91cf7ea8b845e03fcee0fe6c7769e5556c4af16ab5c8e4916e3ee5"
+        },
+        "k222": {
+          "operator_applications": 2543,
+          "davidson_iterations": 408,
+          "certificate_applications": 208,
+          "certificate_iterations": 24,
+          "label": "2x2x2 (8 k), 30 Ry",
+          "wall_s": [
+            0.6751965
+          ],
+          "wall_median_s": 0.6751965,
+          "engine_total_s": 0.669092625,
+          "phases_s": {
+            "density_s": 0.029464875,
+            "diagonalization_s": 0.5078825,
+            "mixing_s": 0.002415084,
+            "potential_s": 0.005212042,
+            "total_energy_s": 0.058823541
+          },
+          "engine_total_median_s": 0.669092625,
+          "phase_medians_s": {
+            "density_s": 0.029464875,
+            "diagonalization_s": 0.5078825,
+            "mixing_s": 0.002415084,
+            "potential_s": 0.005212042,
+            "total_energy_s": 0.058823541
+          },
+          "iterations": 10,
+          "total_energy_ha": -7.831230057121137,
+          "density_sha256": "f203190f8c973771213a5074eb769c3ceecf264945aa805ea2da6edad5988840"
+        },
+        "k444s": {
+          "operator_applications": 10290,
+          "davidson_iterations": 1686,
+          "certificate_applications": 891,
+          "certificate_iterations": 141,
+          "label": "4x4x4 shifted (32 k), 30 Ry",
+          "wall_s": [
+            2.523237625
+          ],
+          "wall_median_s": 2.523237625,
+          "engine_total_s": 2.516108751,
+          "phases_s": {
+            "density_s": 0.111357457,
+            "diagonalization_s": 2.002158167,
+            "mixing_s": 0.002358667,
+            "potential_s": 0.006582581,
+            "total_energy_s": 0.228364417
+          },
+          "engine_total_median_s": 2.516108751,
+          "phase_medians_s": {
+            "density_s": 0.111357457,
+            "diagonalization_s": 2.002158167,
+            "mixing_s": 0.002358667,
+            "potential_s": 0.006582581,
+            "total_energy_s": 0.228364417
+          },
+          "iterations": 10,
+          "total_energy_ha": -7.9259761266480915,
+          "density_sha256": "ad4d3eabe1b8823365908f6647c4470831a51416e8c738cd3f2aaabf7549b220"
+        }
+      }
+    },
+    "interpretation": "All four energy values and density hashes are identical. Shared-host single samples are not performance evidence."
+  },
+  "oracle_provenance": "PW92 equations supplied by architect from Perdew and Wang, Phys. Rev. B 45, 13244 (1992). Independently transcribed test, no xcx calls inside the oracle. PBE correlation absolute value has no independent transcription; only scaling/reduction and derivative consistency tested. No QE or other matched external-code run."
+}

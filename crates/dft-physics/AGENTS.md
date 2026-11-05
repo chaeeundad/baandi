@@ -6,4 +6,53 @@
 
 **Before editing:** read ../../AGENTS.md, ../../ownership.toml (allowed dependencies) and the ADRs in ../../docs/decisions/.
 **Verify:** `scripts/check.sh dft-physics`, then `scripts/check.sh` for the whole workspace.
+
+## MF03 polarized XC (P13B)
+
+`tests/spin_oracles.rs` validates the vendored xcx 0.3.1 polarized LDA exchange,
+standard PW92 correlation, and PBE exchange/correlation boundary. Production `spin.rs` supplies tagged density, LDA-PW/PBE spin XC, and reusable
+spectral/Poisson buffers. The engine owns spin SCF. Run:
+
+```sh
+cargo test -p dft-physics --test spin_oracles -- --nocapture
+```
+
+The independent PW92 oracle is transcribed from the architect-supplied equations
+of J. P. Perdew and Y. Wang, Phys. Rev. B 45, 13244 (1992), including the standard
+rounded coefficients and f''(0)=1.709921. It does not call xcx. Caps were frozen
+before measurement: 1e-12 Ha/electron and potential relative 1e-8 or absolute
+1e-10 Ha near zero. The test covers total densities 0.01, 0.1, 1 Bohr^-3 and
+polarizations 0, 0.3, 0.9, 1. Central derivatives exclude an empty channel and
+use three steps with a second-order trend or a resolved sub-cap plateau.
+The initial sigma difference steps suffered roundoff; increasing the perturbation
+resolved the signal without changing the oracle, library or acceptance caps.
+
+Observed maxima on 2026-11-05: combined PW92/exchange energy error
+7.07712968089913e-15 Ha/electron and interior potential error
+1.3881562566098182e-11 Ha; PBE exchange scaling error
+2.0122792321330962e-14 Ha/electron, density derivative error
+5.2889137514000595e-11 Ha and sigma derivative error
+8.586198418925051e-10 Ha Bohr^5 (within the relative cap).
+Spin-swap potential differences were zero. Zero-polarization reduction here is
+only the point functional boundary, not a complete SCF reduction certificate.
+PBE correlation has no independently transcribed absolute-value oracle in this
+test; only reduction, swap and derivative consistency are established. The
+gradient perturbation explicitly tests the single cross-sigma flux factor.
+These are synthetic functional checks, not matched external-code calculations.
+
+The architect approved xcx's owned result-vector allocation once per density
+field evaluation (input map, output energy audit, and fresh certificate), outside
+orbital/k/Hamiltonian loops. All new adapter grid, spectral, local-potential,
+orbital-copy and nonlocal-projection buffers are prepared once and reused.
+Existing solver and mixer ownership APIs retain their existing allocations;
+this is not a claim of a wholly allocation-free SCF. No production XC formula
+is transcribed. PZ remains unpolarized only. No measured optimization is claimed.
+
+`tests/spin_grid.rs` checks functional perturbations on 12x14x16 and 15x12x10
+skew grids, zero-spin grid reduction, tagged density validation and retained
+output storage. Maximum extrapolated grid-derivative error was
+6.5800906390300895e-12 Ha. It also establishes bit-identical Poisson energy
+and real potential against the existing full-grid evaluator on those grids.
+See `docs/user/collinear-spin.md` for full SCF scope and evidence.
+
 **Rules:** keep public API changes out of unrelated tickets; every behavior change adds or updates a test with stated tolerance and units; prefer general-purpose crates (ADR 0003); record design decisions in an ADR.

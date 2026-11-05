@@ -13,7 +13,7 @@ Rules you must keep:
 - Mac timings are observations, not acceptance: acceptance numbers come from dev08, measured by the remote session (master) through the orchestrator. Mac profiles mislead for threading (thread creation is cheap there).
 - A profile ratio from fewer than 30 samples is directional only; never quote it as firm.
 - Every change: bit-identical or within the stated gates; energy within 1e-12 Ha of the stored baseline; generality rule (cubic, skewed, elongated, slab-like, 2 to 20 atoms, Gamma and k meshes, synthetic variants); no relaxation of the final convergence certificate; determinism across thread counts within a backend.
-- Do not read Quantum ESPRESSO source. Only the notes in docs/research/qe-study/ and QE outputs.
+- QE source: you MAY read the QE 7.6 source at /Users/mino/Develop/rust-dft-wt/qe-src under the policy in AGENTS.md (analysis notes in your own words, no code, no excerpts, no structural mirroring, never given to Codex). Codex implementers receive only the notes. Target: match and exceed QE at equal cores and accuracy, compared against QE's best configuration per case.
 - Never commit UPF files, never touch frozen files, never run destructive git commands; do not merge or push (orchestrator does).
 - Report real numbers with commands and exit codes; mark relayed numbers as relayed. Reports to the orchestrator are short, English; the orchestrator reports to the user in Korean.
 When you finish an investigation, update the ledger (new attempt rows with numbers and lessons) and the backlog, so the next agent starts from the facts.

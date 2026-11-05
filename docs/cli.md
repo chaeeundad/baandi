@@ -929,3 +929,46 @@ work is still reported when available. Use `--qe-output /path/pw.out` (repeatabl
 Raw QE parsing was tested on all four existing k222/k222s/si30 outputs.
 The validation-claim scripts reject non-strict or explicitly uncertified results.
 See [measured accuracy, limitations and commands](performance/p17a-standard-profile.md).
+## Finite-temperature occupations (P17B)
+
+Omitting `[occupations]` preserves fixed insulating occupations and all existing
+rejections. Explicit fixed mode is `[occupations] mode = "fixed"` (written as a
+normal TOML table with `mode` on the next line). Fixed mode accepts no smearing.
+
+```toml
+[occupations]
+mode = "fermi_dirac"
+smearing_ha = 0.01
+band_cap = 24
+```
+
+Supply exactly one of `smearing_ha`, `smearing_ev`, `smearing_kelvin`, finite and
+positive. Kelvin uses the exact SI Boltzmann constant at the CLI boundary;
+the engine uses theta=k_B T in Ha. Gaussian, MP and cold schemes reject.
+Odd unpolarized electron counts are permitted only in FD mode.
+
+`band_cap` defaults to 32. The initial policy prepares and solves this entire
+cap, automatically adding empty bands up to it; `scf.nbands` is a lower bound
+and must not exceed the cap. The cap must fit every k basis. Insufficient
+empty-state coverage fails with an instruction to increase the cap. The
+reported top-band diagnostics are not bounds on infinitely many omitted bands;
+repeat with at least four more bands and compare F/density.
+
+For collinear FD, omit channel counts and `total_moment` for one shared mu and
+free moment, or supply `total_moment` (possibly fractional) or matching
+`n_up`/`n_down` for two roots. Positive-temperature sector endpoints reject.
+Use a full mesh (`basis.ktime_reversal = false`) and `lda-pw` or `pbe`.
+
+Results contain occupations in spin/k/band order, mu, S/k_B, E, positive TS,
+F=E-TS, separate E/-TS/F ledger lines, a fresh finite-T certificate, and the
+proposed `state_contracts` extension. Band-gap output becomes explicit
+metallic/Fermi-level information. Total density is written as Gaussian cube;
+collinear channel and magnetization cubes are also written, and all channel grids
+are retained in JSON. Forces/stress are unavailable, not zero.
+Fixed-policy results retain their original output path.
+
+Finite-T runtime control, legacy band/DOS/volumetric options, XC density floor,
+final spectral guard and checkpoint v1 restart are explicitly unavailable.
+A fixed-occupation checkpoint is never silently converted to FD.
+See [occupation validation](validation/occupations.md) for measured scope,
+root algorithm, thresholds, ignored Al command and remaining integration work.

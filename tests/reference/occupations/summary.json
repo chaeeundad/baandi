@@ -1,0 +1,106 @@
+{
+  "task_id": "P17B-FERMI-DIRAC",
+  "source_base": "84f06a478549ce39151ba6095f5980bb652d8d26",
+  "changes": "uncommitted",
+  "host": "macOS-27.0.1-arm64-arm-64bit",
+  "reference_kind": "independent analytic synthetic oracles; no QE comparison",
+  "synthetic": {
+    "energy_ha": -0.46189330421395736,
+    "free_energy_ha": -0.47575624782515624,
+    "mu_ha": -0.2312710584471131,
+    "entropy_over_kb": 1.3862943611198906,
+    "iterations": 11
+  },
+  "entropy_derivative": [
+    {
+      "step_ha": 0.004,
+      "error_dimensionless": 5.67271592100127e-06
+    },
+    {
+      "step_ha": 0.002,
+      "error_dimensionless": 1.3911603249372462e-06
+    },
+    {
+      "step_ha": 0.001,
+      "error_dimensionless": 3.4608951726688986e-07
+    }
+  ],
+  "empty_band_refinement": [
+    {
+      "bands": 16,
+      "free_energy_difference_ha": 1.554312234475219e-14,
+      "density_distance_bohr_minus_3_over_2": 6.176008364592932e-15
+    },
+    {
+      "bands": 20,
+      "free_energy_difference_ha": 5.6066262743570405e-15,
+      "density_distance_bohr_minus_3_over_2": 2.2233310105992728e-15
+    }
+  ],
+  "low_temperature": [
+    {
+      "theta_ha": 0.1,
+      "energy_difference_ha": 0.06620835808849757,
+      "density_distance_bohr_minus_3_over_2": 0.0015465440599151338
+    },
+    {
+      "theta_ha": 0.01,
+      "energy_difference_ha": 2.220446049250313e-15,
+      "density_distance_bohr_minus_3_over_2": 2.6048364036077945e-16
+    },
+    {
+      "theta_ha": 0.001,
+      "energy_difference_ha": 4.440892098500626e-16,
+      "density_distance_bohr_minus_3_over_2": 7.791559387301204e-17
+    }
+  ],
+  "al_smoke": {
+    "theta_ha": 0.01,
+    "energy_ha": -2.308957374807491,
+    "mu_ha": 0.27591212552271216,
+    "iterations": 8,
+    "cutoff_ha": 20,
+    "bands": 20,
+    "mesh": [
+      2,
+      2,
+      2
+    ],
+    "shift": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "upf_sha256": "b02eaa07c5d98f5eeae1bec4155854a7a94ea3635ca6b42e914f3f7ebd6912fb",
+    "claim": "external-file smoke only, not material validation"
+  },
+  "legacy": {
+    "build": "debug",
+    "threads": 1,
+    "repetitions": 1,
+    "performance_claim": false,
+    "cases": {
+      "gamma": {
+        "energy_difference_ha": 0.0,
+        "density_identical": true,
+        "iterations": 10
+      },
+      "k222s": {
+        "energy_difference_ha": 0.0,
+        "density_identical": true,
+        "iterations": 10
+      },
+      "k222": {
+        "energy_difference_ha": 0.0,
+        "density_identical": true,
+        "iterations": 10
+      },
+      "k444s": {
+        "energy_difference_ha": 0.0,
+        "density_identical": true,
+        "iterations": 10
+      }
+    }
+  },
+  "readme_integration": "requires generator extension outside OWNED_FILES"
+}

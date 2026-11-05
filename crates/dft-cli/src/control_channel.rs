@@ -192,9 +192,7 @@ impl AuditSink for Journal {
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
-#[path = "../tests/common/mod.rs"]
-mod fixture;
+use crate::test_fixtures as fixture;
 
 #[cfg(test)]
 mod tests {

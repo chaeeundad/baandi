@@ -1,0 +1,128 @@
+{
+ "note": "Original debug binary produced by initial scripts/check.sh before engine edits; equivalence only",
+ "binary": "p17b-original-cli",
+ "machine_note": "record host and commit in the note",
+ "energy_tolerance_ha": 1e-12,
+ "cases": {
+  "gamma": {
+   "operator_applications": 281,
+   "davidson_iterations": 41,
+   "certificate_applications": 38,
+   "certificate_iterations": 8,
+   "label": "Gamma only, 30 Ry",
+   "wall_s": [
+    5.453951167
+   ],
+   "wall_median_s": 5.453951167,
+   "engine_total_s": 4.737984,
+   "phases_s": {
+    "density_s": 0.191962917,
+    "diagonalization_s": 3.6638242930000002,
+    "mixing_s": 0.020936791,
+    "potential_s": 0.201294998,
+    "total_energy_s": 0.313047667
+   },
+   "engine_total_median_s": 4.737984,
+   "phase_medians_s": {
+    "density_s": 0.191962917,
+    "diagonalization_s": 3.6638242930000002,
+    "mixing_s": 0.020936791,
+    "potential_s": 0.201294998,
+    "total_energy_s": 0.313047667
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.29553046821076,
+   "density_sha256": "6077d62f5ddcf7d003e61b29f12e83d73e0dc332a208097da0836dfb63ec1b26"
+  },
+  "k222s": {
+   "operator_applications": 1266,
+   "davidson_iterations": 204,
+   "certificate_applications": 113,
+   "certificate_iterations": 21,
+   "label": "2x2x2 shifted (4 k), 30 Ry",
+   "wall_s": [
+    19.13745925
+   ],
+   "wall_median_s": 19.13745925,
+   "engine_total_s": 19.08816875,
+   "phases_s": {
+    "density_s": 0.77601671,
+    "diagonalization_s": 16.286626957,
+    "mixing_s": 0.045651582,
+    "potential_s": 0.203937292,
+    "total_energy_s": 1.261170293
+   },
+   "engine_total_median_s": 19.08816875,
+   "phase_medians_s": {
+    "density_s": 0.77601671,
+    "diagonalization_s": 16.286626957,
+    "mixing_s": 0.045651582,
+    "potential_s": 0.203937292,
+    "total_energy_s": 1.261170293
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.9194234124690865,
+   "density_sha256": "9e311684370831efd1f4e5a3f3fd41479dcadfc4794b51e2db0183f05e7e9104"
+  },
+  "k222": {
+   "operator_applications": 2543,
+   "davidson_iterations": 408,
+   "certificate_applications": 208,
+   "certificate_iterations": 24,
+   "label": "2x2x2 (8 k), 30 Ry",
+   "wall_s": [
+    37.219597792
+   ],
+   "wall_median_s": 37.219597792,
+   "engine_total_s": 37.160686875,
+   "phases_s": {
+    "density_s": 1.513461753,
+    "diagonalization_s": 32.130100915,
+    "mixing_s": 0.046161126,
+    "potential_s": 0.205107293,
+    "total_energy_s": 2.505250458
+   },
+   "engine_total_median_s": 37.160686875,
+   "phase_medians_s": {
+    "density_s": 1.513461753,
+    "diagonalization_s": 32.130100915,
+    "mixing_s": 0.046161126,
+    "potential_s": 0.205107293,
+    "total_energy_s": 2.505250458
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.831230057121135,
+   "density_sha256": "21238c7026d96860233edfc427807389029229e7ce26162b5025d471e255bdbe"
+  },
+  "k444s": {
+   "operator_applications": 10290,
+   "davidson_iterations": 1686,
+   "certificate_applications": 891,
+   "certificate_iterations": 141,
+   "label": "4x4x4 shifted (32 k), 30 Ry",
+   "wall_s": [
+    155.294638958
+   ],
+   "wall_median_s": 155.294638958,
+   "engine_total_s": 155.188815375,
+   "phases_s": {
+    "density_s": 6.077640667,
+    "diagonalization_s": 136.604023249,
+    "mixing_s": 0.046612873,
+    "potential_s": 0.213945375,
+    "total_energy_s": 10.057254458
+   },
+   "engine_total_median_s": 155.188815375,
+   "phase_medians_s": {
+    "density_s": 6.077640667,
+    "diagonalization_s": 136.604023249,
+    "mixing_s": 0.046612873,
+    "potential_s": 0.213945375,
+    "total_energy_s": 10.057254458
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.92597612664809,
+   "density_sha256": "0ae6c23932177aa279a247f9089d924923b2579433aa0e5fb31654c80497ba40"
+  }
+ }
+}

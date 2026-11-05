@@ -98,3 +98,4 @@ Conventions: docs are English; one fact lives in one place and others link to it
 - `docs/decisions/0035-standard-convergence-profile.md`: additive labelled QE-comparable convergence profile (accepted 2026-11-05; default unchanged).
 - [Reproducible material QE inputs and comparisons](validation/qe-materials-protocol.md): P16A manifest-only multi-species generation, unchanged legacy inputs, remote evidence protocol and reporting without acceptance caps.
 - [P17A standard convergence profile](performance/p17a-standard-profile.md): ratcheted Ritz stopping, independent Hartree Pulay metric, frozen threshold, delivered accuracy, strict preservation and negative results.
+- [Finite-temperature occupations](validation/occupations.md): P17B FD number roots, E/-TS/F, fresh certificates, synthetic stationary and band/low-T oracles, legacy identity and external Al smoke scope.

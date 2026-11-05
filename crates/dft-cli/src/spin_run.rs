@@ -8,7 +8,7 @@ use dft_physics::spin::SpinDensity;
 /// Versioned canonical binary encoding of finite JSON-shaped records for this
 /// result profile. Length-prefixed UTF-8, sorted object keys, little-endian
 /// integers/f64 and normalized signed zero; never hash decimal float text.
-fn digest(value: &Value) -> String {
+pub(super) fn digest(value: &Value) -> String {
     fn put(v: &Value, b: &mut Vec<u8>) {
         match v {
             Value::Null => b.push(0),

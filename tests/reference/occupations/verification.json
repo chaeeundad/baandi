@@ -1,0 +1,64 @@
+{
+  "commands": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-physics --lib occupations -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-engine --lib finite_temperature -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-cli --lib finite_cli -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test collinear -- --include-ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex cargo test --release -p dft-engine --lib real_al_finite -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/debug/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s --repeats 1 --baseline tests/reference/occupations/legacy-before.json --record tests/reference/occupations/legacy-after.json --require-identical",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    }
+  ],
+  "scope": "Final passing commands; earlier failures and fixes documented in docs/validation/occupations.md. Cargo used /opt/homebrew/opt/rustup/bin. Benchmark executable predates subsequent FD-only output and certificate checks; fixed-path source is unchanged.",
+  "files_sha256": {
+    "summary.json": "dafcf6c9f2a4df701d4ab6b290b04214a7117d7f997af10887ba18afd6f1038c",
+    "cli-tests.txt": "2b684ae46398225c6158d1e82c2164a4bad0edffab659f8e2b40ff2e5baa3e62",
+    "cli-unpolarized.json": "d4af3a74605f560967d5226d93dbec60e58fc55e39c9c7f054b170569b7070f0",
+    "cli-fixed-moment.json": "1f6aa516f34beb761dfe82dcbf041870793fe91761c627fd43d8b46f675460fc",
+    "synthetic.txt": "3209b74ccadd879b86d0540db88a61338b92e74d4e9d46c499ad0f6090b1c000",
+    "cli-shared.json": "b952ebd63897f319639dc76fcede4b7acf0bd8d5e9d800ebbb9d42ab91602ee3",
+    "al-smoke.txt": "a862fb163b3b6c28c7d99d53d659ee26b73568cb2ebf05c7b3cb477d3064cafc",
+    "legacy-spin.txt": "fa9cacbca7fefbf24c64821d4f6b891bb1b58c3485e6874519037fcdfd090618",
+    "legacy-before.json": "66b62111f8ce12f78cdbbfe289da621ad3aff8cbb1b575b33dc8652fe753519e",
+    "legacy-after.json": "f77cc8995e672cf7371ac3f66ba0ac849b04ac4dd6d7723d931b05a1dd17bdab"
+  },
+  "remaining_required_edits": [
+    "scripts/make_readme_figures.py: add occupations summary support",
+    "README.md: regenerate validation block after generator extension"
+  ],
+  "limitations": [
+    "No QE Al comparison",
+    "No full external JSON Schema validator installed",
+    "Debug legacy equivalence timings are not performance measurements",
+    "No v2 finite-T checkpoint persistence; v1 policy change rejects",
+    "Dashboard publication belongs to the orchestrator"
+  ]
+}

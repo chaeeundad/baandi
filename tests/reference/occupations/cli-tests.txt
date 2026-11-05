@@ -1,0 +1,16 @@
+
+running 1 test
+Valid: synthetic FD. Will compute spin-unpolarized finite-T lda-pz SCF for UPF composition Si:1 (labels Si:1; 1 atoms, 1 electrons), k mesh Gamma only (1 resolved points), cutoff 5 Ry, 12 bands, 1 threads.
+Plane waves per k: [27]; FFT grid: [8, 8, 8]; estimated array payload: 17472 bytes (orbital plus one real and one complex grid payload only; excludes scratch, projectors, allocator overhead; not peak RSS)
+XC: lda-pz; allow_functional_override=false; override_applied=false
+Valid: synthetic FD. Will compute collinear finite-T lda-pw SCF for UPF composition Si:1 (labels Si:1; 1 atoms, 1 electrons), k mesh Gamma only (1 resolved points), cutoff 5 Ry, 12 bands, 1 threads.
+Plane waves per k: [27]; FFT grid: [8, 8, 8]; estimated array payload: 17472 bytes (orbital plus one real and one complex grid payload only; excludes scratch, projectors, allocator overhead; not peak RSS)
+XC: lda-pw; allow_functional_override=false; override_applied=false
+Valid: synthetic FD. Will compute collinear finite-T lda-pw SCF for UPF composition Si:1 (labels Si:1; 1 atoms, 1 electrons), k mesh Gamma only (1 resolved points), cutoff 5 Ry, 12 bands, 1 threads.
+Plane waves per k: [27]; FFT grid: [8, 8, 8]; estimated array payload: 17472 bytes (orbital plus one real and one complex grid payload only; excludes scratch, projectors, allocator overhead; not peak RSS)
+XC: lda-pw; allow_functional_override=false; override_applied=false
+Wrote ExactContinuation, iteration 1: /var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17b-cli-10020-1793884562696388000/fixed.cp
+test run::finite_run::finite_cli_and_fixed_rejection ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 3.41s
+

@@ -68,3 +68,11 @@ negative-density policies remain those of the selected functional. See the
 engine `tests/nlcc.rs` for localized three-step differences, translation, analytic
 multiple-projector assembly and converged spin reduction. No force/stress
 capability is established and no new per-orbital allocation is introduced.
+
+## MF04 occupation roots
+
+`occupations.rs` is a pure, allocation-free number/entropy boundary with explicit
+spin/k/band layout and caller-owned output. Keep the independent tanh/binary
+entropy tests independent of the production stable-tail formula. Failed output
+buffers are not states. See `docs/validation/occupations.md` for the bracket,
+relative electron tolerance, sector endpoints and frozen oracle caps.

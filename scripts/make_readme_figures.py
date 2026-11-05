@@ -236,6 +236,197 @@ def standard_rows():
             for r in rows if r["label"] == "strict"]
 
 
+def evidence_text(path):
+    with open(os.path.join(ROOT, path)) as f:
+        return f.read()
+
+
+def stress_term_errors():
+    """Read the current isolated-term log, retaining its test/order provenance."""
+    path = "tests/reference/stress/physics-terms.log"
+    log = evidence_text(path)
+    groups = {}
+    for name, body in re.findall(r"test (\w+) \.\.\. (.*?)\nok", log, re.S):
+        groups[name] = [json.loads(x)[-1] for x in re.findall(r"max errors (\[[^\]]+\]) Ha/Bohr\^3", body)]
+    # Calls in stress_terms.rs: core then XC variants; nonlocal, local, Hartree.
+    core = groups["core_and_xc_metric"]
+    isolated = groups["isolated_local_core_hartree_nonlocal"]
+    if len(core) != 6 or len(isolated) != 3:
+        raise ValueError("Unexpected term log layout: " + path)
+    return [("Kinetic", max(groups["frozen_coefficient_kinetic_strain_metric"])),
+            ("Ewald (including background)", max(groups["ewald_strain_includes_background_and_eta_cancellation"])),
+            ("Nonlocal", isolated[0]), ("Local", isolated[1]), ("Hartree", isolated[2]),
+            ("NLCC core", core[0]), ("XC metric (LDA/PBE/spin)", max(core[1:]))]
+
+
+def structural_results():
+    """P19A–P22A: distinguish derivative oracles from material qualification."""
+    cell_files = sorted(os.path.relpath(os.path.join(base, name), ROOT)
+                        for base, _, names in os.walk(os.path.join(REF, "relaxation"))
+                        for name in names if "cell" in name.lower())
+    if cell_files:
+        raise ValueError("Review new cell-relaxation evidence before regenerating: " + ", ".join(cell_files))
+    sp = "tests/reference/symmetry/evidence.json"
+    sy = load(os.path.join(ROOT, sp))
+    mp = "tests/reference/symmetry/mac-k444s.json"
+    mac = load(os.path.join(ROOT, mp))["cases"]
+    tr, cr = mac["time_reversal"], mac["crystal"]
+    median = lambda rows: sorted(r["wall_s"] for r in rows)[len(rows) // 2]
+    lines = ["### Crystal symmetry: fewer k points for the same calculation", "",
+             f"The shifted Si mesh goes from {tr[0]['irreducible_k_count']} time-reversal representatives to "
+             f"{cr[0]['irreducible_k_count']} with crystal symmetry. Mac median wall time "
+             f"({len(tr)} samples each): {median(tr):.3f} to {median(cr):.3f} s; this is an observation, "
+             "not a server benchmark or a comparison with QE. " + evidence_link(mp) + ".", "",
+             "Full mesh versus reduced mesh in the same engine (not an independent DFT code): "
+             f"{len(sy['scf_oracles'])} Si, MgO and synthetic cases have maximum energy difference "
+             f"{max(abs(r['delta_energy_ha']) for r in sy['scf_oracles']):.2e} Ha and density distance "
+             f"{max(r['density_distance_bohr_minus_3_over_2'] for r in sy['scf_oracles']):.2e} Bohr^-3/2. "
+             f"Fixed-spin differences: {sy['spin']['delta_energy_ha']:.2e} Ha, "
+             f"{sy['spin']['density_distance_bohr_minus_3_over_2']:.2e} Bohr^-3/2 and "
+             f"{sy['spin']['delta_moment_mu_b']:.2e} mu_B. Finite-temperature differences: "
+             f"E {sy['fermi_dirac']['delta_energy_ha']:.2e} Ha, F {sy['fermi_dirac']['delta_free_energy_ha']:.2e} Ha, "
+             f"density {sy['fermi_dirac']['density_distance_bohr_minus_3_over_2']:.2e} Bohr^-3/2. "
+             + evidence_link(sp) + ".", "",
+             "Only operations preserving the model, k mesh and FFT grid are retained; magnetic spin swaps and "
+             "magnetic antiunitary operations are disabled. See [symmetry scope](docs/validation/symmetry.md); "
+             "comparison with QE pending.", "", "### Atomic forces: checked against energy changes", ""]
+    fp = "tests/reference/forces/manifest.json"
+    force = load(os.path.join(ROOT, fp))
+    obs = force["observations"]
+    lines += ["Central displacement finite differences check individual terms and converged combinations. "
+              f"Stored displacement steps: {', '.join(f'{x:g}' for x in force['steps_bohr'])} Bohr. "
+              + evidence_link(fp) + ".", "",
+              "| Force check | Maximum difference (Ha/Bohr) | Reference |", "|---|---:|---|"]
+    for label, key, oracle in [
+        ("Ewald", "ewald_max_error", "Energy finite differences"),
+        ("Frozen local", "frozen_local_max_error", "Energy finite differences"),
+        ("Frozen nonlocal", "frozen_nonlocal_max_error", "Energy finite differences"),
+        ("Converged local + nonlocal", "converged_local_nonlocal_max_error", "Total-energy finite differences"),
+        ("NLCC combination", "nlcc_max_error", "Total-energy finite differences"),
+        ("PBE + NLCC combination", "pbe_nlcc_max_error", "Total-energy finite differences"),
+        ("Finite temperature", "fd_max_error", "Free-energy finite differences"),
+        ("Independent local + Ewald", "independent_max_error", "Second scalar energy reimplementation, finite differences"),
+        ("Zero-moment spin reduction", "spin_reduction_max_difference", "Unpolarized engine")]:
+        lines.append(f"| {label} | {obs[key + '_ha_per_bohr']:.2e} | {oracle} |")
+    lines += ["", f"Resolved MgO net-force maximum component: {obs['mgo_resolved_net_max_ha_per_bohr']:.2e} Ha/Bohr "
+              f"(cap {force['net_force_cap_resolved_grid']:.0e}). Real-file results from the same manifest:", "",
+              "| Material | Force vs finite difference (Ha/Bohr) | Summed numerical uncertainty (Ha/Bohr) |",
+              "|---|---:|---:|"]
+    for name in ("si", "mgo"):
+        lines.append(f"| {'Si' if name == 'si' else 'MgO'} | {obs[name + '_max_error_ha_per_bohr']:.2e} | "
+                     f"{obs[name + '_uncertainty_sum_ha_per_bohr']:.2e} |")
+    lines += ["", "Uncertainty covers SCF, cutoff and FFT-grid checks; it is not the derivative error. "
+              f"Both sums are below one third of the {force['real_cap']:.0e} Ha/Bohr real-force cap. "
+              "These results do not establish pseudopotential transferability. Forces require strict converged "
+              "states and complete NC derivatives; DFT+U forces are unsupported. Spin and finite-temperature "
+              "forces exist in engine/CLI; the ASE adapter remains Gamma/unpolarized. "
+              "[Force scope](docs/validation/forces.md); comparison with QE pending.", "",
+              "Mac cost observations (one sample per case, no performance acceptance): "
+              + evidence_link("tests/reference/forces/cost.json") + ".", "",
+              "| Case | SCF (s) | Force pass (s) | Force / (SCF + force) |", "|---|---:|---:|---:|"]
+    for r in load(os.path.join(REF, "forces/cost.json")):
+        lines.append(f"| {r['case']} | {r['timings']['engine_total_s']:.3f} | {r['forces']['elapsed_seconds']:.3f} | "
+                     f"{100 * r['force_share_scf_plus_force']:.2f}% |")
+    rp = "tests/reference/relaxation/manifest.json"
+    relax = load(os.path.join(ROOT, rp))
+    si = next(r for r in relax["materials"] if r["material"] == "Si")["trajectory"][-1]
+    ase = relax["ase_comparison"]
+    lp = "tests/reference/relaxation/logs/cli-all.log"
+    log = evidence_text(lp)
+    coords = re.search(r"Si final fractional coordinates: (\[\[.*\]\])", log)
+    restart = re.search(r"relaxation restart: complete files bit-identical; (\d+) steps", log)
+    if coords is None or restart is None:
+        raise ValueError("Missing relaxation oracle in " + lp)
+    position = json.loads(coords[1])[1]
+    lines += ["", "### Ionic relaxation: move atoms at a fixed cell", "",
+              "BFGS/FIRE are available with Cartesian constraints. Against an independent scalar energy scan, "
+              f"compressed/stretched synthetic starts reach the periodic minimum within "
+              f"{max(r['error_bohr'] for r in relax['synthetic_periodic_scan']):.2e} Bohr. "
+              "This is a periodic model, not an isolated molecule or a global-minimum proof. "
+              f"Warm versus fresh SCF energy differs by at most {max(relax['warm_fresh_energy_errors_ha']):.2e} Ha. "
+              f"ASE BFGS versus CLI BFGS differs by {ase['max_position_error_bohr']:.2e} Bohr and "
+              f"{ase['energy_error_ha']:.2e} Ha; ASE is an independent optimizer using BAANDI forces, not another DFT code. "
+              + evidence_link(rp) + ".", "",
+              f"Gamma-only Si returns to the ideal diamond bond: final atom fractional coordinates "
+              f"({', '.join(f'{x:.12f}' for x in position)}), after {si['step']} steps, "
+              f"maximum free force {si['max_force_ha_bohr']:.2e} Ha/Bohr. "
+              f"Restart after an accepted boundary yields byte-identical complete output files in the "
+              f"{restart[1]}-step fixture. " + evidence_link(lp) + "; " + evidence_link(rp) + ".", ""]
+    curvature_path = "tests/reference/relaxation/mgo-curvature.json"
+    curv = load(os.path.join(ROOT, curvature_path))["curvatures"]
+    lines += ["MgO caveat: the Gamma-only model relaxes away from ideal rocksalt. A fresh-SCF scalar "
+              f"energy scan finds negative curvature {curv[-1]['directional_curvature_ha_bohr2']:.5f} Ha/Bohr^2 "
+              "at the ideal position; this is not bulk structural qualification. " + evidence_link(curvature_path) + ". "
+              "CLI spin-polarized or finite-temperature relaxation is unsupported; strict unpolarized fixed occupations only. "
+              "[Relaxation scope](docs/validation/relaxation.md); comparison with QE pending.", "",
+              "![Si relaxation force history](docs/img/relaxation-forces.svg)", "", "### Stress: checked against cell strains", ""]
+    stp = "tests/reference/stress/validation.json"
+    stress = load(os.path.join(ROOT, stp))
+    syn = stress["synthetic_cases"]
+    lines += ["Tensile-positive stress differentiates energy (free energy at finite temperature) with fixed fractional atoms "
+              "and a frozen set of plane-wave indices. This checks a finite-basis derivative, not cutoff convergence. "
+              f"Strain steps: {', '.join(f'{x:g}' for x in stress['strain_steps'])}. "
+              + evidence_link(stp) + ".", "",
+              "Isolated terms against strain-energy finite differences (maximum at the smallest stored step): "
+              + evidence_link("tests/reference/stress/physics-terms.log") + ".", "",
+              "| Term | Difference (Ha/Bohr^3) |", "|---|---:|"]
+    for label, error in stress_term_errors():
+        lines.append(f"| {label} | {error:.2e} |")
+    lines += ["", f"Across {len(syn)} synthetic total-stress cases (skew/slab, local/nonlocal, NLCC, PBE, spin and finite temperature), "
+              f"maximum final strain error is {max(r['maximum_final_error_ha_bohr3'] for r in syn.values()):.2e} Ha/Bohr^3; "
+              f"maximum raw antisymmetric norm is {max(r['antisymmetric_norm_ha_bohr3'] for r in syn.values()):.2e} Ha/Bohr^3. "
+              f"ASE {stress['ase']['version']}'s independent numerical strain oracle differs by "
+              f"{stress['ase']['maximum_error_ev_angstrom3']:.2e} eV/Angstrom^3, using BAANDI energies. "
+              + evidence_link(stp) + ".", "",
+              "Real-file results remain **inconclusive** as converged material stresses; small strain errors do not remove "
+              "cutoff/k/grid uncertainty. Same evidence file:", "",
+              "| Case | Strain error (Ha/Bohr^3) | Numerical uncertainty (Ha/Bohr^3) | Status |", "|---|---:|---:|---|"]
+    for name, r in stress["real_materials"].items():
+        lines.append(f"| {name} | {r['maximum_final_error_ha_bohr3']:.2e} | {r['uncertainty_ha_bohr3']:.2e} | {r['status']} |")
+    lines += ["", "The separate isotropic Pulay estimate measures cutoff sensitivity; its two-step spread is not an error bound, "
+              "does not establish anisotropic convergence and is not silently added to the analytic tensor. "
+              "Stress with the standard profile is unsupported; a fresh strict stationary certificate is required. "
+              "[Stress scope](docs/validation/stress.md); comparison with QE pending.", "",
+              "Mac cost observations, one on/off pair per case. Analytic time includes force-based precondition checking; "
+              "Pulay scans are extra. " + evidence_link("tests/reference/stress/cost.json") + ".", "",
+              "| Case | SCF (s) | Analytic stress (s) | Pass / (SCF + pass) | Pulay scans (s) | Extra SCFs |",
+              "|---|---:|---:|---:|---:|---:|"]
+    for name, r in load(os.path.join(REF, "stress/cost.json"))["cases"].items():
+        run = next(x for x in r["runs"] if x["enabled"])
+        st = run["stress"]
+        lines.append(f"| {name} | {run['scf_seconds']:.3f} | {st['elapsed_seconds']:.3f} | "
+                     f"{100*r['analytic_fraction_of_scf_plus_pass']:.2f}% | {st['pulay_assessment']['elapsed_seconds']:.3f} | {st['cutoff_scf_runs']} |")
+    lines += ["", "### Cell relaxation", "",
+              "P23A cell-relaxation results skipped: no cell evidence files are present under "
+              "`tests/reference/relaxation/` in this snapshot. No cell-relaxation validation is claimed; comparison with QE pending.", ""]
+    return lines
+
+
+def fig_relaxation():
+    rows = next(r for r in load(os.path.join(REF, "relaxation/manifest.json"))["materials"]
+                if r["material"] == "Si")["trajectory"]
+    s = svg_open(760, 300, "Si fixed-cell relaxation: maximum free force versus ionic step")
+    s += txt(20, 25, "Si Gamma-only: return to the ideal bond (not bulk qualification)", 15, weight="bold")
+    x0, x1, y0, y1 = 90, 710, 60, 235
+    vals = [math.log10(r["max_force_ha_bohr"]) for r in rows]
+    lo, hi = math.floor(min(vals)), math.ceil(max(vals))
+    for power in range(lo, hi + 1):
+        y = y1 - (power - lo) / (hi - lo) * (y1 - y0)
+        s += f'<path d="M {x0} {y:.1f} H {x1}" stroke="{GRID}"/>'
+        s += txt(x0 - 8, y + 4, f"1e{power}", 11, "end")
+    points = []
+    for r, value in zip(rows, vals):
+        x = x0 + r["step"] / rows[-1]["step"] * (x1 - x0)
+        y = y1 - (value - lo) / (hi - lo) * (y1 - y0)
+        points.append(f"{x:.1f},{y:.1f}")
+        s += txt(x, y1 + 18, str(r["step"]), 11, "middle")
+        s += f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="{C_OURS}"/>'
+    s += f'<polyline points="{" ".join(points)}" fill="none" stroke="{C_OURS}"/>'
+    s += txt(90, 46, "Maximum free force (Ha/Bohr, log scale)", 12)
+    s += txt(400, 273, "Ionic step; source: tests/reference/relaxation/manifest.json", 12, "middle")
+    return s + "</svg>\n"
+
+
 def extended_results():
     """Render measured values, references and limits without promoting smoke tests."""
     spin_path = "crates/dft-engine/tests/collinear-evidence.json"
@@ -271,7 +462,7 @@ def extended_results():
     lines += [f"Limits: translating the synthetic PBE cell changes the energy by {pbe[0]['delta_ha']:.2e} Ha on the coarse grid "
               f"(fails the {nlcc['caps_frozen_before_measurement']['translation_energy_ha']:.0e} Ha cap), falling to {pbe[-1]['delta_ha']:.2e} Ha "
               "with grid refinement. The stored isolated-atom runs include failures; all datasets remain unqualified "
-              "for transferability, ghost states and cutoff convergence. NLCC checkpoint persistence and ionic force/stress derivatives are unavailable.", "",
+              "for transferability, ghost states and cutoff convergence. NLCC checkpoint persistence remains unavailable; validated NC force/stress derivatives are reported below.", "",
               "### Real-material bulk runs: Si and MgO", "",
               "PBE calculations with external PseudoDojo files, positive uniform starting density. "
               "These are successful calculation checks, not an independent accuracy reference; comparison with QE pending for Si and MgO. "
@@ -396,6 +587,7 @@ def block(rows, kruns, gamma, perf=None):
         lines += ["", "32 k points against QE with the same number of cores: " + ", ".join(f"{n}: {o[str(n)] / qe['np' + str(n)]:.1f}x slower" for n in (1, 4, 8, 16)) + ". After the parallel setup, density, energy-audit and certificate phases the 32-k-point run takes 1.23 s on 16 threads (3.06 s with k-point threads only), of which the diagonalization is 0.84 s; with 4 and 8 k points the best thread count is 8 (there are few k points per thread). One k point (Gamma) is not parallelized yet.", ""]
         lines += ["", f"Cross-platform check: the total energy on this Linux x86 build differs from the macOS Apple Silicon build by {perf['xplat']['gamma']:+.2e} Ha (Gamma) and {perf['xplat']['k444s']:+.2e} Ha (4x4x4, shifted).", ""]
     lines += extended_results()
+    lines += structural_results()
     checkpoint = load(os.path.join(REF, "checkpoint", "results.json"))
     lines += ["### Checkpoint/restart equivalence (synthetic fixtures)", "",
               f"Reference: the uninterrupted BAANDI engine in the same build. "
@@ -476,6 +668,8 @@ def main():
         f.write(fig_cutoff(rows))
     with open(os.path.join(IMG, "kpoint-comparison.svg"), "w") as f:
         f.write(fig_kpoints(gamma, kruns))
+    with open(os.path.join(IMG, "relaxation-forces.svg"), "w") as f:
+        f.write(fig_relaxation())
     readme = os.path.join(ROOT, "README.md")
     text = open(readme).read()
     new = block(rows, kruns, gamma, perf)

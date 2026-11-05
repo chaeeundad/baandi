@@ -13,6 +13,57 @@ def load():
 
 
 class ReadmeIsCurrent(unittest.TestCase):
+    def test_structural_evidence_changes_invalidate_generated_results(self):
+        m = load()
+        baseline = m.structural_results()
+        original = m.load
+        changes = [
+            ("symmetry/evidence.json", lambda d: d["spin"].update(delta_energy_ha=0.123)),
+            ("symmetry/mac-k444s.json", lambda d: [r.update(wall_s=123) for r in d["cases"]["crystal"]]),
+            ("forces/manifest.json", lambda d: d["observations"].update(si_uncertainty_sum_ha_per_bohr=0.123)),
+            ("forces/cost.json", lambda d: d[0]["forces"].update(elapsed_seconds=123)),
+            ("relaxation/manifest.json", lambda d: d["ase_comparison"].update(energy_error_ha=0.123)),
+            ("relaxation/mgo-curvature.json", lambda d: d["curvatures"][-1].update(directional_curvature_ha_bohr2=0.123)),
+            ("stress/validation.json", lambda d: d["real_materials"]["Si-a10.6"].update(uncertainty_ha_bohr3=0.123)),
+            ("stress/cost.json", lambda d: d["cases"]["si8"]["runs"][1]["stress"].update(elapsed_seconds=123)),
+        ]
+        for relative, mutate in changes:
+            def changed(path):
+                data = original(path)
+                if os.path.relpath(path, m.REF) == relative:
+                    mutate(data)
+                return data
+            with self.subTest(source=relative), patch.object(m, "load", side_effect=changed):
+                self.assertNotEqual(baseline, m.structural_results())
+        original_text = m.evidence_text
+        for path, old, new in (
+            ("tests/reference/stress/physics-terms.log", "2.3386910873168798e-8", "0.123"),
+            ("tests/reference/relaxation/logs/cli-all.log", "0.2499999999839776", "0.123"),
+        ):
+            def changed_text(target):
+                text = original_text(target)
+                return text.replace(old, new) if target == path else text
+            with self.subTest(source=path), patch.object(m, "evidence_text", side_effect=changed_text):
+                self.assertNotEqual(baseline, m.structural_results())
+
+    def test_structural_scope_and_sources(self):
+        import re
+        m = load()
+        text = "\n".join(m.structural_results())
+        for phrase in ("32 time-reversal representatives to 10", "inconclusive",
+                       "DFT+U forces are unsupported", "standard profile is unsupported",
+                       "CLI spin-polarized or finite-temperature relaxation is unsupported",
+                       "not an error bound", "Second scalar energy reimplementation",
+                       "byte-identical", "No cell-relaxation validation is claimed"):
+            self.assertIn(phrase, text)
+        self.assertEqual(text.count("comparison with QE pending"), 5)
+        for target in re.findall(r"\]\(([^)]+)\)", text):
+            self.assertTrue(Path(ROOT, target).is_file(), target)
+        self.assertEqual(len(m.stress_term_errors()), 7)
+        with patch.object(m.os, "walk", return_value=[(str(Path(m.REF, "relaxation")), [], ["cell-results.json"])]):
+            with self.assertRaisesRegex(ValueError, "Review new cell-relaxation evidence"):
+                m.structural_results()
+
     def test_readme_validation_block_matches_the_evidence(self):
         m = load()
         rows, kruns = m.cutoff_data(), m.kpoint_data()
@@ -83,6 +134,7 @@ class ReadmeIsCurrent(unittest.TestCase):
         g = next(r for r in rows if r["ecut"] == 30.0)
         gamma = {"e": abs(g["ours"] - g["qe"]) / 2, "eig": g["eig"], "iters": g["iters"]}
         for name, svg in (("cutoff-scan.svg", m.fig_cutoff(rows)), ("kpoint-comparison.svg", m.fig_kpoints(gamma, kruns)),
+                          ("relaxation-forces.svg", m.fig_relaxation()),
                           ("performance.svg", m.fig_perf(m.perf_data())), ("thread-scaling.svg", m.fig_threads(m.threads_data()))):
             self.assertEqual(Path(ROOT, "docs", "img", name).read_text(), svg, name + " is stale")
         self.assertTrue(all(k["ok"] for k in kruns))

@@ -2265,24 +2265,42 @@
     "started_at": "2026-11-05T17:45:07Z",
     "ended_at": "2026-11-05T18:29:05Z",
     "exit_code": 0,
-    "note": ""
+    "note": "merged"
   },
   {
     "run_id": "P22A-STRESS#1",
     "task_id": "P22A-STRESS",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "blocked",
     "codex_pid": 79491,
     "wrapper_pid": 79469,
-    "session_id": null,
+    "session_id": "01a1ad07-2926-7900-8aa5-4f36b11a5b7f",
     "branch": "task/P22A-STRESS",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P22A-STRESS",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P22A-STRESS.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P22A-STRESS/report.json",
     "started_at": "2026-11-05T18:44:49Z",
-    "ended_at": null,
-    "exit_code": null,
+    "ended_at": "2026-11-05T18:54:03Z",
+    "exit_code": 0,
     "note": ""
+  },
+  {
+    "run_id": "P22A-STRESS#2",
+    "task_id": "P22A-STRESS",
+    "mode": "resume",
+    "role": "implementer",
+    "status": "done",
+    "codex_pid": 88219,
+    "wrapper_pid": 88207,
+    "session_id": "01a1ad07-2926-7900-8aa5-4f36b11a5b7f",
+    "branch": "task/P22A-STRESS",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P22A-STRESS",
+    "ticket": "/Users/mino/Develop/rust-dft/.delegate/P22A-STRESS/resume1.md",
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P22A-STRESS/report.json",
+    "started_at": "2026-11-05T19:11:08Z",
+    "ended_at": "2026-11-05T19:57:39Z",
+    "exit_code": 0,
+    "note": "merged"
   }
 ]

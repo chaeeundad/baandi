@@ -6,3 +6,5 @@ OWNED_FILES: crates/dft-physics/src (stress terms), crates/dft-engine/src (stres
 GATES: scripts/check.sh; scripts/bench_scf.py legacy bit-identical; python3 -I scripts/tests/test_readme_figures.py; ignored real-file tests run by you if DFT_NC_DIR is readable.
 GIT: branch task/P22A-STRESS, uncommitted
 RETURN_FORMAT: docs/schemas/report.schema.json
+EXTENDED 2026-11-06 by architect: OWNED_FILES also include crates/dft-basis/src and crates/dft-basis/tests (additive fixed-Miller-set basis construction under strain for the frozen-basis protocol and the Pulay estimate). Legacy basis behaviour must stay bit-identical.
+

@@ -2212,5 +2212,23 @@
     "ended_at": "2026-11-05T15:15:33Z",
     "exit_code": 0,
     "note": ""
+  },
+  {
+    "run_id": "P20A-FORCES#1",
+    "task_id": "P20A-FORCES",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 40553,
+    "wrapper_pid": 40525,
+    "session_id": null,
+    "branch": "task/P20A-FORCES",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P20A-FORCES",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P20A-FORCES.md",
+    "report": null,
+    "started_at": "2026-11-05T16:11:34Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

@@ -1,0 +1,95 @@
+{
+  "task_id": "P14B-GEMM-ACCOUNTING",
+  "status": "DONE",
+  "changed_files": [
+    "crates/dft-numerics/src/linalg.rs",
+    "crates/dft-numerics/src/linalg/tiled.rs",
+    "crates/dft-numerics/src/linalg/accounting.rs",
+    "crates/dft-solvers/src/lib.rs",
+    "crates/dft-solvers/src/work_accounting.rs",
+    "tests/p14a_work_accounting.py",
+    "tests/p14b_summarize.py",
+    "tests/p14b_adoption.py",
+    "tests/reference/perf/p14b/",
+    "docs/INDEX.md",
+    "docs/performance/optimization-log.md",
+    "docs/research/qe-study/README.md",
+    "docs/research/qe-study/davidson-gemm-accounting.md"
+  ],
+  "design_choices": [
+    "Architect adoption decision supersedes the original toy iteration-count gate.",
+    "Incremental reduced Hamiltonian is the default in pure Rust and MKL; no experimental build switch.",
+    "Both triangles are retained; cache invalidates on restart and untrusted H products.",
+    "MKL borrows input column ranges and issues two sequential GEMMs using preallocated small output scratch.",
+    "No second reduction: unlocked all-root residual decisions require all current residuals; guaranteed removable work without an algorithm change is zero."
+  ],
+  "commands": [
+    {
+      "command": "scripts/check.sh (final)",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo check --features mkl --all-targets (final)",
+      "exit_code": 0
+    },
+    {
+      "command": "P14B_GEMM_ACCOUNTING=1 cargo test --release -p dft-numerics accounting_shapes -- --ignored",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary /tmp/p14b-adopted-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222,k444s,si8 --repeats 1 --baseline tests/reference/perf/p14b/scf-final.json --record tests/reference/perf/p14b/adopted/scf.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_suite.py --binary /tmp/p14b-adopted-cli --robustness --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --baseline tests/reference/perf/p14b/suite-final.json --output tests/reference/perf/p14b/adopted/suite1.json",
+      "exit_code": 5
+    },
+    {
+      "command": "bench_suite.py --robustness --require-identical at threads 2, 4, 8 against suite1.json (each)",
+      "exit_code": 5
+    },
+    {
+      "command": "tests/p14a_work_accounting.py at threads 1, 2, 4, 8 and cubic full-product baseline (each; individual case exit codes retained)",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p14b_adoption.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo build --release -p dft-cli --offline (final; measurement flags unset)",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "si8: 21636961594 -> 9489226838 in 2mnk, 56.14% reduction; SCF 15 -> 15.",
+    "k444s: 3300404692 -> 2258007134 in 2mnk, 31.58% reduction; SCF 10 -> 10.",
+    "Four primary fixtures: maximum energy change 2.842171e-13 Ha; SCF counts 15/10/6/9 unchanged.",
+    "12-Bohr 20-atom cubic: 13 -> 13 SCF, energy change 9.379164e-13 Ha; H-vector work 1996 -> 2107.",
+    "Toy SCF changes: syn-fft-primes 14->16, syn-p3 8->10, syn-s1 13->14, syn-s2 17->16.",
+    "All 19 suite cases and six additional fixture definitions have identical energy, density hashes, eigenvalues and H work within pure Rust at T=1,2,4,8.",
+    "Next-site si8 Ritz/residual work: 5386241040 in 2mnk; second projection pass ceiling 1296609804 in 2mnk; no proven safe further reduction."
+  ],
+  "reference_comparison": "All 16 previously converged suite cases remain converged within 1e-12 Ha. All 19 iteration/energy/status rows are in adopted/acceptance.md. Three pre-existing suite failures remain. No baseline was overwritten; no new QE run.",
+  "limitations": [
+    "Legacy robustness exit 5 is retained: accepted toy iteration changes at T1; thread count part of input identity at T2/4/8. Independent architect-rule and determinism checks pass.",
+    "si-elongated, syn-s3 and syn-z14 remain nonconverged; their unconverged energies change and are not accepted energy references. Dense 8-Bohr 20-atom cubic also fails before and after.",
+    "MKL only type checked; runtime, thread determinism and timings require dev08.",
+    "MKL adds small reduced-matrix copies of 16*q*q bytes per extension (prefix plus scatter); no large input copies. This is not a no-copy-increase result.",
+    "No second reduction adopted, no accepted shared-Mac wall-time speedup.",
+    "README generator/tests pass with no generated diff; no new accepted wall-time result was inserted.",
+    "No canonical session registry/dashboard upload or recurring report timer; changes uncommitted."
+  ],
+  "open_questions": [
+    "dev08 MKL execution, determinism and performance validation remain."
+  ],
+  "commit": "Uncommitted on task/P14B-GEMM-ACCOUNTING as requested."
+}

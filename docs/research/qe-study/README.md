@@ -4,3 +4,4 @@ Policy: AGENTS.md, "QE source study policy". These notes are written by Claude C
 Index (added as notes are written):
 - [davidson-and-scf-thresholds.md](davidson-and-scf-thresholds.md): block Davidson structure, preconditioner, SCF threshold rule, and the tuning hypotheses H1 to H8.
 - [fft-call-structure.md](fft-call-structure.md): FFT call structure of the wavefunction path (sticks, plane-fused pipeline, descriptor settings, what did not help), from the user's fastqe Phase 1 report.
+- [davidson-gemm-accounting.md](davidson-gemm-accounting.md): note 4, Codex analysis of rust-dft only; GEMM shape accounting and the adopted incremental-Gram optimization (no QE source read).

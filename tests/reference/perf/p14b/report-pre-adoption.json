@@ -1,0 +1,93 @@
+{
+  "task_id": "P14B-GEMM-ACCOUNTING",
+  "status": "BLOCKED",
+  "changed_files": [
+    "crates/dft-numerics/src/linalg.rs",
+    "crates/dft-numerics/src/linalg/tiled.rs",
+    "crates/dft-numerics/src/linalg/accounting.rs",
+    "crates/dft-solvers/src/lib.rs",
+    "crates/dft-solvers/src/work_accounting.rs",
+    "docs/INDEX.md",
+    "docs/performance/optimization-log.md",
+    "docs/research/qe-study/README.md",
+    "docs/research/qe-study/davidson-gemm-accounting.md",
+    "tests/p14b_summarize.py",
+    "tests/reference/perf/p14b/accounting-before.json",
+    "tests/reference/perf/p14b/accounting-detailed.json",
+    "tests/reference/perf/p14b/accounting-final.json",
+    "tests/reference/perf/p14b/default-before.json",
+    "tests/reference/perf/p14b/default-final.json",
+    "tests/reference/perf/p14b/default-threads4.json",
+    "tests/reference/perf/p14b/gemm-tables.md",
+    "tests/reference/perf/p14b/identity.json",
+    "tests/reference/perf/p14b/incremental-gram.patch",
+    "tests/reference/perf/p14b/incremental-threads4.json",
+    "tests/reference/perf/p14b/incremental-trial.json",
+    "tests/reference/perf/p14b/scf-final.json",
+    "tests/reference/perf/p14b/scf-identity.json",
+    "tests/reference/perf/p14b/suite-before.json",
+    "tests/reference/perf/p14b/suite-before.md",
+    "tests/reference/perf/p14b/suite-final.json",
+    "tests/reference/perf/p14b/suite-final.md",
+    "tests/reference/perf/p14b/suite-trial.json",
+    "tests/reference/perf/p14b/suite-trial.md"
+  ],
+  "design_choices": [
+    "Completed logical Davidson GEMM attribution with source-only counters, bounded storage and timers; no numerical default changed.",
+    "Incremental reduced-matrix trial archived and rejected by the general-system iteration gate.",
+    "Task 2 accepted work reduction remains unresolved; no claim of full task completion."
+  ],
+  "commands": [
+    {
+      "command": "scripts/check.sh (final)",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo check --features mkl --all-targets",
+      "exit_code": 0
+    },
+    {
+      "command": "P14B_GEMM_ACCOUNTING=1 cargo test --release -p dft-numerics accounting_shapes -- --ignored",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222,k444s --repeats 1 --baseline tests/reference/perf/p14a/bench-scf-final.json --require-identical --record tests/reference/perf/p14b/scf-identity.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_suite.py --robustness --upf ../pseudo/Si.pz-vbc.UPF --baseline tests/reference/perf/p14b/suite-before.json --require-identical --output tests/reference/perf/p14b/suite-final.json",
+      "exit_code": 5
+    },
+    {
+      "command": "python3 -I tests/p14b_summarize.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "si8 trial 2mnk: 21636961594 -> 9489226838; rejected.",
+    "k444s trial 2mnk: 3300404692 -> 2258007134; rejected.",
+    "Maximum four-case trial energy difference: 2.842171e-13 Ha; SCF counts 15/10/6/9 unchanged.",
+    "Generality failures: syn-fft-primes 14->16, syn-p3 8->10, syn-s1 13->14, syn-s2 17->16 SCF iterations.",
+    "Final four-case energy, density, H-work and T1/T4 identity passed."
+  ],
+  "reference_comparison": "Final Gamma/k222/k444s energies and density hashes identical to stored P14A benchmark. Independent final/before comparison verifies all 19 suite scientific results unchanged. No new QE run.",
+  "limitations": [
+    "No accepted redundancy reduction; production GEMM work unchanged.",
+    "Logical Davidson products only; excludes backend-internal EVD and Hamiltonian GEMMs and separate packing timings.",
+    "Robustness harness exits 5 because diagnostic stderr differs for three existing nonconvergence cases; independent comparison strips only P14B timing lines and verifies unchanged errors and scientific results.",
+    "MKL type-check only; dev08 acceptance not run.",
+    "No dashboard upload or session registry modification outside ticket ownership; no recurring timer active."
+  ],
+  "open_questions": [
+    "A general-system-safe reduced-matrix or other GEMM optimization remains to be developed."
+  ],
+  "commit": "Uncommitted as requested; branch task/P14B-GEMM-ACCOUNTING."
+}

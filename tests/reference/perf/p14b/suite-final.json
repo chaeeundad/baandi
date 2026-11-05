@@ -1,0 +1,3440 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "timestamp_utc": "2026-11-05T06:23:20.380425+00:00",
+    "platform": "macOS-27.0.1-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "cpu_count": 12,
+    "python": "3.9.6",
+    "commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+    "dirty": "M crates/dft-numerics/src/linalg.rs\n M crates/dft-numerics/src/linalg/tiled.rs\n M crates/dft-solvers/src/lib.rs\n M crates/dft-solvers/src/work_accounting.rs\n M docs/performance/optimization-log.md\n?? crates/dft-numerics/src/linalg/accounting.rs\n?? tests/p14b_summarize.py\n?? tests/reference/perf/p14b/",
+    "binary": "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+    "binary_sha256": "7c39697194ab25d7dc9ce7b406230a5c0a60322e3a13e96d1bc98a2e7a5238e0",
+    "generator_sha256": "3416877435e56092d6ac004b69b208301ebd962760e363d1f096c8f53db70cc9",
+    "runner_sha256": "7b80dc573538c88c6990f2df26aa105b4d879c686178f59f683b30fa8f392707",
+    "toolchain": "[toolchain]\nchannel = \"1.99.1\"\nprofile = \"minimal\"\ncomponents = [\"rustfmt\", \"clippy\"]\n",
+    "cargo_lock_sha256": "4bb9b549ee1765023993b3a887e8dc57792da6bd16a6e5eb71c13893e3589912"
+  },
+  "seed": 1,
+  "threads": 1,
+  "repeats": 1,
+  "work_dir": "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9",
+  "energy_tolerance_ha": 1e-12,
+  "invocation": [
+    "scripts/bench_suite.py",
+    "--robustness",
+    "--upf",
+    "../pseudo/Si.pz-vbc.UPF",
+    "--baseline",
+    "tests/reference/perf/p14b/suite-before.json",
+    "--require-identical",
+    "--output",
+    "tests/reference/perf/p14b/suite-final.json"
+  ],
+  "cases": {
+    "si-elongated": {
+      "case": {
+        "id": "si-elongated",
+        "purpose": "Four atoms, aspect ratio 1:1:3; robustness probe",
+        "system_class": "elongated",
+        "tier": "default",
+        "potential": "si",
+        "lattice": [
+          [
+            8,
+            0,
+            0
+          ],
+          [
+            0,
+            8,
+            0
+          ],
+          [
+            0,
+            0,
+            24
+          ]
+        ],
+        "atoms": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25,
+            0.125
+          ],
+          [
+            0,
+            0,
+            0.5
+          ],
+          [
+            0.25,
+            0.25,
+            0.625
+          ]
+        ],
+        "cutoff_ry": 8,
+        "timeout_s": 240,
+        "deterministic": true
+      },
+      "input_toml": "[system]\nname = \"si-elongated\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[8, 0, 0], [0, 8, 0], [0, 0, 24]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0, 0]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.125]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0, 0.5]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.625]\n[pseudopotentials]\nSi = \"SI_UPF_PATH\"\n[basis]\necutwfc_ry = 8\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "ba635fc19d0cd4600c2c1afa2af13bf277cbb233c1b02eac02ce779a7cce1e3d",
+      "fingerprint": "5a3707a18635288bc777a8f5ef90d9bc4a8827590af6a18b910cc794abe10035",
+      "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/si-elongated/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/si-elongated/out-0"
+          ],
+          "converged": false,
+          "iterations": 100,
+          "total_energy_ha": -15.128518095558501,
+          "density_sha256": "6f121f32398fbfb9c7d5b6de30635a4597eaa1f2fa59a68e9f87c302a071f0bf",
+          "phases_s": {
+            "density_s": 0.037317464,
+            "diagonalization_s": 0.374996917,
+            "mixing_s": 0.034405169,
+            "potential_s": 0.029273496,
+            "total_energy_s": 0.053121995
+          },
+          "operator_applications": 2755,
+          "exit_code": 3,
+          "status": "nonconverged",
+          "error": "error: NOT CONVERGED: iteration budget exhausted",
+          "engine_total_s": 0.559926084,
+          "fft_grid": [
+            15,
+            15,
+            45
+          ],
+          "bands": 12,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              -0.35338419705683155,
+              -0.33458225993848084,
+              -0.18904646223450342,
+              -0.1711277681568829,
+              -0.06489162863653579,
+              -0.044133495534307295,
+              -0.0429329264001577,
+              -0.028091673004056277,
+              -0.020485042142280918,
+              0.0013938265776379751,
+              0.01202834175937416,
+              0.018273347895607497
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 0.009982877632274054,
+            "max_eigen_residual_ha": 0.0005185852997089746,
+            "relative_charge_error": 1.1102230246251565e-16,
+            "fixed_point_certificate": null
+          },
+          "minimum_direct_gap_ha": 0.007606630861775359,
+          "indirect_gap_ha": 0.007606630861775359,
+          "wall_s": 0.572877958
+        }
+      ],
+      "status": "nonconverged",
+      "converged": false,
+      "repeat_identical": true,
+      "wall_median_s": 0.572877958,
+      "wall_min_s": 0.572877958,
+      "wall_max_s": 0.572877958,
+      "timeout_s": 240,
+      "total_energy_ha": -15.128518095558501,
+      "iterations": 100,
+      "density_sha256": "6f121f32398fbfb9c7d5b6de30635a4597eaa1f2fa59a68e9f87c302a071f0bf",
+      "operator_applications": 2755,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "si-gamma": {
+      "case": {
+        "id": "si-gamma",
+        "purpose": "Existing primitive Si Gamma, 8 default bands; insulating reference",
+        "system_class": "si-primitive",
+        "tier": "default",
+        "potential": "si",
+        "lattice": [
+          [
+            0,
+            5.130606428358966,
+            5.130606428358966
+          ],
+          [
+            5.130606428358966,
+            0,
+            5.130606428358966
+          ],
+          [
+            5.130606428358966,
+            5.130606428358966,
+            0
+          ]
+        ],
+        "atoms": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25,
+            0.25
+          ]
+        ],
+        "cutoff_ry": 30,
+        "timeout_s": 240,
+        "deterministic": true
+      },
+      "input_toml": "[system]\nname = \"si-gamma\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[0, 5.130606428358966, 5.130606428358966], [5.130606428358966, 0, 5.130606428358966], [5.130606428358966, 5.130606428358966, 0]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0, 0]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n[pseudopotentials]\nSi = \"SI_UPF_PATH\"\n[basis]\necutwfc_ry = 30\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "3649ddded2a72e3881a43bf1657d6ee38d8b5cafb516db985c09b10c4286bea6",
+      "fingerprint": "4cc955f02de78651877a58a96f21b9d24b286d132965de3fa2bfaf76e647467c",
+      "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/si-gamma/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/si-gamma/out-0"
+          ],
+          "converged": true,
+          "iterations": 10,
+          "total_energy_ha": -7.295530468210765,
+          "density_sha256": "1854d1ea91d96933ec85e908ec62b4466ddb044abe16b060c1cbe376daea0d3f",
+          "phases_s": {
+            "density_s": 0.004829125,
+            "diagonalization_s": 0.08006071,
+            "mixing_s": 0.001292706,
+            "potential_s": 0.006794667,
+            "total_energy_s": 0.009860999
+          },
+          "operator_applications": 319,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.147676,
+          "fft_grid": [
+            25,
+            25,
+            25
+          ],
+          "bands": 8,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              -0.1901139853590461,
+              0.25863420414918054,
+              0.25863420414918187,
+              0.25863420576847446,
+              0.33714643735176103,
+              0.33714643766137187,
+              0.3371464376613724,
+              0.3784479402252047
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 4.242642630939513e-08,
+            "max_eigen_residual_ha": 5.4020737668904115e-09,
+            "relative_charge_error": 0.0,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  3.118755712871204e-06,
+                  1.0540295129760824e-07,
+                  6.676822625238418e-06
+                ]
+              ],
+              "davidson_iterations": 8,
+              "davidson_iterations_per_k": [
+                8
+              ],
+              "density_residual": 7.042872129351432e-08,
+              "occupied_eigenvalue_change_ha": 3.1319139948138286e-08,
+              "operator_applications": 38,
+              "operator_applications_per_k": [
+                38
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  8.327248265787799e-10,
+                  5.927056878410723e-10,
+                  4.2912447661105076e-10,
+                  2.954316740957125e-10,
+                  6.338215268092351e-10
+                ]
+              ],
+              "timings": {
+                "density_s": 0.000449833,
+                "diagonalization_s": 0.010365042,
+                "mixing_s": 0.0,
+                "potential_s": 0.000630042,
+                "total_energy_s": 0.00092675
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.07851223158328657,
+          "indirect_gap_ha": 0.07851223158328657,
+          "wall_s": 0.15873220799999987
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.15873220799999987,
+      "wall_min_s": 0.15873220799999987,
+      "wall_max_s": 0.15873220799999987,
+      "timeout_s": 240,
+      "total_energy_ha": -7.295530468210765,
+      "iterations": 10,
+      "density_sha256": "1854d1ea91d96933ec85e908ec62b4466ddb044abe16b060c1cbe376daea0d3f",
+      "operator_applications": 319,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "si-k222": {
+      "case": {
+        "id": "si-k222",
+        "purpose": "Existing unshifted 2x2x2 mesh",
+        "system_class": "si-primitive",
+        "tier": "default",
+        "potential": "si",
+        "lattice": [
+          [
+            0,
+            5.130606428358966,
+            5.130606428358966
+          ],
+          [
+            5.130606428358966,
+            0,
+            5.130606428358966
+          ],
+          [
+            5.130606428358966,
+            5.130606428358966,
+            0
+          ]
+        ],
+        "atoms": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25,
+            0.25
+          ]
+        ],
+        "cutoff_ry": 30,
+        "timeout_s": 240,
+        "deterministic": true,
+        "kgrid": [
+          2,
+          2,
+          2
+        ]
+      },
+      "input_toml": "[system]\nname = \"si-k222\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[0, 5.130606428358966, 5.130606428358966], [5.130606428358966, 0, 5.130606428358966], [5.130606428358966, 5.130606428358966, 0]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0, 0]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n[pseudopotentials]\nSi = \"SI_UPF_PATH\"\n[basis]\necutwfc_ry = 30\nkgrid = [2, 2, 2]\nkshift = [0, 0, 0]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "26031e34be1760701871bfd0bf8fd24812f1e22073411ab6a695e93d22d02321",
+      "fingerprint": "f2f1c04736f823c110cae762b151b46c920de5d1a44fa26e4cbcf6160e64c0ab",
+      "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/si-k222/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/si-k222/out-0"
+          ],
+          "converged": true,
+          "iterations": 10,
+          "total_energy_ha": -7.831230057121137,
+          "density_sha256": "f203190f8c973771213a5074eb769c3ceecf264945aa805ea2da6edad5988840",
+          "phases_s": {
+            "density_s": 0.040367124,
+            "diagonalization_s": 0.685642252,
+            "mixing_s": 0.002833958,
+            "potential_s": 0.007226874,
+            "total_energy_s": 0.079646626
+          },
+          "operator_applications": 2751,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.9114755,
+          "fft_grid": [
+            25,
+            25,
+            25
+          ],
+          "bands": 8,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              -0.20838382427211485,
+              0.232906051281292,
+              0.23290605141600032,
+              0.23290605141600082,
+              0.322165490922442,
+              0.3221654909291215,
+              0.322165490929263,
+              0.3533718672683982
+            ],
+            [
+              -0.12091386556988497,
+              -0.027185847506082234,
+              0.18777512906866073,
+              0.18777512918287406,
+              0.2847116778478887,
+              0.349560948237326,
+              0.349560948314364,
+              0.501347267369521
+            ],
+            [
+              -0.12091386556988391,
+              -0.02718584750608229,
+              0.18777512906866214,
+              0.18777512918287306,
+              0.2847116778478875,
+              0.34956094823732564,
+              0.34956094831436346,
+              0.5013472673695227
+            ],
+            [
+              -0.05468270299898107,
+              -0.05468265840783161,
+              0.12513790807991765,
+              0.1251379081268539,
+              0.25011987676721215,
+              0.25011999679402286,
+              0.5980784965694877,
+              0.598078496596945
+            ],
+            [
+              -0.12091386556988414,
+              -0.027185847506081672,
+              0.18777512906866214,
+              0.18777512918287428,
+              0.2847116778478864,
+              0.349560948237326,
+              0.3495609483143652,
+              0.5013472673695212
+            ],
+            [
+              -0.05468270299898227,
+              -0.05468265840783085,
+              0.1251379080799173,
+              0.12513790812685438,
+              0.25011987676720915,
+              0.25011999679402236,
+              0.5980784965694882,
+              0.5980784965969471
+            ],
+            [
+              -0.05468270299897878,
+              -0.0546826584078305,
+              0.12513790807991826,
+              0.12513790812685396,
+              0.25011987676721,
+              0.25011999679402297,
+              0.5980784965694893,
+              0.5980784965969469
+            ],
+            [
+              -0.12091386550956493,
+              -0.02718584762752077,
+              0.18777512915200065,
+              0.1877751291520014,
+              0.284711677840249,
+              0.3495609483337753,
+              0.349560948333777,
+              0.501347267409519
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 4.69077285124121e-09,
+            "max_eigen_residual_ha": 1.4846832810170326e-09,
+            "relative_charge_error": 1.5543122344752192e-15,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  5.966880666226168e-06,
+                  6.03302709332324e-06,
+                  6.690919358858388e-06
+                ],
+                [
+                  7.720307994588372e-06,
+                  7.72097441652525e-06,
+                  3.0229811184966053e-06
+                ],
+                [
+                  7.720308025617835e-06,
+                  7.720974413937766e-06,
+                  3.022981311513067e-06
+                ],
+                [
+                  2.6735682610402456e-06,
+                  5.502214928219832e-06,
+                  5.6692039946530494e-06
+                ],
+                [
+                  7.72030801869798e-06,
+                  7.72097436444589e-06,
+                  3.0229811996510043e-06
+                ],
+                [
+                  2.6735706582783932e-06,
+                  5.502214986945985e-06,
+                  5.669204060952384e-06
+                ],
+                [
+                  2.6735685571184443e-06,
+                  5.502214988045117e-06,
+                  5.6692040529013334e-06
+                ],
+                [
+                  7.719081935330406e-06,
+                  7.719081974699163e-06,
+                  3.019033314989734e-06
+                ]
+              ],
+              "davidson_iterations": 24,
+              "davidson_iterations_per_k": [
+                3,
+                3,
+                3,
+                3,
+                3,
+                3,
+                3,
+                3
+              ],
+              "density_residual": 5.399170265847502e-10,
+              "occupied_eigenvalue_change_ha": 4.6672495312982676e-09,
+              "operator_applications": 208,
+              "operator_applications_per_k": [
+                26,
+                26,
+                26,
+                26,
+                26,
+                26,
+                26,
+                26
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  4.5842727728808957e-10,
+                  3.1415830043351415e-10,
+                  3.1415839036111153e-10,
+                  2.9116818510897967e-10,
+                  4.3979310523814955e-10
+                ],
+                [
+                  4.6379026571336046e-10,
+                  2.9915329325856224e-10,
+                  6.250595678018158e-10,
+                  6.101145788056692e-10,
+                  7.098771463918109e-10
+                ],
+                [
+                  4.637903290609453e-10,
+                  2.991539712993003e-10,
+                  6.250594923625744e-10,
+                  6.101145177476878e-10,
+                  7.09877078136769e-10
+                ],
+                [
+                  3.5264432106291457e-10,
+                  4.2452568451807774e-10,
+                  7.009082923449298e-10,
+                  6.721798696306756e-10,
+                  4.187598801478099e-10
+                ],
+                [
+                  4.6379021129933413e-10,
+                  2.991543017040595e-10,
+                  6.250594934137905e-10,
+                  6.101145241794556e-10,
+                  7.098770403828916e-10
+                ],
+                [
+                  3.5264380938446766e-10,
+                  4.245265100323139e-10,
+                  7.009081264206367e-10,
+                  6.721799725270728e-10,
+                  4.187600831783025e-10
+                ],
+                [
+                  3.526441606058218e-10,
+                  4.2452643498384777e-10,
+                  7.009083556481632e-10,
+                  6.721798155470845e-10,
+                  4.18760208345367e-10
+                ],
+                [
+                  4.589547538838519e-10,
+                  2.94528930281955e-10,
+                  6.45554850384086e-10,
+                  6.455548740137135e-10,
+                  7.232025252819422e-10
+                ]
+              ],
+              "timings": {
+                "density_s": 0.003005,
+                "diagonalization_s": 0.0446885,
+                "mixing_s": 0.0,
+                "potential_s": 0.000734833,
+                "total_energy_s": 0.005965458
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.08925943950644119,
+          "indirect_gap_ha": 0.01721382535120833,
+          "wall_s": 0.9196495
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.9196495,
+      "wall_min_s": 0.9196495,
+      "wall_max_s": 0.9196495,
+      "timeout_s": 240,
+      "total_energy_ha": -7.831230057121137,
+      "iterations": 10,
+      "density_sha256": "f203190f8c973771213a5074eb769c3ceecf264945aa805ea2da6edad5988840",
+      "operator_applications": 2751,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "si-k222s": {
+      "case": {
+        "id": "si-k222s",
+        "purpose": "Existing half-shifted 2x2x2 mesh",
+        "system_class": "si-primitive",
+        "tier": "default",
+        "potential": "si",
+        "lattice": [
+          [
+            0,
+            5.130606428358966,
+            5.130606428358966
+          ],
+          [
+            5.130606428358966,
+            0,
+            5.130606428358966
+          ],
+          [
+            5.130606428358966,
+            5.130606428358966,
+            0
+          ]
+        ],
+        "atoms": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25,
+            0.25
+          ]
+        ],
+        "cutoff_ry": 30,
+        "timeout_s": 240,
+        "deterministic": true,
+        "kgrid": [
+          2,
+          2,
+          2
+        ],
+        "kshift": [
+          0.5,
+          0.5,
+          0.5
+        ]
+      },
+      "input_toml": "[system]\nname = \"si-k222s\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[0, 5.130606428358966, 5.130606428358966], [5.130606428358966, 0, 5.130606428358966], [5.130606428358966, 5.130606428358966, 0]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0, 0]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n[pseudopotentials]\nSi = \"SI_UPF_PATH\"\n[basis]\necutwfc_ry = 30\nkgrid = [2, 2, 2]\nkshift = [0.5, 0.5, 0.5]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "4c4feb0fe78af6748868dbb0741e36714a7592dbcf6328d280e96660b2887f54",
+      "fingerprint": "fb8220baddac8774f2ad4401f711e5d4361679ab89b0000be796e49308534adf",
+      "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/si-k222s/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/si-k222s/out-0"
+          ],
+          "converged": true,
+          "iterations": 10,
+          "total_energy_ha": -7.919423412469083,
+          "density_sha256": "2b310246ec91cf7ea8b845e03fcee0fe6c7769e5556c4af16ab5c8e4916e3ee5",
+          "phases_s": {
+            "density_s": 0.017575542,
+            "diagonalization_s": 0.318627291,
+            "mixing_s": 0.002668585,
+            "potential_s": 0.006038459,
+            "total_energy_s": 0.036517999
+          },
+          "operator_applications": 1379,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.438723291,
+          "fft_grid": [
+            25,
+            25,
+            25
+          ],
+          "bands": 8,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              -0.18588001520204286,
+              0.08075378757243905,
+              0.19550603988586077,
+              0.19550603988586118,
+              0.2935461798945073,
+              0.35105912063750216,
+              0.351059120637503,
+              0.4733848976512578
+            ],
+            [
+              -0.11455688981644453,
+              -0.011491146975248357,
+              0.09412720803677153,
+              0.14188458495398423,
+              0.27545482668510396,
+              0.3855644153722228,
+              0.4331570928878262,
+              0.4417417346586454
+            ],
+            [
+              -0.11455688981644441,
+              -0.01149114697524807,
+              0.09412720803677206,
+              0.14188458495398498,
+              0.27545482668510307,
+              0.3855644153722225,
+              0.43315709288782334,
+              0.44174173465864547
+            ],
+            [
+              -0.11455688981644493,
+              -0.011491146975246704,
+              0.09412720803677083,
+              0.14188458495398437,
+              0.2754548266851023,
+              0.38556441537222236,
+              0.43315709288782456,
+              0.441741734658645
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 7.406047306078594e-09,
+            "max_eigen_residual_ha": 1.473995284788281e-09,
+            "relative_charge_error": 3.1086244689504383e-15,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  3.903504328800922e-06,
+                  3.903504344703378e-06,
+                  2.6298322009509793e-06
+                ],
+                [
+                  5.44236014409218e-06,
+                  4.7432100226913406e-06,
+                  5.7277989153062964e-06
+                ],
+                [
+                  5.442360110910257e-06,
+                  4.743210627453337e-06,
+                  5.727798724160581e-06
+                ],
+                [
+                  5.4423597907473565e-06,
+                  4.743210181711905e-06,
+                  5.727798831169127e-06
+                ]
+              ],
+              "davidson_iterations": 21,
+              "davidson_iterations_per_k": [
+                6,
+                5,
+                5,
+                5
+              ],
+              "density_residual": 8.643077079644292e-10,
+              "occupied_eigenvalue_change_ha": 2.8123682133118777e-09,
+              "operator_applications": 113,
+              "operator_applications_per_k": [
+                29,
+                28,
+                28,
+                28
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  6.591831649931663e-10,
+                  4.0980947190390463e-10,
+                  4.4149288698106916e-10,
+                  4.414930727946415e-10,
+                  7.116078919152659e-10
+                ],
+                [
+                  5.402683549193647e-10,
+                  4.88799754386829e-10,
+                  7.518449353220273e-10,
+                  5.314580875107102e-10,
+                  7.720419786895185e-10
+                ],
+                [
+                  5.402683238055099e-10,
+                  4.887993898329235e-10,
+                  7.518448528272191e-10,
+                  5.314578955556255e-10,
+                  7.720408324864985e-10
+                ],
+                [
+                  5.402682439340116e-10,
+                  4.887994058188249e-10,
+                  7.518447165439165e-10,
+                  5.314577011975814e-10,
+                  7.72042203710315e-10
+                ]
+              ],
+              "timings": {
+                "density_s": 0.001322333,
+                "diagonalization_s": 0.022725292,
+                "mixing_s": 0.0,
+                "potential_s": 0.000712667,
+                "total_energy_s": 0.002692417
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.09804014000864614,
+          "indirect_gap_ha": 0.07994878679924111,
+          "wall_s": 0.44613108300000004
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.44613108300000004,
+      "wall_min_s": 0.44613108300000004,
+      "wall_max_s": 0.44613108300000004,
+      "timeout_s": 240,
+      "total_energy_ha": -7.919423412469083,
+      "iterations": 10,
+      "density_sha256": "2b310246ec91cf7ea8b845e03fcee0fe6c7769e5556c4af16ab5c8e4916e3ee5",
+      "operator_applications": 1379,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "si-low": {
+      "case": {
+        "id": "si-low",
+        "purpose": "Low cutoff sensitivity, not a converged physical cutoff",
+        "system_class": "si-cutoff",
+        "tier": "default",
+        "potential": "si",
+        "lattice": [
+          [
+            0,
+            5.130606428358966,
+            5.130606428358966
+          ],
+          [
+            5.130606428358966,
+            0,
+            5.130606428358966
+          ],
+          [
+            5.130606428358966,
+            5.130606428358966,
+            0
+          ]
+        ],
+        "atoms": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25,
+            0.25
+          ]
+        ],
+        "cutoff_ry": 8,
+        "timeout_s": 240,
+        "deterministic": true
+      },
+      "input_toml": "[system]\nname = \"si-low\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[0, 5.130606428358966, 5.130606428358966], [5.130606428358966, 0, 5.130606428358966], [5.130606428358966, 5.130606428358966, 0]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0, 0]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n[pseudopotentials]\nSi = \"SI_UPF_PATH\"\n[basis]\necutwfc_ry = 8\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "46c03b836090cbc4b3c98d78a31f3f2ebbf41bf70ec2433ebd779aed6d08721b",
+      "fingerprint": "3dc0252f6c0a5a69607408be6999a1a445a2f9848d532f793f7232365a483346",
+      "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/si-low/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/si-low/out-0"
+          ],
+          "converged": true,
+          "iterations": 11,
+          "total_energy_ha": -7.233756452824798,
+          "density_sha256": "e44a231ca1bbab9d82a70dfc824e22d30a2d5ad68d7a01b4416368ca595b32be",
+          "phases_s": {
+            "density_s": 0.000726581,
+            "diagonalization_s": 0.008943043,
+            "mixing_s": 0.000847876,
+            "potential_s": 0.001261456,
+            "total_energy_s": 0.001794209
+          },
+          "operator_applications": 281,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.020426626,
+          "fft_grid": [
+            15,
+            15,
+            15
+          ],
+          "bands": 8,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              -0.17791882137778384,
+              0.2618492714087711,
+              0.26184927140892456,
+              0.26184927399185376,
+              0.3392824289505453,
+              0.33928242996675334,
+              0.33928242998666425,
+              0.38699926262481404
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 1.628159946614217e-08,
+            "max_eigen_residual_ha": 3.5699434867924436e-09,
+            "relative_charge_error": 1.3322676295501878e-15,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  2.0336717755439583e-09,
+                  7.17212717879461e-09,
+                  5.792130728725338e-06
+                ]
+              ],
+              "davidson_iterations": 11,
+              "davidson_iterations_per_k": [
+                11
+              ],
+              "density_residual": 1.0617111130495722e-09,
+              "occupied_eigenvalue_change_ha": 1.120072701255026e-08,
+              "operator_applications": 34,
+              "operator_applications_per_k": [
+                34
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  1.1085500097289287e-10,
+                  1.9145291571306885e-10,
+                  4.0029847406663776e-10,
+                  4.841229489643476e-10,
+                  5.018301311889337e-10
+                ]
+              ],
+              "timings": {
+                "density_s": 5.9667e-05,
+                "diagonalization_s": 0.001373,
+                "mixing_s": 0.0,
+                "potential_s": 0.000100916,
+                "total_energy_s": 0.000145084
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.07743315495869152,
+          "indirect_gap_ha": 0.07743315495869152,
+          "wall_s": 0.026784249999999954
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.026784249999999954,
+      "wall_min_s": 0.026784249999999954,
+      "wall_max_s": 0.026784249999999954,
+      "timeout_s": 240,
+      "total_energy_ha": -7.233756452824798,
+      "iterations": 11,
+      "density_sha256": "e44a231ca1bbab9d82a70dfc824e22d30a2d5ad68d7a01b4416368ca595b32be",
+      "operator_applications": 281,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "si-skew": {
+      "case": {
+        "id": "si-skew",
+        "purpose": "Sheared primitive lattice, broken degeneracies",
+        "system_class": "skewed",
+        "tier": "default",
+        "potential": "si",
+        "lattice": [
+          [
+            0.7,
+            5.130606428358966,
+            5.130606428358966
+          ],
+          [
+            5.130606428358966,
+            0,
+            5.130606428358966
+          ],
+          [
+            5.130606428358966,
+            5.130606428358966,
+            0.3
+          ]
+        ],
+        "atoms": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25,
+            0.25
+          ]
+        ],
+        "cutoff_ry": 30,
+        "timeout_s": 240,
+        "deterministic": true
+      },
+      "input_toml": "[system]\nname = \"si-skew\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[0.7, 5.130606428358966, 5.130606428358966], [5.130606428358966, 0, 5.130606428358966], [5.130606428358966, 5.130606428358966, 0.3]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0, 0]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n[pseudopotentials]\nSi = \"SI_UPF_PATH\"\n[basis]\necutwfc_ry = 30\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "a306a306e2433d0602794d9cc765a5cd0fabe54a8979a54c265c3b151beda6e5",
+      "fingerprint": "d41dd29a24f1af3bd7b9be566c609f2dae8433fe22bfa2333aaf41e27eb8054f",
+      "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/si-skew/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/si-skew/out-0"
+          ],
+          "converged": true,
+          "iterations": 13,
+          "total_energy_ha": -7.250555672960788,
+          "density_sha256": "7a29618f8e494acc24c956624a65646651fe2ed86ae9c80b6191944d7f465501",
+          "phases_s": {
+            "density_s": 0.005179833,
+            "diagonalization_s": 0.084754001,
+            "mixing_s": 0.004217582,
+            "potential_s": 0.007216538,
+            "total_energy_s": 0.011563833
+          },
+          "operator_applications": 410,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.150361209,
+          "fft_grid": [
+            25,
+            25,
+            25
+          ],
+          "bands": 8,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              -0.1779612856429441,
+              0.2771008316554533,
+              0.2982075269499669,
+              0.3229413405017484,
+              0.32608597635538317,
+              0.38563670668721983,
+              0.40727558007044257,
+              0.4877387780079928
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 1.8351103178001634e-08,
+            "max_eigen_residual_ha": 4.827524298865985e-09,
+            "relative_charge_error": 1.1102230246251565e-15,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  1.774606936728907e-06,
+                  2.0555646603126674e-06,
+                  3.1993689414479044e-06
+                ]
+              ],
+              "davidson_iterations": 5,
+              "davidson_iterations_per_k": [
+                5
+              ],
+              "density_residual": 2.2011372814581613e-08,
+              "occupied_eigenvalue_change_ha": 1.635974217206737e-08,
+              "operator_applications": 34,
+              "operator_applications_per_k": [
+                34
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  3.5295489436817044e-10,
+                  2.0158636333633996e-10,
+                  6.511073098848683e-10,
+                  4.3027533805018016e-10,
+                  3.50896368407917e-10
+                ]
+              ],
+              "timings": {
+                "density_s": 0.000495,
+                "diagonalization_s": 0.008760625,
+                "mixing_s": 0.0,
+                "potential_s": 0.000678166,
+                "total_energy_s": 0.001016458
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.0031446358536347807,
+          "indirect_gap_ha": 0.0031446358536347807,
+          "wall_s": 0.1572225829999998
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.1572225829999998,
+      "wall_min_s": 0.1572225829999998,
+      "wall_max_s": 0.1572225829999998,
+      "timeout_s": 240,
+      "total_energy_ha": -7.250555672960788,
+      "iterations": 13,
+      "density_sha256": "7a29618f8e494acc24c956624a65646651fe2ed86ae9c80b6191944d7f465501",
+      "operator_applications": 410,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "si8-gamma": {
+      "case": {
+        "id": "si8-gamma",
+        "purpose": "P7PC top-band degeneracy/stagnation regression; default bands",
+        "system_class": "si-conventional",
+        "tier": "default",
+        "potential": "si",
+        "lattice": [
+          [
+            10.261212856717933,
+            0,
+            0
+          ],
+          [
+            0,
+            10.261212856717933,
+            0
+          ],
+          [
+            0,
+            0,
+            10.261212856717933
+          ]
+        ],
+        "atoms": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0.5,
+            0.5
+          ],
+          [
+            0.5,
+            0,
+            0.5
+          ],
+          [
+            0.5,
+            0.5,
+            0
+          ],
+          [
+            0.25,
+            0.25,
+            0.25
+          ],
+          [
+            0.25,
+            0.75,
+            0.75
+          ],
+          [
+            0.75,
+            0.25,
+            0.75
+          ],
+          [
+            0.75,
+            0.75,
+            0.25
+          ]
+        ],
+        "cutoff_ry": 30,
+        "timeout_s": 240,
+        "deterministic": true,
+        "expected_error": "not converged after 400 iterations"
+      },
+      "input_toml": "[system]\nname = \"si8-gamma\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[10.261212856717933, 0, 0], [0, 10.261212856717933, 0], [0, 0, 10.261212856717933]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0, 0]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0.5, 0.5]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5, 0, 0.5]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5, 0.5, 0]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.75, 0.75]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.75, 0.25, 0.75]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.75, 0.75, 0.25]\n[pseudopotentials]\nSi = \"SI_UPF_PATH\"\n[basis]\necutwfc_ry = 30\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "ff84633c1eb4f4a16b9a46181b33aba3f188cd973027c13fc0e43167bac1ff5b",
+      "fingerprint": "4092ce821a2086e6bbbca59a2d05d2bd1ab34dd4ed71192dd3a326b44888d5b2",
+      "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/si8-gamma/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/si8-gamma/out-0"
+          ],
+          "converged": true,
+          "iterations": 15,
+          "total_energy_ha": -31.321803601031256,
+          "density_sha256": "9152c7a9c64db67f623379a343a7b8c84b532ccc08736f8870292ad287e3e4de",
+          "phases_s": {
+            "density_s": 0.064521123,
+            "diagonalization_s": 3.943825251,
+            "mixing_s": 0.015731167,
+            "potential_s": 0.024232626,
+            "total_energy_s": 0.07032204
+          },
+          "operator_applications": 2416,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 4.278181917,
+          "fft_grid": [
+            36,
+            36,
+            36
+          ],
+          "bands": 20,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              -0.20759629792390008,
+              -0.0538145894807094,
+              -0.053814585072333304,
+              -0.05381456541918925,
+              -0.05381456293205374,
+              -0.05381455409451313,
+              -0.053814549639010854,
+              0.1258677419476529,
+              0.12586774557231464,
+              0.12586774742330223,
+              0.1258677485768234,
+              0.12586775279941229,
+              0.12586775616306517,
+              0.2338816307410727,
+              0.2338816332152263,
+              0.2338816355630834,
+              0.2508020880091659,
+              0.2508020994257798,
+              0.25080210317640805,
+              0.2508021133590472
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 2.252152745972293e-08,
+            "max_eigen_residual_ha": 4.80678227853641e-09,
+            "relative_charge_error": 2.4424906541753444e-15,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  5.876877019288806e-10,
+                  4.659190609561968e-08,
+                  8.10982567827952e-08
+                ]
+              ],
+              "davidson_iterations": 68,
+              "davidson_iterations_per_k": [
+                68
+              ],
+              "density_residual": 2.9618463445512665e-08,
+              "occupied_eigenvalue_change_ha": 6.500905964934578e-08,
+              "operator_applications": 204,
+              "operator_applications_per_k": [
+                204
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  2.392586298554492e-10,
+                  2.5802970129975354e-10,
+                  5.603226231127883e-10,
+                  5.429957940310606e-10,
+                  3.957891477035879e-10,
+                  3.5613873362498746e-10,
+                  6.751814493865405e-10,
+                  3.712141765129148e-10,
+                  3.505217401119201e-10,
+                  4.035852241742618e-10,
+                  8.771554010952977e-10,
+                  7.723142731068909e-10,
+                  5.132305035679722e-10,
+                  2.4068876611411463e-10,
+                  2.8038048127116514e-10,
+                  2.927346366853797e-10,
+                  4.787443044327638e-10
+                ]
+              ],
+              "timings": {
+                "density_s": 0.003207166,
+                "diagonalization_s": 0.457499167,
+                "mixing_s": 0.0,
+                "potential_s": 0.001631583,
+                "total_energy_s": 0.003824084
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.016920452446082535,
+          "indirect_gap_ha": 0.016920452446082535,
+          "wall_s": 4.287365833999999
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 4.287365833999999,
+      "wall_min_s": 4.287365833999999,
+      "wall_max_s": 4.287365833999999,
+      "timeout_s": 240,
+      "total_energy_ha": -31.321803601031256,
+      "iterations": 15,
+      "density_sha256": "9152c7a9c64db67f623379a343a7b8c84b532ccc08736f8870292ad287e3e4de",
+      "operator_applications": 2416,
+      "expected_failure": false,
+      "resolved_expected_failure": true
+    },
+    "syn-cubic-degenerate": {
+      "case": {
+        "id": "syn-cubic-degenerate",
+        "purpose": "Cubic single ion; symmetry produces degenerate excited multiplets",
+        "system_class": "synthetic-gap",
+        "tier": "default",
+        "potential": "synthetic",
+        "lattice": [
+          [
+            4,
+            0,
+            0
+          ],
+          [
+            0,
+            4,
+            0
+          ],
+          [
+            0,
+            0,
+            4
+          ]
+        ],
+        "atoms": [
+          [
+            0.13,
+            0.21,
+            0.32
+          ]
+        ],
+        "cutoff_ry": 8,
+        "timeout_s": 240,
+        "deterministic": true,
+        "valence": 4,
+        "channels": [
+          0
+        ],
+        "shape": "gaussian",
+        "nbands": 8
+      },
+      "input_toml": "[system]\nname = \"syn-cubic-degenerate\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.32]\n[pseudopotentials]\nSi = \"synthetic.UPF\"\n[basis]\necutwfc_ry = 8\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nnbands = 8\n",
+      "input_sha256": "17a52d19a477579b6bddbf8c23b2f47d40436a288287dd130951b2edc6fb231d",
+      "fingerprint": "ebaba58afbc8ff4bace1ac63dcd97fd92797c08b88d4ff10abafea5daabc0ad5",
+      "upf_sha256": "868c462b441762c87407bbd5db486e59a677d14bd19a3ef9300f81adeb1f6b93",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-cubic-degenerate/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-cubic-degenerate/out-0"
+          ],
+          "converged": true,
+          "iterations": 10,
+          "total_energy_ha": -4.2612772341353455,
+          "density_sha256": "262304ec7437c7989d8d034cfc145047cd2d90610edafc36f5bf669066d6dd10",
+          "phases_s": {
+            "density_s": 7.4833e-05,
+            "diagonalization_s": 0.000985542,
+            "mixing_s": 0.000116794,
+            "potential_s": 0.000169415,
+            "total_energy_s": 0.000237334
+          },
+          "operator_applications": 170,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.006029709,
+          "fft_grid": [
+            8,
+            8,
+            8
+          ],
+          "bands": 8,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              -0.27872804709747023,
+              0.8722590111892194,
+              0.9407358419333743,
+              0.9407544264160267,
+              0.940761532850831,
+              1.0453245360881778,
+              1.0453690941238913,
+              2.1672189609106436
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 1.823350724907051e-09,
+            "max_eigen_residual_ha": 1.7515401016962978e-10,
+            "relative_charge_error": 2.220446049250313e-16,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  8.945657027224349e-07,
+                  1.1156238540130376e-06,
+                  5.784001970970401e-06,
+                  4.622247258163591e-06,
+                  5.632923843480072e-06
+                ]
+              ],
+              "davidson_iterations": 1,
+              "davidson_iterations_per_k": [
+                1
+              ],
+              "density_residual": 3.594286964070658e-10,
+              "occupied_eigenvalue_change_ha": 4.272824871698333e-10,
+              "operator_applications": 16,
+              "operator_applications_per_k": [
+                16
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  3.9537104911596563e-10,
+                  7.958532102238692e-10,
+                  4.945490254701147e-10
+                ]
+              ],
+              "timings": {
+                "density_s": 6.5e-06,
+                "diagonalization_s": 5.5e-05,
+                "mixing_s": 0.0,
+                "potential_s": 1.4875e-05,
+                "total_energy_s": 2.025e-05
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.06847683074415489,
+          "indirect_gap_ha": 0.06847683074415489,
+          "wall_s": 0.011579249999999597
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.011579249999999597,
+      "wall_min_s": 0.011579249999999597,
+      "wall_max_s": 0.011579249999999597,
+      "timeout_s": 240,
+      "total_energy_ha": -4.2612772341353455,
+      "iterations": 10,
+      "density_sha256": "262304ec7437c7989d8d034cfc145047cd2d90610edafc36f5bf669066d6dd10",
+      "operator_applications": 170,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "syn-d3": {
+      "case": {
+        "id": "syn-d3",
+        "purpose": "Three coupled projectors in d channel",
+        "system_class": "synthetic-projectors",
+        "tier": "default",
+        "potential": "synthetic",
+        "lattice": [
+          [
+            4,
+            0,
+            0
+          ],
+          [
+            0,
+            4,
+            0
+          ],
+          [
+            0,
+            0,
+            4
+          ]
+        ],
+        "atoms": [
+          [
+            0.13,
+            0.21,
+            0.32
+          ]
+        ],
+        "cutoff_ry": 3,
+        "timeout_s": 240,
+        "deterministic": true,
+        "valence": 4,
+        "channels": [
+          2,
+          2,
+          2
+        ],
+        "shape": "soft"
+      },
+      "input_toml": "[system]\nname = \"syn-d3\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.32]\n[pseudopotentials]\nSi = \"synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "9f7c1a096a034c09ec0bed48645fedcc1f269047e7aecc1e514a13e542fbb121",
+      "fingerprint": "9f54d84a4bbf6e558acb202a44447bbb542e05abdf7abfc03ffdb9d4a1a0eaad",
+      "upf_sha256": "59758f9471bdef6f0cb53df7704106543fb45fac819d195391b8883aa35d5a1d",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-d3/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-d3/out-0"
+          ],
+          "converged": true,
+          "iterations": 8,
+          "total_energy_ha": -0.9465076331236242,
+          "density_sha256": "02bd53588959ec627041a39b200c8de0b8e7f10705c4684eaedee681cd31786d",
+          "phases_s": {
+            "density_s": 1.7542e-05,
+            "diagonalization_s": 0.000166874,
+            "mixing_s": 2.5999e-05,
+            "potential_s": 2.8001e-05,
+            "total_energy_s": 6.2168e-05
+          },
+          "operator_applications": 71,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.001195126,
+          "fft_grid": [
+            5,
+            5,
+            5
+          ],
+          "bands": 6,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              0.46766947324686214,
+              1.7292225783127015,
+              1.7904513877153936,
+              1.7904773281806885,
+              1.7905038690936503,
+              44.958288564983214
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 4.71167433350084e-09,
+            "max_eigen_residual_ha": 1.2819504637524973e-14,
+            "relative_charge_error": 2.220446049250313e-16,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  7.233616764285321e-15,
+                  5.179673834181956e-15,
+                  4.196346961479208e-14
+                ]
+              ],
+              "davidson_iterations": 2,
+              "davidson_iterations_per_k": [
+                2
+              ],
+              "density_residual": 2.444157703922966e-09,
+              "occupied_eigenvalue_change_ha": 8.319078759200238e-11,
+              "operator_applications": 13,
+              "operator_applications_per_k": [
+                13
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  7.062081168070815e-16,
+                  6.285765313243041e-15,
+                  8.26851479217704e-15
+                ]
+              ],
+              "timings": {
+                "density_s": 1.709e-06,
+                "diagonalization_s": 1.8083e-05,
+                "mixing_s": 0.0,
+                "potential_s": 2.666e-06,
+                "total_energy_s": 5.042e-06
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.06122880940269204,
+          "indirect_gap_ha": 0.06122880940269204,
+          "wall_s": 0.006551582999999361
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.006551582999999361,
+      "wall_min_s": 0.006551582999999361,
+      "wall_max_s": 0.006551582999999361,
+      "timeout_s": 240,
+      "total_energy_ha": -0.9465076331236242,
+      "iterations": 8,
+      "density_sha256": "02bd53588959ec627041a39b200c8de0b8e7f10705c4684eaedee681cd31786d",
+      "operator_applications": 71,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "syn-fft-primes": {
+      "case": {
+        "id": "syn-fft-primes",
+        "purpose": "Explicit 7x11x13 grid: chooser otherwise rounds to 2/3/5 smooth sizes",
+        "system_class": "awkward-fft",
+        "tier": "default",
+        "potential": "synthetic",
+        "lattice": [
+          [
+            4,
+            0,
+            0
+          ],
+          [
+            0,
+            4,
+            0
+          ],
+          [
+            0,
+            0,
+            4
+          ]
+        ],
+        "atoms": [
+          [
+            0.13,
+            0.21,
+            0.32
+          ]
+        ],
+        "cutoff_ry": 3,
+        "timeout_s": 240,
+        "deterministic": true,
+        "valence": 4,
+        "channels": [
+          0
+        ],
+        "shape": "soft",
+        "fft_grid": [
+          7,
+          11,
+          13
+        ]
+      },
+      "input_toml": "[system]\nname = \"syn-fft-primes\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.32]\n[pseudopotentials]\nSi = \"synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\nfft_grid = [7, 11, 13]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "9012e8cab0283565aa5ef51e951f5c1fe1f67432a628640f5bf576e522fd1f38",
+      "fingerprint": "2d9341dbceccbc40bd2a4730f184307afa0b798fb52ec7ef6603986feb696d1e",
+      "upf_sha256": "db4bbd6b640360c6553c6a6d6aeffa092dcf326d8aa44b2a5589134ccd38effb",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-fft-primes/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-fft-primes/out-0"
+          ],
+          "converged": true,
+          "iterations": 14,
+          "total_energy_ha": -0.7346843876893185,
+          "density_sha256": "980b0051e261013d42e612b582520aaf009af877dcd9d0d7f7aac8126c3f2d10",
+          "phases_s": {
+            "density_s": 0.000122293,
+            "diagonalization_s": 0.000498584,
+            "mixing_s": 0.000318082,
+            "potential_s": 0.000316752,
+            "total_energy_s": 0.000484207
+          },
+          "operator_applications": 108,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.002571542,
+          "fft_grid": [
+            7,
+            11,
+            13
+          ],
+          "bands": 6,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              0.53038384077874,
+              1.7724184363248359,
+              1.790492809512731,
+              1.7904930088412911,
+              1.790493022128507,
+              1.8259063064633394
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 4.874935604115826e-11,
+            "max_eigen_residual_ha": 2.6581739012616403e-15,
+            "relative_charge_error": 6.661338147750939e-16,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  1.5810706165576056e-12,
+                  5.0950515553511666e-12,
+                  1.1867284410931197e-12
+                ]
+              ],
+              "davidson_iterations": 1,
+              "davidson_iterations_per_k": [
+                1
+              ],
+              "density_residual": 7.51743330056918e-11,
+              "occupied_eigenvalue_change_ha": 1.0258460747536446e-13,
+              "operator_applications": 12,
+              "operator_applications_per_k": [
+                12
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  5.998532115578148e-12,
+                  1.5432628490732645e-12,
+                  2.14556962235788e-12
+                ]
+              ],
+              "timings": {
+                "density_s": 6.667e-06,
+                "diagonalization_s": 5.425e-05,
+                "mixing_s": 0.0,
+                "potential_s": 2.275e-05,
+                "total_energy_s": 3.75e-05
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.018074373187895176,
+          "indirect_gap_ha": 0.018074373187895176,
+          "wall_s": 0.007251791999999924
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.007251791999999924,
+      "wall_min_s": 0.007251791999999924,
+      "wall_max_s": 0.007251791999999924,
+      "timeout_s": 240,
+      "total_energy_ha": -0.7346843876893185,
+      "iterations": 14,
+      "density_sha256": "980b0051e261013d42e612b582520aaf009af877dcd9d0d7f7aac8126c3f2d10",
+      "operator_applications": 108,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "syn-gaussian-fcc": {
+      "case": {
+        "id": "syn-gaussian-fcc",
+        "purpose": "Two ions, Gaussian local potential and two s/one p projectors; fixture-like gap",
+        "system_class": "synthetic-gap",
+        "tier": "default",
+        "potential": "synthetic",
+        "lattice": [
+          [
+            0,
+            5.130606428358966,
+            5.130606428358966
+          ],
+          [
+            5.130606428358966,
+            0,
+            5.130606428358966
+          ],
+          [
+            5.130606428358966,
+            5.130606428358966,
+            0
+          ]
+        ],
+        "atoms": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.25,
+            0.25,
+            0.25
+          ]
+        ],
+        "cutoff_ry": 8,
+        "timeout_s": 240,
+        "deterministic": true,
+        "valence": 4,
+        "channels": [
+          0,
+          0,
+          1
+        ],
+        "shape": "gaussian"
+      },
+      "input_toml": "[system]\nname = \"syn-gaussian-fcc\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[0, 5.130606428358966, 5.130606428358966], [5.130606428358966, 0, 5.130606428358966], [5.130606428358966, 5.130606428358966, 0]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0, 0]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n[pseudopotentials]\nSi = \"synthetic.UPF\"\n[basis]\necutwfc_ry = 8\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "1491263c99ca21a9e7bfc501189887872e2657375c41a316a4d3c7e5ca33c71e",
+      "fingerprint": "62bd59a9d3aa912486146b7d6aa53c03acdab334c334b034b934089411abbca8",
+      "upf_sha256": "4a0d47fb2c91f31e9cb4984f8638db9e1f77390e4cca285030711b36d033e662",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-gaussian-fcc/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-gaussian-fcc/out-0"
+          ],
+          "converged": true,
+          "iterations": 17,
+          "total_energy_ha": -4.68302340536371,
+          "density_sha256": "c603c2b78de03c2a187010c0908c55634971df0f2a001fd525a23c83b2984c8f",
+          "phases_s": {
+            "density_s": 0.000879751,
+            "diagonalization_s": 0.015710997,
+            "mixing_s": 0.000945418,
+            "potential_s": 0.001371586,
+            "total_energy_s": 0.002027581
+          },
+          "operator_applications": 548,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.041327,
+          "fft_grid": [
+            15,
+            15,
+            15
+          ],
+          "bands": 8,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              0.06632833973180857,
+              0.5162029242889836,
+              0.5406673176737887,
+              0.5406673180456628,
+              0.5534243045442423,
+              0.6263721730705233,
+              0.6263721777702783,
+              0.626372182600998
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 2.116383479437957e-08,
+            "max_eigen_residual_ha": 7.813335632074522e-09,
+            "relative_charge_error": 4.440892098500626e-16,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  3.677055563648634e-06,
+                  3.714547284409457e-06,
+                  4.340730254256539e-06
+                ]
+              ],
+              "davidson_iterations": 5,
+              "davidson_iterations_per_k": [
+                5
+              ],
+              "density_residual": 6.621081903878876e-08,
+              "occupied_eigenvalue_change_ha": 7.553303871254968e-09,
+              "operator_applications": 35,
+              "operator_applications_per_k": [
+                35
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  1.4487318616011144e-10,
+                  4.0828046738211583e-10,
+                  7.807617157771031e-10,
+                  5.855011441640213e-10,
+                  5.476964851702058e-10
+                ]
+              ],
+              "timings": {
+                "density_s": 5.1709e-05,
+                "diagonalization_s": 0.000798666,
+                "mixing_s": 0.0,
+                "potential_s": 8.1709e-05,
+                "total_energy_s": 0.000107333
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.012756986498579481,
+          "indirect_gap_ha": 0.012756986498579481,
+          "wall_s": 0.047323541999999996
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.047323541999999996,
+      "wall_min_s": 0.047323541999999996,
+      "wall_max_s": 0.047323541999999996,
+      "timeout_s": 240,
+      "total_energy_ha": -4.68302340536371,
+      "iterations": 17,
+      "density_sha256": "c603c2b78de03c2a187010c0908c55634971df0f2a001fd525a23c83b2984c8f",
+      "operator_applications": 548,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "syn-odd-shift": {
+      "case": {
+        "id": "syn-odd-shift",
+        "purpose": "Odd 3x1x1 mesh with half shift; sampled-gap rejection probe",
+        "system_class": "synthetic-mesh",
+        "tier": "default",
+        "potential": "synthetic",
+        "lattice": [
+          [
+            4,
+            0,
+            0
+          ],
+          [
+            0,
+            4,
+            0
+          ],
+          [
+            0,
+            0,
+            4
+          ]
+        ],
+        "atoms": [
+          [
+            0.13,
+            0.21,
+            0.32
+          ]
+        ],
+        "cutoff_ry": 8,
+        "timeout_s": 240,
+        "deterministic": true,
+        "valence": 4,
+        "channels": [
+          0
+        ],
+        "shape": "soft",
+        "kgrid": [
+          3,
+          1,
+          1
+        ],
+        "kshift": [
+          0.5,
+          0,
+          0
+        ]
+      },
+      "input_toml": "[system]\nname = \"syn-odd-shift\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.32]\n[pseudopotentials]\nSi = \"synthetic.UPF\"\n[basis]\necutwfc_ry = 8\nkgrid = [3, 1, 1]\nkshift = [0.5, 0, 0]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "7d45fb43ca0c0fe9fd115d26e8c582a63055df8b12912f9aaef714d39e63c6fa",
+      "fingerprint": "1ba4d5da2bffd5179780615e82c4b67f04078dfd5208c912d41c406a0ceaec3d",
+      "upf_sha256": "db4bbd6b640360c6553c6a6d6aeffa092dcf326d8aa44b2a5589134ccd38effb",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-odd-shift/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-odd-shift/out-0"
+          ],
+          "converged": true,
+          "iterations": 9,
+          "total_energy_ha": -1.590066401990696,
+          "density_sha256": "e1289bf69aeef3700d1c6cfdc4a148d79b098aadb1cd201a79be8e70dbc58ded",
+          "phases_s": {
+            "density_s": 0.000122749,
+            "diagonalization_s": 0.001538457,
+            "mixing_s": 9.0917e-05,
+            "potential_s": 0.00015575,
+            "total_energy_s": 0.000411
+          },
+          "operator_applications": 273,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.00623175,
+          "fft_grid": [
+            8,
+            8,
+            8
+          ],
+          "bands": 6,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              0.5628353087475538,
+              1.386653485167775,
+              1.7405864893762621,
+              1.7731103041278706,
+              1.7731103154222099,
+              1.8488254623372176
+            ],
+            [
+              0.7424684409908523,
+              0.9406385192501071,
+              1.9131570869101866,
+              1.951938846434171,
+              1.9519388613160555,
+              2.0490378925714254
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 1.0778400828063362e-09,
+            "max_eigen_residual_ha": 9.8677227932761e-10,
+            "relative_charge_error": 6.661338147750939e-16,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  8.455166278519819e-06,
+                  8.240210834394077e-06,
+                  8.865301219540241e-06
+                ],
+                [
+                  9.147758672075268e-07,
+                  9.147807051716253e-07,
+                  6.437063676733187e-11
+                ]
+              ],
+              "davidson_iterations": 2,
+              "davidson_iterations_per_k": [
+                1,
+                1
+              ],
+              "density_residual": 1.3854080104260994e-11,
+              "occupied_eigenvalue_change_ha": 7.307034977088733e-10,
+              "operator_applications": 24,
+              "operator_applications_per_k": [
+                12,
+                12
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  6.778913909748386e-10,
+                  9.20761774132686e-11,
+                  8.789275716594417e-10
+                ],
+                [
+                  7.863036208616456e-10,
+                  6.881386348237389e-10,
+                  1.952051951492625e-10
+                ]
+              ],
+              "timings": {
+                "density_s": 1.1708e-05,
+                "diagonalization_s": 8.1833e-05,
+                "mixing_s": 0.0,
+                "potential_s": 1.4875e-05,
+                "total_energy_s": 3.925e-05
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.35393300420848717,
+          "indirect_gap_ha": 0.35393300420848717,
+          "wall_s": 0.011027083000000104
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.011027083000000104,
+      "wall_min_s": 0.011027083000000104,
+      "wall_max_s": 0.011027083000000104,
+      "timeout_s": 240,
+      "total_energy_ha": -1.590066401990696,
+      "iterations": 9,
+      "density_sha256": "e1289bf69aeef3700d1c6cfdc4a148d79b098aadb1cd201a79be8e70dbc58ded",
+      "operator_applications": 273,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "syn-p3": {
+      "case": {
+        "id": "syn-p3",
+        "purpose": "Three coupled projectors in p channel",
+        "system_class": "synthetic-projectors",
+        "tier": "default",
+        "potential": "synthetic",
+        "lattice": [
+          [
+            4,
+            0,
+            0
+          ],
+          [
+            0,
+            4,
+            0
+          ],
+          [
+            0,
+            0,
+            4
+          ]
+        ],
+        "atoms": [
+          [
+            0.13,
+            0.21,
+            0.32
+          ]
+        ],
+        "cutoff_ry": 3,
+        "timeout_s": 240,
+        "deterministic": true,
+        "valence": 4,
+        "channels": [
+          1,
+          1,
+          1
+        ],
+        "shape": "soft"
+      },
+      "input_toml": "[system]\nname = \"syn-p3\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.32]\n[pseudopotentials]\nSi = \"synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "8a9f339bf3100228aca5134dcd5e6b81843d9d2756e1a14ffadde02f705bb744",
+      "fingerprint": "e420c7ef54870fa68913d130070afcc720d9aa0e528678d73276124c020333e5",
+      "upf_sha256": "9f892efb5b588cca8ff43fdc1121fa50573825f45f41fff03f70b71e56df23a6",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-p3/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-p3/out-0"
+          ],
+          "converged": true,
+          "iterations": 8,
+          "total_energy_ha": -0.9465076597173674,
+          "density_sha256": "cc2ac0942ee74c0ccb19c76e43b47bcc4b7358ad676aeabb748f66032876e34a",
+          "phases_s": {
+            "density_s": 2.1209e-05,
+            "diagonalization_s": 0.000165915,
+            "mixing_s": 3.2708e-05,
+            "potential_s": 4.0209e-05,
+            "total_energy_s": 6.5667e-05
+          },
+          "operator_applications": 71,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.001400083,
+          "fft_grid": [
+            5,
+            5,
+            5
+          ],
+          "bands": 6,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              0.4676693889521871,
+              1.729222628750774,
+              1.825894925703827,
+              1.8258992234481008,
+              5.531897629225606,
+              5.531919972305014
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 5.28557596902622e-08,
+            "max_eigen_residual_ha": 8.1711262550269e-09,
+            "relative_charge_error": 1.9984014443252818e-15,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  1.778260597826059e-15,
+                  5.24964081706674e-15,
+                  2.434262114845351e-15
+                ]
+              ],
+              "davidson_iterations": 2,
+              "davidson_iterations_per_k": [
+                2
+              ],
+              "density_residual": 4.819741162656559e-09,
+              "occupied_eigenvalue_change_ha": 7.417622072125596e-12,
+              "operator_applications": 13,
+              "operator_applications_per_k": [
+                13
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  2.6832197813280344e-16,
+                  3.0441002905608224e-15,
+                  1.9243357985136894e-15
+                ]
+              ],
+              "timings": {
+                "density_s": 3.125e-06,
+                "diagonalization_s": 2.0833e-05,
+                "mixing_s": 0.0,
+                "potential_s": 4.042e-06,
+                "total_energy_s": 6.417e-06
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.09667229695305313,
+          "indirect_gap_ha": 0.09667229695305313,
+          "wall_s": 0.0068100410000004885
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.0068100410000004885,
+      "wall_min_s": 0.0068100410000004885,
+      "wall_max_s": 0.0068100410000004885,
+      "timeout_s": 240,
+      "total_energy_ha": -0.9465076597173674,
+      "iterations": 8,
+      "density_sha256": "cc2ac0942ee74c0ccb19c76e43b47bcc4b7358ad676aeabb748f66032876e34a",
+      "operator_applications": 71,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "syn-s1": {
+      "case": {
+        "id": "syn-s1",
+        "purpose": "Small soft-Coulomb fixture with one s projector",
+        "system_class": "synthetic-projectors",
+        "tier": "default",
+        "potential": "synthetic",
+        "lattice": [
+          [
+            4,
+            0,
+            0
+          ],
+          [
+            0,
+            4,
+            0
+          ],
+          [
+            0,
+            0,
+            4
+          ]
+        ],
+        "atoms": [
+          [
+            0.13,
+            0.21,
+            0.32
+          ]
+        ],
+        "cutoff_ry": 3,
+        "timeout_s": 240,
+        "deterministic": true,
+        "valence": 4,
+        "channels": [
+          0
+        ],
+        "shape": "soft"
+      },
+      "input_toml": "[system]\nname = \"syn-s1\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.32]\n[pseudopotentials]\nSi = \"synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "c28d7039836f6559b6119f298ab5e2c6a38a72087190865eb4cb49e6b4b3e502",
+      "fingerprint": "9746ad13f0ee5255b4d842690b95b5557320cbe88b97093d9bc2e1ba6d1b5389",
+      "upf_sha256": "db4bbd6b640360c6553c6a6d6aeffa092dcf326d8aa44b2a5589134ccd38effb",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-s1/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-s1/out-0"
+          ],
+          "converged": true,
+          "iterations": 13,
+          "total_energy_ha": -0.7346754280328689,
+          "density_sha256": "26f3376a2875a06a069568566663f29b6d397ac4b0a6a65a0347431d529f4583",
+          "phases_s": {
+            "density_s": 2.5874e-05,
+            "diagonalization_s": 0.000189542,
+            "mixing_s": 4.6499e-05,
+            "potential_s": 4.1082e-05,
+            "total_energy_s": 6.5705e-05
+          },
+          "operator_applications": 105,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.001064167,
+          "fft_grid": [
+            5,
+            5,
+            5
+          ],
+          "bands": 6,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              0.5303606407912002,
+              1.7724474721738857,
+              1.7904556256988355,
+              1.7904768879688504,
+              1.790502382590105,
+              1.825893090598041
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 3.1521315655810177e-09,
+            "max_eigen_residual_ha": 8.635602316518496e-16,
+            "relative_charge_error": 2.220446049250313e-16,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  1.1860679998730974e-10,
+                  5.889696772874525e-11,
+                  7.147466128416763e-11
+                ]
+              ],
+              "davidson_iterations": 1,
+              "davidson_iterations_per_k": [
+                1
+              ],
+              "density_residual": 1.8478371241852466e-09,
+              "occupied_eigenvalue_change_ha": 1.9865584732770003e-09,
+              "operator_applications": 12,
+              "operator_applications_per_k": [
+                12
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  3.6342388213887595e-10,
+                  4.638911022983385e-11,
+                  2.565542302100753e-11
+                ]
+              ],
+              "timings": {
+                "density_s": 1.667e-06,
+                "diagonalization_s": 1.1916e-05,
+                "mixing_s": 0.0,
+                "potential_s": 2.625e-06,
+                "total_energy_s": 4e-06
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.018008153524949888,
+          "indirect_gap_ha": 0.018008153524949888,
+          "wall_s": 0.00528195799999942
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.00528195799999942,
+      "wall_min_s": 0.00528195799999942,
+      "wall_max_s": 0.00528195799999942,
+      "timeout_s": 240,
+      "total_energy_ha": -0.7346754280328689,
+      "iterations": 13,
+      "density_sha256": "26f3376a2875a06a069568566663f29b6d397ac4b0a6a65a0347431d529f4583",
+      "operator_applications": 105,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "syn-s2": {
+      "case": {
+        "id": "syn-s2",
+        "purpose": "Two coupled s projectors",
+        "system_class": "synthetic-projectors",
+        "tier": "default",
+        "potential": "synthetic",
+        "lattice": [
+          [
+            4,
+            0,
+            0
+          ],
+          [
+            0,
+            4,
+            0
+          ],
+          [
+            0,
+            0,
+            4
+          ]
+        ],
+        "atoms": [
+          [
+            0.13,
+            0.21,
+            0.32
+          ]
+        ],
+        "cutoff_ry": 3,
+        "timeout_s": 240,
+        "deterministic": true,
+        "valence": 4,
+        "channels": [
+          0,
+          0
+        ],
+        "shape": "soft"
+      },
+      "input_toml": "[system]\nname = \"syn-s2\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.32]\n[pseudopotentials]\nSi = \"synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "cea5c9a53e7c5a91e7b535425fb214dfcb63131c110d7c796066f2e56e4ffaf0",
+      "fingerprint": "a2190587722a6544ffabfafd0f9d9e5677c7b2d3371ca3beae8e0dd859cf2b5c",
+      "upf_sha256": "2a04289c2142ace38cd3f854f63422b88268de51b1e21e5a6e8844aa052f925e",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-s2/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-s2/out-0"
+          ],
+          "converged": true,
+          "iterations": 17,
+          "total_energy_ha": 0.6304095283333497,
+          "density_sha256": "ef1a03e63d9454074528aef15cc95e2de3842595b10ad8b7662170ddca5d8dd5",
+          "phases_s": {
+            "density_s": 3.3168e-05,
+            "diagonalization_s": 0.000251916,
+            "mixing_s": 6.9836e-05,
+            "potential_s": 5.9875e-05,
+            "total_energy_s": 8.1792e-05
+          },
+          "operator_applications": 133,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.0013275,
+          "fft_grid": [
+            5,
+            5,
+            5
+          ],
+          "bands": 6,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              1.1955431246124342,
+              1.7647119874708812,
+              1.7859459404399767,
+              1.7859469444574771,
+              1.8389794616955444,
+              1.8495256463250351
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 1.017989067746157e-08,
+            "max_eigen_residual_ha": 1.7863326874758438e-15,
+            "relative_charge_error": 1.3322676295501878e-15,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  6.772720571146793e-16,
+                  1.0212057171161553e-15,
+                  1.141898652142058e-15
+                ]
+              ],
+              "davidson_iterations": 2,
+              "davidson_iterations_per_k": [
+                2
+              ],
+              "density_residual": 4.131644896806055e-09,
+              "occupied_eigenvalue_change_ha": 1.1069560823528946e-09,
+              "operator_applications": 13,
+              "operator_applications_per_k": [
+                13
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  5.019585803364699e-16,
+                  1.1130720353313026e-15,
+                  1.3039698779143557e-15
+                ]
+              ],
+              "timings": {
+                "density_s": 1.625e-06,
+                "diagonalization_s": 1.6541e-05,
+                "mixing_s": 0.0,
+                "potential_s": 2.625e-06,
+                "total_energy_s": 4.042e-06
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.02123395296909547,
+          "indirect_gap_ha": 0.02123395296909547,
+          "wall_s": 0.005671874999999993
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.005671874999999993,
+      "wall_min_s": 0.005671874999999993,
+      "wall_max_s": 0.005671874999999993,
+      "timeout_s": 240,
+      "total_energy_ha": 0.6304095283333497,
+      "iterations": 17,
+      "density_sha256": "ef1a03e63d9454074528aef15cc95e2de3842595b10ad8b7662170ddca5d8dd5",
+      "operator_applications": 133,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "syn-s3": {
+      "case": {
+        "id": "syn-s3",
+        "purpose": "Three coupled projectors in s channel",
+        "system_class": "synthetic-projectors",
+        "tier": "default",
+        "potential": "synthetic",
+        "lattice": [
+          [
+            4,
+            0,
+            0
+          ],
+          [
+            0,
+            4,
+            0
+          ],
+          [
+            0,
+            0,
+            4
+          ]
+        ],
+        "atoms": [
+          [
+            0.13,
+            0.21,
+            0.32
+          ]
+        ],
+        "cutoff_ry": 3,
+        "timeout_s": 240,
+        "deterministic": true,
+        "valence": 4,
+        "channels": [
+          0,
+          0,
+          0
+        ],
+        "shape": "soft"
+      },
+      "input_toml": "[system]\nname = \"syn-s3\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.32]\n[pseudopotentials]\nSi = \"synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "632f61fb89932e34fb7b7c9eb6ede094305e11bcd5ad6275c65f15dcbbc10518",
+      "fingerprint": "13d1d9c9be51ca5061bd7541fe353bd656cc4ca00c4480ecce68d3a06613f477",
+      "upf_sha256": "7e9b7ecf3857757fc36e10ec1f117a297101656b66f5aa403f8c14cad713f6ae",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-s3/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-s3/out-0"
+          ],
+          "converged": false,
+          "iterations": 100,
+          "total_energy_ha": 1.7660002310813194,
+          "density_sha256": "e530cb2e3a1449d6618b3fc88eebd2f42ea655645c38b42d9c399c410b597daa",
+          "phases_s": {
+            "density_s": 0.000193594,
+            "diagonalization_s": 0.001087123,
+            "mixing_s": 0.000506385,
+            "potential_s": 0.000384079,
+            "total_energy_s": 0.000568625
+          },
+          "operator_applications": 623,
+          "exit_code": 3,
+          "status": "nonconverged",
+          "error": "error: NOT CONVERGED: iteration budget exhausted",
+          "engine_total_s": 0.003704042,
+          "fft_grid": [
+            5,
+            5,
+            5
+          ],
+          "bands": 6,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              1.771247087339848,
+              1.7903038494995187,
+              1.7929196764218618,
+              1.801726219270736,
+              1.8472720916724172,
+              1.8656607276480146
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 0.02319175715388949,
+            "max_eigen_residual_ha": 0.0006489972822720221,
+            "relative_charge_error": 2.220446049250313e-16,
+            "fixed_point_certificate": null
+          },
+          "minimum_direct_gap_ha": 0.0026158269223430786,
+          "indirect_gap_ha": 0.0026158269223430786,
+          "wall_s": 0.011313708999999506
+        }
+      ],
+      "status": "nonconverged",
+      "converged": false,
+      "repeat_identical": true,
+      "wall_median_s": 0.011313708999999506,
+      "wall_min_s": 0.011313708999999506,
+      "wall_max_s": 0.011313708999999506,
+      "timeout_s": 240,
+      "total_energy_ha": 1.7660002310813194,
+      "iterations": 100,
+      "density_sha256": "e530cb2e3a1449d6618b3fc88eebd2f42ea655645c38b42d9c399c410b597daa",
+      "operator_applications": 623,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "syn-spd": {
+      "case": {
+        "id": "syn-spd",
+        "purpose": "One projector each in s,p,d channels",
+        "system_class": "synthetic-projectors",
+        "tier": "default",
+        "potential": "synthetic",
+        "lattice": [
+          [
+            4,
+            0,
+            0
+          ],
+          [
+            0,
+            4,
+            0
+          ],
+          [
+            0,
+            0,
+            4
+          ]
+        ],
+        "atoms": [
+          [
+            0.13,
+            0.21,
+            0.32
+          ]
+        ],
+        "cutoff_ry": 3,
+        "timeout_s": 240,
+        "deterministic": true,
+        "valence": 4,
+        "channels": [
+          0,
+          1,
+          2
+        ],
+        "shape": "soft"
+      },
+      "input_toml": "[system]\nname = \"syn-spd\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.32]\n[pseudopotentials]\nSi = \"synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+      "input_sha256": "ce0a2e62de02925ccce44b24c444d85265b455df6ad8baf5c455bfcec0e9435a",
+      "fingerprint": "c27c936fe1884db78b998db9a4615b01eb978ccad42c680feaea35f387c233b5",
+      "upf_sha256": "5d783910883fa4fc9615a942ea598295a52858d39c04f5b4c580c2802eca1cba",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-spd/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-spd/out-0"
+          ],
+          "converged": true,
+          "iterations": 11,
+          "total_energy_ha": -0.7346751923893944,
+          "density_sha256": "53cf6ccef1ea09103a9bb6652abd63f5e55733641cb5bf1f6d4744192f780470",
+          "phases_s": {
+            "density_s": 2.5543e-05,
+            "diagonalization_s": 0.000194208,
+            "mixing_s": 4.0626e-05,
+            "potential_s": 3.7875e-05,
+            "total_energy_s": 6.8748e-05
+          },
+          "operator_applications": 92,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.0012755,
+          "fft_grid": [
+            5,
+            5,
+            5
+          ],
+          "bands": 6,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              0.5303601500683183,
+              1.7724481289128722,
+              2.564898831451308,
+              2.5649246834971215,
+              2.564951146639811,
+              37.48025002281214
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 6.590563366256186e-11,
+            "max_eigen_residual_ha": 2.5231776118062822e-14,
+            "relative_charge_error": 1.1102230246251565e-15,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  2.3014687803792266e-12,
+                  7.214465927993571e-13,
+                  4.337899821976307e-13
+                ]
+              ],
+              "davidson_iterations": 1,
+              "davidson_iterations_per_k": [
+                1
+              ],
+              "density_residual": 5.724823066962925e-13,
+              "occupied_eigenvalue_change_ha": 7.176481631177012e-13,
+              "operator_applications": 12,
+              "operator_applications_per_k": [
+                12
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  6.957153996193407e-11,
+                  1.4352603852161901e-11,
+                  9.238494343670603e-13
+                ]
+              ],
+              "timings": {
+                "density_s": 2.417e-06,
+                "diagonalization_s": 1.3042e-05,
+                "mixing_s": 0.0,
+                "potential_s": 2.625e-06,
+                "total_energy_s": 4.5e-06
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 0.792450702538436,
+          "indirect_gap_ha": 0.792450702538436,
+          "wall_s": 0.006296625000000056
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.006296625000000056,
+      "wall_min_s": 0.006296625000000056,
+      "wall_max_s": 0.006296625000000056,
+      "timeout_s": 240,
+      "total_energy_ha": -0.7346751923893944,
+      "iterations": 11,
+      "density_sha256": "53cf6ccef1ea09103a9bb6652abd63f5e55733641cb5bf1f6d4744192f780470",
+      "operator_applications": 92,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "syn-z1": {
+      "case": {
+        "id": "syn-z1",
+        "purpose": "Two light-looking Z=1 ions, even total electron count",
+        "system_class": "synthetic-valence",
+        "tier": "default",
+        "potential": "synthetic",
+        "lattice": [
+          [
+            4,
+            0,
+            0
+          ],
+          [
+            0,
+            4,
+            0
+          ],
+          [
+            0,
+            0,
+            4
+          ]
+        ],
+        "atoms": [
+          [
+            0,
+            0,
+            0
+          ],
+          [
+            0.5,
+            0.5,
+            0.5
+          ]
+        ],
+        "cutoff_ry": 8,
+        "timeout_s": 240,
+        "deterministic": true,
+        "valence": 1,
+        "channels": [
+          0
+        ],
+        "shape": "gaussian",
+        "nbands": 8,
+        "radius": 1.4
+      },
+      "input_toml": "[system]\nname = \"syn-z1\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0, 0]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5, 0.5, 0.5]\n[pseudopotentials]\nSi = \"synthetic.UPF\"\n[basis]\necutwfc_ry = 8\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nnbands = 8\n",
+      "input_sha256": "a315bd958dae74d4ca6805eb4091daa880af8051c83b49aa126c62a354c0bc71",
+      "fingerprint": "1e9f55aca3361206612524088f1570ffa1de959eb05f420eef915b54abd2f9a2",
+      "upf_sha256": "91cba450ae7ce245041ea6d8ab51fdd74c71df76abfcd04aacf27d4679b20044",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-z1/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-z1/out-0"
+          ],
+          "converged": true,
+          "iterations": 7,
+          "total_energy_ha": -0.9291990923944965,
+          "density_sha256": "e5e040215f40afc82044768253c7e6b02cf220cdff2e9f78118288bfe9df0e2d",
+          "phases_s": {
+            "density_s": 5.1332e-05,
+            "diagonalization_s": 0.000517958,
+            "mixing_s": 4.2127e-05,
+            "potential_s": 8.9499e-05,
+            "total_energy_s": 0.000136126
+          },
+          "operator_applications": 102,
+          "exit_code": 0,
+          "status": "pass",
+          "error": "",
+          "engine_total_s": 0.004443125,
+          "fft_grid": [
+            8,
+            8,
+            8
+          ],
+          "bands": 8,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              -0.09393371638182507,
+              1.0641148846795239,
+              1.064114884679835,
+              1.0641148846798454,
+              1.0769221440471242,
+              1.0769221440471244,
+              1.1714221128863078,
+              2.284269957364292
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 1.1073652847541171e-10,
+            "max_eigen_residual_ha": 6.472912933449651e-10,
+            "relative_charge_error": 6.661338147750939e-16,
+            "fixed_point_certificate": {
+              "buffer_residuals_per_k_ha": [
+                [
+                  8.771539076237053e-07,
+                  8.909997296836435e-07,
+                  8.206128949280339e-16,
+                  1.1736225747575713e-15,
+                  9.668893333084335e-07,
+                  1.6742263716695108e-07
+                ]
+              ],
+              "davidson_iterations": 1,
+              "davidson_iterations_per_k": [
+                1
+              ],
+              "density_residual": 0.0,
+              "occupied_eigenvalue_change_ha": 1.732031185142091e-12,
+              "operator_applications": 16,
+              "operator_applications_per_k": [
+                16
+              ],
+              "strict_residuals_per_k_ha": [
+                [
+                  6.170954222490609e-10,
+                  5.262568958058554e-10
+                ]
+              ],
+              "timings": {
+                "density_s": 1.3291e-05,
+                "diagonalization_s": 4.6e-05,
+                "mixing_s": 0.0,
+                "potential_s": 9.833e-06,
+                "total_energy_s": 2.5334e-05
+              }
+            }
+          },
+          "minimum_direct_gap_ha": 1.1580486010613489,
+          "indirect_gap_ha": 1.1580486010613489,
+          "wall_s": 0.009174042000000604
+        }
+      ],
+      "status": "pass",
+      "converged": true,
+      "repeat_identical": true,
+      "wall_median_s": 0.009174042000000604,
+      "wall_min_s": 0.009174042000000604,
+      "wall_max_s": 0.009174042000000604,
+      "timeout_s": 240,
+      "total_energy_ha": -0.9291990923944965,
+      "iterations": 7,
+      "density_sha256": "e5e040215f40afc82044768253c7e6b02cf220cdff2e9f78118288bfe9df0e2d",
+      "operator_applications": 102,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    },
+    "syn-z14": {
+      "case": {
+        "id": "syn-z14",
+        "purpose": "Heavy-looking Z=14, narrow local core, 12 bands",
+        "system_class": "synthetic-valence",
+        "tier": "default",
+        "potential": "synthetic",
+        "lattice": [
+          [
+            4,
+            0,
+            0
+          ],
+          [
+            0,
+            4,
+            0
+          ],
+          [
+            0,
+            0,
+            4
+          ]
+        ],
+        "atoms": [
+          [
+            0.13,
+            0.21,
+            0.32
+          ]
+        ],
+        "cutoff_ry": 12,
+        "timeout_s": 240,
+        "deterministic": true,
+        "valence": 14,
+        "channels": [
+          0,
+          1,
+          2
+        ],
+        "shape": "gaussian",
+        "radius": 0.5,
+        "nbands": 12
+      },
+      "input_toml": "[system]\nname = \"syn-z14\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 4]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.32]\n[pseudopotentials]\nSi = \"synthetic.UPF\"\n[basis]\necutwfc_ry = 12\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nnbands = 12\n",
+      "input_sha256": "cd19453915b70cae601d413e01e26456eb3857a9992fa421518c5fc5cd92bd83",
+      "fingerprint": "0fd7b06f04b93e1e3de85304a5cc965d5ac6945ab408cf080312f4a6f88106d3",
+      "upf_sha256": "ad30e8f5684adeed1eff8468d9f4ffab70f22805388081c0506d329c915b2c90",
+      "runs": [
+        {
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P14B-GEMM-ACCOUNTING/target/release/dft-cli",
+            "run",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-z14/input.toml",
+            "--output-dir",
+            "/private/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/dft-bench-suite-fpsz05n9/syn-z14/out-0"
+          ],
+          "converged": false,
+          "iterations": 100,
+          "total_energy_ha": -71.13959832030042,
+          "density_sha256": "5d464878cfc0f04c1d2220672d648e6e5a6d578f66b4544bcb0e5994c75ae07a",
+          "phases_s": {
+            "density_s": 0.002384082,
+            "diagonalization_s": 0.023700252,
+            "mixing_s": 0.00226967,
+            "potential_s": 0.001842581,
+            "total_energy_s": 0.003057117
+          },
+          "operator_applications": 2457,
+          "exit_code": 3,
+          "status": "nonconverged",
+          "error": "error: NOT CONVERGED: iteration budget exhausted",
+          "engine_total_s": 0.041591291,
+          "fft_grid": [
+            9,
+            9,
+            9
+          ],
+          "bands": 12,
+          "tool": {
+            "git_commit": "aae5d23a2c8f26ac41fbb296fbb2449acd9ba932",
+            "name": "dft-cli",
+            "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+            "version": "0.1.0"
+          },
+          "threading": {
+            "backend": "std::thread::scope over k points and bands; sequential faer and serial FFT per worker",
+            "inner_threads": 1,
+            "outer_threads": 1,
+            "threads": 1,
+            "threads_requested": 1,
+            "threads_used": 1
+          },
+          "eigenvalues_ha": [
+            [
+              -5.489988044901032,
+              0.1750492650835457,
+              0.17616674770937538,
+              0.17667334404168966,
+              0.4072338740903244,
+              2.287972165758763,
+              2.289680634129117,
+              2.291531097081282,
+              2.292223628142092,
+              2.6010836399101547,
+              2.601230798024334,
+              2.601951898167837
+            ]
+          ],
+          "last_iteration_diagnostics": {
+            "density_residual": 0.025161858245456355,
+            "max_eigen_residual_ha": 0.0014021122119999567,
+            "relative_charge_error": 5.075305255429287e-16,
+            "fixed_point_certificate": null
+          },
+          "minimum_direct_gap_ha": 0.0018504629521651772,
+          "indirect_gap_ha": 0.0018504629521651772,
+          "wall_s": 0.04916062499999985
+        }
+      ],
+      "status": "nonconverged",
+      "converged": false,
+      "repeat_identical": true,
+      "wall_median_s": 0.04916062499999985,
+      "wall_min_s": 0.04916062499999985,
+      "wall_max_s": 0.04916062499999985,
+      "timeout_s": 240,
+      "total_energy_ha": -71.13959832030042,
+      "iterations": 100,
+      "density_sha256": "5d464878cfc0f04c1d2220672d648e6e5a6d578f66b4544bcb0e5994c75ae07a",
+      "operator_applications": 2457,
+      "expected_failure": false,
+      "resolved_expected_failure": false
+    }
+  },
+  "comparison": [
+    {
+      "id": "si-elongated",
+      "regressions": [
+        "failure message changed"
+      ],
+      "improvements": []
+    },
+    {
+      "id": "si-gamma",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "si-k222",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "si-k222s",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "si-low",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "si-skew",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "si8-gamma",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "syn-cubic-degenerate",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "syn-d3",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "syn-fft-primes",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "syn-gaussian-fcc",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "syn-odd-shift",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "syn-p3",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "syn-s1",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "syn-s2",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "syn-s3",
+      "regressions": [
+        "failure message changed"
+      ],
+      "improvements": []
+    },
+    {
+      "id": "syn-spd",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "syn-z1",
+      "regressions": [],
+      "improvements": []
+    },
+    {
+      "id": "syn-z14",
+      "regressions": [
+        "failure message changed"
+      ],
+      "improvements": []
+    }
+  ],
+  "aborted": false
+}

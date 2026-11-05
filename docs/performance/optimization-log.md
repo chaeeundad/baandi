@@ -3844,3 +3844,48 @@ SHA-256 provenance (binaries built with `CARGO_PROFILE_RELEASE_DEBUG=true`):
 - `/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF`: `e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
 ### Correction, 2026-11-04: NonlocalOperator::add comparison value
 Commit 9fcb356 ("restore original NonlocalOperator::add loop, blocked traversal measured 2.9x slower on dev08") rests on a wrong reference value. The remote measurement session corrected it: fe0492b `NonlocalOperator::add` is 0.474 s (7.5 percent, 17 of 227 samples, 6 runs) on dev08 MKL T=1 si8, not 0.323 s (6 of 117 samples, a count too small for the stated precision). The P10I regression is about 2.0x, not 2.9x. The revert of 9fcb356 is bit-identical and reduced the function from 0.929 s to 0.800 s (239 samples) but the wall time did not move beyond noise (mkl T1 6.612 to 6.589 s, pure T8 4.567 to 4.540 s). The remaining MKL T=1 gap to fe0492b (6.589 versus 6.334 s) is spread: MKL zgemm kernel +0.512 s, memcpy +0.494 s, NonlocalOperator::add +0.325 s, tile multiply_into +0.221 s, apply_local +0.219 s, concatenate +0.192 s, offset by subtract_projection -1.398 s and old gemm -0.307 s. Rule applied from now on: never quote a profile-derived ratio as a firm number when the counts are below about 30 samples.
+
+## P14B adopted incremental reduced matrix (architect decision, 2026-11-05)
+
+Derived from study note 4, `../research/qe-study/davidson-gemm-accounting.md`,
+using rust-dft analysis only; no QE source read. The supplied sampling profile
+and source-only counters identify full reduced-Hamiltonian recomputation as the
+largest redundant site. Retain its unchanged prefix and compute two rectangular
+products. This is now the default for pure Rust and MKL, without a build switch.
+
+The architect explicitly supersedes the original identical-count rule for toy
+fixtures: realistic fixtures retain SCF counts and energy within 1e-12 Ha;
+converged toys retain suite energy tolerance and convergence, with count changes
+reported. The full 19-row before/after table and T=1,2,4,8 comparisons are in
+`../../tests/reference/perf/p14b/adopted/acceptance.md`.
+
+| Case | Before 2mnk | Adopted 2mnk | SCF before / after |
+| --- | ---: | ---: | --- |
+| si8 | 21636961594 | 9489226838 | 15 / 15 |
+| k444s | 3300404692 | 2258007134 | 10 / 10 |
+| synthetic 20-atom skewed | 2846384 | 2426462 | 6 / 6 |
+| synthetic 4-atom elongated | 612150 | 496818 | 9 / 9 |
+
+Maximum energy difference across these four: 2.842171e-13 Ha. Toy changes:
+syn-fft-primes 14→16, syn-p3 8→10, syn-s1 13→14, syn-s2 17→16. All previously
+converged cases remain converged. Existing si-elongated/syn-s3/syn-z14 failures
+remain. No baseline is rewritten. The dense 8-Bohr 20-atom cube also fails before
+and after; the 12-Bohr cube converges in 13 iterations in both builds at ΔE
+9.379164e-13 Ha, although its H-vector work increases 1996→2107. These are
+explicit limits of the optimization, not uniformly reduced solver work claims.
+
+Pure Rust retains fixed reduction panels. MKL uses two sequential BLAS calls
+with borrowed large operands and reusable small output scratch. Additional
+small copies are 16q² bytes per extension on MKL (prefix plus scatter), versus
+16p² on pure Rust. This is not a copied-byte improvement. MKL runtime,
+thread determinism and timing need dev08; only all-target type checking is local.
+All pure-Rust suite and additional fixture results are identical across
+T=1,2,4,8. Shared-Mac timings are observations, not accepted speedups.
+
+The next largest site, all-root Ritz/residual rotation, has zero proven safely
+removable work under the existing unlocked stopping rule. Site totals and
+second-pass projection ceilings are in the generated table. Prior convergence
+does not justify skipping a current residual; adaptive projection needs an
+orthogonality criterion after normalization. No speculative second optimization
+is adopted. The historical patch and pre-adoption snapshots remain for provenance;
+current default code and the architect acceptance report supersede their status.

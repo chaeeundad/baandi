@@ -84,3 +84,4 @@ Conventions: docs are English; one fact lives in one place and others link to it
 
 - [Fixed-sector collinear SCF](user/collinear-spin.md): P13B implementation,
   LDA-PW/PBE input, certificate/results, synthetic oracles and legacy equivalence.
+- [Study note 4: Davidson GEMM attribution](research/qe-study/davidson-gemm-accounting.md): P14B shape/work/timing tables and adopted incremental reduced-matrix optimization.

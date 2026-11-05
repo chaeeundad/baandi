@@ -92,3 +92,4 @@ Conventions: docs are English; one fact lives in one place and others link to it
 - `docs/performance/exceed-qe-plan.md`: gap model BAANDI versus QE best configuration, equal-accuracy definition, staged roadmap with cumulative ratio estimates, decisions, honest feasibility assessment (2026-11-05).
 
 - [Frozen-H stopping replay (P15A)](research/qe-study/replay-stopping-results.md): stopping predicates versus rate curves, Hartree-metric schedules, equal-accuracy scans and independent spectral-completeness findings; no default change.
+- `docs/decisions/0035-standard-convergence-profile.md`: additive labelled QE-comparable convergence profile (accepted 2026-11-05; default unchanged).

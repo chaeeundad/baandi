@@ -72,6 +72,9 @@ Scientific outputs are written in standard, widely readable formats first, and i
 - Writers live in the CLI/adapter layer; the numerical core does not know file formats (ADR 0017).
 Formats of other codes are written from public format documentation only; no source of those codes is copied.
 
+## Performance owner (user request, 2026-11-05)
+Performance work has a standing owner role, the `perf-optimizer` agent (`.claude/agents/perf-optimizer.md`, assigned by the orchestrator). Every agent that touches a performance question (Codex implementers and Claude agents) reads `docs/performance/AGENT-BRIEF.md`, `docs/performance/attempts-ledger.md` (every optimization tried, adopted or rejected, with numbers and the reason) and `docs/performance/backlog.md` (ideas not yet tried) before starting, and never repeats a rejected idea without stating the new evidence that changes its premise. After finishing, add the attempt with its numbers and lesson to the ledger. Acceptance numbers come from dev08 through the orchestrator; Mac timings are observations.
+
 ## Performance work (user rule, 2026-11-03)
 Read `docs/performance/README.md` before changing any hot path (Hamiltonian apply, eigensolver, FFT, density). Measure and profile first, prove equivalence with `scripts/bench_scf.py` against `docs/performance/baseline.json` (energy within 1e-12 Ha; bit-identical density for overhead-only changes), keep allocation and logging out of hot loops, and record every accepted optimization (profile, change, before and after numbers, rejected ideas) in `docs/performance/optimization-log.md`. New code on the hot path is written to those rules from the start.
 

@@ -2392,5 +2392,23 @@
     "ended_at": "2026-11-05T22:19:12Z",
     "exit_code": 0,
     "note": "merged"
+  },
+  {
+    "run_id": "P24A-LOCKING#1",
+    "task_id": "P24A-LOCKING",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 28058,
+    "wrapper_pid": 28040,
+    "session_id": null,
+    "branch": "task/P24A-LOCKING",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P24A-LOCKING",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P24A-LOCKING.md",
+    "report": null,
+    "started_at": "2026-11-05T22:42:12Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

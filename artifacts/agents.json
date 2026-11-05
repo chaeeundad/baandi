@@ -22,8 +22,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P14A-DAVIDSON-WORK: 고유값 풀이 작업량 줄이기: SCF 반복마다 필요 이상으로 많이 도는 H 적용을 측정하고 허용 오차 일정과 여분 밴드를 조정(QE와 같은 반복 수에서 시간 격차의 원인 추적)",
-    "ref": "pid 90972, session no sessi, task/P14A-DAVIDSON-WORK",
+    "task": "P14B-GEMM-ACCOUNTING: 행렬곱 작업 회계: 호출 위치별 연산량을 측정해서 불필요하거나 지나치게 큰 행렬곱 제거(8원자 셀에서 행렬곱이 시간의 약 45퍼센트)",
+    "ref": "pid 96397, session no sessi, task/P14B-GEMM-ACCOUNTING",
     "updated": "2026-11-05"
   },
   {
@@ -699,6 +699,15 @@
     "state": "done",
     "task": "P13B-COLLINEAR-SPIN: 공선 스핀 계산 구현(LDA·PBE, 위/아래 전자 수 지정, 자기 모멘트 결과): 스핀 해석적 극한과 작은 계로 검증",
     "ref": "pid 77288, session 01a1a9ec, task/P13B-COLLINEAR-SPIN",
+    "updated": "2026-11-05"
+  },
+  {
+    "id": "A79",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P14A-DAVIDSON-WORK: 고유값 풀이 작업량 줄이기: SCF 반복마다 필요 이상으로 많이 도는 H 적용을 측정하고 허용 오차 일정과 여분 밴드를 조정(QE와 같은 반복 수에서 시간 격차의 원인 추적)",
+    "ref": "pid 90972, session 01a1aa37, task/P14A-DAVIDSON-WORK",
     "updated": "2026-11-05"
   }
 ]

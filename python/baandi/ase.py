@@ -13,7 +13,7 @@ class ConvergenceError(RuntimeError):
 
 
 class Baandi(Calculator):
-    implemented_properties = ["energy", "forces"]
+    implemented_properties = ["energy", "forces", "stress"]
     # Recompute instead of reusing a cache with incomplete model identity.
     use_cache = False
 
@@ -35,7 +35,7 @@ class Baandi(Calculator):
     def get_property(self, name, atoms=None, allow_calculation=True):
         if name not in self.implemented_properties:
             raise PropertyNotImplementedError(
-                f"BAANDI does not implement {name}; stress and free_energy "
+                f"BAANDI does not implement {name}; free_energy "
                 "are unavailable (no zero placeholders)."
             )
         # Deliberately disable ASE's results cache, including changes to settings.
@@ -75,6 +75,15 @@ class Baandi(Calculator):
             self.results["forces"] = np.asarray(self.session.forces()) * (
                 hartree_to_ev(1.0) * angstrom_to_bohr(1.0)
             )
+
+        if "stress" in properties:
+            import numpy as np
+            from ase.stress import full_3x3_to_voigt_6_stress
+            # ASE: tensile-positive, (xx, yy, zz, yz, xz, xy), no shear factor.
+            tensor = np.asarray(self.session.stress()) * (
+                hartree_to_ev(1.0) * angstrom_to_bohr(1.0) ** 3
+            )
+            self.results["stress"] = full_3x3_to_voigt_6_stress(tensor)
 
     def get_eigenvalues(self, kpt=0, spin=0):
         if kpt != 0 or spin != 0:

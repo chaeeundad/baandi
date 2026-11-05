@@ -27,3 +27,32 @@ pub fn energy(
     }
     Ok(Hartree(energy))
 }
+
+/// Frozen-Miller-set tensile-positive kinetic stress, in Ha/Bohr^3.
+/// Coefficients and fractional k are fixed; occupations include k weights
+/// supplied by the caller. This is one contribution, not a total stress.
+pub fn stress(
+    basis: &PlaneWaveBasis,
+    coefficients: &[Vec<Complex64>],
+    occupations: &[f64],
+    volume_bohr3: f64,
+) -> Result<[[f64; 3]; 3], PhysicsError> {
+    crate::volume(volume_bohr3)?;
+    orbitals(coefficients, occupations, basis.vectors().len())?;
+    let mut result = [[0.0; 3]; 3];
+    // q(eta) = (I+eta)^-T q, hence d(q^2/2)/d eta_ab = -q_a q_b.
+    for (c, f) in coefficients.iter().zip(occupations) {
+        for (c, q) in c.iter().zip(basis.momenta()) {
+            let weight = f * c.norm_sqr() / volume_bohr3;
+            for (a, row) in result.iter_mut().enumerate() {
+                for (b, value) in row.iter_mut().enumerate() {
+                    *value -= weight * q.cartesian[a] * q.cartesian[b];
+                }
+            }
+        }
+    }
+    if result.iter().flatten().any(|v| !v.is_finite()) {
+        return Err(PhysicsError::Unrepresentable);
+    }
+    Ok(result)
+}

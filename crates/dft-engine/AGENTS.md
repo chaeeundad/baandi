@@ -292,3 +292,12 @@ Do not renormalize or restore orbitals/mixer/history/certification. The caller
 records `warm_transfer`, never exact replay. Ordinary initialization and iteration
 kernels remain unchanged. Run `cargo test -p dft-engine --test density_transfer`
 and the release ignored three-structure warm/fresh energy oracle.
+
+## NC stress (P22A)
+
+`stress(&StressState)` requires the same model and strict certificate as forces.
+It reports frozen-Miller tensor/pressure and an independent isotropic cutoff
+estimate. `frozen_stress` omits that estimate explicitly. Neither claims cutoff
+convergence. The opt-in boxed `ScfOptions.strain_reference` requires a fixed FFT
+grid and is part of derivative identity. Default None retains legacy setup.
+See `docs/validation/stress.md` and release oracles in `tests/stress.rs`.

@@ -261,7 +261,7 @@ millielectronvolt; megaelectronvolt is unsupported.
 Strings accept decimal/scientific numbers with or without whitespace before the
 unit (`30 Ry`, `30Ry`, `408.2 eV`). Empty input, missing/unknown units, NaN,
 infinity and extra tokens are errors that quote the offending input. Pressure
-is available for conversion only; this does not enable stress calculations.
+is available for explicit conversion. See P22A below for supported stress calculations.
 
 ```sh
 cargo run --offline -p dft-cli -- convert 30 Ry Ha
@@ -824,7 +824,7 @@ functionals reject any negative combined density. No separate clipping or
 renormalization of core samples occurs. Fourier truncation can make a coarse
 core grid infeasible, and the error names the combined NLCC density. The density
 threshold remains 1e-10 Bohr^-3. Derivative oracles avoid threshold crossings.
-Forces and stress remain unavailable. NLCC checkpoint v1 export/import rejects
+At that stage forces and stress were unavailable; P20A/P22A below add strict certified derivatives. NLCC checkpoint v1 export/import rejects
 explicitly because that format cannot represent the new ledger; ordinary v1
 encoding/decoding is unchanged. A spin model identity records active NLCC.
 
@@ -964,7 +964,7 @@ F=E-TS, separate E/-TS/F ledger lines, a fresh finite-T certificate, and the
 proposed `state_contracts` extension. Band-gap output becomes explicit
 metallic/Fermi-level information. Total density is written as Gaussian cube;
 collinear channel and magnetization cubes are also written, and all channel grids
-are retained in JSON. Forces/stress are unavailable, not zero.
+are retained in JSON. P20A/P22A add strict certified forces/stress; unsupported derivatives remain unavailable, not zero.
 Fixed-policy results retain their original output path.
 
 Finite-T runtime control, legacy band/DOS/volumetric options, XC density floor,
@@ -1028,3 +1028,24 @@ optimizer restart is a separate same-build ionic continuation record.
 The `calculation_type="relaxation"` results profile contains the `relaxation`
 block and input/executable/UPF provenance. See [input, units and output-format
 losses](user/relaxation.md) and [validation scope](validation/relaxation.md).
+
+
+## Stress and pressure (P22A)
+
+Set `[output] stress = true` after a strict certified NC SCF. Standard profile
+rejects this request. The Cartesian tensile-positive 3x3 tensor is in Ha/Bohr^3;
+pressure is `-trace(stress)/3`. The JSON `stress` block contains per-term values,
+symmetric/antisymmetric parts, raw antisymmetric norm, derivative ledger and
+preconditions. LDA-PZ, LDA-PW, PBE, collinear spin, NLCC and FD free-energy
+stress are supported in the corresponding existing engine/CLI models.
+
+Only frozen-Miller stress is reported as the stress. The separate isotropic
+Pulay estimate performs three additional SCFs at 100%, 105% and 110% cutoff,
+reports a two-step uncertainty diagnostic, and warns above 1e-5 Ha/Bohr^3 or
+when no shell is sampled. It never silently corrects the tensor and never
+asserts cutoff convergence. This can cost more than the analytic pass.
+
+Fixed unpolarized runs print a stress table; spin/FD write `stress.txt` as well
+as JSON. ASE `get_stress` uses tensile-positive eV/Angstrom^3 and order
+xx,yy,zz,yz,xz,xy for the existing Gamma/unpolarized adapter. See
+[conventions, equations, protocols and evidence](validation/stress.md).

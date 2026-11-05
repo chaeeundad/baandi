@@ -54,6 +54,7 @@ pub(crate) struct ModelDescription {
     atoms: Vec<(String, [u64; 3])>,
     species: Arc<[PseudoIdentity]>,
     cutoff: u64,
+    strain_reference: Option<[[u64; 3]; 3]>,
     functional: Functional,
     pub(crate) grid: [usize; 3],
     pub(crate) floor: Option<f64>,
@@ -92,6 +93,10 @@ impl ModelDescription {
                 .collect(),
             species: species(potentials),
             cutoff: options.cutoff_hartree.to_bits(),
+            strain_reference: options
+                .strain_reference
+                .as_ref()
+                .map(|c| c.lattice_columns_bohr().map(|r| r.map(f64::to_bits))),
             functional: options.functional,
             grid,
             floor: None,

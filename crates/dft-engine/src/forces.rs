@@ -5,7 +5,7 @@ use crate::{
     ScfError, ScfOptions, ScfResult, SpeciesPotential, collinear::CollinearResult,
     finite_temperature::FiniteTResult,
 };
-use dft_basis::{FftGridSpec, PlaneWaveBasis};
+use dft_basis::FftGridSpec;
 use dft_geometry::{Atom, Cell};
 use dft_physics::{
     data::*,
@@ -343,8 +343,7 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
     }
     require_complete(&ledger).map_err(ScfError::Numerical)?;
     let volume = state.cell.volume_bohr3();
-    let gamma = PlaneWaveBasis::new(state.cell, Hartree(state.options.cutoff_hartree))?;
-    let density_basis = gamma.density_basis(state.cell)?;
+    let density_basis = state.options.basis(state.cell, [0.; 3], 4.0)?;
     let dims: [usize; 3] = density
         .shape()
         .try_into()
@@ -453,11 +452,7 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
     let mut nonlocal = vec![[0.0; 3]; state.atoms.len()];
     let mut band_passes = 0;
     for (k, occupations) in blocks {
-        let basis = PlaneWaveBasis::at_k(
-            state.cell,
-            Hartree(state.options.cutoff_hartree),
-            k.point.fractional,
-        )?;
+        let basis = state.options.basis(state.cell, k.point.fractional, 1.0)?;
         let operator = NonlocalOperator::new(&basis, volume, &species)?;
         let occupations: Vec<_> = occupations.iter().map(|f| f * k.point.weight).collect();
         let part = terms::nonlocal(&operator, &basis, &k.solution.eigenvectors, &occupations)?;

@@ -308,6 +308,56 @@ impl Session {
             .map_err(runtime_error)
         })
     }
+    /// Tensile-positive Cartesian stress, Ha/Bohr^3; frozen Miller set. Requires certification.
+    fn stress(&self, py: Python<'_>) -> PyResult<[[f64; 3]; 3]> {
+        let rows = self.cell_rows_bohr;
+        let species = self.species.clone();
+        let positions = self.positions_fractional.clone();
+        let potentials = self.pseudopotentials.clone();
+        let options = self.force_options.clone();
+        let (values, pulay) = self.call(py, move |s| {
+            let outcome = s
+                .result()
+                .ok_or_else(|| runtime_error("stress requires a converged result"))?;
+            let cell = Cell::from_user_rows_bohr(rows).map_err(value_error)?;
+            let atoms: Vec<_> = species
+                .into_iter()
+                .zip(positions)
+                .map(|(s, p)| Atom::new(s, p))
+                .collect();
+            let parsed: Vec<_> = potentials
+                .iter()
+                .map(|(s, t)| parse_upf(t).map(|p| (s, p)).map_err(value_error))
+                .collect::<PyResult<_>>()?;
+            let refs: Vec<_> = parsed
+                .iter()
+                .map(|(s, p)| SpeciesPotential {
+                    label: s,
+                    potential: p,
+                })
+                .collect();
+            dft_engine::stress::stress(&dft_engine::forces::ForceState {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &refs,
+                options: &options,
+                electronic: dft_engine::forces::ElectronicState::Fixed(&outcome.result),
+                density_floor: None,
+                symmetry: &[],
+            })
+            .map(|r| {
+                (
+                    r.values,
+                    r.pulay.map(|p| (p.correction, p.uncertainty, p.warning)),
+                )
+            })
+            .map_err(runtime_error)
+        })?;
+        if let Some((correction, uncertainty, true)) = pulay {
+            py.import("warnings")?.call_method1("warn", (format!("Frozen-Miller stress is not cutoff converged: isotropic Pulay estimate {correction:e} +/- {uncertainty:e} Ha/Bohr^3 exceeds 1e-5 or sampled shells are unresolved; increase cutoff"),))?;
+        }
+        Ok(values)
+    }
     /// (shape, minimum, maximum, mean [Bohr^-3], integrated electrons).
     fn density_summary(&self, py: Python<'_>) -> PyResult<(Vec<usize>, f64, f64, f64, f64)> {
         let volume = self.volume;

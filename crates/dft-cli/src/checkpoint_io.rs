@@ -191,6 +191,15 @@ pub fn encode(checkpoint: &Checkpoint) -> Result<Vec<u8>, Error> {
     if checkpoint
         .continuation
         .as_ref()
+        .is_some_and(|c| c.options.strain_reference.is_some())
+    {
+        return Err(invalid(
+            "checkpoint v1 cannot preserve frozen-Miller strain reference",
+        ));
+    }
+    if checkpoint
+        .continuation
+        .as_ref()
         .is_some_and(|c| c.options.spectral_guard == dft_engine::SpectralGuard::Final)
     {
         return Err(invalid(
@@ -484,7 +493,7 @@ wire_struct!(ScfOptions, WScfOptions {
     seed: u64,
     divergence_factor: f64,
     divergence_patience: usize,
-} defaults { spectral_guard: dft_engine::SpectralGuard::Off, });
+} defaults { spectral_guard: dft_engine::SpectralGuard::Off, strain_reference: None, });
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 enum WSolverChoice {

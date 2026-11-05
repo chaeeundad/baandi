@@ -1,0 +1,14 @@
+   Compiling dft-cli v0.1.0 (/Users/mino/Develop/rust-dft-wt/P22A-STRESS/crates/dft-cli)
+    Finished `release` profile [optimized] target(s) in 0.39s
+     Running tests/stress.rs (target/release/deps/stress-8bb3ce93a63c131f)
+
+running 2 tests
+PASS stress schema and physical reporting semantics
+PASS stress schema and physical reporting semantics
+test stress_output_identity_schema_and_standard_rejection ... ok
+PASS stress schema and physical reporting semantics
+PASS stress schema and physical reporting semantics
+test spin_and_finite_stress_envelopes ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.83s
+

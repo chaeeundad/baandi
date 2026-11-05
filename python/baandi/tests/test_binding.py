@@ -109,6 +109,30 @@ class BindingTests(unittest.TestCase):
         self.assertTrue(np.isfinite(forces).all())
         self.assertGreater(np.max(np.abs(forces)), 1e-5)
 
+    def test_ase_stress_sign_voigt_and_energy_derivative(self):
+        from ase import Atoms
+        from ase.calculators.fd import calculate_numerical_stress
+        from ase.stress import full_3x3_to_voigt_6_stress
+        from baandi.ase import Baandi
+        from baandi._baandi import hartree_to_ev, angstrom_to_bohr
+        import numpy as np
+        atoms = Atoms("H2", cell=[[4., 0., 0.], [.2, 3.8, 0.], [.1, .3, 4.2]],
+                      scaled_positions=[[0., 0., 0.], [.27, .23, .19]], pbc=True)
+        options = settings()
+        options.density_tolerance = 1e-10
+        options.energy_tolerance = 1e-12
+        options.eigen_tolerance = 1e-11
+        atoms.calc = Baandi(pseudopotentials={"H": potential("H", 1, (0,))}, options=options)
+        actual = atoms.get_stress()
+        native = np.asarray(atoms.calc.session.stress())
+        factor = hartree_to_ev(1.) * angstrom_to_bohr(1.) ** 3
+        np.testing.assert_allclose(actual, full_3x3_to_voigt_6_stress(native)*factor, rtol=1e-13, atol=1e-13)
+        # ASE's strain/energy oracle establishes sign and shear order. This small
+        # strain stays within a shell; frozen-set SCF oracles are Rust tests.
+        reference = calculate_numerical_stress(atoms, eps=1e-4, force_consistent=False)
+        np.testing.assert_allclose(actual, reference, rtol=0., atol=1e-5)
+        print("ASE stress eV/Angstrom^3", actual.tolist(), "max FD error", float(np.max(np.abs(actual-reference))))
+
     def test_ase_unsupported_properties(self):
         try:
             from baandi.ase import Baandi
@@ -117,11 +141,11 @@ class BindingTests(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             Baandi(pseudopotentials={}, hubbard={"H": 1.0})
         calc = Baandi(pseudopotentials={})
-        for prop in ("stress", "free_energy", "dipole", "charges"):
+        for prop in ("free_energy", "dipole", "charges"):
             with self.subTest(property=prop), self.assertRaises(NotImplementedError):
                 calc.get_property(prop)
         with self.assertRaises(NotImplementedError):
-            calc.calculate(properties=["stress"])
+            calc.calculate(properties=["dipole"])
 
     @unittest.skipUnless(os.environ.get("BAANDI_CLI"), "set BAANDI_CLI for exact CLI comparison")
     def test_native_cli_bitwise(self):

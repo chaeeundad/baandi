@@ -738,6 +738,18 @@ pub fn execute_mode(
         console.push_str(&force_table(&force));
         result["forces"] = force_json(&force);
     }
+    if let Some(stress) = requested_stress(
+        &config,
+        &prepared.cell,
+        &atoms,
+        &refs,
+        &opts,
+        dft_engine::forces::ElectronicState::Fixed(&r),
+        density_floor,
+    )? {
+        console.push_str(&stress_table(&stress));
+        result["stress"] = stress_json(&stress);
+    }
     write_json(&out.join("results.json"), &result)?;
     Ok(RunReport {
         console,
@@ -825,6 +837,60 @@ fn force_table(f: &dft_engine::forces::ForceResult) -> String {
             v[2]
         )
         .unwrap();
+    }
+    text
+}
+
+#[allow(clippy::too_many_arguments)]
+fn requested_stress(
+    config: &Config,
+    cell: &dft_geometry::Cell,
+    atoms: &[Atom],
+    potentials: &[SpeciesPotential<'_>],
+    options: &ScfOptions,
+    electronic: dft_engine::forces::ElectronicState<'_>,
+    density_floor: Option<f64>,
+) -> Result<Option<dft_engine::stress::StressResult>, RunError> {
+    if !config.output.as_ref().is_some_and(|o| o.stress) {
+        return Ok(None);
+    }
+    let operations: Vec<_> =
+        config
+            .symmetry_map()
+            .map_err(|e| error(1, e))?
+            .map_or_else(Vec::new, |m| {
+                m.operations
+                    .into_iter()
+                    .filter(|o| !o.antiunitary)
+                    .collect()
+            });
+    dft_engine::stress::stress(&dft_engine::forces::ForceState {
+        cell,
+        atoms,
+        potentials,
+        options,
+        electronic,
+        density_floor,
+        symmetry: &operations,
+    })
+    .map(Some)
+    .map_err(engine_error)
+}
+
+fn stress_json(s: &dft_engine::stress::StressResult) -> Value {
+    let pulay=s.pulay.as_ref().map(|p|json!({"method":p.method,"isotropic_correction_ha_bohr3":p.correction,"uncertainty_ha_bohr3":p.uncertainty,"cutoff_steps_ha":p.cutoff_steps_ha,"warning_threshold_ha_bohr3":p.warning_threshold,"warning":p.warning,"shells_resolved":p.shells_resolved,"uncertainty_kind":"two_step_spread_not_bound","anisotropic_convergence":"not_established","elapsed_seconds":p.elapsed.as_secs_f64()}));
+    json!({"status":"available","units":s.units,"frame":"cartesian_tensor","sign_convention":"tensile_positive","quantity":s.quantity,"values":s.values,"pressure_ha_bohr3":s.pressure,"symmetric":s.symmetric,"antisymmetric":s.antisymmetric,"antisymmetric_norm_ha_bohr3":s.antisymmetric_norm,"basis_protocol":s.basis_protocol,"cutoff_ha":s.cutoff_ha,"strain_steps":s.strain_steps,"cutoff_converged":false,"pulay_assessment":pulay,"per_term":s.terms.iter().map(|(name,t)|((*name).to_string(),json!(t))).collect::<serde_json::Map<_,_>>(),"derivative_ledger":s.ledger.iter().map(|e|json!({"term_id":e.term_id,"owner":e.owner,"energy_ha":e.energy_ha,"included_in":e.included_in,"dependencies":e.dependencies,"active":e.active,"stress_capability":if e.active {"available"}else{"not_applicable"},"reason":e.reason})).collect::<Vec<_>>(),"unavailable_terms":[],"preconditions":{"convergence_profile":"strict","converged":true,"fixed_point_certificate_passed":true},"elapsed_seconds":s.elapsed.as_secs_f64(),"band_passes":s.band_passes,"precondition_force_band_passes":s.precondition_force_band_passes,"cutoff_scf_runs":3})
+}
+fn stress_table(s: &dft_engine::stress::StressResult) -> String {
+    let mut text = format!(
+        "\nFrozen-Miller tensile-positive stress, Ha/Bohr^3: {:?}\nPressure (-trace/3): {:.12e} Ha/Bohr^3\n",
+        s.values, s.pressure
+    );
+    if let Some(p) = &s.pulay {
+        text.push_str(&format!("Isotropic Pulay estimate: {:.6e} +/- {:.6e} Ha/Bohr^3; cutoff convergence not established\n",p.correction,p.uncertainty));
+        if p.warning {
+            text.push_str("WARNING: Pulay estimate exceeds threshold or sampled shells are unresolved; increase cutoff and repeat.\n");
+        }
     }
     text
 }

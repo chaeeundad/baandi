@@ -131,6 +131,43 @@ impl PlaneWaveBasis {
             k_cartesian,
         })
     }
+    /// Deform the reciprocal metric while retaining the exact ordered Miller
+    /// set and fractional k. The recorded cutoff is the reference cutoff,
+    /// not an assertion that the deformed vectors obey a cutoff sphere.
+    pub fn in_cell(&self, cell: &Cell) -> Result<Self, BasisError> {
+        let b = cell.reciprocal_columns_inverse_bohr();
+        let cart = |m: [f64; 3]| std::array::from_fn(|i| (0..3).map(|j| b[i][j] * m[j]).sum());
+        let k_cartesian = cart(self.k_fractional);
+        let make = |g: &GVector, shift: [f64; 3]| {
+            let cartesian: [f64; 3] =
+                cart(std::array::from_fn(|j| f64::from(g.miller[j]) + shift[j]));
+            GVector {
+                miller: g.miller,
+                norm_squared: cartesian.iter().map(|v| v * v).sum(),
+                cartesian,
+            }
+        };
+        let vectors: Vec<_> = self.vectors.iter().map(|g| make(g, [0.; 3])).collect();
+        let momenta: Vec<_> = self
+            .vectors
+            .iter()
+            .map(|g| make(g, self.k_fractional))
+            .collect();
+        if vectors
+            .iter()
+            .chain(&momenta)
+            .any(|g| !g.norm_squared.is_finite())
+        {
+            return Err(BasisError::SizeOverflow);
+        }
+        Ok(Self {
+            cutoff: self.cutoff,
+            vectors,
+            momenta,
+            k_fractional: self.k_fractional,
+            k_cartesian,
+        })
+    }
     /// Cartesian k+G and squared magnitude, in the same ordering as `vectors`.
     pub fn momenta(&self) -> &[GVector] {
         &self.momenta

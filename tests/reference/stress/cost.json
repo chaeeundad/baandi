@@ -1,0 +1,687 @@
+{
+  "scope": "Mac observation, T=1, one pair per case; no speedup acceptance",
+  "binary_sha256": "29d35838074f78398c2716431774e7866f7ba507eaefefd320560c3c00fa58c5",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "cases": {
+    "si8": {
+      "runs": [
+        {
+          "enabled": false,
+          "exit_code": 0,
+          "wall_seconds": 2.903874,
+          "scf_seconds": 2.567892125,
+          "energy_ha": -31.32180360103127,
+          "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+          "iterations": 15,
+          "operator_applications": 2063,
+          "davidson_iterations": 283,
+          "stress": null
+        },
+        {
+          "enabled": true,
+          "exit_code": 0,
+          "wall_seconds": 14.891290542000002,
+          "scf_seconds": 2.5527098329999998,
+          "energy_ha": -31.32180360103127,
+          "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e",
+          "iterations": 15,
+          "operator_applications": 2063,
+          "davidson_iterations": 283,
+          "stress": {
+            "antisymmetric": [
+              [
+                0.0,
+                8.975995320754326e-20,
+                4.504465727773843e-19
+              ],
+              [
+                -8.975995320754326e-20,
+                0.0,
+                -3.145296376590009e-19
+              ],
+              [
+                -4.504465727773843e-19,
+                3.145296376590009e-19,
+                0.0
+              ]
+            ],
+            "antisymmetric_norm_ha_bohr3": 7.872583528837457e-19,
+            "band_passes": 20,
+            "basis_protocol": "frozen_miller_set",
+            "cutoff_converged": false,
+            "cutoff_ha": 15.0,
+            "cutoff_scf_runs": 3,
+            "derivative_ledger": [
+              {
+                "active": true,
+                "dependencies": [],
+                "energy_ha": 13.26738009203087,
+                "included_in": "E",
+                "owner": "physics::kinetic",
+                "reason": "complete NC frozen-Miller strain derivative",
+                "stress_capability": "available",
+                "term_id": "kinetic"
+              },
+              {
+                "active": true,
+                "dependencies": [],
+                "energy_ha": -10.64713276338582,
+                "included_in": "E",
+                "owner": "physics::stress",
+                "reason": "complete NC frozen-Miller strain derivative",
+                "stress_capability": "available",
+                "term_id": "local"
+              },
+              {
+                "active": true,
+                "dependencies": [],
+                "energy_ha": 6.857802588520553,
+                "included_in": "E",
+                "owner": "physics::stress",
+                "reason": "complete NC frozen-Miller strain derivative",
+                "stress_capability": "available",
+                "term_id": "nonlocal"
+              },
+              {
+                "active": true,
+                "dependencies": [],
+                "energy_ha": 2.538523134694666,
+                "included_in": "E",
+                "owner": "physics::stress",
+                "reason": "complete NC frozen-Miller strain derivative",
+                "stress_capability": "available",
+                "term_id": "hartree"
+              },
+              {
+                "active": true,
+                "dependencies": [],
+                "energy_ha": -9.740489186853225,
+                "included_in": "E",
+                "owner": "physics::xc/gga/spin",
+                "reason": "complete NC frozen-Miller strain derivative",
+                "stress_capability": "available",
+                "term_id": "xc"
+              },
+              {
+                "active": false,
+                "dependencies": [
+                  "xc"
+                ],
+                "energy_ha": 0.0,
+                "included_in": "audit_only",
+                "owner": "physics::stress",
+                "reason": "complete NC frozen-Miller strain derivative",
+                "stress_capability": "not_applicable",
+                "term_id": "core"
+              },
+              {
+                "active": true,
+                "dependencies": [],
+                "energy_ha": -33.597887466038316,
+                "included_in": "E",
+                "owner": "physics::ewald",
+                "reason": "complete NC frozen-Miller strain derivative",
+                "stress_capability": "available",
+                "term_id": "ewald"
+              },
+              {
+                "active": false,
+                "dependencies": [],
+                "energy_ha": -0.0,
+                "included_in": "correction",
+                "owner": "engine::occupations",
+                "reason": "stationary F at fixed theta,N,M: no explicit entropy strain term",
+                "stress_capability": "not_applicable",
+                "term_id": "entropy"
+              }
+            ],
+            "elapsed_seconds": 3.584649583,
+            "frame": "cartesian_tensor",
+            "per_term": {
+              "core": [
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "entropy": [
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "ewald": [
+                [
+                  0.010365604314205308,
+                  -5.17225300443231e-20,
+                  4.8862964243332257e-20
+                ],
+                [
+                  -5.17225300443231e-20,
+                  0.010365604314205093,
+                  -2.488691167426563e-19
+                ],
+                [
+                  4.8862964243332257e-20,
+                  -2.488691167426563e-19,
+                  0.010365604314205093
+                ]
+              ],
+              "hartree": [
+                [
+                  -0.0007831839542294379,
+                  2.990421319316698e-11,
+                  -7.777734158760305e-12
+                ],
+                [
+                  2.990421319316698e-11,
+                  -0.0007831839546956342,
+                  -2.0475424768228237e-11
+                ],
+                [
+                  -7.777734158760305e-12,
+                  -2.0475424768228237e-11,
+                  -0.0007831839535214461
+                ]
+              ],
+              "kinetic": [
+                [
+                  -0.008186491631532462,
+                  -3.972400510675841e-11,
+                  9.366996437555318e-12
+                ],
+                [
+                  -3.972400510675841e-11,
+                  -0.008186491625475998,
+                  2.767196581418171e-11
+                ],
+                [
+                  9.366996437555318e-12,
+                  2.767196581418171e-11,
+                  -0.008186491643161223
+                ]
+              ],
+              "local": [
+                [
+                  0.005026319681906076,
+                  -1.1265916071740773e-10,
+                  -1.622581007408974e-11
+                ],
+                [
+                  -1.1265916071740773e-10,
+                  0.005026319672215574,
+                  3.060390841898815e-11
+                ],
+                [
+                  -1.622581007408974e-11,
+                  3.060390841898815e-11,
+                  0.005026319696467923
+                ]
+              ],
+              "nonlocal": [
+                [
+                  -0.00940096418799774,
+                  1.514639398095491e-11,
+                  1.6998482680704693e-11
+                ],
+                [
+                  1.514639398095491e-11,
+                  -0.009400964181205281,
+                  1.24361305295503e-11
+                ],
+                [
+                  1.6998482680704693e-11,
+                  1.24361305295503e-11,
+                  -0.009400964199850833
+                ]
+              ],
+              "xc": [
+                [
+                  0.002741385268612931,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.002741385268612931,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.002741385268612931
+                ]
+              ]
+            },
+            "precondition_force_band_passes": 20,
+            "preconditions": {
+              "converged": true,
+              "convergence_profile": "strict",
+              "fixed_point_certificate_passed": true
+            },
+            "pressure_ha_bohr3": 0.00023733051087539898,
+            "pulay_assessment": {
+              "anisotropic_convergence": "not_established",
+              "cutoff_steps_ha": [
+                0.75,
+                1.5
+              ],
+              "elapsed_seconds": 8.745434875,
+              "isotropic_correction_ha_bohr3": -3.933883797369123e-06,
+              "method": "isotropic_cutoff_derivative_5_10_percent",
+              "shells_resolved": true,
+              "uncertainty_ha_bohr3": 2.883207289135283e-07,
+              "uncertainty_kind": "two_step_spread_not_bound",
+              "warning": false,
+              "warning_threshold_ha_bohr3": 1e-05
+            },
+            "quantity": "E",
+            "sign_convention": "tensile_positive",
+            "status": "available",
+            "strain_steps": [],
+            "symmetric": [
+              [
+                -0.00023733050903532518,
+                -1.0733255870176678e-10,
+                2.3619349342729308e-12
+              ],
+              [
+                -1.0733255870176678e-10,
+                -0.0002373305063433171,
+                5.02365797456228e-11
+              ],
+              [
+                2.3619349342729308e-12,
+                5.02365797456228e-11,
+                -0.0002373305172475547
+              ]
+            ],
+            "unavailable_terms": [],
+            "units": "Ha/Bohr^3",
+            "values": [
+              [
+                -0.00023733050903532518,
+                -1.0733255870176678e-10,
+                2.3619349342729308e-12
+              ],
+              [
+                -1.0733255870176678e-10,
+                -0.0002373305063433171,
+                5.02365797456228e-11
+              ],
+              [
+                2.3619349342729308e-12,
+                5.02365797456228e-11,
+                -0.0002373305172475547
+              ]
+            ]
+          }
+        }
+      ],
+      "analytic_fraction_of_scf_plus_pass": 0.5840703370988629,
+      "analytic_fraction_including_pulay": 0.24085863937309998
+    },
+    "k444s": {
+      "runs": [
+        {
+          "enabled": false,
+          "exit_code": 0,
+          "wall_seconds": 2.46846575,
+          "scf_seconds": 2.460815959,
+          "energy_ha": -7.9259761266480915,
+          "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+          "iterations": 10,
+          "operator_applications": 10290,
+          "davidson_iterations": 1686,
+          "stress": null
+        },
+        {
+          "enabled": true,
+          "exit_code": 0,
+          "wall_seconds": 12.982982042,
+          "scf_seconds": 2.460176,
+          "energy_ha": -7.9259761266480915,
+          "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660",
+          "iterations": 10,
+          "operator_applications": 10290,
+          "davidson_iterations": 1686,
+          "stress": {
+            "antisymmetric": [
+              [
+                0.0,
+                1.0842021724855044e-19,
+                2.913793338554793e-19
+              ],
+              [
+                -1.0842021724855044e-19,
+                0.0,
+                -3.3881317890172014e-19
+              ],
+              [
+                -2.913793338554793e-19,
+                3.3881317890172014e-19,
+                0.0
+              ]
+            ],
+            "antisymmetric_norm_ha_bohr3": 6.503095107774063e-19,
+            "band_passes": 256,
+            "basis_protocol": "frozen_miller_set",
+            "cutoff_converged": false,
+            "cutoff_ha": 15.0,
+            "cutoff_scf_runs": 3,
+            "derivative_ledger": [
+              {
+                "active": true,
+                "dependencies": [],
+                "energy_ha": 3.1056531459408117,
+                "included_in": "E",
+                "owner": "physics::kinetic",
+                "reason": "complete NC frozen-Miller strain derivative",
+                "stress_capability": "available",
+                "term_id": "kinetic"
+              },
+              {
+                "active": true,
+                "dependencies": [],
+                "energy_ha": -2.5196534442035836,
+                "included_in": "E",
+                "owner": "physics::stress",
+                "reason": "complete NC frozen-Miller strain derivative",
+                "stress_capability": "available",
+                "term_id": "local"
+              },
+              {
+                "active": true,
+                "dependencies": [],
+                "energy_ha": 1.7394724191491893,
+                "included_in": "E",
+                "owner": "physics::stress",
+                "reason": "complete NC frozen-Miller strain derivative",
+                "stress_capability": "available",
+                "term_id": "nonlocal"
+              },
+              {
+                "active": true,
+                "dependencies": [],
+                "energy_ha": 0.5469470488422945,
+                "included_in": "E",
+                "owner": "physics::stress",
+                "reason": "complete NC frozen-Miller strain derivative",
+                "stress_capability": "available",
+                "term_id": "hartree"
+              },
+              {
+                "active": true,
+                "dependencies": [],
+                "energy_ha": -2.398923429867173,
+                "included_in": "E",
+                "owner": "physics::xc/gga/spin",
+                "reason": "complete NC frozen-Miller strain derivative",
+                "stress_capability": "available",
+                "term_id": "xc"
+              },
+              {
+                "active": false,
+                "dependencies": [
+                  "xc"
+                ],
+                "energy_ha": 0.0,
+                "included_in": "audit_only",
+                "owner": "physics::stress",
+                "reason": "complete NC frozen-Miller strain derivative",
+                "stress_capability": "not_applicable",
+                "term_id": "core"
+              },
+              {
+                "active": true,
+                "dependencies": [],
+                "energy_ha": -8.39947186650963,
+                "included_in": "E",
+                "owner": "physics::ewald",
+                "reason": "complete NC frozen-Miller strain derivative",
+                "stress_capability": "available",
+                "term_id": "ewald"
+              },
+              {
+                "active": false,
+                "dependencies": [],
+                "energy_ha": -0.0,
+                "included_in": "correction",
+                "owner": "engine::occupations",
+                "reason": "stationary F at fixed theta,N,M: no explicit entropy strain term",
+                "stress_capability": "not_applicable",
+                "term_id": "entropy"
+              }
+            ],
+            "elapsed_seconds": 1.981509667,
+            "frame": "cartesian_tensor",
+            "per_term": {
+              "core": [
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "entropy": [
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              ],
+              "ewald": [
+                [
+                  0.010365604314204857,
+                  -8.659650484983546e-19,
+                  -5.764433231557914e-19
+                ],
+                [
+                  -8.659650484983546e-19,
+                  0.010365604314204857,
+                  3.205662960334843e-19
+                ],
+                [
+                  -5.764433231557914e-19,
+                  3.205662960334843e-19,
+                  0.01036560431420486
+                ]
+              ],
+              "hartree": [
+                [
+                  -0.0006749753769307304,
+                  -6.823994386739385e-06,
+                  -6.823994363097218e-06
+                ],
+                [
+                  -6.823994386739385e-06,
+                  -0.0006749753769315419,
+                  -6.823994444048659e-06
+                ],
+                [
+                  -6.823994363097218e-06,
+                  -6.823994444048659e-06,
+                  -0.0006749753769317091
+                ]
+              ],
+              "kinetic": [
+                [
+                  -0.007665237091008785,
+                  5.761081453935078e-05,
+                  5.761081451298758e-05
+                ],
+                [
+                  5.761081453935078e-05,
+                  -0.007665237090997122,
+                  5.761081461337687e-05
+                ],
+                [
+                  5.761081451298758e-05,
+                  5.761081461337687e-05,
+                  -0.007665237090992422
+                ]
+              ],
+              "local": [
+                [
+                  0.004823094452456872,
+                  -5.170309459463455e-05,
+                  -5.170309469461587e-05
+                ],
+                [
+                  -5.170309459463455e-05,
+                  0.004823094452440258,
+                  -5.170309433540193e-05
+                ],
+                [
+                  -5.170309469461587e-05,
+                  -5.170309433540193e-05,
+                  0.004823094452431901
+                ]
+              ],
+              "nonlocal": [
+                [
+                  -0.009494737327946458,
+                  3.5732772452527496e-05,
+                  3.573277247252071e-05
+                ],
+                [
+                  3.5732772452527496e-05,
+                  -0.009494737327927919,
+                  3.5732772419618605e-05
+                ],
+                [
+                  3.573277247252071e-05,
+                  3.5732772419618605e-05,
+                  -0.00949473732791879
+                ]
+              ],
+              "xc": [
+                [
+                  0.0026994028223123892,
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0026994028223123892,
+                  0.0
+                ],
+                [
+                  0.0,
+                  0.0,
+                  0.0026994028223123892
+                ]
+              ]
+            },
+            "precondition_force_band_passes": 256,
+            "preconditions": {
+              "converged": true,
+              "convergence_profile": "strict",
+              "fixed_point_certificate_passed": true
+            },
+            "pressure_ha_bohr3": -5.31517930984308e-05,
+            "pulay_assessment": {
+              "anisotropic_convergence": "not_established",
+              "cutoff_steps_ha": [
+                0.75,
+                1.5
+              ],
+              "elapsed_seconds": 8.533295792,
+              "isotropic_correction_ha_bohr3": -4.856633449171126e-06,
+              "method": "isotropic_cutoff_derivative_5_10_percent",
+              "shells_resolved": true,
+              "uncertainty_ha_bohr3": 4.1566810235593665e-07,
+              "uncertainty_kind": "two_step_spread_not_bound",
+              "warning": false,
+              "warning_threshold_ha_bohr3": 1e-05
+            },
+            "quantity": "E",
+            "sign_convention": "tensile_positive",
+            "status": "available",
+            "strain_steps": [],
+            "symmetric": [
+              [
+                5.315179308814505e-05,
+                3.4816498010503475e-05,
+                3.481649792779463e-05
+              ],
+              [
+                3.4816498010503475e-05,
+                5.315179310091955e-05,
+                3.48164982535452e-05
+              ],
+              [
+                3.481649792779463e-05,
+                3.48164982535452e-05,
+                5.315179310622781e-05
+              ]
+            ],
+            "unavailable_terms": [],
+            "units": "Ha/Bohr^3",
+            "values": [
+              [
+                5.315179308814505e-05,
+                3.4816498010503475e-05,
+                3.481649792779463e-05
+              ],
+              [
+                3.4816498010503475e-05,
+                5.315179310091955e-05,
+                3.48164982535452e-05
+              ],
+              [
+                3.481649792779463e-05,
+                3.48164982535452e-05,
+                5.315179310622781e-05
+              ]
+            ]
+          }
+        }
+      ],
+      "analytic_fraction_of_scf_plus_pass": 0.4461165907623422,
+      "analytic_fraction_including_pulay": 0.15271772628434396
+    }
+  }
+}

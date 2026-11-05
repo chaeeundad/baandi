@@ -94,3 +94,15 @@ claim a complete stationary force. Species-grouped atom order must be restored
 by callers (the engine supplies one species entry per input atom). Core forces
 are the explicit XC derivative, not an additional core energy. Historical P13C
 statements about absent force capability describe that earlier ticket's scope.
+
+## Analytic stress (P22A)
+
+`kinetic::stress`, `ewald::stress`, and `stress` implement tensile-positive
+frozen-Miller strain derivatives in Ha/Bohr^3. XC gradient metrics live beside
+their functional adapters. The engine alone certifies a complete total. Core
+response is contracted against the XC potential, not added as a core energy.
+All supported l=0..3 channels have a two-projector coupled-D fixture; solid
+harmonic derivatives avoid polar-axis singularities. No numerical projector
+finite differences or SCF hot-loop calls are used. See
+`docs/validation/stress.md` for equations, conventions and scope.
+Run `cargo test --release -p dft-physics --test stress_terms -- --include-ignored --nocapture`.

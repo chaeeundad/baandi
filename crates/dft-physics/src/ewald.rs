@@ -46,6 +46,93 @@ pub struct EwaldEnergy {
 fn matrix(a: [[f64; 3]; 3]) -> Matrix3<f64> {
     Matrix3::from_fn(|i, j| a[i][j])
 }
+
+/// Tensile-positive ion/background strain derivative in Ha/Bohr^3, at fixed
+/// fractional ion positions. Eta is held fixed in the derivative: its response
+/// cancels between the four Ewald terms in the infinite sums. The energy
+/// evaluator's truncation spheres are reused; its energy tail bound is not a
+/// stress error bound. This is an isolated contribution, not a total stress.
+pub fn stress(
+    cell: &Cell,
+    ions: &[Ion],
+    options: EwaldOptions,
+) -> Result<[[f64; 3]; 3], PhysicsError> {
+    let parameters = energy(cell, ions, options)?;
+    let eta = parameters.eta;
+    let omega = cell.volume_bohr3();
+    let a = matrix(cell.lattice_columns_bohr());
+    let b = matrix(cell.reciprocal_columns_inverse_bohr());
+    let rb = bounds(&b, parameters.real_cutoff_bohr, 1.0)?;
+    let gb = bounds(&a, parameters.reciprocal_cutoff_inverse_bohr, 0.0)?;
+    let positions: Vec<_> = ions
+        .iter()
+        .map(|ion| Vector3::from(ion.fractional_position.map(|x| x.rem_euclid(1.0))))
+        .collect();
+    let mut result = [[0.0; 3]; 3];
+    for (i, ion) in ions.iter().enumerate() {
+        for (j, other) in ions.iter().enumerate() {
+            enumerate(
+                |m| {
+                    if i == j && m == [0; 3] {
+                        return Ok(());
+                    }
+                    let r = a * (positions[i] - positions[j] + Vector3::from(m.map(f64::from)));
+                    let distance = r.norm();
+                    if distance <= parameters.real_cutoff_bohr {
+                        let factor = -0.5 * ion.charge * other.charge / omega
+                            * (libm::erfc(eta * distance) / distance.powi(3)
+                                + 2.0 * eta / PI.sqrt() * (-(eta * distance).powi(2)).exp()
+                                    / distance.powi(2));
+                        for (a, row) in result.iter_mut().enumerate() {
+                            for (b, value) in row.iter_mut().enumerate() {
+                                *value += factor * r[a] * r[b];
+                            }
+                        }
+                    }
+                    Ok(())
+                },
+                rb,
+            )?;
+        }
+    }
+    enumerate(
+        |m| {
+            if m == [0; 3] {
+                return Ok(());
+            }
+            let mv = Vector3::from(m.map(f64::from));
+            let g = b * mv;
+            let g2 = g.norm_squared();
+            if g2 <= parameters.reciprocal_cutoff_inverse_bohr.powi(2) {
+                let structure: Complex64 = ions
+                    .iter()
+                    .zip(&positions)
+                    .map(|(ion, s)| Complex64::from_polar(ion.charge, TAU * mv.dot(s)))
+                    .sum();
+                let weight = 2.0 * PI / omega.powi(2) * (-g2 / (4.0 * eta * eta)).exp() / g2
+                    * structure.norm_sqr();
+                for (a, row) in result.iter_mut().enumerate() {
+                    for (b, value) in row.iter_mut().enumerate() {
+                        *value += weight
+                            * ((2.0 / g2 + 0.5 / eta.powi(2)) * g[a] * g[b]
+                                - if a == b { 1.0 } else { 0.0 });
+                    }
+                }
+            }
+            Ok(())
+        },
+        gb,
+    )?;
+    // The self term has no explicit fixed-eta strain derivative. Background
+    // scales as 1/Omega and must not be mistaken for a zero-mode constant.
+    for (a, row) in result.iter_mut().enumerate() {
+        row[a] -= parameters.background.0 / omega;
+    }
+    if result.iter().flatten().any(|v| !v.is_finite()) {
+        return Err(PhysicsError::Unrepresentable);
+    }
+    Ok(result)
+}
 fn covering_radius(a: &Matrix3<f64>) -> f64 {
     (0..3).map(|i| a.column(i).norm()).sum::<f64>() / 2.0
 }

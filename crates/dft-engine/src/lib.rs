@@ -38,3 +38,6 @@ pub mod forces;
 pub use forces::{ElectronicState, ForceResult, ForceState, forces};
 
 mod force_identity;
+
+pub mod stress;
+pub use stress::{StressResult, StressState, stress};

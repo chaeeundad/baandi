@@ -1,0 +1,56 @@
+   Compiling syn v3.0.9
+   Compiling target-lexicon v0.13.5
+   Compiling pyo3-macros-backend v0.30.1
+   Compiling baandi-py v0.1.0 (/Users/mino/Develop/rust-dft-wt/P22A-STRESS/crates/baandi-py)
+   Compiling pyo3-build-config v0.30.1
+   Compiling pyo3-ffi v0.30.1
+   Compiling pyo3 v0.30.1
+   Compiling synstructure v0.14.0
+   Compiling pest_generator v2.9.5
+   Compiling darling_core v0.24.1
+   Compiling thiserror-impl v2.0.21
+   Compiling zerovec-derive v0.11.7
+   Compiling displaydoc v0.2.7
+   Compiling serde_derive v1.0.229
+   Compiling zerofrom-derive v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling pest_derive v2.9.5
+    Checking py_literal v0.4.0
+    Checking thiserror v2.0.21
+    Checking zerofrom v0.1.8
+   Compiling darling_macro v0.24.1
+    Checking npyz v0.8.4
+   Compiling darling v0.24.1
+   Compiling serde v1.0.229
+    Checking faer v0.24.4
+   Compiling cobs v0.3.0
+    Checking dft-geometry v0.1.0 (/Users/mino/Develop/rust-dft-wt/P22A-STRESS/crates/dft-geometry)
+    Checking yoke v0.8.4
+   Compiling pyo3-macros v0.30.1
+    Checking dft-basis v0.1.0 (/Users/mino/Develop/rust-dft-wt/P22A-STRESS/crates/dft-basis)
+   Compiling serde_with_macros v3.24.0
+    Checking zerovec v0.11.9
+    Checking zerotrie v0.2.5
+    Checking heapless v0.7.17
+    Checking quick-xml v0.39.4
+    Checking serde_with v3.24.0
+    Checking postcard v1.1.3
+   Compiling phonenumber v0.3.10+9.0.33
+    Checking tinystr v0.8.5
+    Checking potential_utf v0.1.6
+    Checking icu_collections v2.4.0
+    Checking icu_locale_core v2.4.0
+    Checking icu_provider v2.4.0
+    Checking icu_properties v2.4.0
+    Checking icu_normalizer v2.4.0
+    Checking idna_adapter v1.2.2
+    Checking idna v1.1.0
+    Checking url v2.5.8
+    Checking validify v2.0.0
+    Checking upf v0.1.1
+    Checking dft-upf v0.1.0 (/Users/mino/Develop/rust-dft-wt/P22A-STRESS/crates/dft-upf)
+    Checking dft-numerics v0.1.0 (/Users/mino/Develop/rust-dft-wt/P22A-STRESS/crates/dft-numerics)
+    Checking dft-solvers v0.1.0 (/Users/mino/Develop/rust-dft-wt/P22A-STRESS/crates/dft-solvers)
+    Checking dft-physics v0.1.0 (/Users/mino/Develop/rust-dft-wt/P22A-STRESS/crates/dft-physics)
+    Checking dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P22A-STRESS/crates/dft-engine)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.25s

@@ -1,0 +1,19 @@
+{
+  "base_commit": "bfe3e93d1c09b293d15ef754cfef260251ad7138",
+  "scope": "Final default-thread legacy SCF identity against the previously built unmodified HEAD; no speedup claim",
+  "files": {
+    "base_binary": {
+      "path": "target/release/dft-cli",
+      "sha256": "8a5159d1b3b3fabcd7a7cb62b71bff461939087c005740d73c1ff2a9c5f7c25a"
+    },
+    "candidate_binary": {
+      "path": "target/release/dft-cli",
+      "sha256": "29d35838074f78398c2716431774e7866f7ba507eaefefd320560c3c00fa58c5"
+    },
+    "upf": {
+      "path": "/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+      "sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+    }
+  },
+  "record": "scf-final.json"
+}

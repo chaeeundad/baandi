@@ -278,3 +278,31 @@ fn shifted_basis_keeps_density_grid_and_handles_skewed_gauge() {
     assert!(error < 1e-12);
     assert!(PlaneWaveBasis::at_k(&cell, cutoff, [f64::NAN, 0.0, 0.0]).is_err());
 }
+
+#[test]
+fn frozen_millers_preserve_order_under_strain_and_shell_crossing() {
+    let cell = Cell::from_user_rows_bohr([[8., 0., 0.], [0., 8., 0.], [0., 0., 8.]]).unwrap();
+    let deformed =
+        Cell::from_user_rows_bohr([[9., 0.1, 0.], [0., 7., 0.2], [0., 0., 12.]]).unwrap();
+    for k in [[0.; 3], [0.1, 0.2, -0.3]] {
+        let base = PlaneWaveBasis::at_k(&cell, Hartree(2.), k).unwrap();
+        let frozen = base.in_cell(&deformed).unwrap();
+        assert_eq!(
+            base.vectors().iter().map(|g| g.miller).collect::<Vec<_>>(),
+            frozen
+                .vectors()
+                .iter()
+                .map(|g| g.miller)
+                .collect::<Vec<_>>()
+        );
+        let rebuilt = PlaneWaveBasis::at_k(&deformed, Hartree(2.), k).unwrap();
+        assert_ne!(rebuilt.vectors().len(), frozen.vectors().len());
+        for (g, q) in frozen.vectors().iter().zip(frozen.momenta()) {
+            for a in 0..3 {
+                assert!((g.cartesian[a] + frozen.k_cartesian()[a] - q.cartesian[a]).abs() < 1e-14);
+            }
+        }
+        let original = base.in_cell(&cell).unwrap();
+        assert_eq!(base.vectors(), original.vectors());
+    }
+}

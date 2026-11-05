@@ -162,6 +162,38 @@ impl SpinXc {
     ) -> Result<(), PhysicsError> {
         self.evaluate_with_core(density, None, out)
     }
+    /// Explicit gradient metric after evaluate_with_core; no density response.
+    pub fn stress_metric(&self) -> Result<[[f64; 3]; 3], PhysicsError> {
+        if self.kind != SpinFunctional::Pbe {
+            return Ok([[0.; 3]; 3]);
+        }
+        let len = self.rho.len() / 2;
+        let input = XcInput::gga(&self.rho, &self.sigma);
+        let x = self
+            .exchange
+            .eval(len, &input)
+            .map_err(|e| PhysicsError::Xc(e.to_string()))?;
+        let c = self
+            .correlation
+            .eval(len, &input)
+            .map_err(|e| PhysicsError::Xc(e.to_string()))?;
+        Ok(std::array::from_fn(|a| {
+            std::array::from_fn(|b| {
+                -(0..len)
+                    .map(|i| {
+                        let u = |a: usize| self.gradients[0][a].as_slice().unwrap()[i];
+                        let d = |a: usize| self.gradients[1][a].as_slice().unwrap()[i];
+                        2. * (x.vsigma[3 * i] + c.vsigma[3 * i]) * u(a) * u(b)
+                            + (x.vsigma[3 * i + 1] + c.vsigma[3 * i + 1])
+                                * (u(a) * d(b) + d(a) * u(b))
+                            + 2. * (x.vsigma[3 * i + 2] + c.vsigma[3 * i + 2]) * d(a) * d(b)
+                    })
+                    .sum::<f64>()
+                    / len as f64
+            })
+        }))
+    }
+
     /// Immutable, spin-neutral model core. Apply the existing strict collinear
     /// nonnegative-density rule to each combined channel, without clipping.
     pub fn evaluate_with_core(

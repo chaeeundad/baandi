@@ -1,0 +1,66 @@
+{
+  "task_id": "P22A-STRESS",
+  "status": "historical_first_stage",
+  "scope": "Historical first-stage isolated kinetic/Ewald evidence; superseded for task completion by validation.json and gates.json",
+  "command": "cargo test --release -p dft-physics --test stress_terms -- --include-ignored --nocapture",
+  "exit_code": 0,
+  "tests_passed": 2,
+  "units": "Ha/Bohr^3",
+  "strain_steps": [
+    0.002,
+    0.001,
+    0.0005
+  ],
+  "kinetic_max_errors": {
+    "cubic": [
+      6.665537686037504e-09,
+      1.6663770411283474e-09,
+      4.165936697171635e-10
+    ],
+    "skew": [
+      6.990775102463237e-09,
+      1.7476857045979968e-09,
+      4.369208135481667e-10
+    ],
+    "slab_like": [
+      3.0781028038397683e-09,
+      7.695222359717716e-10,
+      1.9238036630311178e-10
+    ]
+  },
+  "ewald_max_errors_auto_eta": {
+    "cubic": [
+      1.3201930992639763e-10,
+      3.3004058633181316e-11,
+      8.251289354468255e-12
+    ],
+    "skew": [
+      8.033440122772275e-10,
+      2.0083628799933187e-10,
+      5.0209070608157836e-11
+    ],
+    "slab_like": [
+      8.511745448619716e-10,
+      2.1279268981795764e-10,
+      5.319799485476202e-11
+    ]
+  },
+  "ewald_max_errors_fixed_eta_0_31_inverse_bohr": {
+    "cubic": [
+      1.3201928309239386e-10,
+      3.300384206379736e-11,
+      8.251072785084301e-12
+    ],
+    "skew": [
+      8.033439983282889e-10,
+      2.0083634388656573e-10,
+      5.0209070625098495e-11
+    ],
+    "slab_like": [
+      8.511745787974996e-10,
+      2.1279257731588862e-10,
+      5.3197859823734183e-11
+    ]
+  },
+  "external_code_comparison": null
+}

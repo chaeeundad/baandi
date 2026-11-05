@@ -1,0 +1,71 @@
+{
+  "task_id": "P22A-STRESS",
+  "status": "DONE",
+  "checks": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-physics --test stress_terms -- --include-ignored --nocapture --test-threads=1",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test stress synthetic_local_nonlocal -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test stress synthetic_models_and_shapes -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test stress symmetry_preconditions_and_pulay -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test stress spin_fd_free_energy -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test stress spin_pbe_swap -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex cargo test --release -p dft-engine --test stress real_files -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-cli --test stress -- --include-ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "BAANDI_CLI=target/release/dft-cli /Users/mino/Develop/rust-dft-wt/pyenv/bin/python -m unittest discover -s python/baandi/tests -v",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo clippy -p baandi-py --features python-extension --all-targets -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --baseline tests/reference/stress/scf-base.json --require-identical --record tests/reference/stress/scf-final.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/stress/measure_cost.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --output tests/reference/stress/cost.json",
+      "exit_code": 0
+    }
+  ],
+  "qualification": "Real Si/MgO accuracy acceptance is inconclusive; frozen-basis finite differences pass. See validation.json.",
+  "historical_failed_comparison": {
+    "command": "scripts/bench_scf.py --require-identical against docs/performance/baseline.json",
+    "exit_code": 5,
+    "reason": "Historical density hashes differ; fresh unmodified same-HEAD baseline is used for feature identity."
+  },
+  "not_run": [
+    "Dashboard/README publication and performance-owner ledger update: orchestrator-owned follow-up."
+  ]
+}

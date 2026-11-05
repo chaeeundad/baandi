@@ -149,7 +149,7 @@ pub(super) fn execute(
     let state_digest = digest(
         &json!({"model_digest":model_digest,"density_sha256":sha256(&density_bits),"eigenvalues_ha":eigenvalues,"residuals_ha":residuals,"occupations":values,"thermodynamics":thermodynamics,"converged":r.converged,"certificate":certificate}),
     );
-    let extension = json!({"proposal_status":"proposed","extension_version":2,"model_digest":model_digest,"basis_digest":basis_digest,"state_digest":state_digest,"spin":spin,"occupations":occupations,"thermodynamics":thermodynamics,"forces":{"status":"unavailable","reason":"not_requested","units":"Ha/Bohr","frame":"cartesian_input_atom_order"},"stress":{"status":"unavailable","reason":"not_implemented","units":"Ha/Bohr^3","frame":"cartesian_tensor","sign_convention":"tensile_positive"}});
+    let extension = json!({"proposal_status":"proposed","extension_version":2,"model_digest":model_digest,"basis_digest":basis_digest,"state_digest":state_digest,"spin":spin,"occupations":occupations,"thermodynamics":thermodynamics,"forces":{"status":"unavailable","reason":"not_requested","units":"Ha/Bohr","frame":"cartesian_input_atom_order"},"stress":{"status":"unavailable","reason":"not_requested","units":"Ha/Bohr^3","frame":"cartesian_tensor","sign_convention":"tensile_positive"}});
 
     let history:Vec<_>=r.history.iter().map(|h|json!({"iteration":h.iteration,"energy_ha":h.energy_ha,"charge_density_residual":h.charge_density_residual,"spin_density_residual":h.spin_density_residual,"mixing_fraction":h.mixing_fraction})).collect();
     // Real atoms use the established independently tested cube writer. Synthetic
@@ -218,6 +218,19 @@ pub(super) fn execute(
         result["forces"] = force_json(&force);
         result["state_contracts"]["forces"] = force_json(&force);
         fs::write(out.join("forces.txt"), force_table(&force)).map_err(|e| error(1, e))?;
+    }
+    if let Some(stress) = requested_stress(
+        config,
+        &prepared.cell,
+        atoms,
+        potentials,
+        &opts,
+        dft_engine::forces::ElectronicState::Collinear(&r),
+        None,
+    )? {
+        result["stress"] = stress_json(&stress);
+        result["state_contracts"]["stress"] = stress_json(&stress);
+        fs::write(out.join("stress.txt"), stress_table(&stress)).map_err(|e| error(1, e))?;
     }
     write_json(&out.join("results.json"), &result)?;
     // Conventional total-density binary remains a documented additional format.

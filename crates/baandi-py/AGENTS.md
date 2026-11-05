@@ -4,7 +4,7 @@ Purpose: optional PyO3 binding to dft-engine and Python/ASE integration (ADR 003
 Read root AGENTS.md, ownership.toml and ADR 0030 before edits. No core crate depends
 on Python. Unit conversion uses dft-units; no duplicated physical constants.
 Python receives owned results and drives the existing session; do not duplicate
-SCF or policy validation. ASE energy requires certified convergence. Stress and free energy remain unsupported, never synthesized as zeros. P20A adds
+SCF or policy validation. ASE energy requires certified convergence. Free energy remains unsupported, never synthesized as zero. P22A adds certified frozen-Miller stress for the existing Gamma/unpolarized session. P20A adds
 post-convergence forces for the existing Gamma, unpolarized NC model; the worker
 uses retained model inputs and requires the engine certificate. ASE converts
 Ha/Bohr to eV/Angstrom using dft-units conversions.
@@ -13,3 +13,8 @@ Verify: `scripts/check.sh baandi-py`, then `scripts/check.sh`. Native wheel and 
 commands/evidence are in `VALIDATION.md`, `native-evidence.json` and
 `ase-evidence.json`. Tests that skip when the extension is absent do not establish
 native acceptance. No MLIP loop or low-level external coupling is implemented.
+
+ASE stress is tensile-positive in eV/Angstrom^3, Voigt xx,yy,zz,yz,xz,xy.
+The native method returns Ha/Bohr^3 and warns on the separate Pulay assessment.
+`test_ase_stress_sign_voigt_and_energy_derivative` uses ASE's own numerical
+stress oracle. Do not claim installed-wheel acceptance from skipped tests.

@@ -1,0 +1,154 @@
+{
+  "task_id": "P22A-STRESS",
+  "status": "DONE",
+  "changed_files": [
+    "crates/dft-cli/tests/stress.rs",
+    "crates/dft-cli/tests/validate_stress_schema.py",
+    "crates/dft-engine/src/stress.rs",
+    "crates/dft-engine/tests/stress.rs",
+    "crates/dft-physics/src/stress.rs",
+    "crates/dft-physics/tests/stress_support/mod.rs",
+    "crates/dft-physics/tests/stress_terms.rs",
+    "docs/validation/stress.md",
+    "tests/reference/stress/check.log",
+    "tests/reference/stress/cli.log",
+    "tests/reference/stress/cost.json",
+    "tests/reference/stress/cost.log",
+    "tests/reference/stress/finite-temperature.log",
+    "tests/reference/stress/gates.json",
+    "tests/reference/stress/initial-fd-fixture-failure.log",
+    "tests/reference/stress/isolated-terms.json",
+    "tests/reference/stress/legacy-identity.log",
+    "tests/reference/stress/measure_cost.py",
+    "tests/reference/stress/physics-terms.log",
+    "tests/reference/stress/preconditions.log",
+    "tests/reference/stress/python-ase.log",
+    "tests/reference/stress/python-clippy.log",
+    "tests/reference/stress/readme-gate.log",
+    "tests/reference/stress/real-files.log",
+    "tests/reference/stress/report.json",
+    "tests/reference/stress/scf-base.json",
+    "tests/reference/stress/scf-candidate.json",
+    "tests/reference/stress/scf-final-provenance.json",
+    "tests/reference/stress/scf-final.json",
+    "tests/reference/stress/scf-provenance.json",
+    "tests/reference/stress/spin-finite-temperature.log",
+    "tests/reference/stress/spin-swap.log",
+    "tests/reference/stress/synthetic-local-nonlocal.log",
+    "tests/reference/stress/synthetic-models.log",
+    "tests/reference/stress/validation.json",
+    "crates/baandi-py/AGENTS.md",
+    "crates/baandi-py/src/lib.rs",
+    "crates/dft-basis/AGENTS.md",
+    "crates/dft-basis/src/lib.rs",
+    "crates/dft-basis/src/tests.rs",
+    "crates/dft-cli/src/checkpoint_io.rs",
+    "crates/dft-cli/src/config.rs",
+    "crates/dft-cli/src/finite_run.rs",
+    "crates/dft-cli/src/run.rs",
+    "crates/dft-cli/src/spin_run.rs",
+    "crates/dft-cli/tests/validate_spin_results.py",
+    "crates/dft-engine/AGENTS.md",
+    "crates/dft-engine/src/checkpoint.rs",
+    "crates/dft-engine/src/force_identity.rs",
+    "crates/dft-engine/src/forces.rs",
+    "crates/dft-engine/src/lib.rs",
+    "crates/dft-engine/src/scf.rs",
+    "crates/dft-physics/AGENTS.md",
+    "crates/dft-physics/src/ewald.rs",
+    "crates/dft-physics/src/gga.rs",
+    "crates/dft-physics/src/kinetic.rs",
+    "crates/dft-physics/src/lib.rs",
+    "crates/dft-physics/src/spin.rs",
+    "docs/INDEX.md",
+    "docs/cli.md",
+    "docs/schemas/results-state.proposal.json",
+    "python/baandi/ase.py",
+    "python/baandi/tests/test_binding.py"
+  ],
+  "design_choices": [
+    "Analytic post-convergence full Cartesian tensile-positive stress in Ha/Bohr^3; pressure = -trace/3.",
+    "Additive frozen-Miller API; legacy basis construction unchanged.",
+    "All supported NC energy terms audited; strict certificate/model preconditions; raw antisymmetric diagnostic and spatial symmetrization.",
+    "Separate isotropic cutoff-derivative Pulay estimate with uncertainty diagnostic and threshold/shell warnings; never claims cutoff convergence.",
+    "CLI/schema/ASE integration; no new dependency or unsafe code."
+  ],
+  "commands": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-physics --test stress_terms -- --include-ignored --nocapture --test-threads=1",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test stress synthetic_local_nonlocal -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test stress synthetic_models_and_shapes -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test stress symmetry_preconditions_and_pulay -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test stress spin_fd_free_energy -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test stress spin_pbe_swap -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex cargo test --release -p dft-engine --test stress real_files -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-cli --test stress -- --include-ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "BAANDI_CLI=target/release/dft-cli /Users/mino/Develop/rust-dft-wt/pyenv/bin/python -m unittest discover -s python/baandi/tests -v",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo clippy -p baandi-py --features python-extension --all-targets -- -D warnings",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --baseline tests/reference/stress/scf-base.json --require-identical --record tests/reference/stress/scf-final.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/stress/measure_cost.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --output tests/reference/stress/cost.json",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "10 synthetic cases: maximum final strain error 1.3006765445505025e-9 Ha/Bohr^3, cap 1e-7.",
+    "Maximum raw antisymmetric norm 8.571370772892337e-20 Ha/Bohr^3.",
+    "Spin PBE channel swap difference 6.358195220323992e-15 Ha/Bohr^3.",
+    "ASE numerical stress maximum error 3.6657227253655833e-10 eV/Angstrom^3; Python 8 tests passed, zero skipped.",
+    "Legacy five-case same-HEAD comparison: energy difference 0 Ha, density bit-identical.",
+    "Mac T1 si8 analytic pass 3.584649583 s, 58.407% of SCF+pass; k444s 1.981509667 s, 44.612%; each includes force-precondition validation.",
+    "Separate three-SCF Pulay scans: si8 8.745434875 s; k444s 8.533295792 s."
+  ],
+  "reference_comparison": "Independent central strain differences h=0.002,0.001,0.0005 with fixed Miller sets and fractional positions; all six components and O(h^2) trend. Real Si (two cells) and MgO tests executed; cutoff/k/grid qualification inconclusive. No external-code stress agreement claimed.",
+  "limitations": [
+    "Real Si/MgO uncertainty exceeds 1e-5/3 Ha/Bohr^3: frozen-basis agreement does not establish converged real-material stress.",
+    "Pulay uncertainty is an isotropic two-step diagnostic spread, not a rigorous bound or an anisotropic convergence certificate.",
+    "ASE adapter retains its existing Gamma/unpolarized model support.",
+    "Legacy identity measured at default thread budget. Historical performance baseline comparison failed density identity; fresh unmodified same-HEAD baseline passed.",
+    "Mac costs are observations, not dev08 performance acceptance.",
+    "README/dashboard publication and performance-owner ledger update remain orchestrator-owned follow-up."
+  ],
+  "open_questions": [],
+  "commit": "Uncommitted as requested."
+}

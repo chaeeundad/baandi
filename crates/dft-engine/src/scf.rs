@@ -143,6 +143,9 @@ pub struct ScfOptions {
     pub bands: Option<usize>,
     pub extra_bands: usize,
     pub grid_override: Option<[usize; 3]>,
+    /// Opt-in frozen Miller protocol. The reference cell selects all reciprocal
+    /// lists; an explicit reference FFT grid is required. None is legacy.
+    pub strain_reference: Option<Box<Cell>>,
     pub mixing: Mixing,
     pub density_tolerance: f64,
     pub energy_tolerance: f64,
@@ -163,6 +166,25 @@ pub struct ScfOptions {
     pub divergence_factor: f64,
     pub divergence_patience: usize,
 }
+impl ScfOptions {
+    pub(crate) fn basis(
+        &self,
+        cell: &Cell,
+        k: [f64; 3],
+        scale: f64,
+    ) -> Result<PlaneWaveBasis, dft_basis::BasisError> {
+        let basis = PlaneWaveBasis::at_k(
+            self.strain_reference.as_deref().unwrap_or(cell),
+            Hartree(scale * self.cutoff_hartree),
+            k,
+        )?;
+        if self.strain_reference.is_some() {
+            basis.in_cell(cell)
+        } else {
+            Ok(basis)
+        }
+    }
+}
 impl Default for ScfOptions {
     fn default() -> Self {
         Self {
@@ -177,6 +199,7 @@ impl Default for ScfOptions {
             bands: None,
             extra_bands: 4,
             grid_override: None,
+            strain_reference: None,
             mixing: Mixing::default(),
             density_tolerance: 1e-7,
             energy_tolerance: 1e-8,
@@ -625,8 +648,13 @@ impl ScfProblem {
                 "gap certification requires an empty band at every k",
             ));
         }
-        let gamma = PlaneWaveBasis::new(cell, Hartree(options.cutoff_hartree))?;
-        let density_basis = gamma.density_basis(cell)?;
+        if options.strain_reference.is_some() && options.grid_override.is_none() {
+            return Err(ScfError::InvalidInput(
+                "strain reference requires a frozen FFT grid",
+            ));
+        }
+        let gamma = options.basis(cell, [0.; 3], 1.0)?;
+        let density_basis = options.basis(cell, [0.; 3], 4.0)?;
         let grid = FftGridSpec::new(&gamma, &density_basis, options.grid_override)?;
         let dg = FftGridSpec::new(&density_basis, &density_basis, Some(grid.dims()))?;
         let species: Vec<_> = potentials
@@ -672,8 +700,7 @@ impl ScfProblem {
             options.threads,
             &pool,
             |_, point| {
-                let basis =
-                    PlaneWaveBasis::at_k(cell, Hartree(options.cutoff_hartree), point.fractional)?;
+                let basis = options.basis(cell, point.fractional, 1.0)?;
                 if bands > basis.vectors().len()
                     || (options.davidson_subspace.min(basis.vectors().len()) <= bands
                         && bands != basis.vectors().len())
@@ -786,7 +813,7 @@ impl ScfProblem {
                 "symmetry.fft_grid: rotations/translations must preserve nonlinear XC quadrature; use compatible_fft_grid at setup",
             ));
         }
-        let basis = PlaneWaveBasis::new(&self.cell, Hartree(4.0 * self.options.cutoff_hartree))?;
+        let basis = self.options.basis(&self.cell, [0.; 3], 4.0)?;
         self.force_model.symmetry = ops.clone();
         self.symmetry = Some(dft_physics::symmetry::DensitySymmetrizer::new(
             &basis, &self.grid, &ops,

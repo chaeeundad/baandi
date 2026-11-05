@@ -1,0 +1,30 @@
+   Compiling dft-physics v0.1.0 (/Users/mino/Develop/rust-dft-wt/P22A-STRESS/crates/dft-physics)
+    Finished `release` profile [optimized] target(s) in 0.93s
+     Running tests/stress_terms.rs (target/release/deps/stress_terms-b3fadc1b42272bf0)
+
+running 4 tests
+test core_and_xc_metric ... strain steps [0.002,0.001,0.0005], max errors [9.24998024790652e-9, 2.3124815572627896e-9, 5.781205558762562e-10] Ha/Bohr^3
+strain steps [0.002,0.001,0.0005], max errors [5.1065509099924855e-9, 1.2766859136710551e-9, 3.192286959947943e-10] Ha/Bohr^3
+strain steps [0.002,0.001,0.0005], max errors [5.117663571564679e-9, 1.2794031741154843e-9, 3.1968674062132774e-10] Ha/Bohr^3
+strain steps [0.002,0.001,0.0005], max errors [5.165796084297125e-9, 1.2914441868336346e-9, 3.228345147633649e-10] Ha/Bohr^3
+strain steps [0.002,0.001,0.0005], max errors [5.27680298024677e-9, 1.3192028597980299e-9, 3.298443527859074e-10] Ha/Bohr^3
+strain steps [0.002,0.001,0.0005], max errors [5.326003951668795e-9, 1.3315633708502195e-9, 3.3326228192007146e-10] Ha/Bohr^3
+ok
+test ewald_strain_includes_background_and_eta_cancellation ... strain steps [0.002,0.001,0.0005], max errors [1.3201930992639763e-10, 3.3004058633181316e-11, 8.251289354468255e-12] Ha/Bohr^3
+strain steps [0.002,0.001,0.0005], max errors [1.3201928309239386e-10, 3.300384206379736e-11, 8.251072785084301e-12] Ha/Bohr^3
+strain steps [0.002,0.001,0.0005], max errors [8.033440122772275e-10, 2.0083628799933187e-10, 5.0209070608157836e-11] Ha/Bohr^3
+strain steps [0.002,0.001,0.0005], max errors [8.033439983282889e-10, 2.0083634388656573e-10, 5.0209070625098495e-11] Ha/Bohr^3
+strain steps [0.002,0.001,0.0005], max errors [8.511745448619716e-10, 2.1279268981795764e-10, 5.319799485476202e-11] Ha/Bohr^3
+strain steps [0.002,0.001,0.0005], max errors [8.511745787974996e-10, 2.1279257731588862e-10, 5.3197859823734183e-11] Ha/Bohr^3
+ok
+test frozen_coefficient_kinetic_strain_metric ... strain steps [0.002,0.001,0.0005], max errors [6.665537686037504e-9, 1.6663770411283474e-9, 4.165936697171635e-10] Ha/Bohr^3
+strain steps [0.002,0.001,0.0005], max errors [6.990775102463237e-9, 1.7476857045979968e-9, 4.369208135481667e-10] Ha/Bohr^3
+strain steps [0.002,0.001,0.0005], max errors [3.0781028038397683e-9, 7.695222359717716e-10, 1.9238036630311178e-10] Ha/Bohr^3
+ok
+test isolated_local_core_hartree_nonlocal ... strain steps [0.002,0.001,0.0005], max errors [3.7418973521802235e-7, 9.354757990465146e-8, 2.3386910873168798e-8] Ha/Bohr^3
+strain steps [0.002,0.001,0.0005], max errors [3.9208151937815405e-9, 9.802001228916002e-10, 2.450493289188338e-10] Ha/Bohr^3
+strain steps [0.002,0.001,0.0005], max errors [1.9191605828806175e-10, 4.797893653825814e-11, 1.1994748374882444e-11] Ha/Bohr^3
+ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+

@@ -173,32 +173,239 @@
       ]
     },
     "stress": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "status",
-        "reason",
-        "units",
-        "frame",
-        "sign_convention"
-      ],
-      "properties": {
-        "status": {
-          "const": "unavailable"
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "reason",
+            "units",
+            "frame",
+            "sign_convention"
+          ],
+          "properties": {
+            "status": {
+              "const": "unavailable"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1
+            },
+            "units": {
+              "const": "Ha/Bohr^3"
+            },
+            "frame": {
+              "const": "cartesian_tensor"
+            },
+            "sign_convention": {
+              "const": "tensile_positive"
+            }
+          }
         },
-        "reason": {
-          "const": "not_implemented"
-        },
-        "units": {
-          "const": "Ha/Bohr^3"
-        },
-        "frame": {
-          "const": "cartesian_tensor"
-        },
-        "sign_convention": {
-          "const": "tensile_positive"
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "status": {
+              "const": "available"
+            },
+            "units": {
+              "const": "Ha/Bohr^3"
+            },
+            "frame": {
+              "const": "cartesian_tensor"
+            },
+            "sign_convention": {
+              "const": "tensile_positive"
+            },
+            "quantity": {
+              "enum": [
+                "E",
+                "F"
+              ]
+            },
+            "values": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": {
+                  "type": "number"
+                }
+              }
+            },
+            "symmetric": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": {
+                  "type": "number"
+                }
+              }
+            },
+            "antisymmetric": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": {
+                  "type": "number"
+                }
+              }
+            },
+            "antisymmetric_norm_ha_bohr3": {
+              "type": "number",
+              "minimum": 0,
+              "exclusiveMaximum": 1e-10
+            },
+            "pressure_ha_bohr3": {
+              "type": "number"
+            },
+            "basis_protocol": {
+              "const": "frozen_miller_set"
+            },
+            "cutoff_ha": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "cutoff_converged": {
+              "const": false
+            },
+            "pulay_assessment": {
+              "type": "object",
+              "required": [
+                "method",
+                "isotropic_correction_ha_bohr3",
+                "uncertainty_ha_bohr3",
+                "warning"
+              ],
+              "properties": {
+                "method": {
+                  "const": "isotropic_cutoff_derivative_5_10_percent"
+                },
+                "isotropic_correction_ha_bohr3": {
+                  "type": "number"
+                },
+                "uncertainty_ha_bohr3": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "warning": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "per_term": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "minItems": 3,
+                "maxItems": 3,
+                "items": {
+                  "type": "array",
+                  "minItems": 3,
+                  "maxItems": 3,
+                  "items": {
+                    "type": "number"
+                  }
+                }
+              },
+              "required": [
+                "kinetic",
+                "local",
+                "nonlocal",
+                "hartree",
+                "xc",
+                "core",
+                "ewald",
+                "entropy"
+              ]
+            },
+            "derivative_ledger": {
+              "type": "array",
+              "minItems": 8
+            },
+            "unavailable_terms": {
+              "type": "array",
+              "maxItems": 0
+            },
+            "preconditions": {
+              "type": "object",
+              "required": [
+                "convergence_profile",
+                "converged",
+                "fixed_point_certificate_passed"
+              ],
+              "properties": {
+                "convergence_profile": {
+                  "const": "strict"
+                },
+                "converged": {
+                  "const": true
+                },
+                "fixed_point_certificate_passed": {
+                  "const": true
+                }
+              }
+            },
+            "elapsed_seconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "band_passes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "precondition_force_band_passes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cutoff_scf_runs": {
+              "const": 3
+            },
+            "strain_steps": {
+              "type": "array",
+              "maxItems": 0
+            }
+          },
+          "required": [
+            "status",
+            "units",
+            "frame",
+            "sign_convention",
+            "quantity",
+            "values",
+            "symmetric",
+            "antisymmetric",
+            "antisymmetric_norm_ha_bohr3",
+            "pressure_ha_bohr3",
+            "basis_protocol",
+            "cutoff_ha",
+            "cutoff_converged",
+            "pulay_assessment",
+            "per_term",
+            "derivative_ledger",
+            "unavailable_terms",
+            "preconditions",
+            "elapsed_seconds",
+            "band_passes",
+            "precondition_force_band_passes",
+            "cutoff_scf_runs",
+            "strain_steps"
+          ]
         }
-      }
+      ]
     }
   },
   "allOf": [
@@ -587,6 +794,88 @@
       "then": {
         "properties": {
           "forces": {
+            "properties": {
+              "quantity": {
+                "const": "E"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stress": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "extension_version": {
+            "const": 2
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stress": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            }
+          },
+          "occupations": {
+            "properties": {
+              "policy": {
+                "const": "fermi_dirac"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stress": {
+            "properties": {
+              "quantity": {
+                "const": "F"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stress": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            }
+          },
+          "occupations": {
+            "properties": {
+              "policy": {
+                "const": "fixed_insulator"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stress": {
             "properties": {
               "quantity": {
                 "const": "E"

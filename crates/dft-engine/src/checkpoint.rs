@@ -263,6 +263,15 @@ impl Checkpoint {
 /// Explicit bit comparison of every option, including signed floating zero.
 /// No formatting or serialization participates in numerical compatibility.
 pub(crate) fn options_identical(a: &ScfOptions, b: &ScfOptions) -> bool {
+    if a.strain_reference
+        .as_ref()
+        .map(|c| c.lattice_columns_bohr())
+        != b.strain_reference
+            .as_ref()
+            .map(|c| c.lattice_columns_bohr())
+    {
+        return false;
+    }
     use crate::Mixing;
     let mixing = match (&a.mixing, &b.mixing) {
         (Mixing::Linear { beta: a }, Mixing::Linear { beta: b }) => a.to_bits() == b.to_bits(),

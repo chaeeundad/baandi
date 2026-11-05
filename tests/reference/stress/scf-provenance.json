@@ -1,0 +1,18 @@
+{
+  "base_commit": "bfe3e93d1c09b293d15ef754cfef260251ad7138",
+  "scope": "Default thread budget; unchanged SCF, stress APIs not invoked; no stress timing claim",
+  "files": {
+    "base_binary": {
+      "path": "target/release/dft-cli",
+      "sha256": "8a5159d1b3b3fabcd7a7cb62b71bff461939087c005740d73c1ff2a9c5f7c25a"
+    },
+    "candidate_binary": {
+      "path": "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p22a-baseline-k_nru4ge/dft-cli-candidate",
+      "sha256": "9f79c1edc46ebc581f7730f69bf5e66951d46a9b9a304c0a7c5d085fde99a3cc"
+    },
+    "upf": {
+      "path": "/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+      "sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+    }
+  }
+}

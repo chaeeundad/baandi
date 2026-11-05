@@ -116,3 +116,50 @@ pub fn evaluate(
         potential_integral: Hartree(integral),
     })
 }
+
+/// Explicit gradient-metric contribution at fixed fractional density samples.
+/// Density/volume response is accounted for separately through the XC potential.
+pub fn stress_metric(
+    n: &Array3<f64>,
+    cell: &Cell,
+    fft: &mut impl Fft3d,
+) -> Result<[[f64; 3]; 3], PhysicsError> {
+    let gradients = (0..3)
+        .map(|a| derivative(n, cell, a, fft))
+        .collect::<Result<Vec<_>, _>>()?;
+    let rho: Vec<_> = n
+        .iter()
+        .map(|&v| if v <= DENSITY_THRESHOLD { 0. } else { v })
+        .collect();
+    let sigma: Vec<f64> = (0..n.len())
+        .map(|i| {
+            if rho[i] == 0. {
+                0.
+            } else {
+                gradients
+                    .iter()
+                    .map(|g| g.as_slice().unwrap()[i].powi(2))
+                    .sum()
+            }
+        })
+        .collect();
+    let input = XcInput::gga(&rho, &sigma);
+    let eval = |id| {
+        Functional::new(id, Spin::Unpolarized)
+            .and_then(|f| f.eval(n.len(), &input))
+            .map_err(|e| PhysicsError::Xc(e.to_string()))
+    };
+    let x = eval(FunctionalId::GgaXPbe)?;
+    let c = eval(FunctionalId::GgaCPbe)?;
+    Ok(std::array::from_fn(|a| {
+        std::array::from_fn(|b| {
+            -2. / n.len() as f64
+                * gradients[a]
+                    .iter()
+                    .zip(&gradients[b])
+                    .enumerate()
+                    .map(|(i, (a, b))| (x.vsigma[i] + c.vsigma[i]) * a * b)
+                    .sum::<f64>()
+        })
+    }))
+}

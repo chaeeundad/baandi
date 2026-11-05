@@ -16,7 +16,7 @@ def validate(v, s):
     allowed = {'$schema', '$comment', 'title', '$ref', 'type', 'const', 'enum',
                'required', 'properties', 'additionalProperties', 'items', 'prefixItems',
                'minItems', 'maxItems', 'minimum', 'maximum', 'exclusiveMinimum',
-               'pattern', 'oneOf', 'allOf', 'if', 'then'}
+               'pattern', 'oneOf', 'allOf', 'if', 'then', 'minLength', 'exclusiveMaximum'}
     assert not set(s) - allowed, set(s) - allowed
     if '$ref' in s:
         validate(v, json.loads((SCHEMAS / s['$ref']).read_text()))
@@ -53,6 +53,9 @@ def validate(v, s):
         assert math.isfinite(v)
         assert v >= s.get('minimum', -math.inf) and v <= s.get('maximum', math.inf)
         assert v > s.get('exclusiveMinimum', -math.inf)
+        assert v < s.get('exclusiveMaximum', math.inf)
+    if isinstance(v, str):
+        assert len(v) >= s.get('minLength', 0)
     if isinstance(v, str) and 'pattern' in s:
         assert re.search(s['pattern'], v)
     if isinstance(v, list):
@@ -67,6 +70,8 @@ def validate(v, s):
                 validate(x, s['properties'][k])
             else:
                 assert s.get('additionalProperties') is not False, k
+                if isinstance(s.get('additionalProperties'), dict):
+                    validate(x, s['additionalProperties'])
 
 def main(path):
     result = json.loads(path.read_text())

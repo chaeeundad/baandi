@@ -1,0 +1,10 @@
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P22A-STRESS/crates/dft-engine)
+    Finished `release` profile [optimized] target(s) in 0.71s
+     Running tests/stress.rs (target/release/deps/stress-cf0f4ab3baadb8b7)
+
+running 1 test
+polarized PBE+NLCC swap max error=6.358195220323992e-15 Ha/Bohr^3
+test spin_pbe_swap ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 24.22s
+

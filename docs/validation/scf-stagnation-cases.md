@@ -199,4 +199,4 @@ Repository coordination: this worktree has no P11M running entry in its local
 No replacement agent was spawned. Dashboard/session files and README-generation
 code are outside this ticket's owned paths; orchestrator integration must update
 them. No dashboard upload or recurring reporting timer was installed here.
-Changes remain uncommitted on `task/P11M-STAGNATION-CASES` as requested.
+Historical handoff was uncommitted on `task/P11M-STAGNATION-CASES`; the studies are now merged (2026-11-05 status reconciliation).

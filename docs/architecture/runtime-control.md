@@ -1,6 +1,6 @@
 # Runtime control contracts
 
-Status: design only; wraps `ScfProblem::run_impl`, `ScfOptions`, `Mixing`, `DensityMixer::reset` and `ScfOutcome`. [State/event schemas](scientific-state-api.md) are normative companions.
+Status: P11B control and P11C continuation are merged (2026-11-05); semantic design below wraps `ScfProblem::run_impl`, `ScfOptions`, `Mixing`, `DensityMixer::reset` and `ScfOutcome`. [State/event schemas](scientific-state-api.md) are normative companions.
 
 ## Lifecycle
 
@@ -33,7 +33,7 @@ Full `Policy`: `mixing:{kind:linear/pulay/kerker_pulay,beta:f64,history:u64|null
 
 Allowed: beta/strategy/history changes, explicit history reset, budget extension within quota, tolerance tightening (new <= old). Loosening any tolerance is rejected in v1, including through checkpoint import; no `unsafe_relaxed` escape hatch. Immutable for a live session: XC/functional override, pseudopotentials/species/electron count/structure, k mesh, cutoff/grid, occupations/gap threshold, bands/extra bands, seed, threads, eigensolver subspace/schedule and divergence guards. These require a new calculation and recorded lineage. No policy field can set convergence, certificate thresholds, charge safeguards or positivity rules.
 
-Every mixer change resets all mixer history, even beta-only changes, via `DensityMixer::reset` or construction of a validated replacement. No-op changes are rejected. Tolerance/budget-only changes preserve history; explicit reset clears it. P10D owns preconditioner parameters, conservation, feasibility and diagnostic definitions. The proposed v1 tagged mixing schema additionally reserves `kind:kerker_pulay` with `q0_inverse_bohr:f64>0` and history required; only a build advertising the merged compatible P10D capability may accept it. This checkout rejects it because the implementation is not merged here. Reject q0 on linear/pulay. No wire identifier alone grants a capability. Buffer-band recovery is a new calculation, not a hidden live patch.
+Every mixer change resets all mixer history, even beta-only changes, via `DensityMixer::reset` or construction of a validated replacement. No-op changes are rejected. Tolerance/budget-only changes preserve history; explicit reset clears it. P10D owns preconditioner parameters, conservation, feasibility and diagnostic definitions. The proposed v1 tagged mixing schema additionally reserves `kind:kerker_pulay` with `q0_inverse_bohr:f64>0` and history required; only a build advertising the merged compatible P10D capability may accept it. The merged engine implements Kerker-Pulay; adapters must still advertise and validate the actual capability. Reject q0 on linear/pulay. No wire identifier alone grants a capability. Buffer-band recovery is a new calculation, not a hidden live patch.
 
 Validate the complete prospective policy and allocate replacements before commit. Persist audit intent before mutation, then atomically commit policy/revision/reset and outcome record; storage failure prevents applying it. A rejected request leaves numerical state, mixer history and revision unchanged, while audit/event sequence advances. Retrying the same request id and canonical payload returns its recorded decision; different payload with that id is a conflict. Replay uses recorded boundary order, never wall time.
 

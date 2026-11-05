@@ -4,7 +4,7 @@ Status: **Designed**, P11I, 2026-11-03. Semantic schema v1.0, not executable Rus
 
 ## Relationship to P11R
 
-P11R documents are not merged into this checkout. Reviewed read-only in the sibling `P11R-RUNTIME-ARCH-DOCS` worktree: `agent-native-runtime.md`, `scientific-state-api.md`, `runtime-control.md`, `scientific-integration.md`, `external-solver-contracts.md` and ADR 0020. These are pending dependencies, not implemented APIs. Their paths below refer to the eventual `docs/architecture/` or `docs/research/` destinations. Reconcile the delivered versions before implementation.
+P11R documents and runtime ADR 0028 are now merged. P11A/B/C implement sessions, controls and checkpoint payloads; P11G supplies a narrower Python/ASE adapter. The complete workflow schema in this document remains a design, not an implemented API.
 
 Use P11R's single runtime, lifecycle, `ProvenanceRecord`, `ExecutionIdentity`, `ArrayRef`, workflow DAG and checkpoint envelope. This specification refines D1/D2/E1/E2, not a second scheduler or persistence format. The ESLE `ElectronicState` remains a checkpoint payload; save/load belongs to adapters. P11R's `step` means a full SCF iteration with mixing when applicable and its nested certificate; current `step_kpoints` alone is not that step.
 
@@ -49,7 +49,7 @@ Control requests carry calc ID, observed state version, action/parameters, preco
 
 ## Gap table against current code
 
-Inspected checkout `98f0b50` on 2026-11-03; these are source observations, not new numerical verification.
+Reconciled at `b5d515a` on 2026-11-05; these are source observations, not new numerical verification.
 
 | Interface or building block | Status | Current evidence and missing work |
 | --- | --- | --- |
@@ -57,9 +57,9 @@ Inspected checkout `98f0b50` on 2026-11-03; these are source observations, not n
 | Energy, density, per-k eigenpairs | Implemented (internal result) | `ScfResult`, `EnergyAudit` in `scf.rs`/`energy.rs`; identity and dataset metadata supplied by future adapter |
 | LDA/PBE, insulating k-point model | Implemented (library selections) | `ScfOptions`, `OccupationPolicy`, `dft-physics` XC; support is not blanket validation for all inputs |
 | Density binary export | Implemented (CLI artifact) | `crates/dft-cli/src/run.rs`: density payload/manifest; not field import or restart |
-| Versioned workflow/provenance/capability envelopes | Designed | This document and P11R; no runtime implementation |
-| Full step session, events/control, checkpoints | Designed | P11R/P11A–D; existing `step_kpoints` is only a constituent solve |
-| Python/ASE and MCP | Designed | P11G/P11F implementation pending; distinct adapters |
+| Versioned workflow/provenance/capability envelopes | Designed | Full workflow schema remains designed; narrower engine runtime/state interfaces exist |
+| Full step session, events/control, checkpoints | Implemented | P11A–D; `session.rs`, `runtime.rs`, `checkpoint.rs`; existing `step_kpoints` is only a constituent solve |
+| Python/ASE and MCP | Implemented, limited adapters | P11G/P11F merged; no forces/stress, no autonomous MCP approval |
 | Active learning and dataset validation | Designed | Contract below; no trainer or deployment service |
 | Forces/stress, coupled total/outer certificate | Deferred | No derivative implementation or validated coupling ledger |
 | External fields/electrostatic export/operator lease | Designed | Internal numerics exist; public external contracts and transport absent |

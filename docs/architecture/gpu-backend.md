@@ -115,9 +115,8 @@ Davidson blocks implicitly and call the result a resident algorithm.
 
 P10C defines semantic operations: apply local V to sphere coefficients and
 accumulate weighted squared modulus into density, with a grid/pattern plan and
-owned scratch. It is pending here (`fused.rs` does not exist at this revision).
-Adopt these semantics; do not prescribe its unmerged signature or duplicate its
-implementation. A host-slice fused interface is useful for CPU/MKL and testing,
+owned scratch. P10C is now merged (`crates/dft-numerics/src/fused.rs`, status 2026-11-05).
+Use its current CPU contracts without duplicating its implementation. A host-slice fused interface is useful for CPU/MKL and testing,
 but cannot alone keep GPU C/HV resident. A later additive resident-view overload
 or companion capability must use the same normalization tests. The GPU may use
 full cuFFT grids where CPU uses pruned sticks; zero outside the specified output

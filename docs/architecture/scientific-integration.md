@@ -1,10 +1,10 @@
 # Scientific integration contracts
 
-Status: design only, not implemented. No Python, MCP, MLIP or coupling code is authorized by P11R. Adapter calls ultimately wrap `ScfProblem::new/with_kpoints`, the proposed session, `ScfOutcome` and `EnergyAudit`. [ADR 0017](../decisions/0017-coupling-commitments.md) remains authoritative for physical roles and energy ownership.
+Status: Python/ASE (P11G) and MCP (P11F) are merged as of 2026-11-05. MLIP and external coupling remain design only. P11R itself authorized documentation, not adapter implementation. Adapter calls ultimately wrap `ScfProblem::new/with_kpoints`, the merged SCF session, `ScfOutcome` and `EnergyAudit`. [ADR 0017](../decisions/0017-coupling-commitments.md) remains authoritative for physical roles and energy ownership.
 
 ## Ownership boundary with P11I (D1/D2/D3)
 
-P11I-COUPLING-API-SPEC owns the canonical high-level workflow/ASE/Python contract (`docs/architecture/workflow-api.md`), low-level coupling contract (`docs/architecture/coupling-api-lowlevel.md`) and MLIP/active-learning contract (`docs/architecture/active-learning-contract.md`). Those files are not present in this checkout when this addendum is written; see the P11I ticket on main `98f0b50`. Do not treat the absent files as implemented features. The first P11R draft's duplicate structure, prediction and field request schemas are withdrawn in favor of that single owner.
+P11I-COUPLING-API-SPEC owns the canonical high-level workflow/ASE/Python contract (`docs/architecture/workflow-api.md`), low-level coupling contract (`docs/architecture/coupling-api-lowlevel.md`) and MLIP/active-learning contract (`docs/architecture/active-learning-contract.md`). Those P11I files are now present; they remain specifications rather than implemented coupling or MLIP capabilities. The first P11R draft's duplicate structure, prediction and field request schemas are withdrawn in favor of that single owner.
 
 P11R supplies the runtime adapter boundary: validate a P11I scientific request into `ScfProblem::new/with_kpoints`, drive the one session under a declared mode, and return qualified `ScfOutcome`/`EnergyAudit` references with provenance. Modes never change P11I's physical interpretation. P11G implements optional Python/ASE binding; P11F implements MCP over the same driver; P11H presents CLI capabilities. None creates a second SCF/control implementation.
 

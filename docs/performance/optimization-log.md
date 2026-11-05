@@ -1,5 +1,14 @@
 # Optimization log (newest first)
 
+## Status index — 2026-11-05
+
+See [current P10A–P10M status](README.md#reconciled-status--2026-11-05) and
+[claim-to-evidence map](../validation/evidence-map.md). Entries below are historical
+measurements and handoffs; “uncommitted”, “blocked” and “pending” describe their
+recorded stage. P10I–M retained changes are now merged, but rejected QR and unmet
+worker-utilization goals remain rejected/unmet. Current dev08 results are the
+fdce016 Part 4 relay, not a local reproduction or blanket acceptance of all goals.
+
 Every entry: profile finding, change, numbers before and after (same machine, `scripts/bench_scf.py`), equivalence evidence, rejected ideas. Rules: [README.md](README.md).
 
 ## 2026-11-03: profile of the starting point (macOS Apple Silicon, release build with symbols, 8-k-point case, `sample` for 8 s, 6445 samples)

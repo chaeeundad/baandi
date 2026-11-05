@@ -1,5 +1,15 @@
 # dft-engine
 
+## Current ownership (2026-11-05)
+
+Owns SCF orchestration/session, `events`/`state_view`, `runtime`/`policy`,
+`diagnostics`, and in-memory `checkpoint` payload/validation; also NSCF and
+band-density orchestration. File persistence stays in CLI, transports in adapters.
+The P11A/B notes below are historical implementation detail: P11C now supplies
+checkpoint/restore APIs, including runtime/audit restoration. No cross-build exact
+restart guarantee or engine disk I/O is implied. See `docs/checkpoint-format.md`.
+
+
 **Purpose:** Orchestrates SCF, occupations, total energy and its audit (ion-ion/Ewald, double counting).
 
 **Invariants to preserve and test:** Every energy term has a unit test and appears in results; no hidden constants.

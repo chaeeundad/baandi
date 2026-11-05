@@ -1,6 +1,17 @@
 # dft-numerics
 
-**Purpose:** Adapters to general-purpose numerical libraries (linear algebra, FFT). Thin traits so backends stay swappable; the only crate allowed to contain unsafe.
+## Current ownership (2026-11-05)
+
+Owns FFT adapters (`fused.rs`, optional `mkl_backend.rs`), linear algebra and
+`tiled.rs` workspaces, and the persistent `pool.rs` worker executor. Pure-Rust
+reductions use fixed pieces independent of worker count; MKL remains optional,
+with sequential library calls inside the engine budget. Analysis scripts/counters
+under `pool/` are diagnostics, not production telemetry. P10M retained copy and
+duplicate-product removal; its CholeskyQR2 trial was rejected. See the performance
+README and optimization log before modifying these paths.
+
+
+**Purpose:** Adapters to general-purpose numerical libraries (linear algebra, FFT). Thin traits so backends stay swappable; unsafe is confined to adapters here and in dft-mkl under ownership.toml.
 
 **Invariants to preserve and test:** Column-major complex layout stated; FFT normalization stated; plans and scratch reused; unsafe preconditions documented and tested.
 

@@ -65,8 +65,8 @@ If an inspected transition-metal file has NLCC, `suggest` reports nonlinear core
 correction as the missing capability; it never substitutes an unsupported entry.
 Reader expansion belongs to feature-gap survey T4; NLCC, SOC and PAW/USPP physics
 belong to P8D. See [feature-gap survey](../research/feature-gap-survey.md).
-P8D's planned `docs/research/xc-and-manybody-roadmap.md` was absent in this checkout;
-link/coordinate its capability milestones when it lands, without presuming dates.
+P8D's `docs/research/xc-and-manybody-roadmap.md` is now present;
+coordinate its capability milestones without presuming implementation dates.
 
 ## Offline commands and ranking
 

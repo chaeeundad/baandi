@@ -1,5 +1,16 @@
 # P7 plan (started 2026-11-03, after MVP approval)
 
+## Current status — 2026-11-05
+
+P7A/P7A2 k-point engine/CLI and P7B PBE through xcx are merged. ADR 0018
+accepted xcx 0.3.1; library selection is no longer open. R6 covers unshifted and
+shifted 2x2x2 plus shifted 4x4x4, not unshifted 4x4x4. R8 covers Gamma and
+shifted 2x2x2 PBE with an explicit LDA-UPF override. P7C/P10E produced GPU
+design documents only; there is no GPU backend. The original plan below records
+intended gates, not evidence that every proposed comparison was performed.
+See [evidence map](validation/evidence-map.md) for commands and evidence limits.
+
+
 Goal: extend the verified Gamma-only LDA engine without weakening any MVP gate. Each step keeps the Gamma-only result bit-for-bit comparable (E = -7.295530468210927 Ha at 30 Ry, see docs/validation.md) and is validated against QE 7.6 through the dft5090 session on dev08 (never a local pw.x).
 
 | Ticket | Content | Gate |
@@ -17,6 +28,6 @@ Order: P7A, then P7B, then P7C. P7B needs a library decision that Claude prepare
 - Convergence in the number of k-points is reported, never tuned to match QE.
 - k-point weights sum to 1; occupations remain spin-unpolarized insulator-like (no smearing).
 
-## Not decided yet (needs the user or an ADR)
-- PBE library choice (P7B).
+## Remaining provenance question
+- PBE library choice is resolved by ADR 0018; xcx is merged.
 - Whether P7 also covers a second pseudopotential; provenance-verified Si UPF would help (see docs/mvp-review.md).

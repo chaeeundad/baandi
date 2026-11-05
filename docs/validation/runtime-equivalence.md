@@ -1,5 +1,13 @@
 # Runtime equivalence acceptance protocol
 
+Status update (2026-11-05): P11A/B/C/E/J implementations and local records are
+merged. Later dev08 results are relayed in
+`tests/reference/perf/dev08_final_relayed.md`, Part 3: the 300-pair campaign reports
+all 18 combinations meeting targets, provisionally. Raw remote files are still
+missing; the local-only failed/inconclusive measurements below remain valid
+historical evidence, not superseded by an independently verified remote run.
+
+
 Status: acceptance protocol with executed P11E recovery and P11J local benchmark slices below; broader performance acceptance remains pending. The P11R docs-only check does not establish runtime equivalence. Grounding: `ScfProblem::run/run_outcome/run_impl`, `step_kpoints`, `IterationRecord`, `FixedPointCertificate`; existing `crates/dft-engine/tests/{scf,kpoints,threading,pbe}.rs` and `docs/performance/baseline*.json`.
 
 ## Controlled comparisons

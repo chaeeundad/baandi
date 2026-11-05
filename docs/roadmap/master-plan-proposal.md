@@ -8,21 +8,21 @@ The ordering targets transition-metal oxides, cathodes, defects, alloys and magn
 
 ## Baseline and decision authority
 
-Snapshot: `318b1c2`, inspected 2026-11-04. The [matrix evidence map](../research/dft-feature-matrix.md#verified-engine-evidence-map)
-links the implementation behind each claim. This engine has complex NC plane-wave
-SCF, weighted k points with time-reversal reduction, LDA-PZ and library-backed
-PBE, fixed insulating occupations, audited energies, scoped CPU k/band workers,
-and structured result export. It does not yet have spin, smearing, derivatives,
-state reload, PAW/USPP, MPI or GPU. ADR 0019 authorizes an optional MKL implementation;
-the inspected numerical source does not yet select it. PBE implementation and
-synthetic tests exist; the real-Si PBE comparison is still deferred in ADR 0018.
-The older architecture/P7 prose is therefore not a reliable implementation ledger.
+Status reconciled 2026-11-05 at `b5d515a`: the engine has NC plane-wave SCF,
+weighted k points, LDA/PBE, fixed insulating occupations, audited energies,
+persistent CPU workers, optional MKL, checkpoint/restart and P11 runtime/adapters.
+R8 stores real-Si PBE code-to-code comparison summaries (explicit LDA-UPF override).
+Spin, smearing, forces/stress, PAW/USPP, MPI and GPU remain unavailable.
+P12A implements the documentation/evidence reconciliation scope of MF01; it does
+not authorize the later proposed tickets. See [current status](../progress.md)
+and [evidence map](../validation/evidence-map.md) for measured and relayed limits.
+
 
 This proposal merges P7, ESLE, coupling and performance ordering without treating
 proposed ADRs 0016/0017 as accepted or expanding AGENTS.md scope. P8D owns the
 XC/many-body depth; P8E owns usability, robustness and workflow depth. Their named
-documents were absent when inspected. Queue entries below are integration slots:
-reuse their eventual tickets rather than creating a competing implementation.
+documents are now present. Queue entries below remain proposed integration slots;
+reuse delivered contracts rather than creating a competing implementation.
 Only these two P8F documents are owned; no issue JSON, session registry, README,
 ADR or actual ticket file is modified. Session registration belongs to the
 invoking delegate wrapper; recursively launching another Codex run is unnecessary.

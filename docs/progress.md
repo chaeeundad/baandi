@@ -1,4 +1,49 @@
-# Progress log (상태 원천)
+# Progress log
+
+## Current status — 2026-11-05 (P12A reconciliation)
+
+This is the current status list; the dated log below is history and must not be
+read as a live task registry. Source checkout `b5d515a`; evidence detail and
+unverifiable claims: [evidence map](validation/evidence-map.md).
+
+- **Done, implemented:** P7 k-point SCF/CLI and PBE via xcx; standard scientific
+  outputs and input preflight/registry; P10 opt-in RMM/Kerker, optional MKL,
+  fused FFT and persistent-pool/tiled linear algebra through retained P10M changes.
+  P10H is superseded by P10J; QR trial was rejected. Defaults are not justified
+  by silicon alone. GPU, MPI, smearing, spin, forces and stress remain unavailable.
+- **Done, runtime/adapters:** P11 session/modes, events, safe-point policy,
+  checkpoint/restart, diagnostics, offline recovery demo, CLI, MCP and Python/ASE
+  are merged. MCP supports Observe/Supervised with host approval; Python/ASE has
+  no forces/stress. Coupling/MLIP workflow specifications are delivered, but their
+  complete adapters/loops are not implemented. P11L case studies explicitly omit
+  those gaps; P11M records both recovery and unrecovered stagnation cases.
+- **Measured locally and stored:** checkpoint exact/warm equivalence, recovery
+  arrays/audits, stagnation sweeps, runtime benchmark and historical-baseline
+  regression are under `tests/reference/{checkpoint,runtime,stagnation}`. Native
+  Python/ASE evidence is under `crates/baandi-py`. These are same-build fixtures,
+  not general material accuracy or cross-build identity guarantees.
+- **Remote, relayed:** R3/R4 and small R6 comparisons have stored full QE outputs;
+  R5 density, R6 shifted 4x4x4, R8 PBE and performance campaigns have summaries
+  only. Local comparison replay cannot establish remote execution authenticity.
+  Current speed is fdce016, Part 4 of `tests/reference/perf/dev08_final_relayed.md`;
+  P11J 300-pair overhead verdict is provisional until its raw files arrive.
+- **Known weaknesses:** si8 Gamma scales only 1.40x from one to eight pure-Rust
+  threads (5.801 to 4.151 s, Part 4 relay). QE ratios depend on thresholds,
+  iterations, backend and timer floor. Small synthetic multiple-fixed-point
+  claims lack committed raw evidence; unconverged cases are not proof of
+  multiplicity. UPF provenance/license remains unverified. R8's small XC offset
+  is unexplained; no real PBE density comparison exists.
+- **Open handoff:** obtain/hash-check remote originals, retain missing historical
+  raw experiment records, resolve README/feature-status and artifact registry
+  contradictions through their owners. README and artifacts are outside this
+  ticket's write scope. No dashboard upload or recurring report timer is active
+  in this implementer session. Session registry in this checkout has no P12A run;
+  do not infer running/stopped state from this prose. See evidence-map TODOs.
+- **P12A verification:** `scripts/check.sh` build/test/fmt/clippy exit 0;
+  `python3 -I scripts/tests/test_readme_figures.py` exit 0 (3 tests). Stored R6/R8
+  comparisons replayed locally, all exit 0. No new physics or performance run.
+
+## Historical log (statements apply to their recorded date)
 
 ## 2026-11-02 환경 확인
 - arm64 / macOS 27.0.1 / Xcode CLT / Accelerate.framework 확인.

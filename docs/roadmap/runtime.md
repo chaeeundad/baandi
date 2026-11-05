@@ -1,6 +1,6 @@
 # Agent-native runtime roadmap
 
-Status: design only; no implementation completion implied. [ADR 0028](../decisions/0028-agent-native-runtime.md) and [architecture](../architecture/agent-native-runtime.md) define the contract. All phases preserve existing numerical defaults unless a separate measured ticket authorizes changes.
+Status (2026-11-05): P11R/A/B/C/D/E/F/G/H merged; P11I specifications delivered; P11K preflight and P11M stagnation studies delivered; P11L case studies partial (MLIP/coupling excluded). P11J local benchmark delivered, dev08 overhead verdict provisional until raw evidence arrives. [ADR 0028](../decisions/0028-agent-native-runtime.md) and [architecture](../architecture/agent-native-runtime.md) define the contract. All phases preserve existing numerical defaults unless a separate measured ticket authorizes changes.
 
 | Ticket/phase | Scope and existing seam | Dependency and exit gate |
 | --- | --- | --- |
@@ -15,7 +15,7 @@ Status: design only; no implementation completion implied. [ADR 0028](../decisio
 | Future D2/D3 | MLIP and external solver adapters | Separately scoped tickets, ADR 0017 physical gates; no implementation in P11R |
 | Future E1/E2 | Provenance store and workflow DAG | Stable identities, state/control and adapter contracts; deduplication, lineage and resource tests |
 
-P11H CLI work and independent design work do not authorize concurrent edits to scf.rs. Before P11A starts, compare this document's inspected revision with merged code, especially P7PC certificate/band semantics and P10D strategy state. Reconcile delivered P9A docs when present (they were absent here). Keep one validator and one server; do not let each frontend implement its own safety rules.
+P11H CLI work and independent design work do not authorize concurrent edits to scf.rs. P11A and its P10A/P10D/P10C/P7PC dependencies are merged; P9A documents are present. Keep one validator and one server; do not let each frontend implement its own safety rules.
 
 Implementation acceptance artifacts must include actual commands/exit codes, input/build hashes, thread topology, numerical comparisons and scope limitations. Update README validation through its generator only when new measured implementation evidence exists. No numerical implementation was made in P11R, so no README result or new baseline is justified. Dashboard/session updates belong to the orchestrator's artifact ownership; this ticket is confined to the listed documentation paths.
 
@@ -23,7 +23,7 @@ A crate split requires a later ownership/ADR change, two independent consumers o
 
 ## Three-mode addendum ownership and sequencing
 
-The addendum was read from main `98f0b50`; this worktree's P11-COMMON predates it. New design entry point: [execution-modes.md](../architecture/execution-modes.md). ADR moved from draft 0020 to [0022](../decisions/0028-agent-native-runtime.md) after competing 0020 drafts were found in P10A/P10D and P11I created 0021 during this run. Integration must recheck numbering across active tasks.
+Status reconciliation: the current common contract is `tickets/P11-COMMON.md`; the runtime decision is ADR 0028. The earlier draft-number and missing-ticket notes are superseded.
 
 | Ticket | Owns | Consumes from P11R; does not duplicate |
 | --- | --- | --- |
@@ -31,6 +31,6 @@ The addendum was read from main `98f0b50`; this worktree's P11-COMMON predates i
 | P11I-COUPLING-API-SPEC | `workflow-api.md`, `coupling-api-lowlevel.md`, `active-learning-contract.md`, external-coupling efficiency and physical tests | Immutable runtime request lifecycle, state/provenance IDs and mode/control boundary; P11R's earlier duplicate D1/D2/D3 schemas are withdrawn |
 | P11J-RUNTIME-BENCH | `scripts/bench_runtime.py`, measured runtime-equivalence results, `tests/reference/runtime/`, optimization-log append | Target definitions and measurement/test matrix; append measured results after implementation, never mark design targets as passed |
 
-These tickets exist on main but not in this checkout's tickets directory. P11H depends on merged P11A/P11B/P8G; P11J on P11A/P11B. P11I is design-only and can proceed without numerical edits. P11A must integrate only merged algorithms: inspection found P10D Kerker-Pulay and P10A solver selection uncommitted, and P7PC's actual strict/buffer API in dirty files despite its HEAD being an ancestor of main. See the exact source inventory in [runtime architecture](../architecture/agent-native-runtime.md).
+Status: P11H and the P11J tooling are merged, and P11I design documents are present. Merged algorithm capabilities are inventoried in [runtime architecture](../architecture/agent-native-runtime.md).
 
 Refined gates: Classic has no event allocations or agent; Observed never waits for subscriber; AgentControlled without intervention stays bit-identical; stale control and approval checks precede mutation; unavailable-agent default preserves policy; no mode transition changes scientific settings; routine loss is counted; critical capacity exhaustion is explicit. P11J measures the <0.5%/<1%/<1% targets on matched normal and short cases, and reports failed/inconclusive targets honestly.

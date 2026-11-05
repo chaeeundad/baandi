@@ -1,6 +1,6 @@
 # Scientific state and persistence API
 
-Status: design only. Pure projections wrap `IterationRecord`, `FixedPointCertificate`, `ScfResult` and `ScfOutcome` in [scf.rs](../../crates/dft-engine/src/scf.rs). Serialization belongs to dft-cli. [Control](runtime-control.md) defines lifecycle and revisions.
+Status: P11A state/events and P11C checkpoint are merged (2026-11-05); broader semantic schemas below remain design contracts, not a claim that every proposed field is exported. Pure projections wrap `IterationRecord`, `FixedPointCertificate`, `ScfResult` and `ScfOutcome` in [scf.rs](../../crates/dft-engine/src/scf.rs). Serialization belongs to dft-cli. [Control](runtime-control.md) defines lifecycle and revisions.
 
 ## Common wire rules
 

@@ -1,6 +1,6 @@
 # Agent-native runtime
 
-Status: design only, P11R, 2026-11-03. Code inspected at `425b0f2984be0e05598e2cd6d67fa19394a33553`; no runtime interface described here is implemented. [ADR 0028](../decisions/0028-agent-native-runtime.md) records commitments; [roadmap](../roadmap/runtime.md) assigns gates.
+Status: reconciled 2026-11-05 at `b5d515a`. P11A–H runtime, checkpoint, diagnostics, CLI, MCP and Python/ASE implementations are merged. The original P11R semantic sketches below are design history, not exact public signatures; current exports are in `crates/dft-engine/src/lib.rs`. [ADR 0028](../decisions/0028-agent-native-runtime.md) records commitments; [roadmap](../roadmap/runtime.md) assigns gates.
 
 ## Placement and resolved overlaps
 
@@ -13,7 +13,7 @@ Status: design only, P11R, 2026-11-03. Code inspected at `425b0f2984be0e05598e2c
 | D integration | CLI-side adapters initially, separately ticketed optional external clients later | ASE, MLIP and external solvers never become numerical dependencies |
 | E agent tools | P11F owns one server over the driver | P9A L4 and conversational UI consume that MCP server; no second server or natural-language parsing in engine |
 
-ADR 0016's `save/load` sketch appears beside pure engine types: resolve it explicitly as CLI persistence, never engine file I/O. Its optional exact-trajectory concept is made explicit by the three checkpoint kinds in [state API](scientific-state-api.md). `run_from`/`InitialState` remain additive ESLE warm-start proposals, not an alternative session. ADR 0017's external-field and energy-ledger capabilities remain unimplemented; session extraction does not authorize them. P9A's three design documents are absent in this checkout; reconciliation uses [its ticket](../../tickets/P9A-USER-INTERFACE-DESIGN.md), especially L4. Recheck the delivered P9A documents before implementation.
+ADR 0016's `save/load` sketch appears beside pure engine types: resolve it explicitly as CLI persistence, never engine file I/O. Its optional exact-trajectory concept is made explicit by the three checkpoint kinds in [state API](scientific-state-api.md). `run_from`/`InitialState` remain additive ESLE warm-start proposals, not an alternative session. ADR 0017's external-field and energy-ledger capabilities remain unimplemented; session extraction does not authorize them. P9A documents are now present: `user-interface.md` and `../roadmap/ui.md`; their proposed UI work is not all implemented.
 
 No new crate before the stepwise API passes equivalence. Consider splitting a pure state crate only with two independent consumers and stable versioned types; consider a runtime adapter crate when CLI and Python/MCP demonstrably duplicate driver logic. Each split needs dependency/license/Apple Silicon review, an ownership update and a new ADR, without upward dependencies from numerics.
 
@@ -44,31 +44,20 @@ The eigensolver seam is `dft-solvers/src/lib.rs::Davidson::solve` (delegating to
 
 [Execution modes](execution-modes.md) defines Classic/Observed/AgentControlled as policies over this one session. [ControlRequest](runtime-control.md) is the only asynchronous intervention envelope; external agents never call `step_kpoints`, `DensityMixer::mix` or solver methods directly. Compile/runtime capabilities come from the actual merged build, not a ticket label or branch name.
 
-Read-only inventory taken 2026-11-03: this worktree HEAD is `425b0f2`; main was `98f0b50`; P10A/P10D worktree HEADs were `0142ebf`, with feature changes uncommitted. P7PC HEAD `18a5547` is an ancestor of main, but inspection of that commit's source does NOT contain the new `BandTolerances` API; the implementation below exists in P7PC's dirty working tree. A merged commit with a descriptive title is not proof its later working-tree changes were merged. These findings are a source inspection, not rerun validation of those tasks.
+Current source inventory (2026-11-05; implementation presence, not fresh numerical acceptance):
 
-| Intervention | Existing implementation inspected | Merge state and runtime decision |
+| Capability | Merged implementation | Limits |
 | --- | --- | --- |
-| Set beta / reset history | This checkout `dft-solvers/src/mixing.rs`: `LinearMixer`, `PulayMixer::new`, `DensityMixer::reset`; `run_impl` constructs/owns mixer | Present here/main; session mutation wiring is still proposed. Reset the exact active mixer, not a replacement algorithm written by runtime |
-| Choose Linear/Pulay | `scf.rs::Mixing::{Linear,Pulay}` and matching `run_impl` branches | Present; same density representation and charge/positivity safeguards required |
-| Choose Kerker-Pulay | P10D `scf.rs::Mixing::KerkerPulay{beta,history,q0_inverse_bohr}`; `dft-solvers/src/mixing/kerker.rs::{Kerker,PreconditionedPulay,MixerHistory}`; engine provides FFT/cell/grid to `Kerker::new` | Uncommitted P10D implementation, not in this checkout/main. Advertise only after merge and capability tests; q0 positive Bohr^-1, no filter recreation from agent code |
-| Mixer health | P10D `MixingDiagnostics::{residual_norm,contraction,history_used,resets,raw_recoveries,used_raw_recovery}`, `PreconditionedPulay::diagnostics` | Uncommitted. Raw Euclidean residual norm (electron number/Bohr^3, no quadrature) is NOT `density_distance` (Bohr^-3/2); label and convert only with a stated definition |
-| Choose compatible eigensolver | P10A `dft-solvers/src/rmm.rs::SolverChoice::{Davidson,Hybrid(HybridRmm)}`, `HybridRmm::solve`, `RmmDiis::solve`; proposed `ScfOptions::eigensolver` dispatches in `step_kpoints` | Uncommitted. Runtime exposes only davidson/hybrid after merge, not a raw-RMM choice merely because `RmmDiis` exists. Preserve warm-orbital shape and strict-band/certificate contracts |
-| Eigensolver fallback | P10A `HybridSolution::{phase,fallback}` and `RmmFailureReason`; hybrid implementation owns fallback to Davidson | Uncommitted. Runtime reports existing fallback, does not implement another DIIS or replace solver residual tests |
-| Buffer-band accuracy | P7PC `BandTolerances{strict_bands,buffer_tolerance}`, `Davidson::solve_with_band_tolerances_and_certification`, `EigenSolution::buffer`, certificate `buffer_residuals_per_k` | Dirty working-tree implementation only at inspection. Occupied + first empty band strict; code's buffer threshold `max(tolerance,1e-5)` Ha is observed implementation, NOT a new runtime setting or recommendation |
-| Tolerance tightening | Existing `ScfOptions::{density_tolerance,energy_tolerance,eigen_tolerance}`, candidate/certificate checks in `run_impl` | Present scalar fields; runtime validator/floors not implemented. Preserve existing certificate and no weakening |
-| Pause/resume/cancel/checkpoint | Loop boundary after record/certificate/mixing; retained `ScfOutcome` | No public session/control or checkpoint implementation here; P11A/B/C supply it, no direct kernel hook |
+| Complete SCF iteration and three modes | `dft-engine/src/session.rs`, `events.rs`, `state_view.rs` | One session; certificate alone establishes convergence |
+| Linear/Pulay/Kerker-Pulay and diagnostics | `scf.rs`, `dft-solvers/src/mixing/kerker.rs`, `diagnostics.rs` | Raw mixer residual and physical density distance have different units |
+| Davidson/hybrid RMM and fallback | `dft-solvers/src/rmm.rs`, engine solver dispatch | Opt-in; buffer-band policies retain Davidson fallback; no raw-RMM runtime choice |
+| Safe-point beta/reset/solver/tolerance/budget control | `runtime.rs`, `policy.rs` | Host approval or bounded launch authority; no weakening certificate gates |
+| Pause/resume/cancel, checkpoint restore | `runtime.rs`, `checkpoint.rs`; CLI checkpoint adapter | Engine payload is in memory; binary persistence belongs to CLI; exact continuation is build/identity constrained |
+| MCP | `crates/baandi-mcp` | Observe/Supervised, host-owned inputs and approval; no autonomous MCP authority |
+| Python/ASE | `crates/baandi-py`, `python/` | Optional native extension; energy workflows, no forces/stress |
 
-P10A/P7PC compatibility is not automatic: the inspected `SolverChoice::solve` constructs an all-band tolerance vector, whereas P7PC distinguishes strict/buffer bands. Until the merged solver preserves the agreed strict-band and certification semantics, deny live solver selection with `incompatible_solver_policy`; continue with the original solver. Switching algorithms is an intentional trajectory change and needs replay plus final scientific validation, not bit equality to a different algorithm. Reset algorithm-specific cache only after the new choice validates; leave physical state unchanged on rejection. Changes to band count, subspace, physical model or buffer threshold remain outside the autonomous first slice.
-
-Inspection fingerprints (SHA-256 of dirty files, not commits or test evidence):
-
-| Worktree and relative path | SHA-256 |
-| --- | --- |
-| P10D `crates/dft-solvers/src/mixing/kerker.rs` | `199e6214ff70e2957c840d0d4eceeef77597dfc4b4806ce37bec0325e5dac37f` |
-| P10D `crates/dft-engine/src/scf.rs` | `6488ca963c59bff77b42557b2bac8791347795fb0586c7a04d2d0d67c72e3b0f` |
-| P10A `crates/dft-solvers/src/rmm.rs` | `69bf6c9b8fbe762324ad78e0c62a5043bca09efdd48d3b919d30bcf16a8df72b` |
-| P10A `crates/dft-engine/src/scf.rs` | `3ecbfdd2dce8d0a69b174efe50724e3625fc33faa3c25820e1cc619d19301a94` |
-| P7PC `crates/dft-solvers/src/lib.rs` | `f4ade1684c57414bbcd693181fb4524057e858ab486f9dc26d95409716bb7cf7` |
-| P7PC `crates/dft-engine/src/scf.rs` | `dfdcb11d98fa87913e5f76b4fd1d9ce0c9fd14930e63690599c1b177ad893de4` |
-
-These parallel worktrees are active and may change immediately after inspection. P11A must re-read merged code and refresh this mapping before implementation. No files in those worktrees were modified by P11R. P11H CLI consumes these capabilities, P11I owns scientific coupling specifications, and P11J measures mode overhead; none should infer readiness from an unmerged implementation.
+P10A/P10D/P7PC are merged dependencies. Switching algorithms intentionally changes
+the trajectory and requires replay and scientific validation. Changes to physical
+model, band count or buffer threshold are not authorized runtime policy changes.
+See [evidence map](../validation/evidence-map.md) for executed slices and remaining
+proof gaps. P11I coupling/MLIP contracts remain specifications, not delivered adapters.

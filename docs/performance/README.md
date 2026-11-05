@@ -1,5 +1,43 @@
 # Performance: rules, measurements and the optimization log
 
+## Reconciled status — 2026-11-05
+
+Source checkout: `b5d515a` on `task/P12A-STATUS-RECONCILIATION`. Presence is
+checked against merged source and git history, not stale delegate registry notes.
+Historical measurements below remain tied to their original builds.
+
+| Work | Current state | Evidence/index and limits |
+| --- | --- | --- |
+| P10A | Merged opt-in hybrid RMM-DIIS; Davidson default retained | `rmm-diis-benchmark.md`; buffer policies use Davidson fallback |
+| P10B | Optional MKL FFT/GEMM merged; remote acceptance recorded | `fft-backend-comparison.md`; final dev08 relay, not a native Mac MKL run |
+| P10C | FFT call-structure changes merged | Optimization log P10C final integration; rejected experiments retained in history |
+| P10D | Kerker-Pulay and mixer diagnostics merged, opt-in | `scf-mixing-comparison.md`; no general recovery default adopted |
+| P10E | GPU architecture/roadmap delivered | `../architecture/gpu-backend.md`; no GPU implementation |
+| P10F | No ticket in this checkout | No feature or completion inferred from the alphabetic gap |
+| P10G | General benchmark harness and suite delivered | `benchmark-suite.md`, `suite-baseline.json`; synthetic and real-Si coverage distinguished |
+| P10H | Superseded by P10J | Git `0cdcf41`; not a separate unmerged backend requirement |
+| P10I | Intra-k linear algebra merged; scheduling superseded by J | Optimization log P10I; historical scoped-worker/MKL panel path |
+| P10J | Persistent executor and backend-specific products merged | Optimization log P10J; no multiplied outer/inner thread budget |
+| P10K | Synchronization/validation glue merged | Optimization log P10K; local timings are not remote scaling acceptance |
+| P10L | Fixed pieces/batching and utilization instrumentation merged | Optimization log P10L; utilization/scaling targets not all achieved |
+| P10M | Copy and duplicate-GEMM removal merged (`1cae61c`) | Optimization log P10M; CholeskyQR2 rejected after synthetic iteration regression; not an enabled default |
+
+Current cross-code speed claims use only
+`tests/reference/perf/dev08_final_relayed.md`, **Part 4**, fdce016, 2026-11-05.
+On dev08, shifted 4x4x4 Si at 8–16 cores is 2.0–2.2 times QE at conv_thr
+1e-8 and 1.4–1.6 at 1e-12; the ratio changes with QE iteration count.
+The 8-atom Gamma pure-Rust time is 5.801 s (T=1) versus 4.151 s (T=8),
+only 1.40x scaling. MKL is not uniformly faster: Part 4 reports si8 T=1
+6.016 s versus pure 5.801 s. Both are measured, relayed results, not rerun here.
+QE internal times below 0.3 s are excluded from README ratios because its
+resolution is 0.01 s; the si8 16-core 0.3000 s point is at the inclusion boundary.
+Part 1's fe0492b table and R7's pre-P10 tables are historical, not current values.
+
+P11J Part 3 reports all 18 combinations meeting overhead targets with 300 pairs;
+that is provisional relayed evidence. Local `tests/reference/runtime/benchmark.json`
+retains its own failed/inconclusive targets. The remote raw JSON and independent
+reproduction are still TODOs. See [evidence map](../validation/evidence-map.md).
+
 Read this before touching a hot path (anything on the Hamiltonian apply, the eigensolver, FFTs, density accumulation). Physics correctness always comes first; a change that is faster but not equivalent is a bug.
 
 ## Rules for every agent

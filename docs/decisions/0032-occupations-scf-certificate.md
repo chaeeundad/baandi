@@ -1,6 +1,6 @@
 # ADR 0032: Occupation policy, entropy and finite-temperature certificate
 
-- Status: **proposed**, 2026-11-05; P13A-STATE-CONTRACTS / MF02.
+- Status: **accepted by the user 2026-11-05** (contract approved; implementation capability still absent until its ticket delivers it); P13A-STATE-CONTRACTS / MF02.
 - Basis: [master plan D2, MF04](../roadmap/master-plan-proposal.md), [physics conventions §25–26](../physics-conventions.md), [ADR 0025](0025-preconditioned-density-mixing.md).
 
 ## Proposed policy contract

@@ -1,6 +1,6 @@
 # ADR 0034: Extend the P11C envelope for spin and occupations
 
-- Status: **proposed**, 2026-11-05; P13A-STATE-CONTRACTS / MF02.
+- Status: **accepted by the user 2026-11-05** (contract approved; implementation capability still absent until its ticket delivers it); P13A-STATE-CONTRACTS / MF02.
 - Basis: [master plan D9, MF07–08, U5](../roadmap/master-plan-proposal.md), [scientific-state API](../architecture/scientific-state-api.md), [implemented checkpoint v1](../checkpoint-format.md).
 
 ## One container, explicit version

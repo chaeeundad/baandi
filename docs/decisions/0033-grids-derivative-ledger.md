@@ -1,6 +1,6 @@
 # ADR 0033: Grid roles, energy ownership and derivative ledger
 
-- Status: **proposed**, 2026-11-05; P13A-STATE-CONTRACTS / MF02.
+- Status: **accepted by the user 2026-11-05** (contract approved; implementation capability still absent until its ticket delivers it); P13A-STATE-CONTRACTS / MF02.
 - Basis: [master plan D5, D6, D8, D10–12 and MF12–16](../roadmap/master-plan-proposal.md), [physics conventions](../physics-conventions.md), [ADR 0017](0017-coupling-commitments.md), [ADR 0019](0019-optional-mkl-backend.md).
 
 ## Grid contract

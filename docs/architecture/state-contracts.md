@@ -1,6 +1,6 @@
 # State contracts for staged materials support
 
-Status: **proposed**, P13A-STATE-CONTRACTS / MF02, 2026-11-05. Documentation and
+Status: **approved by the user on 2026-11-05** (ADRs 0031 to 0034 and the eight recommendations of the review table), P13A-STATE-CONTRACTS / MF02. Documentation and
 schema proposal only. Scope B is authorized in [AGENTS.md](../../AGENTS.md);
 these contracts still require user approval before MF03. No feature, external
 reference run or derivative implementation is delivered here.

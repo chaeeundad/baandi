@@ -1,6 +1,6 @@
 # ADR 0031: Tagged spin and ElectronicState
 
-- Status: **proposed**, 2026-11-05; P13A-STATE-CONTRACTS / MF02. User approval is required before MF03.
+- Status: **accepted by the user 2026-11-05** (contract approved; implementation capability still absent until its ticket delivers it); P13A-STATE-CONTRACTS / MF02. User approval is required before MF03.
 - Authority: [master plan D1, D3, D4, MF03, MF07](../roadmap/master-plan-proposal.md), scope B in [AGENTS.md](../../AGENTS.md). This is a contract, not implemented capability.
 - Dependencies: [ADR 0016](0016-esle-layering.md) remains proposed; [P11C](../checkpoint-format.md) is the concrete persistence baseline. [Evidence map](../validation/evidence-map.md) supersedes older survey statements about missing restart support.
 

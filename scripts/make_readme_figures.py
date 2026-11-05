@@ -1,10 +1,10 @@
 #!/usr/bin/env python3 -I
 """Regenerate the README validation block and figures from the stored evidence.
 
-Reads tests/reference (QE comparison reports and the k-point bundles), writes
+Reads tests/reference plus the stored collinear report, writes
 docs/img/*.svg and replaces the text between the markers
 <!-- validation:begin --> and <!-- validation:end --> in README.md.
-No number is typed here: every value comes from a stored report or from
+New measurements come from stored reports or from
 scripts/compare_kpoints_qe.py. Standard library only. Run after each verified
 implementation (see AGENTS.md, "README results").
 """
@@ -222,14 +222,136 @@ def show_perf():
     return bool(load(os.path.join(ROOT, "docs", "readme-config.json")).get("show_qe_performance", False))
 
 
+def evidence_link(path):
+    return f"[`{path}`]({path})"
+
+
+def standard_rows():
+    """Pair the frozen standard setting with strict, retaining failed cases."""
+    freeze = load(os.path.join(REF, "perf/p17a/default-freeze.json"))
+    report = load(os.path.join(REF, "perf/p17a/final-report.json"))
+    label = f"standard-{freeze['standard_threshold_ha']:g}"
+    rows = report["rows"]
+    return [(r, next(s for s in rows if s["case"] == r["case"] and s["label"] == label))
+            for r in rows if r["label"] == "strict"]
+
+
+def extended_results():
+    """Render measured values, references and limits without promoting smoke tests."""
+    spin_path = "crates/dft-engine/tests/collinear-evidence.json"
+    spin = load(os.path.join(ROOT, spin_path))
+    reduced = [r for r in spin["matrix"] if r["status"] == "certified_reduction"]
+    # The original spin report stores independent-oracle measurements as test output.
+    physics = spin["raw_output"]["physics"]
+    match = re.search(r"PW92\+X maximum energy error=([\deE.+-]+) Ha/electron; interior potential error=([\deE.+-]+) Ha", physics)
+    if match is None:
+        raise ValueError("Missing PW92 oracle measurements in " + spin_path)
+    lines = ["### Collinear spin: fixed up/down electron counts", "",
+             f"LDA-PW and PBE synthetic checks: {len(reduced)} zero-moment calculations reproduce the "
+             f"unpolarized engine with maximum energy difference {max(r['energy_difference_ha'] for r in reduced):.2e} Ha "
+             f"and density distance {max(r['density_distance_bohr_minus_3_over_2'] for r in reduced):.2e} Bohr^-3/2. "
+             f"The remaining {len(spin['matrix']) - len(reduced)} case gives the same noninsulating rejection. "
+             f"Independent analytic exchange/PW92 formulas give maximum energy error {float(match[1]):.2e} Ha/electron; "
+             f"finite-difference potentials differ by at most {float(match[2]):.2e} Ha. "
+             "These test fixed spin populations, not a magnetic material ground state or agreement with QE. "
+             + evidence_link(spin_path) + ".", ""]
+    nlcc = load(os.path.join(REF, "datasets/p13c-status.json"))
+    headers = load(os.path.join(REF, "datasets/pseudodojo-headers.json"))["datasets"]
+    floor = load(os.path.join(REF, "materials/verification.json"))
+    lines += ["### Nonlinear core correction and PseudoDojo files", "",
+              f"Rust and independent Python header readers agree for {sum(r['rust_python_equal'] for r in headers)} "
+              f"files ({', '.join(r['element'] for r in headers)}). Header identity is not dataset qualification. "
+              + evidence_link("tests/reference/datasets/pseudodojo-headers.json") + ".", "",
+              f"Synthetic Gaussian core transforms match the analytic formula to {nlcc['gaussian_core_max_relative_error']:.2e} relative error; "
+              f"localized XC potentials match finite differences to {nlcc['localized_xc_derivative_max_error_ha']:.2e} Ha. "
+              f"The later density-floor derivative check has maximum error {floor['floor_derivative_max_error_ha_bohr3']:.2e} Ha Bohr^3. "
+              + evidence_link("tests/reference/datasets/p13c-status.json") + "; "
+              + evidence_link("tests/reference/materials/verification.json") + ".", ""]
+    pbe = [r for r in nlcc["total_scf_translation"] if r["functional"] == "Pbe"]
+    lines += [f"Limits: translating the synthetic PBE cell changes the energy by {pbe[0]['delta_ha']:.2e} Ha on the coarse grid "
+              f"(fails the {nlcc['caps_frozen_before_measurement']['translation_energy_ha']:.0e} Ha cap), falling to {pbe[-1]['delta_ha']:.2e} Ha "
+              "with grid refinement. The stored isolated-atom runs include failures; all datasets remain unqualified "
+              "for transferability, ghost states and cutoff convergence. NLCC checkpoint persistence and ionic force/stress derivatives are unavailable.", "",
+              "### Real-material bulk runs: Si and MgO", "",
+              "PBE calculations with external PseudoDojo files, positive uniform starting density. "
+              "These are successful calculation checks, not an independent accuracy reference; comparison with QE pending for Si and MgO. "
+              + evidence_link("tests/reference/materials/results.json") + ".", "",
+              "| Case | Cutoff (Ha) | SCF iterations | Total energy (Ha/cell) | Electron-count error | Indirect gap (Ha) |",
+              "|---|---:|---:|---:|---:|---:|"]
+    for r in load(os.path.join(REF, "materials/results.json"))["cases"]:
+        lines.append(f"| {r['case']} | {r['cutoff_ha']:g} | {r['iterations']} | {r['total_energy_ha']:.12f} | "
+                     f"{abs(r['electron_count'] - r['expected_electrons']):.2e} | {r['band_gap']['indirect_ha']:.6f} |")
+    lines += ["", "These sampled cutoffs do not establish a converged material energy or gap. Atomic-superposition initialization remains unavailable; "
+              "see the [scope and verification record](tests/reference/materials/verification.json).", ""]
+    spectra = load(os.path.join(REF, "spectral/summary.json"))
+    material = [r for r in spectra if r["case"].startswith(("si-", "mgo-"))]
+    skew = next(r for r in spectra if r["case"] == "syn20-skew")
+    final = load(os.path.join(REF, "spectral/final/summary.json"))
+    corrected = next(r for r in final["cases"] if r["case"] == "syn20-skew")
+    lines += ["### Are the lowest electronic states actually found?", "",
+              f"Independent full-matrix dense diagonalization at the final fixed Hamiltonian checks {len(material)} Si/MgO cases "
+              f"at the stored sampled k points. Maximum occupied-state error: {max(r['occupied_max_error_ha'] for r in material):.2e} Ha; "
+              f"maximum buffer-state error: {max(r['buffer_max_error_ha'] for r in material):.2e} Ha. "
+              "This checks the eigensolver, not agreement with another DFT code. "
+              + evidence_link("tests/reference/spectral/summary.json") + ".", "",
+              f"A synthetic skew cell exposes a false success after {skew['iterations']} iterations: "
+              f"occupied-state error {skew['occupied_max_error_ha']:.6f} Ha and fixed-H band-sum excess "
+              f"{skew['maximum_absolute_per_k_band_sum_excess_ha']:.6f} Ha. The optional final audit detects it; "
+              f"the corrected run exhausts {corrected['final_iterations']} iterations rather than claiming convergence. "
+              "The band-sum excess is not a corrected SCF total energy. The audit defaults to "
+              f"`{final['default']}`; large-operator searches are not a universal completeness proof. "
+              + evidence_link("tests/reference/spectral/final/summary.json") + "; "
+              + evidence_link("tests/reference/spectral/final/verification.json") + ".", "",
+              "### Standard convergence profile: work versus strict", ""]
+    freeze = load(os.path.join(REF, "perf/p17a/default-freeze.json"))
+    lines += [f"Opt-in standard threshold: {freeze['standard_threshold_ha']:.0e} Ha; strict remains the default. "
+              "**Standard results are not certified.** The table compares BAANDI with its own strict run, not QE. "
+              "Energy differences are per cell; unavailable means no successful pair. Failed runs retain their work counts. "
+              + evidence_link("tests/reference/perf/p17a/final-report.json") + ".", "",
+              "| Case | Status strict / standard | SCF iterations strict / standard | Davidson steps strict / standard | E standard - E strict (Ha) |",
+              "|---|---|---:|---:|---:|"]
+    for strict, standard in standard_rows():
+        delta = (f"{standard['total_energy_ha'] - strict['total_energy_ha']:+.2e}"
+                 if strict["status"] == standard["status"] == "ok" else "unavailable")
+        lines.append(f"| {strict['case']} | {strict['status']} / {standard['status']} | "
+                     f"{strict.get('scf_iterations', 'unavailable')} / {standard.get('scf_iterations', 'unavailable')} | "
+                     f"{strict.get('davidson_steps', 'unavailable')} / {standard.get('davidson_steps', 'unavailable')} | {delta} |")
+    lines += ["", "Strict success alone does not prove spectral completeness (see the skew-cell result above). "
+              "The threshold calibration uses relayed QE estimated errors, not independently reproduced equal-accuracy measurements. "
+              "Mac timings are observations, not a server speedup claim. "
+              + evidence_link("tests/reference/perf/p17a/default-freeze.json") + ".", ""]
+    fd = load(os.path.join(REF, "occupations/summary.json"))
+    syn, al = fd["synthetic"], fd["al_smoke"]
+    derivative = fd["entropy_derivative"]
+    low = fd["low_temperature"][-1]
+    lines += ["### Finite-temperature Fermi-Dirac occupations", "",
+              "Reference: independent analytic occupation/entropy formulas, finite differences of free energy, "
+              "and the same engine's fixed-occupation low-temperature limit; no QE comparison. "
+              + evidence_link("tests/reference/occupations/summary.json") + "; "
+              + evidence_link("tests/reference/occupations/verification.json") + ".", "",
+              f"Synthetic SCF: E = {syn['energy_ha']:.12f} Ha, F = {syn['free_energy_ha']:.12f} Ha, "
+              f"S/kB = {syn['entropy_over_kb']:.12f}, in {syn['iterations']} iterations. "
+              f"The entropy derivative error falls from {derivative[0]['error_dimensionless']:.2e} to "
+              f"{derivative[-1]['error_dimensionless']:.2e} (dimensionless) as the temperature-energy step decreases "
+              f"from {derivative[0]['step_ha']:g} to {derivative[-1]['step_ha']:g} Ha. "
+              f"Empty-band refinement changes F by at most {max(r['free_energy_difference_ha'] for r in fd['empty_band_refinement']):.2e} Ha. "
+              f"At kB T = {low['theta_ha']:g} Ha, energy differs from fixed occupations by {low['energy_difference_ha']:.2e} Ha.", "",
+              f"External-file Al smoke: kB T = {al['theta_ha']:g} Ha, cutoff {al['cutoff_ha']:g} Ha, "
+              f"{al['bands']} bands, mesh {'x'.join(map(str, al['mesh']))}, "
+              f"E = {al['energy_ha']:.12f} Ha in {al['iterations']} iterations. "
+              "This is not validated metallic material accuracy. Empty-band convergence must be checked for each calculation; "
+              "finite-temperature checkpoint persistence is unavailable.", ""]
+    return lines
+
+
 def block(rows, kruns, gamma, perf=None):
     if not show_perf():
         perf = None
     n_rust = None
     lines = [BEGIN, "", "## Validation results", "",
-             "Generated by `scripts/make_readme_figures.py` from the stored evidence in `tests/reference` (do not edit by hand). "
+             "Generated by `scripts/make_readme_figures.py` from stored evidence in `tests/reference` and the linked collinear report (do not edit by hand). "
              "Reference: Quantum ESPRESSO 7.6 run on a remote server (see [validation record](docs/validation.md)). "
-             "Evidence covers one cell (Si diamond) and one pseudopotential of unverified provenance; it is not a statement about general material accuracy.", "",
+             "The QE comparison below covers one cell (Si diamond) and one pseudopotential of unverified provenance; it is not a statement about general material accuracy.", "",
              "![Total energy versus cutoff](docs/img/cutoff-scan.svg)", "",
              "| Check (Si, 30 Ry, same pseudopotential for both codes) | k points | QE iterations | energy difference (Ha/atom) | largest eigenvalue difference (Ha) | tolerance (energy / eigenvalue) | status |",
              "|---|---|---|---|---|---|---|",
@@ -273,6 +395,7 @@ def block(rows, kruns, gamma, perf=None):
         o = ts["k444s"]
         lines += ["", "32 k points against QE with the same number of cores: " + ", ".join(f"{n}: {o[str(n)] / qe['np' + str(n)]:.1f}x slower" for n in (1, 4, 8, 16)) + ". After the parallel setup, density, energy-audit and certificate phases the 32-k-point run takes 1.23 s on 16 threads (3.06 s with k-point threads only), of which the diagonalization is 0.84 s; with 4 and 8 k points the best thread count is 8 (there are few k points per thread). One k point (Gamma) is not parallelized yet.", ""]
         lines += ["", f"Cross-platform check: the total energy on this Linux x86 build differs from the macOS Apple Silicon build by {perf['xplat']['gamma']:+.2e} Ha (Gamma) and {perf['xplat']['k444s']:+.2e} Ha (4x4x4, shifted).", ""]
+    lines += extended_results()
     checkpoint = load(os.path.join(REF, "checkpoint", "results.json"))
     lines += ["### Checkpoint/restart equivalence (synthetic fixtures)", "",
               f"Reference: the uninterrupted BAANDI engine in the same build. "

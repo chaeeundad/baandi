@@ -22,7 +22,7 @@
    "status": "done",
    "area": "Physics",
    "feature": "Insulators with fixed occupations",
-   "note": "The sampled band gap is checked; partial occupations are refused on purpose (no smearing yet)."
+   "note": "Fixed occupations require a sampled band gap. Use the separate Fermi-Dirac option for partial occupations."
   },
   {
    "status": "done",
@@ -34,7 +34,7 @@
    "status": "done",
    "area": "SCF",
    "feature": "Pulay and linear density mixing, block Davidson eigensolver",
-   "note": "Every run ends with a fixed-point certificate and a term-by-term energy audit."
+   "note": "Strict runs use a fixed-point certificate and energy audit. Opt-in standard results are not certified."
   },
   {
    "status": "done",
@@ -121,16 +121,16 @@
    "note": "`pseudo` subcommands; pseudopotential files are never shipped in the repository."
   },
   {
-   "status": "planned",
+   "status": "done",
    "area": "Physics",
-   "feature": "Metals: smearing, Fermi level",
-   "note": "Needed for aluminum, iron and most alloys."
+   "feature": "Fermi-Dirac occupations and chemical potential",
+   "note": "Unpolarized and collinear finite-temperature SCF; analytic synthetic oracles and an Al smoke run, no QE metal comparison. Check empty-band convergence; finite-T restart unavailable. [Evidence](tests/reference/occupations/summary.json)."
   },
   {
-   "status": "planned",
+   "status": "done",
    "area": "Physics",
-   "feature": "Magnetism: spin-polarized LSDA and spin GGA, then noncollinear and spin-orbit",
-   "note": "Needed for transition-metal oxides and cathodes."
+   "feature": "Collinear spin with fixed up/down electron counts",
+   "note": "LDA-PW and PBE; synthetic analytic and zero-moment oracles. No validated magnetic material ground state; noncollinear and spin-orbit remain unavailable. [Evidence](crates/dft-engine/tests/collinear-evidence.json)."
   },
   {
    "status": "planned",
@@ -139,10 +139,10 @@
    "note": "Roadmap and validation oracles are in docs/research/xc-and-manybody-roadmap.md."
   },
   {
-   "status": "planned",
+   "status": "done",
    "area": "Physics",
-   "feature": "Nonlinear core correction, ultrasoft and PAW pseudopotentials",
-   "note": "Most transition-metal pseudopotentials need at least nonlinear core correction."
+   "feature": "Nonlinear core correction and PseudoDojo NC file support",
+   "note": "Independent header checks and synthetic NLCC oracles; Si/MgO bulk smoke, comparison with QE pending. Datasets remain unqualified; ultrasoft and PAW unavailable. [Evidence](tests/reference/datasets/p13c-status.json)."
   },
   {
    "status": "planned",
@@ -179,6 +179,12 @@
    "area": "Speed",
    "feature": "GPU backends and MPI",
    "note": "Design study in progress; the CPU path stays the reference."
+  },
+  {
+   "status": "done",
+   "area": "SCF",
+   "feature": "Opt-in standard convergence profile",
+   "note": "Strict remains default. Standard reduces solver work in stored successful cases but is not certified; skew/slab/mesh failures remain. [Evidence](tests/reference/perf/p17a/final-report.json)."
   }
  ],
  "can_today": [
@@ -186,7 +192,7 @@
   "Reproducible runs: the result files carry hashes, options and the energy audit."
  ],
  "not_yet": [
-  "Metals (no smearing), magnetic systems, most transition-metal oxides (they need nonlinear core correction, spin and often +U).",
+  "Validated magnetic and metallic material accuracy; DFT+U for correlated transition-metal oxides. Spin, NLCC and Fermi-Dirac options have limited validation below.",
   "Forces and relaxations, symmetry reduction, hybrid functionals."
  ],
  "speed": "Measured on one server (dev08, 2 x Xeon Gold 6230, Rocky Linux 9.7, one socket, Intel MKL 2026.1 linked in both codes, same silicon pseudopotential and FFT grid; QE 7.6 with MPI, one thread per process), same session and idle node, 2026-11-05, BAANDI commit fdce016 for the k-point mesh and the later commit 7fe2e9a for the 8-atom cell (the k-point results did not change between them). Ratios are BAANDI time over QE time, so above 1 means BAANDI is slower. Silicon with a 4x4x4 shifted k mesh (2 atoms): at 8 to 16 cores 2.0 to 2.2 times slower than QE at convergence threshold 1e-8 and 1.4 to 1.6 times slower at 1e-12 (QE needs 8 instead of 5 iterations at 1e-12; both are reported because the ratio depends on it); on one core 4.2 to 5.1 times (1e-8). An 8-atom cell at Gamma only (one k point): against QE's complex k=0 path (`K_POINTS automatic 1 1 1`) BAANDI is 5.3 to 8.0 times slower on one core and 13 to 15 times slower at 16 cores; against QE's real-wavefunction Gamma path (`K_POINTS gamma`, QE's best configuration for this case, 1.3 to 1.9 times faster than its complex path and the reference for the goal of exceeding QE) BAANDI is 9.6 to 14.9 times slower on one core (1e-12 and 1e-8 convergence thresholds; MKL and pure Rust builds), (a machine-tuned build, `target-cpu=native`, makes the pure Rust build 1.1 to 1.4 times faster on dev08 with bit-identical results, bringing the one-core ratio to QE's real Gamma path down to 11.3; the ratios above use the default portable build) because BAANDI's threading speeds this case up only 1.4 times at 8 threads, it has no real-wavefunction Gamma path yet, and it performs more eigensolver work per SCF iteration; this is the main known weakness and is being worked on. Cases where QE takes under 0.3 s are excluded: QE's timer resolves only 0.01 s. The numbers were relayed from the measuring session and have not been independently reproduced here; build hashes, raw tables and limits: tests/reference/perf/dev08_final_relayed.md."

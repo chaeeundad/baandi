@@ -79,7 +79,7 @@ Status as of 2026-11-03, written for people who run calculations. Source: `docs/
 
 **You can use it today for:** Total energy, eigenvalues and electron density of insulating periodic systems with LDA or PBE, on Gamma or a k mesh. Reproducible runs: the result files carry hashes, options and the energy audit.
 
-**Not available yet:** Metals (no smearing), magnetic systems, most transition-metal oxides (they need nonlinear core correction, spin and often +U). Forces and relaxations, symmetry reduction, hybrid functionals.
+**Not available yet:** Validated magnetic and metallic material accuracy; DFT+U for correlated transition-metal oxides. Spin, NLCC and Fermi-Dirac options have limited validation below. Forces and relaxations, symmetry reduction, hybrid functionals.
 
 **Speed:** Measured on one server (dev08, 2 x Xeon Gold 6230, Rocky Linux 9.7, one socket, Intel MKL 2026.1 linked in both codes, same silicon pseudopotential and FFT grid; QE 7.6 with MPI, one thread per process), same session and idle node, 2026-11-05, BAANDI commit fdce016 for the k-point mesh and the later commit 7fe2e9a for the 8-atom cell (the k-point results did not change between them). Ratios are BAANDI time over QE time, so above 1 means BAANDI is slower. Silicon with a 4x4x4 shifted k mesh (2 atoms): at 8 to 16 cores 2.0 to 2.2 times slower than QE at convergence threshold 1e-8 and 1.4 to 1.6 times slower at 1e-12 (QE needs 8 instead of 5 iterations at 1e-12; both are reported because the ratio depends on it); on one core 4.2 to 5.1 times (1e-8). An 8-atom cell at Gamma only (one k point): against QE's complex k=0 path (`K_POINTS automatic 1 1 1`) BAANDI is 5.3 to 8.0 times slower on one core and 13 to 15 times slower at 16 cores; against QE's real-wavefunction Gamma path (`K_POINTS gamma`, QE's best configuration for this case, 1.3 to 1.9 times faster than its complex path and the reference for the goal of exceeding QE) BAANDI is 9.6 to 14.9 times slower on one core (1e-12 and 1e-8 convergence thresholds; MKL and pure Rust builds), (a machine-tuned build, `target-cpu=native`, makes the pure Rust build 1.1 to 1.4 times faster on dev08 with bit-identical results, bringing the one-core ratio to QE's real Gamma path down to 11.3; the ratios above use the default portable build) because BAANDI's threading speeds this case up only 1.4 times at 8 threads, it has no real-wavefunction Gamma path yet, and it performs more eigensolver work per SCF iteration; this is the main known weakness and is being worked on. Cases where QE takes under 0.3 s are excluded: QE's timer resolves only 0.01 s. The numbers were relayed from the measuring session and have not been independently reproduced here; build hashes, raw tables and limits: tests/reference/perf/dev08_final_relayed.md.
 
@@ -89,9 +89,9 @@ Status as of 2026-11-03, written for people who run calculations. Source: `docs/
 |---|---|---|
 | Physics | Kohn-Sham DFT with plane waves | Periodic cells, norm-conserving pseudopotentials (UPF v2 subset), spin-unpolarized. |
 | Physics | LDA (Perdew-Zunger) and PBE (GGA) | PBE comes from the xcx library; tested against QE on the same pseudopotential. |
-| Physics | Insulators with fixed occupations | The sampled band gap is checked; partial occupations are refused on purpose (no smearing yet). |
+| Physics | Insulators with fixed occupations | Fixed occupations require a sampled band gap. Use the separate Fermi-Dirac option for partial occupations. |
 | k points | Gamma, Monkhorst-Pack grids (shifted or not), explicit k lists | Time-reversal reduction only; no space-group symmetry reduction yet. |
-| SCF | Pulay and linear density mixing, block Davidson eigensolver | Every run ends with a fixed-point certificate and a term-by-term energy audit. |
+| SCF | Pulay and linear density mixing, block Davidson eigensolver | Strict runs use a fixed-point certificate and energy audit. Opt-in standard results are not certified. |
 | Input | One TOML file; units (Ha, Ry, eV, Angstrom, Bohr, ...) and expressions such as 1/4 or 5.43/2 Angstrom | Wrong inputs are rejected with the key path of the problem. |
 | Output | results.json (energies, eigenvalues, convergence history, provenance) and the electron density (binary + metadata) | Every run records input and pseudopotential hashes. |
 | Speed | Threads over k points and over bands, bit-identical results for any thread count | `[scf] threads = N`; default is 1. |
@@ -101,6 +101,10 @@ Status as of 2026-11-03, written for people who run calculations. Source: `docs/
 | Robustness | Convergence fix for larger cells (8-atom silicon cell stalled at the default settings) | Buffer bands: the highest requested bands are loosely converged; strict bands keep the full tolerance. The 8-atom silicon cell now converges. |
 | Usability | Input preflight check: element versus pseudopotential, SCF settings, plain-language summary of what will be computed | `validate` checks element versus pseudopotential and SCF settings and prints a plain-language summary; no SCF is run. |
 | Input | Offline pseudopotential registry with license and SHA-256 checks | `pseudo` subcommands; pseudopotential files are never shipped in the repository. |
+| Physics | Fermi-Dirac occupations and chemical potential | Unpolarized and collinear finite-temperature SCF; analytic synthetic oracles and an Al smoke run, no QE metal comparison. Check empty-band convergence; finite-T restart unavailable. [Evidence](tests/reference/occupations/summary.json). |
+| Physics | Collinear spin with fixed up/down electron counts | LDA-PW and PBE; synthetic analytic and zero-moment oracles. No validated magnetic material ground state; noncollinear and spin-orbit remain unavailable. [Evidence](crates/dft-engine/tests/collinear-evidence.json). |
+| Physics | Nonlinear core correction and PseudoDojo NC file support | Independent header checks and synthetic NLCC oracles; Si/MgO bulk smoke, comparison with QE pending. Datasets remain unqualified; ultrasoft and PAW unavailable. [Evidence](tests/reference/datasets/p13c-status.json). |
+| SCF | Opt-in standard convergence profile | Strict remains default. Standard reduces solver work in stored successful cases but is not certified; skew/slab/mesh failures remain. [Evidence](tests/reference/perf/p17a/final-report.json). |
 
 ### Being built now
 
@@ -116,10 +120,7 @@ Status as of 2026-11-03, written for people who run calculations. Source: `docs/
 
 | Area | Feature | Notes |
 |---|---|---|
-| Physics | Metals: smearing, Fermi level | Needed for aluminum, iron and most alloys. |
-| Physics | Magnetism: spin-polarized LSDA and spin GGA, then noncollinear and spin-orbit | Needed for transition-metal oxides and cathodes. |
 | Physics | DFT+U, meta-GGA, hybrid functionals, dispersion corrections | Roadmap and validation oracles are in docs/research/xc-and-manybody-roadmap.md. |
-| Physics | Nonlinear core correction, ultrasoft and PAW pseudopotentials | Most transition-metal pseudopotentials need at least nonlinear core correction. |
 | Physics | Forces, stress, structure relaxation, molecular dynamics, phonons | Hellmann-Feynman forces come first. |
 | Physics | Space-group symmetry (k-point reduction, density symmetrization) | Large speedup for crystals with many k points. |
 | Physics | RPA and cRPA correlation (research stage) | Design only; no implementation yet. |
@@ -133,7 +134,7 @@ Status as of 2026-11-03, written for people who run calculations. Source: `docs/
 
 ## Validation results
 
-Generated by `scripts/make_readme_figures.py` from the stored evidence in `tests/reference` (do not edit by hand). Reference: Quantum ESPRESSO 7.6 run on a remote server (see [validation record](docs/validation.md)). Evidence covers one cell (Si diamond) and one pseudopotential of unverified provenance; it is not a statement about general material accuracy.
+Generated by `scripts/make_readme_figures.py` from stored evidence in `tests/reference` and the linked collinear report (do not edit by hand). Reference: Quantum ESPRESSO 7.6 run on a remote server (see [validation record](docs/validation.md)). The QE comparison below covers one cell (Si diamond) and one pseudopotential of unverified provenance; it is not a statement about general material accuracy.
 
 ![Total energy versus cutoff](docs/img/cutoff-scan.svg)
 
@@ -149,6 +150,65 @@ Generated by `scripts/make_readme_figures.py` from the stored evidence in `tests
 ![k-point comparison](docs/img/kpoint-comparison.svg)
 
 Cutoff scan: 7 cutoffs from 20 to 80 Ry; the energy difference to QE is the same at every cutoff (2.54 to 2.57 micro-Ha per cell), a constant offset explained by the G=0 local-potential integral convention (validation record R4). The 4x4x4 and PBE evidence are relayed text summaries; the other LDA runs are whole-file, hash-verified outputs. The PBE rows use QE's `input_dft = 'pbe'` override on the LDA pseudopotential: a code-to-code consistency test of the PBE implementation, not a physically meaningful PBE result for this pseudopotential.
+
+### Collinear spin: fixed up/down electron counts
+
+LDA-PW and PBE synthetic checks: 23 zero-moment calculations reproduce the unpolarized engine with maximum energy difference 6.66e-15 Ha and density distance 6.04e-14 Bohr^-3/2. The remaining 1 case gives the same noninsulating rejection. Independent analytic exchange/PW92 formulas give maximum energy error 7.08e-15 Ha/electron; finite-difference potentials differ by at most 1.39e-11 Ha. These test fixed spin populations, not a magnetic material ground state or agreement with QE. [`crates/dft-engine/tests/collinear-evidence.json`](crates/dft-engine/tests/collinear-evidence.json).
+
+### Nonlinear core correction and PseudoDojo files
+
+Rust and independent Python header readers agree for 5 files (O, Ni, Al, Mg, Si). Header identity is not dataset qualification. [`tests/reference/datasets/pseudodojo-headers.json`](tests/reference/datasets/pseudodojo-headers.json).
+
+Synthetic Gaussian core transforms match the analytic formula to 8.33e-16 relative error; localized XC potentials match finite differences to 7.25e-12 Ha. The later density-floor derivative check has maximum error 2.23e-10 Ha Bohr^3. [`tests/reference/datasets/p13c-status.json`](tests/reference/datasets/p13c-status.json); [`tests/reference/materials/verification.json`](tests/reference/materials/verification.json).
+
+Limits: translating the synthetic PBE cell changes the energy by 3.08e-06 Ha on the coarse grid (fails the 1e-07 Ha cap), falling to 5.17e-09 Ha with grid refinement. The stored isolated-atom runs include failures; all datasets remain unqualified for transferability, ghost states and cutoff convergence. NLCC checkpoint persistence and ionic force/stress derivatives are unavailable.
+
+### Real-material bulk runs: Si and MgO
+
+PBE calculations with external PseudoDojo files, positive uniform starting density. These are successful calculation checks, not an independent accuracy reference; comparison with QE pending for Si and MgO. [`tests/reference/materials/results.json`](tests/reference/materials/results.json).
+
+| Case | Cutoff (Ha) | SCF iterations | Total energy (Ha/cell) | Electron-count error | Indirect gap (Ha) |
+|---|---:|---:|---:|---:|---:|
+| si-20 | 20 | 15 | -8.462317836906 | 5.86e-14 | 0.043357 |
+| si-30 | 30 | 15 | -8.462329006518 | 3.91e-14 | 0.043356 |
+| si-40 | 40 | 15 | -8.462336822427 | 1.07e-14 | 0.043357 |
+| mgo-40 | 40 | 18 | -76.050880851711 | 1.60e-13 | 0.234595 |
+| mgo-50 | 50 | 19 | -76.050969240430 | 2.84e-14 | 0.234593 |
+| mgo-60 | 60 | 19 | -76.050977170773 | 1.81e-13 | 0.234592 |
+
+These sampled cutoffs do not establish a converged material energy or gap. Atomic-superposition initialization remains unavailable; see the [scope and verification record](tests/reference/materials/verification.json).
+
+### Are the lowest electronic states actually found?
+
+Independent full-matrix dense diagonalization at the final fixed Hamiltonian checks 6 Si/MgO cases at the stored sampled k points. Maximum occupied-state error: 3.60e-14 Ha; maximum buffer-state error: 2.84e-11 Ha. This checks the eigensolver, not agreement with another DFT code. [`tests/reference/spectral/summary.json`](tests/reference/spectral/summary.json).
+
+A synthetic skew cell exposes a false success after 6 iterations: occupied-state error 1.514952 Ha and fixed-H band-sum excess 27.958044 Ha. The optional final audit detects it; the corrected run exhausts 100 iterations rather than claiming convergence. The band-sum excess is not a corrected SCF total energy. The audit defaults to `off`; large-operator searches are not a universal completeness proof. [`tests/reference/spectral/final/summary.json`](tests/reference/spectral/final/summary.json); [`tests/reference/spectral/final/verification.json`](tests/reference/spectral/final/verification.json).
+
+### Standard convergence profile: work versus strict
+
+Opt-in standard threshold: 5e-09 Ha; strict remains the default. **Standard results are not certified.** The table compares BAANDI with its own strict run, not QE. Energy differences are per cell; unavailable means no successful pair. Failed runs retain their work counts. [`tests/reference/perf/p17a/final-report.json`](tests/reference/perf/p17a/final-report.json).
+
+| Case | Status strict / standard | SCF iterations strict / standard | Davidson steps strict / standard | E standard - E strict (Ha) |
+|---|---|---:|---:|---:|
+| si8 | ok / ok | 15 / 14 | 345 / 69 | +1.00e-09 |
+| k444s | ok / ok | 10 / 9 | 1827 / 866 | +1.33e-10 |
+| si-20 | ok / ok | 15 / 11 | 2865 / 1042 | +2.59e-10 |
+| mgo-40 | ok / ok | 18 / 13 | 1306 / 609 | +1.50e-10 |
+| syn20-skew | ok / failed | 6 / 100 | 15 / 212 | unavailable |
+| syn4-elongated | ok / ok | 9 / 9 | 31 / 28 | +9.03e-10 |
+| syn4-slab | failed / failed | 100 / 13 | 539 / 57 | unavailable |
+| syn16-gamma | ok / ok | 10 / 7 | 69 / 24 | +3.66e-10 |
+| syn16-k211 | failed / failed | 100 / 100 | 622 / 442 | unavailable |
+
+Strict success alone does not prove spectral completeness (see the skew-cell result above). The threshold calibration uses relayed QE estimated errors, not independently reproduced equal-accuracy measurements. Mac timings are observations, not a server speedup claim. [`tests/reference/perf/p17a/default-freeze.json`](tests/reference/perf/p17a/default-freeze.json).
+
+### Finite-temperature Fermi-Dirac occupations
+
+Reference: independent analytic occupation/entropy formulas, finite differences of free energy, and the same engine's fixed-occupation low-temperature limit; no QE comparison. [`tests/reference/occupations/summary.json`](tests/reference/occupations/summary.json); [`tests/reference/occupations/verification.json`](tests/reference/occupations/verification.json).
+
+Synthetic SCF: E = -0.461893304214 Ha, F = -0.475756247825 Ha, S/kB = 1.386294361120, in 11 iterations. The entropy derivative error falls from 5.67e-06 to 3.46e-07 (dimensionless) as the temperature-energy step decreases from 0.004 to 0.001 Ha. Empty-band refinement changes F by at most 1.55e-14 Ha. At kB T = 0.001 Ha, energy differs from fixed occupations by 4.44e-16 Ha.
+
+External-file Al smoke: kB T = 0.01 Ha, cutoff 20 Ha, 20 bands, mesh 2x2x2, E = -2.308957374807 Ha in 8 iterations. This is not validated metallic material accuracy. Empty-band convergence must be checked for each calculation; finite-temperature checkpoint persistence is unavailable.
 
 ### Checkpoint/restart equivalence (synthetic fixtures)
 

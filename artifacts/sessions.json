@@ -2380,17 +2380,17 @@
     "task_id": "P18C-README-CELL",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "done",
     "codex_pid": 23009,
     "wrapper_pid": 22988,
-    "session_id": null,
+    "session_id": "01a1adc7-dffb-74d0-8a38-832f2438d2cb",
     "branch": "task/P18C-README-CELL",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P18C-README-CELL",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P18C-README-CELL.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P18C-README-CELL/report.json",
     "started_at": "2026-11-05T22:15:19Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-05T22:19:12Z",
+    "exit_code": 0,
+    "note": "merged"
   }
 ]

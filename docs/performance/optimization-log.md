@@ -1,5 +1,41 @@
 # Optimization log (newest first)
 
+## P15A — frozen stopping replay, measurement only (2026-11-05)
+
+Derived from `qe-solvers-and-subspace.md` hypothesis 1 and `qe-scf-cycle.md`
+E0–E2; no QE source read. Baseline/current main:
+`ce64b57437e2cb7b14804a4bdd15fb252dab6286`; branch changes uncommitted.
+Motivation: A53's relayed 290 versus 83 steps compared different criteria and
+units; A15/A21 changed SCF trajectories and could not isolate this question.
+This experiment changes no production numerical policy.
+
+[Interpretation](../research/qe-study/replay-stopping-results.md),
+[tables](../../tests/reference/perf/p15a/tables.md),
+[commands and hashes](../../tests/reference/perf/p15a/verification.json).
+On fixed current si8 histories, replacing the residual predicate by Ritz change
+at identical per-root numeric tolerances gives 283→39 rows, 2063→749 H vectors.
+QE-like empty thresholds give 38/729; the native-history Hartree ratchet gives
+54/1000. k444s native 1686/10290 versus ratcheted Ritz 740/5631. These are prefix
+work counters, not measured speedups, changed SCFs or an equal-accuracy claim.
+For the first 14 si8 iterations the relayed QE ladder gives 89 native-style rows
+(75 expansions) versus 257 baseline rows (243 expansions); QE relays 83.
+
+An independent dense oracle uncovered missed low roots despite small residuals:
+initial si8 tight-replay occupied discrepancy 0.110723486 Ha; synthetic cases
+also exhibit the issue. Native final skew occupied discrepancy is 1.514951753 Ha
+against its own frozen dense spectrum. This existing finding blocks treating
+residual convergence as spectral completeness; it is not repaired here.
+Dense replaces the tight replay as accuracy oracle wherever available.
+
+Seven replay fixtures retain energy exactly (delta 0 Ha), bit-identical density,
+eigenvalues and scientific histories/certificates. Repeated traces are identical.
+Slab and 16-atom mesh exhaust 100 iterations in both builds and are reported
+separately. Default five-case bench_scf comparisons at T=1,2,4,8,12 pass identity;
+full check and README figure tests pass. Work counters are the evidence; Mac
+timings overlap other runs/builds and are observations only. No MKL/dev08 run.
+No speedup or default is adopted. The unchanged-QE-reference limitation prevents
+a causal percent split of cross-code convergence rate versus stopping strength.
+
 ## P14A — work accounting and rejected schedules (2026-11-05)
 
 Derived from study note 1 H2/H6/H7; existing notes and outputs only, no QE source.

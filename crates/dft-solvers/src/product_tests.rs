@@ -215,3 +215,67 @@ fn failed_true_residual_certificate_cannot_return() {
         s.history, s.operator_applications
     );
 }
+
+#[test]
+fn replay_trace_matches_independent_counts_and_dense_spectrum() {
+    let n = 12;
+    let mut matrix = ComplexMatrix::zeros(n, n).unwrap();
+    for i in 0..n {
+        matrix[(i, i)] = Complex64::new(i as f64 * 0.4, 0.0);
+        if i > 0 {
+            matrix[(i, i - 1)] = Complex64::new(0.07, 0.02);
+            matrix[(i - 1, i)] = matrix[(i, i - 1)].conj();
+        }
+    }
+    let op = ColumnMatrix(matrix);
+    let counter = Counted {
+        inner: &op,
+        columns: Cell::new(0),
+        blocks: Cell::new(0),
+    };
+    let solver = Davidson {
+        bands: 3,
+        tolerance: 1e-10,
+        max_iterations: 80,
+        max_subspace: 10,
+        block_size: 3,
+        seed: 42,
+    };
+    let mode = SolveMode {
+        recurrence: true,
+        contract_restart: true,
+        certify: true,
+    };
+    let policy = BandTolerances {
+        strict_bands: 3,
+        buffer_tolerance: 1e-10,
+    };
+    let mut trace = replay::Trace::new(3, 80);
+    let measured = solver
+        .solve_policy_traced::<true>(&counter, None, None, mode, policy, &mut trace)
+        .unwrap();
+    assert_eq!(trace.blocks, counter.blocks.get());
+    assert_eq!(trace.rows.last().unwrap().1, counter.columns.get());
+    assert_eq!(trace.rows.len(), measured.iterations);
+    assert_eq!(trace.values.len(), 3 * measured.iterations);
+    let ordinary = solver
+        .solve_policy_traced::<false>(&op, None, None, mode, policy, &mut replay::Trace::default())
+        .unwrap();
+    assert_eq!(ordinary.eigenvalues, measured.eigenvalues);
+    assert_eq!(ordinary.residuals, measured.residuals);
+    assert_eq!(ordinary.history, measured.history);
+    assert_eq!(
+        ordinary.operator_applications,
+        measured.operator_applications
+    );
+    let dense = DenseEigensolver.solve(&op, 3).unwrap();
+    for (a, b) in dense.eigenvalues.iter().zip(&measured.eigenvalues) {
+        assert!((a - b).abs() < 1e-12);
+    }
+    assert!(
+        trace
+            .rows
+            .windows(2)
+            .all(|p| p[1].1 >= p[0].1 && p[1].2 >= p[0].2)
+    );
+}

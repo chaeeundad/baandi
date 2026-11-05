@@ -102,6 +102,7 @@ impl Drop for Trace {
 
 /// Called by the CLI after a complete SCF, never by a numerical kernel.
 pub fn take() -> Vec<Record> {
+    crate::replay::drain();
     // The CLI calls this boundary after the complete SCF, outside numerical loops.
     for r in dft_numerics::linalg::accounting::take() {
         eprintln!(

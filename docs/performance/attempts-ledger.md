@@ -156,3 +156,17 @@ Sources: D08 parts 4 and 5 (relayed dev08), OL P10I/P10L/P10M, N3/N4, tests/refe
 **Update 2026-11-05 (notes H, V).** QE h_psi costs about 3.7 ms per Davidson step against 3.5-4.5 ms of BAANDI H time per step: the H application is not the per-step gap. The gap is Davidson algebra (V cost model: about 5600N vs 1100N multiply-adds per step, matching the P14B GEMM total within 20%) and the vector count (about 2.2x); Davidson capacity is `max(48, 6*bands)` = 120 for 20 bands. Full decomposition: exceed-qe-plan.md section a.
 
 **Reading the map.** (1) The step count is 3.5x QE's on si8 and the per-step cost 2.4x; neither of the five tolerance/band/preconditioner ideas tried so far reduced steps without raising SCF count (A13-A15, A19, A21). (2) After A55, half of the remaining GEMM work is Ritz/residual formation for all roots, even in tail steps that carry about four vectors. (3) Parallel utilisation (23%) is the dominant loss on dev08 at T>=4, caused by small regions with serial dependency chains (MGS, EVD, residual norms), not by dispatch latency. (4) Non-Davidson phases (potential, mixing, energy audit) do not scale at Gamma: about 0.09 s of 1.8 s at Mac T=8 (derived, 5%). (5) k-point parallelism is already good for 32 k points and saturates for 4 and 8.
+
+
+## P15A measurement additions (2026-11-05; append-only)
+
+The historical row count above describes A01–A56. These new rows extend it to
+A59 without rewriting prior attempts. Derived from solver note V-1 and SCF
+note S-E0–E2. Evidence: `tests/reference/perf/p15a/`,
+`docs/research/qe-study/replay-stopping-results.md`.
+
+| ID | Experiment | Status | Measured effect | Lesson / limits |
+| --- | --- | --- | --- | --- |
+| A57 | P15A frozen-H stopping and tolerance replay | measurement only | si8 native 283 rows / 2063 H vectors; Ritz predicate with identical per-root numeric tolerances 39 / 749; QE-empty policy 38 / 729; Hartree ratchet on native history 54 / 1000. k444s 1686 / 10290 to 740 / 5631 under ratcheted Ritz. | Stopping strength can explain the size of the step gap on these fixed histories. No actual SCF policy changed; no equal-accuracy speedup. QE per-root rate traces remain missing. A15/A21 are not repeated or overturned. |
+| A58 | P15A E0 and offline schedule/first-redo diagnostic | measurement only | E_res < 5e-9 Ha first at si8 11, k444s 7, skew 4, elongated 5, 16-atom Gamma 7; no crossing in slab/16-atom mesh at 100 iterations. First-redo condition fires on skew and 16-atom mesh. | Conditional stored-history ratchet is not a new SCF trajectory. Actual redo work requires its changed start/residual. Two new cases exhaust identically before/after. H6 remains unproved. |
+| A59 | P15A independent dense spectral-completeness oracle | measurement only; follow-up needed | si8 initial all-root 1e-10 Ha residual replay misses a low root: occupied error 0.110723486 Ha. Initial synthetic all-root discrepancies 2.958860388 / 0.380087693 / 8.225605511 / 0.523220374 Ha (skew/elongated/16-atom/slab). Native final skew occupied error 1.514951753 Ha versus its frozen dense spectrum. | True residuals do not certify lowest-root completeness. Baseline outputs are bit-identical, so this is an existing finding. Resolve completeness before claiming equal accuracy or adopting locking/schedule changes. No repair in this ticket. |

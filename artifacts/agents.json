@@ -682,5 +682,14 @@
     "task": "P13A-STATE-CONTRACTS: 스핀·점유·격자·미분·저장 형식의 설계 계약 문서 작성(사용자 승인용, 코드 없음): 다음 기능 개발의 기반",
     "ref": "pid 66431, session 01a1a9c9, task/P13A-STATE-CONTRACTS",
     "updated": "2026-11-05"
+  },
+  {
+    "id": "A77",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "blocked",
+    "task": "P13B-COLLINEAR-SPIN: 공선 스핀 계산 구현(LDA·PBE, 위/아래 전자 수 지정, 자기 모멘트 결과): 스핀 해석적 극한과 작은 계로 검증",
+    "ref": "pid 72226, session 01a1a9ec, task/P13B-COLLINEAR-SPIN",
+    "updated": "2026-11-05"
   }
 ]

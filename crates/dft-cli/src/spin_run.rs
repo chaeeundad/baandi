@@ -59,6 +59,7 @@ pub(super) fn digest(value: &Value) -> String {
 }
 #[allow(clippy::too_many_arguments)]
 pub(super) fn execute(
+    config: &Config,
     prepared: &PreparedInput,
     opts: ScfOptions,
     atoms: &[Atom],
@@ -70,7 +71,7 @@ pub(super) fn execute(
     species: Vec<Value>,
     input_bytes: &[u8],
 ) -> Result<RunReport, RunError> {
-    let r = CollinearProblem::new(
+    let mut problem = CollinearProblem::new(
         &prepared.cell,
         atoms,
         potentials,
@@ -78,9 +79,16 @@ pub(super) fn execute(
         points,
         sector,
     )
-    .map_err(engine_error)?
-    .run()
     .map_err(engine_error)?;
+    if config.symmetry.mode == crate::config::SymmetryMode::Auto {
+        problem
+            .enable_symmetry(
+                &config.symmetry_full_mesh().map_err(|e| error(1, e))?,
+                config.symmetry.tolerance_bohr,
+            )
+            .map_err(engine_error)?;
+    }
+    let r = problem.run().map_err(engine_error)?;
     let SpinDensity::Collinear { channels, .. } = &r.density else {
         unreachable!()
     };
@@ -125,7 +133,10 @@ pub(super) fn execute(
     }
     let basis_record = json!({"canonicalization_version":"baandi-mf03-record-v1","cell_columns_bohr":prepared.cell.lattice_columns_bohr(),"grid":prepared.grid.dims(),"origin_fractional":[0,0,0],"cutoff_ha":opts.cutoff_hartree,"density_cutoff_ha":4.0*opts.cutoff_hartree,"ordering":"C_z_fastest","normalization":"forward_1_over_N_inverse_unscaled","derivative":"cartesian_zero_axis_nyquist_v1","channel_capacity":[1,1],"band_count":nb,"k_points":k_basis_records,"grid_id":"density","grid_role":"density","wavefunction_grid_alias":"same_dimensions_density_grid","periodic":[true,true,true],"quadrature_weight_bohr3":prepared.cell.volume_bohr3()/total.len() as f64});
     let basis_digest = digest(&basis_record);
-    let model_record = json!({"canonicalization_version":"baandi-mf03-record-v1","basis_digest":basis_digest,"functional":opts.functional.name(),"xc_version":"xcx-0.3.1","spin_mode":"collinear","hubbard":"none","core_density":if r.energy.nlcc.is_some() {"immutable_spin_neutral_nlcc"} else {"absent"},"relativity":"scalar_or_nonrelativistic_no_SOC","allow_functional_override":opts.allow_functional_override,"axis_cartesian":r.sector.axis_cartesian,"channel_electrons":[r.sector.n_up,r.sector.n_down],"occupation_policy":"fixed_insulator_v1","gap_threshold_ha":1e-7_f64.max(2.0*opts.eigen_tolerance),"symmetry":"full_mesh","environment":"periodic_neutral_valence_G0_zero","atoms":atoms.iter().map(|a|json!({"species":a.species,"fractional":a.fractional_position})).collect::<Vec<_>>(),"datasets":species.iter().map(|p|json!({"name":p["name"],"sha256":p["sha256"],"functional":p["functional"],"valence":p["z_valence"]})).collect::<Vec<_>>()});
+    let mut model_record = json!({"canonicalization_version":"baandi-mf03-record-v1","basis_digest":basis_digest,"functional":opts.functional.name(),"xc_version":"xcx-0.3.1","spin_mode":"collinear","hubbard":"none","core_density":if r.energy.nlcc.is_some() {"immutable_spin_neutral_nlcc"} else {"absent"},"relativity":"scalar_or_nonrelativistic_no_SOC","allow_functional_override":opts.allow_functional_override,"axis_cartesian":r.sector.axis_cartesian,"channel_electrons":[r.sector.n_up,r.sector.n_down],"occupation_policy":"fixed_insulator_v1","gap_threshold_ha":1e-7_f64.max(2.0*opts.eigen_tolerance),"symmetry":"full_mesh","environment":"periodic_neutral_valence_G0_zero","atoms":atoms.iter().map(|a|json!({"species":a.species,"fractional":a.fractional_position})).collect::<Vec<_>>(),"datasets":species.iter().map(|p|json!({"name":p["name"],"sha256":p["sha256"],"functional":p["functional"],"valence":p["z_valence"]})).collect::<Vec<_>>()});
+    if let Some(symmetry) = config.symmetry_json().map_err(|e| error(1, e))? {
+        model_record["symmetry"] = symmetry;
+    }
     let model_digest = digest(&model_record);
     let density_bits: Vec<u8> = channels
         .iter()
@@ -187,7 +198,10 @@ pub(super) fn execute(
         )
         .map_err(|e| error(5, e))?;
     }
-    let mut result = json!({"schema_version":2,"output_profile":"collinear_fixed_v1","preflight":preflight,"tool":{"name":"dft-cli","version":env!("CARGO_PKG_VERSION"),"git_commit":env!("DFT_GIT_COMMIT")},"input_sha256":sha256(input_bytes),"species":species,"xc":opts.functional.name(),"scf":options_json(&opts),"spin":spin,"state_contracts":extension,"identity":{"model":model_record,"basis":basis_record},"provenance":{"initial_moment_seed":r.sector.initial_moment_seed,"seed_role":"provenance_only_uniform_fixed_sector_initialization"},"energies":energy_json(&r.energy),"total_energy":{"ha":r.energy.total_hartree(),"ry":2.0*r.energy.total_hartree()},"band_data":{"axes":["spin","k","band"],"shape":[2,nk,nb],"ordering":"C_band_fastest","eigenvalues_ha":eigenvalues,"residuals_ha":residuals,"occupations_electrons":values},"convergence":{"converged":r.converged,"iterations":r.history.len(),"certificate":certificate,"history":history},"density":{"shape":[2,prepared.grid.dims()[0],prepared.grid.dims()[1],prepared.grid.dims()[2]],"ordering":"C_spin_xyz_z_fastest","units":"electrons/Bohr^3","channel_values":channels.iter().map(|n|n.iter().copied().collect::<Vec<_>>()).collect::<Vec<_>>(),"cube_atoms_included":cube_atoms.is_some()},"limitations":["fixed moment sector, not unconstrained magnetic ground state","full meshes only; no spin restart, runtime control or band/DOS postprocessing"]});
+    let mut result = json!({"schema_version":2,"output_profile":"collinear_fixed_v1","preflight":preflight,"tool":{"name":"dft-cli","version":env!("CARGO_PKG_VERSION"),"git_commit":env!("DFT_GIT_COMMIT")},"input_sha256":sha256(input_bytes),"species":species,"xc":opts.functional.name(),"scf":options_json(&opts),"spin":spin,"state_contracts":extension,"identity":{"model":model_record,"basis":basis_record},"provenance":{"initial_moment_seed":r.sector.initial_moment_seed,"seed_role":"provenance_only_uniform_fixed_sector_initialization"},"energies":energy_json(&r.energy),"total_energy":{"ha":r.energy.total_hartree(),"ry":2.0*r.energy.total_hartree()},"band_data":{"axes":["spin","k","band"],"shape":[2,nk,nb],"ordering":"C_band_fastest","eigenvalues_ha":eigenvalues,"residuals_ha":residuals,"occupations_electrons":values},"convergence":{"converged":r.converged,"iterations":r.history.len(),"certificate":certificate,"history":history},"density":{"shape":[2,prepared.grid.dims()[0],prepared.grid.dims()[1],prepared.grid.dims()[2]],"ordering":"C_spin_xyz_z_fastest","units":"electrons/Bohr^3","channel_values":channels.iter().map(|n|n.iter().copied().collect::<Vec<_>>()).collect::<Vec<_>>(),"cube_atoms_included":cube_atoms.is_some()},"limitations":["fixed moment sector, not unconstrained magnetic ground state","no spin restart, runtime control or band/DOS postprocessing"]});
+    if let Some(symmetry) = config.symmetry_json().map_err(|e| error(1, e))? {
+        result["symmetry"] = symmetry;
+    }
     if let Some(report) = &r.spectral_completeness {
         result["spectral_completeness"] = super::spectral_json(report);
     }

@@ -1,0 +1,8 @@
+case      wall med (s)  engine (s)  diag (s) iters  dE vs base (Ha)    density  speedup
+gamma            0.079       0.074     0.025    10         0.00e+00  identical    7.16x
+k222s            0.118       0.113     0.056    10         0.00e+00  identical    2.75x
+k222             0.170       0.164     0.099    10         0.00e+00  identical    3.63x
+k444s            0.473       0.466     0.334    10         0.00e+00  identical    5.04x
+si8              1.248       1.240     1.000    15         0.00e+00  identical    1.97x
+recorded tests/reference/symmetry/legacy-t12.json
+OK

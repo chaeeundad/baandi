@@ -910,6 +910,9 @@ impl ScfSession {
     ) -> Result<(), crate::checkpoint::Rejection> {
         use crate::checkpoint::Rejection as R;
         model.validate()?;
+        if self.problem.symmetry.is_some() {
+            return Err(R::Boundary);
+        }
         // Checkpoint v1 has no cumulative spectral audit record. Fail closed
         // rather than silently dropping its policy or retry history.
         if self.problem.options.spectral_guard == crate::SpectralGuard::Final {

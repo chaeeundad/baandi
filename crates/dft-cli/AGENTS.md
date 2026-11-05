@@ -34,3 +34,10 @@ only in config. Unknown schemes, competing widths, finite-T v1 checkpoints and
 unsupported output/runtime options reject. Model identity excludes spontaneous
 moment and seeds; state identity includes the actual occupations, mu and entropy.
 See `docs/validation/occupations.md` for caps and reproduction commands.
+
+## MF11 crystal symmetry (P19A)
+
+`[symmetry]` defaults off. Auto selects a mesh subgroup and compatible FFT dimensions, records multiplicities/operations/orbits and model identity, and rejects unsupported model terms. Preserve legacy output and arithmetic when off.
+
+See `docs/validation/symmetry.md` and `tests/reference/symmetry/` for commands,
+observed failures and validation limits. No QE symmetry-on oracle is available.

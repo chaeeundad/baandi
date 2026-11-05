@@ -1,0 +1,1665 @@
+{
+  "kind": "Mac observation, no dev08 acceptance",
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
+  "load_before": [
+    1.876953125,
+    3.22705078125,
+    2.90087890625
+  ],
+  "binary_sha256": "bcc7c217007069b4cb0826be09421beb38d2c9a72f97c8ad01718c7f8855c3ba",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "inputs": {
+    "full": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nfft_grid=[32,32,32]\nkgrid = [4, 4, 4]\nkshift = [0.5, 0.5, 0.5]\n\nktime_reversal = false\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-12\neigen_tolerance = 1e-11\ndensity_residual_tolerance = 1e-11\n\n[symmetry]\nmode=\"off\"\n",
+    "time_reversal": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nfft_grid=[32,32,32]\nkgrid = [4, 4, 4]\nkshift = [0.5, 0.5, 0.5]\n\nktime_reversal = true\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-12\neigen_tolerance = 1e-11\ndensity_residual_tolerance = 1e-11\n\n[symmetry]\nmode=\"off\"\n",
+    "crystal": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nfft_grid=[32,32,32]\nkgrid = [4, 4, 4]\nkshift = [0.5, 0.5, 0.5]\n\nktime_reversal = true\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-12\neigen_tolerance = 1e-11\ndensity_residual_tolerance = 1e-11\n\n[symmetry]\nmode=\"auto\"\n"
+  },
+  "cases": {
+    "full": [
+      {
+        "wall_s": 6.991090166999999,
+        "engine_s": 6.579633459,
+        "energy_ha": -7.925976134331547,
+        "iterations": 14,
+        "operator_applications": 25946,
+        "certificate_applications": 1962,
+        "irreducible_k_count": 64,
+        "density_sha256": "ec215d1cb827d06b3fdd26be1fc5cfd1dec38a545fe3f45ae756989d4b838410"
+      },
+      {
+        "wall_s": 6.606304917000001,
+        "engine_s": 6.596352875,
+        "energy_ha": -7.925976134331547,
+        "iterations": 14,
+        "operator_applications": 25946,
+        "certificate_applications": 1962,
+        "irreducible_k_count": 64,
+        "density_sha256": "ec215d1cb827d06b3fdd26be1fc5cfd1dec38a545fe3f45ae756989d4b838410"
+      },
+      {
+        "wall_s": 6.647655624999999,
+        "engine_s": 6.63734875,
+        "energy_ha": -7.925976134331547,
+        "iterations": 14,
+        "operator_applications": 25946,
+        "certificate_applications": 1962,
+        "irreducible_k_count": 64,
+        "density_sha256": "ec215d1cb827d06b3fdd26be1fc5cfd1dec38a545fe3f45ae756989d4b838410"
+      }
+    ],
+    "time_reversal": [
+      {
+        "wall_s": 3.319574167,
+        "engine_s": 3.311255542,
+        "energy_ha": -7.9259761343315365,
+        "iterations": 14,
+        "operator_applications": 12973,
+        "certificate_applications": 981,
+        "irreducible_k_count": 32,
+        "density_sha256": "93bd7211867a45dbb17a5a389d7cb1e2b1dbf26ee20ded220e33962ebd0c380f"
+      },
+      {
+        "wall_s": 3.327696416,
+        "engine_s": 3.319934875,
+        "energy_ha": -7.9259761343315365,
+        "iterations": 14,
+        "operator_applications": 12973,
+        "certificate_applications": 981,
+        "irreducible_k_count": 32,
+        "density_sha256": "93bd7211867a45dbb17a5a389d7cb1e2b1dbf26ee20ded220e33962ebd0c380f"
+      },
+      {
+        "wall_s": 3.3527918330000013,
+        "engine_s": 3.3422317489999998,
+        "energy_ha": -7.9259761343315365,
+        "iterations": 14,
+        "operator_applications": 12973,
+        "certificate_applications": 981,
+        "irreducible_k_count": 32,
+        "density_sha256": "93bd7211867a45dbb17a5a389d7cb1e2b1dbf26ee20ded220e33962ebd0c380f"
+      }
+    ],
+    "crystal": [
+      {
+        "wall_s": 1.106044584000001,
+        "engine_s": 1.087475959,
+        "energy_ha": -7.925976134331535,
+        "iterations": 14,
+        "operator_applications": 4040,
+        "certificate_applications": 307,
+        "irreducible_k_count": 10,
+        "density_sha256": "2c0d2cfd6869c7e9f0157063cf8da6bcf27de5c5db68260adfa15f462b487d51"
+      },
+      {
+        "wall_s": 1.1057433340000014,
+        "engine_s": 1.086912917,
+        "energy_ha": -7.925976134331535,
+        "iterations": 14,
+        "operator_applications": 4040,
+        "certificate_applications": 307,
+        "irreducible_k_count": 10,
+        "density_sha256": "2c0d2cfd6869c7e9f0157063cf8da6bcf27de5c5db68260adfa15f462b487d51"
+      },
+      {
+        "wall_s": 1.110148916,
+        "engine_s": 1.091386459,
+        "energy_ha": -7.925976134331535,
+        "iterations": 14,
+        "operator_applications": 4040,
+        "certificate_applications": 307,
+        "irreducible_k_count": 10,
+        "density_sha256": "2c0d2cfd6869c7e9f0157063cf8da6bcf27de5c5db68260adfa15f462b487d51"
+      }
+    ]
+  },
+  "symmetry": {
+    "full_k_count": 64,
+    "irreducible_k_count": 10,
+    "magnetic_policy": "identity spin only; spin swap and magnetic antiunitary operations disabled without model-invariance proof",
+    "mode": "auto",
+    "operations": [
+      {
+        "antiunitary": false,
+        "atom_permutation": [
+          1,
+          0
+        ],
+        "rotation": [
+          [
+            -1,
+            0,
+            0
+          ],
+          [
+            0,
+            -1,
+            0
+          ],
+          [
+            0,
+            0,
+            -1
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.25,
+          0.25,
+          0.25
+        ]
+      },
+      {
+        "antiunitary": false,
+        "atom_permutation": [
+          1,
+          0
+        ],
+        "rotation": [
+          [
+            -1,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            -1
+          ],
+          [
+            0,
+            -1,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.25,
+          0.25,
+          0.25
+        ]
+      },
+      {
+        "antiunitary": false,
+        "atom_permutation": [
+          1,
+          0
+        ],
+        "rotation": [
+          [
+            0,
+            -1,
+            0
+          ],
+          [
+            -1,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            -1
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.25,
+          0.25,
+          0.25
+        ]
+      },
+      {
+        "antiunitary": false,
+        "atom_permutation": [
+          1,
+          0
+        ],
+        "rotation": [
+          [
+            0,
+            -1,
+            0
+          ],
+          [
+            0,
+            0,
+            -1
+          ],
+          [
+            -1,
+            0,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.25,
+          0.25,
+          0.25
+        ]
+      },
+      {
+        "antiunitary": false,
+        "atom_permutation": [
+          1,
+          0
+        ],
+        "rotation": [
+          [
+            0,
+            0,
+            -1
+          ],
+          [
+            -1,
+            0,
+            0
+          ],
+          [
+            0,
+            -1,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.25,
+          0.25,
+          0.25
+        ]
+      },
+      {
+        "antiunitary": false,
+        "atom_permutation": [
+          1,
+          0
+        ],
+        "rotation": [
+          [
+            0,
+            0,
+            -1
+          ],
+          [
+            0,
+            -1,
+            0
+          ],
+          [
+            -1,
+            0,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.25,
+          0.25,
+          0.25
+        ]
+      },
+      {
+        "antiunitary": false,
+        "atom_permutation": [
+          0,
+          1
+        ],
+        "rotation": [
+          [
+            0,
+            0,
+            1
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "antiunitary": false,
+        "atom_permutation": [
+          0,
+          1
+        ],
+        "rotation": [
+          [
+            0,
+            0,
+            1
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "antiunitary": false,
+        "atom_permutation": [
+          0,
+          1
+        ],
+        "rotation": [
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ],
+          [
+            1,
+            0,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "antiunitary": false,
+        "atom_permutation": [
+          0,
+          1
+        ],
+        "rotation": [
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "antiunitary": false,
+        "atom_permutation": [
+          0,
+          1
+        ],
+        "rotation": [
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "antiunitary": false,
+        "atom_permutation": [
+          0,
+          1
+        ],
+        "rotation": [
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "antiunitary": true,
+        "atom_permutation": [
+          1,
+          0
+        ],
+        "rotation": [
+          [
+            -1,
+            0,
+            0
+          ],
+          [
+            0,
+            -1,
+            0
+          ],
+          [
+            0,
+            0,
+            -1
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.25,
+          0.25,
+          0.25
+        ]
+      },
+      {
+        "antiunitary": true,
+        "atom_permutation": [
+          1,
+          0
+        ],
+        "rotation": [
+          [
+            -1,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            -1
+          ],
+          [
+            0,
+            -1,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.25,
+          0.25,
+          0.25
+        ]
+      },
+      {
+        "antiunitary": true,
+        "atom_permutation": [
+          1,
+          0
+        ],
+        "rotation": [
+          [
+            0,
+            -1,
+            0
+          ],
+          [
+            -1,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            -1
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.25,
+          0.25,
+          0.25
+        ]
+      },
+      {
+        "antiunitary": true,
+        "atom_permutation": [
+          1,
+          0
+        ],
+        "rotation": [
+          [
+            0,
+            -1,
+            0
+          ],
+          [
+            0,
+            0,
+            -1
+          ],
+          [
+            -1,
+            0,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.25,
+          0.25,
+          0.25
+        ]
+      },
+      {
+        "antiunitary": true,
+        "atom_permutation": [
+          1,
+          0
+        ],
+        "rotation": [
+          [
+            0,
+            0,
+            -1
+          ],
+          [
+            -1,
+            0,
+            0
+          ],
+          [
+            0,
+            -1,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.25,
+          0.25,
+          0.25
+        ]
+      },
+      {
+        "antiunitary": true,
+        "atom_permutation": [
+          1,
+          0
+        ],
+        "rotation": [
+          [
+            0,
+            0,
+            -1
+          ],
+          [
+            0,
+            -1,
+            0
+          ],
+          [
+            -1,
+            0,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.25,
+          0.25,
+          0.25
+        ]
+      },
+      {
+        "antiunitary": true,
+        "atom_permutation": [
+          0,
+          1
+        ],
+        "rotation": [
+          [
+            0,
+            0,
+            1
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "antiunitary": true,
+        "atom_permutation": [
+          0,
+          1
+        ],
+        "rotation": [
+          [
+            0,
+            0,
+            1
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "antiunitary": true,
+        "atom_permutation": [
+          0,
+          1
+        ],
+        "rotation": [
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ],
+          [
+            1,
+            0,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "antiunitary": true,
+        "atom_permutation": [
+          0,
+          1
+        ],
+        "rotation": [
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "antiunitary": true,
+        "atom_permutation": [
+          0,
+          1
+        ],
+        "rotation": [
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ],
+          [
+            0,
+            1,
+            0
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "antiunitary": true,
+        "atom_permutation": [
+          0,
+          1
+        ],
+        "rotation": [
+          [
+            1,
+            0,
+            0
+          ],
+          [
+            0,
+            1,
+            0
+          ],
+          [
+            0,
+            0,
+            1
+          ]
+        ],
+        "spin_action": "identity",
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    ],
+    "operations_count": 12,
+    "orbit_map": [
+      {
+        "full_id": 0,
+        "multiplicity": 2,
+        "operation_id": 6,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 0
+      },
+      {
+        "full_id": 1,
+        "multiplicity": 6,
+        "operation_id": 9,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 1
+      },
+      {
+        "full_id": 2,
+        "multiplicity": 6,
+        "operation_id": 9,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 2
+      },
+      {
+        "full_id": 3,
+        "multiplicity": 6,
+        "operation_id": 9,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 3
+      },
+      {
+        "full_id": 4,
+        "multiplicity": 6,
+        "operation_id": 8,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 1
+      },
+      {
+        "full_id": 5,
+        "multiplicity": 6,
+        "operation_id": 10,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 4
+      },
+      {
+        "full_id": 6,
+        "multiplicity": 12,
+        "operation_id": 11,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 5
+      },
+      {
+        "full_id": 7,
+        "multiplicity": 12,
+        "operation_id": 11,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 6
+      },
+      {
+        "full_id": 8,
+        "multiplicity": 6,
+        "operation_id": 8,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 2
+      },
+      {
+        "full_id": 9,
+        "multiplicity": 12,
+        "operation_id": 10,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 5
+      },
+      {
+        "full_id": 10,
+        "multiplicity": 6,
+        "operation_id": 10,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 7
+      },
+      {
+        "full_id": 11,
+        "multiplicity": 12,
+        "operation_id": 5,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 6
+      },
+      {
+        "full_id": 12,
+        "multiplicity": 6,
+        "operation_id": 8,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 3
+      },
+      {
+        "full_id": 13,
+        "multiplicity": 12,
+        "operation_id": 10,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 6
+      },
+      {
+        "full_id": 14,
+        "multiplicity": 12,
+        "operation_id": 4,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 6
+      },
+      {
+        "full_id": 15,
+        "multiplicity": 6,
+        "operation_id": 4,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 3
+      },
+      {
+        "full_id": 16,
+        "multiplicity": 6,
+        "operation_id": 6,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 1
+      },
+      {
+        "full_id": 17,
+        "multiplicity": 6,
+        "operation_id": 7,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 4
+      },
+      {
+        "full_id": 18,
+        "multiplicity": 12,
+        "operation_id": 9,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 5
+      },
+      {
+        "full_id": 19,
+        "multiplicity": 12,
+        "operation_id": 9,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 6
+      },
+      {
+        "full_id": 20,
+        "multiplicity": 6,
+        "operation_id": 6,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 4
+      },
+      {
+        "full_id": 21,
+        "multiplicity": 2,
+        "operation_id": 6,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 8
+      },
+      {
+        "full_id": 22,
+        "multiplicity": 6,
+        "operation_id": 9,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 9
+      },
+      {
+        "full_id": 23,
+        "multiplicity": 6,
+        "operation_id": 3,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 7
+      },
+      {
+        "full_id": 24,
+        "multiplicity": 12,
+        "operation_id": 8,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 5
+      },
+      {
+        "full_id": 25,
+        "multiplicity": 6,
+        "operation_id": 8,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 9
+      },
+      {
+        "full_id": 26,
+        "multiplicity": 6,
+        "operation_id": 4,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 9
+      },
+      {
+        "full_id": 27,
+        "multiplicity": 12,
+        "operation_id": 5,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 5
+      },
+      {
+        "full_id": 28,
+        "multiplicity": 12,
+        "operation_id": 8,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 6
+      },
+      {
+        "full_id": 29,
+        "multiplicity": 6,
+        "operation_id": 2,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 7
+      },
+      {
+        "full_id": 30,
+        "multiplicity": 12,
+        "operation_id": 4,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 5
+      },
+      {
+        "full_id": 31,
+        "multiplicity": 6,
+        "operation_id": 4,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 2
+      },
+      {
+        "full_id": 32,
+        "multiplicity": 6,
+        "operation_id": 6,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 2
+      },
+      {
+        "full_id": 33,
+        "multiplicity": 12,
+        "operation_id": 7,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 5
+      },
+      {
+        "full_id": 34,
+        "multiplicity": 6,
+        "operation_id": 7,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 7
+      },
+      {
+        "full_id": 35,
+        "multiplicity": 12,
+        "operation_id": 3,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 6
+      },
+      {
+        "full_id": 36,
+        "multiplicity": 12,
+        "operation_id": 6,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 5
+      },
+      {
+        "full_id": 37,
+        "multiplicity": 6,
+        "operation_id": 6,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 9
+      },
+      {
+        "full_id": 38,
+        "multiplicity": 6,
+        "operation_id": 1,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 9
+      },
+      {
+        "full_id": 39,
+        "multiplicity": 12,
+        "operation_id": 3,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 5
+      },
+      {
+        "full_id": 40,
+        "multiplicity": 6,
+        "operation_id": 6,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 7
+      },
+      {
+        "full_id": 41,
+        "multiplicity": 6,
+        "operation_id": 0,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 9
+      },
+      {
+        "full_id": 42,
+        "multiplicity": 2,
+        "operation_id": 0,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 8
+      },
+      {
+        "full_id": 43,
+        "multiplicity": 6,
+        "operation_id": 3,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 4
+      },
+      {
+        "full_id": 44,
+        "multiplicity": 12,
+        "operation_id": 2,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 6
+      },
+      {
+        "full_id": 45,
+        "multiplicity": 12,
+        "operation_id": 2,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 5
+      },
+      {
+        "full_id": 46,
+        "multiplicity": 6,
+        "operation_id": 2,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 4
+      },
+      {
+        "full_id": 47,
+        "multiplicity": 6,
+        "operation_id": 4,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 1
+      },
+      {
+        "full_id": 48,
+        "multiplicity": 6,
+        "operation_id": 6,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 3
+      },
+      {
+        "full_id": 49,
+        "multiplicity": 12,
+        "operation_id": 7,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 6
+      },
+      {
+        "full_id": 50,
+        "multiplicity": 12,
+        "operation_id": 1,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 6
+      },
+      {
+        "full_id": 51,
+        "multiplicity": 6,
+        "operation_id": 1,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 3
+      },
+      {
+        "full_id": 52,
+        "multiplicity": 12,
+        "operation_id": 6,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 6
+      },
+      {
+        "full_id": 53,
+        "multiplicity": 6,
+        "operation_id": 0,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 7
+      },
+      {
+        "full_id": 54,
+        "multiplicity": 12,
+        "operation_id": 1,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 5
+      },
+      {
+        "full_id": 55,
+        "multiplicity": 6,
+        "operation_id": 1,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 2
+      },
+      {
+        "full_id": 56,
+        "multiplicity": 12,
+        "operation_id": 0,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 6
+      },
+      {
+        "full_id": 57,
+        "multiplicity": 12,
+        "operation_id": 0,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 5
+      },
+      {
+        "full_id": 58,
+        "multiplicity": 6,
+        "operation_id": 0,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 4
+      },
+      {
+        "full_id": 59,
+        "multiplicity": 6,
+        "operation_id": 1,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 1
+      },
+      {
+        "full_id": 60,
+        "multiplicity": 6,
+        "operation_id": 0,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 3
+      },
+      {
+        "full_id": 61,
+        "multiplicity": 6,
+        "operation_id": 0,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 2
+      },
+      {
+        "full_id": 62,
+        "multiplicity": 6,
+        "operation_id": 0,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 1
+      },
+      {
+        "full_id": 63,
+        "multiplicity": 2,
+        "operation_id": 0,
+        "reciprocal_shift": [
+          0,
+          0,
+          0
+        ],
+        "representative_id": 0
+      }
+    ],
+    "phase_convention": "exp(-i(k+G).tau), physical reciprocal vectors; fractional dot includes 2*pi",
+    "points": [
+      {
+        "fractional": [
+          0.125,
+          0.125,
+          0.125
+        ],
+        "multiplicity": 2,
+        "weight": 0.03125
+      },
+      {
+        "fractional": [
+          0.125,
+          0.125,
+          0.375
+        ],
+        "multiplicity": 6,
+        "weight": 0.09375
+      },
+      {
+        "fractional": [
+          0.125,
+          0.125,
+          -0.375
+        ],
+        "multiplicity": 6,
+        "weight": 0.09375
+      },
+      {
+        "fractional": [
+          0.125,
+          0.125,
+          -0.125
+        ],
+        "multiplicity": 6,
+        "weight": 0.09375
+      },
+      {
+        "fractional": [
+          0.125,
+          0.375,
+          0.375
+        ],
+        "multiplicity": 6,
+        "weight": 0.09375
+      },
+      {
+        "fractional": [
+          0.125,
+          0.375,
+          -0.375
+        ],
+        "multiplicity": 12,
+        "weight": 0.1875
+      },
+      {
+        "fractional": [
+          0.125,
+          0.375,
+          -0.125
+        ],
+        "multiplicity": 12,
+        "weight": 0.1875
+      },
+      {
+        "fractional": [
+          0.125,
+          -0.375,
+          -0.375
+        ],
+        "multiplicity": 6,
+        "weight": 0.09375
+      },
+      {
+        "fractional": [
+          0.375,
+          0.375,
+          0.375
+        ],
+        "multiplicity": 2,
+        "weight": 0.03125
+      },
+      {
+        "fractional": [
+          0.375,
+          0.375,
+          -0.375
+        ],
+        "multiplicity": 6,
+        "weight": 0.09375
+      }
+    ],
+    "tolerance_bohr": 1e-07
+  },
+  "comparison": {
+    "full": {
+      "delta_energy_ha": 0.0,
+      "density_distance_bohr_minus_3_over_2": 0.0,
+      "wall_median_s": 6.647655624999999
+    },
+    "time_reversal": {
+      "delta_energy_ha": 1.0658141036401503e-14,
+      "density_distance_bohr_minus_3_over_2": 7.109784131684816e-15,
+      "wall_median_s": 3.327696416
+    },
+    "crystal": {
+      "delta_energy_ha": 1.2434497875801753e-14,
+      "density_distance_bohr_minus_3_over_2": 4.665499908802415e-16,
+      "wall_median_s": 1.106044584000001
+    }
+  },
+  "load_after": [
+    1.93017578125,
+    3.10302734375,
+    2.869140625
+  ]
+}

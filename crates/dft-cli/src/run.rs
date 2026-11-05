@@ -58,7 +58,11 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
         functional: config.xc.functional.engine(),
         allow_functional_override: config.xc.allow_functional_override,
         cutoff_hartree: config.basis.ecutwfc_ry / 2.,
-        grid_override: config.basis.fft_grid,
+        grid_override: if config.symmetry.mode == crate::config::SymmetryMode::Auto {
+            Some(config.prepare().map_err(|e| error(1, e))?.grid.dims())
+        } else {
+            config.basis.fft_grid
+        },
         ..ScfOptions::default()
     };
     if let Some(s) = &config.scf {
@@ -279,6 +283,12 @@ pub fn execute_mode(
             "spin.execution: runtime control is not spin-aware; use Classic execution",
         ));
     }
+    if config.symmetry.mode == crate::config::SymmetryMode::Auto && (mode.observe || mode.agent) {
+        return Err(error(
+            1,
+            "symmetry.execution: checkpoint identity does not carry symmetry yet; use Classic execution",
+        ));
+    }
     let preflight = crate::config::preflight::check(&config, input).map_err(|e| error(1, e))?;
     if mode.events.as_deref() == Some("-") {
         eprintln!("{}", preflight.summary);
@@ -359,7 +369,7 @@ pub fn execute_mode(
         .iter()
         .map(|(label, potential)| SpeciesPotential { label, potential })
         .collect();
-    let points = config.basis.resolve_kpoints().map_err(|e| error(1, e))?;
+    let points = config.resolved_points().map_err(|e| error(1, e))?;
     let electron_target: f64 = atoms
         .iter()
         .map(|a| {
@@ -391,7 +401,8 @@ pub fn execute_mode(
         .map_err(|e| error(1, e))?
     {
         return spin_run::execute(
-            &prepared, opts, &atoms, &refs, &points, sector, &out, preflight, species, &bytes,
+            &config, &prepared, opts, &atoms, &refs, &points, sector, &out, preflight, species,
+            &bytes,
         );
     }
     let mut problem = if config.basis.legacy_gamma() {
@@ -409,6 +420,15 @@ pub fn execute_mode(
         )
     }
     .map_err(engine_error)?;
+    if config.symmetry.mode == crate::config::SymmetryMode::Auto {
+        problem
+            .enable_symmetry(
+                &config.symmetry_full_mesh().map_err(|e| error(1, e))?,
+                config.symmetry.tolerance_bohr,
+                config.basis.time_reversal(),
+            )
+            .map_err(engine_error)?;
+    }
     let density_floor = config
         .xc
         .density_floor
@@ -525,6 +545,9 @@ pub fn execute_mode(
         result["spectral_completeness"] = spectral_json(report);
     }
 
+    if let Some(symmetry) = config.symmetry_json().map_err(|e| error(1, e))? {
+        result["symmetry"] = symmetry;
+    }
     result["band_accuracy"] = json!(r.k_points[0].solution.residuals.iter()
         .zip(&r.k_points[0].solution.buffer).zip(&r.k_points[0].solution.converged)
         .map(|((&residual, &buffer), &converged)| json!({"residual_ha":residual,"buffer":buffer,"converged":converged}))

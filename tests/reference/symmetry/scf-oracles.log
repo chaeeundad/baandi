@@ -1,0 +1,30 @@
+   Compiling dft-physics v0.1.0 (/Users/mino/Develop/rust-dft-wt/P19A-SYMMETRY/crates/dft-physics)
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P19A-SYMMETRY/crates/dft-engine)
+    Finished `release` profile [optimized] target(s) in 2.50s
+     Running tests/symmetry.rs (target/release/deps/symmetry-0f2c8a12cfd2f442)
+
+running 5 tests
+test diamond_and_cubic_si ... FFT shape=[32, 32, 32]
+atoms=2 full=64 irreducible=8 dE=1.4210854715202004e-14 Ha dn=7.1647668774096543e-13 Bohr^-3/2
+FFT shape=[32, 32, 32]
+atoms=2 full=64 irreducible=10 dE=3.5527136788005009e-15 Ha dn=4.9572998718915160e-15 Bohr^-3/2
+FFT shape=[36, 36, 36]
+atoms=8 full=8 irreducible=1 dE=5.3290705182007514e-14 Ha dn=1.5836589940202198e-12 Bohr^-3/2
+ok
+test rejects_noninvariant_density_and_mismatched_mesh ... ok
+test rocksalt_mgo ... FFT shape=[24, 24, 24]
+atoms=2 full=8 irreducible=2 dE=5.6843418860808015e-14 Ha dn=3.2628991613279542e-16 Bohr^-3/2
+ok
+test spin_and_fermi_dirac ... spin: full=8 reduced=1 dE=5.551115123125783e-17 Ha dn=5.3602772020624745e-17 Bohr^-3/2 dM=4.440892098500626e-16 mu_B
+FD: dE=1.1102230246251565e-15 Ha dF=1.1102230246251565e-15 Ha dn=7.87755885128197e-16 Bohr^-3/2
+ok
+test synthetic_shapes ... FFT shape=[8, 8, 8]
+atoms=1 full=8 irreducible=1 dE=1.5543122344752192e-15 Ha dn=2.4261367266594467e-13 Bohr^-3/2
+FFT shape=[8, 8, 20]
+atoms=1 full=8 irreducible=1 dE=5.5511151231257827e-16 Ha dn=3.4819366776078743e-16 Bohr^-3/2
+FFT shape=[8, 9, 9]
+atoms=1 full=8 irreducible=4 dE=6.6613381477509392e-16 Ha dn=1.5068652634364039e-14 Bohr^-3/2
+ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 40.83s
+

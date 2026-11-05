@@ -1,0 +1,114 @@
+{
+  "task_id": "P19A-SYMMETRY",
+  "caps": {
+    "energy_ha": 1e-10,
+    "density_distance_bohr_minus_3_over_2": 1e-09,
+    "moment_mu_b": 1e-09,
+    "weight_sum_error": 1e-14
+  },
+  "scf_oracles": [
+    {
+      "case": "si2-unshifted",
+      "atoms": 2,
+      "full_k_count": 64,
+      "irreducible_k_count": 8,
+      "delta_energy_ha": 1.4210854715202004e-14,
+      "density_distance_bohr_minus_3_over_2": 7.164766877409654e-13,
+      "reduced_threads_1_4_bit_identical": true
+    },
+    {
+      "case": "si2-shifted",
+      "atoms": 2,
+      "full_k_count": 64,
+      "irreducible_k_count": 10,
+      "delta_energy_ha": 3.552713678800501e-15,
+      "density_distance_bohr_minus_3_over_2": 4.957299871891516e-15,
+      "reduced_threads_1_4_bit_identical": true
+    },
+    {
+      "case": "si8-shifted",
+      "atoms": 8,
+      "full_k_count": 8,
+      "irreducible_k_count": 1,
+      "delta_energy_ha": 5.3290705182007514e-14,
+      "density_distance_bohr_minus_3_over_2": 1.5836589940202198e-12,
+      "reduced_threads_1_4_bit_identical": true
+    },
+    {
+      "case": "mgo-shifted",
+      "atoms": 2,
+      "full_k_count": 8,
+      "irreducible_k_count": 2,
+      "delta_energy_ha": 5.684341886080802e-14,
+      "density_distance_bohr_minus_3_over_2": 3.262899161327954e-16,
+      "reduced_threads_1_4_bit_identical": true
+    },
+    {
+      "case": "synthetic-cubic",
+      "atoms": 1,
+      "full_k_count": 8,
+      "irreducible_k_count": 1,
+      "delta_energy_ha": 1.5543122344752192e-15,
+      "density_distance_bohr_minus_3_over_2": 2.4261367266594467e-13,
+      "reduced_threads_1_4_bit_identical": true
+    },
+    {
+      "case": "synthetic-slab",
+      "atoms": 1,
+      "full_k_count": 8,
+      "irreducible_k_count": 1,
+      "delta_energy_ha": 5.551115123125783e-16,
+      "density_distance_bohr_minus_3_over_2": 3.4819366776078743e-16,
+      "reduced_threads_1_4_bit_identical": true
+    },
+    {
+      "case": "synthetic-skew",
+      "atoms": 1,
+      "full_k_count": 8,
+      "irreducible_k_count": 4,
+      "delta_energy_ha": 6.661338147750939e-16,
+      "density_distance_bohr_minus_3_over_2": 1.506865263436404e-14,
+      "reduced_threads_1_4_bit_identical": true
+    }
+  ],
+  "spin": {
+    "full_k_count": 8,
+    "irreducible_k_count": 1,
+    "delta_energy_ha": 5.551115123125783e-17,
+    "density_distance_bohr_minus_3_over_2": 5.3602772020624745e-17,
+    "delta_moment_mu_b": 4.440892098500626e-16
+  },
+  "fermi_dirac": {
+    "delta_energy_ha": 1.1102230246251565e-15,
+    "delta_free_energy_ha": 1.1102230246251565e-15,
+    "density_distance_bohr_minus_3_over_2": 7.87755885128197e-16
+  },
+  "density_phase_max_error_electrons_bohr3": 2.220446049250313e-15,
+  "legacy": {
+    "cases": [
+      "gamma",
+      "k222s",
+      "k222",
+      "k444s",
+      "si8"
+    ],
+    "threads": [
+      1,
+      2,
+      4,
+      8,
+      12
+    ],
+    "comparisons": 25,
+    "energy_delta_ha": 0.0,
+    "density_bit_identical": true
+  },
+  "sources": [
+    "scf-oracles.log",
+    "density-oracle.log",
+    "geometry-oracles.log",
+    "legacy-gates.json",
+    "mac-k444s.json",
+    "provenance.json"
+  ]
+}

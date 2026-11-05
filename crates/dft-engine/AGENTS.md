@@ -258,3 +258,10 @@ occupation view. Every retained band is strict and the fresh certificate repeats
 the entire map. Direct and band E must use identical fractional weights and
 subtract the same TS once. Fixed branches retain their arithmetic. See
 `docs/validation/occupations.md` for evidence and limitations.
+
+## MF11 crystal symmetry (P19A)
+
+`enable_symmetry` re-detects the group against stored atoms, checks exact reduced sampling and compatible FFT quadrature, and installs the prepared density projector. Both scalar and spin density builds and fresh certificates use it. Noninvariant input densities and checkpoint identity without symmetry reject.
+
+See `docs/validation/symmetry.md` and `tests/reference/symmetry/` for commands,
+observed failures and validation limits. No QE symmetry-on oracle is available.

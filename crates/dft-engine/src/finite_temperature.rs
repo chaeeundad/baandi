@@ -175,6 +175,15 @@ impl FiniteTProblem {
             occupations,
         })
     }
+    pub fn enable_symmetry(
+        &mut self,
+        full: &[KPoint],
+        tolerance_bohr: f64,
+        time_reversal: bool,
+    ) -> Result<(), ScfError> {
+        self.problem
+            .enable_symmetry(full, tolerance_bohr, time_reversal)
+    }
     pub fn run(mut self) -> Result<FiniteTResult, ScfError> {
         let p = &mut self.problem;
         let opts = p.options.clone();

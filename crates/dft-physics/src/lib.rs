@@ -7,6 +7,7 @@ pub mod hamiltonian;
 pub mod hartree;
 pub mod kinetic;
 pub mod spin;
+pub mod symmetry;
 pub mod volumetric;
 pub mod xc;
 

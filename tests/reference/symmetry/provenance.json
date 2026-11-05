@@ -1,0 +1,68 @@
+{
+  "task_id": "P19A-SYMMETRY",
+  "baseline_commit": "05f4ca89670406941372bf1647548d97c446683c",
+  "upfs": {
+    "/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+    "/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Mg.upf": "15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14",
+    "/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/O.upf": "2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11"
+  },
+  "baseline_binary_sha256": "ae98067f2193cdfaacc69221c79407f77fb743c4a674fb7fa93c71ff1f71c8f9",
+  "commands": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_SI_UPF=/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex cargo test --release -p dft-engine --test symmetry -- --include-ignored --nocapture --test-threads=1",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 1 --baseline tests/reference/symmetry/legacy-baseline.json --require-identical --record tests/reference/symmetry/legacy-t1.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 2 --baseline tests/reference/symmetry/legacy-baseline.json --require-identical --record tests/reference/symmetry/legacy-t2.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 4 --baseline tests/reference/symmetry/legacy-baseline.json --require-identical --record tests/reference/symmetry/legacy-t4.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 8 --baseline tests/reference/symmetry/legacy-baseline.json --require-identical --record tests/reference/symmetry/legacy-t8.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 12 --baseline tests/reference/symmetry/legacy-baseline.json --require-identical --record tests/reference/symmetry/legacy-t12.json",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-geometry --test symmetry -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-physics --test symmetry -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-cli --test symmetry",
+      "exit_code": 0
+    }
+  ],
+  "limits": [
+    "External material tests establish finite-cutoff symmetry equivalence, not physical cutoff convergence.",
+    "Baseline binary predates integration: added geometry/physics modules were unused by production then.",
+    "Stored QE outputs have symmetry off; no new QE runs performed.",
+    "README generator and performance/dashboard artifacts are outside OWNED_FILES; owner update required."
+  ],
+  "final_binary_sha256": "e7727b3d960699421c632a01dc09a0c5bc3fb89987956c5cff37aac28fd00d75",
+  "source_sha256": {
+    "crates/dft-physics/src/symmetry.rs": "3d1e336218b0026800c0752bbb1ec2b1d1ea7bcad7d444f83684a97b975048cf",
+    "crates/dft-geometry/src/symmetry.rs": "8bb5a284116954e773a858748f87933f938148f435067a722015cfc096c5c511"
+  },
+  "timing_build_note": "Timing preceded only nonnumerical documentation/proof-label/Gamma-input validation edits; its distinct binary SHA-256 is in mac-k444s.json."
+}

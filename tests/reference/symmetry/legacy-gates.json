@@ -1,0 +1,22 @@
+[
+  {
+    "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 1 --baseline tests/reference/symmetry/legacy-baseline.json --require-identical --record tests/reference/symmetry/legacy-t1.json",
+    "exit_code": 0
+  },
+  {
+    "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 2 --baseline tests/reference/symmetry/legacy-baseline.json --require-identical --record tests/reference/symmetry/legacy-t2.json",
+    "exit_code": 0
+  },
+  {
+    "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 4 --baseline tests/reference/symmetry/legacy-baseline.json --require-identical --record tests/reference/symmetry/legacy-t4.json",
+    "exit_code": 0
+  },
+  {
+    "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 8 --baseline tests/reference/symmetry/legacy-baseline.json --require-identical --record tests/reference/symmetry/legacy-t8.json",
+    "exit_code": 0
+  },
+  {
+    "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 12 --baseline tests/reference/symmetry/legacy-baseline.json --require-identical --record tests/reference/symmetry/legacy-t12.json",
+    "exit_code": 0
+  }
+]

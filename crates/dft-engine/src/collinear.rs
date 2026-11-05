@@ -120,6 +120,19 @@ pub struct CollinearProblem {
     mixers: [Box<dyn MixerHistory>; 2],
 }
 impl CollinearProblem {
+    /// Spatial identity-spin operations only. Magnetic antiunitary operations
+    /// and spin swapping require a separate model-invariance proof.
+    pub fn enable_symmetry(
+        &mut self,
+        full: &[KPoint],
+        tolerance_bohr: f64,
+    ) -> Result<(), ScfError> {
+        for channel in &mut self.channels {
+            channel.enable_symmetry(full, tolerance_bohr, false)?;
+        }
+        Ok(())
+    }
+
     /// `points` must be a full quadrature: no magnetic/time-reversal reduction.
     /// Explicit sector; no search over moments or unconstrained ground-state claim.
     pub fn new(
@@ -251,6 +264,15 @@ impl CollinearProblem {
         output: &mut [Array3<f64>; 2],
         tolerance: f64,
     ) -> Result<EnergyAudit, ScfError> {
+        for (p, n) in self.channels.iter_mut().zip(density) {
+            if let Some(symmetry) = &mut p.symmetry
+                && !symmetry.check_invariant(n, &mut p.fft)?
+            {
+                return Err(ScfError::InvalidInput(
+                    "symmetry.density: spin channel breaks selected symmetry; use full mesh",
+                ));
+            }
+        }
         self.total.assign(&density[0]);
         self.total += &density[1];
         self.input_h.evaluate(&self.total)?;
@@ -363,6 +385,11 @@ impl CollinearProblem {
                     band_sum += weight * solution.eigenvalues[b];
                     eig_bound += weight * solution.residuals[b];
                 }
+            }
+        }
+        for (p, n) in self.channels.iter_mut().zip(output.iter_mut()) {
+            if let Some(symmetry) = &mut p.symmetry {
+                symmetry.apply(n, &mut p.fft)?;
             }
         }
         self.total.assign(&output[0]);

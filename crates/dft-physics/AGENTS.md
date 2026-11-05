@@ -76,3 +76,10 @@ spin/k/band layout and caller-owned output. Keep the independent tanh/binary
 entropy tests independent of the production stable-tail formula. Failed output
 buffers are not states. See `docs/validation/occupations.md` for the bracket,
 relative electron tolerance, sector endpoints and frozen oracle caps.
+
+## MF11 crystal symmetry (P19A)
+
+`symmetry::DensitySymmetrizer` prepares source indices, translation phases and persistent FFT buffers. Apply rho_sym(G)=mean exp(-2*pi*i*G.tau) rho(R^T G). Do not allocate inside application. The independent real-space field oracle must remain independent.
+
+See `docs/validation/symmetry.md` and `tests/reference/symmetry/` for commands,
+observed failures and validation limits. No QE symmetry-on oracle is available.

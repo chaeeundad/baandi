@@ -36,12 +36,88 @@ pub struct Config {
     pub pseudopotentials: BTreeMap<String, PathBuf>,
     pub basis: Basis,
     pub xc: Xc,
+    #[serde(default)]
+    pub symmetry: Symmetry,
     pub spin: Option<SpinConfig>,
     pub occupations: Option<Occupations>,
     pub scf: Option<Scf>,
     pub output: Option<Output>,
     pub bands: Option<Bands>,
     pub dos: Option<Dos>,
+}
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SymmetryMode {
+    #[default]
+    Off,
+    Auto,
+}
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Symmetry {
+    pub mode: SymmetryMode,
+    pub tolerance_bohr: f64,
+}
+impl Default for Symmetry {
+    fn default() -> Self {
+        Self {
+            mode: SymmetryMode::Off,
+            tolerance_bohr: 1e-7,
+        }
+    }
+}
+impl Config {
+    pub fn symmetry_map(&self) -> Result<Option<dft_geometry::symmetry::KOrbitMap>, ConfigError> {
+        if self.symmetry.mode == SymmetryMode::Off {
+            return Ok(None);
+        }
+        let fail = |e: String| {
+            ConfigError::Invalid(format!(
+                "symmetry.operations: {e}; cannot safely reduce; use symmetry.mode='off' or correct the structure/mesh"
+            ))
+        };
+        let full = self.symmetry_full_mesh()?;
+        let atoms: Vec<_> = self
+            .system
+            .atoms
+            .iter()
+            .map(|a| dft_geometry::Atom::new(&a.species, a.fractional))
+            .collect();
+        let ops =
+            dft_geometry::symmetry::detect(&self.cell()?, &atoms, self.symmetry.tolerance_bohr)
+                .map_err(|e| fail(e.to_string()))?;
+        dft_geometry::symmetry::reduce_mesh(&full, &ops, self.basis.time_reversal(), false)
+            .map(Some)
+            .map_err(|e| fail(e.to_string()))
+    }
+    pub fn symmetry_full_mesh(&self) -> Result<Vec<dft_geometry::kpoints::KPoint>, ConfigError> {
+        self.basis.resolve_kpoints()?; // Preserve all input consistency checks.
+        if let Some(grid) = self.basis.kgrid {
+            dft_geometry::kpoints::monkhorst_pack(grid, self.basis.kshift.unwrap_or([0.; 3]))
+                .map_err(|e| ConfigError::Invalid(e.to_string()))
+        } else if self.basis.kpoints.as_deref() == Some(&[vec![0.0, 0.0, 0.0]]) {
+            self.basis.resolve_kpoints()
+        } else {
+            Err(ConfigError::Invalid("symmetry.mesh: auto requires kgrid or legacy Gamma; use a full Monkhorst-Pack mesh".into()))
+        }
+    }
+    pub fn resolved_points(&self) -> Result<Vec<dft_geometry::kpoints::KPoint>, ConfigError> {
+        Ok(if let Some(map) = self.symmetry_map()? {
+            map.points
+        } else {
+            self.basis.resolve_kpoints()?
+        })
+    }
+    pub fn symmetry_json(&self) -> Result<Option<serde_json::Value>, ConfigError> {
+        Ok(self.symmetry_map()?.map(|m| serde_json::json!({
+            "mode":"auto", "operations_count":m.operations.iter().filter(|o|!o.antiunitary).count(),
+            "irreducible_k_count":m.points.len(),"full_k_count":m.entries.len(),"tolerance_bohr":self.symmetry.tolerance_bohr,
+            "phase_convention":m.phase_convention,"magnetic_policy":"identity spin only; spin swap and magnetic antiunitary operations disabled without model-invariance proof",
+            "points":m.points.iter().enumerate().map(|(i,p)|serde_json::json!({"fractional":p.fractional,"weight":p.weight,"multiplicity":m.entries.iter().filter(|e|e.representative_id==i).count()})).collect::<Vec<_>>(),
+            "operations":m.operations.iter().map(|o|serde_json::json!({"rotation":o.rotation,"translation":o.translation,"atom_permutation":o.atom_permutation,"spin_action":"identity","antiunitary":o.antiunitary,"model_invariance_proof":"nc_scalar_periodic_identity_spin_no_external_terms_v1"})).collect::<Vec<_>>(),
+            "orbit_map":m.entries.iter().map(|e|serde_json::json!({"full_id":e.full_id,"representative_id":e.representative_id,"operation_id":e.operation_id,"reciprocal_shift":e.reciprocal_shift,"multiplicity":e.multiplicity})).collect::<Vec<_>>()
+        })))
+    }
 }
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -769,6 +845,7 @@ impl Config {
             s.hartree_mixing()?;
         }
         self.cell()?;
+        self.symmetry_map()?;
         if let Some(v) = self.output.as_ref().and_then(|o| o.volumetric.as_ref()) {
             v.validate()?;
         }
@@ -788,7 +865,22 @@ impl Config {
         let cutoff = Hartree::from(Rydberg(self.basis.ecutwfc_ry));
         let wavefunctions = PlaneWaveBasis::new(&cell, cutoff)?;
         let density = wavefunctions.density_basis(&cell)?;
-        let grid = FftGridSpec::new(&wavefunctions, &density, self.basis.fft_grid)?;
+        let mut grid = FftGridSpec::new(&wavefunctions, &density, self.basis.fft_grid)?;
+        if let Some(map) = self.symmetry_map()? {
+            let ops: Vec<_> = map
+                .operations
+                .into_iter()
+                .filter(|o| !o.antiunitary)
+                .collect();
+            if self.basis.fft_grid.is_some()
+                && !dft_geometry::symmetry::preserves_fft_grid(grid.dims(), &ops)
+            {
+                return Err(ConfigError::Invalid("symmetry.fft_grid: explicit grid does not preserve translations/rotations; omit basis.fft_grid for automatic compatible dimensions".into()));
+            }
+            let dims = dft_geometry::symmetry::compatible_fft_grid(grid.dims(), &ops)
+                .map_err(|e| ConfigError::Invalid(e.to_string()))?;
+            grid = FftGridSpec::new(&wavefunctions, &density, Some(dims))?;
+        }
         let first = self.basis.resolve_kpoints()?[0].fractional;
         let wavefunctions = PlaneWaveBasis::at_k(&cell, cutoff, first)?;
         Ok(PreparedInput {

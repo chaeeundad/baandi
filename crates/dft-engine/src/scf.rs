@@ -308,6 +308,8 @@ pub struct SpeciesPotential<'a> {
 /// Cached ionic terms, Hamiltonian application plan, and density FFT plan.
 /// `step` is exposed for independent post-SCF fixed-point verification.
 pub struct ScfProblem {
+    atoms: Vec<Atom>,
+    symmetry: Option<dft_physics::symmetry::DensitySymmetrizer>,
     coulomb: Option<CoulombMetric>,
     cell: Cell,
     states: Vec<KState>,
@@ -727,6 +729,8 @@ impl ScfProblem {
             core_density,
             xc_density,
             density_floor: None,
+            atoms: atoms.to_vec(),
+            symmetry: None,
             fft,
             worker_ffts,
             pool,
@@ -738,6 +742,46 @@ impl ScfProblem {
             minimum_gap,
         })
     }
+    /// Enable only a geometry-verified reduction of the supplied full mesh.
+    /// No fields, local constraints or Hubbard terms exist in this SCF model.
+    pub fn enable_symmetry(
+        &mut self,
+        full: &[KPoint],
+        tolerance_bohr: f64,
+        time_reversal: bool,
+    ) -> Result<(), ScfError> {
+        let ops = dft_geometry::symmetry::detect(&self.cell, &self.atoms, tolerance_bohr)
+            .map_err(|e| ScfError::Numerical(e.to_string()))?;
+        let map = dft_geometry::symmetry::reduce_mesh(full, &ops, time_reversal, false)
+            .map_err(|e| ScfError::Numerical(e.to_string()))?;
+        if self.states.len() != map.points.len()
+            || self
+                .states
+                .iter()
+                .zip(&map.points)
+                .any(|(s, p)| s.point != *p)
+        {
+            return Err(ScfError::InvalidInput(
+                "symmetry: engine k points differ from verified irreducible mesh",
+            ));
+        }
+        let ops: Vec<_> = map
+            .operations
+            .into_iter()
+            .filter(|o| !o.antiunitary)
+            .collect();
+        if !dft_geometry::symmetry::preserves_fft_grid(self.grid.dims(), &ops) {
+            return Err(ScfError::InvalidInput(
+                "symmetry.fft_grid: rotations/translations must preserve nonlinear XC quadrature; use compatible_fft_grid at setup",
+            ));
+        }
+        let basis = PlaneWaveBasis::new(&self.cell, Hartree(4.0 * self.options.cutoff_hartree))?;
+        self.symmetry = Some(dft_physics::symmetry::DensitySymmetrizer::new(
+            &basis, &self.grid, &ops,
+        )?);
+        Ok(())
+    }
+
     /// Opt-in XC-only floor; the legacy construction path is unchanged.
     pub fn set_density_floor(&mut self, floor: f64) -> Result<(), ScfError> {
         if !floor.is_finite() || floor <= 0.0 {
@@ -834,6 +878,13 @@ impl ScfProblem {
             return Err(ScfError::InvalidInput("input density grid"));
         }
         let start = Instant::now();
+        if let Some(symmetry) = &mut self.symmetry
+            && !symmetry.check_invariant(n, &mut self.fft)?
+        {
+            return Err(ScfError::InvalidInput(
+                "symmetry.density: input breaks the selected symmetry; use full mesh",
+            ));
+        }
         let h = hartree::evaluate(n, &self.cell, &mut self.fft)?;
         let x = self.options.functional.evaluate_with_floor(
             n,
@@ -1013,6 +1064,9 @@ impl ScfProblem {
             for (out, n) in output.iter_mut().zip(state.band_density.density()) {
                 *out += state.point.weight * n;
             }
+        }
+        if let Some(symmetry) = &mut self.symmetry {
+            symmetry.apply(&mut output, &mut self.fft)?;
         }
         timings.density = start.elapsed();
         let start = Instant::now();

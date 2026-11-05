@@ -1,0 +1,14 @@
+   Compiling dft-geometry v0.1.0 (/Users/mino/Develop/rust-dft-wt/P19A-SYMMETRY/crates/dft-geometry)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.46s
+     Running tests/symmetry.rs (target/debug/deps/symmetry-067e29b1bfdace9c)
+
+running 4 tests
+test ambiguous_atoms_and_invalid_operations_reject ... ok
+test cubic_slab_skew_species_and_origin ... ok
+test bloch_phase_reconstruction_and_fft_quadrature ... ok
+diamond shift=0: operations=48 reduced=8 weight_error=0e0
+diamond shift=0.5: operations=12 reduced=10 weight_error=0e0
+test diamond_counts_and_full_mesh_reconstruction ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+

@@ -972,3 +972,32 @@ final spectral guard and checkpoint v1 restart are explicitly unavailable.
 A fixed-occupation checkpoint is never silently converted to FD.
 See [occupation validation](validation/occupations.md) for measured scope,
 root algorithm, thresholds, ignored Al command and remaining integration work.
+
+## P19A crystal symmetry (opt-in)
+
+```toml
+[symmetry]
+mode = "auto"       # default "off"
+tolerance_bohr = 1e-7
+```
+
+`auto` detects species-aware spatial operations, uses the subgroup preserving
+`basis.kgrid`/`kshift`, and reports irreducible eigenvalues, weights and integer
+multiplicities in an additive `results.json.symmetry` block. It includes the
+operation list and complete full-to-irreducible orbit map. `off` retains legacy
+behavior, including the separate `basis.ktime_reversal` setting.
+
+Density is symmetrized on the full FFT grid, with fractional-translation phases.
+Automatic FFT dimensions may increase to preserve the nonlinear XC quadrature;
+explicit incompatible grids reject. Compare full and reduced calculations with
+identical FFT dimensions (Si diamond 30 Ry uses 32^3 with auto, versus the legacy
+25^3 default). Extremely skew cells or incommensurate origins can reject with
+an actionable diagnostic; no invalid reduction is silently accepted.
+
+Unpolarized fixed occupations and Fermi–Dirac are supported. Collinear input
+requires `basis.ktime_reversal=false`; only spatial identity-spin operations
+act on each channel. Spin swaps and magnetic antiunitary operations are disabled
+without a model-invariance proof. Fields, local constraints and Hubbard input
+are unsupported and rejected. Auto currently requires Classic execution;
+checkpoint identity does not yet include symmetry. Band and density file formats
+are unchanged. See [validation and limits](validation/symmetry.md).

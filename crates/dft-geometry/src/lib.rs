@@ -1,5 +1,6 @@
 //! Lattice columns in Bohr, reciprocal columns in inverse Bohr.
 pub mod kpoints;
+pub mod symmetry;
 
 use nalgebra::{Matrix3, Vector3};
 use std::f64::consts::TAU;

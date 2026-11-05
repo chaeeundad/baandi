@@ -38,7 +38,7 @@ pub(super) fn execute(
         residuals,
         spin,
     ) = if let Some(sector) = sector {
-        let r = dft_engine::collinear::CollinearProblem::new_fermi_dirac(
+        let mut problem = dft_engine::collinear::CollinearProblem::new_fermi_dirac(
             &prepared.cell,
             atoms,
             potentials,
@@ -49,9 +49,16 @@ pub(super) fn execute(
             config.finite_constraint(),
             cap,
         )
-        .map_err(engine_error)?
-        .run()
         .map_err(engine_error)?;
+        if config.symmetry.mode == crate::config::SymmetryMode::Auto {
+            problem
+                .enable_symmetry(
+                    &config.symmetry_full_mesh().map_err(|e| error(1, e))?,
+                    config.symmetry.tolerance_bohr,
+                )
+                .map_err(engine_error)?;
+        }
+        let r = problem.run().map_err(engine_error)?;
         let eigenvalues = r
             .k_points
             .iter()
@@ -87,7 +94,7 @@ pub(super) fn execute(
             spin,
         )
     } else {
-        let r = FiniteTProblem::new(
+        let mut problem = FiniteTProblem::new(
             &prepared.cell,
             atoms,
             potentials,
@@ -96,9 +103,17 @@ pub(super) fn execute(
             theta,
             cap,
         )
-        .map_err(engine_error)?
-        .run()
         .map_err(engine_error)?;
+        if config.symmetry.mode == crate::config::SymmetryMode::Auto {
+            problem
+                .enable_symmetry(
+                    &config.symmetry_full_mesh().map_err(|e| error(1, e))?,
+                    config.symmetry.tolerance_bohr,
+                    config.basis.time_reversal(),
+                )
+                .map_err(engine_error)?;
+        }
+        let r = problem.run().map_err(engine_error)?;
         let eigenvalues = r
             .state
             .k_points
@@ -204,7 +219,10 @@ pub(super) fn execute(
     }
     let basis_record = json!({"canonicalization_version":"baandi-mf03-record-v1","cell_columns_bohr":prepared.cell.lattice_columns_bohr(),"grid":prepared.grid.dims(),"origin_fractional":[0,0,0],"periodic":[true,true,true],"cutoff_ha":opts.cutoff_hartree,"density_cutoff_ha":4.0*opts.cutoff_hartree,"ordering":"C_z_fastest","normalization":"forward_1_over_N_inverse_unscaled","derivative":"cartesian_zero_axis_nyquist_v1","band_count":cap,"channel_capacity":spin["channel_capacity_electrons"],"k_points":k_basis,"grid_id":"density","grid_role":"density","wavefunction_grid_alias":"same_dimensions_density_grid","quadrature_weight_bohr3":prepared.cell.volume_bohr3()/total.len() as f64});
     let basis_digest = super::spin_run::digest(&basis_record);
-    let model_record = json!({"canonicalization_version":"baandi-mf03-record-v1","basis_digest":basis_digest,"functional":opts.functional.name(),"xc_version":"xcx-0.3.1_or_internal_pz","hubbard":"none","core_density":if energy.nlcc.is_some(){"immutable_spin_neutral_nlcc"}else{"absent"},"relativity":"scalar_or_nonrelativistic_no_SOC","allow_functional_override":opts.allow_functional_override,"spin":physical_spin,"occupation_policy":policy_record,"symmetry":"resolved_mesh","environment":"periodic_neutral_valence_G0_zero","atoms":atoms.iter().map(|a|json!({"species":a.species,"fractional":a.fractional_position})).collect::<Vec<_>>(),"datasets":species.iter().map(|p|json!({"name":p["name"],"sha256":p["sha256"],"functional":p["functional"],"valence":p["z_valence"]})).collect::<Vec<_>>()});
+    let mut model_record = json!({"canonicalization_version":"baandi-mf03-record-v1","basis_digest":basis_digest,"functional":opts.functional.name(),"xc_version":"xcx-0.3.1_or_internal_pz","hubbard":"none","core_density":if energy.nlcc.is_some(){"immutable_spin_neutral_nlcc"}else{"absent"},"relativity":"scalar_or_nonrelativistic_no_SOC","allow_functional_override":opts.allow_functional_override,"spin":physical_spin,"occupation_policy":policy_record,"symmetry":"resolved_mesh","environment":"periodic_neutral_valence_G0_zero","atoms":atoms.iter().map(|a|json!({"species":a.species,"fractional":a.fractional_position})).collect::<Vec<_>>(),"datasets":species.iter().map(|p|json!({"name":p["name"],"sha256":p["sha256"],"functional":p["functional"],"valence":p["z_valence"]})).collect::<Vec<_>>()});
+    if let Some(symmetry) = config.symmetry_json().map_err(|e| error(1, e))? {
+        model_record["symmetry"] = symmetry;
+    }
     let model_digest = super::spin_run::digest(&model_record);
     let channel_bytes: Vec<_> = densities
         .iter()
@@ -220,6 +238,9 @@ pub(super) fn execute(
     let stress = json!({"status":"unavailable","reason":"not_implemented","units":"Ha/Bohr^3","frame":"cartesian_tensor","sign_convention":"tensile_positive"});
     let extension = json!({"proposal_status":"proposed","extension_version":1,"model_digest":model_digest,"basis_digest":basis_digest,"state_digest":state_digest,"spin":spin,"occupations":block,"thermodynamics":thermodynamics,"forces":forces,"stress":stress});
     let mut result = json!({"schema_version":2,"output_profile":"fermi_dirac_v1","spin":spin,"occupations":block,"thermodynamics":thermodynamics,"energies":energy_json(&energy),"energy_ledger":[{"term":"E","energy_ha":thermo.internal_energy_ha},{"term":"-TS","energy_ha":-thermo.entropy_term_ha},{"term":"F","energy_ha":thermo.free_energy_ha}],"band_gap":{"status":"not_applicable","reason":"metallic/Fermi level","chemical_potential_ha":mu},"band_data":{"shape":[densities.len(),points.len(),cap],"eigenvalues_ha":eigenvalues,"residuals_ha":residuals},"band_policy":{"kind":"prepare_explicit_cap","cap":cap,"retained_bands":cap,"scope":"retained_basis","omitted_tail_bound":null},"convergence":{"converged":converged,"iterations":iterations,"certificate":cert},"forces":{"status":"unavailable","reason":"not_implemented"},"stress":{"status":"unavailable","reason":"not_implemented"},"density":{"channel_values":densities.iter().map(|d|d.iter().copied().collect::<Vec<_>>()).collect::<Vec<_>>()},"limitations":["synthetic validation only; no real-metal QE comparison","finite edge occupancy is not an infinite omitted-state bound","finite-T restart and runtime control unavailable"]});
+    if let Some(symmetry) = config.symmetry_json().map_err(|e| error(1, e))? {
+        result["symmetry"] = symmetry;
+    }
     result["state_contracts"] = extension;
     result["identity"] = json!({"model":model_record,"basis":basis_record});
     result["preflight"] = json!(preflight);

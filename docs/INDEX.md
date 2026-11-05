@@ -69,3 +69,13 @@ Conventions: docs are English; one fact lives in one place and others link to it
 - [Measured SCF stagnation cases](validation/scf-stagnation-cases.md): synthetic multi-system sweep, P11D evidence, P11B interventions, negative results and reproducers (P11M).
 - [External-control case studies](case-studies/README.md): freshly executed Python/ASE, preflight and budget-recovery evidence; MCP contract checks; explicit MLIP/coupling implementation gaps (P11L, partial).
 - `docs/validation/scf-fixed-point-multiplicity.md`: syn-s2 backend difference explained as SCF fixed-point multiplicity (1e-14 perturbation flips the solution); cross-backend gate scope.
+
+| Proposed MF02 state foundation (P13A; approval required before MF03) | Where |
+| --- | --- |
+| Concrete records, D1–D12 coverage, migration/rejections and review questions | [State contracts](architecture/state-contracts.md) |
+| Tagged spin, explicit arrays and spin XC | [ADR 0031](decisions/0031-spin-electronic-state.md) (proposed) |
+| Occupations, entropy and finite-T certificate | [ADR 0032](decisions/0032-occupations-scf-certificate.md) (proposed) |
+| Grid roles, derivative ownership and force/stress signs | [ADR 0033](decisions/0033-grids-derivative-ledger.md) (proposed) |
+| Spin/occupation extension of concrete P11C persistence | [ADR 0034](decisions/0034-state-envelope-extension.md) (proposed); [existing v1 format](checkpoint-format.md) |
+| Additive results extension schemas, not current engine output | [Results extension](schemas/results-state.proposal.json), [spin](schemas/spin.proposal.json), [occupations](schemas/occupations.proposal.json) (proposed) |
+| MF03–MF14 independent oracles, tolerance rationale and pending dev08 recipes | [Stage oracles](validation/stage-oracles.md) (proposed, no new measurements) |

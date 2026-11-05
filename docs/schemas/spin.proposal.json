@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Proposed spin results block",
+  "$comment": "PROPOSED ONLY: P13A-STATE-CONTRACTS / MF02. Not an implemented output contract. See docs/architecture/state-contracts.md. Reject duplicate keys and nonfinite values before validation.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "channel_order",
+        "channel_capacity_electrons",
+        "axis_cartesian",
+        "constraint",
+        "total_electrons",
+        "moment_mu_b"
+      ],
+      "properties": {
+        "mode": {
+          "const": "unpolarized"
+        },
+        "channel_order": {
+          "const": [
+            "total"
+          ]
+        },
+        "channel_capacity_electrons": {
+          "const": [
+            2
+          ]
+        },
+        "axis_cartesian": {
+          "type": "null"
+        },
+        "constraint": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "none"
+            }
+          }
+        },
+        "total_electrons": {
+          "type": "number",
+          "minimum": 0
+        },
+        "moment_mu_b": {
+          "const": 0
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "channel_order",
+        "channel_capacity_electrons",
+        "axis_cartesian",
+        "constraint",
+        "total_electrons",
+        "moment_mu_b"
+      ],
+      "properties": {
+        "mode": {
+          "const": "collinear"
+        },
+        "channel_order": {
+          "const": [
+            "up",
+            "down"
+          ]
+        },
+        "channel_capacity_electrons": {
+          "const": [
+            1,
+            1
+          ]
+        },
+        "axis_cartesian": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "constraint": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "none"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "electron_difference"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "fixed_total_moment"
+                },
+                "electron_difference": {
+                  "type": "number"
+                }
+              }
+            }
+          ]
+        },
+        "total_electrons": {
+          "type": "number",
+          "minimum": 0
+        },
+        "moment_mu_b": {
+          "type": "number"
+        }
+      }
+    }
+  ]
+}

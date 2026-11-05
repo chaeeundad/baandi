@@ -1,0 +1,318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Proposed occupation results block",
+  "$comment": "PROPOSED ONLY: P13A-STATE-CONTRACTS / MF02. Not an implemented output contract. See docs/architecture/state-contracts.md. Reject duplicate keys and nonfinite values before validation.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_version",
+        "occupations_electrons",
+        "k_weights",
+        "electron_target",
+        "electron_count",
+        "electron_residual",
+        "moment_residual",
+        "policy",
+        "temperature_energy_ha",
+        "channel_electrons",
+        "gap_threshold_ha",
+        "chemical_potential",
+        "chemical_potential_reason",
+        "entropy_kind",
+        "entropy_over_kb",
+        "entropy_term_ha"
+      ],
+      "properties": {
+        "policy_version": {
+          "const": 1
+        },
+        "occupations_electrons": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "axes",
+            "shape",
+            "ordering",
+            "values"
+          ],
+          "properties": {
+            "axes": {
+              "const": [
+                "spin",
+                "k",
+                "band"
+              ]
+            },
+            "shape": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "ordering": {
+              "const": "C_band_fastest"
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0
+              },
+              "minItems": 1
+            }
+          }
+        },
+        "k_weights": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          },
+          "minItems": 1
+        },
+        "electron_target": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "electron_count": {
+          "type": "number",
+          "minimum": 0
+        },
+        "electron_residual": {
+          "type": "number"
+        },
+        "moment_residual": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "policy": {
+          "const": "fixed_insulator"
+        },
+        "temperature_energy_ha": {
+          "const": 0
+        },
+        "channel_electrons": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minItems": 1
+        },
+        "gap_threshold_ha": {
+          "type": "number",
+          "minimum": 0
+        },
+        "chemical_potential": {
+          "type": "null"
+        },
+        "chemical_potential_reason": {
+          "const": "fixed_insulator"
+        },
+        "entropy_kind": {
+          "const": "zero"
+        },
+        "entropy_over_kb": {
+          "const": 0
+        },
+        "entropy_term_ha": {
+          "const": 0
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_version",
+        "occupations_electrons",
+        "k_weights",
+        "electron_target",
+        "electron_count",
+        "electron_residual",
+        "moment_residual",
+        "policy",
+        "temperature_energy_ha",
+        "chemical_potential",
+        "chemical_potential_reason",
+        "entropy_kind",
+        "entropy_over_kb",
+        "entropy_term_ha",
+        "root_iterations",
+        "root_brackets_ha",
+        "edge_max_fraction",
+        "edge_electrons"
+      ],
+      "properties": {
+        "policy_version": {
+          "const": 1
+        },
+        "occupations_electrons": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "axes",
+            "shape",
+            "ordering",
+            "values"
+          ],
+          "properties": {
+            "axes": {
+              "const": [
+                "spin",
+                "k",
+                "band"
+              ]
+            },
+            "shape": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "ordering": {
+              "const": "C_band_fastest"
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "minimum": 0
+              },
+              "minItems": 1
+            }
+          }
+        },
+        "k_weights": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          },
+          "minItems": 1
+        },
+        "electron_target": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "electron_count": {
+          "type": "number",
+          "minimum": 0
+        },
+        "electron_residual": {
+          "type": "number"
+        },
+        "moment_residual": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "policy": {
+          "const": "fermi_dirac"
+        },
+        "temperature_energy_ha": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "chemical_potential": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "values_ha"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "common"
+                },
+                "values_ha": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 1,
+                  "maxItems": 1
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "values_ha"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "per_spin"
+                },
+                "values_ha": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  },
+                  "minItems": 2,
+                  "maxItems": 2
+                }
+              }
+            }
+          ]
+        },
+        "chemical_potential_reason": {
+          "type": "null"
+        },
+        "entropy_kind": {
+          "const": "physical_fermi_dirac"
+        },
+        "entropy_over_kb": {
+          "type": "number",
+          "minimum": 0
+        },
+        "entropy_term_ha": {
+          "type": "number",
+          "minimum": 0
+        },
+        "root_iterations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "root_brackets_ha": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "minItems": 1
+        },
+        "edge_max_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "edge_electrons": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    }
+  ]
+}

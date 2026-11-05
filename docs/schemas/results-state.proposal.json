@@ -1,0 +1,436 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Proposed results.json state_contracts extension (not whole results.json)",
+  "$comment": "PROPOSED ONLY: P13A-STATE-CONTRACTS / MF02. Not an implemented output contract. See docs/architecture/state-contracts.md. Reject duplicate keys and nonfinite values before validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "proposal_status",
+    "extension_version",
+    "model_digest",
+    "basis_digest",
+    "state_digest",
+    "spin",
+    "occupations",
+    "thermodynamics",
+    "forces",
+    "stress"
+  ],
+  "properties": {
+    "proposal_status": {
+      "const": "proposed"
+    },
+    "extension_version": {
+      "const": 1
+    },
+    "model_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "basis_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "state_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "spin": {
+      "$ref": "spin.proposal.json"
+    },
+    "occupations": {
+      "$ref": "occupations.proposal.json"
+    },
+    "thermodynamics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "internal_energy_ha",
+        "free_energy_ha",
+        "entropy_term_ha",
+        "entropy_over_kb",
+        "entropy_kind",
+        "temperature_energy_ha",
+        "variational_quantity",
+        "grand_potential"
+      ],
+      "properties": {
+        "internal_energy_ha": {
+          "type": "number"
+        },
+        "free_energy_ha": {
+          "type": "number"
+        },
+        "entropy_term_ha": {
+          "type": "number",
+          "minimum": 0
+        },
+        "entropy_over_kb": {
+          "type": "number",
+          "minimum": 0
+        },
+        "entropy_kind": {
+          "enum": [
+            "zero",
+            "physical_fermi_dirac"
+          ]
+        },
+        "temperature_energy_ha": {
+          "type": "number",
+          "minimum": 0
+        },
+        "variational_quantity": {
+          "enum": [
+            "internal_energy",
+            "free_energy"
+          ]
+        },
+        "grand_potential": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "reason"
+          ],
+          "properties": {
+            "status": {
+              "const": "unavailable"
+            },
+            "reason": {
+              "const": "fixed_electron_number"
+            }
+          }
+        }
+      }
+    },
+    "forces": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason",
+        "units",
+        "frame"
+      ],
+      "properties": {
+        "status": {
+          "const": "unavailable"
+        },
+        "reason": {
+          "const": "not_implemented"
+        },
+        "units": {
+          "const": "Ha/Bohr"
+        },
+        "frame": {
+          "const": "cartesian_input_atom_order"
+        }
+      }
+    },
+    "stress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason",
+        "units",
+        "frame",
+        "sign_convention"
+      ],
+      "properties": {
+        "status": {
+          "const": "unavailable"
+        },
+        "reason": {
+          "const": "not_implemented"
+        },
+        "units": {
+          "const": "Ha/Bohr^3"
+        },
+        "frame": {
+          "const": "cartesian_tensor"
+        },
+        "sign_convention": {
+          "const": "tensile_positive"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "spin": {
+            "properties": {
+              "mode": {
+                "const": "unpolarized"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "occupations": {
+            "properties": {
+              "occupations_electrons": {
+                "properties": {
+                  "shape": {
+                    "prefixItems": [
+                      {
+                        "const": 1
+                      }
+                    ],
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "spin": {
+            "properties": {
+              "mode": {
+                "const": "collinear"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "occupations": {
+            "properties": {
+              "occupations_electrons": {
+                "properties": {
+                  "shape": {
+                    "prefixItems": [
+                      {
+                        "const": 2
+                      }
+                    ],
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "occupations": {
+            "properties": {
+              "policy": {
+                "const": "fixed_insulator"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "thermodynamics": {
+            "properties": {
+              "variational_quantity": {
+                "const": "internal_energy"
+              },
+              "entropy_kind": {
+                "const": "zero"
+              },
+              "entropy_term_ha": {
+                "const": 0
+              },
+              "entropy_over_kb": {
+                "const": 0
+              },
+              "temperature_energy_ha": {
+                "const": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "occupations": {
+            "properties": {
+              "policy": {
+                "const": "fixed_insulator"
+              }
+            }
+          },
+          "spin": {
+            "properties": {
+              "mode": {
+                "const": "collinear"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spin": {
+            "properties": {
+              "constraint": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "electron_difference"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "fixed_total_moment"
+                  },
+                  "electron_difference": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "occupations": {
+            "properties": {
+              "policy": {
+                "const": "fermi_dirac"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "thermodynamics": {
+            "properties": {
+              "variational_quantity": {
+                "const": "free_energy"
+              },
+              "entropy_kind": {
+                "const": "physical_fermi_dirac"
+              },
+              "temperature_energy_ha": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "occupations": {
+            "properties": {
+              "policy": {
+                "const": "fermi_dirac"
+              }
+            }
+          },
+          "spin": {
+            "properties": {
+              "constraint": {
+                "properties": {
+                  "kind": {
+                    "const": "none"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "occupations": {
+            "properties": {
+              "chemical_potential": {
+                "properties": {
+                  "kind": {
+                    "const": "common"
+                  }
+                }
+              },
+              "moment_residual": {
+                "type": "null"
+              },
+              "root_brackets_ha": {
+                "minItems": 1,
+                "maxItems": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "occupations": {
+            "properties": {
+              "policy": {
+                "const": "fermi_dirac"
+              }
+            }
+          },
+          "spin": {
+            "properties": {
+              "constraint": {
+                "properties": {
+                  "kind": {
+                    "const": "fixed_total_moment"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "occupations": {
+            "properties": {
+              "chemical_potential": {
+                "properties": {
+                  "kind": {
+                    "const": "per_spin"
+                  }
+                }
+              },
+              "moment_residual": {
+                "type": "number"
+              },
+              "root_brackets_ha": {
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

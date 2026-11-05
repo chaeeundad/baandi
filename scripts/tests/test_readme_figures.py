@@ -54,15 +54,52 @@ class ReadmeIsCurrent(unittest.TestCase):
                        "DFT+U forces are unsupported", "standard profile is unsupported",
                        "CLI spin-polarized or finite-temperature relaxation is unsupported",
                        "not an error bound", "Second scalar energy reimplementation",
-                       "byte-identical", "No cell-relaxation validation is claimed"):
+                       "byte-identical", "Cutoff convergence is not claimed",
+                       "not full-tensor relaxation", "no comparison with experiment or other codes"):
             self.assertIn(phrase, text)
         self.assertEqual(text.count("comparison with QE pending"), 5)
         for target in re.findall(r"\]\(([^)]+)\)", text):
             self.assertTrue(Path(ROOT, target).is_file(), target)
         self.assertEqual(len(m.stress_term_errors()), 7)
-        with patch.object(m.os, "walk", return_value=[(str(Path(m.REF, "relaxation")), [], ["cell-results.json"])]):
-            with self.assertRaisesRegex(ValueError, "Review new cell-relaxation evidence"):
-                m.structural_results()
+
+    def test_cell_evidence_changes_invalidate_generated_results(self):
+        m = load()
+        original = m.load
+        baseline = m.cell_results()
+        changes = [
+            ("validation.json", lambda d: d['synthetic_scans'][0].update(relative_error=0.123)),
+            ("validation.json", lambda d: d['tetragonal'].update(relative_difference=0.123)),
+            ("validation.json", lambda d: d['combined_scf_directional_derivative'].update(relative_error=0.123)),
+            ("validation.json", lambda d: d.update(restart="changed restart evidence")),
+            ("real-followup/real-validation.json", lambda d: d['cases'][0].update(lattice_bohr=12.3)),
+            ("real-followup/real-validation.json", lambda d: d['cases'][0]['rebuilt_final'].update(pressure_ha_bohr3=0.123)),
+            ("real-followup/real-validation.json", lambda d: d['cutoff_comparisons'][0].update(higher_minus_lower_cutoff_bohr=0.123)),
+            ("real-followup/real-validation.json", lambda d: d['start_comparisons'][0].update(expanded_minus_compressed_bohr=0.123)),
+            ("rebuild-followup/validation.json", lambda d: d['cases'][0]['stages'][-1].update(lattice_bohr=12.3)),
+            ("rebuild-followup/validation.json", lambda d: d['cases'][0]['stages'][-1].update(rebuilt_pressure_ha_bohr3=0.123)),
+            ("rebuild-followup/validation.json", lambda d: d['comparisons'][0].update(final_difference_bohr=0.123)),
+        ]
+        for relative, mutate in changes:
+            def changed(path):
+                data = original(path)
+                if os.path.relpath(path, m.REF) == "relaxation/cell/" + relative:
+                    mutate(data)
+                return data
+            with self.subTest(source=relative), patch.object(m, "load", side_effect=changed):
+                self.assertNotEqual(baseline, m.cell_results())
+
+    def test_cell_values_and_protocol_limits_are_visible(self):
+        m = load()
+        text = "\n".join(m.cell_results())
+        for phrase in ("9.24e-07", "1.46e-07", "5.85e-10", "parabola fit",
+                       "not electronic exact continuation", "5.435e-05", "2.223e-06",
+                       "1.541e-04", "1.307e-04", "1.257e-08", "2.919e-09",
+                       "6.825e-08", "4.036e-08", "9.212e-11", "1e-07 Ha/Bohr^3",
+                       "frozen-only MgO start comparisons failed", "different effective cutoffs"):
+            self.assertIn(phrase, text)
+        status = m.load(os.path.join(ROOT, "docs/feature-status.json"))['items']
+        self.assertEqual(next(r['status'] for r in status if r['feature'] == 'Cell relaxation'), 'done')
+        self.assertEqual(next(r['status'] for r in status if r['feature'] == 'Molecular dynamics and phonons'), 'planned')
 
     def test_readme_validation_block_matches_the_evidence(self):
         m = load()

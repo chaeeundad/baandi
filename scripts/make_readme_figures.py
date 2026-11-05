@@ -260,12 +260,7 @@ def stress_term_errors():
 
 
 def structural_results():
-    """P19A–P22A: distinguish derivative oracles from material qualification."""
-    cell_files = sorted(os.path.relpath(os.path.join(base, name), ROOT)
-                        for base, _, names in os.walk(os.path.join(REF, "relaxation"))
-                        for name in names if "cell" in name.lower())
-    if cell_files:
-        raise ValueError("Review new cell-relaxation evidence before regenerating: " + ", ".join(cell_files))
+    """P19A–P23A: distinguish derivative oracles from material qualification."""
     sp = "tests/reference/symmetry/evidence.json"
     sy = load(os.path.join(ROOT, sp))
     mp = "tests/reference/symmetry/mac-k444s.json"
@@ -396,9 +391,66 @@ def structural_results():
         st = run["stress"]
         lines.append(f"| {name} | {run['scf_seconds']:.3f} | {st['elapsed_seconds']:.3f} | "
                      f"{100*r['analytic_fraction_of_scf_plus_pass']:.2f}% | {st['pulay_assessment']['elapsed_seconds']:.3f} | {st['cutoff_scf_runs']} |")
-    lines += ["", "### Cell relaxation", "",
-              "P23A cell-relaxation results skipped: no cell evidence files are present under "
-              "`tests/reference/relaxation/` in this snapshot. No cell-relaxation validation is claimed; comparison with QE pending.", ""]
+    return lines + cell_results()
+
+
+def cell_results():
+    """Render the synthetic oracle, historical frozen runs and rebuilt protocol."""
+    base = "tests/reference/relaxation/cell/"
+    evidence = load(os.path.join(ROOT, base, "validation.json"))
+    frozen_path = base + evidence["real_files"]["record"]
+    rebuilt_path = base + evidence["rebuild_protocol"]["record"]
+    frozen, rebuilt = load(os.path.join(ROOT, frozen_path)), load(os.path.join(ROOT, rebuilt_path))
+    lines = ["", "### Cell relaxation", "",
+             "Synthetic checks compare the relaxed lattice constant with an independent fine scan of energy "
+             "versus lattice constant and a parabola fit (enthalpy at applied pressure). Maximum relative difference: "
+             f"{max(r['relative_error'] for r in evidence['synthetic_scans']):.2e}. "
+             f"Tetragonal return to cubic: relative axis difference {evidence['tetragonal']['relative_difference']:.2e}. "
+             "The combined force/stress gradient is checked against an SCF enthalpy directional finite difference "
+             f"(conjugacy): relative error {evidence['combined_scf_directional_derivative']['relative_error']:.2e}. "
+             f"Restart: {evidence['restart']}. " + evidence_link(base + "validation.json") + ".", "",
+             "Real-material runs use PseudoDojo PBE Si and MgO. The following frozen-basis runs keep the "
+             "plane-wave indices selected at each start; the final pressure is evaluated again with a basis "
+             "rebuilt at the nominal cutoff. Lattice constants are conventional cubic lengths. "
+             + evidence_link(frozen_path) + ".", "",
+             "| Material | Cutoff (Ha) | Shifted mesh | Start (Bohr) | Relaxed lattice (Bohr) | Final rebuilt pressure (Ha/Bohr^3) |",
+             "|---|---:|---|---:|---:|---:|"]
+    for r in frozen["cases"]:
+        mesh = "x".join(str(n) for n in r['input']['basis']['kgrid'])
+        lines.append(f"| {r['material']} | {r['cutoff_ha']:g} | {mesh} | {r['start_lattice_bohr']:.6f} | "
+                     f"{r['lattice_bohr']:.11f} | {r['rebuilt_final']['pressure_ha_bohr3']:.3e} |")
+    lines += ["", "Cutoff dependence of these frozen-basis minima (higher minus lower cutoff):", "",
+              "| Material | Start / nominal lattice | Lattice change (Bohr) |", "|---|---:|---:|"]
+    for r in frozen['cutoff_comparisons']:
+        lines.append(f"| {r['material']} | {r['start_factor']:g} | {r['higher_minus_lower_cutoff_bohr']:.3e} |")
+    lines += ["", "Different start cells select different frozen plane-wave sets and FFT grids. Under cell strain "
+              "they fix different effective cutoffs, so they minimize different finite-basis energies. "
+              "The frozen-only MgO start comparisons failed their original estimated lattice tolerances at both cutoffs; "
+              "small optimizer residuals alone do not resolve this. The follow-up periodically rebuilds the basis, "
+              "then starts fresh-basis polish cycles from the accepted geometry. It retains the original tolerances "
+              "and the frozen-only default. N below is the requested rebuild interval in ionic moves. "
+              + evidence_link(rebuilt_path) + ".", "",
+              "| Material | Cutoff (Ha) | Frozen start difference (Bohr, absolute) |",
+              "|---|---:|---:|"]
+    for r in frozen['start_comparisons']:
+        lines.append(f"| {r['material']} | {r['cutoff_ha']:g} | {abs(r['expanded_minus_compressed_bohr']):.3e} |")
+    lines += ["", "| Material | Cutoff (Ha) | N | Start / nominal lattice | Polish cycles | Relaxed lattice (Bohr) | Final rebuilt pressure (Ha/Bohr^3) |",
+              "|---|---:|---:|---:|---:|---:|---:|"]
+    for r in rebuilt['cases']:
+        final = r['stages'][-1]
+        lines.append(f"| {r['material']} | {r['cutoff_ha']:g} | {r['rebuild_every']} | {r['start_factor']:g} | "
+                     f"{r['polish_cycles']} | {final['lattice_bohr']:.11f} | {final['rebuilt_pressure_ha_bohr3']:.3e} |")
+    lines += ["", "| Material | Cutoff (Ha) | N | Rebuild + polish start difference (Bohr, absolute) |",
+              "|---|---:|---:|---:|"]
+    for r in rebuilt['comparisons']:
+        lines.append(f"| {r['material']} | {r['cutoff_ha']:g} | {r['rebuild_every']} | {abs(r['final_difference_bohr']):.3e} |")
+    pressure = max(abs(r['stages'][-1]['rebuilt_pressure_ha_bohr3']) for r in rebuilt['cases'])
+    lines += ["", f"Largest final rebuilt pressure magnitude after polish: {pressure:.3e} Ha/Bohr^3 "
+              f"(unchanged tolerance {rebuilt['pressure_tolerance_ha_bohr3']:.0e} Ha/Bohr^3). "
+              "This verifies isotropic relaxation on the stated shifted meshes, not full-tensor relaxation "
+              "with full symmetry preservation on shifted meshes. Cutoff convergence is not claimed. "
+              "There is no comparison with experiment or other codes; comparison with QE pending. "
+              "See [usage](docs/user/cell-relaxation.md) and [validation scope](docs/validation/cell-relaxation.md).", ""]
     return lines
 
 

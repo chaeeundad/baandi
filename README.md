@@ -79,7 +79,7 @@ Status as of 2026-11-03, written for people who run calculations. Source: `docs/
 
 **You can use it today for:** Total energy, eigenvalues and electron density of insulating periodic systems with LDA or PBE, on Gamma or a k mesh. Reproducible runs: the result files carry hashes, options and the energy audit.
 
-**Not available yet:** Validated magnetic and metallic material accuracy; DFT+U for correlated transition-metal oxides. Spin, NLCC and Fermi-Dirac options have limited validation below. Spin-polarized or finite-temperature relaxation in the CLI, DFT+U forces, standard-profile stress, validated cell relaxation, molecular dynamics, phonons and hybrid functionals.
+**Not available yet:** Validated magnetic and metallic material accuracy; DFT+U for correlated transition-metal oxides. Spin, NLCC and Fermi-Dirac options have limited validation below. Spin-polarized or finite-temperature relaxation in the CLI, DFT+U forces, standard-profile stress, molecular dynamics, phonons and hybrid functionals.
 
 **Speed:** Measured on one server (dev08, 2 x Xeon Gold 6230, Rocky Linux 9.7, one socket, Intel MKL 2026.1 linked in both codes, same silicon pseudopotential and FFT grid; QE 7.6 with MPI, one thread per process), same session and idle node, 2026-11-05, BAANDI commit fdce016 for the k-point mesh and the later commit 7fe2e9a for the 8-atom cell (the k-point results did not change between them). Ratios are BAANDI time over QE time, so above 1 means BAANDI is slower. Silicon with a 4x4x4 shifted k mesh (2 atoms): at 8 to 16 cores 2.0 to 2.2 times slower than QE at convergence threshold 1e-8 and 1.4 to 1.6 times slower at 1e-12 (QE needs 8 instead of 5 iterations at 1e-12; both are reported because the ratio depends on it); on one core 4.2 to 5.1 times (1e-8). An 8-atom cell at Gamma only (one k point): against QE's complex k=0 path (`K_POINTS automatic 1 1 1`) BAANDI is 5.3 to 8.0 times slower on one core and 13 to 15 times slower at 16 cores; against QE's real-wavefunction Gamma path (`K_POINTS gamma`, QE's best configuration for this case, 1.3 to 1.9 times faster than its complex path and the reference for the goal of exceeding QE) BAANDI is 9.6 to 14.9 times slower on one core (1e-12 and 1e-8 convergence thresholds; MKL and pure Rust builds), (a machine-tuned build, `target-cpu=native`, makes the pure Rust build 1.1 to 1.4 times faster on dev08 with bit-identical results, bringing the one-core ratio to QE's real Gamma path down to 11.3; the ratios above use the default portable build) because BAANDI's threading speeds this case up only 1.4 times at 8 threads, it has no real-wavefunction Gamma path yet, and it performs more eigensolver work per SCF iteration; this is the main known weakness and is being worked on. Cases where QE takes under 0.3 s are excluded: QE's timer resolves only 0.01 s. The numbers were relayed from the measuring session and have not been independently reproduced here; build hashes, raw tables and limits: tests/reference/perf/dev08_final_relayed.md.
 
@@ -109,6 +109,7 @@ Status as of 2026-11-03, written for people who run calculations. Source: `docs/
 | SCF | Opt-in standard convergence profile | Strict remains default. Standard reduces solver work in stored successful cases but is not certified; skew/slab/mesh failures remain. [Evidence](tests/reference/perf/p17a/final-report.json). |
 | Physics | Stress and pressure | Strict NC frozen-basis strain derivatives; ASE strain check and separate Pulay estimate. Standard profile unsupported; real Si/MgO material stresses inconclusive; comparison with QE pending. [Evidence](tests/reference/stress/validation.json). |
 | Physics | Fixed-cell ionic relaxation | BFGS/FIRE, Cartesian constraints, warm starts and byte-identical restart. CLI spin-polarized and finite-temperature relaxation unsupported; Gamma-only MgO is not bulk qualification; comparison with QE pending. [Evidence](tests/reference/relaxation/manifest.json). |
+| Physics | Cell relaxation | Works for the stated synthetic cases and isotropic PseudoDojo Si/MgO shifted-mesh runs, with limits: rebuild plus fresh-basis polish verifies start agreement and final pressure. Full-tensor symmetry preservation on shifted meshes and cutoff convergence are not established; comparison with QE pending. [Evidence](tests/reference/relaxation/cell/validation.json). |
 
 ### Being built now
 
@@ -129,7 +130,7 @@ Status as of 2026-11-03, written for people who run calculations. Source: `docs/
 | Method | Electronic-state landscape exploration: several self-consistent solutions, state comparison, branch tracking | Design in docs/roadmap/esle.md; starts after the baseline is complete. |
 | Method | Coupling to outside environments (embedding, solvent, QM/MM, applied electric fields) through typed interfaces | Design in docs/architecture/scientific-coupling.md. |
 | Speed | GPU backends and MPI | Design study in progress; the CPU path stays the reference. |
-| Physics | Cell relaxation, molecular dynamics and phonons | No P23A cell-relaxation evidence in this snapshot; no validation claim. |
+| Physics | Molecular dynamics and phonons | Planned; not available yet. |
 
 <!-- status:end -->
 
@@ -300,7 +301,58 @@ Mac cost observations, one on/off pair per case. Analytic time includes force-ba
 
 ### Cell relaxation
 
-P23A cell-relaxation results skipped: no cell evidence files are present under `tests/reference/relaxation/` in this snapshot. No cell-relaxation validation is claimed; comparison with QE pending.
+Synthetic checks compare the relaxed lattice constant with an independent fine scan of energy versus lattice constant and a parabola fit (enthalpy at applied pressure). Maximum relative difference: 9.24e-07. Tetragonal return to cubic: relative axis difference 1.46e-07. The combined force/stress gradient is checked against an SCF enthalpy directional finite difference (conjugacy): relative error 5.85e-10. Restart: same-build output files byte identical; cell optimizer continuation, not electronic exact continuation. [`tests/reference/relaxation/cell/validation.json`](tests/reference/relaxation/cell/validation.json).
+
+Real-material runs use PseudoDojo PBE Si and MgO. The following frozen-basis runs keep the plane-wave indices selected at each start; the final pressure is evaluated again with a basis rebuilt at the nominal cutoff. Lattice constants are conventional cubic lengths. [`tests/reference/relaxation/cell/real-followup/real-validation.json`](tests/reference/relaxation/cell/real-followup/real-validation.json).
+
+| Material | Cutoff (Ha) | Shifted mesh | Start (Bohr) | Relaxed lattice (Bohr) | Final rebuilt pressure (Ha/Bohr^3) |
+|---|---:|---|---:|---:|---:|
+| Si | 30 | 4x4x4 | 10.054800 | 10.33446059930 | 3.715e-08 |
+| Si | 30 | 4x4x4 | 10.465200 | 10.33451495242 | -1.028e-08 |
+| Si | 40 | 4x4x4 | 10.054800 | 10.33435486116 | -1.130e-08 |
+| Si | 40 | 4x4x4 | 10.465200 | 10.33435263854 | -9.360e-09 |
+| MgO | 50 | 3x3x3 | 7.791000 | 8.03684243825 | 1.758e-07 |
+| MgO | 50 | 3x3x3 | 8.109000 | 8.03699649487 | -1.158e-07 |
+| MgO | 60 | 3x3x3 | 7.791000 | 8.03704564414 | -2.224e-07 |
+| MgO | 60 | 3x3x3 | 8.109000 | 8.03691490880 | 2.479e-08 |
+
+Cutoff dependence of these frozen-basis minima (higher minus lower cutoff):
+
+| Material | Start / nominal lattice | Lattice change (Bohr) |
+|---|---:|---:|
+| Si | 0.98 | -1.057e-04 |
+| Si | 1.02 | -1.623e-04 |
+| MgO | 0.98 | 2.032e-04 |
+| MgO | 1.02 | -8.159e-05 |
+
+Different start cells select different frozen plane-wave sets and FFT grids. Under cell strain they fix different effective cutoffs, so they minimize different finite-basis energies. The frozen-only MgO start comparisons failed their original estimated lattice tolerances at both cutoffs; small optimizer residuals alone do not resolve this. The follow-up periodically rebuilds the basis, then starts fresh-basis polish cycles from the accepted geometry. It retains the original tolerances and the frozen-only default. N below is the requested rebuild interval in ionic moves. [`tests/reference/relaxation/cell/rebuild-followup/validation.json`](tests/reference/relaxation/cell/rebuild-followup/validation.json).
+
+| Material | Cutoff (Ha) | Frozen start difference (Bohr, absolute) |
+|---|---:|---:|
+| Si | 30 | 5.435e-05 |
+| Si | 40 | 2.223e-06 |
+| MgO | 50 | 1.541e-04 |
+| MgO | 60 | 1.307e-04 |
+
+| Material | Cutoff (Ha) | N | Start / nominal lattice | Polish cycles | Relaxed lattice (Bohr) | Final rebuilt pressure (Ha/Bohr^3) |
+|---|---:|---:|---:|---:|---:|---:|
+| MgO | 50 | 3 | 0.98 | 2 | 8.03693534348 | -3.300e-11 |
+| MgO | 50 | 3 | 1.02 | 2 | 8.03693533091 | -9.214e-12 |
+| MgO | 50 | 5 | 0.98 | 2 | 8.03693534985 | -4.507e-11 |
+| MgO | 50 | 5 | 1.02 | 2 | 8.03693535277 | -5.059e-11 |
+| Si | 30 | 3 | 0.98 | 2 | 10.33450308919 | 7.043e-11 |
+| Si | 30 | 3 | 1.02 | 2 | 10.33450315744 | 1.087e-11 |
+| Si | 30 | 5 | 0.98 | 2 | 10.33450310470 | 5.690e-11 |
+| Si | 30 | 5 | 1.02 | 2 | 10.33450306434 | 9.212e-11 |
+
+| Material | Cutoff (Ha) | N | Rebuild + polish start difference (Bohr, absolute) |
+|---|---:|---:|---:|
+| MgO | 50 | 3 | 1.257e-08 |
+| MgO | 50 | 5 | 2.919e-09 |
+| Si | 30 | 3 | 6.825e-08 |
+| Si | 30 | 5 | 4.036e-08 |
+
+Largest final rebuilt pressure magnitude after polish: 9.212e-11 Ha/Bohr^3 (unchanged tolerance 1e-07 Ha/Bohr^3). This verifies isotropic relaxation on the stated shifted meshes, not full-tensor relaxation with full symmetry preservation on shifted meshes. Cutoff convergence is not claimed. There is no comparison with experiment or other codes; comparison with QE pending. See [usage](docs/user/cell-relaxation.md) and [validation scope](docs/validation/cell-relaxation.md).
 
 ### Checkpoint/restart equivalence (synthetic fixtures)
 

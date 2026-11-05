@@ -172,7 +172,7 @@ impl Wire for SystemTime {
     }
 }
 macro_rules! wire_struct {
-    ($t:ident, $w:ident { $($f:ident: $ty:ty,)* }) => {
+    ($t:ident, $w:ident { $($f:ident: $ty:ty,)* } $(defaults { $($df:ident: $dv:expr,)* })?) => {
         #[derive(Serialize, Deserialize)]
         #[serde(deny_unknown_fields)]
         struct $w { $($f: <$ty as Wire>::Repr,)* }
@@ -180,7 +180,7 @@ macro_rules! wire_struct {
             type Repr = $w;
             fn encode(&self, bytes: &mut Vec<u8>) -> Result<$w, Error> { Ok($w { $($f: self.$f.encode(bytes)?,)* }) }
             fn decode(w: $w, bytes: &[u8], cursor: &mut usize) -> Result<Self, Error> {
-                Ok(Self { $($f: <$ty>::decode(w.$f, bytes, cursor)?,)* })
+                Ok(Self { $($f: <$ty>::decode(w.$f, bytes, cursor)?,)* $($($df: $dv,)*)? })
             }
         }
     };
@@ -188,6 +188,15 @@ macro_rules! wire_struct {
 
 /// Encoding never opens files and can be used by an authenticated host adapter.
 pub fn encode(checkpoint: &Checkpoint) -> Result<Vec<u8>, Error> {
+    if checkpoint
+        .continuation
+        .as_ref()
+        .is_some_and(|c| c.options.spectral_guard == dft_engine::SpectralGuard::Final)
+    {
+        return Err(invalid(
+            "checkpoint v1 cannot preserve scf.spectral_guard=final audit history",
+        ));
+    }
     let mut binary = Vec::new();
     let wire = checkpoint.encode(&mut binary)?;
     let header = serde_json::to_vec(&wire)?;
@@ -436,7 +445,7 @@ wire_struct!(ScfOptions, WScfOptions {
     seed: u64,
     divergence_factor: f64,
     divergence_patience: usize,
-});
+} defaults { spectral_guard: dft_engine::SpectralGuard::Off, });
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 enum WSolverChoice {

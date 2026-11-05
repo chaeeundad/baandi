@@ -61,6 +61,7 @@ pub struct ScfSession {
     state_version: u64,
     events: Option<EventQueue>,
     certificate_attempted: bool,
+    spectral_report: Option<crate::SpectralReport>,
 }
 impl ScfSession {
     pub(crate) fn prepare_boundary_policy(
@@ -163,7 +164,10 @@ impl ScfSession {
     ) -> Result<Self, ScfError> {
         config.validate()?;
         let events = (config.mode != ExecutionMode::Classic).then(|| EventQueue::new(&config));
+        let spectral_report = (problem.options.spectral_guard == crate::SpectralGuard::Final)
+            .then(crate::SpectralReport::default);
         Ok(Self {
+            spectral_report,
             problem,
             completion,
             config,
@@ -302,7 +306,7 @@ impl ScfSession {
                     .powf((iteration - 1) as f64))
             .max(0.1 * self.problem.options.eigen_tolerance)
         };
-        let step = self
+        let mut step = self
             .problem
             .step_kpoints_with_certification(
                 n,
@@ -421,6 +425,8 @@ impl ScfSession {
         }
         // Certify the returned output density itself, not just the input
         // fixed-point residual. A small-gap response can amplify that residual.
+        let mut rescued = None;
+        let mut unable_to_verify = false;
         let certified = if converged {
             self.certificate_attempted = true;
             let warm: Vec<_> = step
@@ -462,7 +468,7 @@ impl ScfSession {
                 .filter(|(_, f)| **f > 0.0)
                 .map(|((a, b), _)| (a - b).abs())
                 .fold(0.0, f64::max);
-            let passed = density_residual <= self.problem.options.density_tolerance
+            let mut passed = density_residual <= self.problem.options.density_tolerance
                 && occupied_eigenvalue_change <= 1e-7;
             if passed && self.problem.density_floor.is_some() {
                 let clipped = self
@@ -523,6 +529,15 @@ impl ScfSession {
                     .collect(),
                 timings: check.timings,
             });
+            if passed && let Some(report) = &mut self.spectral_report {
+                (rescued, unable_to_verify) = self.problem.audit_reported_spectrum(
+                    n,
+                    &mut step.k_points,
+                    iteration,
+                    report,
+                )?;
+                passed = report.passed;
+            }
             if passed {
                 self.problem.check_gap(&check.k_points)?;
             }
@@ -530,7 +545,10 @@ impl ScfSession {
         } else {
             false
         };
-        if certified || (retain_last && iteration == self.problem.options.max_iterations) {
+        if certified
+            || unable_to_verify
+            || (retain_last && iteration == self.problem.options.max_iterations)
+        {
             let gap_hartree = if certified {
                 self.problem.check_gap(&step.k_points)?
             } else {
@@ -541,6 +559,10 @@ impl ScfSession {
             self.outcome = Some(ScfOutcome {
                 converged: certified,
                 result: ScfResult {
+                    spectral_completeness: self.spectral_report.clone().map(|mut r| {
+                        r.passed &= certified;
+                        r
+                    }),
                     k_points: step.k_points,
                     gap_hartree,
                     energy: step.energy,
@@ -564,6 +586,18 @@ impl ScfSession {
             });
         }
         let mix_start = Instant::now();
+        if rescued.is_some() {
+            // The old history converged in an incomplete invariant subspace.
+            // Its near-zero residual is not a meaningful growth baseline after
+            // inserting the missing occupied states. Start a fresh mixing history.
+            mixer.reset();
+            *best = f64::INFINITY;
+            *growing = 0;
+            *mixing_resets += 1;
+            let record = history.last_mut().unwrap();
+            record.mixer_reset = true;
+            record.mixing_resets = *mixing_resets;
+        }
         let mut mixed = mixer
             .mix(
                 n.as_slice().unwrap(),
@@ -604,12 +638,14 @@ impl ScfSession {
         }
         n.as_slice_mut().unwrap().copy_from_slice(&mixed);
         history.last_mut().unwrap().timings.mixing = mix_start.elapsed();
-        *previous = Some(
-            step.k_points
-                .into_iter()
-                .map(|k| k.solution.eigenvectors)
-                .collect(),
-        );
+        *previous = rescued.or_else(|| {
+            Some(
+                step.k_points
+                    .into_iter()
+                    .map(|k| k.solution.eigenvectors)
+                    .collect(),
+            )
+        });
         if iteration == self.problem.options.max_iterations {
             Ok(StepStatus::NotConverged)
         } else {
@@ -786,6 +822,11 @@ impl ScfSession {
     ) -> Result<(), crate::checkpoint::Rejection> {
         use crate::checkpoint::Rejection as R;
         model.validate()?;
+        // Checkpoint v1 has no cumulative spectral audit record. Fail closed
+        // rather than silently dropping its policy or retry history.
+        if self.problem.options.spectral_guard == crate::SpectralGuard::Final {
+            return Err(R::Boundary);
+        }
         if self.problem.core_density.is_some() || self.problem.density_floor.is_some() {
             return Err(R::Xc);
         }

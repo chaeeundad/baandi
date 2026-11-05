@@ -1,0 +1,214 @@
+{
+  "task_id": "P15C-SPECTRAL-COMPLETENESS",
+  "status": "BLOCKED",
+  "reason": "Task 2 acceptance unresolved: low-cost complete-spectrum repair with stable corrected skew SCF not established; default unchanged.",
+  "head": "01a68a1fc087cafd384a0e1fdeb105024b3c20a6",
+  "branch": "task/P15C-SPECTRAL-COMPLETENESS",
+  "eigenvalue_cap_ha": 1e-09,
+  "band_sum_cap_ha": 1e-09,
+  "commands": [
+    {
+      "command": "cargo build --release -p dft-cli --offline",
+      "exit_code": 0
+    },
+    {
+      "command": "P15C_ORACLE=1 cargo build --release -p dft-cli --offline",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/spectral/scope.py --binary /tmp/p15c-oracle-cli",
+      "exit_code": 0
+    },
+    {
+      "command": "P15C_ORACLE=1 P15C_CANDIDATES=1 cargo build --release -p dft-cli --offline",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/spectral/scope.py --binary /tmp/p15c-candidate-cli --cases syn20-skew,syn4-elongated,syn16-gamma --output tests/reference/spectral/candidates",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/spectral/scope.py --binary /tmp/p15c-candidate-cli --cases si8,k444s --output tests/reference/spectral/candidates",
+      "exit_code": 0
+    },
+    {
+      "command": "P15C_ORACLE=1 P15C_UNGUARDED=1 cargo build --release -p dft-cli --offline",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/spectral/scope.py --binary /tmp/p15c-spin-oracle-cli --cases si-30,si-40,mgo-50,mgo-60",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/spectral/build_spin_fixture.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/spectral/spin_scope.py /tmp/p15c-spin-oracle-cli",
+      "exit_code": 0
+    },
+    {
+      "command": "P15C_GUARD=1 P15C_RICH_START=1 cargo build --release -p dft-cli --offline",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-solvers spectral_ -- --include-ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/spectral/test_scope.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/spectral/summarize.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/spectral/validate_evidence.py",
+      "exit_code": 0
+    },
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary /tmp/p15c-default-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --threads 1 --repeats 1 --baseline tests/reference/spectral/baseline-t1.json --require-identical --record tests/reference/spectral/default-t1.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary /tmp/p15c-default-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --threads 2 --repeats 1 --baseline tests/reference/spectral/baseline-t1.json --require-identical --record tests/reference/spectral/default-t2.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary /tmp/p15c-default-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --threads 4 --repeats 1 --baseline tests/reference/spectral/baseline-t1.json --require-identical --record tests/reference/spectral/default-t4.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary /tmp/p15c-default-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --threads 8 --repeats 1 --baseline tests/reference/spectral/baseline-t1.json --require-identical --record tests/reference/spectral/default-t8.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary /tmp/p15c-screen-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --threads 2 --repeats 1 --baseline tests/reference/spectral/screen-t1.json --require-identical --record tests/reference/spectral/screen-t2.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary /tmp/p15c-screen-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --threads 4 --repeats 1 --baseline tests/reference/spectral/screen-t1.json --require-identical --record tests/reference/spectral/screen-t4.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary /tmp/p15c-screen-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --threads 8 --repeats 1 --baseline tests/reference/spectral/screen-t1.json --require-identical --record tests/reference/spectral/screen-t8.json",
+      "exit_code": 0
+    },
+    {
+      "command": "scripts/bench_suite.py --binary /tmp/p15c-default-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --robustness --output tests/reference/spectral/default-robustness.json",
+      "exit_code": 0
+    },
+    {
+      "command": "scripts/bench_suite.py --binary /tmp/p15c-guard-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --robustness --output tests/reference/spectral/guard-robustness.json",
+      "exit_code": 0
+    }
+  ],
+  "binary_sha256": {
+    "p15c-candidate-cli": "85ef73f3729cd4f9b1e2c61a63c1ea9e77a040076c905440531cb03c08d53b5b",
+    "p15c-oracle-cli": "585e4345428283f102ae41d6d545a296a1a672490c5419bf6d481ae6a307168d",
+    "p15c-default-cli": "767ab38a0f5346197a79e2420739f0e89209d24a242ec8dde0e5d4c0cee43c1b",
+    "p15c-rich-cli": "4b49d8603cd3e2ded359981e1ef9fd6ab7eda422626731c855d8f20deecdd3bc",
+    "p15c-spin-oracle-cli": "90d47f79c50a24bd6eb7151bea4bb1206175c3848dc5d2e2192c6dd28920f953",
+    "p15c-guard-cli": "5799f88d063c82d96e6bf6d449168350e54845f771a0dcab058fd5895cc56461",
+    "p15c-baseline-cli": "e199b5fb6fc660b635fb94ad2e2b047dcadda20f0bf89012bf540f2727b0929e",
+    "p15c-screen-cli": "3f497bae9f3f10050e7f40cbe6fcb1625ef29b9ce1aa46e2cc44f32f2c4ed0d3"
+  },
+  "current_review_source_sha256": {
+    "crates/dft-cli/src/run.rs": "be1c273863e3015361938b3abb15a1a17766ad7177decbe2c3b12a8c7f0cdf77",
+    "crates/dft-cli/src/spin_run.rs": "24d3cb42f003e96859b0ea85b0e1a09df0d0a180022387467afd9c12ee0a2354",
+    "crates/dft-engine/src/collinear.rs": "339ba1e634b9e2766ca14d30b05749b1ee58b22b5f15726c9f63aeb9d2775c04",
+    "crates/dft-engine/src/lib.rs": "5aca69b1fced6712fafe66339849959f8cbe10e1b4323db4abb0d91e8bc7b74a",
+    "crates/dft-engine/src/scf.rs": "9f72343ba2b026eed6bb4a7f27dd50d8db7111a942d13961bbd0a533a4493fb8",
+    "crates/dft-engine/src/session.rs": "42d946d02b23c0eb916b062d60ef06cc9c0132625c80951e7cea48deb336d16f",
+    "crates/dft-solvers/src/legacy.rs": "d71b8886da1bc593333cdc5190602d9ea3dc4d4a69acec85d733e15703f6704a",
+    "crates/dft-solvers/src/lib.rs": "d9de93cf4f7afbafa5fec2aca27c0d4a800b8621e43543f25fed4c6c18e1d46f",
+    "crates/dft-solvers/src/replay.rs": "7fd257c44361740c3d09995a754252f1b148e01fa0d13089a0a15276a766e237",
+    "crates/dft-solvers/src/rmm.rs": "d0901bf4c8c23ba7500a464321d2aedef9c472775347a5f024b5d05e459d7538",
+    "crates/dft-solvers/src/tests.rs": "7c2298d2f32b420a6b5e49b4dbbc3ef542d54d14d53ca3fb4d01a9a90f26f68b",
+    "docs/INDEX.md": "3994720f76b001562b7a741a1e95fd29119fbbd1ae073d4a63ef5266b030626e",
+    "docs/performance/attempts-ledger.md": "b722bb12da10c456ff5a630f2b51dcda5182597998effc6d688dbc99305c3169",
+    "docs/performance/optimization-log.md": "26c4c280eb39bc758f1638c106a03501b230c289d866ef9014a0d38d6e0ce13f",
+    "crates/dft-solvers/src/spectral.rs": "e9d406a00d0a4757dfc56d7214c6183c9f5e4f3213c05055c024235bd6ccbb88",
+    "docs/validation/spectral-completeness.md": "3cf5a4fdefdafde2c569c54b2e1689451cc537fa09ad11ee01daefc262a88a49"
+  },
+  "provenance_limit": "Current review-source hashes are not historical build-source hashes. Candidate binaries were captured at successive experimental stages; compile flags and retained binary hashes distinguish them.",
+  "failures": [
+    {
+      "stage": "first candidate replay",
+      "exit_code": 1,
+      "reason": "Append attempted without reserving matrix columns; fixed before retained candidate replay."
+    },
+    {
+      "stage": "first mechanism test",
+      "exit_code": 101,
+      "reason": "Exact float equality incorrectly expected faer eigenvalues -3 rather than -3.0000000000000004; replaced with the pre-frozen 1e-9 Ha cap."
+    },
+    {
+      "stage": "first guard CLI build",
+      "exit_code": 101,
+      "reason": "CLI lacked direct dft-solvers dependency and helper module path was wrong; used existing engine KPointSolution facade."
+    },
+    {
+      "stage": "first bench invocation",
+      "exit_code": 3,
+      "reason": "Relative UPF path resolved under temporary input directory; rerun with absolute external path."
+    },
+    {
+      "stage": "candidate-mode CLI schema tests",
+      "exit_code": 101,
+      "reason": "Two legacy tests freeze top-level fields; spectral_completeness is additive. Tests outside OWNED_FILES left unchanged. Candidate is not default."
+    },
+    {
+      "stage": "first full check",
+      "exit_code": 1,
+      "reason": "Candidate-mode schema tests and clippy helper placement; helper moved and default candidate gating restored. Final default check passes."
+    },
+    {
+      "stage": "intermediate default check",
+      "exit_code": 1,
+      "reason": "Formatting of newly added release-only test; corrected. Final full check passes."
+    },
+    {
+      "stage": "first skew guard trajectory",
+      "exit_code": 4,
+      "reason": "Old near-zero growth baseline caused divergence after rescue. Resetting stale mixer/growth state removed this false divergence; corrected trajectory still exhausts 100 steps. Original raw per-case file overwritten by rerun; observation retained here from tool output."
+    },
+    {
+      "stage": "retained skew guard/rich trajectories",
+      "exit_code": 3,
+      "reason": "100-step exhaustion, versus legacy incomplete 6-step convergence. No tolerance relaxed."
+    }
+  ],
+  "robustness": {
+    "default": {
+      "pass": 16,
+      "nonconverged": 3
+    },
+    "full_guard": {
+      "pass": 16,
+      "nonconverged": 3
+    }
+  },
+  "limitations": [
+    "No production repair accepted.",
+    "Initial physical-manifold overlap ranks not measured.",
+    "Large complement guard is seeded heuristic, not inertia proof.",
+    "Candidate cumulative retry persistence incomplete.",
+    "Mac walls overlap other work; no dev08 timing.",
+    "Dashboard/session upload and README generator changes outside OWNED_FILES; no accepted README claim added."
+  ],
+  "commit": "Uncommitted as instructed."
+}

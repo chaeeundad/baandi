@@ -265,6 +265,7 @@ impl Config {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scf {
+    pub spectral_guard: Option<String>,
     pub threads: Option<usize>,
     pub max_iterations: Option<i64>,
     pub mixing: Option<String>,
@@ -279,6 +280,16 @@ pub struct Scf {
     pub seed: Option<u64>,
 }
 impl Scf {
+    pub fn spectral_guard(&self) -> Result<dft_engine::SpectralGuard, ConfigError> {
+        match self.spectral_guard.as_deref().unwrap_or("off") {
+            "off" => Ok(dft_engine::SpectralGuard::Off),
+            "final" => Ok(dft_engine::SpectralGuard::Final),
+            _ => Err(ConfigError::Invalid(
+                "scf.spectral_guard must be 'final' or 'off'".into(),
+            )),
+        }
+    }
+
     pub fn mixing_strategy(&self) -> Result<dft_engine::Mixing, ConfigError> {
         let invalid = |message: &str| ConfigError::Invalid(message.into());
         let beta = self.mixing_beta.unwrap_or(0.3);
@@ -638,6 +649,9 @@ impl Config {
                     atom.species
                 )));
             }
+        }
+        if let Some(s) = &self.scf {
+            s.spectral_guard()?;
         }
         self.cell()?;
         if let Some(v) = self.output.as_ref().and_then(|o| o.volumetric.as_ref()) {

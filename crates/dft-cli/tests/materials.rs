@@ -45,3 +45,30 @@ fn real_nc_bulk_insulators() {
         assert_eq!(a["iterations"], b["iterations"]);
     }
 }
+
+/// P15C_ORACLE=1 DFT_NC_DIR=/path/to/ex cargo test --release -p dft-cli
+/// --test materials final_state_dense_spectra -- --ignored --nocapture
+#[test]
+#[ignore = "full-space final P13D spectra; requires release, P15C_ORACLE=1 and DFT_NC_DIR"]
+fn final_state_dense_spectra() {
+    assert!(
+        option_env!("P15C_ORACLE").is_some(),
+        "build with P15C_ORACLE=1"
+    );
+    assert!(std::env::var_os("DFT_NC_DIR").is_some(), "set DFT_NC_DIR");
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let status = std::process::Command::new("python3")
+        .arg("-I")
+        .arg(root.join("tests/reference/spectral/materials_final.py"))
+        .arg("--binary")
+        .arg(env!("CARGO_BIN_EXE_dft-cli"))
+        .arg("--output")
+        .arg(root.join("tests/reference/spectral/final/materials"))
+        .current_dir(&root)
+        .status()
+        .unwrap();
+    assert!(
+        status.success(),
+        "final-state dense spectra failed: {status}"
+    );
+}

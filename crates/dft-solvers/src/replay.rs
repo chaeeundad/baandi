@@ -4,7 +4,8 @@
 //! and initial columns, never feed their result back to SCF, and use fixed seeds.
 use std::sync::{LazyLock, Mutex};
 
-pub const ENABLED: bool = option_env!("P15A_REPLAY").is_some();
+pub const SPECTRAL: bool = option_env!("P15C_ORACLE").is_some();
+pub const ENABLED: bool = option_env!("P15A_REPLAY").is_some() || SPECTRAL;
 static RECORDS: LazyLock<Mutex<Vec<Record>>> = LazyLock::new(|| Mutex::new(Vec::new()));
 static METRICS: Mutex<Vec<(usize, f64, f64)>> = Mutex::new(Vec::new());
 
@@ -92,8 +93,13 @@ pub(crate) fn dense_oracle(
     bands: usize,
 ) -> Result<Option<Vec<f64>>, crate::SolverError> {
     let id = RECORDS.lock().expect("replay records").len();
-    let selected = option_env!("P15A_DENSE_IDS")
-        .is_some_and(|ids| ids.split(',').any(|s| s.parse::<usize>().ok() == Some(id)));
+    let spectral_selected = SPECTRAL
+        && std::env::var("P15C_DENSE_IDS").map_or(true, |ids| {
+            ids.split(',').any(|s| s.parse::<usize>().ok() == Some(id))
+        });
+    let selected = spectral_selected
+        || option_env!("P15A_DENSE_IDS")
+            .is_some_and(|ids| ids.split(',').any(|s| s.parse::<usize>().ok() == Some(id)));
     let n = operator.dimension();
     if n > 128 && !selected {
         return Ok(None);
@@ -111,6 +117,7 @@ pub(crate) fn dense_oracle(
     let matrix = crate::apply(operator, &identity)?;
     drop(identity);
     let (mut values, mut vectors) = crate::hermitian_eigh(&matrix)?;
+    let full_values = SPECTRAL.then(|| values.clone());
     values.truncate(bands);
     vectors.resize_columns(bands)?;
     let (_, residuals) = crate::residual(operator, &vectors, &values)?;
@@ -119,5 +126,5 @@ pub(crate) fn dense_oracle(
             "dense replay oracle residual exceeds 1e-10 Ha".into(),
         ));
     }
-    Ok(Some(values))
+    Ok(Some(full_values.unwrap_or(values)))
 }

@@ -1,0 +1,46 @@
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/crates/dft-engine)
+   Compiling dft-cli v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/crates/dft-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.99s
+     Running tests/run.rs (target/debug/deps/run-1473d584b8b25930)
+
+running 17 tests
+test agent_socket_mode ... ignored, requires filesystem Unix socket binding; cargo test -p dft-cli --test run agent_socket_mode -- --ignored --nocapture
+test fcc_end_to_end ... ignored, two-atom 8 Ry SCF: run in release; see docs/cli.md
+test kpoint_scf ... ignored, multiple SCF solves; cargo test --release -p dft-cli --test run kpoint_scf -- --ignored --nocapture
+test observed_socket_mirror_and_existing_log_protection ... ignored, requires filesystem Unix socket binding; cargo test -p dft-cli --test run observed_socket -- --ignored --nocapture
+test protects_inputs ... ok
+
+thread 'expressions_preserve_energy_and_record_resolutions' (20446740) panicked at crates/dft-cli/tests/run.rs:622:5:
+assertion `left == right` failed
+  left: {"atoms", "band_accuracy", "bands", "basis", "cell", "convergence", "cutoff", "eigenvalues", "electrons", "energies", "input_sha256", "memory_estimate", "occupations", "preflight", "scf", "schema_version", "species", "spectral_completeness", "threading", "timestamp", "timings", "tool", "total_energy", "units", "xc"}
+ right: {"atoms", "band_accuracy", "bands", "basis", "cell", "convergence", "cutoff", "eigenvalues", "electrons", "energies", "input_sha256", "memory_estimate", "occupations", "preflight", "scf", "schema_version", "species", "threading", "timestamp", "timings", "tool", "total_energy", "units", "xc"}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test expressions_preserve_energy_and_record_resolutions ... FAILED
+test explain_and_status_report_evidence_and_reject_invalid_input ... ok
+test kpoint_inputs_and_errors ... ok
+
+thread 'small_end_to_end' (20446748) panicked at crates/dft-cli/tests/run.rs:109:5:
+assertion `left == right` failed
+  left: 25
+ right: 24
+test small_end_to_end ... FAILED
+test observed_file_mirror_is_exact_and_logs_are_never_overwritten ... ok
+test functional_compatibility_and_original_label ... ok
+P11H synthetic fixture: Classic/alias/Observed (agent=false), 3 iterations; density bytes and numerical JSON identical (0 Ha energy difference).
+test execution_modes_are_bit_identical_and_alias_preserves_classic ... ok
+test unit_cutoff_preserves_scf_and_legacy_outputs ... ok
+quantity expression equivalence: total=-2.65002920218772164e0 Ha, delta=0.000e0 Ha
+test quantity_expression_energy_equivalence ... ok
+test failures_and_paths ... ok
+test pbe_selection_override_and_spin_rejection ... ok
+test threading_metadata_and_identical_outputs ... ok
+
+failures:
+
+failures:
+    expressions_preserve_energy_and_record_resolutions
+    small_end_to_end
+
+test result: FAILED. 11 passed; 2 failed; 4 ignored; 0 measured; 0 filtered out; finished in 1.05s
+
+error: test failed, to rerun pass `-p dft-cli --test run`

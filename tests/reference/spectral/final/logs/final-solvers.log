@@ -1,0 +1,32 @@
+   Compiling dft-solvers v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/crates/dft-solvers)
+    Finished `release` profile [optimized] target(s) in 1.08s
+     Running unittests src/lib.rs (target/release/deps/dft_solvers-08892c39ca7bbe78)
+
+running 3 tests
+independent spectral start: eigenvalue_error=4.440892098500626e-16 residual=4.3229543622835004e-15 orth=3.511580642493903e-16 iterations=4 (dimensionless)
+test tests::spectral_guard_recovers_missing_degeneracy_and_preserves_complete_state ... ok
+independent spectral start: eigenvalue_error=8.881784197001252e-16 residual=2.2728916906222237e-15 orth=1.3323547541019195e-15 iterations=5 (dimensionless)
+test tests::spectral_completeness_is_not_a_residual_certificate ... ok
+complement guard: eigenvalues=[-2.741417982341608e-15, 0.05000000000000713] Ha, extra H=82
+test tests::spectral_complement_guard ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.07s
+
+     Running tests/mixing_kerker.rs (target/release/deps/mixing_kerker-8a655ac193d3b32f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/mixing_scf.rs (target/release/deps/mixing_scf-6ffa8364a37e1ac7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/rmm.rs (target/release/deps/rmm-ef5f69c5512bc664)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+

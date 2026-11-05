@@ -1,0 +1,14 @@
+si8 off 0 15 guard H 0 retries None
+si8 final 0 15 guard H 90 retries 0
+k444s off 0 10 guard H 0 retries None
+k444s final 0 10 guard H 2618 retries 0
+syn20-skew off 0 6 guard H 0 retries None
+syn20-skew final 3 100 guard H 130 retries 1
+syn4-elongated off 0 9 guard H 0 retries None
+syn4-elongated final 0 9 guard H 29 retries 0
+syn4-slab off 3 100 guard H 0 retries None
+syn4-slab final 3 100 guard H 0 retries 0
+syn16-gamma off 0 10 guard H 0 retries None
+syn16-gamma final 0 10 guard H 79 retries 0
+syn16-k211 off 3 100 guard H 0 retries None
+syn16-k211 final 3 100 guard H 0 retries 0

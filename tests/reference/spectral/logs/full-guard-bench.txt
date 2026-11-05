@@ -1,0 +1,8 @@
+case      wall med (s)  engine (s)  diag (s) iters  dE vs base (Ha)    density  speedup
+gamma            0.187       0.180     0.125    10         0.00e+00  identical    1.37x
+k222s            0.712       0.706     0.598    10         0.00e+00  identical    0.92x
+k222             1.533       1.526     1.311    10         0.00e+00  identical    0.80x
+k444s            6.414       6.405     5.799    10         0.00e+00  identical    0.54x
+si8              6.811       6.800     6.373    15         0.00e+00  identical    0.42x
+recorded tests/reference/spectral/guard-t1.json
+OK

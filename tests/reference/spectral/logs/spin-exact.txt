@@ -1,0 +1,78 @@
+[
+  {
+    "solve": 22,
+    "spin_channel": 0,
+    "occupied_max_error_ha": 0.0,
+    "first_empty_error_ha": 0.0,
+    "buffer_max_error_ha": 9.419875990346327e-11,
+    "band_sum_excess_ha": 0.0,
+    "missing_dense_indices_zero_based": [],
+    "unmatched_dense_indices_zero_based": [],
+    "missing_indices_certified": true,
+    "missing_clusters": [],
+    "matched_dense_indices_zero_based": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "all_roots_within_cap": true
+  },
+  {
+    "solve": 23,
+    "spin_channel": 1,
+    "occupied_max_error_ha": 0,
+    "first_empty_error_ha": 4.163336342344337e-16,
+    "buffer_max_error_ha": 2.917177610584076e-11,
+    "band_sum_excess_ha": 0.0,
+    "missing_dense_indices_zero_based": [],
+    "unmatched_dense_indices_zero_based": [],
+    "missing_indices_certified": true,
+    "missing_clusters": [],
+    "matched_dense_indices_zero_based": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "all_roots_within_cap": true
+  },
+  {
+    "solve": 24,
+    "spin_channel": 0,
+    "occupied_max_error_ha": 0.0,
+    "first_empty_error_ha": 5.551115123125783e-16,
+    "buffer_max_error_ha": 9.419787172504357e-11,
+    "band_sum_excess_ha": 0.0,
+    "missing_dense_indices_zero_based": [],
+    "unmatched_dense_indices_zero_based": [],
+    "missing_indices_certified": true,
+    "missing_clusters": [],
+    "matched_dense_indices_zero_based": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "all_roots_within_cap": true
+  },
+  {
+    "solve": 25,
+    "spin_channel": 1,
+    "occupied_max_error_ha": 0,
+    "first_empty_error_ha": 4.163336342344337e-16,
+    "buffer_max_error_ha": 1.4951861970757818e-10,
+    "band_sum_excess_ha": 0.0,
+    "missing_dense_indices_zero_based": [],
+    "unmatched_dense_indices_zero_based": [],
+    "missing_indices_certified": true,
+    "missing_clusters": [],
+    "matched_dense_indices_zero_based": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "all_roots_within_cap": true
+  }
+]

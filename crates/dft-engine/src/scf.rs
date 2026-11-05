@@ -124,6 +124,7 @@ impl Default for Mixing {
 }
 #[derive(Clone, Debug)]
 pub struct ScfOptions {
+    pub spectral_guard: crate::SpectralGuard,
     /// Experimental opt-in hybrid; Davidson remains the default.
     pub eigensolver: dft_solvers::SolverChoice,
     /// Independent k-point workers; zero means one, capped at the k-point count.
@@ -157,6 +158,7 @@ pub struct ScfOptions {
 impl Default for ScfOptions {
     fn default() -> Self {
         Self {
+            spectral_guard: crate::SpectralGuard::Off,
             eigensolver: dft_solvers::SolverChoice::default(),
             threads: 1,
             functional: Functional::LdaPz,
@@ -257,6 +259,7 @@ pub struct KPointSolution {
 
 #[derive(Debug)]
 pub struct ScfResult {
+    pub spectral_completeness: Option<crate::SpectralReport>,
     pub energy: EnergyAudit,
     /// First k point, retained for Gamma API compatibility; see `k_points`.
     pub eigenvalues: Vec<f64>,
@@ -1365,3 +1368,6 @@ mod threading_tests {
         }
     }
 }
+
+#[path = "spectral_scf.rs"]
+mod spectral_scf;

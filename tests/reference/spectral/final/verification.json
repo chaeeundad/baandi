@@ -1,0 +1,99 @@
+{
+  "task_id": "P15C-SPECTRAL-COMPLETENESS",
+  "status": "DONE",
+  "scope": "Architect follow-up: final-only explicit option; measured default off. No universal completeness proof or default-on performance claim.",
+  "head": "01a68a1fc087cafd384a0e1fdeb105024b3c20a6",
+  "branch": "task/P15C-SPECTRAL-COMPLETENESS",
+  "eigenvalue_cap_ha": 1e-09,
+  "band_sum_cap_ha": 1e-09,
+  "default": "off",
+  "commands": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo build --release --offline -p dft-cli",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-solvers spectral_ -- --include-ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-engine cumulative_retries_and_failed_probes_are_not_lost",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-cli --test spin final_guard_reports_both_spin_channels_without_changing_schema_version -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "P15C_ORACLE=1 cargo test --release -p dft-cli --test materials final_state_dense_spectra -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/spectral/final_policy.py --binary /tmp/p15c-final-v2-cli --threads 1 --output tests/reference/spectral/final/latest-t1",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary /tmp/p15c-final-v2-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --threads 1 --repeats 1 --baseline tests/reference/spectral/baseline-t1.json --require-identical --record tests/reference/spectral/final/default-bench.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_suite.py --binary /tmp/p15c-final-v2-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --robustness --output tests/reference/spectral/final/robustness.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/reference/spectral/final_summary.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    }
+  ],
+  "thread_commands": "thread-commands.json",
+  "summary": "summary.json",
+  "binary_sha256": "90057d2951fe66be62683c42c4cdb4a6f56cef778b3e70bf0123459d3b94a1ed",
+  "review_source_sha256": {
+    "crates/dft-engine/src/spectral.rs": "636a0343df12fe52dea0b75a9e1aac2a4176b720604821b61b5a6f70041eadaf",
+    "crates/dft-engine/src/spectral_scf.rs": "34cf168896e30f7efa18d975c0767e217451ca055123b6ebb6be03e75ba40091",
+    "crates/dft-solvers/src/spectral.rs": "dc42fd588ab182b57156fb611c70f998a9eb474a716e875c74d58c908a03163b",
+    "crates/dft-cli/src/checkpoint_io.rs": "6f8d54f01fdfb7211e16eca7eee9a741eb9dbe01387d007f93fdb4390689f68c",
+    "crates/dft-cli/src/config.rs": "9c477904690fe3a8ace8e6aac1abbae9bae0f154b8453099e2c53f6a78b662bc",
+    "crates/dft-cli/src/run.rs": "be6a53e5726e12e4991a3fd2a1225857ee2673ea2db74fda3cd003a5bb45b823",
+    "crates/dft-cli/src/spin_run.rs": "4acef98cb9201496fcace350faecfe16c163020969dfbd6aecfa24cf5ffdfd7b",
+    "crates/dft-cli/tests/materials.rs": "85ee5e82e141b36c9772567bf2e313a1480d326cfbbcdd515dcb4b70bd16e15f",
+    "crates/dft-cli/tests/run.rs": "6f2a65f034bb91bc1f5da726055f9bac234ed618b511331398e9036dd1ee4e38",
+    "crates/dft-cli/tests/spin.rs": "de48f06c374d208118970b4ad9f03553513d0cccae0b64b132c7de4bebdd749f",
+    "crates/dft-engine/src/checkpoint.rs": "290b2edf1bf7184230e14cf24d01418ca03dfa70b235494b111c8ecfe1fc562b",
+    "crates/dft-engine/src/collinear.rs": "dd6db3a85de33a87741d079ba9b5b6f375ca8d280724b3af333ea6f5700df99c",
+    "crates/dft-engine/src/lib.rs": "188dbdc07691739252c78e039409771d7438fdbba5da84d31ab836bafac05c46",
+    "crates/dft-engine/src/scf.rs": "133fb74a8f6a205b1ddcbdc781b28c834315653f09bf55df0afe5a76fbe4dd30",
+    "crates/dft-engine/src/session.rs": "543f12b56552ace272f3c268570c8435e13553ab66d9788a9bf092a7d4b63bee",
+    "crates/dft-solvers/src/legacy.rs": "d71b8886da1bc593333cdc5190602d9ea3dc4d4a69acec85d733e15703f6704a",
+    "crates/dft-solvers/src/lib.rs": "e9b11b8904dc1ec6ad54d49723da597d7265a9dff82d893ac36bad23ef97ee56",
+    "crates/dft-solvers/src/replay.rs": "7fd257c44361740c3d09995a754252f1b148e01fa0d13089a0a15276a766e237",
+    "crates/dft-solvers/src/rmm.rs": "d0901bf4c8c23ba7500a464321d2aedef9c472775347a5f024b5d05e459d7538",
+    "crates/dft-solvers/src/tests.rs": "a3313a1b144b7b72ad30aab5ac991f0694a5c6d95b2342d8c9d0ceb0bca33948"
+  },
+  "failures_resolved": [
+    "Legacy checkpoint wire initializer required a default for the new option; v1 defaults off, final sessions explicitly unsupported.",
+    "Engine accounting test used unavailable direct dependencies; corrected to the existing physics data facade.",
+    "Exact-diagonal-preconditioner retry exposed rank cancellation and failed closed. Accounting test uses scalar preconditioner; no tolerance changed. Retry now attempts 3*bands after a failed 2*bands solve."
+  ],
+  "expected_nonconvergence": [
+    "Final-guard skew: legacy wrong candidate rejected, one retry, 100 iterations exhausted.",
+    "Dense-every-step skew: 100 iterations exhausted.",
+    "Slab and 16-atom mesh: ordinary SCF exhausted before a final certificate, no guard performed."
+  ],
+  "limitations": [
+    "Default off does not certify spectral completeness; CLI states not verified.",
+    "Large-space independent seeded search is not an inertia proof.",
+    "No dev08/native timing acceptance; Mac wall observations only.",
+    "Final-mode checkpoint v1 rejected to preserve cumulative audit semantics.",
+    "Original registry/dashboard and generated README integration remain with orchestrator outside owned files."
+  ],
+  "commit": "Uncommitted as instructed."
+}

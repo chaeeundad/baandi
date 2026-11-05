@@ -1,0 +1,98 @@
+[
+  {
+    "command": [
+      "python3",
+      "-I",
+      "scripts/bench_scf.py",
+      "--binary",
+      "/tmp/p15c-default-cli",
+      "--upf",
+      "/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+      "--cases",
+      "gamma,k222s,k222,k444s,si8",
+      "--threads",
+      "1",
+      "--repeats",
+      "1",
+      "--baseline",
+      "tests/reference/spectral/baseline-t1.json",
+      "--require-identical",
+      "--record",
+      "tests/reference/spectral/default-t1.json"
+    ],
+    "exit_code": 0,
+    "output": "case      wall med (s)  engine (s)  diag (s) iters  dE vs base (Ha)    density  speedup\ngamma            0.443       0.138     0.071    10         0.00e+00  identical    0.58x\nk222s            0.443       0.431     0.297    10         0.00e+00  identical    1.49x\nk222             0.729       0.722     0.536    10         0.00e+00  identical    1.67x\nk444s            2.868       2.860     2.284    10         0.00e+00  identical    1.21x\nsi8              2.908       2.899     2.574    15         0.00e+00  identical    0.98x\nrecorded tests/reference/spectral/default-t1.json\nOK\n"
+  },
+  {
+    "command": [
+      "python3",
+      "-I",
+      "scripts/bench_scf.py",
+      "--binary",
+      "/tmp/p15c-default-cli",
+      "--upf",
+      "/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+      "--cases",
+      "gamma,k222s,k222,k444s,si8",
+      "--threads",
+      "2",
+      "--repeats",
+      "1",
+      "--baseline",
+      "tests/reference/spectral/baseline-t1.json",
+      "--require-identical",
+      "--record",
+      "tests/reference/spectral/default-t2.json"
+    ],
+    "exit_code": 0,
+    "output": "case      wall med (s)  engine (s)  diag (s) iters  dE vs base (Ha)    density  speedup\ngamma            0.129       0.121     0.050    10         0.00e+00  identical    1.98x\nk222s            0.256       0.250     0.160    10         0.00e+00  identical    2.57x\nk222             0.433       0.426     0.304    10         0.00e+00  identical    2.82x\nk444s            1.613       1.604     1.230    10         0.00e+00  identical    2.16x\nsi8              2.143       2.133     1.834    15         0.00e+00  identical    1.33x\nrecorded tests/reference/spectral/default-t2.json\nOK\n"
+  },
+  {
+    "command": [
+      "python3",
+      "-I",
+      "scripts/bench_scf.py",
+      "--binary",
+      "/tmp/p15c-default-cli",
+      "--upf",
+      "/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+      "--cases",
+      "gamma,k222s,k222,k444s,si8",
+      "--threads",
+      "4",
+      "--repeats",
+      "1",
+      "--baseline",
+      "tests/reference/spectral/baseline-t1.json",
+      "--require-identical",
+      "--record",
+      "tests/reference/spectral/default-t4.json"
+    ],
+    "exit_code": 0,
+    "output": "case      wall med (s)  engine (s)  diag (s) iters  dE vs base (Ha)    density  speedup\ngamma            0.092       0.087     0.033    10         0.00e+00  identical    2.78x\nk222s            0.165       0.158     0.090    10         0.00e+00  identical    3.99x\nk222             0.295       0.288     0.190    10         0.00e+00  identical    4.13x\nk444s            1.094       1.085     0.804    10         0.00e+00  identical    3.18x\nsi8              2.178       2.168     1.757    15         0.00e+00  identical    1.31x\nrecorded tests/reference/spectral/default-t4.json\nOK\n"
+  },
+  {
+    "command": [
+      "python3",
+      "-I",
+      "scripts/bench_scf.py",
+      "--binary",
+      "/tmp/p15c-default-cli",
+      "--upf",
+      "/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+      "--cases",
+      "gamma,k222s,k222,k444s,si8",
+      "--threads",
+      "8",
+      "--repeats",
+      "1",
+      "--baseline",
+      "tests/reference/spectral/baseline-t1.json",
+      "--require-identical",
+      "--record",
+      "tests/reference/spectral/default-t8.json"
+    ],
+    "exit_code": 0,
+    "output": "case      wall med (s)  engine (s)  diag (s) iters  dE vs base (Ha)    density  speedup\ngamma            0.107       0.100     0.035    10         0.00e+00  identical    2.39x\nk222s            0.155       0.149     0.078    10         0.00e+00  identical    4.24x\nk222             0.214       0.206     0.125    10         0.00e+00  identical    5.70x\nk444s            0.685       0.675     0.485    10         0.00e+00  identical    5.08x\nsi8              1.657       1.648     1.312    15         0.00e+00  identical    1.72x\nrecorded tests/reference/spectral/default-t8.json\nOK\n"
+  }
+]

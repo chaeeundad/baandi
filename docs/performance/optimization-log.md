@@ -1,5 +1,55 @@
 # Optimization log (newest first)
 
+## P15C follow-up — final-only runtime option, default off (2026-11-05)
+
+Derived from the P15A finding in `research/qe-study/replay-stopping-results.md`;
+no QE source read. The architect-authorized runtime policy checks every reported
+k point/spin only after the unchanged fixed-point certificate passes. It audits
+the original returned states against their own Hamiltonian, retains cumulative
+retry/work/error events, and rejects the old candidate after any repair.
+Complete-case numerical outputs are preserved exactly.
+
+The final-only guard adds 90 H columns on si8 (3.9735%) and 2618 on k444s
+(23.4147%), preserving 15/10 SCF iterations. Therefore `[scf] spectral_guard`
+defaults to `"off"`; `"final"` is explicit. The 3% target is not met. No speculative
+early trigger or tolerance relaxation was introduced. Large-space seeded checks
+are numerical evidence, not an inertia proof. Small spaces use a dense check.
+
+All six P13D Si/MgO cutoff fixtures pass the final-state dense comparison:
+max ordinary occupied discrepancy 3.59712e-14 Ha. Dense diagonalization at every
+step of the skew fixture also exhausts 100 SCF iterations with density residual
+2.079e-3, despite eigen residuals below 2.889e-14 Ha. Its near-zero occupied gap
+supports a difficult integer-occupation SCF map; no solver defaults were tuned.
+The guarded skew run records one repair and cannot report convergence.
+
+T=1,2,4,8 agree exactly across seven cases and both policies; spin schema tests
+also check all four thread settings. Mac walls are observations, not acceptance
+measurements. See [current report](../validation/spectral-completeness.md),
+[dev08 request](../validation/spectral-dev08-request.md), and
+[current evidence](../../tests/reference/spectral/final/). Earlier entries below
+record historical experimental builds and their then-current limitations.
+
+
+## P15C — spectral guard candidates not adopted (2026-11-05)
+
+Derived from the finding in `research/qe-study/replay-stopping-results.md`;
+no QE source read. Final realistic sampled spectra pass 1e-9 Ha; the synthetic
+skew final occupied discrepancy is 1.514951753 Ha and fixed-H occupied band-sum
+excess 27.958043614 Ha. New evidence justifies testing random starts for root
+completeness, not repeating rejected capacity-only speed tuning.
+
+Full independent certificate searches add 1035 / 11463 H vectors on si8/k444s
+(45.70% / 102.52% of original total work). Complement searches reduce that to
+89 / 2618 (3.93% / 23.41%). The latter preserves complete-case energy/density
+bits and SCF counts, but still misses the 3% target; corrected skew SCF exhausts
+100 iterations. Richer initial starts also exhaust skew; si8/k444s energy changes
+are 2.70e-13 / 3.55e-15 Ha, with unchanged 15/10 iterations. No default adopted.
+Mac single-run wall samples overlap other work and are not acceptance timings.
+
+[Protocol, limits and rejected attempts](../validation/spectral-completeness.md),
+[stored evidence](../../tests/reference/spectral/). Branch changes uncommitted;
+source hashes, commands, failures and gate exits are in `verification.json`.
+
 ## P15A — frozen stopping replay, measurement only (2026-11-05)
 
 Derived from `qe-solvers-and-subspace.md` hypothesis 1 and `qe-scf-cycle.md`

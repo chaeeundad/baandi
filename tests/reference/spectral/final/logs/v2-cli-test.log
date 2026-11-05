@@ -1,0 +1,21 @@
+   Compiling dft-solvers v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/crates/dft-solvers)
+   Compiling dft-physics v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/crates/dft-physics)
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/crates/dft-engine)
+warning: unused variable: `start`
+   --> crates/dft-engine/src/collinear.rs:755:13
+    |
+755 |         let start = Instant::now();
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_start`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling dft-cli v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/crates/dft-cli)
+warning: `dft-engine` (lib) generated 1 warning (run `cargo fix --lib -p dft-engine` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.12s
+     Running tests/run.rs (target/debug/deps/run-1473d584b8b25930)
+
+running 1 test
+test final_spectral_guard_is_additive_and_audits_only_reported_state ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 0.76s
+

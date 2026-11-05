@@ -69,6 +69,7 @@ pub struct SpinIteration {
     pub mixing_fraction: f64,
 }
 pub struct CollinearResult {
+    pub spectral_completeness: Option<crate::SpectralReport>,
     pub converged: bool,
     pub sector: SpinSector,
     pub density: SpinDensity,
@@ -445,6 +446,8 @@ impl CollinearProblem {
         let mut output = std::array::from_fn(|_| Array3::zeros(dims));
         let mut check = std::array::from_fn(|_| Array3::zeros(dims));
         let mut proposals = std::array::from_fn::<_, 2, _>(|_| Array3::zeros(dims));
+        let mut spectral_report =
+            (o.spectral_guard == crate::SpectralGuard::Final).then(crate::SpectralReport::default);
         let mut history = Vec::with_capacity(o.max_iterations);
         let mut previous_energy: Option<f64> = None;
         let mut previous_residual: f64 = 0.1;
@@ -509,6 +512,8 @@ impl CollinearProblem {
                 mixing_fraction: 1.0,
             });
             let mut passed = false;
+            let mut unable_to_verify = false;
+            let mut rescued = false;
             if candidate {
                 let candidate_gaps = self.gaps();
                 // Retain the candidate orbitals while checking a fresh map.
@@ -584,14 +589,25 @@ impl CollinearProblem {
                     energy_tolerance_ha: o.energy_tolerance,
                     eigen_tolerance_ha: o.eigen_tolerance,
                 });
-                // Returned candidate density, energy and eigenpairs refer to one state.
+                if passed && let Some(report) = &mut spectral_report {
+                    (rescued, unable_to_verify) = self.audit_reported_spectrum(
+                        &density,
+                        iteration,
+                        iteration < o.max_iterations,
+                        report,
+                    )?;
+                    passed = report.passed;
+                }
+                // The ordinary candidate remains the reported state. Repaired
+                // starts may enter a subsequent ordinary map, never this result.
                 for channel in &mut self.blocks {
                     for w in channel {
                         w.solution = w.saved.take();
                     }
                 }
             }
-            if passed || iteration == o.max_iterations {
+
+            if passed || unable_to_verify || iteration == o.max_iterations {
                 let k_points = std::array::from_fn(|s| {
                     self.blocks[s]
                         .iter_mut()
@@ -603,6 +619,10 @@ impl CollinearProblem {
                         .collect()
                 });
                 return Ok(CollinearResult {
+                    spectral_completeness: spectral_report.map(|mut r| {
+                        r.passed &= passed;
+                        r
+                    }),
                     converged: passed,
                     sector: self.sector,
                     density: SpinDensity::Collinear {
@@ -620,6 +640,13 @@ impl CollinearProblem {
                     channel_electrons: charge,
                     moment_mu_b: charge[0] - charge[1],
                 });
+            }
+            if rescued {
+                for mixer in &mut self.mixers {
+                    mixer.reset();
+                }
+                best = f64::INFINITY;
+                growing = 0;
             }
             for s in 0..2 {
                 if counts[s] == 0.0 {
@@ -716,4 +743,72 @@ fn make_spin_mixer(p: &ScfProblem) -> Result<Box<dyn MixerHistory>, ScfError> {
             )?)
         }
     })
+}
+
+impl CollinearProblem {
+    fn audit_reported_spectrum(
+        &mut self,
+        input: &[Array3<f64>; 2],
+        iteration: usize,
+        allow_rescue: bool,
+        report: &mut crate::SpectralReport,
+    ) -> Result<(bool, bool), ScfError> {
+        let start = Instant::now();
+        self.total.assign(&input[0]);
+        self.total += &input[1];
+        self.input_h.evaluate(&self.total)?;
+        self.xc.evaluate_with_core(
+            input,
+            self.channels[0].core_density.as_ref(),
+            &mut self.input_xc,
+        )?;
+        let first = report.events.len();
+        let mut failed = false;
+        for s in 0..2 {
+            let p = &mut self.channels[s];
+            for (((v, ion), h), x) in self
+                .effective
+                .iter_mut()
+                .zip(&p.ionic_real)
+                .zip(&self.input_h.potential)
+                .zip(&self.input_xc.potentials[s])
+            {
+                *v = ion + h + x;
+            }
+            let bands = p.occupations.len();
+            let solver = Davidson {
+                bands,
+                tolerance: 1e-10,
+                max_iterations: p.options.davidson_max_iterations,
+                max_subspace: p.options.davidson_subspace.max(6 * bands),
+                block_size: bands,
+                seed: p.options.seed,
+            };
+            for (k, (state, w)) in p.states.iter_mut().zip(&mut self.blocks[s]).enumerate() {
+                state.hamiltonian.copy_local_potential(&self.effective)?;
+                match report.audit(
+                    iteration,
+                    Some(s),
+                    k,
+                    &solver,
+                    &state.hamiltonian,
+                    &w.preconditioner,
+                    w.saved.as_ref().unwrap(),
+                ) {
+                    Some(checked) => {
+                        if checked.spectral_completeness.as_ref().unwrap().retries == 0 {
+                            w.saved.as_mut().unwrap().spectral_completeness =
+                                checked.spectral_completeness;
+                        } else if allow_rescue {
+                            w.saved = Some(checked);
+                        }
+                    }
+                    None => failed = true,
+                }
+            }
+        }
+        report.passed = report.events[first..].iter().all(|e| e.passed);
+        report.elapsed += start.elapsed();
+        Ok((report.events[first..].iter().any(|e| e.retries > 0), failed))
+    }
 }

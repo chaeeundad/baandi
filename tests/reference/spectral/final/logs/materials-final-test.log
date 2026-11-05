@@ -1,0 +1,19 @@
+   Compiling dft-solvers v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/crates/dft-solvers)
+   Compiling dft-physics v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/crates/dft-physics)
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/crates/dft-engine)
+   Compiling dft-cli v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/crates/dft-cli)
+    Finished `release` profile [optimized] target(s) in 6.02s
+     Running tests/materials.rs (target/release/deps/materials-69d2c3c4f5dda202)
+
+running 1 test
+si-20 occupied 1.0935696792557792e-14 all-root 2.838251855763474e-11
+test final_state_dense_spectra has been running for over 60 seconds
+si-30 occupied 2.5895952049381776e-14 all-root 2.7553070935937285e-11
+si-40 occupied 2.400857290751901e-14 all-root 2.676109334132093e-11
+mgo-40 occupied 4.1300296516055823e-14 all-root 1.1046941139625233e-11
+mgo-50 occupied 5.6066262743570405e-14 all-root 1.0073053502424045e-11
+mgo-60 occupied 7.205347429817266e-14 all-root 9.866663042146229e-12
+test final_state_dense_spectra ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 350.22s
+

@@ -1,0 +1,87 @@
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/crates/dft-engine)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.85s
+     Running unittests src/lib.rs (target/debug/deps/dft_engine-c2fad8f0141c558e)
+
+running 1 test
+test spectral::tests::cumulative_retries_and_failed_probes_are_not_lost ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.01s
+
+     Running tests/checkpoint.rs (target/debug/deps/checkpoint-1be99c4ccccf93ef)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/collinear.rs (target/debug/deps/collinear-7d70b7d23db6e69f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/diagnostics.rs (target/debug/deps/diagnostics-9841d4660ab0a1c0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests/electrostatic.rs (target/debug/deps/electrostatic-fb11bbfb1a0ba446)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/kpoints.rs (target/debug/deps/kpoints-e70b54e8a9c8d875)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/nlcc.rs (target/debug/deps/nlcc-e1f88f5169e5ba46)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/nscf.rs (target/debug/deps/nscf-4196f57f35927d51)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/pbe.rs (target/debug/deps/pbe-5ef2f4e912573249)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/real_nc.rs (target/debug/deps/real_nc-45a7bde38f8d218d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/runtime_policy.rs (target/debug/deps/runtime_policy-235c35c01499c71f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.00s
+
+     Running tests/scf.rs (target/debug/deps/scf-599cbd347ed35b94)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/stepwise_equivalence.rs (target/debug/deps/stepwise_equivalence-38e0e87ca4833212)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/threading.rs (target/debug/deps/threading-6cb6f07c4f35f6b5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+

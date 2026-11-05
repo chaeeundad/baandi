@@ -159,6 +159,7 @@ impl RmmDiis {
                     None
                 } else {
                     Some(Box::new(EigenSolution {
+                        spectral_completeness: None,
                         eigenvalues: safe_values,
                         eigenvectors: safe_x,
                         converged: safe_residuals
@@ -205,6 +206,7 @@ impl RmmDiis {
                     None
                 } else {
                     Some(Box::new(EigenSolution {
+                        spectral_completeness: None,
                         eigenvalues: safe_values,
                         eigenvectors: safe_x,
                         converged: safe_residuals
@@ -227,6 +229,7 @@ impl RmmDiis {
             }
             if residuals.iter().zip(tolerances).all(|(r, t)| r <= t) {
                 return Ok(EigenSolution {
+                    spectral_completeness: None,
                     eigenvalues: values,
                     eigenvectors: x,
                     converged: vec![true; m],
@@ -253,6 +256,7 @@ impl RmmDiis {
                         RmmFailureReason::Stagnation
                     },
                     last: Some(Box::new(EigenSolution {
+                        spectral_completeness: None,
                         eigenvalues: values,
                         eigenvectors: x,
                         converged: residuals

@@ -303,6 +303,7 @@ pub(crate) fn options_identical(a: &ScfOptions, b: &ScfOptions) -> bool {
     mixing
         && solver
         && eq!(
+            spectral_guard,
             threads,
             functional,
             allow_functional_override,

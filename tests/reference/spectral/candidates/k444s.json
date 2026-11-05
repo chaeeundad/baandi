@@ -1,0 +1,2701 @@
+{
+  "case": "k444s",
+  "eigenvalue_cap_ha": 1e-09,
+  "band_sum_cap_ha": 1e-09,
+  "commit": "01a68a1fc087cafd384a0e1fdeb105024b3c20a6",
+  "input": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkgrid = [4, 4, 4]\nkshift = [0.5, 0.5, 0.5]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nthreads = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\n",
+  "upf_sha256": {
+    "pseudo": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+  },
+  "binary_sha256": "85ef73f3729cd4f9b1e2c61a63c1ea9e77a040076c905440531cb03c08d53b5b",
+  "baseline_binary_sha256": "e199b5fb6fc660b635fb94ad2e2b047dcadda20f0bf89012bf540f2727b0929e",
+  "baseline_command": [
+    "/tmp/p15c-baseline-cli",
+    "run",
+    "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p15c-wiayr2jj/input.toml",
+    "--output-dir",
+    "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p15c-wiayr2jj/base"
+  ],
+  "command": [
+    "/tmp/p15c-candidate-cli",
+    "run",
+    "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p15c-wiayr2jj/input.toml",
+    "--output-dir",
+    "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p15c-wiayr2jj/oracle"
+  ],
+  "dense_ids": [
+    0,
+    16,
+    31,
+    32,
+    48,
+    63,
+    96,
+    112,
+    127,
+    128,
+    144,
+    159,
+    288,
+    304,
+    319,
+    320,
+    336,
+    351
+  ],
+  "exit_code": 0,
+  "baseline_exit_code": 0,
+  "converged": true,
+  "iterations": 10,
+  "total_energy_ha": -7.9259761266480915,
+  "energy_identical": true,
+  "density_identical": true,
+  "history_identical": true,
+  "comparisons": [
+    {
+      "solve": 0,
+      "iteration": 1,
+      "k": 0,
+      "phase": "ordinary",
+      "residuals_ha": [
+        0.009085155552253737,
+        0.005267017074688787,
+        0.00689500544812862,
+        0.006895005448128607,
+        0.006560383763404796,
+        0.005826435234947651,
+        0.0058264352349476885,
+        0.009538097697053929
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 39,
+          "occupied_max_error_ha": 2.3040693615639096e-05,
+          "first_empty_error_ha": 1.36896710904999e-05,
+          "buffer_max_error_ha": 4.044298620214937e-05,
+          "band_sum_excess_ha": 0.000126980741206352,
+          "missing_dense_indices_zero_based": null,
+          "missing_clusters": [
+            [
+              0
+            ],
+            [
+              1
+            ],
+            [
+              2,
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5,
+              6
+            ],
+            [
+              7
+            ]
+          ],
+          "matched_dense_indices_zero_based": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "all_roots_within_cap": false,
+          "unmatched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "missing_indices_certified": false
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 207,
+          "occupied_max_error_ha": 4.066191827689636e-15,
+          "first_empty_error_ha": 2.6645352591003757e-15,
+          "buffer_max_error_ha": 3.3861802251067274e-15,
+          "band_sum_excess_ha": 1.1608769501236793e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 334,
+          "occupied_max_error_ha": 5.7141791298676026e-15,
+          "first_empty_error_ha": 1.7763568394002505e-15,
+          "buffer_max_error_ha": 3.747002708109903e-15,
+          "band_sum_excess_ha": 4.586608870482678e-15,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 2.3040693615639096e-05,
+      "first_empty_error_ha": 1.36896710904999e-05,
+      "buffer_max_error_ha": 4.044298620214937e-05,
+      "band_sum_excess_ha": 0.000126980741206352,
+      "missing_dense_indices_zero_based": null,
+      "missing_clusters": [
+        [
+          0
+        ],
+        [
+          1
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          4
+        ],
+        [
+          5,
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "matched_dense_indices_zero_based": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "all_roots_within_cap": false,
+      "unmatched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "missing_indices_certified": false
+    },
+    {
+      "solve": 16,
+      "iteration": 1,
+      "k": 16,
+      "phase": "ordinary",
+      "residuals_ha": [
+        0.004232467160898147,
+        0.002800180939978426,
+        0.005159912275234256,
+        0.004291335759630441,
+        0.0028832217918300664,
+        0.002997963653384073,
+        0.003322148867683044,
+        0.00861542084432417
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 46,
+          "occupied_max_error_ha": 7.383917423262054e-06,
+          "first_empty_error_ha": 3.9058127751512295e-06,
+          "buffer_max_error_ha": 2.41504730707498e-05,
+          "band_sum_excess_ha": 3.752007996357665e-05,
+          "missing_dense_indices_zero_based": null,
+          "missing_clusters": [
+            [
+              0
+            ],
+            [
+              1
+            ],
+            [
+              2
+            ],
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ],
+            [
+              6
+            ],
+            [
+              7
+            ]
+          ],
+          "matched_dense_indices_zero_based": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "all_roots_within_cap": false,
+          "unmatched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "missing_indices_certified": false
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 228,
+          "occupied_max_error_ha": 3.0253577421035516e-15,
+          "first_empty_error_ha": 4.496403249731884e-15,
+          "buffer_max_error_ha": 2.275957200481571e-15,
+          "band_sum_excess_ha": -6.661338147750939e-16,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 366,
+          "occupied_max_error_ha": 5.440092820663267e-15,
+          "first_empty_error_ha": 5.3013149425851225e-15,
+          "buffer_max_error_ha": 2.7200464103316335e-15,
+          "band_sum_excess_ha": -8.222589276130066e-15,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 7.383917423262054e-06,
+      "first_empty_error_ha": 3.9058127751512295e-06,
+      "buffer_max_error_ha": 2.41504730707498e-05,
+      "band_sum_excess_ha": 3.752007996357665e-05,
+      "missing_dense_indices_zero_based": null,
+      "missing_clusters": [
+        [
+          0
+        ],
+        [
+          1
+        ],
+        [
+          2
+        ],
+        [
+          3
+        ],
+        [
+          4
+        ],
+        [
+          5
+        ],
+        [
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "matched_dense_indices_zero_based": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "all_roots_within_cap": false,
+      "unmatched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "missing_indices_certified": false
+    },
+    {
+      "solve": 31,
+      "iteration": 1,
+      "k": 31,
+      "phase": "ordinary",
+      "residuals_ha": [
+        0.005024606515845423,
+        0.004258547453997689,
+        0.005181789471915454,
+        0.0056837227060153395,
+        0.008815979026170692,
+        0.005182591326565438,
+        0.0047090135887593145,
+        0.006968010799592028
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 44,
+          "occupied_max_error_ha": 8.383430760407207e-06,
+          "first_empty_error_ha": 2.620335105901761e-05,
+          "buffer_max_error_ha": 1.4128237510291353e-05,
+          "band_sum_excess_ha": 5.411627275388187e-05,
+          "missing_dense_indices_zero_based": null,
+          "missing_clusters": [
+            [
+              0
+            ],
+            [
+              1
+            ],
+            [
+              2
+            ],
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ],
+            [
+              6
+            ],
+            [
+              7
+            ]
+          ],
+          "matched_dense_indices_zero_based": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "all_roots_within_cap": false,
+          "unmatched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "missing_indices_certified": false
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 230,
+          "occupied_max_error_ha": 3.878841692284141e-15,
+          "first_empty_error_ha": 1.2212453270876722e-15,
+          "buffer_max_error_ha": 3.3306690738754696e-15,
+          "band_sum_excess_ha": 3.608224830031759e-16,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 371,
+          "occupied_max_error_ha": 3.3653635433950058e-15,
+          "first_empty_error_ha": 4.996003610813204e-16,
+          "buffer_max_error_ha": 3.3306690738754696e-15,
+          "band_sum_excess_ha": -1.5959455978986625e-15,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 8.383430760407207e-06,
+      "first_empty_error_ha": 2.620335105901761e-05,
+      "buffer_max_error_ha": 1.4128237510291353e-05,
+      "band_sum_excess_ha": 5.411627275388187e-05,
+      "missing_dense_indices_zero_based": null,
+      "missing_clusters": [
+        [
+          0
+        ],
+        [
+          1
+        ],
+        [
+          2
+        ],
+        [
+          3
+        ],
+        [
+          4
+        ],
+        [
+          5
+        ],
+        [
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "matched_dense_indices_zero_based": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "all_roots_within_cap": false,
+      "unmatched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "missing_indices_certified": false
+    },
+    {
+      "solve": 32,
+      "iteration": 2,
+      "k": 0,
+      "phase": "ordinary",
+      "residuals_ha": [
+        0.0015946244876615797,
+        0.0021753409912705357,
+        0.004802445694485073,
+        0.004802833195542562,
+        0.003984181683451174,
+        0.0031770453863907517,
+        0.0031759869714216124,
+        0.005400122620566709
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 30,
+          "occupied_max_error_ha": 1.0054282796212455e-05,
+          "first_empty_error_ha": 4.8013720146955485e-06,
+          "buffer_max_error_ha": 1.1022396551430003e-05,
+          "band_sum_excess_ha": 4.5746305849664326e-05,
+          "missing_dense_indices_zero_based": null,
+          "missing_clusters": [
+            [
+              0
+            ],
+            [
+              1
+            ],
+            [
+              2
+            ],
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ],
+            [
+              6
+            ],
+            [
+              7
+            ]
+          ],
+          "matched_dense_indices_zero_based": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "all_roots_within_cap": false,
+          "unmatched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "missing_indices_certified": false
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 175,
+          "occupied_max_error_ha": 1.3239409568654992e-14,
+          "first_empty_error_ha": 3.941291737419306e-15,
+          "buffer_max_error_ha": 2.7755575615628914e-15,
+          "band_sum_excess_ha": 4.551914400963142e-15,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 321,
+          "occupied_max_error_ha": 1.2406742300186124e-14,
+          "first_empty_error_ha": 5.717648576819556e-15,
+          "buffer_max_error_ha": 2.942091015256665e-15,
+          "band_sum_excess_ha": 5.467848396278896e-15,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 1.0054282796212455e-05,
+      "first_empty_error_ha": 4.8013720146955485e-06,
+      "buffer_max_error_ha": 1.1022396551430003e-05,
+      "band_sum_excess_ha": 4.5746305849664326e-05,
+      "missing_dense_indices_zero_based": null,
+      "missing_clusters": [
+        [
+          0
+        ],
+        [
+          1
+        ],
+        [
+          2
+        ],
+        [
+          3
+        ],
+        [
+          4
+        ],
+        [
+          5
+        ],
+        [
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "matched_dense_indices_zero_based": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "all_roots_within_cap": false,
+      "unmatched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "missing_indices_certified": false
+    },
+    {
+      "solve": 48,
+      "iteration": 2,
+      "k": 16,
+      "phase": "ordinary",
+      "residuals_ha": [
+        0.0013407208747394455,
+        0.0018776270105017154,
+        0.003521335591441394,
+        0.0021909657149221493,
+        0.005170933242607621,
+        0.002419450075147566,
+        0.004006816155289483,
+        0.005419507863871486
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 34,
+          "occupied_max_error_ha": 3.471077817493451e-06,
+          "first_empty_error_ha": 8.866136332164043e-06,
+          "buffer_max_error_ha": 1.7258175360079786e-05,
+          "band_sum_excess_ha": 1.2752669429638014e-05,
+          "missing_dense_indices_zero_based": null,
+          "missing_clusters": [
+            [
+              0
+            ],
+            [
+              1
+            ],
+            [
+              2
+            ],
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ],
+            [
+              6
+            ],
+            [
+              7
+            ]
+          ],
+          "matched_dense_indices_zero_based": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "all_roots_within_cap": false,
+          "unmatched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "missing_indices_certified": false
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 199,
+          "occupied_max_error_ha": 6.179085021429387e-15,
+          "first_empty_error_ha": 1.887379141862766e-15,
+          "buffer_max_error_ha": 4.9960036108132044e-15,
+          "band_sum_excess_ha": -5.3637649877202875e-15,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 361,
+          "occupied_max_error_ha": 6.187758638809271e-15,
+          "first_empty_error_ha": 3.7192471324942744e-15,
+          "buffer_max_error_ha": 6.38378239159465e-15,
+          "band_sum_excess_ha": -1.1820405765305964e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 3.471077817493451e-06,
+      "first_empty_error_ha": 8.866136332164043e-06,
+      "buffer_max_error_ha": 1.7258175360079786e-05,
+      "band_sum_excess_ha": 1.2752669429638014e-05,
+      "missing_dense_indices_zero_based": null,
+      "missing_clusters": [
+        [
+          0
+        ],
+        [
+          1
+        ],
+        [
+          2
+        ],
+        [
+          3
+        ],
+        [
+          4
+        ],
+        [
+          5
+        ],
+        [
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "matched_dense_indices_zero_based": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "all_roots_within_cap": false,
+      "unmatched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "missing_indices_certified": false
+    },
+    {
+      "solve": 63,
+      "iteration": 2,
+      "k": 31,
+      "phase": "ordinary",
+      "residuals_ha": [
+        0.0016942392157950747,
+        0.0020253016993775044,
+        0.0019087924541039002,
+        0.002670781553509081,
+        0.005205722514612705,
+        0.00497616127741046,
+        0.005581770973721194,
+        0.0036718474931435045
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 33,
+          "occupied_max_error_ha": 1.920791170187397e-06,
+          "first_empty_error_ha": 8.967791620073662e-06,
+          "buffer_max_error_ha": 1.1489674613174294e-05,
+          "band_sum_excess_ha": 1.0337334237858764e-05,
+          "missing_dense_indices_zero_based": null,
+          "missing_clusters": [
+            [
+              0
+            ],
+            [
+              1
+            ],
+            [
+              2
+            ],
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ],
+            [
+              6
+            ],
+            [
+              7
+            ]
+          ],
+          "matched_dense_indices_zero_based": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "all_roots_within_cap": false,
+          "unmatched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "missing_indices_certified": false
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 194,
+          "occupied_max_error_ha": 8.909539772616881e-15,
+          "first_empty_error_ha": 5.773159728050814e-15,
+          "buffer_max_error_ha": 6.328271240363392e-15,
+          "band_sum_excess_ha": 6.34492458573277e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 354,
+          "occupied_max_error_ha": 8.451572774959004e-15,
+          "first_empty_error_ha": 7.549516567451064e-15,
+          "buffer_max_error_ha": 8.715250743307479e-15,
+          "band_sum_excess_ha": 6.197820034969936e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 1.920791170187397e-06,
+      "first_empty_error_ha": 8.967791620073662e-06,
+      "buffer_max_error_ha": 1.1489674613174294e-05,
+      "band_sum_excess_ha": 1.0337334237858764e-05,
+      "missing_dense_indices_zero_based": null,
+      "missing_clusters": [
+        [
+          0
+        ],
+        [
+          1
+        ],
+        [
+          2
+        ],
+        [
+          3
+        ],
+        [
+          4
+        ],
+        [
+          5
+        ],
+        [
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "matched_dense_indices_zero_based": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "all_roots_within_cap": false,
+      "unmatched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "missing_indices_certified": false
+    },
+    {
+      "solve": 96,
+      "iteration": 4,
+      "k": 0,
+      "phase": "ordinary",
+      "residuals_ha": [
+        0.00021981593576560711,
+        0.0002341055123476093,
+        0.00021257569452672612,
+        0.00021257300559905914,
+        0.00019718448179196232,
+        0.0002171795484712404,
+        0.00021686566436151722,
+        0.0002992231827488253
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 28,
+          "occupied_max_error_ha": 2.0534453359921656e-08,
+          "first_empty_error_ha": 1.188342846347723e-08,
+          "buffer_max_error_ha": 2.231495910276493e-08,
+          "band_sum_excess_ha": 1.1632661989224857e-07,
+          "missing_dense_indices_zero_based": null,
+          "missing_clusters": [
+            [
+              0
+            ],
+            [
+              1
+            ],
+            [
+              2
+            ],
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ],
+            [
+              6
+            ],
+            [
+              7
+            ]
+          ],
+          "matched_dense_indices_zero_based": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "all_roots_within_cap": false,
+          "unmatched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "missing_indices_certified": false
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 148,
+          "occupied_max_error_ha": 4.08006961549745e-15,
+          "first_empty_error_ha": 7.827072323607354e-15,
+          "buffer_max_error_ha": 6.217248937900877e-15,
+          "band_sum_excess_ha": 1.3322676295501878e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 319,
+          "occupied_max_error_ha": 5.10702591327572e-15,
+          "first_empty_error_ha": 9.43689570931383e-15,
+          "buffer_max_error_ha": 6.38378239159465e-15,
+          "band_sum_excess_ha": 2.4702462297909733e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 2.0534453359921656e-08,
+      "first_empty_error_ha": 1.188342846347723e-08,
+      "buffer_max_error_ha": 2.231495910276493e-08,
+      "band_sum_excess_ha": 1.1632661989224857e-07,
+      "missing_dense_indices_zero_based": null,
+      "missing_clusters": [
+        [
+          0
+        ],
+        [
+          1
+        ],
+        [
+          2
+        ],
+        [
+          3
+        ],
+        [
+          4
+        ],
+        [
+          5
+        ],
+        [
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "matched_dense_indices_zero_based": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "all_roots_within_cap": false,
+      "unmatched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "missing_indices_certified": false
+    },
+    {
+      "solve": 112,
+      "iteration": 4,
+      "k": 16,
+      "phase": "ordinary",
+      "residuals_ha": [
+        0.00022126947824182633,
+        0.00020906918645226364,
+        0.0002496830123856902,
+        7.516018338324567e-05,
+        0.00014243036398774823,
+        0.00013850350833473054,
+        0.0001951811252996557,
+        0.0002689960447445748
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 31,
+          "occupied_max_error_ha": 2.312021105121964e-08,
+          "first_empty_error_ha": 7.63786250912446e-09,
+          "buffer_max_error_ha": 3.9342261615171736e-08,
+          "band_sum_excess_ha": 1.0963773580674463e-07,
+          "missing_dense_indices_zero_based": null,
+          "missing_clusters": [
+            [
+              0
+            ],
+            [
+              1
+            ],
+            [
+              2
+            ],
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ],
+            [
+              6
+            ],
+            [
+              7
+            ]
+          ],
+          "matched_dense_indices_zero_based": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "all_roots_within_cap": false,
+          "unmatched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "missing_indices_certified": false
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 162,
+          "occupied_max_error_ha": 4.350686477749832e-15,
+          "first_empty_error_ha": 2.7755575615628914e-16,
+          "buffer_max_error_ha": 3.4416913763379853e-15,
+          "band_sum_excess_ha": -1.3308798507694064e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 359,
+          "occupied_max_error_ha": 4.808653475407709e-15,
+          "first_empty_error_ha": 7.216449660063518e-16,
+          "buffer_max_error_ha": 2.7200464103316335e-15,
+          "band_sum_excess_ha": -2.0664026045835726e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 2.312021105121964e-08,
+      "first_empty_error_ha": 7.63786250912446e-09,
+      "buffer_max_error_ha": 3.9342261615171736e-08,
+      "band_sum_excess_ha": 1.0963773580674463e-07,
+      "missing_dense_indices_zero_based": null,
+      "missing_clusters": [
+        [
+          0
+        ],
+        [
+          1
+        ],
+        [
+          2
+        ],
+        [
+          3
+        ],
+        [
+          4
+        ],
+        [
+          5
+        ],
+        [
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "matched_dense_indices_zero_based": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "all_roots_within_cap": false,
+      "unmatched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "missing_indices_certified": false
+    },
+    {
+      "solve": 127,
+      "iteration": 4,
+      "k": 31,
+      "phase": "ordinary",
+      "residuals_ha": [
+        0.00024370249931222974,
+        0.00016599933125872762,
+        9.80111617187238e-05,
+        0.00012063472751491501,
+        0.0002765051875069314,
+        0.00017362278095910369,
+        0.00024605014227117443,
+        0.00019562428036385646
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 32,
+          "occupied_max_error_ha": 1.71302705631593e-08,
+          "first_empty_error_ha": 3.0302552300742747e-08,
+          "buffer_max_error_ha": 2.2891914863709673e-08,
+          "band_sum_excess_ha": 6.403595290832564e-08,
+          "missing_dense_indices_zero_based": null,
+          "missing_clusters": [
+            [
+              0
+            ],
+            [
+              1
+            ],
+            [
+              2
+            ],
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ],
+            [
+              6
+            ],
+            [
+              7
+            ]
+          ],
+          "matched_dense_indices_zero_based": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "all_roots_within_cap": false,
+          "unmatched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "missing_indices_certified": false
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 162,
+          "occupied_max_error_ha": 1.3600232051658168e-15,
+          "first_empty_error_ha": 4.440892098500626e-16,
+          "buffer_max_error_ha": 7.271960811294775e-15,
+          "band_sum_excess_ha": -7.771561172376096e-16,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 359,
+          "occupied_max_error_ha": 2.6922908347160046e-15,
+          "first_empty_error_ha": 1.9984014443252818e-15,
+          "buffer_max_error_ha": 5.773159728050814e-15,
+          "band_sum_excess_ha": 1.0477729794899915e-15,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 1.71302705631593e-08,
+      "first_empty_error_ha": 3.0302552300742747e-08,
+      "buffer_max_error_ha": 2.2891914863709673e-08,
+      "band_sum_excess_ha": 6.403595290832564e-08,
+      "missing_dense_indices_zero_based": null,
+      "missing_clusters": [
+        [
+          0
+        ],
+        [
+          1
+        ],
+        [
+          2
+        ],
+        [
+          3
+        ],
+        [
+          4
+        ],
+        [
+          5
+        ],
+        [
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "matched_dense_indices_zero_based": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      "all_roots_within_cap": false,
+      "unmatched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "missing_indices_certified": false
+    },
+    {
+      "solve": 128,
+      "iteration": 5,
+      "k": 0,
+      "phase": "ordinary",
+      "residuals_ha": [
+        3.374920444487745e-05,
+        6.394129390414315e-05,
+        6.84080831891459e-05,
+        6.841203376628199e-05,
+        0.00010798447365747754,
+        8.868569881344489e-05,
+        8.8845404620795e-05,
+        5.548232970481904e-05
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 33,
+          "occupied_max_error_ha": 1.6931190338631552e-09,
+          "first_empty_error_ha": 3.2726144016947956e-09,
+          "buffer_max_error_ha": 3.365928702425691e-09,
+          "band_sum_excess_ha": 1.0332630195897252e-08,
+          "missing_dense_indices_zero_based": null,
+          "missing_clusters": [
+            [
+              1
+            ],
+            [
+              2
+            ],
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              5
+            ],
+            [
+              6
+            ]
+          ],
+          "matched_dense_indices_zero_based": [
+            0,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            7
+          ],
+          "all_roots_within_cap": false,
+          "unmatched_dense_indices_zero_based": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ],
+          "missing_indices_certified": false
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 138,
+          "occupied_max_error_ha": 3.4139358007223564e-15,
+          "first_empty_error_ha": 1.3322676295501878e-15,
+          "buffer_max_error_ha": 2.9976021664879227e-15,
+          "band_sum_excess_ha": 9.936496070395151e-15,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 319,
+          "occupied_max_error_ha": 3.0531133177191805e-15,
+          "first_empty_error_ha": 1.27675647831893e-15,
+          "buffer_max_error_ha": 3.497202527569243e-15,
+          "band_sum_excess_ha": 3.3306690738754696e-15,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 1.6931190338631552e-09,
+      "first_empty_error_ha": 3.2726144016947956e-09,
+      "buffer_max_error_ha": 3.365928702425691e-09,
+      "band_sum_excess_ha": 1.0332630195897252e-08,
+      "missing_dense_indices_zero_based": null,
+      "missing_clusters": [
+        [
+          1
+        ],
+        [
+          2
+        ],
+        [
+          3
+        ],
+        [
+          4
+        ],
+        [
+          5
+        ],
+        [
+          6
+        ]
+      ],
+      "matched_dense_indices_zero_based": [
+        0,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        7
+      ],
+      "all_roots_within_cap": false,
+      "unmatched_dense_indices_zero_based": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
+      ],
+      "missing_indices_certified": false
+    },
+    {
+      "solve": 144,
+      "iteration": 5,
+      "k": 16,
+      "phase": "ordinary",
+      "residuals_ha": [
+        2.891822282779588e-05,
+        3.307046980993476e-05,
+        6.475780859315107e-05,
+        7.8605662758223e-05,
+        2.911331913593914e-05,
+        6.692680484548529e-05,
+        2.988963032254736e-05,
+        6.59976358474138e-05
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 37,
+          "occupied_max_error_ha": 1.493293405596674e-09,
+          "first_empty_error_ha": 2.308350177671059e-10,
+          "buffer_max_error_ha": 1.960177797855067e-09,
+          "band_sum_excess_ha": 6.5515534941607e-09,
+          "missing_dense_indices_zero_based": null,
+          "missing_clusters": [
+            [
+              2
+            ],
+            [
+              3
+            ],
+            [
+              5
+            ],
+            [
+              7
+            ]
+          ],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            null,
+            null,
+            4,
+            null,
+            6,
+            null
+          ],
+          "all_roots_within_cap": false,
+          "unmatched_dense_indices_zero_based": [
+            2,
+            3,
+            5,
+            7
+          ],
+          "missing_indices_certified": false
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 159,
+          "occupied_max_error_ha": 2.699229728619912e-15,
+          "first_empty_error_ha": 4.996003610813204e-16,
+          "buffer_max_error_ha": 3.941291737419306e-15,
+          "band_sum_excess_ha": -6.800116025829084e-16,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 358,
+          "occupied_max_error_ha": 4.08006961549745e-15,
+          "first_empty_error_ha": 1.0547118733938987e-15,
+          "buffer_max_error_ha": 6.106226635438361e-15,
+          "band_sum_excess_ha": -3.0531133177191805e-15,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 1.493293405596674e-09,
+      "first_empty_error_ha": 2.308350177671059e-10,
+      "buffer_max_error_ha": 1.960177797855067e-09,
+      "band_sum_excess_ha": 6.5515534941607e-09,
+      "missing_dense_indices_zero_based": null,
+      "missing_clusters": [
+        [
+          2
+        ],
+        [
+          3
+        ],
+        [
+          5
+        ],
+        [
+          7
+        ]
+      ],
+      "matched_dense_indices_zero_based": [
+        0,
+        1,
+        null,
+        null,
+        4,
+        null,
+        6,
+        null
+      ],
+      "all_roots_within_cap": false,
+      "unmatched_dense_indices_zero_based": [
+        2,
+        3,
+        5,
+        7
+      ],
+      "missing_indices_certified": false
+    },
+    {
+      "solve": 159,
+      "iteration": 5,
+      "k": 31,
+      "phase": "ordinary",
+      "residuals_ha": [
+        4.6390858428083196e-05,
+        5.552442189382727e-05,
+        7.525974313242851e-05,
+        9.232681706971924e-05,
+        0.00011899692421077434,
+        3.703175604653634e-05,
+        0.00012352426540873467,
+        7.477898891469786e-05
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 35,
+          "occupied_max_error_ha": 2.0365180097847713e-09,
+          "first_empty_error_ha": 4.833547506688518e-09,
+          "buffer_max_error_ha": 5.214119969121356e-09,
+          "band_sum_excess_ha": 1.0223553170707333e-08,
+          "missing_dense_indices_zero_based": null,
+          "missing_clusters": [
+            [
+              2
+            ],
+            [
+              3
+            ],
+            [
+              4
+            ],
+            [
+              6
+            ],
+            [
+              7
+            ]
+          ],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            null,
+            null,
+            null,
+            5,
+            null,
+            null
+          ],
+          "all_roots_within_cap": false,
+          "unmatched_dense_indices_zero_based": [
+            2,
+            3,
+            4,
+            6,
+            7
+          ],
+          "missing_indices_certified": false
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 157,
+          "occupied_max_error_ha": 8.472389456670726e-15,
+          "first_empty_error_ha": 3.3861802251067274e-15,
+          "buffer_max_error_ha": 5.495603971894525e-15,
+          "band_sum_excess_ha": -2.5049406993105094e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 353,
+          "occupied_max_error_ha": 7.851358452271029e-15,
+          "first_empty_error_ha": 5.10702591327572e-15,
+          "buffer_max_error_ha": 5.662137425588298e-15,
+          "band_sum_excess_ha": -2.2142010447367966e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 2.0365180097847713e-09,
+      "first_empty_error_ha": 4.833547506688518e-09,
+      "buffer_max_error_ha": 5.214119969121356e-09,
+      "band_sum_excess_ha": 1.0223553170707333e-08,
+      "missing_dense_indices_zero_based": null,
+      "missing_clusters": [
+        [
+          2
+        ],
+        [
+          3
+        ],
+        [
+          4
+        ],
+        [
+          6
+        ],
+        [
+          7
+        ]
+      ],
+      "matched_dense_indices_zero_based": [
+        0,
+        1,
+        null,
+        null,
+        null,
+        5,
+        null,
+        null
+      ],
+      "all_roots_within_cap": false,
+      "unmatched_dense_indices_zero_based": [
+        2,
+        3,
+        4,
+        6,
+        7
+      ],
+      "missing_indices_certified": false
+    },
+    {
+      "solve": 288,
+      "iteration": 10,
+      "k": 0,
+      "phase": "ordinary",
+      "residuals_ha": [
+        1.7466913877050501e-09,
+        2.0032060406665983e-09,
+        2.7046327758684433e-09,
+        2.7046344619389676e-09,
+        3.822600996241096e-09,
+        3.62793608687693e-06,
+        3.6363077781248445e-06,
+        3.4502731853211854e-06
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 33,
+          "occupied_max_error_ha": 6.467049118441537e-15,
+          "first_empty_error_ha": 2.7755575615628914e-15,
+          "buffer_max_error_ha": 6.499023541550741e-12,
+          "band_sum_excess_ha": -5.995204332975845e-15,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 87,
+          "occupied_max_error_ha": 6.050715484207103e-15,
+          "first_empty_error_ha": 2.4424906541753444e-15,
+          "buffer_max_error_ha": 3.774758283725532e-15,
+          "band_sum_excess_ha": -8.548717289613705e-15,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 317,
+          "occupied_max_error_ha": 6.467049118441537e-15,
+          "first_empty_error_ha": 2.1649348980190553e-15,
+          "buffer_max_error_ha": 9.992007221626409e-16,
+          "band_sum_excess_ha": -7.882583474838611e-15,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 6.467049118441537e-15,
+      "first_empty_error_ha": 2.7755575615628914e-15,
+      "buffer_max_error_ha": 6.499023541550741e-12,
+      "band_sum_excess_ha": -5.995204332975845e-15,
+      "missing_dense_indices_zero_based": [],
+      "missing_clusters": [],
+      "matched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "all_roots_within_cap": true,
+      "unmatched_dense_indices_zero_based": [],
+      "missing_indices_certified": true
+    },
+    {
+      "solve": 304,
+      "iteration": 10,
+      "k": 16,
+      "phase": "ordinary",
+      "residuals_ha": [
+        1.1716886054733955e-09,
+        1.7431397897936285e-09,
+        2.9683253856412985e-09,
+        3.95827350557151e-09,
+        1.3367261127644575e-09,
+        4.024207977096761e-06,
+        4.298508675723792e-06,
+        5.503070037233581e-06
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 32,
+          "occupied_max_error_ha": 8.798517470154366e-15,
+          "first_empty_error_ha": 2.7755575615628914e-16,
+          "buffer_max_error_ha": 2.098105023051744e-11,
+          "band_sum_excess_ha": -3.8163916471489756e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 93,
+          "occupied_max_error_ha": 8.770761894538737e-15,
+          "first_empty_error_ha": 6.106226635438361e-16,
+          "buffer_max_error_ha": 3.552713678800501e-15,
+          "band_sum_excess_ha": -3.762268274698499e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 359,
+          "occupied_max_error_ha": 7.93809462606987e-15,
+          "first_empty_error_ha": 3.3306690738754696e-16,
+          "buffer_max_error_ha": 2.0539125955565396e-15,
+          "band_sum_excess_ha": -3.8538616742300746e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 8.798517470154366e-15,
+      "first_empty_error_ha": 2.7755575615628914e-16,
+      "buffer_max_error_ha": 2.098105023051744e-11,
+      "band_sum_excess_ha": -3.8163916471489756e-14,
+      "missing_dense_indices_zero_based": [],
+      "missing_clusters": [],
+      "matched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "all_roots_within_cap": true,
+      "unmatched_dense_indices_zero_based": [],
+      "missing_indices_certified": true
+    },
+    {
+      "solve": 319,
+      "iteration": 10,
+      "k": 31,
+      "phase": "ordinary",
+      "residuals_ha": [
+        3.332642792811388e-09,
+        1.4846416201413597e-09,
+        2.9578714863744525e-09,
+        3.30601886199505e-09,
+        3.932855029673408e-09,
+        4.267859616111169e-06,
+        3.844033759484105e-06,
+        8.251239733273634e-06
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 30,
+          "occupied_max_error_ha": 9.547918011776346e-15,
+          "first_empty_error_ha": 3.1086244689504383e-15,
+          "buffer_max_error_ha": 4.957451116283096e-11,
+          "band_sum_excess_ha": 2.4168167467308876e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 91,
+          "occupied_max_error_ha": 1.1379786002407855e-14,
+          "first_empty_error_ha": 2.9976021664879227e-15,
+          "buffer_max_error_ha": 2.55351295663786e-15,
+          "band_sum_excess_ha": 2.885885974635016e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 359,
+          "occupied_max_error_ha": 1.1546319456101628e-14,
+          "first_empty_error_ha": 2.4980018054066022e-15,
+          "buffer_max_error_ha": 2.886579864025407e-15,
+          "band_sum_excess_ha": 2.819272593157507e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 9.547918011776346e-15,
+      "first_empty_error_ha": 3.1086244689504383e-15,
+      "buffer_max_error_ha": 4.957451116283096e-11,
+      "band_sum_excess_ha": 2.4168167467308876e-14,
+      "missing_dense_indices_zero_based": [],
+      "missing_clusters": [],
+      "matched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "all_roots_within_cap": true,
+      "unmatched_dense_indices_zero_based": [],
+      "missing_indices_certified": true
+    },
+    {
+      "solve": 320,
+      "iteration": 10,
+      "k": 0,
+      "phase": "certificate",
+      "residuals_ha": [
+        3.540063613961435e-10,
+        2.8635052367890065e-10,
+        6.848106870543214e-10,
+        6.842019028157332e-10,
+        2.9440321693507907e-10,
+        3.537841088459969e-06,
+        3.529065146054868e-06,
+        3.081950990346394e-06
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 29,
+          "occupied_max_error_ha": 5.828670879282072e-15,
+          "first_empty_error_ha": 2.942091015256665e-15,
+          "buffer_max_error_ha": 5.437206240799242e-12,
+          "band_sum_excess_ha": -1.4099832412739488e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 76,
+          "occupied_max_error_ha": 5.689893001203927e-15,
+          "first_empty_error_ha": 2.4980018054066022e-15,
+          "buffer_max_error_ha": 3.164135620181696e-15,
+          "band_sum_excess_ha": -1.1879386363489175e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 317,
+          "occupied_max_error_ha": 5.440092820663267e-15,
+          "first_empty_error_ha": 1.887379141862766e-15,
+          "buffer_max_error_ha": 1.887379141862766e-15,
+          "band_sum_excess_ha": -1.2545520178264269e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 5.828670879282072e-15,
+      "first_empty_error_ha": 2.942091015256665e-15,
+      "buffer_max_error_ha": 5.437206240799242e-12,
+      "band_sum_excess_ha": -1.4099832412739488e-14,
+      "missing_dense_indices_zero_based": [],
+      "missing_clusters": [],
+      "matched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "all_roots_within_cap": true,
+      "unmatched_dense_indices_zero_based": [],
+      "missing_indices_certified": true
+    },
+    {
+      "solve": 336,
+      "iteration": 10,
+      "k": 16,
+      "phase": "certificate",
+      "residuals_ha": [
+        3.7933106388291146e-10,
+        6.892414044797671e-10,
+        6.580352248298199e-10,
+        9.68851024538692e-10,
+        8.895789474449597e-10,
+        4.166964079486035e-06,
+        4.034792262333342e-06,
+        5.264834716027019e-06
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 29,
+          "occupied_max_error_ha": 6.661338147750939e-15,
+          "first_empty_error_ha": 3.885780586188048e-15,
+          "buffer_max_error_ha": 1.8355816866488794e-11,
+          "band_sum_excess_ha": 2.513267371995198e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 88,
+          "occupied_max_error_ha": 6.217248937900877e-15,
+          "first_empty_error_ha": 3.941291737419306e-15,
+          "buffer_max_error_ha": 1.4988010832439613e-15,
+          "band_sum_excess_ha": 2.5701663020072374e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 359,
+          "occupied_max_error_ha": 8.243405957841787e-15,
+          "first_empty_error_ha": 2.220446049250313e-15,
+          "buffer_max_error_ha": 3.0531133177191805e-15,
+          "band_sum_excess_ha": 2.5326962749261384e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 6.661338147750939e-15,
+      "first_empty_error_ha": 3.885780586188048e-15,
+      "buffer_max_error_ha": 1.8355816866488794e-11,
+      "band_sum_excess_ha": 2.513267371995198e-14,
+      "missing_dense_indices_zero_based": [],
+      "missing_clusters": [],
+      "matched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "all_roots_within_cap": true,
+      "unmatched_dense_indices_zero_based": [],
+      "missing_indices_certified": true
+    },
+    {
+      "solve": 351,
+      "iteration": 10,
+      "k": 31,
+      "phase": "certificate",
+      "residuals_ha": [
+        4.0443977380446204e-10,
+        5.62134058920972e-10,
+        3.666384212548425e-10,
+        8.283671090830699e-10,
+        5.309305057946549e-10,
+        4.255312818672638e-06,
+        3.7489762188241062e-06,
+        8.909122043959612e-06
+      ],
+      "variants": {
+        "0": {
+          "success": true,
+          "h_vectors": 28,
+          "occupied_max_error_ha": 6.5780714209040525e-15,
+          "first_empty_error_ha": 4.884981308350689e-15,
+          "buffer_max_error_ha": 4.3684889039496966e-11,
+          "band_sum_excess_ha": 3.1308289294429414e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "1": {
+          "success": true,
+          "h_vectors": 85,
+          "occupied_max_error_ha": 6.626643678231403e-15,
+          "first_empty_error_ha": 4.829470157119431e-15,
+          "buffer_max_error_ha": 2.4980018054066022e-15,
+          "band_sum_excess_ha": 2.851885394505871e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        },
+        "2": {
+          "success": true,
+          "h_vectors": 359,
+          "occupied_max_error_ha": 6.467049118441537e-15,
+          "first_empty_error_ha": 4.218847493575595e-15,
+          "buffer_max_error_ha": 3.164135620181696e-15,
+          "band_sum_excess_ha": 3.031602746617068e-14,
+          "missing_dense_indices_zero_based": [],
+          "missing_clusters": [],
+          "matched_dense_indices_zero_based": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "all_roots_within_cap": true,
+          "unmatched_dense_indices_zero_based": [],
+          "missing_indices_certified": true
+        }
+      },
+      "occupied_max_error_ha": 6.5780714209040525e-15,
+      "first_empty_error_ha": 4.884981308350689e-15,
+      "buffer_max_error_ha": 4.3684889039496966e-11,
+      "band_sum_excess_ha": 3.1308289294429414e-14,
+      "missing_dense_indices_zero_based": [],
+      "missing_clusters": [],
+      "matched_dense_indices_zero_based": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "all_roots_within_cap": true,
+      "unmatched_dense_indices_zero_based": [],
+      "missing_indices_certified": true
+    }
+  ],
+  "stderr_tail": ""
+}

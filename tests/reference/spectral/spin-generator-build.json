@@ -1,0 +1,14 @@
+{
+  "command": [
+    "rustc",
+    "--edition=2024",
+    "/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/tests/reference/spectral/spin_fixture.rs",
+    "-L",
+    "dependency=/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/target/release/deps",
+    "--extern",
+    "dft_physics=/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/target/release/deps/libdft_physics-0e97201c496f7e66.rlib",
+    "-o",
+    "/tmp/p15c-spin-fixture"
+  ],
+  "exit_code": 0
+}

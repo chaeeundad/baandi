@@ -1,0 +1,5 @@
+case      wall med (s)  engine (s)  diag (s) iters  dE vs base (Ha)    density  speedup
+si8              3.048       3.039     2.714    15         2.70e-13    differs    0.93x
+k444s            3.528       3.519     2.920    10         3.55e-15    differs    0.99x
+recorded tests/reference/spectral/rich-t1.json
+OK

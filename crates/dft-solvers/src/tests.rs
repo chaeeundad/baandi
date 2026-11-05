@@ -645,3 +645,92 @@ fn degenerate_buffer_policy_and_iteration_limit() {
         ));
     }
 }
+
+/// P15C mechanism fixture (Ha): a zero residual in an invariant start does not
+/// count eigenvalues below its Ritz boundary. The diagonal preconditioner
+/// preserves this subspace, so no correction can supply the missing direction.
+#[test]
+fn spectral_completeness_is_not_a_residual_certificate() {
+    let op = Diagonal(vec![-3.0, -3.0, -1.0, 2.0, 4.0, 6.0, 8.0, 10.0]);
+    let mut start = ComplexMatrix::zeros(8, 2).unwrap();
+    start[(1, 0)] = 1.0.into();
+    start[(2, 1)] = 1.0.into();
+    let cfg = config(2, 8);
+    let preconditioner = DiagonalPreconditioner::new(op.0.clone(), 0.1).unwrap();
+    for pre in [None, Some(&preconditioner as &dyn Preconditioner)] {
+        let missed = cfg.solve(&op, Some(&start), pre).unwrap();
+        assert!(missed.residuals_certified);
+        assert_eq!(missed.residuals, vec![0.0, 0.0]);
+        assert_eq!(missed.eigenvalues, vec![-3.0, -1.0]);
+        let dense = DenseEigensolver.solve(&op, 2).unwrap();
+        assert!(dense.eigenvalues.iter().all(|v| (v + 3.0).abs() < 1e-9));
+        assert!((missed.eigenvalues[1] - dense.eigenvalues[1] - 2.0).abs() < 1e-9);
+        // Independent seeded start restores both members of the doublet.
+        let recovered = cfg.solve(&op, None, pre).unwrap();
+        assess(
+            "independent spectral start",
+            &op,
+            &recovered,
+            &dense.eigenvalues,
+            1e-10,
+        );
+    }
+}
+
+#[test]
+fn spectral_guard_recovers_missing_degeneracy_and_preserves_complete_state() {
+    let op = Diagonal(vec![-3.0, -3.0, -1.0, 2.0, 4.0, 6.0, 8.0, 10.0]);
+    let mut start = ComplexMatrix::zeros(8, 2).unwrap();
+    start[(1, 0)] = 1.0.into();
+    start[(2, 1)] = 1.0.into();
+    let cfg = config(2, 8);
+    let missed = cfg.solve(&op, Some(&start), None).unwrap();
+    let mut invalid = missed.clone();
+    invalid.eigenvalues.clear();
+    assert!(matches!(
+        cfg.guard_spectrum(&op, None, invalid),
+        Err(SolverError::InvalidParameter(_))
+    ));
+    let fixed = cfg.guard_spectrum(&op, None, missed).unwrap();
+    assert!(fixed.eigenvalues.iter().all(|v| (v + 3.0).abs() < 1e-9));
+    let evidence = fixed.spectral_completeness.as_ref().unwrap();
+    assert!(evidence.passed);
+    assert_eq!(evidence.retries, 1);
+    assert!(evidence.extra_operator_applications > 10); // Dense detection plus enlarged retry.
+    let checked = cfg.guard_spectrum(&op, None, fixed.clone()).unwrap();
+    assert_eq!(checked.eigenvalues, fixed.eigenvalues);
+    assert_eq!(checked.eigenvectors, fixed.eigenvectors);
+    assert_eq!(checked.residuals, fixed.residuals);
+    assert_eq!(checked.spectral_completeness.unwrap().retries, 0);
+}
+
+/// Release-only matrix-free guard regression; exercises the complementary
+/// operator rather than the small full-space fallback.
+/// cargo test --release -p dft-solvers spectral_complement_guard -- --ignored --nocapture
+#[test]
+#[ignore = "independent spectral searches; run in release"]
+fn spectral_complement_guard() {
+    let n = 144;
+    let op = Diagonal((0..n).map(|i| i as f64 * 0.05).collect());
+    let mut start = ComplexMatrix::zeros(n, 2).unwrap();
+    start[(10, 0)] = 1.0.into();
+    start[(11, 1)] = 1.0.into();
+    let cfg = config(2, n);
+    let missed = cfg.solve(&op, Some(&start), None).unwrap();
+    let checked = cfg.guard_spectrum(&op, None, missed).unwrap();
+    assert!(checked.eigenvalues[0].abs() < 1e-9);
+    assert!((checked.eigenvalues[1] - 0.05).abs() < 1e-9);
+    assert_eq!(checked.spectral_completeness.as_ref().unwrap().retries, 1);
+    let complete = cfg.guard_spectrum(&op, None, checked.clone()).unwrap();
+    assert_eq!(complete.eigenvalues, checked.eigenvalues);
+    assert_eq!(complete.eigenvectors, checked.eigenvectors);
+    assert_eq!(complete.spectral_completeness.as_ref().unwrap().retries, 0);
+    println!(
+        "complement guard: eigenvalues={:?} Ha, extra H={}",
+        complete.eigenvalues,
+        complete
+            .spectral_completeness
+            .unwrap()
+            .extra_operator_applications
+    );
+}

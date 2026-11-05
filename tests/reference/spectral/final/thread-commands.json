@@ -1,0 +1,50 @@
+[
+  {
+    "command": [
+      "python3",
+      "-I",
+      "tests/reference/spectral/final_policy.py",
+      "--binary",
+      "/tmp/p15c-final-v2-cli",
+      "--threads",
+      "2",
+      "--output",
+      "tests/reference/spectral/final/t2"
+    ],
+    "exit_code": 0,
+    "stdout": "si8 off 0 15 guard H 0 retries None\nsi8 final 0 15 guard H 90 retries 0\nk444s off 0 10 guard H 0 retries None\nk444s final 0 10 guard H 2618 retries 0\nsyn20-skew off 0 6 guard H 0 retries None\nsyn20-skew final 3 100 guard H 130 retries 1\nsyn4-elongated off 0 9 guard H 0 retries None\nsyn4-elongated final 0 9 guard H 29 retries 0\nsyn4-slab off 3 100 guard H 0 retries None\nsyn4-slab final 3 100 guard H 0 retries 0\nsyn16-gamma off 0 10 guard H 0 retries None\nsyn16-gamma final 0 10 guard H 79 retries 0\nsyn16-k211 off 3 100 guard H 0 retries None\nsyn16-k211 final 3 100 guard H 0 retries 0\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "python3",
+      "-I",
+      "tests/reference/spectral/final_policy.py",
+      "--binary",
+      "/tmp/p15c-final-v2-cli",
+      "--threads",
+      "4",
+      "--output",
+      "tests/reference/spectral/final/t4"
+    ],
+    "exit_code": 0,
+    "stdout": "si8 off 0 15 guard H 0 retries None\nsi8 final 0 15 guard H 90 retries 0\nk444s off 0 10 guard H 0 retries None\nk444s final 0 10 guard H 2618 retries 0\nsyn20-skew off 0 6 guard H 0 retries None\nsyn20-skew final 3 100 guard H 130 retries 1\nsyn4-elongated off 0 9 guard H 0 retries None\nsyn4-elongated final 0 9 guard H 29 retries 0\nsyn4-slab off 3 100 guard H 0 retries None\nsyn4-slab final 3 100 guard H 0 retries 0\nsyn16-gamma off 0 10 guard H 0 retries None\nsyn16-gamma final 0 10 guard H 79 retries 0\nsyn16-k211 off 3 100 guard H 0 retries None\nsyn16-k211 final 3 100 guard H 0 retries 0\n",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "python3",
+      "-I",
+      "tests/reference/spectral/final_policy.py",
+      "--binary",
+      "/tmp/p15c-final-v2-cli",
+      "--threads",
+      "8",
+      "--output",
+      "tests/reference/spectral/final/t8"
+    ],
+    "exit_code": 0,
+    "stdout": "si8 off 0 15 guard H 0 retries None\nsi8 final 0 15 guard H 90 retries 0\nk444s off 0 10 guard H 0 retries None\nk444s final 0 10 guard H 2618 retries 0\nsyn20-skew off 0 6 guard H 0 retries None\nsyn20-skew final 3 100 guard H 130 retries 1\nsyn4-elongated off 0 9 guard H 0 retries None\nsyn4-elongated final 0 9 guard H 29 retries 0\nsyn4-slab off 3 100 guard H 0 retries None\nsyn4-slab final 3 100 guard H 0 retries 0\nsyn16-gamma off 0 10 guard H 0 retries None\nsyn16-gamma final 0 10 guard H 79 retries 0\nsyn16-k211 off 3 100 guard H 0 retries None\nsyn16-k211 final 3 100 guard H 0 retries 0\n",
+    "stderr": ""
+  }
+]

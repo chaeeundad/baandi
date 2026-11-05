@@ -1,0 +1,213 @@
+[
+  {
+    "case": "gamma",
+    "converged": true,
+    "iterations": 10,
+    "sampled_k": [
+      0
+    ],
+    "occupied_max_error_ha": 5.9119376061289586e-15,
+    "first_empty_max_error_ha": 1.8318679906315083e-15,
+    "buffer_max_error_ha": 2.1473822719997315e-11,
+    "maximum_absolute_per_k_band_sum_excess_ha": 6.494804694057166e-15
+  },
+  {
+    "case": "k222",
+    "converged": true,
+    "iterations": 10,
+    "sampled_k": [
+      0,
+      4,
+      7
+    ],
+    "occupied_max_error_ha": 1.1379786002407855e-14,
+    "first_empty_max_error_ha": 5.023759186428833e-12,
+    "buffer_max_error_ha": 2.8997637624428307e-11,
+    "maximum_absolute_per_k_band_sum_excess_ha": 1.9040324872321435e-14
+  },
+  {
+    "case": "k222s",
+    "converged": true,
+    "iterations": 10,
+    "sampled_k": [
+      0,
+      2,
+      3
+    ],
+    "occupied_max_error_ha": 8.43769498715119e-15,
+    "first_empty_max_error_ha": 1.942890293094024e-15,
+    "buffer_max_error_ha": 3.389988290081192e-11,
+    "maximum_absolute_per_k_band_sum_excess_ha": 1.7590096046404824e-14
+  },
+  {
+    "case": "k444s",
+    "converged": true,
+    "iterations": 10,
+    "sampled_k": [
+      0,
+      16,
+      31
+    ],
+    "occupied_max_error_ha": 9.547918011776346e-15,
+    "first_empty_max_error_ha": 3.1086244689504383e-15,
+    "buffer_max_error_ha": 4.957451116283096e-11,
+    "maximum_absolute_per_k_band_sum_excess_ha": 3.8163916471489756e-14
+  },
+  {
+    "case": "mgo-40",
+    "converged": true,
+    "iterations": 18,
+    "sampled_k": [
+      0,
+      7,
+      13
+    ],
+    "occupied_max_error_ha": 3.042011087472929e-14,
+    "first_empty_max_error_ha": 2.4424906541753444e-14,
+    "buffer_max_error_ha": 1.1046941139625233e-11,
+    "maximum_absolute_per_k_band_sum_excess_ha": 6.589173651150304e-14
+  },
+  {
+    "case": "mgo-50",
+    "converged": true,
+    "iterations": 19,
+    "sampled_k": [
+      0,
+      7,
+      13
+    ],
+    "occupied_max_error_ha": 3.597122599785507e-14,
+    "first_empty_max_error_ha": 7.105427357601002e-15,
+    "buffer_max_error_ha": 1.0073053502424045e-11,
+    "maximum_absolute_per_k_band_sum_excess_ha": 4.496403249731884e-14
+  },
+  {
+    "case": "mgo-60",
+    "converged": true,
+    "iterations": 19,
+    "sampled_k": [
+      0,
+      7,
+      13
+    ],
+    "occupied_max_error_ha": 3.574918139293004e-14,
+    "first_empty_max_error_ha": 1.3988810110276972e-14,
+    "buffer_max_error_ha": 9.866663042146229e-12,
+    "maximum_absolute_per_k_band_sum_excess_ha": 8.520961713998076e-14
+  },
+  {
+    "case": "si-20",
+    "converged": true,
+    "iterations": 15,
+    "sampled_k": [
+      0,
+      16,
+      31
+    ],
+    "occupied_max_error_ha": 1.0935696792557792e-14,
+    "first_empty_max_error_ha": 1.3100631690576847e-14,
+    "buffer_max_error_ha": 2.838251855763474e-11,
+    "maximum_absolute_per_k_band_sum_excess_ha": 7.144285163462882e-14
+  },
+  {
+    "case": "si-30",
+    "converged": true,
+    "iterations": 15,
+    "sampled_k": [
+      0,
+      16,
+      31
+    ],
+    "occupied_max_error_ha": 2.5895952049381776e-14,
+    "first_empty_max_error_ha": 9.270362255620057e-15,
+    "buffer_max_error_ha": 2.7553070935937285e-11,
+    "maximum_absolute_per_k_band_sum_excess_ha": 5.563605132152816e-14
+  },
+  {
+    "case": "si-40",
+    "converged": true,
+    "iterations": 15,
+    "sampled_k": [
+      0,
+      16,
+      31
+    ],
+    "occupied_max_error_ha": 1.7236212457305555e-14,
+    "first_empty_max_error_ha": 8.548717289613705e-15,
+    "buffer_max_error_ha": 2.676109334132093e-11,
+    "maximum_absolute_per_k_band_sum_excess_ha": 8.615330671091215e-14
+  },
+  {
+    "case": "si8",
+    "converged": true,
+    "iterations": 15,
+    "sampled_k": [
+      0
+    ],
+    "occupied_max_error_ha": 1.3898604489526178e-14,
+    "first_empty_max_error_ha": 1.9984014443252818e-14,
+    "buffer_max_error_ha": 3.3084646133829665e-14,
+    "maximum_absolute_per_k_band_sum_excess_ha": 2.2445934000359102e-13
+  },
+  {
+    "case": "syn16-gamma",
+    "converged": true,
+    "iterations": 10,
+    "sampled_k": [
+      0
+    ],
+    "occupied_max_error_ha": 1.1324274851176597e-14,
+    "first_empty_max_error_ha": 2.220446049250313e-15,
+    "buffer_max_error_ha": 5.773159728050814e-15,
+    "maximum_absolute_per_k_band_sum_excess_ha": 4.884981308350689e-14
+  },
+  {
+    "case": "syn16-k211",
+    "converged": false,
+    "iterations": 100,
+    "sampled_k": [
+      0,
+      1
+    ],
+    "occupied_max_error_ha": 9.089927699434952e-09,
+    "first_empty_max_error_ha": 1.3573475676764701e-10,
+    "buffer_max_error_ha": 2.379578742939259e-07,
+    "maximum_absolute_per_k_band_sum_excess_ha": 5.743906683619571e-08
+  },
+  {
+    "case": "syn20-skew",
+    "converged": true,
+    "iterations": 6,
+    "sampled_k": [
+      0
+    ],
+    "occupied_max_error_ha": 1.5149517532928702,
+    "first_empty_max_error_ha": 2.159447228889614,
+    "buffer_max_error_ha": 2.958772227714263,
+    "maximum_absolute_per_k_band_sum_excess_ha": 27.958043613987726
+  },
+  {
+    "case": "syn4-elongated",
+    "converged": true,
+    "iterations": 9,
+    "sampled_k": [
+      0
+    ],
+    "occupied_max_error_ha": 1.3322676295501878e-15,
+    "first_empty_max_error_ha": 1.1102230246251565e-15,
+    "buffer_max_error_ha": 3.610445276081009e-13,
+    "maximum_absolute_per_k_band_sum_excess_ha": 1.5543122344752192e-15
+  },
+  {
+    "case": "syn4-slab",
+    "converged": false,
+    "iterations": 100,
+    "sampled_k": [
+      0
+    ],
+    "occupied_max_error_ha": 9.997513256698731e-07,
+    "first_empty_max_error_ha": 1.965897321681842e-06,
+    "buffer_max_error_ha": 0.008728502577904251,
+    "maximum_absolute_per_k_band_sum_excess_ha": 5.586719547867602e-06
+  }
+]

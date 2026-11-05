@@ -1,0 +1,8 @@
+case      wall med (s)  engine (s)  diag (s) iters  dE vs base (Ha)    density  speedup
+gamma            0.583       0.139     0.074    10         0.00e+00  identical    0.44x
+k222s            0.425       0.420     0.324    10         0.00e+00  identical    1.55x
+k222             0.785       0.779     0.627    10         0.00e+00  identical    1.55x
+k444s            3.103       3.096     2.590    10         0.00e+00  identical    1.12x
+si8              2.710       2.702     2.425    15         0.00e+00  identical    1.05x
+recorded tests/reference/spectral/screen-t1.json
+OK

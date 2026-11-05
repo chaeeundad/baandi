@@ -30,3 +30,6 @@ pub use session::{CompletionMode, ScfSession, StepReport, StepStatus};
 pub mod diagnostics;
 
 pub mod checkpoint;
+
+mod spectral;
+pub use spectral::{SpectralEvent, SpectralGuard, SpectralReport};

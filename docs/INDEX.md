@@ -92,3 +92,6 @@ Conventions: docs are English; one fact lives in one place and others link to it
 - `docs/performance/exceed-qe-plan.md`: gap model BAANDI versus QE best configuration, equal-accuracy definition, staged roadmap with cumulative ratio estimates, decisions, honest feasibility assessment (2026-11-05).
 
 - [Frozen-H stopping replay (P15A)](research/qe-study/replay-stopping-results.md): stopping predicates versus rate curves, Hartree-metric schedules, equal-accuracy scans and independent spectral-completeness findings; no default change.
+
+- [Spectral completeness and final audit option (P15C)](validation/spectral-completeness.md): realistic final dense comparisons, cumulative fail-closed repair, skew dense-SCF diagnosis, and measured default-off decision.
+- [P15C dev08 measurement request](validation/spectral-dev08-request.md): final guard on/off H work and wall-time protocol for ordinary/native builds.

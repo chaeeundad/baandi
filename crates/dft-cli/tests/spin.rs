@@ -158,3 +158,50 @@ fn collinear_cli_certificate_schemas_and_cubes() {
     );
     assert_eq!(a["total_energy"], b["total_energy"]);
 }
+
+#[test]
+fn final_guard_reports_both_spin_channels_without_changing_schema_version() {
+    let mut reference = None;
+    for threads in [1, 2, 4, 8] {
+        let c = Case::new();
+        let text = c
+            .input("mode='collinear'\ntotal_moment=1.0\naxis='z'\ninitial_moment_seed=0.5")
+            .replace(
+                "[scf]",
+                &format!("[scf]\nspectral_guard='final'\nthreads={threads}"),
+            );
+        let out = c.run(&text, "run");
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let result: serde_json::Value =
+            serde_json::from_slice(&fs::read(c.dir.join("results/results.json")).unwrap()).unwrap();
+        assert_eq!(result["schema_version"], 2);
+        let report = &result["spectral_completeness"];
+        assert_eq!(report["passed"], true);
+        assert_eq!(report["retries"], 0);
+        let events = report["events"].as_array().unwrap();
+        assert_eq!(events.len(), 2);
+        for (s, e) in events.iter().enumerate() {
+            assert_eq!(e["spin"], s);
+            assert_eq!(e["k_point"], 0);
+            assert_eq!(e["iteration"], result["convergence"]["iterations"]);
+            assert_eq!(e["passed"], true);
+        }
+        let mut audit = report.clone();
+        audit.as_object_mut().unwrap().remove("timings");
+        let scientific = serde_json::json!([
+            result["total_energy"],
+            result["band_data"],
+            result["density"],
+            audit
+        ]);
+        if let Some(previous) = &reference {
+            assert_eq!(previous, &scientific);
+        } else {
+            reference = Some(scientific);
+        }
+    }
+}

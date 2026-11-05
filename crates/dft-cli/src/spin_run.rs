@@ -187,7 +187,11 @@ pub(super) fn execute(
         )
         .map_err(|e| error(5, e))?;
     }
-    let result = json!({"schema_version":2,"output_profile":"collinear_fixed_v1","preflight":preflight,"tool":{"name":"dft-cli","version":env!("CARGO_PKG_VERSION"),"git_commit":env!("DFT_GIT_COMMIT")},"input_sha256":sha256(input_bytes),"species":species,"xc":opts.functional.name(),"scf":options_json(&opts),"spin":spin,"state_contracts":extension,"identity":{"model":model_record,"basis":basis_record},"provenance":{"initial_moment_seed":r.sector.initial_moment_seed,"seed_role":"provenance_only_uniform_fixed_sector_initialization"},"energies":energy_json(&r.energy),"total_energy":{"ha":r.energy.total_hartree(),"ry":2.0*r.energy.total_hartree()},"band_data":{"axes":["spin","k","band"],"shape":[2,nk,nb],"ordering":"C_band_fastest","eigenvalues_ha":eigenvalues,"residuals_ha":residuals,"occupations_electrons":values},"convergence":{"converged":r.converged,"iterations":r.history.len(),"certificate":certificate,"history":history},"density":{"shape":[2,prepared.grid.dims()[0],prepared.grid.dims()[1],prepared.grid.dims()[2]],"ordering":"C_spin_xyz_z_fastest","units":"electrons/Bohr^3","channel_values":channels.iter().map(|n|n.iter().copied().collect::<Vec<_>>()).collect::<Vec<_>>(),"cube_atoms_included":cube_atoms.is_some()},"limitations":["fixed moment sector, not unconstrained magnetic ground state","full meshes only; no spin restart, runtime control or band/DOS postprocessing"]});
+    let mut result = json!({"schema_version":2,"output_profile":"collinear_fixed_v1","preflight":preflight,"tool":{"name":"dft-cli","version":env!("CARGO_PKG_VERSION"),"git_commit":env!("DFT_GIT_COMMIT")},"input_sha256":sha256(input_bytes),"species":species,"xc":opts.functional.name(),"scf":options_json(&opts),"spin":spin,"state_contracts":extension,"identity":{"model":model_record,"basis":basis_record},"provenance":{"initial_moment_seed":r.sector.initial_moment_seed,"seed_role":"provenance_only_uniform_fixed_sector_initialization"},"energies":energy_json(&r.energy),"total_energy":{"ha":r.energy.total_hartree(),"ry":2.0*r.energy.total_hartree()},"band_data":{"axes":["spin","k","band"],"shape":[2,nk,nb],"ordering":"C_band_fastest","eigenvalues_ha":eigenvalues,"residuals_ha":residuals,"occupations_electrons":values},"convergence":{"converged":r.converged,"iterations":r.history.len(),"certificate":certificate,"history":history},"density":{"shape":[2,prepared.grid.dims()[0],prepared.grid.dims()[1],prepared.grid.dims()[2]],"ordering":"C_spin_xyz_z_fastest","units":"electrons/Bohr^3","channel_values":channels.iter().map(|n|n.iter().copied().collect::<Vec<_>>()).collect::<Vec<_>>(),"cube_atoms_included":cube_atoms.is_some()},"limitations":["fixed moment sector, not unconstrained magnetic ground state","full meshes only; no spin restart, runtime control or band/DOS postprocessing"]});
+    if let Some(report) = &r.spectral_completeness {
+        result["spectral_completeness"] = super::spectral_json(report);
+    }
+    let _ = dft_engine::work_accounting::take();
     write_json(&out.join("results.json"), &result)?;
     // Conventional total-density binary remains a documented additional format.
     let total_bytes: Vec<u8> = total.iter().flat_map(|v| v.to_le_bytes()).collect();
@@ -199,7 +203,8 @@ pub(super) fn execute(
     Ok(RunReport {
         converged: r.converged,
         console: format!(
-            "Collinear fixed sector: N_up={}, N_down={}, M={:.12} mu_B\nTotal energy: {:.16} Ha\n{}\n",
+            "Spectral completeness: {}\nCollinear fixed sector: N_up={}, N_down={}, M={:.12} mu_B\nTotal energy: {:.16} Ha\n{}\n",
+            super::spectral_status(r.spectral_completeness.as_ref()),
             r.sector.n_up,
             r.sector.n_down,
             r.moment_mu_b,

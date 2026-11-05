@@ -5,6 +5,8 @@ pub mod mixing;
 #[doc(hidden)]
 pub mod replay;
 pub mod rmm;
+mod spectral;
+pub use spectral::SpectralCompleteness;
 #[doc(hidden)]
 pub mod work_accounting;
 #[doc(hidden)]
@@ -134,6 +136,7 @@ impl Preconditioner for DiagonalPreconditioner {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EigenSolution {
+    pub spectral_completeness: Option<SpectralCompleteness>,
     pub eigenvalues: Vec<f64>,
     pub eigenvectors: ComplexMatrix,
     pub residuals: Vec<f64>,
@@ -181,6 +184,7 @@ impl DenseEigensolver {
         let (_, residuals) = residual(operator, &vectors, &values)?;
         let maximum = max_residual(&residuals);
         Ok(EigenSolution {
+            spectral_completeness: None,
             eigenvalues: values,
             eigenvectors: vectors,
             residuals,
@@ -317,6 +321,49 @@ impl Davidson {
         mode: SolveMode,
         policy: BandTolerances,
     ) -> Result<EigenSolution, SolverError> {
+        // Diagnostic SCF oracle, deliberately not a production solver option.
+        if option_env!("P15C_DENSE_SCF").is_some() {
+            let solution = DenseEigensolver.solve(operator, self.bands)?;
+            if replay::ENABLED {
+                let mut trace = replay::Trace::new(self.bands, 1);
+                trace.step(
+                    operator.dimension(),
+                    solution.operator_applications,
+                    &solution.eigenvalues,
+                    &solution.residuals,
+                );
+                replay::store(replay::Record {
+                    dense_values: Some(solution.eigenvalues.clone()),
+                    traces: vec![(
+                        self.tolerance,
+                        policy.strict_bands,
+                        policy.buffer_tolerance,
+                        true,
+                        trace,
+                    )],
+                });
+            }
+            return Ok(solution);
+        }
+        let enriched;
+        let initial = if option_env!("P15C_RICH_START").is_some()
+            && initial.is_some_and(|v| {
+                (0..v.cols())
+                    .all(|j| v.column(j).iter().filter(|z| z.norm_sqr() > 0.0).count() == 1)
+            }) {
+            let mut start = initial.unwrap().clone();
+            let width = (2 * self.bands)
+                .min(self.max_subspace)
+                .min(operator.dimension());
+            start.reserve_columns(width)?;
+            let random = SplitMix64(self.seed ^ 0x9e3779b97f4a7c15)
+                .block(operator.dimension(), width.saturating_sub(start.cols()))?;
+            start.append_columns(&random)?;
+            enriched = start;
+            Some(&enriched)
+        } else {
+            initial
+        };
         if !replay::ENABLED {
             return self.solve_policy_traced::<false>(
                 operator,
@@ -346,6 +393,53 @@ impl Davidson {
                 trace,
             )],
         };
+        if replay::SPECTRAL {
+            record.dense_values = replay::dense_oracle(operator, self.bands)?;
+            if option_env!("P15C_CANDIDATES").is_some() && record.dense_values.is_some() {
+                for rich in [true, false] {
+                    let solver = Self {
+                        tolerance: 1e-10,
+                        seed: self.seed ^ 0x9e3779b97f4a7c15,
+                        ..self.clone()
+                    };
+                    let mut rng = SplitMix64(solver.seed);
+                    let width = (2 * self.bands)
+                        .min(self.max_subspace)
+                        .min(operator.dimension());
+                    let mut start = if rich {
+                        initial
+                            .cloned()
+                            .unwrap_or(ComplexMatrix::zeros(operator.dimension(), 0)?)
+                    } else {
+                        ComplexMatrix::zeros(operator.dimension(), 0)?
+                    };
+                    start.reserve_columns(width)?;
+                    start.append_columns(
+                        &rng.block(operator.dimension(), width.saturating_sub(start.cols()))?,
+                    )?;
+                    let mut trace = replay::Trace::new(self.bands, self.max_iterations);
+                    let checked = solver.solve_policy_traced::<true>(
+                        operator,
+                        Some(&start),
+                        preconditioner,
+                        SolveMode {
+                            certify: true,
+                            ..mode
+                        },
+                        BandTolerances {
+                            strict_bands: self.bands,
+                            buffer_tolerance: 1e-10,
+                        },
+                        &mut trace,
+                    );
+                    record
+                        .traces
+                        .push((1e-10, self.bands, 1e-10, checked.is_ok(), trace));
+                }
+            }
+            replay::store(record);
+            return result;
+        }
         // Independent solves from identical starts, with the same expansion,
         // restart and preconditioner. The last solve is an all-root reference.
         for tolerance in [1e-2_f64, 1e-3, 1e-4, 1e-5, 1e-6, 1e-10] {
@@ -589,6 +683,7 @@ impl Davidson {
             {
                 work.returned();
                 return Ok(EigenSolution {
+                    spectral_completeness: None,
                     eigenvalues: values,
                     eigenvectors: vectors,
                     converged: residuals

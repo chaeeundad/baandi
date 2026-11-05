@@ -1,0 +1,68 @@
+{
+ "note": "",
+ "binary": "p15c-rich-cli",
+ "machine_note": "record host and commit in the note",
+ "energy_tolerance_ha": 1e-12,
+ "cases": {
+  "si8": {
+   "operator_applications": 1979,
+   "davidson_iterations": 231,
+   "certificate_applications": 268,
+   "certificate_iterations": 51,
+   "label": "8-atom conventional Gamma, 30 Ry",
+   "wall_s": [
+    3.04772375
+   ],
+   "wall_median_s": 3.04772375,
+   "engine_total_s": 3.039327291,
+   "phases_s": {
+    "density_s": 0.064382918,
+    "diagonalization_s": 2.7143538720000002,
+    "mixing_s": 0.015876293,
+    "potential_s": 0.02494975,
+    "total_energy_s": 0.070573998
+   },
+   "engine_total_median_s": 3.039327291,
+   "phase_medians_s": {
+    "density_s": 0.064382918,
+    "diagonalization_s": 2.7143538720000002,
+    "mixing_s": 0.015876293,
+    "potential_s": 0.02494975,
+    "total_energy_s": 0.070573998
+   },
+   "iterations": 15,
+   "total_energy_ha": -31.32180360103154,
+   "density_sha256": "244e86e10406bef6f10d36c4dca04a52f71db1a4476145ae433fe11bee9b8d03"
+  },
+  "k444s": {
+   "operator_applications": 10576,
+   "davidson_iterations": 1710,
+   "certificate_applications": 3503,
+   "certificate_iterations": 138,
+   "label": "4x4x4 shifted (32 k), 30 Ry",
+   "wall_s": [
+    3.5280934589999995
+   ],
+   "wall_median_s": 3.5280934589999995,
+   "engine_total_s": 3.518955459,
+   "phases_s": {
+    "density_s": 0.124906043,
+    "diagonalization_s": 2.920327041,
+    "mixing_s": 0.002549544,
+    "potential_s": 0.007063666,
+    "total_energy_s": 0.251696541
+   },
+   "engine_total_median_s": 3.518955459,
+   "phase_medians_s": {
+    "density_s": 0.124906043,
+    "diagonalization_s": 2.920327041,
+    "mixing_s": 0.002549544,
+    "potential_s": 0.007063666,
+    "total_energy_s": 0.251696541
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.925976126648088,
+   "density_sha256": "18e2af578b7a1edf1b6e393937e9f66991e4b572d24c685ea5000fa8a37f2d89"
+  }
+ }
+}

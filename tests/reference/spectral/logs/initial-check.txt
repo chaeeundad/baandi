@@ -1,0 +1,44 @@
+PASS build
+FAIL test
+assertion `left == right` failed
+  left: {"atoms", "band_accuracy", "bands", "basis", "cell", "convergence", "cutoff", "eigenvalues", "electrons", "energies", "input_sha256", "memory_estimate", "occupations", "preflight", "scf", "schema_version", "species", "spectral_completeness", "threading", "timestamp", "timings", "tool", "total_energy", "units", "xc"}
+ right: {"atoms", "band_accuracy", "bands", "basis", "cell", "convergence", "cutoff", "eigenvalues", "electrons", "energies", "input_sha256", "memory_estimate", "occupations", "preflight", "scf", "schema_version", "species", "threading", "timestamp", "timings", "tool", "total_energy", "units", "xc"}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- small_end_to_end stdout ----
+
+thread 'small_end_to_end' (20439667) panicked at crates/dft-cli/tests/run.rs:109:5:
+assertion `left == right` failed
+  left: 25
+ right: 24
+
+
+failures:
+    expressions_preserve_energy_and_record_resolutions
+    small_end_to_end
+
+test result: FAILED. 11 passed; 2 failed; 4 ignored; 0 measured; 0 filtered out; finished in 0.36s
+
+error: test failed, to rerun pass `-p dft-cli --test run`
+PASS fmt
+FAIL clippy
+    Checking dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/crates/dft-engine)
+    Checking baandi-mcp v0.1.0 (/Users/mino/Develop/rust-dft-wt/P15C-SPECTRAL-COMPLETENESS/crates/baandi-mcp)
+error: items after a test module
+   --> crates/dft-cli/src/run.rs:644:1
+    |
+644 |   mod tests {
+    |   ^^^^^^^^^
+...
+677 | / pub(crate) fn spectral_json<'a>(
+678 | |     solutions: impl Iterator<Item = &'a dft_engine::KPointSolution>,
+679 | | ) -> serde_json::Value {
+    | |______________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.99.0/index.html#items_after_test_module
+    = note: `-D clippy::items-after-test-module` implied by `-D warnings`
+    = help: to override `-D warnings` add `#[allow(clippy::items_after_test_module)]`
+    = help: move the items to before the test module was defined
+
+error: could not compile `dft-cli` (lib test) due to 1 previous error
+warning: build failed, waiting for other jobs to finish...

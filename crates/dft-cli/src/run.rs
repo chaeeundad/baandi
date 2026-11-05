@@ -60,6 +60,7 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
         ..ScfOptions::default()
     };
     if let Some(s) = &config.scf {
+        o.spectral_guard = s.spectral_guard().map_err(|e| error(1, e.to_string()))?;
         o.threads = s.threads.unwrap_or(1);
         if let Some(n) = s.max_iterations {
             o.max_iterations =
@@ -107,7 +108,7 @@ fn options_json(o: &ScfOptions) -> Value {
             json!({"method":"kerker-pulay","beta":beta,"history":history,"q0_inverse_bohr":q0_inverse_bohr})
         }
     };
-    json!({"threads":o.threads,"cutoff_hartree":o.cutoff_hartree,"nbands":o.bands,"extra_bands":o.extra_bands,"grid_override":o.grid_override,"mixing":mixing,
+    json!({"spectral_guard":o.spectral_guard.name(),"threads":o.threads,"cutoff_hartree":o.cutoff_hartree,"nbands":o.bands,"extra_bands":o.extra_bands,"grid_override":o.grid_override,"mixing":mixing,
         "density_residual_tolerance":o.density_tolerance,"energy_tolerance_ha":o.energy_tolerance,"eigen_tolerance":o.eigen_tolerance,
         "residual_eigen_schedule":o.residual_eigen_schedule,"free_electron_initial_guess":o.free_electron_initial_guess,"initial_eigen_tolerance":o.initial_eigen_tolerance,"eigen_tolerance_decay":o.eigen_tolerance_decay,"max_iterations":o.max_iterations,
         "davidson_max_iterations":o.davidson_max_iterations,"davidson_subspace":o.davidson_subspace,"davidson_subspace_min_per_band":6,"seed":o.seed,
@@ -460,6 +461,10 @@ pub fn execute_mode(
     if dft_engine::work_accounting::ENABLED {
         result["davidson_work"] = json!(davidson_work);
     }
+    if let Some(report) = &r.spectral_completeness {
+        result["spectral_completeness"] = spectral_json(report);
+    }
+
     result["band_accuracy"] = json!(r.k_points[0].solution.residuals.iter()
         .zip(&r.k_points[0].solution.buffer).zip(&r.k_points[0].solution.converged)
         .map(|((&residual, &buffer), &converged)| json!({"residual_ha":residual,"buffer":buffer,"converged":converged}))
@@ -491,6 +496,12 @@ pub fn execute_mode(
         });
     }
     let mut console = grid_report(&config, &prepared);
+    writeln!(
+        console,
+        "Spectral completeness: {}",
+        spectral_status(r.spectral_completeness.as_ref())
+    )
+    .unwrap();
     if let Some(floor) = density_floor {
         result["initial_density"] = json!({"method":"uniform", "expected_electrons":electrons,
             "atomic_table_used":false, "density_floor_electrons_bohr3":floor});
@@ -637,6 +648,28 @@ pub fn execute_mode(
         console,
         converged: outcome.converged,
     })
+}
+
+/// Reporting boundary only; untested states never receive a passing flag.
+pub(crate) fn spectral_status(report: Option<&dft_engine::SpectralReport>) -> &'static str {
+    match report {
+        None => "not verified (scf.spectral_guard=off)",
+        Some(r) if r.passed => {
+            "passed independent spectral check (see method and scope in results.json)"
+        }
+        Some(_) => "could not verify the reported state",
+    }
+}
+pub(crate) fn spectral_json(report: &dft_engine::SpectralReport) -> Value {
+    json!({"method":"final_reported_hamiltonian", "passed":report.passed,
+        "retries":report.retries, "extra_operator_applications":report.operator_applications,
+        "timings":{"wall_s":report.elapsed.as_secs_f64()},
+        "verification_scope":"full-space dense for dimension <=128; independent seeded search otherwise, not an inertia proof",
+        "status":if report.passed {"verified_by_method"} else {"could_not_verify_reported_state"},
+        "events":report.events.iter().map(|e| json!({"iteration":e.iteration,"spin":e.spin,
+            "k_point":e.k_point,"method":e.method,"passed":e.passed,"retries":e.retries,
+            "extra_operator_applications":e.operator_applications,
+            "maximum_discrepancy_ha":e.discrepancy_ha,"error":e.error})).collect::<Vec<_>>()})
 }
 
 #[cfg(test)]

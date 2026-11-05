@@ -2020,17 +2020,17 @@
     "task_id": "P13D-REAL-NC-BULK",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "blocked",
     "codex_pid": 30522,
     "wrapper_pid": 30507,
-    "session_id": null,
+    "session_id": "01a1aae3-0896-7761-becf-ef5789174c58",
     "branch": "task/P13D-REAL-NC-BULK",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P13D-REAL-NC-BULK",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P13D-REAL-NC-BULK.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P13D-REAL-NC-BULK/report.json",
     "started_at": "2026-11-05T08:46:07Z",
-    "ended_at": null,
-    "exit_code": null,
+    "ended_at": "2026-11-05T09:03:22Z",
+    "exit_code": 0,
     "note": ""
   }
 ]

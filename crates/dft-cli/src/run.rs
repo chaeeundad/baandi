@@ -1,4 +1,6 @@
-//! File/console boundary for the sequential engine. No I/O occurs in SCF kernels.
+#[path = "finite_run.rs"]
+mod finite_run;
+// File/console boundary for the sequential engine. No I/O occurs in SCF kernels.
 use crate::{config::Config, grid_report};
 #[path = "spin_run.rs"]
 mod spin_run;
@@ -245,7 +247,13 @@ pub fn execute_mode(
     let bytes = fs::read(input).map_err(|e| error(5, format!("{}: {e}", input.display())))?;
     let text = std::str::from_utf8(&bytes).map_err(|e| error(1, e))?;
     let config = Config::parse(text).map_err(|e| error(1, e))?;
-    if config.collinear() && (mode.observe || mode.agent) {
+    if (config.collinear()
+        || config
+            .finite_temperature()
+            .map_err(|e| error(1, e))?
+            .is_some())
+        && (mode.observe || mode.agent)
+    {
         return Err(error(
             1,
             "spin.execution: runtime control is not spin-aware; use Classic execution",
@@ -342,6 +350,22 @@ pub fn execute_mode(
                 .z_valence()
         })
         .sum();
+    if let Some(theta) = config.finite_temperature().map_err(|e| error(1, e))? {
+        return finite_run::execute(
+            &config,
+            &prepared,
+            opts,
+            &atoms,
+            &refs,
+            &points,
+            &out,
+            theta,
+            electron_target,
+            preflight,
+            species,
+            &bytes,
+        );
+    }
     if let Some(sector) = config
         .spin_sector(electron_target)
         .map_err(|e| error(1, e))?

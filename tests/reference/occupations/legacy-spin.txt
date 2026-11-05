@@ -1,0 +1,92 @@
+
+running 5 tests
+test sector_validation ... ok
+E=-4.8409468993977539e-1 Ha, M=1.000000000000, iterations=12, certificate charge=1.020e-15, spin=1.020e-15, gaps=[Some(0.7333477275842073), None]
+E=-4.8409468993977539e-1 Ha, M=-1.000000000000, iterations=12, certificate charge=1.020e-15, spin=1.020e-15, gaps=[None, Some(0.7333477275842073)]
+E=-9.1551991304348546e-1 Ha, M=0.000000000000, iterations=14, certificate charge=2.601e-12, spin=0.000e0, gaps=[Some(0.5377561156421826), Some(0.5377561156421826)]
+zero moment LdaPw: dE=2.220446049250313e-16 Ha, dn=6.755619037531951e-17, iterations spin=14 unpolarized=14
+matrix geometry=0 mesh=0 xc=LdaPw
+E=-9.1863072269888657e-1 Ha, M=0.000000000000, iterations=16, certificate charge=2.191e-12, spin=0.000e0, gaps=[Some(0.5374404442053171), Some(0.5374404442053171)]
+zero moment Pbe: dE=3.3306690738754696e-16 Ha, dn=2.160720336232367e-17, iterations spin=16 unpolarized=16
+test zero_moment_reduces_to_same_unpolarized_functional ... ok
+E=-1.7058042036322076e0 Ha, M=1.000000000000, iterations=94, certificate charge=3.824e-11, spin=4.224e-11, gaps=[Some(0.09540251565129743), Some(0.4257116443884407)]
+E=-4.8439633882319211e-1 Ha, M=1.000000000000, iterations=12, certificate charge=8.279e-14, spin=8.279e-14, gaps=[Some(0.7317262151247393), None]
+E=-4.8439633882319211e-1 Ha, M=-1.000000000000, iterations=12, certificate charge=8.279e-14, spin=8.279e-14, gaps=[None, Some(0.7317262151247393)]
+test odd_electron_certificate_and_swap ... ok
+E=-7.9135127177011788e-1 Ha, M=0.000000000000, iterations=17, certificate charge=1.986e-12, spin=0.000e0, gaps=[Some(0.25329797051841174), Some(0.25329797051841174)]
+matrix reduction dE=8.881784197001252e-16 Ha dn=2.813284314573309e-17 iterations=17/17
+E=-1.7058042036322081e0 Ha, M=1.000000000000, iterations=72, certificate charge=1.488e-11, spin=2.778e-11, gaps=[Some(0.09540251563184948), Some(0.4257116443854741)]
+E=-1.7058042036322072e0 Ha, M=1.000000000000, iterations=90, certificate charge=1.785e-11, spin=2.839e-11, gaps=[Some(0.0954025156481077), Some(0.4257116443891486)]
+test occupied_channels_and_existing_mixers ... ok
+matrix geometry=0 mesh=0 xc=Pbe
+E=-7.9483316128002790e-1 Ha, M=0.000000000000, iterations=20, certificate charge=3.774e-12, spin=0.000e0, gaps=[Some(0.2510314636132851), Some(0.2510314636132851)]
+matrix reduction dE=2.6645352591003757e-15 Ha dn=1.5740438361109957e-16 iterations=20/20
+matrix geometry=0 mesh=1 xc=LdaPw
+E=-7.1593742553905559e-1 Ha, M=0.000000000000, iterations=18, certificate charge=7.533e-13, spin=0.000e0, gaps=[Some(0.14128991997231474), Some(0.14128991997231474)]
+matrix reduction dE=2.220446049250313e-16 Ha dn=1.9909095140395525e-17 iterations=18/18
+matrix geometry=0 mesh=1 xc=Pbe
+E=-7.2221659505528124e-1 Ha, M=0.000000000000, iterations=21, certificate charge=4.554e-12, spin=0.000e0, gaps=[Some(0.14363645514609696), Some(0.14363645514609696)]
+matrix reduction dE=2.6645352591003757e-15 Ha dn=3.2224884675584846e-17 iterations=21/21
+matrix geometry=0 mesh=2 xc=LdaPw
+E=-7.7916954162610841e-1 Ha, M=0.000000000000, iterations=18, certificate charge=7.375e-12, spin=0.000e0, gaps=[Some(0.2147054267073469), Some(0.2147054267073469)]
+matrix reduction dE=1.1102230246251565e-15 Ha dn=4.576580486939451e-17 iterations=18/18
+matrix geometry=0 mesh=2 xc=Pbe
+E=-7.8293958738526337e-1 Ha, M=0.000000000000, iterations=18, certificate charge=5.304e-12, spin=0.000e0, gaps=[Some(0.21438898392185568), Some(0.21438898392185568)]
+matrix reduction dE=2.220446049250313e-16 Ha dn=3.3543883461173576e-17 iterations=18/18
+matrix geometry=1 mesh=0 xc=LdaPw
+E=-9.3333024833408085e-1 Ha, M=0.000000000000, iterations=16, certificate charge=1.424e-11, spin=0.000e0, gaps=[Some(0.056692633156090966), Some(0.056692633156090966)]
+matrix reduction dE=4.440892098500626e-16 Ha dn=8.897839242536823e-16 iterations=16/16
+matrix geometry=1 mesh=0 xc=Pbe
+E=-9.4086142417217300e-1 Ha, M=0.000000000000, iterations=19, certificate charge=1.588e-11, spin=0.000e0, gaps=[Some(0.06456237579839053), Some(0.06456237579839053)]
+matrix reduction dE=7.771561172376096e-16 Ha dn=7.041657581331182e-16 iterations=19/19
+matrix geometry=1 mesh=1 xc=LdaPw
+E=-7.8434910704664751e-1 Ha, M=0.000000000000, iterations=15, certificate charge=2.065e-11, spin=0.000e0, gaps=[Some(0.015094631730455998), Some(0.015094631730455998)]
+matrix reduction dE=4.440892098500626e-16 Ha dn=5.216615172606567e-16 iterations=15/15
+matrix geometry=1 mesh=1 xc=Pbe
+E=-7.8630020149760349e-1 Ha, M=0.000000000000, iterations=16, certificate charge=5.636e-11, spin=0.000e0, gaps=[Some(0.014624367278672556), Some(0.014624367278672556)]
+matrix reduction dE=1.1102230246251565e-16 Ha dn=2.49960348337875e-16 iterations=16/16
+matrix geometry=1 mesh=2 xc=LdaPw
+matched noninsulating rejection spin_gap=-4.909216171718467e-4 Ha legacy_gap=-4.90921617171014e-4 Ha
+matrix geometry=1 mesh=2 xc=Pbe
+E=-9.1299621886197946e-1 Ha, M=0.000000000000, iterations=23, certificate charge=3.804e-11, spin=0.000e0, gaps=[Some(0.0020272038944700033), Some(0.0020272038944700033)]
+matrix reduction dE=1.3322676295501878e-15 Ha dn=4.745556928667274e-15 iterations=23/23
+matrix geometry=2 mesh=0 xc=LdaPw
+E=-1.6716715680534517e0 Ha, M=0.000000000000, iterations=15, certificate charge=3.862e-11, spin=0.000e0, gaps=[Some(0.04921748503047746), Some(0.04921748503047746)]
+matrix reduction dE=0e0 Ha dn=1.0162516083028919e-16 iterations=15/15
+matrix geometry=2 mesh=0 xc=Pbe
+E=-1.6746725758768779e0 Ha, M=0.000000000000, iterations=19, certificate charge=9.188e-11, spin=0.000e0, gaps=[Some(0.05279941753727427), Some(0.05279941753727427)]
+matrix reduction dE=1.7763568394002505e-15 Ha dn=1.9908712277311385e-16 iterations=19/19
+matrix geometry=2 mesh=1 xc=LdaPw
+E=-1.4381935820571672e0 Ha, M=0.000000000000, iterations=16, certificate charge=3.434e-12, spin=0.000e0, gaps=[Some(0.07020748857655928), Some(0.07020748857655928)]
+matrix reduction dE=2.220446049250313e-16 Ha dn=1.915033758310648e-17 iterations=16/16
+matrix geometry=2 mesh=1 xc=Pbe
+E=-1.4420129707766889e0 Ha, M=0.000000000000, iterations=17, certificate charge=9.943e-11, spin=0.000e0, gaps=[Some(0.07094624177108617), Some(0.07094624177108617)]
+matrix reduction dE=8.881784197001252e-16 Ha dn=2.6655925699599314e-17 iterations=17/17
+matrix geometry=2 mesh=2 xc=LdaPw
+E=-1.6302807870684675e0 Ha, M=0.000000000000, iterations=15, certificate charge=1.389e-11, spin=0.000e0, gaps=[Some(0.03749812807053712), Some(0.03749812807053712)]
+matrix reduction dE=4.440892098500626e-16 Ha dn=8.871035197267909e-17 iterations=15/15
+matrix geometry=2 mesh=2 xc=Pbe
+E=-1.6333064815745089e0 Ha, M=0.000000000000, iterations=18, certificate charge=3.102e-11, spin=0.000e0, gaps=[Some(0.04063860231450267), Some(0.04063860231450267)]
+matrix reduction dE=0e0 Ha dn=5.351453228009101e-17 iterations=18/18
+matrix geometry=3 mesh=0 xc=LdaPw
+E=-2.8651378162344345e0 Ha, M=0.000000000000, iterations=15, certificate charge=1.125e-12, spin=0.000e0, gaps=[Some(0.0978789409475946), Some(0.0978789409475946)]
+matrix reduction dE=1.0658141036401503e-14 Ha dn=1.0844034796950755e-13 iterations=15/15
+matrix geometry=3 mesh=0 xc=Pbe
+E=-2.8693129337316976e0 Ha, M=0.000000000000, iterations=15, certificate charge=5.177e-12, spin=0.000e0, gaps=[Some(0.10012720045212122), Some(0.10012720045212122)]
+matrix reduction dE=4.440892098500626e-16 Ha dn=2.974869736202083e-14 iterations=15/15
+matrix geometry=3 mesh=1 xc=LdaPw
+E=-2.4319505956232481e0 Ha, M=0.000000000000, iterations=15, certificate charge=2.810e-11, spin=0.000e0, gaps=[Some(0.03522113890222828), Some(0.03522113890222828)]
+matrix reduction dE=8.881784197001252e-16 Ha dn=2.7225972469264096e-14 iterations=15/15
+matrix geometry=3 mesh=1 xc=Pbe
+E=-2.4347881983179738e0 Ha, M=0.000000000000, iterations=15, certificate charge=1.296e-11, spin=0.000e0, gaps=[Some(0.03573108141007371), Some(0.03573108141007371)]
+matrix reduction dE=1.7763568394002505e-15 Ha dn=3.841295263400296e-14 iterations=15/15
+matrix geometry=3 mesh=2 xc=LdaPw
+E=-2.7881675252039466e0 Ha, M=0.000000000000, iterations=14, certificate charge=1.355e-11, spin=0.000e0, gaps=[Some(0.08498620648578521), Some(0.08498620648578521)]
+matrix reduction dE=8.881784197001252e-16 Ha dn=4.936730209648966e-14 iterations=14/14
+matrix geometry=3 mesh=2 xc=Pbe
+E=-2.7919902609391412e0 Ha, M=0.000000000000, iterations=15, certificate charge=3.431e-12, spin=0.000e0, gaps=[Some(0.0866248303462014), Some(0.0866248303462014)]
+matrix reduction dE=4.440892098500626e-15 Ha dn=1.202529715484728e-14 iterations=15/15
+test mf03_synthetic_matrix ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.39s
+

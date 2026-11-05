@@ -25,3 +25,12 @@ is `scripts/check_upf_headers.py`; external files are selected by `DFT_NC_DIR`.
 not SCF or material qualification. Engine tests cover NLCC and real atom smoke;
 see docs/cli.md. NLCC local-potential export includes the core in XC only.
 NLCC ledger data cannot be silently serialized into checkpoint v1.
+
+## MF04 finite-temperature boundary
+
+`finite_run.rs` writes the explicit FD profile and proposed state-contracts
+extension; default/fixed outputs retain their existing path. Unit conversion is
+only in config. Unknown schemes, competing widths, finite-T v1 checkpoints and
+unsupported output/runtime options reject. Model identity excludes spontaneous
+moment and seeds; state identity includes the actual occupations, mu and entropy.
+See `docs/validation/occupations.md` for caps and reproduction commands.

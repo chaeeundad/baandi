@@ -37,6 +37,7 @@ pub struct Config {
     pub basis: Basis,
     pub xc: Xc,
     pub spin: Option<SpinConfig>,
+    pub occupations: Option<Occupations>,
     pub scf: Option<Scf>,
     pub output: Option<Output>,
     pub bands: Option<Bands>,
@@ -158,6 +159,53 @@ impl Functional {
         }
     }
 }
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Occupations {
+    pub mode: String,
+    pub smearing_ha: Option<f64>,
+    pub smearing_ev: Option<f64>,
+    pub smearing_kelvin: Option<f64>,
+    pub band_cap: Option<usize>,
+}
+impl Config {
+    pub fn finite_temperature(&self) -> Result<Option<f64>, ConfigError> {
+        let Some(o) = &self.occupations else {
+            return Ok(None);
+        };
+        let values = [
+            o.smearing_ha,
+            o.smearing_ev
+                .map(|v| dft_units::to_hartree(v, dft_units::EnergyUnit::ElectronVolt)),
+            o.smearing_kelvin
+                .map(|v| dft_units::to_hartree(v * 1.380649e-23, dft_units::EnergyUnit::Joule)),
+        ];
+        let count = values.iter().flatten().count();
+        match o.mode.as_str() {
+            "fixed" if count == 0 && o.band_cap.is_none() => Ok(None),
+            "fermi_dirac" if count == 1 => {
+                let theta = values.into_iter().flatten().next().unwrap();
+                if !theta.is_finite() || theta <= 0.0 || o.band_cap == Some(0) {
+                    return Err(ConfigError::Invalid("occupations.smearing: positive finite width and band cap required; use fixed mode for zero temperature".into()));
+                }
+                Ok(Some(theta))
+            }
+            "fixed" => Err(ConfigError::Invalid("occupations: fixed mode cannot carry smearing or band cap; remove them".into())),
+            "fermi_dirac" => Err(ConfigError::Invalid("occupations.smearing: supply exactly one of smearing_ha, smearing_ev, smearing_kelvin".into())),
+            _ => Err(ConfigError::Invalid("occupations.mode: unsupported smearing scheme; select fixed or fermi_dirac".into())),
+        }
+    }
+    pub fn finite_constraint(&self) -> dft_physics::occupations::Constraint {
+        use dft_physics::occupations::Constraint;
+        self.spin
+            .as_ref()
+            .and_then(|s| {
+                s.total_moment
+                    .or_else(|| s.n_up.zip(s.n_down).map(|(u, d)| u as f64 - d as f64))
+            })
+            .map_or(Constraint::Total, Constraint::FixedMoment)
+    }
+}
 /// Additive fixed-sector input; magnetic seeds are provenance only.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -212,29 +260,57 @@ impl Config {
                 "symmetry.operations: reduction is not valid for this model; use the full mesh with basis.ktime_reversal = false",
             ));
         }
-        let (n_up, n_down) = match (s.n_up, s.n_down, s.total_moment) {
-            (Some(u), Some(d), None) => (u, d),
-            (None, None, Some(m)) => {
-                let up = (electrons + m) / 2.0;
-                let down = (electrons - m) / 2.0;
-                if !m.is_finite()
-                    || up < 0.0
-                    || down < 0.0
-                    || up >= usize::MAX as f64
-                    || down >= usize::MAX as f64
-                    || (up - up.round()).abs() > 1e-10
-                    || (down - down.round()).abs() > 1e-10
-                {
+        let finite = self.finite_temperature()?.is_some();
+        let (n_up, n_down) = if finite {
+            if s.n_up.is_some() != s.n_down.is_some()
+                || (s.total_moment.is_some() && s.n_up.is_some())
+            {
+                return Err(fail(
+                    "spin.constraint: competing or incomplete constraint; choose total_moment or both channel counts",
+                ));
+            }
+            if let (Some(u), Some(d)) = (s.n_up, s.n_down)
+                && u.checked_add(d)
+                    .is_none_or(|n| (n as f64 - electrons).abs() > 1e-10)
+            {
+                return Err(fail(
+                    "spin.constraint: channel counts must sum to total electrons; correct n_up/n_down",
+                ));
+            }
+            if let dft_physics::occupations::Constraint::FixedMoment(m) = self.finite_constraint()
+                && (!m.is_finite() || m.abs() >= electrons)
+            {
+                return Err(fail(
+                    "occupations.electron_target: finite temperature requires interior spin-sector targets",
+                ));
+            }
+            let n = electrons.round() as usize;
+            (n.div_ceil(2), n / 2)
+        } else {
+            match (s.n_up, s.n_down, s.total_moment) {
+                (Some(u), Some(d), None) => (u, d),
+                (None, None, Some(m)) => {
+                    let up = (electrons + m) / 2.0;
+                    let down = (electrons - m) / 2.0;
+                    if !m.is_finite()
+                        || up < 0.0
+                        || down < 0.0
+                        || up >= usize::MAX as f64
+                        || down >= usize::MAX as f64
+                        || (up - up.round()).abs() > 1e-10
+                        || (down - down.round()).abs() > 1e-10
+                    {
+                        return Err(fail(
+                            "spin.constraint: fixed occupations require integer channel counts within capacity; correct total_moment",
+                        ));
+                    }
+                    (up.round() as usize, down.round() as usize)
+                }
+                _ => {
                     return Err(fail(
-                        "spin.constraint: fixed occupations require integer channel counts within capacity; correct total_moment",
+                        "spin.constraint: select exactly one fixed sector; supply both n_up/n_down or total_moment",
                     ));
                 }
-                (up.round() as usize, down.round() as usize)
-            }
-            _ => {
-                return Err(fail(
-                    "spin.constraint: select exactly one fixed sector; supply both n_up/n_down or total_moment",
-                ));
             }
         };
         if s.axis.is_some() && s.axis_cartesian.is_some() {
@@ -634,6 +710,7 @@ impl Config {
     }
     /// Validate active physical settings and cell geometry. SCF/output are type-checked only.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        self.finite_temperature()?;
         let invalid = |message: &str| ConfigError::Invalid(message.to_owned());
         if !self.basis.ecutwfc_ry.is_finite() || self.basis.ecutwfc_ry <= 0. {
             return Err(invalid("basis.ecutwfc_ry must be finite and positive"));

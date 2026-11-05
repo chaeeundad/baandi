@@ -248,3 +248,13 @@ on capture and restore; CLI serialization also rejects an active NLCC ledger,
 while legacy bytes remain unchanged. Local-potential export uses the same core.
 Run the ignored release commands in docs/cli.md; real smoke failures are explicit
 and must not be advertised as converged or qualified materials.
+
+## MF04 finite temperature
+
+`finite_temperature.rs` owns prepared occupation arrays and a separate scalar FD
+driver; collinear uses the same spin map with a shared or fixed-M number solve.
+Do not feed FD into legacy sessions/checkpoints, fixed certificates or a band-only
+occupation view. Every retained band is strict and the fresh certificate repeats
+the entire map. Direct and band E must use identical fractional weights and
+subtract the same TS once. Fixed branches retain their arithmetic. See
+`docs/validation/occupations.md` for evidence and limitations.

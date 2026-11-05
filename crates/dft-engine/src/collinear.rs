@@ -1,5 +1,7 @@
 //! Explicit fixed-sector collinear SCF. Legacy scalar result/session APIs remain separate.
+use super::finite_temperature::{OccupationWorkspace, ThermodynamicLedger};
 use super::*;
+use dft_physics::occupations::Constraint;
 use dft_physics::spin::{SpinDensity, SpinFunctional, SpinHartree, SpinXc, SpinXcResponse};
 
 #[derive(Clone, Debug)]
@@ -69,12 +71,17 @@ pub struct SpinIteration {
     pub mixing_fraction: f64,
 }
 pub struct CollinearResult {
+    pub finite_certificate: Option<super::finite_temperature::FiniteTCertificate>,
+    pub finite_occupations: Option<OccupationWorkspace>,
+    pub thermodynamics: Option<ThermodynamicLedger>,
     pub spectral_completeness: Option<crate::SpectralReport>,
     pub converged: bool,
     pub sector: SpinSector,
     pub density: SpinDensity,
     /// Spin-major, then input k-point order. Occupations exclude k weights.
     pub k_points: [Vec<KPointSolution>; 2],
+    /// Fixed-policy band-only view. Empty for finite T: use finite_occupations,
+    /// whose explicit spin/k/band layout cannot be represented by this field.
     pub occupations: [Vec<f64>; 2],
     pub energy: EnergyAudit,
     pub certificate: Option<SpinCertificate>,
@@ -99,6 +106,7 @@ struct BlockWork {
     saved: Option<EigenSolution>,
 }
 pub struct CollinearProblem {
+    finite: Option<OccupationWorkspace>,
     channels: [ScfProblem; 2],
     sector: SpinSector,
     blocks: [Vec<BlockWork>; 2],
@@ -198,6 +206,7 @@ impl CollinearProblem {
         }
         let mixers = [make_spin_mixer(&up)?, make_spin_mixer(&down)?];
         Ok(Self {
+            finite: None,
             channels: [up, down],
             sector,
             blocks,
@@ -210,6 +219,28 @@ impl CollinearProblem {
             effective: Array3::zeros(dims),
             mixers,
         })
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_fermi_dirac(
+        cell: &Cell,
+        atoms: &[Atom],
+        potentials: &[SpeciesPotential<'_>],
+        mut options: ScfOptions,
+        points: &[KPoint],
+        sector: SpinSector,
+        theta_ha: f64,
+        constraint: Constraint,
+        band_cap: usize,
+    ) -> Result<Self, ScfError> {
+        super::finite_temperature::validate_options(&options, theta_ha, band_cap)?;
+        options.bands = Some(band_cap);
+        let mut problem = Self::new(cell, atoms, potentials, options, points, sector)?;
+        let finite = OccupationWorkspace::new(band_cap, points, true, theta_ha, constraint)?;
+        for p in &mut problem.channels {
+            p.occupations.fill(1.0);
+        }
+        problem.finite = Some(finite);
+        Ok(problem)
     }
     pub fn grid_dimensions(&self) -> [usize; 3] {
         self.channels[0].grid.dims()
@@ -234,7 +265,6 @@ impl CollinearProblem {
         let mut eig_bound = 0.0;
         for (s, channel_output) in output.iter_mut().enumerate() {
             let p = &mut self.channels[s];
-            let volume = p.cell.volume_bohr3();
             let bands = p.occupations.len();
             let solver = Davidson {
                 bands,
@@ -280,13 +310,35 @@ impl CollinearProblem {
                 for (b, orbital) in work.orbitals.iter_mut().enumerate() {
                     orbital.copy_from_slice(solution.eigenvectors.column(b));
                 }
+                work.solution = Some(solution);
+            }
+        }
+        if let Some(finite) = &mut self.finite {
+            for s in 0..2 {
+                for (k, work) in self.blocks[s].iter().enumerate() {
+                    let first = (s * self.blocks[s].len() + k) * finite.bands;
+                    finite.eigenvalues[first..first + finite.bands]
+                        .copy_from_slice(&work.solution.as_ref().unwrap().eigenvalues);
+                }
+            }
+            finite.evaluate(self.channels[0].electrons)?;
+        }
+        for (s, channel_output) in output.iter_mut().enumerate() {
+            let p = &mut self.channels[s];
+            let volume = p.cell.volume_bohr3();
+            for (k, (state, work)) in p.states.iter_mut().zip(&mut self.blocks[s]).enumerate() {
+                let occupations = self
+                    .finite
+                    .as_ref()
+                    .map_or(p.occupations.as_slice(), |f| f.block(s, k));
+                let solution = work.solution.as_ref().unwrap();
                 state
                     .band_density
-                    .compute(&work.orbitals, &p.occupations, &state.grid, volume)?;
+                    .compute(&work.orbitals, occupations, &state.grid, volume)?;
                 for (out, &n) in channel_output.iter_mut().zip(state.band_density.density()) {
                     *out += state.point.weight * n;
                 }
-                for (b, (&f, orbital)) in p.occupations.iter().zip(&work.orbitals).enumerate() {
+                for (b, (&f, orbital)) in occupations.iter().zip(&work.orbitals).enumerate() {
                     if f == 0.0 {
                         continue;
                     }
@@ -311,7 +363,6 @@ impl CollinearProblem {
                     band_sum += weight * solution.eigenvalues[b];
                     eig_bound += weight * solution.residuals[b];
                 }
-                work.solution = Some(solution);
             }
         }
         self.total.assign(&output[0]);
@@ -440,7 +491,17 @@ impl CollinearProblem {
         let dims = self.grid_dimensions();
         let volume = self.channels[0].cell.volume_bohr3();
         let electrons = self.channels[0].electrons;
-        let counts = [self.sector.n_up as f64, self.sector.n_down as f64];
+        let counts = if let Some(f) = &self.finite {
+            match f.constraint() {
+                Constraint::FixedMoment(m) => [(electrons + m) / 2.0, (electrons - m) / 2.0],
+                Constraint::Total => {
+                    let m = self.sector.initial_moment_seed.unwrap_or(0.0);
+                    [(electrons + m) / 2.0, (electrons - m) / 2.0]
+                }
+            }
+        } else {
+            [self.sector.n_up as f64, self.sector.n_down as f64]
+        };
         let weight = volume / dims.iter().product::<usize>() as f64;
         let mut density = std::array::from_fn(|s| Array3::from_elem(dims, counts[s] / volume));
         let mut output = std::array::from_fn(|_| Array3::zeros(dims));
@@ -449,11 +510,16 @@ impl CollinearProblem {
         let mut spectral_report =
             (o.spectral_guard == crate::SpectralGuard::Final).then(crate::SpectralReport::default);
         let mut history = Vec::with_capacity(o.max_iterations);
+        let mut saved_occupations = self
+            .finite
+            .as_ref()
+            .map(|f| vec![0.0; f.occupations().len()]);
         let mut previous_energy: Option<f64> = None;
         let mut previous_residual: f64 = 0.1;
         let mut best: f64 = f64::INFINITY;
         let mut growing = 0;
         for iteration in 1..=o.max_iterations {
+            let mut finite_certificate = None;
             let mut final_certificate = None;
             let tolerance = if o.residual_eigen_schedule {
                 (0.1 * previous_residual)
@@ -468,6 +534,16 @@ impl CollinearProblem {
                 .map_err(|error| {
                     ScfError::Numerical(format!("collinear SCF iteration {iteration}: {error}"))
                 })?;
+            let finite_evaluation = self.finite.as_ref().and_then(|f| f.evaluation);
+            let free_energy =
+                energy.total_hartree() - finite_evaluation.map_or(0.0, |f| f.entropy_term_ha);
+            if finite_evaluation.is_some_and(|f| {
+                f.edge_max_fraction > 1e-8 || f.edge_electrons > 1e-10 * electrons.max(1.0)
+            }) {
+                return Err(ScfError::InvalidInput(
+                    "occupations.bands: insufficient empty-state coverage at cap; increase cap",
+                ));
+            }
             let (charge_residual, spin_residual) =
                 spin_distances(&density, &output, weight, electrons);
             let strict = self.strict_residuals();
@@ -493,16 +569,20 @@ impl CollinearProblem {
                     charge.iter().sum::<f64>()
                 )));
             }
-            let numbers_ok = numbers_ok
-                && ((charge[0] + charge[1]) - electrons).abs() <= 1e-10 * electrons.max(1.0)
-                && ((charge[0] - charge[1]) - self.sector.moment()).abs()
-                    <= 1e-10 * electrons.max(1.0);
+            let numbers_ok = if let Some(f) = finite_evaluation {
+                f.electron_residual.abs() <= 1e-10 * electrons.max(1.0)
+                    && f.moment_residual.unwrap_or(0.0).abs() <= 1e-10 * electrons.max(1.0)
+            } else {
+                numbers_ok
+                    && ((charge[0] + charge[1]) - electrons).abs() <= 1e-10 * electrons.max(1.0)
+                    && ((charge[0] - charge[1]) - self.sector.moment()).abs()
+                        <= 1e-10 * electrons.max(1.0)
+            };
             let candidate = charge_residual <= o.density_tolerance
                 && spin_residual <= o.density_tolerance
                 && strict.iter().all(|r| *r <= o.eigen_tolerance)
                 && numbers_ok
-                && previous_energy
-                    .is_some_and(|e| (energy.total_hartree() - e).abs() <= o.energy_tolerance)
+                && previous_energy.is_some_and(|e| (free_energy - e).abs() <= o.energy_tolerance)
                 && tolerance <= o.eigen_tolerance;
             history.push(SpinIteration {
                 iteration,
@@ -515,7 +595,14 @@ impl CollinearProblem {
             let mut unable_to_verify = false;
             let mut rescued = false;
             if candidate {
-                let candidate_gaps = self.gaps();
+                let candidate_gaps = if self.finite.is_some() {
+                    [None; 2]
+                } else {
+                    self.gaps()
+                };
+                if let (Some(f), Some(saved)) = (&self.finite, &mut saved_occupations) {
+                    saved.copy_from_slice(f.occupations());
+                }
                 // Retain the candidate orbitals while checking a fresh map.
                 for channel in &mut self.blocks {
                     for w in channel {
@@ -534,7 +621,11 @@ impl CollinearProblem {
                     })?;
                 let (nr, mr) = spin_distances(&output, &check, weight, electrons);
                 let residuals = self.strict_residuals();
-                let gaps = self.gaps();
+                let gaps = if self.finite.is_some() {
+                    [None; 2]
+                } else {
+                    self.gaps()
+                };
                 let fresh_charge = std::array::from_fn(|s| check[s].sum() * weight);
                 let mut eigen_change: f64 = 0.0;
                 for s in 0..2 {
@@ -565,6 +656,57 @@ impl CollinearProblem {
                         <= 1e-10 * electrons.max(1.0)
                     && ((fresh_charge[0] - fresh_charge[1]) - self.sector.moment()).abs()
                         <= 1e-10 * electrons.max(1.0);
+                if let Some(f) = &self.finite {
+                    let fresh_eval = f.evaluation.unwrap();
+                    let change = saved_occupations
+                        .as_ref()
+                        .unwrap()
+                        .iter()
+                        .zip(f.occupations())
+                        .enumerate()
+                        .map(|(i, (a, b))| {
+                            self.channels[0].states[(i / f.bands) % self.channels[0].states.len()]
+                                .point
+                                .weight
+                                * (a - b).abs()
+                        })
+                        .sum::<f64>();
+                    passed = nr <= o.density_tolerance
+                        && mr <= o.density_tolerance
+                        && (fresh.total_hartree() - fresh_eval.entropy_term_ha - free_energy).abs()
+                            <= o.energy_tolerance
+                        && residuals.iter().all(|r| *r <= o.eigen_tolerance)
+                        && change <= 1e-8 * electrons.max(1.0)
+                        && fresh_eval.electron_residual.abs() <= 1e-10 * electrons.max(1.0)
+                        && fresh_eval.moment_residual.unwrap_or(0.0).abs()
+                            <= 1e-10 * electrons.max(1.0)
+                        && (fresh_charge[0] + fresh_charge[1] - electrons).abs()
+                            <= 1e-10 * electrons.max(1.0)
+                        && match f.constraint() {
+                            Constraint::Total => true,
+                            Constraint::FixedMoment(m) => {
+                                (fresh_charge[0] - fresh_charge[1] - m).abs()
+                                    <= 1e-10 * electrons.max(1.0)
+                            }
+                        }
+                        && fresh_eval.edge_max_fraction <= 1e-8
+                        && fresh_eval.edge_electrons <= 1e-10 * electrons.max(1.0);
+                    finite_certificate = Some(super::finite_temperature::FiniteTCertificate {
+                        passed,
+                        charge_density_residual: nr,
+                        spin_density_residual: Some(mr),
+                        retained_eigen_residual_ha: residuals[0].max(residuals[1]),
+                        occupation_change_electrons: change,
+                        electron_residual: fresh_eval.electron_residual,
+                        moment_residual: fresh_eval.moment_residual,
+                        free_energy_change_ha: (fresh.total_hartree()
+                            - fresh_eval.entropy_term_ha
+                            - free_energy)
+                            .abs(),
+                        edge_max_fraction: fresh_eval.edge_max_fraction,
+                        edge_electrons: fresh_eval.edge_electrons,
+                    });
+                }
                 if passed {
                     for gap in gaps.into_iter().chain(candidate_gaps).flatten() {
                         let required = 1e-7_f64.max(2.0 * o.eigen_tolerance);
@@ -598,6 +740,9 @@ impl CollinearProblem {
                     )?;
                     passed = report.passed;
                 }
+                if let (Some(f), Some(saved)) = (&mut self.finite, &saved_occupations) {
+                    f.restore(saved, finite_evaluation.unwrap());
+                }
                 // The ordinary candidate remains the reported state. Repaired
                 // starts may enter a subsequent ordinary map, never this result.
                 for channel in &mut self.blocks {
@@ -619,6 +764,11 @@ impl CollinearProblem {
                         .collect()
                 });
                 return Ok(CollinearResult {
+                    finite_certificate,
+                    thermodynamics: finite_evaluation.map(|f| {
+                        ThermodynamicLedger::new(energy.total_hartree(), f.entropy_term_ha)
+                    }),
+                    finite_occupations: self.finite,
                     spectral_completeness: spectral_report.map(|mut r| {
                         r.passed &= passed;
                         r
@@ -630,12 +780,20 @@ impl CollinearProblem {
                         channels: output,
                     },
                     k_points,
-                    occupations: [
-                        self.channels[0].occupations.clone(),
-                        self.channels[1].occupations.clone(),
-                    ],
+                    occupations: if finite_evaluation.is_some() {
+                        [Vec::new(), Vec::new()]
+                    } else {
+                        [
+                            self.channels[0].occupations.clone(),
+                            self.channels[1].occupations.clone(),
+                        ]
+                    },
                     energy,
-                    certificate: final_certificate,
+                    certificate: if finite_evaluation.is_some() {
+                        None
+                    } else {
+                        final_certificate
+                    },
                     history,
                     channel_electrons: charge,
                     moment_mu_b: charge[0] - charge[1],
@@ -649,7 +807,7 @@ impl CollinearProblem {
                 growing = 0;
             }
             for s in 0..2 {
-                if counts[s] == 0.0 {
+                if counts[s] == 0.0 && self.finite.is_none() {
                     proposals[s].fill(0.0);
                     continue;
                 }
@@ -658,7 +816,11 @@ impl CollinearProblem {
                 let proposal = self.mixers[s].mix(
                     density[s].as_slice().unwrap(),
                     output[s].as_slice().unwrap(),
-                    counts[s] / volume,
+                    if self.finite.is_some() {
+                        charge[s] / volume
+                    } else {
+                        counts[s] / volume
+                    },
                 )?;
                 proposals[s]
                     .as_slice_mut()
@@ -689,7 +851,7 @@ impl CollinearProblem {
                 }
             }
             history.last_mut().unwrap().mixing_fraction = fraction;
-            previous_energy = Some(energy.total_hartree());
+            previous_energy = Some(free_energy);
             previous_residual = charge_residual.max(spin_residual);
         }
         unreachable!()
@@ -706,7 +868,7 @@ fn spin_distances(a: &[Array3<f64>; 2], b: &[Array3<f64>; 2], weight: f64, n: f6
     }
     ((weight * charge).sqrt() / n, (weight * spin).sqrt() / n)
 }
-fn make_spin_mixer(p: &ScfProblem) -> Result<Box<dyn MixerHistory>, ScfError> {
+pub(super) fn make_spin_mixer(p: &ScfProblem) -> Result<Box<dyn MixerHistory>, ScfError> {
     Ok(match p.options.mixing {
         Mixing::Linear { beta } => Box::new(LinearMixer { beta }),
         Mixing::Pulay { beta, history } => Box::new(PulayMixer::new(beta, history)?),

@@ -68,3 +68,5 @@ fn orbitals(
 
 #[cfg(test)]
 mod tests;
+
+pub mod occupations;

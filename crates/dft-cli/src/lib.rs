@@ -61,3 +61,8 @@ pub mod telemetry;
 
 mod checkpoint_inspect;
 pub mod checkpoint_io;
+
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../tests/common/mod.rs"]
+mod test_fixtures;

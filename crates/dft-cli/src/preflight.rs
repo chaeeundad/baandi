@@ -397,6 +397,22 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             "use potentials and composition giving a positive integral count",
         ));
     }
+    let finite = config.finite_temperature()?.is_some();
+    if finite
+        && (config.bands.is_some()
+            || config.dos.is_some()
+            || config.xc.density_floor.is_some()
+            || config
+                .output
+                .as_ref()
+                .is_some_and(|o| o.volumetric.is_some()))
+    {
+        return Err(fail(
+            "occupations.outputs",
+            "finite-T legacy postprocessing or XC floor is unsupported",
+            "remove these options; finite-T writes total density cube and spin-resolved JSON",
+        ));
+    }
     let sector = config.spin_sector(electrons)?;
     if sector.is_some()
         && (config.bands.is_some()
@@ -416,7 +432,7 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         .as_ref()
         .map_or(electrons.round() as usize / 2, |s| s.n_up.max(s.n_down));
     let electrons = electrons.round() as usize;
-    if sector.is_none() && !electrons.is_multiple_of(2) {
+    if !finite && sector.is_none() && !electrons.is_multiple_of(2) {
         return Err(Finding::error(
             "system.atoms / pseudopotentials",
             FindingData::ElectronParity { electrons },
@@ -432,8 +448,45 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             "reduce extra_bands",
         )
     })?;
-    let bands = options.bands.unwrap_or(default_bands);
-    if sector.is_some() && bands <= occupied {
+    let bands = if finite {
+        config
+            .occupations
+            .as_ref()
+            .and_then(|o| o.band_cap)
+            .unwrap_or(32)
+    } else {
+        options.bands.unwrap_or(default_bands)
+    };
+    if finite {
+        let required = if sector.is_some() {
+            match config.finite_constraint() {
+                dft_physics::occupations::Constraint::Total => electrons as f64 / 2.0,
+                dft_physics::occupations::Constraint::FixedMoment(m) => {
+                    (electrons as f64 + m.abs()) / 2.0
+                }
+            }
+        } else {
+            electrons as f64 / 2.0
+        };
+        if bands as f64 <= required {
+            return Err(fail(
+                "occupations.band_cap",
+                "no finite chemical potential at retained-capacity endpoint",
+                "increase band_cap to provide empty states",
+            ));
+        }
+        if options.density_tolerance > 1e-7
+            || options.energy_tolerance > 1e-8
+            || options.eigen_tolerance > 1e-8
+        {
+            return Err(fail(
+                "occupations.certificate",
+                "tolerances exceed approved finite-T caps",
+                "use density<=1e-7 and energy/eigen<=1e-8 Ha",
+            ));
+        }
+    }
+    if !finite && sector.is_some() && bands <= occupied {
         return Err(fail(
             "spin.constraint",
             "fixed channels require an empty band",
@@ -518,7 +571,11 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
     let summary = format!(
         "Valid: {}. Will compute {} {} SCF for UPF composition {} (labels {}; {} atoms, {electrons} electrons), k mesh {} ({} resolved points), cutoff {} Ry, {bands} bands, {} threads.",
         config.system.name,
-        if sector.is_some() {
+        if finite && sector.is_some() {
+            "collinear finite-T"
+        } else if finite {
+            "spin-unpolarized finite-T"
+        } else if sector.is_some() {
             "collinear fixed-sector"
         } else {
             "spin-unpolarized"

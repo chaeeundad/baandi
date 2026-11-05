@@ -1,0 +1,23 @@
+
+running 7 tests
+test scf::finite_temperature::tests::real_al_finite ... ignored, external Al NC data; cargo test --release -p dft-engine real_al_finite -- --ignored --nocapture
+test scf::finite_temperature::tests::insufficient_empty_band_cap_fails_closed ... ok
+synthetic N=1 E=-4.6189330421395736e-1 Ha F=-4.7575624782515624e-1 Ha mu=-2.3127105844711310e-1 Ha entropy=1.3862943611198906e0 iterations=11
+test scf::finite_temperature::tests::synthetic_metal ... ok
+band refinement 12 -> 16: delta F=1.5543122344752192e-14 Ha, density=6.1760083645929322e-15 Bohr^-3/2
+band refinement 12 -> 20: delta F=5.6066262743570405e-15 Ha, density=2.2233310105992728e-15 Bohr^-3/2
+test scf::finite_temperature::tests::empty_band_refinement ... ok
+entropy derivative h=0.004 Ha: error=5.6727159210012701e-6 dimensionless
+spin Total: F=-4.7549034108945593e-1 Ha M=0.0000000000000000e0 iterations=51
+entropy derivative h=0.002 Ha: error=1.3911603249372462e-6 dimensionless
+entropy derivative h=0.001 Ha: error=3.4608951726688986e-7 dimensionless
+test scf::finite_temperature::tests::stationary_entropy_derivative ... ok
+T->0 theta=0.1 Ha delta E=6.6208358088497565e-2 Ha density=1.5465440599151338e-3 Bohr^-3/2
+spin FixedMoment(0.3): F=-4.7646031162655389e-1 Ha M=3.0000000000000271e-1 iterations=52
+test scf::finite_temperature::tests::spin_finite_roots_and_scf ... ok
+T->0 theta=0.01 Ha delta E=2.2204460492503131e-15 Ha density=2.6048364036077945e-16 Bohr^-3/2
+T->0 theta=0.001 Ha delta E=4.4408920985006262e-16 Ha density=7.7915593873012045e-17 Bohr^-3/2
+test scf::finite_temperature::tests::gapped_zero_temperature_limit ... ok
+
+test result: ok. 6 passed; 0 failed; 1 ignored; 0 measured; 11 filtered out; finished in 4.91s
+

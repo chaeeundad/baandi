@@ -1539,6 +1539,11 @@ fn context(
     };
     use dft_engine::{OccupationPolicy, ScfProblem, SpeciesPotential};
     let config = Config::parse(&fs::read_to_string(input)?)?;
+    if config.finite_temperature()?.is_some() {
+        return Err(invalid(
+            "checkpoint.occupation_policy: v1 fixed-occupation checkpoint cannot be resumed under fermi_dirac; start a new run",
+        ));
+    }
     if config.xc.density_floor.is_some() {
         return Err(invalid(
             "xc.density_floor: checkpoint v1 cannot encode the XC floor policy; use run without checkpoint/restart",

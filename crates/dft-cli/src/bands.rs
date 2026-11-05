@@ -43,6 +43,16 @@ impl Context {
         let bytes = fs::read(input)?;
         let config = Config::parse(std::str::from_utf8(&bytes).map_err(|e| err(1, e))?)
             .map_err(|e| err(1, e))?;
+        if config
+            .finite_temperature()
+            .map_err(|e| err(1, e))?
+            .is_some()
+        {
+            return Err(err(
+                1,
+                "occupations: bands/DOS requires fixed mode; use the finite-T SCF band data",
+            ));
+        }
         if config.xc.density_floor.is_some() {
             return Err(err(
                 1,

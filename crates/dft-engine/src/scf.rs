@@ -1,5 +1,7 @@
 #[path = "collinear.rs"]
 pub mod collinear;
+#[path = "finite_temperature.rs"]
+pub mod finite_temperature;
 #[path = "replay_capture.rs"]
 mod replay_capture;
 #[path = "session.rs"]
@@ -778,6 +780,17 @@ impl ScfProblem {
         tolerance: f64,
         certify: bool,
     ) -> Result<ScfStep, ScfError> {
+        self.step_with_occupations(n, initial, tolerance, certify, None)
+    }
+
+    fn step_with_occupations(
+        &mut self,
+        n: &Array3<f64>,
+        initial: Option<&[ComplexMatrix]>,
+        tolerance: f64,
+        certify: bool,
+        mut finite: Option<&mut finite_temperature::OccupationWorkspace>,
+    ) -> Result<ScfStep, ScfError> {
         if initial.is_some_and(|v| v.len() != self.states.len()) {
             return Err(ScfError::InvalidInput("one warm start required per k"));
         }
@@ -907,8 +920,16 @@ impl ScfProblem {
             )?
         };
         timings.diagonalization = start.elapsed();
+        if let Some(w) = finite.as_mut() {
+            for (k, point) in k_points.iter().enumerate() {
+                w.eigenvalues[k * w.bands..(k + 1) * w.bands]
+                    .copy_from_slice(&point.solution.eigenvalues);
+            }
+            w.evaluate(self.electrons)?;
+        }
         let start = Instant::now();
         let occupations = &self.occupations;
+        let finite = finite.as_deref();
         let volume = self.cell.volume_bohr3();
         let orbitals = ordered_solves(
             &mut self.states,
@@ -919,9 +940,12 @@ impl ScfProblem {
                 let orbitals: Vec<_> = (0..vectors.cols())
                     .map(|b| vectors.column(b).to_vec())
                     .collect();
-                state
-                    .band_density
-                    .compute(&orbitals, occupations, &state.grid, volume)?;
+                state.band_density.compute(
+                    &orbitals,
+                    finite.map_or(occupations.as_slice(), |w| w.block(0, i)),
+                    &state.grid,
+                    volume,
+                )?;
                 Ok(orbitals)
             },
         )?;
@@ -962,7 +986,7 @@ impl ScfProblem {
                         ionic_g: &self.ionic_g,
                         nonlocal: state.hamiltonian.nonlocal(),
                         orbitals: &orbitals[i],
-                        occupations: &self.occupations,
+                        occupations: finite.map_or(self.occupations.as_slice(), |w| w.block(0, i)),
                         eigenvalues: &k.solution.eigenvalues,
                         eigen_residuals: &k.solution.residuals,
                         input_density: n,

@@ -1840,17 +1840,17 @@
     "task_id": "P13A-STATE-CONTRACTS",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "done",
     "codex_pid": 66431,
     "wrapper_pid": 66403,
-    "session_id": null,
+    "session_id": "01a1a9c9-3959-7cb0-ac55-201710ea96e5",
     "branch": "task/P13A-STATE-CONTRACTS",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P13A-STATE-CONTRACTS",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P13A-STATE-CONTRACTS.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P13A-STATE-CONTRACTS/report.json",
     "started_at": "2026-11-05T03:38:19Z",
-    "ended_at": null,
-    "exit_code": null,
+    "ended_at": "2026-11-05T03:53:30Z",
+    "exit_code": 0,
     "note": ""
   }
 ]

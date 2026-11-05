@@ -6,7 +6,8 @@
 # Usage: scripts/build_native.sh [extra cargo args, e.g. --features mkl]
 set -euo pipefail
 cd "$(dirname "$0")/.."
-export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
+# Only help the Mac setup when cargo is not already on PATH (never override a chosen toolchain).
+if ! command -v cargo >/dev/null 2>&1 && [ -d /opt/homebrew/opt/rustup/bin ]; then export PATH="/opt/homebrew/opt/rustup/bin:$PATH"; fi
 TARGET_DIR="${TARGET_DIR:-target/native}"
 RUSTFLAGS="${RUSTFLAGS:-} -C target-cpu=native" cargo build --release -p dft-cli --target-dir "$TARGET_DIR" "$@"
 echo "built $TARGET_DIR/release/dft-cli (target-cpu=native)"

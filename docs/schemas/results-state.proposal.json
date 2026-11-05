@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Proposed results.json state_contracts extension (not whole results.json)",
-  "$comment": "PROPOSED ONLY: P13A-STATE-CONTRACTS / MF02. Not an implemented output contract. See docs/architecture/state-contracts.md. Reject duplicate keys and nonfinite values before validation.",
+  "$comment": "State extension: v1 retains historical unavailable forces; v2 adds validated NC forces. Reject duplicate keys and nonfinite values before validation. Numbers under unavailable are forbidden.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -21,7 +21,11 @@
       "const": "proposed"
     },
     "extension_version": {
-      "const": 1
+      "enum": [
+        1,
+        2
+      ],
+      "type": "integer"
     },
     "model_digest": {
       "type": "string",
@@ -104,28 +108,69 @@
       }
     },
     "forces": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "status",
-        "reason",
-        "units",
-        "frame"
-      ],
-      "properties": {
-        "status": {
-          "const": "unavailable"
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "reason",
+            "units",
+            "frame"
+          ],
+          "properties": {
+            "status": {
+              "const": "unavailable"
+            },
+            "reason": {
+              "enum": [
+                "not_implemented",
+                "not_requested",
+                "not_converged",
+                "standard_profile",
+                "incomplete_derivative_coverage",
+                "model_mismatch"
+              ]
+            },
+            "units": {
+              "const": "Ha/Bohr"
+            },
+            "frame": {
+              "const": "cartesian_input_atom_order"
+            },
+            "unavailable_terms": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "incomplete_derivative_coverage"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "unavailable_terms"
+                ],
+                "properties": {
+                  "unavailable_terms": {
+                    "minItems": 1
+                  }
+                }
+              }
+            }
+          ]
         },
-        "reason": {
-          "const": "not_implemented"
-        },
-        "units": {
-          "const": "Ha/Bohr"
-        },
-        "frame": {
-          "const": "cartesian_input_atom_order"
+        {
+          "$ref": "forces-available.proposal.json"
         }
-      }
+      ]
     },
     "stress": {
       "type": "object",
@@ -426,6 +471,125 @@
               "root_brackets_ha": {
                 "minItems": 2,
                 "maxItems": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "extension_version": {
+            "const": 1
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "forces": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "reason",
+              "units",
+              "frame"
+            ],
+            "properties": {
+              "status": {
+                "const": "unavailable"
+              },
+              "reason": {
+                "const": "not_implemented"
+              },
+              "units": {
+                "const": "Ha/Bohr"
+              },
+              "frame": {
+                "const": "cartesian_input_atom_order"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "forces": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "extension_version": {
+            "const": 2
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "forces": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            }
+          },
+          "occupations": {
+            "properties": {
+              "policy": {
+                "const": "fermi_dirac"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "forces": {
+            "properties": {
+              "quantity": {
+                "const": "F"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "forces": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            }
+          },
+          "occupations": {
+            "properties": {
+              "policy": {
+                "const": "fixed_insulator"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "forces": {
+            "properties": {
+              "quantity": {
+                "const": "E"
               }
             }
           }

@@ -71,6 +71,7 @@ pub struct SpinIteration {
     pub mixing_fraction: f64,
 }
 pub struct CollinearResult {
+    pub(crate) force_identity: crate::force_identity::ForceIdentity,
     pub finite_certificate: Option<super::finite_temperature::FiniteTCertificate>,
     pub finite_occupations: Option<OccupationWorkspace>,
     pub thermodynamics: Option<ThermodynamicLedger>,
@@ -791,6 +792,13 @@ impl CollinearProblem {
                         .collect()
                 });
                 return Ok(CollinearResult {
+                    force_identity: self.channels[0].force_model.with_policy(
+                        crate::force_identity::OccupationIdentity::new(
+                            &[&self.channels[0].occupations, &self.channels[1].occupations],
+                            self.finite.as_ref(),
+                            Some(&self.sector),
+                        ),
+                    ),
                     finite_certificate,
                     thermodynamics: finite_evaluation.map(|f| {
                         ThermodynamicLedger::new(energy.total_hartree(), f.entropy_term_ha)

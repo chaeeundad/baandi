@@ -83,3 +83,14 @@ relative electron tolerance, sector endpoints and frozen oracle caps.
 
 See `docs/validation/symmetry.md` and `tests/reference/symmetry/` for commands,
 observed failures and validation limits. No QE symmetry-on oracle is available.
+
+## Explicit ionic derivatives (P20A)
+
+`ewald::forces` uses the energy's eta/truncation protocol. `forces::local_or_core`
+contracts phase derivatives against a forward-normalized Fourier field, and
+`forces::nonlocal` differentiates both sides of the full Hermitian D coupling.
+These APIs are fixed-electronic-state partial derivatives; only the engine may
+claim a complete stationary force. Species-grouped atom order must be restored
+by callers (the engine supplies one species entry per input atom). Core forces
+are the explicit XC derivative, not an additional core energy. Historical P13C
+statements about absent force capability describe that earlier ticket's scope.

@@ -1,0 +1,130 @@
+{
+  "task_id": "P20A-FORCES",
+  "units": "Ha/Bohr",
+  "scope": "NC fixed-cell force oracles, no QE force comparison",
+  "synthetic_cap": 1e-06,
+  "real_cap": 0.0001,
+  "net_force_cap_resolved_grid": 1e-08,
+  "steps_bohr": [
+    0.01,
+    0.005,
+    0.0025
+  ],
+  "real_upf_sha256": {
+    "Si": "39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282",
+    "Mg": "15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14",
+    "O": "2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11"
+  },
+  "fixture_source_sha256": {
+    "crates/dft-engine/tests/forces.rs": "3abe71aa666c7f87582d16d51f676d28350a072c14b57eddcf739532e952183b",
+    "crates/dft-engine/tests/common/mod.rs": "603c0d743850e013e64dce2d567c074c84fcb338dc257db3e3744aafc57c6627"
+  },
+  "preliminary_failures": [
+    "PBE net-force residual requires refined 96x96x192 grid; tolerance unchanged.",
+    "MgO cutoff20/30 and twice-minimum grid inconclusive; accepted at40/60 cutoff with four-times-minimum resolved-grid check.",
+    "Composite scan completed NLCC/PBE/spin components but then failed FD theta=0.05 Ha with 24 bands; a corrected FD-only run uses 48 bands.",
+    "48-band FD requires an explicit Davidson subspace of 96; the default 48-column capacity rejects before SCF. Corrected FD-only scan passes."
+  ],
+  "integration_blockers": [],
+  "raw_logs": [
+    "ewald-local-nonlocal-initial.log",
+    "independent.log",
+    "converged-cutoffs.log",
+    "composite-nlcc-pbe-spin-fd-cap24-failure.log",
+    "spin-reduction.log",
+    "real-cutoff20-failure.log",
+    "real-grid2x-failure.log",
+    "real-accepted.log",
+    "cli.log",
+    "python.log",
+    "wheel.log",
+    "legacy-on.log",
+    "legacy-off.log",
+    "readme.log",
+    "fd-accepted.log",
+    "gates.log",
+    "fd-subspace-rejection.log",
+    "followup-gates.log",
+    "followup-schema.log",
+    "followup-identity.log",
+    "followup-fd.log",
+    "followup-real.log",
+    "followup-cli.log",
+    "followup-fd-schema.log",
+    "followup-bench.log",
+    "followup-python.log",
+    "followup-readme.log",
+    "followup-wheel.log"
+  ],
+  "observations": {
+    "independent_max_error_ha_per_bohr": 5.440234595796567e-08,
+    "nlcc_max_error_ha_per_bohr": 5.767274878498707e-08,
+    "pbe_nlcc_max_error_ha_per_bohr": 5.729584622027328e-08,
+    "spin_reduction_max_difference_ha_per_bohr": 9.922618282587337e-16,
+    "fd_max_error_ha_per_bohr": 2.696742596244861e-08,
+    "fd_theta_ha": 0.05,
+    "fd_ts_ha": 0.05634887783423022,
+    "fd_bands": 48,
+    "si_max_error_ha_per_bohr": 5.4258887209612805e-09,
+    "mgo_max_error_ha_per_bohr": 2.8072423141276004e-08,
+    "si_uncertainty_sum_ha_per_bohr": 5.554736918125108e-07,
+    "mgo_uncertainty_sum_ha_per_bohr": 3.11319055323017e-05,
+    "mgo_resolved_net_max_ha_per_bohr": 3.396038954824737e-09,
+    "converged_local_nonlocal_max_error_ha_per_bohr": 3.0541495874003566e-08,
+    "ewald_max_error_ha_per_bohr": 8.064787125616757e-08,
+    "frozen_local_max_error_ha_per_bohr": 8.158687520715135e-09,
+    "frozen_nonlocal_max_error_ha_per_bohr": 5.360975872115148e-07
+  },
+  "commands": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test forces converged -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test forces spin_core_and_finite -- --ignored --nocapture (24-band FD attempt; NLCC/PBE/spin assertions passed before FD rejection)",
+      "exit_code": 101
+    },
+    {
+      "command": "DFT_FORCE_CASE=spin cargo test --release -p dft-engine --test forces spin_core_and_finite -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_FORCE_CASE=fd cargo test --release -p dft-engine --test forces spin_core_and_finite -- --ignored --nocapture (48 bands, subspace 96)",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex cargo test --release -p dft-engine --test forces real_files -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-cli --test forces -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222,si8,k444s --repeats 1 --baseline tests/reference/forces/legacy-off.json --require-identical --extra-toml '[output]' --extra-toml \"forces = true\" --record tests/reference/forces/legacy-on.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "PYO3_PYTHON=/Users/mino/Develop/rust-dft-wt/pyenv/bin/python /Users/mino/Develop/rust-dft-wt/pyenv/bin/maturin build --offline --locked (cwd python/baandi)",
+      "exit_code": 0
+    },
+    {
+      "command": "PYTHONPATH=/private/tmp/p20-wheel-test BAANDI_CLI=$PWD/target/debug/dft-cli /Users/mino/Develop/rust-dft-wt/pyenv/bin/python -m unittest discover -s python/baandi/tests -v",
+      "exit_code": 0
+    }
+  ],
+  "format_validation": "Production v1/v2 schemas checked by dependency-free validator: 17 accepted/rejected fixtures plus actual scalar, spin and FD CLI outputs.",
+  "status": "DONE: architect follow-up resolved schema integration and added independent model checks.",
+  "followup": "followup.json",
+  "owner_followups": [
+    "README generator/images and dashboard/session registration remain orchestrator-owned, as stated by the ticket."
+  ]
+}

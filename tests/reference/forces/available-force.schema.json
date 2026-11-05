@@ -1,0 +1,5 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "Production branch integrated under extension version 2; retained evidence link.",
+  "$ref": "../../../docs/schemas/forces-available.proposal.json"
+}

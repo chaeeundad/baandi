@@ -205,3 +205,28 @@ fn final_guard_reports_both_spin_channels_without_changing_schema_version() {
         }
     }
 }
+
+#[test]
+fn spin_force_extension_v2_validates() {
+    let c = Case::new();
+    let text = c.input("mode='collinear'\nn_up=1\nn_down=0") + "\n[output]\nforces=true\n";
+    let out = c.run(&text, "run");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let path = c.dir.join("results/results.json");
+    let r: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(r["schema_version"], 2);
+    assert_eq!(r["state_contracts"]["extension_version"], 2);
+    assert!(
+        Command::new("python3")
+            .arg("-I")
+            .arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/validate_force_schema.py"))
+            .arg(path)
+            .status()
+            .unwrap()
+            .success()
+    );
+}

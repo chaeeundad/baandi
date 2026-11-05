@@ -89,18 +89,39 @@ class BindingTests(unittest.TestCase):
         s.run()
         self.assertFalse(s.result().converged)
         self.assertEqual(s.status, "NotConverged")
+        with self.assertRaises(RuntimeError):
+            s.forces()
+
+    def test_ase_forces_and_units(self):
+        try:
+            from ase import Atoms
+            from baandi.ase import Baandi
+            from baandi._baandi import hartree_to_ev, angstrom_to_bohr
+            import numpy as np
+        except ImportError as exc:
+            self.skipTest(str(exc))
+        atoms = Atoms("H2", cell=[4., 4., 4.], scaled_positions=[[0., 0., 0.], [.27, .23, .19]], pbc=True)
+        atoms.calc = Baandi(pseudopotentials={"H": potential("H", 1, (0,))}, options=settings())
+        forces = atoms.get_forces()
+        native = np.asarray(atoms.calc.session.forces())
+        np.testing.assert_allclose(forces, native * hartree_to_ev(1.) * angstrom_to_bohr(1.), rtol=1e-14, atol=1e-14)
+        self.assertEqual(forces.shape, (2, 3))
+        self.assertTrue(np.isfinite(forces).all())
+        self.assertGreater(np.max(np.abs(forces)), 1e-5)
 
     def test_ase_unsupported_properties(self):
         try:
             from baandi.ase import Baandi
         except ImportError as exc:
             self.skipTest(str(exc))
+        with self.assertRaises(NotImplementedError):
+            Baandi(pseudopotentials={}, hubbard={"H": 1.0})
         calc = Baandi(pseudopotentials={})
-        for prop in ("forces", "stress", "free_energy", "dipole", "charges"):
+        for prop in ("stress", "free_energy", "dipole", "charges"):
             with self.subTest(property=prop), self.assertRaises(NotImplementedError):
                 calc.get_property(prop)
         with self.assertRaises(NotImplementedError):
-            calc.calculate(properties=["forces"])
+            calc.calculate(properties=["stress"])
 
     @unittest.skipUnless(os.environ.get("BAANDI_CLI"), "set BAANDI_CLI for exact CLI comparison")
     def test_native_cli_bitwise(self):

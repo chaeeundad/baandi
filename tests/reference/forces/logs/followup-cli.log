@@ -1,0 +1,21 @@
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P20A-FORCES/crates/dft-engine)
+   Compiling dft-cli v0.1.0 (/Users/mino/Develop/rust-dft-wt/P20A-FORCES/crates/dft-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.97s
+     Running tests/forces.rs (target/debug/deps/forces-700a570ffc802595)
+
+running 1 test
+PASS force schema: 13 accepted/rejected fixtures and requested output
+test force_output_and_standard_rejection ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.27s
+
+     Running tests/spin.rs (target/debug/deps/spin-7eea84ac7365b620)
+
+running 3 tests
+test spin_preflight_rejections ... ok
+MF03 result proposal schemas, N/M sums and independent cube reader: PASS
+test collinear_cli_certificate_schemas_and_cubes ... ok
+test final_guard_reports_both_spin_channels_without_changing_schema_version ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.88s
+

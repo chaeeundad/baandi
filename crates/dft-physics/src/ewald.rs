@@ -197,3 +197,80 @@ pub fn energy(
         tail_bound: Hartree(tail * abs_charge * abs_charge),
     })
 }
+
+/// Cartesian -dE/dR in Ha/Bohr, including real and reciprocal terms.
+/// Self and uniform-background energies have no position derivative at fixed cell.
+/// Uses exactly the energy evaluator's truncation spheres and eta.
+pub fn forces(
+    cell: &Cell,
+    ions: &[Ion],
+    options: EwaldOptions,
+) -> Result<Vec<[f64; 3]>, PhysicsError> {
+    let parameters = energy(cell, ions, options)?;
+    let eta = parameters.eta;
+    let a = matrix(cell.lattice_columns_bohr());
+    let b = matrix(cell.reciprocal_columns_inverse_bohr());
+    let rb = bounds(&b, parameters.real_cutoff_bohr, 1.0)?;
+    let gb = bounds(&a, parameters.reciprocal_cutoff_inverse_bohr, 0.0)?;
+    let positions: Vec<_> = ions
+        .iter()
+        .map(|ion| Vector3::from(ion.fractional_position.map(|x| x.rem_euclid(1.0))))
+        .collect();
+    let mut result = vec![[0.0; 3]; ions.len()];
+    for (i, ion) in ions.iter().enumerate() {
+        for (j, other) in ions.iter().enumerate() {
+            enumerate(
+                |m| {
+                    if i == j && m == [0; 3] {
+                        return Ok(());
+                    }
+                    let r = a * (positions[i] - positions[j] + Vector3::from(m.map(f64::from)));
+                    let distance = r.norm();
+                    if distance <= parameters.real_cutoff_bohr {
+                        let factor = ion.charge
+                            * other.charge
+                            * (libm::erfc(eta * distance) / distance.powi(3)
+                                + 2.0 * eta / PI.sqrt() * (-(eta * distance).powi(2)).exp()
+                                    / distance.powi(2));
+                        for axis in 0..3 {
+                            result[i][axis] += factor * r[axis];
+                        }
+                    }
+                    Ok(())
+                },
+                rb,
+            )?;
+        }
+    }
+    enumerate(
+        |m| {
+            if m == [0; 3] {
+                return Ok(());
+            }
+            let mv = Vector3::from(m.map(f64::from));
+            let g = b * mv;
+            let g2 = g.norm_squared();
+            if g2 <= parameters.reciprocal_cutoff_inverse_bohr.powi(2) {
+                let structure: Complex64 = ions
+                    .iter()
+                    .zip(&positions)
+                    .map(|(ion, s)| Complex64::from_polar(ion.charge, TAU * mv.dot(s)))
+                    .sum();
+                let prefactor =
+                    4.0 * PI / cell.volume_bohr3() * (-g2 / (4.0 * eta * eta)).exp() / g2;
+                for (i, ion) in ions.iter().enumerate() {
+                    let phase = Complex64::from_polar(ion.charge, TAU * mv.dot(&positions[i]));
+                    for axis in 0..3 {
+                        result[i][axis] += prefactor * (structure.conj() * phase).im * g[axis];
+                    }
+                }
+            }
+            Ok(())
+        },
+        gb,
+    )?;
+    if result.iter().flatten().any(|v| !v.is_finite()) {
+        return Err(PhysicsError::Unrepresentable);
+    }
+    Ok(result)
+}

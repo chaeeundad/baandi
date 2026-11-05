@@ -271,6 +271,7 @@ pub struct KPointSolution {
 
 #[derive(Debug)]
 pub struct ScfResult {
+    pub(crate) force_identity: crate::force_identity::ForceIdentity,
     pub standard: Option<StandardProfile>,
     pub certified: bool,
     pub spectral_completeness: Option<crate::SpectralReport>,
@@ -308,6 +309,7 @@ pub struct SpeciesPotential<'a> {
 /// Cached ionic terms, Hamiltonian application plan, and density FFT plan.
 /// `step` is exposed for independent post-SCF fixed-point verification.
 pub struct ScfProblem {
+    force_model: crate::force_identity::ModelDescription,
     atoms: Vec<Atom>,
     symmetry: Option<dft_physics::symmetry::DensitySymmetrizer>,
     coulomb: Option<CoulombMetric>,
@@ -719,7 +721,16 @@ impl ScfProblem {
             .standard
             .map(|_| CoulombMetric::new(cell, options.cutoff_hartree, grid.dims()))
             .transpose()?;
+        let force_model = crate::force_identity::ModelDescription::new(
+            cell,
+            atoms,
+            potentials,
+            &options,
+            grid.dims(),
+            states.iter().map(|s| s.point).collect(),
+        );
         Ok(Self {
+            force_model,
             coulomb,
             cell: cell.clone(),
             states,
@@ -776,6 +787,7 @@ impl ScfProblem {
             ));
         }
         let basis = PlaneWaveBasis::new(&self.cell, Hartree(4.0 * self.options.cutoff_hartree))?;
+        self.force_model.symmetry = ops.clone();
         self.symmetry = Some(dft_physics::symmetry::DensitySymmetrizer::new(
             &basis, &self.grid, &ops,
         )?);
@@ -790,6 +802,7 @@ impl ScfProblem {
             ));
         }
         self.density_floor = Some(floor);
+        self.force_model.floor = Some(floor);
         self.xc_density = Array3::zeros(self.grid.dims());
         Ok(())
     }

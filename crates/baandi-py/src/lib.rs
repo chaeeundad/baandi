@@ -106,6 +106,11 @@ struct ResultView {
 type Job = Box<dyn FnOnce(&mut ScfSession) + Send>;
 #[pyclass(name = "Session")]
 struct Session {
+    cell_rows_bohr: [[f64; 3]; 3],
+    species: Vec<String>,
+    positions_fractional: Vec<[f64; 3]>,
+    pseudopotentials: BTreeMap<String, String>,
+    force_options: ScfOptions,
     jobs: mpsc::Sender<Job>,
     volume: f64,
 }
@@ -145,6 +150,12 @@ impl Session {
             ));
         }
         let options = options.cloned().unwrap_or_else(Options::new).engine()?;
+        let retained = (
+            species.clone(),
+            positions_fractional.clone(),
+            pseudopotentials.clone(),
+            options.clone(),
+        );
         py.detach(move || {
             let (jobs, requests) = mpsc::channel::<Job>();
             let (ready, response) = mpsc::channel();
@@ -198,7 +209,15 @@ impl Session {
             let volume = response
                 .recv()
                 .map_err(|_| runtime_error("session setup worker failed"))??;
-            Ok(Self { jobs, volume })
+            Ok(Self {
+                jobs,
+                volume,
+                cell_rows_bohr,
+                species: retained.0,
+                positions_fractional: retained.1,
+                pseudopotentials: retained.2,
+                force_options: retained.3,
+            })
         })
     }
     fn initialize(&mut self, py: Python<'_>) -> PyResult<()> {
@@ -246,6 +265,47 @@ impl Session {
                 charge_electrons: o.result.charge,
                 iterations: s.snapshot().iteration,
             })
+        })
+    }
+    /// Cartesian forces in input atom order, Ha/Bohr. Requires certification.
+    fn forces(&self, py: Python<'_>) -> PyResult<Vec<[f64; 3]>> {
+        let rows = self.cell_rows_bohr;
+        let species = self.species.clone();
+        let positions = self.positions_fractional.clone();
+        let potentials = self.pseudopotentials.clone();
+        let options = self.force_options.clone();
+        self.call(py, move |s| {
+            let outcome = s
+                .result()
+                .ok_or_else(|| runtime_error("forces require a converged result"))?;
+            let cell = Cell::from_user_rows_bohr(rows).map_err(value_error)?;
+            let atoms: Vec<_> = species
+                .into_iter()
+                .zip(positions)
+                .map(|(s, p)| Atom::new(s, p))
+                .collect();
+            let parsed: Vec<_> = potentials
+                .iter()
+                .map(|(s, t)| parse_upf(t).map(|p| (s, p)).map_err(value_error))
+                .collect::<PyResult<_>>()?;
+            let refs: Vec<_> = parsed
+                .iter()
+                .map(|(s, p)| SpeciesPotential {
+                    label: s,
+                    potential: p,
+                })
+                .collect();
+            dft_engine::forces::forces(&dft_engine::forces::ForceState {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &refs,
+                options: &options,
+                electronic: dft_engine::forces::ElectronicState::Fixed(&outcome.result),
+                density_floor: None,
+                symmetry: &[],
+            })
+            .map(|r| r.values)
+            .map_err(runtime_error)
         })
     }
     /// (shape, minimum, maximum, mean [Bohr^-3], integrated electrons).

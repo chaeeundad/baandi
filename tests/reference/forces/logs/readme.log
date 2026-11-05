@@ -1,0 +1,17 @@
+/Users/mino/Develop/rust-dft-wt/P20A-FORCES/scripts/compare_kpoints_qe.py:27: ResourceWarning: unclosed file <_io.TextIOWrapper name='/Users/mino/Develop/rust-dft-wt/P20A-FORCES/tests/reference/kpoints/k222_c/qe.out' mode='r' encoding='UTF-8'>
+  txt = open(path).read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/mino/Develop/rust-dft-wt/P20A-FORCES/scripts/compare_kpoints_qe.py:27: ResourceWarning: unclosed file <_io.TextIOWrapper name='/Users/mino/Develop/rust-dft-wt/P20A-FORCES/tests/reference/kpoints/k222s_c/qe.out' mode='r' encoding='UTF-8'>
+  txt = open(path).read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+.../Users/mino/Develop/rust-dft-wt/P20A-FORCES/scripts/compare_kpoints_qe.py:27: ResourceWarning: unclosed file <_io.TextIOWrapper name='/Users/mino/Develop/rust-dft-wt/P20A-FORCES/tests/reference/kpoints/k222_c/qe.out' mode='r' encoding='UTF-8'>
+  txt = open(path).read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+/Users/mino/Develop/rust-dft-wt/P20A-FORCES/scripts/compare_kpoints_qe.py:27: ResourceWarning: unclosed file <_io.TextIOWrapper name='/Users/mino/Develop/rust-dft-wt/P20A-FORCES/tests/reference/kpoints/k222s_c/qe.out' mode='r' encoding='UTF-8'>
+  txt = open(path).read()
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+..
+----------------------------------------------------------------------
+Ran 5 tests in 0.055s
+
+OK

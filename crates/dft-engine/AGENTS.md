@@ -265,3 +265,19 @@ subtract the same TS once. Fixed branches retain their arithmetic. See
 
 See `docs/validation/symmetry.md` and `tests/reference/symmetry/` for commands,
 observed failures and validation limits. No QE symmetry-on oracle is available.
+
+## Atomic forces (P20A)
+
+`forces(&ForceState)` is post-convergence only. It rejects standard/uncertified
+states and reports the complete NC derivative sum. The borrowed cell, atoms,
+UPFs, options, density floor and symmetry operations must be the exact original
+model. A private setup-time descriptor independently compares these fields and
+exact parsed pseudopotential content before force work. File SHA-256 provenance
+remains at the adapter boundary; the engine does not receive original file bytes. Do not alter
+SCF kernels to calculate forces. The adapter must not reuse a certificate after
+mutating result arrays. See `docs/validation/forces.md` for force term ownership,
+FD stationarity, independent oracles and versioned force schemas.
+
+Fast tests: `cargo test -p dft-engine --test forces`. Ignored displacement tests
+must run in release mode with the commands in that note. Do not weaken the
+1e-6 synthetic, 1e-4 real-file or 1e-8 resolved-grid net-force caps.

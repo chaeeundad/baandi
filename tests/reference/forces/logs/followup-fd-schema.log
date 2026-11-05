@@ -1,0 +1,127 @@
+   Compiling dft-cli v0.1.0 (/Users/mino/Develop/rust-dft-wt/P20A-FORCES/crates/dft-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.49s
+     Running unittests src/lib.rs (target/debug/deps/dft_cli-a116d5145f8ddc3a)
+
+running 1 test
+Valid: synthetic FD. Will compute spin-unpolarized finite-T lda-pz SCF for UPF composition Si:1 (labels Si:1; 1 atoms, 1 electrons), k mesh Gamma only (1 resolved points), cutoff 5 Ry, 12 bands, 1 threads.
+Plane waves per k: [27]; FFT grid: [8, 8, 8]; estimated array payload: 17472 bytes (orbital plus one real and one complex grid payload only; excludes scratch, projectors, allocator overhead; not peak RSS)
+XC: lda-pz; allow_functional_override=false; override_applied=false
+Valid: synthetic FD. Will compute spin-unpolarized finite-T lda-pz SCF for UPF composition Si:1 (labels Si:1; 1 atoms, 1 electrons), k mesh Gamma only (1 resolved points), cutoff 5 Ry, 12 bands, 1 threads.
+Plane waves per k: [27]; FFT grid: [8, 8, 8]; estimated array payload: 17472 bytes (orbital plus one real and one complex grid payload only; excludes scratch, projectors, allocator overhead; not peak RSS)
+XC: lda-pz; allow_functional_override=false; override_applied=false
+PASS force schema: 17 accepted/rejected fixtures and requested output
+Valid: synthetic FD. Will compute collinear finite-T lda-pw SCF for UPF composition Si:1 (labels Si:1; 1 atoms, 1 electrons), k mesh Gamma only (1 resolved points), cutoff 5 Ry, 12 bands, 1 threads.
+Plane waves per k: [27]; FFT grid: [8, 8, 8]; estimated array payload: 17472 bytes (orbital plus one real and one complex grid payload only; excludes scratch, projectors, allocator overhead; not peak RSS)
+XC: lda-pw; allow_functional_override=false; override_applied=false
+PASS force schema: 17 accepted/rejected fixtures and requested output
+Valid: synthetic FD. Will compute collinear finite-T lda-pw SCF for UPF composition Si:1 (labels Si:1; 1 atoms, 1 electrons), k mesh Gamma only (1 resolved points), cutoff 5 Ry, 12 bands, 1 threads.
+Plane waves per k: [27]; FFT grid: [8, 8, 8]; estimated array payload: 17472 bytes (orbital plus one real and one complex grid payload only; excludes scratch, projectors, allocator overhead; not peak RSS)
+XC: lda-pw; allow_functional_override=false; override_applied=false
+PASS force schema: 17 accepted/rejected fixtures and requested output
+Wrote ExactContinuation, iteration 1: /var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17b-cli-57706-1793899473743849000/fixed.cp
+test run::finite_run::finite_cli_and_fixed_rejection ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 3.82s
+
+     Running unittests src/main.rs (target/debug/deps/dft_cli-4dfee3b2eb9a5ca5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/bands_dos.rs (target/debug/deps/bands_dos-b3330b2e419c4933)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/buffer_bands.rs (target/debug/deps/buffer_bands-b9f3fcf3e1386bc5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/checkpoint_inspect.rs (target/debug/deps/checkpoint_inspect-137efccb30b3903d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/checkpoint_io.rs (target/debug/deps/checkpoint_io-5812e643d9d93f27)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/commands.rs (target/debug/deps/commands-2ec7d0343963482d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/forces.rs (target/debug/deps/forces-700a570ffc802595)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/inspect_upf.rs (target/debug/deps/inspect_upf-2bc50fd27820bbe2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/materials.rs (target/debug/deps/materials-72e8cfb0f98123c4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/preflight.rs (target/debug/deps/preflight-dfb0c1f9fd197df7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/preflight_findings.rs (target/debug/deps/preflight_findings-6f4dd418581dc0e5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+
+     Running tests/pseudo.rs (target/debug/deps/pseudo-75465586dd7ecef0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+     Running tests/run.rs (target/debug/deps/run-1473d584b8b25930)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.00s
+
+     Running tests/self_healing.rs (target/debug/deps/self_healing-b5fbd5f15be0dc53)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
+
+     Running tests/spin.rs (target/debug/deps/spin-7eea84ac7365b620)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.00s
+
+     Running tests/symmetry.rs (target/debug/deps/symmetry-744e1ad754ef0432)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/volumetric.rs (target/debug/deps/volumetric-bb4928f9619f300e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+

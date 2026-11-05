@@ -1,0 +1,70 @@
+   Compiling dft-physics v0.1.0 (/Users/mino/Develop/rust-dft-wt/P20A-FORCES/crates/dft-physics)
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P20A-FORCES/crates/dft-engine)
+warning: function `cell` is never used
+ --> crates/dft-engine/tests/common/mod.rs:6:8
+  |
+6 | pub fn cell() -> Cell {
+  |        ^^^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `atoms` is never used
+  --> crates/dft-engine/tests/common/mod.rs:15:8
+   |
+15 | pub fn atoms() -> Vec<Atom> {
+   |        ^^^^^
+
+warning: `dft-engine` (test "forces") generated 2 warnings
+    Finished `release` profile [optimized] target(s) in 1.99s
+     Running tests/forces.rs (target/release/deps/forces-1fd0d04afea81f19)
+
+running 4 tests
+test ledger_lists_every_missing_derivative ... ok
+Ewald eta=0.25 atom=0 axis=0 error=5.4808365790304236e-8 Ha/Bohr
+Ewald eta=0.25 atom=0 axis=1 error=7.263741648444455e-8 Ha/Bohr
+Ewald eta=0.25 atom=0 axis=2 error=8.064787125616757e-8 Ha/Bohr
+Ewald eta=0.25 atom=1 axis=0 error=5.4808365790304236e-8 Ha/Bohr
+Ewald eta=0.25 atom=1 axis=1 error=7.263741649832234e-8 Ha/Bohr
+Ewald eta=0.25 atom=1 axis=2 error=8.0647871228412e-8 Ha/Bohr
+Ewald eta=0.5 atom=0 axis=0 error=5.480858786266474e-8 Ha/Bohr
+Ewald eta=0.5 atom=0 axis=1 error=7.263754973896308e-8 Ha/Bohr
+Ewald eta=0.5 atom=0 axis=2 error=8.064780467054167e-8 Ha/Bohr
+Ewald eta=0.5 atom=1 axis=0 error=5.4808565602693093e-8 Ha/Bohr
+Ewald eta=0.5 atom=1 axis=1 error=7.263754973896308e-8 Ha/Bohr
+Ewald eta=0.5 atom=1 axis=2 error=8.064776026162068e-8 Ha/Bohr
+Ewald eta=0.25 atom=0 axis=0 error=3.335696595330173e-8 Ha/Bohr
+Ewald eta=0.25 atom=0 axis=1 error=6.006695789373406e-8 Ha/Bohr
+Ewald eta=0.25 atom=0 axis=2 error=6.168317590038441e-8 Ha/Bohr
+Ewald eta=0.25 atom=1 axis=0 error=3.3356965925546156e-8 Ha/Bohr
+Ewald eta=0.25 atom=1 axis=1 error=6.006693567539578e-8 Ha/Bohr
+frozen atom=0 axis=0 local_error=5.9462540290960986e-9 nonlocal_error=5.249441932531074e-8 Ha/Bohr
+Ewald eta=0.25 atom=1 axis=2 error=6.168315368204613e-8 Ha/Bohr
+Ewald eta=0.5 atom=0 axis=0 error=3.3357076642537287e-8 Ha/Bohr
+Ewald eta=0.5 atom=0 axis=1 error=6.0067313095713e-8 Ha/Bohr
+Ewald eta=0.5 atom=0 axis=2 error=6.168324220845456e-8 Ha/Bohr
+Ewald eta=0.5 atom=1 axis=0 error=3.335709884699778e-8 Ha/Bohr
+Ewald eta=0.5 atom=1 axis=1 error=6.00672687145476e-8 Ha/Bohr
+Ewald eta=0.5 atom=1 axis=2 error=6.168324223621013e-8 Ha/Bohr
+test ewald_all_atoms_axes_and_eta ... ok
+frozen atom=0 axis=1 local_error=3.187146973421262e-9 nonlocal_error=6.802952207118906e-8 Ha/Bohr
+frozen atom=0 axis=2 local_error=4.575046612387279e-9 nonlocal_error=5.360975872115148e-7 Ha/Bohr
+frozen atom=1 axis=0 local_error=8.158687520715135e-9 nonlocal_error=4.6613662252337207e-7 Ha/Bohr
+frozen atom=1 axis=1 local_error=7.496383191279987e-9 nonlocal_error=1.858863281911649e-7 Ha/Bohr
+frozen atom=1 axis=2 local_error=7.7978723339589e-9 nonlocal_error=4.860900987280203e-7 Ha/Bohr
+test frozen_local_and_coupled_projectors ... ok
+converged nonlocal=false atom=0 axis=0 force=-2.6163642039594773e-2 error=3.4383549479821696e-9 Ha/Bohr
+converged nonlocal=false atom=0 axis=1 force=-2.2476882114771946e-2 error=1.1833609092626318e-8 Ha/Bohr
+converged nonlocal=false atom=0 axis=2 force=-1.8635984427707596e-2 error=1.6049563077852325e-8 Ha/Bohr
+converged nonlocal=false atom=1 axis=0 force=2.6163642039594797e-2 error=3.4387768570176558e-9 Ha/Bohr
+converged nonlocal=false atom=1 axis=1 force=2.2476882114771956e-2 error=1.1834030987784017e-8 Ha/Bohr
+converged nonlocal=false atom=1 axis=2 force=1.863598442770758e-2 error=1.6047942134889137e-8 Ha/Bohr
+converged nonlocal=true atom=0 axis=0 force=-4.932926122479447e-2 error=1.77936101894427e-8 Ha/Bohr
+converged nonlocal=true atom=0 axis=1 force=-4.463695631992362e-2 error=2.6249305201675455e-8 Ha/Bohr
+converged nonlocal=true atom=0 axis=2 force=-3.875469212658838e-2 error=2.9637239711000074e-8 Ha/Bohr
+converged nonlocal=true atom=1 axis=0 force=4.932926579648319e-2 error=1.7768698033771013e-8 Ha/Bohr
+converged nonlocal=true atom=1 axis=1 force=4.463695367627439e-2 error=2.624297966435929e-8 Ha/Bohr
+converged nonlocal=true atom=1 axis=2 force=3.8754688376783974e-2 error=2.9613032914710402e-8 Ha/Bohr
+test converged_local_and_nonlocal ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 29.32s
+

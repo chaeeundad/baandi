@@ -1,4 +1,4 @@
-"""Optional ASE energy calculator; no derivatives or free-energy alias.
+"""Optional ASE energy and force calculator; no free-energy alias.
 
 Pseudopotentials are UPF text keyed by ASE chemical symbol. Copying the text
 at construction avoids a file changing underneath a cached calculation.
@@ -13,11 +13,13 @@ class ConvergenceError(RuntimeError):
 
 
 class Baandi(Calculator):
-    implemented_properties = ["energy"]
+    implemented_properties = ["energy", "forces"]
     # Recompute instead of reusing a cache with incomplete model identity.
     use_cache = False
 
     def __init__(self, *, pseudopotentials, options=None, **kwargs):
+        if any(name in kwargs for name in ("hubbard", "hubbard_u")):
+            raise NotImplementedError("BAANDI ASE Hubbard energies and forces are unavailable")
         super().__init__(**kwargs)
         self._pseudopotentials = dict(pseudopotentials)
         source = options or Options()
@@ -33,7 +35,7 @@ class Baandi(Calculator):
     def get_property(self, name, atoms=None, allow_calculation=True):
         if name not in self.implemented_properties:
             raise NotImplementedError(
-                f"BAANDI does not implement {name}; forces, stress and free_energy "
+                f"BAANDI does not implement {name}; stress and free_energy "
                 "are unavailable (no zero placeholders)."
             )
         # Deliberately disable ASE's results cache, including changes to settings.
@@ -67,6 +69,12 @@ class Baandi(Calculator):
                 "uncertified diagnostics are in calculator.session.result()"
             )
         self.results = {"energy": hartree_to_ev(result.energy_hartree)}
+        if "forces" in properties:
+            import numpy as np
+            # (Ha/Bohr) * (eV/Ha) * (Bohr/Angstrom).
+            self.results["forces"] = np.asarray(self.session.forces()) * (
+                hartree_to_ev(1.0) * angstrom_to_bohr(1.0)
+            )
 
     def get_eigenvalues(self, kpt=0, spin=0):
         if kpt != 0 or spin != 0:

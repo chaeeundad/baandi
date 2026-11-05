@@ -1,0 +1,17 @@
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P20A-FORCES/crates/dft-engine)
+    Finished `release` profile [optimized] target(s) in 2.83s
+     Running tests/forces.rs (target/release/deps/forces-1fd0d04afea81f19)
+
+running 1 test
+spin reduction force_difference=9.922618282587337e-16 Ha/Bohr
+spin net_force=[-5.791027657409131e-10, 6.023033322088978e-10, -1.2735114768291922e-9] Ha/Bohr
+spin atom=0 axis=0 error=1.3484596363133594e-8 Ha/Bohr
+spin atom=0 axis=1 error=2.4501283588801437e-8 Ha/Bohr
+spin atom=0 axis=2 error=2.482759305783011e-8 Ha/Bohr
+spin atom=1 axis=0 error=1.3480722350911467e-8 Ha/Bohr
+spin atom=1 axis=1 error=2.4519698427899472e-8 Ha/Bohr
+spin atom=1 axis=2 error=2.4821378959150042e-8 Ha/Bohr
+test spin_core_and_finite ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 32.34s
+

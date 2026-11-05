@@ -103,6 +103,7 @@ pub struct FiniteTCertificate {
     pub edge_electrons: f64,
 }
 pub struct FiniteTResult {
+    pub(crate) force_identity: crate::force_identity::ForceIdentity,
     pub converged: bool,
     pub iterations: usize,
     pub state: ScfStep,
@@ -285,6 +286,13 @@ impl FiniteTProblem {
             }
             if passed || iteration == opts.max_iterations {
                 return Ok(FiniteTResult {
+                    force_identity: self.problem.force_model.with_policy(
+                        crate::force_identity::OccupationIdentity::new(
+                            &[],
+                            Some(&self.occupations),
+                            None,
+                        ),
+                    ),
                     converged: passed,
                     iterations: iteration,
                     state,

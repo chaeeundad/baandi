@@ -1001,3 +1001,19 @@ without a model-invariance proof. Fields, local constraints and Hubbard input
 are unsupported and rejected. Auto currently requires Classic execution;
 checkpoint identity does not yet include symmetry. Band and density file formats
 are unchanged. See [validation and limits](validation/symmetry.md).
+
+## Atomic forces (P20A)
+
+Set `[output] forces = true` to request Cartesian forces in input atom order,
+Ha/Bohr. A strict, certified state is required; `standard` rejects at preflight.
+`results.json.forces` contains `status`, `quantity` (E or F), `units`, `frame`,
+`values`, `per_term` (ewald/local/nonlocal/core), `net_force`,
+`maximum_absolute_component`, `elapsed_seconds`, `band_passes` and
+`unavailable_terms` and a named `derivative_ledger`. Missing derivatives never become zero or a partial total.
+The fixed unpolarized path prints the table; spin and FD also write `forces.txt`.
+With symmetry auto the same SCF spatial subgroup averages each term.
+For FD these are derivatives of free energy at fixed temperature and charge.
+State-contract extension version 2 includes the available-force branch and requires
+strict/converged/certificate-passed preconditions. Version 1 unavailable documents
+remain valid, and unavailable forces never carry numerical arrays. The outer
+results schema version is unchanged. See [validation](validation/forces.md).

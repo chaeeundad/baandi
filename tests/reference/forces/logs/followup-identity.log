@@ -1,0 +1,10 @@
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P20A-FORCES/crates/dft-engine)
+    Finished `release` profile [optimized] target(s) in 4.22s
+     Running tests/force_identity.rs (target/release/deps/force_identity-3796edb8d6dc5e75)
+
+running 2 tests
+test retained_model_rejects_independent_input_mutations ... ok
+test finite_temperature_policy_is_bound_to_certificate ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.49s
+

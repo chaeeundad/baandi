@@ -520,6 +520,8 @@ impl Scf {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Output {
+    #[serde(default)]
+    pub forces: bool,
     pub directory: Option<String>,
     pub volumetric: Option<Volumetric>,
 }
@@ -842,6 +844,9 @@ impl Config {
         if let Some(s) = &self.scf {
             s.spectral_guard()?;
             s.standard_profile()?;
+            if s.standard_profile()?.is_some() && self.output.as_ref().is_some_and(|o| o.forces) {
+                return Err(ConfigError::Invalid("output.forces: strict convergence profile required; set scf.convergence_profile='strict'".into()));
+            }
             s.hartree_mixing()?;
         }
         self.cell()?;

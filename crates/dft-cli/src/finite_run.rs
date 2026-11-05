@@ -26,6 +26,7 @@ pub(super) fn execute(
         .and_then(|o| o.band_cap)
         .unwrap_or(32);
     let sector = config.spin_sector(target).map_err(|e| error(1, e))?;
+    let force_result;
     let (
         converged,
         iterations,
@@ -59,6 +60,15 @@ pub(super) fn execute(
                 .map_err(engine_error)?;
         }
         let r = problem.run().map_err(engine_error)?;
+        force_result = requested_forces(
+            config,
+            &prepared.cell,
+            atoms,
+            potentials,
+            &opts,
+            dft_engine::forces::ElectronicState::Collinear(&r),
+            None,
+        )?;
         let eigenvalues = r
             .k_points
             .iter()
@@ -114,6 +124,15 @@ pub(super) fn execute(
                 .map_err(engine_error)?;
         }
         let r = problem.run().map_err(engine_error)?;
+        force_result = requested_forces(
+            config,
+            &prepared.cell,
+            atoms,
+            potentials,
+            &opts,
+            dft_engine::forces::ElectronicState::FiniteTemperature(&r),
+            None,
+        )?;
         let eigenvalues = r
             .state
             .k_points
@@ -234,10 +253,10 @@ pub(super) fn execute(
     let state_digest = super::spin_run::digest(
         &json!({"model_digest":model_digest,"density_sha256":sha256(&channel_bytes),"band_data":{"eigenvalues_ha":eigenvalues,"residuals_ha":residuals,"occupations":block},"thermodynamics":thermodynamics,"converged":converged,"certificate":cert}),
     );
-    let forces = json!({"status":"unavailable","reason":"not_implemented","units":"Ha/Bohr","frame":"cartesian_input_atom_order"});
+    let forces = json!({"status":"unavailable","reason":"not_requested","units":"Ha/Bohr","frame":"cartesian_input_atom_order"});
     let stress = json!({"status":"unavailable","reason":"not_implemented","units":"Ha/Bohr^3","frame":"cartesian_tensor","sign_convention":"tensile_positive"});
-    let extension = json!({"proposal_status":"proposed","extension_version":1,"model_digest":model_digest,"basis_digest":basis_digest,"state_digest":state_digest,"spin":spin,"occupations":block,"thermodynamics":thermodynamics,"forces":forces,"stress":stress});
-    let mut result = json!({"schema_version":2,"output_profile":"fermi_dirac_v1","spin":spin,"occupations":block,"thermodynamics":thermodynamics,"energies":energy_json(&energy),"energy_ledger":[{"term":"E","energy_ha":thermo.internal_energy_ha},{"term":"-TS","energy_ha":-thermo.entropy_term_ha},{"term":"F","energy_ha":thermo.free_energy_ha}],"band_gap":{"status":"not_applicable","reason":"metallic/Fermi level","chemical_potential_ha":mu},"band_data":{"shape":[densities.len(),points.len(),cap],"eigenvalues_ha":eigenvalues,"residuals_ha":residuals},"band_policy":{"kind":"prepare_explicit_cap","cap":cap,"retained_bands":cap,"scope":"retained_basis","omitted_tail_bound":null},"convergence":{"converged":converged,"iterations":iterations,"certificate":cert},"forces":{"status":"unavailable","reason":"not_implemented"},"stress":{"status":"unavailable","reason":"not_implemented"},"density":{"channel_values":densities.iter().map(|d|d.iter().copied().collect::<Vec<_>>()).collect::<Vec<_>>()},"limitations":["synthetic validation only; no real-metal QE comparison","finite edge occupancy is not an infinite omitted-state bound","finite-T restart and runtime control unavailable"]});
+    let extension = json!({"proposal_status":"proposed","extension_version":2,"model_digest":model_digest,"basis_digest":basis_digest,"state_digest":state_digest,"spin":spin,"occupations":block,"thermodynamics":thermodynamics,"forces":forces,"stress":stress});
+    let mut result = json!({"schema_version":2,"output_profile":"fermi_dirac_v1","spin":spin,"occupations":block,"thermodynamics":thermodynamics,"energies":energy_json(&energy),"energy_ledger":[{"term":"E","energy_ha":thermo.internal_energy_ha},{"term":"-TS","energy_ha":-thermo.entropy_term_ha},{"term":"F","energy_ha":thermo.free_energy_ha}],"band_gap":{"status":"not_applicable","reason":"metallic/Fermi level","chemical_potential_ha":mu},"band_data":{"shape":[densities.len(),points.len(),cap],"eigenvalues_ha":eigenvalues,"residuals_ha":residuals},"band_policy":{"kind":"prepare_explicit_cap","cap":cap,"retained_bands":cap,"scope":"retained_basis","omitted_tail_bound":null},"convergence":{"converged":converged,"iterations":iterations,"certificate":cert},"forces":{"status":"unavailable","reason":"not_requested"},"stress":{"status":"unavailable","reason":"not_implemented"},"density":{"channel_values":densities.iter().map(|d|d.iter().copied().collect::<Vec<_>>()).collect::<Vec<_>>()},"limitations":["synthetic validation only; no real-metal QE comparison","finite edge occupancy is not an infinite omitted-state bound","finite-T restart and runtime control unavailable"]});
     if let Some(symmetry) = config.symmetry_json().map_err(|e| error(1, e))? {
         result["symmetry"] = symmetry;
     }
@@ -253,6 +272,11 @@ pub(super) fn execute(
     result["energy_audit"] = json!({"free_energy_band_ha":energy.band_form-e.entropy_term_ha,"free_energy_direct_ha":thermo.free_energy_ha});
     result["forces"] = forces;
     result["stress"] = stress;
+    if let Some(force) = force_result {
+        result["forces"] = force_json(&force);
+        result["state_contracts"]["forces"] = force_json(&force);
+        fs::write(out.join("forces.txt"), force_table(&force)).map_err(|e| error(1, e))?;
+    }
     write_json(&out.join("results.json"), &result)?;
     Ok(RunReport {
         converged,
@@ -344,6 +368,25 @@ band_cap=12
     ] {
         assert!(Config::parse(&bad).is_err());
     }
+    // Exercise the emitted v2 available envelope through the independent checker.
+    fs::write(&input, format!("{text}\n[output]\nforces=true\n")).unwrap();
+    let force_destination = dir.join("forces");
+    assert!(
+        super::execute(&input, Some(&force_destination))
+            .unwrap()
+            .converged
+    );
+    let checker =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/validate_force_schema.py");
+    assert!(
+        std::process::Command::new("python3")
+            .arg("-I")
+            .arg(&checker)
+            .arg(force_destination.join("results.json"))
+            .status()
+            .unwrap()
+            .success()
+    );
     let fixed = text.replace(
         "mode=\"fermi_dirac\"\nsmearing_ha=0.01\nband_cap=12",
         "mode=\"fixed\"",
@@ -360,7 +403,7 @@ band_cap=12
     .unwrap();
     for (name, constraint, roots) in [("shared", "", 1), ("fixed-moment", "total_moment=0.3", 2)] {
         let spin_text = format!(
-            "{}\n[spin]\nmode=\"collinear\"\n{constraint}\n",
+            "{}\n[spin]\nmode=\"collinear\"\n{constraint}\n[output]\nforces=true\n",
             text.replace("lda-pz", "lda-pw")
         );
         fs::write(&input, spin_text).unwrap();
@@ -384,6 +427,15 @@ band_cap=12
             roots
         );
         assert!(spin["convergence"]["certificate"]["spin_density_residual"].is_number());
+        assert!(
+            std::process::Command::new("python3")
+                .arg("-I")
+                .arg(&checker)
+                .arg(destination.join("results.json"))
+                .status()
+                .unwrap()
+                .success()
+        );
         if roots == 2 {
             assert!((spin["spin"]["moment_mu_b"].as_f64().unwrap() - 0.3).abs() < 1e-10);
         }

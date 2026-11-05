@@ -1,0 +1,15 @@
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P20A-FORCES/crates/dft-engine)
+    Finished `release` profile [optimized] target(s) in 0.71s
+     Running tests/forces.rs (target/release/deps/forces-1fd0d04afea81f19)
+
+running 1 test
+independent atom=0 axis=0 error=1.712457855553018e-8 Ha/Bohr
+independent atom=0 axis=1 error=5.235875229128023e-8 Ha/Bohr
+independent atom=0 axis=2 error=5.440234595796567e-8 Ha/Bohr
+independent atom=1 axis=0 error=3.172939777237871e-9 Ha/Bohr
+independent atom=1 axis=1 error=4.032041438922773e-8 Ha/Bohr
+independent atom=1 axis=2 error=4.112051899332614e-8 Ha/Bohr
+test independent_molecule_ewald_and_local_energy ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.01s
+

@@ -1,0 +1,424 @@
+{
+  "basis_digest": "91275c053792a7ed6fdaaf0feb53188cb492eb28a4c5cc52e778ab06b42273b5",
+  "extension_version": 2,
+  "forces": {
+    "band_passes": 20,
+    "derivative_ledger": [
+      {
+        "active": true,
+        "dependencies": [],
+        "energy_ha": 13.26738009203087,
+        "force_capability": "available",
+        "included_in": "E",
+        "owner": "physics::kinetic",
+        "reason": "stationary fixed plane-wave basis",
+        "stress_capability": "unavailable",
+        "term_id": "kinetic"
+      },
+      {
+        "active": true,
+        "dependencies": [],
+        "energy_ha": -10.64713276338582,
+        "force_capability": "available",
+        "included_in": "E",
+        "owner": "physics::forces",
+        "reason": "ionic structure-factor derivative",
+        "stress_capability": "unavailable",
+        "term_id": "local"
+      },
+      {
+        "active": true,
+        "dependencies": [],
+        "energy_ha": 6.857802588520553,
+        "force_capability": "available",
+        "included_in": "E",
+        "owner": "physics::forces",
+        "reason": "Hermitian projector derivative",
+        "stress_capability": "unavailable",
+        "term_id": "nonlocal"
+      },
+      {
+        "active": true,
+        "dependencies": [],
+        "energy_ha": 2.538523134694666,
+        "force_capability": "available",
+        "included_in": "E",
+        "owner": "physics::hartree",
+        "reason": "no explicit ionic dependence",
+        "stress_capability": "unavailable",
+        "term_id": "hartree"
+      },
+      {
+        "active": true,
+        "dependencies": [],
+        "energy_ha": -9.740489186853225,
+        "force_capability": "available",
+        "included_in": "E",
+        "owner": "physics::xc",
+        "reason": "valence response cancels by stationarity",
+        "stress_capability": "unavailable",
+        "term_id": "xc"
+      },
+      {
+        "active": false,
+        "dependencies": [
+          "xc"
+        ],
+        "energy_ha": 0.0,
+        "force_capability": "not_applicable",
+        "included_in": "audit_only",
+        "owner": "physics::forces",
+        "reason": "moving core against XC potential",
+        "stress_capability": "unavailable",
+        "term_id": "core"
+      },
+      {
+        "active": true,
+        "dependencies": [],
+        "energy_ha": -33.597887466038316,
+        "force_capability": "available",
+        "included_in": "E",
+        "owner": "physics::ewald",
+        "reason": "real and reciprocal derivatives",
+        "stress_capability": "unavailable",
+        "term_id": "ewald"
+      },
+      {
+        "active": false,
+        "dependencies": [],
+        "energy_ha": -0.0,
+        "force_capability": "not_applicable",
+        "included_in": "correction",
+        "owner": "engine::occupations",
+        "reason": "stationary free energy at fixed theta,N,M",
+        "stress_capability": "unavailable",
+        "term_id": "entropy"
+      }
+    ],
+    "elapsed_seconds": 1.007871125,
+    "frame": "cartesian_input_atom_order",
+    "maximum_absolute_component": 4.0280333979379854e-07,
+    "net_force": [
+      5.298655539378477e-10,
+      2.2655688798195775e-10,
+      7.95286130851668e-12
+    ],
+    "per_term": {
+      "core": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "ewald": [
+        [
+          -1.1523234790089157e-16,
+          -8.679211520885221e-17,
+          -1.000266435304651e-15
+        ],
+        [
+          6.310535823853654e-17,
+          1.2940942203960549e-17,
+          9.285698971998323e-16
+        ],
+        [
+          -1.9114004520947723e-16,
+          -6.203841557611899e-17,
+          -1.0458977848141912e-15
+        ],
+        [
+          9.386282461907166e-17,
+          3.74981289002121e-17,
+          9.834847278112799e-16
+        ],
+        [
+          -2.0449210465039522e-16,
+          -4.611076139322166e-17,
+          -1.0365022238904618e-15
+        ],
+        [
+          9.092588359081606e-17,
+          -3.360176791785156e-17,
+          9.610318696071504e-16
+        ],
+        [
+          -1.3724445718972952e-16,
+          3.328867293464477e-18,
+          -1.0651251509799933e-15
+        ],
+        [
+          1.0253362951901753e-16,
+          -9.470332827286508e-17,
+          1.0042711972352599e-15
+        ]
+      ],
+      "local": [
+        [
+          1.6834503245910763e-07,
+          -1.6095572110587226e-07,
+          -3.5822930385266994e-08
+        ],
+        [
+          2.457876392960067e-07,
+          1.9570338976087225e-07,
+          -7.062734507510143e-08
+        ],
+        [
+          -9.709207376249185e-08,
+          -1.0474788594172613e-07,
+          -6.635144967531727e-09
+        ],
+        [
+          -2.0358581653756253e-07,
+          1.3037382194553323e-07,
+          2.515044640897963e-10
+        ],
+        [
+          5.058481513433117e-07,
+          -6.225648396096294e-07,
+          1.461407875530442e-07
+        ],
+        [
+          4.171103795642598e-07,
+          5.987592666445492e-07,
+          -1.2714732980982906e-07
+        ],
+        [
+          -5.303765799467947e-07,
+          -7.366721102293881e-07,
+          -9.799553950882035e-08
+        ],
+        [
+          -5.04160567062487e-07,
+          7.015939359596014e-07,
+          1.8943267466508424e-07
+        ]
+      ],
+      "nonlocal": [
+        [
+          -6.203127151592688e-08,
+          6.127811681168327e-08,
+          1.7746265155299534e-08
+        ],
+        [
+          -1.0246994770933236e-07,
+          -8.17541580943465e-08,
+          5.1495916024435484e-08
+        ],
+        [
+          1.1241152635776313e-08,
+          2.26507291343353e-08,
+          3.450829337559025e-09
+        ],
+        [
+          7.250250355844395e-08,
+          -4.9469039314561924e-08,
+          -1.7181823429301968e-09
+        ],
+        [
+          -2.1487497638455374e-07,
+          2.728427065581268e-07,
+          -4.085000098602576e-08
+        ],
+        [
+          -1.5915311498167507e-07,
+          -2.4653038765455604e-07,
+          2.9920753479018014e-08
+        ],
+        [
+          2.312871453286705e-07,
+          3.338687704322607e-07,
+          1.1847139737980461e-08
+        ],
+        [
+          2.2215220956686646e-07,
+          -3.1415003813942133e-07,
+          -6.948144420926283e-08
+        ]
+      ]
+    },
+    "quantity": "F",
+    "status": "available",
+    "unavailable_terms": [],
+    "units": "Ha/Bohr",
+    "values": [
+      [
+        1.063137608279484e-07,
+        -9.967760438098109e-08,
+        -1.8076666230233895e-08
+      ],
+      [
+        1.4331769164977976e-07,
+        1.139492316794667e-07,
+        -1.9131428122096046e-08
+      ],
+      [
+        -8.585092131785558e-08,
+        -8.209715686942925e-08,
+        -3.184316675870487e-09
+      ],
+      [
+        -1.3108331288525576e-07,
+        8.090478266846943e-08,
+        -1.4666768953556726e-09
+      ],
+      [
+        2.9097317475426594e-07,
+        -3.497221330976134e-07,
+        1.0529078553051622e-07
+      ],
+      [
+        2.579572646735106e-07,
+        3.522288789563914e-07,
+        -9.722657536977916e-08
+      ],
+      [
+        -2.990894347553686e-07,
+        -4.0280333979379854e-07,
+        -8.614840083596504e-08
+      ],
+      [
+        -2.8200835739308686e-07,
+        3.874438977254767e-07,
+        1.199512314600926e-07
+      ]
+    ],
+    "preconditions": {
+      "convergence_profile": "standard",
+      "converged": true,
+      "fixed_point_certificate_passed": true
+    }
+  },
+  "model_digest": "a6084244106938e7004b86b260318ddb256254a86358985e7bbf07075f2d70c0",
+  "occupations": {
+    "chemical_potential": {
+      "kind": "common",
+      "values_ha": [
+        -0.23127105827063021
+      ]
+    },
+    "chemical_potential_reason": null,
+    "edge_electrons": 6.426809392391277e-70,
+    "edge_max_fraction": 3.2134046961956384e-70,
+    "electron_count": 0.9999999999999029,
+    "electron_residual": -9.71445146547012e-14,
+    "electron_target": 1.0,
+    "entropy_kind": "physical_fermi_dirac",
+    "entropy_over_kb": 1.3862943611198906,
+    "entropy_term_ha": 0.013862943611198907,
+    "k_weights": [
+      1.0
+    ],
+    "moment_residual": null,
+    "occupations_electrons": {
+      "axes": [
+        "spin",
+        "k",
+        "band"
+      ],
+      "ordering": "C_band_fastest",
+      "shape": [
+        1,
+        1,
+        12
+      ],
+      "values": [
+        0.9999999999999029,
+        2.706921088896579e-32,
+        2.9756309514831353e-35,
+        2.9756309514828814e-35,
+        2.9756309514827125e-35,
+        1.2843148457897398e-36,
+        1.284314845789685e-36,
+        2.0638679553279493e-67,
+        1.165736795211349e-68,
+        1.165736795211349e-68,
+        1.16573679521115e-68,
+        6.426809392391277e-70
+      ]
+    },
+    "policy": "fermi_dirac",
+    "policy_version": 1,
+    "root_brackets_ha": [
+      [
+        -0.2312710582706417,
+        -0.2312710582706187
+      ]
+    ],
+    "root_iterations": 47,
+    "temperature_energy_ha": 0.01
+  },
+  "proposal_status": "proposed",
+  "spin": {
+    "axis_cartesian": null,
+    "channel_capacity_electrons": [
+      2
+    ],
+    "channel_order": [
+      "total"
+    ],
+    "constraint": {
+      "kind": "none"
+    },
+    "mode": "unpolarized",
+    "moment_mu_b": 0,
+    "total_electrons": 1.0
+  },
+  "state_digest": "979174a16ea667a7d69e942f1860eaa74f5c4e1b0b573b117e0a1104e07815ff",
+  "stress": {
+    "frame": "cartesian_tensor",
+    "reason": "not_implemented",
+    "sign_convention": "tensile_positive",
+    "status": "unavailable",
+    "units": "Ha/Bohr^3"
+  },
+  "thermodynamics": {
+    "entropy_kind": "physical_fermi_dirac",
+    "entropy_over_kb": 1.3862943611198906,
+    "entropy_term_ha": 0.013862943611198907,
+    "free_energy_ha": -0.4757562478251164,
+    "grand_potential": {
+      "reason": "fixed_electron_number",
+      "status": "unavailable"
+    },
+    "internal_energy_ha": -0.4618933042139175,
+    "temperature_energy_ha": 0.01,
+    "variational_quantity": "free_energy"
+  }
+}

@@ -1,0 +1,38 @@
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P20A-FORCES/crates/dft-engine)
+    Finished `release` profile [optimized] target(s) in 0.82s
+     Running tests/forces.rs (target/release/deps/forces-1fd0d04afea81f19)
+
+running 1 test
+nlcc atom=0 axis=0 error=1.535299337662721e-8 Ha/Bohr
+nlcc atom=0 axis=1 error=5.747378949150228e-8 Ha/Bohr
+nlcc atom=0 axis=2 error=5.767274878498707e-8 Ha/Bohr
+nlcc atom=1 axis=0 error=1.5347486448380465e-8 Ha/Bohr
+nlcc atom=1 axis=1 error=5.746428605180043e-8 Ha/Bohr
+nlcc atom=1 axis=2 error=5.7671152436933326e-8 Ha/Bohr
+test spin_core_and_finite has been running for over 60 seconds
+pbe atom=0 axis=0 error=1.5712684542368294e-8 Ha/Bohr
+pbe atom=0 axis=1 error=5.729584622027328e-8 Ha/Bohr
+pbe atom=0 axis=2 error=5.708751420197e-8 Ha/Bohr
+pbe atom=1 axis=0 error=1.5710104953048365e-8 Ha/Bohr
+pbe atom=1 axis=1 error=5.729247168351215e-8 Ha/Bohr
+pbe atom=1 axis=2 error=5.708707830065496e-8 Ha/Bohr
+spin atom=0 axis=0 error=1.3484596363133594e-8 Ha/Bohr
+spin atom=0 axis=1 error=2.4501283588801437e-8 Ha/Bohr
+spin atom=0 axis=2 error=2.482759305783011e-8 Ha/Bohr
+spin atom=1 axis=0 error=1.3480722350911467e-8 Ha/Bohr
+spin atom=1 axis=1 error=2.4519698427899472e-8 Ha/Bohr
+spin atom=1 axis=2 error=2.4821378959150042e-8 Ha/Bohr
+
+thread 'spin_core_and_finite' (21300547) panicked at crates/dft-engine/tests/forces.rs:389:26:
+called `Result::unwrap()` on an `Err` value: InvalidInput("occupations.bands: insufficient empty-state coverage at explicit cap; increase cap and repeat the convergence study")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test spin_core_and_finite ... FAILED
+
+failures:
+
+failures:
+    spin_core_and_finite
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 1022.20s
+
+error: test failed, to rerun pass `-p dft-engine --test forces`

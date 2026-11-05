@@ -1,0 +1,28 @@
+    Finished `release` profile [optimized] target(s) in 0.07s
+     Running tests/forces.rs (target/release/deps/forces-1fd0d04afea81f19)
+
+running 1 test
+real Si refined_grid_net_force=[-6.071532165918825e-16, -2.2083029849184754e-15, -2.7109391120827553e-15] Ha/Bohr
+real Si grid_uncertainty=9.78161145831491e-11 scf_uncertainty=1.9098362995240148e-10 net_force=[9.505022810496477e-11, 5.0782966373730254e-11, 2.1050891065022004e-12] Ha/Bohr
+real Si cutoff_uncertainty=5.551848920679753e-7 Ha/Bohr
+real Si atom=0 axis=0 error=5.4258887209612805e-9 Ha/Bohr
+real Si atom=0 axis=1 error=3.6027253480855337e-9 Ha/Bohr
+real Si atom=0 axis=2 error=1.849893791535523e-9 Ha/Bohr
+real Si atom=1 axis=0 error=5.424630133976649e-9 Ha/Bohr
+real Si atom=1 axis=1 error=3.605943629629571e-9 Ha/Bohr
+real Si atom=1 axis=2 error=1.8538283156829816e-9 Ha/Bohr
+real MgO refined_grid_net_force=[1.553137548258865e-9, -2.2097646739781956e-8, -8.58277264902509e-8] Ha/Bohr
+
+thread 'real_files' (21300719) panicked at crates/dft-engine/tests/forces.rs:609:9:
+INCONCLUSIVE MgO: refined grid translation residual [1.553137548258865e-9, -2.2097646739781956e-8, -8.58277264902509e-8]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test real_files ... FAILED
+
+failures:
+
+failures:
+    real_files
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 40.57s
+
+error: test failed, to rerun pass `-p dft-engine --test forces`

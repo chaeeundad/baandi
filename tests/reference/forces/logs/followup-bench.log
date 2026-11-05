@@ -1,0 +1,7 @@
+case      wall med (s)  engine (s)  diag (s) iters  dE vs base (Ha)    density  speedup
+gamma            1.261       0.473     0.291    10         0.00e+00  identical    0.38x
+k222             1.438       1.282     1.053    10         0.00e+00  identical    0.59x
+si8              3.970       2.944     2.615    15         0.00e+00  identical    0.86x
+k444s            2.828       2.527     2.002    10         0.00e+00  identical    1.60x
+recorded tests/reference/forces/followup-legacy.json
+OK

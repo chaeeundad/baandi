@@ -43,10 +43,10 @@ def validate(v, s):
         types = [types]
     checks = {'null': v is None, 'number': type(v) in (int, float),
               'integer': type(v) is int, 'array': isinstance(v, list),
-              'object': isinstance(v, dict), 'string': isinstance(v, str)}
+              'object': isinstance(v, dict), 'string': isinstance(v, str), 'boolean': type(v) is bool}
     assert not types or any(checks[t] for t in types)
     if 'const' in s:
-        assert v == s['const'], (v, s['const'])
+        assert v == s['const'] and (isinstance(s['const'], bool) == isinstance(v, bool)), (v, s['const'])
     if 'enum' in s:
         assert v in s['enum']
     if type(v) in (int, float):

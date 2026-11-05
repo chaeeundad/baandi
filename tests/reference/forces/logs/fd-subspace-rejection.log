@@ -1,0 +1,19 @@
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P20A-FORCES/crates/dft-engine)
+    Finished `release` profile [optimized] target(s) in 0.68s
+     Running tests/forces.rs (target/release/deps/forces-1fd0d04afea81f19)
+
+running 1 test
+
+thread 'spin_core_and_finite' (21334519) panicked at crates/dft-engine/tests/forces.rs:444:26:
+called `Result::unwrap()` on an `Err` value: Numerical("k index 0: InvalidInput(\"bands/subspace incompatible with k basis\")")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test spin_core_and_finite ... FAILED
+
+failures:
+
+failures:
+    spin_core_and_finite
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p dft-engine --test forces`

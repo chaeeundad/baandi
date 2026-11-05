@@ -1,0 +1,9 @@
+🍹 Building a mixed python/rust project
+🐍 Found CPython 3.9 at /Users/mino/Develop/rust-dft-wt/pyenv/bin/python
+🔗 Found pyo3 bindings
+📡 Using build options features from pyproject.toml
+💻 Using `MACOSX_DEPLOYMENT_TARGET=11.0` for aarch64-apple-darwin by default
+   Compiling baandi-py v0.1.0 (/Users/mino/Develop/rust-dft-wt/P20A-FORCES/crates/baandi-py)
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P20A-FORCES/crates/dft-engine)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.70s
+📦 Built wheel for CPython 3.9 to /Users/mino/Develop/rust-dft-wt/P20A-FORCES/target/wheels/baandi-0.1.0-cp39-cp39-macosx_11_0_arm64.whl

@@ -1,0 +1,111 @@
+{
+  "basis_digest": "91275c053792a7ed6fdaaf0feb53188cb492eb28a4c5cc52e778ab06b42273b5",
+  "extension_version": 2,
+  "forces": {
+    "frame": "cartesian_input_atom_order",
+    "reason": "not_requested",
+    "status": "unavailable",
+    "units": "Ha/Bohr",
+    "net_force": [
+      1.0,
+      0.0,
+      0.0
+    ]
+  },
+  "model_digest": "a6084244106938e7004b86b260318ddb256254a86358985e7bbf07075f2d70c0",
+  "occupations": {
+    "chemical_potential": {
+      "kind": "common",
+      "values_ha": [
+        -0.23127105827063021
+      ]
+    },
+    "chemical_potential_reason": null,
+    "edge_electrons": 6.426809392391277e-70,
+    "edge_max_fraction": 3.2134046961956384e-70,
+    "electron_count": 0.9999999999999029,
+    "electron_residual": -9.71445146547012e-14,
+    "electron_target": 1.0,
+    "entropy_kind": "physical_fermi_dirac",
+    "entropy_over_kb": 1.3862943611198906,
+    "entropy_term_ha": 0.013862943611198907,
+    "k_weights": [
+      1.0
+    ],
+    "moment_residual": null,
+    "occupations_electrons": {
+      "axes": [
+        "spin",
+        "k",
+        "band"
+      ],
+      "ordering": "C_band_fastest",
+      "shape": [
+        1,
+        1,
+        12
+      ],
+      "values": [
+        0.9999999999999029,
+        2.706921088896579e-32,
+        2.9756309514831353e-35,
+        2.9756309514828814e-35,
+        2.9756309514827125e-35,
+        1.2843148457897398e-36,
+        1.284314845789685e-36,
+        2.0638679553279493e-67,
+        1.165736795211349e-68,
+        1.165736795211349e-68,
+        1.16573679521115e-68,
+        6.426809392391277e-70
+      ]
+    },
+    "policy": "fermi_dirac",
+    "policy_version": 1,
+    "root_brackets_ha": [
+      [
+        -0.2312710582706417,
+        -0.2312710582706187
+      ]
+    ],
+    "root_iterations": 47,
+    "temperature_energy_ha": 0.01
+  },
+  "proposal_status": "proposed",
+  "spin": {
+    "axis_cartesian": null,
+    "channel_capacity_electrons": [
+      2
+    ],
+    "channel_order": [
+      "total"
+    ],
+    "constraint": {
+      "kind": "none"
+    },
+    "mode": "unpolarized",
+    "moment_mu_b": 0,
+    "total_electrons": 1.0
+  },
+  "state_digest": "979174a16ea667a7d69e942f1860eaa74f5c4e1b0b573b117e0a1104e07815ff",
+  "stress": {
+    "frame": "cartesian_tensor",
+    "reason": "not_implemented",
+    "sign_convention": "tensile_positive",
+    "status": "unavailable",
+    "units": "Ha/Bohr^3"
+  },
+  "thermodynamics": {
+    "entropy_kind": "physical_fermi_dirac",
+    "entropy_over_kb": 1.3862943611198906,
+    "entropy_term_ha": 0.013862943611198907,
+    "free_energy_ha": -0.4757562478251164,
+    "grand_potential": {
+      "reason": "fixed_electron_number",
+      "status": "unavailable"
+    },
+    "internal_energy_ha": -0.4618933042139175,
+    "temperature_energy_ha": 0.01,
+    "variational_quantity": "free_energy"
+  }
+}

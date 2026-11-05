@@ -1,0 +1,11 @@
+test_ase_forces_and_units (test_binding.BindingTests) ... ok
+test_ase_unsupported_properties (test_binding.BindingTests) ... ok
+test_cli_and_ase_bitwise (test_binding.BindingTests) ... ok
+test_invalid_inputs_and_exhaustion (test_binding.BindingTests) ... ok
+test_native_cli_bitwise (test_binding.BindingTests) ... ok
+test_two_systems_stepwise_and_owned_results (test_binding.BindingTests) ... ok
+
+----------------------------------------------------------------------
+Ran 6 tests in 2.990s
+
+OK

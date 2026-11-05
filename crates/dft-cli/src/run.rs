@@ -726,6 +726,18 @@ pub fn execute_mode(
     volumetric_out::write_outputs(&config, &prepared, &refs, &r, &out).map_err(|e| error(5, e))?;
     fs::write(out.join("density.bin"), density_bytes)?;
     write_json(&out.join("density.json"), &density_meta)?;
+    if let Some(force) = requested_forces(
+        &config,
+        &prepared.cell,
+        &atoms,
+        &refs,
+        &opts,
+        dft_engine::forces::ElectronicState::Fixed(&r),
+        density_floor,
+    )? {
+        console.push_str(&force_table(&force));
+        result["forces"] = force_json(&force);
+    }
     write_json(&out.join("results.json"), &result)?;
     Ok(RunReport {
         console,
@@ -753,6 +765,68 @@ pub(crate) fn spectral_json(report: &dft_engine::SpectralReport) -> Value {
             "k_point":e.k_point,"method":e.method,"passed":e.passed,"retries":e.retries,
             "extra_operator_applications":e.operator_applications,
             "maximum_discrepancy_ha":e.discrepancy_ha,"error":e.error})).collect::<Vec<_>>()})
+}
+
+#[allow(clippy::too_many_arguments)]
+fn requested_forces(
+    config: &Config,
+    cell: &dft_geometry::Cell,
+    atoms: &[Atom],
+    potentials: &[SpeciesPotential<'_>],
+    options: &ScfOptions,
+    electronic: dft_engine::forces::ElectronicState<'_>,
+    density_floor: Option<f64>,
+) -> Result<Option<dft_engine::forces::ForceResult>, RunError> {
+    if !config.output.as_ref().is_some_and(|o| o.forces) {
+        return Ok(None);
+    }
+    let operations: Vec<_> =
+        config
+            .symmetry_map()
+            .map_err(|e| error(1, e))?
+            .map_or_else(Vec::new, |m| {
+                m.operations
+                    .into_iter()
+                    .filter(|o| !o.antiunitary)
+                    .collect()
+            });
+    dft_engine::forces::forces(&dft_engine::forces::ForceState {
+        cell,
+        atoms,
+        potentials,
+        options,
+        electronic,
+        density_floor,
+        symmetry: &operations,
+    })
+    .map(Some)
+    .map_err(engine_error)
+}
+fn force_json(f: &dft_engine::forces::ForceResult) -> Value {
+    json!({"status":"available", "units":f.units,"frame":"cartesian_input_atom_order",
+        "quantity":f.quantity,"values":f.values,
+        "preconditions":{"convergence_profile":"strict","converged":true,"fixed_point_certificate_passed":true},
+        "derivative_ledger":f.ledger.iter().map(|e|json!({"term_id":e.term_id,"owner":e.owner,"active":e.active,"energy_ha":e.energy_ha,"included_in":e.included_in,"dependencies":e.dependencies,"force_capability":if e.active {"available"} else {"not_applicable"},"stress_capability":"unavailable","reason":e.reason})).collect::<Vec<_>>(),"per_term":{"ewald":f.ewald,"local":f.local,"nonlocal":f.nonlocal,"core":f.core},
+        "net_force":f.net_force,"maximum_absolute_component":f.maximum_absolute_component,
+        "elapsed_seconds":f.elapsed.as_secs_f64(),"band_passes":f.band_passes,"unavailable_terms":[]})
+}
+fn force_table(f: &dft_engine::forces::ForceResult) -> String {
+    let mut text = format!(
+        "\nCartesian forces (-d{}/dR), Ha/Bohr\n atom               Fx               Fy               Fz\n",
+        f.quantity
+    );
+    for (i, v) in f.values.iter().enumerate() {
+        writeln!(
+            text,
+            "{:5} {:16.9e} {:16.9e} {:16.9e}",
+            i + 1,
+            v[0],
+            v[1],
+            v[2]
+        )
+        .unwrap();
+    }
+    text
 }
 
 #[cfg(test)]

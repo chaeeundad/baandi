@@ -4,8 +4,10 @@ Purpose: optional PyO3 binding to dft-engine and Python/ASE integration (ADR 003
 Read root AGENTS.md, ownership.toml and ADR 0030 before edits. No core crate depends
 on Python. Unit conversion uses dft-units; no duplicated physical constants.
 Python receives owned results and drives the existing session; do not duplicate
-SCF or policy validation. ASE energy requires certified convergence. Forces,
-stress and free energy remain unsupported, never synthesized as zeros.
+SCF or policy validation. ASE energy requires certified convergence. Stress and free energy remain unsupported, never synthesized as zeros. P20A adds
+post-convergence forces for the existing Gamma, unpolarized NC model; the worker
+uses retained model inputs and requires the engine certificate. ASE converts
+Ha/Bohr to eV/Angstrom using dft-units conversions.
 
 Verify: `scripts/check.sh baandi-py`, then `scripts/check.sh`. Native wheel and ASE
 commands/evidence are in `VALIDATION.md`, `native-evidence.json` and

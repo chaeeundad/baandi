@@ -645,6 +645,13 @@ impl ScfSession {
             self.outcome = Some(ScfOutcome {
                 converged: certified,
                 result: ScfResult {
+                    force_identity: self.problem.force_model.with_policy(
+                        crate::force_identity::OccupationIdentity::new(
+                            &[&self.problem.occupations],
+                            None,
+                            None,
+                        ),
+                    ),
                     standard,
                     certified: certified && standard.is_none(),
                     spectral_completeness: self.spectral_report.clone().map(|mut r| {

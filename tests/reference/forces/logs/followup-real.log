@@ -1,0 +1,29 @@
+    Blocking waiting for file lock on build directory
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P20A-FORCES/crates/dft-engine)
+    Finished `release` profile [optimized] target(s) in 3.89s
+     Running tests/forces.rs (target/release/deps/forces-1fd0d04afea81f19)
+
+running 1 test
+real Si refined_grid_net_force=[-6.071532165918825e-16, -2.2083029849184754e-15, -2.7109391120827553e-15] Ha/Bohr
+real Si grid_uncertainty=9.78161145831491e-11 scf_uncertainty=1.9098362995240148e-10 net_force=[9.505022810496477e-11, 5.0782966373730254e-11, 2.1050891065022004e-12] Ha/Bohr
+real Si cutoff_uncertainty=5.551848920679753e-7 Ha/Bohr
+real Si atom=0 axis=0 error=5.4258887209612805e-9 Ha/Bohr
+real Si atom=0 axis=1 error=3.6027253480855337e-9 Ha/Bohr
+real Si atom=0 axis=2 error=1.849893791535523e-9 Ha/Bohr
+real Si atom=1 axis=0 error=5.424630133976649e-9 Ha/Bohr
+real Si atom=1 axis=1 error=3.605943629629571e-9 Ha/Bohr
+real Si atom=1 axis=2 error=1.8538283156829816e-9 Ha/Bohr
+test real_files has been running for over 60 seconds
+real MgO refined_grid_net_force=[2.1106408331153514e-10, 3.396038954824737e-9, 1.3421297331969381e-9] Ha/Bohr
+real MgO grid_uncertainty=7.327763179576074e-6 scf_uncertainty=3.3691233188720693e-9 net_force=[-7.420842828555381e-6, -3.8125084098074823e-6, -1.0761947052478297e-6] Ha/Bohr
+real MgO cutoff_uncertainty=2.3800773229406755e-5 Ha/Bohr
+real MgO atom=0 axis=0 error=2.8072423141276004e-8 Ha/Bohr
+real MgO atom=0 axis=1 error=1.863720863661683e-8 Ha/Bohr
+real MgO atom=0 axis=2 error=9.294887210603564e-9 Ha/Bohr
+real MgO atom=1 axis=0 error=5.900781406033284e-9 Ha/Bohr
+real MgO atom=1 axis=1 error=9.817540583875045e-9 Ha/Bohr
+real MgO atom=1 axis=2 error=6.738782209114377e-9 Ha/Bohr
+test real_files ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 151.18s
+

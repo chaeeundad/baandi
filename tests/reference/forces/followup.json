@@ -1,0 +1,92 @@
+{
+  "task_id": "P20A-FORCES",
+  "status": "DONE",
+  "timestamp_utc": "2026-11-05T17:31:38.118774+00:00",
+  "extension_versions": [
+    1,
+    2
+  ],
+  "outer_schema_version_unchanged": true,
+  "schema_fixtures": 17,
+  "identity_tests_passed": 2,
+  "native_tests_passed": 6,
+  "readme_tests_passed": 5,
+  "commands": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I crates/dft-cli/tests/validate_force_schema.py",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test force_identity -- --include-ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_FORCE_CASE=fd cargo test --release -p dft-engine --test forces spin_core_and_finite -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex cargo test --release -p dft-engine --test forces real_files -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-cli finite_cli_and_fixed_rejection -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222,si8,k444s --repeats 1 --baseline tests/reference/forces/legacy-off.json --require-identical --extra-toml '[output]' --extra-toml 'forces = true' --record tests/reference/forces/followup-legacy.json",
+      "exit_code": 0
+    },
+    {
+      "command": "PYO3_PYTHON=/Users/mino/Develop/rust-dft-wt/pyenv/bin/python /Users/mino/Develop/rust-dft-wt/pyenv/bin/maturin build --offline --locked",
+      "exit_code": 0
+    },
+    {
+      "command": "PYTHONPATH=/private/tmp/p20-wheel-test BAANDI_CLI=$PWD/target/debug/dft-cli /Users/mino/Develop/rust-dft-wt/pyenv/bin/python -m unittest discover -s python/baandi/tests -v",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    }
+  ],
+  "wheel_working_directory": "python/baandi",
+  "identity_fields": [
+    "cell",
+    "ordered atoms/species",
+    "exact parsed pseudopotential physics arrays",
+    "cutoff",
+    "functional",
+    "grid",
+    "kpoints and weights",
+    "density floor",
+    "symmetry operations",
+    "fixed occupations or FD temperature/constraint/band count",
+    "spin sector/axis"
+  ],
+  "identity_limitation": "Original-file SHA-256 is not passed to ScfProblem. Exact parsed physics content is independently retained and compared instead; file-byte provenance remains in the adapter. This is not an attestation of arbitrary mutations to public orbital arrays or certificate fields.",
+  "numerical_scope": "FD and real-file force results unchanged; see initial manifest for Ha/Bohr maxima. Four legacy cases remain energy/density bit-identical. No SCF numerical kernel or force derivative formula changed.",
+  "logs": [
+    "followup-gates.log",
+    "followup-schema.log",
+    "followup-identity.log",
+    "followup-fd.log",
+    "followup-real.log",
+    "followup-cli.log",
+    "followup-fd-schema.log",
+    "followup-bench.log",
+    "followup-python.log",
+    "followup-readme.log",
+    "followup-wheel.log"
+  ],
+  "source_sha256": {
+    "docs/schemas/results-state.proposal.json": "3aa5b357a4b65a1d142504611ee5d3c3b7445689e51c6098529e2e59223d7586",
+    "docs/schemas/forces-available.proposal.json": "72ac0f91ecf521d2c59f2972aca7dc98ca20a9c210e5bf9fe755142c2fbd9f89",
+    "crates/dft-engine/src/force_identity.rs": "da836bf036633e3da0ded6c5d58a60e0efe677945b367fac24ab70192c16a60e",
+    "crates/dft-engine/tests/force_identity.rs": "8cdfb0ef75f8a8eb2c12796f6fcf2e1277a8ddcb93ce25292c130d99a8581934",
+    "crates/dft-cli/tests/validate_force_schema.py": "1d3165976689f2f2b324239e4621ead12e66f38c2bde83afa53a1e2ede8ddfc8"
+  }
+}

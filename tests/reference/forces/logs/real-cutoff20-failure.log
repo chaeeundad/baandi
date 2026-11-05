@@ -1,0 +1,27 @@
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P20A-FORCES/crates/dft-engine)
+    Finished `release` profile [optimized] target(s) in 2.70s
+     Running tests/forces.rs (target/release/deps/forces-1fd0d04afea81f19)
+
+running 1 test
+real Si cutoff20_to30_uncertainty=5.551848920679753e-7 Ha/Bohr
+real Si atom=0 axis=0 error=5.4258887209612805e-9 Ha/Bohr
+real Si atom=0 axis=1 error=3.6027253480855337e-9 Ha/Bohr
+real Si atom=0 axis=2 error=1.849893791535523e-9 Ha/Bohr
+real Si atom=1 axis=0 error=5.424630133976649e-9 Ha/Bohr
+real Si atom=1 axis=1 error=3.605943629629571e-9 Ha/Bohr
+real Si atom=1 axis=2 error=1.8538283156829816e-9 Ha/Bohr
+real MgO cutoff20_to30_uncertainty=3.8624082886913593e-3 Ha/Bohr
+
+thread 'real_files' (21282726) panicked at crates/dft-engine/tests/forces.rs:606:9:
+INCONCLUSIVE MgO: cutoff uncertainty 3.8624082886913593e-3 exceeds one third of cap; refine cutoff/grid before acceptance
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test real_files ... FAILED
+
+failures:
+
+failures:
+    real_files
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 6 filtered out; finished in 25.44s
+
+error: test failed, to rerun pass `-p dft-engine --test forces`

@@ -41,3 +41,11 @@ See `docs/validation/occupations.md` for caps and reproduction commands.
 
 See `docs/validation/symmetry.md` and `tests/reference/symmetry/` for commands,
 observed failures and validation limits. No QE symmetry-on oracle is available.
+
+## Force output (P20A)
+
+`output.forces` defaults false. Standard profile rejects at shared preflight;
+all paths use the engine's post-SCF derivative implementation. Force-on output
+has a per-term block and text table. The results proposal accepts extension versions 1 (historical unavailable) and 2
+(available forces with strict certificate preconditions); keep outer schema_version
+unchanged. `tests/validate_force_schema.py` checks fixtures and actual CLI output. Run `cargo test -p dft-cli --test forces`.

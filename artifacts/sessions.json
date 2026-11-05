@@ -2266,5 +2266,23 @@
     "ended_at": "2026-11-05T18:29:05Z",
     "exit_code": 0,
     "note": ""
+  },
+  {
+    "run_id": "P22A-STRESS#1",
+    "task_id": "P22A-STRESS",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 79491,
+    "wrapper_pid": 79469,
+    "session_id": null,
+    "branch": "task/P22A-STRESS",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P22A-STRESS",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P22A-STRESS.md",
+    "report": null,
+    "started_at": "2026-11-05T18:44:49Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

@@ -22,8 +22,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P21A-RELAXATION: 원자 위치 구조 최적화: 힘을 따라 원자를 움직여 안정한 구조를 찾는 도구(고정 원자, 대칭 유지, 중단 후 재개, 이전 밀도로 빠른 재시작)",
-    "ref": "pid 61730, session no sessi, task/P21A-RELAXATION",
+    "task": "P22A-STRESS: 응력(셀을 늘리거나 비틀 때의 반응) 계산: 압력과 3x3 텐서, 셀을 직접 변형해 에너지 변화를 재는 방법으로 검증, 부호 규약 문서화",
+    "ref": "pid 79491, session no sessi, task/P22A-STRESS",
     "updated": "2026-11-05"
   },
   {
@@ -816,6 +816,15 @@
     "state": "done",
     "task": "P20A-FORCES: 원자에 작용하는 힘 계산(구조 최적화의 기초): 에너지를 원자 위치로 미분한 값과 대조해 검증, 힘이 계산 안 되는 경우는 0이 아니라 \"불가\"로 표시",
     "ref": "pid 55364, session 01a1ac7a, task/P20A-FORCES",
+    "updated": "2026-11-05"
+  },
+  {
+    "id": "A92",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P21A-RELAXATION: 원자 위치 구조 최적화: 힘을 따라 원자를 움직여 안정한 구조를 찾는 도구(고정 원자, 대칭 유지, 중단 후 재개, 이전 밀도로 빠른 재시작)",
+    "ref": "pid 61730, session 01a1acd0, task/P21A-RELAXATION",
     "updated": "2026-11-05"
   }
 ]

@@ -22,8 +22,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P18C-README-CELL: README에 셀 최적화 검증 결과 추가(근거 파일에서 자동 생성)",
-    "ref": "pid 23009, session no sessi, task/P18C-README-CELL",
+    "task": "P24A-LOCKING: 속도: 이미 수렴한 상태는 더 이상 큰 계산을 하지 않도록 고정(잠금)하고 부분 행렬을 절반만 계산(QE 방식), 결과는 같아야 함",
+    "ref": "pid 28058, session no sessi, task/P24A-LOCKING",
     "updated": "2026-11-05"
   },
   {
@@ -852,6 +852,15 @@
     "state": "done",
     "task": "P23A-CELL-RELAXATION: 셀 크기와 모양까지 함께 최적화(힘과 응력 사용): 평면파를 고정한 에너지로 최적화한 뒤 마지막에 새로 계산해 절단 에너지 영향을 보고",
     "ref": "pid 17461, session 01a1ad59, task/P23A-CELL-RELAXATION",
+    "updated": "2026-11-05"
+  },
+  {
+    "id": "A96",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P18C-README-CELL: README에 셀 최적화 검증 결과 추가(근거 파일에서 자동 생성)",
+    "ref": "pid 23009, session 01a1adc7, task/P18C-README-CELL",
     "updated": "2026-11-05"
   }
 ]

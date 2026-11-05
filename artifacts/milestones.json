@@ -115,8 +115,8 @@
     "id": "P13",
     "name": "단계적 기능 확장(스핀, 금속, DFT+U, 대칭, 힘, 응력, 이완)",
     "status": "in progress",
-    "gates_done": 2,
-    "gates_total": 3,
-    "note": "완료: 설계 계약(P13A, 사용자 승인), 공선 스핀 SCF(P13B: 위/아래 전자 수 지정, PBE와 lda-pw, 해석적 오라클 오차 1e-11 Ha 이하, 비스핀 결과 비트 동일). 다음: NLCC와 실제 의사퍼텐셜(PseudoDojo O, Ni, Al, Mg), 금속 점유(smearing), DFT+U, 대칭, 힘, 응력"
+    "gates_done": 3,
+    "gates_total": 4,
+    "note": "완료: 설계 계약(P13A, 승인), 공선 스핀 SCF(P13B), 코어 보정(NLCC)과 PseudoDojo 파일 검사·읽기(P13C: 가우시안 코어 푸리에 오차 8e-16, XC 미분 오차 7e-12 Ha, 5개 파일 파싱 5/5). 진행: 실제 결정 계산 확인(P13D: 규소, MgO). 다음: 금속 점유(smearing), DFT+U, 대칭, 힘, 응력, 이완"
   }
 ]

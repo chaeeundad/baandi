@@ -79,3 +79,4 @@ Conventions: docs are English; one fact lives in one place and others link to it
 | Spin/occupation extension of concrete P11C persistence | [ADR 0034](decisions/0034-state-envelope-extension.md) (proposed); [existing v1 format](checkpoint-format.md) |
 | Additive results extension schemas, not current engine output | [Results extension](schemas/results-state.proposal.json), [spin](schemas/spin.proposal.json), [occupations](schemas/occupations.proposal.json) (proposed) |
 | MF03–MF14 independent oracles, tolerance rationale and pending dev08 recipes | [Stage oracles](validation/stage-oracles.md) (proposed, no new measurements) |
+- `docs/research/nc-dataset-candidates.md`: PseudoDojo NC-SR v0.4 PBE standard set (O, Ni, Al, Mg, Si) facts, hashes, CC BY 4.0, NLCC and projector consequences (MF05 groundwork).

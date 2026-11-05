@@ -1,0 +1,170 @@
+{
+  "rule": "Architect decision, 2026-11-05",
+  "cases": [
+    {
+      "case": "si-elongated",
+      "status": "nonconverged",
+      "iterations_before": 100,
+      "iterations_after": 100,
+      "delta_energy_ha": 0.046039952982521726,
+      "threads_identical": true
+    },
+    {
+      "case": "si-gamma",
+      "status": "pass",
+      "iterations_before": 10,
+      "iterations_after": 10,
+      "delta_energy_ha": 4.440892098500626e-15,
+      "threads_identical": true
+    },
+    {
+      "case": "si-k222",
+      "status": "pass",
+      "iterations_before": 10,
+      "iterations_after": 10,
+      "delta_energy_ha": 1.7763568394002505e-15,
+      "threads_identical": true
+    },
+    {
+      "case": "si-k222s",
+      "status": "pass",
+      "iterations_before": 10,
+      "iterations_after": 10,
+      "delta_energy_ha": -3.552713678800501e-15,
+      "threads_identical": true
+    },
+    {
+      "case": "si-low",
+      "status": "pass",
+      "iterations_before": 11,
+      "iterations_after": 11,
+      "delta_energy_ha": -6.217248937900877e-15,
+      "threads_identical": true
+    },
+    {
+      "case": "si-skew",
+      "status": "pass",
+      "iterations_before": 13,
+      "iterations_after": 13,
+      "delta_energy_ha": -1.7763568394002505e-15,
+      "threads_identical": true
+    },
+    {
+      "case": "si8-gamma",
+      "status": "pass",
+      "iterations_before": 15,
+      "iterations_after": 15,
+      "delta_energy_ha": -1.4210854715202004e-14,
+      "threads_identical": true
+    },
+    {
+      "case": "syn-cubic-degenerate",
+      "status": "pass",
+      "iterations_before": 10,
+      "iterations_after": 10,
+      "delta_energy_ha": 2.6645352591003757e-15,
+      "threads_identical": true
+    },
+    {
+      "case": "syn-d3",
+      "status": "pass",
+      "iterations_before": 8,
+      "iterations_after": 8,
+      "delta_energy_ha": 1.7763568394002505e-15,
+      "threads_identical": true
+    },
+    {
+      "case": "syn-fft-primes",
+      "status": "pass",
+      "iterations_before": 14,
+      "iterations_after": 16,
+      "delta_energy_ha": 0.0,
+      "threads_identical": true
+    },
+    {
+      "case": "syn-gaussian-fcc",
+      "status": "pass",
+      "iterations_before": 17,
+      "iterations_after": 17,
+      "delta_energy_ha": -8.881784197001252e-16,
+      "threads_identical": true
+    },
+    {
+      "case": "syn-odd-shift",
+      "status": "pass",
+      "iterations_before": 9,
+      "iterations_after": 9,
+      "delta_energy_ha": 2.6645352591003757e-15,
+      "threads_identical": true
+    },
+    {
+      "case": "syn-p3",
+      "status": "pass",
+      "iterations_before": 8,
+      "iterations_after": 10,
+      "delta_energy_ha": -7.105427357601002e-15,
+      "threads_identical": true
+    },
+    {
+      "case": "syn-s1",
+      "status": "pass",
+      "iterations_before": 13,
+      "iterations_after": 14,
+      "delta_energy_ha": 5.329070518200751e-15,
+      "threads_identical": true
+    },
+    {
+      "case": "syn-s2",
+      "status": "pass",
+      "iterations_before": 17,
+      "iterations_after": 16,
+      "delta_energy_ha": -8.881784197001252e-16,
+      "threads_identical": true
+    },
+    {
+      "case": "syn-s3",
+      "status": "nonconverged",
+      "iterations_before": 100,
+      "iterations_after": 100,
+      "delta_energy_ha": 0.049447250626284855,
+      "threads_identical": true
+    },
+    {
+      "case": "syn-spd",
+      "status": "pass",
+      "iterations_before": 11,
+      "iterations_after": 11,
+      "delta_energy_ha": 0.0,
+      "threads_identical": true
+    },
+    {
+      "case": "syn-z1",
+      "status": "pass",
+      "iterations_before": 7,
+      "iterations_after": 7,
+      "delta_energy_ha": 1.1102230246251565e-16,
+      "threads_identical": true
+    },
+    {
+      "case": "syn-z14",
+      "status": "nonconverged",
+      "iterations_before": 100,
+      "iterations_after": 100,
+      "delta_energy_ha": -0.010277044693111748,
+      "threads_identical": true
+    }
+  ],
+  "all_previously_converged_cases_converge": true,
+  "existing_nonconvergence": [
+    "si-elongated",
+    "syn-s3",
+    "syn-z14"
+  ],
+  "pure_rust_threads": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "mkl_runtime_verified": false
+}

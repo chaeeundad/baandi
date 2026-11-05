@@ -22,8 +22,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P14B-GEMM-ACCOUNTING: 행렬곱 작업 회계: 호출 위치별 연산량을 측정해서 불필요하거나 지나치게 큰 행렬곱 제거(8원자 셀에서 행렬곱이 시간의 약 45퍼센트)",
-    "ref": "pid 96397, session no sessi, task/P14B-GEMM-ACCOUNTING",
+    "task": "P13C-NLCC-REAL-NC: 실제 재료용 의사퍼텐셜 지원: PseudoDojo(O, Ni, Al, Mg, Si) 파일 검사 도구와 코어 보정(NLCC) 구현, 독립 검증 후 작은 계에서 실행 확인",
+    "ref": "pid 16522, session no sessi, task/P13C-NLCC-REAL-NC",
     "updated": "2026-11-05"
   },
   {
@@ -708,6 +708,15 @@
     "state": "done",
     "task": "P14A-DAVIDSON-WORK: 고유값 풀이 작업량 줄이기: SCF 반복마다 필요 이상으로 많이 도는 H 적용을 측정하고 허용 오차 일정과 여분 밴드를 조정(QE와 같은 반복 수에서 시간 격차의 원인 추적)",
     "ref": "pid 90972, session 01a1aa37, task/P14A-DAVIDSON-WORK",
+    "updated": "2026-11-05"
+  },
+  {
+    "id": "A80",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P14B-GEMM-ACCOUNTING: 행렬곱 작업 회계: 호출 위치별 연산량을 측정해서 불필요하거나 지나치게 큰 행렬곱 제거(8원자 셀에서 행렬곱이 시간의 약 45퍼센트)",
+    "ref": "pid 2836, session 01a1aa58, task/P14B-GEMM-ACCOUNTING",
     "updated": "2026-11-05"
   }
 ]

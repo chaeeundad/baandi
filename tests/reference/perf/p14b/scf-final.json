@@ -1,0 +1,98 @@
+{
+ "note": "",
+ "binary": "dft-cli",
+ "machine_note": "record host and commit in the note",
+ "energy_tolerance_ha": 1e-12,
+ "cases": {
+  "gamma": {
+   "operator_applications": 281,
+   "davidson_iterations": 41,
+   "certificate_applications": 38,
+   "certificate_iterations": 8,
+   "label": "Gamma only, 30 Ry",
+   "wall_s": [
+    0.12655395800000002
+   ],
+   "wall_median_s": 0.12655395800000002,
+   "engine_total_s": 0.1210145,
+   "phases_s": {
+    "density_s": 0.003967667,
+    "diagonalization_s": 0.063929586,
+    "mixing_s": 0.001222624,
+    "potential_s": 0.005600752,
+    "total_energy_s": 0.008222415
+   },
+   "engine_total_median_s": 0.1210145,
+   "phase_medians_s": {
+    "density_s": 0.003967667,
+    "diagonalization_s": 0.063929586,
+    "mixing_s": 0.001222624,
+    "potential_s": 0.005600752,
+    "total_energy_s": 0.008222415
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.295530468210765,
+   "density_sha256": "1854d1ea91d96933ec85e908ec62b4466ddb044abe16b060c1cbe376daea0d3f"
+  },
+  "k222": {
+   "operator_applications": 2543,
+   "davidson_iterations": 408,
+   "certificate_applications": 208,
+   "certificate_iterations": 24,
+   "label": "2x2x2 (8 k), 30 Ry",
+   "wall_s": [
+    0.7453251249999999
+   ],
+   "wall_median_s": 0.7453251249999999,
+   "engine_total_s": 0.739556333,
+   "phases_s": {
+    "density_s": 0.029421501,
+    "diagonalization_s": 0.562663584,
+    "mixing_s": 0.002831501,
+    "potential_s": 0.006478334,
+    "total_energy_s": 0.069196833
+   },
+   "engine_total_median_s": 0.739556333,
+   "phase_medians_s": {
+    "density_s": 0.029421501,
+    "diagonalization_s": 0.562663584,
+    "mixing_s": 0.002831501,
+    "potential_s": 0.006478334,
+    "total_energy_s": 0.069196833
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.831230057121137,
+   "density_sha256": "f203190f8c973771213a5074eb769c3ceecf264945aa805ea2da6edad5988840"
+  },
+  "k444s": {
+   "operator_applications": 10290,
+   "davidson_iterations": 1686,
+   "certificate_applications": 891,
+   "certificate_iterations": 141,
+   "label": "4x4x4 shifted (32 k), 30 Ry",
+   "wall_s": [
+    2.621835
+   ],
+   "wall_median_s": 2.621835,
+   "engine_total_s": 2.614353791,
+   "phases_s": {
+    "density_s": 0.117725249,
+    "diagonalization_s": 2.090127043,
+    "mixing_s": 0.002493124,
+    "potential_s": 0.006728419,
+    "total_energy_s": 0.238564623
+   },
+   "engine_total_median_s": 2.614353791,
+   "phase_medians_s": {
+    "density_s": 0.117725249,
+    "diagonalization_s": 2.090127043,
+    "mixing_s": 0.002493124,
+    "potential_s": 0.006728419,
+    "total_energy_s": 0.238564623
+   },
+   "iterations": 10,
+   "total_energy_ha": -7.9259761266480915,
+   "density_sha256": "ad4d3eabe1b8823365908f6647c4470831a51416e8c738cd3f2aaabf7549b220"
+  }
+ }
+}

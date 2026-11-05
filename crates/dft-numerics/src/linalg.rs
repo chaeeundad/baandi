@@ -640,6 +640,7 @@ pub fn orthonormalize_into(
     Ok(count)
 }
 
+pub mod accounting;
 mod tiled;
 pub use tiled::{GemmWorkspace, ProjectionWorkspace};
 

@@ -85,3 +85,4 @@ Conventions: docs are English; one fact lives in one place and others link to it
 - [Fixed-sector collinear SCF](user/collinear-spin.md): P13B implementation,
   LDA-PW/PBE input, certificate/results, synthetic oracles and legacy equivalence.
 - [NC dataset manifest](data/nc-datasets.json) and [independent header comparison](../tests/reference/datasets/pseudodojo-headers.json): P13C header identity, NLCC synthetic oracles, explicit real-file smoke outcomes and qualification limits. See [CLI support](cli.md#p13c-nc-datasets-and-nlcc).
+- [Study note 4: Davidson GEMM attribution](research/qe-study/davidson-gemm-accounting.md): P14B shape/work/timing tables and adopted incremental reduced-matrix optimization.

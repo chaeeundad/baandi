@@ -1,0 +1,94 @@
+[
+  {
+    "case": "si8",
+    "energy_density_work_thread_identity": true
+  },
+  {
+    "case": "k444s",
+    "energy_density_work_thread_identity": true
+  },
+  {
+    "case": "syn20-skew",
+    "energy_density_work_thread_identity": true
+  },
+  {
+    "case": "syn4-elongated",
+    "energy_density_work_thread_identity": true
+  },
+  {
+    "case": "si-elongated",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "si-gamma",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "si-k222",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "si-k222s",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "si-low",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "si-skew",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "si8-gamma",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "syn-cubic-degenerate",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "syn-d3",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "syn-fft-primes",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "syn-gaussian-fcc",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "syn-odd-shift",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "syn-p3",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "syn-s1",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "syn-s2",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "syn-s3",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "syn-spd",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "syn-z1",
+    "baseline_final_scientific_identity": true
+  },
+  {
+    "case": "syn-z14",
+    "baseline_final_scientific_identity": true
+  }
+]

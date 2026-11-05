@@ -30,6 +30,11 @@ pub struct GemmWorkspace {
     short: usize,
     threads: usize,
     pool: Arc<WorkerPool>,
+    #[cfg(feature = "mkl")]
+    reduced_scratch: Vec<Complex64>,
+    site: &'static str,
+    solve: usize,
+    minimum: Option<u64>,
 }
 impl GemmWorkspace {
     pub fn new(long: usize, short: usize, threads: usize) -> Result<Self, LinalgError> {
@@ -68,6 +73,7 @@ impl GemmWorkspace {
             }
             tiles
         };
+        accounting::prepare();
         Ok(Self {
             #[cfg(not(feature = "mkl"))]
             tiles,
@@ -75,7 +81,21 @@ impl GemmWorkspace {
             short,
             threads: threads.max(1),
             pool,
+            #[cfg(feature = "mkl")]
+            reduced_scratch: vec![Complex64::default(); short * short],
+            site: "other",
+            solve: accounting::solve_id(),
+            minimum: None,
         })
+    }
+
+    /// Diagnostic attribution only; no arithmetic policy is selected here.
+    #[inline(always)]
+    pub fn accounting_site(&mut self, site: &'static str) {
+        if accounting::ENABLED {
+            self.site = site;
+            self.minimum = None;
+        }
     }
 
     /// Allocating convenience boundary for legacy Davidson result ownership.
@@ -92,6 +112,113 @@ impl GemmWorkspace {
         let mut out = ComplexMatrix::zeros(m, n)?;
         self.multiply_into(a, oa, b, ob, &mut out)?;
         Ok(out)
+    }
+
+    /// Extend the reduced Hamiltonian while retaining the old-old block.
+    /// `previous` must be the product of the unchanged prefix of both inputs.
+    /// Invalidate it whenever the basis is restarted or H products are replaced.
+    pub fn reduced_hamiltonian(
+        &mut self,
+        basis: &ComplexMatrix,
+        products: &ComplexMatrix,
+        previous: Option<&ComplexMatrix>,
+    ) -> Result<ComplexMatrix, LinalgError> {
+        self.accounting_site("reduced_hamiltonian");
+        if let Some(previous) = previous {
+            previous.validate_finite()?;
+            basis.validate_finite()?;
+            products.validate_finite()?;
+            let width = basis.cols;
+            let old = previous.rows;
+            if products.rows != basis.rows
+                || products.cols != width
+                || previous.cols != old
+                || old > width
+                || width > self.short
+                || basis.rows > self.long
+            {
+                return Err(LinalgError::Dimension);
+            }
+            let mut out = ComplexMatrix::zeros(width, width)?;
+            // Preserve both triangles, including their original roundoff.
+            for j in 0..old {
+                out.column_mut(j)[..old].copy_from_slice(previous.column(j));
+            }
+            crate::pool::analysis::copied(old * old * size_of::<Complex64>());
+            #[cfg(not(feature = "mkl"))]
+            let count = basis.rows.div_ceil(PANEL).max(1);
+            for (row, col, m, n) in [(old, 0, width - old, width), (0, old, old, width - old)] {
+                if m == 0 || n == 0 {
+                    continue;
+                }
+                let _measurement = accounting::Span::new(
+                    self.solve,
+                    "reduced_extension",
+                    [m, n, basis.rows],
+                    1,
+                    (2 * m * n * basis.rows) as u64,
+                );
+                crate::pool::analysis::logical_gemm(m, n, basis.rows);
+                #[cfg(feature = "mkl")]
+                {
+                    let rows = basis.rows;
+                    let a =
+                        dft_mkl::Matrix::new(&basis.data[row * rows..(row + m) * rows], rows, m)
+                            .map_err(|_| LinalgError::Dimension)?;
+                    let b =
+                        dft_mkl::Matrix::new(&products.data[col * rows..(col + n) * rows], rows, n)
+                            .map_err(|_| LinalgError::Dimension)?;
+                    let scratch = &mut self.reduced_scratch[..m * n];
+                    crate::pool::analysis::executed_gemm(m, n, rows);
+                    dft_mkl::gemm(a, true, b, false, scratch)
+                        .map_err(|_| LinalgError::Dimension)?;
+                    // Contiguous BLAS output is scattered into the small reduced matrix.
+                    // Large operands are borrowed column ranges, never packed/copied.
+                    for j in 0..n {
+                        out.column_mut(col + j)[row..row + m]
+                            .copy_from_slice(&scratch[j * m..(j + 1) * m]);
+                    }
+                    crate::pool::analysis::copied(m * n * size_of::<Complex64>());
+                }
+                #[cfg(not(feature = "mkl"))]
+                {
+                    let job = Job {
+                        a: basis,
+                        oa: MatrixOp::Adjoint,
+                        b: products,
+                        ob: MatrixOp::Identity,
+                        m,
+                        n,
+                        k: basis.rows,
+                        reduce: true,
+                        panel: PANEL,
+                        row_offset: row,
+                        col_offset: col,
+                    };
+                    let threads = if m * n * basis.rows < 262_144 || count < 4 {
+                        1
+                    } else {
+                        self.threads.min(count)
+                    };
+                    if threads == 1 {
+                        run(&mut self.tiles[..count], 0, 1, &job)?;
+                    } else {
+                        self.pool
+                            .install(|| run(&mut self.tiles[..count], 0, threads, &job))?;
+                    }
+                    for tile in &self.tiles[..count] {
+                        for j in 0..n {
+                            for i in 0..m {
+                                out[(row + i, col + j)] += tile.c[(i, j)];
+                            }
+                        }
+                    }
+                }
+            }
+            out.validate_finite()?;
+            return Ok(out);
+        }
+        self.multiply(basis, MatrixOp::Adjoint, products, MatrixOp::Identity)
     }
 
     /// Rotate a basis and its Hamiltonian image in one scheduling region.
@@ -127,6 +254,8 @@ impl GemmWorkspace {
                 n,
                 reduce: false,
                 panel: PANEL,
+                row_offset: 0,
+                col_offset: 0,
             };
             let hjob = Job { a: h, ..job };
             let count = m.div_ceil(PANEL).max(1);
@@ -136,6 +265,8 @@ impl GemmWorkspace {
             } else {
                 self.threads.min(count)
             };
+            let _measurement =
+                accounting::Span::new(self.solve, self.site, [m, n, k], 2, (4 * m * n * k) as u64);
             crate::pool::analysis::logical_gemm(m, n, k);
             crate::pool::analysis::logical_gemm(m, n, k);
             let output = faer::MatMut::from_column_major_slice_mut(&mut out.data, m, n);
@@ -211,6 +342,13 @@ impl GemmWorkspace {
         {
             return Err(LinalgError::Dimension);
         }
+        let _measurement = accounting::Span::new(
+            self.solve,
+            self.site,
+            [m, n, k],
+            1,
+            self.minimum.unwrap_or((2 * m * n * k) as u64),
+        );
         crate::pool::analysis::logical_gemm(m, n, k);
         #[cfg(feature = "mkl")]
         {
@@ -231,6 +369,8 @@ impl GemmWorkspace {
                 n,
                 reduce,
                 panel,
+                row_offset: 0,
+                col_offset: 0,
             };
             // Fixed 2,097,152-real-flop cutoff (8 flops per complex multiply-add).
             // Require four panels to avoid a single full panel plus a tiny tail.
@@ -298,6 +438,8 @@ struct Job<'a> {
     n: usize,
     reduce: bool,
     panel: usize,
+    row_offset: usize,
+    col_offset: usize,
 }
 #[cfg(not(feature = "mkl"))]
 fn run(tiles: &mut [Tile], first: usize, threads: usize, job: &Job<'_>) -> Result<(), LinalgError> {
@@ -400,7 +542,11 @@ fn borrowed_product(
     mut c: faer::MatMut<'_, Complex64>,
 ) {
     crate::pool::analysis::executed_gemm(rows, job.n, inner);
-    let row = if job.reduce { 0 } else { start };
+    let row = if job.reduce {
+        job.row_offset
+    } else {
+        start + job.row_offset
+    };
     let reduction = if job.reduce { start } else { 0 };
     let a = faer::MatRef::from_column_major_slice(&job.a.data, job.a.rows, job.a.cols);
     let b = faer::MatRef::from_column_major_slice(&job.b.data, job.b.rows, job.b.cols);
@@ -409,8 +555,8 @@ fn borrowed_product(
         MatrixOp::Adjoint => a.submatrix(reduction, row, inner, rows),
     };
     let b = match job.ob {
-        MatrixOp::Identity => b.submatrix(reduction, 0, inner, job.n),
-        MatrixOp::Adjoint => b.submatrix(0, reduction, job.n, inner),
+        MatrixOp::Identity => b.submatrix(reduction, job.col_offset, inner, job.n),
+        MatrixOp::Adjoint => b.submatrix(job.col_offset, reduction, job.n, inner),
     };
     let one = Complex64::new(1.0, 0.0);
     match (job.oa, job.ob) {
@@ -604,6 +750,11 @@ impl ProjectionWorkspace {
                 // the preceding MGS pass) changed the incoming block; check it
                 // once. The first product checks coefficients on output.
                 self.normalized.validate_finite()?;
+                gemm.accounting_site(if pass == 0 {
+                    "projection_overlap_1"
+                } else {
+                    "projection_overlap_2"
+                });
                 gemm.multiply_panels(
                     q,
                     MatrixOp::Adjoint,
@@ -616,6 +767,11 @@ impl ProjectionWorkspace {
                         256
                     },
                 )?;
+                gemm.accounting_site(if pass == 0 {
+                    "projection_subtract_1"
+                } else {
+                    "projection_subtract_2"
+                });
                 gemm.multiply_panels(
                     q,
                     MatrixOp::Identity,
@@ -769,6 +925,59 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn incremental_gram_prefix_scalar_oracle_and_threads() {
+        // Non-Hermitian products ensure that neither triangle is inferred from the other.
+        for rows in [31, 513, 1025] {
+            let a = matrix(rows, 40);
+            let mut b = a.clone();
+            for (i, z) in b.data.iter_mut().enumerate() {
+                *z *= Complex64::new(0.7, (i % 9) as f64 * 0.01);
+            }
+            let mut reference = Vec::new();
+            for threads in [1, 2, 4, 8] {
+                let mut work = GemmWorkspace::new(rows.max(40), 40, threads).unwrap();
+                let mut previous: Option<ComplexMatrix> = None;
+                for (stage, width) in [7, 11, 19, 33, 33].into_iter().enumerate() {
+                    let mut aa = a.clone();
+                    aa.resize_columns(width).unwrap();
+                    let mut bb = b.clone();
+                    bb.resize_columns(width).unwrap();
+                    let result = work
+                        .reduced_hamiltonian(&aa, &bb, previous.as_ref())
+                        .unwrap();
+                    for j in 0..width {
+                        for i in 0..width {
+                            let expected: Complex64 =
+                                (0..rows).map(|k| a[(k, i)].conj() * b[(k, j)]).sum();
+                            assert!((result[(i, j)] - expected).norm() < 2e-11);
+                            if let Some(old) = &previous
+                                && i < old.rows
+                                && j < old.cols
+                            {
+                                assert_eq!(result[(i, j)], old[(i, j)]);
+                            }
+                        }
+                    }
+                    if threads == 1 {
+                        reference.push(result.clone());
+                    } else {
+                        bits(&result, &reference[stage]);
+                    }
+                    previous = Some(result);
+                }
+                // A restart discards the old product and computes the complete new basis.
+                let fresh = work.reduced_hamiltonian(&a, &b, None).unwrap();
+                let full = work
+                    .multiply(&a, MatrixOp::Adjoint, &b, MatrixOp::Identity)
+                    .unwrap();
+                bits(&fresh, &full);
+                let bad = ComplexMatrix::zeros(41, 41).unwrap();
+                assert!(work.reduced_hamiltonian(&a, &b, Some(&bad)).is_err());
+            }
+        }
+    }
+
     #[test]
     fn products_all_adjoint_shapes_partial_tiles_and_budgets() {
         use MatrixOp::{Adjoint, Identity};
@@ -1065,6 +1274,8 @@ mod tests {
                     n: width,
                     reduce: true,
                     panel: PANEL,
+                    row_offset: 0,
+                    col_offset: 0,
                 };
                 let count = rows.div_ceil(PANEL);
                 let mut times = [0.0; 2];

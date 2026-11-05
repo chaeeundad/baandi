@@ -217,3 +217,21 @@ Numerical defaults, certificate thresholds and existing README reference evidenc
 are unchanged. README/figure regeneration and its three specification tests pass;
 the generated files have no diff. Adding a new README result type or dashboard
 JSON entries requires the corresponding orchestrator-owned reporting files.
+
+## Collinear SCF (P13B / MF03)
+
+`scf::collinear` owns the additive `CollinearProblem`, `SpinSector`, result and
+fresh-map certificate. Legacy `ScfProblem` constructors pass no spin sector;
+no change to their iteration arithmetic or result shape is intended. Shared
+construction accepts an internal channel occupied count only for the new API.
+There is one solver implementation, called for each channel; density/audit
+buffers are reserved once. One common feasibility fraction applies to both
+existing mixer proposals. Only raw charge and spin residuals certify convergence;
+per-channel gaps apply only to nonempty channels. Output energy/eigenpairs/density
+are one state, with fresh certificate metrics separate. No spin runtime or exact
+checkpoint support is implied. See `docs/user/collinear-spin.md` for bounds,
+measured evidence and limitations.
+
+The geometry/mesh test exceeds the debug budget and is ignored by default:
+`cargo test --release -p dft-engine --test collinear -- --include-ignored --nocapture`.
+Run `scripts/check.sh` and the unchanged SCF benchmark identity check too.

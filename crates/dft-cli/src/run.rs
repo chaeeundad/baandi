@@ -1,5 +1,7 @@
 //! File/console boundary for the sequential engine. No I/O occurs in SCF kernels.
 use crate::{config::Config, grid_report};
+#[path = "spin_run.rs"]
+mod spin_run;
 #[path = "volumetric_out.rs"]
 pub mod volumetric_out;
 use dft_engine::{
@@ -175,7 +177,15 @@ pub struct RunReport {
 // Canonicalize existing destinations (including symlinks) before any writes.
 // Unix inode checks additionally protect hard-linked input files.
 fn protect_outputs(dir: &Path, inputs: &[PathBuf]) -> Result<(), RunError> {
-    for name in ["results.json", "density.json", "density.bin"] {
+    for name in [
+        "results.json",
+        "density.json",
+        "density.bin",
+        "density-up.cube",
+        "density-down.cube",
+        "density-total.cube",
+        "magnetization.cube",
+    ] {
         let dest = dir.join(name);
         if dest.exists() {
             let canonical = fs::canonicalize(&dest)?;
@@ -223,6 +233,12 @@ pub fn execute_mode(
     let bytes = fs::read(input).map_err(|e| error(5, format!("{}: {e}", input.display())))?;
     let text = std::str::from_utf8(&bytes).map_err(|e| error(1, e))?;
     let config = Config::parse(text).map_err(|e| error(1, e))?;
+    if config.collinear() && (mode.observe || mode.agent) {
+        return Err(error(
+            1,
+            "spin.execution: runtime control is not spin-aware; use Classic execution",
+        ));
+    }
     let preflight = crate::config::preflight::check(&config, input).map_err(|e| error(1, e))?;
     if mode.events.as_deref() == Some("-") {
         eprintln!("{}", preflight.summary);
@@ -304,6 +320,24 @@ pub fn execute_mode(
         .map(|(label, potential)| SpeciesPotential { label, potential })
         .collect();
     let points = config.basis.resolve_kpoints().map_err(|e| error(1, e))?;
+    let electron_target: f64 = atoms
+        .iter()
+        .map(|a| {
+            refs.iter()
+                .find(|p| p.label == a.species)
+                .unwrap()
+                .potential
+                .z_valence()
+        })
+        .sum();
+    if let Some(sector) = config
+        .spin_sector(electron_target)
+        .map_err(|e| error(1, e))?
+    {
+        return spin_run::execute(
+            &prepared, opts, &atoms, &refs, &points, sector, &out, preflight, species, &bytes,
+        );
+    }
     let problem = if config.basis.legacy_gamma() {
         ScfProblem::new(&prepared.cell, &atoms, &refs, opts.clone())
     } else {
@@ -372,7 +406,7 @@ pub fn execute_mode(
         .map(|((&residual, &buffer), &converged)| json!({"residual_ha":residual,"buffer":buffer,"converged":converged}))
         .collect::<Vec<_>>());
     // Preserve the legacy LDA schema unless an override was explicitly enabled.
-    if opts.functional == dft_engine::Functional::Pbe || opts.allow_functional_override {
+    if opts.functional != dft_engine::Functional::LdaPz || opts.allow_functional_override {
         result["allow_functional_override"] = json!(opts.allow_functional_override);
         result["functional_override_applied"] = json!(
             potentials

@@ -28,7 +28,7 @@
    "status": "done",
    "area": "k points",
    "feature": "Gamma, Monkhorst-Pack grids (shifted or not), explicit k lists",
-   "note": "Time-reversal reduction only; no space-group symmetry reduction yet."
+   "note": "Time reversal and opt-in crystal symmetry reduction; only model-, mesh- and FFT-grid-preserving operations. [Evidence](tests/reference/symmetry/evidence.json)."
   },
   {
    "status": "done",
@@ -145,16 +145,16 @@
    "note": "Independent header checks and synthetic NLCC oracles; Si/MgO bulk smoke, comparison with QE pending. Datasets remain unqualified; ultrasoft and PAW unavailable. [Evidence](tests/reference/datasets/p13c-status.json)."
   },
   {
-   "status": "planned",
+   "status": "done",
    "area": "Physics",
-   "feature": "Forces, stress, structure relaxation, molecular dynamics, phonons",
-   "note": "Hellmann-Feynman forces come first."
+   "feature": "Atomic forces",
+   "note": "Strict NC LDA/PBE, NLCC, fixed spin and Fermi-Dirac; energy finite differences and independent scalar checks. DFT+U forces unsupported; comparison with QE pending. [Evidence](tests/reference/forces/manifest.json)."
   },
   {
-   "status": "planned",
+   "status": "done",
    "area": "Physics",
    "feature": "Space-group symmetry (k-point reduction, density symmetrization)",
-   "note": "Large speedup for crystals with many k points."
+   "note": "Opt-in k-point reduction and density symmetrization; full/reduced, spin and finite-temperature checks. Magnetic spin swaps unsupported; comparison with QE pending. [Evidence](tests/reference/symmetry/evidence.json)."
   },
   {
    "status": "planned",
@@ -185,6 +185,24 @@
    "area": "SCF",
    "feature": "Opt-in standard convergence profile",
    "note": "Strict remains default. Standard reduces solver work in stored successful cases but is not certified; skew/slab/mesh failures remain. [Evidence](tests/reference/perf/p17a/final-report.json)."
+  },
+  {
+   "status": "done",
+   "area": "Physics",
+   "feature": "Stress and pressure",
+   "note": "Strict NC frozen-basis strain derivatives; ASE strain check and separate Pulay estimate. Standard profile unsupported; real Si/MgO material stresses inconclusive; comparison with QE pending. [Evidence](tests/reference/stress/validation.json)."
+  },
+  {
+   "status": "done",
+   "area": "Physics",
+   "feature": "Fixed-cell ionic relaxation",
+   "note": "BFGS/FIRE, Cartesian constraints, warm starts and byte-identical restart. CLI spin-polarized and finite-temperature relaxation unsupported; Gamma-only MgO is not bulk qualification; comparison with QE pending. [Evidence](tests/reference/relaxation/manifest.json)."
+  },
+  {
+   "status": "planned",
+   "area": "Physics",
+   "feature": "Cell relaxation, molecular dynamics and phonons",
+   "note": "No P23A cell-relaxation evidence in this snapshot; no validation claim."
   }
  ],
  "can_today": [
@@ -193,7 +211,7 @@
  ],
  "not_yet": [
   "Validated magnetic and metallic material accuracy; DFT+U for correlated transition-metal oxides. Spin, NLCC and Fermi-Dirac options have limited validation below.",
-  "Forces and relaxations, symmetry reduction, hybrid functionals."
+  "Spin-polarized or finite-temperature relaxation in the CLI, DFT+U forces, standard-profile stress, validated cell relaxation, molecular dynamics, phonons and hybrid functionals."
  ],
  "speed": "Measured on one server (dev08, 2 x Xeon Gold 6230, Rocky Linux 9.7, one socket, Intel MKL 2026.1 linked in both codes, same silicon pseudopotential and FFT grid; QE 7.6 with MPI, one thread per process), same session and idle node, 2026-11-05, BAANDI commit fdce016 for the k-point mesh and the later commit 7fe2e9a for the 8-atom cell (the k-point results did not change between them). Ratios are BAANDI time over QE time, so above 1 means BAANDI is slower. Silicon with a 4x4x4 shifted k mesh (2 atoms): at 8 to 16 cores 2.0 to 2.2 times slower than QE at convergence threshold 1e-8 and 1.4 to 1.6 times slower at 1e-12 (QE needs 8 instead of 5 iterations at 1e-12; both are reported because the ratio depends on it); on one core 4.2 to 5.1 times (1e-8). An 8-atom cell at Gamma only (one k point): against QE's complex k=0 path (`K_POINTS automatic 1 1 1`) BAANDI is 5.3 to 8.0 times slower on one core and 13 to 15 times slower at 16 cores; against QE's real-wavefunction Gamma path (`K_POINTS gamma`, QE's best configuration for this case, 1.3 to 1.9 times faster than its complex path and the reference for the goal of exceeding QE) BAANDI is 9.6 to 14.9 times slower on one core (1e-12 and 1e-8 convergence thresholds; MKL and pure Rust builds), (a machine-tuned build, `target-cpu=native`, makes the pure Rust build 1.1 to 1.4 times faster on dev08 with bit-identical results, bringing the one-core ratio to QE's real Gamma path down to 11.3; the ratios above use the default portable build) because BAANDI's threading speeds this case up only 1.4 times at 8 threads, it has no real-wavefunction Gamma path yet, and it performs more eigensolver work per SCF iteration; this is the main known weakness and is being worked on. Cases where QE takes under 0.3 s are excluded: QE's timer resolves only 0.01 s. The numbers were relayed from the measuring session and have not been independently reproduced here; build hashes, raw tables and limits: tests/reference/perf/dev08_final_relayed.md."
 }

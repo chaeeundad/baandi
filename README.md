@@ -79,7 +79,7 @@ Status as of 2026-11-03, written for people who run calculations. Source: `docs/
 
 **You can use it today for:** Total energy, eigenvalues and electron density of insulating periodic systems with LDA or PBE, on Gamma or a k mesh. Reproducible runs: the result files carry hashes, options and the energy audit.
 
-**Not available yet:** Validated magnetic and metallic material accuracy; DFT+U for correlated transition-metal oxides. Spin, NLCC and Fermi-Dirac options have limited validation below. Forces and relaxations, symmetry reduction, hybrid functionals.
+**Not available yet:** Validated magnetic and metallic material accuracy; DFT+U for correlated transition-metal oxides. Spin, NLCC and Fermi-Dirac options have limited validation below. Spin-polarized or finite-temperature relaxation in the CLI, DFT+U forces, standard-profile stress, validated cell relaxation, molecular dynamics, phonons and hybrid functionals.
 
 **Speed:** Measured on one server (dev08, 2 x Xeon Gold 6230, Rocky Linux 9.7, one socket, Intel MKL 2026.1 linked in both codes, same silicon pseudopotential and FFT grid; QE 7.6 with MPI, one thread per process), same session and idle node, 2026-11-05, BAANDI commit fdce016 for the k-point mesh and the later commit 7fe2e9a for the 8-atom cell (the k-point results did not change between them). Ratios are BAANDI time over QE time, so above 1 means BAANDI is slower. Silicon with a 4x4x4 shifted k mesh (2 atoms): at 8 to 16 cores 2.0 to 2.2 times slower than QE at convergence threshold 1e-8 and 1.4 to 1.6 times slower at 1e-12 (QE needs 8 instead of 5 iterations at 1e-12; both are reported because the ratio depends on it); on one core 4.2 to 5.1 times (1e-8). An 8-atom cell at Gamma only (one k point): against QE's complex k=0 path (`K_POINTS automatic 1 1 1`) BAANDI is 5.3 to 8.0 times slower on one core and 13 to 15 times slower at 16 cores; against QE's real-wavefunction Gamma path (`K_POINTS gamma`, QE's best configuration for this case, 1.3 to 1.9 times faster than its complex path and the reference for the goal of exceeding QE) BAANDI is 9.6 to 14.9 times slower on one core (1e-12 and 1e-8 convergence thresholds; MKL and pure Rust builds), (a machine-tuned build, `target-cpu=native`, makes the pure Rust build 1.1 to 1.4 times faster on dev08 with bit-identical results, bringing the one-core ratio to QE's real Gamma path down to 11.3; the ratios above use the default portable build) because BAANDI's threading speeds this case up only 1.4 times at 8 threads, it has no real-wavefunction Gamma path yet, and it performs more eigensolver work per SCF iteration; this is the main known weakness and is being worked on. Cases where QE takes under 0.3 s are excluded: QE's timer resolves only 0.01 s. The numbers were relayed from the measuring session and have not been independently reproduced here; build hashes, raw tables and limits: tests/reference/perf/dev08_final_relayed.md.
 
@@ -90,7 +90,7 @@ Status as of 2026-11-03, written for people who run calculations. Source: `docs/
 | Physics | Kohn-Sham DFT with plane waves | Periodic cells, norm-conserving pseudopotentials (UPF v2 subset), spin-unpolarized. |
 | Physics | LDA (Perdew-Zunger) and PBE (GGA) | PBE comes from the xcx library; tested against QE on the same pseudopotential. |
 | Physics | Insulators with fixed occupations | Fixed occupations require a sampled band gap. Use the separate Fermi-Dirac option for partial occupations. |
-| k points | Gamma, Monkhorst-Pack grids (shifted or not), explicit k lists | Time-reversal reduction only; no space-group symmetry reduction yet. |
+| k points | Gamma, Monkhorst-Pack grids (shifted or not), explicit k lists | Time reversal and opt-in crystal symmetry reduction; only model-, mesh- and FFT-grid-preserving operations. [Evidence](tests/reference/symmetry/evidence.json). |
 | SCF | Pulay and linear density mixing, block Davidson eigensolver | Strict runs use a fixed-point certificate and energy audit. Opt-in standard results are not certified. |
 | Input | One TOML file; units (Ha, Ry, eV, Angstrom, Bohr, ...) and expressions such as 1/4 or 5.43/2 Angstrom | Wrong inputs are rejected with the key path of the problem. |
 | Output | results.json (energies, eigenvalues, convergence history, provenance) and the electron density (binary + metadata) | Every run records input and pseudopotential hashes. |
@@ -104,7 +104,11 @@ Status as of 2026-11-03, written for people who run calculations. Source: `docs/
 | Physics | Fermi-Dirac occupations and chemical potential | Unpolarized and collinear finite-temperature SCF; analytic synthetic oracles and an Al smoke run, no QE metal comparison. Check empty-band convergence; finite-T restart unavailable. [Evidence](tests/reference/occupations/summary.json). |
 | Physics | Collinear spin with fixed up/down electron counts | LDA-PW and PBE; synthetic analytic and zero-moment oracles. No validated magnetic material ground state; noncollinear and spin-orbit remain unavailable. [Evidence](crates/dft-engine/tests/collinear-evidence.json). |
 | Physics | Nonlinear core correction and PseudoDojo NC file support | Independent header checks and synthetic NLCC oracles; Si/MgO bulk smoke, comparison with QE pending. Datasets remain unqualified; ultrasoft and PAW unavailable. [Evidence](tests/reference/datasets/p13c-status.json). |
+| Physics | Atomic forces | Strict NC LDA/PBE, NLCC, fixed spin and Fermi-Dirac; energy finite differences and independent scalar checks. DFT+U forces unsupported; comparison with QE pending. [Evidence](tests/reference/forces/manifest.json). |
+| Physics | Space-group symmetry (k-point reduction, density symmetrization) | Opt-in k-point reduction and density symmetrization; full/reduced, spin and finite-temperature checks. Magnetic spin swaps unsupported; comparison with QE pending. [Evidence](tests/reference/symmetry/evidence.json). |
 | SCF | Opt-in standard convergence profile | Strict remains default. Standard reduces solver work in stored successful cases but is not certified; skew/slab/mesh failures remain. [Evidence](tests/reference/perf/p17a/final-report.json). |
+| Physics | Stress and pressure | Strict NC frozen-basis strain derivatives; ASE strain check and separate Pulay estimate. Standard profile unsupported; real Si/MgO material stresses inconclusive; comparison with QE pending. [Evidence](tests/reference/stress/validation.json). |
+| Physics | Fixed-cell ionic relaxation | BFGS/FIRE, Cartesian constraints, warm starts and byte-identical restart. CLI spin-polarized and finite-temperature relaxation unsupported; Gamma-only MgO is not bulk qualification; comparison with QE pending. [Evidence](tests/reference/relaxation/manifest.json). |
 
 ### Being built now
 
@@ -121,12 +125,11 @@ Status as of 2026-11-03, written for people who run calculations. Source: `docs/
 | Area | Feature | Notes |
 |---|---|---|
 | Physics | DFT+U, meta-GGA, hybrid functionals, dispersion corrections | Roadmap and validation oracles are in docs/research/xc-and-manybody-roadmap.md. |
-| Physics | Forces, stress, structure relaxation, molecular dynamics, phonons | Hellmann-Feynman forces come first. |
-| Physics | Space-group symmetry (k-point reduction, density symmetrization) | Large speedup for crystals with many k points. |
 | Physics | RPA and cRPA correlation (research stage) | Design only; no implementation yet. |
 | Method | Electronic-state landscape exploration: several self-consistent solutions, state comparison, branch tracking | Design in docs/roadmap/esle.md; starts after the baseline is complete. |
 | Method | Coupling to outside environments (embedding, solvent, QM/MM, applied electric fields) through typed interfaces | Design in docs/architecture/scientific-coupling.md. |
 | Speed | GPU backends and MPI | Design study in progress; the CPU path stays the reference. |
+| Physics | Cell relaxation, molecular dynamics and phonons | No P23A cell-relaxation evidence in this snapshot; no validation claim. |
 
 <!-- status:end -->
 
@@ -161,7 +164,7 @@ Rust and independent Python header readers agree for 5 files (O, Ni, Al, Mg, Si)
 
 Synthetic Gaussian core transforms match the analytic formula to 8.33e-16 relative error; localized XC potentials match finite differences to 7.25e-12 Ha. The later density-floor derivative check has maximum error 2.23e-10 Ha Bohr^3. [`tests/reference/datasets/p13c-status.json`](tests/reference/datasets/p13c-status.json); [`tests/reference/materials/verification.json`](tests/reference/materials/verification.json).
 
-Limits: translating the synthetic PBE cell changes the energy by 3.08e-06 Ha on the coarse grid (fails the 1e-07 Ha cap), falling to 5.17e-09 Ha with grid refinement. The stored isolated-atom runs include failures; all datasets remain unqualified for transferability, ghost states and cutoff convergence. NLCC checkpoint persistence and ionic force/stress derivatives are unavailable.
+Limits: translating the synthetic PBE cell changes the energy by 3.08e-06 Ha on the coarse grid (fails the 1e-07 Ha cap), falling to 5.17e-09 Ha with grid refinement. The stored isolated-atom runs include failures; all datasets remain unqualified for transferability, ghost states and cutoff convergence. NLCC checkpoint persistence remains unavailable; validated NC force/stress derivatives are reported below.
 
 ### Real-material bulk runs: Si and MgO
 
@@ -209,6 +212,95 @@ Reference: independent analytic occupation/entropy formulas, finite differences 
 Synthetic SCF: E = -0.461893304214 Ha, F = -0.475756247825 Ha, S/kB = 1.386294361120, in 11 iterations. The entropy derivative error falls from 5.67e-06 to 3.46e-07 (dimensionless) as the temperature-energy step decreases from 0.004 to 0.001 Ha. Empty-band refinement changes F by at most 1.55e-14 Ha. At kB T = 0.001 Ha, energy differs from fixed occupations by 4.44e-16 Ha.
 
 External-file Al smoke: kB T = 0.01 Ha, cutoff 20 Ha, 20 bands, mesh 2x2x2, E = -2.308957374807 Ha in 8 iterations. This is not validated metallic material accuracy. Empty-band convergence must be checked for each calculation; finite-temperature checkpoint persistence is unavailable.
+
+### Crystal symmetry: fewer k points for the same calculation
+
+The shifted Si mesh goes from 32 time-reversal representatives to 10 with crystal symmetry. Mac median wall time (3 samples each): 3.328 to 1.106 s; this is an observation, not a server benchmark or a comparison with QE. [`tests/reference/symmetry/mac-k444s.json`](tests/reference/symmetry/mac-k444s.json).
+
+Full mesh versus reduced mesh in the same engine (not an independent DFT code): 7 Si, MgO and synthetic cases have maximum energy difference 5.68e-14 Ha and density distance 1.58e-12 Bohr^-3/2. Fixed-spin differences: 5.55e-17 Ha, 5.36e-17 Bohr^-3/2 and 4.44e-16 mu_B. Finite-temperature differences: E 1.11e-15 Ha, F 1.11e-15 Ha, density 7.88e-16 Bohr^-3/2. [`tests/reference/symmetry/evidence.json`](tests/reference/symmetry/evidence.json).
+
+Only operations preserving the model, k mesh and FFT grid are retained; magnetic spin swaps and magnetic antiunitary operations are disabled. See [symmetry scope](docs/validation/symmetry.md); comparison with QE pending.
+
+### Atomic forces: checked against energy changes
+
+Central displacement finite differences check individual terms and converged combinations. Stored displacement steps: 0.01, 0.005, 0.0025 Bohr. [`tests/reference/forces/manifest.json`](tests/reference/forces/manifest.json).
+
+| Force check | Maximum difference (Ha/Bohr) | Reference |
+|---|---:|---|
+| Ewald | 8.06e-08 | Energy finite differences |
+| Frozen local | 8.16e-09 | Energy finite differences |
+| Frozen nonlocal | 5.36e-07 | Energy finite differences |
+| Converged local + nonlocal | 3.05e-08 | Total-energy finite differences |
+| NLCC combination | 5.77e-08 | Total-energy finite differences |
+| PBE + NLCC combination | 5.73e-08 | Total-energy finite differences |
+| Finite temperature | 2.70e-08 | Free-energy finite differences |
+| Independent local + Ewald | 5.44e-08 | Second scalar energy reimplementation, finite differences |
+| Zero-moment spin reduction | 9.92e-16 | Unpolarized engine |
+
+Resolved MgO net-force maximum component: 3.40e-09 Ha/Bohr (cap 1e-08). Real-file results from the same manifest:
+
+| Material | Force vs finite difference (Ha/Bohr) | Summed numerical uncertainty (Ha/Bohr) |
+|---|---:|---:|
+| Si | 5.43e-09 | 5.55e-07 |
+| MgO | 2.81e-08 | 3.11e-05 |
+
+Uncertainty covers SCF, cutoff and FFT-grid checks; it is not the derivative error. Both sums are below one third of the 1e-04 Ha/Bohr real-force cap. These results do not establish pseudopotential transferability. Forces require strict converged states and complete NC derivatives; DFT+U forces are unsupported. Spin and finite-temperature forces exist in engine/CLI; the ASE adapter remains Gamma/unpolarized. [Force scope](docs/validation/forces.md); comparison with QE pending.
+
+Mac cost observations (one sample per case, no performance acceptance): [`tests/reference/forces/cost.json`](tests/reference/forces/cost.json).
+
+| Case | SCF (s) | Force pass (s) | Force / (SCF + force) |
+|---|---:|---:|---:|
+| si8 | 2.554 | 1.008 | 28.30% |
+| k444s | 2.439 | 0.298 | 10.88% |
+
+### Ionic relaxation: move atoms at a fixed cell
+
+BFGS/FIRE are available with Cartesian constraints. Against an independent scalar energy scan, compressed/stretched synthetic starts reach the periodic minimum within 6.04e-10 Bohr. This is a periodic model, not an isolated molecule or a global-minimum proof. Warm versus fresh SCF energy differs by at most 5.55e-16 Ha. ASE BFGS versus CLI BFGS differs by 3.62e-07 Bohr and 7.77e-16 Ha; ASE is an independent optimizer using BAANDI forces, not another DFT code. [`tests/reference/relaxation/manifest.json`](tests/reference/relaxation/manifest.json).
+
+Gamma-only Si returns to the ideal diamond bond: final atom fractional coordinates (0.249999999984, 0.249999999987, 0.249999999983), after 5 steps, maximum free force 5.57e-11 Ha/Bohr. Restart after an accepted boundary yields byte-identical complete output files in the 4-step fixture. [`tests/reference/relaxation/logs/cli-all.log`](tests/reference/relaxation/logs/cli-all.log); [`tests/reference/relaxation/manifest.json`](tests/reference/relaxation/manifest.json).
+
+MgO caveat: the Gamma-only model relaxes away from ideal rocksalt. A fresh-SCF scalar energy scan finds negative curvature -0.08178 Ha/Bohr^2 at the ideal position; this is not bulk structural qualification. [`tests/reference/relaxation/mgo-curvature.json`](tests/reference/relaxation/mgo-curvature.json). CLI spin-polarized or finite-temperature relaxation is unsupported; strict unpolarized fixed occupations only. [Relaxation scope](docs/validation/relaxation.md); comparison with QE pending.
+
+![Si relaxation force history](docs/img/relaxation-forces.svg)
+
+### Stress: checked against cell strains
+
+Tensile-positive stress differentiates energy (free energy at finite temperature) with fixed fractional atoms and a frozen set of plane-wave indices. This checks a finite-basis derivative, not cutoff convergence. Strain steps: 0.002, 0.001, 0.0005. [`tests/reference/stress/validation.json`](tests/reference/stress/validation.json).
+
+Isolated terms against strain-energy finite differences (maximum at the smallest stored step): [`tests/reference/stress/physics-terms.log`](tests/reference/stress/physics-terms.log).
+
+| Term | Difference (Ha/Bohr^3) |
+|---|---:|
+| Kinetic | 4.37e-10 |
+| Ewald (including background) | 5.32e-11 |
+| Nonlocal | 2.34e-08 |
+| Local | 2.45e-10 |
+| Hartree | 1.20e-11 |
+| NLCC core | 5.78e-10 |
+| XC metric (LDA/PBE/spin) | 3.33e-10 |
+
+Across 10 synthetic total-stress cases (skew/slab, local/nonlocal, NLCC, PBE, spin and finite temperature), maximum final strain error is 1.30e-09 Ha/Bohr^3; maximum raw antisymmetric norm is 8.57e-20 Ha/Bohr^3. ASE 3.26.0's independent numerical strain oracle differs by 3.67e-10 eV/Angstrom^3, using BAANDI energies. [`tests/reference/stress/validation.json`](tests/reference/stress/validation.json).
+
+Real-file results remain **inconclusive** as converged material stresses; small strain errors do not remove cutoff/k/grid uncertainty. Same evidence file:
+
+| Case | Strain error (Ha/Bohr^3) | Numerical uncertainty (Ha/Bohr^3) | Status |
+|---|---:|---:|---|
+| Si-a10.2612 | 1.06e-09 | 1.14e-03 | inconclusive |
+| Si-a10.6 | 7.45e-10 | 9.24e-04 | inconclusive |
+| MgO-a7.96 | 5.93e-09 | 2.22e-03 | inconclusive |
+
+The separate isotropic Pulay estimate measures cutoff sensitivity; its two-step spread is not an error bound, does not establish anisotropic convergence and is not silently added to the analytic tensor. Stress with the standard profile is unsupported; a fresh strict stationary certificate is required. [Stress scope](docs/validation/stress.md); comparison with QE pending.
+
+Mac cost observations, one on/off pair per case. Analytic time includes force-based precondition checking; Pulay scans are extra. [`tests/reference/stress/cost.json`](tests/reference/stress/cost.json).
+
+| Case | SCF (s) | Analytic stress (s) | Pass / (SCF + pass) | Pulay scans (s) | Extra SCFs |
+|---|---:|---:|---:|---:|---:|
+| si8 | 2.553 | 3.585 | 58.41% | 8.745 | 3 |
+| k444s | 2.460 | 1.982 | 44.61% | 8.533 | 3 |
+
+### Cell relaxation
+
+P23A cell-relaxation results skipped: no cell evidence files are present under `tests/reference/relaxation/` in this snapshot. No cell-relaxation validation is claimed; comparison with QE pending.
 
 ### Checkpoint/restart equivalence (synthetic fixtures)
 

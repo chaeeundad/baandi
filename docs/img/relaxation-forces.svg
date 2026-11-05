@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="300" viewBox="0 0 760 300" role="img" aria-label="Si fixed-cell relaxation: maximum free force versus ionic step" font-family="Helvetica, Arial, sans-serif" font-size="12">
+<title>Si fixed-cell relaxation: maximum free force versus ionic step</title>
+<rect width="760" height="300" fill="#ffffff"/>
+<text x="20.0" y="25.0" font-size="15" text-anchor="start" fill="#1f2328" font-weight="bold">Si Gamma-only: return to the ideal bond (not bulk qualification)</text>
+<path d="M 90 235.0 H 710" stroke="#d1d9e0"/><text x="82.0" y="239.0" font-size="11" text-anchor="end" fill="#1f2328" font-weight="normal">1e-11</text>
+<path d="M 90 215.6 H 710" stroke="#d1d9e0"/><text x="82.0" y="219.6" font-size="11" text-anchor="end" fill="#1f2328" font-weight="normal">1e-10</text>
+<path d="M 90 196.1 H 710" stroke="#d1d9e0"/><text x="82.0" y="200.1" font-size="11" text-anchor="end" fill="#1f2328" font-weight="normal">1e-9</text>
+<path d="M 90 176.7 H 710" stroke="#d1d9e0"/><text x="82.0" y="180.7" font-size="11" text-anchor="end" fill="#1f2328" font-weight="normal">1e-8</text>
+<path d="M 90 157.2 H 710" stroke="#d1d9e0"/><text x="82.0" y="161.2" font-size="11" text-anchor="end" fill="#1f2328" font-weight="normal">1e-7</text>
+<path d="M 90 137.8 H 710" stroke="#d1d9e0"/><text x="82.0" y="141.8" font-size="11" text-anchor="end" fill="#1f2328" font-weight="normal">1e-6</text>
+<path d="M 90 118.3 H 710" stroke="#d1d9e0"/><text x="82.0" y="122.3" font-size="11" text-anchor="end" fill="#1f2328" font-weight="normal">1e-5</text>
+<path d="M 90 98.9 H 710" stroke="#d1d9e0"/><text x="82.0" y="102.9" font-size="11" text-anchor="end" fill="#1f2328" font-weight="normal">1e-4</text>
+<path d="M 90 79.4 H 710" stroke="#d1d9e0"/><text x="82.0" y="83.4" font-size="11" text-anchor="end" fill="#1f2328" font-weight="normal">1e-3</text>
+<path d="M 90 60.0 H 710" stroke="#d1d9e0"/><text x="82.0" y="64.0" font-size="11" text-anchor="end" fill="#1f2328" font-weight="normal">1e-2</text>
+<text x="90.0" y="253.0" font-size="11" text-anchor="middle" fill="#1f2328" font-weight="normal">0</text>
+<circle cx="90.0" cy="61.2" r="3" fill="#0b6bcb"/><text x="214.0" y="253.0" font-size="11" text-anchor="middle" fill="#1f2328" font-weight="normal">1</text>
+<circle cx="214.0" cy="64.0" r="3" fill="#0b6bcb"/><text x="338.0" y="253.0" font-size="11" text-anchor="middle" fill="#1f2328" font-weight="normal">2</text>
+<circle cx="338.0" cy="95.9" r="3" fill="#0b6bcb"/><text x="462.0" y="253.0" font-size="11" text-anchor="middle" fill="#1f2328" font-weight="normal">3</text>
+<circle cx="462.0" cy="130.9" r="3" fill="#0b6bcb"/><text x="586.0" y="253.0" font-size="11" text-anchor="middle" fill="#1f2328" font-weight="normal">4</text>
+<circle cx="586.0" cy="197.0" r="3" fill="#0b6bcb"/><text x="710.0" y="253.0" font-size="11" text-anchor="middle" fill="#1f2328" font-weight="normal">5</text>
+<circle cx="710.0" cy="220.5" r="3" fill="#0b6bcb"/><polyline points="90.0,61.2 214.0,64.0 338.0,95.9 462.0,130.9 586.0,197.0 710.0,220.5" fill="none" stroke="#0b6bcb"/><text x="90.0" y="46.0" font-size="12" text-anchor="start" fill="#1f2328" font-weight="normal">Maximum free force (Ha/Bohr, log scale)</text>
+<text x="400.0" y="273.0" font-size="12" text-anchor="middle" fill="#1f2328" font-weight="normal">Ionic step; source: tests/reference/relaxation/manifest.json</text>
+</svg>

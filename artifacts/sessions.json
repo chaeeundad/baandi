@@ -2020,7 +2020,7 @@
     "task_id": "P13D-REAL-NC-BULK",
     "mode": "new",
     "role": "implementer",
-    "status": "blocked",
+    "status": "done",
     "codex_pid": 30522,
     "wrapper_pid": 30507,
     "session_id": "01a1aae3-0896-7761-becf-ef5789174c58",
@@ -2031,6 +2031,6 @@
     "started_at": "2026-11-05T08:46:07Z",
     "ended_at": "2026-11-05T09:03:22Z",
     "exit_code": 0,
-    "note": ""
+    "note": "merged"
   }
 ]

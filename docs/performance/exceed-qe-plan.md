@@ -1,11 +1,13 @@
 # Plan: match and then exceed QE 7.6 at equal cores and equal accuracy
 
-Written 2026-11-05 by the performance owner. Target (AGENTS.md, Performance target): BAANDI must match and then exceed QE 7.6 on the benchmark set at equal core count and equal accuracy, against QE's BEST configuration per case. Sources: relayed dev08 data (`tests/reference/perf/dev08_final_relayed.md` parts 4 and 5, `qe_iteration_data_relayed.md`), the P14A/P14B tables, the four QE study notes G, H, S, V of 2026-11-05 (see [backlog.md](backlog.md) for the key), the ledger. Every number marked (est.) is an estimate, (der.) is arithmetic on recorded numbers, (rel.) is relayed from dev08. Nothing here is a new measurement. Items needing the remote session are collected as M0 in the backlog.
+Written 2026-11-05 by the performance owner. Target (AGENTS.md, Performance target): BAANDI must match and then exceed QE 7.6 on the benchmark set at equal core count and equal accuracy, against QE's BEST configuration per case. Sources: relayed dev08 data (`tests/reference/perf/dev08_final_relayed.md` parts 4, 5 and 6, `qe_iteration_data_relayed.md`), the P14A/P14B tables, the four QE study notes G, H, S, V of 2026-11-05 (see [backlog.md](backlog.md) for the key), the ledger. Every number marked (est.) is an estimate, (der.) is arithmetic on recorded numbers, (rel.) is relayed from dev08. Nothing here is a new measurement. Items needing the remote session are collected as M0 in the backlog.
 
 ## (a) Gap model
 
 ### a.1 si8 Gamma, one core, conv_thr 1e-8 (fdce016, rel.)
 BAANDI pure 5.801 s, MKL 6.016 s; QE internal 0.684 s (complex Gamma, MKL-DFTI, nbnd 20, nosym). Ratio 8.48 pure, 8.80 MKL. With P14B (rel.): pure 5.463 s (7.99), MKL 4.814 s (7.04).
+
+**Measured QE best configuration (part 6, rel.): QE real Gamma path (`K_POINTS gamma`), si8, one core, 0.366 s at conv 1e-8 (12 SCF iterations, 81 Davidson steps, h_psi 94 calls 0.18 s, fftw 964 calls 0.13 s, real Davidson 0.23 s) and 0.500 s at 1e-12 (18 iterations); same total energy; 1.87x faster than the complex path at N=1 (1.3-1.9x across cases). The real target is therefore BAANDI/QE-best = 14.9 (pure) and 13.2 (MKL) at 1e-8 with fdce016 numbers, and 5.463/0.366 = 14.9, 4.814/0.366 = 13.2 with P14B (the relay quotes 14.9 and 13.2); at 1e-12 10.9 and 9.6. The h_psi call count is nearly equal in the two QE paths (94 vs 98): the real path halves the cost per call (two real bands per complex FFT, real symmetric Davidson), it does not reduce calls. QE build: plain -O3, MKL run-time dispatch, no -march=native; BAANDI on dev08 was always a default release build (no RUSTFLAGS, no `.cargo/config`), so both are default builds; a target-cpu/LTO experiment is being measured by the remote session.**
 
 | Factor | QE | BAANDI | Ratio | Source / label |
 |---|---|---|---|---|
@@ -26,7 +28,7 @@ Remaining factors not visible in the time split:
 | Factor | Facts | Size |
 |---|---|---|
 | Accuracy definition | QE: Ritz-value-change test, up to 5 unconverged roots accepted, no certificate, no gap check, last threshold 5.9e-11 Ry (residual about 1e-5, est.). BAANDI: residual in Ha, certificate solve (Mac local: 68 of 408 steps = 16.7%, 204 of 2416 H vectors = 8.4%, der.), 4 extra bands (24.9% of H vectors), tolerance 100-1000x tighter late (V 6.3, est.). QE alone moving conv_thr 1e-8 -> 1e-12 costs 0.684 -> 0.912 s (+33%) | not measured; plausibly 1.3-2x of the ratio (est.); E1/E2/replay measure it |
-| QE configuration | the 8.48 compares against QE's complex Gamma, nbnd 20, MKL-DFTI (no FFT pruning, 0.29 s of 0.68 s is FFT). Best configuration: real Gamma (est. 1.7-2.4x faster, G 7.4), occupied bands only (nbnd 16, est. 1.1-1.25x), FFTW3 build prunes (saves about 0.13 s of the FFT part, est.) | QE best on si8 about 0.22-0.40 s (est.); ratio vs best with P14B pure 14-25 (der.) |
+| QE configuration | the 8.48 compares against QE's complex Gamma, nbnd 20, MKL-DFTI (no FFT pruning, 0.29 s of 0.68 s is FFT). Measured real Gamma path: 0.366 s (part 6), FFT 0.13 s (2.22x fewer FFT calls), real Davidson 0.23 s of which h_psi 0.18 s, i.e. QE algebra only about 0.05 s. Not yet measured: occupied bands only (nbnd 16, est. 1.1-1.25x), FFTW3 build (prunes, est. a further 0.05 s of the 0.13 s FFT part), symmetry | QE best on si8 = 0.366 s measured (est. 0.28-0.36 s if nbnd 16 and FFTW3 help); ratio vs best with P14B pure 14.9, MKL 13.2 (measured/rel.) |
 
 ### a.2 k444s, one core, conv_thr 1e-8 (fdce016, rel.)
 BAANDI pure 6.127 s, MKL 5.034 s; QE 1.204 s; ratios 5.09 and 4.18. At N=16: 0.834 / 0.788 s vs 0.384 s: 2.17 / 2.05.
@@ -42,7 +44,7 @@ BAANDI pure 6.127 s, MKL 5.034 s; QE 1.204 s; ratios 5.09 and 4.18. At N=16: 0.8
 Ratio vs QE best on k444s, N=1: 6.127 / (0.38-0.45) = 14-16 (est.).
 
 ### a.3 What the model says
-(1) Hamiltonian application is not the main gap (V and H agree: 3.7 ms vs 3.5-4.5 ms per step). (2) Davidson algebra is: about 70-78% of BAANDI's time vs 16% of QE's. (3) Step and vector counts are about 2.2-3.5x and partly definition. (4) QE's best configuration lowers the target by about 2x (real Gamma) on Gamma-only and about 3x (symmetry) on k meshes; our current ratios understate the gap. (5) Caveat on the model: dev08 pure si8 T=1 gained only 1.06x from a 56% cut in explicit GEMM flops (A55) while MKL gained 1.26x; the flop model over-predicts time gains for pure Rust until the post-P14B profile is known.
+(1) Hamiltonian application is not the main gap (V and H agree: 3.7 ms vs 3.5-4.5 ms per step). (2) Davidson algebra is: about 70-78% of BAANDI's time vs 16% of QE's. (3) Step and vector counts are about 2.2-3.5x and partly definition. (4) QE's best configuration lowers the target by 1.3-1.9x (real Gamma, measured, 1.87x on si8 N=1) on Gamma-only and by about 3x (symmetry, est.) on k meshes; our earlier ratios understated the gap: on si8 the real target is 13-15, not 7-8. For QE's real path, algebra around h_psi is only about 0.05 s (0.23 - 0.18): the BAANDI algebra factor against QE best is about 80-90 (der.). (5) Caveat on the model: dev08 pure si8 T=1 gained only 1.06x from a 56% cut in explicit GEMM flops (A55) while MKL gained 1.26x; the flop model over-predicts time gains for pure Rust until the post-P14B profile is known.
 
 ## (b) What the target means operationally
 
@@ -60,26 +62,26 @@ Real Gamma path (`K_POINTS gamma`) for Gamma-only; default symmetry for k meshes
 
 ## (c) Staged roadmap (dependency order)
 
-Predicted time and ratio are estimates; stage gains are multiplied for a mid case and are not independent (Amdahl lowers later gains; ranges in the text). Start state: P14B, pure Rust, si8 Gamma N=1 = 5.46 s (rel.), QE complex 0.684 s, QE best central 0.30 s (range 0.22-0.40, est.). k444s start 6.127 s, QE complex 1.204 s, QE best with symmetry central 0.41 s (est.).
+Predicted time and ratio are estimates; stage gains are multiplied for a mid case and are not independent (Amdahl lowers later gains; ranges in the text). Start state: P14B, pure Rust, si8 Gamma N=1 = 5.46 s (rel.), QE complex 0.684 s, QE best (real Gamma) 0.366 s (measured, rel.). k444s start 6.127 s, QE complex 1.204 s, QE best with symmetry central 0.41 s (est.).
 
 | Stage | Content (backlog id) | Expected time factor (est.) | si8 N=1: ratio to QE complex / to QE best | k444s N=1: ratio to QE complex (nosym) / to QE best (sym) |
 |---|---|---|---|---|
-| S0 | dev08 measurements M0; no code | 1.0 | 8.0 / 18 | 5.1 / 15 |
-| S1 | bit-identical and cheap: band-blocked nonlocal, release flags, cheap energy in non-final iterations, kernel caches (B07) | 0.85-0.93, mid 0.89 | 7.1 / 16 | 4.5 / 13 |
-| S2 | Davidson algebra: locking + one rectangle (B01), then non-orthonormal basis (B13); capacity retune afterwards (B17) | 0.55-0.80, mid 0.67 (basis: non-H machinery 65-70% of time, cut by 30-65%) | 4.8 / 11 | 3.0 / 9 |
-| S3 | step count and accuracy definition: standard profile (B14, needs approval), Hartree-metric mixing (B16), energy-weighted schedule with redo (B04), atomic starts (B10) | 0.55-0.85, mid 0.70 | 3.3 / 7.6 | 2.1 / 6.3 |
-| S4a | real Gamma path (B02), Gamma-only | 0.43-0.58, mid 0.50 (QE best already includes it) | 1.7 / 3.8 | not applicable |
-| S4b | k-point symmetry (B15) on the k path | 0.31-0.40 (10 of 32 k points, plus symmetrisation) | not applicable | 0.7 / 6.3 (vs complex nosym); vs best (symmetric QE) 2.1 / 2.1 |
-| S5 | H per vector to QE parity or below: MKL pruned FFT, matrix-product nonlocal (B08); parallel decomposition (B03) for N>1 | 0.88-0.96 at N=1; larger gain only at N>1 | 1.55 / 3.5 | 2.0 / 2.0 |
+| S0 | dev08 measurements M0; no code | 1.0 | 8.0 / 14.9 | 5.1 / 15 |
+| S1 | bit-identical and cheap: band-blocked nonlocal, release flags, cheap energy in non-final iterations, kernel caches (B07) | 0.85-0.93, mid 0.89 | 7.1 / 13.3 | 4.5 / 13 |
+| S2 | Davidson algebra: locking + one rectangle (B01), then non-orthonormal basis (B13); capacity retune afterwards (B17) | 0.55-0.80, mid 0.67 (basis: non-H machinery 65-70% of time, cut by 30-65%) | 4.8 / 8.9 | 3.0 / 9 |
+| S3 | step count and accuracy definition: standard profile (B14, needs approval), Hartree-metric mixing (B16), energy-weighted schedule with redo (B04), atomic starts (B10) | 0.55-0.85, mid 0.70 | 3.3 / 6.2 | 2.1 / 6.3 |
+| S4a | real Gamma path (B02), Gamma-only | 0.43-0.58, mid 0.50 (QE best already includes it) | 1.7 / 3.1 (the stage is the largest single factor for Gamma cases: QE's own gain from it is 1.3-1.9x, so BAANDI must take it merely to stop falling behind) | not applicable |
+| S4b | k-point symmetry (B15) on the k path | 0.31-0.40 (10 of 32 k points, plus symmetrisation) | not applicable | 0.75 / 2.2 |
+| S5 | H per vector to QE parity or below: MKL pruned FFT, matrix-product nonlocal (B08); parallel decomposition (B03) for N>1 | 0.88-0.96 at N=1; larger gain only at N>1 | 1.55 / 2.9 | 0.7 / 2.0 |
 
-Range of the cumulative product at the end (si8 N=1): optimistic 0.85 x 0.55 x 0.55 x 0.43 x 0.88 = 0.097 (time 0.53 s, ratio 0.78 vs complex, 1.8 vs best); pessimistic 0.93 x 0.80 x 0.85 x 0.58 x 0.96 = 0.35 (1.9 s, ratio 2.8 vs complex, 6.4 vs best). k444s N=1 after S1-S4b and S5: optimistic 0.85 x 0.55 x 0.5 x 0.31 x 0.9 = 0.065 (0.40 s, ratio 1.0 vs best); mid 2.0 vs best; pessimistic 0.93 x 0.8 x 0.8 x 0.4 x 0.96 = 0.23 (1.4 s, 3.5 vs best).
+Range of the cumulative product at the end (si8 N=1): optimistic 0.85 x 0.55 x 0.55 x 0.43 x 0.88 = 0.097 (time 0.53 s, ratio 0.78 vs complex, 1.45 vs best 0.366 s); mid 1.06 s (2.9 vs best); pessimistic 0.93 x 0.80 x 0.85 x 0.58 x 0.96 = 0.35 (1.9 s, ratio 2.8 vs complex, 5.2 vs best). k444s N=1 after S1-S4b and S5: optimistic 0.85 x 0.55 x 0.5 x 0.31 x 0.9 = 0.065 (0.40 s, ratio 1.0 vs best); mid 2.0 vs best; pessimistic 0.93 x 0.8 x 0.8 x 0.4 x 0.96 = 0.23 (1.4 s, 3.5 vs best).
 
 Order, dependencies, alternatives:
 1. S0 first (decides everything; the post-P14B dev08 profile may reorder S1/S2).
 2. S1 can run in parallel with S0 reading; it conflicts with nothing and is bit-identical except the energy change.
 3. S2: locking and non-orthonormal basis are ALTERNATIVES in structure and must not be done together (V-3); order locking then non-orthonormal on the same fixtures; stage 0 of the non-orthonormal route is the rank/conditioning diagnostic on the 20-atom skewed case (A52). Capacity retune only after S2.
 4. S3 is gated by the user decision on the standard profile; E0-E2 and the frozen-Hamiltonian replay come first (offline, no solver change); the Hartree-metric mixer (B16) precedes the schedule (S: mixer must accept the noise before looser tolerances). Alternative to the energy-weighted schedule: single-sweep RMM in the SCF loop (B11): conflicts with locking (uncertified intermediate maps), low priority.
-5. S4a real Gamma versus the k-point path: separate modules; real Gamma must be built on the S2 solver structure (otherwise the algebra is rewritten twice and a second Davidson family doubles maintenance); S4b symmetry applies only to the k path; neither helps the other's case class.
+5. S4a real Gamma versus the k-point path (the measured QE gain of 1.3-1.9x from this path and the near-equal h_psi call count, 94 vs 98, show the mechanism is cost per call, which the pair FFT and real products reproduce): separate modules; real Gamma must be built on the S2 solver structure (otherwise the algebra is rewritten twice and a second Davidson family doubles maintenance); S4b symmetry applies only to the k path; neither helps the other's case class.
 6. S5: matrix-product nonlocal only if band-blocked nonlocal (S1) leaves a measured gap; MKL pruned FFT only for the MKL build; B03 is independent but changes rounding like S2, so it follows S2.
 
 M0 (must be measured first on dev08): QE real Gamma and variants; post-P14B profiles; build-flag experiment; E1 (how much of the 8.5x is definition); frozen-Hamiltonian replay (criterion strength versus convergence rate); re-crossing count for locking.
@@ -102,14 +104,14 @@ M0 (must be measured first on dev08): QE real Gamma and variants; post-P14B prof
 |---|---|---|
 | Many-k (k222, k444s) at 8-16 cores, both codes symmetric | Parity plausible, exceeding possible but unproven | k444s N=16 is 2.17 now vs QE nosym; stage factors 0.89 x 0.67 x 0.70 = 0.42 give about 0.9 vs QE nosym; with symmetry on both sides about 1-2 vs best, limited by k-parallel saturation at about 10 k points (k222-like saturation at T=8 seen); exceeding needs intra-k scaling better than today |
 | Many-k at 1 core | Parity only in the optimistic case | optimistic 1.0 vs best, mid 2.0, pessimistic 3.5 (c) |
-| Gamma-only small cells (si8) at 1 core vs QE real Gamma | Out of reach with current ideas; matching QE complex Gamma is plausible | best-case 0.53 s vs QE best 0.22-0.40 s; floor: QE spends 0.11 s on algebra, BAANDI 4.0-4.7 s, and S2 gives at most 1.5-3x of that; H alone at vector-count parity is about 0.18-0.25 s (real path) so total below QE's 0.30 s requires algebra plus phases below 0.1 s, a 40x cut from today, and S2 delivers 1.5-3x |
-| Gamma/single-k at 8-16 cores (si8) | Out of reach | QE 0.21-0.30 s (at the timer limit) vs BAANDI T=8 4.15 s; single-core stages give about 2.4x (0.42 factor), threading 1.40x now; even 100% utilisation of 8 workers gives 4.24x on the parallel part (ideal 1.369 s): remaining gap about 4-6x vs QE complex and 8-12x vs QE real |
+| Gamma-only small cells (si8) at 1 core vs QE real Gamma | Out of reach with current ideas; matching QE complex Gamma is plausible | best case 0.53 s vs QE best 0.366 s measured (1.45x); QE real path spends 0.18 s in h_psi and about 0.05 s in algebra; BAANDI algebra is 4.0-4.7 s and S2 gives at most 1.5-3x of that; even at vector-count parity H alone is about 0.18-0.25 s (real path, est.), so beating 0.366 s needs algebra plus phases below about 0.15 s, a 25-30x cut from today, while S2 delivers 1.5-3x |
+| Gamma/single-k at 8-16 cores (si8) | Out of reach | QE complex 0.21-0.29 s, QE real 0.14-0.19 s (below or at the timer limit, not valid) vs BAANDI T=8 4.15 s; single-core stages give about 2.4x (0.42 factor), threading 1.40x now; even 100% utilisation of 8 workers gives 4.24x on the parallel part (ideal 1.369 s): remaining gap about 4-6x vs QE complex and 8-12x or more vs QE real (QE real scales only 1.3-1.5x from N=1 to 8, part 6, so the gap at equal cores does not shrink with threads) |
 | Large systems (20+ atoms, 100+ bands) | Unknown; parity plausible after S2 because both codes then scale as N m^2 in the algebra and BAANDI has no MPI communication | no QE reference or large BAANDI case exists; P10G has `syn-100-bands` only for BAANDI |
 | Cases below QE's timer limit (gamma, k222s) | Not measurable | QE 0.06-0.2 s, ticks up to 20% |
 
 What would change this assessment:
 - E1/E2/replay show the definition share is 2x or more of the 8.5x (then S3 may close the step gap cheaply and Gamma parity moves into reach).
-- M0 shows QE real Gamma is less than 1.7x faster than complex (the best-config target drops) or that no FFTW3 QE build is competitive.
+- The build-flag experiment (target-cpu, LTO, codegen-units) shows a large gain for the hand-written loops on dev08 (QE is also a plain -O3 build, so equal footing); nbnd 16 and an FFTW3 build for QE could lower QE best below 0.366 s and widen the gap (not yet measured).
 - The post-P14B dev08 profile shows the algebra concentrated in a few removable sites (scalar MGS 4-26% of wall, memcpy 0.17-0.66 s) rather than spread over the step: then S2 would exceed the flop-model 1.5-3x.
 - A measured vector count at or below QE's about 950 with the cost per vector at 0.38 ms or less (MKL pruning plus nonlocal blocking): then H time falls to QE parity and exceeding becomes possible through pruned FFT (QE's MKL build does not prune) and equal-or-better parallel scaling.
 - Evidence to the contrary: if locking or the non-orthonormal basis fail the skewed-cell gates (as CholeskyQR2 did), S2 shrinks to the cheap one-rectangle change and the gap stays above 5x on Gamma.

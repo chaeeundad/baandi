@@ -1816,5 +1816,23 @@
     "ended_at": "2026-11-04T23:00:05Z",
     "exit_code": 0,
     "note": "branch pushed; QR64 candidate rejected (iteration regression), duplicate GEMM and copies removed; awaiting dev08"
+  },
+  {
+    "run_id": "P12A-STATUS-RECONCILIATION#1",
+    "task_id": "P12A-STATUS-RECONCILIATION",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 48949,
+    "wrapper_pid": 48922,
+    "session_id": null,
+    "branch": "task/P12A-STATUS-RECONCILIATION",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P12A-STATUS-RECONCILIATION",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P12A-STATUS-RECONCILIATION.md",
+    "report": null,
+    "started_at": "2026-11-05T00:11:23Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

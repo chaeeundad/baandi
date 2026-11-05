@@ -110,5 +110,13 @@
     "gates_done": 2,
     "gates_total": 3,
     "note": "P12A 문서 정리 완료. 사용자가 단계적 기능 확장(B안)을 승인(2026-11-05). P13A 설계 계약 문서 완료(ADR 0031~0034, 스키마 제안, 단계별 검증 기준표): 사용자 승인 대기. 승인 후 공선 스핀 SCF(MF03) 시작"
+  },
+  {
+    "id": "P13",
+    "name": "단계적 기능 확장(스핀, 금속, DFT+U, 대칭, 힘, 응력, 이완)",
+    "status": "in progress",
+    "gates_done": 2,
+    "gates_total": 3,
+    "note": "완료: 설계 계약(P13A, 사용자 승인), 공선 스핀 SCF(P13B: 위/아래 전자 수 지정, PBE와 lda-pw, 해석적 오라클 오차 1e-11 Ha 이하, 비스핀 결과 비트 동일). 다음: NLCC와 실제 의사퍼텐셜(PseudoDojo O, Ni, Al, Mg), 금속 점유(smearing), DFT+U, 대칭, 힘, 응력"
   }
 ]

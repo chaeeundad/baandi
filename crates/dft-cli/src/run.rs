@@ -353,6 +353,19 @@ pub fn execute_mode(
     }
     let total = start.elapsed().as_secs_f64();
     let energies = energy_json(&r.energy);
+    let davidson_work: Vec<_> = dft_engine::work_accounting::take()
+        .into_iter()
+        .map(|w| {
+            json!({
+                "bands":w.bands,"strict_bands":w.strict_bands,"tolerance_ha":w.tolerance,
+                "buffer_tolerance_ha":w.buffer_tolerance,"iterations":w.iterations,
+                "block_calls":w.block_calls,"vector_applications":w.vector_applications,
+                "buffer_origin_applications":w.buffer_origin_applications,
+                "unattributed_applications":w.unattributed_applications,"restarts":w.restarts,
+                "first_below":w.first_below,"last_above":w.last_above,"returned":w.returned
+            })
+        })
+        .collect();
     let mut result = json!({"preflight":preflight,"schema_version":1,"tool":{"name":"dft-cli","version":env!("CARGO_PKG_VERSION"),"git_commit":env!("DFT_GIT_COMMIT"),"rustc_version":env!("DFT_RUSTC_VERSION")},
         "timestamp":timestamp(SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|error(5,e))?.as_secs()),"input_sha256":sha256(&bytes),"species":species,
         "cell":{"lattice_columns_bohr":cell,"volume_bohr3":volume,"reciprocal_columns_inverse_bohr":prepared.cell.reciprocal_columns_inverse_bohr()},
@@ -367,6 +380,9 @@ pub fn execute_mode(
         "threading":{"threads":opts.threads.max(1).min(r.k_points.len()),"threads_requested":opts.threads,"threads_used":opts.threads.max(1).min(r.k_points.len()),"outer_threads":opts.threads.max(1).min(r.k_points.len()),"inner_threads":opts.threads.max(1) / opts.threads.max(1).min(r.k_points.len()),"backend":"std::thread::scope over k points and bands; sequential faer and serial FFT per worker"},
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
+    if dft_engine::work_accounting::ENABLED {
+        result["davidson_work"] = json!(davidson_work);
+    }
     result["band_accuracy"] = json!(r.k_points[0].solution.residuals.iter()
         .zip(&r.k_points[0].solution.buffer).zip(&r.k_points[0].solution.converged)
         .map(|((&residual, &buffer), &converged)| json!({"residual_ha":residual,"buffer":buffer,"converged":converged}))

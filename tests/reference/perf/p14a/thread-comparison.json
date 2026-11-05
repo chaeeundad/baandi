@@ -1,0 +1,30 @@
+[
+  {
+    "case": "si8",
+    "energy_identical": true,
+    "density_identical": true,
+    "iterations_identical": true,
+    "work_identical": true
+  },
+  {
+    "case": "k444s",
+    "energy_identical": true,
+    "density_identical": true,
+    "iterations_identical": true,
+    "work_identical": true
+  },
+  {
+    "case": "syn20-skew",
+    "energy_identical": true,
+    "density_identical": true,
+    "iterations_identical": true,
+    "work_identical": true
+  },
+  {
+    "case": "syn4-elongated",
+    "energy_identical": true,
+    "density_identical": true,
+    "iterations_identical": true,
+    "work_identical": true
+  }
+]

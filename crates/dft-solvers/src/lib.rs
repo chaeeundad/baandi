@@ -4,6 +4,8 @@ pub mod kerker;
 pub mod mixing;
 pub mod rmm;
 #[doc(hidden)]
+pub mod work_accounting;
+#[doc(hidden)]
 pub use dft_numerics::pool::analysis;
 pub use rmm::{
     HybridPhase, HybridRmm, HybridSolution, RmmDiis, RmmError, RmmFailureReason, SolverChoice,
@@ -388,6 +390,12 @@ impl Davidson {
         }
         let mut history = Vec::new();
         let mut operator_applications = 0;
+        let mut work = work_accounting::Trace::new(
+            self.bands,
+            policy.strict_bands,
+            self.tolerance,
+            policy.buffer_tolerance,
+        );
         // Fixed-capacity cache; only the first basis.cols() columns are live.
         let mut cached = ComplexMatrix::zeros(n, 0)?;
         cached.reserve_columns(capacity)?;
@@ -402,6 +410,11 @@ impl Davidson {
             let _iteration = dft_numerics::pool::analysis::Span::new("iteration");
             cached.resize_columns(basis.cols())?;
             if !cache_valid {
+                work.apply(
+                    basis.cols(),
+                    (iteration == 1 && basis.cols() == self.bands)
+                        .then_some(self.bands - policy.strict_bands),
+                );
                 operator_applications += basis.cols();
                 operator.apply_block(&basis, &mut cached)?;
                 if cached.rows() != n || cached.cols() != basis.cols() {
@@ -444,6 +457,7 @@ impl Davidson {
                 }
                 residual_from_products(products, &vectors, &values)?
             } else {
+                work.apply(self.bands, Some(self.bands - policy.strict_bands));
                 operator_applications += self.bands;
                 residual(operator, &vectors, &values)?
             };
@@ -454,6 +468,7 @@ impl Davidson {
                 && (meets_policy(&residuals)
                     || (iteration == self.max_iterations && meets_strict(&residuals)))
             {
+                work.apply(self.bands, Some(self.bands - policy.strict_bands));
                 operator_applications += self.bands;
                 (residual_block, residuals) = residual(operator, &vectors, &values)?;
                 residuals_certified = true;
@@ -462,10 +477,12 @@ impl Davidson {
                 // its actual maximum is recorded in this iteration's history.
             }
             let maximum = max_residual(&residuals);
+            work.residuals(iteration, &residuals);
             history.push(maximum);
             if meets_policy(&residuals)
                 || (iteration == self.max_iterations && meets_strict(&residuals))
             {
+                work.returned();
                 return Ok(EigenSolution {
                     eigenvalues: values,
                     eigenvectors: vectors,
@@ -519,6 +536,7 @@ impl Davidson {
             }
             cache_valid = products_trusted && basis.cols() + corrections.cols() <= capacity;
             if !cache_valid {
+                work.restart();
                 let (restarted, valid) = if restart_products_saved
                     && products_trusted
                     && orthogonality_defect(&vectors) <= 1e-12
@@ -541,9 +559,11 @@ impl Davidson {
             let mut extra = projection
                 .orthonormalize(&corrections, Some(&basis), &mut gemm_work)?
                 .vectors;
+            let mut correction_origins_known = true;
             // A stalled direction can occur with an exact preconditioner or an invariant
             // initial space. Try fresh independent directions, never infer convergence.
             if extra.cols() == 0 {
+                correction_origins_known = false;
                 let width = self.block_size.min(capacity - basis.cols());
                 let random = rng.block(n, width)?;
                 extra = projection
@@ -558,6 +578,17 @@ impl Davidson {
                 });
             }
             if cache_valid {
+                if work_accounting::ENABLED {
+                    work.apply(
+                        extra.cols(),
+                        (correction_origins_known && extra.cols() == selected.len()).then(|| {
+                            selected
+                                .iter()
+                                .filter(|&&j| j >= policy.strict_bands)
+                                .count()
+                        }),
+                    );
+                }
                 appended_products.resize_columns(extra.cols())?;
                 let products = &mut appended_products;
                 operator.apply_block(&extra, products)?;

@@ -1,0 +1,145 @@
+{
+  "task_id": "P14A-DAVIDSON-WORK",
+  "status": "DONE",
+  "changed_files": [
+    "crates/dft-cli/src/run.rs",
+    "crates/dft-engine/src/scf.rs",
+    "crates/dft-solvers/src/lib.rs",
+    "crates/dft-solvers/src/product_tests.rs",
+    "crates/dft-solvers/src/work_accounting.rs",
+    "docs/INDEX.md",
+    "docs/performance/optimization-log.md",
+    "docs/research/qe-study/davidson-work-accounting.md",
+    "tests/p14a_summarize.py",
+    "tests/p14a_work_accounting.py",
+    "tests/reference/perf/p14a/accounting.json",
+    "tests/reference/perf/p14a/baseline.json",
+    "tests/reference/perf/p14a/bench-scf-final.json",
+    "tests/reference/perf/p14a/bench-scf.json",
+    "tests/reference/perf/p14a/default-final.json",
+    "tests/reference/perf/p14a/extra1.json",
+    "tests/reference/perf/p14a/extra2.json",
+    "tests/reference/perf/p14a/factor1.json",
+    "tests/reference/perf/p14a/factor10.json",
+    "tests/reference/perf/p14a/factor100.json",
+    "tests/reference/perf/p14a/factor3.json",
+    "tests/reference/perf/p14a/factor30.json",
+    "tests/reference/perf/p14a/qe_iteration_data_relayed.md",
+    "tests/reference/perf/p14a/report.json",
+    "tests/reference/perf/p14a/robustness-final.json",
+    "tests/reference/perf/p14a/robustness-final.md",
+    "tests/reference/perf/p14a/robustness.json",
+    "tests/reference/perf/p14a/robustness.md",
+    "tests/reference/perf/p14a/thread-comparison.json",
+    "tests/reference/perf/p14a/threads4.json",
+    "tests/reference/perf/p14a/tolerance-factor.patch",
+    "tests/reference/perf/p14a/verification.json",
+    "tests/reference/perf/p14a/work-tables.md"
+  ],
+  "design_choices": [
+    "Completed work-accounting and bounded tolerance experiment; no candidate above factor one meets the unchanged-SCF-count gate, so conditional H6/H2 implementation is deferred.",
+    "Kept only default-off source-build diagnostics; temporary numerical experiment patch is archived and removed.",
+    "Rejected both smaller-band variants on generality or same-result evidence; no default or certificate change."
+  ],
+  "commands": [
+    {
+      "command": "PATH=/opt/homebrew/opt/rustup/bin:$PATH cargo build --release -p dft-cli --offline",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p14a_work_accounting.py --output tests/reference/perf/p14a/baseline.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p14a_work_accounting.py --extra-bands 1 --output tests/reference/perf/p14a/extra1.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p14a_work_accounting.py --extra-bands 2 --output tests/reference/perf/p14a/extra2.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 /tmp/p14a-sweep.py",
+      "exit_code": 0
+    },
+    {
+      "command": "P14A_WORK_ACCOUNTING=1 cargo build --release -p dft-cli --offline (initial attempt: CLI dependency reference)",
+      "exit_code": 101
+    },
+    {
+      "command": "P14A_WORK_ACCOUNTING=1 cargo build --release -p dft-cli --offline (corrected engine re-export)",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p14a_work_accounting.py --label default-final --output tests/reference/perf/p14a/default-final.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p14a_work_accounting.py --threads 4 --label default-final-T4 --output tests/reference/perf/p14a/threads4.json",
+      "exit_code": 0
+    },
+    {
+      "command": "P14A_WORK_ACCOUNTING=1 cargo test --release -p dft-solvers work_accounting_counts -- --ignored",
+      "exit_code": 0
+    },
+    {
+      "command": "scripts/check.sh (first post-instrumentation run: diagnostic test constant assertion lint)",
+      "exit_code": 1
+    },
+    {
+      "command": "scripts/check.sh (final rerun)",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf ../pseudo/Si.pz-vbc.UPF --cases gamma,k222,k444s --repeats 1 --baseline docs/performance/baseline.json --record tests/reference/perf/p14a/bench-scf.json (initial relative path)",
+      "exit_code": 3
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222,k444s --repeats 1 --baseline docs/performance/baseline.json --record tests/reference/perf/p14a/bench-scf.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222,k444s --repeats 1 --baseline tests/reference/perf/p14a/bench-scf.json --require-identical --record tests/reference/perf/p14a/bench-scf-final.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_suite.py --robustness --upf ../pseudo/Si.pz-vbc.UPF --baseline docs/performance/suite-baseline.json --output tests/reference/perf/p14a/robustness.json",
+      "exit_code": 5
+    },
+    {
+      "command": "python3 -I scripts/bench_suite.py --robustness --upf ../pseudo/Si.pz-vbc.UPF --baseline tests/reference/perf/p14a/robustness.json --require-identical --output tests/reference/perf/p14a/robustness-final.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p14a_summarize.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "si8 factors 1/3/10/30/100: SCF counts 15/16/16/21/57; ordinary Davidson steps 340/242/264/278/288; total H vectors 2416/2072/1794/1722/2280.",
+    "Baseline si8/k444s/skewed20/elongated4: total H vectors 2416/11181/255/171; no factor above one preserves SCF count on any case.",
+    "Default final versus pre-change: Gamma/k222/k444s energy difference exactly 0 Ha, identical density bytes. All four accounting systems have bit-identical density and energy at pure-Rust threads 1 and 4."
+  ],
+  "reference_comparison": "QE relay: si8 83 Davidson steps and 98 H block calls; local 340 ordinary steps and 410 H blocks including certificate. Relay is not a same-build local comparison; QE vector widths unavailable and residual versus Ritz-change thresholds differ. Historical suite exits 5 for synthetic input/UPF mismatch; same-input pre-change suite passes with identical densities.",
+  "limitations": [
+    "No accepted speedup; H6/H2 are deferred by the conditional experimental gate, not disproved.",
+    "Buffer-origin attribution tracks correction seeds, not a decomposition of mixed vectors; four elongated applications are unattributed.",
+    "Shared-host timings are not speedup acceptance; no MKL or new sampling profile.",
+    "Historical robustness baseline is incomparable for synthetic Xx versus Si inputs; existing nonconverged cases retained.",
+    "No dashboard upload or orchestrator-owned session update; git metadata is read-only and main was read directly without merging."
+  ],
+  "open_questions": [],
+  "commit": "Uncommitted; architect commits after review."
+}

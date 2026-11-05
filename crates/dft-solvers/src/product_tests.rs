@@ -4,6 +4,7 @@ use std::cell::Cell;
 struct Counted<'a> {
     inner: &'a dyn LinearOperator,
     columns: Cell<usize>,
+    blocks: Cell<usize>,
 }
 impl LinearOperator for Counted<'_> {
     fn dimension(&self) -> usize {
@@ -14,6 +15,7 @@ impl LinearOperator for Counted<'_> {
         self.inner.apply(x, y)
     }
     fn apply_block(&self, x: &ComplexMatrix, y: &mut ComplexMatrix) -> Result<(), SolverError> {
+        self.blocks.set(self.blocks.get() + 1);
         self.columns.set(self.columns.get() + x.cols());
         self.inner.apply_block(x, y)
     }
@@ -42,6 +44,7 @@ fn compare(
     let counter = Counted {
         inner: op,
         columns: Cell::new(0),
+        blocks: Cell::new(0),
     };
     let old = cfg.solve_legacy(&counter, initial, p).unwrap();
     assert_eq!(counter.columns.get(), old.operator_applications);
@@ -83,6 +86,33 @@ fn compare(
         delta(&new.eigenvalues, &recurrent.eigenvalues),
         delta(&new.residuals, &recurrent.residuals)
     );
+}
+
+/// Run in a source-only measurement build, isolated from other trace producers:
+/// P14A_WORK_ACCOUNTING=1 cargo test --release -p dft-solvers work_accounting_counts -- --ignored
+#[test]
+#[ignore = "requires P14A_WORK_ACCOUNTING=1 measurement build"]
+#[allow(clippy::assertions_on_constants)] // Fail explicitly if invoked in the wrong build.
+fn work_accounting_counts() {
+    assert!(work_accounting::ENABLED);
+    let op = ColumnMatrix(random_matrix(18, 83));
+    let counted = Counted {
+        inner: &op,
+        columns: Cell::new(0),
+        blocks: Cell::new(0),
+    };
+    let solution = config(3, 9).solve(&counted, None, None).unwrap();
+    let records = work_accounting::take();
+    assert_eq!(records.len(), 1);
+    let record = &records[0];
+    assert_eq!(record.block_calls, counted.blocks.get());
+    assert_eq!(record.vector_applications, counted.columns.get());
+    assert_eq!(record.vector_applications, solution.operator_applications);
+    assert_eq!(record.iterations, solution.iterations);
+    assert!(record.restarts > 0);
+    assert!(record.returned);
+    assert!(record.first_below.iter().all(|&i| i > 0));
+    assert!(record.last_above.iter().all(|&i| i < record.iterations));
 }
 
 #[test]

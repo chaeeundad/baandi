@@ -1,0 +1,95 @@
+{
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
+  "machine": "arm64",
+  "commit": "a1c6644d59ed58d1e89b610716343bdf696bfc70",
+  "commands": [
+    {
+      "command": "PATH=/opt/homebrew/opt/rustup/bin:$PATH cargo build --release -p dft-cli --offline",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p14a_work_accounting.py --output tests/reference/perf/p14a/baseline.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p14a_work_accounting.py --extra-bands 1 --output tests/reference/perf/p14a/extra1.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p14a_work_accounting.py --extra-bands 2 --output tests/reference/perf/p14a/extra2.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 /tmp/p14a-sweep.py",
+      "exit_code": 0
+    },
+    {
+      "command": "P14A_WORK_ACCOUNTING=1 cargo build --release -p dft-cli --offline (initial attempt: CLI dependency reference)",
+      "exit_code": 101
+    },
+    {
+      "command": "P14A_WORK_ACCOUNTING=1 cargo build --release -p dft-cli --offline (corrected engine re-export)",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p14a_work_accounting.py --label default-final --output tests/reference/perf/p14a/default-final.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p14a_work_accounting.py --threads 4 --label default-final-T4 --output tests/reference/perf/p14a/threads4.json",
+      "exit_code": 0
+    },
+    {
+      "command": "P14A_WORK_ACCOUNTING=1 cargo test --release -p dft-solvers work_accounting_counts -- --ignored",
+      "exit_code": 0
+    },
+    {
+      "command": "scripts/check.sh (first post-instrumentation run: diagnostic test constant assertion lint)",
+      "exit_code": 1
+    },
+    {
+      "command": "scripts/check.sh (final rerun)",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf ../pseudo/Si.pz-vbc.UPF --cases gamma,k222,k444s --repeats 1 --baseline docs/performance/baseline.json --record tests/reference/perf/p14a/bench-scf.json (initial relative path)",
+      "exit_code": 3
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222,k444s --repeats 1 --baseline docs/performance/baseline.json --record tests/reference/perf/p14a/bench-scf.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222,k444s --repeats 1 --baseline tests/reference/perf/p14a/bench-scf.json --require-identical --record tests/reference/perf/p14a/bench-scf-final.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_suite.py --robustness --upf ../pseudo/Si.pz-vbc.UPF --baseline docs/performance/suite-baseline.json --output tests/reference/perf/p14a/robustness.json",
+      "exit_code": 5
+    },
+    {
+      "command": "python3 -I scripts/bench_suite.py --robustness --upf ../pseudo/Si.pz-vbc.UPF --baseline tests/reference/perf/p14a/robustness.json --require-identical --output tests/reference/perf/p14a/robustness-final.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p14a_summarize.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "readme_tests_passed": 3,
+  "counter_tests_passed": 1,
+  "note": "Runner exit zero means all requested attempts were recorded; factor 3/10 skewed cases exited 4, and extra1 skewed retained a nonconverged outcome. See individual evidence.",
+  "relay_sha256": "f845c9f7812416f1991dd3e45afaf3dd1b860d96d9924c908a12e01ee3c450b3"
+}

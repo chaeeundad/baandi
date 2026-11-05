@@ -13,6 +13,8 @@ use dft_physics::{
     hamiltonian::{self, Hamiltonian, NonlocalOperator, Species},
     hartree, xc,
 };
+#[doc(hidden)]
+pub use dft_solvers::work_accounting;
 use dft_solvers::{
     BandTolerances, Davidson, DiagonalPreconditioner, EigenSolution,
     kerker::{Kerker, MixerHistory, PreconditionedPulay},

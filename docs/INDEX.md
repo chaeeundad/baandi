@@ -21,6 +21,7 @@ Current evidence and status: [claim-to-evidence map](validation/evidence-map.md)
 | Build, run, example inputs, reproduce the QE comparisons | `getting-started.md` |
 | Performance rules for agents, benchmark, optimization log | `performance/README.md` |
 | QE source study notes (own words; policy in AGENTS.md) | `research/qe-study/README.md` |
+| P14A Davidson work accounting, tolerance sweep and rejected variants | [Study note 3](research/qe-study/davidson-work-accounting.md) |
 | Feature and workflow gap survey (usability, robustness findings) | `research/feature-gap-survey.md` |
 | MVP review: gates, evidence, what is not established, decisions for the user | `mvp-review.md` |
 | P7 plan: k-points, PBE through a library, GPU design note | `p7-plan.md` |

@@ -1,0 +1,22 @@
+diff --git a/crates/dft-engine/src/session.rs b/crates/dft-engine/src/session.rs
+index 8365223..36846cc 100644
+--- a/crates/dft-engine/src/session.rs
++++ b/crates/dft-engine/src/session.rs
+@@ -290,7 +290,16 @@ impl ScfSession {
+             // 0.1 is an empirical scheduling coefficient in atomic units.
+             history
+                 .last()
+-                .map_or(1e-2, |r| 0.1 * r.density_residual)
++                .map_or(1e-2, |r| {
++                    // P14A source-only measurement build. The initial cap and
++                    // strict floor are unchanged; no certificate uses this factor.
++                    // A compile-time setting avoids mutable process environment
++                    // in the engine and is tied to the measured binary hash.
++                    let factor = option_env!("P14A_TOLERANCE_FACTOR")
++                        .map_or(1.0, |s| s.parse::<f64>().expect("P14A factor"));
++                    assert!(factor.is_finite() && factor >= 1.0);
++                    (0.1 * r.density_residual) * factor
++                })
+                 .min(1e-2)
+                 .max(0.1 * self.problem.options.eigen_tolerance)
+         } else {

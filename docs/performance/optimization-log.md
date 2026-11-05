@@ -1,5 +1,38 @@
 # Optimization log (newest first)
 
+## P14A — work accounting and rejected schedules (2026-11-05)
+
+Derived from study note 1 H2/H6/H7; existing notes and outputs only, no QE source.
+[Study note 3](../research/qe-study/davidson-work-accounting.md) and
+[complete measured tables](../../tests/reference/perf/p14a/work-tables.md) contain
+commands, binary/input hashes, the relayed QE calibration and all rejections.
+No numerical policy or default is adopted. Optional source-only counters add
+no numerical changes; the temporary tolerance patch is archived and removed.
+
+Default local si8: 15 SCF iterations, 340 ordinary Davidson steps, 410 H block
+calls and 2416 H vector applications including certification, 14 restarts.
+The relay's 83 QE steps / 98 H blocks and 290 BAANDI steps / 2070 H vectors
+are different units/builds and are kept separate. For factors 1/3/10/30/100,
+local si8 SCF counts are 15/16/16/21/57 and total H vectors are
+2416/2072/1794/1722/2280. No loosened factor preserves SCF count on any of the
+four tested systems. Conditional H6/H2 implementation is therefore deferred;
+this is not proof against all adaptive schedules.
+
+One extra band gives si8/k444s/skewed/elongated H counts 2444/8310/3260/164;
+skewed does not converge in 100 iterations. Two extras give 3249/9068/295/149;
+si8 needs 17 iterations and skewed changes energy by +29.3839772182878 Ha.
+Reject both as general defaults. Detailed per-iteration root and phase counts
+are stored; buffer-origin fractions exclude the first empty band and explicitly
+bound unattributed rank-loss/fallback directions. Timings are shared-host
+observations, not accepted speedups. No new sampling profile was collected.
+
+Final check.sh and README gates pass (0). Default Gamma/k222/k444s match the
+pre-change run with exactly equal energies and density bytes; same-input
+robustness comparison passes (0). Historical robustness comparison exits 5
+because the stored synthetic Xx inputs/UPFs differ from current Si-labelled
+fixtures; the old baseline is not changed. All four accounting cases are
+bit-identical in density and energy at pure-Rust T=1/4. No MKL claim is made.
+
 ## Status index — 2026-11-05
 
 See [current P10A–P10M status](README.md#reconciled-status--2026-11-05) and

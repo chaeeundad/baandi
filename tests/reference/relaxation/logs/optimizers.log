@@ -1,0 +1,9 @@
+   Compiling dft-cli v0.1.0 (/Users/mino/Develop/rust-dft-wt/P21A-RELAXATION/crates/dft-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.45s
+     Running unittests src/lib.rs (target/debug/deps/dft_cli-a116d5145f8ddc3a)
+
+running 1 test
+test relax::optimizer::tests::quadratic_and_rosenbrock ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.00s
+

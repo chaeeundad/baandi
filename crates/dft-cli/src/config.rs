@@ -44,6 +44,7 @@ pub struct Config {
     pub output: Option<Output>,
     pub bands: Option<Bands>,
     pub dos: Option<Dos>,
+    pub relax: Option<crate::relax::Settings>,
 }
 #[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -825,6 +826,23 @@ impl Config {
     /// Validate active physical settings and cell geometry. SCF/output are type-checked only.
     pub fn validate(&self) -> Result<(), ConfigError> {
         self.finite_temperature()?;
+        if let Some(relax) = &self.relax {
+            relax
+                .validate(self.system.atoms.len())
+                .map_err(|e| ConfigError::Invalid(e.to_string()))?;
+            if self
+                .scf
+                .as_ref()
+                .map(|s| s.standard_profile())
+                .transpose()?
+                .flatten()
+                .is_some()
+            {
+                return Err(ConfigError::Invalid(
+                    "relax: strict convergence profile required".into(),
+                ));
+            }
+        }
         let invalid = |message: &str| ConfigError::Invalid(message.to_owned());
         if !self.basis.ecutwfc_ry.is_finite() || self.basis.ecutwfc_ry <= 0. {
             return Err(invalid("basis.ecutwfc_ry must be finite and positive"));

@@ -49,3 +49,16 @@ all paths use the engine's post-SCF derivative implementation. Force-on output
 has a per-term block and text table. The results proposal accepts extension versions 1 (historical unavailable) and 2
 (available forces with strict certificate preconditions); keep outer schema_version
 unchanged. `tests/validate_force_schema.py` checks fixtures and actual CLI output. Run `cargo test -p dft-cli --test forces`.
+
+## Fixed-cell ionic driver (P21A)
+
+`relax` is the ticket-authorized driver-layer optimizer exception to the general
+I/O-only rule. BFGS/FIRE and optimizer restart/output ownership stay here, never
+in the electronic numerical core. Keep physical forces separate from constraint
+projection. Standard profile and unsupported spin/FD modes reject. Retry a failed
+candidate exactly once fresh at half displacement, then retain the last good
+structure; never query uncertified forces. The restart uses float bits and a
+checksum, includes the next warm density and optimizer memory, and is not an
+exact electronic checkpoint. Commands, limits and measured evidence are in
+`docs/user/relaxation.md` and `docs/validation/relaxation.md`. Long CLI trajectory
+oracles are ignored in debug and must run with `--release`.

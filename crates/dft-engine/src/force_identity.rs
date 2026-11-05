@@ -61,6 +61,21 @@ pub(crate) struct ModelDescription {
     pub(crate) points: Vec<KPoint>,
 }
 impl ModelDescription {
+    /// Fixed-cell density transfer allows only ordered atomic positions to differ.
+    pub(crate) fn transfer_matches(&self, other: &Self) -> bool {
+        let mut source = other.clone();
+        if self.atoms.len() != source.atoms.len()
+            || self
+                .atoms
+                .iter()
+                .zip(&source.atoms)
+                .any(|(a, b)| a.0 != b.0)
+        {
+            return false;
+        }
+        source.atoms.clone_from(&self.atoms);
+        *self == source
+    }
     pub(crate) fn new(
         cell: &Cell,
         atoms: &[Atom],

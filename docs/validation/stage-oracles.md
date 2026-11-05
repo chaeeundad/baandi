@@ -41,6 +41,13 @@ projector structures and small/large gaps; real Si alone cannot set defaults.
 | MF13 forces | Central displacement differences of Q on distorted S and R1/R2/R3, h=0.01,0.005,0.0025 Bohr, all Cartesian components and translational/net-force checks. Term-isolated local/nonlocal/Ewald, LDA/PBE, spin, NLCC, U and FD combinations; QE R4 only after complete term coverage. | Synthetic derivative cap 1e-6 Ha/Bohr; translation/net force <=1e-8 Ha/Bohr at resolved grid. Real matched force cap 1e-4 Ha/Bohr with SCF/cutoff/k/grid uncertainty <=one third. Several steps separate discretization from sign/term errors. | Any active derivative missing, E differentiated instead of FD F, net force/sign failure, plateau above cap; reject unsupported combination rather than partial total. |
 | MF14 stress | Central strain differences at h=0.002,0.001,0.0005 for three diagonal and three symmetric shears, fixed fractional ions; frozen Miller and rebuilt fixed-cutoff protocols separate. Cubic/skew/slab cells, Ewald/background, core/U/FD terms, R4 QE stress with explicit sign conversion. | Frozen-set synthetic cap 1e-7 Ha/Bohr^3; converged real cap 1e-5 Ha/Bohr^3, uncertainty<=one third. Tensor antisymmetric norm<=1e-10 Ha/Bohr^3 for supported rotationally invariant model. Cutoff shell jumps require a converged scan, not a relaxed cap. | Factor-two shear/sign/volume error, Pulay estimate absent, frozen-set result advertised as cutoff-converged, omission of any active term. |
 
+
+| MF15 fixed-cell relaxation (P21A ticket) | Independent scalar-energy scan/parabolic minimum for a synthetic pair from compressed/stretched starts; analytic quadratic/Rosenbrock BFGS/FIRE; displaced Si and MgO, space-group preservation, exact frozen coordinates, three-step directional energy differences, interrupted ionic continuation and failed SCF retention. | Synthetic distance <=1e-4 Bohr; warm/fresh E <=1e-10 Ha at three structures; transferred charge <=1e-8 relative; stopping requires force and energy tolerances for two consecutive steps. Same-build resumed accepted trajectory is bit-identical. Use MF13 directional force caps. | Uncertified forces, standard profile accepted, silent model coercion, lost failed trials, constraints violated, warm transfer labelled exact SCF continuation, missing last good structure on failure. Gamma-only material minima are not bulk structural qualification. |
+
+The MF15 row is added from the explicit P21A-RELAXATION ticket; the original
+P13A table stopped at MF14. Measured scope and negative MgO ideal-position
+curvature are recorded in [relaxation](relaxation.md).
+
 ## Fixture S: reproducible synthetic coverage
 
 Reuse the analytic fixture definitions in `crates/dft-engine/tests/scf.rs`,

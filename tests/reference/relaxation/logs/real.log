@@ -1,0 +1,79 @@
+   Compiling dft-cli v0.1.0 (/Users/mino/Develop/rust-dft-wt/P21A-RELAXATION/crates/dft-cli)
+    Finished `release` profile [optimized] target(s) in 5.57s
+     Running tests/relaxation.rs (target/release/deps/relaxation-966ce92e000f951c)
+
+running 1 test
+Si: step 0 E=-7.835299555589e0 Ha maxF=8.696182e-3 Ha/Bohr displacement=0.000000e0 Bohr SCF=17 running
+step 1 E=-7.835494130742e0 Ha maxF=6.215022e-3 Ha/Bohr displacement=1.506223e-2 Bohr SCF=13 running
+step 2 E=-7.835693679319e0 Ha maxF=1.420474e-4 Ha/Bohr displacement=3.772917e-2 Bohr SCF=14 running
+step 3 E=-7.835693781369e0 Ha maxF=2.254891e-6 Ha/Bohr displacement=8.430502e-4 Bohr SCF=13 running
+step 4 E=-7.835693781395e0 Ha maxF=8.971663e-10 Ha/Bohr displacement=1.317362e-5 Bohr SCF=18 running
+step 5 E=-7.835693781395e0 Ha maxF=5.570571e-11 Ha/Bohr displacement=5.233844e-9 Bohr SCF=18 converged
+
+Si final fractional coordinates: [[0.0,0.0,0.0],[0.2499999999839776,0.24999999998659828,0.24999999998342143]]
+Si budget-17 failure retained step 3 with two rejected attempts
+test real_si_and_mgo has been running for over 60 seconds
+MgO: step 0 E=-7.565570717657e1 Ha maxF=2.449997e-3 Ha/Bohr displacement=0.000000e0 Bohr SCF=21 running
+step 1 E=-7.565572591611e1 Ha maxF=2.649163e-3 Ha/Bohr displacement=4.243519e-3 Bohr SCF=13 running
+step 2 E=-7.565574782511e1 Ha maxF=2.864220e-3 Ha/Bohr displacement=4.588485e-3 Bohr SCF=13 running
+step 3 E=-7.565577343399e1 Ha maxF=3.096352e-3 Ha/Bohr displacement=4.960974e-3 Bohr SCF=13 running
+step 4 E=-7.565580335990e1 Ha maxF=3.346826e-3 Ha/Bohr displacement=5.363039e-3 Bohr SCF=13 running
+step 5 E=-7.565583832041e1 Ha maxF=3.616987e-3 Ha/Bohr displacement=5.796873e-3 Bohr SCF=13 running
+step 6 E=-7.565587914915e1 Ha maxF=3.908258e-3 Ha/Bohr displacement=6.264804e-3 Bohr SCF=13 running
+step 7 E=-7.565592681359e1 Ha maxF=4.222145e-3 Ha/Bohr displacement=6.769302e-3 Bohr SCF=13 running
+step 8 E=-7.565598243536e1 Ha maxF=4.560220e-3 Ha/Bohr displacement=7.312970e-3 Bohr SCF=13 running
+step 9 E=-7.565604731290e1 Ha maxF=4.924124e-3 Ha/Bohr displacement=7.898533e-3 Bohr SCF=13 running
+step 10 E=-7.565612294695e1 Ha maxF=5.315538e-3 Ha/Bohr displacement=8.528833e-3 Bohr SCF=13 running
+step 11 E=-7.565621106786e1 Ha maxF=5.736099e-3 Ha/Bohr displacement=9.206782e-3 Bohr SCF=13 running
+step 12 E=-7.565631366295e1 Ha maxF=6.187331e-3 Ha/Bohr displacement=9.935215e-3 Bohr SCF=13 running
+step 13 E=-7.565643300315e1 Ha maxF=6.670591e-3 Ha/Bohr displacement=1.071677e-2 Bohr SCF=13 running
+step 14 E=-7.565657167014e1 Ha maxF=7.187163e-3 Ha/Bohr displacement=1.155380e-2 Bohr SCF=13 running
+step 15 E=-7.565673258833e1 Ha maxF=7.738336e-3 Ha/Bohr displacement=1.244853e-2 Bohr SCF=15 running
+step 16 E=-7.565691906043e1 Ha maxF=8.325312e-3 Ha/Bohr displacement=1.340319e-2 Bohr SCF=14 running
+step 17 E=-7.565713479932e1 Ha maxF=8.949047e-3 Ha/Bohr displacement=1.441986e-2 Bohr SCF=15 running
+step 18 E=-7.565738394978e1 Ha maxF=9.609867e-3 Ha/Bohr displacement=1.550020e-2 Bohr SCF=15 running
+step 19 E=-7.565767107945e1 Ha maxF=1.030691e-2 Ha/Bohr displacement=1.664478e-2 Bohr SCF=15 running
+step 20 E=-7.565800113118e1 Ha maxF=1.103850e-2 Ha/Bohr displacement=1.785210e-2 Bohr SCF=15 running
+step 21 E=-7.565837938882e1 Ha maxF=1.180295e-2 Ha/Bohr displacement=1.911924e-2 Bohr SCF=15 running
+step 22 E=-7.565881146261e1 Ha maxF=1.259797e-2 Ha/Bohr displacement=2.044331e-2 Bohr SCF=15 running
+step 23 E=-7.565930320086e1 Ha maxF=1.341909e-2 Ha/Bohr displacement=2.182033e-2 Bohr SCF=14 running
+step 24 E=-7.565986044479e1 Ha maxF=1.425880e-2 Ha/Bohr displacement=2.324255e-2 Bohr SCF=15 running
+step 25 E=-7.566048873928e1 Ha maxF=1.510985e-2 Ha/Bohr displacement=2.469697e-2 Bohr SCF=15 running
+step 26 E=-7.566119322328e1 Ha maxF=1.596467e-2 Ha/Bohr displacement=2.617103e-2 Bohr SCF=15 running
+step 27 E=-7.566197834618e1 Ha maxF=1.681088e-2 Ha/Bohr displacement=2.765162e-2 Bohr SCF=15 running
+step 28 E=-7.566284721530e1 Ha maxF=1.763408e-2 Ha/Bohr displacement=2.911730e-2 Bohr SCF=15 running
+step 29 E=-7.566380129000e1 Ha maxF=1.842227e-2 Ha/Bohr displacement=3.054312e-2 Bohr SCF=15 running
+step 30 E=-7.566484019463e1 Ha maxF=1.915812e-2 Ha/Bohr displacement=3.190830e-2 Bohr SCF=16 running
+step 31 E=-7.566596090778e1 Ha maxF=1.982381e-2 Ha/Bohr displacement=3.318284e-2 Bohr SCF=17 running
+step 32 E=-7.566715772412e1 Ha maxF=2.040620e-2 Ha/Bohr displacement=3.433584e-2 Bohr SCF=17 running
+step 33 E=-7.566842226945e1 Ha maxF=2.088557e-2 Ha/Bohr displacement=3.534457e-2 Bohr SCF=17 running
+step 34 E=-7.566974297537e1 Ha maxF=2.125057e-2 Ha/Bohr displacement=3.617487e-2 Bohr SCF=16 running
+step 35 E=-7.567110611559e1 Ha maxF=2.149049e-2 Ha/Bohr displacement=3.680707e-2 Bohr SCF=16 running
+step 36 E=-7.567249570766e1 Ha maxF=2.159411e-2 Ha/Bohr displacement=3.722262e-2 Bohr SCF=16 running
+step 37 E=-7.567389439450e1 Ha maxF=2.156444e-2 Ha/Bohr displacement=3.740210e-2 Bohr SCF=16 running
+step 38 E=-7.568105573951e1 Ha maxF=1.919037e-2 Ha/Bohr displacement=2.000000e-1 Bohr SCF=17 running
+step 39 E=-7.568684421842e1 Ha maxF=1.385678e-2 Ha/Bohr displacement=2.000000e-1 Bohr SCF=16 running
+step 40 E=-7.569051540159e1 Ha maxF=7.327985e-3 Ha/Bohr displacement=2.000000e-1 Bohr SCF=16 running
+step 41 E=-7.569207188472e1 Ha maxF=2.112422e-3 Ha/Bohr displacement=2.000000e-1 Bohr SCF=17 running
+step 42 E=-7.569228247127e1 Ha maxF=1.021061e-3 Ha/Bohr displacement=8.100456e-2 Bohr SCF=16 running
+step 43 E=-7.569239101516e1 Ha maxF=7.688306e-4 Ha/Bohr displacement=7.578669e-2 Bohr SCF=16 running
+step 44 E=-7.569309897614e1 Ha maxF=4.400211e-3 Ha/Bohr displacement=2.000000e-1 Bohr SCF=18 running
+step 45 E=-7.569613721944e1 Ha maxF=1.395325e-2 Ha/Bohr displacement=2.000000e-1 Bohr SCF=18 running
+step 46 E=-7.570305891416e1 Ha maxF=2.600955e-2 Ha/Bohr displacement=2.000000e-1 Bohr SCF=18 running
+step 47 E=-7.571386923684e1 Ha maxF=3.564949e-2 Ha/Bohr displacement=2.000000e-1 Bohr SCF=17 running
+step 48 E=-7.572709322271e1 Ha maxF=3.963306e-2 Ha/Bohr displacement=2.000000e-1 Bohr SCF=18 running
+step 49 E=-7.574058025793e1 Ha maxF=3.717526e-2 Ha/Bohr displacement=2.000000e-1 Bohr SCF=17 running
+step 50 E=-7.575214708556e1 Ha maxF=2.862707e-2 Ha/Bohr displacement=2.000000e-1 Bohr SCF=17 running
+step 51 E=-7.575973290568e1 Ha maxF=1.414018e-2 Ha/Bohr displacement=2.000000e-1 Bohr SCF=17 running
+step 52 E=-7.576119349958e1 Ha maxF=6.810330e-3 Ha/Bohr displacement=1.952135e-1 Bohr SCF=17 running
+step 53 E=-7.576151064584e1 Ha maxF=8.813978e-4 Ha/Bohr displacement=6.345756e-2 Bohr SCF=17 running
+step 54 E=-7.576151650599e1 Ha maxF=4.721703e-5 Ha/Bohr displacement=7.271625e-3 Bohr SCF=13 running
+step 55 E=-7.576151652269e1 Ha maxF=3.532965e-7 Ha/Bohr displacement=4.115949e-4 Bohr SCF=11 running
+step 56 E=-7.576151652269e1 Ha maxF=6.321764e-9 Ha/Bohr displacement=3.056842e-6 Bohr SCF=11 running
+step 57 E=-7.576151652269e1 Ha maxF=3.967598e-9 Ha/Bohr displacement=5.373599e-8 Bohr SCF=16 converged
+
+MgO final fractional coordinates: [[0.0,0.0,0.0],[0.7500000039764356,0.7500000039762897,0.7500000039763687]]
+test real_si_and_mgo ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 234.07s
+

@@ -1,0 +1,34 @@
+test_ase_bfgs_matches_cli_and_reads_formats (test_relaxation.RelaxationTests) ... ERROR
+
+======================================================================
+ERROR: test_ase_bfgs_matches_cli_and_reads_formats (test_relaxation.RelaxationTests)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/mino/Develop/rust-dft-wt/P21A-RELAXATION/python/baandi/tests/test_relaxation.py", line 42, in test_ase_bfgs_matches_cli_and_reads_formats
+    self.assertTrue(optimizer.run(fmax=1e-8*ev/ang, steps=200))
+  File "/Users/mino/Develop/rust-dft-wt/pyenv/lib/python3.9/site-packages/ase/optimize/optimize.py", line 417, in run
+    return Dynamics.run(self, steps=steps)
+  File "/Users/mino/Develop/rust-dft-wt/pyenv/lib/python3.9/site-packages/ase/optimize/optimize.py", line 286, in run
+    for converged in Dynamics.irun(self, steps=steps):
+  File "/Users/mino/Develop/rust-dft-wt/pyenv/lib/python3.9/site-packages/ase/optimize/optimize.py", line 237, in irun
+    self.log(gradient)
+  File "/Users/mino/Develop/rust-dft-wt/pyenv/lib/python3.9/site-packages/ase/optimize/optimize.py", line 426, in log
+    e = self.optimizable.get_value()
+  File "/Users/mino/Develop/rust-dft-wt/pyenv/lib/python3.9/site-packages/ase/optimize/optimize.py", line 58, in get_value
+    force_consistent = self._use_force_consistent_energy
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/functools.py", line 969, in __get__
+    val = self.func(instance)
+  File "/Users/mino/Develop/rust-dft-wt/pyenv/lib/python3.9/site-packages/ase/optimize/optimize.py", line 45, in _use_force_consistent_energy
+    self.atoms.get_potential_energy(force_consistent=True)
+  File "/Users/mino/Develop/rust-dft-wt/pyenv/lib/python3.9/site-packages/ase/atoms.py", line 832, in get_potential_energy
+    energy = self._calc.get_potential_energy(
+  File "/Users/mino/Develop/rust-dft-wt/pyenv/lib/python3.9/site-packages/ase/calculators/abc.py", line 26, in get_potential_energy
+    return self.get_property(name, atoms)
+  File "/tmp/p21-python/baandi/ase.py", line 37, in get_property
+    raise NotImplementedError(
+NotImplementedError: BAANDI does not implement free_energy; stress and free_energy are unavailable (no zero placeholders).
+
+----------------------------------------------------------------------
+Ran 1 test in 4.323s
+
+FAILED (errors=1)

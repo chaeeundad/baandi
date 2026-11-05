@@ -1,0 +1,31 @@
+   Compiling dft-cli v0.1.0 (/Users/mino/Develop/rust-dft-wt/P21A-RELAXATION/crates/dft-cli)
+    Finished `release` profile [optimized] target(s) in 7.89s
+     Running tests/relaxation.rs (target/release/deps/relaxation-966ce92e000f951c)
+
+running 5 tests
+scan energies Ha: -7.16752947321611655e-1 -7.16752947582719346e-1 -7.16752947321611211e-1; fitted distance=6.92820322968633828e0 Bohr
+test rejects_standard_profile_and_invalid_constraints_without_scf ... ok
+step 2 E=-6.960029961499e-1 Ha maxF=2.079341e-2 Ha/Bohr displacement=2.000000e-1 Bohr SCF=16 running
+step 3 E=-7.006126006347e-1 Ha maxF=1.666298e-2 Ha/Bohr displacement=2.000000e-1 Bohr SCF=14 running
+step 4 E=-7.043007336349e-1 Ha maxF=1.314972e-2 Ha/Bohr displacement=2.000000e-1 Bohr SCF=14 unconverged
+error: relax unconverged: max_steps reached
+symmetry operation counts over trajectory: [16, 16, 16, 16, 16]
+test symmetry_preserves_axis_and_space_group ... ok
+relaxation restart: complete files bit-identical; 4 steps; frozen atom exact; initial SCF failure exit=4
+test resume_fixed_atoms_formats_and_failure ... ok
+compressed: steps=12 distance=6.92820323029074903e0 Bohr error=6.04410743676453421e-10 Bohr maxF=2.850826289979865e-15 Ha/Bohr
+compressed: directional FD errors=[5.544455765251616e-8, 1.3861276389713628e-8, 3.4654588495705574e-9] Ha/Bohr
+compressed: directional FD errors=[5.5354870456044564e-8, 1.3838602255008409e-8, 3.4597045137606253e-9] Ha/Bohr
+compressed: directional FD errors=[4.0684951444066794e-8, 1.0171604039729484e-8, 2.5431062063065862e-9] Ha/Bohr
+compressed: directional FD errors=[2.939788561759707e-8, 7.349689015809929e-9, 1.837653743150952e-9] Ha/Bohr
+stretched: steps=12 distance=6.92820323026010687e0 Bohr error=5.73768588196799101e-10 Bohr maxF=2.8504631753287984e-15 Ha/Bohr
+stretched: directional FD errors=[5.544456318910297e-8, 1.3861265272955073e-8, 3.4656364707261883e-9] Ha/Bohr
+stretched: directional FD errors=[5.535489261670329e-8, 1.3838691029048611e-8, 3.459593447656395e-9] Ha/Bohr
+stretched: directional FD errors=[4.0684951413925974e-8, 1.0171604009588664e-8, 2.543106176165766e-9] Ha/Bohr
+stretched: directional FD errors=[2.939788558311944e-8, 7.349666776871808e-9, 1.837742526515293e-9] Ha/Bohr
+test independent_energy_scan_two_starts_and_directional_derivative ... ok
+FIRE: steps=190 maxF=3.9237548310215466e-8 Ha/Bohr
+test fire_converges_from_displaced_structure ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 14.35s
+

@@ -281,3 +281,14 @@ FD stationarity, independent oracles and versioned force schemas.
 Fast tests: `cargo test -p dft-engine --test forces`. Ignored displacement tests
 must run in release mode with the commands in that note. Do not weaken the
 1e-6 synthetic, 1e-4 real-file or 1e-8 resolved-grid net-force caps.
+
+## Fixed-cell density transfer (P21A / MF07 minimum)
+
+`ScfSession::initialize_density_transfer` is opt-in initialization only. Compare
+independent setup model descriptions with ordered atom positions removed; retain
+all other identity, sampling, occupation, symmetry and grid checks. Validate
+shape, finite/XC-feasible values and relative charge <=1e-8 before mutation.
+Do not renormalize or restore orbitals/mixer/history/certification. The caller
+records `warm_transfer`, never exact replay. Ordinary initialization and iteration
+kernels remain unchanged. Run `cargo test -p dft-engine --test density_transfer`
+and the release ignored three-structure warm/fresh energy oracle.

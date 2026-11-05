@@ -1,0 +1,13 @@
+test_ase_forces_and_units (test_binding.BindingTests) ... ok
+test_ase_unsupported_properties (test_binding.BindingTests) ... ok
+test_cli_and_ase_bitwise (test_binding.BindingTests) ... ok
+test_invalid_inputs_and_exhaustion (test_binding.BindingTests) ... ok
+test_native_cli_bitwise (test_binding.BindingTests) ... ok
+test_two_systems_stepwise_and_owned_results (test_binding.BindingTests) ... ok
+test_ase_bfgs_matches_cli_and_reads_formats (test_relaxation.RelaxationTests) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 1.420s
+
+OK
+ASE BFGS vs CLI: max coordinate difference=3.61940169835150982e-07 Bohr; energy difference=7.77156117237609578e-16 Ha; ASE steps=7; CLI steps=12; extxyz/POSCAR independent readers passed

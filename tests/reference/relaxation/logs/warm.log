@@ -1,0 +1,13 @@
+   Compiling dft-engine v0.1.0 (/Users/mino/Develop/rust-dft-wt/P21A-RELAXATION/crates/dft-engine)
+    Finished `release` profile [optimized] target(s) in 2.49s
+     Running tests/density_transfer.rs (target/release/deps/density_transfer-b6f4ff91641b650a)
+
+running 2 tests
+test rejects_invalid_density_and_changed_model_before_initialization ... ok
+dx=-0.01 fractional delta_E=2.22044604925031308e-16 Ha fresh=-6.87111922043035950e-1 warm=-6.87111922043036172e-1
+dx=0.005 fractional delta_E=5.55111512312578270e-16 Ha fresh=-6.90322698187043615e-1 warm=-6.90322698187044170e-1
+dx=0.02 fractional delta_E=2.22044604925031308e-16 Ha fresh=-6.93280798262176923e-1 warm=-6.93280798262177145e-1
+test three_displaced_structures_match_fresh ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+

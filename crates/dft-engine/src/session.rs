@@ -201,6 +201,45 @@ impl ScfSession {
             }
         }
     }
+    /// Start a new, uncertified SCF with a validated fixed-cell density transfer.
+    /// This resets orbitals, mixer and history and is never exact continuation.
+    pub fn initialize_density_transfer(
+        &mut self,
+        source: &ScfProblem,
+        density: &Array3<f64>,
+    ) -> Result<(), ScfError> {
+        if !self
+            .problem
+            .force_model
+            .transfer_matches(&source.force_model)
+            || self.problem.occupations != source.occupations
+            || self.problem.electrons.to_bits() != source.electrons.to_bits()
+            || self.problem.minimum_gap != source.minimum_gap
+        {
+            return Err(ScfError::InvalidInput(
+                "warm_transfer: model differs beyond atom positions",
+            ));
+        }
+        if density.shape() != self.problem.grid.dims()
+            || !density.is_standard_layout()
+            || density
+                .iter()
+                .any(|v| !v.is_finite() || *v < -xc::NEGATIVE_ROUNDOFF)
+        {
+            return Err(ScfError::InvalidInput(
+                "warm_transfer: invalid density shape, C-order layout or values",
+            ));
+        }
+        let charge = density.sum() * self.problem.cell.volume_bohr3() / density.len() as f64;
+        if (charge - self.problem.electrons).abs() / self.problem.electrons > 1e-8 {
+            return Err(ScfError::InvalidInput(
+                "warm_transfer: relative charge error exceeds 1e-8",
+            ));
+        }
+        self.initialize()?;
+        self.continuation.as_mut().unwrap().n = density.clone();
+        Ok(())
+    }
     fn make_mixer(&self, mixing: &Mixing) -> Result<Box<dyn MixerHistory>, ScfError> {
         let mixer: Box<dyn MixerHistory> = match *mixing {
             Mixing::Linear { beta } => Box::new(LinearMixer { beta }),

@@ -1,0 +1,663 @@
+{
+  "task_id": "P21A-RELAXATION",
+  "base_commit": "2d45f1aea400178e3b2f9a483ca00ec65e277f0e",
+  "reference_kind": "analytic, scalar finite differences, same-build self-equivalence and independent ASE; no QE relaxation reference",
+  "commands": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0,
+      "log": "logs/gates.log"
+    },
+    {
+      "command": "cargo test -p dft-cli --lib relax -- --nocapture",
+      "exit_code": 0,
+      "log": "logs/optimizers.log"
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test density_transfer -- --include-ignored --nocapture",
+      "exit_code": 0,
+      "log": "logs/warm.log"
+    },
+    {
+      "command": "cargo test --release -p dft-cli --test relaxation -- --include-ignored --skip real_si_and_mgo --nocapture",
+      "exit_code": 0,
+      "log": "logs/cli.log"
+    },
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex cargo test --release -p dft-cli --test relaxation real_si_and_mgo -- --ignored --nocapture",
+      "exit_code": 0,
+      "log": "logs/real.log"
+    },
+    {
+      "command": "PYTHONPATH=/tmp/p21-python BAANDI_CLI=/Users/mino/Develop/rust-dft-wt/P21A-RELAXATION/target/release/dft-cli /Users/mino/Develop/rust-dft-wt/pyenv/bin/python -m unittest discover -s python/baandi/tests -v",
+      "exit_code": 0,
+      "log": "logs/python.log"
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222,si8,k444s --repeats 1 --baseline tests/reference/forces/followup-legacy.json --require-identical --record tests/reference/relaxation/legacy.json",
+      "exit_code": 0,
+      "log": "logs/legacy.log"
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0,
+      "log": "logs/readme.log"
+    },
+    {
+      "command": "python3 -I tests/reference/relaxation/check_mgo_curvature.py --binary target/release/dft-cli --nc-dir /Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex",
+      "exit_code": 0,
+      "log": "logs/mgo-curvature.log"
+    },
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex cargo test --release -p dft-cli --test relaxation -- --include-ignored --nocapture",
+      "exit_code": 0,
+      "log": "logs/cli-all.log"
+    }
+  ],
+  "warm_fresh_energy_errors_ha": [
+    2.220446049250313e-16,
+    5.551115123125783e-16,
+    2.220446049250313e-16
+  ],
+  "synthetic_periodic_scan": [
+    {
+      "start": "compressed",
+      "steps": 12,
+      "distance_bohr": 6.928203230290749,
+      "error_bohr": 6.044107436764534e-10,
+      "max_force_ha_bohr": 2.850826289979865e-15
+    },
+    {
+      "start": "stretched",
+      "steps": 12,
+      "distance_bohr": 6.928203230260107,
+      "error_bohr": 5.737685881967991e-10,
+      "max_force_ha_bohr": 2.8504631753287984e-15
+    }
+  ],
+  "materials": [
+    {
+      "material": "Si",
+      "scope": "Gamma-only fixed-cell stationary state, not bulk qualification",
+      "trajectory": [
+        {
+          "step": 0,
+          "energy_ha": -7.835299555589,
+          "max_force_ha_bohr": 0.008696182,
+          "step_length_bohr": 0.0,
+          "scf_iterations": 17,
+          "status": "running"
+        },
+        {
+          "step": 1,
+          "energy_ha": -7.835494130742,
+          "max_force_ha_bohr": 0.006215022,
+          "step_length_bohr": 0.01506223,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 2,
+          "energy_ha": -7.835693679319,
+          "max_force_ha_bohr": 0.0001420474,
+          "step_length_bohr": 0.03772917,
+          "scf_iterations": 14,
+          "status": "running"
+        },
+        {
+          "step": 3,
+          "energy_ha": -7.835693781369,
+          "max_force_ha_bohr": 2.254891e-06,
+          "step_length_bohr": 0.0008430502,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 4,
+          "energy_ha": -7.835693781395,
+          "max_force_ha_bohr": 8.971663e-10,
+          "step_length_bohr": 1.317362e-05,
+          "scf_iterations": 18,
+          "status": "running"
+        },
+        {
+          "step": 5,
+          "energy_ha": -7.835693781395,
+          "max_force_ha_bohr": 5.570571e-11,
+          "step_length_bohr": 5.233844e-09,
+          "scf_iterations": 18,
+          "status": "converged"
+        }
+      ]
+    },
+    {
+      "material": "MgO",
+      "scope": "Gamma-only fixed-cell stationary state, not bulk qualification",
+      "trajectory": [
+        {
+          "step": 0,
+          "energy_ha": -75.65570717657,
+          "max_force_ha_bohr": 0.002449997,
+          "step_length_bohr": 0.0,
+          "scf_iterations": 21,
+          "status": "running"
+        },
+        {
+          "step": 1,
+          "energy_ha": -75.65572591611,
+          "max_force_ha_bohr": 0.002649163,
+          "step_length_bohr": 0.004243519,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 2,
+          "energy_ha": -75.65574782511,
+          "max_force_ha_bohr": 0.00286422,
+          "step_length_bohr": 0.004588485,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 3,
+          "energy_ha": -75.65577343399,
+          "max_force_ha_bohr": 0.003096352,
+          "step_length_bohr": 0.004960974,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 4,
+          "energy_ha": -75.6558033599,
+          "max_force_ha_bohr": 0.003346826,
+          "step_length_bohr": 0.005363039,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 5,
+          "energy_ha": -75.65583832041,
+          "max_force_ha_bohr": 0.003616987,
+          "step_length_bohr": 0.005796873,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 6,
+          "energy_ha": -75.65587914915,
+          "max_force_ha_bohr": 0.003908258,
+          "step_length_bohr": 0.006264804,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 7,
+          "energy_ha": -75.65592681359,
+          "max_force_ha_bohr": 0.004222145,
+          "step_length_bohr": 0.006769302,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 8,
+          "energy_ha": -75.65598243536,
+          "max_force_ha_bohr": 0.00456022,
+          "step_length_bohr": 0.00731297,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 9,
+          "energy_ha": -75.6560473129,
+          "max_force_ha_bohr": 0.004924124,
+          "step_length_bohr": 0.007898533,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 10,
+          "energy_ha": -75.65612294695,
+          "max_force_ha_bohr": 0.005315538,
+          "step_length_bohr": 0.008528833,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 11,
+          "energy_ha": -75.65621106786,
+          "max_force_ha_bohr": 0.005736099,
+          "step_length_bohr": 0.009206782,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 12,
+          "energy_ha": -75.65631366295,
+          "max_force_ha_bohr": 0.006187331,
+          "step_length_bohr": 0.009935215,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 13,
+          "energy_ha": -75.65643300315,
+          "max_force_ha_bohr": 0.006670591,
+          "step_length_bohr": 0.01071677,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 14,
+          "energy_ha": -75.65657167014,
+          "max_force_ha_bohr": 0.007187163,
+          "step_length_bohr": 0.0115538,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 15,
+          "energy_ha": -75.65673258833,
+          "max_force_ha_bohr": 0.007738336,
+          "step_length_bohr": 0.01244853,
+          "scf_iterations": 15,
+          "status": "running"
+        },
+        {
+          "step": 16,
+          "energy_ha": -75.65691906043,
+          "max_force_ha_bohr": 0.008325312,
+          "step_length_bohr": 0.01340319,
+          "scf_iterations": 14,
+          "status": "running"
+        },
+        {
+          "step": 17,
+          "energy_ha": -75.65713479932,
+          "max_force_ha_bohr": 0.008949047,
+          "step_length_bohr": 0.01441986,
+          "scf_iterations": 15,
+          "status": "running"
+        },
+        {
+          "step": 18,
+          "energy_ha": -75.65738394978,
+          "max_force_ha_bohr": 0.009609867,
+          "step_length_bohr": 0.0155002,
+          "scf_iterations": 15,
+          "status": "running"
+        },
+        {
+          "step": 19,
+          "energy_ha": -75.65767107945,
+          "max_force_ha_bohr": 0.01030691,
+          "step_length_bohr": 0.01664478,
+          "scf_iterations": 15,
+          "status": "running"
+        },
+        {
+          "step": 20,
+          "energy_ha": -75.65800113118,
+          "max_force_ha_bohr": 0.0110385,
+          "step_length_bohr": 0.0178521,
+          "scf_iterations": 15,
+          "status": "running"
+        },
+        {
+          "step": 21,
+          "energy_ha": -75.65837938882,
+          "max_force_ha_bohr": 0.01180295,
+          "step_length_bohr": 0.01911924,
+          "scf_iterations": 15,
+          "status": "running"
+        },
+        {
+          "step": 22,
+          "energy_ha": -75.65881146261,
+          "max_force_ha_bohr": 0.01259797,
+          "step_length_bohr": 0.02044331,
+          "scf_iterations": 15,
+          "status": "running"
+        },
+        {
+          "step": 23,
+          "energy_ha": -75.65930320086,
+          "max_force_ha_bohr": 0.01341909,
+          "step_length_bohr": 0.02182033,
+          "scf_iterations": 14,
+          "status": "running"
+        },
+        {
+          "step": 24,
+          "energy_ha": -75.65986044479,
+          "max_force_ha_bohr": 0.0142588,
+          "step_length_bohr": 0.02324255,
+          "scf_iterations": 15,
+          "status": "running"
+        },
+        {
+          "step": 25,
+          "energy_ha": -75.66048873928,
+          "max_force_ha_bohr": 0.01510985,
+          "step_length_bohr": 0.02469697,
+          "scf_iterations": 15,
+          "status": "running"
+        },
+        {
+          "step": 26,
+          "energy_ha": -75.66119322328,
+          "max_force_ha_bohr": 0.01596467,
+          "step_length_bohr": 0.02617103,
+          "scf_iterations": 15,
+          "status": "running"
+        },
+        {
+          "step": 27,
+          "energy_ha": -75.66197834618,
+          "max_force_ha_bohr": 0.01681088,
+          "step_length_bohr": 0.02765162,
+          "scf_iterations": 15,
+          "status": "running"
+        },
+        {
+          "step": 28,
+          "energy_ha": -75.6628472153,
+          "max_force_ha_bohr": 0.01763408,
+          "step_length_bohr": 0.0291173,
+          "scf_iterations": 15,
+          "status": "running"
+        },
+        {
+          "step": 29,
+          "energy_ha": -75.66380129,
+          "max_force_ha_bohr": 0.01842227,
+          "step_length_bohr": 0.03054312,
+          "scf_iterations": 15,
+          "status": "running"
+        },
+        {
+          "step": 30,
+          "energy_ha": -75.66484019463,
+          "max_force_ha_bohr": 0.01915812,
+          "step_length_bohr": 0.0319083,
+          "scf_iterations": 16,
+          "status": "running"
+        },
+        {
+          "step": 31,
+          "energy_ha": -75.66596090778,
+          "max_force_ha_bohr": 0.01982381,
+          "step_length_bohr": 0.03318284,
+          "scf_iterations": 17,
+          "status": "running"
+        },
+        {
+          "step": 32,
+          "energy_ha": -75.66715772412,
+          "max_force_ha_bohr": 0.0204062,
+          "step_length_bohr": 0.03433584,
+          "scf_iterations": 17,
+          "status": "running"
+        },
+        {
+          "step": 33,
+          "energy_ha": -75.66842226945,
+          "max_force_ha_bohr": 0.02088557,
+          "step_length_bohr": 0.03534457,
+          "scf_iterations": 17,
+          "status": "running"
+        },
+        {
+          "step": 34,
+          "energy_ha": -75.66974297537,
+          "max_force_ha_bohr": 0.02125057,
+          "step_length_bohr": 0.03617487,
+          "scf_iterations": 16,
+          "status": "running"
+        },
+        {
+          "step": 35,
+          "energy_ha": -75.67110611559,
+          "max_force_ha_bohr": 0.02149049,
+          "step_length_bohr": 0.03680707,
+          "scf_iterations": 16,
+          "status": "running"
+        },
+        {
+          "step": 36,
+          "energy_ha": -75.67249570766,
+          "max_force_ha_bohr": 0.02159411,
+          "step_length_bohr": 0.03722262,
+          "scf_iterations": 16,
+          "status": "running"
+        },
+        {
+          "step": 37,
+          "energy_ha": -75.6738943945,
+          "max_force_ha_bohr": 0.02156444,
+          "step_length_bohr": 0.0374021,
+          "scf_iterations": 16,
+          "status": "running"
+        },
+        {
+          "step": 38,
+          "energy_ha": -75.68105573951,
+          "max_force_ha_bohr": 0.01919037,
+          "step_length_bohr": 0.2,
+          "scf_iterations": 17,
+          "status": "running"
+        },
+        {
+          "step": 39,
+          "energy_ha": -75.68684421842,
+          "max_force_ha_bohr": 0.01385678,
+          "step_length_bohr": 0.2,
+          "scf_iterations": 16,
+          "status": "running"
+        },
+        {
+          "step": 40,
+          "energy_ha": -75.69051540159,
+          "max_force_ha_bohr": 0.007327985,
+          "step_length_bohr": 0.2,
+          "scf_iterations": 16,
+          "status": "running"
+        },
+        {
+          "step": 41,
+          "energy_ha": -75.69207188472,
+          "max_force_ha_bohr": 0.002112422,
+          "step_length_bohr": 0.2,
+          "scf_iterations": 17,
+          "status": "running"
+        },
+        {
+          "step": 42,
+          "energy_ha": -75.69228247127,
+          "max_force_ha_bohr": 0.001021061,
+          "step_length_bohr": 0.08100456,
+          "scf_iterations": 16,
+          "status": "running"
+        },
+        {
+          "step": 43,
+          "energy_ha": -75.69239101516,
+          "max_force_ha_bohr": 0.0007688306,
+          "step_length_bohr": 0.07578669,
+          "scf_iterations": 16,
+          "status": "running"
+        },
+        {
+          "step": 44,
+          "energy_ha": -75.69309897614,
+          "max_force_ha_bohr": 0.004400211,
+          "step_length_bohr": 0.2,
+          "scf_iterations": 18,
+          "status": "running"
+        },
+        {
+          "step": 45,
+          "energy_ha": -75.69613721944,
+          "max_force_ha_bohr": 0.01395325,
+          "step_length_bohr": 0.2,
+          "scf_iterations": 18,
+          "status": "running"
+        },
+        {
+          "step": 46,
+          "energy_ha": -75.70305891416,
+          "max_force_ha_bohr": 0.02600955,
+          "step_length_bohr": 0.2,
+          "scf_iterations": 18,
+          "status": "running"
+        },
+        {
+          "step": 47,
+          "energy_ha": -75.71386923684,
+          "max_force_ha_bohr": 0.03564949,
+          "step_length_bohr": 0.2,
+          "scf_iterations": 17,
+          "status": "running"
+        },
+        {
+          "step": 48,
+          "energy_ha": -75.72709322271,
+          "max_force_ha_bohr": 0.03963306,
+          "step_length_bohr": 0.2,
+          "scf_iterations": 18,
+          "status": "running"
+        },
+        {
+          "step": 49,
+          "energy_ha": -75.74058025793,
+          "max_force_ha_bohr": 0.03717526,
+          "step_length_bohr": 0.2,
+          "scf_iterations": 17,
+          "status": "running"
+        },
+        {
+          "step": 50,
+          "energy_ha": -75.75214708556,
+          "max_force_ha_bohr": 0.02862707,
+          "step_length_bohr": 0.2,
+          "scf_iterations": 17,
+          "status": "running"
+        },
+        {
+          "step": 51,
+          "energy_ha": -75.75973290568,
+          "max_force_ha_bohr": 0.01414018,
+          "step_length_bohr": 0.2,
+          "scf_iterations": 17,
+          "status": "running"
+        },
+        {
+          "step": 52,
+          "energy_ha": -75.76119349958,
+          "max_force_ha_bohr": 0.00681033,
+          "step_length_bohr": 0.1952135,
+          "scf_iterations": 17,
+          "status": "running"
+        },
+        {
+          "step": 53,
+          "energy_ha": -75.76151064584,
+          "max_force_ha_bohr": 0.0008813978,
+          "step_length_bohr": 0.06345756,
+          "scf_iterations": 17,
+          "status": "running"
+        },
+        {
+          "step": 54,
+          "energy_ha": -75.76151650599,
+          "max_force_ha_bohr": 4.721703e-05,
+          "step_length_bohr": 0.007271625,
+          "scf_iterations": 13,
+          "status": "running"
+        },
+        {
+          "step": 55,
+          "energy_ha": -75.76151652269,
+          "max_force_ha_bohr": 3.532965e-07,
+          "step_length_bohr": 0.0004115949,
+          "scf_iterations": 11,
+          "status": "running"
+        },
+        {
+          "step": 56,
+          "energy_ha": -75.76151652269,
+          "max_force_ha_bohr": 6.321764e-09,
+          "step_length_bohr": 3.056842e-06,
+          "scf_iterations": 11,
+          "status": "running"
+        },
+        {
+          "step": 57,
+          "energy_ha": -75.76151652269,
+          "max_force_ha_bohr": 3.967598e-09,
+          "step_length_bohr": 5.373599e-08,
+          "scf_iterations": 16,
+          "status": "converged"
+        }
+      ]
+    }
+  ],
+  "ase_comparison": {
+    "max_position_error_bohr": 3.61940169835151e-07,
+    "energy_error_ha": 7.771561172376096e-16
+  },
+  "fixture_source_sha256": {
+    "crates/dft-cli/tests/common/mod.rs": "d3b7e4f858c5c122e0aa473f6cff7a070e29391b80c20aa42179ab15205dbefb",
+    "crates/dft-cli/tests/relaxation.rs": "36e95f49777cd2d6ac9433e46a5c36d593149d4e10f329d33044014733a8ca62",
+    "crates/dft-cli/src/relax.rs": "6358df15ee54e99fc43ffc706faa52f331c3008cafa556906cc5aba11a5b7528",
+    "crates/dft-cli/src/relax/optimizer.rs": "e429d20f26250dd2af92aa3c11ea2bd8ad04ac90f6f8548d57dec6abfec4d419",
+    "crates/dft-engine/tests/density_transfer.rs": "bad45c48418cc6207ff0d68bbb1b4d7e57dbf5bdc9eaaee830c052b222caeb88",
+    "python/baandi/tests/test_relaxation.py": "345609b13cb1c17a4bb8f938974eb46e89f0104e2c0576e693f92f19f58ea456",
+    "crates/dft-engine/src/session.rs": "1cce2590c6e611e6259202a50746d0112a78ce2003739ffee0010633957ca19a",
+    "crates/dft-engine/src/force_identity.rs": "2336f8a7010f5b221a34dac079d55a0f18425f5844b1a353c6c03f9aa383432f",
+    "python/baandi/ase.py": "1f3630650234db206875273d71080d661e0a7e90468f9ce2826604fb1b64679c"
+  },
+  "external_pp_sha256": {
+    "Si": "39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282",
+    "Mg": "15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14",
+    "O": "2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11"
+  },
+  "logs_sha256": {
+    "ase-initial-property-failure.log": "932a97ab2ca8ea991ef2ec398037bbbc67675ba926bf450ed6d56f9148c7634f",
+    "cli-all.log": "18e389ff3b50cb68e183d9adad9a1e4c8d42fa8bff417c2703136e36b5a6ceb0",
+    "cli.log": "d571fbad9496ce9aab1ed27a410f478d12d5eb4008c21a340a1425e57fcf8f94",
+    "gates.log": "17daba7a92a05d4f9abe3a74eafa0518ad55617ca759c8b3368473d60c1b03dc",
+    "legacy.log": "97798fe545a8ae98fac0ebb8956a6e9292646549951b8715ecf9262d0f24003d",
+    "mgo-curvature.log": "a36a3969c39cd22680c1868cd36867774f2348b4b3ffc964ec11f7b6b7bbf1f9",
+    "optimizers.log": "86be6693be82ba31921b63243093ce01c03e15b93e79065c66068905e134e5bd",
+    "python.log": "e927ab7116f56eef681f737ea2e308b5f032e35c195717d49daaaa658894d341",
+    "readme.log": "9c6b2bb49171e13e045a8021066792843f3566ead420a4bc7651682a54a28a37",
+    "real-initial-ideal-expectation-failure.log": "c78ca673e2ec85a16f453eae4160747333ef989fbdbb1a77085fb62824666e0e",
+    "real.log": "c2a5541e6b1b5d286ba46d57749c7d9c7786dfa532068253f1a91457cde1e9e4",
+    "warm.log": "2fdb4903dd38b2c4342997b19a304984923d0b3498eff2c3443b38e1abc3c3f2",
+    "wheel.log": "d3f1362559b144eb4c4db345a4322cec4a733d71daf2d30f1e26e8322ed946f7"
+  },
+  "retained_negative_results": [
+    {
+      "log": "logs/real-initial-ideal-expectation-failure.log",
+      "exit_code": 101,
+      "reason": "Extra ideal-position assertion failed for Gamma-only MgO. Independent negative curvature explains nonideal minimum; the required Si ideal-bond oracle remains unchanged."
+    },
+    {
+      "log": "logs/ase-initial-property-failure.log",
+      "exit_code": 1,
+      "reason": "ASE BFGS catches PropertyNotImplementedError; adapter previously raised the base NotImplementedError. Fixed without adding free_energy."
+    }
+  ],
+  "limitations": [
+    "Only unpolarized fixed occupations in this CLI driver.",
+    "Periodic synthetic compressed/stretched starts are related by inversion, not an isolated molecular dissociation scan.",
+    "Gamma-only MgO is not bulk structural qualification.",
+    "README generator/dashboard/frozen schemas require orchestrator followup outside OWNED_FILES."
+  ],
+  "final_release_cli_tests": {
+    "passed": 6,
+    "failed": 0,
+    "ignored": 0,
+    "log": "logs/cli-all.log"
+  }
+}

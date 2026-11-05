@@ -1,0 +1,69 @@
+{
+  "scope": "Gamma-only MgO primitive fixed-cell model; not bulk structural qualification",
+  "samples": [
+    {
+      "cartesian_shift_each_axis_bohr": -0.005,
+      "energy_ha": -75.65559990480561,
+      "input": "[system]\nname='MgO'\nlattice_unit='bohr'\nlattice_vectors=[[0.0,3.98,3.98],[3.98,0.0,3.98],[3.98,3.98,0.0]]\n[[system.atoms]]\nspecies='Mg'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='O'\nfractional=[0.4993718592964824,0.4993718592964824,0.4993718592964824]\n[pseudopotentials]\nMg=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Mg.upf\"\nO=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/O.upf\"\n[basis]\necutwfc_ry=120\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='pbe'\ndensity_floor=1e-10\n[scf]\nmax_iterations=300\ndensity_residual_tolerance=1e-9\nenergy_tolerance_ha=1e-11\neigen_tolerance=1e-10\n[relax]\nmax_steps=80\nforce_tol_ha_bohr=1e-4\nenergy_tol_ha=1e-9\nfixed=[{atom=0}]\n"
+    },
+    {
+      "cartesian_shift_each_axis_bohr": 0.0,
+      "energy_ha": -75.65559683801573,
+      "input": "[system]\nname='MgO'\nlattice_unit='bohr'\nlattice_vectors=[[0.0,3.98,3.98],[3.98,0.0,3.98],[3.98,3.98,0.0]]\n[[system.atoms]]\nspecies='Mg'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='O'\nfractional=[0.5,0.5,0.5]\n[pseudopotentials]\nMg=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Mg.upf\"\nO=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/O.upf\"\n[basis]\necutwfc_ry=120\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='pbe'\ndensity_floor=1e-10\n[scf]\nmax_iterations=300\ndensity_residual_tolerance=1e-9\nenergy_tolerance_ha=1e-11\neigen_tolerance=1e-10\n[relax]\nmax_steps=80\nforce_tol_ha_bohr=1e-4\nenergy_tol_ha=1e-9\nfixed=[{atom=0}]\n"
+    },
+    {
+      "cartesian_shift_each_axis_bohr": 0.005,
+      "energy_ha": -75.65559990480546,
+      "input": "[system]\nname='MgO'\nlattice_unit='bohr'\nlattice_vectors=[[0.0,3.98,3.98],[3.98,0.0,3.98],[3.98,3.98,0.0]]\n[[system.atoms]]\nspecies='Mg'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='O'\nfractional=[0.5006281407035176,0.5006281407035176,0.5006281407035176]\n[pseudopotentials]\nMg=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Mg.upf\"\nO=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/O.upf\"\n[basis]\necutwfc_ry=120\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='pbe'\ndensity_floor=1e-10\n[scf]\nmax_iterations=300\ndensity_residual_tolerance=1e-9\nenergy_tolerance_ha=1e-11\neigen_tolerance=1e-10\n[relax]\nmax_steps=80\nforce_tol_ha_bohr=1e-4\nenergy_tol_ha=1e-9\nfixed=[{atom=0}]\n"
+    },
+    {
+      "cartesian_shift_each_axis_bohr": -0.0025,
+      "energy_ha": -75.65559760472044,
+      "input": "[system]\nname='MgO'\nlattice_unit='bohr'\nlattice_vectors=[[0.0,3.98,3.98],[3.98,0.0,3.98],[3.98,3.98,0.0]]\n[[system.atoms]]\nspecies='Mg'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='O'\nfractional=[0.4996859296482412,0.4996859296482412,0.4996859296482412]\n[pseudopotentials]\nMg=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Mg.upf\"\nO=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/O.upf\"\n[basis]\necutwfc_ry=120\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='pbe'\ndensity_floor=1e-10\n[scf]\nmax_iterations=300\ndensity_residual_tolerance=1e-9\nenergy_tolerance_ha=1e-11\neigen_tolerance=1e-10\n[relax]\nmax_steps=80\nforce_tol_ha_bohr=1e-4\nenergy_tol_ha=1e-9\nfixed=[{atom=0}]\n"
+    },
+    {
+      "cartesian_shift_each_axis_bohr": 0.0,
+      "energy_ha": -75.65559683801573,
+      "input": "[system]\nname='MgO'\nlattice_unit='bohr'\nlattice_vectors=[[0.0,3.98,3.98],[3.98,0.0,3.98],[3.98,3.98,0.0]]\n[[system.atoms]]\nspecies='Mg'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='O'\nfractional=[0.5,0.5,0.5]\n[pseudopotentials]\nMg=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Mg.upf\"\nO=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/O.upf\"\n[basis]\necutwfc_ry=120\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='pbe'\ndensity_floor=1e-10\n[scf]\nmax_iterations=300\ndensity_residual_tolerance=1e-9\nenergy_tolerance_ha=1e-11\neigen_tolerance=1e-10\n[relax]\nmax_steps=80\nforce_tol_ha_bohr=1e-4\nenergy_tol_ha=1e-9\nfixed=[{atom=0}]\n"
+    },
+    {
+      "cartesian_shift_each_axis_bohr": 0.0025,
+      "energy_ha": -75.65559760472084,
+      "input": "[system]\nname='MgO'\nlattice_unit='bohr'\nlattice_vectors=[[0.0,3.98,3.98],[3.98,0.0,3.98],[3.98,3.98,0.0]]\n[[system.atoms]]\nspecies='Mg'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='O'\nfractional=[0.5003140703517588,0.5003140703517588,0.5003140703517588]\n[pseudopotentials]\nMg=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Mg.upf\"\nO=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/O.upf\"\n[basis]\necutwfc_ry=120\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='pbe'\ndensity_floor=1e-10\n[scf]\nmax_iterations=300\ndensity_residual_tolerance=1e-9\nenergy_tolerance_ha=1e-11\neigen_tolerance=1e-10\n[relax]\nmax_steps=80\nforce_tol_ha_bohr=1e-4\nenergy_tol_ha=1e-9\nfixed=[{atom=0}]\n"
+    },
+    {
+      "cartesian_shift_each_axis_bohr": -0.00125,
+      "energy_ha": -75.65559702969183,
+      "input": "[system]\nname='MgO'\nlattice_unit='bohr'\nlattice_vectors=[[0.0,3.98,3.98],[3.98,0.0,3.98],[3.98,3.98,0.0]]\n[[system.atoms]]\nspecies='Mg'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='O'\nfractional=[0.4998429648241206,0.4998429648241206,0.4998429648241206]\n[pseudopotentials]\nMg=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Mg.upf\"\nO=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/O.upf\"\n[basis]\necutwfc_ry=120\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='pbe'\ndensity_floor=1e-10\n[scf]\nmax_iterations=300\ndensity_residual_tolerance=1e-9\nenergy_tolerance_ha=1e-11\neigen_tolerance=1e-10\n[relax]\nmax_steps=80\nforce_tol_ha_bohr=1e-4\nenergy_tol_ha=1e-9\nfixed=[{atom=0}]\n"
+    },
+    {
+      "cartesian_shift_each_axis_bohr": 0.0,
+      "energy_ha": -75.65559683801573,
+      "input": "[system]\nname='MgO'\nlattice_unit='bohr'\nlattice_vectors=[[0.0,3.98,3.98],[3.98,0.0,3.98],[3.98,3.98,0.0]]\n[[system.atoms]]\nspecies='Mg'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='O'\nfractional=[0.5,0.5,0.5]\n[pseudopotentials]\nMg=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Mg.upf\"\nO=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/O.upf\"\n[basis]\necutwfc_ry=120\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='pbe'\ndensity_floor=1e-10\n[scf]\nmax_iterations=300\ndensity_residual_tolerance=1e-9\nenergy_tolerance_ha=1e-11\neigen_tolerance=1e-10\n[relax]\nmax_steps=80\nforce_tol_ha_bohr=1e-4\nenergy_tol_ha=1e-9\nfixed=[{atom=0}]\n"
+    },
+    {
+      "cartesian_shift_each_axis_bohr": 0.00125,
+      "energy_ha": -75.65559702969144,
+      "input": "[system]\nname='MgO'\nlattice_unit='bohr'\nlattice_vectors=[[0.0,3.98,3.98],[3.98,0.0,3.98],[3.98,3.98,0.0]]\n[[system.atoms]]\nspecies='Mg'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='O'\nfractional=[0.5001570351758794,0.5001570351758794,0.5001570351758794]\n[pseudopotentials]\nMg=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Mg.upf\"\nO=\"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/O.upf\"\n[basis]\necutwfc_ry=120\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='pbe'\ndensity_floor=1e-10\n[scf]\nmax_iterations=300\ndensity_residual_tolerance=1e-9\nenergy_tolerance_ha=1e-11\neigen_tolerance=1e-10\n[relax]\nmax_steps=80\nforce_tol_ha_bohr=1e-4\nenergy_tol_ha=1e-9\nfixed=[{atom=0}]\n"
+    }
+  ],
+  "curvatures": [
+    {
+      "step_each_axis_bohr": 0.005,
+      "directional_curvature_ha_bohr2": -0.08178106156719879
+    },
+    {
+      "step_each_axis_bohr": 0.0025,
+      "directional_curvature_ha_bohr2": -0.0817818575645409
+    },
+    {
+      "step_each_axis_bohr": 0.00125,
+      "directional_curvature_ha_bohr2": -0.08178172114033563
+    }
+  ],
+  "command": "python3 -I tests/reference/relaxation/check_mgo_curvature.py --binary target/release/dft-cli --nc-dir /Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex",
+  "pp_sha256": {
+    "Mg": "15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14",
+    "O": "2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11"
+  }
+}

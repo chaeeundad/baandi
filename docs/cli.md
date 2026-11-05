@@ -1017,3 +1017,14 @@ State-contract extension version 2 includes the available-force branch and requi
 strict/converged/certificate-passed preconditions. Version 1 unavailable documents
 remain valid, and unavailable forces never carry numerical arrays. The outer
 results schema version is unchanged. See [validation](validation/forces.md).
+
+## Fixed-cell relaxation (P21A)
+
+`dft-cli relax input.toml --output-dir DIR [--resume]` accepts the optional
+`[relax]` table, certified strict forces, capped BFGS/FIRE steps and Cartesian
+constraints. Exit 0 is converged, 3 is ionic step exhaustion, 4 is failure after
+one fresh half-step retry. Density transfer is labelled `warm_transfer`; the
+optimizer restart is a separate same-build ionic continuation record.
+The `calculation_type="relaxation"` results profile contains the `relaxation`
+block and input/executable/UPF provenance. See [input, units and output-format
+losses](user/relaxation.md) and [validation scope](validation/relaxation.md).

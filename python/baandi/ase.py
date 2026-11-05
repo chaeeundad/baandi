@@ -3,7 +3,7 @@
 Pseudopotentials are UPF text keyed by ASE chemical symbol. Copying the text
 at construction avoids a file changing underneath a cached calculation.
 """
-from ase.calculators.calculator import Calculator, all_changes
+from ase.calculators.calculator import Calculator, PropertyNotImplementedError, all_changes
 
 from . import Options, Session
 
@@ -34,7 +34,7 @@ class Baandi(Calculator):
 
     def get_property(self, name, atoms=None, allow_calculation=True):
         if name not in self.implemented_properties:
-            raise NotImplementedError(
+            raise PropertyNotImplementedError(
                 f"BAANDI does not implement {name}; stress and free_energy "
                 "are unavailable (no zero placeholders)."
             )
@@ -46,7 +46,7 @@ class Baandi(Calculator):
         self.results = {}
         for name in properties:
             if name not in self.implemented_properties:
-                raise NotImplementedError(f"BAANDI does not implement {name}")
+                raise PropertyNotImplementedError(f"BAANDI does not implement {name}")
         super().calculate(atoms, properties, system_changes)
         if self.atoms is None or not self.atoms.pbc.all():
             raise ValueError("BAANDI requires a fully periodic, nonsingular 3D cell")

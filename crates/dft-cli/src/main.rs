@@ -20,6 +20,14 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Relax atomic positions at fixed cell with strict certified forces.
+    Relax {
+        input: PathBuf,
+        #[arg(long)]
+        output_dir: PathBuf,
+        #[arg(long)]
+        resume: bool,
+    },
     /// Validate a proposal and record an explicit review; never edits the input.
     PreflightReview {
         input: PathBuf,
@@ -239,6 +247,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Bands { .. }
         | Command::Dos { .. }
         | Command::Run { .. }
+        | Command::Relax { .. }
         | Command::Convert { .. } => {
             unreachable!()
         }
@@ -260,6 +269,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Bands { .. }
         | Command::Dos { .. }
         | Command::Run { .. }
+        | Command::Relax { .. }
         | Command::Convert { .. } => {
             unreachable!()
         }
@@ -270,6 +280,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let post = match &cli.command {
+        Command::Relax {
+            input,
+            output_dir,
+            resume,
+        } => Some(dft_cli::relax::execute(input, output_dir, *resume)),
         Command::Bands { input, output_dir } => Some(bands::execute(input, output_dir.as_deref())),
         Command::Dos { input, output_dir } => Some(dos::execute(input, output_dir.as_deref())),
         _ => None,

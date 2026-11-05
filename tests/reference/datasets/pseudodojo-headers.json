@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "scope": "Header identity only; no radial data, SCF or qualification",
+  "command": "DFT_NC_DIR=<external directory> python3 -I scripts/check_upf_headers.py --binary target/debug/dft-cli --output tests/reference/datasets/pseudodojo-headers.json",
+  "datasets": [
+    {
+      "element": "O",
+      "manifest_hash_match": true,
+      "header_facts": {
+        "element": "O",
+        "z_valence": 6.0,
+        "pseudo_type": "NC",
+        "relativistic": "scalar",
+        "functional": "PBE",
+        "nlcc": true,
+        "number_of_wfc": 2,
+        "mesh_size": 936,
+        "number_of_proj": 5,
+        "projector_channels": [
+          {
+            "index": 1,
+            "l": 0
+          },
+          {
+            "index": 2,
+            "l": 0
+          },
+          {
+            "index": 3,
+            "l": 1
+          },
+          {
+            "index": 4,
+            "l": 1
+          },
+          {
+            "index": 5,
+            "l": 2
+          }
+        ],
+        "cutoff_hints_ry": {
+          "wavefunction": null,
+          "density": 9.35
+        }
+      },
+      "qualification_status": "unqualified",
+      "rust_python_equal": true,
+      "blockers": [],
+      "supported_by_engine": true
+    },
+    {
+      "element": "Ni",
+      "manifest_hash_match": true,
+      "header_facts": {
+        "element": "Ni",
+        "z_valence": 18.0,
+        "pseudo_type": "NC",
+        "relativistic": "scalar",
+        "functional": "PBE",
+        "nlcc": true,
+        "number_of_wfc": 4,
+        "mesh_size": 1372,
+        "number_of_proj": 6,
+        "projector_channels": [
+          {
+            "index": 1,
+            "l": 0
+          },
+          {
+            "index": 2,
+            "l": 0
+          },
+          {
+            "index": 3,
+            "l": 1
+          },
+          {
+            "index": 4,
+            "l": 1
+          },
+          {
+            "index": 5,
+            "l": 2
+          },
+          {
+            "index": 6,
+            "l": 2
+          }
+        ],
+        "cutoff_hints_ry": {
+          "wavefunction": null,
+          "density": 13.71
+        }
+      },
+      "qualification_status": "unqualified",
+      "rust_python_equal": true,
+      "blockers": [],
+      "supported_by_engine": true
+    },
+    {
+      "element": "Al",
+      "manifest_hash_match": true,
+      "header_facts": {
+        "element": "Al",
+        "z_valence": 3.0,
+        "pseudo_type": "NC",
+        "relativistic": "scalar",
+        "functional": "PBE",
+        "nlcc": true,
+        "number_of_wfc": 2,
+        "mesh_size": 1876,
+        "number_of_proj": 6,
+        "projector_channels": [
+          {
+            "index": 1,
+            "l": 0
+          },
+          {
+            "index": 2,
+            "l": 0
+          },
+          {
+            "index": 3,
+            "l": 1
+          },
+          {
+            "index": 4,
+            "l": 1
+          },
+          {
+            "index": 5,
+            "l": 2
+          },
+          {
+            "index": 6,
+            "l": 2
+          }
+        ],
+        "cutoff_hints_ry": {
+          "wavefunction": null,
+          "density": 18.75
+        }
+      },
+      "qualification_status": "unqualified",
+      "rust_python_equal": true,
+      "blockers": [],
+      "supported_by_engine": true
+    },
+    {
+      "element": "Mg",
+      "manifest_hash_match": true,
+      "header_facts": {
+        "element": "Mg",
+        "z_valence": 10.0,
+        "pseudo_type": "NC",
+        "relativistic": "scalar",
+        "functional": "PBE",
+        "nlcc": false,
+        "number_of_wfc": 3,
+        "mesh_size": 1510,
+        "number_of_proj": 4,
+        "projector_channels": [
+          {
+            "index": 1,
+            "l": 0
+          },
+          {
+            "index": 2,
+            "l": 0
+          },
+          {
+            "index": 3,
+            "l": 1
+          },
+          {
+            "index": 4,
+            "l": 1
+          }
+        ],
+        "cutoff_hints_ry": {
+          "wavefunction": null,
+          "density": 15.09
+        }
+      },
+      "qualification_status": "unqualified",
+      "rust_python_equal": true,
+      "blockers": [],
+      "supported_by_engine": true
+    },
+    {
+      "element": "Si",
+      "manifest_hash_match": true,
+      "header_facts": {
+        "element": "Si",
+        "z_valence": 4.0,
+        "pseudo_type": "NC",
+        "relativistic": "scalar",
+        "functional": "PBE",
+        "nlcc": true,
+        "number_of_wfc": 2,
+        "mesh_size": 1510,
+        "number_of_proj": 6,
+        "projector_channels": [
+          {
+            "index": 1,
+            "l": 0
+          },
+          {
+            "index": 2,
+            "l": 0
+          },
+          {
+            "index": 3,
+            "l": 1
+          },
+          {
+            "index": 4,
+            "l": 1
+          },
+          {
+            "index": 5,
+            "l": 2
+          },
+          {
+            "index": 6,
+            "l": 2
+          }
+        ],
+        "cutoff_hints_ry": {
+          "wavefunction": null,
+          "density": 15.09
+        }
+      },
+      "qualification_status": "unqualified",
+      "rust_python_equal": true,
+      "blockers": [],
+      "supported_by_engine": true
+    }
+  ]
+}

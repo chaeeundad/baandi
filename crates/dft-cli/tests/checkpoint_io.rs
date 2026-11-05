@@ -461,3 +461,34 @@ fn command_line_cross_process() {
     );
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn v1_codec_rejects_nlcc_instead_of_dropping_its_ledger() {
+    let (m, e) = identity(0, 1);
+    let mut s = ScfSession::new(
+        fixture(0, Mixing::default(), 1, 200),
+        CompletionMode::Strict,
+        ExecutionConfig::default(),
+    )
+    .unwrap();
+    s.initialize().unwrap();
+    s.step().unwrap();
+    let mut checkpoint = s
+        .checkpoint(CheckpointKind::ExactContinuation, m, e)
+        .unwrap();
+    let bytes = io::encode(&checkpoint).unwrap();
+    assert_eq!(io::encode(&io::decode(&bytes).unwrap()).unwrap(), bytes);
+    checkpoint.continuation.as_mut().unwrap().history[0]
+        .energy
+        .nlcc = Some(dft_engine::energy::CoreXcLedger {
+        core_electrons: 1.,
+        core_potential_integral_ha: -0.1,
+        valence_potential_integral_ha: -0.2,
+    });
+    assert!(
+        io::encode(&checkpoint)
+            .unwrap_err()
+            .to_string()
+            .contains("NLCC")
+    );
+}

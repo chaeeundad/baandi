@@ -3844,3 +3844,23 @@ SHA-256 provenance (binaries built with `CARGO_PROFILE_RELEASE_DEBUG=true`):
 - `/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF`: `e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
 ### Correction, 2026-11-04: NonlocalOperator::add comparison value
 Commit 9fcb356 ("restore original NonlocalOperator::add loop, blocked traversal measured 2.9x slower on dev08") rests on a wrong reference value. The remote measurement session corrected it: fe0492b `NonlocalOperator::add` is 0.474 s (7.5 percent, 17 of 227 samples, 6 runs) on dev08 MKL T=1 si8, not 0.323 s (6 of 117 samples, a count too small for the stated precision). The P10I regression is about 2.0x, not 2.9x. The revert of 9fcb356 is bit-identical and reduced the function from 0.929 s to 0.800 s (239 samples) but the wall time did not move beyond noise (mkl T1 6.612 to 6.589 s, pure T8 4.567 to 4.540 s). The remaining MKL T=1 gap to fe0492b (6.589 versus 6.334 s) is spread: MKL zgemm kernel +0.512 s, memcpy +0.494 s, NonlocalOperator::add +0.325 s, tile multiply_into +0.221 s, apply_local +0.219 s, concatenate +0.192 s, offset by subtract_projection -1.398 s and old gemm -0.307 s. Rule applied from now on: never quote a profile-derived ratio as a firm number when the counts are below about 30 samples.
+
+## P13C: correctness extension for NLCC, no optimization claim
+
+NLCC-off retains the original XC evaluator and summation order. New combined
+XC-density storage and spin scratch are prepared at construction; scalar core
+arrays are immutable. Radial shell caching is setup-only. No core allocation,
+logging or I/O occurs in orbital/Hamiltonian loops. Existing allocating XC
+library/output boundaries remain; this is not a wholly allocation-free SCF.
+NLCC evaluates output XC once for the common density before k audits and records
+core integrals as audit-only values. No numerical defaults or solver policies
+were changed, and no silicon-only performance default was adopted.
+
+The original HEAD CLI was archived/built for paired legacy checks. Benchmark
+commands and results are in tests/reference/datasets/p13c-status.json. A macOS
+`sample PID 1 1 -file /private/tmp/p13c-before-profile.txt` attempt on that control
+binary failed with exit 255 (process inspection unavailable in the sandbox);
+the underlying k444s run exited 0. No profile finding or speedup is claimed.
+The older historical baseline's density bits already differ from the control
+HEAD, despite energies within 1e-12 Ha; acceptance uses the recorded same-HEAD
+pair as well as explicitly reporting the historical-gate failure.

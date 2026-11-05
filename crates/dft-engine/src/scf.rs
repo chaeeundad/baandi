@@ -294,6 +294,8 @@ pub struct ScfProblem {
     grid: FftGridSpec,
     ionic_g: Array3<Complex64>,
     ionic_real: Array3<f64>,
+    core_density: Option<Array3<f64>>,
+    xc_density: Array3<f64>,
     fft: FftPlan3d,
     // One reusable FFT workspace per active k worker, shared across phases.
     worker_ffts: Vec<FftPlan3d>,
@@ -598,6 +600,18 @@ impl ScfProblem {
             &species,
         )?)?;
         let mut fft = FftPlan3d::new(grid.dims())?;
+        let core_density = dft_physics::density::core_density(
+            &density_basis,
+            &dg,
+            cell.volume_bohr3(),
+            &species,
+            &mut fft,
+        )?;
+        let xc_density = Array3::zeros(if core_density.is_some() {
+            grid.dims()
+        } else {
+            [0; 3]
+        });
         let mut ionic = Array3::zeros(grid.dims());
         fft.to_real(&ionic_g, &mut ionic)?;
         let scale = ionic.iter().map(|z| z.re.abs()).fold(1.0, f64::max);
@@ -666,6 +680,8 @@ impl ScfProblem {
             grid,
             ionic_g,
             ionic_real,
+            core_density,
+            xc_density,
             fft,
             worker_ffts,
             pool,
@@ -676,6 +692,9 @@ impl ScfProblem {
             setup_time: start.elapsed(),
             minimum_gap,
         })
+    }
+    pub fn core_density(&self) -> Option<&Array3<f64>> {
+        self.core_density.as_ref()
     }
     pub fn grid_dimensions(&self) -> [usize; 3] {
         self.grid.dims()
@@ -726,10 +745,13 @@ impl ScfProblem {
         }
         let start = Instant::now();
         let h = hartree::evaluate(n, &self.cell, &mut self.fft)?;
-        let x = self
-            .options
-            .functional
-            .evaluate(n, &self.cell, &mut self.fft)?;
+        let x = self.options.functional.evaluate_with_core(
+            n,
+            self.core_density.as_ref(),
+            &mut self.xc_density,
+            &self.cell,
+            &mut self.fft,
+        )?;
         let mut effective = self.ionic_real.clone();
         for ((v, h), x) in effective.iter_mut().zip(&h.potential).zip(&x.potential) {
             *v += h.re + x;
@@ -871,6 +893,17 @@ impl ScfProblem {
         }
         timings.density = start.elapsed();
         let start = Instant::now();
+        let output_xc = if self.core_density.is_some() {
+            Some(self.options.functional.evaluate_with_core(
+                &output,
+                self.core_density.as_ref(),
+                &mut self.xc_density,
+                &self.cell,
+                &mut self.fft,
+            )?)
+        } else {
+            None
+        };
         let mut audits = Vec::new();
         ordered_chunks(
             &mut self.states,
@@ -878,7 +911,7 @@ impl ScfProblem {
             &self.pool,
             |i, state, fft| {
                 let k = &k_points[i];
-                let audit = energy::evaluate_with_functional(
+                let audit = energy::evaluate_with_core_xc(
                     AuditInput {
                         cell: &self.cell,
                         basis: &state.basis,
@@ -897,6 +930,8 @@ impl ScfProblem {
                     },
                     fft,
                     self.options.functional,
+                    output_xc.as_ref(),
+                    self.core_density.as_ref(),
                 )?;
                 Ok((state.point.weight, audit))
             },
@@ -1140,6 +1175,7 @@ mod tests {
             nonlocal: 0.0,
             hartree: 0.0,
             xc: 0.0,
+            nlcc: None,
             ewald: 0.0,
             band_sum: 0.0,
             double_counting: 0.0,

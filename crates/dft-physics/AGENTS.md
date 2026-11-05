@@ -56,3 +56,15 @@ and real potential against the existing full-grid evaluator on those grids.
 See `docs/user/collinear-spin.md` for full SCF scope and evidence.
 
 **Rules:** keep public API changes out of unrelated tickets; every behavior change adds or updates a test with stated tolerance and units; prefer general-purpose crates (ADR 0003); record design decisions in an ADR.
+
+## MF06 NLCC (P13C)
+
+`density::core_density` prepares immutable core Fourier coefficients at setup,
+with shell caching, density-sphere truncation, 1/volume and ionic phases. It never
+renormalizes or clips core density. Spin XC uses half the core in each channel
+and differentiates the combined density; its valence potential integral excludes
+core and its separate core integral is audit-only. Combined-density screens and
+negative-density policies remain those of the selected functional. See the
+engine `tests/nlcc.rs` for localized three-step differences, translation, analytic
+multiple-projector assembly and converged spin reduction. No force/stress
+capability is established and no new per-orbital allocation is introduced.

@@ -17,3 +17,11 @@ Unpolarized results remain version 1. Never route a collinear result through a
 scalar legacy orbital view or unpolarized runtime/checkpoint/postprocessing.
 Use `tests/spin.rs` and its independent standard-library schema/cube checker.
 See `docs/user/collinear-spin.md` for supported combinations and format losses.
+
+P13C: `inspect-upf --json --manifest PATH` matches provenance by SHA-256 and
+reports header facts even when SCF support fails. The independent stdlib reader
+is `scripts/check_upf_headers.py`; external files are selected by `DFT_NC_DIR`.
+`tests/inspect_upf.rs::real_nc_headers` is ignored and checks inspection only,
+not SCF or material qualification. Engine tests cover NLCC and real atom smoke;
+see docs/cli.md. NLCC local-potential export includes the core in XC only.
+NLCC ledger data cannot be silently serialized into checkpoint v1.

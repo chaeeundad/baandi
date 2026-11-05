@@ -1,0 +1,462 @@
+{
+  "task_id": "P13C-NLCC-REAL-NC",
+  "status": "DONE",
+  "base_commit": "76fbb769e6111ec5e559dfa3a040ac14e9f16d7e",
+  "scope": "NC reader and NLCC implementation with synthetic oracles and explicit real-file smoke failures. No dataset qualification or external-code agreement.",
+  "caps_frozen_before_measurement": {
+    "radial_relative": 1e-10,
+    "xc_directional_derivative_ha": 1e-07,
+    "translation_energy_ha": 1e-07,
+    "legacy_energy_ha": 1e-12,
+    "density_bit_identity": true
+  },
+  "commands": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-upf gaussian_core_fourier_oracle -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test nlcc -- --include-ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex cargo test --release -p dft-upf --test real_nc -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex cargo test --release -p dft-cli --test inspect_upf real_nc_headers -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex cargo test --release -p dft-engine --test real_nc -- --ignored --nocapture --test-threads=1",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_NC_CUTOFF=30 DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex cargo test --release -p dft-engine --test real_nc isolated_atoms_pbe_smoke -- --ignored --nocapture --test-threads=1",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex python3 -I scripts/check_upf_headers.py --binary target/debug/dft-cli --output tests/reference/datasets/pseudodojo-headers.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary /private/tmp/p13c-before-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --record /private/tmp/p13c-before-all.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --baseline /private/tmp/p13c-before-all.json --require-identical --record /private/tmp/p13c-after-all.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --baseline docs/performance/baseline.json --require-identical --record /private/tmp/p13c-historical-final.json",
+      "exit_code": 5
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    }
+  ],
+  "gate_summary": {
+    "build": "PASS",
+    "test": "PASS",
+    "fmt": "PASS",
+    "clippy": "PASS",
+    "independent_header_files": 5,
+    "nlcc_release_tests_passed": 6,
+    "readme_specification_tests_passed": 3
+  },
+  "gaussian_core_max_relative_error": 8.328257648378766e-16,
+  "localized_xc_derivative_max_error_ha": 7.247765538773154e-12,
+  "grid_xc_translation_max_error_ha": 1.2821157469034006e-09,
+  "five_projector_analytic_assembly_max_relative_error": 3.9863972549185803e-16,
+  "converged_spin_reduction": [
+    {
+      "functional": "LdaPw",
+      "unpolarized_energy_ha": -1.3289139642451278,
+      "spin_energy_ha": -1.3289139642451278,
+      "delta_ha": 0.0,
+      "density_distance_bohr_minus_3_over_2": 7.713669191982733e-17,
+      "iterations": [
+        17,
+        17
+      ]
+    },
+    {
+      "functional": "Pbe",
+      "unpolarized_energy_ha": -1.337656960912955,
+      "spin_energy_ha": -1.3376569609129565,
+      "delta_ha": 1.5543122344752192e-15,
+      "density_distance_bohr_minus_3_over_2": 5.68613938416396e-17,
+      "iterations": [
+        18,
+        18
+      ]
+    }
+  ],
+  "total_scf_translation": [
+    {
+      "functional": "LdaPz",
+      "refinement": 1,
+      "grid": [
+        18,
+        15,
+        20
+      ],
+      "energies_ha": [
+        -2.2835208895076695,
+        -2.283520895664026
+      ],
+      "delta_ha": 6.156356313624656e-09,
+      "cap_passed": true
+    },
+    {
+      "functional": "LdaPz",
+      "refinement": 2,
+      "grid": [
+        36,
+        30,
+        40
+      ],
+      "energies_ha": [
+        -2.283520892818796,
+        -2.2835208928187756
+      ],
+      "delta_ha": 2.042810365310288e-14,
+      "cap_passed": true
+    },
+    {
+      "functional": "LdaPz",
+      "refinement": 3,
+      "grid": [
+        54,
+        45,
+        60
+      ],
+      "energies_ha": [
+        -2.283520892818779,
+        -2.2835208928187516
+      ],
+      "delta_ha": 2.7533531010703882e-14,
+      "cap_passed": true
+    },
+    {
+      "functional": "LdaPw",
+      "refinement": 1,
+      "grid": [
+        18,
+        15,
+        20
+      ],
+      "energies_ha": [
+        -2.2818468713269526,
+        -2.281846877455397
+      ],
+      "delta_ha": 6.12844441860716e-09,
+      "cap_passed": true
+    },
+    {
+      "functional": "LdaPw",
+      "refinement": 2,
+      "grid": [
+        36,
+        30,
+        40
+      ],
+      "energies_ha": [
+        -2.2818468746230502,
+        -2.2818468746230685
+      ],
+      "delta_ha": 1.8207657603852567e-14,
+      "cap_passed": true
+    },
+    {
+      "functional": "LdaPw",
+      "refinement": 3,
+      "grid": [
+        54,
+        45,
+        60
+      ],
+      "energies_ha": [
+        -2.2818468746230582,
+        -2.2818468746230605
+      ],
+      "delta_ha": 2.220446049250313e-15,
+      "cap_passed": true
+    },
+    {
+      "functional": "Pbe",
+      "refinement": 1,
+      "grid": [
+        18,
+        15,
+        20
+      ],
+      "energies_ha": [
+        -2.29954622584767,
+        -2.299543147725543
+      ],
+      "delta_ha": 3.0781221274089887e-06,
+      "cap_passed": false
+    },
+    {
+      "functional": "Pbe",
+      "refinement": 2,
+      "grid": [
+        36,
+        30,
+        40
+      ],
+      "energies_ha": [
+        -2.299544554810662,
+        -2.2995444874424695
+      ],
+      "delta_ha": 6.736819235797498e-08,
+      "cap_passed": true
+    },
+    {
+      "functional": "Pbe",
+      "refinement": 3,
+      "grid": [
+        54,
+        45,
+        60
+      ],
+      "energies_ha": [
+        -2.2995444956464777,
+        -2.2995444904750304
+      ],
+      "delta_ha": 5.1714472704134096e-09,
+      "cap_passed": true
+    }
+  ],
+  "legacy_cases": [
+    {
+      "case": "gamma",
+      "energy_ha": -7.295530468210765,
+      "iterations": 10,
+      "delta_from_control_ha": 0.0,
+      "density_bit_identical": true,
+      "historical_delta_ha": 1.6253665080512292e-13
+    },
+    {
+      "case": "k222s",
+      "energy_ha": -7.919423412469083,
+      "iterations": 10,
+      "delta_from_control_ha": 0.0,
+      "density_bit_identical": true,
+      "historical_delta_ha": 1.2434497875801753e-14
+    },
+    {
+      "case": "k222",
+      "energy_ha": -7.831230057121137,
+      "iterations": 10,
+      "delta_from_control_ha": 0.0,
+      "density_bit_identical": true,
+      "historical_delta_ha": 6.039613253960852e-14
+    },
+    {
+      "case": "k444s",
+      "energy_ha": -7.9259761266480915,
+      "iterations": 10,
+      "delta_from_control_ha": 0.0,
+      "density_bit_identical": true,
+      "historical_delta_ha": null
+    },
+    {
+      "case": "si8",
+      "energy_ha": -31.321803601031256,
+      "iterations": 15,
+      "delta_from_control_ha": 0.0,
+      "density_bit_identical": true,
+      "historical_delta_ha": null
+    }
+  ],
+  "real_atom_smoke": [
+    {
+      "element": "O",
+      "cutoff_ha": 20.0,
+      "status": "failed",
+      "energy_ha": null,
+      "electron_count": null,
+      "iterations": 1,
+      "seconds": 1.384332,
+      "qualification_status": "unqualified",
+      "reason": "Numerical(\"collinear SCF iteration 1: Numerical(\\\"XC library: NLCC combined spin density -1.4019060515802547e-4 Bohr^-3 is not finite/nonnegative; resolve density-grid truncation or valence feasibility without clipping core\\\")\")",
+      "electrons_target": 6.0
+    },
+    {
+      "element": "Ni",
+      "cutoff_ha": 20.0,
+      "status": "failed",
+      "energy_ha": null,
+      "electron_count": null,
+      "iterations": 1,
+      "seconds": 1.601441,
+      "qualification_status": "unqualified",
+      "reason": "Numerical(\"collinear SCF iteration 1: Numerical(\\\"XC library: NLCC combined spin density -6.409563403723685e-5 Bohr^-3 is not finite/nonnegative; resolve density-grid truncation or valence feasibility without clipping core\\\")\")",
+      "electrons_target": 18.0
+    },
+    {
+      "element": "Al",
+      "cutoff_ha": 20.0,
+      "status": "failed",
+      "energy_ha": null,
+      "electron_count": null,
+      "iterations": 53,
+      "seconds": 7.869918,
+      "qualification_status": "unqualified",
+      "reason": "Numerical(\"collinear SCF iteration 53: spin density residual exceeded configured growth limit; last evaluated energy_ha=-2.1923657170060453e0, electrons=2.9999999999999929e0\")",
+      "electrons_target": 3.0,
+      "last_evaluated_energy_ha": -2.1923657170060453,
+      "last_evaluated_electrons": 2.999999999999993
+    },
+    {
+      "element": "Mg",
+      "cutoff_ha": 20.0,
+      "status": "converged",
+      "energy_ha": -58.84104352104094,
+      "electron_count": 9.999999999999988,
+      "iterations": 14,
+      "seconds": 3.300429,
+      "qualification_status": "unqualified"
+    },
+    {
+      "element": "Si",
+      "cutoff_ha": 20.0,
+      "status": "not_converged_iteration_budget",
+      "energy_ha": -3.9933735253120233,
+      "electron_count": 3.999999999999996,
+      "iterations": 60,
+      "seconds": 7.718153,
+      "qualification_status": "unqualified"
+    },
+    {
+      "element": "O",
+      "cutoff_ha": 30.0,
+      "status": "failed",
+      "energy_ha": null,
+      "electron_count": null,
+      "iterations": 1,
+      "seconds": 2.789618,
+      "qualification_status": "unqualified",
+      "reason": "Numerical(\"collinear SCF iteration 1: Numerical(\\\"XC library: NLCC combined spin density -3.5788431989919474e-7 Bohr^-3 is not finite/nonnegative; resolve density-grid truncation or valence feasibility without clipping core\\\")\")",
+      "electrons_target": 6.0
+    },
+    {
+      "element": "Ni",
+      "cutoff_ha": 30.0,
+      "status": "failed",
+      "energy_ha": null,
+      "electron_count": null,
+      "iterations": 1,
+      "seconds": 5.035891,
+      "qualification_status": "unqualified",
+      "reason": "Numerical(\"collinear SCF iteration 1: Numerical(\\\"XC library: NLCC combined spin density -5.99661156031544e-7 Bohr^-3 is not finite/nonnegative; resolve density-grid truncation or valence feasibility without clipping core\\\")\")",
+      "electrons_target": 18.0
+    },
+    {
+      "element": "Al",
+      "cutoff_ha": 30.0,
+      "status": "not_converged_iteration_budget",
+      "energy_ha": -2.1918858438296764,
+      "electron_count": 3.0000000000000027,
+      "iterations": 60,
+      "seconds": 14.056389,
+      "qualification_status": "unqualified"
+    },
+    {
+      "element": "Mg",
+      "cutoff_ha": 30.0,
+      "status": "converged",
+      "energy_ha": -59.37214856023922,
+      "electron_count": 10.0,
+      "iterations": 14,
+      "seconds": 5.74305,
+      "qualification_status": "unqualified"
+    },
+    {
+      "element": "Si",
+      "cutoff_ha": 30.0,
+      "status": "not_converged_iteration_budget",
+      "energy_ha": -3.9987078856409406,
+      "electron_count": 3.9999999999999956,
+      "iterations": 60,
+      "seconds": 12.800186,
+      "qualification_status": "unqualified"
+    }
+  ],
+  "real_radial_checks": [
+    {
+      "element": "O",
+      "points": 936,
+      "tabulated_atomic_electrons": 5.9999962145159005,
+      "z_valence": 6.0,
+      "relative_charge_deficit": -6.309140166e-07,
+      "independent_quadrature_difference_electrons": -5.329070518e-15,
+      "normalization_cap_passed": false,
+      "renormalized": false
+    },
+    {
+      "element": "Ni",
+      "points": 1372,
+      "tabulated_atomic_electrons": 17.99999808384758,
+      "z_valence": 18.0,
+      "relative_charge_deficit": -1.064529123e-07,
+      "independent_quadrature_difference_electrons": -1.065814104e-14,
+      "normalization_cap_passed": false,
+      "renormalized": false
+    },
+    {
+      "element": "Al",
+      "points": 1876,
+      "tabulated_atomic_electrons": 2.999999050146801,
+      "z_valence": 3.0,
+      "relative_charge_deficit": -3.166177331e-07,
+      "independent_quadrature_difference_electrons": -1.776356839e-15,
+      "normalization_cap_passed": false,
+      "renormalized": false
+    },
+    {
+      "element": "Mg",
+      "points": 1510,
+      "tabulated_atomic_electrons": 9.999997867535754,
+      "z_valence": 10.0,
+      "relative_charge_deficit": -2.132464246e-07,
+      "independent_quadrature_difference_electrons": -1.065814104e-14,
+      "normalization_cap_passed": false,
+      "renormalized": false
+    },
+    {
+      "element": "Si",
+      "points": 1510,
+      "tabulated_atomic_electrons": 3.9999977732125087,
+      "z_valence": 4.0,
+      "relative_charge_deficit": -5.566968728e-07,
+      "independent_quadrature_difference_electrons": 2.664535259e-15,
+      "normalization_cap_passed": false,
+      "renormalized": false
+    }
+  ],
+  "real_nonlocal_max_absolute_error_ha": 1.3877787807814457e-17,
+  "limitations": [
+    "All five datasets remain unqualified; no cutoff convergence, ghost/scattering or transferability certificate.",
+    "O/Ni fail combined-density feasibility before a finite total XC energy can be evaluated at the smoke cutoffs; no density clipping.",
+    "Real PP_RHOATOM tables fail the 1e-10 normalization cap; independent quadrature agrees, and source tables are not renormalized.",
+    "Coarse-grid PBE two-atom translation failed the frozen cap (initial release test exit 101); independent FFT-grid refinement resolves it without changing the basis, SCF tolerances or cap.",
+    "Historical baseline density identity fails (exit 5); all five same-HEAD control densities and energies match exactly. No performance claim from shared-host single runs.",
+    "NLCC checkpoint v1 and ionic force/stress derivatives remain explicitly unavailable.",
+    "macOS sample process inspection failed with exit 255; no profile finding or speedup claimed.",
+    "New README result rendering and dashboard/session publication are outside the ticket file ownership; existing README regeneration/specification checks passed unchanged."
+  ],
+  "normalization_contract": "No dependency/vendor change. Original numbered tags and indices validated before enum-compatible renaming; arrays and order preserved. Only unused informational metadata receives neutral reader defaults; original absent attributes stay absent in inspection.",
+  "commit": "Uncommitted, task/P13C-NLCC-REAL-NC"
+}

@@ -1,4 +1,4 @@
-//! Collinear valence XC and reusable spectral workspaces (ADR 0031).
+//! Collinear XC with optional spin-neutral NLCC and reusable spectral workspaces.
 use crate::{PhysicsError, data::*, hartree, xc};
 use dft_geometry::Cell;
 use std::f64::consts::PI;
@@ -82,7 +82,7 @@ pub enum SpinFunctional {
     Pbe,
 }
 
-/// Output storage is reused. Energies are Ha; potentials Ha; no core density.
+/// Ionic derivatives are unavailable even when valence XC and NLCC are evaluated.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IonicDerivativeCapability {
     Unavailable { reason: &'static str },
@@ -96,6 +96,8 @@ pub struct SpinXcResponse {
     pub stress_capability: IonicDerivativeCapability,
     pub energy_ha: f64,
     pub valence_potential_integral_ha: f64,
+    /// Audit only: integral (rho_core/2)*(V_up+V_down), excluded from band double counting.
+    pub core_potential_integral_ha: f64,
 }
 impl SpinXcResponse {
     pub fn new(dims: [usize; 3]) -> Self {
@@ -109,6 +111,7 @@ impl SpinXcResponse {
             },
             energy_ha: 0.0,
             valence_potential_integral_ha: 0.0,
+            core_potential_integral_ha: 0.0,
         }
     }
 }
@@ -121,6 +124,7 @@ pub struct SpinXc {
     sigma: Vec<f64>,
     gradients: [[Array3<f64>; 3]; 2],
     flux: Array3<f64>,
+    total_channel: Array3<f64>,
     derivative: Array3<f64>,
     spectral: Spectral,
     weight: f64,
@@ -143,6 +147,7 @@ impl SpinXc {
             sigma: vec![0.0; 3 * len],
             gradients: std::array::from_fn(|_| std::array::from_fn(|_| Array3::zeros(dims))),
             flux: Array3::zeros(dims),
+            total_channel: Array3::zeros(dims),
             derivative: Array3::zeros(dims),
             spectral,
             weight: cell.volume_bohr3() / len as f64,
@@ -155,6 +160,20 @@ impl SpinXc {
         density: &[Array3<f64>; 2],
         out: &mut SpinXcResponse,
     ) -> Result<(), PhysicsError> {
+        self.evaluate_with_core(density, None, out)
+    }
+    /// Immutable, spin-neutral model core. Apply the existing strict collinear
+    /// nonnegative-density rule to each combined channel, without clipping.
+    pub fn evaluate_with_core(
+        &mut self,
+        density: &[Array3<f64>; 2],
+        core: Option<&Array3<f64>>,
+        out: &mut SpinXcResponse,
+    ) -> Result<(), PhysicsError> {
+        if core.is_some_and(|c| c.shape() != self.flux.shape() || c.iter().any(|v| !v.is_finite()))
+        {
+            return Err(PhysicsError::Shape);
+        }
         let len = self.rho.len() / 2;
         for (s, channel) in density.iter().enumerate() {
             if channel.shape() != self.flux.shape()
@@ -162,16 +181,33 @@ impl SpinXc {
             {
                 return Err(PhysicsError::Shape);
             }
-            for (i, &n) in channel.iter().enumerate() {
+            if let Some(core) = core {
+                for ((total, &valence), &c) in self.total_channel.iter_mut().zip(channel).zip(core)
+                {
+                    *total = valence + 0.5 * c;
+                }
+            }
+            let combined = if core.is_some() {
+                &self.total_channel
+            } else {
+                channel
+            };
+            for (i, &n) in combined.iter().enumerate() {
                 if !n.is_finite() || n < 0.0 {
-                    return Err(PhysicsError::Density(n));
+                    return Err(if core.is_some() {
+                        PhysicsError::Xc(format!(
+                            "NLCC combined spin density {n:e} Bohr^-3 is not finite/nonnegative; resolve density-grid truncation or valence feasibility without clipping core"
+                        ))
+                    } else {
+                        PhysicsError::Density(n)
+                    });
                 }
                 self.rho[2 * i + s] = n;
             }
             if self.kind == SpinFunctional::Pbe {
                 for a in 0..3 {
                     self.spectral
-                        .derivative(channel, a, &mut self.gradients[s][a])?;
+                        .derivative(combined, a, &mut self.gradients[s][a])?;
                 }
             }
         }
@@ -242,7 +278,17 @@ impl SpinXc {
                         .sum::<f64>()
                 })
                 .sum::<f64>();
-        if !out.energy_ha.is_finite()
+        out.core_potential_integral_ha = core.map_or(0.0, |core| {
+            self.weight
+                * core
+                    .iter()
+                    .zip(&out.potentials[0])
+                    .zip(&out.potentials[1])
+                    .map(|((&c, &u), &d)| 0.5 * c * (u + d))
+                    .sum::<f64>()
+        });
+        if !out.core_potential_integral_ha.is_finite()
+            || !out.energy_ha.is_finite()
             || !out.valence_potential_integral_ha.is_finite()
             || out.potentials.iter().flatten().any(|v| !v.is_finite())
         {

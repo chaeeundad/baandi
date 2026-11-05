@@ -755,6 +755,9 @@ impl ScfSession {
     ) -> Result<(), crate::checkpoint::Rejection> {
         use crate::checkpoint::Rejection as R;
         model.validate()?;
+        if self.problem.core_density.is_some() {
+            return Err(R::Xc);
+        }
         if model.cell_bohr != self.problem.cell.lattice_columns_bohr() {
             return Err(R::Cell);
         }

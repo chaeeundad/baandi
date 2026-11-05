@@ -282,3 +282,57 @@ pub fn projector_transform(
             }),
     )
 }
+
+/// Fourier transform of a spherical density rho(r), in electrons/Bohr^3.
+/// Returns electrons: 4*pi integral r^2 rho(r) j0(qr) dr. Unlike PP_RHOATOM,
+/// PP_NLCC is a density, not a radial charge already multiplied by 4*pi*r^2.
+/// Uses the same index-coordinate Simpson/3/8 quadrature as local/projectors.
+pub fn spherical_density_transform(
+    mesh: &RadialMesh,
+    rho: &[f64],
+    q: f64,
+) -> Result<f64, RadialError> {
+    if rho.len() != mesh.r.len()
+        || rho.iter().any(|v| !v.is_finite())
+        || !q.is_finite()
+        || q < 0.0
+        || !(q * mesh.r[mesh.r.len() - 1]).is_finite()
+    {
+        return Err(RadialError::Argument("density samples or q"));
+    }
+    finite(
+        4.0 * PI
+            * integrate(rho.len(), |i| {
+                let r = mesh.r[i];
+                r * r * rho[i] * bessel(0, q * r) * mesh.rab[i]
+            }),
+    )
+}
+
+#[cfg(test)]
+mod core_tests {
+    use super::*;
+    #[test]
+    fn gaussian_core_fourier_oracle() {
+        // rho = Q*(a/pi)^(3/2)*exp(-a*r^2); transform Q*exp(-q^2/(4a)).
+        // Frozen MF06 relative cap 1e-10; both odd and even mesh lengths.
+        for n in [2001, 2002] {
+            let h = 0.005;
+            let mesh = RadialMesh::new((0..n).map(|i| i as f64 * h).collect(), vec![h; n]).unwrap();
+            for a in [0.5, 1.0, 2.0] {
+                let rho: Vec<_> = mesh
+                    .r()
+                    .iter()
+                    .map(|r| 3.0 * (a / PI).powf(1.5) * (-a * r * r).exp())
+                    .collect();
+                for q in [0.0, 0.3, 1.0, 3.0] {
+                    let actual = spherical_density_transform(&mesh, &rho, q).unwrap();
+                    let expected = 3.0 * (-q * q / (4.0 * a)).exp();
+                    let error = (actual - expected).abs() / expected;
+                    println!("core Gaussian n={n} a={a} q={q} relative_error={error:e}");
+                    assert!(error <= 1e-10);
+                }
+            }
+        }
+    }
+}

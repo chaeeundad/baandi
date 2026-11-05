@@ -132,6 +132,9 @@ fn energy_json(e: &EnergyAudit) -> Value {
     ] {
         m.insert(name.into(), json!({"ha":x,"ry":2.*x}));
     }
+    if let Some(core) = &e.nlcc {
+        m.insert("nlcc".into(), json!({"core_electrons":core.core_electrons,"core_potential_integral_ha":core.core_potential_integral_ha,"valence_potential_integral_ha":core.valence_potential_integral_ha,"energy_convention":"xc_includes_core; Hartree_and_band_double_counting_valence_only","force_stress":"unavailable"}));
+    }
     Value::Object(m)
 }
 fn phase_json(t: &PhaseTimings) -> Value {

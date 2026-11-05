@@ -72,9 +72,7 @@ fn inspect_synthetic_success_and_failure() {
     .unwrap();
     let result = run();
     assert!(!result.status.success());
-    assert!(
-        String::from_utf8_lossy(&result.stderr).contains("unsupported feature: core correction")
-    );
+    assert!(String::from_utf8_lossy(&result.stderr).contains("invalid field PP_NLCC"));
     std::fs::write(&path, "<UPF").unwrap();
     let result = run();
     assert!(!result.status.success());
@@ -82,4 +80,103 @@ fn inspect_synthetic_success_and_failure() {
     std::fs::remove_file(&path).unwrap();
     assert!(!run().status.success());
     std::fs::remove_dir(dir).unwrap();
+}
+
+#[test]
+fn json_inspection_lists_independent_blockers_and_ordered_channels() {
+    let dir = std::env::temp_dir().join(format!("dft-inspect-blockers-{}", std::process::id()));
+    std::fs::create_dir(&dir).unwrap();
+    let path = dir.join("synthetic.upf");
+    for (text, expected) in [
+        (fixture().replace("is_paw=\"F\"", "is_paw=\"T\""), "PAW"),
+        (
+            fixture().replace("is_ultrasoft=\"F\"", "is_ultrasoft=\"T\""),
+            "USPP",
+        ),
+        (
+            fixture().replace("relativistic=\"nonrelativistic\"", "relativistic=\"full\""),
+            "full-relativistic/SOC",
+        ),
+        (fixture().replace("has_so=\"F\"", "has_so=\"T\""), "SOC"),
+        (fixture().replace("index=\"1\"", "index=\"2\""), "malformed"),
+        (
+            fixture().replace("angular_momentum=\"0\"", "angular_momentum=\"bad\""),
+            "invalid index/angular_momentum",
+        ),
+        (
+            fixture().replace("<PP_DIJ>2</PP_DIJ>", ""),
+            "missing coupling matrix",
+        ),
+    ] {
+        std::fs::write(&path, text).unwrap();
+        let result = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+            .args(["inspect-upf", path.to_str().unwrap(), "--json"])
+            .output()
+            .unwrap();
+        assert!(result.status.success()); // Inspection succeeded; SCF is blocked.
+        let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(report["supported_by_engine"], false);
+        assert!(
+            report["blockers"].to_string().contains(expected),
+            "{report}"
+        );
+        assert_eq!(report["header_facts"]["mesh_size"], 401);
+        assert_eq!(report["sha256"].as_str().unwrap().len(), 64);
+        assert!(report["license_reference"].is_null());
+    }
+    std::fs::write(&path, fixture()).unwrap();
+    let report = inspection_report(&path, None).unwrap();
+    assert_eq!(
+        report["header_facts"]["projector_channels"],
+        serde_json::json!([{"index":1,"l":0}])
+    );
+    let manifest = dir.join("manifest.json");
+    let entry = serde_json::json!({"datasets":[{"element":"Xx", "sha256":report["sha256"], "license":{"identifier":"synthetic"},"qualification_status":"unqualified"}]});
+    std::fs::write(&manifest, entry.to_string()).unwrap();
+    let matched = inspection_report(&path, Some(&manifest)).unwrap();
+    assert_eq!(matched["license_reference"]["identifier"], "synthetic");
+    std::fs::write(&path, fixture().replace("SLA PZ", "PBE")).unwrap();
+    assert!(inspection_report(&path, Some(&manifest)).is_err());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// Header inspection only; SCF smoke is in the engine real_nc test.
+/// DFT_NC_DIR=/external/path cargo test --release -p dft-cli --test inspect_upf real_nc_headers -- --ignored --nocapture
+#[test]
+#[ignore = "requires external licensed UPFs via DFT_NC_DIR"]
+fn real_nc_headers() {
+    let dir = std::path::PathBuf::from(std::env::var_os("DFT_NC_DIR").expect("set DFT_NC_DIR"));
+    let manifest =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/data/nc-datasets.json");
+    for element in ["O", "Ni", "Al", "Mg", "Si"] {
+        let start = std::time::Instant::now();
+        let report =
+            inspection_report(&dir.join(format!("{element}.upf")), Some(&manifest)).unwrap();
+        assert_eq!(report["header_facts"]["element"], element);
+        assert_eq!(report["qualification_status"], "unqualified");
+        assert!(report["header_facts"]["number_of_proj"].as_u64().unwrap() > 3);
+        assert_eq!(report["supported_by_engine"], true);
+        assert_eq!(report["blockers"], serde_json::json!([]));
+        println!(
+            "{element}: inspection_s={:.6}, inspection blockers: {}",
+            start.elapsed().as_secs_f64(),
+            report["blockers"]
+        );
+    }
+}
+
+fn inspection_report(
+    path: &std::path::Path,
+    manifest: Option<&std::path::Path>,
+) -> Result<serde_json::Value, String> {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_dft-cli"));
+    command.arg("inspect-upf").arg(path).arg("--json");
+    if let Some(manifest) = manifest {
+        command.arg("--manifest").arg(manifest);
+    }
+    let output = command.output().unwrap();
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())
 }

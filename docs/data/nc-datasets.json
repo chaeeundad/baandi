@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "dataset": "PseudoDojo NC-SR v0.4 PBE standard UPF2",
+  "provenance": "docs/research/nc-dataset-candidates.md",
+  "datasets": [
+    {
+      "element": "O",
+      "filename": "O.upf",
+      "sha256": "2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11",
+      "source_url": "http://www.pseudo-dojo.org/pseudos/nc-sr-04_pbe_standard_upf.tgz",
+      "license": {
+        "identifier": "CC-BY-4.0",
+        "reference": "https://github.com/abinit/pseudo_dojo/blob/master/README.md",
+        "attribution": "PseudoDojo project",
+        "citations": "http://www.pseudo-dojo.org/faq.html"
+      },
+      "qualification_status": "unqualified",
+      "z_valence": 6,
+      "functional": "PBE",
+      "relativistic": "scalar",
+      "pseudo_type": "NC",
+      "nlcc": true,
+      "semicore": "not specified in source note",
+      "projector_counts": {
+        "0": 2,
+        "1": 2,
+        "2": 1
+      }
+    },
+    {
+      "element": "Ni",
+      "filename": "Ni.upf",
+      "sha256": "f83c9ee8062152d26e736c0ff9c0af7c86936f0642f3ab66ffb2eda42bd46a64",
+      "source_url": "http://www.pseudo-dojo.org/pseudos/nc-sr-04_pbe_standard_upf.tgz",
+      "license": {
+        "identifier": "CC-BY-4.0",
+        "reference": "https://github.com/abinit/pseudo_dojo/blob/master/README.md",
+        "attribution": "PseudoDojo project",
+        "citations": "http://www.pseudo-dojo.org/faq.html"
+      },
+      "qualification_status": "unqualified",
+      "z_valence": 18,
+      "functional": "PBE",
+      "relativistic": "scalar",
+      "pseudo_type": "NC",
+      "nlcc": true,
+      "semicore": "3s3p",
+      "projector_counts": {
+        "0": 2,
+        "1": 2,
+        "2": 2
+      }
+    },
+    {
+      "element": "Al",
+      "filename": "Al.upf",
+      "sha256": "b02eaa07c5d98f5eeae1bec4155854a7a94ea3635ca6b42e914f3f7ebd6912fb",
+      "source_url": "http://www.pseudo-dojo.org/pseudos/nc-sr-04_pbe_standard_upf.tgz",
+      "license": {
+        "identifier": "CC-BY-4.0",
+        "reference": "https://github.com/abinit/pseudo_dojo/blob/master/README.md",
+        "attribution": "PseudoDojo project",
+        "citations": "http://www.pseudo-dojo.org/faq.html"
+      },
+      "qualification_status": "unqualified",
+      "z_valence": 3,
+      "functional": "PBE",
+      "relativistic": "scalar",
+      "pseudo_type": "NC",
+      "nlcc": true,
+      "semicore": "not specified in source note",
+      "projector_counts": {
+        "0": 2,
+        "1": 2,
+        "2": 2
+      }
+    },
+    {
+      "element": "Mg",
+      "filename": "Mg.upf",
+      "sha256": "15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14",
+      "source_url": "http://www.pseudo-dojo.org/pseudos/nc-sr-04_pbe_standard_upf.tgz",
+      "license": {
+        "identifier": "CC-BY-4.0",
+        "reference": "https://github.com/abinit/pseudo_dojo/blob/master/README.md",
+        "attribution": "PseudoDojo project",
+        "citations": "http://www.pseudo-dojo.org/faq.html"
+      },
+      "qualification_status": "unqualified",
+      "z_valence": 10,
+      "functional": "PBE",
+      "relativistic": "scalar",
+      "pseudo_type": "NC",
+      "nlcc": false,
+      "semicore": "2s2p",
+      "projector_counts": {
+        "0": 2,
+        "1": 2
+      }
+    },
+    {
+      "element": "Si",
+      "filename": "Si.upf",
+      "sha256": "39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282",
+      "source_url": "http://www.pseudo-dojo.org/pseudos/nc-sr-04_pbe_standard_upf.tgz",
+      "license": {
+        "identifier": "CC-BY-4.0",
+        "reference": "https://github.com/abinit/pseudo_dojo/blob/master/README.md",
+        "attribution": "PseudoDojo project",
+        "citations": "http://www.pseudo-dojo.org/faq.html"
+      },
+      "qualification_status": "unqualified",
+      "z_valence": 4,
+      "functional": "PBE",
+      "relativistic": "scalar",
+      "pseudo_type": "NC",
+      "nlcc": true,
+      "semicore": "not specified in source note",
+      "projector_counts": {
+        "0": 2,
+        "1": 2,
+        "2": 2
+      }
+    }
+  ]
+}

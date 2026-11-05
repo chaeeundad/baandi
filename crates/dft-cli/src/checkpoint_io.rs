@@ -703,23 +703,61 @@ wire_struct!(IterationRecord, WIterationRecord {
     fixed_point_certificate: Option<FixedPointCertificate>,
     timings: PhaseTimings,
 });
-wire_struct!(
-    EnergyAudit,
-    WEnergyAudit {
-        kinetic: f64,
-        local: f64,
-        local_zero_mode: f64,
-        nonlocal: f64,
-        hartree: f64,
-        xc: f64,
-        ewald: f64,
-        band_sum: f64,
-        double_counting: f64,
-        band_form: f64,
-        harris_foulkes: f64,
-        functional_difference_bound: f64,
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WEnergyAudit {
+    kinetic: <f64 as Wire>::Repr,
+    local: <f64 as Wire>::Repr,
+    local_zero_mode: <f64 as Wire>::Repr,
+    nonlocal: <f64 as Wire>::Repr,
+    hartree: <f64 as Wire>::Repr,
+    xc: <f64 as Wire>::Repr,
+    ewald: <f64 as Wire>::Repr,
+    band_sum: <f64 as Wire>::Repr,
+    double_counting: <f64 as Wire>::Repr,
+    band_form: <f64 as Wire>::Repr,
+    harris_foulkes: <f64 as Wire>::Repr,
+    functional_difference_bound: <f64 as Wire>::Repr,
+}
+impl Wire for EnergyAudit {
+    type Repr = WEnergyAudit;
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<WEnergyAudit, Error> {
+        if self.nlcc.is_some() {
+            return Err(invalid("checkpoint v1 does not carry NLCC ledger"));
+        }
+        Ok(WEnergyAudit {
+            kinetic: self.kinetic.encode(bytes)?,
+            local: self.local.encode(bytes)?,
+            local_zero_mode: self.local_zero_mode.encode(bytes)?,
+            nonlocal: self.nonlocal.encode(bytes)?,
+            hartree: self.hartree.encode(bytes)?,
+            xc: self.xc.encode(bytes)?,
+            ewald: self.ewald.encode(bytes)?,
+            band_sum: self.band_sum.encode(bytes)?,
+            double_counting: self.double_counting.encode(bytes)?,
+            band_form: self.band_form.encode(bytes)?,
+            harris_foulkes: self.harris_foulkes.encode(bytes)?,
+            functional_difference_bound: self.functional_difference_bound.encode(bytes)?,
+        })
     }
-);
+    fn decode(w: WEnergyAudit, bytes: &[u8], cursor: &mut usize) -> Result<Self, Error> {
+        Ok(Self {
+            nlcc: None,
+            kinetic: f64::decode(w.kinetic, bytes, cursor)?,
+            local: f64::decode(w.local, bytes, cursor)?,
+            local_zero_mode: f64::decode(w.local_zero_mode, bytes, cursor)?,
+            nonlocal: f64::decode(w.nonlocal, bytes, cursor)?,
+            hartree: f64::decode(w.hartree, bytes, cursor)?,
+            xc: f64::decode(w.xc, bytes, cursor)?,
+            ewald: f64::decode(w.ewald, bytes, cursor)?,
+            band_sum: f64::decode(w.band_sum, bytes, cursor)?,
+            double_counting: f64::decode(w.double_counting, bytes, cursor)?,
+            band_form: f64::decode(w.band_form, bytes, cursor)?,
+            harris_foulkes: f64::decode(w.harris_foulkes, bytes, cursor)?,
+            functional_difference_bound: f64::decode(w.functional_difference_bound, bytes, cursor)?,
+        })
+    }
+}
 wire_struct!(FixedPointCertificate, WFixedPointCertificate {
     strict_residuals_per_k: Vec<Vec<f64>>,
     buffer_residuals_per_k: Vec<Vec<f64>>,

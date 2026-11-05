@@ -781,3 +781,94 @@ also supports unpolarized runs. `lda-pz` remains unpolarized only. A collinear
 `run` writes the version 2 spin result profile and channel/total/magnetization
 cubes; omitted spin settings preserve version 1 output. `validate` and `run`
 share sector/parity/capacity, axis, unsupported-functional and symmetry checks.
+
+### P13C NC datasets and NLCC
+
+`dft-cli inspect-upf FILE --json [--manifest docs/data/nc-datasets.json]`
+reports SHA-256, ordered one-based projector channels, wavefunction/mesh counts,
+original XC and relativistic labels, NLCC, and cutoff hints in Ry (absent hints
+are null). The optional manifest is matched by hash, never filename; missing or
+ambiguous identity and element mismatches fail. License provenance comes from
+that manifest. Text mode prints facts and blockers before numerical validation.
+JSON inspection exits zero when the report can be produced even for unsupported
+content: callers must examine `supported_by_engine` and `blockers`. Inspection
+and a successful parse are not material qualification.
+
+The five PseudoDojo files now parse without modifying the vendor or dependencies.
+The exact third-party failure was `missing field @wfc_cutoff`; the old adapter
+also rejected `PP_BETA.4`. Compatibility normalization in dft-upf validates original
+numbered suffixes, indices, order, channel count and D before use. Extra numbered
+nodes map to repeatable third-party enum variants without dropping or reordering
+any array, index, occupation or D entry. Missing informational header/mesh
+attributes receive neutral reader-only defaults; the mesh count derives from the
+header. Only the explicit PP_R and PP_RAB arrays enter radial numerics. Original
+missing metadata remains absent in inspection; `raw()` is explicitly a normalized
+compatibility view, not an exact representation of the source XML. A finite
+projector sample at r=0 is preserved: its r*u*j_l quadrature weight is exactly
+zero, with a bit-exact synthetic test rather than an acceptance tolerance.
+
+PP_NLCC is rho_core(r), electrons/Bohr^3, not 4*pi*r^2*rho. Its spherical Fourier
+transform uses the existing Simpson/3/8 index quadrature, shell caching at setup,
+1/volume normalization and atomic phases on the density sphere/grid. The prepared
+core grid is immutable and never enters electron count, Hartree or orbital
+density. LDA-PZ, LDA-PW and PBE evaluate XC on valence+core; collinear LDA-PW/PBE
+split the core equally between channels, including GGA gradients. Band double
+counting uses valence alone. `energies.nlcc`, present only for NLCC, exposes core
+charge, core-potential integral (audit only) and valence-potential integral.
+The XC energy already includes core; never add the core audit integral to total E.
+Local-potential volumetric output follows the same XC convention.
+
+Negative combined-density rules are unchanged: LDA-PZ and unpolarized LDA-PW
+allow their existing <=1e-14 Bohr^-3 roundoff clamp; unpolarized PBE and both spin
+functionals reject any negative combined density. No separate clipping or
+renormalization of core samples occurs. Fourier truncation can make a coarse
+core grid infeasible, and the error names the combined NLCC density. The density
+threshold remains 1e-10 Bohr^-3. Derivative oracles avoid threshold crossings.
+Forces and stress remain unavailable. NLCC checkpoint v1 export/import rejects
+explicitly because that format cannot represent the new ledger; ordinary v1
+encoding/decoding is unchanged. A spin model identity records active NLCC.
+
+Reproduction (all real files remain external):
+
+```sh
+export DFT_NC_DIR=/absolute/external/pseudodojo/ex
+python3 -I scripts/check_upf_headers.py --binary target/debug/dft-cli \
+  --output tests/reference/datasets/pseudodojo-headers.json
+cargo test --release -p dft-cli --test inspect_upf real_nc_headers -- --ignored --nocapture
+cargo test --release -p dft-engine --test nlcc -- --include-ignored --nocapture
+cargo test --release -p dft-engine --test real_nc -- --ignored --nocapture --test-threads=1
+# Additional discretization diagnostic; does not change engine defaults:
+DFT_NC_CUTOFF=30 cargo test --release -p dft-engine --test real_nc isolated_atoms_pbe_smoke -- --ignored --nocapture
+```
+
+Frozen synthetic caps: radial/atomic integrals 1e-10 relative, XC directional
+finite difference 1e-7 Ha per dimensionless perturbation with three h steps,
+translation energy 1e-7 Ha. The translation cap is this ticket's explicit
+pre-measurement choice at the MF06 derivative energy scale; the source table
+specified no separate translation-energy cap. Cubic, skew and elongated cells,
+even/odd radial meshes, spin swap and zero-spin reduction are covered. Five
+coupled synthetic projectors are checked against analytic Gaussian radial
+transforms and the spherical-harmonic addition theorem. Real-file D assembly
+is independent of the production matrix assembly, but reuses its radial
+transforms; it is not an independent scattering/ghost oracle.
+
+Evidence and commands are in `tests/reference/datasets/p13c-status.json` and
+`pseudodojo-headers.json`. Real atom runs use a 10 Bohr cubic cell, Gamma, fixed
+spin sectors, 20/30 Ha and at most 60 iterations. Failures and unconverged states
+are retained as smoke diagnostics, never labeled successful SCFs. Real finite
+atomic-density tables have small charge deficits; they are reported without
+renormalization and are not certified against the analytic 1e-10 normalization
+cap. All five datasets remain unqualified: cutoff scans, ghost/scattering tests
+and matched external-code validation are absent. No QE agreement is claimed.
+
+README regeneration and its specification tests retain the existing evidence.
+Adding a new README result renderer and dashboard/session publication remains
+outside this ticket's explicit owned-file list.
+
+The two-atom skew-cell total-SCF translation test additionally holds the
+wavefunction cutoff at 6 Ha and refines only the FFT grid. PBE fails at
+18x15x20 (3.0781221274e-6 Ha), passes at 36x30x40
+(6.7368192358e-8 Ha), and improves to 5.1714472704e-9 Ha at 54x45x60.
+The cap stays 1e-7 Ha throughout; coarse-grid failure is retained in evidence.
+This is a resolved-grid invariance check, not a promise that default grids give
+that tolerance for every system. Production grid/cutoff defaults are unchanged.

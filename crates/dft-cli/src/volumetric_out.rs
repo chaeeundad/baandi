@@ -234,11 +234,21 @@ pub fn write_outputs(
                 let mut fft = FftPlan3d::new(dims)?;
                 let mut ionic = Array3::zeros(dims);
                 fft.to_real(&reciprocal, &mut ionic)?;
-                let xc = config
-                    .xc
-                    .functional
-                    .engine()
-                    .evaluate(&result.density, cell, &mut fft)?;
+                let core = dft_physics::density::core_density(
+                    &prepared.density,
+                    &grid,
+                    cell.volume_bohr3(),
+                    &species,
+                    &mut fft,
+                )?;
+                let mut xc_density = Array3::zeros(dims);
+                let xc = config.xc.functional.engine().evaluate_with_core(
+                    &result.density,
+                    core.as_ref(),
+                    &mut xc_density,
+                    cell,
+                    &mut fft,
+                )?;
                 volumetric::total_local(
                     &ionic.mapv(|z| z.re),
                     &volumetric::hartree_potential(&result.density, cell)?,

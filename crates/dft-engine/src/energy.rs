@@ -6,6 +6,9 @@ use dft_physics::{data::*, hamiltonian::NonlocalOperator, hartree, kinetic, xc};
 
 #[derive(Clone, Debug)]
 pub struct EnergyAudit {
+    /// Explicit audit-only core contribution; XC energy includes core, all band
+    /// double counting excludes it. None preserves the legacy model/ledger.
+    pub nlcc: Option<CoreXcLedger>,
     pub kinetic: f64,
     pub local: f64,
     pub local_zero_mode: f64,
@@ -22,6 +25,32 @@ pub struct EnergyAudit {
     /// Bound using exact Hartree remainder, absolute XC remainder, and
     /// sum f_b ||H c_b-eps_b c_b|| (normalized orbitals).
     pub functional_difference_bound: f64,
+}
+#[derive(Clone, Debug)]
+pub struct CoreXcLedger {
+    pub core_electrons: f64,
+    pub core_potential_integral_ha: f64,
+    pub valence_potential_integral_ha: f64,
+}
+pub(crate) fn core_ledger(
+    core: Option<&Array3<f64>>,
+    valence: &Array3<f64>,
+    x: &xc::XcGrid,
+    volume: f64,
+) -> Option<CoreXcLedger> {
+    core.map(|core| {
+        let weight = volume / valence.len() as f64;
+        CoreXcLedger {
+            core_electrons: core.sum() * weight,
+            core_potential_integral_ha: weight
+                * core
+                    .iter()
+                    .zip(&x.potential)
+                    .map(|(c, v)| c * v)
+                    .sum::<f64>(),
+            valence_potential_integral_ha: x.potential_integral.0,
+        }
+    })
 }
 impl EnergyAudit {
     pub fn total_hartree(&self) -> f64 {
@@ -81,6 +110,15 @@ pub fn evaluate_with_functional(
     fft: &mut FftPlan3d,
     functional: Functional,
 ) -> Result<EnergyAudit, ScfError> {
+    evaluate_with_core_xc(a, fft, functional, None, None)
+}
+pub(crate) fn evaluate_with_core_xc(
+    a: AuditInput<'_>,
+    fft: &mut FftPlan3d,
+    functional: Functional,
+    output_xc: Option<&xc::XcGrid>,
+    core: Option<&Array3<f64>>,
+) -> Result<EnergyAudit, ScfError> {
     let n = a.output_density;
     if a.orbitals.len() != a.occupations.len()
         || a.eigenvalues.len() != a.occupations.len()
@@ -104,7 +142,13 @@ pub fn evaluate_with_functional(
     let volume = a.cell.volume_bohr3();
     let weight = volume / n.len() as f64;
     let h = hartree::evaluate(n, a.cell, fft)?;
-    let x = functional.evaluate(n, a.cell, fft)?;
+    let owned_xc;
+    let x = if let Some(x) = output_xc {
+        x
+    } else {
+        owned_xc = functional.evaluate(n, a.cell, fft)?;
+        &owned_xc
+    };
     let kinetic = kinetic::energy(a.basis, a.orbitals, a.occupations)?.0;
     let local = local_energy(n, a.ionic_g, volume, fft)?;
     let charge = n.sum() * weight;
@@ -154,6 +198,7 @@ pub fn evaluate_with_functional(
         .map(|(r, f)| r * f)
         .sum::<f64>();
     let audit = EnergyAudit {
+        nlcc: core_ledger(core, n, x, volume),
         kinetic,
         local,
         local_zero_mode: charge * a.ionic_g[[0, 0, 0]].re,
@@ -192,6 +237,7 @@ pub(crate) fn weighted_audits(audits: &[(f64, EnergyAudit)]) -> EnergyAudit {
         };
     }
     EnergyAudit {
+        nlcc: audits.first().and_then(|(_, a)| a.nlcc.clone()),
         kinetic: sum!(kinetic),
         local: sum!(local),
         local_zero_mode: sum!(local_zero_mode),

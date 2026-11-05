@@ -98,6 +98,9 @@ enum Command {
     /// Inspect a UPF v2 NC pseudopotential and report strict support validation.
     InspectUpf {
         file: PathBuf,
+        /// Hash-matched dataset provenance; never authorizes a calculation.
+        #[arg(long)]
+        manifest: Option<PathBuf>,
         #[arg(long)]
         json: bool,
     },
@@ -168,9 +171,28 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     if let Command::Pseudo { command, registry } = &cli.command {
         return pseudo::execute(command, registry.as_deref());
     }
-    if let Command::InspectUpf { file, json } = &cli.command {
+    if let Command::InspectUpf {
+        file,
+        json,
+        manifest,
+    } = &cli.command
+    {
         if *json {
-            return pseudo::inspect_json(file);
+            return pseudo::inspect_json(file, manifest.as_deref());
+        }
+        let report = pseudo::inspection_report(file, manifest.as_deref())?;
+        println!(
+            "SHA-256: {}\nHeader facts: {}\nLicense reference: {}\nQualification: {}",
+            report["sha256"],
+            report["header_facts"],
+            report["license_reference"],
+            report["qualification_status"]
+        );
+        for blocker in report["blockers"].as_array().into_iter().flatten() {
+            println!(
+                "Blocker: {}",
+                blocker.as_str().unwrap_or("invalid metadata")
+            );
         }
         let p = dft_upf::from_file(file)
             .map_err(|e| format!("{}: UNSUPPORTED or INVALID: {e}", file.display()))?;

@@ -40,11 +40,6 @@ fn negative_variants() {
         ("is_paw=\"F\"", "is_paw=\"T\"", "PAW"),
         ("is_ultrasoft=\"F\"", "is_ultrasoft=\"T\"", "ultrasoft"),
         ("has_so=\"F\"", "has_so=\"T\"", "spin-orbit"),
-        (
-            "core_correction=\"F\"",
-            "core_correction=\"T\"",
-            "core correction",
-        ),
         ("pseudo_type=\"NC\"", "pseudo_type=\"SL\"", "pseudo_type=SL"),
     ] {
         assert!(
@@ -111,7 +106,6 @@ fn supplemental_metadata_and_storage_boundaries() {
     assert_eq!(p.raw().local.values[0], 2.0 * p.local_hartree()[0]);
     assert_eq!(p.raw().nonlocal.dij.values[0], 2.0 * p.dij_hartree()[0]);
     for (key, feature) in [
-        ("core_correction", "core correction"),
         ("has_so", "spin-orbit"),
         ("has_gipaw", "GIPAW"),
         ("has_wfc", "all-electron wavefunctions"),
@@ -142,7 +136,7 @@ fn supplemental_metadata_and_storage_boundaries() {
         matches!(parse_upf(&s.replace("<PP_LOCAL>", "<PP_LOCAL units=\"Ha\">")), Err(UpfError::Unsupported(f)) if f.contains("units=Ha"))
     );
     assert!(
-        matches!(parse_upf(&s.replace("number_of_proj=\"3\"", "number_of_proj=\"4\"")), Err(UpfError::Unsupported(f)) if f.contains("three projectors"))
+        matches!(parse_upf(&s.replace("number_of_proj=\"3\"", "number_of_proj=\"4\"")), Err(UpfError::Missing(f)) if f == "PP_BETA.4")
     );
     assert!(
         matches!(parse_upf(&s.replace("angular_momentum=\"1\"", "angular_momentum=\"4\"")), Err(UpfError::Unsupported(f)) if f == "projector l=4")
@@ -335,4 +329,84 @@ fn functional_label_preserves_whitespace() {
     let p = parse_upf(&common::fixture().replace("SLA PZ", label)).unwrap();
     assert_eq!(p.functional(), label);
     assert!(parse_upf(&common::fixture().replace("SLA PZ", "   ")).is_err());
+}
+
+#[test]
+fn generic_numbered_channels_optional_metadata_and_nlcc() {
+    let n = 601;
+    let mut text = common::fixture_with_options(
+        n,
+        &common::Options {
+            wavefunctions: true,
+            ..Default::default()
+        },
+    );
+    let (r, _) = common::mesh(n, 12.);
+    let extra: String = (4..=6).map(|i| format!("<PP_BETA.{i} index=\" {i}\" angular_momentum=\"1\" cutoff_radius=\"12\" cutoff_radius_index=\" {n}\">{}</PP_BETA.{i}>",common::array(&r.iter().map(|r|r*r*(-r*r).exp()).collect::<Vec<_>>()))).collect();
+    text = text.replace("<PP_DIJ>", &format!("{extra}<PP_DIJ>"));
+    let d: Vec<_> = (0..6)
+        .flat_map(|i| (0..6).map(move |j| if i == j { 2. * (i + 1) as f64 } else { 0. }))
+        .collect();
+    text = replace_body(&text, "PP_DIJ", &common::array(&d));
+    text = text
+        .replace("number_of_proj=\"3\"", "number_of_proj=\"6\"")
+        .replace("number_of_wfc=\"3\"", "number_of_wfc=\"4\"")
+        .replace(" wfc_cutoff=\"0\"", "")
+        .replace(" l_max_rho=\"0\"", "")
+        .replace("core_correction=\"F\"", "core_correction=\"T\"");
+    let start = text.find("<PP_MESH").unwrap();
+    let end = start + text[start..].find('>').unwrap() + 1;
+    text.replace_range(start..end, "<PP_MESH>");
+    text = text.replace(
+        "</PP_PSWFC>",
+        &format!(
+            "<PP_CHI.4 label=\"synthetic4\" l=\"1\" occupation=\"0\">{}</PP_CHI.4></PP_PSWFC>",
+            common::array(&r)
+        ),
+    );
+    let core: Vec<_> = r.iter().map(|r| (-r * r).exp()).collect();
+    text = text.replace(
+        "</UPF>",
+        &format!(
+            "<PP_NLCC size=\" {n}\">{}</PP_NLCC></UPF>",
+            common::array(&core)
+        ),
+    );
+    let p = parse_upf(&text).unwrap();
+    assert_eq!(p.projectors().len(), 6);
+    assert_eq!(p.raw().pswfc.as_ref().unwrap().orbitals.len(), 4);
+    assert_eq!(p.core_density().unwrap(), core);
+    assert_eq!(
+        p.dij_hartree(),
+        d.iter().map(|v| v / 2.).collect::<Vec<_>>()
+    );
+    let facts = dft_upf::header_facts(&text).unwrap();
+    assert!(!facts.attributes.contains_key("wfc_cutoff"));
+    assert_eq!(
+        facts.projector_channels,
+        vec![(1, 0), (2, 0), (3, 1), (4, 1), (5, 1), (6, 1)]
+    );
+    for i in 3..6 {
+        assert_eq!(
+            p.projectors()[i].radial_times_r(),
+            r.iter().map(|r| r * r * (-r * r).exp()).collect::<Vec<_>>()
+        );
+    }
+    assert!(parse_upf(&text.replace("index=\" 5\"", "index=\" 4\"")).is_err());
+    assert!(parse_upf(&text.replace("PP_BETA.5", "PP_BETA.7")).is_err());
+    assert!(parse_upf(&text.replace("PP_CHI.4", "PP_CHI.5")).is_err());
+    assert!(parse_upf(&text.replace("core_correction=\"T\"", "core_correction=\"F\"")).is_err());
+    assert!(parse_upf(&text.replace(&format!("size=\" {n}\""), "size=\"3\"")).is_err());
+}
+
+#[test]
+fn finite_origin_projector_sample_has_exactly_zero_transform_weight() {
+    let mesh = dft_upf::radial::RadialMesh::new(vec![0., 0.5, 1.], vec![0.5; 3]).unwrap();
+    for l in 0..=3 {
+        for q in [0., 0.1, 2.] {
+            let a = dft_upf::radial::projector_transform(&mesh, l, &[0., 0.2, 0.1], q).unwrap();
+            let b = dft_upf::radial::projector_transform(&mesh, l, &[42., 0.2, 0.1], q).unwrap();
+            assert_eq!(a.to_bits(), b.to_bits());
+        }
+    }
 }

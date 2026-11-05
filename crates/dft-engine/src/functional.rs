@@ -51,4 +51,35 @@ impl Functional {
             Self::Pbe => gga::evaluate(n, cell, fft),
         }
     }
+    /// XC alone sees the immutable core. Scratch is retained by the caller;
+    /// the existing allocating XC output/library boundary is unchanged.
+    pub fn evaluate_with_core(
+        self,
+        n: &Array3<f64>,
+        core: Option<&Array3<f64>>,
+        scratch: &mut Array3<f64>,
+        cell: &Cell,
+        fft: &mut FftPlan3d,
+    ) -> Result<xc::XcGrid, PhysicsError> {
+        let Some(core) = core else {
+            return self.evaluate(n, cell, fft);
+        };
+        if n.shape() != core.shape() || scratch.shape() != n.shape() {
+            return Err(PhysicsError::Shape);
+        }
+        for ((total, &valence), &c) in scratch.iter_mut().zip(n).zip(core) {
+            *total = valence + c;
+        }
+        // Each functional applies its existing screening/negative-density rule
+        // to the combined density. Never renormalize or clip the model core.
+        let mut result = self.evaluate(scratch, cell, fft)?;
+        result.potential_integral = Hartree(
+            cell.volume_bohr3() / n.len() as f64
+                * n.iter()
+                    .zip(&result.potential)
+                    .map(|(n, v)| n * v)
+                    .sum::<f64>(),
+        );
+        Ok(result)
+    }
 }

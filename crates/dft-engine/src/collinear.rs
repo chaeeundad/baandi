@@ -222,7 +222,11 @@ impl CollinearProblem {
         self.total.assign(&density[0]);
         self.total += &density[1];
         self.input_h.evaluate(&self.total)?;
-        self.xc.evaluate(density, &mut self.input_xc)?;
+        self.xc.evaluate_with_core(
+            density,
+            self.channels[0].core_density.as_ref(),
+            &mut self.input_xc,
+        )?;
         let mut kinetic = 0.0;
         let mut nonlocal = 0.0;
         let mut band_sum = 0.0;
@@ -312,7 +316,11 @@ impl CollinearProblem {
         self.total.assign(&output[0]);
         self.total += &output[1];
         self.output_h.evaluate(&self.total)?;
-        self.xc.evaluate(output, &mut self.output_xc)?;
+        self.xc.evaluate_with_core(
+            output,
+            self.channels[0].core_density.as_ref(),
+            &mut self.output_xc,
+        )?;
         let p = &self.channels[0];
         let weight = p.cell.volume_bohr3() / self.total.len() as f64;
         let local = weight
@@ -363,6 +371,14 @@ impl CollinearProblem {
             nonlocal,
             hartree: self.output_h.energy_ha,
             xc: self.output_xc.energy_ha,
+            nlcc: self.channels[0]
+                .core_density
+                .as_ref()
+                .map(|core| crate::energy::CoreXcLedger {
+                    core_electrons: core.sum() * weight,
+                    core_potential_integral_ha: self.output_xc.core_potential_integral_ha,
+                    valence_potential_integral_ha: self.output_xc.valence_potential_integral_ha,
+                }),
             ewald,
             band_sum,
             double_counting: dc,
@@ -443,7 +459,11 @@ impl CollinearProblem {
                 (o.initial_eigen_tolerance * o.eigen_tolerance_decay.powf((iteration - 1) as f64))
                     .max(0.1 * o.eigen_tolerance)
             };
-            let energy = self.map(&density, &mut output, tolerance)?;
+            let energy = self
+                .map(&density, &mut output, tolerance)
+                .map_err(|error| {
+                    ScfError::Numerical(format!("collinear SCF iteration {iteration}: {error}"))
+                })?;
             let (charge_residual, spin_residual) =
                 spin_distances(&density, &output, weight, electrons);
             let strict = self.strict_residuals();
@@ -463,9 +483,11 @@ impl CollinearProblem {
             }
             best = best.min(residual);
             if growing >= o.divergence_patience {
-                return Err(ScfError::Numerical(
-                    "spin density residual exceeded configured growth limit".into(),
-                ));
+                return Err(ScfError::Numerical(format!(
+                    "collinear SCF iteration {iteration}: spin density residual exceeded configured growth limit; last evaluated energy_ha={:.16e}, electrons={:.16e}",
+                    energy.total_hartree(),
+                    charge.iter().sum::<f64>()
+                )));
             }
             let numbers_ok = numbers_ok
                 && ((charge[0] + charge[1]) - electrons).abs() <= 1e-10 * electrons.max(1.0)
@@ -497,7 +519,13 @@ impl CollinearProblem {
                         w.saved = w.solution.take();
                     }
                 }
-                let fresh = self.map(&output, &mut check, 0.1 * o.eigen_tolerance)?;
+                let fresh = self
+                    .map(&output, &mut check, 0.1 * o.eigen_tolerance)
+                    .map_err(|error| {
+                        ScfError::Numerical(format!(
+                            "collinear certificate iteration {iteration}: {error}"
+                        ))
+                    })?;
                 let (nr, mr) = spin_distances(&output, &check, weight, electrons);
                 let residuals = self.strict_residuals();
                 let gaps = self.gaps();

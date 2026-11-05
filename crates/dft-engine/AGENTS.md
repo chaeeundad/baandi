@@ -235,3 +235,16 @@ measured evidence and limitations.
 The geometry/mesh test exceeds the debug budget and is ignored by default:
 `cargo test --release -p dft-engine --test collinear -- --include-ignored --nocapture`.
 Run `scripts/check.sh` and the unchanged SCF benchmark identity check too.
+
+## MF06 NLCC (P13C)
+
+ScfProblem owns optional immutable core density and reusable XC input storage.
+NLCC-off dispatch retains old functional arithmetic. The output-density core XC
+is evaluated once before k-weighted audits; Hartree and band double counting use
+only valence. `EnergyAudit.nlcc` records core charge, core-potential integral and
+valence-potential integral; only `xc` contributes XC energy to total E.
+Collinear channels share the spin-neutral convention. NLCC v1 checkpoints reject
+on capture and restore; CLI serialization also rejects an active NLCC ledger,
+while legacy bytes remain unchanged. Local-potential export uses the same core.
+Run the ignored release commands in docs/cli.md; real smoke failures are explicit
+and must not be advertised as converged or qualified materials.

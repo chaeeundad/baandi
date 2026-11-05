@@ -54,7 +54,9 @@ fn valid_hash(s: &str) -> bool {
 }
 fn xc_supported(s: &str) -> bool {
     use dft_engine::Functional;
-    Functional::LdaPz.matches_upf(s) || Functional::Pbe.matches_upf(s)
+    Functional::LdaPz.matches_upf(s)
+        || Functional::LdaPw.matches_upf(s)
+        || Functional::Pbe.matches_upf(s)
 }
 fn reasons(e: &Value) -> Vec<String> {
     let mut r = Vec::new();
@@ -459,8 +461,9 @@ pub fn execute(command: &Command, registry: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-pub fn inspect_json(path: &Path) -> Result<()> {
+pub fn inspection_report(path: &Path, manifest: Option<&Path>) -> Result<Value> {
     let text = fs::read_to_string(path)?;
+    let hash = digest(text.as_bytes());
     let mut report = match dft_upf::parse_upf(&text) {
         Ok(p) => {
             let mut counts = serde_json::Map::new();
@@ -469,7 +472,7 @@ pub fn inspect_json(path: &Path) -> Result<()> {
                 *n = json!(n.as_u64().unwrap() + 1);
             }
             let supported = xc_supported(p.functional());
-            json!({"element":p.element(),"valence_electrons":p.z_valence(),"xc":p.functional(),"relativistic":p.raw().header.relativistic,"pseudo_type":"NC","nlcc":false,"spin_orbit":false,"paw":false,"ultrasoft":false,"projector_counts":counts,"formats":["UPF2"],"supported_by_engine":supported,"support_reasons":if supported {vec![]} else {vec!["XC label unsupported"]}})
+            json!({"element":p.element(),"valence_electrons":p.z_valence(),"xc":p.functional(),"relativistic":p.raw().header.relativistic,"pseudo_type":"NC","nlcc":p.core_density().is_some(),"spin_orbit":false,"paw":false,"ultrasoft":false,"projector_counts":counts,"formats":["UPF2"],"supported_by_engine":supported,"support_reasons":if supported {vec![]} else {vec!["XC label unsupported"]}})
         }
         Err(e) => json!({"supported_by_engine":false,"support_reasons":[e.to_string()]}),
     };
@@ -482,12 +485,66 @@ pub fn inspect_json(path: &Path) -> Result<()> {
                 _ => None,
             }
         };
-        let fields = json!({"element":a.get("element").map(|s|s.trim()), "valence_electrons":a.get("z_valence").and_then(|s|s.parse::<f64>().ok()), "xc":a.get("functional"), "relativistic":a.get("relativistic"), "pseudo_type":a.get("pseudo_type"), "nlcc":flag("core_correction"), "spin_orbit":flag("has_so"), "paw":flag("is_paw"), "ultrasoft":flag("is_ultrasoft"), "projector_counts":facts.projector_counts, "formats": if matches!(facts.version.as_str(),"2.0"|"2.0.0"|"2.0.1") {vec!["UPF2"]} else {vec!["UPF"]}});
+        let fields = json!({"element":a.get("element").map(|s|s.trim()), "valence_electrons":a.get("z_valence").and_then(|s|s.trim().parse::<f64>().ok()), "xc":a.get("functional"), "relativistic":a.get("relativistic"), "pseudo_type":a.get("pseudo_type"), "nlcc":flag("core_correction"), "spin_orbit":flag("has_so"), "paw":flag("is_paw"), "ultrasoft":flag("is_ultrasoft"), "projector_counts":facts.projector_counts, "formats": if matches!(facts.version.as_str(),"2.0"|"2.0.0"|"2.0.1") {vec!["UPF2"]} else {vec!["UPF"]}});
+        let integer = |key| a.get(key).and_then(|s| s.trim().parse::<usize>().ok());
+        let real = |key| a.get(key).and_then(|s| s.trim().parse::<f64>().ok());
+        report["header_facts"] = json!({
+            "element": a.get("element").map(|s| s.trim()),
+            "z_valence": real("z_valence"), "pseudo_type": a.get("pseudo_type"),
+            "relativistic": a.get("relativistic"), "functional": a.get("functional"),
+            "nlcc": flag("core_correction"), "number_of_wfc": integer("number_of_wfc"),
+            "mesh_size": integer("mesh_size"), "number_of_proj": integer("number_of_proj"),
+            "projector_channels": facts.projector_channels.iter().map(|&(index,l)| json!({"index":index,"l":l})).collect::<Vec<_>>(),
+            "cutoff_hints_ry": {"wavefunction":real("wfc_cutoff"),"density":real("rho_cutoff")}
+        });
+        let mut blockers = facts.blockers;
+        if let Some(reasons) = report["support_reasons"].as_array() {
+            blockers.extend(
+                reasons
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(|s| format!("upf.validation: {s}; supply a supported, valid dataset")),
+            );
+        }
+        report["blockers"] = json!(blockers);
+        if !blockers.is_empty() {
+            report["supported_by_engine"] = json!(false);
+        }
         for (key, value) in fields.as_object().unwrap() {
             report[key] = value.clone();
         }
     }
-    println!("{}", serde_json::to_string_pretty(&report)?);
+    report["sha256"] = json!(hash);
+    report["schema_version"] = json!(1);
+    report["license_reference"] = Value::Null;
+    report["qualification_status"] = json!("unqualified");
+    if report.get("blockers").is_none() {
+        report["blockers"] = report["support_reasons"].clone();
+    }
+    if let Some(path) = manifest {
+        let m: Value = serde_json::from_slice(&fs::read(path)?)?;
+        let entries = m["datasets"]
+            .as_array()
+            .ok_or("manifest.datasets: expected array")?;
+        let matches: Vec<_> = entries.iter().filter(|e| e["sha256"] == hash).collect();
+        if matches.len() != 1 {
+            return Err("manifest.sha256: expected exactly one matching file identity; verify manifest and file".into());
+        }
+        let entry = matches[0];
+        if entry["element"] != report["header_facts"]["element"] {
+            return Err("manifest.element: differs from file; repair manifest".into());
+        }
+        report["license_reference"] = entry["license"].clone();
+        report["qualification_status"] = entry["qualification_status"].clone();
+    }
+    Ok(report)
+}
+
+pub fn inspect_json(path: &Path, manifest: Option<&Path>) -> Result<()> {
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&inspection_report(path, manifest)?)?
+    );
     Ok(())
 }
 #[cfg(test)]

@@ -872,3 +872,18 @@ wavefunction cutoff at 6 Ha and refines only the FFT grid. PBE fails at
 The cap stays 1e-7 Ha throughout; coarse-grid failure is retained in evidence.
 This is a resolved-grid invariance check, not a promise that default grids give
 that tolerance for every system. Production grid/cutoff defaults are unchanged.
+
+## P13D bulk NC XC floor
+
+For unpolarized `run`, `[xc] density_floor = 1e-10` selects an XC-only floor
+in electrons/Bohr^3. Values must be finite and positive. NLCC inputs default to
+this value; legacy inputs without NLCC or this key keep the existing evaluator.
+PBE gradients use the clipped combined valence-plus-core density; the chain-rule
+mask is applied after assembling the potential. Conserved density is unchanged.
+`energies.xc_floor` reports input/output clipped negative charge per iteration.
+Converged charge above max(1e-3 electrons, 1e-4 times valence electrons) is a
+numerical failure, with a cutoff/grid/dataset diagnostic. `band_gap` records the
+sampled direct and indirect gaps in Ha for floor-enabled results.
+`initial_density` identifies the existing uniform start; atomic tables are not
+used. Explicit polarized floor inputs and floor-ledger checkpoints are rejected.
+See [bulk smoke evidence and limitations](validation/materials-smoke.md).

@@ -188,6 +188,24 @@ impl Report {
 pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
     let (mut findings, metrics) = structure::review(config)?;
     config.validate()?;
+    if config
+        .xc
+        .density_floor
+        .is_some_and(|v| !v.is_finite() || v <= 0.0)
+    {
+        return Err(fail(
+            "xc.density_floor",
+            "invalid density floor",
+            "use finite positive electrons/Bohr^3",
+        ));
+    }
+    if config.xc.density_floor.is_some() && config.collinear() {
+        return Err(fail(
+            "xc.density_floor",
+            "polarized floor is unavailable",
+            "use spin.mode = unpolarized",
+        ));
+    }
     if config.system.atoms.is_empty() {
         return Err(fail(
             "system.atoms",
@@ -229,10 +247,15 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
                 "set a positive integer",
             ));
         }
-        if s.mixing.as_deref().is_some_and(|s| {
-            s != "linear" && s != "pulay" && !(config.collinear() && s == "kerker-pulay")
-        }) {
-            return Err(fail("scf.mixing", "unknown mixer", "use linear or pulay"));
+        if s.mixing
+            .as_deref()
+            .is_some_and(|s| s != "linear" && s != "pulay" && s != "kerker-pulay")
+        {
+            return Err(fail(
+                "scf.mixing",
+                "unknown mixer",
+                "use linear, pulay or kerker-pulay",
+            ));
         }
     }
     let options =

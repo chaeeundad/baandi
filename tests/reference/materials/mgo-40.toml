@@ -1,0 +1,34 @@
+# Manifest SHA-256: d0a122864e41991e60b862f3e81761f9c1124d73e70f7c4892bea7130d23f635
+# Mg.upf SHA-256: 15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14
+# O.upf SHA-256: 2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11
+[system]
+name = "mgo bulk smoke, no accuracy claim"
+lattice_unit = "bohr"
+lattice_vectors = [[0,3.975,3.975],[3.975,0,3.975],[3.975,3.975,0]]
+[[system.atoms]]
+species = "Mg"
+fractional = [0,0,0]
+[[system.atoms]]
+species = "O"
+fractional = [0.5,0.5,0.5]
+[pseudopotentials]
+Mg = "Mg.upf"
+O = "O.upf"
+[basis]
+ecutwfc_ry = 80
+kgrid = [3,3,3]
+kshift = [0.5,0.5,0.5]
+[xc]
+functional = "pbe"
+density_floor = 1e-10
+[spin]
+mode = "unpolarized"
+[scf]
+max_iterations = 120
+mixing = "kerker-pulay"
+mixing_beta = 0.3
+mixing_q0_inverse_bohr = 1.0
+extra_bands = 4
+threads = 4
+energy_tolerance_ha = 1e-8
+density_residual_tolerance = 1e-7

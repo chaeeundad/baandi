@@ -132,6 +132,14 @@ fn energy_json(e: &EnergyAudit) -> Value {
     ] {
         m.insert(name.into(), json!({"ha":x,"ry":2.*x}));
     }
+    if let Some(floor) = &e.xc_floor {
+        m.insert(
+            "xc_floor".into(),
+            json!({"density_floor_electrons_bohr3":floor.density_floor,
+            "input_negative_charge_electrons":floor.input_negative_charge,
+            "output_negative_charge_electrons":floor.output_negative_charge}),
+        );
+    }
     if let Some(core) = &e.nlcc {
         m.insert("nlcc".into(), json!({"core_electrons":core.core_electrons,"core_potential_integral_ha":core.core_potential_integral_ha,"valence_potential_integral_ha":core.valence_potential_integral_ha,"energy_convention":"xc_includes_core; Hartree_and_band_double_counting_valence_only","force_stress":"unavailable"}));
     }
@@ -341,7 +349,7 @@ pub fn execute_mode(
             &prepared, opts, &atoms, &refs, &points, sector, &out, preflight, species, &bytes,
         );
     }
-    let problem = if config.basis.legacy_gamma() {
+    let mut problem = if config.basis.legacy_gamma() {
         ScfProblem::new(&prepared.cell, &atoms, &refs, opts.clone())
     } else {
         ScfProblem::with_kpoints(
@@ -356,12 +364,44 @@ pub fn execute_mode(
         )
     }
     .map_err(engine_error)?;
+    let density_floor = config
+        .xc
+        .density_floor
+        .or_else(|| problem.core_density().map(|_| 1e-10));
+    if let Some(floor) = density_floor {
+        problem.set_density_floor(floor).map_err(engine_error)?;
+    }
     let electrons = problem.electron_count();
     let setup = start.elapsed().as_secs_f64();
     let outcome = if mode.observe || mode.agent {
         crate::telemetry::drive(problem, mode, &out)?
     } else {
-        problem.run_outcome().map_err(engine_error)?
+        match problem.run_outcome() {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                if density_floor.is_some()
+                    && let ScfError::Diverged { history, .. } | ScfError::NotConverged { history } =
+                        &e
+                {
+                    let history: Vec<_> = history.iter().map(history_json).collect();
+                    write_json(
+                        &out.join("results.json"),
+                        &json!({
+                            "convergence":{"converged":false,"iterations":history.len(),"history":history},
+                            "failure":e.to_string()}),
+                    )?;
+                    fs::write(
+                        out.join("scf.log"),
+                        format!(
+                            "{}\n{}\n",
+                            e,
+                            serde_json::to_string_pretty(&history).map_err(|e| error(5, e))?
+                        ),
+                    )?;
+                }
+                return Err(engine_error(e));
+            }
+        }
     };
     let r = outcome.result;
     let ngrid = r.density.len();
@@ -451,6 +491,20 @@ pub fn execute_mode(
         });
     }
     let mut console = grid_report(&config, &prepared);
+    if let Some(floor) = density_floor {
+        result["initial_density"] = json!({"method":"uniform", "expected_electrons":electrons,
+            "atomic_table_used":false, "density_floor_electrons_bohr3":floor});
+        for h in &r.history {
+            if let Some(f) = &h.energy.xc_floor {
+                writeln!(
+                    console,
+                    "XC floor iteration {}: clipped negative charge input={} output={} electrons",
+                    h.iteration, f.input_negative_charge, f.output_negative_charge
+                )
+                .unwrap();
+            }
+        }
+    }
     writeln!(
         console,
         "Electrons: {electrons}; bands: {bands}; mixing: {:?}",
@@ -480,6 +534,9 @@ pub fn execute_mode(
         .unwrap();
     }
     for (term, v) in energies.as_object().unwrap() {
+        if v.get("ha").is_none() {
+            continue;
+        }
         writeln!(
             console,
             "{term}: {:.15} Ha = {:.15} Ry",
@@ -543,6 +600,9 @@ pub fn execute_mode(
             if l - h < direct.1 {
                 direct = (i + 1, l - h);
             }
+        }
+        if density_floor.is_some() {
+            result["band_gap"] = json!({"direct_ha":direct.1,"indirect_ha":lumo.1-homo.1});
         }
         writeln!(console, "HOMO/LUMO gap: direct {:.12} Ha = {:.12} eV at k{}; indirect {:.12} Ha = {:.12} eV (HOMO k{}, LUMO k{})",
             direct.1, from_hartree(direct.1, EnergyUnit::ElectronVolt), direct.0,

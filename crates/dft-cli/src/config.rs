@@ -135,6 +135,7 @@ impl Basis {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Xc {
+    pub density_floor: Option<f64>,
     pub functional: Functional,
     #[serde(default)]
     pub allow_functional_override: bool,

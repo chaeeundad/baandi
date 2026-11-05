@@ -365,6 +365,7 @@ impl CollinearProblem {
                 .sum::<f64>();
         let ewald = p.ewald.energy.0;
         let audit = EnergyAudit {
+            xc_floor: None,
             kinetic,
             local,
             local_zero_mode: self.total.sum() * weight * p.ionic_g[[0, 0, 0]].re,

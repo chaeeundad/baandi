@@ -1,0 +1,589 @@
+{
+  "manifest_sha256": "d0a122864e41991e60b862f3e81761f9c1124d73e70f7c4892bea7130d23f635",
+  "cases": [
+    {
+      "case": "si-20",
+      "cutoff_ha": 20.0,
+      "exit_code": 0,
+      "wall_s": 2.2555756660000004,
+      "expected_electrons": 8,
+      "input_sha256": "15ad913e9c1601341f77bf14fa06388db591634d12da91b1fa76ca0cb74684bf",
+      "converged": true,
+      "iterations": 15,
+      "total_energy_ha": -8.462317836906042,
+      "band_gap": {
+        "direct_ha": 0.10058071064082152,
+        "indirect_ha": 0.04335660469010144
+      },
+      "electron_count": 8.000000000000059,
+      "density_sha256": "3c48ca15ad7672e3f3a1265a16b6b3ebb31d21f483feb0d4b25c55742a031de6",
+      "xc_floor": {
+        "density_floor_electrons_bohr3": 1e-10,
+        "input_negative_charge_electrons": 0.0,
+        "output_negative_charge_electrons": 0.0
+      },
+      "clipped_negative_charge_per_iteration": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "certificate": {
+        "density_residual": 2.8361100426239544e-09,
+        "occupied_eigenvalue_change_ha": 1.3106684348951347e-08,
+        "max_strict_residual_ha": 9.928556539536035e-10
+      },
+      "passed": true
+    },
+    {
+      "case": "si-30",
+      "cutoff_ha": 30.0,
+      "exit_code": 0,
+      "wall_s": 4.290502292,
+      "expected_electrons": 8,
+      "input_sha256": "8b0ff66fd20e7c97fa8349261c04e04260f5d4cf2239f88204fd45df1e70311b",
+      "converged": true,
+      "iterations": 15,
+      "total_energy_ha": -8.462329006518452,
+      "band_gap": {
+        "direct_ha": 0.10057597694239989,
+        "indirect_ha": 0.04335575767424757
+      },
+      "electron_count": 8.000000000000039,
+      "density_sha256": "6e854235bc46b5a3a157664451029332e94f18012c8954691d8558b7e73bf1f6",
+      "xc_floor": {
+        "density_floor_electrons_bohr3": 1e-10,
+        "input_negative_charge_electrons": 0.0,
+        "output_negative_charge_electrons": 0.0
+      },
+      "clipped_negative_charge_per_iteration": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "certificate": {
+        "density_residual": 2.8686494333807696e-09,
+        "occupied_eigenvalue_change_ha": 1.3983511237825041e-08,
+        "max_strict_residual_ha": 9.653809899555532e-10
+      },
+      "passed": true
+    },
+    {
+      "case": "si-40",
+      "cutoff_ha": 40.0,
+      "exit_code": 0,
+      "wall_s": 7.91865275,
+      "expected_electrons": 8,
+      "input_sha256": "eefc246f975adeb50d539bad90d22e6a604d036ea8b5d8e5df6700aa8d1ff7b9",
+      "converged": true,
+      "iterations": 15,
+      "total_energy_ha": -8.462336822426911,
+      "band_gap": {
+        "direct_ha": 0.10057568405379202,
+        "indirect_ha": 0.04335664433829217
+      },
+      "electron_count": 7.999999999999989,
+      "density_sha256": "4853559e111fe081e7495f8f8ab80fb5dca4c263886f7c0a6e8bbae7325ee5d1",
+      "xc_floor": {
+        "density_floor_electrons_bohr3": 1e-10,
+        "input_negative_charge_electrons": 0.0,
+        "output_negative_charge_electrons": 0.0
+      },
+      "clipped_negative_charge_per_iteration": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "certificate": {
+        "density_residual": 2.8680205972976485e-09,
+        "occupied_eigenvalue_change_ha": 1.3975915147401707e-08,
+        "max_strict_residual_ha": 9.71882236548732e-10
+      },
+      "passed": true
+    },
+    {
+      "case": "mgo-40",
+      "cutoff_ha": 40.0,
+      "exit_code": 0,
+      "wall_s": 4.410912625,
+      "expected_electrons": 16,
+      "input_sha256": "cb98fc736d75dc046345d76cd416ef31d7028185f4b85bee40b0b585a6095d67",
+      "converged": true,
+      "iterations": 18,
+      "total_energy_ha": -76.05088085171062,
+      "band_gap": {
+        "direct_ha": 0.2345954393321914,
+        "indirect_ha": 0.2345954393321914
+      },
+      "electron_count": 16.00000000000016,
+      "density_sha256": "f5f7e17893f6d85c03402e3d6658822e6109999bd1d584a132a52a18725d6a4a",
+      "xc_floor": {
+        "density_floor_electrons_bohr3": 1e-10,
+        "input_negative_charge_electrons": 0.0,
+        "output_negative_charge_electrons": 0.0
+      },
+      "clipped_negative_charge_per_iteration": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "certificate": {
+        "density_residual": 1.5246186177956903e-09,
+        "occupied_eigenvalue_change_ha": 1.0625336499536786e-08,
+        "max_strict_residual_ha": 9.691087789815237e-10
+      },
+      "passed": true
+    },
+    {
+      "case": "mgo-50",
+      "cutoff_ha": 50.0,
+      "exit_code": 0,
+      "wall_s": 4.513996208000002,
+      "expected_electrons": 16,
+      "input_sha256": "f2f012e8e4b6b74a90f1179274f087ef72cd551c2588674e5845c780be8a9572",
+      "converged": true,
+      "iterations": 19,
+      "total_energy_ha": -76.0509692404303,
+      "band_gap": {
+        "direct_ha": 0.23459303164028156,
+        "indirect_ha": 0.23459303164028156
+      },
+      "electron_count": 16.00000000000003,
+      "density_sha256": "b05ff5d0e974cf36b0f70e30ef9e6be089ddaa9401ba4ba9b8a5d8f4003238b7",
+      "xc_floor": {
+        "density_floor_electrons_bohr3": 1e-10,
+        "input_negative_charge_electrons": 0.0,
+        "output_negative_charge_electrons": 0.0
+      },
+      "clipped_negative_charge_per_iteration": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "certificate": {
+        "density_residual": 5.889218011308426e-09,
+        "occupied_eigenvalue_change_ha": 4.3582003450559625e-08,
+        "max_strict_residual_ha": 8.378882522303439e-10
+      },
+      "passed": true
+    },
+    {
+      "case": "mgo-60",
+      "cutoff_ha": 60.0,
+      "exit_code": 0,
+      "wall_s": 5.564325583000002,
+      "expected_electrons": 16,
+      "input_sha256": "b35a736fb04aad9cf9b5329cb5aa59aad305f40a17443174902cc2cdb39cc7e8",
+      "converged": true,
+      "iterations": 19,
+      "total_energy_ha": -76.05097717077302,
+      "band_gap": {
+        "direct_ha": 0.23459235460754013,
+        "indirect_ha": 0.23459235460754013
+      },
+      "electron_count": 16.00000000000018,
+      "density_sha256": "f952d204ef498135bdf58cfb275acd16e404271744f0f0e877cca9be19c044f3",
+      "xc_floor": {
+        "density_floor_electrons_bohr3": 1e-10,
+        "input_negative_charge_electrons": 0.0,
+        "output_negative_charge_electrons": 0.0
+      },
+      "clipped_negative_charge_per_iteration": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "certificate": {
+        "density_residual": 7.464402565840366e-09,
+        "occupied_eigenvalue_change_ha": 5.750613890631584e-08,
+        "max_strict_residual_ha": 9.855173337355934e-10
+      },
+      "passed": true
+    }
+  ]
+}

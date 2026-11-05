@@ -447,6 +447,20 @@ impl ScfSession {
                 .fold(0.0, f64::max);
             let passed = density_residual <= self.problem.options.density_tolerance
                 && occupied_eigenvalue_change <= 1e-7;
+            if passed && self.problem.density_floor.is_some() {
+                let clipped = self
+                    .problem
+                    .negative_charge(&step.density)
+                    .max(self.problem.negative_charge(&check.density));
+                if let Err(reason) =
+                    ScfProblem::validate_clipped_charge(clipped, self.problem.electrons)
+                {
+                    return Err(ScfError::Diverged {
+                        reason,
+                        history: std::mem::take(history),
+                    });
+                }
+            }
             history.last_mut().unwrap().fixed_point_certificate = Some(FixedPointCertificate {
                 strict_residuals_per_k: check
                     .k_points
@@ -755,7 +769,7 @@ impl ScfSession {
     ) -> Result<(), crate::checkpoint::Rejection> {
         use crate::checkpoint::Rejection as R;
         model.validate()?;
-        if self.problem.core_density.is_some() {
+        if self.problem.core_density.is_some() || self.problem.density_floor.is_some() {
             return Err(R::Xc);
         }
         if model.cell_bohr != self.problem.cell.lattice_columns_bohr() {

@@ -82,4 +82,52 @@ impl Functional {
         );
         Ok(result)
     }
+    /// Evaluate E_xc[max(n + core, floor)]. The chain rule masks the
+    /// potential below the floor after the GGA divergence is assembled.
+    #[allow(clippy::too_many_arguments)]
+    pub fn evaluate_with_floor(
+        self,
+        n: &Array3<f64>,
+        core: Option<&Array3<f64>>,
+        scratch: &mut Array3<f64>,
+        cell: &Cell,
+        fft: &mut FftPlan3d,
+        floor: Option<f64>,
+    ) -> Result<xc::XcGrid, PhysicsError> {
+        let Some(floor) = floor else {
+            return self.evaluate_with_core(n, core, scratch, cell, fft);
+        };
+        if !floor.is_finite()
+            || floor <= 0.0
+            || scratch.shape() != n.shape()
+            || core.is_some_and(|c| c.shape() != n.shape())
+        {
+            return Err(PhysicsError::Shape);
+        }
+        for (i, (out, &v)) in scratch.iter_mut().zip(n).enumerate() {
+            let total = v + core.map_or(0.0, |c| c.as_slice().unwrap()[i]);
+            if !total.is_finite() {
+                return Err(PhysicsError::Density(total));
+            }
+            *out = total.max(floor);
+        }
+        let mut result = self.evaluate(scratch, cell, fft)?;
+        for (i, (v, &valence)) in result.potential.iter_mut().zip(n).enumerate() {
+            if valence + core.map_or(0.0, |c| c.as_slice().unwrap()[i]) < floor {
+                *v = 0.0;
+            }
+        }
+        result.potential_integral = Hartree(
+            cell.volume_bohr3() / n.len() as f64
+                * n.iter()
+                    .zip(&result.potential)
+                    .map(|(n, v)| n * v)
+                    .sum::<f64>(),
+        );
+        Ok(result)
+    }
 }
+
+#[cfg(test)]
+#[path = "floor_tests.rs"]
+mod floor_tests;

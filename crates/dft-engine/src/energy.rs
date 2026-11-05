@@ -6,6 +6,7 @@ use dft_physics::{data::*, hamiltonian::NonlocalOperator, hartree, kinetic, xc};
 
 #[derive(Clone, Debug)]
 pub struct EnergyAudit {
+    pub xc_floor: Option<XcFloorAudit>,
     /// Explicit audit-only core contribution; XC energy includes core, all band
     /// double counting excludes it. None preserves the legacy model/ledger.
     pub nlcc: Option<CoreXcLedger>,
@@ -25,6 +26,12 @@ pub struct EnergyAudit {
     /// Bound using exact Hartree remainder, absolute XC remainder, and
     /// sum f_b ||H c_b-eps_b c_b|| (normalized orbitals).
     pub functional_difference_bound: f64,
+}
+#[derive(Clone, Debug)]
+pub struct XcFloorAudit {
+    pub density_floor: f64,
+    pub input_negative_charge: f64,
+    pub output_negative_charge: f64,
 }
 #[derive(Clone, Debug)]
 pub struct CoreXcLedger {
@@ -198,6 +205,7 @@ pub(crate) fn evaluate_with_core_xc(
         .map(|(r, f)| r * f)
         .sum::<f64>();
     let audit = EnergyAudit {
+        xc_floor: None,
         nlcc: core_ledger(core, n, x, volume),
         kinetic,
         local,
@@ -237,6 +245,7 @@ pub(crate) fn weighted_audits(audits: &[(f64, EnergyAudit)]) -> EnergyAudit {
         };
     }
     EnergyAudit {
+        xc_floor: None,
         nlcc: audits.first().and_then(|(_, a)| a.nlcc.clone()),
         kinetic: sum!(kinetic),
         local: sum!(local),

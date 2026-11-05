@@ -722,7 +722,7 @@ struct WEnergyAudit {
 impl Wire for EnergyAudit {
     type Repr = WEnergyAudit;
     fn encode(&self, bytes: &mut Vec<u8>) -> Result<WEnergyAudit, Error> {
-        if self.nlcc.is_some() {
+        if self.nlcc.is_some() || self.xc_floor.is_some() {
             return Err(invalid("checkpoint v1 does not carry NLCC ledger"));
         }
         Ok(WEnergyAudit {
@@ -743,6 +743,7 @@ impl Wire for EnergyAudit {
     fn decode(w: WEnergyAudit, bytes: &[u8], cursor: &mut usize) -> Result<Self, Error> {
         Ok(Self {
             nlcc: None,
+            xc_floor: None,
             kinetic: f64::decode(w.kinetic, bytes, cursor)?,
             local: f64::decode(w.local, bytes, cursor)?,
             local_zero_mode: f64::decode(w.local_zero_mode, bytes, cursor)?,
@@ -1529,6 +1530,11 @@ fn context(
     };
     use dft_engine::{OccupationPolicy, ScfProblem, SpeciesPotential};
     let config = Config::parse(&fs::read_to_string(input)?)?;
+    if config.xc.density_floor.is_some() {
+        return Err(invalid(
+            "xc.density_floor: checkpoint v1 cannot encode the XC floor policy; use run without checkpoint/restart",
+        ));
+    }
     let cell = config.cell()?;
     let opts = options(&config)?;
     let atoms: Vec<_> = config

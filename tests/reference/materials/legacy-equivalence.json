@@ -1,0 +1,166 @@
+{
+  "before_commit": "a3947c6e6499437837baf848d991c217ce533dd6",
+  "before_baseline": {
+    "note": "",
+    "binary": "p13d-before-cli",
+    "machine_note": "record host and commit in the note",
+    "energy_tolerance_ha": 1e-12,
+    "cases": {
+      "gamma": {
+        "operator_applications": 281,
+        "davidson_iterations": 41,
+        "certificate_applications": 38,
+        "certificate_iterations": 8,
+        "label": "Gamma only, 30 Ry",
+        "wall_s": [
+          0.4962835
+        ],
+        "wall_median_s": 0.4962835,
+        "engine_total_s": 0.133461792,
+        "phases_s": {
+          "density_s": 0.003677291,
+          "diagonalization_s": 0.058005625,
+          "mixing_s": 0.001082457,
+          "potential_s": 0.004987791,
+          "total_energy_s": 0.007426625
+        },
+        "engine_total_median_s": 0.133461792,
+        "phase_medians_s": {
+          "density_s": 0.003677291,
+          "diagonalization_s": 0.058005625,
+          "mixing_s": 0.001082457,
+          "potential_s": 0.004987791,
+          "total_energy_s": 0.007426625
+        },
+        "iterations": 10,
+        "total_energy_ha": -7.29553046821076,
+        "density_sha256": "6077d62f5ddcf7d003e61b29f12e83d73e0dc332a208097da0836dfb63ec1b26"
+      },
+      "k222s": {
+        "operator_applications": 1266,
+        "davidson_iterations": 204,
+        "certificate_applications": 113,
+        "certificate_iterations": 21,
+        "label": "2x2x2 shifted (4 k), 30 Ry",
+        "wall_s": [
+          0.340922583
+        ],
+        "wall_median_s": 0.340922583,
+        "engine_total_s": 0.334983542,
+        "phases_s": {
+          "density_s": 0.014033124,
+          "diagonalization_s": 0.240533458,
+          "mixing_s": 0.002349168,
+          "potential_s": 0.004833335,
+          "total_energy_s": 0.028645544
+        },
+        "engine_total_median_s": 0.334983542,
+        "phase_medians_s": {
+          "density_s": 0.014033124,
+          "diagonalization_s": 0.240533458,
+          "mixing_s": 0.002349168,
+          "potential_s": 0.004833335,
+          "total_energy_s": 0.028645544
+        },
+        "iterations": 10,
+        "total_energy_ha": -7.9194234124690865,
+        "density_sha256": "9e311684370831efd1f4e5a3f3fd41479dcadfc4794b51e2db0183f05e7e9104"
+      },
+      "k222": {
+        "operator_applications": 2543,
+        "davidson_iterations": 408,
+        "certificate_applications": 208,
+        "certificate_iterations": 24,
+        "label": "2x2x2 (8 k), 30 Ry",
+        "wall_s": [
+          0.6370356670000001
+        ],
+        "wall_median_s": 0.6370356670000001,
+        "engine_total_s": 0.631441667,
+        "phases_s": {
+          "density_s": 0.02786129,
+          "diagonalization_s": 0.477914709,
+          "mixing_s": 0.002362792,
+          "potential_s": 0.005112793,
+          "total_energy_s": 0.057855958
+        },
+        "engine_total_median_s": 0.631441667,
+        "phase_medians_s": {
+          "density_s": 0.02786129,
+          "diagonalization_s": 0.477914709,
+          "mixing_s": 0.002362792,
+          "potential_s": 0.005112793,
+          "total_energy_s": 0.057855958
+        },
+        "iterations": 10,
+        "total_energy_ha": -7.831230057121135,
+        "density_sha256": "21238c7026d96860233edfc427807389029229e7ce26162b5025d471e255bdbe"
+      },
+      "k444s": {
+        "operator_applications": 10290,
+        "davidson_iterations": 1686,
+        "certificate_applications": 891,
+        "certificate_iterations": 141,
+        "label": "4x4x4 shifted (32 k), 30 Ry",
+        "wall_s": [
+          2.479683083
+        ],
+        "wall_median_s": 2.479683083,
+        "engine_total_s": 2.4725397080000002,
+        "phases_s": {
+          "density_s": 0.113255792,
+          "diagonalization_s": 1.962290249,
+          "mixing_s": 0.002436166,
+          "potential_s": 0.006558458,
+          "total_energy_s": 0.231934084
+        },
+        "engine_total_median_s": 2.4725397080000002,
+        "phase_medians_s": {
+          "density_s": 0.113255792,
+          "diagonalization_s": 1.962290249,
+          "mixing_s": 0.002436166,
+          "potential_s": 0.006558458,
+          "total_energy_s": 0.231934084
+        },
+        "iterations": 10,
+        "total_energy_ha": -7.9259761266480915,
+        "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660"
+      },
+      "si8": {
+        "operator_applications": 2063,
+        "davidson_iterations": 283,
+        "certificate_applications": 202,
+        "certificate_iterations": 62,
+        "label": "8-atom conventional Gamma, 30 Ry",
+        "wall_s": [
+          2.550594375
+        ],
+        "wall_median_s": 2.550594375,
+        "engine_total_s": 2.543220917,
+        "phases_s": {
+          "density_s": 0.050891581,
+          "diagonalization_s": 2.2697596669999998,
+          "mixing_s": 0.013921335,
+          "potential_s": 0.019162794,
+          "total_energy_s": 0.058810876
+        },
+        "engine_total_median_s": 2.543220917,
+        "phase_medians_s": {
+          "density_s": 0.050891581,
+          "diagonalization_s": 2.2697596669999998,
+          "mixing_s": 0.013921335,
+          "potential_s": 0.019162794,
+          "total_energy_s": 0.058810876
+        },
+        "iterations": 15,
+        "total_energy_ha": -31.32180360103127,
+        "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e"
+      }
+    }
+  },
+  "paired_command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --baseline /tmp/p13d-before-baseline.json --require-identical",
+  "paired_exit_code": 0,
+  "paired_output": "case      wall med (s)  engine (s)  diag (s) iters  dE vs base (Ha)    density  speedup\ngamma            0.474       0.133     0.059    10         0.00e+00  identical    1.05x\nk222s            0.343       0.338     0.238    10         0.00e+00  identical    0.99x\nk222             0.642       0.636     0.472    10         0.00e+00  identical    0.99x\nk444s            2.496       2.489     1.938    10         0.00e+00  identical    0.99x\nsi8              2.555       2.547     2.268    15         0.00e+00  identical    1.00x\nOK\n",
+  "historical_baseline_exit_code": 5,
+  "historical_baseline_output": "case      wall med (s)  engine (s)  diag (s) iters  dE vs base (Ha)    density  speedup\ngamma            0.412       0.106     0.056    10         1.67e-13    differs    3.16x\nk222s            0.348       0.342     0.243    10         1.60e-14    differs   18.80x\nk222             0.640       0.635     0.479    10         5.86e-14    differs   18.86x\nk444s            2.757       2.750     2.200    10                -          -        -\nsi8              2.644       2.636     2.353    15                -          -        -\nFAIL: energy outside 1e-12 Ha or density not identical\n"
+}

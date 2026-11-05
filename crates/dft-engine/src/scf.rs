@@ -296,6 +296,7 @@ pub struct ScfProblem {
     ionic_real: Array3<f64>,
     core_density: Option<Array3<f64>>,
     xc_density: Array3<f64>,
+    density_floor: Option<f64>,
     fft: FftPlan3d,
     // One reusable FFT workspace per active k worker, shared across phases.
     worker_ffts: Vec<FftPlan3d>,
@@ -682,6 +683,7 @@ impl ScfProblem {
             ionic_real,
             core_density,
             xc_density,
+            density_floor: None,
             fft,
             worker_ffts,
             pool,
@@ -692,6 +694,40 @@ impl ScfProblem {
             setup_time: start.elapsed(),
             minimum_gap,
         })
+    }
+    /// Opt-in XC-only floor; the legacy construction path is unchanged.
+    pub fn set_density_floor(&mut self, floor: f64) -> Result<(), ScfError> {
+        if !floor.is_finite() || floor <= 0.0 {
+            return Err(ScfError::InvalidInput(
+                "xc.density_floor: require finite positive electrons/Bohr^3",
+            ));
+        }
+        self.density_floor = Some(floor);
+        self.xc_density = Array3::zeros(self.grid.dims());
+        Ok(())
+    }
+    pub(crate) fn validate_clipped_charge(clipped: f64, electrons: f64) -> Result<(), String> {
+        let limit = 1e-3_f64.max(1e-4 * electrons);
+        if !clipped.is_finite() || clipped > limit {
+            return Err(format!(
+                "xc.density_floor: converged clipped negative charge {clipped} electrons exceeds {limit}; increase cutoff/grid and inspect the dataset; no certified result"
+            ));
+        }
+        Ok(())
+    }
+    fn negative_charge(&self, n: &Array3<f64>) -> f64 {
+        n.iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                let c = self
+                    .core_density
+                    .as_ref()
+                    .map_or(0.0, |c| c.as_slice().unwrap()[i]);
+                (-(v + c)).max(0.0)
+            })
+            .sum::<f64>()
+            * self.cell.volume_bohr3()
+            / n.len() as f64
     }
     pub fn core_density(&self) -> Option<&Array3<f64>> {
         self.core_density.as_ref()
@@ -745,12 +781,13 @@ impl ScfProblem {
         }
         let start = Instant::now();
         let h = hartree::evaluate(n, &self.cell, &mut self.fft)?;
-        let x = self.options.functional.evaluate_with_core(
+        let x = self.options.functional.evaluate_with_floor(
             n,
             self.core_density.as_ref(),
             &mut self.xc_density,
             &self.cell,
             &mut self.fft,
+            self.density_floor,
         )?;
         let mut effective = self.ionic_real.clone();
         for ((v, h), x) in effective.iter_mut().zip(&h.potential).zip(&x.potential) {
@@ -893,13 +930,14 @@ impl ScfProblem {
         }
         timings.density = start.elapsed();
         let start = Instant::now();
-        let output_xc = if self.core_density.is_some() {
-            Some(self.options.functional.evaluate_with_core(
+        let output_xc = if self.core_density.is_some() || self.density_floor.is_some() {
+            Some(self.options.functional.evaluate_with_floor(
                 &output,
                 self.core_density.as_ref(),
                 &mut self.xc_density,
                 &self.cell,
                 &mut self.fft,
+                self.density_floor,
             )?)
         } else {
             None
@@ -937,7 +975,12 @@ impl ScfProblem {
             },
             |audit| audits.push(audit),
         )?;
-        let energy = energy::weighted_audits(&audits);
+        let mut energy = energy::weighted_audits(&audits);
+        energy.xc_floor = self.density_floor.map(|floor| energy::XcFloorAudit {
+            density_floor: floor,
+            input_negative_charge: self.negative_charge(n),
+            output_negative_charge: self.negative_charge(&output),
+        });
         timings.energy = start.elapsed();
         Ok(ScfStep {
             solution: k_points[0].solution.clone(),
@@ -1169,6 +1212,7 @@ mod tests {
     fn convergence_requires_every_certificate_on_same_iteration() {
         let o = ScfOptions::default();
         let energy = EnergyAudit {
+            xc_floor: None,
             kinetic: 0.0,
             local: 0.0,
             local_zero_mode: 0.0,

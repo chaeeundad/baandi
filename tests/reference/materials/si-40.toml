@@ -1,0 +1,32 @@
+# Manifest SHA-256: d0a122864e41991e60b862f3e81761f9c1124d73e70f7c4892bea7130d23f635
+# Si.upf SHA-256: 39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282
+[system]
+name = "si bulk smoke, no accuracy claim"
+lattice_unit = "bohr"
+lattice_vectors = [[0,5.13,5.13],[5.13,0,5.13],[5.13,5.13,0]]
+[[system.atoms]]
+species = "Si"
+fractional = [0,0,0]
+[[system.atoms]]
+species = "Si"
+fractional = [0.25,0.25,0.25]
+[pseudopotentials]
+Si = "Si.upf"
+[basis]
+ecutwfc_ry = 80
+kgrid = [4,4,4]
+kshift = [0.5,0.5,0.5]
+[xc]
+functional = "pbe"
+density_floor = 1e-10
+[spin]
+mode = "unpolarized"
+[scf]
+max_iterations = 120
+mixing = "kerker-pulay"
+mixing_beta = 0.3
+mixing_q0_inverse_bohr = 1.0
+extra_bands = 4
+threads = 4
+energy_tolerance_ha = 1e-8
+density_residual_tolerance = 1e-7

@@ -1,0 +1,60 @@
+{
+  "task_id": "P13D-REAL-NC-BULK",
+  "status": "BLOCKED",
+  "commands": [
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex cargo test --offline --release -p dft-cli --test materials -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --offline --release -p dft-engine --test nlcc -- --include-ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --baseline /tmp/p13d-before-baseline.json --require-identical",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --baseline docs/performance/baseline.json --require-identical",
+      "exit_code": 5
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "gates": [
+    "PASS build",
+    "PASS test",
+    "PASS fmt",
+    "PASS clippy"
+  ],
+  "real_file_tests": {
+    "passed": 1,
+    "cli_runs": 12,
+    "wall_s": 58.08,
+    "explicit_implicit_energy_and_density_identical": true
+  },
+  "nlcc_tests": {
+    "passed": 6,
+    "failed": 0,
+    "ignored": 0
+  },
+  "floor_derivative_max_error_ha_bohr3": 2.2271806621176893e-10,
+  "floor_derivative_cap_ha_bohr3": 1e-07,
+  "limitations": [
+    "Atomic-superposition initialization and rescaling remain unimplemented: engine uses positive, charge-correct uniform initialization. A validated dft-upf atomic-density API is outside OWNED_FILES.",
+    "Historical benchmark density hashes differ; a paired build of unchanged parent proves zero energy difference and bit-identical density on five cases.",
+    "README generator/results block and artifacts/dashboard updates require edits outside OWNED_FILES and architect integration.",
+    "No QE comparison, accuracy or cutoff-convergence claim."
+  ],
+  "commit": "Uncommitted as requested; branch task/P13D-REAL-NC-BULK"
+}

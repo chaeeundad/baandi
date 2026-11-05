@@ -43,6 +43,12 @@ impl Context {
         let bytes = fs::read(input)?;
         let config = Config::parse(std::str::from_utf8(&bytes).map_err(|e| err(1, e))?)
             .map_err(|e| err(1, e))?;
+        if config.xc.density_floor.is_some() {
+            return Err(err(
+                1,
+                "xc.density_floor: bands/DOS does not yet support the XC floor policy; use run",
+            ));
+        }
         let cell = config.cell().map_err(|e| err(1, e))?;
         let options = options(&config)?;
         let atoms = config

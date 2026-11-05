@@ -1,0 +1,5 @@
+{
+  "crates/dft-numerics/src/linalg/tiled.rs": "359446ae2fb81b3241b3573cc2f2d303b009545fa23963455cb250a53faa315f",
+  "crates/dft-solvers/src/lib.rs": "886c648f041f97f87e5feb5d2e84e6667320f625c5fe747c3591b6fcfc7d7c09",
+  "tests/p14a_work_accounting.py": "fc0a13125c3e8be10f36fcb7f31a452a6670fc10a2757d1bc9e0ce7d00afdee5"
+}

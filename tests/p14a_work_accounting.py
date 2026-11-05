@@ -76,8 +76,10 @@ def main():
                 text = scf.case_input(str(upf), name, threads=args.threads)
                 occupied = 16 if name == 'si8' else 4
             else:
-                if name == 'syn20-skew':
-                    lattice = [[12, 0, 0], [1, 6, 0], [.5, .3, 6]]
+                if name in ('syn20-skew', 'syn20-cubic', 'syn20-cubic12'):
+                    side = 12 if name == 'syn20-cubic12' else 8
+                    lattice = ([[side, 0, 0], [0, side, 0], [0, 0, side]] if name.startswith('syn20-cubic')
+                               else [[12, 0, 0], [1, 6, 0], [.5, .3, 6]])
                     atoms = [[(i+.13)/5, (j+.21)/2, (k+.32)/2]
                              for i in range(5) for j in range(2) for k in range(2)]
                 elif name == 'syn4-elongated':

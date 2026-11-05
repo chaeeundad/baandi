@@ -406,6 +406,7 @@ impl Davidson {
         // narrow buffer for new columns; no full-subspace packing is needed.
         let mut appended_products = ComplexMatrix::zeros(n, 0)?;
         appended_products.reserve_columns(self.block_size.min(capacity - self.bands))?;
+        let mut reduced_cache = None;
         for iteration in 1..=self.max_iterations {
             let _iteration = dft_numerics::pool::analysis::Span::new("iteration");
             cached.resize_columns(basis.cols())?;
@@ -428,13 +429,17 @@ impl Davidson {
             // Borrow the live prefix directly; the backend sees its original
             // column stride and no first_columns allocation or copy.
             let h_basis = &cached;
-            let projected = gemm_work.multiply(&basis, Adjoint, h_basis, Identity)?;
+            gemm_work.accounting_site("reduced_hamiltonian");
+            let projected =
+                gemm_work.reduced_hamiltonian(&basis, h_basis, reduced_cache.as_ref())?;
             let (mut values, mut coefficients) = {
                 let _phase = dft_numerics::pool::analysis::Span::serial("evd");
                 hermitian_eigh(&projected)?
             };
+            reduced_cache = Some(projected);
             values.truncate(self.bands);
             coefficients.resize_columns(self.bands)?;
+            gemm_work.accounting_site("ritz_and_residual");
             let (vectors, products) = if recurrence {
                 let (vectors, products) = gemm_work.rotate_pair(&basis, h_basis, &coefficients)?;
                 (vectors, Some(products))
@@ -536,6 +541,7 @@ impl Davidson {
             }
             cache_valid = products_trusted && basis.cols() + corrections.cols() <= capacity;
             if !cache_valid {
+                reduced_cache = None;
                 work.restart();
                 let (restarted, valid) = if restart_products_saved
                     && products_trusted
@@ -738,6 +744,7 @@ fn restart(
     if contract && orthogonality_defect(&vectors) <= 1e-12 {
         // Derived from study note section 1: H(V C) = (H V) C.
         cached.resize_columns(vectors.cols())?;
+        gemm_work.accounting_site("restart_contraction");
         gemm_work.multiply_into(h_basis, Identity, coefficients, Identity, cached)?;
         Ok((vectors, true))
     } else {

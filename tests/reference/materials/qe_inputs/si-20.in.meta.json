@@ -1,0 +1,308 @@
+{
+  "input_sha256": "a5fa1f292032a5fd707d63e24d78e344951bdf2504c9b48352a948d6f6f35673",
+  "source_results_sha256": "656983fb1691b8a6c74067154cf71f98a70285554200162beb006a1f302a3475",
+  "generator_options": {
+    "results": "scripts/tests/fixtures/materials/si-20.json",
+    "pseudo_dir": "/scr/mino/rustdft/pseudo",
+    "upf_name": null,
+    "out": "tests/reference/materials/qe_inputs/si-20.in",
+    "fft_grid": "ours",
+    "ecut_ry": null,
+    "conv_thr": 1e-12,
+    "mixing_beta": 0.7,
+    "prefix": "rust_dft",
+    "outdir": "./qe-work",
+    "disk_io": "nowf",
+    "manifest": "/Users/mino/Develop/rust-dft-wt/P16A-QE-MATERIALS-INPUT/docs/data/nc-datasets.json",
+    "command": "python3 -I scripts/make_qe_input.py --results scripts/tests/fixtures/materials/si-20.json --pseudo-dir /scr/mino/rustdft/pseudo --out tests/reference/materials/qe_inputs/si-20.in"
+  },
+  "upf_datasets": [
+    {
+      "element": "Si",
+      "filename": "Si.upf",
+      "sha256": "39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282",
+      "source_url": "http://www.pseudo-dojo.org/pseudos/nc-sr-04_pbe_standard_upf.tgz",
+      "license": {
+        "identifier": "CC-BY-4.0",
+        "reference": "https://github.com/abinit/pseudo_dojo/blob/master/README.md",
+        "attribution": "PseudoDojo project",
+        "citations": "http://www.pseudo-dojo.org/faq.html"
+      },
+      "qualification_status": "unqualified",
+      "z_valence": 4,
+      "functional": "PBE",
+      "relativistic": "scalar",
+      "pseudo_type": "NC",
+      "nlcc": true,
+      "semicore": "not specified in source note",
+      "projector_counts": {
+        "0": 2,
+        "1": 2,
+        "2": 2
+      }
+    }
+  ],
+  "manifest_sha256": "d0a122864e41991e60b862f3e81761f9c1124d73e70f7c4892bea7130d23f635",
+  "command": "python3 -I scripts/make_qe_input.py --results scripts/tests/fixtures/materials/si-20.json --pseudo-dir /scr/mino/rustdft/pseudo --out tests/reference/materials/qe_inputs/si-20.in",
+  "baandi_commit": "a3947c6e6499437837baf848d991c217ce533dd6",
+  "baandi_input_sha256": "fb03c25bddafeef922d58ec12ee7f57ad12536bd64a449e27cbf5484f656e87a",
+  "expected_kpoints": [
+    {
+      "fractional": [
+        0.125,
+        0.125,
+        0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        0.125,
+        0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        0.125,
+        -0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        0.125,
+        -0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        0.375,
+        0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        0.375,
+        0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        0.375,
+        -0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        0.375,
+        -0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        -0.375,
+        0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        -0.375,
+        0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        -0.375,
+        -0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        -0.375,
+        -0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        -0.125,
+        0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        -0.125,
+        0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        -0.125,
+        -0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.125,
+        -0.125,
+        -0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        0.125,
+        0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        0.125,
+        0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        0.125,
+        -0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        0.125,
+        -0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        0.375,
+        0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        0.375,
+        0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        0.375,
+        -0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        0.375,
+        -0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        -0.375,
+        0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        -0.375,
+        0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        -0.375,
+        -0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        -0.375,
+        -0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        -0.125,
+        0.125
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        -0.125,
+        0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        -0.125,
+        -0.375
+      ],
+      "weight": 0.03125
+    },
+    {
+      "fractional": [
+        0.375,
+        -0.125,
+        -0.125
+      ],
+      "weight": 0.03125
+    }
+  ],
+  "kpoint_comparison": "Compare modulo reciprocal integers and time reversal when enabled; weights sum to one."
+}

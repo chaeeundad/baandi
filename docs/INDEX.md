@@ -93,3 +93,4 @@ Conventions: docs are English; one fact lives in one place and others link to it
 
 - [Frozen-H stopping replay (P15A)](research/qe-study/replay-stopping-results.md): stopping predicates versus rate curves, Hartree-metric schedules, equal-accuracy scans and independent spectral-completeness findings; no default change.
 - `docs/decisions/0035-standard-convergence-profile.md`: additive labelled QE-comparable convergence profile (accepted 2026-11-05; default unchanged).
+- [Reproducible material QE inputs and comparisons](validation/qe-materials-protocol.md): P16A manifest-only multi-species generation, unchanged legacy inputs, remote evidence protocol and reporting without acceptance caps.

@@ -1,0 +1,52 @@
+! BAANDI commit: "a3947c6e6499437837baf848d991c217ce533dd6"
+! BAANDI input SHA-256: 43d1efefa948a4a70b63f80ae6063af3ddf1f7d7ab9ac785c3ed9823d49daf1b
+! Manifest SHA-256: d0a122864e41991e60b862f3e81761f9c1124d73e70f7c4892bea7130d23f635
+! Exact command: python3 -I scripts/make_qe_input.py --results scripts/tests/fixtures/materials/mgo-40.json --pseudo-dir /scr/mino/rustdft/pseudo --out tests/reference/materials/qe_inputs/mgo-40.in
+! NC density cutoff: ecutrho = 4 * ecutwfc (Ry).
+! UPF Mg.upf SHA-256: 15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14
+! UPF O.upf SHA-256: 2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11
+! Generated from rust-dft results; lattice columns transposed to QE rows.
+! Gamma-centered (m+s)/n grid; only requested time reversal, no space-group reduction.
+&CONTROL
+  calculation = 'scf',
+  prefix = 'rust_dft',
+  pseudo_dir = '/scr/mino/rustdft/pseudo',
+  outdir = './qe-work',
+  disk_io = 'nowf',
+  verbosity = 'high',
+  tprnfor = .false.,
+  tstress = .false.,
+/
+&SYSTEM
+  ibrav = 0,
+  nat = 2,
+  ntyp = 2,
+  ecutwfc = 80,
+  ecutrho = 320,
+  nbnd = 12,
+  occupations = 'fixed',
+  nosym = .true.,
+  input_dft = 'pbe',
+  nr1 = 36,
+  nr2 = 36,
+  nr3 = 36,
+/
+&ELECTRONS
+  diagonalization = 'david',
+  diago_full_acc = .true.,
+  conv_thr = 9.9999999999999998e-13,
+  mixing_beta = 0.69999999999999996,
+  electron_maxstep = 200,
+/
+ATOMIC_SPECIES
+Mg 1.0 Mg.upf
+O 1.0 O.upf
+CELL_PARAMETERS bohr
+0 3.9750000000000001 3.9750000000000001
+3.9750000000000001 0 3.9750000000000001
+3.9750000000000001 3.9750000000000001 0
+ATOMIC_POSITIONS crystal
+Mg 0 0 0
+O 0.5 0.5 0.5
+K_POINTS automatic
+3 3 3 1 1 1

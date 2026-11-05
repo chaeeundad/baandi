@@ -14,12 +14,14 @@ from qe_common import Error, read_json, sha256
 
 
 def synthetic_upf():
+    # A recognized element label satisfies current CLI geometry validation;
+    # this invented potential is still purely a format fixture.
     n = 401
     r = [i*0.025 for i in range(n)]
     def array(values):
         return ' '.join(format(x, '.17g') for x in values)
     return f'''<UPF version="2.0.1"><PP_INFO>SYNTHETIC FORMAT TEST ONLY; NOT A REFERENCE</PP_INFO>
-<PP_HEADER generated="synthetic" author="tests" date="2026" comment="synthetic" element="Xx"
+<PP_HEADER generated="synthetic" author="tests" date="2026" comment="synthetic" element="Si"
 pseudo_type="NC" relativistic="nonrelativistic" is_ultrasoft="F" is_paw="F" is_coulomb="F"
 has_so="F" has_wfc="F" has_gipaw="F" core_correction="F" functional="SLA PZ"
 z_valence="4" total_psenergy="0" wfc_cutoff="0" rho_cutoff="0" l_max="0" l_max_rho="0"
@@ -35,10 +37,10 @@ name = 'synthetic scan, not a reference'
 lattice_unit = 'bohr'
 lattice_vectors = [[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]
 [[system.atoms]]
-species = 'Xx'
+species = 'Si'
 fractional = [0.13,0.21,0.32]
 [pseudopotentials]
-Xx = 'synthetic.xml'
+Si = 'synthetic.xml'
 [basis]
 ecutwfc_ry = 3.0
 kpoints = [[0.0,0.0,0.0]]

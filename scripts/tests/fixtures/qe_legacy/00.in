@@ -1,0 +1,44 @@
+! Generated from rust-dft results; lattice columns transposed to QE rows.
+! Automatic 1x1x1 selects complex Gamma, not the real-wavefunction gamma trick.
+&CONTROL
+  calculation = 'scf',
+  prefix = 'rust_dft',
+  pseudo_dir = '/legacy/pseudo',
+  outdir = './qe-work',
+  disk_io = 'low',
+  verbosity = 'high',
+  tprnfor = .false.,
+  tstress = .false.,
+/
+&SYSTEM
+  ibrav = 0,
+  nat = 2,
+  ntyp = 1,
+  ecutwfc = 20,
+  ecutrho = 80,
+  nbnd = 8,
+  occupations = 'fixed',
+  nosym = .true.,
+  noinv = .true.,
+  nr1 = 24,
+  nr2 = 24,
+  nr3 = 24,
+/
+&ELECTRONS
+  diagonalization = 'david',
+  diago_full_acc = .true.,
+  conv_thr = 9.9999999999999998e-13,
+  mixing_beta = 0.69999999999999996,
+  electron_maxstep = 200,
+/
+ATOMIC_SPECIES
+Si 1.0 Si.pz-vbc.UPF
+CELL_PARAMETERS bohr
+0 5.1306064283589663 5.1306064283589663
+5.1306064283589663 0 5.1306064283589663
+5.1306064283589663 5.1306064283589663 0
+ATOMIC_POSITIONS crystal
+Si 0 0 0
+Si 0.25 0.25 0.25
+K_POINTS automatic
+1 1 1 0 0 0

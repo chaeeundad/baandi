@@ -1,0 +1,187 @@
+{
+  "input_sha256": "62bd370aee41065087ff35c04ab7530988304bcc69eebc87f9304e0cd867339f",
+  "source_results_sha256": "0dd1952cf4547624ce2b7ecc09a1209a24fea8d81f4fbaf32eda68928c1d7466",
+  "generator_options": {
+    "results": "scripts/tests/fixtures/materials/mgo-40.json",
+    "pseudo_dir": "/scr/mino/rustdft/pseudo",
+    "upf_name": null,
+    "out": "tests/reference/materials/qe_inputs/mgo-40.in",
+    "fft_grid": "ours",
+    "ecut_ry": null,
+    "conv_thr": 1e-12,
+    "mixing_beta": 0.7,
+    "prefix": "rust_dft",
+    "outdir": "./qe-work",
+    "disk_io": "nowf",
+    "manifest": "/Users/mino/Develop/rust-dft-wt/P16A-QE-MATERIALS-INPUT/docs/data/nc-datasets.json",
+    "command": "python3 -I scripts/make_qe_input.py --results scripts/tests/fixtures/materials/mgo-40.json --pseudo-dir /scr/mino/rustdft/pseudo --out tests/reference/materials/qe_inputs/mgo-40.in"
+  },
+  "upf_datasets": [
+    {
+      "element": "Mg",
+      "filename": "Mg.upf",
+      "sha256": "15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14",
+      "source_url": "http://www.pseudo-dojo.org/pseudos/nc-sr-04_pbe_standard_upf.tgz",
+      "license": {
+        "identifier": "CC-BY-4.0",
+        "reference": "https://github.com/abinit/pseudo_dojo/blob/master/README.md",
+        "attribution": "PseudoDojo project",
+        "citations": "http://www.pseudo-dojo.org/faq.html"
+      },
+      "qualification_status": "unqualified",
+      "z_valence": 10,
+      "functional": "PBE",
+      "relativistic": "scalar",
+      "pseudo_type": "NC",
+      "nlcc": false,
+      "semicore": "2s2p",
+      "projector_counts": {
+        "0": 2,
+        "1": 2
+      }
+    },
+    {
+      "element": "O",
+      "filename": "O.upf",
+      "sha256": "2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11",
+      "source_url": "http://www.pseudo-dojo.org/pseudos/nc-sr-04_pbe_standard_upf.tgz",
+      "license": {
+        "identifier": "CC-BY-4.0",
+        "reference": "https://github.com/abinit/pseudo_dojo/blob/master/README.md",
+        "attribution": "PseudoDojo project",
+        "citations": "http://www.pseudo-dojo.org/faq.html"
+      },
+      "qualification_status": "unqualified",
+      "z_valence": 6,
+      "functional": "PBE",
+      "relativistic": "scalar",
+      "pseudo_type": "NC",
+      "nlcc": true,
+      "semicore": "not specified in source note",
+      "projector_counts": {
+        "0": 2,
+        "1": 2,
+        "2": 1
+      }
+    }
+  ],
+  "manifest_sha256": "d0a122864e41991e60b862f3e81761f9c1124d73e70f7c4892bea7130d23f635",
+  "command": "python3 -I scripts/make_qe_input.py --results scripts/tests/fixtures/materials/mgo-40.json --pseudo-dir /scr/mino/rustdft/pseudo --out tests/reference/materials/qe_inputs/mgo-40.in",
+  "baandi_commit": "a3947c6e6499437837baf848d991c217ce533dd6",
+  "baandi_input_sha256": "43d1efefa948a4a70b63f80ae6063af3ddf1f7d7ab9ac785c3ed9823d49daf1b",
+  "expected_kpoints": [
+    {
+      "fractional": [
+        0.16666666666666666,
+        0.16666666666666666,
+        0.16666666666666666
+      ],
+      "weight": 0.07407407407407407
+    },
+    {
+      "fractional": [
+        0.16666666666666666,
+        0.16666666666666666,
+        -0.5
+      ],
+      "weight": 0.07407407407407407
+    },
+    {
+      "fractional": [
+        0.16666666666666666,
+        0.16666666666666666,
+        -0.16666666666666663
+      ],
+      "weight": 0.07407407407407407
+    },
+    {
+      "fractional": [
+        0.16666666666666666,
+        -0.5,
+        0.16666666666666666
+      ],
+      "weight": 0.07407407407407407
+    },
+    {
+      "fractional": [
+        0.16666666666666666,
+        -0.5,
+        -0.5
+      ],
+      "weight": 0.07407407407407407
+    },
+    {
+      "fractional": [
+        0.16666666666666666,
+        -0.5,
+        -0.16666666666666663
+      ],
+      "weight": 0.07407407407407407
+    },
+    {
+      "fractional": [
+        0.16666666666666666,
+        -0.16666666666666663,
+        0.16666666666666666
+      ],
+      "weight": 0.07407407407407407
+    },
+    {
+      "fractional": [
+        0.16666666666666666,
+        -0.16666666666666663,
+        -0.5
+      ],
+      "weight": 0.07407407407407407
+    },
+    {
+      "fractional": [
+        0.16666666666666666,
+        -0.16666666666666663,
+        -0.16666666666666663
+      ],
+      "weight": 0.07407407407407407
+    },
+    {
+      "fractional": [
+        -0.5,
+        0.16666666666666666,
+        0.16666666666666666
+      ],
+      "weight": 0.07407407407407407
+    },
+    {
+      "fractional": [
+        -0.5,
+        0.16666666666666666,
+        -0.5
+      ],
+      "weight": 0.07407407407407407
+    },
+    {
+      "fractional": [
+        -0.5,
+        0.16666666666666666,
+        -0.16666666666666663
+      ],
+      "weight": 0.07407407407407407
+    },
+    {
+      "fractional": [
+        -0.5,
+        -0.5,
+        0.16666666666666666
+      ],
+      "weight": 0.07407407407407407
+    },
+    {
+      "fractional": [
+        -0.5,
+        -0.5,
+        -0.5
+      ],
+      "weight": 0.037037037037037035
+    }
+  ],
+  "kpoint_comparison": "Compare modulo reciprocal integers and time reversal when enabled; weights sum to one."
+}

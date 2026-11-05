@@ -1,0 +1,115 @@
+{
+  "status": "partial; standard profile not implemented",
+  "baseline_commit": "84f06a478549ce39151ba6095f5980bb652d8d26",
+  "commands": [
+    {
+      "command": "PATH=/opt/homebrew/opt/rustup/bin:$PATH cargo build --release -p dft-cli",
+      "exit_code": 0
+    },
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p17a_equal_accuracy_test.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_materials_qe.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_qe.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_qe_real.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex python3 -I scripts/equal_accuracy.py --strict-only --output-dir /tmp/p17a-strict-evidence",
+      "exit_code": 3
+    },
+    {
+      "command": "python3 -I scripts/equal_accuracy.py --cases syn4-elongated --output-dir /tmp/p17a-profile-readiness",
+      "exit_code": 3
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf ../pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 1 --record tests/reference/perf/p17a/strict-t1-before.json",
+      "exit_code": 3
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 1 --record tests/reference/perf/p17a/strict-t1-before.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 1 --baseline tests/reference/perf/p17a/strict-t1-before.json --require-identical --record tests/reference/perf/p17a/strict-t1-after.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 8 --record tests/reference/perf/p17a/strict-t8-before.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads 8 --baseline tests/reference/perf/p17a/strict-t8-before.json --require-identical --record tests/reference/perf/p17a/strict-t8-after.json",
+      "exit_code": 0
+    }
+  ],
+  "sha256": {
+    "scripts/equal_accuracy.py": "17aab1a4f58786934c372ddd5b62323eb449ee4d53bebcaaf510cc8177d0ff20",
+    "scripts/verify_qe.py": "4bf65caf30c07337512ee08631a470e2678c0fd7639b106fd0123755e7cb4fd0",
+    "scripts/compare_materials_qe.py": "3c76beca5da4637a468d2e39a8a6883e0775bc1edd814cd7d203bb400ce159c3",
+    "tests/p17a_equal_accuracy_test.py": "83e418e09c9cbf73437a4ef6b3214bb2a66938a4e82883502b7be7a782957115",
+    "target/release/dft-cli": "69bc852ac22393b73a24d979dd84d45ede1cdc06144d2010b04b5da8e9ea5d3f"
+  },
+  "gates": {
+    "build": "PASS",
+    "test": "PASS",
+    "fmt": "PASS",
+    "clippy": "PASS"
+  },
+  "test_counts": {
+    "p17a": 9,
+    "materials_qe": 10,
+    "qe": 49,
+    "qe_real": 8,
+    "readme_figures": 3
+  },
+  "limitations": [
+    "No core changes; same-binary strict identity checks are not feature-preservation evidence.",
+    "Relative --upf benchmark attempt failed; absolute path corrected it.",
+    "Mac wall observations overlap other work; no accepted speed claim.",
+    "No standard default frozen; no raw required QE calibration pair.",
+    "Two strict reference failures (skew) and six iteration-budget failures (slab/mesh16); all retained."
+  ],
+  "strict_thread_identity": {
+    "gamma": {
+      "energy_identical": true,
+      "density_identical": true
+    },
+    "k222s": {
+      "energy_identical": true,
+      "density_identical": true
+    },
+    "k222": {
+      "energy_identical": true,
+      "density_identical": true
+    },
+    "k444s": {
+      "energy_identical": true,
+      "density_identical": true
+    },
+    "si8": {
+      "energy_identical": true,
+      "density_identical": true
+    }
+  }
+}

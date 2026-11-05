@@ -1,0 +1,55 @@
+{
+  "command": "python3 -I tests/p17a_replay_calibrate.py",
+  "rows": [
+    {
+      "case": "si8",
+      "native_steps": 283,
+      "ratcheted_ritz_prefix_steps": 54,
+      "h_vectors": 1000,
+      "censored": 0
+    },
+    {
+      "case": "k444s",
+      "native_steps": 1686,
+      "ratcheted_ritz_prefix_steps": 740,
+      "h_vectors": 5631,
+      "censored": 0
+    },
+    {
+      "case": "syn20-skew",
+      "native_steps": 13,
+      "ratcheted_ritz_prefix_steps": 8,
+      "h_vectors": 140,
+      "censored": 2
+    },
+    {
+      "case": "syn4-elongated",
+      "native_steps": 28,
+      "ratcheted_ritz_prefix_steps": 12,
+      "h_vectors": 76,
+      "censored": 3
+    },
+    {
+      "case": "syn4-slab",
+      "native_steps": 539,
+      "ratcheted_ritz_prefix_steps": 192,
+      "h_vectors": 1372,
+      "censored": 21
+    },
+    {
+      "case": "syn16-gamma",
+      "native_steps": 65,
+      "ratcheted_ritz_prefix_steps": 28,
+      "h_vectors": 350,
+      "censored": 1
+    },
+    {
+      "case": "syn16-k211",
+      "native_steps": 622,
+      "ratcheted_ritz_prefix_steps": 230,
+      "h_vectors": 3389,
+      "censored": 92
+    }
+  ],
+  "limits": "Frozen trajectories only; not SCF speedups. No first-step change is invented. All roots must meet the rule in this calibration."
+}

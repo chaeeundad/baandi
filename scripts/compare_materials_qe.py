@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from qe_common import (Error, Parser, NUMBER, EV_PER_HA, materials_results,
                        number, sha256)
 from make_qe_input import kpoint_input
-from verify_qe import match
+from verify_qe import match, require_strict_result
 from qe_rhog import load_ours, read_qe, validate_grid, FormatError
 from compare_rhog import compare as compare_density
 
@@ -97,6 +97,7 @@ def difference(ours, qe, unit):
 
 def compare(ours, qe_out, qe_density=None):
     source, r = materials_results(ours)
+    require_strict_result(r)
     q = parse_output(Path(qe_out).read_text())
     require(r['convergence']['converged'] is True, 'BAANDI SCF is not converged')
     require(q['grid'] == r['basis']['fft_grid'], 'FFT grid mismatch')

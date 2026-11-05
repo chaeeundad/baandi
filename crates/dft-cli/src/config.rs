@@ -265,6 +265,9 @@ impl Config {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scf {
+    pub convergence_profile: Option<String>,
+    pub standard_threshold_ha: Option<f64>,
+    pub mixing_metric: Option<String>,
     pub spectral_guard: Option<String>,
     pub threads: Option<usize>,
     pub max_iterations: Option<i64>,
@@ -280,6 +283,38 @@ pub struct Scf {
     pub seed: Option<u64>,
 }
 impl Scf {
+    pub fn standard_profile(&self) -> Result<Option<dft_engine::StandardProfile>, ConfigError> {
+        let threshold = self
+            .standard_threshold_ha
+            .unwrap_or(dft_engine::StandardProfile::default().threshold_ha);
+        if !threshold.is_finite() || threshold <= 0.0 {
+            return Err(ConfigError::Invalid(
+                "scf.standard_threshold_ha must be finite and positive".into(),
+            ));
+        }
+        match self.convergence_profile.as_deref().unwrap_or("strict") {
+            "strict" if self.standard_threshold_ha.is_none() => Ok(None),
+            "strict" => Err(ConfigError::Invalid(
+                "standard_threshold_ha requires convergence_profile=standard".into(),
+            )),
+            "standard" => Ok(Some(dft_engine::StandardProfile {
+                threshold_ha: threshold,
+            })),
+            _ => Err(ConfigError::Invalid(
+                "scf.convergence_profile must be strict or standard".into(),
+            )),
+        }
+    }
+    pub fn hartree_mixing(&self) -> Result<bool, ConfigError> {
+        match self.mixing_metric.as_deref().unwrap_or("l2") {
+            "l2" => Ok(false),
+            "hartree" => Ok(true),
+            _ => Err(ConfigError::Invalid(
+                "scf.mixing_metric must be l2 or hartree".into(),
+            )),
+        }
+    }
+
     pub fn spectral_guard(&self) -> Result<dft_engine::SpectralGuard, ConfigError> {
         match self.spectral_guard.as_deref().unwrap_or("off") {
             "off" => Ok(dft_engine::SpectralGuard::Off),
@@ -477,6 +512,7 @@ fn normalize(
         (
             "scf",
             &[
+                "standard_threshold_ha",
                 "energy_tolerance_ha",
                 "density_residual_tolerance",
                 "mixing_beta",
@@ -652,6 +688,8 @@ impl Config {
         }
         if let Some(s) = &self.scf {
             s.spectral_guard()?;
+            s.standard_profile()?;
+            s.hartree_mixing()?;
         }
         self.cell()?;
         if let Some(v) = self.output.as_ref().and_then(|o| o.volumetric.as_ref()) {

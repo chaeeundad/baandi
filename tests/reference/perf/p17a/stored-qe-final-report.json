@@ -1,0 +1,656 @@
+{
+  "schema_version": 1,
+  "command": [
+    "/Library/Developer/CommandLineTools/usr/bin/python3",
+    "scripts/equal_accuracy.py",
+    "--cases",
+    "",
+    "--qe-output",
+    "tests/reference/kpoints/k222_c/qe.out",
+    "--qe-output",
+    "tests/reference/kpoints/k222s_c/qe.out",
+    "--qe-output",
+    "tests/reference/si30_auto/qe.out",
+    "--qe-output",
+    "tests/reference/si30_ours/qe.out",
+    "--output-dir",
+    "/tmp/p17a-qe-recorded"
+  ],
+  "rows": [
+    {
+      "requested_scf_threshold_ry": 1e-12,
+      "estimated_scf_errors_ha": [
+        0.05232024,
+        0.002285135,
+        4.055e-05,
+        4.25e-07,
+        5e-09,
+        3.55e-10,
+        1.15e-11,
+        1.1e-12,
+        4e-14
+      ],
+      "final_estimated_scf_error_ha": 4e-14,
+      "code": "QE",
+      "convergence_profile": "qe-conv-thr",
+      "certified": false,
+      "status": "ok",
+      "output": "tests/reference/kpoints/k222_c/qe.out",
+      "output_sha256": "f93516f6a488f870b5880a9d2f1c1da6ff7e4cde7dd391afdd338948169afaf2",
+      "version": "7.6",
+      "total_energy_ha": -7.83123262,
+      "energy_rounding_bound_ha": 2.5e-09,
+      "eigenvalues_ha": [
+        [
+          -0.20838335646483405,
+          0.23290617915264863,
+          0.23290617915264863,
+          0.23290617915264863,
+          0.32216660778509704
+        ],
+        [
+          -0.12091261982234006,
+          -0.02718714854554956,
+          0.18777433658872675,
+          0.18777433658872675,
+          0.28471169862366946
+        ],
+        [
+          -0.12091261982234006,
+          -0.02718714854554956,
+          0.18777433658872675,
+          0.18777433658872675,
+          0.28471169862366946
+        ],
+        [
+          -0.054682991397374626,
+          -0.054682991397374626,
+          0.12513879187254037,
+          0.12513879187254037,
+          0.25011956165972543
+        ],
+        [
+          -0.12091261982234006,
+          -0.02718714854554956,
+          0.18777433658872675,
+          0.18777433658872675,
+          0.28471169862366946
+        ],
+        [
+          -0.054682991397374626,
+          -0.054682991397374626,
+          0.12513879187254037,
+          0.12513879187254037,
+          0.25011956165972543
+        ],
+        [
+          -0.054682991397374626,
+          -0.054682991397374626,
+          0.12513879187254037,
+          0.12513879187254037,
+          0.25011956165972543
+        ],
+        [
+          -0.12091261982234006,
+          -0.02718714854554956,
+          0.18777433658872675,
+          0.18777433658872675,
+          0.28471169862366946
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "weight": 0.125
+        },
+        {
+          "fractional": [
+            0.0,
+            0.0,
+            -0.5
+          ],
+          "weight": 0.125
+        },
+        {
+          "fractional": [
+            0.0,
+            -0.5,
+            0.0
+          ],
+          "weight": 0.125
+        },
+        {
+          "fractional": [
+            0.0,
+            -0.5,
+            -0.5
+          ],
+          "weight": 0.125
+        },
+        {
+          "fractional": [
+            -0.5,
+            0.0,
+            0.0
+          ],
+          "weight": 0.125
+        },
+        {
+          "fractional": [
+            -0.5,
+            0.0,
+            -0.5
+          ],
+          "weight": 0.125
+        },
+        {
+          "fractional": [
+            -0.5,
+            -0.5,
+            0.0
+          ],
+          "weight": 0.125
+        },
+        {
+          "fractional": [
+            -0.5,
+            -0.5,
+            -0.5
+          ],
+          "weight": 0.125
+        }
+      ],
+      "scf_iterations": 9,
+      "davidson_steps": 342,
+      "h_vectors": null,
+      "davidson_steps_definition": "initial solve calls plus expansion timer calls; unavailable without timers",
+      "h_blocks": 350,
+      "wall_s": 0.28,
+      "wall_scope": "PWSCF internal WALL; rounded; excludes launcher",
+      "model": {
+        "printed_geometry_and_pp": {
+          "alat": "7.2558",
+          "axes": [
+            [
+              "0.000000",
+              "0.707107",
+              "0.707107"
+            ],
+            [
+              "0.707107",
+              "0.000000",
+              "0.707107"
+            ],
+            [
+              "0.707107",
+              "0.707107",
+              "0.000000"
+            ]
+          ],
+          "atoms": [
+            [
+              "Si",
+              "0.0000000",
+              "0.0000000",
+              "0.0000000"
+            ],
+            [
+              "Si",
+              "0.3535534",
+              "0.3535534",
+              "0.3535534"
+            ],
+            [
+              "Si",
+              "0.0000000",
+              "0.0000000",
+              "0.0000000"
+            ],
+            [
+              "Si",
+              "0.2500000",
+              "0.2500000",
+              "0.2500000"
+            ]
+          ],
+          "pseudo_md5": [
+            "9f25e6ff280f3123e9b3a84715b2e9c9"
+          ]
+        },
+        "grid": [
+          25,
+          25,
+          25
+        ],
+        "ecutwfc": 30.0,
+        "ecutrho": 120.0,
+        "xc": "SLA  PZ   NOGX NOGC",
+        "electrons": 8.0,
+        "bands": 8
+      },
+      "accuracy": null,
+      "case": "tests/reference/kpoints/k222_c",
+      "label": "stored-output",
+      "reference_available": false
+    },
+    {
+      "requested_scf_threshold_ry": 1e-12,
+      "estimated_scf_errors_ha": [
+        0.03523181,
+        0.001270235,
+        3.4245e-05,
+        2.25e-07,
+        2e-08,
+        3.8e-10,
+        1.5e-11,
+        7e-13,
+        3.4e-14
+      ],
+      "final_estimated_scf_error_ha": 3.4e-14,
+      "code": "QE",
+      "convergence_profile": "qe-conv-thr",
+      "certified": false,
+      "status": "ok",
+      "output": "tests/reference/kpoints/k222s_c/qe.out",
+      "output_sha256": "162a89801e5ea6edace18e5e26635a9f9a10e0b84518f3a5316c0a3a21e45ea6",
+      "version": "7.6",
+      "total_energy_ha": -7.919425975,
+      "energy_rounding_bound_ha": 2.5e-09,
+      "eigenvalues_ha": [
+        [
+          -0.1858817464966805,
+          0.08075296054878428,
+          0.19550639397448458,
+          0.19550639397448458,
+          0.29354623567469695
+        ],
+        [
+          -0.1145586620181693,
+          -0.011491513044327314,
+          0.09412603888850514,
+          0.14188545798798635,
+          0.27545454436762196
+        ],
+        [
+          -0.1145586620181693,
+          -0.011491513044327314,
+          0.09412603888850514,
+          0.14188545798798635,
+          0.27545454436762196
+        ],
+        [
+          -0.1145586620181693,
+          -0.011491513044327314,
+          0.09412603888850514,
+          0.14188545798798635,
+          0.27545454436762196
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0.25,
+            0.25,
+            0.25
+          ],
+          "weight": 0.25
+        },
+        {
+          "fractional": [
+            0.25,
+            0.25,
+            -0.25
+          ],
+          "weight": 0.25
+        },
+        {
+          "fractional": [
+            0.25,
+            -0.25,
+            0.25
+          ],
+          "weight": 0.25
+        },
+        {
+          "fractional": [
+            0.25,
+            -0.25,
+            -0.25
+          ],
+          "weight": 0.25
+        }
+      ],
+      "scf_iterations": 9,
+      "davidson_steps": 179,
+      "h_vectors": null,
+      "davidson_steps_definition": "initial solve calls plus expansion timer calls; unavailable without timers",
+      "h_blocks": 183,
+      "wall_s": 0.14,
+      "wall_scope": "PWSCF internal WALL; rounded; excludes launcher",
+      "model": {
+        "printed_geometry_and_pp": {
+          "alat": "7.2558",
+          "axes": [
+            [
+              "0.000000",
+              "0.707107",
+              "0.707107"
+            ],
+            [
+              "0.707107",
+              "0.000000",
+              "0.707107"
+            ],
+            [
+              "0.707107",
+              "0.707107",
+              "0.000000"
+            ]
+          ],
+          "atoms": [
+            [
+              "Si",
+              "0.0000000",
+              "0.0000000",
+              "0.0000000"
+            ],
+            [
+              "Si",
+              "0.3535534",
+              "0.3535534",
+              "0.3535534"
+            ],
+            [
+              "Si",
+              "0.0000000",
+              "0.0000000",
+              "0.0000000"
+            ],
+            [
+              "Si",
+              "0.2500000",
+              "0.2500000",
+              "0.2500000"
+            ]
+          ],
+          "pseudo_md5": [
+            "9f25e6ff280f3123e9b3a84715b2e9c9"
+          ]
+        },
+        "grid": [
+          25,
+          25,
+          25
+        ],
+        "ecutwfc": 30.0,
+        "ecutrho": 120.0,
+        "xc": "SLA  PZ   NOGX NOGC",
+        "electrons": 8.0,
+        "bands": 8
+      },
+      "accuracy": null,
+      "case": "tests/reference/kpoints/k222s_c",
+      "label": "stored-output",
+      "reference_available": false
+    },
+    {
+      "requested_scf_threshold_ry": 1e-12,
+      "estimated_scf_errors_ha": [
+        0.15940201,
+        0.00648157,
+        0.00016635,
+        1.585e-06,
+        9.3e-07,
+        1.1e-07,
+        5e-09,
+        3.1e-10,
+        2.2e-11,
+        3.75e-12,
+        3.35e-13
+      ],
+      "final_estimated_scf_error_ha": 3.35e-13,
+      "code": "QE",
+      "convergence_profile": "qe-conv-thr",
+      "certified": false,
+      "status": "ok",
+      "output": "tests/reference/si30_auto/qe.out",
+      "output_sha256": "d677d4e6724f801bf9d95d8fe4b38c985261062b4dfec698b5bc10c57944725e",
+      "version": "7.6",
+      "total_energy_ha": -7.29553303,
+      "energy_rounding_bound_ha": 2.5e-09,
+      "eigenvalues_ha": [
+        [
+          -0.19011526841131599,
+          0.2586343796078247,
+          0.2586343796078247,
+          0.2586343796078247,
+          0.33714563150389404
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "weight": 1.0
+        }
+      ],
+      "scf_iterations": 11,
+      "davidson_steps": 37,
+      "h_vectors": null,
+      "davidson_steps_definition": "initial solve calls plus expansion timer calls; unavailable without timers",
+      "h_blocks": 38,
+      "wall_s": 0.07,
+      "wall_scope": "PWSCF internal WALL; rounded; excludes launcher",
+      "model": {
+        "printed_geometry_and_pp": {
+          "alat": "7.2558",
+          "axes": [
+            [
+              "0.000000",
+              "0.707107",
+              "0.707107"
+            ],
+            [
+              "0.707107",
+              "0.000000",
+              "0.707107"
+            ],
+            [
+              "0.707107",
+              "0.707107",
+              "0.000000"
+            ]
+          ],
+          "atoms": [
+            [
+              "Si",
+              "0.0000000",
+              "0.0000000",
+              "0.0000000"
+            ],
+            [
+              "Si",
+              "0.3535534",
+              "0.3535534",
+              "0.3535534"
+            ],
+            [
+              "Si",
+              "0.0000000",
+              "0.0000000",
+              "0.0000000"
+            ],
+            [
+              "Si",
+              "0.2500000",
+              "0.2500000",
+              "0.2500000"
+            ]
+          ],
+          "pseudo_md5": [
+            "9f25e6ff280f3123e9b3a84715b2e9c9"
+          ]
+        },
+        "grid": [
+          25,
+          25,
+          25
+        ],
+        "ecutwfc": 30.0,
+        "ecutrho": 120.0,
+        "xc": "SLA  PZ   NOGX NOGC",
+        "electrons": 8.0,
+        "bands": 8
+      },
+      "accuracy": null,
+      "case": "tests/reference/si30_auto",
+      "label": "stored-output",
+      "reference_available": false
+    },
+    {
+      "requested_scf_threshold_ry": 1e-12,
+      "estimated_scf_errors_ha": [
+        0.15940201,
+        0.00648157,
+        0.00016635,
+        1.585e-06,
+        9.3e-07,
+        1.1e-07,
+        5e-09,
+        3.1e-10,
+        2.2e-11,
+        3.75e-12,
+        3.35e-13
+      ],
+      "final_estimated_scf_error_ha": 3.35e-13,
+      "code": "QE",
+      "convergence_profile": "qe-conv-thr",
+      "certified": false,
+      "status": "ok",
+      "output": "tests/reference/si30_ours/qe.out",
+      "output_sha256": "9ee1a3a2feb9f5ddc26e5271ca1084a3b732fde363cbeaeb2ebefe308add2d41",
+      "version": "7.6",
+      "total_energy_ha": -7.29553303,
+      "energy_rounding_bound_ha": 2.5e-09,
+      "eigenvalues_ha": [
+        [
+          -0.19011526841131599,
+          0.2586343796078247,
+          0.2586343796078247,
+          0.2586343796078247,
+          0.33714563150389404
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "weight": 1.0
+        }
+      ],
+      "scf_iterations": 11,
+      "davidson_steps": 37,
+      "h_vectors": null,
+      "davidson_steps_definition": "initial solve calls plus expansion timer calls; unavailable without timers",
+      "h_blocks": 38,
+      "wall_s": 0.07,
+      "wall_scope": "PWSCF internal WALL; rounded; excludes launcher",
+      "model": {
+        "printed_geometry_and_pp": {
+          "alat": "7.2558",
+          "axes": [
+            [
+              "0.000000",
+              "0.707107",
+              "0.707107"
+            ],
+            [
+              "0.707107",
+              "0.000000",
+              "0.707107"
+            ],
+            [
+              "0.707107",
+              "0.707107",
+              "0.000000"
+            ]
+          ],
+          "atoms": [
+            [
+              "Si",
+              "0.0000000",
+              "0.0000000",
+              "0.0000000"
+            ],
+            [
+              "Si",
+              "0.3535534",
+              "0.3535534",
+              "0.3535534"
+            ],
+            [
+              "Si",
+              "0.0000000",
+              "0.0000000",
+              "0.0000000"
+            ],
+            [
+              "Si",
+              "0.2500000",
+              "0.2500000",
+              "0.2500000"
+            ]
+          ],
+          "pseudo_md5": [
+            "9f25e6ff280f3123e9b3a84715b2e9c9"
+          ]
+        },
+        "grid": [
+          25,
+          25,
+          25
+        ],
+        "ecutwfc": 30.0,
+        "ecutrho": 120.0,
+        "xc": "SLA  PZ   NOGX NOGC",
+        "electrons": 8.0,
+        "bands": 8
+      },
+      "accuracy": null,
+      "case": "tests/reference/si30_ours",
+      "label": "stored-output",
+      "reference_available": false
+    }
+  ],
+  "binary_sha256": null,
+  "experiment_thresholds_ha": [
+    5e-08,
+    5e-09,
+    5e-10
+  ],
+  "frozen_standard_default_ha": 5e-09,
+  "complete": false,
+  "strict_only": false,
+  "limitations": [
+    "A two-level energy plateau is empirical, not proof of the ground state or spectral completeness.",
+    "Hartree norm is sqrt(2*pi*Omega*sum_G!=0 |delta n_G|^2/G^2), density sphere only; no electron-count division.",
+    "L2 is sqrt(integral(delta n^2)), full real-space grid, in Bohr^-3/2.",
+    "QE Davidson steps use initial+expansion timer calls when available; H-vector counts remain unknown, h_psi calls are blocks. Optional density norms use rounded stdout geometry and the stored G set.",
+    "QE rounded equal energies do not establish zero delivered error; rounding bounds are reported.",
+    "Wall samples are local observations; no speedup acceptance or default calibration is implied."
+  ]
+}

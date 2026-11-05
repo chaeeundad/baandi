@@ -1,3 +1,7 @@
+#[path = "convergence.rs"]
+mod convergence;
+use convergence::CoulombMetric;
+pub use convergence::StandardProfile;
 #[path = "collinear.rs"]
 pub mod collinear;
 #[path = "replay_capture.rs"]
@@ -124,6 +128,8 @@ impl Default for Mixing {
 }
 #[derive(Clone, Debug)]
 pub struct ScfOptions {
+    pub standard: Option<StandardProfile>,
+    pub hartree_mixing: bool,
     pub spectral_guard: crate::SpectralGuard,
     /// Experimental opt-in hybrid; Davidson remains the default.
     pub eigensolver: dft_solvers::SolverChoice,
@@ -158,6 +164,8 @@ pub struct ScfOptions {
 impl Default for ScfOptions {
     fn default() -> Self {
         Self {
+            standard: None,
+            hartree_mixing: false,
             spectral_guard: crate::SpectralGuard::Off,
             eigensolver: dft_solvers::SolverChoice::default(),
             threads: 1,
@@ -194,6 +202,8 @@ pub struct PhaseTimings {
 }
 #[derive(Clone, Debug)]
 pub struct IterationRecord {
+    pub standard_error_ha: Option<f64>,
+    pub standard_redo: bool,
     pub iteration: usize,
     pub energy: EnergyAudit,
     pub energy_change: Option<f64>,
@@ -259,6 +269,8 @@ pub struct KPointSolution {
 
 #[derive(Debug)]
 pub struct ScfResult {
+    pub standard: Option<StandardProfile>,
+    pub certified: bool,
     pub spectral_completeness: Option<crate::SpectralReport>,
     pub energy: EnergyAudit,
     /// First k point, retained for Gamma API compatibility; see `k_points`.
@@ -294,6 +306,7 @@ pub struct SpeciesPotential<'a> {
 /// Cached ionic terms, Hamiltonian application plan, and density FFT plan.
 /// `step` is exposed for independent post-SCF fixed-point verification.
 pub struct ScfProblem {
+    coulomb: Option<CoulombMetric>,
     cell: Cell,
     states: Vec<KState>,
     grid: FftGridSpec,
@@ -486,6 +499,24 @@ impl ScfProblem {
         minimum_gap: Option<f64>,
         channel: Option<usize>,
     ) -> Result<Self, ScfError> {
+        if options
+            .standard
+            .is_some_and(|p| !p.threshold_ha.is_finite() || p.threshold_ha <= 0.0)
+        {
+            return Err(ScfError::InvalidInput(
+                "positive finite standard_threshold_ha required",
+            ));
+        }
+        if channel.is_some() && (options.standard.is_some() || options.hartree_mixing) {
+            return Err(ScfError::InvalidInput(
+                "standard profile and Hartree metric currently require unpolarized SCF",
+            ));
+        }
+        if options.standard.is_some()
+            && !matches!(options.eigensolver, dft_solvers::SolverChoice::Davidson)
+        {
+            return Err(ScfError::InvalidInput("standard profile requires Davidson"));
+        }
         kpoints::validate(points)
             .map_err(|_| ScfError::InvalidInput("invalid k-point quadrature"))?;
         let start = Instant::now();
@@ -680,7 +711,12 @@ impl ScfProblem {
                 }
             })
             .collect();
+        let coulomb = options
+            .standard
+            .map(|_| CoulombMetric::new(cell, options.cutoff_hartree, grid.dims()))
+            .transpose()?;
         Ok(Self {
+            coulomb,
             cell: cell.clone(),
             states,
             grid,
@@ -828,7 +864,11 @@ impl ScfProblem {
         let policy = BandTolerances {
             strict_bands: (self.occupations.iter().filter(|&&f| f > 0.0).count() + 1)
                 .min(self.occupations.len()),
-            buffer_tolerance: tolerance.max(1e-5),
+            buffer_tolerance: if self.options.standard.is_some() {
+                StandardProfile::empty_threshold(tolerance)
+            } else {
+                tolerance.max(1e-5)
+            },
         };
         // A single k point still has an intra-k budget. Keep its complete solve
         // resident on that pool, so each band/GEMM phase does not enter from
@@ -849,16 +889,25 @@ impl ScfProblem {
                     None
                 };
                 let solution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    self.options
-                        .eigensolver
-                        .solve_with_band_tolerances_and_certification(
-                            &solver,
+                    if self.options.standard.is_some() {
+                        solver.solve_ritz_changes(
                             &state.hamiltonian,
                             initial.map(|v| &v[i]).or(guess.as_ref()),
                             Some(&preconditioner),
                             policy,
-                            certify,
                         )
+                    } else {
+                        self.options
+                            .eigensolver
+                            .solve_with_band_tolerances_and_certification(
+                                &solver,
+                                &state.hamiltonian,
+                                initial.map(|v| &v[i]).or(guess.as_ref()),
+                                Some(&preconditioner),
+                                policy,
+                                certify,
+                            )
+                    }
                 }))
                 .map_err(|_| ScfError::Numerical(format!("k index {i}: solve panicked")))?
                 .map_err(|e| ScfError::Numerical(format!("k index {i}: {e}")))?;
@@ -888,17 +937,25 @@ impl ScfProblem {
                     } else {
                         None
                     };
-                    let solution = self
-                        .options
-                        .eigensolver
-                        .solve_with_band_tolerances_and_certification(
-                            &solver,
+                    let solution = if self.options.standard.is_some() {
+                        solver.solve_ritz_changes(
                             &state.hamiltonian,
                             initial.map(|v| &v[i]).or(guess.as_ref()),
                             Some(&preconditioner),
                             policy,
-                            certify,
-                        )?;
+                        )
+                    } else {
+                        self.options
+                            .eigensolver
+                            .solve_with_band_tolerances_and_certification(
+                                &solver,
+                                &state.hamiltonian,
+                                initial.map(|v| &v[i]).or(guess.as_ref()),
+                                Some(&preconditioner),
+                                policy,
+                                certify,
+                            )
+                    }?;
                     Ok(KPointSolution {
                         point: state.point,
                         solution,
@@ -1233,6 +1290,8 @@ mod tests {
             functional_difference_bound: 0.0,
         };
         let good = IterationRecord {
+            standard_error_ha: None,
+            standard_redo: false,
             iteration: 2,
             energy,
             energy_change: Some(0.0),

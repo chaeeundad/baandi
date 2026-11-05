@@ -242,6 +242,7 @@ fn replay_trace_matches_independent_counts_and_dense_spectrum() {
         seed: 42,
     };
     let mode = SolveMode {
+        ritz: false,
         recurrence: true,
         contract_restart: true,
         certify: true,

@@ -203,6 +203,9 @@ pub struct PreconditionedPulay<P> {
     diagnostics: MixingDiagnostics,
 }
 impl<P: ResidualPreconditioner> PreconditionedPulay<P> {
+    pub fn set_metric(&mut self, metric: Box<dyn crate::mixing::ResidualMetric>) {
+        self.pulay.set_metric(metric);
+    }
     pub fn new(
         beta: f64,
         history: usize,

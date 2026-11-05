@@ -60,6 +60,8 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
         ..ScfOptions::default()
     };
     if let Some(s) = &config.scf {
+        o.standard = s.standard_profile().map_err(|e| error(1, e.to_string()))?;
+        o.hartree_mixing = s.hartree_mixing().map_err(|e| error(1, e.to_string()))?;
         o.spectral_guard = s.spectral_guard().map_err(|e| error(1, e.to_string()))?;
         o.threads = s.threads.unwrap_or(1);
         if let Some(n) = s.max_iterations {
@@ -108,11 +110,24 @@ fn options_json(o: &ScfOptions) -> Value {
             json!({"method":"kerker-pulay","beta":beta,"history":history,"q0_inverse_bohr":q0_inverse_bohr})
         }
     };
-    json!({"spectral_guard":o.spectral_guard.name(),"threads":o.threads,"cutoff_hartree":o.cutoff_hartree,"nbands":o.bands,"extra_bands":o.extra_bands,"grid_override":o.grid_override,"mixing":mixing,
+    let mut result = json!({"spectral_guard":o.spectral_guard.name(),"threads":o.threads,"cutoff_hartree":o.cutoff_hartree,"nbands":o.bands,"extra_bands":o.extra_bands,"grid_override":o.grid_override,"mixing":mixing,
         "density_residual_tolerance":o.density_tolerance,"energy_tolerance_ha":o.energy_tolerance,"eigen_tolerance":o.eigen_tolerance,
         "residual_eigen_schedule":o.residual_eigen_schedule,"free_electron_initial_guess":o.free_electron_initial_guess,"initial_eigen_tolerance":o.initial_eigen_tolerance,"eigen_tolerance_decay":o.eigen_tolerance_decay,"max_iterations":o.max_iterations,
         "davidson_max_iterations":o.davidson_max_iterations,"davidson_subspace":o.davidson_subspace,"davidson_subspace_min_per_band":6,"seed":o.seed,
-        "divergence_factor":o.divergence_factor,"divergence_patience":o.divergence_patience})
+        "divergence_factor":o.divergence_factor,"divergence_patience":o.divergence_patience});
+    if let Some(p) = o.standard {
+        result["convergence_profile"] = json!("standard");
+        result["standard_threshold_ha"] = json!(p.threshold_ha);
+        result["eigensolver_stopping_rule"] = json!("ritz_value_change");
+        result["standard_eigen_cap_ha"] = json!(dft_engine::StandardProfile::CAP_HA);
+        result["standard_eigen_floor_ha"] = json!(dft_engine::StandardProfile::FLOOR_HA);
+        result["empty_threshold_rule"] =
+            json!("max(5 * occupied_threshold_ha, 5e-6 Ha); first empty required");
+    }
+    if o.hartree_mixing || o.standard.is_some() {
+        result["mixing_metric"] = json!(if o.hartree_mixing { "hartree" } else { "l2" });
+    }
+    result
 }
 fn energy_json(e: &EnergyAudit) -> Value {
     let mut m = serde_json::Map::new();
@@ -153,11 +168,16 @@ fn phase_sum(t: &PhaseTimings) -> f64 {
     (t.potential + t.diagonalization + t.density + t.energy + t.mixing).as_secs_f64()
 }
 fn history_json(r: &IterationRecord) -> Value {
-    json!({"iteration":r.iteration,"energies":energy_json(&r.energy),"delta_energy_ha":r.energy_change,"density_residual":r.density_residual,
+    let mut result = json!({"iteration":r.iteration,"energies":energy_json(&r.energy),"delta_energy_ha":r.energy_change,"density_residual":r.density_residual,
         "max_eigen_residual_ha":r.max_eigen_residual,"requested_eigen_tolerance_ha":r.requested_eigen_tolerance,"davidson_iterations":r.davidson_iterations,"operator_applications":r.operator_applications,"davidson_iterations_per_k":r.davidson_iterations_per_k,"operator_applications_per_k":r.operator_applications_per_k,
         "relative_charge_error":r.charge_error,"relative_input_charge_error":r.input_charge_error,"min_density_electrons_per_bohr3":r.min_density,
         "mixing_fraction":r.mixing_fraction,"mixer_reset":r.mixer_reset,"density_contraction":r.density_contraction,"mixing_history_used":r.mixing_history_used,"mixing_resets":r.mixing_resets,"mixing_raw_recovery":r.mixing_raw_recovery,"timings":phase_json(&r.timings),
-        "fixed_point_certificate":r.fixed_point_certificate.as_ref().map(|c| json!({"strict_residuals_per_k_ha":c.strict_residuals_per_k,"buffer_residuals_per_k_ha":c.buffer_residuals_per_k,"density_residual":c.density_residual,"occupied_eigenvalue_change_ha":c.occupied_eigenvalue_change,"davidson_iterations":c.davidson_iterations,"operator_applications":c.operator_applications,"davidson_iterations_per_k":c.davidson_iterations_per_k,"operator_applications_per_k":c.operator_applications_per_k,"timings":phase_json(&c.timings)}))})
+        "fixed_point_certificate":r.fixed_point_certificate.as_ref().map(|c| json!({"strict_residuals_per_k_ha":c.strict_residuals_per_k,"buffer_residuals_per_k_ha":c.buffer_residuals_per_k,"density_residual":c.density_residual,"occupied_eigenvalue_change_ha":c.occupied_eigenvalue_change,"davidson_iterations":c.davidson_iterations,"operator_applications":c.operator_applications,"davidson_iterations_per_k":c.davidson_iterations_per_k,"operator_applications_per_k":c.operator_applications_per_k,"timings":phase_json(&c.timings)}))});
+    if let Some(e) = r.standard_error_ha {
+        result["standard_error_ha"] = json!(e);
+        result["standard_first_iteration_redo"] = json!(r.standard_redo);
+    }
+    result
 }
 /// Gregorian UTC conversion from nonnegative Unix seconds, including leap years.
 pub fn timestamp(seconds: u64) -> String {
@@ -380,17 +400,20 @@ pub fn execute_mode(
         match problem.run_outcome() {
             Ok(outcome) => outcome,
             Err(e) => {
-                if density_floor.is_some()
+                if (density_floor.is_some() || opts.standard.is_some() || opts.hartree_mixing)
                     && let ScfError::Diverged { history, .. } | ScfError::NotConverged { history } =
                         &e
                 {
                     let history: Vec<_> = history.iter().map(history_json).collect();
-                    write_json(
-                        &out.join("results.json"),
-                        &json!({
-                            "convergence":{"converged":false,"iterations":history.len(),"history":history},
-                            "failure":e.to_string()}),
-                    )?;
+                    let mut failure = json!({
+                        "convergence":{"converged":false,"iterations":history.len(),"history":history},
+                        "failure":e.to_string()});
+                    if let Some(p) = opts.standard {
+                        failure["convergence_profile"] = json!("standard");
+                        failure["certified"] = json!(false);
+                        failure["standard_threshold_ha"] = json!(p.threshold_ha);
+                    }
+                    write_json(&out.join("results.json"), &failure)?;
                     fs::write(
                         out.join("scf.log"),
                         format!(
@@ -458,6 +481,19 @@ pub fn execute_mode(
         "threading":{"threads":opts.threads.max(1).min(r.k_points.len()),"threads_requested":opts.threads,"threads_used":opts.threads.max(1).min(r.k_points.len()),"outer_threads":opts.threads.max(1).min(r.k_points.len()),"inner_threads":opts.threads.max(1) / opts.threads.max(1).min(r.k_points.len()),"backend":"std::thread::scope over k points and bands; sequential faer and serial FFT per worker"},
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
+    if let Some(p) = opts.standard {
+        result["convergence_profile"] = json!("standard");
+        result["certified"] = json!(false);
+        result["standard_threshold_ha"] = json!(p.threshold_ha);
+        result["work"] = json!({"davidson_steps":r.history.iter().map(|h|h.davidson_iterations).sum::<usize>(),
+            "h_vectors":r.history.iter().map(|h|h.operator_applications).sum::<usize>() + r.spectral_completeness.as_ref().map_or(0, |s| s.operator_applications),
+            "first_iteration_redos":r.history.iter().filter(|h|h.standard_redo).count(),
+            "certificate_solves":0});
+        println!(
+            "convergence_profile: standard; certified: false; standard_threshold_ha: {}",
+            p.threshold_ha
+        );
+    }
     if dft_engine::work_accounting::ENABLED {
         result["davidson_work"] = json!(davidson_work);
     }

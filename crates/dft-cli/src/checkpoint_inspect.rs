@@ -77,7 +77,7 @@ pub(crate) fn evidence(path: &Path) -> Result<Value, checkpoint_io::Error> {
             }))
         })
     });
-    Ok(json!({
+    let mut evidence = json!({
         "source":path, "format":"BAANDICP", "schema_version":cp.schema_version,
         "kind":format!("{:?}",cp.kind), "capability":capability,
         "state":state, "calc_id":cp.calc_id, "sequence":cp.sequence,
@@ -98,5 +98,14 @@ pub(crate) fn evidence(path: &Path) -> Result<Value, checkpoint_io::Error> {
         "execution":{"build_sha256":cp.execution.build_sha256,"platform":cp.execution.platform,"threads":cp.execution.threads},
         "validation":"Container checksum, schema and decoding checked; restart compatibility and physical accuracy are not established. No SCF executed.",
         "preflight":"Not rerun: original configuration and pseudopotential files are not required for inspection."
-    }))
+    });
+    if let Some(p) = cp.standard {
+        evidence["convergence_profile"] = json!("standard");
+        evidence["certified"] = json!(false);
+        evidence["standard_threshold_ha"] = json!(p.threshold_ha);
+    }
+    if cp.hartree_mixing {
+        evidence["mixing_metric"] = json!("hartree");
+    }
+    Ok(evidence)
 }

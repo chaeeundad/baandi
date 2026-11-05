@@ -1,0 +1,50 @@
+[
+  {
+    "case": "syn20-skew",
+    "label": "tight",
+    "sha256": "ca4ba4d99928f05ad903cd2a0d16061e3e039c80db5256ea71941aba1935c240",
+    "first_1000_characters": "error: Diverged { reason: \"density residual exceeded growth limit\", history: [IterationRecord { iteration: 1, energy: EnergyAudit { xc_floor: None, nlcc: None, kinetic: 38.46654176875289, local: 57.105947471186624, local_zero_mode: 58.05791935188683, nonlocal: 130.9177660950183, hartree: 0.13258692585152312, xc: -15.569361480718134, ewald: -40.09248558862522, band_sum: 206.27280786965719, double_counting: -20.217447465300662, band_form: 170.960995191466, harris_foulkes: 170.91682694656777, functional_difference_bound: 0.22100560680567016 }, energy_change: None, density_residual: 0.008212591881969026, max_eigen_residual: 7.731912009620968e-14, requested_eigen_tolerance: 0.01, davidson_iterations: 3, operator_applications: 35, davidson_iterations_per_k: [3], operator_applications_per_k: [35], charge_error: 3.552713678800501e-16, input_charge_error: 2.3092638912203257e-15, min_density: 0.0708615725913878, mixing_fraction: 1.0, mixer_reset: false, density_contraction: None, mixing_history_"
+  },
+  {
+    "case": "syn20-skew",
+    "label": "tighter",
+    "sha256": "9688c60182660765fb2e5f17ef58500e7b7ff6cfc6b09f8b778705dfbc65c8c2",
+    "first_1000_characters": "error: Diverged { reason: \"density residual exceeded growth limit\", history: [IterationRecord { iteration: 1, energy: EnergyAudit { xc_floor: None, nlcc: None, kinetic: 38.46654176875289, local: 57.105947471186624, local_zero_mode: 58.05791935188683, nonlocal: 130.9177660950183, hartree: 0.13258692585152312, xc: -15.569361480718134, ewald: -40.09248558862522, band_sum: 206.27280786965719, double_counting: -20.217447465300662, band_form: 170.960995191466, harris_foulkes: 170.91682694656777, functional_difference_bound: 0.22100560680567016 }, energy_change: None, density_residual: 0.008212591881969026, max_eigen_residual: 7.731912009620968e-14, requested_eigen_tolerance: 0.01, davidson_iterations: 3, operator_applications: 35, davidson_iterations_per_k: [3], operator_applications_per_k: [35], charge_error: 3.552713678800501e-16, input_charge_error: 2.3092638912203257e-15, min_density: 0.0708615725913878, mixing_fraction: 1.0, mixer_reset: false, density_contraction: None, mixing_history_"
+  },
+  {
+    "case": "syn16-k211",
+    "label": "tight",
+    "sha256": "d9b6ec703470598b459b647a3642056a0f7b31c4b4a10135043021f41c0c36c6",
+    "first_1000_characters": "error: NOT CONVERGED: iteration budget exhausted\n"
+  },
+  {
+    "case": "syn16-k211",
+    "label": "tighter",
+    "sha256": "d9b6ec703470598b459b647a3642056a0f7b31c4b4a10135043021f41c0c36c6",
+    "first_1000_characters": "error: NOT CONVERGED: iteration budget exhausted\n"
+  },
+  {
+    "case": "syn16-k211",
+    "label": "strict",
+    "sha256": "d9b6ec703470598b459b647a3642056a0f7b31c4b4a10135043021f41c0c36c6",
+    "first_1000_characters": "error: NOT CONVERGED: iteration budget exhausted\n"
+  },
+  {
+    "case": "syn4-slab",
+    "label": "tight",
+    "sha256": "d9b6ec703470598b459b647a3642056a0f7b31c4b4a10135043021f41c0c36c6",
+    "first_1000_characters": "error: NOT CONVERGED: iteration budget exhausted\n"
+  },
+  {
+    "case": "syn4-slab",
+    "label": "tighter",
+    "sha256": "d9b6ec703470598b459b647a3642056a0f7b31c4b4a10135043021f41c0c36c6",
+    "first_1000_characters": "error: NOT CONVERGED: iteration budget exhausted\n"
+  },
+  {
+    "case": "syn4-slab",
+    "label": "strict",
+    "sha256": "d9b6ec703470598b459b647a3642056a0f7b31c4b4a10135043021f41c0c36c6",
+    "first_1000_characters": "error: NOT CONVERGED: iteration budget exhausted\n"
+  }
+]

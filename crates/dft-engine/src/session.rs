@@ -204,7 +204,17 @@ impl ScfSession {
     fn make_mixer(&self, mixing: &Mixing) -> Result<Box<dyn MixerHistory>, ScfError> {
         let mixer: Box<dyn MixerHistory> = match *mixing {
             Mixing::Linear { beta } => Box::new(LinearMixer { beta }),
-            Mixing::Pulay { beta, history } => Box::new(PulayMixer::new(beta, history)?),
+            Mixing::Pulay { beta, history } => {
+                let mut p = PulayMixer::new(beta, history)?;
+                if self.problem.options.hartree_mixing {
+                    p.set_metric(Box::new(CoulombMetric::new(
+                        &self.problem.cell,
+                        self.problem.options.cutoff_hartree,
+                        self.problem.grid.dims(),
+                    )?));
+                }
+                Box::new(p)
+            }
             Mixing::KerkerPulay {
                 beta,
                 history,
@@ -231,12 +241,15 @@ impl ScfSession {
                     q0_inverse_bohr,
                     transform,
                 )?;
-                Box::new(PreconditionedPulay::new(
-                    beta,
-                    history,
-                    dims.iter().product(),
-                    filter,
-                )?)
+                let mut p = PreconditionedPulay::new(beta, history, dims.iter().product(), filter)?;
+                if self.problem.options.hartree_mixing {
+                    p.set_metric(Box::new(CoulombMetric::new(
+                        &self.problem.cell,
+                        self.problem.options.cutoff_hartree,
+                        dims,
+                    )?));
+                }
+                Box::new(p)
             }
         };
         Ok(mixer)
@@ -289,7 +302,16 @@ impl ScfSession {
                 history: std::mem::take(history),
             });
         }
-        let tolerance = if self.problem.options.residual_eigen_schedule {
+        let standard = self.problem.options.standard;
+        let mut tolerance = if standard.is_some() {
+            history.last().map_or(StandardProfile::CAP_HA, |r| {
+                StandardProfile::ratchet(
+                    r.requested_eigen_tolerance,
+                    r.standard_error_ha.expect("standard history metric"),
+                    self.problem.electrons,
+                )
+            })
+        } else if self.problem.options.residual_eigen_schedule {
             // Residual is the normalized density L2 norm in atomic units.
             // 0.1 is an empirical scheduling coefficient in atomic units.
             history
@@ -321,6 +343,47 @@ impl ScfSession {
                 },
                 other => other,
             })?;
+        let mut standard_error_ha = self
+            .problem
+            .coulomb
+            .as_mut()
+            .map(|m| m.error(n, &step.density))
+            .transpose()?;
+        let standard_redo = iteration == 1
+            && standard_error_ha.is_some_and(|e| e < tolerance * self.problem.electrons.max(1.0));
+        if standard_redo {
+            tolerance = StandardProfile::ratchet(
+                tolerance,
+                standard_error_ha.unwrap(),
+                self.problem.electrons,
+            );
+            let warm: Vec<_> = step
+                .k_points
+                .iter()
+                .map(|k| k.solution.eigenvectors.clone())
+                .collect();
+            let mut redo =
+                self.problem
+                    .step_kpoints_with_certification(n, Some(&warm), tolerance, false)?;
+            // Charge every discarded first solve, including its potential,
+            // density and audit work. No mixer history exists before the redo.
+            for (new, old) in redo.k_points.iter_mut().zip(&step.k_points) {
+                new.solution.iterations += old.solution.iterations;
+                new.solution.operator_applications += old.solution.operator_applications;
+            }
+            redo.timings.potential += step.timings.potential;
+            redo.timings.diagonalization += step.timings.diagonalization;
+            redo.timings.density += step.timings.density;
+            redo.timings.energy += step.timings.energy;
+            step = redo;
+            standard_error_ha = Some(
+                self.problem
+                    .coulomb
+                    .as_mut()
+                    .unwrap()
+                    .error(n, &step.density)?,
+            );
+        }
         if dft_solvers::replay::ENABLED {
             // Measurement only: signed density residual, normalized FFT, density
             // sphere and G=0 omission. Do not pass a signed field to the physical
@@ -359,6 +422,8 @@ impl ScfSession {
             .map(|(r, _)| *r)
             .fold(0.0, f64::max);
         let record = IterationRecord {
+            standard_error_ha,
+            standard_redo,
             fixed_point_certificate: None,
             mixing_fraction: 1.0,
             mixer_reset: false,
@@ -396,7 +461,11 @@ impl ScfSession {
             min_density: step.density.iter().copied().fold(f64::INFINITY, f64::min),
             timings: step.timings,
         };
-        let converged = converged(&record, &self.problem.options);
+        let converged = if let Some(p) = standard {
+            standard_error_ha.is_some_and(|e| e < p.threshold_ha)
+        } else {
+            converged(&record, &self.problem.options)
+        };
         history.push(record);
         if !residual.is_finite()
             || !step.energy.total_hartree().is_finite()
@@ -427,7 +496,24 @@ impl ScfSession {
         // fixed-point residual. A small-gap response can amplify that residual.
         let mut rescued = None;
         let mut unable_to_verify = false;
-        let certified = if converged {
+        let certified = if converged && standard.is_some() {
+            // Standard convergence is explicitly uncertified. An independently
+            // requested spectral audit remains a separate, charged operation.
+            let mut passed = true;
+            if let Some(report) = &mut self.spectral_report {
+                (rescued, unable_to_verify) = self.problem.audit_reported_spectrum(
+                    n,
+                    &mut step.k_points,
+                    iteration,
+                    report,
+                )?;
+                passed = report.passed;
+            }
+            if passed {
+                self.problem.check_gap(&step.k_points)?;
+            }
+            passed
+        } else if converged {
             self.certificate_attempted = true;
             let warm: Vec<_> = step
                 .k_points
@@ -559,6 +645,8 @@ impl ScfSession {
             self.outcome = Some(ScfOutcome {
                 converged: certified,
                 result: ScfResult {
+                    standard,
+                    certified: certified && standard.is_none(),
                     spectral_completeness: self.spectral_report.clone().map(|mut r| {
                         r.passed &= certified;
                         r
@@ -945,6 +1033,8 @@ impl ScfSession {
             None
         };
         Ok(Checkpoint {
+            standard: self.problem.options.standard,
+            hartree_mixing: self.problem.options.hartree_mixing,
             schema_version: SCHEMA_VERSION,
             kind,
             calc_id: self.config.calc_id.clone(),
@@ -1062,6 +1152,11 @@ impl ScfSession {
         if checkpoint.result.is_some() {
             return Err(Rejection::Kind);
         }
+        if checkpoint.standard != c.options.standard
+            || checkpoint.hartree_mixing != c.options.hartree_mixing
+        {
+            return Err(Rejection::Options);
+        }
         if !options_identical(&problem.options, &c.options) || problem.minimum_gap != c.minimum_gap
         {
             return Err(Rejection::Options);
@@ -1083,6 +1178,14 @@ impl ScfSession {
                 r.iteration != i + 1
                     || !r.energy.total_hartree().is_finite()
                     || !r.density_residual.is_finite()
+                    || r.standard_error_ha.is_some() != c.options.standard.is_some()
+                    || r.standard_error_ha
+                        .is_some_and(|v| !v.is_finite() || v < 0.0)
+                    || (c.options.standard.is_some()
+                        && (!r.requested_eigen_tolerance.is_finite()
+                            || !(StandardProfile::FLOOR_HA..=StandardProfile::CAP_HA)
+                                .contains(&r.requested_eigen_tolerance)
+                            || r.fixed_point_certificate.is_some()))
             })
             || (c.iteration > 0 && checkpoint.electronic_state.orbitals.is_empty())
             || c.best.is_some_and(|v| !v.is_finite() || v < 0.0)

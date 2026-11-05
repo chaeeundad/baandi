@@ -90,6 +90,7 @@ impl Davidson {
                 None,
                 preconditioner,
                 SolveMode {
+                    ritz: false,
                     recurrence: true,
                     contract_restart: true,
                     certify: true,
@@ -230,6 +231,7 @@ impl Davidson {
             Some(&start),
             preconditioner,
             SolveMode {
+                ritz: false,
                 recurrence: true,
                 contract_restart: true,
                 certify: true,

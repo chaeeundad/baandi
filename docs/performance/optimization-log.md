@@ -1,5 +1,36 @@
 # Optimization log (newest first)
 
+## P17A — additive standard profile and equal accuracy (2026-11-05)
+
+Derived from notes `qe-scf-cycle.md`, `qe-solvers-and-subspace.md` and P15A replay
+results; no QE source read. Baseline `84f06a478549ce39151ba6095f5980bb652d8d26`;
+branch uncommitted. Strict remains unchanged. The premise differs from A15/A21:
+this is an explicitly labelled, uncertified profile with a different stopping
+contract, not a uniform residual-tolerance loosening inside strict certification.
+
+Frozen-H calibration: si8 283->54 prefix steps, k444s 1686->740 under the ratchet.
+Actual standard SCF at the frozen 5e-9 Ha threshold: si8 strict/standard
+345/69 Davidson, 2265/742 H vectors, 15/14 SCF, delivered dE=1.00089e-9 Ha;
+k444s 1827/866 Davidson, 11181/5864 H, 10/9 SCF, dE=1.33280e-10 Ha.
+Six systems have empirical tight-reference energy plateaus; their standard
+errors span 1.3328e-10 to 1.0009e-9 Ha, compared with stored QE estimates of
+2.7e-9 Ha (si8) and approximately 3e-9 Ha (k444s). This is not an exact QE
+error guarantee; rounded equal printed energies remain unresolved.
+
+Negative results: elongated standard has 172 vs strict 171 H vectors; skew and
+mesh16 standard exhaust, slab standard diverges. No tight references exist for
+those three stress cases. E4 Hartree-only mixing is not adopted as default:
+MgO changes energy by -1.40687e-12 Ha versus strict/L2 and several H counts rise.
+All work and accuracy rows, including failures, are retained. Mac serial wall
+samples are observations, not dev08 performance acceptance or cross-code ratios.
+
+Strict pre-feature/feature comparisons pass on all five cases at T=1/T=8 with
+0 Ha energy difference and identical density. Standard scientific outputs and
+failure statuses agree across T=1/T=8 in 18 pairs (nine cases, two metrics).
+Checkpoint/redo tests, analytic metric tests and full gates are recorded in
+`tests/reference/perf/p17a/final-verification.json`. Full implementation,
+threshold rationale, commands and limits: `docs/performance/p17a-standard-profile.md`.
+
 ## P15C follow-up — final-only runtime option, default off (2026-11-05)
 
 Derived from the P15A finding in `research/qe-study/replay-stopping-results.md`;

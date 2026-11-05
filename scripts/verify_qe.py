@@ -241,8 +241,18 @@ def conditions(r, q, input_text):
     return [] if grid_keys else ['QE automatic FFT grid: grid equality not required; inspect grid convergence']
 
 
+def require_strict_result(result):
+    """Legacy unlabelled results are strict; explicit weaker claims fail closed."""
+    for section in (result, result.get('scf', {}), result.get('convergence', {})):
+        if section.get('convergence_profile', 'strict') != 'strict':
+            raise Error('validation requires strict convergence_profile; use equal_accuracy.py for standard results', 3)
+        if 'certified' in section and section['certified'] is not True:
+            raise Error('validation rejects explicitly uncertified results', 3)
+
+
 def compare(ours, bundle, tolerances=None, decomposition_note=None):
     source, r = results(ours)
+    require_strict_result(r)
     bundle = Path(bundle)
     p = provenance(bundle, r)
     try:

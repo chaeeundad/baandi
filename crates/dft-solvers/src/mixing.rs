@@ -58,12 +58,35 @@ impl DensityMixer for LinearMixer {
 /// Type-II Anderson: x+beta R - (Delta x+beta Delta R) gamma,
 /// minimizing ||R-Delta R gamma||. The Gram eigensolve is in dft-numerics.
 /// Eigenvalues <= 1e-12 * largest are discarded (spectral regularization).
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PulayMixer {
     pub beta: f64,
     capacity: usize,
+    metric: Option<Box<dyn ResidualMetric>>,
+    metric_vectors: Vec<Vec<f64>>,
+    metric_r: Vec<f64>,
     pairs: Vec<(Vec<f64>, Vec<f64>)>,
     mean: Option<f64>,
+}
+/// A positive semidefinite density metric. Applies its symmetric kernel to
+/// a residual; unlike preconditioning, it changes only the least-squares fit.
+/// Implementations own reusable transform scratch and have no history.
+pub trait ResidualMetric: std::fmt::Debug {
+    fn duplicate(&self) -> Box<dyn ResidualMetric>;
+    fn apply(&mut self, residual: &[f64], output: &mut [f64]) -> Result<(), SolverError>;
+}
+impl Clone for PulayMixer {
+    fn clone(&self) -> Self {
+        Self {
+            beta: self.beta,
+            capacity: self.capacity,
+            pairs: self.pairs.clone(),
+            mean: self.mean,
+            metric: self.metric.as_ref().map(|m| m.duplicate()),
+            metric_vectors: self.metric_vectors.clone(),
+            metric_r: self.metric_r.clone(),
+        }
+    }
 }
 impl PulayMixer {
     pub fn new(beta: f64, history: usize) -> Result<Self, SolverError> {
@@ -75,9 +98,16 @@ impl PulayMixer {
         Ok(Self {
             beta,
             capacity: history,
+            metric: None,
+            metric_vectors: Vec::new(),
+            metric_r: Vec::new(),
             pairs: Vec::new(),
             mean: None,
         })
+    }
+    pub fn set_metric(&mut self, metric: Box<dyn ResidualMetric>) {
+        self.reset();
+        self.metric = Some(metric);
     }
     pub fn history_len(&self) -> usize {
         self.pairs.len()
@@ -99,6 +129,12 @@ impl DensityMixer for PulayMixer {
             self.reset();
         }
         self.mean = Some(mean);
+        if self.metric.is_some() && self.metric_r.len() != input.len() {
+            // Session initialization validates a zero step before SCF, so this
+            // metric scratch is allocated once, not during the SCF hot loop.
+            self.metric_vectors = vec![vec![0.0; input.len()]; self.capacity];
+            self.metric_r = vec![0.0; input.len()];
+        }
         let r: Vec<_> = output.iter().zip(input).map(|(b, a)| b - a).collect();
         self.pairs.push((input.to_vec(), r.clone()));
         if self.pairs.len() > self.capacity + 1 {
@@ -122,15 +158,39 @@ impl DensityMixer for PulayMixer {
                 .map(|p| p[1].1.iter().zip(&p[0].1).map(|(a, b)| a - b).collect())
                 .collect();
             let dot = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(a, b)| a * b).sum::<f64>();
+            let weighted = &mut self.metric_vectors;
+            let weighted_r = &mut self.metric_r;
+            if let Some(metric) = &mut self.metric {
+                for (source, dest) in dr.iter().zip(weighted.iter_mut()) {
+                    metric.apply(source, dest)?;
+                }
+                metric.apply(&r, weighted_r)?;
+            }
             let mut gram = ComplexMatrix::zeros(m, m)?;
             for i in 0..m {
                 for j in 0..m {
-                    gram[(i, j)] = dot(&dr[i], &dr[j]).into();
+                    gram[(i, j)] = if self.metric.is_some() {
+                        (0.5 * (dot(&dr[i], &weighted[j]) + dot(&dr[j], &weighted[i]))).into()
+                    } else {
+                        dot(&dr[i], &dr[j]).into()
+                    };
                 }
             }
             let (values, vectors) = hermitian_eigh(&gram)?;
             let largest = values.iter().copied().fold(0.0, f64::max);
-            let rhs: Vec<_> = dr.iter().map(|d| dot(d, &r)).collect();
+            let rhs: Vec<_> = dr
+                .iter()
+                .map(|d| {
+                    dot(
+                        d,
+                        if self.metric.is_some() {
+                            weighted_r
+                        } else {
+                            &r
+                        },
+                    )
+                })
+                .collect();
             let mut gamma = vec![0.0; m];
             for (k, &value) in values.iter().enumerate() {
                 if value > 1e-12 * largest {
@@ -267,5 +327,45 @@ impl PulayMixer {
             .collect();
         self.mean = state.mean;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod metric_tests {
+    use super::*;
+    #[derive(Debug, Clone)]
+    struct DiagonalMetric([f64; 3]);
+    impl ResidualMetric for DiagonalMetric {
+        fn duplicate(&self) -> Box<dyn ResidualMetric> {
+            Box::new(self.clone())
+        }
+        fn apply(&mut self, r: &[f64], out: &mut [f64]) -> Result<(), SolverError> {
+            for ((v, r), w) in out.iter_mut().zip(r).zip(self.0) {
+                *v = r * w;
+            }
+            Ok(())
+        }
+    }
+    #[test]
+    fn metric_changes_only_the_pulay_least_squares_and_restores_raw_history() {
+        let mut p = PulayMixer::new(0.3, 2).unwrap();
+        p.set_metric(Box::new(DiagonalMetric([1., 2., 4.])));
+        let x0 = [2., 2., 2.];
+        let r0 = [0.2, -0.1, -0.1];
+        let x1 = [2.03, 1.98, 1.99];
+        let r1 = [-0.1, 0.2, -0.1];
+        let y0: Vec<_> = x0.iter().zip(r0).map(|(x, r)| x + r).collect();
+        let y1: Vec<_> = x1.iter().zip(r1).map(|(x, r)| x + r).collect();
+        p.mix(&x0, &y0, 2.).unwrap();
+        let state = p.checkpoint();
+        let result = p.mix(&x1, &y1, 2.).unwrap();
+        let d = [-0.3, 0.3, 0.];
+        let gamma = (d[0] * r1[0] + 2. * d[1] * r1[1]) / (d[0] * d[0] + 2. * d[1] * d[1]);
+        for i in 0..3 {
+            let expected = x1[i] + 0.3 * r1[i] - (x1[i] - x0[i] + 0.3 * d[i]) * gamma;
+            assert!((result[i] - expected).abs() < 1e-14);
+        }
+        p.restore(&state, 3).unwrap();
+        assert_eq!(result, p.mix(&x1, &y1, 2.).unwrap());
     }
 }

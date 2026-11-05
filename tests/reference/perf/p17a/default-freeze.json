@@ -1,0 +1,61 @@
+{
+  "frozen_at_utc": "2026-11-05T13:21:35.182035+00:00",
+  "standard_threshold_ha": 5e-09,
+  "cap_ha": 0.005,
+  "floor_ha": 5e-14,
+  "empty_rule": "max(5*threshold,5e-6 Ha); occupied+first empty required",
+  "qe_estimated_errors_ha": {
+    "si8": 2.7e-09,
+    "k444s_approx": 3e-09
+  },
+  "qe_source": "tests/reference/perf/qe_iteration_data_relayed.md; relayed, not reproduced. Stored 1e-8/1e-12 energies equal at printed precision; not a measured exact zero.",
+  "rationale": "Among 5e-8,5e-9,5e-10 Ha candidates, 5e-9 keeps six reference-backed energy errors 1.33e-10 to 1.00e-9 Ha: within the QE estimated error scale without the extra tightening of 5e-10. No proof of equal rigorous error bounds.",
+  "calibration_rows": [
+    {
+      "case": "si8",
+      "energy_difference_ha": 1.00089181387375e-09,
+      "status": "ok"
+    },
+    {
+      "case": "k444s",
+      "energy_difference_ha": 1.332800536602008e-10,
+      "status": "ok"
+    },
+    {
+      "case": "si-20",
+      "energy_difference_ha": 2.5933388769772137e-10,
+      "status": "ok"
+    },
+    {
+      "case": "mgo-40",
+      "energy_difference_ha": 1.5087664451129967e-10,
+      "status": "ok"
+    },
+    {
+      "case": "syn20-skew",
+      "energy_difference_ha": null,
+      "status": "failed"
+    },
+    {
+      "case": "syn4-elongated",
+      "energy_difference_ha": 9.03337848967567e-10,
+      "status": "ok"
+    },
+    {
+      "case": "syn4-slab",
+      "energy_difference_ha": null,
+      "status": "failed"
+    },
+    {
+      "case": "syn16-gamma",
+      "energy_difference_ha": 3.661142500277492e-10,
+      "status": "ok"
+    },
+    {
+      "case": "syn16-k211",
+      "energy_difference_ha": null,
+      "status": "failed"
+    }
+  ],
+  "metric_default": "l2; E4 MgO energy differs from strict default by about 1.4e-12 Ha, so no Hartree default adoption"
+}

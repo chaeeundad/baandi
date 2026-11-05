@@ -140,7 +140,8 @@ pub struct EigenSolution {
     pub eigenvalues: Vec<f64>,
     pub eigenvectors: ComplexMatrix,
     pub residuals: Vec<f64>,
-    /// Whether each residual meets its band's requested tolerance.
+    /// Whether each root meets its requested stopping criterion: residual norm
+    /// in strict solves, consecutive Ritz-value change in standard solves.
     pub converged: Vec<bool>,
     /// Bands outside the strict prefix; excluded from strict certification.
     pub buffer: Vec<bool>,
@@ -207,6 +208,7 @@ pub struct BandTolerances {
 
 #[derive(Clone, Copy)]
 struct SolveMode {
+    ritz: bool,
     recurrence: bool,
     contract_restart: bool,
     certify: bool,
@@ -260,6 +262,7 @@ impl Davidson {
             initial,
             preconditioner,
             SolveMode {
+                ritz: false,
                 recurrence,
                 contract_restart,
                 certify: true,
@@ -305,9 +308,35 @@ impl Davidson {
             initial,
             preconditioner,
             SolveMode {
+                ritz: false,
                 recurrence: true,
                 contract_restart: true,
                 certify,
+            },
+            policy,
+        )
+    }
+
+    /// Standard-profile Ritz-value-change stopping in eigenvalue units.
+    /// Empty roots use the buffer threshold, but the required prefix (occupied
+    /// plus first empty) must converge even at the iteration limit. No locking:
+    /// every rotated root is tested again. This is not a residual certificate.
+    pub fn solve_ritz_changes(
+        &self,
+        operator: &dyn LinearOperator,
+        initial: Option<&ComplexMatrix>,
+        preconditioner: Option<&dyn Preconditioner>,
+        policy: BandTolerances,
+    ) -> Result<EigenSolution, SolverError> {
+        self.solve_policy(
+            operator,
+            initial,
+            preconditioner,
+            SolveMode {
+                ritz: true,
+                recurrence: true,
+                contract_restart: true,
+                certify: false,
             },
             policy,
         )
@@ -423,6 +452,7 @@ impl Davidson {
                         Some(&start),
                         preconditioner,
                         SolveMode {
+                            ritz: false,
                             certify: true,
                             ..mode
                         },
@@ -463,6 +493,7 @@ impl Davidson {
                 initial,
                 preconditioner,
                 SolveMode {
+                    ritz: false,
                     certify: tolerance == 1e-10 || mode.certify,
                     ..mode
                 },
@@ -495,6 +526,7 @@ impl Davidson {
     ) -> Result<EigenSolution, SolverError> {
         let _phase = dft_numerics::pool::analysis::Span::new("davidson");
         let SolveMode {
+            ritz,
             recurrence,
             contract_restart,
             certify,
@@ -511,7 +543,7 @@ impl Davidson {
             ));
         }
         let threshold = |j: usize| {
-            if j < policy.strict_bands {
+            if j < policy.strict_bands - usize::from(ritz) {
                 self.tolerance
             } else {
                 policy.buffer_tolerance
@@ -584,6 +616,16 @@ impl Davidson {
         // narrow buffer for new columns; no full-subspace packing is needed.
         let mut appended_products = ComplexMatrix::zeros(n, 0)?;
         appended_products.reserve_columns(self.block_size.min(capacity - self.bands))?;
+        let mut previous_values = if ritz {
+            vec![f64::NAN; self.bands]
+        } else {
+            Vec::new()
+        };
+        let mut changes = if ritz {
+            vec![f64::INFINITY; self.bands]
+        } else {
+            Vec::new()
+        };
         let mut reduced_cache = None;
         for iteration in 1..=self.max_iterations {
             let _iteration = dft_numerics::pool::analysis::Span::new("iteration");
@@ -654,7 +696,8 @@ impl Davidson {
             };
             let mut products_trusted = true;
             let mut residuals_certified = !recurrence;
-            if recurrence
+            if !ritz
+                && recurrence
                 && (certify || iteration == self.max_iterations)
                 && (meets_policy(&residuals)
                     || (iteration == self.max_iterations && meets_strict(&residuals)))
@@ -678,19 +721,39 @@ impl Davidson {
             let maximum = max_residual(&residuals);
             work.residuals(iteration, &residuals);
             history.push(maximum);
-            if meets_policy(&residuals)
-                || (iteration == self.max_iterations && meets_strict(&residuals))
-            {
+            if ritz {
+                for j in 0..self.bands {
+                    changes[j] = if iteration == 1 {
+                        f64::INFINITY
+                    } else {
+                        (values[j] - previous_values[j]).abs()
+                    };
+                }
+                previous_values.copy_from_slice(&values);
+            }
+            let stopping = if ritz { &changes } else { &residuals };
+            let root_converged = |j: usize| {
+                if ritz {
+                    stopping[j] < threshold(j)
+                } else {
+                    stopping[j] <= threshold(j)
+                }
+            };
+            let finished = if ritz {
+                (0..self.bands).all(root_converged)
+                    || (iteration == self.max_iterations
+                        && (0..policy.strict_bands).all(root_converged))
+            } else {
+                meets_policy(&residuals)
+                    || (iteration == self.max_iterations && meets_strict(&residuals))
+            };
+            if finished {
                 work.returned();
                 return Ok(EigenSolution {
                     spectral_completeness: None,
                     eigenvalues: values,
                     eigenvectors: vectors,
-                    converged: residuals
-                        .iter()
-                        .enumerate()
-                        .map(|(j, &r)| r <= threshold(j))
-                        .collect(),
+                    converged: (0..self.bands).map(root_converged).collect(),
                     residuals_certified,
                     buffer: (0..self.bands).map(|j| j >= policy.strict_bands).collect(),
                     residuals,
@@ -706,11 +769,13 @@ impl Davidson {
                     residuals,
                 });
             }
-            let selected: Vec<_> = residuals
-                .iter()
-                .enumerate()
-                .filter(|(j, r)| **r > threshold(*j))
-                .map(|(j, _)| j)
+            // A full-space first solve has no expansion direction. Repeat its
+            // small solve once to establish an actual consecutive Ritz change.
+            if ritz && iteration == 1 && basis.cols() == n {
+                continue;
+            }
+            let selected: Vec<_> = (0..self.bands)
+                .filter(|&j| !root_converged(j))
                 .take(self.block_size.min(capacity - self.bands))
                 .collect();
             let mut corrections = ComplexMatrix::zeros(n, selected.len())?;

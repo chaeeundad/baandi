@@ -172,10 +172,10 @@ impl Wire for SystemTime {
     }
 }
 macro_rules! wire_struct {
-    ($t:ident, $w:ident { $($f:ident: $ty:ty,)* } $(defaults { $($df:ident: $dv:expr,)* })?) => {
+    ($t:ident, $w:ident { $($(#[$attr:meta])* $f:ident: $ty:ty,)* } $(defaults { $($df:ident: $dv:expr,)* })?) => {
         #[derive(Serialize, Deserialize)]
         #[serde(deny_unknown_fields)]
-        struct $w { $($f: <$ty as Wire>::Repr,)* }
+        struct $w { $($(#[$attr])* $f: <$ty as Wire>::Repr,)* }
         impl Wire for $t {
             type Repr = $w;
             fn encode(&self, bytes: &mut Vec<u8>) -> Result<$w, Error> { Ok($w { $($f: self.$f.encode(bytes)?,)* }) }
@@ -284,7 +284,10 @@ use dft_engine::Functional;
 use dft_engine::IterationRecord;
 use dft_engine::Mixing;
 use dft_engine::PhaseTimings;
-use dft_engine::ScfOptions;
+use dft_engine::{ScfOptions, StandardProfile};
+fn is_false(v: &bool) -> bool {
+    !v
+}
 use dft_engine::checkpoint::Checkpoint;
 use dft_engine::checkpoint::CheckpointKind;
 use dft_engine::checkpoint::ContinuationState;
@@ -341,6 +344,10 @@ wire_vec!([f64; 3]);
 wire_vec!([f64; 4]);
 wire_vec!(usize);
 wire_struct!(Checkpoint, WCheckpoint {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    standard: Option<StandardProfile>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    hartree_mixing: bool,
     schema_version: u32,
     kind: CheckpointKind,
     calc_id: String,
@@ -422,7 +429,39 @@ wire_struct!(ContinuationState, WContinuationState {
     mixing_resets: usize,
     minimum_gap: Option<f64>,
 });
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WStandardProfile {
+    convergence_profile: String,
+    certified: bool,
+    threshold_ha: <f64 as Wire>::Repr,
+}
+impl Wire for StandardProfile {
+    type Repr = WStandardProfile;
+    fn encode(&self, bytes: &mut Vec<u8>) -> Result<Self::Repr, Error> {
+        Ok(WStandardProfile {
+            convergence_profile: "standard".into(),
+            certified: false,
+            threshold_ha: self.threshold_ha.encode(bytes)?,
+        })
+    }
+    fn decode(w: Self::Repr, bytes: &[u8], cursor: &mut usize) -> Result<Self, Error> {
+        let threshold_ha = f64::decode(w.threshold_ha, bytes, cursor)?;
+        if w.convergence_profile != "standard"
+            || w.certified
+            || !threshold_ha.is_finite()
+            || threshold_ha <= 0.0
+        {
+            return Err(invalid("invalid standard profile provenance"));
+        }
+        Ok(Self { threshold_ha })
+    }
+}
 wire_struct!(ScfOptions, WScfOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    standard: Option<StandardProfile>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    hartree_mixing: bool,
     eigensolver: SolverChoice,
     threads: usize,
     functional: Functional,
@@ -690,6 +729,10 @@ wire_struct!(MixingDiagnostics, WMixingDiagnostics {
     used_raw_recovery: bool,
 });
 wire_struct!(IterationRecord, WIterationRecord {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    standard_error_ha: Option<f64>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    standard_redo: bool,
     iteration: usize,
     energy: EnergyAudit,
     energy_change: Option<f64>,
@@ -1653,6 +1696,12 @@ pub fn create(input: &Path, output: &Path, iteration: usize, kind: Kind) -> Resu
     }
     let cp = session.checkpoint(kind, model, execution)?;
     write(output, &cp)?;
+    if let Some(p) = cp.standard {
+        println!(
+            "convergence_profile: standard; certified: false; standard_threshold_ha: {}",
+            p.threshold_ha
+        );
+    }
     println!(
         "Wrote {:?}, iteration {}: {}",
         kind,
@@ -1687,6 +1736,12 @@ pub fn restart(input: &Path, source: &Path, output: &Path, warm: bool) -> Result
     finish(&mut session)?;
     let result = session.checkpoint(CheckpointKind::ResultExport, model, execution)?;
     write(output, &result)?;
+    if let Some(p) = result.standard {
+        println!(
+            "convergence_profile: standard; certified: false; standard_threshold_ha: {}",
+            p.threshold_ha
+        );
+    }
     let r = result.result.as_ref().unwrap();
     println!(
         "Energy {:.17} Ha, converged={}, iterations={}",

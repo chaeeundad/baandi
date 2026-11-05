@@ -887,3 +887,45 @@ sampled direct and indirect gaps in Ha for floor-enabled results.
 `initial_density` identifies the existing uniform start; atomic tables are not
 used. Explicit polarized floor inputs and floor-ledger checkpoints are rejected.
 See [bulk smoke evidence and limitations](validation/materials-smoke.md).
+
+### Standard convergence profile (ADR 0035)
+
+`[scf] convergence_profile = "strict" | "standard"` defaults to `strict`.
+Strict arithmetic, certificate, output schema version and omitted-extension
+fields are unchanged. `standard_threshold_ha` is valid only with `standard`;
+it must be positive and finite and defaults to **5e-9 Ha** (frozen P17A E1).
+The standard profile is unpolarized Davidson only; collinear use rejects.
+
+Standard stops on the **total Coulomb energy of output-minus-input density**,
+without electron-count division. Its Ritz-change threshold starts at 5e-3 Ha,
+ratchets to `min(previous, 0.1*previous_error_ha/max(1,N_e))`, and is floored at
+5e-14 Ha. If the first error is below `threshold*max(1,N_e)`, it repeats that
+iteration once from the returned orbitals before any mixing, charging both
+solves. Empty roots use `max(5*threshold,5e-6 Ha)`; all occupied roots and the
+first empty must converge, including at the iteration limit. Higher buffer
+roots may remain unconverged only at that limit. This is not residual certification.
+
+No fixed-point certificate solve runs for standard. Results and checkpoint
+provenance explicitly label it `standard` and `certified: false`; results include
+thresholds, Hartree residuals, redo flags and total work (including discarded
+redo solves). `spectral_guard="final"` remains an independent opt-in audit and
+cannot turn a standard result into a certified result. Standard does not
+establish spectral completeness with the guard off.
+
+The independent `[scf] mixing_metric = "l2" | "hartree"` switch defaults to L2.
+Hartree changes Pulay's Gram matrix and right-hand side, not its update formula;
+it also works with Kerker-Pulay (the metric sees the filtered residual). Linear
+mixing has no least-squares fit, so this setting has no effect there. Exact
+checkpoints retain the profile, metric, ratchet history and redo records; warm
+starts record their source profile but run under the explicitly selected new
+configuration. Existing NLCC/XC-floor/checkpoint restrictions still apply.
+
+`python3 -I scripts/equal_accuracy.py --output-dir /fresh/path` runs strict,
+two tight references, three standard thresholds and strict/Hartree E4.
+Exit 3 means incomplete evidence, including expected unavailable references;
+work is still reported when available. Use `--qe-output /path/pw.out` (repeatable),
+`--qe-reference /path/tight.out`, and optionally `--qe-density` plus
+`--qe-reference-density` for explicit QE files. Set `--cases ''` for QE-only.
+Raw QE parsing was tested on all four existing k222/k222s/si30 outputs.
+The validation-claim scripts reject non-strict or explicitly uncertified results.
+See [measured accuracy, limitations and commands](performance/p17a-standard-profile.md).

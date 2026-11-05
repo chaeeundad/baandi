@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "command": [
+    "/Library/Developer/CommandLineTools/usr/bin/python3",
+    "scripts/equal_accuracy.py",
+    "--cases",
+    "",
+    "--qe-output",
+    "tests/reference/si30_ours/qe.out",
+    "--qe-reference",
+    "tests/reference/si30_auto/qe.out",
+    "--output-dir",
+    "/tmp/p17a-qe-recorded-pair"
+  ],
+  "rows": [
+    {
+      "requested_scf_threshold_ry": 1e-12,
+      "estimated_scf_errors_ha": [
+        0.15940201,
+        0.00648157,
+        0.00016635,
+        1.585e-06,
+        9.3e-07,
+        1.1e-07,
+        5e-09,
+        3.1e-10,
+        2.2e-11,
+        3.75e-12,
+        3.35e-13
+      ],
+      "final_estimated_scf_error_ha": 3.35e-13,
+      "code": "QE",
+      "convergence_profile": "qe-conv-thr",
+      "certified": false,
+      "status": "ok",
+      "output": "tests/reference/si30_ours/qe.out",
+      "output_sha256": "9ee1a3a2feb9f5ddc26e5271ca1084a3b732fde363cbeaeb2ebefe308add2d41",
+      "version": "7.6",
+      "total_energy_ha": -7.29553303,
+      "energy_rounding_bound_ha": 2.5e-09,
+      "eigenvalues_ha": [
+        [
+          -0.19011526841131599,
+          0.2586343796078247,
+          0.2586343796078247,
+          0.2586343796078247,
+          0.33714563150389404
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "weight": 1.0
+        }
+      ],
+      "scf_iterations": 11,
+      "davidson_steps": 37,
+      "h_vectors": null,
+      "davidson_steps_definition": "initial solve calls plus expansion timer calls; unavailable without timers",
+      "h_blocks": 38,
+      "wall_s": 0.07,
+      "wall_scope": "PWSCF internal WALL; rounded; excludes launcher",
+      "model": {
+        "printed_geometry_and_pp": {
+          "alat": "7.2558",
+          "axes": [
+            [
+              "0.000000",
+              "0.707107",
+              "0.707107"
+            ],
+            [
+              "0.707107",
+              "0.000000",
+              "0.707107"
+            ],
+            [
+              "0.707107",
+              "0.707107",
+              "0.000000"
+            ]
+          ],
+          "atoms": [
+            [
+              "Si",
+              "0.0000000",
+              "0.0000000",
+              "0.0000000"
+            ],
+            [
+              "Si",
+              "0.3535534",
+              "0.3535534",
+              "0.3535534"
+            ],
+            [
+              "Si",
+              "0.0000000",
+              "0.0000000",
+              "0.0000000"
+            ],
+            [
+              "Si",
+              "0.2500000",
+              "0.2500000",
+              "0.2500000"
+            ]
+          ],
+          "pseudo_md5": [
+            "9f25e6ff280f3123e9b3a84715b2e9c9"
+          ]
+        },
+        "grid": [
+          25,
+          25,
+          25
+        ],
+        "ecutwfc": 30.0,
+        "ecutrho": 120.0,
+        "xc": "SLA  PZ   NOGX NOGC",
+        "electrons": 8.0,
+        "bands": 8
+      },
+      "accuracy": {
+        "energy_difference_ha": 0.0,
+        "max_occupied_eigenvalue_difference_ha": 0.0,
+        "max_first_empty_eigenvalue_difference_ha": 0.0,
+        "max_eigenvalue_difference_ha": 0.0,
+        "density_l2_bohr_m3_over_2": null,
+        "density_hartree_energy_ha": null,
+        "density_hartree_norm_sqrt_ha": null
+      },
+      "case": "tests/reference/si30_ours",
+      "label": "stored-output",
+      "reference_available": true,
+      "reference_output_sha256": "d677d4e6724f801bf9d95d8fe4b38c985261062b4dfec698b5bc10c57944725e",
+      "energy_difference_rounding_bound_ha": 5e-09,
+      "reference_check": {
+        "verified": false,
+        "criterion": "explicit user-supplied output; stdout is not a 1e-12 Ha proof"
+      }
+    }
+  ],
+  "binary_sha256": null,
+  "experiment_thresholds_ha": [
+    5e-08,
+    5e-09,
+    5e-10
+  ],
+  "frozen_standard_default_ha": 5e-09,
+  "complete": true,
+  "strict_only": false,
+  "limitations": [
+    "A two-level energy plateau is empirical, not proof of the ground state or spectral completeness.",
+    "Hartree norm is sqrt(2*pi*Omega*sum_G!=0 |delta n_G|^2/G^2), density sphere only; no electron-count division.",
+    "L2 is sqrt(integral(delta n^2)), full real-space grid, in Bohr^-3/2.",
+    "QE Davidson steps use initial+expansion timer calls when available; H-vector counts remain unknown, h_psi calls are blocks. Optional density norms use rounded stdout geometry and the stored G set.",
+    "QE rounded equal energies do not establish zero delivered error; rounding bounds are reported.",
+    "Wall samples are local observations; no speedup acceptance or default calibration is implied."
+  ]
+}

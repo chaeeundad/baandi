@@ -187,3 +187,19 @@ note S-E0–E2. Evidence: `tests/reference/perf/p15a/`,
 
 | P15C-5 | Runtime final-certificate-only spectral audit, all reported k/spin states | explicit option accepted; default **off** | si8 +90/2265 H (3.9735%), k444s +2618/11181 (23.4147%); 15/10 steps unchanged, energy change 0 Ha and identical density | Target <3% unmet even at final pass only. No early trigger added. Cumulative retries/work/errors retained; failed repairs reject certification. Mac wall observations only; dev08 request in validation/spectral-dev08-request.md. |
 | P15C-6 | Dense eigensolver at every skew SCF step, same initial density/mixing | diagnostic, no defaults tuned | 100 steps exhausted; max eigen residual 2.889e-14 Ha; final density residual 2.079e-3 vs 1e-7 target; initial occupied gap 1.776e-15 Ha | Corrected SCF difficulty is not solely rescue history. Soft synthetic near-degenerate integer-occupation stress case, not evidence against realistic insulating final samples. Final audit catches legacy 27.958 Ha band-sum excess, retries once and refuses false convergence. |
+
+## P17A preparation (2026-11-05; append-only)
+
+| ID | Experiment | Status | Measured effect | Lesson / limits |
+| --- | --- | --- | --- | --- |
+| P17A-1 | Two-level strict references across nine fixtures | partial measurement | Six plateaus <=1e-12 Ha; strict default energy differences si8 4.97380e-13 Ha, k444s -1.77636e-15 Ha, Si 3.37508e-14 Ha, MgO 3.83693e-13 Ha | Skew tight/tighter diverge (exit 4); slab and mesh16 exhaust (exit 3). Accuracy stays null without a usable reference. `perf/p17a/strict-preparation-report.json`; no spectral-completeness claim. |
+| P17A-2 | E1 calibration evidence inventory; standard/E4 readiness | blocked, no algorithm tried | No raw requested QE si8/k444s 1e-8/1e-14 pair; four requested standard/Hartree configurations rejected by unchanged CLI (exit 1) | No default or speedup adopted; profile and metric implementation still required. Do not substitute rounded relay energies for delivered error. A15/A21 are neither repeated nor overturned. |
+
+## P17A implementation after architect follow-up (2026-11-05)
+
+| ID | Experiment | Status | Measured effect | Lesson / limits |
+| --- | --- | --- | --- | --- |
+| P17A-3 | Ratcheted Ritz standard profile, 3 thresholds | opt-in implemented; default strict | Frozen 5e-9 Ha: si8 Davidson 345->69, H 2265->742, energy error 1.00089e-9 Ha; k444s 1827->866, H 11181->5864, error 1.33280e-10 Ha. Six reference-backed systems. | Different explicitly uncertified contract, not an A15/A21 strict-path loosening. Stored QE estimates calibrate scale; equal printed energies do not prove zero error. No dev08 speed acceptance. |
+| P17A-4 | Standard generality stress fixtures | negative results retained | Elongated H 171->172; skew standard 100 SCF / 4168 H exhausted; slab 13 SCF / 297 H diverged; mesh16 100 SCF / 8182 H exhausted. | Three cases lack tight references: work-only, no delivered accuracy. Skew strict convergence is already spectrally suspect. |
+| P17A-5 | Independent Hartree Pulay metric, strict E4 | experimental switch, L2 default retained | H si8 2265->2190, k444s 11181->11206, MgO 12202->12382; MgO energy delta -1.40687e-12 Ha exceeds 1e-12 target. | Not a uniformly successful optimization. SCF counts unchanged on six reference cases; mesh16 strict/Hartree diverges. |
+| P17A-6 | Strict preservation, standard determinism and restart | verified | Five strict cases at T=1/T=8: 0 Ha delta and identical density versus pre-feature. Nine standard cases x two metrics: 18 T=1/T=8 pairs identical including failures. Exact restart density/orbital bytes match for both metrics. | Timers excluded; standard is never certified. Evidence: `perf/p17a/final-verification.json`, `thread-identity.json`. |

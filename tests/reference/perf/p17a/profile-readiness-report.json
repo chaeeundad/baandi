@@ -1,0 +1,342 @@
+{
+  "schema_version": 1,
+  "command": [
+    "/Library/Developer/CommandLineTools/usr/bin/python3",
+    "scripts/equal_accuracy.py",
+    "--cases",
+    "syn4-elongated",
+    "--output-dir",
+    "/tmp/p17a-profile-readiness"
+  ],
+  "rows": [
+    {
+      "code": "BAANDI",
+      "label": "tight",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-profile-readiness/syn4-elongated/tight/input.toml",
+        "--output-dir",
+        "/tmp/p17a-profile-readiness/syn4-elongated/tight/output"
+      ],
+      "input": "[system]\nname = \"syn4-elongated\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 16]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.08]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.33]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.58]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.83]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-k5a98cfv/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-12\ndensity_residual_tolerance = 1e-09\neigen_tolerance = 1e-10\n",
+      "input_sha256": "d37a5a7bf5a544437a97cbf573b5d4176d4fdbffdad7a55745fdb30b0ac13d92",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 0.0,
+        "max_occupied_eigenvalue_difference_ha": 0.0,
+        "max_first_empty_eigenvalue_difference_ha": 0.0,
+        "max_eigenvalue_difference_ha": 0.0,
+        "density_l2_bohr_m3_over_2": 0.0,
+        "density_hartree_energy_ha": 0.0,
+        "density_hartree_norm_sqrt_ha": 0.0
+      },
+      "exit_code": 0,
+      "wall_s": 0.010781499999999986,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": 2.642829065994616,
+      "eigenvalues_ha": [
+        [
+          0.7012399339708808,
+          1.0149961429795153,
+          1.0151322128935998,
+          1.1744373660721537,
+          1.4024431854300519
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0,
+            0,
+            0
+          ],
+          "weight": 1
+        }
+      ],
+      "scf_iterations": 11,
+      "davidson_steps": 41,
+      "h_vectors": 215,
+      "certified": true,
+      "result_sha256": "3c7f863bdd0167a6f4e13bf0ec6c93021bf653f1a433b53c7887d4e945591d2b",
+      "case": "syn4-elongated",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 0.0
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "tighter",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-profile-readiness/syn4-elongated/tighter/input.toml",
+        "--output-dir",
+        "/tmp/p17a-profile-readiness/syn4-elongated/tighter/output"
+      ],
+      "input": "[system]\nname = \"syn4-elongated\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 16]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.08]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.33]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.58]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.83]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-k5a98cfv/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-13\ndensity_residual_tolerance = 1e-10\neigen_tolerance = 1e-11\n",
+      "input_sha256": "d094aeb85dba026886ec30d6d1e898471d9dcde83a68e39816fbeae306927e38",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 0.0,
+        "max_occupied_eigenvalue_difference_ha": 0.0,
+        "max_first_empty_eigenvalue_difference_ha": 0.0,
+        "max_eigenvalue_difference_ha": 0.0,
+        "density_l2_bohr_m3_over_2": 0.0,
+        "density_hartree_energy_ha": 0.0,
+        "density_hartree_norm_sqrt_ha": 0.0
+      },
+      "exit_code": 0,
+      "wall_s": 0.009984458000000002,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": 2.642829065994616,
+      "eigenvalues_ha": [
+        [
+          0.7012399339708808,
+          1.0149961429795153,
+          1.0151322128935998,
+          1.1744373660721537,
+          1.4024431854300519
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0,
+            0,
+            0
+          ],
+          "weight": 1
+        }
+      ],
+      "scf_iterations": 11,
+      "davidson_steps": 42,
+      "h_vectors": 220,
+      "certified": true,
+      "result_sha256": "5fcbcb256b6b7ffdfd02d0ba7f3437b639f86e916fb2cd6b7607088faaedeceb",
+      "case": "syn4-elongated",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 0.0
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "strict",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-profile-readiness/syn4-elongated/strict/input.toml",
+        "--output-dir",
+        "/tmp/p17a-profile-readiness/syn4-elongated/strict/output"
+      ],
+      "input": "[system]\nname = \"syn4-elongated\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 16]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.08]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.33]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.58]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.83]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-k5a98cfv/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nthreads = 1\n",
+      "input_sha256": "bcde9bb06dc0537063cf7ae6a0379f14344fa24f6c6805c26f875bb1a5030154",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 5.329070518200751e-15,
+        "max_occupied_eigenvalue_difference_ha": 2.0791657284746634e-10,
+        "max_first_empty_eigenvalue_difference_ha": 2.812003963015286e-10,
+        "max_eigenvalue_difference_ha": 2.812003963015286e-10,
+        "density_l2_bohr_m3_over_2": 1.3759316198168999e-09,
+        "density_hartree_energy_ha": 4.47796049489944e-18,
+        "density_hartree_norm_sqrt_ha": 2.1161192062120318e-09
+      },
+      "exit_code": 0,
+      "wall_s": 0.009599875000000008,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": 2.642829065994621,
+      "eigenvalues_ha": [
+        [
+          0.7012399337629642,
+          1.014996142824886,
+          1.0151322128635005,
+          1.1744373662014387,
+          1.4024431857112523
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0,
+            0,
+            0
+          ],
+          "weight": 1
+        }
+      ],
+      "scf_iterations": 9,
+      "davidson_steps": 31,
+      "h_vectors": 171,
+      "certified": true,
+      "result_sha256": "c421411d86dcf4f3a2166126ac55d53cabe5e02de0e4d091cca943ce09b24f7f",
+      "case": "syn4-elongated",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 0.0
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "standard-5e-08",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-profile-readiness/syn4-elongated/standard-5e-08/input.toml",
+        "--output-dir",
+        "/tmp/p17a-profile-readiness/syn4-elongated/standard-5e-08/output"
+      ],
+      "input": "[system]\nname = \"syn4-elongated\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 16]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.08]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.33]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.58]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.83]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-k5a98cfv/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nthreads = 1\nconvergence_profile = \"standard\"\nstandard_threshold_ha = 5e-08\n",
+      "input_sha256": "893df6b09cfff0755aacad53c5aa21147fbbda6a53ac0314d12b6ada176f7c5e",
+      "convergence_profile": "standard",
+      "status": "failed",
+      "accuracy": null,
+      "exit_code": 1,
+      "wall_s": 0.0024013330000000055,
+      "wall_scope": "process, including startup",
+      "stderr": "error: invalid TOML input: unknown field `convergence_profile`, expected one of `spectral_guard`, `threads`, `max_iterations`, `mixing`, `energy_tolerance_ha`, `density_residual_tolerance`, `mixing_beta`, `mixing_history`, `mixing_q0_inverse_bohr`, `nbands`, `extra_bands`, `eigen_tolerance`, `seed`\nin `scf`\n\n",
+      "error": "CLI exit 1",
+      "case": "syn4-elongated",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 0.0
+      }
+    },
+    {
+      "code": "BAANDI",
+      "label": "standard-5e-09",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-profile-readiness/syn4-elongated/standard-5e-09/input.toml",
+        "--output-dir",
+        "/tmp/p17a-profile-readiness/syn4-elongated/standard-5e-09/output"
+      ],
+      "input": "[system]\nname = \"syn4-elongated\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 16]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.08]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.33]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.58]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.83]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-k5a98cfv/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nthreads = 1\nconvergence_profile = \"standard\"\nstandard_threshold_ha = 5e-09\n",
+      "input_sha256": "6c81323dbe36150739823dca423f20b05780ae4279674eb1c8e849adfce49cb4",
+      "convergence_profile": "standard",
+      "status": "failed",
+      "accuracy": null,
+      "exit_code": 1,
+      "wall_s": 0.002542875,
+      "wall_scope": "process, including startup",
+      "stderr": "error: invalid TOML input: unknown field `convergence_profile`, expected one of `spectral_guard`, `threads`, `max_iterations`, `mixing`, `energy_tolerance_ha`, `density_residual_tolerance`, `mixing_beta`, `mixing_history`, `mixing_q0_inverse_bohr`, `nbands`, `extra_bands`, `eigen_tolerance`, `seed`\nin `scf`\n\n",
+      "error": "CLI exit 1",
+      "case": "syn4-elongated",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 0.0
+      }
+    },
+    {
+      "code": "BAANDI",
+      "label": "standard-5e-10",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-profile-readiness/syn4-elongated/standard-5e-10/input.toml",
+        "--output-dir",
+        "/tmp/p17a-profile-readiness/syn4-elongated/standard-5e-10/output"
+      ],
+      "input": "[system]\nname = \"syn4-elongated\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 16]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.08]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.33]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.58]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.83]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-k5a98cfv/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nthreads = 1\nconvergence_profile = \"standard\"\nstandard_threshold_ha = 5e-10\n",
+      "input_sha256": "69323b2ae40ca8b978b6d01634b27e9fdfd033811d7eda1805e407fd79928d02",
+      "convergence_profile": "standard",
+      "status": "failed",
+      "accuracy": null,
+      "exit_code": 1,
+      "wall_s": 0.002805165999999998,
+      "wall_scope": "process, including startup",
+      "stderr": "error: invalid TOML input: unknown field `convergence_profile`, expected one of `spectral_guard`, `threads`, `max_iterations`, `mixing`, `energy_tolerance_ha`, `density_residual_tolerance`, `mixing_beta`, `mixing_history`, `mixing_q0_inverse_bohr`, `nbands`, `extra_bands`, `eigen_tolerance`, `seed`\nin `scf`\n\n",
+      "error": "CLI exit 1",
+      "case": "syn4-elongated",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 0.0
+      }
+    },
+    {
+      "code": "BAANDI",
+      "label": "strict-hartree",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-profile-readiness/syn4-elongated/strict-hartree/input.toml",
+        "--output-dir",
+        "/tmp/p17a-profile-readiness/syn4-elongated/strict-hartree/output"
+      ],
+      "input": "[system]\nname = \"syn4-elongated\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 16]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.08]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.33]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.58]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.83]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-k5a98cfv/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nthreads = 1\nmixing_metric = \"hartree\"\n",
+      "input_sha256": "149901f9dfa2adc2aa7535ed46b98cc205988aab5267d2c21dbe583a4930651a",
+      "convergence_profile": "strict",
+      "status": "failed",
+      "accuracy": null,
+      "exit_code": 1,
+      "wall_s": 0.0024292919999999996,
+      "wall_scope": "process, including startup",
+      "stderr": "error: invalid TOML input: unknown field `mixing_metric`, expected one of `spectral_guard`, `threads`, `max_iterations`, `mixing`, `energy_tolerance_ha`, `density_residual_tolerance`, `mixing_beta`, `mixing_history`, `mixing_q0_inverse_bohr`, `nbands`, `extra_bands`, `eigen_tolerance`, `seed`\nin `scf`\n\n",
+      "error": "CLI exit 1",
+      "case": "syn4-elongated",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 0.0
+      }
+    }
+  ],
+  "binary_sha256": "69bc852ac22393b73a24d979dd84d45ede1cdc06144d2010b04b5da8e9ea5d3f",
+  "experiment_thresholds_ha": [
+    5e-08,
+    5e-09,
+    5e-10
+  ],
+  "frozen_standard_default_ha": null,
+  "complete": false,
+  "strict_only": false,
+  "limitations": [
+    "A two-level energy plateau is empirical, not proof of the ground state or spectral completeness.",
+    "Hartree norm is sqrt(2*pi*Omega*sum_G!=0 |delta n_G|^2/G^2), density sphere only; no electron-count division.",
+    "L2 is sqrt(integral(delta n^2)), full real-space grid, in Bohr^-3/2.",
+    "QE exact Davidson/H-vector counts and optional densities are unavailable from the supported stdout protocol.",
+    "QE rounded equal energies do not establish zero delivered error; rounding bounds are reported.",
+    "Wall samples are local observations; no speedup acceptance or default calibration is implied."
+  ]
+}

@@ -734,3 +734,46 @@ fn spectral_complement_guard() {
             .extra_operator_applications
     );
 }
+
+#[test]
+fn ritz_rule_requires_two_values_and_required_empty_root() {
+    let op = MatrixOperator(fourier(&[0.1, 0.8, 1.4, 2.0, 4.0, 6.0, 9.0, 12.0]));
+    let mut solver = config(3, 8);
+    solver.tolerance = 1e-9;
+    let policy = BandTolerances {
+        strict_bands: 3,
+        buffer_tolerance: 5e-6,
+    };
+    solver.max_iterations = 1;
+    assert!(matches!(
+        solver.solve_ritz_changes(&op, None, None, policy),
+        Err(SolverError::NotConverged { .. })
+    ));
+    solver.max_iterations = 100;
+    let result = solver.solve_ritz_changes(&op, None, None, policy).unwrap();
+    assert!(result.iterations >= 2);
+    assert!(result.converged.iter().all(|x| *x));
+    assert!(!result.residuals_certified);
+    for (a, b) in result.eigenvalues.iter().zip([0.1, 0.8, 1.4]) {
+        assert!((a - b).abs() < 1e-5);
+    }
+    // Full-space first solve cannot expand; it must still establish two Ritz values.
+    let full = Davidson {
+        bands: 8,
+        max_subspace: 8,
+        block_size: 8,
+        ..solver
+    };
+    let r = full
+        .solve_ritz_changes(
+            &op,
+            None,
+            None,
+            BandTolerances {
+                strict_bands: 8,
+                buffer_tolerance: 5e-6,
+            },
+        )
+        .unwrap();
+    assert_eq!(r.iterations, 2);
+}

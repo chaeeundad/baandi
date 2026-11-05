@@ -1,0 +1,241 @@
+{
+  "commands": [
+    {
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "-I",
+        "scripts/equal_accuracy.py",
+        "--output-dir",
+        "/tmp/p17a-final-verification/accuracy"
+      ],
+      "exit_code": 3,
+      "expected_exit_code": 3,
+      "log": "/tmp/p17a-final-verification/command-0.log",
+      "log_sha256": "d1a710e6cad2505f8f0a2ee2d88074c681c95afe394f5243ce48fd0620b997eb"
+    },
+    {
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "-I",
+        "scripts/bench_scf.py",
+        "--binary",
+        "target/release/dft-cli",
+        "--upf",
+        "/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+        "--cases",
+        "gamma,k222s,k222,k444s,si8",
+        "--repeats",
+        "1",
+        "--threads",
+        "1",
+        "--baseline",
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/tests/reference/perf/p17a/strict-t1-before.json",
+        "--require-identical",
+        "--record",
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/tests/reference/perf/p17a/feature-strict-t1.json"
+      ],
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log": "/tmp/p17a-final-verification/command-1.log",
+      "log_sha256": "ac7bfadf49425ae98e5d6850f0a13e1a800a4c6fc0786aeeaaf11bb7e72da391"
+    },
+    {
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "-I",
+        "scripts/bench_scf.py",
+        "--binary",
+        "target/release/dft-cli",
+        "--upf",
+        "/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+        "--cases",
+        "gamma,k222s,k222,k444s,si8",
+        "--repeats",
+        "1",
+        "--threads",
+        "8",
+        "--baseline",
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/tests/reference/perf/p17a/strict-t8-before.json",
+        "--require-identical",
+        "--record",
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/tests/reference/perf/p17a/feature-strict-t8.json"
+      ],
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log": "/tmp/p17a-final-verification/command-2.log",
+      "log_sha256": "91f904389e599d7510bf0348788e16d1c9a32efc94d0e1947919d08c015a4091"
+    },
+    {
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "-I",
+        "tests/p17a_threads.py"
+      ],
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log": "/tmp/p17a-final-verification/command-3.log",
+      "log_sha256": "8e7c993de5a09f81ee47a203ef079e4a0169d060a4f17440ddc771684824900a"
+    },
+    {
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "-I",
+        "tests/p17a_cli_test.py"
+      ],
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log": "/tmp/p17a-final-verification/command-4.log",
+      "log_sha256": "a7b901519355a3b2ffaf74d06d23955f7f06f60f6c193507753e79a9ce35d788"
+    },
+    {
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "-I",
+        "tests/p17a_equal_accuracy_test.py"
+      ],
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log": "/tmp/p17a-final-verification/command-5.log",
+      "log_sha256": "1716b47a03188bc918a0e69af2d063dbf3f51ded577934827cd953a60bd6070d"
+    },
+    {
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "-I",
+        "scripts/tests/test_qe.py"
+      ],
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log": "/tmp/p17a-final-verification/command-6.log",
+      "log_sha256": "71f4b97ebc68ed0bafd9b7c476ceb036f8b5651b2dbf2a8ecf6cc6e4b0a04cad"
+    },
+    {
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "-I",
+        "scripts/tests/test_qe_real.py"
+      ],
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log": "/tmp/p17a-final-verification/command-7.log",
+      "log_sha256": "c94f88ae55abd762836b63ddffb3df0f62f19f28134aad16a1d293d8ea9789a5"
+    },
+    {
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "-I",
+        "scripts/tests/test_materials_qe.py"
+      ],
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log": "/tmp/p17a-final-verification/command-8.log",
+      "log_sha256": "c6ee4700ad4cc1e90aced22e39a6972f982bb47ff2b4687320db2dd2c55ee3fe"
+    },
+    {
+      "command": [
+        "scripts/check.sh"
+      ],
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log": "/tmp/p17a-final-verification/command-9.log",
+      "log_sha256": "17daba7a92a05d4f9abe3a74eafa0518ad55617ca759c8b3368473d60c1b03dc"
+    },
+    {
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "-I",
+        "scripts/make_readme_figures.py"
+      ],
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log": "/tmp/p17a-final-verification/command-10.log",
+      "log_sha256": "043533b2ed07cbda33d5dba357798c4eff62ee75cda7844d2bc801cdc890d652"
+    },
+    {
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "-I",
+        "scripts/tests/test_readme_figures.py"
+      ],
+      "exit_code": 0,
+      "expected_exit_code": 0,
+      "log": "/tmp/p17a-final-verification/command-11.log",
+      "log_sha256": "529eaaa3d5d3f44bd8f6decbb7b2e471b1d58d1eb06442ca66a0ddc7d3bee39a"
+    }
+  ],
+  "status": "passed_with_documented_reference_failures",
+  "baseline_commit": "84f06a478549ce39151ba6095f5980bb652d8d26",
+  "sha256": {
+    "crates/dft-engine/src/band_density.rs": "b01edb8d71161d35c03db9886a126d1a0f85460cfd779331f3e4a0f2f3a474ae",
+    "crates/dft-engine/src/checkpoint.rs": "4fe7fee20148163d93fabbed2873651898c421130ab61081bfebf838ac45d960",
+    "crates/dft-engine/src/collinear.rs": "dd6db3a85de33a87741d079ba9b5b6f375ca8d280724b3af333ea6f5700df99c",
+    "crates/dft-engine/src/convergence.rs": "eab73a0ca5ebf3d8d556a9385d98831b9bedd8cd9b559ca92cb7e52cd1fb593e",
+    "crates/dft-engine/src/diagnostics.rs": "dd6ca891d3787509b251d75a9e73d91332db1a6118e3eaadd79fae49db3bcf4a",
+    "crates/dft-engine/src/energy.rs": "96f1f8971f7d96b3501f30091d9a241295ddf851ec0382e684e174fc395bd904",
+    "crates/dft-engine/src/events.rs": "03c6719edf7b5f09b8a526fc5959e2e52e0cdbc449370a01f194656411897d2c",
+    "crates/dft-engine/src/floor_tests.rs": "f07346e58bf7b8f16d4494dac10f46226d82de758e17fe1c5c47da7f416059ca",
+    "crates/dft-engine/src/functional.rs": "9af0c74184b82f05e21148ec49791183b5b0e2b6adc1e240512d01e9c6189310",
+    "crates/dft-engine/src/lib.rs": "188dbdc07691739252c78e039409771d7438fdbba5da84d31ab836bafac05c46",
+    "crates/dft-engine/src/nscf.rs": "4cff81269d5ecbe789e5120aa2f161fc7eae7ebe082130d676217b4e95ac00a8",
+    "crates/dft-engine/src/policy.rs": "65d44257ac15ac1c4429fb0849dd6a835fa6805859c6e7fc28912c881502f6a9",
+    "crates/dft-engine/src/replay_capture.rs": "541a0187eb526721e92748e5faf8c6c4995ad01213b10949ef5d6b8b1a82fbd3",
+    "crates/dft-engine/src/runtime.rs": "6a35075acd7043e404629aa2618cebb6df06f41abbd2e1130facb4ddb3bb74cf",
+    "crates/dft-engine/src/scf.rs": "25cad00e5d3dc752ea922f1aef3fe6281da306bdd7eac98470983ad9b48e6f2d",
+    "crates/dft-engine/src/session.rs": "4dedb285291e444b7e64a5dc94b76197cc1908936b080dd8ec2835b7ef609ccc",
+    "crates/dft-engine/src/spectral.rs": "636a0343df12fe52dea0b75a9e1aac2a4176b720604821b61b5a6f70041eadaf",
+    "crates/dft-engine/src/spectral_scf.rs": "34cf168896e30f7efa18d975c0767e217451ca055123b6ebb6be03e75ba40091",
+    "crates/dft-engine/src/state_view.rs": "0900fd89bdb55b2bd795a7e710669f93adde3d33cd9098df9fd56d1e6fad7567",
+    "crates/dft-solvers/src/legacy.rs": "d71b8886da1bc593333cdc5190602d9ea3dc4d4a69acec85d733e15703f6704a",
+    "crates/dft-solvers/src/lib.rs": "bd3468f5d1324e000adc056de3c343e3a1c143572f39daf5fa055bae68293d09",
+    "crates/dft-solvers/src/mixing/kerker.rs": "630e0f36cbf40ffc96480eeae12274b98cf44df13aa7e4704f7a580b2d291c57",
+    "crates/dft-solvers/src/mixing.rs": "a34cf70b1d78547bb3fccfc1c4bc7acd2b7199c8f069caf3056b231ab99562b6",
+    "crates/dft-solvers/src/product_tests.rs": "e38f7ce8b2b2d46a8585197437da3cbbcf92bc9b1697ba4adc30d27bc41e1f83",
+    "crates/dft-solvers/src/replay.rs": "7fd257c44361740c3d09995a754252f1b148e01fa0d13089a0a15276a766e237",
+    "crates/dft-solvers/src/rmm.rs": "d0901bf4c8c23ba7500a464321d2aedef9c472775347a5f024b5d05e459d7538",
+    "crates/dft-solvers/src/spectral.rs": "d15b57f190982431492daaceab21165194a4c4b772d2d388e4cfb53cfe6262b9",
+    "crates/dft-solvers/src/tests.rs": "27d1812569d6f84174fc215e8b2e672d7a40ab6715320b38725038dafedb9377",
+    "crates/dft-solvers/src/work_accounting.rs": "b3030f71bfc4fd80b1664bdc13affae93535141ccc6b9593077f5767aa784574",
+    "crates/dft-cli/src/bands.rs": "a0eb0645e8d2fadf0c93498fb159cfd6c98b8a952ecf0594aa1663046feebd81",
+    "crates/dft-cli/src/checkpoint_inspect.rs": "fe9622abd3de546d36040685b9346889990ba3a8562d5f633c663e070489da12",
+    "crates/dft-cli/src/checkpoint_io.rs": "f2915dee1527bc7161874911fa32bab142dc43f8c1478edc107056439b02a0d8",
+    "crates/dft-cli/src/config.rs": "c1d49177c37f736f911816bd5c9a11ddd20b0d8ceaa9789f72afd021bf295d71",
+    "crates/dft-cli/src/control_channel.rs": "3a6586c9fcd4a04b8322c000f124485de0bf19c191a845566492fa4e2de8398f",
+    "crates/dft-cli/src/dos.rs": "f01f42305907ba6adae2426456e53439da278a86f41cb0535bf1fcbdc211d52b",
+    "crates/dft-cli/src/heal.rs": "3bf49057a54b46b91e3219badcdf075a72b99c12eaf36864a2727d17089ab77e",
+    "crates/dft-cli/src/inspect.rs": "4746b9eda36b03b5aeee454b045973db1e7ed77de7738e4dcbf4c1aa38d5794b",
+    "crates/dft-cli/src/lib.rs": "2a49d4441f1e49139d512a391b0e8bb0eea42f173fc86c1cb2c019114c267da2",
+    "crates/dft-cli/src/main.rs": "4917610b644c4d0ca434465e2f5ff6533816cf1ff6e6dfdd1f8ce53afdcbf306",
+    "crates/dft-cli/src/preflight.rs": "5318c4bd6f0074b3f4eced23f69ab234a578dd6af25526f63ce826279f7d08c6",
+    "crates/dft-cli/src/pseudo.rs": "7ec77da9d1f6e17472206d9b31cece10cc9d03c39837b857633c43bdbf24c5e3",
+    "crates/dft-cli/src/run.rs": "81f54f05f1ee01d1bdc014ecff946ad964d530f6e58f957ebff9fe59ae27dca6",
+    "crates/dft-cli/src/spin_run.rs": "4acef98cb9201496fcace350faecfe16c163020969dfbd6aecfa24cf5ffdfd7b",
+    "crates/dft-cli/src/telemetry.rs": "4de21f843c6543e0c1f347379d11e5ad0053e5c9378fb9754b373c103f05148e",
+    "crates/dft-cli/src/volumetric_out.rs": "62caa3750097fbe017b2c77a8e1a8f733f5d91c940e3f2f39e24019c2f22f234",
+    "scripts/equal_accuracy.py": "66eee20bad190d4965c56ed23c23153fafd9535b3de07cbe060efc53720bb2e1",
+    "target/release/dft-cli": "00fa09f0d9538cff1a5501272970e84ecae8ca948a42e95027293d400caef072"
+  },
+  "limits": [
+    "No remote QE runs; local timing samples are observations.",
+    "Accuracy harness exit 3 is expected: three stress fixtures have no tight reference; inspect every failed row.",
+    "Standard is not certified; no claim of spectral completeness when guard is off."
+  ],
+  "pre_feature_binary_sha256": "69bc852ac22393b73a24d979dd84d45ede1cdc06144d2010b04b5da8e9ea5d3f",
+  "pre_feature_evidence": "strict-t1-before.json and strict-t8-before.json, recorded before any numerical source edits; same hash as initial verification.json",
+  "extra_commands": [
+    {
+      "command": "python3 -I scripts/equal_accuracy.py --cases \"\" --qe-output tests/reference/kpoints/k222_c/qe.out --qe-output tests/reference/kpoints/k222s_c/qe.out --qe-output tests/reference/si30_auto/qe.out --qe-output tests/reference/si30_ours/qe.out --output-dir /tmp/p17a-qe-recorded",
+      "exit_code": 3,
+      "note": "raw parsing succeeds; no tight references supplied"
+    },
+    {
+      "command": "python3 -I scripts/equal_accuracy.py --cases \"\" --qe-output tests/reference/si30_ours/qe.out --qe-reference tests/reference/si30_auto/qe.out --output-dir /tmp/p17a-qe-recorded-pair",
+      "exit_code": 0,
+      "note": "same-model explicit output comparison, not a convergence-threshold pair"
+    }
+  ],
+  "development_failures": [
+    "Initial cargo check failed on two missing SolveMode.ritz initializers; fixed.",
+    "First full gate failed on missing product-test SolveMode.ritz initializer; fixed.",
+    "CLI redo test incorrectly assumed uniform elongated start triggers redo; replaced with measured near-fixed warm-start test, which passes."
+  ]
+}

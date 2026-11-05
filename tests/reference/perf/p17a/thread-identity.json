@@ -1,0 +1,692 @@
+{
+  "binary_sha256": "00fa09f0d9538cff1a5501272970e84ecae8ca948a42e95027293d400caef072",
+  "command": "DFT_NC_DIR=/path/to/ex python3 -I tests/p17a_threads.py",
+  "rows": [
+    {
+      "case": "si8",
+      "metric": "l2",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si8/l2-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si8/l2-1"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "907ec56ef74c9e45333ab2d1e9ccc95afbd0564fb36a27984c584156445c840c",
+          "density_sha256": "d9d84368511866842cea0cc87f1f46b031ac452d8952649b7b61338a27357850",
+          "iterations": 14
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si8/l2-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si8/l2-8"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "907ec56ef74c9e45333ab2d1e9ccc95afbd0564fb36a27984c584156445c840c",
+          "density_sha256": "d9d84368511866842cea0cc87f1f46b031ac452d8952649b7b61338a27357850",
+          "iterations": 14
+        }
+      ],
+      "upf_sha256": {
+        "Si.pz-vbc.UPF": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+      }
+    },
+    {
+      "case": "si8",
+      "metric": "hartree",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si8/hartree-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si8/hartree-1"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "6eed2299bc77e8a463faf9a05435c70d6339b147afc153b0487d3b58f6b4bfb0",
+          "density_sha256": "ff647eef6db48639a1f18c17b369ec0cd5f747b5a4934ce6e3ff716bf11a5142",
+          "iterations": 14
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si8/hartree-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si8/hartree-8"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "6eed2299bc77e8a463faf9a05435c70d6339b147afc153b0487d3b58f6b4bfb0",
+          "density_sha256": "ff647eef6db48639a1f18c17b369ec0cd5f747b5a4934ce6e3ff716bf11a5142",
+          "iterations": 14
+        }
+      ],
+      "upf_sha256": {
+        "Si.pz-vbc.UPF": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+      }
+    },
+    {
+      "case": "k444s",
+      "metric": "l2",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/k444s/l2-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/k444s/l2-1"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "55395f059c527c17b605274116c921bb3f22a030bc84fb8296a580c9a06efe94",
+          "density_sha256": "3ba066496b3a8e56c8c36a9221984d9848c18532ec1bf2192dfc659975bbb158",
+          "iterations": 9
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/k444s/l2-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/k444s/l2-8"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "55395f059c527c17b605274116c921bb3f22a030bc84fb8296a580c9a06efe94",
+          "density_sha256": "3ba066496b3a8e56c8c36a9221984d9848c18532ec1bf2192dfc659975bbb158",
+          "iterations": 9
+        }
+      ],
+      "upf_sha256": {
+        "Si.pz-vbc.UPF": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+      }
+    },
+    {
+      "case": "k444s",
+      "metric": "hartree",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/k444s/hartree-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/k444s/hartree-1"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "9e6397d48982801ba28f3914d94f9f04e3ed49706d43fe7b9b049b77c52d05ed",
+          "density_sha256": "7e3c8f7d32eb36b059e51dbc702d94e29d6cf035d5a31d10d0e551597cc11bc9",
+          "iterations": 9
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/k444s/hartree-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/k444s/hartree-8"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "9e6397d48982801ba28f3914d94f9f04e3ed49706d43fe7b9b049b77c52d05ed",
+          "density_sha256": "7e3c8f7d32eb36b059e51dbc702d94e29d6cf035d5a31d10d0e551597cc11bc9",
+          "iterations": 9
+        }
+      ],
+      "upf_sha256": {
+        "Si.pz-vbc.UPF": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+      }
+    },
+    {
+      "case": "si-20",
+      "metric": "l2",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si-20/l2-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si-20/l2-1"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "4d06689d313c0ae53da2d5bac58ce5694a42df6aca9efab47983666863e4f221",
+          "density_sha256": "0f879897b874dd037b52690cf6b738558525b8ed41d43d91ec411efdd327ad9f",
+          "iterations": 11
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si-20/l2-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si-20/l2-8"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "4d06689d313c0ae53da2d5bac58ce5694a42df6aca9efab47983666863e4f221",
+          "density_sha256": "0f879897b874dd037b52690cf6b738558525b8ed41d43d91ec411efdd327ad9f",
+          "iterations": 11
+        }
+      ],
+      "upf_sha256": {
+        "Si.upf": "39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282"
+      }
+    },
+    {
+      "case": "si-20",
+      "metric": "hartree",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si-20/hartree-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si-20/hartree-1"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "8c74ac5bf3aaa27e1fdb40ba4045aca74edcae87c655dc8db3ada6506e52ebad",
+          "density_sha256": "5f49154500d0eb5ab225aa5f7800cc873d6cee2c232e3dcac4575b6bd636bfd8",
+          "iterations": 11
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si-20/hartree-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/si-20/hartree-8"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "8c74ac5bf3aaa27e1fdb40ba4045aca74edcae87c655dc8db3ada6506e52ebad",
+          "density_sha256": "5f49154500d0eb5ab225aa5f7800cc873d6cee2c232e3dcac4575b6bd636bfd8",
+          "iterations": 11
+        }
+      ],
+      "upf_sha256": {
+        "Si.upf": "39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282"
+      }
+    },
+    {
+      "case": "mgo-40",
+      "metric": "l2",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/mgo-40/l2-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/mgo-40/l2-1"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "1a72cc50b258741c0922bd4f4f383bda1c256b79f90599ac017ac7aa804a4559",
+          "density_sha256": "6b1254a44a3f25598636e0126e997c3be3d4060c4c8a2eea7001b3e054a89346",
+          "iterations": 13
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/mgo-40/l2-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/mgo-40/l2-8"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "1a72cc50b258741c0922bd4f4f383bda1c256b79f90599ac017ac7aa804a4559",
+          "density_sha256": "6b1254a44a3f25598636e0126e997c3be3d4060c4c8a2eea7001b3e054a89346",
+          "iterations": 13
+        }
+      ],
+      "upf_sha256": {
+        "Mg.upf": "15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14",
+        "O.upf": "2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11"
+      }
+    },
+    {
+      "case": "mgo-40",
+      "metric": "hartree",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/mgo-40/hartree-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/mgo-40/hartree-1"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "595a253aafc3ec7e8470532f22df7057c38969970abed02f737c66ced2b44d48",
+          "density_sha256": "f83be931aee5bc7e907db2f9f48279904c7ec72bf3777f379bbde9063cead51b",
+          "iterations": 14
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/mgo-40/hartree-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/mgo-40/hartree-8"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "595a253aafc3ec7e8470532f22df7057c38969970abed02f737c66ced2b44d48",
+          "density_sha256": "f83be931aee5bc7e907db2f9f48279904c7ec72bf3777f379bbde9063cead51b",
+          "iterations": 14
+        }
+      ],
+      "upf_sha256": {
+        "Mg.upf": "15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14",
+        "O.upf": "2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11"
+      }
+    },
+    {
+      "case": "syn20-skew",
+      "metric": "l2",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn20-skew/l2-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn20-skew/l2-1"
+          ],
+          "exit_code": 3,
+          "scientific_sha256": "4443ca1519ad5fc23ab4cae2f4c1dc969582c0fc1917f8ea12d22b579dbab830",
+          "density_sha256": "f4bce6756f9d7871ee83c895eb6df06b7b005f9a57c38d155ad6629179c58e85",
+          "iterations": 100
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn20-skew/l2-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn20-skew/l2-8"
+          ],
+          "exit_code": 3,
+          "scientific_sha256": "4443ca1519ad5fc23ab4cae2f4c1dc969582c0fc1917f8ea12d22b579dbab830",
+          "density_sha256": "f4bce6756f9d7871ee83c895eb6df06b7b005f9a57c38d155ad6629179c58e85",
+          "iterations": 100
+        }
+      ],
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      }
+    },
+    {
+      "case": "syn20-skew",
+      "metric": "hartree",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn20-skew/hartree-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn20-skew/hartree-1"
+          ],
+          "exit_code": 3,
+          "scientific_sha256": "7ff6ab7f248a0d97d8d47a74263e2c43e6196e4d1ed27887e21a34e1db95bcc5",
+          "density_sha256": "1e4db2034c10001ce62f0072b95e79ca95c3181980d7c1ea8451b859d59c6205",
+          "iterations": 100
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn20-skew/hartree-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn20-skew/hartree-8"
+          ],
+          "exit_code": 3,
+          "scientific_sha256": "7ff6ab7f248a0d97d8d47a74263e2c43e6196e4d1ed27887e21a34e1db95bcc5",
+          "density_sha256": "1e4db2034c10001ce62f0072b95e79ca95c3181980d7c1ea8451b859d59c6205",
+          "iterations": 100
+        }
+      ],
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      }
+    },
+    {
+      "case": "syn4-elongated",
+      "metric": "l2",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-elongated/l2-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-elongated/l2-1"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "911a66113cd5ef35d6715696660fb33b0b686e36fc77c9ddda36a69755935b6a",
+          "density_sha256": "75db22f0e547582c0c134048b6b80809b68b8fe653900f25bcb5356b326768ec",
+          "iterations": 9
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-elongated/l2-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-elongated/l2-8"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "911a66113cd5ef35d6715696660fb33b0b686e36fc77c9ddda36a69755935b6a",
+          "density_sha256": "75db22f0e547582c0c134048b6b80809b68b8fe653900f25bcb5356b326768ec",
+          "iterations": 9
+        }
+      ],
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      }
+    },
+    {
+      "case": "syn4-elongated",
+      "metric": "hartree",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-elongated/hartree-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-elongated/hartree-1"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "aaed98bc4980ff8e0e6362b1201a137f231d50096bc1cd16c6ce3808a1c6c74b",
+          "density_sha256": "c2d56689aa1ffe38b303f8ee997f94a13d9fe6c5371d78a197f562695902ca29",
+          "iterations": 10
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-elongated/hartree-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-elongated/hartree-8"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "aaed98bc4980ff8e0e6362b1201a137f231d50096bc1cd16c6ce3808a1c6c74b",
+          "density_sha256": "c2d56689aa1ffe38b303f8ee997f94a13d9fe6c5371d78a197f562695902ca29",
+          "iterations": 10
+        }
+      ],
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      }
+    },
+    {
+      "case": "syn4-slab",
+      "metric": "l2",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-slab/l2-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-slab/l2-1"
+          ],
+          "exit_code": 4,
+          "scientific_sha256": "ed39a6a0c33b5e6d562aded6bf65c1fc7885a8700cd6289b02190c485b7e9c75",
+          "density_sha256": null,
+          "iterations": 13
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-slab/l2-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-slab/l2-8"
+          ],
+          "exit_code": 4,
+          "scientific_sha256": "ed39a6a0c33b5e6d562aded6bf65c1fc7885a8700cd6289b02190c485b7e9c75",
+          "density_sha256": null,
+          "iterations": 13
+        }
+      ],
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      }
+    },
+    {
+      "case": "syn4-slab",
+      "metric": "hartree",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-slab/hartree-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-slab/hartree-1"
+          ],
+          "exit_code": 3,
+          "scientific_sha256": "c00a95738d8b00431ca175d1e03cfd9846a63d0a7ad4fb9f4c61b322365ba289",
+          "density_sha256": "448befaae5ae9bf5537484859ad320f2f385512259e41dff843f8107b6e4246f",
+          "iterations": 100
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-slab/hartree-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn4-slab/hartree-8"
+          ],
+          "exit_code": 3,
+          "scientific_sha256": "c00a95738d8b00431ca175d1e03cfd9846a63d0a7ad4fb9f4c61b322365ba289",
+          "density_sha256": "448befaae5ae9bf5537484859ad320f2f385512259e41dff843f8107b6e4246f",
+          "iterations": 100
+        }
+      ],
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      }
+    },
+    {
+      "case": "syn16-gamma",
+      "metric": "l2",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-gamma/l2-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-gamma/l2-1"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "47b7366f7a9078810b99caeaf060b18995f0e9bccb5a546512feabc8e4d99057",
+          "density_sha256": "1c3c2f65ecad7bfbaa738daec952a2ee16dedf352c296d41efbf3be2a8e775ca",
+          "iterations": 7
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-gamma/l2-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-gamma/l2-8"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "47b7366f7a9078810b99caeaf060b18995f0e9bccb5a546512feabc8e4d99057",
+          "density_sha256": "1c3c2f65ecad7bfbaa738daec952a2ee16dedf352c296d41efbf3be2a8e775ca",
+          "iterations": 7
+        }
+      ],
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      }
+    },
+    {
+      "case": "syn16-gamma",
+      "metric": "hartree",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-gamma/hartree-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-gamma/hartree-1"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "4636e6608089466fe2e58e9b009b22bc28a0668e3ea0d080e7b1266a2a2e9d41",
+          "density_sha256": "5c9c345490316d4998185f8027ebb2420e14a0276a88d090cb1e4420eafa8395",
+          "iterations": 6
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-gamma/hartree-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-gamma/hartree-8"
+          ],
+          "exit_code": 0,
+          "scientific_sha256": "4636e6608089466fe2e58e9b009b22bc28a0668e3ea0d080e7b1266a2a2e9d41",
+          "density_sha256": "5c9c345490316d4998185f8027ebb2420e14a0276a88d090cb1e4420eafa8395",
+          "iterations": 6
+        }
+      ],
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      }
+    },
+    {
+      "case": "syn16-k211",
+      "metric": "l2",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-k211/l2-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-k211/l2-1"
+          ],
+          "exit_code": 3,
+          "scientific_sha256": "0fc560124103dce2a5eef0e144fb0a3f05beacd84649256d449700c3ebefe7b9",
+          "density_sha256": "f66a9d848a36ab186ac3957adf9b0a55855e13ee9c6ebd085f90b94657148cfe",
+          "iterations": 100
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-k211/l2-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-k211/l2-8"
+          ],
+          "exit_code": 3,
+          "scientific_sha256": "0fc560124103dce2a5eef0e144fb0a3f05beacd84649256d449700c3ebefe7b9",
+          "density_sha256": "f66a9d848a36ab186ac3957adf9b0a55855e13ee9c6ebd085f90b94657148cfe",
+          "iterations": 100
+        }
+      ],
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      }
+    },
+    {
+      "case": "syn16-k211",
+      "metric": "hartree",
+      "identical": true,
+      "runs": [
+        {
+          "threads": 1,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-k211/hartree-1.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-k211/hartree-1"
+          ],
+          "exit_code": 3,
+          "scientific_sha256": "f71865ba25f9d72426f2bf647a4a01e12192528cb4da3c5f16af9686b76c6647",
+          "density_sha256": "b9ad841c85c7416241c75a188c76eef29dac675f871eb32c55c9bd68eecad4f3",
+          "iterations": 100
+        },
+        {
+          "threads": 8,
+          "command": [
+            "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+            "run",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-k211/hartree-8.toml",
+            "--output-dir",
+            "/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-threads-wdxqt0_8/syn16-k211/hartree-8"
+          ],
+          "exit_code": 3,
+          "scientific_sha256": "f71865ba25f9d72426f2bf647a4a01e12192528cb4da3c5f16af9686b76c6647",
+          "density_sha256": "b9ad841c85c7416241c75a188c76eef29dac675f871eb32c55c9bd68eecad4f3",
+          "iterations": 100
+        }
+      ],
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      }
+    }
+  ]
+}

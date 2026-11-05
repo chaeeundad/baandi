@@ -1,0 +1,33 @@
+{
+  "roots": [
+    "tests/reference/perf",
+    "tests/reference/kpoints"
+  ],
+  "raw_outputs": [
+    {
+      "output": "tests/reference/kpoints/k222_c/qe.out",
+      "sha256": "f93516f6a488f870b5880a9d2f1c1da6ff7e4cde7dd391afdd338948169afaf2",
+      "input": "tests/reference/kpoints/k222_c/qe.in",
+      "conv_thr": [
+        "9.9999999999999998e-13"
+      ],
+      "total_energy_ry": [
+        "-15.66246524"
+      ]
+    },
+    {
+      "output": "tests/reference/kpoints/k222s_c/qe.out",
+      "sha256": "162a89801e5ea6edace18e5e26635a9f9a10e0b84518f3a5316c0a3a21e45ea6",
+      "input": "tests/reference/kpoints/k222s_c/qe.in",
+      "conv_thr": [
+        "9.9999999999999998e-13"
+      ],
+      "total_energy_ry": [
+        "-15.83885195"
+      ]
+    }
+  ],
+  "required_si8_k444s_pairs_available": false,
+  "standard_default_frozen": false,
+  "reason": "No raw si8/k444s conv_thr=1e-8 and 1e-14 pair in the requested roots. Relayed rounded energies are not an E1 delivered-error measurement."
+}

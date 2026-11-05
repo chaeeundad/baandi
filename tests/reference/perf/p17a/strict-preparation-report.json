@@ -1,0 +1,5110 @@
+{
+  "schema_version": 1,
+  "command": [
+    "/Library/Developer/CommandLineTools/usr/bin/python3",
+    "scripts/equal_accuracy.py",
+    "--strict-only",
+    "--output-dir",
+    "/tmp/p17a-strict-evidence"
+  ],
+  "rows": [
+    {
+      "code": "BAANDI",
+      "label": "tight",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/si8/tight/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/si8/tight/output"
+      ],
+      "input": "[system]\nname = \"Si diamond conventional, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[5.43, 0.0, 0.0], [0.0, 5.43, 0.0], [0.0, 0.0, 5.43]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0, 0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0.5, 0.5]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5, 0, 0.5]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5, 0.5, 0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.75, 0.75]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.75, 0.25, 0.75]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.75, 0.75, 0.25]\n\n[pseudopotentials]\nSi = \"/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkpoints = [[0.0, 0.0, 0.0]]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-12\ndensity_residual_tolerance = 1e-09\neigen_tolerance = 1e-10\n",
+      "input_sha256": "370e362a499af40cb5e2e21bee038efce2c820ac79c27ec952df24de40b094e8",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": -2.1316282072803006e-14,
+        "max_occupied_eigenvalue_difference_ha": 2.575619370559501e-10,
+        "max_first_empty_eigenvalue_difference_ha": 1.1272577316034926e-10,
+        "max_eigenvalue_difference_ha": 2.575619370559501e-10,
+        "density_l2_bohr_m3_over_2": 1.244743002938212e-09,
+        "density_hartree_energy_ha": 1.169675319191211e-17,
+        "density_hartree_norm_sqrt_ha": 3.420051635854656e-09
+      },
+      "exit_code": 0,
+      "wall_s": 3.951680208,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": -31.32180360103179,
+      "eigenvalues_ha": [
+        [
+          -0.2075962933594032,
+          -0.053814557117806666,
+          -0.05381455705273627,
+          -0.05381455697903276,
+          -0.05381455695511639,
+          -0.05381455687574326,
+          -0.05381455674738453,
+          0.12586775505485281,
+          0.12586775506769374,
+          0.12586775509052445,
+          0.1258677551409235,
+          0.12586775517853283,
+          0.12586775522942534,
+          0.23388164662619487,
+          0.23388164666331657,
+          0.23388164667785238,
+          0.25080209086674066
+        ]
+      ],
+      "occupied": 16,
+      "kpoints": [
+        {
+          "fractional": [
+            0,
+            0,
+            0
+          ],
+          "weight": 1
+        }
+      ],
+      "scf_iterations": 20,
+      "davidson_steps": 594,
+      "h_vectors": 2969,
+      "certified": true,
+      "result_sha256": "78342fbb77b8308d49ffef5c1fd252b0f5540e438f7d3206ef37c9167080600b",
+      "case": "si8",
+      "upf_sha256": {
+        "Si.pz-vbc.UPF": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": -2.1316282072803006e-14
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "tighter",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/si8/tighter/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/si8/tighter/output"
+      ],
+      "input": "[system]\nname = \"Si diamond conventional, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[5.43, 0.0, 0.0], [0.0, 5.43, 0.0], [0.0, 0.0, 5.43]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0, 0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0.5, 0.5]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5, 0, 0.5]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5, 0.5, 0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.75, 0.75]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.75, 0.25, 0.75]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.75, 0.75, 0.25]\n\n[pseudopotentials]\nSi = \"/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkpoints = [[0.0, 0.0, 0.0]]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-13\ndensity_residual_tolerance = 1e-10\neigen_tolerance = 1e-11\n",
+      "input_sha256": "b8238f641f2f8f1a5fcf303269d063ac3308ce150917d3a44f766cfb9c22f2c9",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 0.0,
+        "max_occupied_eigenvalue_difference_ha": 0.0,
+        "max_first_empty_eigenvalue_difference_ha": 0.0,
+        "max_eigenvalue_difference_ha": 0.0,
+        "density_l2_bohr_m3_over_2": 0.0,
+        "density_hartree_energy_ha": 0.0,
+        "density_hartree_norm_sqrt_ha": 0.0
+      },
+      "exit_code": 0,
+      "wall_s": 4.910735541,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": -31.321803601031768,
+      "eigenvalues_ha": [
+        [
+          -0.20759629340731106,
+          -0.0538145570168811,
+          -0.05381455701568493,
+          -0.053814557014607314,
+          -0.05381455701258079,
+          -0.05381455701052138,
+          -0.053814557004946466,
+          0.12586775507231487,
+          0.12586775507272918,
+          0.12586775507352663,
+          0.12586775507478573,
+          0.12586775507555423,
+          0.125867755076854,
+          0.23388164658237956,
+          0.23388164658375893,
+          0.23388164658524416,
+          0.25080209097946643
+        ]
+      ],
+      "occupied": 16,
+      "kpoints": [
+        {
+          "fractional": [
+            0,
+            0,
+            0
+          ],
+          "weight": 1
+        }
+      ],
+      "scf_iterations": 23,
+      "davidson_steps": 895,
+      "h_vectors": 3730,
+      "certified": true,
+      "result_sha256": "b3a271bd4b7d433a54d55de53e7b7fdc91b9247c6d90ccd392cf2d8ccd312ec9",
+      "case": "si8",
+      "upf_sha256": {
+        "Si.pz-vbc.UPF": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": -2.1316282072803006e-14
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "strict",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/si8/strict/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/si8/strict/output"
+      ],
+      "input": "[system]\nname = \"Si diamond conventional, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[5.43, 0.0, 0.0], [0.0, 5.43, 0.0], [0.0, 0.0, 5.43]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0, 0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0, 0.5, 0.5]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5, 0, 0.5]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5, 0.5, 0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.75, 0.75]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.75, 0.25, 0.75]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.75, 0.75, 0.25]\n\n[pseudopotentials]\nSi = \"/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkpoints = [[0.0, 0.0, 0.0]]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nthreads = 1\n",
+      "input_sha256": "6323429b98a1cc6cb085db4abf210717307a161725b0281b27a53e280c9626a5",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 4.973799150320701e-13,
+        "max_occupied_eigenvalue_difference_ha": 4.0862973678390535e-08,
+        "max_first_empty_eigenvalue_difference_ha": 2.3075679145279082e-09,
+        "max_eigenvalue_difference_ha": 4.0862973678390535e-08,
+        "density_l2_bohr_m3_over_2": 2.3026170714185988e-07,
+        "density_hartree_energy_ha": 4.581607998728813e-13,
+        "density_hartree_norm_sqrt_ha": 6.768757639869234e-07
+      },
+      "exit_code": 0,
+      "wall_s": 4.123248708,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": -31.32180360103127,
+      "eigenvalues_ha": [
+        [
+          -0.2075962919943522,
+          -0.05381459787985478,
+          -0.053814573338767144,
+          -0.05381455822972501,
+          -0.053814548784261604,
+          -0.053814546355621,
+          -0.05381452991480834,
+          0.1258677429071218,
+          0.12586774525379185,
+          0.1258677509015039,
+          0.1258677595386886,
+          0.12586776536145716,
+          0.1258677673239302,
+          0.23388163890347938,
+          0.2338816428581821,
+          0.23388164867226893,
+          0.2508020886718985
+        ]
+      ],
+      "occupied": 16,
+      "kpoints": [
+        {
+          "fractional": [
+            0,
+            0,
+            0
+          ],
+          "weight": 1
+        }
+      ],
+      "scf_iterations": 15,
+      "davidson_steps": 345,
+      "h_vectors": 2265,
+      "certified": true,
+      "result_sha256": "da0742af257151258cb8f4e07694dc5c804013a2e09566fe5fbed10b477cf7d1",
+      "case": "si8",
+      "upf_sha256": {
+        "Si.pz-vbc.UPF": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": -2.1316282072803006e-14
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "tight",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/k444s/tight/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/k444s/tight/output"
+      ],
+      "input": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkgrid = [4, 4, 4]\nkshift = [0.5, 0.5, 0.5]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-12\ndensity_residual_tolerance = 1e-09\neigen_tolerance = 1e-10\n",
+      "input_sha256": "41166fde8b746342801788da079fae24f53ae2fd7a83e76e954947ff473c397e",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": -1.1546319456101628e-14,
+        "max_occupied_eigenvalue_difference_ha": 8.272876828030462e-11,
+        "max_first_empty_eigenvalue_difference_ha": 9.819317581261089e-11,
+        "max_eigenvalue_difference_ha": 9.819317581261089e-11,
+        "density_l2_bohr_m3_over_2": 1.373938724532773e-10,
+        "density_hartree_energy_ha": 6.712647932598573e-20,
+        "density_hartree_norm_sqrt_ha": 2.5908778305042814e-10
+      },
+      "exit_code": 0,
+      "wall_s": 5.138855707999998,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": -7.925976126648101,
+      "eigenvalues_ha": [
+        [
+          -0.20875497748079486,
+          0.1635928730584699,
+          0.2114955001534515,
+          0.21149550015378418,
+          0.31250573018206
+        ],
+        [
+          -0.17023624992743847,
+          0.05257260495461578,
+          0.13697935969470296,
+          0.19365206319923325,
+          0.3207571310253023
+        ],
+        [
+          -0.126919318580671,
+          -0.025930351153286603,
+          0.13827924798172084,
+          0.164635615768895,
+          0.3012628957391632
+        ],
+        [
+          -0.18897281384622383,
+          0.10395768972329307,
+          0.17361983291105676,
+          0.17652331922621609,
+          0.2998131468607311
+        ],
+        [
+          -0.17023624992741346,
+          0.052572604954433305,
+          0.13697935969475136,
+          0.1936520631993481,
+          0.32075713102543674
+        ],
+        [
+          -0.15035372058212632,
+          0.04169760660039015,
+          0.12351570491452134,
+          0.14089583990002644,
+          0.2702497097974518
+        ],
+        [
+          -0.08844112472012498,
+          -0.031424042375383425,
+          0.07205812890261708,
+          0.11283627881601042,
+          0.3085679678850238
+        ],
+        [
+          -0.13452850588166917,
+          0.008075255511515094,
+          0.09962501625315573,
+          0.1510726674744944,
+          0.326699899217105
+        ],
+        [
+          -0.1269193185805683,
+          -0.025930351153515982,
+          0.13827924798174585,
+          0.16463561576897454,
+          0.30126289573929177
+        ],
+        [
+          -0.08844112472002878,
+          -0.03142404237556374,
+          0.0720581289026998,
+          0.11283627881601216,
+          0.30856796788501073
+        ],
+        [
+          -0.09511764575574758,
+          -0.02761407153966883,
+          0.09530796557362353,
+          0.12338099112049625,
+          0.25310966098124427
+        ],
+        [
+          -0.1345285058816835,
+          0.008075255511557999,
+          0.09962501625317657,
+          0.1510726674744296,
+          0.32669989921721143
+        ],
+        [
+          -0.18897281384621573,
+          0.10395768972315705,
+          0.17361983291114247,
+          0.17652331922626044,
+          0.2998131468607948
+        ],
+        [
+          -0.13452850588170182,
+          0.00807525551164722,
+          0.09962501625305371,
+          0.15107266747450393,
+          0.32669989921699477
+        ],
+        [
+          -0.13452850588173837,
+          0.008075255511771235,
+          0.09962501625307908,
+          0.15107266747435974,
+          0.32669989921724046
+        ],
+        [
+          -0.18897281384622797,
+          0.10395768972338151,
+          0.1736198329109456,
+          0.17652331922622685,
+          0.2998131468607391
+        ],
+        [
+          -0.17023624992745767,
+          0.0525726049547242,
+          0.13697935969470648,
+          0.1936520631991159,
+          0.32075713102534986
+        ],
+        [
+          -0.15035372058213822,
+          0.0416976066004934,
+          0.12351570491422355,
+          0.14089583990021953,
+          0.2702497097975749
+        ],
+        [
+          -0.08844112472016284,
+          -0.03142404237536137,
+          0.07205812890285142,
+          0.11283627881580138,
+          0.3085679678848221
+        ],
+        [
+          -0.134528505881761,
+          0.008075255511852699,
+          0.09962501625302449,
+          0.15107266747437423,
+          0.3266998992171491
+        ],
+        [
+          -0.1503537205821312,
+          0.04169760660042556,
+          0.12351570491439434,
+          0.1408958399001415,
+          0.2702497097974569
+        ],
+        [
+          -0.15388673760594324,
+          0.003861936890233951,
+          0.18223369091644884,
+          0.18223369091677738,
+          0.28143028186088137
+        ],
+        [
+          -0.10856984662572339,
+          -0.020986801841815103,
+          0.07463655590699787,
+          0.15275395492600755,
+          0.28830209009800295
+        ],
+        [
+          -0.09511764575572579,
+          -0.02761407153971,
+          0.09530796557356365,
+          0.12338099112060548,
+          0.2531096609812706
+        ],
+        [
+          -0.08844112472004276,
+          -0.03142404237556551,
+          0.07205812890282166,
+          0.11283627881591876,
+          0.30856796788491786
+        ],
+        [
+          -0.10856984662568543,
+          -0.02098680184187444,
+          0.07463655590691524,
+          0.15275395492610003,
+          0.28830209009816293
+        ],
+        [
+          -0.10856984662574709,
+          -0.02098680184179081,
+          0.07463655590709571,
+          0.15275395492588764,
+          0.2883020900979651
+        ],
+        [
+          -0.08844112472019922,
+          -0.031424042375273575,
+          0.07205812890270133,
+          0.11283627881589767,
+          0.3085679678849342
+        ],
+        [
+          -0.13452850588173895,
+          0.00807525551177282,
+          0.09962501625302132,
+          0.15107266747445278,
+          0.3266998992170059
+        ],
+        [
+          -0.09511764575568693,
+          -0.027614071539775287,
+          0.09530796557351164,
+          0.1233809911206701,
+          0.2531096609813937
+        ],
+        [
+          -0.08844112472022449,
+          -0.03142404237525013,
+          0.07205812890281597,
+          0.11283627881578297,
+          0.3085679678848242
+        ],
+        [
+          -0.126919318580739,
+          -0.025930351153140463,
+          0.13827924798174124,
+          0.1646356157687883,
+          0.3012628957391733
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        }
+      ],
+      "scf_iterations": 12,
+      "davidson_steps": 2150,
+      "h_vectors": 12700,
+      "certified": true,
+      "result_sha256": "15cf7ceed2ffae90194f92459658473353004ceaa8a0922cfe459d0d515cde76",
+      "case": "k444s",
+      "upf_sha256": {
+        "Si.pz-vbc.UPF": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": -1.1546319456101628e-14
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "tighter",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/k444s/tighter/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/k444s/tighter/output"
+      ],
+      "input": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkgrid = [4, 4, 4]\nkshift = [0.5, 0.5, 0.5]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-13\ndensity_residual_tolerance = 1e-10\neigen_tolerance = 1e-11\n",
+      "input_sha256": "0eb14e4a16201be300dd9e01763819c1d27d40e0e7b83f3a74b6a5739dfab11e",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 0.0,
+        "max_occupied_eigenvalue_difference_ha": 0.0,
+        "max_first_empty_eigenvalue_difference_ha": 0.0,
+        "max_eigenvalue_difference_ha": 0.0,
+        "density_l2_bohr_m3_over_2": 0.0,
+        "density_hartree_energy_ha": 0.0,
+        "density_hartree_norm_sqrt_ha": 0.0
+      },
+      "exit_code": 0,
+      "wall_s": 4.639588041,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": -7.92597612664809,
+      "eigenvalues_ha": [
+        [
+          -0.20875497744737842,
+          0.16359287305941808,
+          0.21149550019086968,
+          0.21149550019092825,
+          0.31250573014822247
+        ],
+        [
+          -0.1702362498953106,
+          0.05257260499085865,
+          0.13697935968662586,
+          0.1936520632583442,
+          0.32075713111112836
+        ],
+        [
+          -0.12691931856195338,
+          -0.025930351096313174,
+          0.1382792479685835,
+          0.1646356158307943,
+          0.3012628958373564
+        ],
+        [
+          -0.18897281381623232,
+          0.10395768977142485,
+          0.17361983296296654,
+          0.1765233192216641,
+          0.29981314690189675
+        ],
+        [
+          -0.1702362498953073,
+          0.05257260499083203,
+          0.1369793596866325,
+          0.1936520632583626,
+          0.3207571311111441
+        ],
+        [
+          -0.15035372054515847,
+          0.04169760660835152,
+          0.12351570492903866,
+          0.14089583993918783,
+          0.2702497098938797
+        ],
+        [
+          -0.08844112469385028,
+          -0.03142404234254285,
+          0.07205812894362987,
+          0.11283627884190277,
+          0.30856796788666535
+        ],
+        [
+          -0.13452850585811776,
+          0.008075255550000052,
+          0.09962501633578252,
+          0.15107266745913775,
+          0.32669989921234777
+        ],
+        [
+          -0.1269193185619387,
+          -0.02593035109634694,
+          0.13827924796858707,
+          0.1646356158308077,
+          0.301262895837373
+        ],
+        [
+          -0.08844112469383611,
+          -0.03142404234256967,
+          0.07205812894364214,
+          0.1128362788419032,
+          0.3085679678866633
+        ],
+        [
+          -0.09511764573138023,
+          -0.02761407149525045,
+          0.09530796557092729,
+          0.12338099116478524,
+          0.2531096610613957
+        ],
+        [
+          -0.13452850585812132,
+          0.008075255550014282,
+          0.09962501633578233,
+          0.15107266745912434,
+          0.3266998992123739
+        ],
+        [
+          -0.18897281381623152,
+          0.10395768977140547,
+          0.17361983296298095,
+          0.17652331922166997,
+          0.2998131469019024
+        ],
+        [
+          -0.13452850585812273,
+          0.008075255550019811,
+          0.09962501633576835,
+          0.1510726674591396,
+          0.3266998992123307
+        ],
+        [
+          -0.13452850585812914,
+          0.008075255550044848,
+          0.09962501633576827,
+          0.15107266745911418,
+          0.32669989921237813
+        ],
+        [
+          -0.1889728138162345,
+          0.10395768977145055,
+          0.17361983296294983,
+          0.17652331922165582,
+          0.29981314690188826
+        ],
+        [
+          -0.17023624989531552,
+          0.05257260499089101,
+          0.13697935968661765,
+          0.19365206325832343,
+          0.32075713111110704
+        ],
+        [
+          -0.15035372054515972,
+          0.04169760660837258,
+          0.12351570492898321,
+          0.14089583993921614,
+          0.2702497098939129
+        ],
+        [
+          -0.08844112469385815,
+          -0.03142404234253544,
+          0.07205812894366548,
+          0.11283627884186631,
+          0.3085679678866291
+        ],
+        [
+          -0.13452850585813514,
+          0.008075255550068458,
+          0.09962501633575052,
+          0.15107266745911613,
+          0.3266998992123594
+        ],
+        [
+          -0.15035372054515922,
+          0.041697606608363004,
+          0.12351570492900803,
+          0.14089583993920263,
+          0.27024970989389807
+        ],
+        [
+          -0.15388673755764723,
+          0.003861936876603006,
+          0.1822336909411387,
+          0.18223369094119302,
+          0.28143028184515484
+        ],
+        [
+          -0.10856984656855802,
+          -0.020986801855813274,
+          0.07463655592163504,
+          0.15275395496575947,
+          0.2883020901856954
+        ],
+        [
+          -0.09511764573137323,
+          -0.027614071495262824,
+          0.0953079655709187,
+          0.12338099116479899,
+          0.2531096610614111
+        ],
+        [
+          -0.08844112469384068,
+          -0.03142404234256485,
+          0.07205812894366116,
+          0.11283627884188328,
+          0.30856796788664376
+        ],
+        [
+          -0.10856984656855266,
+          -0.020986801855821295,
+          0.07463655592162383,
+          0.15275395496577332,
+          0.28830209018571484
+        ],
+        [
+          -0.10856984656856516,
+          -0.020986801855803733,
+          0.07463655592164904,
+          0.15275395496574007,
+          0.2883020901856707
+        ],
+        [
+          -0.0884411246938713,
+          -0.031424042342507355,
+          0.07205812894363345,
+          0.1128362788418816,
+          0.30856796788664853
+        ],
+        [
+          -0.13452850585813209,
+          0.008075255550057085,
+          0.09962501633575009,
+          0.15107266745912679,
+          0.3266998992123382
+        ],
+        [
+          -0.0951176457313677,
+          -0.027614071495273118,
+          0.09530796557091167,
+          0.12338099116481052,
+          0.25310966106142646
+        ],
+        [
+          -0.08844112469387486,
+          -0.03142404234250435,
+          0.07205812894365121,
+          0.11283627884186627,
+          0.3085679678866316
+        ],
+        [
+          -0.12691931856197164,
+          -0.025930351096273934,
+          0.1382792479685781,
+          0.16463561583077851,
+          0.3012628958373387
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        }
+      ],
+      "scf_iterations": 14,
+      "davidson_steps": 2402,
+      "h_vectors": 13954,
+      "certified": true,
+      "result_sha256": "de6aba5aea9cceed4860a3f5cf7df500e93a325d5640b8e22423ee1565ef9343",
+      "case": "k444s",
+      "upf_sha256": {
+        "Si.pz-vbc.UPF": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": -1.1546319456101628e-14
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "strict",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/k444s/strict/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/k444s/strict/output"
+      ],
+      "input": "[system]\nname = \"Si diamond primitive, a = 5.43 Angstrom\"\nlattice_unit = \"angstrom\"\nlattice_vectors = [[0.0, 2.715, 2.715], [2.715, 0.0, 2.715], [2.715, 2.715, 0.0]]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0, 0.0, 0.0]\n\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25, 0.25, 0.25]\n\n[pseudopotentials]\nSi = \"/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n\n[basis]\necutwfc_ry = 30.0\nkgrid = [4, 4, 4]\nkshift = [0.5, 0.5, 0.5]\n\n[xc]\nfunctional = \"lda-pz\"\n\n[scf]\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nthreads = 1\n",
+      "input_sha256": "3130cc32c53cd909e70498fd44af2a4ec5d49fb1223600140d2397a8cfce4e53",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": -1.7763568394002505e-15,
+        "max_occupied_eigenvalue_difference_ha": 2.685068337809904e-09,
+        "max_first_empty_eigenvalue_difference_ha": 3.974849949184289e-09,
+        "max_eigenvalue_difference_ha": 3.974849949184289e-09,
+        "density_l2_bohr_m3_over_2": 5.317285851410056e-09,
+        "density_hartree_energy_ha": 9.337714611195323e-17,
+        "density_hartree_norm_sqrt_ha": 9.663185091467162e-09
+      },
+      "exit_code": 0,
+      "wall_s": 2.6815513340000017,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": -7.9259761266480915,
+      "eigenvalues_ha": [
+        [
+          -0.20875497667943027,
+          0.16359287522092306,
+          0.21149550094682118,
+          0.21149550095830869,
+          0.3125057261733725
+        ],
+        [
+          -0.17023624906492812,
+          0.05257260610195423,
+          0.13697936034215474,
+          0.19365206421894515,
+          0.3207571323023888
+        ],
+        [
+          -0.12691931738395826,
+          -0.025930350911008822,
+          0.13827924927792878,
+          0.1646356169283196,
+          0.30126289616801866
+        ],
+        [
+          -0.18897281297208063,
+          0.1039576898928224,
+          0.17361983401353745,
+          0.17652332154629724,
+          0.29981314624086175
+        ],
+        [
+          -0.17023624906540002,
+          0.05257260610526988,
+          0.13697936034130087,
+          0.19365206421667103,
+          0.32075713230043174
+        ],
+        [
+          -0.15035371978751336,
+          0.04169760871956488,
+          0.12351570435493452,
+          0.14089584109617187,
+          0.27024971074917786
+        ],
+        [
+          -0.08844112357401951,
+          -0.031424041567104204,
+          0.07205812975698087,
+          0.11283627947546551,
+          0.30856796863434305
+        ],
+        [
+          -0.13452850478929726,
+          0.008075255713608164,
+          0.09962501772668492,
+          0.15107266844050407,
+          0.32669989967076546
+        ],
+        [
+          -0.1269193173858174,
+          -0.02593035090683984,
+          0.13827924927752336,
+          0.16463561692662132,
+          0.30126289616612995
+        ],
+        [
+          -0.08844112357576679,
+          -0.03142404156381939,
+          0.0720581297554771,
+          0.1128362794753662,
+          0.30856796863463815
+        ],
+        [
+          -0.09511764468266797,
+          -0.027614070698806167,
+          0.09530796644970949,
+          0.12338099233949888,
+          0.2531096602081825
+        ],
+        [
+          -0.134528504788384,
+          0.008075255710610584,
+          0.0996250177256962,
+          0.1510726684442102,
+          0.3266998996651643
+        ],
+        [
+          -0.1889728129722204,
+          0.10395768989533213,
+          0.17361983401171177,
+          0.17652332154558684,
+          0.2998131462401573
+        ],
+        [
+          -0.13452850478870604,
+          0.008075255711201127,
+          0.09962501772849497,
+          0.1510726684403223,
+          0.32669989967277735
+        ],
+        [
+          -0.13452850478738804,
+          0.008075255706745539,
+          0.09962501772744495,
+          0.15107266844550712,
+          0.3266998996644167
+        ],
+        [
+          -0.18897281297175722,
+          0.10395768988737812,
+          0.1736198340178806,
+          0.17652332154699754,
+          0.2998131462435359
+        ],
+        [
+          -0.17023624906385457,
+          0.05257260609484609,
+          0.13697936034307856,
+          0.1936520642243853,
+          0.3207571323051374
+        ],
+        [
+          -0.1503537197871106,
+          0.0416976087156513,
+          0.12351570436560688,
+          0.14089584109024705,
+          0.27024971074334475
+        ],
+        [
+          -0.0884411235727047,
+          -0.03142404156794354,
+          0.07205812974878952,
+          0.11283627948314984,
+          0.3085679686412387
+        ],
+        [
+          -0.13452850478604927,
+          0.008075255701428903,
+          0.09962501773131291,
+          0.1510726684450438,
+          0.3266998996692196
+        ],
+        [
+          -0.15035371978723416,
+          0.04169760871686021,
+          0.12351570436243406,
+          0.140895841091956,
+          0.27024971074512316
+        ],
+        [
+          -0.15388673697556926,
+          0.0038619388514992002,
+          0.1822336920023528,
+          0.1822336920136294,
+          0.2814302786146261
+        ],
+        [
+          -0.10856984621816501,
+          -0.02098679917181155,
+          0.07463655532997061,
+          0.1527539561081649,
+          0.288302089917497
+        ],
+        [
+          -0.09511764468419685,
+          -0.027614070696326366,
+          0.09530796645289452,
+          0.12338099233585095,
+          0.2531096602028178
+        ],
+        [
+          -0.08844112357489195,
+          -0.031424041564283633,
+          0.07205812974948252,
+          0.11283627948094437,
+          0.30856796863947
+        ],
+        [
+          -0.10856984621886137,
+          -0.020986799170752957,
+          0.07463655533155424,
+          0.15275395610625628,
+          0.28830208991502343
+        ],
+        [
+          -0.10856984621666729,
+          -0.02098679917366669,
+          0.07463655532523887,
+          0.15275395611293444,
+          0.2883020899238986
+        ],
+        [
+          -0.08844112356925456,
+          -0.031424041574691274,
+          0.0720581297537336,
+          0.11283627948151301,
+          0.3085679686389617
+        ],
+        [
+          -0.13452850478645487,
+          0.008075255702877836,
+          0.09962501773138423,
+          0.15107266844356773,
+          0.3266998996719238
+        ],
+        [
+          -0.09511764468489153,
+          -0.02761407069511595,
+          0.09530796645388798,
+          0.12338099233436371,
+          0.25310966020107933
+        ],
+        [
+          -0.08844112356881312,
+          -0.031424041575075494,
+          0.07205812975154208,
+          0.11283627948362247,
+          0.3085679686410105
+        ],
+        [
+          -0.12691931737974194,
+          -0.025930350920276055,
+          0.1382792492779619,
+          0.16463561693243137,
+          0.3012628961718755
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        }
+      ],
+      "scf_iterations": 10,
+      "davidson_steps": 1827,
+      "h_vectors": 11181,
+      "certified": true,
+      "result_sha256": "7f040d5b2a4bf1a58b2eaafdd88739d12329474495fe051a09d97ba0fcd6759f",
+      "case": "k444s",
+      "upf_sha256": {
+        "Si.pz-vbc.UPF": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": -1.1546319456101628e-14
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "tight",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/si-20/tight/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/si-20/tight/output"
+      ],
+      "input": "# Manifest SHA-256: d0a122864e41991e60b862f3e81761f9c1124d73e70f7c4892bea7130d23f635\n# Si.upf SHA-256: 39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282\n[system]\nname = \"si bulk smoke, no accuracy claim\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[0,5.13,5.13],[5.13,0,5.13],[5.13,5.13,0]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0,0,0]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25,0.25,0.25]\n[pseudopotentials]\nSi = \"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Si.upf\"\n[basis]\necutwfc_ry = 40\nkgrid = [4,4,4]\nkshift = [0.5,0.5,0.5]\n[xc]\nfunctional = \"pbe\"\ndensity_floor = 1e-10\n[spin]\nmode = \"unpolarized\"\n[scf]\nmax_iterations = 120\nmixing = \"kerker-pulay\"\nmixing_beta = 0.3\nmixing_q0_inverse_bohr = 1.0\nextra_bands = 4\nthreads = 1\nenergy_tolerance_ha = 1e-12\ndensity_residual_tolerance = 1e-09\neigen_tolerance = 1e-10\n",
+      "input_sha256": "8b88c26a81c52338c0c10f8bd69c355f9ad966107cf1850251fb675a426e1dd1",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 5.329070518200751e-15,
+        "max_occupied_eigenvalue_difference_ha": 4.800590203135613e-10,
+        "max_first_empty_eigenvalue_difference_ha": 4.548808552051753e-10,
+        "max_eigenvalue_difference_ha": 4.800590203135613e-10,
+        "density_l2_bohr_m3_over_2": 4.017713752126357e-10,
+        "density_hartree_energy_ha": 4.09714345460878e-19,
+        "density_hartree_norm_sqrt_ha": 6.400893261575903e-10
+      },
+      "exit_code": 0,
+      "wall_s": 9.589069665999997,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": -8.46231783690607,
+      "eigenvalues_ha": [
+        [
+          -0.20310321328542635,
+          0.17049487005956937,
+          0.21856651069523322,
+          0.21856651069525207,
+          0.32048363802118346
+        ],
+        [
+          -0.16465536383610907,
+          0.059060691743751455,
+          0.14418807205636833,
+          0.20067801105167457,
+          0.328890934994135
+        ],
+        [
+          -0.1216961214404715,
+          -0.019080439592541857,
+          0.14539487341132448,
+          0.17166970250968824,
+          0.3096262469824672
+        ],
+        [
+          -0.18334149669832284,
+          0.11045599076963272,
+          0.18064716201436373,
+          0.18363877465031897,
+          0.3078939708989531
+        ],
+        [
+          -0.16465536383610713,
+          0.05906069174373618,
+          0.14418807205637305,
+          0.2006780110516863,
+          0.32889093499414435
+        ],
+        [
+          -0.14475995900140093,
+          0.04758471566639099,
+          0.13081775480192567,
+          0.14795209858130987,
+          0.27877500071848743
+        ],
+        [
+          -0.08312629388329663,
+          -0.02578896393961736,
+          0.07985983517244533,
+          0.12029975890527848,
+          0.31705657041838536
+        ],
+        [
+          -0.12906848895543438,
+          0.014242765095418856,
+          0.10704333924232001,
+          0.15825778845262867,
+          0.3349617577797907
+        ],
+        [
+          -0.1216961214404633,
+          -0.019080439592559763,
+          0.1453948734113268,
+          0.17166970250969765,
+          0.3096262469824758
+        ],
+        [
+          -0.08312629388328915,
+          -0.02578896393963199,
+          0.07985983517245199,
+          0.12029975890527814,
+          0.3170565704183847
+        ],
+        [
+          -0.08959962190498236,
+          -0.022053309083460218,
+          0.10286575157197084,
+          0.13048527714478933,
+          0.26192312865134043
+        ],
+        [
+          -0.12906848895543394,
+          0.014242765095417404,
+          0.10704333924232014,
+          0.15825778845262833,
+          0.3349617577797857
+        ],
+        [
+          -0.1833414966983224,
+          0.11045599076962101,
+          0.18064716201437295,
+          0.18363877465032039,
+          0.30789397089895676
+        ],
+        [
+          -0.12906848895543632,
+          0.014242765095430852,
+          0.10704333924230963,
+          0.15825778845262886,
+          0.33496175777978177
+        ],
+        [
+          -0.1290684889554372,
+          0.014242765095434989,
+          0.10704333924231159,
+          0.1582577884526238,
+          0.33496175777978743
+        ],
+        [
+          -0.1833414966983227,
+          0.1104559907696315,
+          0.18064716201436398,
+          0.1836387746503215,
+          0.30789397089895404
+        ],
+        [
+          -0.1646553638361089,
+          0.05906069174374937,
+          0.14418807205637083,
+          0.20067801105167576,
+          0.3288909349941438
+        ],
+        [
+          -0.14475995900140085,
+          0.047584715666393544,
+          0.13081775480191127,
+          0.14795209858132102,
+          0.2787750007184889
+        ],
+        [
+          -0.08312629388329966,
+          -0.02578896393961521,
+          0.0798598351724544,
+          0.12029975890526813,
+          0.31705657041838153
+        ],
+        [
+          -0.1290684889554375,
+          0.014242765095433412,
+          0.10704333924231355,
+          0.15825778845262317,
+          0.33496175777979
+        ],
+        [
+          -0.14475995900140137,
+          0.04758471566638918,
+          0.13081775480192823,
+          0.1479520985813108,
+          0.2787750007184831
+        ],
+        [
+          -0.14841385204327628,
+          0.010634244086555614,
+          0.1892348748268505,
+          0.18923487482686846,
+          0.2898155919813027
+        ],
+        [
+          -0.10329447213127646,
+          -0.014815672356996752,
+          0.08221988187234229,
+          0.1597846842283795,
+          0.2968028838837544
+        ],
+        [
+          -0.08959962190498413,
+          -0.02205330908345732,
+          0.10286575157197031,
+          0.13048527714478894,
+          0.2619231286513377
+        ],
+        [
+          -0.08312629388328875,
+          -0.025788963939632283,
+          0.07985983517245188,
+          0.1202997589052794,
+          0.3170565704183877
+        ],
+        [
+          -0.10329447213127295,
+          -0.014815672357000126,
+          0.08221988187233678,
+          0.15978468422838976,
+          0.29680288388376125
+        ],
+        [
+          -0.10329447213127642,
+          -0.014815672356997624,
+          0.08221988187234386,
+          0.1597846842283797,
+          0.29680288388375764
+        ],
+        [
+          -0.08312629388329493,
+          -0.025788963939622284,
+          0.07985983517244662,
+          0.12029975890527873,
+          0.31705657041838736
+        ],
+        [
+          -0.12906848895543538,
+          0.01424276509542637,
+          0.10704333924231266,
+          0.15825778845262864,
+          0.33496175777978043
+        ],
+        [
+          -0.08959962190497917,
+          -0.022053309083464465,
+          0.10286575157196529,
+          0.13048527714479777,
+          0.261923128651342
+        ],
+        [
+          -0.08312629388329652,
+          -0.025788963939618725,
+          0.07985983517245566,
+          0.12029975890526802,
+          0.3170565704183816
+        ],
+        [
+          -0.12169612144046807,
+          -0.019080439592546204,
+          0.14539487341132595,
+          0.17166970250968824,
+          0.30962624698247226
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        }
+      ],
+      "scf_iterations": 21,
+      "davidson_steps": 3856,
+      "h_vectors": 20853,
+      "certified": true,
+      "result_sha256": "2ba7f10364914184d10d2188738138ab7ac5b7bff1064aca5322a6827de9f129",
+      "case": "si-20",
+      "upf_sha256": {
+        "Si.upf": "39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 5.329070518200751e-15
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "tighter",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/si-20/tighter/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/si-20/tighter/output"
+      ],
+      "input": "# Manifest SHA-256: d0a122864e41991e60b862f3e81761f9c1124d73e70f7c4892bea7130d23f635\n# Si.upf SHA-256: 39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282\n[system]\nname = \"si bulk smoke, no accuracy claim\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[0,5.13,5.13],[5.13,0,5.13],[5.13,5.13,0]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0,0,0]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25,0.25,0.25]\n[pseudopotentials]\nSi = \"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Si.upf\"\n[basis]\necutwfc_ry = 40\nkgrid = [4,4,4]\nkshift = [0.5,0.5,0.5]\n[xc]\nfunctional = \"pbe\"\ndensity_floor = 1e-10\n[spin]\nmode = \"unpolarized\"\n[scf]\nmax_iterations = 120\nmixing = \"kerker-pulay\"\nmixing_beta = 0.3\nmixing_q0_inverse_bohr = 1.0\nextra_bands = 4\nthreads = 1\nenergy_tolerance_ha = 1e-13\ndensity_residual_tolerance = 1e-10\neigen_tolerance = 1e-11\n",
+      "input_sha256": "4d699b6e6c3494dba56220ec2896136b4652bb8a0ec8536acbffada5949448d8",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 0.0,
+        "max_occupied_eigenvalue_difference_ha": 0.0,
+        "max_first_empty_eigenvalue_difference_ha": 0.0,
+        "max_eigenvalue_difference_ha": 0.0,
+        "density_l2_bohr_m3_over_2": 0.0,
+        "density_hartree_energy_ha": 0.0,
+        "density_hartree_norm_sqrt_ha": 0.0
+      },
+      "exit_code": 0,
+      "wall_s": 12.194485667000002,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": -8.462317836906076,
+      "eigenvalues_ha": [
+        [
+          -0.20310321369802786,
+          0.1704948696244375,
+          0.21856651021518841,
+          0.21856651021519305,
+          0.3204836377167015
+        ],
+        [
+          -0.16465536425274296,
+          0.05906069131254955,
+          0.14418807166263586,
+          0.20067801057730716,
+          0.32889093462044033
+        ],
+        [
+          -0.12169612186664616,
+          -0.019080440005877084,
+          0.1453948730067642,
+          0.17166970206785326,
+          0.30962624662584637
+        ],
+        [
+          -0.18334149711324396,
+          0.11045599031761025,
+          0.1806471615791052,
+          0.18363877423748373,
+          0.30789397054082446
+        ],
+        [
+          -0.16465536425274252,
+          0.05906069131255044,
+          0.14418807166263672,
+          0.20067801057730758,
+          0.32889093462044044
+        ],
+        [
+          -0.14475995941964281,
+          0.04758471521847853,
+          0.13081775442389407,
+          0.14795209817942787,
+          0.27877500030533925
+        ],
+        [
+          -0.08312629431388587,
+          -0.025788964378836984,
+          0.07985983479229077,
+          0.12029975854055357,
+          0.31705656996957005
+        ],
+        [
+          -0.1290684893777849,
+          0.01424276465689133,
+          0.10704333884602742,
+          0.1582577880732637,
+          0.3349617573678708
+        ],
+        [
+          -0.12169612186664537,
+          -0.019080440005878642,
+          0.14539487300676415,
+          0.17166970206785098,
+          0.3096262466258454
+        ],
+        [
+          -0.08312629431388652,
+          -0.025788964378836578,
+          0.07985983479229054,
+          0.1202997585405542,
+          0.31705656996956944
+        ],
+        [
+          -0.08959962233331709,
+          -0.02205330952367025,
+          0.10286575121800624,
+          0.1304852767485554,
+          0.26192312826276604
+        ],
+        [
+          -0.129068489377786,
+          0.014242764656891262,
+          0.10704333884602661,
+          0.1582577880732639,
+          0.33496175736787065
+        ],
+        [
+          -0.18334149711324446,
+          0.1104559903176108,
+          0.18064716157910515,
+          0.18363877423748345,
+          0.30789397054082357
+        ],
+        [
+          -0.1290684893777865,
+          0.014242764656891086,
+          0.10704333884602614,
+          0.15825778807326338,
+          0.33496175736787104
+        ],
+        [
+          -0.12906848937778576,
+          0.014242764656890727,
+          0.10704333884602706,
+          0.15825778807326304,
+          0.3349617573678716
+        ],
+        [
+          -0.1833414971132429,
+          0.11045599031761151,
+          0.18064716157910526,
+          0.18363877423748518,
+          0.30789397054082496
+        ],
+        [
+          -0.16465536425274216,
+          0.059060691312549485,
+          0.14418807166263448,
+          0.20067801057730716,
+          0.3288909346204394
+        ],
+        [
+          -0.1447599594196428,
+          0.0475847152184785,
+          0.13081775442389293,
+          0.14795209817942753,
+          0.2787750003053368
+        ],
+        [
+          -0.08312629431388598,
+          -0.025788964378836262,
+          0.07985983479229142,
+          0.12029975854055383,
+          0.31705656996957154
+        ],
+        [
+          -0.12906848937778645,
+          0.014242764656891239,
+          0.10704333884602647,
+          0.15825778807326446,
+          0.3349617573678703
+        ],
+        [
+          -0.14475995941964181,
+          0.04758471521847809,
+          0.13081775442389268,
+          0.14795209817942878,
+          0.27877500030533725
+        ],
+        [
+          -0.14841385246044322,
+          0.010634243676191505,
+          0.1892348743909587,
+          0.18923487439095968,
+          0.28981559152642183
+        ],
+        [
+          -0.10329447255778798,
+          -0.014815672776935938,
+          0.0822198814797593,
+          0.15978468381415736,
+          0.2968028835082122
+        ],
+        [
+          -0.08959962233331613,
+          -0.022053309523670628,
+          0.10286575121800642,
+          0.1304852767485552,
+          0.26192312826276637
+        ],
+        [
+          -0.08312629431388596,
+          -0.02578896437883561,
+          0.0798598347922925,
+          0.12029975854055477,
+          0.31705656996957193
+        ],
+        [
+          -0.10329447255778706,
+          -0.01481567277693579,
+          0.08221988147975873,
+          0.15978468381415747,
+          0.2968028835082108
+        ],
+        [
+          -0.10329447255778659,
+          -0.01481567277693562,
+          0.08221988147976024,
+          0.15978468381415747,
+          0.296802883508211
+        ],
+        [
+          -0.08312629431388585,
+          -0.02578896437883685,
+          0.07985983479229083,
+          0.12029975854055423,
+          0.31705656996956927
+        ],
+        [
+          -0.12906848937778567,
+          0.014242764656891609,
+          0.10704333884602742,
+          0.15825778807326357,
+          0.33496175736787126
+        ],
+        [
+          -0.08959962233331781,
+          -0.022053309523669778,
+          0.10286575121800598,
+          0.13048527674855448,
+          0.26192312826276676
+        ],
+        [
+          -0.08312629431388664,
+          -0.025788964378836644,
+          0.07985983479229217,
+          0.12029975854055533,
+          0.31705656996957066
+        ],
+        [
+          -0.12169612186664601,
+          -0.01908044000587717,
+          0.14539487300676385,
+          0.17166970206785193,
+          0.3096262466258467
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        }
+      ],
+      "scf_iterations": 24,
+      "davidson_steps": 4290,
+      "h_vectors": 22853,
+      "certified": true,
+      "result_sha256": "44728e147035baae15a675a3e41bc50f81cf38bfc08822607344d690d1279afc",
+      "case": "si-20",
+      "upf_sha256": {
+        "Si.upf": "39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 5.329070518200751e-15
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "strict",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/si-20/strict/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/si-20/strict/output"
+      ],
+      "input": "# Manifest SHA-256: d0a122864e41991e60b862f3e81761f9c1124d73e70f7c4892bea7130d23f635\n# Si.upf SHA-256: 39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282\n[system]\nname = \"si bulk smoke, no accuracy claim\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[0,5.13,5.13],[5.13,0,5.13],[5.13,5.13,0]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0,0,0]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.25,0.25,0.25]\n[pseudopotentials]\nSi = \"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Si.upf\"\n[basis]\necutwfc_ry = 40\nkgrid = [4,4,4]\nkshift = [0.5,0.5,0.5]\n[xc]\nfunctional = \"pbe\"\ndensity_floor = 1e-10\n[spin]\nmode = \"unpolarized\"\n[scf]\nmax_iterations = 120\nmixing = \"kerker-pulay\"\nmixing_beta = 0.3\nmixing_q0_inverse_bohr = 1.0\nextra_bands = 4\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nthreads = 1\n",
+      "input_sha256": "19e3cc3e05ba805332fc0e56723e92d03b11af5b9180e118451cf7f44da552f5",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 3.375077994860476e-14,
+        "max_occupied_eigenvalue_difference_ha": 9.25526275064037e-09,
+        "max_first_empty_eigenvalue_difference_ha": 8.225757408553136e-09,
+        "max_eigenvalue_difference_ha": 9.25526275064037e-09,
+        "density_l2_bohr_m3_over_2": 1.917187762620747e-08,
+        "density_hartree_energy_ha": 9.092476952939934e-16,
+        "density_hartree_norm_sqrt_ha": 3.015373435072335e-08
+      },
+      "exit_code": 0,
+      "wall_s": 6.503282833,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": -8.462317836906042,
+      "eigenvalues_ha": [
+        [
+          -0.20310321365100206,
+          0.1704948626271112,
+          0.21856651534570415,
+          0.2185665153469079,
+          0.3204836346955105
+        ],
+        [
+          -0.1646553638961572,
+          0.05906069170831091,
+          0.14418806857810262,
+          0.20067801868560947,
+          0.32889093239105494
+        ],
+        [
+          -0.12169612176606691,
+          -0.019080437767131787,
+          0.1453948672175804,
+          0.17166971087164615,
+          0.3096262386362508
+        ],
+        [
+          -0.18334149712171188,
+          0.110455995315697,
+          0.1806471691227019,
+          0.18363876498259535,
+          0.3078939690380402
+        ],
+        [
+          -0.16465536389631388,
+          0.059060691709361145,
+          0.14418806857777822,
+          0.20067801868488122,
+          0.3288909323903047
+        ],
+        [
+          -0.1447599585424706,
+          0.04758471165757425,
+          0.1308177561768247,
+          0.14795210430871744,
+          0.27877499673804373
+        ],
+        [
+          -0.08312629368354685,
+          -0.025788962245292448,
+          0.07985983439545088,
+          0.12029975738048318,
+          0.31705656748551936
+        ],
+        [
+          -0.12906848939127222,
+          0.014242768648952363,
+          0.1070433398484874,
+          0.15825778361581797,
+          0.33496175559541536
+        ],
+        [
+          -0.12169612176667095,
+          -0.01908043776579812,
+          0.14539486721734707,
+          0.17166971087117594,
+          0.30962623863560895
+        ],
+        [
+          -0.08312629368410888,
+          -0.025788962244260125,
+          0.07985983439497797,
+          0.12029975738046499,
+          0.3170565674856767
+        ],
+        [
+          -0.08959962192136534,
+          -0.022053307166782683,
+          0.1028657464443776,
+          0.13048528365188067,
+          0.2619231200375002
+        ],
+        [
+          -0.12906848939139123,
+          0.014242768649431763,
+          0.10704333984840209,
+          0.15825778361541926,
+          0.33496175559612834
+        ],
+        [
+          -0.18334149712176037,
+          0.11045599531648494,
+          0.18064716912223786,
+          0.1836387649822207,
+          0.30789396903790534
+        ],
+        [
+          -0.12906848939107793,
+          0.014242768648189215,
+          0.10704333984907456,
+          0.1582577836157657,
+          0.3349617555959784
+        ],
+        [
+          -0.12906848939106436,
+          0.014242768648206883,
+          0.10704333984898504,
+          0.1582577836158183,
+          0.3349617555956727
+        ],
+        [
+          -0.18334149712175252,
+          0.11045599531651298,
+          0.1806471691221412,
+          0.1836387649823205,
+          0.3078939690377943
+        ],
+        [
+          -0.16465536389629173,
+          0.059060691709392314,
+          0.14418806857774477,
+          0.20067801868493237,
+          0.3288909323902093
+        ],
+        [
+          -0.14475995854246468,
+          0.04758471165754635,
+          0.13081775617675354,
+          0.1479521043089365,
+          0.2787749967377255
+        ],
+        [
+          -0.08312629368356435,
+          -0.02578896224520766,
+          0.07985983439531892,
+          0.12029975738048408,
+          0.3170565674858532
+        ],
+        [
+          -0.1290684893912341,
+          0.014242768648962434,
+          0.10704333984839323,
+          0.1582577836158731,
+          0.3349617555950344
+        ],
+        [
+          -0.1447599585425059,
+          0.047584711657929886,
+          0.13081775617587463,
+          0.1479521043092614,
+          0.27877499673850814
+        ],
+        [
+          -0.14841385057806378,
+          0.010634236886609593,
+          0.18923487808564507,
+          0.18923487808669293,
+          0.28981558872751445
+        ],
+        [
+          -0.10329446864757941,
+          -0.014815680536726617,
+          0.08221988387237322,
+          0.15978468986784408,
+          0.29680288009116074
+        ],
+        [
+          -0.08959962192115221,
+          -0.022053307167188032,
+          0.10286574644415572,
+          0.13048528365235418,
+          0.26192312003782176
+        ],
+        [
+          -0.08312629368426139,
+          -0.025788962244062345,
+          0.07985983439547979,
+          0.12029975737989837,
+          0.3170565674851924
+        ],
+        [
+          -0.10329446864780215,
+          -0.014815680536403376,
+          0.08221988387283474,
+          0.15978468986741404,
+          0.29680288009009836
+        ],
+        [
+          -0.10329446864779582,
+          -0.014815680536310619,
+          0.08221988387269381,
+          0.15978468986724617,
+          0.2968028800906187
+        ],
+        [
+          -0.08312629368421938,
+          -0.025788962244084168,
+          0.07985983439542109,
+          0.12029975737992225,
+          0.3170565674851039
+        ],
+        [
+          -0.12906848939136786,
+          0.014242768649420983,
+          0.10704333984840095,
+          0.15825778361542095,
+          0.3349617555960549
+        ],
+        [
+          -0.08959962192137805,
+          -0.022053307166807423,
+          0.10286574644435488,
+          0.1304852836521013,
+          0.26192312003700935
+        ],
+        [
+          -0.08312629368408309,
+          -0.025788962244194837,
+          0.0798598343947822,
+          0.12029975738049416,
+          0.3170565674859274
+        ],
+        [
+          -0.12169612176660122,
+          -0.01908043776584437,
+          0.14539486721738082,
+          0.17166971087114327,
+          0.30962623863554656
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.125,
+            -0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.375,
+            -0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            0.125
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            -0.375
+          ],
+          "weight": 0.03125
+        },
+        {
+          "fractional": [
+            0.375,
+            -0.125,
+            -0.125
+          ],
+          "weight": 0.03125
+        }
+      ],
+      "scf_iterations": 15,
+      "davidson_steps": 2865,
+      "h_vectors": 16526,
+      "certified": true,
+      "result_sha256": "2a31c6a82942b33d47017a708cdef57b768d540fb40fff63b1791b3aa5f06c1a",
+      "case": "si-20",
+      "upf_sha256": {
+        "Si.upf": "39822757f53f36e3bf3bfb779356152a8d3f21199c7db9dd5a931e5d18c45282"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 5.329070518200751e-15
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "tight",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/mgo-40/tight/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/mgo-40/tight/output"
+      ],
+      "input": "# Manifest SHA-256: d0a122864e41991e60b862f3e81761f9c1124d73e70f7c4892bea7130d23f635\n# Mg.upf SHA-256: 15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14\n# O.upf SHA-256: 2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11\n[system]\nname = \"mgo bulk smoke, no accuracy claim\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[0,3.975,3.975],[3.975,0,3.975],[3.975,3.975,0]]\n[[system.atoms]]\nspecies = \"Mg\"\nfractional = [0,0,0]\n[[system.atoms]]\nspecies = \"O\"\nfractional = [0.5,0.5,0.5]\n[pseudopotentials]\nMg = \"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Mg.upf\"\nO = \"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/O.upf\"\n[basis]\necutwfc_ry = 80\nkgrid = [3,3,3]\nkshift = [0.5,0.5,0.5]\n[xc]\nfunctional = \"pbe\"\ndensity_floor = 1e-10\n[spin]\nmode = \"unpolarized\"\n[scf]\nmax_iterations = 120\nmixing = \"kerker-pulay\"\nmixing_beta = 0.3\nmixing_q0_inverse_bohr = 1.0\nextra_bands = 4\nthreads = 1\nenergy_tolerance_ha = 1e-12\ndensity_residual_tolerance = 1e-09\neigen_tolerance = 1e-10\n",
+      "input_sha256": "5c84ce2f002db3820970cce5a09d0362fe39e7a175d083c7ad36cd127d08ad31",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": -7.105427357601002e-14,
+        "max_occupied_eigenvalue_difference_ha": 2.2412743883037933e-10,
+        "max_first_empty_eigenvalue_difference_ha": 2.244182617516799e-10,
+        "max_eigenvalue_difference_ha": 2.244182617516799e-10,
+        "density_l2_bohr_m3_over_2": 5.772131273193545e-10,
+        "density_hartree_energy_ha": 4.372082684512028e-19,
+        "density_hartree_norm_sqrt_ha": 6.612172626687864e-10
+      },
+      "exit_code": 0,
+      "wall_s": 8.449682832999997,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": -76.05088085171107,
+      "eigenvalues_ha": [
+        [
+          -2.3609144158382454,
+          -1.140144644914905,
+          -1.139164410468386,
+          -1.1391644104683518,
+          -0.32391404485686526,
+          0.2423874787866271,
+          0.2914567079385368,
+          0.29145670793857703,
+          0.5260521503366851
+        ],
+        [
+          -2.360672665625286,
+          -1.1417189953860913,
+          -1.1401605442767653,
+          -1.1394116646581318,
+          -0.28826305402095675,
+          0.15516154360868953,
+          0.24104233125019073,
+          0.2741434503374295,
+          0.629564397693993
+        ],
+        [
+          -2.360753414461967,
+          -1.1409722933051898,
+          -1.1398064687760052,
+          -1.1395614332984705,
+          -0.30168964220048294,
+          0.1850066160613596,
+          0.26599868485840633,
+          0.2716949473009704,
+          0.6048535659404206
+        ],
+        [
+          -2.3606726656252865,
+          -1.1417189953861155,
+          -1.1401605442767657,
+          -1.1394116646581125,
+          -0.2882630540209584,
+          0.15516154360866935,
+          0.24104233125021032,
+          0.2741434503374207,
+          0.6295643976940138
+        ],
+        [
+          -2.360593218426892,
+          -1.1417030198271358,
+          -1.1404164104589976,
+          -1.139961165336276,
+          -0.2800104567982162,
+          0.15958748732779549,
+          0.22840542154765758,
+          0.2544646732108785,
+          0.6606652437471724
+        ],
+        [
+          -2.3605927832839537,
+          -1.1414859454619215,
+          -1.1405740018873294,
+          -1.1400765741261942,
+          -0.27809681559521987,
+          0.1665853640633768,
+          0.2078409374011397,
+          0.25137069067322615,
+          0.6881636090251811
+        ],
+        [
+          -2.3607534144619815,
+          -1.1409722933052173,
+          -1.1398064687760097,
+          -1.1395614332984536,
+          -0.3016896422004808,
+          0.18500661606136093,
+          0.26599868485840145,
+          0.2716949473009631,
+          0.6048535659404415
+        ],
+        [
+          -2.3605927832839657,
+          -1.1414859454619035,
+          -1.1405740018873451,
+          -1.1400765741261911,
+          -0.2780968155952161,
+          0.16658536406339555,
+          0.20784093740113863,
+          0.25137069067320694,
+          0.6881636090251685
+        ],
+        [
+          -2.360753414461965,
+          -1.1409722933052155,
+          -1.1398064687760041,
+          -1.1395614332984507,
+          -0.3016896422004867,
+          0.18500661606133914,
+          0.26599868485839995,
+          0.27169494730099725,
+          0.604853565940435
+        ],
+        [
+          -2.360672665625275,
+          -1.1417189953861413,
+          -1.1401605442767477,
+          -1.1394116646581043,
+          -0.28826305402095553,
+          0.15516154360864268,
+          0.2410423312502131,
+          0.2741434503374575,
+          0.629564397694017
+        ],
+        [
+          -2.3605932184268865,
+          -1.1417030198271492,
+          -1.140416410458972,
+          -1.1399611653362864,
+          -0.2800104567982128,
+          0.15958748732778655,
+          0.22840542154768123,
+          0.25446467321084143,
+          0.6606652437472024
+        ],
+        [
+          -2.360592783283964,
+          -1.1414859454619393,
+          -1.1405740018873258,
+          -1.1400765741261791,
+          -0.2780968155952163,
+          0.16658536406334593,
+          0.20784093740116402,
+          0.2513706906732231,
+          0.6881636090252036
+        ],
+        [
+          -2.3605932184268985,
+          -1.1417030198271436,
+          -1.14041641045896,
+          -1.1399611653363044,
+          -0.2800104567982096,
+          0.15958748732776973,
+          0.2284054215477049,
+          0.2544646732108512,
+          0.6606652437471595
+        ],
+        [
+          -2.3606721871179537,
+          -1.1425206771596095,
+          -1.13940797668836,
+          -1.139407976688331,
+          -0.2859017117091236,
+          0.12824158090536625,
+          0.2741379019903008,
+          0.2741379019903483,
+          0.5902657511176458
+        ]
+      ],
+      "occupied": 8,
+      "kpoints": [
+        {
+          "fractional": [
+            0.16666666666666666,
+            0.16666666666666666,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            0.16666666666666666,
+            -0.5
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            0.16666666666666666,
+            -0.16666666666666663
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.5,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.5,
+            -0.5
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.5,
+            -0.16666666666666663
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.16666666666666663,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.16666666666666663,
+            -0.5
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.16666666666666663,
+            -0.16666666666666663
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            0.16666666666666666,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            0.16666666666666666,
+            -0.5
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            0.16666666666666666,
+            -0.16666666666666663
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            -0.5,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            -0.5,
+            -0.5
+          ],
+          "weight": 0.037037037037037035
+        }
+      ],
+      "scf_iterations": 20,
+      "davidson_steps": 1371,
+      "h_vectors": 12356,
+      "certified": true,
+      "result_sha256": "105d50de71f529af87fd48207344b321948ed9ace470b8d203d2f1c82bb91025",
+      "case": "mgo-40",
+      "upf_sha256": {
+        "Mg.upf": "15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14",
+        "O.upf": "2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": -7.105427357601002e-14
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "tighter",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/mgo-40/tighter/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/mgo-40/tighter/output"
+      ],
+      "input": "# Manifest SHA-256: d0a122864e41991e60b862f3e81761f9c1124d73e70f7c4892bea7130d23f635\n# Mg.upf SHA-256: 15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14\n# O.upf SHA-256: 2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11\n[system]\nname = \"mgo bulk smoke, no accuracy claim\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[0,3.975,3.975],[3.975,0,3.975],[3.975,3.975,0]]\n[[system.atoms]]\nspecies = \"Mg\"\nfractional = [0,0,0]\n[[system.atoms]]\nspecies = \"O\"\nfractional = [0.5,0.5,0.5]\n[pseudopotentials]\nMg = \"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Mg.upf\"\nO = \"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/O.upf\"\n[basis]\necutwfc_ry = 80\nkgrid = [3,3,3]\nkshift = [0.5,0.5,0.5]\n[xc]\nfunctional = \"pbe\"\ndensity_floor = 1e-10\n[spin]\nmode = \"unpolarized\"\n[scf]\nmax_iterations = 120\nmixing = \"kerker-pulay\"\nmixing_beta = 0.3\nmixing_q0_inverse_bohr = 1.0\nextra_bands = 4\nthreads = 1\nenergy_tolerance_ha = 1e-13\ndensity_residual_tolerance = 1e-10\neigen_tolerance = 1e-11\n",
+      "input_sha256": "a8a3134e51296172edd503c2b669951ae57d72ddafbfa9e58f8a7219370c4f0c",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 0.0,
+        "max_occupied_eigenvalue_difference_ha": 0.0,
+        "max_first_empty_eigenvalue_difference_ha": 0.0,
+        "max_eigenvalue_difference_ha": 0.0,
+        "density_l2_bohr_m3_over_2": 0.0,
+        "density_hartree_energy_ha": 0.0,
+        "density_hartree_norm_sqrt_ha": 0.0
+      },
+      "exit_code": 0,
+      "wall_s": 9.028400208000008,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": -76.050880851711,
+      "eigenvalues_ha": [
+        [
+          -2.360914415942729,
+          -1.1401446448885768,
+          -1.1391644105572032,
+          -1.1391644105571983,
+          -0.3239140447112012,
+          0.2423874788029277,
+          0.29145670815740654,
+          0.2914567081574132,
+          0.5260521503176077
+        ],
+        [
+          -2.3606726657299077,
+          -1.1417189954408413,
+          -1.1401605442826814,
+          -1.1394116647466288,
+          -0.2882630538591251,
+          0.15516154371356522,
+          0.24104233130622874,
+          0.27414345056138206,
+          0.6295643976534469
+        ],
+        [
+          -2.360753414566549,
+          -1.1409722933928372,
+          -1.1398064687497138,
+          -1.1395614333869097,
+          -0.3016896420449951,
+          0.18500661619992548,
+          0.2659986848760439,
+          0.2716949475217992,
+          0.6048535659908193
+        ],
+        [
+          -2.3606726657299077,
+          -1.141718995440836,
+          -1.1401605442826843,
+          -1.1394116647466237,
+          -0.2882630538591247,
+          0.1551615437135671,
+          0.24104233130622735,
+          0.27414345056137823,
+          0.6295643976534461
+        ],
+        [
+          -2.3605932185315703,
+          -1.141703019832197,
+          -1.1404164105145067,
+          -1.1399611654243722,
+          -0.28001045663083857,
+          0.1595874873818251,
+          0.22840542166439665,
+          0.2544646734325373,
+          0.6606652435524121
+        ],
+        [
+          -2.36059278338865,
+          -1.1414859455223136,
+          -1.1405740019751485,
+          -1.140076574126449,
+          -0.27809681542733544,
+          0.1665853641802974,
+          0.20784093755792193,
+          0.2513706907364912,
+          0.688163608992679
+        ],
+        [
+          -2.360753414566544,
+          -1.1409722933928463,
+          -1.139806468749709,
+          -1.1395614333869024,
+          -0.30168964204498966,
+          0.185006616199924,
+          0.2659986848760447,
+          0.2716949475217938,
+          0.6048535659908215
+        ],
+        [
+          -2.360592783388641,
+          -1.1414859455223154,
+          -1.1405740019751462,
+          -1.1400765741264498,
+          -0.2780968154273361,
+          0.1665853641802928,
+          0.20784093755792163,
+          0.25137069073649293,
+          0.6881636089926796
+        ],
+        [
+          -2.360753414566545,
+          -1.1409722933928508,
+          -1.1398064687497056,
+          -1.1395614333869069,
+          -0.30168964204499565,
+          0.18500661619992614,
+          0.26599868487604444,
+          0.2716949475217934,
+          0.6048535659908194
+        ],
+        [
+          -2.360672665729909,
+          -1.1417189954408469,
+          -1.1401605442826808,
+          -1.1394116647466261,
+          -0.28826305385912415,
+          0.1551615437135702,
+          0.24104233130622363,
+          0.2741434505613769,
+          0.6295643976534456
+        ],
+        [
+          -2.3605932185315694,
+          -1.1417030198322025,
+          -1.1404164105145118,
+          -1.1399611654243669,
+          -0.2800104566308344,
+          0.15958748738182743,
+          0.22840542166439384,
+          0.25446467343253776,
+          0.6606652435524184
+        ],
+        [
+          -2.3605927833886406,
+          -1.1414859455223143,
+          -1.140574001975145,
+          -1.1400765741264491,
+          -0.27809681542733694,
+          0.16658536418030037,
+          0.20784093755791852,
+          0.25137069073649015,
+          0.6881636089926847
+        ],
+        [
+          -2.360593218531575,
+          -1.1417030198322025,
+          -1.1404164105145094,
+          -1.1399611654243755,
+          -0.2800104566308395,
+          0.15958748738182862,
+          0.22840542166438876,
+          0.25446467343253976,
+          0.6606652435524134
+        ],
+        [
+          -2.3606721872225793,
+          -1.1425206771319938,
+          -1.1394079767768799,
+          -1.1394079767768721,
+          -0.2859017115464052,
+          0.12824158092271032,
+          0.27413790221442824,
+          0.27413790221443696,
+          0.5902657508932275
+        ]
+      ],
+      "occupied": 8,
+      "kpoints": [
+        {
+          "fractional": [
+            0.16666666666666666,
+            0.16666666666666666,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            0.16666666666666666,
+            -0.5
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            0.16666666666666666,
+            -0.16666666666666663
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.5,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.5,
+            -0.5
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.5,
+            -0.16666666666666663
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.16666666666666663,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.16666666666666663,
+            -0.5
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.16666666666666663,
+            -0.16666666666666663
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            0.16666666666666666,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            0.16666666666666666,
+            -0.5
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            0.16666666666666666,
+            -0.16666666666666663
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            -0.5,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            -0.5,
+            -0.5
+          ],
+          "weight": 0.037037037037037035
+        }
+      ],
+      "scf_iterations": 22,
+      "davidson_steps": 1504,
+      "h_vectors": 13318,
+      "certified": true,
+      "result_sha256": "808f1363702d297fc28f3fa105a3ff50428494e470abbead6690c09d4b4914e9",
+      "case": "mgo-40",
+      "upf_sha256": {
+        "Mg.upf": "15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14",
+        "O.upf": "2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": -7.105427357601002e-14
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "strict",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/mgo-40/strict/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/mgo-40/strict/output"
+      ],
+      "input": "# Manifest SHA-256: d0a122864e41991e60b862f3e81761f9c1124d73e70f7c4892bea7130d23f635\n# Mg.upf SHA-256: 15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14\n# O.upf SHA-256: 2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11\n[system]\nname = \"mgo bulk smoke, no accuracy claim\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[0,3.975,3.975],[3.975,0,3.975],[3.975,3.975,0]]\n[[system.atoms]]\nspecies = \"Mg\"\nfractional = [0,0,0]\n[[system.atoms]]\nspecies = \"O\"\nfractional = [0.5,0.5,0.5]\n[pseudopotentials]\nMg = \"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/Mg.upf\"\nO = \"/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex/O.upf\"\n[basis]\necutwfc_ry = 80\nkgrid = [3,3,3]\nkshift = [0.5,0.5,0.5]\n[xc]\nfunctional = \"pbe\"\ndensity_floor = 1e-10\n[spin]\nmode = \"unpolarized\"\n[scf]\nmax_iterations = 120\nmixing = \"kerker-pulay\"\nmixing_beta = 0.3\nmixing_q0_inverse_bohr = 1.0\nextra_bands = 4\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nthreads = 1\n",
+      "input_sha256": "dd28e4e18863f785b756d97af0c4d822eaa009aad32aa085f217cce5aab91056",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 3.836930773104541e-13,
+        "max_occupied_eigenvalue_difference_ha": 3.103548529281852e-09,
+        "max_first_empty_eigenvalue_difference_ha": 1.0810319306386873e-09,
+        "max_eigenvalue_difference_ha": 3.103548529281852e-09,
+        "density_l2_bohr_m3_over_2": 8.578502366775603e-09,
+        "density_hartree_energy_ha": 1.3910727173248905e-16,
+        "density_hartree_norm_sqrt_ha": 1.1794374579963495e-08
+      },
+      "exit_code": 0,
+      "wall_s": 8.279860834000004,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": -76.05088085171062,
+      "eigenvalues_ha": [
+        [
+          -2.3609144165863225,
+          -1.1401446463500118,
+          -1.1391644117414863,
+          -1.139164411741403,
+          -0.32391404218200825,
+          0.24238748129992133,
+          0.29145671102891463,
+          0.29145671102910675,
+          0.5260521503612982
+        ],
+        [
+          -2.360672666372777,
+          -1.1417189967061239,
+          -1.14016054566784,
+          -1.1394116659324571,
+          -0.28826305090688187,
+          0.15516154495029766,
+          0.2410423337650655,
+          0.2741434532123306,
+          0.6295643971957263
+        ],
+        [
+          -2.360753415209665,
+          -1.1409722945792238,
+          -1.1398064702123076,
+          -1.1395614345723921,
+          -0.30168963926542425,
+          0.1850066176866905,
+          0.2659986878670958,
+          0.2716949500936444,
+          0.6048535659485783
+        ],
+        [
+          -2.360672666372776,
+          -1.1417189967061652,
+          -1.140160545667849,
+          -1.1394116659324005,
+          -0.2882630509068803,
+          0.155161544950197,
+          0.24104233376515696,
+          0.27414345321233263,
+          0.6295643971957718
+        ],
+        [
+          -2.360593219174181,
+          -1.1417030212201298,
+          -1.1404164117797566,
+          -1.1399611666109426,
+          -0.28001045354925336,
+          0.1595874888006537,
+          0.22840542380146647,
+          0.2544646757781729,
+          0.6606652424714177
+        ],
+        [
+          -2.3605927840312786,
+          -1.1414859467753478,
+          -1.1405740031631335,
+          -1.1400765755248548,
+          -0.27809681232379063,
+          0.1665853654756982,
+          0.2078409392460997,
+          0.2513706934412387,
+          0.6881636085159947
+        ],
+        [
+          -2.3607534152096674,
+          -1.1409722945792904,
+          -1.139806470212305,
+          -1.1395614345723348,
+          -0.30168963926542147,
+          0.185006617686676,
+          0.26599868786708264,
+          0.27169495009364314,
+          0.6048535659486357
+        ],
+        [
+          -2.3605927840312746,
+          -1.1414859467753053,
+          -1.1405740031631952,
+          -1.1400765755248439,
+          -0.2780968123237941,
+          0.16658536547579061,
+          0.20784093924607613,
+          0.2513706934411453,
+          0.688163608515959
+        ],
+        [
+          -2.3607534152096576,
+          -1.1409722945792935,
+          -1.139806470212304,
+          -1.1395614345723262,
+          -0.3016896392654191,
+          0.18500661768658908,
+          0.26599868786707664,
+          0.27169495009378053,
+          0.60485356594862
+        ],
+        [
+          -2.3606726663727846,
+          -1.1417189967062435,
+          -1.140160545667792,
+          -1.139411665932384,
+          -0.2882630509068764,
+          0.15516154495007572,
+          0.24104233376517428,
+          0.27414345321246997,
+          0.629564397195778
+        ],
+        [
+          -2.3605932191741807,
+          -1.1417030212202002,
+          -1.1404164117796913,
+          -1.1399611666109466,
+          -0.2800104535492515,
+          0.15958748880063162,
+          0.22840542380157847,
+          0.2544646757780371,
+          0.660665242471495
+        ],
+        [
+          -2.3605927840312737,
+          -1.1414859467754264,
+          -1.1405740031631153,
+          -1.1400765755247995,
+          -0.2780968123237884,
+          0.16658536547557132,
+          0.20784093924620542,
+          0.2513706934412462,
+          0.6881636085160647
+        ],
+        [
+          -2.3605932191741785,
+          -1.141703021220191,
+          -1.1404164117796494,
+          -1.1399611666110072,
+          -0.2800104535492504,
+          0.15958748880055126,
+          0.2284054238017004,
+          0.2544646757780367,
+          0.6606652424713815
+        ],
+        [
+          -2.3606721878654358,
+          -1.1425206785955968,
+          -1.1394079779627198,
+          -1.1394079779626385,
+          -0.28590170856242936,
+          0.1282415821229758,
+          0.2741379048711117,
+          0.2741379048713104,
+          0.590265750020161
+        ]
+      ],
+      "occupied": 8,
+      "kpoints": [
+        {
+          "fractional": [
+            0.16666666666666666,
+            0.16666666666666666,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            0.16666666666666666,
+            -0.5
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            0.16666666666666666,
+            -0.16666666666666663
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.5,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.5,
+            -0.5
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.5,
+            -0.16666666666666663
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.16666666666666663,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.16666666666666663,
+            -0.5
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            0.16666666666666666,
+            -0.16666666666666663,
+            -0.16666666666666663
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            0.16666666666666666,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            0.16666666666666666,
+            -0.5
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            0.16666666666666666,
+            -0.16666666666666663
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            -0.5,
+            0.16666666666666666
+          ],
+          "weight": 0.07407407407407407
+        },
+        {
+          "fractional": [
+            -0.5,
+            -0.5,
+            -0.5
+          ],
+          "weight": 0.037037037037037035
+        }
+      ],
+      "scf_iterations": 18,
+      "davidson_steps": 1306,
+      "h_vectors": 12202,
+      "certified": true,
+      "result_sha256": "bd4e9bf64474348a16490259d039860e078d1813c9168177b24cf7c3242afdf0",
+      "case": "mgo-40",
+      "upf_sha256": {
+        "Mg.upf": "15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14",
+        "O.upf": "2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": -7.105427357601002e-14
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "tight",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn20-skew/tight/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn20-skew/tight/output"
+      ],
+      "input": "[system]\nname = \"syn20-skew\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[12, 0, 0], [1, 6, 0], [0.5, 0.3, 6]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.026000000000000002, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.026000000000000002, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.026000000000000002, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.026000000000000002, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.22599999999999998, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.22599999999999998, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.22599999999999998, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.22599999999999998, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.426, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.426, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.426, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.426, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.626, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.626, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.626, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.626, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.826, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.826, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.826, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.826, 0.605, 0.66]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-4f44xis0/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-12\ndensity_residual_tolerance = 1e-09\neigen_tolerance = 1e-10\n",
+      "input_sha256": "0c584c7cc21201d4ec37444a3c671778f1b776ca512e907755377001c41e394f",
+      "convergence_profile": "strict",
+      "status": "failed",
+      "accuracy": null,
+      "exit_code": 4,
+      "wall_s": 0.030384707999999705,
+      "wall_scope": "process, including startup",
+      "stderr": " davidson_iterations: 18, operator_applications: 108, davidson_iterations_per_k: [18], operator_applications_per_k: [108], timings: PhaseTimings { potential: 18.416\u00b5s, diagonalization: 2.286375ms, density: 80.125\u00b5s, energy: 118.791\u00b5s, mixing: 0ns } }), timings: PhaseTimings { potential: 18.333\u00b5s, diagonalization: 627.792\u00b5s, density: 79\u00b5s, energy: 117\u00b5s, mixing: 27.875\u00b5s } }, IterationRecord { iteration: 9, energy: EnergyAudit { xc_floor: None, nlcc: None, kinetic: 40.8102436690702, local: 57.23996516317504, local_zero_mode: 58.05791935188691, nonlocal: 100.51278850883517, hartree: 0.1424112300624992, xc: -15.593967623049377, ewald: -40.09248558862522, band_sum: 178.46305057965725, double_counting: -20.09994676142306, band_form: 143.01895535946824, harris_foulkes: 143.00288403805655, functional_difference_bound: 0.0875324158589924 }, energy_change: Some(-27.94197229713882), density_residual: 0.004992242401511885, max_eigen_residual: 1.936276804781537e-14, requested_eigen_tolerance: 1.0000000000000001e-11, davidson_iterations: 10, operator_applications: 80, davidson_iterations_per_k: [10], operator_applications_per_k: [80], charge_error: 1.5987211554602255e-15, input_charge_error: 1.7763568394002506e-16, min_density: 0.04928730862493432, mixing_fraction: 1.0, mixer_reset: false, density_contraction: Some(251722641.69089282), mixing_history_used: Some(6), mixing_resets: 0, mixing_raw_recovery: false, fixed_point_certificate: None, timings: PhaseTimings { potential: 19.291\u00b5s, diagonalization: 1.454458ms, density: 88.125\u00b5s, energy: 130.083\u00b5s, mixing: 30.083\u00b5s } }, IterationRecord { iteration: 10, energy: EnergyAudit { xc_floor: None, nlcc: None, kinetic: 40.81024366907024, local: 57.23996516317489, local_zero_mode: 58.05791935188687, nonlocal: 100.51278850883521, hartree: 0.1531882781846092, xc: -15.59622306679244, ewald: -40.09248558862522, band_sum: 178.4630505796499, double_counting: -20.09994676143047, band_form: 143.02747696384728, harris_foulkes: 143.00288403805507, functional_difference_bound: 0.10056490773529267 }, energy_change: Some(0.008521604378984193), density_residual: 0.0051563241887629795, max_eigen_residual: 1.3930896245167725e-12, requested_eigen_tolerance: 0.0004992242401511886, davidson_iterations: 1, operator_applications: 24, davidson_iterations_per_k: [1], operator_applications_per_k: [24], charge_error: 1.0658141036401502e-15, input_charge_error: 3.552713678800501e-16, min_density: 0.04672274676039784, mixing_fraction: 1.0, mixer_reset: false, density_contraction: Some(1.0328673517939357), mixing_history_used: Some(6), mixing_resets: 0, mixing_raw_recovery: false, fixed_point_certificate: None, timings: PhaseTimings { potential: 20.459\u00b5s, diagonalization: 284.958\u00b5s, density: 86.708\u00b5s, energy: 129.708\u00b5s, mixing: 31.959\u00b5s } }, IterationRecord { iteration: 11, energy: EnergyAudit { xc_floor: None, nlcc: None, kinetic: 40.81024366907038, local: 57.23996516317459, local_zero_mode: 58.05791935188689, nonlocal: 100.51278850883541, hartree: 0.1490287916257735, xc: -15.595352423996141, ewald: -40.09248558862522, band_sum: 178.46305057963755, double_counting: -20.099946761442755, band_form: 143.02418812008472, harris_foulkes: 143.00288403806167, functional_difference_bound: 0.09553477835331387 }, energy_change: Some(-0.0032888437624478684), density_residual: 0.005093621898060265, max_eigen_residual: 1.9470040763654845e-13, requested_eigen_tolerance: 0.0005156324188762979, davidson_iterations: 1, operator_applications: 24, davidson_iterations_per_k: [1], operator_applications_per_k: [24], charge_error: 1.2434497875801752e-15, input_charge_error: 1.5987211554602255e-15, min_density: 0.04771943595793602, mixing_fraction: 1.0, mixer_reset: false, density_contraction: Some(0.987839730705963), mixing_history_used: None, mixing_resets: 0, mixing_raw_recovery: false, fixed_point_certificate: None, timings: PhaseTimings { potential: 20.333\u00b5s, diagonalization: 283.291\u00b5s, density: 87.875\u00b5s, energy: 129.666\u00b5s, mixing: 0ns } }] }\n",
+      "error": "CLI exit 4",
+      "case": "syn20-skew",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": false,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": null
+      }
+    },
+    {
+      "code": "BAANDI",
+      "label": "tighter",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn20-skew/tighter/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn20-skew/tighter/output"
+      ],
+      "input": "[system]\nname = \"syn20-skew\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[12, 0, 0], [1, 6, 0], [0.5, 0.3, 6]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.026000000000000002, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.026000000000000002, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.026000000000000002, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.026000000000000002, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.22599999999999998, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.22599999999999998, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.22599999999999998, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.22599999999999998, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.426, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.426, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.426, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.426, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.626, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.626, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.626, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.626, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.826, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.826, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.826, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.826, 0.605, 0.66]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-4f44xis0/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-13\ndensity_residual_tolerance = 1e-10\neigen_tolerance = 1e-11\n",
+      "input_sha256": "f89b7bc6d6904001c63b815cd5d3410cf5fb1f1229cd979a7e41914cd4e696f5",
+      "convergence_profile": "strict",
+      "status": "failed",
+      "accuracy": null,
+      "exit_code": 4,
+      "wall_s": 0.027204417000007197,
+      "wall_scope": "process, including startup",
+      "stderr": "8800501e-16, min_density: 0.07087679760161794, mixing_fraction: 1.0, mixer_reset: false, density_contraction: Some(0.05096387596771878), mixing_history_used: Some(6), mixing_resets: 0, mixing_raw_recovery: false, fixed_point_certificate: None, timings: PhaseTimings { potential: 18.417\u00b5s, diagonalization: 429.292\u00b5s, density: 78.208\u00b5s, energy: 116.791\u00b5s, mixing: 28.042\u00b5s } }, IterationRecord { iteration: 9, energy: EnergyAudit { xc_floor: None, nlcc: None, kinetic: 40.81024366907019, local: 57.23996516317504, local_zero_mode: 58.057919351886895, nonlocal: 100.51278850883519, hartree: 0.13816110824386763, xc: -15.593078462407345, ewald: -40.09248558862522, band_sum: 178.46305057965725, double_counting: -20.099946761423052, band_form: 143.01559439829163, harris_foulkes: 143.00288403805655, functional_difference_bound: 0.08239313339861823 }, energy_change: Some(-27.945333258315372), density_residual: 0.004926031340076813, max_eigen_residual: 3.9589531703720367e-14, requested_eigen_tolerance: 1.983231372425448e-12, davidson_iterations: 26, operator_applications: 153, davidson_iterations_per_k: [26], operator_applications_per_k: [153], charge_error: 1.4210854715202005e-15, input_charge_error: 1.7763568394002506e-16, min_density: 0.049441245229951226, mixing_fraction: 1.0, mixer_reset: false, density_contraction: Some(248384097.21465766), mixing_history_used: Some(6), mixing_resets: 0, mixing_raw_recovery: false, fixed_point_certificate: None, timings: PhaseTimings { potential: 18.542\u00b5s, diagonalization: 3.269833ms, density: 77.75\u00b5s, energy: 116.917\u00b5s, mixing: 27.333\u00b5s } }, IterationRecord { iteration: 10, energy: EnergyAudit { xc_floor: None, nlcc: None, kinetic: 40.81024366907024, local: 57.239965163174865, local_zero_mode: 58.05791935188685, nonlocal: 100.51278850883517, hartree: 0.1531882678799591, xc: -15.596223051747067, ewald: -40.09248558862522, band_sum: 178.46305057965, double_counting: -20.09994676143022, band_form: 143.0274769685879, harris_foulkes: 143.00288403805524, functional_difference_bound: 0.10056488238354923 }, energy_change: Some(0.011882570296222639), density_residual: 0.005156324034356642, max_eigen_residual: 1.244340387816118e-12, requested_eigen_tolerance: 0.0004926031340076813, davidson_iterations: 1, operator_applications: 24, davidson_iterations_per_k: [1], operator_applications_per_k: [24], charge_error: 7.105427357601002e-16, input_charge_error: 1.2434497875801752e-15, min_density: 0.04805667403929573, mixing_fraction: 1.0, mixer_reset: false, density_contraction: Some(1.046750148015956), mixing_history_used: Some(6), mixing_resets: 0, mixing_raw_recovery: false, fixed_point_certificate: None, timings: PhaseTimings { potential: 18.333\u00b5s, diagonalization: 257.542\u00b5s, density: 77.25\u00b5s, energy: 117.042\u00b5s, mixing: 29.042\u00b5s } }, IterationRecord { iteration: 11, energy: EnergyAudit { xc_floor: None, nlcc: None, kinetic: 40.810243669070346, local: 57.23996516317455, local_zero_mode: 58.05791935188685, nonlocal: 100.51278850883533, hartree: 0.1401798445286975, xc: -15.593500778734306, ewald: -40.09248558862522, band_sum: 178.46305057963755, double_counting: -20.09994676144272, band_form: 143.01719081824945, harris_foulkes: 143.0028840380616, functional_difference_bound: 0.08483418599457036 }, energy_change: Some(-0.010286150338572497), density_residual: 0.004957590738373519, max_eigen_residual: 1.8458375631039358e-13, requested_eigen_tolerance: 0.0005156324034356642, davidson_iterations: 1, operator_applications: 24, davidson_iterations_per_k: [1], operator_applications_per_k: [24], charge_error: 7.105427357601002e-16, input_charge_error: 3.552713678800501e-16, min_density: 0.048984819645391205, mixing_fraction: 1.0, mixer_reset: false, density_contraction: Some(0.9614583384095025), mixing_history_used: None, mixing_resets: 0, mixing_raw_recovery: false, fixed_point_certificate: None, timings: PhaseTimings { potential: 18.458\u00b5s, diagonalization: 254.708\u00b5s, density: 78.292\u00b5s, energy: 117.208\u00b5s, mixing: 0ns } }] }\n",
+      "error": "CLI exit 4",
+      "case": "syn20-skew",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": false,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": null
+      }
+    },
+    {
+      "code": "BAANDI",
+      "label": "strict",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn20-skew/strict/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn20-skew/strict/output"
+      ],
+      "input": "[system]\nname = \"syn20-skew\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[12, 0, 0], [1, 6, 0], [0.5, 0.3, 6]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.026000000000000002, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.026000000000000002, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.026000000000000002, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.026000000000000002, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.22599999999999998, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.22599999999999998, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.22599999999999998, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.22599999999999998, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.426, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.426, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.426, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.426, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.626, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.626, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.626, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.626, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.826, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.826, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.826, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.826, 0.605, 0.66]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-4f44xis0/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nthreads = 1\n",
+      "input_sha256": "2c2c409fbd7448f70963b2c60e3abcfe52570ba3053d190a9ca14529a56d80c6",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": null,
+      "exit_code": 0,
+      "wall_s": 0.02265683299999921,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": 170.960927656607,
+      "eigenvalues_ha": [
+        [
+          2.1514481401895975,
+          2.3190843405998143,
+          2.6535750247715324,
+          2.653575024771541,
+          2.8994546731549242,
+          2.9026923428368407,
+          2.976781485418072,
+          3.0186462831944034,
+          4.533598036487276,
+          5.732620548494672,
+          5.732620548494685,
+          6.441089773294264,
+          6.441089773294279,
+          6.982820407366778,
+          6.982820407366784,
+          7.133782073358109,
+          7.133782073358116,
+          8.149342939405866,
+          8.149342939405871,
+          8.222380310146995,
+          9.293229302247727
+        ]
+      ],
+      "occupied": 20,
+      "kpoints": [
+        {
+          "fractional": [
+            0,
+            0,
+            0
+          ],
+          "weight": 1
+        }
+      ],
+      "scf_iterations": 6,
+      "davidson_steps": 15,
+      "h_vectors": 255,
+      "certified": true,
+      "result_sha256": "8af3498a555f41d0d723f75b04e5d70510af5b8fa5e4dbf1f99ca1682b4ff596",
+      "case": "syn20-skew",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": false,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": null
+      }
+    },
+    {
+      "code": "BAANDI",
+      "label": "tight",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn4-elongated/tight/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn4-elongated/tight/output"
+      ],
+      "input": "[system]\nname = \"syn4-elongated\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 16]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.08]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.33]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.58]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.83]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-ivqe0ep4/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-12\ndensity_residual_tolerance = 1e-09\neigen_tolerance = 1e-10\n",
+      "input_sha256": "e0d917902ea1f4b1f421da647c822f88e1f7fedddf8f5d3f0c603275062ad5ce",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 0.0,
+        "max_occupied_eigenvalue_difference_ha": 0.0,
+        "max_first_empty_eigenvalue_difference_ha": 0.0,
+        "max_eigenvalue_difference_ha": 0.0,
+        "density_l2_bohr_m3_over_2": 0.0,
+        "density_hartree_energy_ha": 0.0,
+        "density_hartree_norm_sqrt_ha": 0.0
+      },
+      "exit_code": 0,
+      "wall_s": 0.00984499999999855,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": 2.642829065994616,
+      "eigenvalues_ha": [
+        [
+          0.7012399339708808,
+          1.0149961429795153,
+          1.0151322128935998,
+          1.1744373660721537,
+          1.4024431854300519
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0,
+            0,
+            0
+          ],
+          "weight": 1
+        }
+      ],
+      "scf_iterations": 11,
+      "davidson_steps": 41,
+      "h_vectors": 215,
+      "certified": true,
+      "result_sha256": "2389da670875e63745e69679b63e70bdead37ea71f9adce2ddf490f78a042ba3",
+      "case": "syn4-elongated",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 0.0
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "tighter",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn4-elongated/tighter/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn4-elongated/tighter/output"
+      ],
+      "input": "[system]\nname = \"syn4-elongated\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 16]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.08]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.33]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.58]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.83]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-ivqe0ep4/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-13\ndensity_residual_tolerance = 1e-10\neigen_tolerance = 1e-11\n",
+      "input_sha256": "362de1e36b8c261aaf01d3315a1753f38c8d39b76f6ea69da5fe7978f8ffee69",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 0.0,
+        "max_occupied_eigenvalue_difference_ha": 0.0,
+        "max_first_empty_eigenvalue_difference_ha": 0.0,
+        "max_eigenvalue_difference_ha": 0.0,
+        "density_l2_bohr_m3_over_2": 0.0,
+        "density_hartree_energy_ha": 0.0,
+        "density_hartree_norm_sqrt_ha": 0.0
+      },
+      "exit_code": 0,
+      "wall_s": 0.010053790999990042,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": 2.642829065994616,
+      "eigenvalues_ha": [
+        [
+          0.7012399339708808,
+          1.0149961429795153,
+          1.0151322128935998,
+          1.1744373660721537,
+          1.4024431854300519
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0,
+            0,
+            0
+          ],
+          "weight": 1
+        }
+      ],
+      "scf_iterations": 11,
+      "davidson_steps": 42,
+      "h_vectors": 220,
+      "certified": true,
+      "result_sha256": "e7279b684ba560aba24373e2c19505b37972781daba400e273fc12e77be74b8e",
+      "case": "syn4-elongated",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 0.0
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "strict",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn4-elongated/strict/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn4-elongated/strict/output"
+      ],
+      "input": "[system]\nname = \"syn4-elongated\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[4, 0, 0], [0, 4, 0], [0, 0, 16]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.08]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.33]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.58]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.13, 0.21, 0.83]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-ivqe0ep4/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nthreads = 1\n",
+      "input_sha256": "2a91e45f6391139755388a72cdca988e5b9a6e41878e8b7d040e2b0e546f3eaf",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 5.329070518200751e-15,
+        "max_occupied_eigenvalue_difference_ha": 2.0791657284746634e-10,
+        "max_first_empty_eigenvalue_difference_ha": 2.812003963015286e-10,
+        "max_eigenvalue_difference_ha": 2.812003963015286e-10,
+        "density_l2_bohr_m3_over_2": 1.3759316198168999e-09,
+        "density_hartree_energy_ha": 4.47796049489944e-18,
+        "density_hartree_norm_sqrt_ha": 2.1161192062120318e-09
+      },
+      "exit_code": 0,
+      "wall_s": 0.009519749999995497,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": 2.642829065994621,
+      "eigenvalues_ha": [
+        [
+          0.7012399337629642,
+          1.014996142824886,
+          1.0151322128635005,
+          1.1744373662014387,
+          1.4024431857112523
+        ]
+      ],
+      "occupied": 4,
+      "kpoints": [
+        {
+          "fractional": [
+            0,
+            0,
+            0
+          ],
+          "weight": 1
+        }
+      ],
+      "scf_iterations": 9,
+      "davidson_steps": 31,
+      "h_vectors": 171,
+      "certified": true,
+      "result_sha256": "d042d79b7e01a65d08af03a7ed0e5791225854bdf8473213ab0f956597de1b6d",
+      "case": "syn4-elongated",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 0.0
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "tight",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn4-slab/tight/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn4-slab/tight/output"
+      ],
+      "input": "[system]\nname = \"syn4-slab\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[8, 0, 0], [0, 8, 0], [0, 0, 20]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.065, 0.105, 0.45]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.065, 0.605, 0.45]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.565, 0.105, 0.45]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.565, 0.605, 0.45]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-ipddjeau/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-12\ndensity_residual_tolerance = 1e-09\neigen_tolerance = 1e-10\n",
+      "input_sha256": "c09335d44709f15609c16eb1274b539f638fe9003d67615bc57460b4760a1539",
+      "convergence_profile": "strict",
+      "status": "failed",
+      "accuracy": null,
+      "exit_code": 3,
+      "wall_s": 0.09468112500000814,
+      "wall_scope": "process, including startup",
+      "stderr": "error: NOT CONVERGED: iteration budget exhausted\n",
+      "error": "CLI exit 3",
+      "case": "syn4-slab",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": false,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": null
+      }
+    },
+    {
+      "code": "BAANDI",
+      "label": "tighter",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn4-slab/tighter/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn4-slab/tighter/output"
+      ],
+      "input": "[system]\nname = \"syn4-slab\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[8, 0, 0], [0, 8, 0], [0, 0, 20]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.065, 0.105, 0.45]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.065, 0.605, 0.45]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.565, 0.105, 0.45]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.565, 0.605, 0.45]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-ipddjeau/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-13\ndensity_residual_tolerance = 1e-10\neigen_tolerance = 1e-11\n",
+      "input_sha256": "5776c8e6d4d0059a39c32c71a8bd80278aa7e5a8588871ba3ea2bdacc4375d1e",
+      "convergence_profile": "strict",
+      "status": "failed",
+      "accuracy": null,
+      "exit_code": 3,
+      "wall_s": 0.09450620900000217,
+      "wall_scope": "process, including startup",
+      "stderr": "error: NOT CONVERGED: iteration budget exhausted\n",
+      "error": "CLI exit 3",
+      "case": "syn4-slab",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": false,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": null
+      }
+    },
+    {
+      "code": "BAANDI",
+      "label": "strict",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn4-slab/strict/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn4-slab/strict/output"
+      ],
+      "input": "[system]\nname = \"syn4-slab\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[8, 0, 0], [0, 8, 0], [0, 0, 20]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.065, 0.105, 0.45]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.065, 0.605, 0.45]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.565, 0.105, 0.45]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.565, 0.605, 0.45]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-ipddjeau/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nthreads = 1\n",
+      "input_sha256": "c5bb2f8342ab616ffa7d53bd3a36c50ee6921112dca38484f8ca9605da23cf35",
+      "convergence_profile": "strict",
+      "status": "failed",
+      "accuracy": null,
+      "exit_code": 3,
+      "wall_s": 0.09286891599998626,
+      "wall_scope": "process, including startup",
+      "stderr": "error: NOT CONVERGED: iteration budget exhausted\n",
+      "error": "CLI exit 3",
+      "case": "syn4-slab",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": false,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": null
+      }
+    },
+    {
+      "code": "BAANDI",
+      "label": "tight",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn16-gamma/tight/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn16-gamma/tight/output"
+      ],
+      "input": "[system]\nname = \"syn16-gamma\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[12, 0, 0], [0, 8, 0], [0, 0, 8]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.605, 0.66]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-vuq9ema5/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-12\ndensity_residual_tolerance = 1e-09\neigen_tolerance = 1e-10\n",
+      "input_sha256": "784667f0e461fc74caa66184c6b2a3d1ff4d75f46a2bc31c788f5313f5448023",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 1.4210854715202004e-14,
+        "max_occupied_eigenvalue_difference_ha": 3.9787861894069465e-10,
+        "max_first_empty_eigenvalue_difference_ha": 2.8357716175264613e-10,
+        "max_eigenvalue_difference_ha": 3.9787861894069465e-10,
+        "density_l2_bohr_m3_over_2": 1.915986741323308e-09,
+        "density_hartree_energy_ha": 4.389856919754085e-17,
+        "density_hartree_norm_sqrt_ha": 6.625599534950845e-09
+      },
+      "exit_code": 0,
+      "wall_s": 0.042154375000009736,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": 22.188464154113873,
+      "eigenvalues_ha": [
+        [
+          1.0220148697361118,
+          1.0680153276590652,
+          1.2050931663241813,
+          1.2050931667430076,
+          1.2435383791105012,
+          1.2435386288878996,
+          1.4397904610244843,
+          1.4397904673569886,
+          1.4454408653040494,
+          1.4748844385953122,
+          1.4748844390961189,
+          1.5086462919522716,
+          1.5086508801815472,
+          1.5364023986206936,
+          1.6036105219407175,
+          1.6290428450292203,
+          1.6734761905711295
+        ]
+      ],
+      "occupied": 16,
+      "kpoints": [
+        {
+          "fractional": [
+            0,
+            0,
+            0
+          ],
+          "weight": 1
+        }
+      ],
+      "scf_iterations": 12,
+      "davidson_steps": 98,
+      "h_vectors": 773,
+      "certified": true,
+      "result_sha256": "ab4c71391490ae1cae50043bb6d0402b041545f1c0c77ab6db6dbc900ae28411",
+      "case": "syn16-gamma",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 1.4210854715202004e-14
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "tighter",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn16-gamma/tighter/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn16-gamma/tighter/output"
+      ],
+      "input": "[system]\nname = \"syn16-gamma\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[12, 0, 0], [0, 8, 0], [0, 0, 8]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.605, 0.66]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-vuq9ema5/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-13\ndensity_residual_tolerance = 1e-10\neigen_tolerance = 1e-11\n",
+      "input_sha256": "57f80f0075b92cd371de2adea02fee4a6a33b088e146b2ba4b5234fcfb0bf919",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 0.0,
+        "max_occupied_eigenvalue_difference_ha": 0.0,
+        "max_first_empty_eigenvalue_difference_ha": 0.0,
+        "max_eigenvalue_difference_ha": 0.0,
+        "density_l2_bohr_m3_over_2": 0.0,
+        "density_hartree_energy_ha": 0.0,
+        "density_hartree_norm_sqrt_ha": 0.0
+      },
+      "exit_code": 0,
+      "wall_s": 0.04470354199999349,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": 22.18846415411386,
+      "eigenvalues_ha": [
+        [
+          1.0220148697356901,
+          1.0680153276591038,
+          1.2050931662308393,
+          1.2050931668364102,
+          1.243538379108951,
+          1.2435386288875416,
+          1.4397904614223629,
+          1.4397904669743629,
+          1.4454408652922865,
+          1.474884438597704,
+          1.474884439098357,
+          1.508646291908431,
+          1.5086508802160563,
+          1.5364023986242719,
+          1.603610521945028,
+          1.6290428450249594,
+          1.6734761908547067
+        ]
+      ],
+      "occupied": 16,
+      "kpoints": [
+        {
+          "fractional": [
+            0,
+            0,
+            0
+          ],
+          "weight": 1
+        }
+      ],
+      "scf_iterations": 14,
+      "davidson_steps": 106,
+      "h_vectors": 893,
+      "certified": true,
+      "result_sha256": "538bb0726d5e8a0e3f7dc9c2df47dae7a4dc0c3903853740e2d32c9f697242de",
+      "case": "syn16-gamma",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 1.4210854715202004e-14
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "strict",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn16-gamma/strict/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn16-gamma/strict/output"
+      ],
+      "input": "[system]\nname = \"syn16-gamma\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[12, 0, 0], [0, 8, 0], [0, 0, 8]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.605, 0.66]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-vuq9ema5/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nthreads = 1\n",
+      "input_sha256": "07ca8f9d44adbaa3b2ebb30ee33a2144f7abf815c5fd22ac2f36fd7b27cb1aba",
+      "convergence_profile": "strict",
+      "status": "ok",
+      "accuracy": {
+        "energy_difference_ha": 7.105427357601002e-15,
+        "max_occupied_eigenvalue_difference_ha": 9.579190995978593e-09,
+        "max_first_empty_eigenvalue_difference_ha": 1.5869983105432084e-09,
+        "max_eigenvalue_difference_ha": 9.579190995978593e-09,
+        "density_l2_bohr_m3_over_2": 1.440774483202847e-08,
+        "density_hartree_energy_ha": 1.9155228860200945e-15,
+        "density_hartree_norm_sqrt_ha": 4.3766686943611515e-08
+      },
+      "exit_code": 0,
+      "wall_s": 0.03597387499999627,
+      "wall_scope": "process, including startup",
+      "stderr": "",
+      "total_energy_ha": 22.188464154113866,
+      "eigenvalues_ha": [
+        [
+          1.022014866919178,
+          1.0680153240506685,
+          1.2050931566516483,
+          1.2050931691985716,
+          1.2435383770112158,
+          1.243538626824174,
+          1.439790457042683,
+          1.4397904642837538,
+          1.4454408664374594,
+          1.4748844374893322,
+          1.4748844379918726,
+          1.5086462912312009,
+          1.50865088353608,
+          1.5364023984037913,
+          1.6036105177820497,
+          1.6290428419703489,
+          1.6734761892677084
+        ]
+      ],
+      "occupied": 16,
+      "kpoints": [
+        {
+          "fractional": [
+            0,
+            0,
+            0
+          ],
+          "weight": 1
+        }
+      ],
+      "scf_iterations": 10,
+      "davidson_steps": 69,
+      "h_vectors": 593,
+      "certified": true,
+      "result_sha256": "66be5201f9b083b14ec83ee492f59e2b978358cfa972e803e869eeabcc6a57b6",
+      "case": "syn16-gamma",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": true,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": 1.4210854715202004e-14
+      },
+      "reference_label": "tighter"
+    },
+    {
+      "code": "BAANDI",
+      "label": "tight",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn16-k211/tight/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn16-k211/tight/output"
+      ],
+      "input": "[system]\nname = \"syn16-k211\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[12, 0, 0], [0, 8, 0], [0, 0, 8]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.605, 0.66]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-ad85ryh0/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkgrid = [2, 1, 1]\nkshift = [0, 0, 0]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-12\ndensity_residual_tolerance = 1e-09\neigen_tolerance = 1e-10\n",
+      "input_sha256": "45fc8ee88bc51ba2a0499a4a58632406d65a1d6ded1432fdd7bb55871c92d47a",
+      "convergence_profile": "strict",
+      "status": "failed",
+      "accuracy": null,
+      "exit_code": 3,
+      "wall_s": 0.18483675000000233,
+      "wall_scope": "process, including startup",
+      "stderr": "error: NOT CONVERGED: iteration budget exhausted\n",
+      "error": "CLI exit 3",
+      "case": "syn16-k211",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": false,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": null
+      }
+    },
+    {
+      "code": "BAANDI",
+      "label": "tighter",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn16-k211/tighter/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn16-k211/tighter/output"
+      ],
+      "input": "[system]\nname = \"syn16-k211\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[12, 0, 0], [0, 8, 0], [0, 0, 8]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.605, 0.66]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-ad85ryh0/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkgrid = [2, 1, 1]\nkshift = [0, 0, 0]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nthreads = 1\nenergy_tolerance_ha = 1e-13\ndensity_residual_tolerance = 1e-10\neigen_tolerance = 1e-11\n",
+      "input_sha256": "48e7af4d2dfb6ba09592a620b93d4a26f5d9329bbf96788478820944023b25c4",
+      "convergence_profile": "strict",
+      "status": "failed",
+      "accuracy": null,
+      "exit_code": 3,
+      "wall_s": 0.1805145419999974,
+      "wall_scope": "process, including startup",
+      "stderr": "error: NOT CONVERGED: iteration budget exhausted\n",
+      "error": "CLI exit 3",
+      "case": "syn16-k211",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": false,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": null
+      }
+    },
+    {
+      "code": "BAANDI",
+      "label": "strict",
+      "command": [
+        "/Users/mino/Develop/rust-dft-wt/P17A-STANDARD-PROFILE/target/release/dft-cli",
+        "run",
+        "/tmp/p17a-strict-evidence/syn16-k211/strict/input.toml",
+        "--output-dir",
+        "/tmp/p17a-strict-evidence/syn16-k211/strict/output"
+      ],
+      "input": "[system]\nname = \"syn16-k211\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[12, 0, 0], [0, 8, 0], [0, 0, 8]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.0325, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2825, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5325, 0.605, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.105, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.105, 0.66]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.605, 0.16]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7825, 0.605, 0.66]\n[pseudopotentials]\nSi = \"/var/folders/9k/54pp1kpn0yq2m15wqgn7rnb40000gn/T/p17a-pseudo-ad85ryh0/synthetic.UPF\"\n[basis]\necutwfc_ry = 3\nkgrid = [2, 1, 1]\nkshift = [0, 0, 0]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 1\nmax_iterations = 100\nmixing = \"pulay\"\nmixing_beta = 0.5\nenergy_tolerance_ha = 1e-8\ndensity_residual_tolerance = 1e-7\nthreads = 1\n",
+      "input_sha256": "f46b7874ca78f9a7d1f163ca3a080d326c20ced1aac46cf3a321d0aa5c07494d",
+      "convergence_profile": "strict",
+      "status": "failed",
+      "accuracy": null,
+      "exit_code": 3,
+      "wall_s": 0.20011650000000714,
+      "wall_scope": "process, including startup",
+      "stderr": "error: NOT CONVERGED: iteration budget exhausted\n",
+      "error": "CLI exit 3",
+      "case": "syn16-k211",
+      "upf_sha256": {
+        "synthetic.UPF": "49ede4355891a3bf316f1a651789302e2468e3dcb98aeac1a463f0a3c544ab51"
+      },
+      "reference_check": {
+        "verified": false,
+        "criterion": "two strict runs; |E_tight-E_tighter| <= 1e-12 Ha",
+        "energy_difference_ha": null
+      }
+    }
+  ],
+  "binary_sha256": "69bc852ac22393b73a24d979dd84d45ede1cdc06144d2010b04b5da8e9ea5d3f",
+  "experiment_thresholds_ha": [
+    5e-08,
+    5e-09,
+    5e-10
+  ],
+  "frozen_standard_default_ha": null,
+  "complete": false,
+  "strict_only": true,
+  "limitations": [
+    "A two-level energy plateau is empirical, not proof of the ground state or spectral completeness.",
+    "Hartree norm is sqrt(2*pi*Omega*sum_G!=0 |delta n_G|^2/G^2), density sphere only; no electron-count division.",
+    "L2 is sqrt(integral(delta n^2)), full real-space grid, in Bohr^-3/2.",
+    "QE exact Davidson/H-vector counts and optional densities are unavailable from the supported stdout protocol.",
+    "QE rounded equal energies do not establish zero delivered error; rounding bounds are reported.",
+    "Wall samples are local observations; no speedup acceptance or default calibration is implied."
+  ]
+}

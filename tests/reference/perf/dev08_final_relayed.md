@@ -242,3 +242,24 @@ Measurement quality: residual spread above 5 percent after 9 repeats for four sm
 
 Range statement for the README sentence "the k-point results did not change between the commits" (relaying session, 2026-11-05): for the four k-point cases (gamma, k222s, k222, k444s), both backends and T 1/4/8/16, the ratios between fdce016, 65036b7 and 7fe2e9a lie between 0.958 and 1.032, i.e. inside the measurement spread (several of the 0.26 to 0.88 s entries had single-outlier spreads above 5 percent after 9 repeats). "Did not change" therefore means "no change beyond measurement spread", not bit-identical timing.
 
+## Part 6: QE real-wavefunction Gamma path (`K_POINTS gamma`) on dev08, relayed 2026-11-05
+
+Same pw.x, same inputs as part 2 except three lines (checked by diff): `K_POINTS gamma` instead of `K_POINTS automatic / 1 1 1 0 0 0`, `disk_io='nowf'` instead of `'low'`, outdir. Unchanged: nbnd (si8 20, gamma 8), nr1/2/3 (36, 25), nosym=.true., ecutwfc=30, diago_full_acc, mixing_beta, structure. 5 runs each in `/scr/mino/rustdft/qe_gammapath/`. QE build flags (`~/fq/builds/orig-mpi-dfti/make.inc`): FFLAGS `-O3 -g -fallow-argument-mismatch -fopenmp`, CFLAGS `-O3`, MKL 2026.1 (gf_lp64, gnu_thread, core) with DFTI FFT, no `-march=native` and no AVX-512 flags (AVX-512 only through MKL run-time dispatch, like BAANDI through rustfft and faer); run with OMP_NUM_THREADS=1 MKL_NUM_THREADS=1. BAANDI on dev08 has never been built with RUSTFLAGS or `.cargo/config` (all measurements are default release builds). Total energies identical to the complex k=0 path (si8 -62.64362757 Ry, gamma -14.59106606 Ry).
+
+```
+case   conv     N   internal(s)  spr%   CPU     external  SCF iters  E(Ry)
+si8    1e-8     1    0.3660      2.8   0.3520  0.4713     12   -62.64362757
+si8    1e-8     8    0.1440      7.1   0.1320  0.2696     12   -62.64362757
+si8    1e-8    16    0.1600      0.0   0.1420  0.3294     12   -62.64362757
+si8    1e-12    1    0.5000      0.0   0.4900  0.6084     18   -62.64362757
+si8    1e-12    8    0.1900      0.0   0.1720  0.3212     19   -62.64362757
+si8    1e-12   16    0.2300      0.0   0.2100  0.3933     22   -62.64362757
+gamma  1e-8     1    0.0700      0.0   0.0620  0.1769      8   -14.59106606
+gamma  1e-12    1    0.0840     12.5   0.0740  0.1880     11   -14.59106606
+```
+Gamma path versus complex k=0 (time ratio complex over gamma path): si8 1e-8 N1 1.87, N8 1.46, N16 1.44; si8 1e-12 N1 1.82, N8 1.53, N16 1.30; gamma 1e-8 N1 1.29, 1e-12 N1 1.43. SCF iterations gamma path / complex: si8 12/14 (1e-8), 18/20 (1e-12). Entries with QE internal time below 0.3 s are not valid comparisons (timer resolution 0.01 s).
+
+si8 1e-8 N=1 call counts: h_psi 94 calls 0.18 s (complex 98 calls 0.36 s); vloc_psi 94 calls 0.17 s (98, 0.32 s); fftw 964 calls 0.13 s (2138, 0.29 s: 2.22x fewer); sum_band 12 calls 0.03 s (14, 0.07 s); Davidson real solver 0.23 s (complex 0.45 s); PWSCF 0.37 s (0.68 s). Davidson steps in total 81 (complex 83). Per iteration (ethr, avg iterations, est_scf_acc Ry): 1: 1.00E-02, 3.0, 0.43627941; 2: 1.36E-03, 2.0, 0.01927863; 3: 6.02E-05, 4.0, 0.00058473; 4: 1.83E-06, 10.0, 0.00068686; 5: 1.83E-06, 2.0, 0.00002029; 6: 6.34E-08, 7.0, 0.00003409; 7: 6.34E-08, 2.0, 0.00001157; 8: 3.61E-08, 16.0, 0.00000089; 9: 2.77E-09, 12.0, 0.00000082; 10: 2.57E-09, 2.0, 0.00000029; 11: 8.98E-10, 17.0, 0.00000003; 12: 7.85E-11, 4.0, 6.6E-09. Reading: the h_psi call count is almost equal (94 versus 98) but the time is halved: the saving is per call (two real bands per complex FFT, real symmetric Davidson), not fewer calls.
+
+Target baseline for "match and exceed QE at equal cores" on the 8-atom Gamma case: QE best configuration 0.366 s (1e-8) and 0.500 s (1e-12) on one core versus BAANDI main 5.463 s (pure) and 4.814 s (MKL): ratios 14.9 and 13.2 (1e-8), 10.9 and 9.6 (1e-12).
+

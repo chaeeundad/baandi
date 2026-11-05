@@ -317,6 +317,23 @@ impl ScfSession {
                 },
                 other => other,
             })?;
+        if dft_solvers::replay::ENABLED {
+            // Measurement only: signed density residual, normalized FFT, density
+            // sphere and G=0 omission. Do not pass a signed field to the physical
+            // Hartree API, which correctly rejects negative electron densities.
+            assert_eq!(
+                self.problem.options.threads, 1,
+                "P15A requires ordered one-thread captures"
+            );
+            let dr2_ry = super::replay_capture::density_error_ry(
+                n,
+                &step.density,
+                &self.problem.cell,
+                self.problem.options.cutoff_hartree,
+                &mut self.problem.fft,
+            )?;
+            dft_solvers::replay::metric(iteration, dr2_ry, self.problem.electrons);
+        }
         let residual = density_distance(
             &step.density,
             n,

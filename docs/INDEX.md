@@ -92,3 +92,4 @@ Conventions: docs are English; one fact lives in one place and others link to it
 - `docs/performance/exceed-qe-plan.md`: gap model BAANDI versus QE best configuration, equal-accuracy definition, staged roadmap with cumulative ratio estimates, decisions, honest feasibility assessment (2026-11-05).
 
 - [P15B nonlocal band blocking](performance/optimization-log.md#p15b--band-blocked-nonlocal-traversal-2026-11-05-dev08-pending): bit-preserving kernel, synthetic and SCF measurements, and pending dev08 gates.
+- [Frozen-H stopping replay (P15A)](research/qe-study/replay-stopping-results.md): stopping predicates versus rate curves, Hartree-metric schedules, equal-accuracy scans and independent spectral-completeness findings; no default change.

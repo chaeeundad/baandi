@@ -1,0 +1,127 @@
+{
+  "task_id": "P15A-REPLAY-STOPPING",
+  "status": "DONE",
+  "changed_files": [
+    "crates/dft-engine/src/replay_capture.rs",
+    "crates/dft-engine/src/scf.rs",
+    "crates/dft-engine/src/session.rs",
+    "crates/dft-solvers/src/lib.rs",
+    "crates/dft-solvers/src/product_tests.rs",
+    "crates/dft-solvers/src/replay.rs",
+    "crates/dft-solvers/src/work_accounting.rs",
+    "docs/INDEX.md",
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/optimization-log.md",
+    "docs/research/qe-study/replay-stopping-results.md",
+    "tests/p15a_analysis_test.py",
+    "tests/p15a_analyze.py",
+    "tests/p15a_evidence_test.py",
+    "tests/p15a_replay.py",
+    "tests/p15a_verify.py",
+    "tests/reference/perf/p15a/README.md",
+    "tests/reference/perf/p15a/after.json",
+    "tests/reference/perf/p15a/analysis.json",
+    "tests/reference/perf/p15a/before.json",
+    "tests/reference/perf/p15a/default-after-t1.json",
+    "tests/reference/perf/p15a/default-after-t12.json",
+    "tests/reference/perf/p15a/default-after-t2.json",
+    "tests/reference/perf/p15a/default-after-t4.json",
+    "tests/reference/perf/p15a/default-after-t8.json",
+    "tests/reference/perf/p15a/default-before-t1.json",
+    "tests/reference/perf/p15a/default-before-t12.json",
+    "tests/reference/perf/p15a/default-before-t2.json",
+    "tests/reference/perf/p15a/default-before-t4.json",
+    "tests/reference/perf/p15a/default-before-t8.json",
+    "tests/reference/perf/p15a/identity-commands.json",
+    "tests/reference/perf/p15a/k444s-traces.json.gz",
+    "tests/reference/perf/p15a/k444s.json",
+    "tests/reference/perf/p15a/report.json",
+    "tests/reference/perf/p15a/si8-traces.json.gz",
+    "tests/reference/perf/p15a/si8.json",
+    "tests/reference/perf/p15a/syn16-gamma-traces.json.gz",
+    "tests/reference/perf/p15a/syn16-gamma.json",
+    "tests/reference/perf/p15a/syn16-k211-traces.json.gz",
+    "tests/reference/perf/p15a/syn16-k211.json",
+    "tests/reference/perf/p15a/syn20-skew-traces.json.gz",
+    "tests/reference/perf/p15a/syn20-skew.json",
+    "tests/reference/perf/p15a/syn4-elongated-traces.json.gz",
+    "tests/reference/perf/p15a/syn4-elongated.json",
+    "tests/reference/perf/p15a/syn4-slab-traces.json.gz",
+    "tests/reference/perf/p15a/syn4-slab.json",
+    "tests/reference/perf/p15a/tables.md",
+    "tests/reference/perf/p15a/verification.json"
+  ],
+  "design_choices": [
+    "Compile-time opt-in trace with const-generic zero-instrumentation production solver; no default or certificate changes.",
+    "Borrow each frozen Hamiltonian and identical starting columns synchronously; independent residual replays plus offline prefix stopping scans isolate stopping from expansion dynamics.",
+    "Independent dense spectra for small systems and selected large snapshots; true residual check <=1e-10 Ha; missed low roots explicitly retained as existing findings.",
+    "Normalized signed-density Fourier metric restricted to the density sphere, G=0 omitted; conditional QE schedule recomputed offline.",
+    "Native initial reduced solve distinguished from QE expansion counts; block and vector work kept separate."
+  ],
+  "commands": [
+    {
+      "command": "P15A_REPLAY=1 P15A_DENSE_IDS=0,7,14,128,288 cargo build --release -p dft-cli --offline",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p15a_replay.py --binary /tmp/p15a-oracle-cli --verify-repeat",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p15a_analyze.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p15a_analysis_test.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p15a_evidence_test.py",
+      "exit_code": 0
+    },
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo build --release -p dft-cli --offline",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p15a_verify.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "si8 ordinary native: 283 Rayleigh-Ritz rows, 2063 H vectors over 15 SCF iterations.",
+    "si8 same-numeric-threshold Ritz predicate: 39 rows, 749 H vectors; QE empty policy: 38/729; conditional Hartree ratchet: 54/1000.",
+    "k444s native 1686 rows / 10290 vectors; conditional ratcheted Ritz prefix 740 / 5631, no censored ordinary solves.",
+    "First 14 si8 iterations: native 257 rows (243 expansions); relayed QE ladder prefix 89 rows (75 expansions); relayed QE reports 83 expansions.",
+    "Seven fixture pairs: energy delta exactly 0 Ha; density, eigenvalues, scientific histories and certificates identical; repeated traces/dr2 identical.",
+    "Five default cases at T=1,2,4,8,12: all bench_scf identity gates pass; energy/density/work/certificate counts also identical across threads.",
+    "Initial si8 all-root tight replay vs dense occupied error: 0.110723486150125 Ha despite residual <=1e-10 Ha; native final skew occupied error vs dense: 1.51495175329287 Ha.",
+    "Slab and 16-atom mesh: unchanged exit 3 at 100 SCF iterations in both builds."
+  ],
+  "reference_comparison": "Stopping strength can explain the magnitude of the fixed-trajectory step gap; it is not an equal-accuracy speedup or a causal cross-code rate decomposition. QE relay lacks matched per-root accuracy traces. Dense oracles expose spectral completeness limitations even in strict residual replays. See docs/research/qe-study/replay-stopping-results.md.",
+  "limitations": [
+    "Prefix Ritz stopping preserves the measured correction trajectory; it does not implement QE direction selection or generalized basis.",
+    "First-iteration redo flags and thresholds are conditional on stored native dr2; actual redo work/new SCF histories are not inferred.",
+    "Two added fixtures do not converge; some prefix stops are censored. Dense-oracle availability is explicit.",
+    "Existing missed low roots are reported, not repaired. Tight-replay-only reference spectra are not independently certified complete.",
+    "No MKL/dev08 execution or accepted Mac timing claim. Dashboard uploads and canonical registry updates remain orchestrator-owned.",
+    "Initial relative UPF path failure (exit 3) and misplaced TRACE compile failure (exit 101) were corrected; retained in verification.json."
+  ],
+  "open_questions": [
+    "Independently reproduce and address spectral completeness, particularly degenerate initial subspaces and the final skewed synthetic state, in a separate algorithm ticket.",
+    "Obtain matched QE frozen-H per-root residual/eigenvalue traces and H block widths through the orchestrator before attributing a convergence-rate penalty."
+  ],
+  "commit": "Uncommitted on task/P15A-REPLAY-STOPPING as requested; baseline ce64b57437e2cb7b14804a4bdd15fb252dab6286."
+}

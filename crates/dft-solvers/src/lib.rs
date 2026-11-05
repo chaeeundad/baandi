@@ -2,6 +2,8 @@
 #[path = "mixing/kerker.rs"]
 pub mod kerker;
 pub mod mixing;
+#[doc(hidden)]
+pub mod replay;
 pub mod rmm;
 #[doc(hidden)]
 pub mod work_accounting;
@@ -315,6 +317,88 @@ impl Davidson {
         mode: SolveMode,
         policy: BandTolerances,
     ) -> Result<EigenSolution, SolverError> {
+        if !replay::ENABLED {
+            return self.solve_policy_traced::<false>(
+                operator,
+                initial,
+                preconditioner,
+                mode,
+                policy,
+                &mut replay::Trace::default(),
+            );
+        }
+        let mut trace = replay::Trace::new(self.bands, self.max_iterations);
+        let result = self.solve_policy_traced::<true>(
+            operator,
+            initial,
+            preconditioner,
+            mode,
+            policy,
+            &mut trace,
+        );
+        let mut record = replay::Record {
+            dense_values: None,
+            traces: vec![(
+                self.tolerance,
+                policy.strict_bands,
+                policy.buffer_tolerance,
+                result.is_ok(),
+                trace,
+            )],
+        };
+        // Independent solves from identical starts, with the same expansion,
+        // restart and preconditioner. The last solve is an all-root reference.
+        for tolerance in [1e-2_f64, 1e-3, 1e-4, 1e-5, 1e-6, 1e-10] {
+            let solver = Self {
+                tolerance,
+                ..self.clone()
+            };
+            let strict = if tolerance == 1e-10 {
+                self.bands
+            } else {
+                policy.strict_bands
+            };
+            let buffer = if strict == self.bands {
+                tolerance
+            } else {
+                tolerance.max(1e-5)
+            };
+            let mut trace = replay::Trace::new(self.bands, self.max_iterations);
+            let replayed = solver.solve_policy_traced::<true>(
+                operator,
+                initial,
+                preconditioner,
+                SolveMode {
+                    certify: tolerance == 1e-10 || mode.certify,
+                    ..mode
+                },
+                BandTolerances {
+                    strict_bands: strict,
+                    buffer_tolerance: buffer,
+                },
+                &mut trace,
+            );
+            record
+                .traces
+                .push((tolerance, strict, buffer, replayed.is_ok(), trace));
+        }
+        // An independent full-space oracle for the small synthetic fixtures.
+        // This diagnostic work is not charged to any replay trajectory.
+        record.dense_values = replay::dense_oracle(operator, self.bands)?;
+        replay::store(record);
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn solve_policy_traced<const TRACE: bool>(
+        &self,
+        operator: &dyn LinearOperator,
+        initial: Option<&ComplexMatrix>,
+        preconditioner: Option<&dyn Preconditioner>,
+        mode: SolveMode,
+        policy: BandTolerances,
+        trace: &mut replay::Trace,
+    ) -> Result<EigenSolution, SolverError> {
         let _phase = dft_numerics::pool::analysis::Span::new("davidson");
         let SolveMode {
             recurrence,
@@ -417,6 +501,9 @@ impl Davidson {
                         .then_some(self.bands - policy.strict_bands),
                 );
                 operator_applications += basis.cols();
+                if TRACE {
+                    trace.blocks += 1;
+                }
                 operator.apply_block(&basis, &mut cached)?;
                 if cached.rows() != n || cached.cols() != basis.cols() {
                     return Err(LinalgError::Dimension.into());
@@ -464,7 +551,12 @@ impl Davidson {
             } else {
                 work.apply(self.bands, Some(self.bands - policy.strict_bands));
                 operator_applications += self.bands;
-                residual(operator, &vectors, &values)?
+                {
+                    if TRACE {
+                        trace.blocks += 1;
+                    }
+                    residual(operator, &vectors, &values)?
+                }
             };
             let mut products_trusted = true;
             let mut residuals_certified = !recurrence;
@@ -475,11 +567,19 @@ impl Davidson {
             {
                 work.apply(self.bands, Some(self.bands - policy.strict_bands));
                 operator_applications += self.bands;
-                (residual_block, residuals) = residual(operator, &vectors, &values)?;
+                (residual_block, residuals) = {
+                    if TRACE {
+                        trace.blocks += 1;
+                    }
+                    residual(operator, &vectors, &values)?
+                };
                 residuals_certified = true;
                 products_trusted = meets_policy(&residuals);
                 // A failed certificate supplies actual correction directions and
                 // its actual maximum is recorded in this iteration's history.
+            }
+            if TRACE {
+                trace.step(basis.cols(), operator_applications, &values, &residuals);
             }
             let maximum = max_residual(&residuals);
             work.residuals(iteration, &residuals);
@@ -543,6 +643,9 @@ impl Davidson {
             if !cache_valid {
                 reduced_cache = None;
                 work.restart();
+                if TRACE {
+                    trace.restarts += 1;
+                }
                 let (restarted, valid) = if restart_products_saved
                     && products_trusted
                     && orthogonality_defect(&vectors) <= 1e-12
@@ -597,6 +700,9 @@ impl Davidson {
                 }
                 appended_products.resize_columns(extra.cols())?;
                 let products = &mut appended_products;
+                if TRACE {
+                    trace.blocks += 1;
+                }
                 operator.apply_block(&extra, products)?;
                 if products.rows() != n || products.cols() != extra.cols() {
                     return Err(LinalgError::Dimension.into());

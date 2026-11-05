@@ -1,5 +1,7 @@
 #[path = "collinear.rs"]
 pub mod collinear;
+#[path = "replay_capture.rs"]
+mod replay_capture;
 #[path = "session.rs"]
 pub mod session;
 use crate::Functional;

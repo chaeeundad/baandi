@@ -1,0 +1,106 @@
+{
+  "task_id": "P15A-REPLAY-STOPPING",
+  "baseline_commit": "ce64b57437e2cb7b14804a4bdd15fb252dab6286",
+  "branch": "task/P15A-REPLAY-STOPPING",
+  "uncommitted": true,
+  "host": "macOS-27.0.1-arm64-arm-64bit",
+  "source_sha256": {
+    "crates/dft-solvers/src/lib.rs": "e9447b29371c8fae7cb41a6eabc5c62a02f776f86c9f503f29ee6742da50d9a6",
+    "crates/dft-solvers/src/replay.rs": "0b218b1a0f9f7ebe3a7bef410c970bf45da1da58edafd781cd9f22c4e6d7bcd8",
+    "crates/dft-solvers/src/work_accounting.rs": "b3030f71bfc4fd80b1664bdc13affae93535141ccc6b9593077f5767aa784574",
+    "crates/dft-solvers/src/product_tests.rs": "520f362ed560b01aa6bdcfb6514dc163031531c1d4af48f2c1a894ebd2f5d224",
+    "crates/dft-engine/src/scf.rs": "288736a4dda4d687e0d0b57355add1c861cbe9b388c51295b6c4654463164dea",
+    "crates/dft-engine/src/session.rs": "ced0e2aa24f4c7968ec4422a6b823648380843756c867a560096883b1b4ec5e2",
+    "crates/dft-engine/src/replay_capture.rs": "541a0187eb526721e92748e5faf8c6c4995ad01213b10949ef5d6b8b1a82fbd3",
+    "tests/p15a_analysis_test.py": "e64535795db3cf93e23998e0bc2e7cc6b2774c33e50dc3f691046f272aca1c71",
+    "tests/p15a_analyze.py": "c2d2a9c6e68330ce48f7ae9c42b48dcd6d8feb1a3b54978d61918333dd616da2",
+    "tests/p15a_evidence_test.py": "3b64b8c9269fbe5788df16793aa4ffd1140d1ecfe3cb28ec41c5f9d03be3d274",
+    "tests/p15a_replay.py": "3797220bd7c40aff6823e51365e507bc2beee70cb90001c2b4d366bd3ed1f0f8",
+    "tests/p15a_verify.py": "9aac4a45b2c158b1f283f70db398fa5fbf38623dfb78d5eec8ac7658c77181f4"
+  },
+  "binary_sha256": {
+    "/tmp/p15a-before-cli": "3bac2130fac9b4f00f3c59a9a3e1162fc1432814778299ab2eccab15915b4965",
+    "/tmp/p15a-oracle-cli": "6a2c7c2858f979906eb5f32847dcd2fc2e63b57cd4678173033ff32ce8cea1cd",
+    "target/release/dft-cli": "608ad807b65462e11cae74621b025f67e5c3698d4cb66641508690b1b47153ed"
+  },
+  "commands": [
+    {
+      "command": "cargo build --release -p dft-cli --offline (baseline, before edits)",
+      "exit_code": 0
+    },
+    {
+      "command": "scripts/bench_scf.py --upf ../pseudo/Si.pz-vbc.UPF (initial relative-path attempt)",
+      "exit_code": 3
+    },
+    {
+      "command": "P15A_REPLAY=1 cargo build --release -p dft-cli --offline (initial misplaced TRACE insertion)",
+      "exit_code": 101
+    },
+    {
+      "command": "P15A_REPLAY=1 P15A_DENSE_IDS=0,7,14,128,288 cargo build --release -p dft-cli --offline",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p15a_replay.py --binary /tmp/p15a-oracle-cli --verify-repeat",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p15a_analyze.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p15a_analysis_test.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p15a_evidence_test.py",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --release -p dft-solvers replay_trace_matches --offline",
+      "exit_code": 0
+    },
+    {
+      "command": "scripts/check.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo build --release -p dft-cli --offline (final default, measurement variables unset)",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I tests/p15a_verify.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "default_gate_stdout": "PASS build\nPASS test\nPASS fmt\nPASS clippy\n",
+  "identity_gate_stdout": "threads 1 default-before-t1.json exit 0\nthreads 1 default-after-t1.json exit 0\nthreads 2 default-before-t2.json exit 0\nthreads 2 default-after-t2.json exit 0\nthreads 4 default-before-t4.json exit 0\nthreads 4 default-after-t4.json exit 0\nthreads 8 default-before-t8.json exit 0\nthreads 8 default-after-t8.json exit 0\nthreads 12 default-before-t12.json exit 0\nthreads 12 default-after-t12.json exit 0\nCross-thread energy/density/work/certificate identity: PASS\n",
+  "replay_stdout": "si8 0 16 {'scientific_history_identical': True, 'eigenvalues_identical': True, 'energy_delta_ha': 0.0, 'density_identical': True, 'history_length_equal': True}\nk444s 0 352 {'scientific_history_identical': True, 'eigenvalues_identical': True, 'energy_delta_ha': 0.0, 'density_identical': True, 'history_length_equal': True}\nsyn20-skew 0 7 {'scientific_history_identical': True, 'eigenvalues_identical': True, 'energy_delta_ha': 0.0, 'density_identical': True, 'history_length_equal': True}\nsyn4-elongated 0 10 {'scientific_history_identical': True, 'eigenvalues_identical': True, 'energy_delta_ha': 0.0, 'density_identical': True, 'history_length_equal': True}\nsyn4-slab 3 100 {'scientific_history_identical': True, 'eigenvalues_identical': True, 'energy_delta_ha': 0.0, 'density_identical': True, 'history_length_equal': True}\nsyn16-gamma 0 11 {'scientific_history_identical': True, 'eigenvalues_identical': True, 'energy_delta_ha': 0.0, 'density_identical': True, 'history_length_equal': True}\nsyn16-k211 3 200 {'scientific_history_identical': True, 'eigenvalues_identical': True, 'energy_delta_ha': 0.0, 'density_identical': True, 'history_length_equal': True}\n",
+  "default_binary_contains_replay_output_labels": false,
+  "qe_reference": {
+    "path": "tests/reference/perf/qe_iteration_data_relayed.md",
+    "sha256": "f845c9f7812416f1991dd3e45afaf3dd1b860d96d9924c908a12e01ee3c450b3",
+    "provenance": "Relayed dev08 QE 7.6, not reproduced here; see source for paths and limitations"
+  },
+  "limits": [
+    "All times are overlapping-work Mac observations, not speedup evidence.",
+    "Native-history offline redo flags do not predict changed redo work or SCF trajectories.",
+    "Synthetic slab and 16-atom mesh return exit 3 after 100 SCF iterations in both executables.",
+    "Independent dense checks uncover existing missing low roots; residual convergence is not spectral completeness.",
+    "No QE per-root matched-Hamiltonian rate oracle, MKL or dev08 run.",
+    "README generation leaves tracked README and figure files unchanged.",
+    "Canonical delegate registry is orchestrator-owned; no dashboard artifact/upload changed outside OWNED_FILES."
+  ]
+}

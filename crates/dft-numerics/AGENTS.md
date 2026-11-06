@@ -58,3 +58,40 @@ Parent binary SHA-256:
 final R1 binary SHA-256:
 `ac818152ad0e04b4963afc02a11a899801fe0729f2cc147db6023f796d61705b`.
 This is Mac correctness evidence only; no QE run or performance acceptance.
+
+## P26B real Gamma pairs (library only)
+
+`fused_pair.rs` owns `PairMap`, `PairPlan<P>`, the additive
+`PairDensityOperator` trait and `PairDensityWorkspace<P>`. The basis layer
+passes `HalfSphere::plus/minus` and its ordered FFT indices; numerics must not
+import dft-basis (that would reverse the crate dependency). PairMap validates
+G=0, coverage, unique indices and FFT mirrors. A supplied backend must use
+exactly those ordered indices. PairPlan checks shape and coefficient count.
+
+Local application packs ORC columns as a+i*b, calls the unchanged full-sphere
+local kernel, and separates by parity with sqrt(2) conversion. Column pairs
+are always (0,1), (2,3), ...; an odd tail has an exact zero partner. G=0 has
+only one real coordinate per band. Debug builds assert nonzero partner norms
+within 1e3; exact zero partners are exempt. Finite coefficient/potential
+validation remains the physics caller's responsibility.
+
+Only additive trait implementations were added to `fused.rs`, following the
+architect's explicit R2 ownership extension. Ordered and generic grid plans
+reuse their existing inverse stages; no existing method body, signature,
+visibility, arithmetic or fused test changed. Pair density performs one inverse
+and no forward transform, and skips only when both weights equal zero.
+
+Density uses fixed pieces of four pairs (eight columns), private plan scratch
+and one grid per piece, with ascending-piece-order reduction. This is a fixed
+arithmetic grouping, not a performance-tuned threshold. Scratch memory scales
+with ceil(bands/8), independently of thread budget. Recursive joins run on the
+supplied persistent WorkerPool, including nested installations. Numerical
+storage is allocated at construction and reused in calls; tests check stable
+buffer pointers/lengths/capacities. This does not instrument hidden allocations
+inside external backends. The existing allocation-free FFT contract applies.
+
+Validation, reproduction commands, numerical results and Mac-only timings:
+`docs/performance/real-gamma-r2-microbench.md`. The ignored release test is
+`cargo test --release -p dft-numerics --test real_gamma_pair pair_microbenchmark
+-- --ignored --nocapture`. No engine caller or performance default is changed;
+dev08 remains the performance acceptance authority.

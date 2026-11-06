@@ -577,6 +577,55 @@ impl<F: crate::Fft3d> FusedOperator for GridFusedPlan<F> {
     }
 }
 
+// Additive real-Gamma density entries. The existing single-band kernels above
+// remain untouched; reuse exactly their inverse stages and storage.
+impl crate::fused_pair::PairDensityOperator for OrderedFusedPlan {
+    fn accumulate_density_pair(
+        &mut self,
+        phi: &[C],
+        weights: [f64; 2],
+        volume: f64,
+        density: &mut [f64],
+    ) -> Result<(), FftError> {
+        self.validate(phi, density.len())?;
+        crate::fused_pair::validate_density(weights, volume)?;
+        if weights == [0.; 2] {
+            return Ok(());
+        }
+        self.inverse_xy(phi);
+        let [nx, ny, nz] = self.shape;
+        for xy in 0..nx * ny {
+            self.inverse_z(xy);
+            for z in 0..nz {
+                let value = self.kernels.lane[z];
+                density[xy * nz + z] +=
+                    (weights[0] * value.re * value.re + weights[1] * value.im * value.im) / volume;
+            }
+        }
+        Ok(())
+    }
+}
+impl<F: crate::Fft3d> crate::fused_pair::PairDensityOperator for GridFusedPlan<F> {
+    fn accumulate_density_pair(
+        &mut self,
+        phi: &[C],
+        weights: [f64; 2],
+        volume: f64,
+        density: &mut [f64],
+    ) -> Result<(), FftError> {
+        self.validate(phi, density.len())?;
+        crate::fused_pair::validate_density(weights, volume)?;
+        if weights == [0.; 2] {
+            return Ok(());
+        }
+        self.inverse(phi)?;
+        for (dst, value) in density.iter_mut().zip(&self.real) {
+            *dst += (weights[0] * value.re * value.re + weights[1] * value.im * value.im) / volume;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

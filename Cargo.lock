@@ -502,6 +502,7 @@ version = "0.1.0"
 dependencies = [
  "dft-basis",
  "dft-geometry",
+ "dft-numerics",
  "dft-physics",
  "dft-solvers",
  "dft-upf",

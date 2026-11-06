@@ -71,6 +71,8 @@ pub struct SpinIteration {
     pub mixing_fraction: f64,
 }
 pub struct CollinearResult {
+    pub gamma_real_used: bool,
+    pub gamma_real_fallback_reason: Option<String>,
     pub(crate) force_identity: crate::force_identity::ForceIdentity,
     pub finite_certificate: Option<super::finite_temperature::FiniteTCertificate>,
     pub finite_occupations: Option<OccupationWorkspace>,
@@ -792,6 +794,11 @@ impl CollinearProblem {
                         .collect()
                 });
                 return Ok(CollinearResult {
+                    gamma_real_used: false,
+                    gamma_real_fallback_reason: self.channels[0]
+                        .states
+                        .iter()
+                        .find_map(|s| s.gamma_real.fallback_reason.clone()),
                     force_identity: self.channels[0].force_model.with_policy(
                         crate::force_identity::OccupationIdentity::new(
                             &[&self.channels[0].occupations, &self.channels[1].occupations],

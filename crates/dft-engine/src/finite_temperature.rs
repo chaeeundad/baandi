@@ -103,6 +103,8 @@ pub struct FiniteTCertificate {
     pub edge_electrons: f64,
 }
 pub struct FiniteTResult {
+    pub gamma_real_used: bool,
+    pub gamma_real_fallback_reason: Option<String>,
     pub(crate) force_identity: crate::force_identity::ForceIdentity,
     pub converged: bool,
     pub iterations: usize,
@@ -159,9 +161,17 @@ impl FiniteTProblem {
         band_cap: usize,
     ) -> Result<Self, ScfError> {
         validate_options(&options, theta_ha, band_cap)?;
+        let mut gamma_real = crate::GammaRealDiagnostics::default();
+        if options.gamma_real != crate::GammaReal::Off {
+            gamma_real.fallback(options.gamma_real, "Fermi-Dirac occupations")?;
+        }
         options.bands = Some(band_cap);
         let mut problem =
             ScfProblem::construct(cell, atoms, potentials, options, points, None, Some(0))?;
+        problem.gamma_real_exclusion = Some("Fermi-Dirac occupations");
+        for state in &mut problem.states {
+            state.gamma_real = gamma_real.clone();
+        }
         // Used only to mark every retained eigenpair strict, never for density.
         problem.occupations.fill(1.0);
         let occupations =
@@ -286,6 +296,12 @@ impl FiniteTProblem {
             }
             if passed || iteration == opts.max_iterations {
                 return Ok(FiniteTResult {
+                    gamma_real_used: false,
+                    gamma_real_fallback_reason: self
+                        .problem
+                        .states
+                        .iter()
+                        .find_map(|s| s.gamma_real.fallback_reason.clone()),
                     force_identity: self.problem.force_model.with_policy(
                         crate::force_identity::OccupationIdentity::new(
                             &[],

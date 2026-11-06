@@ -130,6 +130,7 @@ impl Default for Mixing {
 }
 #[derive(Clone, Debug)]
 pub struct ScfOptions {
+    pub gamma_real: crate::GammaReal,
     pub standard: Option<StandardProfile>,
     pub hartree_mixing: bool,
     pub spectral_guard: crate::SpectralGuard,
@@ -189,6 +190,7 @@ impl ScfOptions {
 impl Default for ScfOptions {
     fn default() -> Self {
         Self {
+            gamma_real: crate::GammaReal::Off,
             standard: None,
             hartree_mixing: false,
             spectral_guard: crate::SpectralGuard::Off,
@@ -296,6 +298,8 @@ pub struct KPointSolution {
 
 #[derive(Debug)]
 pub struct ScfResult {
+    pub gamma_real_used: bool,
+    pub gamma_real_fallback_reason: Option<String>,
     pub(crate) force_identity: crate::force_identity::ForceIdentity,
     pub standard: Option<StandardProfile>,
     pub certified: bool,
@@ -356,8 +360,10 @@ pub struct ScfProblem {
     options: ScfOptions,
     setup_time: Duration,
     minimum_gap: Option<f64>,
+    gamma_real_exclusion: Option<&'static str>,
 }
 struct KState {
+    gamma_real: crate::GammaRealDiagnostics,
     point: KPoint,
     basis: PlaneWaveBasis,
     grid: FftGridSpec,
@@ -466,6 +472,11 @@ pub struct ScfStep {
     pub timings: PhaseTimings,
 }
 impl ScfProblem {
+    /// Dispatch evidence in input k order for the latest solve.
+    pub fn gamma_real_diagnostics(&self) -> impl Iterator<Item = &crate::GammaRealDiagnostics> {
+        self.states.iter().map(|s| &s.gamma_real)
+    }
+
     pub fn new(
         cell: &Cell,
         atoms: &[Atom],
@@ -530,6 +541,19 @@ impl ScfProblem {
         minimum_gap: Option<f64>,
         channel: Option<usize>,
     ) -> Result<Self, ScfError> {
+        let gamma_real_exclusion = if channel.is_some() {
+            Some("spin-polarized solve")
+        } else if points.len() != 1 {
+            Some("multiple k points or shifted mesh")
+        } else {
+            None
+        };
+        let mut gamma_real = crate::GammaRealDiagnostics::default();
+        if options.gamma_real != crate::GammaReal::Off
+            && let Some(reason) = gamma_real_exclusion
+        {
+            gamma_real.fallback(options.gamma_real, reason)?;
+        }
         if options
             .standard
             .is_some_and(|p| !p.threshold_ha.is_finite() || p.threshold_ha <= 0.0)
@@ -728,6 +752,7 @@ impl ScfProblem {
                 let band_density =
                     crate::band_density::BandDensity::new(&k_grid, bands, inner, pool.clone())?;
                 Ok(KState {
+                    gamma_real: gamma_real.clone(),
                     point: KPoint {
                         fractional: basis.k_fractional(),
                         weight: point.weight,
@@ -765,6 +790,7 @@ impl ScfProblem {
             states.iter().map(|s| s.point).collect(),
         );
         Ok(Self {
+            gamma_real_exclusion,
             force_model,
             coulomb,
             cell: cell.clone(),
@@ -987,7 +1013,7 @@ impl ScfProblem {
         // the external caller and wait on a LockLatch again.
         let k_points = if self.options.threads <= 1 {
             let mut k_points = Vec::new();
-            for (i, state) in self.states.iter().enumerate() {
+            for (i, state) in self.states.iter_mut().enumerate() {
                 let preconditioner = DiagonalPreconditioner::new(
                     state.hamiltonian.kinetic_diagonal().to_vec(),
                     0.1,
@@ -1000,36 +1026,55 @@ impl ScfProblem {
                 } else {
                     None
                 };
-                let solution = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    if self.options.standard.is_some() {
-                        solver.solve_ritz_changes(
-                            &state.hamiltonian,
-                            initial.map(|v| &v[i]).or(guess.as_ref()),
-                            Some(&preconditioner),
-                            policy,
-                        )
-                    } else if self.options.locking == dft_solvers::locking::Locking::Auto {
-                        solver.solve_locked(
-                            &state.hamiltonian,
-                            initial.map(|v| &v[i]).or(guess.as_ref()),
-                            Some(&preconditioner),
-                            policy,
-                        )
-                    } else {
-                        self.options
-                            .eigensolver
-                            .solve_with_band_tolerances_and_certification(
-                                &solver,
+                let real_solution = crate::gamma_real::solve_real_gamma(
+                    &state.hamiltonian,
+                    &state.basis,
+                    initial.map(|v| &v[i]),
+                    state.hamiltonian.kinetic_diagonal(),
+                    self.occupations.len(),
+                    tolerance,
+                    policy,
+                    certify,
+                    &self.options,
+                    self.pool.clone(),
+                    self.gamma_real_exclusion
+                        .or(finite.as_ref().map(|_| "Fermi-Dirac occupations")),
+                    &mut state.gamma_real,
+                )?;
+                let solution = if let Some(solution) = real_solution {
+                    solution
+                } else {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        if self.options.standard.is_some() {
+                            solver.solve_ritz_changes(
                                 &state.hamiltonian,
                                 initial.map(|v| &v[i]).or(guess.as_ref()),
                                 Some(&preconditioner),
                                 policy,
-                                certify,
                             )
-                    }
-                }))
-                .map_err(|_| ScfError::Numerical(format!("k index {i}: solve panicked")))?
-                .map_err(|e| ScfError::Numerical(format!("k index {i}: {e}")))?;
+                        } else if self.options.locking == dft_solvers::locking::Locking::Auto {
+                            solver.solve_locked(
+                                &state.hamiltonian,
+                                initial.map(|v| &v[i]).or(guess.as_ref()),
+                                Some(&preconditioner),
+                                policy,
+                            )
+                        } else {
+                            self.options
+                                .eigensolver
+                                .solve_with_band_tolerances_and_certification(
+                                    &solver,
+                                    &state.hamiltonian,
+                                    initial.map(|v| &v[i]).or(guess.as_ref()),
+                                    Some(&preconditioner),
+                                    policy,
+                                    certify,
+                                )
+                        }
+                    }))
+                    .map_err(|_| ScfError::Numerical(format!("k index {i}: solve panicked")))?
+                    .map_err(|e| ScfError::Numerical(format!("k index {i}: {e}")))?
+                };
                 k_points.push(KPointSolution {
                     point: state.point,
                     solution,
@@ -1056,32 +1101,51 @@ impl ScfProblem {
                     } else {
                         None
                     };
-                    let solution = if self.options.standard.is_some() {
-                        solver.solve_ritz_changes(
-                            &state.hamiltonian,
-                            initial.map(|v| &v[i]).or(guess.as_ref()),
-                            Some(&preconditioner),
-                            policy,
-                        )
-                    } else if self.options.locking == dft_solvers::locking::Locking::Auto {
-                        solver.solve_locked(
-                            &state.hamiltonian,
-                            initial.map(|v| &v[i]).or(guess.as_ref()),
-                            Some(&preconditioner),
-                            policy,
-                        )
+                    let real_solution = crate::gamma_real::solve_real_gamma(
+                        &state.hamiltonian,
+                        &state.basis,
+                        initial.map(|v| &v[i]),
+                        state.hamiltonian.kinetic_diagonal(),
+                        bands,
+                        tolerance,
+                        policy,
+                        certify,
+                        &self.options,
+                        self.pool.clone(),
+                        self.gamma_real_exclusion
+                            .or(finite.as_ref().map(|_| "Fermi-Dirac occupations")),
+                        &mut state.gamma_real,
+                    )?;
+                    let solution = if let Some(solution) = real_solution {
+                        solution
                     } else {
-                        self.options
-                            .eigensolver
-                            .solve_with_band_tolerances_and_certification(
-                                &solver,
+                        if self.options.standard.is_some() {
+                            solver.solve_ritz_changes(
                                 &state.hamiltonian,
                                 initial.map(|v| &v[i]).or(guess.as_ref()),
                                 Some(&preconditioner),
                                 policy,
-                                certify,
                             )
-                    }?;
+                        } else if self.options.locking == dft_solvers::locking::Locking::Auto {
+                            solver.solve_locked(
+                                &state.hamiltonian,
+                                initial.map(|v| &v[i]).or(guess.as_ref()),
+                                Some(&preconditioner),
+                                policy,
+                            )
+                        } else {
+                            self.options
+                                .eigensolver
+                                .solve_with_band_tolerances_and_certification(
+                                    &solver,
+                                    &state.hamiltonian,
+                                    initial.map(|v| &v[i]).or(guess.as_ref()),
+                                    Some(&preconditioner),
+                                    policy,
+                                    certify,
+                                )
+                        }?
+                    };
                     Ok(KPointSolution {
                         point: state.point,
                         solution,

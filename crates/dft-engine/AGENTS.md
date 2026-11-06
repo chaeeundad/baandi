@@ -314,3 +314,24 @@ reference through the wavefunction basis into Hamiltonian construction. Freezing
 only the engine's density list is insufficient: the Hamiltonian also asks the
 basis for density support when validating its grid. Preserve the ordinary
 None-reference branch and verify legacy SCF identity after changes here.
+
+## Experimental real Gamma SCF (P26E / R5)
+
+`gamma_real.rs` owns the default-off dispatcher and RealLinearOperator bridge.
+`GammaReal::On` fails closed on ineligible inputs; Auto preserves the complex
+solve and stores a reason in per-k diagnostics and result metadata. Strict,
+unpolarized, single exact-Gamma Davidson only; no standard/locking/guard/hybrid,
+spin or FD real solves. Warm orbitals must pack at the existing absolute 1e-14
+ORC tolerance; never repair their gauge or discard an incompatible warm start.
+Only Hermitian-completed complex vectors leave this module. Density, audit,
+forces and stress retain their implementations. R4 currently certifies every
+strict eigensolve (including intermediate ones); report the extra H work.
+
+Exact checkpoints compare gamma_real. Optional v1 serialization defaults to off
+and omits off; different paths require explicit WarmStart, with complex-to-real
+Auto allowed to retain the complex path when the saved gauge is incompatible.
+
+Release validation (calibration must precede real comparisons):
+`cargo test --release -p dft-engine --test gamma_real_scf -- --include-ignored --nocapture`.
+See `docs/performance/real-gamma-r5-results.md` for fixed comparison thresholds,
+Mac observations, failed exploratory commands and outstanding dev08 acceptance.

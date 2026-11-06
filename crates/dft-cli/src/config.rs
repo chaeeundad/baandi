@@ -418,6 +418,7 @@ impl Config {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scf {
+    pub gamma_real: Option<String>,
     pub convergence_profile: Option<String>,
     pub standard_threshold_ha: Option<f64>,
     pub mixing_metric: Option<String>,
@@ -437,6 +438,17 @@ pub struct Scf {
     pub seed: Option<u64>,
 }
 impl Scf {
+    pub fn gamma_real(&self) -> Result<dft_engine::GammaReal, ConfigError> {
+        match self.gamma_real.as_deref().unwrap_or("off") {
+            "off" => Ok(dft_engine::GammaReal::Off),
+            "auto" => Ok(dft_engine::GammaReal::Auto),
+            "on" => Ok(dft_engine::GammaReal::On),
+            _ => Err(ConfigError::Invalid(
+                "scf.gamma_real must be off, auto or on".into(),
+            )),
+        }
+    }
+
     pub fn standard_profile(&self) -> Result<Option<dft_engine::StandardProfile>, ConfigError> {
         let threshold = self
             .standard_threshold_ha
@@ -875,6 +887,7 @@ impl Config {
         if let Some(s) = &self.scf {
             s.spectral_guard()?;
             s.locking()?;
+            s.gamma_real()?;
             s.standard_profile()?;
             if s.standard_profile()?.is_some()
                 && self.output.as_ref().is_some_and(|o| o.forces || o.stress)

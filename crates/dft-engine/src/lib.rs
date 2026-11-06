@@ -43,3 +43,6 @@ pub mod stress;
 pub use stress::{StressResult, StressState, stress};
 
 pub use dft_solvers::locking::Locking;
+
+pub mod gamma_real;
+pub use gamma_real::{GammaReal, GammaRealDiagnostics};

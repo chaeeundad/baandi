@@ -465,7 +465,29 @@ impl Wire for StandardProfile {
         Ok(Self { threshold_ha })
     }
 }
+impl Wire for dft_engine::GammaReal {
+    type Repr = String;
+    fn encode(&self, _bytes: &mut Vec<u8>) -> Result<String, Error> {
+        Ok(self.name().into())
+    }
+    fn decode(w: String, _bytes: &[u8], _cursor: &mut usize) -> Result<Self, Error> {
+        match w.as_str() {
+            "off" => Ok(Self::Off),
+            "auto" => Ok(Self::Auto),
+            "on" => Ok(Self::On),
+            _ => Err(invalid("invalid gamma_real option")),
+        }
+    }
+}
+fn gamma_real_off() -> String {
+    "off".into()
+}
+fn is_gamma_real_off(s: &str) -> bool {
+    s == "off"
+}
 wire_struct!(ScfOptions, WScfOptions {
+    #[serde(default = "gamma_real_off", skip_serializing_if = "is_gamma_real_off")]
+    gamma_real: dft_engine::GammaReal,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     standard: Option<StandardProfile>,
     #[serde(default, skip_serializing_if = "is_false")]

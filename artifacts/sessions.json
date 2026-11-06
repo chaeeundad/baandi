@@ -2446,5 +2446,41 @@
     "ended_at": "2026-11-06T04:49:58Z",
     "exit_code": 0,
     "note": "merged; library only"
+  },
+  {
+    "run_id": "P26B-REAL-GAMMA-R2#1",
+    "task_id": "P26B-REAL-GAMMA-R2",
+    "mode": "new",
+    "role": "implementer",
+    "status": "blocked",
+    "codex_pid": 70160,
+    "wrapper_pid": 70132,
+    "session_id": "01a1af5f-fcca-70c0-9b01-756964886e93",
+    "branch": "task/P26B-REAL-GAMMA-R2",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P26B-REAL-GAMMA-R2",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P26B-REAL-GAMMA-R2.md",
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P26B-REAL-GAMMA-R2/report.json",
+    "started_at": "2026-11-06T05:41:05Z",
+    "ended_at": "2026-11-06T05:42:30Z",
+    "exit_code": 0,
+    "note": ""
+  },
+  {
+    "run_id": "P26B-REAL-GAMMA-R2#2",
+    "task_id": "P26B-REAL-GAMMA-R2",
+    "mode": "resume",
+    "role": "implementer",
+    "status": "done",
+    "codex_pid": 71205,
+    "wrapper_pid": 71193,
+    "session_id": "01a1af5f-fcca-70c0-9b01-756964886e93",
+    "branch": "task/P26B-REAL-GAMMA-R2",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P26B-REAL-GAMMA-R2",
+    "ticket": "/tmp/p26b-resume.md",
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P26B-REAL-GAMMA-R2/report.json",
+    "started_at": "2026-11-06T06:10:57Z",
+    "ended_at": "2026-11-06T06:21:16Z",
+    "exit_code": 0,
+    "note": "merged; library only"
   }
 ]

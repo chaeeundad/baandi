@@ -106,3 +106,34 @@ harmonic derivatives avoid polar-axis singularities. No numerical projector
 finite differences or SCF hot-loop calls are used. See
 `docs/validation/stress.md` for equations, conventions and scope.
 Run `cargo test --release -p dft-physics --test stress_terms -- --include-ignored --nocapture`.
+
+## P26C real Gamma Hamiltonian (R3, library only)
+
+`real_gamma::{RealNonlocal, RealHamiltonian}` uses R1 ORC and deterministic real
+GEMM, R2 paired local transforms, and a duplicated kinetic diagonal. Construct
+`RealHamiltonian::from_complex` with the exact source basis, block capacity and
+persistent worker pool. It snapshots the real potential and projectors; later
+updates of the source Hamiltonian do not change the snapshot. Applications
+borrow caller-owned `RealMatrix` blocks and reuse construction-sized scratch.
+No engine dispatch or existing complex arithmetic changes. Direct
+`RealNonlocal::new` requires a matching Gamma `HalfSphere` from the caller.
+
+Projectors are converted from public complex representative entries only. The
+G=0 imaginary allowance is 1e-14 times the column maximum (zero columns accepted).
+Per-atom row-major coupling blocks remain separate between P^T X and P W.
+The 1e-13 relative component and Hermiticity gates allow FFT pairing and GEMM
+summation rounding; they are not SCF or external-reference tolerances. Pair
+norms must satisfy R2's factor-1e3 debug assertion. Local pairs are serial;
+real GEMM uses the persistent pool with its existing fixed panel decomposition.
+
+```sh
+cargo test -p dft-physics --test real_gamma_hamiltonian -- --nocapture
+cargo test --release -p dft-physics --test real_gamma_hamiltonian large_parallel -- --ignored --nocapture
+cargo test --release -p dft-physics --test real_gamma_hamiltonian timing_blocks -- --ignored --nocapture --test-threads=1
+```
+
+The latter two tests are ignored in the fast debug gate. Ten small synthetic
+shapes test 1–20 atoms, mixed species, repeated s/p/d/f radial channels, off-diagonal
+couplings and odd/even bands. The large test crosses the actual parallel GEMM
+threshold and compares every output bit at T=1,2,4,8. See
+`docs/performance/real-gamma-r3-timing.md` for observations and scope limits.

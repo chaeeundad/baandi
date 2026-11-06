@@ -415,6 +415,21 @@ impl Hamiltonian {
         self.data.potential.assign(potential);
         Ok(())
     }
+    /// Read-only basis identity for isolated operator adapters.
+    pub fn basis_momenta(&self) -> &[GVector] {
+        &self.data.nonlocal.basis
+    }
+    /// Read-only FFT mapping for isolated operator adapters.
+    pub fn fft_grid(&self) -> &FftGridSpec {
+        &self.data.grid
+    }
+    /// Real potential in standard contiguous grid order, in Hartree.
+    pub fn local_potential_values(&self) -> &[f64] {
+        self.data
+            .potential
+            .as_slice()
+            .expect("Hamiltonian stores standard layout")
+    }
     /// Read-only access for term-by-term orbital energy audits.
     pub fn nonlocal(&self) -> &NonlocalOperator {
         &self.data.nonlocal

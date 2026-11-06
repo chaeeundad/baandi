@@ -7,6 +7,8 @@ pub mod gga;
 pub mod hamiltonian;
 pub mod hartree;
 pub mod kinetic;
+pub mod real_gamma;
+pub use real_gamma::{RealGammaError, RealHamiltonian, RealNonlocal};
 pub mod spin;
 pub mod stress;
 pub mod symmetry;

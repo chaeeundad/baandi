@@ -2596,17 +2596,17 @@
     "task_id": "P26F-REAL-DAVIDSON-CERTIFY",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "failed",
     "codex_pid": 17155,
     "wrapper_pid": 17140,
-    "session_id": null,
+    "session_id": "01a1b091-40fb-7270-beb0-d5378599ea77",
     "branch": "task/P26F-REAL-DAVIDSON-CERTIFY",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P26F-REAL-DAVIDSON-CERTIFY",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P26F-REAL-DAVIDSON-CERTIFY.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P26F-REAL-DAVIDSON-CERTIFY/report.json",
     "started_at": "2026-11-06T11:14:31Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-06T11:21:32Z",
+    "exit_code": 0,
+    "note": "merged; H work fixed (+2.84% vs complex); Si primitive SCF count gate still 10->12 (start vectors)"
   }
 ]

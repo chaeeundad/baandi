@@ -158,9 +158,9 @@ fn real_complex_and_thread_matrix() {
 
 #[test]
 fn fallback_modes_and_warm_vectors() {
-    use dft_engine::{Locking, OccupationPolicy, SpectralGuard, StandardProfile};
+    use dft_engine::{Locking, OccupationPolicy, SpectralGuard};
     use dft_geometry::kpoints::KPoint;
-    for case in 0..6 {
+    for case in 0..7 {
         let (cell, atoms, pp) = model(0);
         let mut opts = options(GammaReal::Auto, 1, 2026);
         let mut points = vec![KPoint {
@@ -181,10 +181,17 @@ fn fallback_modes_and_warm_vectors() {
                     },
                 ]
             }
-            2 => opts.standard = Some(StandardProfile::default()),
-            3 => opts.locking = Locking::Auto,
-            4 => opts.spectral_guard = SpectralGuard::Final,
-            _ => opts.eigensolver = dft_solvers::SolverChoice::Hybrid(Default::default()),
+            2 => opts.locking = Locking::Auto,
+            3 => opts.spectral_guard = SpectralGuard::Final,
+            4 => opts.eigensolver = dft_solvers::SolverChoice::Hybrid(Default::default()),
+            5 => {
+                opts.standard = Some(dft_engine::StandardProfile::default());
+                points[0].fractional[0] = 0.1;
+            }
+            _ => {
+                opts.standard = Some(dft_engine::StandardProfile::default());
+                opts.spectral_guard = SpectralGuard::Final;
+            }
         }
         let create = |o| {
             ScfProblem::with_kpoints(
@@ -471,4 +478,228 @@ fn finite_temperature_is_excluded_without_mislabeling_spin() {
     );
     assert_eq!(auto.state.density, off.state.density);
     assert_eq!(auto.state.solution, off.state.solution);
+}
+
+// R6: run with --release --test gamma_real_scf -- --include-ignored --nocapture.
+#[test]
+#[ignore = "release standard-profile SCF and thread matrix"]
+fn standard_real_complex_and_threads() {
+    use dft_engine::StandardProfile;
+    let mut failures = Vec::new();
+    for kind in 0..4 {
+        let run_standard = |mode, threads| {
+            let mut opts = options(mode, threads, 2026);
+            opts.standard = Some(StandardProfile::default());
+            problem(kind, opts).run().unwrap()
+        };
+        let complex = run_standard(GammaReal::Off, 1);
+        let real = run_standard(GammaReal::On, 1);
+        let d = differences(&complex, &real, model(kind).0.volume_bohr3());
+        let work = |r: &ScfResult| {
+            (
+                r.history
+                    .iter()
+                    .map(|h| h.davidson_iterations)
+                    .sum::<usize>(),
+                r.history
+                    .iter()
+                    .map(|h| h.operator_applications)
+                    .sum::<usize>(),
+            )
+        };
+        println!(
+            "STANDARD kind={kind} E={:.17e} dE={:.17e} eigen={:.17e} density={:.17e} SCF={}/{} work={:?}/{:?}",
+            real.total_hartree(),
+            d.0,
+            d.1,
+            d.2,
+            complex.history.len(),
+            real.history.len(),
+            work(&complex),
+            work(&real)
+        );
+        for r in [&complex, &real] {
+            assert!(!r.certified);
+            assert!(r.k_points.iter().all(|k| !k.solution.residuals_certified));
+            assert!(
+                r.history
+                    .iter()
+                    .all(|h| h.fixed_point_certificate.is_none())
+            );
+            assert!(r.history.iter().all(|h| {
+                h.standard_error_ha
+                    .is_some_and(|e| e.is_finite() && e >= 0.)
+            }));
+            assert!(
+                r.history.last().unwrap().standard_error_ha.unwrap()
+                    < StandardProfile::default().threshold_ha
+            );
+            assert!(r.history.iter().skip(1).all(|h| !h.standard_redo));
+            let electrons: f64 = r.occupations.iter().sum();
+            for h in r.history.windows(2) {
+                assert_eq!(
+                    h[1].requested_eigen_tolerance,
+                    StandardProfile::ratchet(
+                        h[0].requested_eigen_tolerance,
+                        h[0].standard_error_ha.unwrap(),
+                        electrons
+                    )
+                );
+            }
+            println!(
+                "STANDARD_FIELDS kind={kind} real={} redo={} error={:.17e} Ha",
+                r.gamma_real_used,
+                r.history[0].standard_redo,
+                r.history.last().unwrap().standard_error_ha.unwrap()
+            );
+        }
+        assert!(real.gamma_real_used && real.gamma_real_fallback_reason.is_none());
+        for (mode, threads) in [
+            (GammaReal::Auto, 1),
+            (GammaReal::On, 2),
+            (GammaReal::On, 4),
+            (GammaReal::On, 8),
+            (GammaReal::On, 12),
+        ] {
+            let other = run_standard(mode, threads);
+            assert!(other.gamma_real_used);
+            assert_eq!(
+                real.total_hartree().to_bits(),
+                other.total_hartree().to_bits()
+            );
+            assert_eq!(real.density, other.density);
+            assert_eq!(real.k_points[0].solution, other.k_points[0].solution);
+            assert_eq!(work(&real), work(&other));
+            assert_eq!(real.history.len(), other.history.len());
+            for (a, b) in real.history.iter().zip(&other.history) {
+                assert_eq!(a.standard_redo, b.standard_redo);
+                assert_eq!(a.standard_error_ha, b.standard_error_ha);
+                assert_eq!(a.requested_eigen_tolerance, b.requested_eigen_tolerance);
+            }
+        }
+        // Architect decision (2026-11-06): standard is judged against the
+        // same certified tight reference, not another uncertified trajectory.
+        let reference = |energy, density, eigen| {
+            let mut opts = options(GammaReal::Off, 1, 2026);
+            opts.energy_tolerance = energy;
+            opts.density_tolerance = density;
+            opts.eigen_tolerance = eigen;
+            let r = problem(kind, opts).run().unwrap();
+            assert!(r.certified && r.standard.is_none() && !r.gamma_real_used);
+            assert!(r.k_points.iter().all(|k| k.solution.residuals_certified));
+            r
+        };
+        let tight = reference(1e-12, 1e-9, 1e-10);
+        let tighter = reference(1e-13, 1e-10, 1e-11);
+        let plateau = (tight.total_hartree() - tighter.total_hartree()).abs();
+        assert!(plateau <= 1e-12, "reference plateau {kind}: {plateau} Ha");
+        let c = differences(&complex, &tighter, model(kind).0.volume_bohr3());
+        let r = differences(&real, &tighter, model(kind).0.volume_bohr3());
+        let all_eigen = |s: &ScfResult| {
+            s.eigenvalues
+                .iter()
+                .zip(&tighter.eigenvalues)
+                .map(|(a, b)| (a - b).abs())
+                .fold(0., f64::max)
+        };
+        let relative_cap = (3. * c.0).max(1e-10);
+        println!(
+            "ACCURACY kind={kind} tight={:.17e} reference={:.17e} plateau={plateau:.17e} complex_E={:.17e} complex_error={:.17e} real_error={:.17e} relative_cap={relative_cap:.17e} complex_eigen={:.17e} real_eigen={:.17e} complex_all_eigen={:.17e} real_all_eigen={:.17e} complex_density={:.17e} real_density={:.17e} reference_SCF={}",
+            tight.total_hartree(),
+            tighter.total_hartree(),
+            complex.total_hartree(),
+            c.0,
+            r.0,
+            c.1,
+            r.1,
+            all_eigen(&complex),
+            all_eigen(&real),
+            c.2,
+            r.2,
+            tighter.history.len()
+        );
+        if r.0 > 5e-9 || r.0 > relative_cap {
+            failures.push((kind, c.0, r.0, relative_cap));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "standard energy gate (Ha): {failures:?}"
+    );
+}
+
+#[test]
+fn standard_dispatch_and_derivative_rejection() {
+    use dft_engine::{
+        StandardProfile,
+        forces::{ElectronicState, ForceState, forces},
+        stress::frozen_stress,
+    };
+    let (cell, atoms, pp) = model(0);
+    let species = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let mut errors = Vec::new();
+    for mode in [GammaReal::Off, GammaReal::Auto, GammaReal::On] {
+        let mut opts = options(mode, 1, 2026);
+        opts.standard = Some(StandardProfile::default());
+        let r = ScfProblem::new(&cell, &atoms, &species, opts.clone())
+            .unwrap()
+            .run()
+            .unwrap();
+        assert_eq!(r.gamma_real_used, mode != GammaReal::Off);
+        assert!(!r.certified && !r.k_points[0].solution.residuals_certified);
+        let state = ForceState {
+            cell: &cell,
+            atoms: &atoms,
+            potentials: &species,
+            options: &opts,
+            electronic: ElectronicState::Fixed(&r),
+            density_floor: None,
+            symmetry: &[],
+        };
+        errors.push((
+            forces(&state).unwrap_err().to_string(),
+            frozen_stress(&state).unwrap_err().to_string(),
+        ));
+    }
+    assert!(errors[0].0.contains("strict convergence profile required"));
+    assert!(errors[0].1.contains("strict convergence profile required"));
+    assert!(errors.windows(2).all(|e| e[0] == e[1]));
+}
+
+#[test]
+fn standard_first_redo_stays_real_and_uncertified() {
+    use dft_engine::{CompletionMode, ExecutionConfig, ScfSession, StandardProfile};
+    // A converged density makes the first-map Coulomb error small enough to
+    // exercise the existing redo branch, without changing its threshold.
+    let source = problem(0, options(GammaReal::Off, 1, 2026));
+    let density = run(0, GammaReal::Off, 1, 2026).density;
+    for mode in [GammaReal::Off, GammaReal::On] {
+        let mut opts = options(mode, 1, 2026);
+        opts.standard = Some(StandardProfile::default());
+        let mut session = ScfSession::new(
+            problem(0, opts),
+            CompletionMode::Strict,
+            ExecutionConfig::default(),
+        )
+        .unwrap();
+        session
+            .initialize_density_transfer(&source, &density)
+            .unwrap();
+        let result = checkpoint_fixture::finish(session);
+        assert_eq!(result.gamma_real_used, mode == GammaReal::On);
+        assert!(result.history[0].standard_redo);
+        assert!(result.history[0].requested_eigen_tolerance < StandardProfile::CAP_HA);
+        assert!(!result.certified && !result.k_points[0].solution.residuals_certified);
+        assert!(result.history[0].standard_error_ha.unwrap().is_finite());
+        println!(
+            "REDO real={} error={:.17e} Ha steps={} H={}",
+            result.gamma_real_used,
+            result.history[0].standard_error_ha.unwrap(),
+            result.history[0].davidson_iterations,
+            result.history[0].operator_applications
+        );
+    }
 }

@@ -239,3 +239,28 @@ in `real-gamma-r5-results.md` for six-fixture evidence and the remaining primiti
 10→12 SCF-count acceptance failure. Existing historical R4 statements above
 about mandatory certification describe the original convenience APIs and R4
 implementation, not the new explicitly uncertified intermediate entry point.
+
+## P26G engine wiring — 2026-11-06
+
+R6 now selects the existing `solve_ritz_changes` method from the real Gamma
+bridge when `ScfOptions.standard` is present. The caller already supplies the
+ratcheted tolerance and `StandardProfile::empty_threshold` band policy in both
+serial and pooled dispatch; no solver or SCF arithmetic changes were needed.
+Strict dispatch still forwards `certify` to the P26F API. Standard results
+remain uncertified, including first-iteration redo solves. Locking, spectral
+guard, hybrid/RMM, spin, FD, non-Gamma/multiple k points and incompatible warm
+vectors retain their exclusions. See the dated P26G section of
+`real-gamma-r5-results.md`: four of six standard-profile energy comparisons
+fail the unchanged 1e-10 Ha gate. This is wiring evidence, not acceptance or a
+change to the default. No threshold or start-vector adjustment was made.
+
+### R6 architect gate revision — 2026-11-06
+
+The architect replaced the standard direct-difference criterion with a shared
+certified complex tight reference: real-standard absolute error <=5e-9 Ha and
+<=max(3*complex-standard error,1e-10 Ha). The preceding four-of-six failure
+statement is historical under the superseded criterion. Revised tests pass
+five of six fixtures; slab fails with real error 6.009215125502010e-9 Ha versus
+complex error 4.598657676879725e-9 Ha. All six reference plateaus pass.
+Standard force/stress rejection equality is accepted. Solver/profile/strict
+criteria are unchanged; the results note contains every reference comparison.

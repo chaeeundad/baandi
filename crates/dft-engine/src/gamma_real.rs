@@ -104,8 +104,6 @@ pub(crate) fn solve_real_gamma(
         Some(reason)
     } else if basis.k_fractional() != [0.; 3] {
         Some("k is not exactly Gamma")
-    } else if options.standard.is_some() {
-        Some("standard profile")
     } else if options.locking != dft_solvers::locking::Locking::Off {
         Some("locking enabled")
     } else if options.spectral_guard != crate::SpectralGuard::Off {
@@ -167,13 +165,19 @@ pub(crate) fn solve_real_gamma(
         n,
         pool,
     };
-    let result = solver.solve_with_band_tolerances_and_certification(
-        &op,
-        packed.as_ref(),
-        &diagonal,
-        policy,
-        certify,
-    )?;
+    // The SCF driver supplies the same ratcheted tolerance and band policy to
+    // both representations. Standard returns remain explicitly uncertified.
+    let result = if options.standard.is_some() {
+        solver.solve_ritz_changes(&op, packed.as_ref(), &diagonal, policy)
+    } else {
+        solver.solve_with_band_tolerances_and_certification(
+            &op,
+            packed.as_ref(),
+            &diagonal,
+            policy,
+            certify,
+        )
+    }?;
     let mut eigenvectors = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
     for j in 0..bands {
         op.h.borrow()

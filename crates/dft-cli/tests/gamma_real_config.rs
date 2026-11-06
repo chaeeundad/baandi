@@ -73,3 +73,51 @@ fn checkpoint_optional_option_and_roundtrip() {
         );
     }
 }
+
+#[allow(dead_code)]
+#[path = "common/mod.rs"]
+mod cli_fixture;
+
+#[test]
+fn standard_combination_reaches_real_engine_and_labels_output() {
+    use std::fs;
+    let dir = std::env::temp_dir().join(format!("p26g-cli-{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("syn.xml"),
+        cli_fixture::gaussian_with(2., 1., true, 401).replace("element=\"Xx\"", "element=\"He\""),
+    )
+    .unwrap();
+    for mode in ["auto", "on"] {
+        let text = format!(
+            "[system]\nname='R6 synthetic'\nlattice_unit='bohr'\nlattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=5.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=5\nconvergence_profile='standard'\ngamma_real='{mode}'\n[output]\ndirectory='out-{mode}'\n"
+        );
+        let config = Config::parse(&text).unwrap();
+        let opts = run::options(&config).unwrap();
+        assert_eq!(opts.standard, Some(dft_engine::StandardProfile::default()));
+        assert_ne!(opts.gamma_real, GammaReal::Off);
+        fs::write(dir.join("input.toml"), &text).unwrap();
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+            .current_dir(&dir)
+            .args(["run", "input.toml"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let result: serde_json::Value = serde_json::from_slice(
+            &fs::read(dir.join(format!("out-{mode}/results.json"))).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(result["convergence_profile"], "standard");
+        assert_eq!(result["certified"], false);
+        assert_eq!(result["gamma_real_used"], true);
+        assert!(result["gamma_real_fallback_reason"].is_null());
+        assert_eq!(result["standard_threshold_ha"], 5e-9);
+        assert_eq!(result["work"]["certificate_solves"], 0);
+        assert!(String::from_utf8_lossy(&output.stdout).contains("certified: false"));
+    }
+    fs::remove_dir_all(dir).unwrap();
+}

@@ -406,3 +406,372 @@ Command: `python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf 
 | si8 Gamma (8 atoms, 20 bands) | 2.546 | 1.665 | 1.53x | 15 / 15 |
 
 Mac observation only (shared machine, 3 samples: directional, below the 30-sample rule). The design estimated about 2.1x; the measured 1.53x on si8 is lower because density, mixing, Hartree and XC still use the complex path and the real Davidson algebra is not yet tuned. dev08 acceptance (ticket R0) is still pending.
+
+## P26G standard-profile engine wiring — 2026-11-06
+
+Base `9da560861a50807768844b9d3f800d5cc3c4f9e7`, branch
+`task/P26G-REAL-GAMMA-R6`, uncommitted. Pure Rust, Apple Silicon Mac.
+**R6 acceptance FAILED:** four of six total-energy differences exceed the
+unchanged 1e-10 Ha cap. The implementation remains explicitly opt-in; no
+threshold, ratchet, starts, band policy, solver numerics or default was changed.
+
+### Change and scope
+
+The only production edit is in `crates/dft-engine/src/gamma_real.rs`: remove
+standard from the exclusion list and select the existing R4 Ritz-change API
+when `options.standard` is present. Both serial and pooled callers already
+forward the same tolerance and band policy. The CLI key is
+`[scf] convergence_profile = "standard"`, combined with
+`gamma_real = "on"` or `"auto"`. Strict mode retains P26F certification policy.
+No edits outside OWNED_FILES and no extra target directory were needed.
+Derived from real-gamma-design sections 8/9/11 and its own-words study inputs;
+no QE source was accessed. This connects P17A's separately labelled contract;
+it does not revive A15's rejected strict-refinement optimization.
+
+### Six-fixture standard comparison
+
+These are BAANDI real versus BAANDI complex with the **same default standard
+profile**, not QE references and not certified results. Fixture geometry,
+pseudopotentials, bands and all other settings are the R5 fixtures. Eigenvalue
+and density differences are observations; the R5 calibrated strict caps do not
+become standard-profile acceptance thresholds. Energy cap remains 1e-10 Ha.
+
+| Fixture | real energy (Ha) | absolute delta E (Ha) | max occupied eigenvalue delta (Ha) | density L2 delta (Bohr^-3/2) | SCF complex → real |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| synthetic cubic, 1 atom | -0.623797726280578613 | 5.411060488569319e-11 | 9.502641645786625e-8 | 2.282897735016452e-6 | 6 → 6 |
+| synthetic skew, 1 atom | -0.847124717309507225 | 1.110223024625157e-16 | 1.415534356397075e-15 | 1.634654385369390e-14 | 8 → 8 |
+| synthetic elongated, 2 atoms, local only | -3.26376645205618132 | **1.131787996655476e-10 FAIL** | 1.466575613534582e-6 | 1.636569729828954e-6 | 6 → 6 |
+| synthetic slab, 2 atoms | -1.44295753589583353 | **1.410557448622285e-9 FAIL** | 2.144911592671939e-6 | 6.900536771091753e-6 | 17 → 17 |
+| Si primitive Gamma, 2 atoms, 8 bands | -7.29553046797730431 | **1.255404669109339e-10 FAIL** | 7.542224024215116e-7 | 3.908261978832460e-6 | 9 → 9 |
+| Si conventional Gamma, 8 atoms, 20 bands | -31.3218036004633120 | **4.324363089835970e-10 FAIL** | 1.109661570082576e-6 | 1.420452106095599e-5 | 14 → 15 |
+
+| Fixture | main Davidson steps, complex → real | main H vectors, complex → real | fresh SCF-certificate steps, complex → real | fresh SCF-certificate H, complex → real |
+| --- | ---: | ---: | ---: | ---: |
+| cubic | 19 → 15 | 71 → 64 | 0 → 0 | 0 → 0 |
+| skew | 24 → 24 | 94 → 94 | 0 → 0 | 0 → 0 |
+| elongated | 16 → 14 | 66 → 65 | 0 → 0 | 0 → 0 |
+| slab | 58 → 55 | 224 → 212 | 0 → 0 | 0 → 0 |
+| Si primitive | 26 → 26 | 176 → 176 | 0 → 0 | 0 → 0 |
+| Si conventional | 69 → 81 | 742 → 808 | 0 → 0 | 0 → 0 |
+
+Totals: main steps 212 → 215; H vectors 1373 → 1419 (+3.3503%). This is
+work accounting, not performance adoption. No tuning was attempted after the
+failed energy comparisons. Standard stopping controls a Coulomb error metric,
+not an absolute inter-trajectory total-energy bound. Different native starts
+and rounding already create distinct trajectories in R5/P26F. These facts
+explain why equality is not guaranteed, but do not establish a unique cause
+of each R6 failure or justify relaxing its acceptance cap.
+
+| Fixture | final standard error complex (Ha) | final standard error real (Ha) | first redo complex / real |
+| --- | ---: | ---: | --- |
+| cubic | 1.832934204791843e-9 | 1.839348069588690e-9 | false / false |
+| skew | 4.341693744891783e-10 | 4.341693746238191e-10 | false / false |
+| elongated | 2.447342378243545e-9 | 2.240860890580877e-9 | false / false |
+| slab | 1.510636745840327e-9 | 1.257230960716203e-9 | false / false |
+| Si primitive | 1.354298380633612e-9 | 3.509790784764162e-9 | false / false |
+| Si conventional | 2.142608186477116e-9 | 8.165916938424420e-10 | false / false |
+
+All final errors meet the frozen 5e-9 Ha standard criterion. Tests assert
+finite nonnegative errors throughout, exact existing ratchet transitions,
+no later redo, absent SCF certificates, `certified=false`, and
+`residuals_certified=false`. A separate cubic test transfers a converged density
+through the public density-transfer API to exercise **true** first redo:
+complex/real first error 8.342819337594015e-18 / 2.361096376322530e-17 Ha,
+7/7 steps, 28/26 H vectors. Both remain uncertified and the real redo retains
+real dispatch. Native starts are unchanged.
+
+### Isolation, fallback and derivatives
+
+All six standard real fixtures were run at T=1,2,4,8,12 before the aggregate
+energy assertions. Energy bits, density entries, complete returned eigen
+solutions, SCF counts, work, ratchet thresholds and redo/error records agree
+across budgets. Auto also matches On for the four synthetic fixtures.
+CLI tests execute both On and Auto and independently inspect results.json
+profile, uncertified flag, real-use flag, null fallback, threshold and absence
+of certificate work.
+
+Fallback tests preserve complete complex solutions for nonzero k, shifted
+multi-k, locking, spectral guard, hybrid/RMM and incompatible warm vectors;
+On rejects them. Nonzero k and spectral guard are additionally checked with
+standard enabled. Spin and FD fallback tests remain unchanged and pass.
+Existing setup validation still rejects standard+locking and standard+hybrid.
+No new RMM enum or eligibility was introduced.
+
+**Derivative requirement conflict:** design section 9, the engine force
+preconditions and CLI preflight require strict convergence. Both complex and
+real standard states reject force and frozen-stress evaluation with the same
+`strict convergence profile required` error. Changing that would alter an
+existing scientific contract beyond this plumbing ticket. No standard force or
+stress values are fabricated. The existing tightened-strict completion tests
+still pass all four synthetic shapes, maximum force difference
+1.974927166248364e-11 Ha/Bohr and maximum frozen-stress difference
+3.548376870110559e-14 Ha/Bohr^3 (each cap 1e-9 in its units).
+
+The same-HEAD release CLI was built before edits in the only target directory,
+then its binary copied to `/tmp/p26g-baseline-cli`. Baseline SHA-256:
+`63bfa167e19c80f19b9544b7435ae315f0980a370a68b110c7f55f9de3b3231c`.
+Final SHA-256:
+`411eda7f5df70c2ef255e13daa34ac497f84a8bd144cef03a21fcd2b57fe960e`.
+External UPF SHA-256 remains
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+No UPF was added to the repository.
+
+All five benchmark cases, both profiles, T=1,2,4,8,12 are exactly identical to
+their respective pre-edit baseline: **50/50** energy values, density SHA-256,
+SCF counts, Davidson steps, H counts and certificate work. Strict benchmark
+commands exit 0. Standard commands exit **5**, including the pre-edit baseline:
+`bench_scf.py` independently hardcodes a strict si8 energy check against
+-31.3218036010316 Ha with cap 1e-9 Ha. Unchanged complex standard si8 is
+-31.321803600030876 Ha, which exceeds that separate cap. The comparison lines
+all report zero energy delta and identical density; an independent JSON exact
+comparison passes. The harness was not edited to suppress this failure.
+
+### Reproduction and command outcomes
+
+Use the pinned toolchain, with `/opt/homebrew/opt/rustup/bin` in PATH. The actual
+all-workspace command is `scripts/check.sh` without an argument; `all` would
+be interpreted as a crate name by this script.
+
+```sh
+cargo build --release -p dft-cli
+# Before editing only:
+cp target/release/dft-cli /tmp/p26g-baseline-cli
+# For PROFILE = strict and standard, record the corresponding baseline;
+# add --extra-toml 'convergence_profile = "standard"' for standard only.
+python3 -I scripts/bench_scf.py --binary /tmp/p26g-baseline-cli \
+  --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF \
+  --cases gamma,k222s,k222,k444s,si8 --threads 1 --repeats 1 \
+  --record /tmp/p26g-base-PROFILE.json
+# After editing/building: same cases/UPF/profile, T = 1,2,4,8,12,
+# --binary target/release/dft-cli --baseline /tmp/p26g-base-PROFILE.json
+# --require-identical --record /tmp/p26g-off-PROFILE-tT.json
+cargo test --release -p dft-engine --test gamma_real_scf \
+  -- --include-ignored --nocapture --test-threads=1
+DFT_SI_UPF=/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF \
+  cargo test --release -p dft-engine --test gamma_real_materials standard \
+  -- --include-ignored --nocapture --test-threads=1
+cargo test --release -p dft-cli --test gamma_real_config
+scripts/check.sh
+python3 -I scripts/make_readme_figures.py
+python3 -I scripts/tests/test_readme_figures.py
+```
+
+| Completed command/check | Exit | Outcome |
+| --- | ---: | --- |
+| Baseline and final `cargo build --release -p dft-cli` | 0 each | same target directory, binary hashes above |
+| `scripts/check.sh` | 0 | build, test, fmt, clippy all PASS |
+| Release `gamma_real_scf`, all tests including ignored | 101 | 10 passed; energy gate failed for elongated/slab; all thread comparisons completed |
+| Release `gamma_real_materials standard`, UPF provided | 101 | both Si energy gates failed after all thread comparisons completed |
+| Release `gamma_real_scf standard_first_redo` | 0 | true redo covered for both representations |
+| Release CLI `gamma_real_config` | 0 | 3 passed, including On/Auto standard output |
+| Strict baseline benchmark and five strict identity invocations | 0 each | 25/25 exact comparisons |
+| Standard baseline benchmark and five standard identity invocations | 5 each | existing hardcoded strict si8 check; 25/25 exact comparisons |
+| Independent recorded-JSON exact comparison | 0 | 50/50 energy/density/count/work identities |
+| README generation and freshness test | 0 each | 9 tests; no tracked generated changes |
+| `git diff --check` | 0 | clean |
+
+An initial release material command omitted `DFT_SI_UPF` and exited 101 before
+running physics. It was rerun with the external file; the resulting numerical
+failures above are separate. The first release synthetic run (before adding
+the true-redo/fallback-standard probes) had 9 passes and the same energy-gate
+failure; the final 10-pass result supersedes that test count, not its numbers.
+
+Local raw evidence: `/tmp/p26g-{base-build,final-build,check,cli,redo,standard,
+synthetic-final,identity,timing}.log`, `/tmp/p26g-base-{strict,standard}.json`,
+`/tmp/p26g-off-{strict,standard}-t{1,2,4,8,12}.json`,
+`/tmp/p26g-identity-exits.json`, `/tmp/p26g-timing.json`.
+The `/tmp` files are not durable repository artifacts; these appended tables
+and committed test sources are the reviewable reproduction record.
+
+README generation has no changes because no accepted reference dataset was
+added. Ownership excludes shared ledger/backlog/dashboard/session files;
+no R6 registry row or `.delegate/P26G-REAL-GAMMA-R6/report.json` exists in this
+worktree. Dashboard upload/dataset updates and recurring session timer were
+not established here. Orchestrator handoff row:
+`P26G: standard real-Gamma dispatch implemented, default off; 4/6 energy gates
+fail (max 1.41055745e-9 Ha); all real thread identities and 50 off identities
+pass; standard derivatives intentionally reject; no solver/default tuning.`
+No MKL/dev08 measurement or new QE reference was performed. Before any default
+or speed acceptance, the architect must resolve the energy-gate failures and
+the standard-derivative requirement conflict under a separately approved
+contract. Existing dev08 equal-core pure/MKL and QE real-Gamma bundle requests
+remain applicable; these Mac observations cannot replace them.
+
+### Mac wall-time observation (R6, four combinations)
+
+macOS 27.0.1, arm64, portable release, pure Rust, T=1. Five cyclic repetitions
+of strict/off, strict/on, standard/off, standard/on, each with gamma then si8.
+No builds or other task benchmarks overlapped this timing batch. Shared-host
+load before/after: 21:17  2 users, load averages: 4.66 4.43 2.94 / 21:18  2 users, load averages: 3.88 4.26 2.93.
+These are **Mac observations only**, not dev08 acceptance, and the failed
+standard accuracy gates prevent an equal-accuracy speed claim. Process wall
+includes CLI startup and output. Each condition reproduced identical energy
+and density hashes in all five repetitions.
+
+| Case | complex strict median (s) | real strict median (s) | complex standard median (s) | real standard median (s) | SCF counts in same order |
+| --- | ---: | ---: | ---: | ---: | --- |
+| gamma | 0.109247750 | 0.097314083 | 0.082767292 | 0.071499958 | 10 / 12 / 9 / 9 |
+| si8 | 2.549217417 | 1.662199917 | 0.799915458 | 0.626848959 | 15 / 15 / 14 / 15 |
+
+Raw process wall seconds in execution order (five per condition):
+
+| Condition | Samples (s) |
+| --- | --- |
+| gamma-strict-off | 0.120082125, 0.109751833, 0.109247750, 0.108480084, 0.109208125 |
+| si8-strict-off | 2.554553542, 2.553947334, 2.537447042, 2.537356791, 2.549217417 |
+| gamma-strict-on | 0.097993291, 0.097314083, 0.097131541, 0.097091416, 0.097432291 |
+| si8-strict-on | 1.657777500, 1.662199917, 1.659906875, 1.664081958, 1.668809167 |
+| gamma-standard-off | 0.082875708, 0.082767292, 0.082451334, 0.083274417, 0.082392459 |
+| si8-standard-off | 0.801972458, 0.797655708, 0.799915458, 0.802367083, 0.797678875 |
+| gamma-standard-on | 0.071584167, 0.071208500, 0.071589167, 0.071499958, 0.071028125 |
+| si8-standard-on | 0.626848959, 0.627413708, 0.624768833, 0.626713709, 0.627536958 |
+
+Reproducer (run after all builds; this invokes the existing harness's
+`run_case` function to retain raw timing and avoids its unrelated strict-si8
+summary check; no acceptance check is redefined):
+
+```python
+import runpy, statistics
+bench = runpy.run_path("scripts/bench_scf.py")
+rows = {}
+for repeat in range(5):
+    for profile, mode in [("strict", "off"), ("strict", "on"),
+                          ("standard", "off"), ("standard", "on")]:
+        for case in ["gamma", "si8"]:
+            extra = [f'gamma_real = "{mode}"']
+            if profile == "standard":
+                extra += ['convergence_profile = "standard"']
+            r = bench["run_case"]("target/release/dft-cli",
+                "/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+                case, 1, 1, extra)
+            rows.setdefault((case, profile, mode), []).extend(r["wall_s"])
+for key, samples in rows.items():
+    print(key, statistics.median(samples), samples)
+```
+
+Executed as `python3 /tmp/p26g-timing.py`, exit 0. Full raw records and load
+are in `/tmp/p26g-timing.json`; the numerical samples above remain in this
+owned document. No speed ratio against QE or default adoption is claimed.
+
+## P26G architect-approved delivered-accuracy gate — 2026-11-06
+
+This section supersedes the preceding R6 **standard-mode acceptance criterion**
+and derivative-conflict disposition, preserving all historical measurements.
+The architect explicitly replaced direct real/complex standard agreement at
+1e-10 Ha with delivered accuracy against the same certified complex strict
+reference. Strict-mode tests and caps are unchanged. Standard force/stress
+rejection equality and the pre-existing standard benchmark exit 5 are accepted
+as sufficient; neither is now an R6 blocker. No production source, solver,
+threshold, ratchet, starts or profile was changed in this follow-up.
+
+**Final R6 status: FAILED, one of six fixtures.** The slab real-standard energy
+error is 6.009215125502010e-9 Ha, above the approved 5e-9 Ha absolute cap.
+Its complex-standard error is 4.598657676879725e-9 Ha; both satisfy the relative
+comparison cap, but only complex satisfies the absolute cap. The other five
+real-standard fixtures satisfy both caps. No tuning or further cap change was
+attempted. The profile's Coulomb error is not itself a rigorous total-energy
+error bound; this is an observed delivered-accuracy failure on this fixture.
+
+### Shared certified reference and exact gate
+
+For each R5 fixture the tests compute complex strict Gamma at P17A's
+`(energy_tolerance Ha, density_tolerance Bohr^-3/2, eigen_tolerance Ha)` settings
+`(1e-12,1e-9,1e-10)` and `(1e-13,1e-10,1e-11)`. The latter supplies **the same
+reference** to both standard paths. All other fixture settings, including
+native starts, mixing, cutoff, band count and thread budget T=1, are preserved.
+Tests assert strict certification and final eigen-residual certification for
+both reference runs, and verify their energy plateau <=1e-12 Ha. Maximum
+observed plateau difference is 2.131628207280301e-14 Ha.
+These are new calculations on the six R5 fixtures, not borrowed P17A energies;
+the R5 synthetic slab is different from P17A's nonconverging stress slab.
+
+With `c = abs(E_complex_standard - E_reference)` and
+`r = abs(E_real_standard - E_reference)`, acceptance requires both
+`r <= 5e-9 Ha` and `r <= max(3*c, 1e-10 Ha)`. The historical direct difference
+is retained only as an observation. Density L2 is the unnormalized
+`sqrt(volume/N * sum(delta_density^2))` in Bohr^-3/2; eigenvalue errors are
+maximum absolute indexed differences in Ha, reported for occupied roots and
+all retained roots separately. Buffer roots do not acquire tighter tolerances.
+
+| Fixture | tight energy (Ha) | tighter/reference energy (Ha) | plateau delta (Ha) | reference SCF |
+| --- | ---: | ---: | ---: | ---: |
+| cubic | -6.23797726399252017e-1 | -6.23797726399251129e-1 | 8.88178419700125232e-16 | 14 |
+| skew | -8.47124717547730777e-1 | -8.47124717547730444e-1 | 3.33066907387546962e-16 | 17 |
+| elongated | -3.26376645234360652e0 | -3.26376645234360696e0 | 4.44089209850062616e-16 | 15 |
+| slab | -1.44295754190504733e0 | -1.44295754190504866e0 | 1.33226762955018785e-15 | 18 |
+| Si primitive | -7.29553046821090234e0 | -7.29553046821091300e0 | 1.06581410364015028e-14 | 16 |
+| Si conventional | -3.13218036010317888e1 | -3.13218036010317675e1 | 2.13162820728030056e-14 | 23 |
+
+| Fixture | complex standard energy (Ha) | complex error (Ha) | real error (Ha) | relative cap (Ha) | direct difference, observation (Ha) | both real gates |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| cubic | -6.23797726226468008e-1 | 1.72783121143993412e-10 | 1.18672516258300220e-10 | 5.18349363431980237e-10 | 5.41106048856931920e-11 | PASS |
+| skew | -8.47124717309507114e-1 | 2.38223329951381402e-10 | 2.38223218929078939e-10 | 7.14669989854144205e-10 | 1.11022302462515654e-16 | PASS |
+| elongated | -3.26376645194300252e0 | 4.00604438510754335e-10 | 2.87425638845206777e-10 | 1.20181331553226300e-9 | 1.13178799665547558e-10 | PASS |
+| slab | -1.44295753730639098e0 | 4.59865767687972493e-9 | 6.00921512550200987e-9 | 1.37959730306391748e-8 | 1.41055744862228494e-9 | **FAIL absolute cap** |
+| Si primitive | -7.29553046810284478e0 | 1.08068221038593038e-10 | 2.33608687949526939e-10 | 3.24204663115779113e-10 | 1.25540466910933901e-10 | PASS |
+| Si conventional | -3.13218036000308757e1 | 1.00089181387374992e-9 | 5.68455504890152952e-10 | 3.00267544162124977e-9 | 4.32436308983596973e-10 | PASS |
+
+Real-standard energies remain exactly those in the preceding R6 six-fixture
+table. Every standard run remains uncertified; no tight certificate is attached
+to a standard result.
+
+| Fixture | occupied eigen error complex (Ha) | occupied eigen error real (Ha) | all-root eigen error complex (Ha) | all-root eigen error real (Ha) | density L2 error complex (Bohr^-3/2) | density L2 error real (Bohr^-3/2) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| cubic | 5.74499871663913808e-6 | 5.84002513309700433e-6 | 1.74958661765867163e-4 | 1.71158483179834064e-4 | 2.61104724359920426e-6 | 2.31996324761337002e-6 |
+| skew | 1.46710461865207087e-6 | 1.46710462006760523e-6 | 8.18133368496454239e-6 | 8.18133368296614094e-6 | 2.46201050774313884e-6 | 2.46201050959926628e-6 |
+| elongated | 3.52200170783412148e-6 | 2.05542609429953949e-6 | 3.87631912834862646e-6 | 2.67780267726447363e-6 | 5.27812000032777299e-6 | 4.69981793158528814e-6 |
+| slab | 9.63924698338392005e-7 | 1.18098689433354664e-6 | 1.38962525308983231e-6 | 1.18098689433354664e-6 | 8.33534301484108849e-6 | 1.09431833569317700e-5 |
+| Si primitive | 1.17585140413378753e-6 | 1.93007380655529914e-6 | 1.17585140413378753e-6 | 1.93007380655529914e-6 | 2.21530625951193330e-6 | 4.71932610835889137e-6 |
+| Si conventional | 1.65592824571958452e-6 | 1.04310554713271664e-6 | 1.65592824571958452e-6 | 1.04310554713271664e-6 | 1.22481987953357553e-5 | 7.72080897910040592e-6 |
+
+### Verification and unchanged timing evidence
+
+The updated ignored release tests retain all thread, metadata, ratchet and
+work comparisons before aggregating accuracy failures. Synthetic release suite:
+10 passed, 1 failed solely for slab delivered accuracy. Material standard suite:
+1 passed, covering both Si cases. All six real-standard trajectories still
+match exactly across T=1,2,4,8,12. The true-first-redo, standard derivative
+rejection, fallback, strict synthetic equivalence, strict derivative and restart
+tests pass. No numerical production edit follows the original R6 wiring.
+
+The previously recorded 50/50 Off identity comparisons and five-sample cyclic
+Mac wall table above remain applicable: the release CLI SHA-256 is unchanged
+(`411eda7f5df70c2ef255e13daa34ac497f84a8bd144cef03a21fcd2b57fe960e`).
+They were not rerun solely for test/document changes. In particular the si8
+standard-to-standard identity still passes even though the old strict absolute
+benchmark guard produces exit 5, now explicitly accepted by the architect.
+No extra target directory was created. No new QE, MKL or dev08 claim is made.
+
+Reproduction uses the same release commands above with the revised tests.
+New raw logs: `/tmp/p26g-revised-synthetic.log`,
+`/tmp/p26g-revised-material.log`, `/tmp/p26g-revised-material-all.log`,
+`/tmp/p26g-revised-check.log`, and `/tmp/p26g-revised-accuracy.json`.
+The final machine-readable report is `.delegate/P26G-REAL-GAMMA-R6/report.json`
+(local ignored handoff artifact). Tests and these appended numerical tables
+are the durable review record. Ledger handoff replaces the old four-failure
+summary with: `P26G revised delivered-accuracy gate: 5/6 pass; slab real error
+6.00921513e-9 Ha exceeds 5e-9 Ha, complex error 4.59865768e-9 Ha; all references
+certified with plateau <=2.14e-14 Ha; no production/tolerance change.`
+
+Final completed follow-up commands:
+
+| Command | Exit | Outcome |
+| --- | ---: | --- |
+| `scripts/check.sh` | 0 | build/test/fmt/clippy PASS on revised tests |
+| `cargo test --release -p dft-engine --test gamma_real_scf -- --include-ignored --nocapture --test-threads=1` | 101 | 10 passed; revised slab absolute-energy gate failed |
+| `DFT_SI_UPF=... cargo test --release -p dft-engine --test gamma_real_materials standard -- --include-ignored --nocapture --test-threads=1` | 0 | both material standard cases pass revised gates |
+| `DFT_SI_UPF=... cargo test --release -p dft-engine --test gamma_real_materials -- --include-ignored --nocapture --test-threads=1` | 101 | standard passed; unchanged R5 strict primitive SCF-count failure (10→12); strict energy/eigen/density/thread checks pass |
+| `python3 -I scripts/make_readme_figures.py` | 0 | generated output unchanged |
+| `python3 -I scripts/tests/test_readme_figures.py` | 0 | 9 passed |
+| `git diff --check` | 0 | clean |
+
+The strict primitive count failure is pre-existing R5/P26F evidence, separate
+from the new standard slab delivered-accuracy failure. Neither is hidden by
+the successful default debug gates (these full matrices are release-only).
+The standard derivative requirement is resolved by the architect decision;
+no outstanding approval is requested in this report. Shared dashboard/registry
+ownership and the absence of a recurring reporting timer remain unchanged.
+
+### Architect disposition of the R6 standard-profile gate (2026-11-06)
+
+The absolute cap of 5e-9 Ha was set by the architect for the standard profile and is exceeded on the synthetic slab by the real path (6.01e-9 Ha) while the complex+standard path itself sits at 4.60e-9 Ha, 92 percent of the cap. The relative criterion (real error <= max(3 x complex error, 1e-10 Ha)) passes on all six fixtures. The slab result therefore shows that the fixture/profile combination delivers about 5e-9 Ha on either path, not a solver defect specific to the real path; the real error is 1.31 x the complex one. The absolute cap is kept as a reported observation and is NOT claimed as passed: the slab row stays marked as exceeding it. Acceptance of `gamma_real` with the standard profile as default remains pending dev08 measurements on the benchmark set. The strict-mode gates are unchanged.

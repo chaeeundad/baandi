@@ -89,6 +89,7 @@ Common gates (details in the brief): energy within 1e-12 Ha of the stored baseli
 - Validate: bit-identical for blocked traversal and caches; energy and certificate unchanged for the audit change.
 
 ### B02 Real-valued Gamma path (G-H1..H6)
+- Design note and ticket breakdown (R0 to R8, orthonormal real coordinates layout, 1e-10 Ha equivalence gate): [real-gamma-design.md](real-gamma-design.md) (2026-11-06).
 - Gain: G 7.4 estimate 2.1x (1.7-2.4) on the Gamma SCF: FFT 2.0x, dense products 3-4x, nonlocal 4-8x; re-profile first (the note's fractions are assumed). QE's best configuration gets the same factor, so this prevents the gap from widening rather than closing it (G 9.5).
 - Staging: G-H1 paired local application and density (FFT 2x, about 1.2-1.3x total), G-H2 real Davidson dense products (about 1.9x with H1), G-H3 real block nonlocal, G-H4 pair work unit, G-H5 dispatcher with logged fallback, G-H6 half-sphere density and potential.
 - Risk: new wavefunction representation and a second Davidson family (permanent maintenance); G=0 bookkeeping; needs an ADR; bit-identity with the complex path not a contract. Dependency: build it on the rank 2-3 solver structure, not before, to avoid rewriting the algebra twice.

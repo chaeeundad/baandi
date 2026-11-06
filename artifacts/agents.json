@@ -871,5 +871,14 @@
     "task": "P25A-BENCH-LARGE: 성능 비교용 큰 계산 사례(원자 32개 등)와 힘·응력 측정 항목을 벤치마크에 추가(코어 8~16개 비교를 가능하게 함)",
     "ref": "pid 50825, session 01a1aebb, task/P25A-BENCH-LARGE",
     "updated": "2026-11-06"
+  },
+  {
+    "id": "A98",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P26A-REAL-GAMMA-R1: 속도(실수 Gamma 경로 1단계): 파동함수를 실수로 다루기 위한 기초 부품(반구 대응표, 실수 좌표 변환, 실수 행렬 곱, 실수 고유값 풀이). 엔진은 아직 쓰지 않음",
+    "ref": "pid 59575, session 01a1af29, task/P26A-REAL-GAMMA-R1",
+    "updated": "2026-11-06"
   }
 ]

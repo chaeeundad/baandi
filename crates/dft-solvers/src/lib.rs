@@ -3,6 +3,8 @@
 pub mod kerker;
 pub mod locking;
 pub mod mixing;
+pub mod real_davidson;
+pub use real_davidson::{RealDavidson, RealEigenSolution};
 #[doc(hidden)]
 pub mod replay;
 pub mod rmm;
@@ -73,6 +75,40 @@ pub trait Preconditioner {
         residuals: &ComplexMatrix,
         output: &mut ComplexMatrix,
     ) -> Result<(), SolverError>;
+}
+
+/// Real symmetric operator in orthonormal real coordinates (ORC).
+/// Overwrite every output entry; blocks supplied by RealDavidson have unit-norm
+/// columns. A physics adapter may pair adjacent columns for FFT application.
+pub trait RealLinearOperator {
+    fn dimension(&self) -> usize;
+    fn worker_pool(&self) -> Option<std::sync::Arc<dft_numerics::pool::WorkerPool>> {
+        None
+    }
+    fn inner_threads(&self) -> usize {
+        1
+    }
+    fn apply(&self, x: &[f64], y: &mut [f64]) -> Result<(), SolverError>;
+    fn apply_block(
+        &self,
+        x: &dft_numerics::real::RealMatrix,
+        y: &mut dft_numerics::real::RealMatrix,
+    ) -> Result<(), SolverError> {
+        let n = self.dimension();
+        if x.rows() != n || y.rows() != n || x.cols() != y.cols() {
+            return Err(LinalgError::Dimension.into());
+        }
+        for j in 0..x.cols() {
+            self.apply(
+                &x.as_slice()[j * n..(j + 1) * n],
+                &mut y.as_mut_slice()[j * n..(j + 1) * n],
+            )?;
+        }
+        if y.as_slice().iter().any(|x| !x.is_finite()) {
+            return Err(LinalgError::NonFinite.into());
+        }
+        Ok(())
+    }
 }
 
 /// Correction -r/(d-lambda), with sign-preserving denominator floor (zero takes +).

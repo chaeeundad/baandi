@@ -81,8 +81,7 @@ impl RealLinearOperator for Operator {
 
 /// Try the real path without modifying an incompatible warm start. Construction
 /// failures are eligibility failures; solver failures propagate, never fall back.
-/// R4 certifies every strict solve, including when `certify` permits recurrence
-/// acceptance. This is stronger than requested and its work is counted.
+/// Certification follows the same caller policy as complex Davidson.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn solve_real_gamma(
     hamiltonian: &Hamiltonian,
@@ -92,7 +91,7 @@ pub(crate) fn solve_real_gamma(
     bands: usize,
     tolerance: f64,
     policy: BandTolerances,
-    _certify: bool,
+    certify: bool,
     options: &ScfOptions,
     pool: Arc<WorkerPool>,
     exclusion: Option<&str>,
@@ -168,7 +167,13 @@ pub(crate) fn solve_real_gamma(
         n,
         pool,
     };
-    let result = solver.solve_with_band_tolerances(&op, packed.as_ref(), &diagonal, policy)?;
+    let result = solver.solve_with_band_tolerances_and_certification(
+        &op,
+        packed.as_ref(),
+        &diagonal,
+        policy,
+        certify,
+    )?;
     let mut eigenvectors = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
     for j in 0..bands {
         op.h.borrow()

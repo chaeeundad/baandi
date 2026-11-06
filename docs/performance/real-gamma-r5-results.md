@@ -244,3 +244,154 @@ Baseline signatures, identical for every final Off budget:
 README/figure regeneration produced no tracked changes. Overall R5 acceptance
 status: **FAILED**, solely for the explicit realistic SCF-count design gate.
 All implementation changes are left uncommitted for architect review.
+
+## P26F certification follow-up — 2026-11-06
+
+Base `cbf604799f5b3b8f728f7748292d93a57c949305`, branch
+`task/P26F-REAL-DAVIDSON-CERTIFY`; changes uncommitted. These are portable
+pure-Rust Mac observations, BAANDI versus BAANDI, not QE measurements.
+The previous sections remain historical R5 evidence.
+
+### Change and exact work attribution
+
+The engine now forwards its existing `certify` flag to the additive
+`RealDavidson::solve_with_band_tolerances_and_certification` entry point.
+Ordinary strict returns with false use recurrence residuals and report
+`residuals_certified=false`. True requests perform a fresh bands-wide H
+application before returning; a failed certificate still corrects/restarts.
+As in complex Davidson, iteration-limit returns always check true residuals,
+even with false. Existing convenience methods still request certification.
+No tolerance, capacity, start, correction selection, complex Davidson, standard
+profile, or default changes. The new operator-count test independently observes
+one initial 3-column block with false (3 H vectors), versus two blocks with true
+(6 H vectors), and two blocks at the iteration limit with false (6 H vectors).
+
+All six real energies, density differences and SCF counts reproduce R5 exactly
+at the printed precision. Skipping certificates changes H work, not trajectories.
+The old material test's `extra_certificate_H_lower_bound` label is retained
+unchanged as requested: its 88/280 now counts **removed** intermediate certificate
+vectors, not remaining extra applications.
+
+| Fixture | real energy (Ha) | absolute delta E (Ha) | max occupied eigenvalue delta (Ha) | density L2 delta (Bohr^-3/2) | SCF complex → real |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| synthetic cubic, 1 atom | -0.623797726399250241 | 3.330669073875470e-16 | 4.532495490039423e-10 | 9.685741052919343e-10 | 10 → 10 |
+| synthetic skew, 1 atom | -0.847124717547730444 | 3.330669073875470e-16 | 1.804112415015879e-16 | 1.490413458162324e-16 | 11 → 11 |
+| synthetic elongated, 2 atoms, local only | -3.26376645234356966 | 3.730349362740526e-14 | 1.893469769864709e-9 | 5.571693726425282e-8 | 11 → 11 |
+| synthetic slab, 2 atoms | -1.44295754190504688 | 1.332267629550188e-15 | 8.566122589037661e-9 | 1.063228310644686e-8 | 13 → 10 |
+| Si primitive Gamma, 2 atoms, 8 bands | -7.29553046821088103 | 1.207922650792170e-13 | 2.255534431450101e-8 | 1.556923501195097e-7 | **10 → 12 (FAIL)** |
+| Si conventional Gamma, 8 atoms, 20 bands | -31.3218036010315828 | 3.126388037344441e-13 | 2.221413531594552e-8 | 1.752960372901859e-7 | 15 → 15 |
+
+| Fixture | main Davidson steps, complex → real | main H vectors, complex → real | fresh SCF-certificate steps, complex → real | fresh SCF-certificate H, complex → real |
+| --- | ---: | ---: | ---: | ---: |
+| cubic | 42 → 40 | 124 → 120 | — | — |
+| skew | 50 → 50 | 161 → 161 | — | — |
+| elongated | 31 → 34 | 116 → 118 | — | — |
+| slab | 70 → 59 | 247 → 205 | — | — |
+| Si primitive | 41 → 55 | 281 → 347 | 8 → 5 | 38 → 31 |
+| Si conventional | 283 → 320 | 2063 → 2126 | 62 → 68 | 202 → 204 |
+
+Main H total is 2992 → 3077 (+2.8409%; arithmetic mean of per-fixture ratios
++1.3393%), compared with R5's 3635 real H vectors. Exactly 558 applications
+were removed: 45/50/50/45/88/280 by row. Main steps remain 517 → 558
+(+7.93%, mean per-fixture +6.07%). Primitive including SCF certificates is
+319 → 378 H vectors; conventional 2265 → 2330. These are work counts, not
+wall-time speedups. The realistic primitive SCF-count gate still fails.
+
+### Primitive count-gap diagnosis (no start changes applied)
+
+The new ignored external-file diagnostic uses the original production runs
+and four separate fixed-H first-map probes. The first-map probes use uniform
+input density and the actual first SCF tolerance, 0.01 Ha. The public `step`
+API certifies, so those probes count 47 H vectors versus production's 39;
+all four require 5 Davidson steps.
+
+The 749-plane-wave primitive basis cuts a kinetic shell at
+0.562410736087223029 Ha: one direction below it, eight in the shell, seven
+selected. The squared Frobenius distance of the native complex and
+Hermitian-completed ORC start projectors is 1.00000000000000178 (dimensionless).
+The first output-density difference is 9.787095689877689e-4 Bohr^-3/2,
+although the first Ritz spectra differ only at roundoff. Feeding the same
+ORC start to both solvers **in this diagnostic only** reduces the first-map
+density difference to 2.526622377017739e-15 Bohr^-3/2. This isolates the
+cut-shell orientation as the initial trajectory difference, rather than an
+H implementation or certification mismatch. It does not prove that a new
+start policy would remove exactly two SCF iterations on every fixture.
+
+| SCF iteration | density residual complex → real (engine normalized atomic-unit norm) | steps complex → real | main H complex → real |
+| --- | ---: | ---: | ---: |
+| 1 | 6.826656818e-2 → 6.826667780e-2 | 5 → 5 | 39 → 39 |
+| 4 | 1.876849334e-3 → 1.871749852e-3 | 4 → 4 | 26 → 26 |
+| 5 | 1.382313393e-4 → 1.539525457e-4 | 4 → 5 | 25 → 29 |
+| 8 | 2.344661869e-6 → 1.735723700e-5 | 3 → 4 | 21 → 28 |
+| 9 | 8.465570655e-8 → 1.749445711e-6 | 4 → 4 | 20 → 27 |
+| 10 | 4.242642576e-8 → 1.946414001e-7 | 4 → 4 | 30 → 21 |
+| 11 | — → 5.273904051e-8 | — → 4 | — → 23 |
+| 12 | — → 6.294606848e-9 | — → 7 | — → 32 |
+
+At step 10 the real density residual still exceeds 1e-7. Step 11 requests
+1.946414001e-8 Ha, above the final 1e-8 eigen-tolerance gate; step 12 requests
+5.273904051e-9 Ha and certifies. The existing density-dependent schedule
+therefore explains how the divergent trajectory adds the two final iterations.
+
+Correction-order inspection found **the same rule**, not a different sort:
+both select unconverged roots in ascending band order, up to bands columns
+(the engine sets complex block_size=bands). Roundoff and different subspaces
+can still rotate/order degenerate Ritz vectors. Buffer handling is also equal:
+primitive has 5 strict roots (4 occupied plus first empty) and 3 buffers;
+strict threshold is the requested tolerance, buffers use max(tolerance,1e-5).
+All eight first-map residuals lie between 0.0040440062 and 0.0088339407 Ha,
+so all meet the 0.01 Ha threshold in both paths. The existing fixed-H R4 buffer
+oracle still gives 8/8 steps and 31/31 H, and the iteration-limit buffer and
+failed-certificate tests pass. No evidence supports tuning buffer thresholds
+or reordering corrections to fix this gap.
+
+**Proposal only:** separately evaluate a common real-structured, shell-complete
+starting subspace (including its added width/work) across the general fixture
+suite, with an independent spectral oracle. This requires a new design decision;
+neither production start vectors nor band/subspace counts were changed here.
+No full SCF with a changed start was used to claim acceptance.
+
+### Verification, provenance and remaining handoff
+
+Commands (PATH includes `/opt/homebrew/opt/rustup/bin`; external UPF path and
+SHA-256 are the same as R5):
+
+| Command | Exit | Result |
+| --- | ---: | --- |
+| `scripts/check.sh` (workspace, no crate argument) | 0 | build/test/fmt/clippy PASS |
+| `cargo test --release -p dft-solvers --test real_davidson -- --include-ignored --nocapture` | 0 | 8 passed, including unchanged R4 tests |
+| `cargo test --release -p dft-engine --test gamma_real_scf -- --include-ignored --nocapture` | 0 | 8 passed; calibration, derivatives, restart, fallback unchanged |
+| `DFT_SI_UPF=... cargo test --release -p dft-engine --test gamma_real_materials --test gamma_real_scf -- --include-ignored --nocapture` | 101 | material accuracy and T=1,2,4,8,12 pass for both; unchanged primitive SCF-count assertion fails, stopping before synthetic binary (run separately above) |
+| `DFT_SI_UPF=... cargo test --release -p dft-engine --test gamma_real_diagnosis -- --ignored --nocapture` | 0 | 1 diagnostic passed |
+| `cargo build --release -p dft-cli` | 0 | portable build |
+| `python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf ... --cases gamma,k222s,k222,k444s,si8 --threads T --repeats 1 --baseline /tmp/r5-baseline.json --require-identical` | 0 each | T=1,2,4,8,12; 25/25 identical, delta E exactly 0 Ha |
+| `python3 -I scripts/make_readme_figures.py` | 0 | no tracked generated changes |
+| `python3 -I scripts/tests/test_readme_figures.py` | 0 | 9 tests passed |
+
+All six real fixtures retain energy/density bit identity and work counts across
+T=1,2,4,8,12. No MKL/dev08 run, new QE reference, or timing acceptance.
+Off comparisons reuse the preserved R5 baseline, not a newly rebuilt same-HEAD
+binary. The unchanged complex code and the previous R5 identity bridge support
+this historical comparison; no new baseline was fabricated. Release CLI SHA-256:
+`fb5311290e2dc383f1b3837abf0093b1ba05b7bfb164ac9bf3e37ca93db433b0`.
+Raw local logs: `/tmp/p26f-{r4,r5,synthetic,diagnosis,check-final}.log`,
+`/tmp/p26f-off-t{1,2,4,8,12}.log`. An initial diagnostic compile failed (101)
+because Hartree has no FromStr implementation; corrected by adding a test-only
+engine dependency on the existing dft-units crate (and its lockfile edge).
+This is additive test plumbing outside OWNED_FILES, no new external dependency.
+
+README regeneration is unchanged because no new accepted reference dataset is
+claimed. The out-of-scope ledger/backlog/dashboard/session registry remain for
+the orchestrator; this worktree has no P26F session entry or delegate report,
+and no dashboard upload or recurring session timer was established here.
+Ledger handoff: `P26F: certify semantics aligned, 558 redundant H vectors removed;
+six-case H +2.84% vs complex, steps +7.93%; primitive 10→12 SCF still fails;
+cut-shell first-density difference isolated with common-start diagnostic;
+no start/default/tolerance changes, no performance adoption.`
+Derived from real-gamma-design (and its own-words study-note inputs); no QE
+source read. Existing dev08 handoff remains necessary after the start-policy
+investigation: pure/MKL T=1,4,8,16, frozen accuracy and density identity, per-map
+H/steps, and caller-resolved profiles with at least 30 samples; equal-core QE
+7.6 real-Gamma bundles with input/binary/UPF hashes. Overall design acceptance
+remains **FAILED**, while the requested certification fix and diagnosis are
+complete and left uncommitted for review.

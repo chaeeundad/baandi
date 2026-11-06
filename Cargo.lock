@@ -505,6 +505,7 @@ dependencies = [
  "dft-numerics",
  "dft-physics",
  "dft-solvers",
+ "dft-units",
  "dft-upf",
 ]
 

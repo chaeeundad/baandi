@@ -2590,5 +2590,23 @@
     "ended_at": "2026-11-06T10:52:14Z",
     "exit_code": 0,
     "note": "merged as experimental option off; Si primitive SCF count gate failed 10->12, see results doc"
+  },
+  {
+    "run_id": "P26F-REAL-DAVIDSON-CERTIFY#1",
+    "task_id": "P26F-REAL-DAVIDSON-CERTIFY",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 17155,
+    "wrapper_pid": 17140,
+    "session_id": null,
+    "branch": "task/P26F-REAL-DAVIDSON-CERTIFY",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P26F-REAL-DAVIDSON-CERTIFY",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P26F-REAL-DAVIDSON-CERTIFY.md",
+    "report": null,
+    "started_at": "2026-11-06T11:14:31Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

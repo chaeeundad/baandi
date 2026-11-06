@@ -64,7 +64,20 @@ impl RealDavidson {
         diagonal: &[f64],
         policy: BandTolerances,
     ) -> Result<RealEigenSolution, SolverError> {
-        self.solve_policy(operator, initial, diagonal, policy, false)
+        self.solve_with_band_tolerances_and_certification(operator, initial, diagonal, policy, true)
+    }
+
+    /// With `certify=false`, ordinary returns accept recurrence residuals.
+    /// As in complex Davidson, iteration-limit returns always certify.
+    pub fn solve_with_band_tolerances_and_certification(
+        &self,
+        operator: &dyn RealLinearOperator,
+        initial: Option<&RealMatrix>,
+        diagonal: &[f64],
+        policy: BandTolerances,
+        certify: bool,
+    ) -> Result<RealEigenSolution, SolverError> {
+        self.solve_policy(operator, initial, diagonal, policy, false, certify)
     }
 
     /// Standard-profile semantics: the last mandatory root is the first empty
@@ -76,7 +89,7 @@ impl RealDavidson {
         diagonal: &[f64],
         policy: BandTolerances,
     ) -> Result<RealEigenSolution, SolverError> {
-        self.solve_policy(operator, initial, diagonal, policy, true)
+        self.solve_policy(operator, initial, diagonal, policy, true, false)
     }
 
     fn solve_policy(
@@ -86,6 +99,7 @@ impl RealDavidson {
         diagonal: &[f64],
         policy: BandTolerances,
         ritz: bool,
+        certify: bool,
     ) -> Result<RealEigenSolution, SolverError> {
         let n = op.dimension();
         crate::validate_bands(n, self.bands)?;
@@ -174,6 +188,7 @@ impl RealDavidson {
             let mut certified = false;
             let mut trusted = true;
             if !ritz
+                && (certify || iteration == self.max_iterations)
                 && (meets_policy(&residuals)
                     || (iteration == self.max_iterations && meets_strict(&residuals)))
             {

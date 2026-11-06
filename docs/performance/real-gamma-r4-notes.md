@@ -217,3 +217,25 @@ scoped threads and A52 CholeskyQR2 remain rejected. Fixed spectra pass, all
 three contraction fixtures exercise restarts, and real/complex counts need not
 match exactly even with the same start. Keep the complex default unchanged;
 no rejected optimization is revived and no default adoption is requested.
+
+## P26F amendment — 2026-11-06
+
+The additive `solve_with_band_tolerances_and_certification(..., certify)` API
+now matches complex Davidson. False accepts recurrence residuals on ordinary
+returns and marks them uncertified; true applies H to all returned bands at a
+candidate return. Failed certification still invalidates products and uses true
+residual corrections. Iteration-limit returns always certify, including false.
+The original `solve` and `solve_with_band_tolerances` methods continue to request
+true certification; Ritz-change behavior is unchanged. No numerical threshold,
+start, correction ordering, capacity, or complex code was changed.
+
+Release `real_davidson -- --include-ignored --nocapture` exits 0: all seven
+existing tests plus one new independent block-call-count test pass. New test:
+three bands, one iteration, false/true produce 1/2 H block calls (3/6 vectors);
+false at max_iterations=1 also produces 2 calls (6 vectors). The adversarial
+failed-certificate test still takes 2 real/complex steps and 10/10 H vectors;
+the buffer test remains 8/8 steps and 31/31 H vectors. See the dated P26F section
+in `real-gamma-r5-results.md` for six-fixture evidence and the remaining primitive
+10→12 SCF-count acceptance failure. Existing historical R4 statements above
+about mandatory certification describe the original convenience APIs and R4
+implementation, not the new explicitly uncertified intermediate entry point.

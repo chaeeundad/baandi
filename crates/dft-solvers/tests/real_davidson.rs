@@ -538,3 +538,40 @@ fn failed_certificate_restarts_with_true_residuals() {
         r.certification_attempts
     );
 }
+
+#[test]
+fn recurrence_return_skips_final_application_but_limit_certifies() {
+    let mut a = RealMatrix::zeros(7, 7).unwrap();
+    for i in 0..7 {
+        a[(i, i)] = i as f64;
+    }
+    let op = CertificateProbe {
+        op: Operator {
+            a,
+            pool: WorkerPool::new(1).unwrap(),
+        },
+        calls: std::cell::Cell::new(0),
+    };
+    let d: Vec<_> = (0..7).map(|i| i as f64).collect();
+    let policy = BandTolerances {
+        strict_bands: 2,
+        buffer_tolerance: 1e-6,
+    };
+    for (certify, limit, blocks, vectors) in
+        [(false, 400, 1, 3), (true, 400, 2, 6), (false, 1, 2, 6)]
+    {
+        op.calls.set(0);
+        let mut s = solver(3);
+        s.max_iterations = limit;
+        let r = s
+            .solve_with_band_tolerances_and_certification(&op, None, &d, policy, certify)
+            .unwrap();
+        assert_eq!(op.calls.get(), blocks);
+        assert_eq!(r.operator_applications, vectors);
+        assert_eq!(r.certification_attempts, blocks - 1);
+        assert_eq!(r.residuals_certified, blocks == 2);
+        assert_eq!(r.iterations, 1);
+        assert_eq!(r.eigenvalues, vec![0., 1., 2.]);
+        assert!(r.converged.iter().all(|&x| x));
+    }
+}

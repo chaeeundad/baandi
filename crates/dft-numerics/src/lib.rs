@@ -1,6 +1,10 @@
 //! Reusable complex FFTs with explicit plane-wave normalization.
 pub mod fused;
 pub mod linalg;
+pub mod real;
+pub use real::{
+    RealGemmWorkspace, RealMatrix, RealMatrixMut, RealMatrixRef, RealOp, symmetric_eigh,
+};
 #[cfg(feature = "mkl")]
 pub mod mkl_backend;
 pub mod pool;

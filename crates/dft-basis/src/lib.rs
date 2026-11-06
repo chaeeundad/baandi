@@ -1,6 +1,8 @@
 //! Full complex Bloch plane waves and alias-free density FFT grids.
+pub mod half;
 use dft_geometry::Cell;
 use dft_units::Hartree;
+pub use half::{HalfSphere, HalfSphereError, ORC_TOLERANCE};
 use ndarray::Array3;
 use num_complex::Complex64;
 use std::f64::consts::TAU;

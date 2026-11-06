@@ -202,6 +202,10 @@ pub(super) fn execute(
     if let Some(symmetry) = config.symmetry_json().map_err(|e| error(1, e))? {
         result["symmetry"] = symmetry;
     }
+    if opts.gamma_real != dft_engine::GammaReal::Off {
+        result["gamma_real_used"] = json!(r.gamma_real_used);
+        result["gamma_real_fallback_reason"] = json!(r.gamma_real_fallback_reason);
+    }
     if let Some(report) = &r.spectral_completeness {
         result["spectral_completeness"] = super::spectral_json(report);
     }

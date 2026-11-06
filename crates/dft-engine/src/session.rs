@@ -710,6 +710,16 @@ impl ScfSession {
             self.outcome = Some(ScfOutcome {
                 converged: certified,
                 result: ScfResult {
+                    gamma_real_used: self
+                        .problem
+                        .states
+                        .iter()
+                        .any(|s| s.gamma_real.gamma_real_used),
+                    gamma_real_fallback_reason: self
+                        .problem
+                        .states
+                        .iter()
+                        .find_map(|s| s.gamma_real.fallback_reason.clone()),
                     force_identity: self.problem.force_model.with_policy(
                         crate::force_identity::OccupationIdentity::new(
                             &[&self.problem.occupations],

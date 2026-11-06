@@ -69,6 +69,7 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
         o.standard = s.standard_profile().map_err(|e| error(1, e.to_string()))?;
         o.hartree_mixing = s.hartree_mixing().map_err(|e| error(1, e.to_string()))?;
         o.spectral_guard = s.spectral_guard().map_err(|e| error(1, e.to_string()))?;
+        o.gamma_real = s.gamma_real().map_err(|e| error(1, e.to_string()))?;
         o.locking = s.locking().map_err(|e| error(1, e.to_string()))?;
         o.threads = s.threads.unwrap_or(1);
         if let Some(n) = s.max_iterations {
@@ -122,6 +123,9 @@ fn options_json(o: &ScfOptions) -> Value {
         "residual_eigen_schedule":o.residual_eigen_schedule,"free_electron_initial_guess":o.free_electron_initial_guess,"initial_eigen_tolerance":o.initial_eigen_tolerance,"eigen_tolerance_decay":o.eigen_tolerance_decay,"max_iterations":o.max_iterations,
         "davidson_max_iterations":o.davidson_max_iterations,"davidson_subspace":o.davidson_subspace,"davidson_subspace_min_per_band":6,"seed":o.seed,
         "divergence_factor":o.divergence_factor,"divergence_patience":o.divergence_patience});
+    if o.gamma_real != dft_engine::GammaReal::Off {
+        result["gamma_real"] = json!(o.gamma_real.name());
+    }
     if o.locking == dft_engine::Locking::Auto {
         result["locking"] = json!("auto");
     }
@@ -545,6 +549,10 @@ pub fn execute_mode(
     }
     if dft_engine::work_accounting::ENABLED {
         result["davidson_work"] = json!(davidson_work);
+    }
+    if opts.gamma_real != dft_engine::GammaReal::Off {
+        result["gamma_real_used"] = json!(r.gamma_real_used);
+        result["gamma_real_fallback_reason"] = json!(r.gamma_real_fallback_reason);
     }
     if let Some(report) = &r.spectral_completeness {
         result["spectral_completeness"] = spectral_json(report);

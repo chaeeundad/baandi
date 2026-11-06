@@ -316,6 +316,7 @@ pub(crate) fn options_identical(a: &ScfOptions, b: &ScfOptions) -> bool {
         && a.hartree_mixing == b.hartree_mixing
         && solver
         && eq!(
+            gamma_real,
             spectral_guard,
             locking,
             threads,

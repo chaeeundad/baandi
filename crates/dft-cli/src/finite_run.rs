@@ -26,6 +26,7 @@ pub(super) fn execute(
         .and_then(|o| o.band_cap)
         .unwrap_or(32);
     let sector = config.spin_sector(target).map_err(|e| error(1, e))?;
+    let gamma_real_fallback_reason;
     let force_result;
     let stress_result;
     let (
@@ -61,6 +62,7 @@ pub(super) fn execute(
                 .map_err(engine_error)?;
         }
         let r = problem.run().map_err(engine_error)?;
+        gamma_real_fallback_reason = r.gamma_real_fallback_reason.clone();
         force_result = requested_forces(
             config,
             &prepared.cell,
@@ -134,6 +136,7 @@ pub(super) fn execute(
                 .map_err(engine_error)?;
         }
         let r = problem.run().map_err(engine_error)?;
+        gamma_real_fallback_reason = r.gamma_real_fallback_reason.clone();
         force_result = requested_forces(
             config,
             &prepared.cell,
@@ -276,6 +279,10 @@ pub(super) fn execute(
     let stress = json!({"status":"unavailable","reason":"not_requested","units":"Ha/Bohr^3","frame":"cartesian_tensor","sign_convention":"tensile_positive"});
     let extension = json!({"proposal_status":"proposed","extension_version":2,"model_digest":model_digest,"basis_digest":basis_digest,"state_digest":state_digest,"spin":spin,"occupations":block,"thermodynamics":thermodynamics,"forces":forces,"stress":stress});
     let mut result = json!({"schema_version":2,"output_profile":"fermi_dirac_v1","spin":spin,"occupations":block,"thermodynamics":thermodynamics,"energies":energy_json(&energy),"energy_ledger":[{"term":"E","energy_ha":thermo.internal_energy_ha},{"term":"-TS","energy_ha":-thermo.entropy_term_ha},{"term":"F","energy_ha":thermo.free_energy_ha}],"band_gap":{"status":"not_applicable","reason":"metallic/Fermi level","chemical_potential_ha":mu},"band_data":{"shape":[densities.len(),points.len(),cap],"eigenvalues_ha":eigenvalues,"residuals_ha":residuals},"band_policy":{"kind":"prepare_explicit_cap","cap":cap,"retained_bands":cap,"scope":"retained_basis","omitted_tail_bound":null},"convergence":{"converged":converged,"iterations":iterations,"certificate":cert},"forces":{"status":"unavailable","reason":"not_requested"},"stress":{"status":"unavailable","reason":"not_requested"},"density":{"channel_values":densities.iter().map(|d|d.iter().copied().collect::<Vec<_>>()).collect::<Vec<_>>()},"limitations":["synthetic validation only; no real-metal QE comparison","finite edge occupancy is not an infinite omitted-state bound","finite-T restart and runtime control unavailable"]});
+    if opts.gamma_real != dft_engine::GammaReal::Off {
+        result["gamma_real_used"] = json!(false);
+        result["gamma_real_fallback_reason"] = json!(gamma_real_fallback_reason);
+    }
     if let Some(symmetry) = config.symmetry_json().map_err(|e| error(1, e))? {
         result["symmetry"] = symmetry;
     }

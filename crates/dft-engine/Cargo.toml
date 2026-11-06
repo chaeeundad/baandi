@@ -15,3 +15,4 @@ dft-solvers = { path = "../dft-solvers" }
 dft-basis = { path = "../dft-basis" }
 dft-geometry = { path = "../dft-geometry" }
 dft-upf = { path = "../dft-upf" }
+dft-numerics = { path = "../dft-numerics" }

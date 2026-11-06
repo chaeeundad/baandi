@@ -2506,17 +2506,17 @@
     "task_id": "P26D-REAL-GAMMA-R4",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "done",
     "codex_pid": 89054,
     "wrapper_pid": 89039,
-    "session_id": null,
+    "session_id": "01a1afd0-bee3-7a80-9326-43b3857a8a44",
     "branch": "task/P26D-REAL-GAMMA-R4",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P26D-REAL-GAMMA-R4",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P26D-REAL-GAMMA-R4.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P26D-REAL-GAMMA-R4/report.json",
     "started_at": "2026-11-06T07:44:15Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-06T07:57:22Z",
+    "exit_code": 0,
+    "note": "merged; library only"
   }
 ]

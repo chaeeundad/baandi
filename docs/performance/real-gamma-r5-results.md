@@ -395,3 +395,14 @@ H/steps, and caller-resolved profiles with at least 30 samples; equal-core QE
 7.6 real-Gamma bundles with input/binary/UPF hashes. Overall design acceptance
 remains **FAILED**, while the requested certification fix and diagnosis are
 complete and left uncommitted for review.
+
+## Architect wall-time observation after P26F (2026-11-06, Mac, release, pure Rust, 1 thread, median of 3)
+
+Command: `python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf <Si.pz-vbc.UPF> --cases gamma,si8 --repeats 3 --threads 1 --extra-toml 'gamma_real = "off"|"on"'`.
+
+| Case | off wall (s) | on wall (s) | ratio | SCF iterations off / on |
+| --- | ---: | ---: | ---: | ---: |
+| Si primitive Gamma (2 atoms) | 0.109 | 0.098 | 1.11x | 10 / 12 |
+| si8 Gamma (8 atoms, 20 bands) | 2.546 | 1.665 | 1.53x | 15 / 15 |
+
+Mac observation only (shared machine, 3 samples: directional, below the 30-sample rule). The design estimated about 2.1x; the measured 1.53x on si8 is lower because density, mixing, Hartree and XC still use the complex path and the real Davidson algebra is not yet tuned. dev08 acceptance (ticket R0) is still pending.

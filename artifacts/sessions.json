@@ -2410,5 +2410,23 @@
     "ended_at": "2026-11-05T23:16:52Z",
     "exit_code": 0,
     "note": "merged as option off; not adopted"
+  },
+  {
+    "run_id": "P25A-BENCH-LARGE#1",
+    "task_id": "P25A-BENCH-LARGE",
+    "mode": "new",
+    "role": "implementer",
+    "status": "done",
+    "codex_pid": 50825,
+    "wrapper_pid": 50796,
+    "session_id": "01a1aebb-5521-71b0-bacf-c9c37d835ca7",
+    "branch": "task/P25A-BENCH-LARGE",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P25A-BENCH-LARGE",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P25A-BENCH-LARGE.md",
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P25A-BENCH-LARGE/report.json",
+    "started_at": "2026-11-06T02:41:14Z",
+    "ended_at": "2026-11-06T02:45:32Z",
+    "exit_code": 0,
+    "note": "merged 59ea727"
   }
 ]

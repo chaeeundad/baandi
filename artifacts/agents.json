@@ -862,5 +862,14 @@
     "task": "P24A-LOCKING: 속도: 이미 수렴한 상태는 더 이상 큰 계산을 하지 않도록 고정(잠금)하고 부분 행렬을 절반만 계산(QE 방식), 결과는 같아야 함",
     "ref": "pid 28058, session 01a1ade0, task/P24A-LOCKING",
     "updated": "2026-11-05"
+  },
+  {
+    "id": "A97",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P25A-BENCH-LARGE: 성능 비교용 큰 계산 사례(원자 32개 등)와 힘·응력 측정 항목을 벤치마크에 추가(코어 8~16개 비교를 가능하게 함)",
+    "ref": "pid 50825, session 01a1aebb, task/P25A-BENCH-LARGE",
+    "updated": "2026-11-06"
   }
 ]

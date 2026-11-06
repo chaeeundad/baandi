@@ -2608,5 +2608,41 @@
     "ended_at": "2026-11-06T11:21:32Z",
     "exit_code": 0,
     "note": "merged; H work fixed (+2.84% vs complex); Si primitive SCF count gate still 10->12 (start vectors)"
+  },
+  {
+    "run_id": "P26G-REAL-GAMMA-R6#1",
+    "task_id": "P26G-REAL-GAMMA-R6",
+    "mode": "new",
+    "role": "implementer",
+    "status": "failed",
+    "codex_pid": 26404,
+    "wrapper_pid": 26389,
+    "session_id": "01a1b0c5-3017-7150-b13d-22bf8dccf0c0",
+    "branch": "task/P26G-REAL-GAMMA-R6",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P26G-REAL-GAMMA-R6",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P26G-REAL-GAMMA-R6.md",
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P26G-REAL-GAMMA-R6/report.json",
+    "started_at": "2026-11-06T12:11:15Z",
+    "ended_at": "2026-11-06T12:19:32Z",
+    "exit_code": 0,
+    "note": "merged experimental option off; slab absolute cap 5e-9 exceeded (6.0e-9, complex 4.6e-9), relative gate passes"
+  },
+  {
+    "run_id": "P26G-REAL-GAMMA-R6#2",
+    "task_id": "P26G-REAL-GAMMA-R6",
+    "mode": "resume",
+    "role": "implementer",
+    "status": "failed",
+    "codex_pid": 32876,
+    "wrapper_pid": 32864,
+    "session_id": "01a1b0c5-3017-7150-b13d-22bf8dccf0c0",
+    "branch": "task/P26G-REAL-GAMMA-R6",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P26G-REAL-GAMMA-R6",
+    "ticket": "/tmp/p26g-resume.md",
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P26G-REAL-GAMMA-R6/report.json",
+    "started_at": "2026-11-06T12:41:11Z",
+    "ended_at": "2026-11-06T12:45:11Z",
+    "exit_code": 0,
+    "note": "merged experimental option off; slab absolute cap 5e-9 exceeded (6.0e-9, complex 4.6e-9), relative gate passes"
   }
 ]

@@ -48,6 +48,78 @@ class SuiteTests(unittest.TestCase):
                          "(out/'density.bin').write_bytes(b'density')\n" +
                          ('' if converged else "sys.exit(3)\n"))
 
+    def test_phase_validation_and_legacy_identity(self):
+        original = (ROOT / 'benchmarks/cases/syn-s1.toml').read_text()
+        legacy = suite.case_input(self.case, 'x.UPF', 1, 1)
+        for phase in ('scf', 'forces', 'stress', 'relax1'):
+            f = self.path / 'phase.toml'
+            f.write_text(original + '\nphase = ' + json.dumps(phase) + '\n')
+            c = suite.load_case(f)
+            rendered = suite.case_input(c, 'x.UPF', 1, 1)
+            if phase == 'scf':
+                self.assertEqual(rendered, legacy)
+            elif phase == 'relax1':
+                self.assertIn('max_steps = 1', rendered)
+            else:
+                self.assertIn(phase + ' = true', rendered)
+        for invalid in ('SCF', '', None, 1, [], {}):
+            f.write_text(original + '\nphase = ' + json.dumps(invalid) + '\n')
+            with self.assertRaises(ValueError):
+                suite.load_case(f)
+        self.assertNotIn('phase', self.case)
+
+    def test_derivative_phase_process(self):
+        for phase in ('forces', 'stress'):
+            with self.subTest(phase=phase):
+                report = fixture_report()
+                report[phase] = {'status': 'available', 'elapsed_seconds': .125}
+                binary = self.fake("out=Path(sys.argv[-1]);out.mkdir()\n"
+                    f"(out/'results.json').write_text({json.dumps(json.dumps(report))})\n"
+                    "(out/'density.bin').write_bytes(b'density')\n")
+                case = dict(self.case, phase=phase)
+                result = suite.run_case(binary, case, None, self.path / phase, 1, 1, 1, 2)
+                self.assertEqual(result['status'], 'pass')
+                self.assertEqual(result['runs'][0]['phase_seconds'], .125)
+                self.assertEqual(result['runs'][0]['command'][1], 'run')
+                self.assertIn('='+phase, suite.markdown({'cases': {'x': result}, 'comparison': []}))
+                del report[phase]
+                with self.assertRaises(KeyError):
+                    suite.phase_measurements(report, phase, 0)
+
+    def test_relax_one_move_process_and_failures(self):
+        report = {'relaxation': {'status': 'unconverged', 'steps': 1, 'failures': [],
+            'frames': [{'energy_ha': -1., 'scf_iterations': 3},
+                       {'energy_ha': -2., 'scf_iterations': 2}]}}
+        binary = self.fake("assert sys.argv[1] == 'relax'\n"
+            "out=Path(sys.argv[-1]);out.mkdir()\n"
+            f"(out/'results.json').write_text({json.dumps(json.dumps(report))})\n"
+            "sys.exit(3)\n")
+        self.case['phase'] = 'relax1'
+        result = self.run_case(binary, repeats=2)
+        self.assertEqual(result['status'], 'pass')
+        self.assertFalse(result['converged'])
+        self.assertTrue(result['repeat_identical'])
+        self.assertEqual(result['iterations'], 5)
+        self.assertIsNone(result['density_sha256'])
+        self.assertEqual(result['runs'][0]['ionic_steps'], 1)
+        changed = copy.deepcopy(result)
+        changed['trajectory_sha256'] = 'changed'
+        self.assertIn('trajectory hash changed', suite.compare({'x': changed}, {'x': result}, True)[0]['regressions'])
+        for field, value in [('steps', 0), ('status', 'failed'), ('failures', ['retry'])]:
+            bad = copy.deepcopy(report)
+            bad['relaxation'][field] = value
+            with self.assertRaises(ValueError):
+                suite.phase_measurements(bad, 'relax1', 3)
+
+    def test_large_si_geometry(self):
+        for name, count in [('si32-gamma', 32), ('si16-k222', 16)]:
+            c = suite.load_case(ROOT / 'benchmarks/cases' / (name + '.toml'))
+            self.assertEqual(len(c['atoms']), count)
+            self.assertEqual(len(set(map(tuple, c['atoms']))), count)
+            volume = math.prod(c['lattice'][i][i] for i in range(3))
+            self.assertAlmostEqual(volume / count, 10.261212856717933**3 / 8)
+            self.assertEqual(c['tier'], 'long')
+
     def test_catalog_and_render(self):
         cases = [suite.load_case(p) for p in (ROOT / 'benchmarks/cases').glob('*.toml')]
         self.assertGreaterEqual(len(cases), 24)

@@ -109,3 +109,39 @@ For limitations, comparison semantics, first measurements and findings see
 | syn-spd | default | One projector each in s,p,d channels |
 | syn-z1 | default | Two light-looking Z=1 ions, even total electron count |
 | syn-z14 | default | Heavy-looking Z=14, narrow local core, 12 bands |
+
+## P25A large and second-phase candidates
+
+New opt-in `long` cases: `si32-gamma` (32 atoms, 2x2x1 conventional cells)
+and `si16-k222` (16 atoms, 1x1x2 conventional cells, unshifted 2x2x2 mesh).
+Each has `-forces`, `-stress`, and `-relax1` companions. The relaxation
+companions displace the first atom by 0.001 along the first fractional axis.
+All timings and convergence qualifications await dev08; these are inputs only.
+A 2x2x2 conventional diamond cell would contain 64 atoms, so it is not used.
+
+Optional `phase` accepts `scf` (omitted default), `forces`, `stress`, or `relax1`.
+Old files, generated inputs, fingerprints and report layout stay unchanged when
+phase is omitted. Explicit phases appear in JSON and the Markdown phase list.
+`scf` uses the existing command; derivatives enable `[output] forces=true` or
+`stress=true`. Their `runs[].phase_seconds` is the CLI's derivative timer;
+`wall_*_s` still includes SCF, process startup and output. Stress retains the
+CLI's Pulay assessment cost and must not be compared to a differently scoped
+QE timer without accounting for that work.
+
+`relax1` uses `dft-cli relax` with BFGS and `max_steps=1`: initial certified SCF
+plus one ionic move and its certified SCF/forces. The CLI does not expose a
+separate move timer, so `phase_seconds` is null; wall time is the full workload.
+Exactly two frames, one move and no failures/retries are required for a passing
+workload. Expected CLI exit 3 (ionic budget exhausted) is accepted in this case;
+`converged` remains false. A pass does not claim geometry convergence. Relaxation
+repeat identity uses the trajectory hash; density hashes remain null because
+this command does not write density.bin. `--require-identical` compares the
+trajectory for relaxation. SCF iteration totals sum the two frames.
+
+Example (external read-only Si UPF, no QE execution):
+
+```sh
+python3 -I scripts/bench_suite.py --upf /path/Si.pz-vbc.UPF \
+  --cases si32-gamma,si32-gamma-forces,si32-gamma-stress,si32-gamma-relax1 \
+  --threads 8 --repeats 3 --robustness --output /tmp/large-phase.json
+```

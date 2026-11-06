@@ -30,7 +30,7 @@ _spec = importlib.util.spec_from_file_location("suite_upf", ROOT / "scripts/gen_
 _upf = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_upf)
 ENERGY_TOL_HA = 1e-12
-KEYS = set("id purpose system_class tier potential lattice atoms cutoff_ry kgrid kshift fft_grid nbands valence channels radius shape timeout_s expected_error deterministic max_iterations".split())
+KEYS = set("id purpose system_class tier potential lattice atoms cutoff_ry kgrid kshift fft_grid nbands valence channels radius shape timeout_s expected_error deterministic max_iterations phase".split())
 
 
 def digest(data):
@@ -69,6 +69,8 @@ def load_case(path):
     for row in case['lattice'] + case['atoms']:
         if len(row) != 3 or any(type(x) not in (int, float) or not math.isfinite(x) for x in row):
             raise ValueError("coordinates must be finite three-vectors")
+    if case.get("phase", "scf") not in ("scf", "forces", "stress", "relax1"):
+        raise ValueError("invalid phase")
     return case
 
 
@@ -112,6 +114,11 @@ def case_input(case, upf, seed, threads):
               'energy_tolerance_ha = 1e-8', 'density_residual_tolerance = 1e-7']
     if 'nbands' in case:
         lines += [f'nbands = {case["nbands"]}']
+    phase = case.get('phase', 'scf')
+    if phase in ('forces', 'stress'):
+        lines += ['[output]', f'{phase} = true']
+    elif phase == 'relax1':
+        lines += ['[relax]', 'method = "bfgs"', 'max_steps = 1']
     return '\n'.join(lines) + '\n'
 
 
@@ -153,7 +160,32 @@ def measurements(report):
                 indirect_gap_ha=min(lumos)-max(homos) if gaps else None)
 
 
+def phase_measurements(report, phase, exit_code):
+    """Keep derivative timers separate; relaxation exposes whole-workload wall only."""
+    if phase == 'relax1':
+        r = report['relaxation']
+        frames = r['frames']
+        if (exit_code not in (0, 3) or r['status'] not in ('converged', 'unconverged')
+                or r['steps'] != 1 or len(frames) != 2 or r['failures']):
+            raise ValueError('relax1 requires exactly one accepted move without retries/failures')
+        energy = frames[-1]['energy_ha']
+        if not math.isfinite(energy):
+            raise ValueError('nonfinite relaxation energy')
+        return dict(converged=False, status='pass', total_energy_ha=energy,
+                    iterations=sum(f['scf_iterations'] for f in frames),
+                    ionic_steps=1, relaxation_status=r['status'], phase_seconds=None,
+                    trajectory_sha256=digest(json.dumps(frames, sort_keys=True).encode()))
+    result = measurements(report)
+    derivative = report[phase]
+    elapsed = derivative['elapsed_seconds']
+    if derivative['status'] != 'available' or type(elapsed) not in (int, float) or not math.isfinite(elapsed) or elapsed < 0:
+        raise ValueError('requested derivative timing unavailable/invalid')
+    result['phase_seconds'] = elapsed
+    return result
+
+
 def run_case(binary, case, upf, directory, seed, threads, repeats, timeout):
+    phase = case.get('phase', 'scf')
     directory.mkdir(parents=True)
     if case['potential'] == 'synthetic':
         upf = directory / 'synthetic.UPF'
@@ -165,9 +197,11 @@ def run_case(binary, case, upf, directory, seed, threads, repeats, timeout):
     fingerprint = digest((portable + file_hash(upf)).encode())
     record = dict(case=case, input_toml=portable, input_sha256=digest(input_text.encode()),
                   fingerprint=fingerprint, upf_sha256=file_hash(upf), runs=[])
+    if 'phase' in case:
+        record['phase'] = phase
     for i in range(repeats):
         output = directory / f'out-{i}'
-        command = [str(binary), 'run', str(directory / 'input.toml'), '--output-dir', str(output)]
+        command = [str(binary), 'relax' if phase == 'relax1' else 'run', str(directory / 'input.toml'), '--output-dir', str(output)]
         start = time.perf_counter()
         run = dict(command=command, converged=False, iterations=None, total_energy_ha=None,
                    density_sha256=None, phases_s=None, operator_applications=None)
@@ -179,9 +213,10 @@ def run_case(binary, case, upf, directory, seed, threads, repeats, timeout):
             if result_path.exists():
                 try:
                     r = json.loads(result_path.read_text())
-                    run.update(measurements(r))
-                    run['density_sha256'] = file_hash(output / 'density.bin')
-                    run['status'] = 'pass' if p.returncode == 0 and run['converged'] else 'nonconverged'
+                    run.update(measurements(r) if phase == 'scf' else phase_measurements(r, phase, p.returncode))
+                    if phase != 'relax1':
+                        run['density_sha256'] = file_hash(output / 'density.bin')
+                        run['status'] = 'pass' if p.returncode == 0 and run['converged'] else 'nonconverged'
                     if run['status'] != 'pass' and not run['error']:
                         run['error'] = 'SCF did not converge'
                 except (KeyError, TypeError, ValueError, OSError) as e:
@@ -198,7 +233,7 @@ def run_case(binary, case, upf, directory, seed, threads, repeats, timeout):
         (directory / f'stderr-{i}.txt').write_text(stderr)
         record['runs'].append(run)
     runs = record['runs']
-    identities = {(r['status'], r['total_energy_ha'], r['density_sha256'], r['iterations']) for r in runs}
+    identities = {(r['status'], r['total_energy_ha'], r['density_sha256'], r['iterations'], r.get('trajectory_sha256')) for r in runs}
     record.update(status=runs[-1]['status'], converged=all(r['converged'] for r in runs),
                   repeat_identical=len(identities) == 1, wall_median_s=statistics.median(r['wall_s'] for r in runs),
                   wall_min_s=min(r['wall_s'] for r in runs), wall_max_s=max(r['wall_s'] for r in runs),
@@ -207,6 +242,8 @@ def run_case(binary, case, upf, directory, seed, threads, repeats, timeout):
         record['status'] = 'nondeterministic'
     for key in ('total_energy_ha', 'iterations', 'density_sha256', 'operator_applications'):
         record[key] = runs[-1][key]
+    if phase == 'relax1':
+        record['trajectory_sha256'] = runs[-1].get('trajectory_sha256')
     expected = case.get('expected_error')
     record['expected_failure'] = bool(expected and all(r['status'] == 'error' and expected in r['error'] for r in runs))
     record['resolved_expected_failure'] = bool(expected and record['status'] == 'pass')
@@ -233,6 +270,9 @@ def compare(current, baseline, require_identical=False):
                     issues.append(f'energy changed by {de:.17g} Ha (>1e-12 Ha)')
                 if now['iterations'] != old['iterations']:
                     issues.append('iteration count changed')
+                if require_identical and now['case'].get('phase', 'scf') == 'relax1':
+                    if now.get('trajectory_sha256') != old.get('trajectory_sha256'):
+                        issues.append('trajectory hash changed')
                 if require_identical and now['density_sha256'] != old['density_sha256']:
                     issues.append('density hash changed')
             elif not improvements and {r['error'] for r in now['runs']} != {r['error'] for r in old['runs']}:
@@ -246,6 +286,8 @@ def compare(current, baseline, require_identical=False):
 def markdown(data):
     lines = ['# Benchmark suite results', '', 'Synthetic results are non-physical. Timings are indicative on a shared host.', '',
              '| Case | Class | Status | Seconds (median) | Iterations | Energy (Ha) |', '|---|---|---|---:|---:|---:|']
+    if any('phase' in r['case'] for r in data['cases'].values()):
+        lines += ['', 'Phases: ' + ', '.join(f"{key}={r['case'].get('phase', 'scf')}" for key, r in data['cases'].items()), '', 'Derivative phase_seconds are separate from subprocess wall time; relax1 wall includes initial SCF and one move.', '']
     groups = {}
     for key, r in data['cases'].items():
         lines.append(f"| {key} | {r['case']['system_class']} | {r['status']} | {r['wall_median_s']:.3f} | {r['iterations']} | {r['total_energy_ha']} |")

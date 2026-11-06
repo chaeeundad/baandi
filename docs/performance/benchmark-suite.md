@@ -1082,3 +1082,63 @@ nbands = 12
 - Running the default tier without `--robustness` aborts with exit 3 at the first case that does not converge (`si-elongated`, `si-slab` and variants are known to hit the 100 iteration limit with the default linear/Pulay 0.5 settings, on both backends). Use `--robustness` to record them as findings and continue. These are genuine SCF stagnation cases and are inputs for ticket P11M.
 - Synthetic cases failed the input preflight (ADR 0022): species label `Xx` is not an element symbol. The synthetic UPF is now written with `element="Si"` and the species label is `Si` (non-physical potential, label only satisfies the identity check). Input hashes of synthetic cases changed; the stored `suite-baseline.json` entries for them must be regenerated before using `--baseline` on those cases.
 - `syn-s2`, `syn-s3`, `syn-z14` are cases with a non-unique SCF fixed point (see `docs/validation/scf-fixed-point-multiplicity.md`): cross-backend energy comparison is not valid for them.
+
+## P25A measurable large-case candidates (2026-11-06)
+
+**Reject QE timing denominators below 0.3 s.** This is the comparison's minimum
+usable timer interval, not a new measurement of QE's clock implementation.
+Apply it to the actual timer being compared at each core count, including 8 and
+16 cores. For per-SCF-iteration comparisons require at least 0.3 s per iteration;
+a long total run does not qualify an unresolved per-iteration timer. Do not
+round sub-threshold values up, compute speedup ratios from them, or replace
+missing phase timers with zero. Small si8/k444s cases remain correctness probes
+when their QE timers fall below this floor.
+
+| Candidate | Geometry / sampling | Timing expectation (estimate only) | Qualification |
+|---|---|---|---|
+| si32-gamma | 32 Si atoms, 2x2x1 conventional, Gamma, 30 Ry | Design target 20–120 s total at 1 core on dev08; candidate for >=0.3 s/iteration at 8–16 cores | Awaiting measurement; not established above floor |
+| si16-k222 | 16 Si atoms, 1x1x2 conventional, 2x2x2 unshifted, 30 Ry | Larger bands and eight full-grid k points are expected to improve timer resolution; >=0.3 s/iteration is an unverified target | Awaiting measurement; not established above floor |
+
+The atom count takes precedence over the ticket's inconsistent phrase
+“2x2x2 conventional cells”: diamond Si has eight atoms per conventional cell,
+so 2x2x2 would be 64, not 32. Volumes per atom and periodic diamond positions
+are preserved. No solver settings or tolerances are retuned. The inputs may
+still expose convergence or subspace limitations; parsing is not a numerical
+success claim. All new cases are conservatively `long` with 900 s timeouts;
+move to default only after a complete Mac run is measured below five minutes.
+Timeouts and early solver failures do not establish workload speed.
+
+Each candidate has forces, stress and relax1 companions forming a second-phase
+workload group. See the [phase contract](../../benchmarks/README.md#p25a-large-and-second-phase-candidates).
+Derivative timers exclude the initial SCF while subprocess wall times include
+it. Relax1 wall time includes initialization and one move; an isolated move
+cost is unavailable from the current CLI. The displaced relaxation geometry
+must be reproduced exactly in a QE comparison. Keep strict certification for
+forces/stress and record QE and BAANDI derivative accuracy and workload scope.
+
+Every new case and companion awaits QE 7.6 reference runs through dft5090 on
+dev08. None is yet proven above the threshold. At 1/8/16 equal core counts,
+record repeats, convergence, actual iteration counts, timers, input, command,
+version and UPF SHA-256; compare against QE's best valid configuration (real
+Gamma for Gamma cases, symmetry/pools evaluated for meshes). If a candidate
+still misses the floor, retain it as unqualified and request a larger workload.
+No potentials or QE reference numbers were added and no QE run was made here.
+
+MgO remains blocked by the current suite's Si-only species/UPF mapping. The
+existing material label `mgo-40` means 40 Ha (80 Ry), not 40 atoms. A real Mg/O
+variant requires multi-species input rendering, external Mg/O potential paths,
+PBE selection and fingerprinting both files. That exceeds the ticket's explicit
+“bench_suite.py only to support phase” scope; no synthetic Si input is mislabeled
+as MgO. A scope extension was requested before making those changes.
+
+P25A local verification (input/runner scope only): `scripts/check.sh` passed
+build, test, fmt and clippy; `python3 -I -m unittest discover scripts/tests`
+passed 158 tests (17 suite tests). All 33 case files parse, including eight new
+Si inputs. An independent comparison against the HEAD runner verified all 25
+pre-existing case dictionaries and rendered inputs are identical and rendering
+the archived suite baseline produces identical Markdown. Phase tests cover
+validation/rejection, derivative dispatch/timers, missing derivative output,
+relaxation exit 3 with exactly one move, failed/retried trajectories, and
+trajectory comparison. No new physical calculation or timing was performed.
+No optimization was attempted; the performance ledger, dashboard artifacts and
+root README remain outside this ticket's owned files. Changes are uncommitted.

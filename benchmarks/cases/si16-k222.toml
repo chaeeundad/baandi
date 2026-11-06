@@ -1,0 +1,13 @@
+# Lengths in Bohr; timings are unmeasured estimates, not QE references.
+id = "si16-k222"
+purpose = "Large Si scaling candidate; dev08 timing unmeasured"
+system_class = "si-conventional"
+tier = "long"
+potential = "si"
+lattice = [[10.261212856717933, 0, 0], [0, 10.261212856717933, 0], [0, 0, 20.522425713435865]]
+atoms = [[0.0, 0.0, 0.0], [0.0, 0.5, 0.25], [0.5, 0.0, 0.25], [0.5, 0.5, 0.0], [0.25, 0.25, 0.125], [0.25, 0.75, 0.375], [0.75, 0.25, 0.375], [0.75, 0.75, 0.125], [0.0, 0.0, 0.5], [0.0, 0.5, 0.75], [0.5, 0.0, 0.75], [0.5, 0.5, 0.5], [0.25, 0.25, 0.625], [0.25, 0.75, 0.875], [0.75, 0.25, 0.875], [0.75, 0.75, 0.625]]
+cutoff_ry = 30
+timeout_s = 900
+deterministic = true
+phase = "scf"
+kgrid = [2, 2, 2]

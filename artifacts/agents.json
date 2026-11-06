@@ -22,8 +22,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P26D-REAL-GAMMA-R4: 속도(실수 Gamma 경로 4단계): 실수 방식 Davidson 고유값 풀이(기존 풀이와 같은 답과 같은 수렴 기준을 시험). 엔진은 아직 쓰지 않음",
-    "ref": "pid 89054, session no sessi, task/P26D-REAL-GAMMA-R4",
+    "task": "P26E-REAL-GAMMA-R5: 속도(실수 Gamma 경로 5단계): 엔진에 연결(옵션 gamma_real, 기본 꺼짐). 켜면 기존 복소수 경로와 에너지 1e-10 Ha 안에서 같아야 하고, 안 되는 경우는 기존 경로로 돌아감",
+    "ref": "pid 98315, session no sessi, task/P26E-REAL-GAMMA-R5",
     "updated": "2026-11-06"
   },
   {
@@ -906,6 +906,15 @@
     "state": "done",
     "task": "P26C-REAL-GAMMA-R3: 속도(실수 Gamma 경로 3단계): 실수 방식 비국소 항과 해밀토니안 적용 부품(기존 복소수 계산과 같은 결과인지 시험). 엔진은 아직 쓰지 않음",
     "ref": "pid 79874, session 01a1afb2, task/P26C-REAL-GAMMA-R3",
+    "updated": "2026-11-06"
+  },
+  {
+    "id": "A102",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P26D-REAL-GAMMA-R4: 속도(실수 Gamma 경로 4단계): 실수 방식 Davidson 고유값 풀이(기존 풀이와 같은 답과 같은 수렴 기준을 시험). 엔진은 아직 쓰지 않음",
+    "ref": "pid 89054, session 01a1afd0, task/P26D-REAL-GAMMA-R4",
     "updated": "2026-11-06"
   }
 ]

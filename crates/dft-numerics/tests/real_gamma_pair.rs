@@ -291,18 +291,29 @@ fn pair_microbenchmark() {
         let potential: Vec<_> = (0..points)
             .map(|i| 0.7 + 0.2 * (i as f64 * 0.19).cos())
             .collect();
-        let mut pair = PairPlan::new(OrderedFusedPlan::new(shape, &indices).unwrap(), map).unwrap();
+        let mut pair =
+            PairPlan::new(OrderedFusedPlan::new(shape, &indices).unwrap(), map.clone()).unwrap();
+        let mut mirror = PairPlan::new(
+            dft_numerics::PairFusedPlan::new(shape, &indices).unwrap(),
+            map,
+        )
+        .unwrap();
         let mut single = OrderedFusedPlan::new(shape, &indices).unwrap();
         let mut out = vec![0.; 2 * n];
         let mut oa = vec![C::default(); n];
         let mut ob = oa.clone();
-        let mut samples = [Vec::new(), Vec::new()];
+        let mut samples = [Vec::new(), Vec::new(), Vec::new()];
         for round in 0..32 {
-            for mode in if round % 2 == 0 { [0, 1] } else { [1, 0] } {
+            for mode in if round % 2 == 0 { [0, 1, 2] } else { [2, 1, 0] } {
                 let start = Instant::now();
                 for _ in 0..20 {
                     if mode == 0 {
                         pair.apply_block(black_box(&x), black_box(&potential), &mut out)
+                            .unwrap();
+                        black_box(&out);
+                    } else if mode == 2 {
+                        mirror
+                            .apply_block(black_box(&x), black_box(&potential), &mut out)
                             .unwrap();
                         black_box(&out);
                     } else {
@@ -320,6 +331,7 @@ fn pair_microbenchmark() {
                 }
             }
         }
+        println!("raw grid={shape:?} library_single_mirror_us_per_band={samples:?}");
         for s in &mut samples {
             s.sort_by(f64::total_cmp);
         }
@@ -332,6 +344,12 @@ fn pair_microbenchmark() {
             med[0],
             med[1],
             med[0] / med[1]
+        );
+        println!(
+            "mirror_observation grid={shape:?} samples=30 library_us_per_band={:.6} mirror_us_per_band={:.6} mirror_over_library={:.6}",
+            med[0],
+            med[2],
+            med[2] / med[0]
         );
     }
 }

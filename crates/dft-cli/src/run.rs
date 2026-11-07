@@ -55,6 +55,11 @@ pub fn sha256(bytes: &[u8]) -> String {
 /// Resolve only user-exposed controls, preserving all other engine defaults.
 pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
     let mut o = ScfOptions {
+        compat_mode: if config.compat.reference() {
+            dft_engine::CompatMode::Reference
+        } else {
+            dft_engine::CompatMode::None
+        },
         crystal_density_group: config.symmetry.density_group
             == crate::config::DensityGroup::Crystal,
         functional: config.xc.functional.engine(),
@@ -126,6 +131,18 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
     }
     Ok(o)
 }
+pub(crate) fn reference_metadata(o: &ScfOptions) -> Option<Value> {
+    (o.compat_mode == dft_engine::CompatMode::Reference).then(|| {
+        json!({
+            "compat_mode": o.compat_mode.name(),
+            "pw92_prefactor": o.pw92_prefactor.name(),
+            "local_mesh": o.local_mesh.name(),
+            "radial_even_rule": o.radial_even_rule.name(),
+            "density_group": if o.crystal_density_group { "crystal" } else { "mesh" },
+            "scope": crate::config::REFERENCE_SCOPE,
+        })
+    })
+}
 fn options_json(o: &ScfOptions) -> Value {
     let mixing = match o.mixing {
         Mixing::Linear { beta } => json!({"method":"linear","beta":beta}),
@@ -143,6 +160,10 @@ fn options_json(o: &ScfOptions) -> Value {
         "residual_eigen_schedule":o.residual_eigen_schedule,"free_electron_initial_guess":o.free_electron_initial_guess,"initial_eigen_tolerance":o.initial_eigen_tolerance,"eigen_tolerance_decay":o.eigen_tolerance_decay,"max_iterations":o.max_iterations,
         "davidson_max_iterations":o.davidson_max_iterations,"davidson_subspace":o.davidson_subspace,"davidson_subspace_min_per_band":o.davidson_capacity_per_band,"davidson_capacity_per_band":o.davidson_capacity_per_band,"seed":o.seed,
         "divergence_factor":o.divergence_factor,"divergence_patience":o.divergence_patience});
+    if let Some(metadata) = reference_metadata(o) {
+        result["compat_mode"] = json!(o.compat_mode.name());
+        result["compat"] = metadata;
+    }
     if o.local_mesh != dft_engine::LocalMesh::Baandi
         || o.radial_even_rule != dft_engine::RadialEvenRule::Simpson3_8
     {
@@ -609,6 +630,10 @@ pub fn execute_mode(
         .map(|((&residual, &buffer), &converged)| json!({"residual_ha":residual,"buffer":buffer,"converged":converged}))
         .collect::<Vec<_>>());
     // Preserve the legacy LDA schema unless an override was explicitly enabled.
+    if let Some(metadata) = reference_metadata(&opts) {
+        result["compat_mode"] = json!(r.compat_mode.name());
+        result["compat"] = metadata;
+    }
     if opts.local_mesh != dft_engine::LocalMesh::Baandi
         || opts.radial_even_rule != dft_engine::RadialEvenRule::Simpson3_8
     {

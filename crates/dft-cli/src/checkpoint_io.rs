@@ -489,6 +489,25 @@ fn gamma_real_off() -> String {
 fn is_gamma_real_off(s: &str) -> bool {
     s == "off"
 }
+impl Wire for dft_engine::CompatMode {
+    type Repr = String;
+    fn encode(&self, _bytes: &mut Vec<u8>) -> Result<String, Error> {
+        Ok(self.name().into())
+    }
+    fn decode(w: String, _bytes: &[u8], _cursor: &mut usize) -> Result<Self, Error> {
+        match w.as_str() {
+            "none" => Ok(Self::None),
+            "reference" => Ok(Self::Reference),
+            _ => Err(invalid("invalid compat_mode option")),
+        }
+    }
+}
+fn compat_none() -> String {
+    "none".into()
+}
+fn is_compat_none(s: &str) -> bool {
+    s == "none"
+}
 impl Wire for dft_engine::Pw92Prefactor {
     type Repr = String;
     fn encode(&self, _bytes: &mut Vec<u8>) -> Result<String, Error> {
@@ -554,6 +573,8 @@ fn is_default_davidson_capacity_per_band(value: &usize) -> bool {
     *value == 6
 }
 wire_struct!(ScfOptions, WScfOptions {
+    #[serde(default = "compat_none", skip_serializing_if = "is_compat_none")]
+    compat_mode: dft_engine::CompatMode,
     #[serde(default, skip_serializing_if = "is_false")]
     crystal_density_group: bool,
     #[serde(default = "default_davidson_capacity_per_band", skip_serializing_if = "is_default_davidson_capacity_per_band")]
@@ -1951,6 +1972,37 @@ mod pw92_wire_tests {
             let decoded =
                 ScfOptions::decode(serde_json::from_value(json).unwrap(), &bytes, &mut 0).unwrap();
             assert_eq!(decoded.standard_density_forcing, enabled);
+        }
+    }
+    #[test]
+    fn reference_mode_roundtrip_legacy_default_and_rejection() {
+        for compat_mode in [
+            dft_engine::CompatMode::None,
+            dft_engine::CompatMode::Reference,
+        ] {
+            let options = ScfOptions {
+                compat_mode,
+                ..Default::default()
+            };
+            let mut bytes = Vec::new();
+            let wire = options.encode(&mut bytes).unwrap();
+            let mut json = serde_json::to_value(wire).unwrap();
+            if compat_mode == dft_engine::CompatMode::None {
+                assert!(json.get("compat_mode").is_none());
+            } else {
+                assert_eq!(json["compat_mode"], "reference");
+            }
+            let decoded = ScfOptions::decode(
+                serde_json::from_value(json.clone()).unwrap(),
+                &bytes,
+                &mut 0,
+            )
+            .unwrap();
+            assert_eq!(decoded.compat_mode, compat_mode);
+            json["compat_mode"] = serde_json::json!("unknown");
+            assert!(
+                ScfOptions::decode(serde_json::from_value(json).unwrap(), &bytes, &mut 0).is_err()
+            );
         }
     }
     #[test]

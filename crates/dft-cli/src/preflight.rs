@@ -151,6 +151,8 @@ pub struct StructureAtom {
 
 #[derive(Debug, Serialize)]
 pub struct Report {
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub compat: Option<serde_json::Value>,
     pub findings_schema_version: u32,
     pub findings: Vec<Finding>,
     pub structure: StructureSummary,
@@ -261,6 +263,9 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
     let options =
         crate::run::options(config).map_err(|e| fail("scf", e, "correct the SCF controls"))?;
     let mut warnings = Vec::new();
+    if let Some(metadata) = crate::run::reference_metadata(&options) {
+        warnings.push(metadata.to_string());
+    }
     let mut overrides = Vec::new();
     let mut charges = BTreeMap::new();
     let mut elements = BTreeMap::new();
@@ -631,6 +636,7 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
                 })
                 .collect(),
         },
+        compat: crate::run::reference_metadata(&options),
         schema_version: 1,
         valid: true,
         warnings,

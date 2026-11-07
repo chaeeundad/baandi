@@ -282,3 +282,15 @@ Full distributions, paired bootstrap, main-versus-certificate counts, mechanism,
 commands and limitations: [standard-robust-gain.md](standard-robust-gain.md).
 Raw evidence: `P29B-evidence/` (orchestrator archives before cleanup). These are
 local pure-Rust work observations, not a robust dev08 wall or QE speed claim.
+
+## P32A real Gamma algebra (2026-11-07; append-only, Mac observations)
+
+| ID | Experiment | Status | Measured effect | Lesson / limits |
+|---|---|---|---|---|
+| P32A-1 | Contiguous finite/Gram/projection/residual/correction loops, Ritz prefix view, projection-buffer swap | candidate, uncommitted | T=1 slice-only medians: Si16 strict 9.552 -> 6.811 s, standard 3.203 -> 2.008 s; old energy/density bits retained | Removes bounds-checked indexing and copies without reassociation; shared Mac load, remote acceptance pending. |
+| P32A-2 | Rotation 4x4x256 calls instead of 16x16x16; unchanged Gram shape and outer 256-row ordered tiles | candidate, not accepted | Full T=1 Si8 strict 1.818 -> 1.271 s, steps 320 -> 253; Si16 strict 9.552 -> 5.336 s, steps 329 -> 264. Si8 standard 0.608 -> 0.503 s but slice-only 0.449 s, SCF 15 -> 17. | 4096-MAC calls stay allocation-free; kernel gain is mixed with changed trajectories. All 25 complex-off comparisons identical; kernel max old/naive relative errors 1.01e-15/7.94e-16; dense eigen max 2.86e-14 Ha. R6 slab absolute cap still fails, primitive extra SCF-count condition still fails. |
+| P32A-3 | Full-panel column SIMD, straight slice products, alternative bounded shapes, general large GEMM | rejected alternatives | 256x120 times 120x20: old 44.07 us; column SIMD 65.60 us, slices 66.94 us, chosen bounded shape 40.55 us, general GEMM 19.91 us | Full GEMM is faster but allocates packing memory with no public caller-owned scratch API. Small-call alternatives do not consistently improve Gram. New evidence is D0 real-path algebra dominance, not a repeat of complex A49 tuning. |
+| P32A-4 | Before/after sampling in task sandbox | blocked | Both actual CLI sampling attachments exit 255, SCF exit 0 | No <30% algebra-share claim. dev08 sampling and performance acceptance requested through orchestrator. |
+
+Full matrix, all candidates, commands, failures and raw-evidence locations:
+[real-gamma-r8-algebra-results.md](real-gamma-r8-algebra-results.md).

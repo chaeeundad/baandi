@@ -3,7 +3,7 @@ use crate::{BandTolerances, RealLinearOperator, SolverError};
 use dft_numerics::{
     linalg::{DEPENDENCE_TOLERANCE, LinalgError},
     pool::WorkerPool,
-    real::{RealGemmWorkspace, RealMatrix, RealOp, symmetric_eigh},
+    real::{RealGemmWorkspace, RealMatrix, RealMatrixRef, RealOp, symmetric_eigh},
 };
 
 /// Same accuracy flags and work units as the complex EigenSolution.
@@ -180,9 +180,9 @@ impl RealDavidson {
             let (mut values, coefficients) = symmetric_eigh(&small)?;
             reduced = Some(small);
             values.truncate(self.bands);
-            let coefficients = prefix(&coefficients, self.bands)?;
-            let vectors = multiply(&basis, RealOp::Identity, &coefficients, &mut gemm)?;
-            let rotated_products = multiply(&products, RealOp::Identity, &coefficients, &mut gemm)?;
+            let coefficients = coefficients.as_ref().subcols(0, self.bands);
+            let vectors = multiply(&basis, RealOp::Identity, coefficients, &mut gemm)?;
+            let rotated_products = multiply(&products, RealOp::Identity, coefficients, &mut gemm)?;
             let (mut residual_block, mut residuals) =
                 residual(&vectors, &rotated_products, &values)?;
             let mut certified = false;
@@ -246,9 +246,12 @@ impl RealDavidson {
                 .collect();
             let mut corrections = RealMatrix::zeros(n, selected.len())?;
             for (k, &j) in selected.iter().enumerate() {
-                for i in 0..n {
-                    corrections[(i, k)] =
-                        precondition(residual_block[(i, j)], diagonal[i], values[j])?;
+                for ((dst, &r), &d) in column_mut(&mut corrections, k)
+                    .iter_mut()
+                    .zip(column(&residual_block, j))
+                    .zip(diagonal)
+                {
+                    *dst = precondition(r, d, values[j])?;
                 }
             }
             if !trusted || basis.cols() + corrections.cols() > capacity {
@@ -307,6 +310,10 @@ fn finite(x: &[f64]) -> Result<(), LinalgError> {
 }
 fn column(x: &RealMatrix, j: usize) -> &[f64] {
     &x.as_slice()[j * x.rows()..(j + 1) * x.rows()]
+}
+fn column_mut(x: &mut RealMatrix, j: usize) -> &mut [f64] {
+    let rows = x.rows();
+    &mut x.as_mut_slice()[j * rows..(j + 1) * rows]
 }
 fn norm(x: &[f64]) -> f64 {
     let mut sums = [0.; 4];
@@ -384,7 +391,7 @@ fn apply(
 fn multiply(
     a: &RealMatrix,
     op: RealOp,
-    b: &RealMatrix,
+    b: RealMatrixRef<'_>,
     ws: &mut RealGemmWorkspace,
 ) -> Result<RealMatrix, LinalgError> {
     let rows = if op == RealOp::Identity {
@@ -392,8 +399,8 @@ fn multiply(
     } else {
         a.cols()
     };
-    let mut out = RealMatrix::zeros(rows, b.cols())?;
-    ws.multiply_into(a.as_ref(), op, b.as_ref(), out.as_mut())?;
+    let mut out = RealMatrix::zeros(rows, b.ncols())?;
+    ws.multiply_into(a.as_ref(), op, b, out.as_mut())?;
     Ok(out)
 }
 fn reduced_matrix(
@@ -407,9 +414,7 @@ fn reduced_matrix(
     let mut out = RealMatrix::zeros(m, m)?;
     if let Some(old) = old {
         for j in 0..prefix {
-            for i in 0..prefix {
-                out[(i, j)] = old[(i, j)];
-            }
+            column_mut(&mut out, j)[..prefix].copy_from_slice(column(old, j));
         }
     }
     // One old/new rectangle and the new square, in one GEMM. Preserve the
@@ -421,8 +426,9 @@ fn reduced_matrix(
         out.as_mut().subcols_mut(prefix, m - prefix),
     )?;
     for j in prefix..m {
-        for i in 0..j {
-            out[(j, i)] = out[(i, j)];
+        let (earlier, current) = out.as_mut_slice().split_at_mut(j * m);
+        for (col, &entry) in earlier.chunks_exact_mut(m).zip(&current[..j]) {
+            col[j] = entry;
         }
     }
     Ok(out)
@@ -435,8 +441,8 @@ fn residual(
     let mut r = hv.clone();
     let mut norms = Vec::with_capacity(values.len());
     for (j, &lambda) in values.iter().enumerate() {
-        for i in 0..v.rows() {
-            r[(i, j)] -= lambda * v[(i, j)];
+        for (r, &v) in column_mut(&mut r, j).iter_mut().zip(column(v, j)) {
+            *r -= lambda * v;
         }
         norms.push(norm(column(&r, j)));
     }
@@ -488,18 +494,19 @@ impl Projection {
         for j in 0..count {
             let len = norm(column(x, j));
             finite(&[len])?;
-            for i in 0..n {
-                self.normalized[(i, j)] = if len == 0. { 0. } else { x[(i, j)] / len };
+            for (dst, &src) in column_mut(&mut self.normalized, j)
+                .iter_mut()
+                .zip(column(x, j))
+            {
+                *dst = if len == 0. { 0. } else { src / len };
             }
         }
         let against = against.filter(|q| q.cols() > 0);
         for pass in 0..if against.is_some() { 2 } else { 1 } {
             if pass > 0 {
-                for j in 0..count {
-                    for i in 0..n {
-                        self.normalized[(i, j)] = self.output[(i, j)];
-                    }
-                }
+                // Both buffers have the same capacity; the previous MGS result
+                // becomes input, and the old input storage becomes output.
+                std::mem::swap(&mut self.normalized, &mut self.output);
             }
             if let Some(q) = against {
                 ws.multiply_into(
@@ -514,22 +521,21 @@ impl Projection {
                     self.overlap.as_ref().submatrix(0, 0, q.cols(), count),
                     self.projected.as_mut().subcols_mut(0, count),
                 )?;
-                for j in 0..count {
-                    for i in 0..n {
-                        self.normalized[(i, j)] -= self.projected[(i, j)];
-                    }
+                for (dst, src) in self.normalized.as_mut_slice()[..n * count]
+                    .iter_mut()
+                    .zip(&self.projected.as_slice()[..n * count])
+                {
+                    *dst -= src;
                 }
             }
             let mut kept = 0;
             for j in 0..count {
-                for i in 0..n {
-                    self.column[i] = self.normalized[(i, j)];
-                }
+                self.column.copy_from_slice(column(&self.normalized, j));
                 for _ in 0..2 {
                     for k in 0..kept {
                         let p = dot(&self.column, column(&self.output, k));
-                        for i in 0..n {
-                            self.column[i] -= p * self.output[(i, k)];
+                        for (dst, &src) in self.column.iter_mut().zip(column(&self.output, k)) {
+                            *dst -= p * src;
                         }
                     }
                 }
@@ -537,8 +543,11 @@ impl Projection {
                 finite(&[len])?;
                 // Same relative rank floor as complex MGS; no CholeskyQR2.
                 if len > DEPENDENCE_TOLERANCE {
-                    for i in 0..n {
-                        self.output[(i, kept)] = self.column[i] / len;
+                    for (dst, &src) in column_mut(&mut self.output, kept)
+                        .iter_mut()
+                        .zip(&self.column)
+                    {
+                        *dst = src / len;
                     }
                     kept += 1;
                 }

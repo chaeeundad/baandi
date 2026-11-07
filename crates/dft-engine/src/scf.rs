@@ -130,6 +130,8 @@ impl Default for Mixing {
 }
 #[derive(Clone, Debug)]
 pub struct ScfOptions {
+    /// Research density projector uses all crystal operations; requires enable_symmetry.
+    pub crystal_density_group: bool,
     pub gamma_real: crate::GammaReal,
     pub standard: Option<StandardProfile>,
     /// Experimental standard-profile stagnation guard; never enabled by default.
@@ -199,6 +201,7 @@ impl ScfOptions {
 impl Default for ScfOptions {
     fn default() -> Self {
         Self {
+            crystal_density_group: false,
             gamma_real: crate::GammaReal::Off,
             standard: None,
             standard_stall_guard: false,
@@ -332,6 +335,8 @@ pub struct KPointSolution {
 
 #[derive(Debug)]
 pub struct ScfResult {
+    /// Density projection policy used to produce this state; derivatives are unsupported.
+    pub crystal_density_group: bool,
     pub standard_stall_guard: bool,
     /// Experimental density-residual forcing cap; default off, standard only.
     pub standard_density_forcing: bool,
@@ -503,6 +508,8 @@ pub struct ScfOutcome {
 }
 
 pub struct ScfStep {
+    /// Density projection policy carried with finite-temperature results as well.
+    pub crystal_density_group: bool,
     /// First-k compatibility view; `k_points` contains every solution.
     pub solution: EigenSolution,
     /// Every k block in input quadrature order.
@@ -915,11 +922,14 @@ impl ScfProblem {
                 "symmetry: engine k points differ from verified irreducible mesh",
             ));
         }
-        let ops: Vec<_> = map
-            .operations
-            .into_iter()
-            .filter(|o| !o.antiunitary)
-            .collect();
+        let ops: Vec<_> = if self.options.crystal_density_group {
+            ops
+        } else {
+            map.operations
+                .into_iter()
+                .filter(|o| !o.antiunitary)
+                .collect()
+        };
         if !dft_geometry::symmetry::preserves_fft_grid(self.grid.dims(), &ops) {
             return Err(ScfError::InvalidInput(
                 "symmetry.fft_grid: rotations/translations must preserve nonlinear XC quadrature; use compatible_fft_grid at setup",
@@ -1023,6 +1033,11 @@ impl ScfProblem {
         certify: bool,
         mut finite: Option<&mut finite_temperature::OccupationWorkspace>,
     ) -> Result<ScfStep, ScfError> {
+        if self.options.crystal_density_group && self.symmetry.is_none() {
+            return Err(ScfError::InvalidInput(
+                "symmetry.density_group=crystal requires enabled auto symmetry",
+            ));
+        }
         if initial.is_some_and(|v| v.len() != self.states.len()) {
             return Err(ScfError::InvalidInput("one warm start required per k"));
         }
@@ -1350,6 +1365,7 @@ impl ScfProblem {
         });
         timings.energy = start.elapsed();
         Ok(ScfStep {
+            crystal_density_group: self.options.crystal_density_group,
             solution: k_points[0].solution.clone(),
             k_points,
             density: output,

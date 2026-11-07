@@ -359,3 +359,27 @@ All 16 Si8/Si16 strict/standard timing rows, workspace-only ablation, routine
 counts, exact failed gate, commands and backend follow-up scope:
 [real-gamma-r9-workspace-results.md](real-gamma-r9-workspace-results.md).
 Raw evidence stays in `P33A-evidence/`; no artifacts or QE source changes.
+
+## P34A — full crystal-group density projection (2026-11-07)
+
+Research option, default unchanged; no performance optimization claimed. New
+premise: relayed QE shifted 4x4x4 symmetry-on/off difference survives matched
+FFT grids, time-reversal controls and tightened convergence, whereas BAANDI's
+mesh-group projection agrees with off. No QE source was accessed.
+
+`[symmetry] density_group="crystal"` keeps the 12-operation k reduction (10
+representatives) but projects density with all 48 crystal operations. All must
+permute the FFT grid; incompatible grids and spin/derivatives fail closed.
+On Si shifted 4x4x4, 32^3, strict T=1, tightened crystal-minus-off is
+**-1.5538989465824216e-5 Ha** versus relayed -1.554e-5 Ha: **0.00650279%** error.
+Frozen support/partial bounds were 5%/20%; **hypothesis supported**. This is
+consistent with different effective k sampling, not a correctness ranking or
+proof of the reference implementation's internals. No convention offset fitted.
+
+Independent real-space permutations: unsymmetrized density differs by
+2.1268811698e-3 electrons/Bohr^3 under each of the 36 non-mesh operations;
+crystal density's all-operation error <=6.2450045136e-17. Unshifted mesh/crystal
+energy and density identical. Default path: 100 case/thread/profile/symmetry
+combinations retain energy/density bits and work counts. Raw evidence lives in
+`P34A-evidence/`; [study and reproduction](../validation/symmetry-full-group.md).
+No dev08 timing or default recommendation follows from this experiment.

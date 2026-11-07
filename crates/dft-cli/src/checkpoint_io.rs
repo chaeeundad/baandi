@@ -554,6 +554,8 @@ fn is_default_davidson_capacity_per_band(value: &usize) -> bool {
     *value == 6
 }
 wire_struct!(ScfOptions, WScfOptions {
+    #[serde(default, skip_serializing_if = "is_false")]
+    crystal_density_group: bool,
     #[serde(default = "default_davidson_capacity_per_band", skip_serializing_if = "is_default_davidson_capacity_per_band")]
     davidson_capacity_per_band: usize,
     #[serde(default = "default_radial_even_rule", skip_serializing_if = "is_default_radial_even_rule")]
@@ -1695,6 +1697,12 @@ fn context(
     };
     use dft_engine::{OccupationPolicy, ScfProblem, SpeciesPotential};
     let config = Config::parse(&fs::read_to_string(input)?)?;
+    config.validate()?;
+    if config.symmetry.mode == crate::config::SymmetryMode::Auto {
+        return Err(invalid(
+            "checkpoint.symmetry: v1 cannot encode symmetry operations or density_group; use Classic run without checkpoint/restart",
+        ));
+    }
     if config.finite_temperature()?.is_some() {
         return Err(invalid(
             "checkpoint.occupation_policy: v1 fixed-occupation checkpoint cannot be resumed under fermi_dirac; start a new run",
@@ -1878,6 +1886,21 @@ pub fn restart(input: &Path, source: &Path, output: &Path, warm: bool) -> Result
 #[cfg(test)]
 mod pw92_wire_tests {
     use super::*;
+    #[test]
+    fn density_group_wire_roundtrip_and_legacy_omission() {
+        for crystal in [false, true] {
+            let options = ScfOptions {
+                crystal_density_group: crystal,
+                ..Default::default()
+            };
+            let mut bytes = Vec::new();
+            let json = serde_json::to_value(options.encode(&mut bytes).unwrap()).unwrap();
+            assert_eq!(json.get("crystal_density_group").is_some(), crystal);
+            let decoded =
+                ScfOptions::decode(serde_json::from_value(json).unwrap(), &bytes, &mut 0).unwrap();
+            assert_eq!(decoded.crystal_density_group, crystal);
+        }
+    }
     #[test]
     fn capacity_wire_roundtrip_and_legacy_omission() {
         for multiplier in [2, 3, 4, 6, 12] {

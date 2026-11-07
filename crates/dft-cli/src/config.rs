@@ -55,22 +55,61 @@ pub enum SymmetryMode {
     Off,
     Auto,
 }
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum DensityGroup {
+    #[default]
+    Mesh,
+    Crystal,
+}
 #[derive(Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Symmetry {
     pub mode: SymmetryMode,
+    pub density_group: DensityGroup,
     pub tolerance_bohr: f64,
 }
 impl Default for Symmetry {
     fn default() -> Self {
         Self {
             mode: SymmetryMode::Off,
+            density_group: DensityGroup::Mesh,
             tolerance_bohr: 1e-7,
         }
     }
 }
 impl Config {
+    pub fn density_operations(
+        &self,
+    ) -> Result<Vec<dft_geometry::symmetry::SymmetryOperation>, ConfigError> {
+        let Some(map) = self.symmetry_map()? else {
+            return Ok(Vec::new());
+        };
+        if self.symmetry.density_group == DensityGroup::Crystal {
+            let atoms: Vec<_> = self
+                .system
+                .atoms
+                .iter()
+                .map(|a| dft_geometry::Atom::new(&a.species, a.fractional))
+                .collect();
+            dft_geometry::symmetry::detect(&self.cell()?, &atoms, self.symmetry.tolerance_bohr)
+                .map_err(|e| ConfigError::Invalid(e.to_string()))
+        } else {
+            Ok(map
+                .operations
+                .into_iter()
+                .filter(|o| !o.antiunitary)
+                .collect())
+        }
+    }
     pub fn symmetry_map(&self) -> Result<Option<dft_geometry::symmetry::KOrbitMap>, ConfigError> {
+        if self.symmetry.density_group == DensityGroup::Crystal
+            && self.symmetry.mode != SymmetryMode::Auto
+        {
+            return Err(ConfigError::Invalid(
+                "symmetry.density_group=crystal requires symmetry.mode=auto".into(),
+            ));
+        }
         if self.symmetry.mode == SymmetryMode::Off {
             return Ok(None);
         }
@@ -112,7 +151,11 @@ impl Config {
         })
     }
     pub fn symmetry_json(&self) -> Result<Option<serde_json::Value>, ConfigError> {
+        let density_ops = self.density_operations()?;
         Ok(self.symmetry_map()?.map(|m| serde_json::json!({
+            "density_group": if self.symmetry.density_group == DensityGroup::Crystal { "crystal" } else { "mesh" },
+            "density_operations_count": density_ops.len(),
+            "density_operations": density_ops.iter().map(|o| serde_json::json!({"rotation":o.rotation,"translation":o.translation,"atom_permutation":o.atom_permutation,"antiunitary":o.antiunitary})).collect::<Vec<_>>(),
             "mode":"auto", "operations_count":m.operations.iter().filter(|o|!o.antiunitary).count(),
             "irreducible_k_count":m.points.len(),"full_k_count":m.entries.len(),"tolerance_bohr":self.symmetry.tolerance_bohr,
             "phase_convention":m.phase_convention,"magnetic_policy":"identity spin only; spin swap and magnetic antiunitary operations disabled without model-invariance proof",
@@ -904,6 +947,19 @@ impl Config {
     }
     /// Validate active physical settings and cell geometry. SCF/output are type-checked only.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.symmetry.density_group == DensityGroup::Crystal {
+            if self.symmetry.mode != SymmetryMode::Auto {
+                return Err(ConfigError::Invalid(
+                    "symmetry.density_group=crystal requires symmetry.mode=auto".into(),
+                ));
+            }
+            if self.collinear()
+                || self.relax.is_some()
+                || self.output.as_ref().is_some_and(|o| o.forces || o.stress)
+            {
+                return Err(ConfigError::Invalid("symmetry.density_group=crystal does not support spin, forces, stress or relaxation".into()));
+            }
+        }
         self.pseudo.local_mesh()?;
         self.pseudo.radial_even_rule()?;
         if self.xc.prefactor()? == dft_engine::Pw92Prefactor::Original
@@ -982,12 +1038,8 @@ impl Config {
         let wavefunctions = PlaneWaveBasis::new(&cell, cutoff)?;
         let density = wavefunctions.density_basis(&cell)?;
         let mut grid = FftGridSpec::new(&wavefunctions, &density, self.basis.fft_grid)?;
-        if let Some(map) = self.symmetry_map()? {
-            let ops: Vec<_> = map
-                .operations
-                .into_iter()
-                .filter(|o| !o.antiunitary)
-                .collect();
+        if self.symmetry_map()?.is_some() {
+            let ops = self.density_operations()?;
             if self.basis.fft_grid.is_some()
                 && !dft_geometry::symmetry::preserves_fft_grid(grid.dims(), &ops)
             {
@@ -1029,6 +1081,58 @@ mod tests {
 
     use super::*;
     const EXAMPLE: &str = include_str!("../../../examples/si_lda.toml");
+    #[test]
+    fn density_group_contract_and_metadata() {
+        let base = EXAMPLE.replace(
+            "kpoints = [[0.0, 0.0, 0.0]]",
+            "kgrid = [4,4,4]\nkshift = [0.5,0.5,0.5]",
+        );
+        let parse = |tail: &str| Config::parse(&format!("{base}\n{tail}\n")).unwrap();
+        assert_eq!(parse("").symmetry.density_group, DensityGroup::Mesh);
+        assert!(Config::parse(&format!("{base}\n[symmetry]\ndensity_group='typo'\n")).is_err());
+        for tail in [
+            "[symmetry]\ndensity_group='crystal'",
+            "[symmetry]\nmode='off'\ndensity_group='crystal'",
+            "[symmetry]\nmode='auto'\ndensity_group='crystal'\n[output]\nforces=true",
+            "[symmetry]\nmode='auto'\ndensity_group='crystal'\n[output]\nstress=true",
+            "[symmetry]\nmode='auto'\ndensity_group='crystal'\n[spin]\nmode='collinear'",
+        ] {
+            assert!(
+                Config::parse(&format!("{base}\n{tail}\n"))
+                    .unwrap_err()
+                    .to_string()
+                    .contains("density_group")
+            );
+        }
+        let mesh = parse("[symmetry]\nmode='auto'");
+        let crystal = parse("[symmetry]\nmode='auto'\ndensity_group='crystal'");
+        assert_eq!(
+            mesh.resolved_points().unwrap(),
+            crystal.resolved_points().unwrap()
+        );
+        let m = mesh.symmetry_json().unwrap().unwrap();
+        let c = crystal.symmetry_json().unwrap().unwrap();
+        assert_eq!(m["operations"], c["operations"]);
+        assert_eq!(m["orbit_map"], c["orbit_map"]);
+        assert_eq!(m["density_operations_count"], 12);
+        assert_eq!(c["density_operations_count"], 48);
+        assert_eq!(c["density_operations"].as_array().unwrap().len(), 48);
+        assert_eq!(c["density_group"], "crystal");
+        assert_eq!(crystal.prepare().unwrap().grid.dims(), [32; 3]);
+        let bad = base.replace("[basis]", "[basis]\nfft_grid=[25,25,25]");
+        let bad = Config::parse(&format!(
+            "{bad}\n[symmetry]\nmode='auto'\ndensity_group='crystal'\n"
+        ))
+        .unwrap();
+        assert!(
+            bad.prepare()
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("fft_grid")
+        );
+    }
+
     #[test]
     fn standard_stall_guard_requires_explicit_standard_profile() {
         for (settings, expected) in [

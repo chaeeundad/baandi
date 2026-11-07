@@ -156,3 +156,20 @@ The two QE paths' conv_thr 1e-14 energies differ by 5.858e-12 Ha. (QE's 8-digit 
 | BAANDI standard, pure native, T=8 | 1.553e-09 | 0.9209 |
 
 At the same delivered-accuracy class (about 2e-9 Ha) QE real gamma is 3.6 times faster than BAANDI standard pure native on one core, and 2.5 times faster than BAANDI on eight cores; BAANDI is 1.9 times behind QE complex k=0 on one core. (BAANDI's gamma_real path and the setup/audit speedups were not in this measurement.)
+
+# dev08 si8 real Gamma path on/off, T=1 (relayed, 2026-11-07, batch-7 B, first rows)
+
+Relayed by the dft5090/master session. BAANDI main `b6a5416`, pure native, `taskset -c 0`, 30 runs per row, Si.pz-vbc.UPF SHA-256 `e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`. si8, one thread.
+
+| gamma_real | profile | n | wall median (s) | min | max | SCF | Davidson steps | H vectors | energy (Ha) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| off | strict | 30 | 3.764 | 3.744 | 3.823 | 15 | 279 | 2044 | -31.321803601032 |
+| off | standard | 30 | 1.308 | 1.300 | 1.358 | 15 | 77 | 772 | -31.321803599479 |
+| on | strict | 30 | 3.525 | 3.511 | 3.586 | 15 | 319 | 2125 | -31.321803601032 |
+| on | standard | 30 | 1.300 | 1.292 | 1.355 | 17 | 85 | 864 | -31.321803599706 |
+
+Energy difference on versus off: strict 0.0 Ha; standard 2.27e-10 Ha (the strict 1e-10 gate applies to strict only; standard uses the delivered-accuracy gate defined for P26G).
+
+Observation: on dev08 the real Gamma path gives only -6.4 percent wall time with strict (and -0.6 percent with standard), whereas the Mac observation was 1.53x (strict) and a clear gain with standard. Davidson steps rise by 14 percent (strict) and 10 percent (standard), H vectors by 4 and 12 percent. The Mac gain does NOT transfer to dev08 for this option; the standard-profile gain (3.0x) does. Open: where the real path loses on dev08 (real GEMM kernels, tile size, FFT pair on x86 AVX-512, step count); the D0 profile of docs/performance/diagonalization-plan.md must cover real on versus off.
+
+Note: `gamma_real_used` is only written to results.json when the option is not off (intentional, keeps off-path output unchanged); a missing key means off.

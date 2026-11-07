@@ -3118,17 +3118,17 @@
     "task_id": "P42A-BAND-BOUNDARY-POLICY",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "done",
     "codex_pid": 13886,
     "wrapper_pid": 13860,
-    "session_id": null,
+    "session_id": "01a1b78b-5aef-7720-ba97-1339c432f43b",
     "branch": "task/P42A-BAND-BOUNDARY-POLICY",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P42A-BAND-BOUNDARY-POLICY",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P42A-BAND-BOUNDARY-POLICY.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P42A-BAND-BOUNDARY-POLICY/report.json",
     "started_at": "2026-11-07T19:45:25Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-07T21:13:51Z",
+    "exit_code": 0,
+    "note": "merged (tests+docs); gap at last band neither necessary nor sufficient; stability depends on extra bands relative to occupied count in Gamma-only cells (si8>=6, si16>=10); evidence archived"
   }
 ]

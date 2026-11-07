@@ -547,3 +547,50 @@ measuring; no default, tolerance, production source or accessor changes.
 |---|---|---|---|---|
 | P40A-1 | A default; B beta 0.5; C beta 0.7/history 8; D beta 0.5/history 8; E existing Hartree metric; F C+Hartree selected by frozen B–D distribution ranking | All alternatives case-dependent; no candidate universal default | 2,244 SCFs, 10 cases, complex plus real on seven Gamma cases, ten paired starts per profile plus two tight references per arm/path. 1,716 converge; 528 failures remain confined to elongated/slab, no new failures. C standard improves 8/10 complex and 5/7 real case medians, but strict only 6/10 and 2/7, with >10% regressions. | Uniform-default rule requires >=70% improved cases, no >10% regression, no new failures and <=1.5x delivered error in both profiles/paths. Every alternative fails available-case criteria as well as lacking stress-case references. `mixing-survey.md`; `P40A-evidence/analysis.json`. |
 | P40A-2 | F distribution and paired hierarchical bootstrap (20,000 case/seed resamples) | Standard work gain is conditional; strict regressions and accuracy limits prevent adoption | Standard paired SCF complex -28.205% [-35.282,-22.222], real -22.222% [-40.000,0.000]; total H including failures complex -20.166% [-26.786,-10.673], real -12.429% [-21.455,-0.803]. Si8 standard medians complex/real 25.5/27.5→16/16, strict 14/14→16/16 (+14.29%). E alone Si8 complex standard max error 2.245319e-9→1.666601e-8 Ha. | Do not infer strict improvement or accuracy from standard SCF savings. F is adaptively selected, intervals exploratory, no wall-time or dev08 acceptance. Tight cross-arm max delta 7.247536e-13 Ha; strict default error can exceed 1e-12 Ha despite certification. All workspace gates exit 0; 25/25 same-source benchmark repeat pairs preserve energy, density and work. |
+
+## P41A trajectory divergence (2026-11-08; measurement only)
+
+Premise: P29A/P29B and P40A show a trajectory distribution, not a universal
+mixer/default improvement. This isolates the loose-state density channel;
+it does not repeat A21's rejected fixed-factor loosening or propose a tuning.
+Derived hypothesis inventory uses the own-words QE stage note, sections 2/4/5;
+no QE source was read. Local Apple Silicon/pure-Rust evidence only.
+
+| ID | Measurement | Result | Numbers and lesson |
+|---|---|---|---|
+| P41A-1 | First-map loose/tight pairs, ten starts × Si8/Si16 × complex/real × strict/standard (80 pairs) | Initial occupied-subspace sensitivity directly observed before mixing | Input density separation <=1.246e-12 Bohr^-3/2 produces loose output separation up to 5.124e-3; tight output <=5.919e-13. Loose occupied-subspace defect reaches 1.393 (dimensionless). Strict first-map occupied/empty gaps are roundoff-scale, versus 0.11072348615 Ha in tight solves; standard loose gaps about 0.00163–0.00170 Ha. Nearly equal loose eigenvalues/residual norms do not imply the same occupied density. This is more than an occupied-space gauge rotation. The particular EVD/expansion operation is not isolated. |
+| P41A-2 | Paired default / every ordinary solve tight at 1e-10 Ha / same-potential tight density only; unchanged mixing and outer profile predicates | Loose density is the dominant observed large-Gamma standard SCF-count variance channel | Si8 complex SCF 20/25.5/32 -> 9/9/9 -> 14/14/15; real 21/27.5/30 -> 9/9/9 -> 13/14/15. Si16 complex 18/21.5/27 -> 7/7/7 -> 13/13/13; real 15/19/25 -> 7/7/7 -> 7/7/7. Density-only removes 98.4%/97.4% of Si8 count variance, all Si16 variance. Work rises: Si8 complex median total H 1167.5 -> 2834.5 / 5854.5; Si16 complex 1854.5 -> 4654 / 9444. These are expensive oracles, not optimizations. |
+| P41A-3 | Strict profile and generality controls | No universal iteration-variance cure or default recommendation | Si8 strict is already 14 SCFs for every seed on both paths; density-only takes 17–19 complex and 18–19 real. k222 standard is 10/10/10 SCFs and 1600 H for every seed; PseudoDojo Si standard is 11/11/11 and 6974 H, strict 15/15/15 and 16526 H. Stable multi-k/material controls prevent generalizing large-Gamma sensitivity to every input. Tight strict final certificates use 1e-10 Ha too; three earlier logs with ordinary final certificates were superseded and retained. |
+
+Full protocol, seed-pair amplification, work accounting, threshold histograms,
+reference comparison limits and source-only trace method:
+[trajectory-divergence.md](trajectory-divergence.md). Raw logs, analysis and
+instrumentation diff: `P41A-evidence/` (archive before worktree cleanup).
+Only a doc-hidden visibility accessor changes production source; numerical
+bodies/defaults and artifacts/* are unchanged. No performance acceptance or
+new QE measurement is claimed.
+
+P41A stopping attribution (default 1e-10 ensembles): all 360 Gamma seed-pair
+first step-count divergences have actual passing/failing band comparisons.
+Standard crossings: 254 occupied, 4 first-empty, 26 higher-buffer bands;
+strict: 102 occupied, 90 first-empty, 97 higher-buffer (multiple bands can
+cross per pair). The first empty is mandatory but uses the empty threshold in
+standard; nominal required-prefix metadata must be converted before comparing.
+Si8 complex standard seeds 1/2 branch at SCF 6, 2 versus 5 Davidson steps,
+band 15 passing 1.65444e-4 < 1.67869e-4 Ha versus failing
+1.73930e-4 > 1.51819e-4 Ha. Their density-residual norms already differ by
+2.51407e-5 Bohr^-3/2 at SCF 1, before internal stopping flags differ.
+Discrete stopping is a later amplifier, not established as the initiating event.
+Noise amplitudes 1e-11/1e-10/1e-9 retain broad Gamma distributions, but medians
+change: this is not proof of exact amplitude independence. No default is tuned.
+
+P41A verification complete: 60 groups / 600 converged reported trajectories,
+2700 seed pairs, 120 instrumented default histories identical field-for-field,
+80 first-map pairs, and zero unresolved default branching pairs. Workspace
+build/test/fmt/clippy exit 0; 25 five-case/thread benchmark comparisons under
+`--require-identical` have energy delta 0 Ha and identical density. README
+freshness: nine tests, exit 0. `P41A-evidence/verify.py` exits 0 and confirms
+that the production function body and artifacts/* are unchanged. Three
+superseded certificate-control groups and one duplicate parallel control are
+kept/accounted for without inflating the ten-seed sample size. Work remains
+uncommitted; archive raw evidence before cleanup.

@@ -22,8 +22,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P29A-STANDARD-STALL: 속도/안정성: 표준 수렴 설정이 MKL 빌드 si8에서 SCF가 15번에서 27번으로 늘어나는 정체 현상을 흔들기 시험으로 재현하고, 안 풀리는 반복을 끊는 보호 장치(기본 꺼짐)를 평가",
-    "ref": "pid 24542, session no sessi, task/P29A-STANDARD-STALL",
+    "task": "P29B-STANDARD-ROBUST-GAIN: 속도 검증: 표준 수렴 설정의 이득이 운 좋은 한 번의 실행인지, 엄격과 같은 흔들기 조건에서 중앙값으로 비교하고, 필요하면 더 안정적인 허용치 규칙(기본 꺼짐)을 평가",
+    "ref": "pid 29802, session no sessi, task/P29B-STANDARD-ROBUST-GAIN",
     "updated": "2026-11-07"
   },
   {
@@ -996,6 +996,15 @@
     "state": "done",
     "task": "P27D-RADIAL-CONVENTION-SCORE: 정확도 조사: 반경 적분 규약 두 가지(국소 메시 점 개수, 짝수 점 끝처리)를 기본 꺼짐 옵션으로 넣어 6개 사례 SCF로 QE와의 남은 에너지 차이를 줄이는지 점수화",
     "ref": "pid 6714, session 01a1b48f, task/P27D-RADIAL-CONVENTION-SCORE",
+    "updated": "2026-11-07"
+  },
+  {
+    "id": "A112",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P29A-STANDARD-STALL: 속도/안정성: 표준 수렴 설정이 MKL 빌드 si8에서 SCF가 15번에서 27번으로 늘어나는 정체 현상을 흔들기 시험으로 재현하고, 안 풀리는 반복을 끊는 보호 장치(기본 꺼짐)를 평가",
+    "ref": "pid 24542, session 01a1b4a7, task/P29A-STANDARD-STALL",
     "updated": "2026-11-07"
   }
 ]

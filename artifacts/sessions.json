@@ -2806,5 +2806,23 @@
     "ended_at": "2026-11-07T07:01:43Z",
     "exit_code": 0,
     "note": "merged; stagnation reproduced on Mac (32/100); guard off by default, not recommended; evidence archived P29A-evidence.tar.gz"
+  },
+  {
+    "run_id": "P29B-STANDARD-ROBUST-GAIN#1",
+    "task_id": "P29B-STANDARD-ROBUST-GAIN",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 29802,
+    "wrapper_pid": 29772,
+    "session_id": null,
+    "branch": "task/P29B-STANDARD-ROBUST-GAIN",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P29B-STANDARD-ROBUST-GAIN",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P29B-STANDARD-ROBUST-GAIN.md",
+    "report": null,
+    "started_at": "2026-11-07T07:16:25Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

@@ -20,6 +20,18 @@ impl StandardProfile {
             .min(0.1 * error_ha / electrons.max(1.0))
             .clamp(Self::FLOOR_HA, Self::CAP_HA)
     }
+    /// Experimental inexact-solve cap: square the previous normalized density
+    /// residual (in atomic units) to map a norm scale to a Ritz-energy scale.
+    /// This heuristic is not an energy bound or an inexact-Newton guarantee.
+    /// Never loosen the ordinary ratchet; retain its existing numerical floor.
+    pub(crate) fn density_forcing(tolerance: f64, history: &[IterationRecord]) -> f64 {
+        history.last().map_or(tolerance, |r| {
+            tolerance
+                .min(r.density_residual.powi(2))
+                .max(Self::FLOOR_HA)
+        })
+    }
+
     pub fn empty_threshold(tolerance: f64) -> f64 {
         (5.0 * tolerance).max(5e-6)
     }
@@ -231,6 +243,19 @@ mod tests {
         history[3].standard_error_ha = Some(0.49);
         history[5].standard_error_ha = Some(2.0);
         assert_eq!(StandardProfile::stall_guard(tolerance, &history), tolerance);
+    }
+
+    #[test]
+    fn density_forcing_never_loosens_and_respects_floor() {
+        assert_eq!(StandardProfile::density_forcing(1e-4, &[]), 1e-4);
+        let mut r = plateau_record();
+        for residual in [0.0, 1e-10, 1e-5, 0.01, 1.0] {
+            r.density_residual = residual;
+            let t = StandardProfile::density_forcing(1e-4, &[r.clone()]);
+            assert!((StandardProfile::FLOOR_HA..=1e-4).contains(&t));
+        }
+        r.density_residual = 1e-4;
+        assert_eq!(StandardProfile::density_forcing(1e-4, &[r]), 1e-8);
     }
 
     #[test]

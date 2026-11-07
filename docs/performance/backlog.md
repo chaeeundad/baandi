@@ -141,3 +141,19 @@ Common gates (details in the brief): energy within 1e-12 Ha of the stored baseli
 
 ## Not on the backlog (closed, see ledger)
 Capacity changes at 8 bands (A08, A13; premise re-opened only for 20+ bands, B17), fuller preconditioner (A14), Ritz-change test with strict refinement (A15), multiplied tolerance factors (A21), fewer or more extra bands as default (A19), FFT lane batching/threads (A11 reopened only as B18, A34), scoped-thread schemes (A33, A35), CholeskyQR2 (A52), finer GEMM tiles (A49), blocked row-wise Nonlocal traversal (A43), band-grouped FFT (A28), hybrid RMM as default (A22). Re-open only with new evidence stated as in ledger section A.
+
+## B17 follow-up — P31A (2026-11-07)
+
+Capacity 2/3/4 versus default 6 has now been measured at 20, 36 and 68 bands,
+with Gamma complex/real, strict/standard, five Si8/Si16 density perturbations,
+a primitive cell, a k mesh, and PseudoDojo Si/MgO. Smaller capacity is
+**case-dependent, not a robust default**: 2 loses strict convergence on 15
+perturbations, 2/3 breach standard accuracy-ratio conditions, and none reduces
+the equally weighted median wall ratio. The 4 result is indistinguishable from
+noise, with only single-perturbation coverage. Keep default 6; the additive
+research option remains available for controlled studies.
+
+See [P31A study](davidson-capacity-study.md) and its ledger entry. Do not repeat
+the same capacity-only sweep as an optimization proposal without new evidence.
+Dense-algebra improvements that preserve the useful larger subspace remain a
+separate premise; any acceptance decision still requires dev08 evidence.

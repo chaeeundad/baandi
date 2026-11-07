@@ -295,7 +295,10 @@ impl CollinearProblem {
                 bands,
                 tolerance,
                 max_iterations: p.options.davidson_max_iterations,
-                max_subspace: p.options.davidson_subspace.max(6 * bands),
+                max_subspace: p
+                    .options
+                    .davidson_subspace
+                    .max(p.options.davidson_capacity_per_band.saturating_mul(bands)),
                 block_size: bands,
                 seed: p.options.seed,
             };
@@ -984,7 +987,10 @@ impl CollinearProblem {
                 bands,
                 tolerance: 1e-10,
                 max_iterations: p.options.davidson_max_iterations,
-                max_subspace: p.options.davidson_subspace.max(6 * bands),
+                max_subspace: p
+                    .options
+                    .davidson_subspace
+                    .max(p.options.davidson_capacity_per_band.saturating_mul(bands)),
                 block_size: bands,
                 seed: p.options.seed,
             };

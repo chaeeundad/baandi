@@ -28,7 +28,11 @@ impl ScfProblem {
             bands,
             tolerance: 1e-10,
             max_iterations: self.options.davidson_max_iterations,
-            max_subspace: self.options.davidson_subspace.max(6 * bands),
+            max_subspace: self.options.davidson_subspace.max(
+                self.options
+                    .davidson_capacity_per_band
+                    .saturating_mul(bands),
+            ),
             block_size: bands,
             seed: self.options.seed,
         };

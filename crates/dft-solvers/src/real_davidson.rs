@@ -26,7 +26,8 @@ pub struct RealEigenSolution {
     pub max_basis_dimension: usize,
 }
 
-/// Block size is bands; effective capacity is min(n, max(max_subspace, 6*bands)).
+/// Block size is bands; default capacity is min(n, max(max_subspace, 6*bands)).
+/// The research entry point replaces 6 with its validated capacity multiplier.
 /// `diagonal` arguments are the kinetic preconditioner in ORC order, in Ha.
 #[derive(Debug, Clone)]
 pub struct RealDavidson {
@@ -101,6 +102,27 @@ impl RealDavidson {
         ritz: bool,
         certify: bool,
     ) -> Result<RealEigenSolution, SolverError> {
+        self.solve_with_capacity_per_band(op, initial, diagonal, policy, ritz, certify, 6)
+    }
+
+    /// Research capacity control. The existing entry points retain multiplier 6.
+    /// Minimum 2 allows one full correction block; values above 12 are rejected.
+    #[allow(clippy::too_many_arguments)]
+    pub fn solve_with_capacity_per_band(
+        &self,
+        op: &dyn RealLinearOperator,
+        initial: Option<&RealMatrix>,
+        diagonal: &[f64],
+        policy: BandTolerances,
+        ritz: bool,
+        certify: bool,
+        capacity_per_band: usize,
+    ) -> Result<RealEigenSolution, SolverError> {
+        if !(2..=12).contains(&capacity_per_band) {
+            return Err(SolverError::InvalidParameter(
+                "davidson_capacity_per_band must be an integer from 2 to 12 (minimum 2 for a full correction block)",
+            ));
+        }
         let n = op.dimension();
         crate::validate_bands(n, self.bands)?;
         if diagonal.len() != n {
@@ -119,7 +141,10 @@ impl RealDavidson {
                 "invalid tolerance, iteration limit or strict prefix",
             ));
         }
-        let capacity = self.max_subspace.max(self.bands.saturating_mul(6)).min(n);
+        let capacity = self
+            .max_subspace
+            .max(self.bands.saturating_mul(capacity_per_band))
+            .min(n);
         let pool = match op.worker_pool() {
             Some(pool) => pool,
             None => WorkerPool::new(op.inner_threads())
@@ -167,10 +192,16 @@ impl RealDavidson {
         };
         let mut history = Vec::with_capacity(self.max_iterations);
         let mut applications = 0;
+        let mut work = crate::work_accounting::Trace::new(
+            self.bands,
+            policy.strict_bands,
+            self.tolerance,
+            policy.buffer_tolerance,
+        );
         let mut restarts = 0;
         let mut contractions = 0;
         let mut certificates = 0;
-        let mut products = apply(op, &basis, &mut applications)?;
+        let mut products = apply(op, &basis, &mut applications, &mut work)?;
         let mut reduced = None;
         let mut previous = vec![f64::NAN; self.bands];
         let mut max_basis_dimension = 0;
@@ -193,13 +224,14 @@ impl RealDavidson {
                     || (iteration == self.max_iterations && meets_strict(&residuals)))
             {
                 certificates += 1;
-                let actual = apply(op, &vectors, &mut applications)?;
+                let actual = apply(op, &vectors, &mut applications, &mut work)?;
                 (residual_block, residuals) = residual(&vectors, &actual, &values)?;
                 certified = true;
                 trusted = meets_policy(&residuals);
             }
             let maximum = residuals.iter().copied().fold(0., f64::max);
             history.push(maximum);
+            work.residuals(iteration, &residuals);
             let converged: Vec<bool> = (0..self.bands)
                 .map(|j| {
                     if ritz {
@@ -214,6 +246,7 @@ impl RealDavidson {
                 || (iteration == self.max_iterations
                     && converged[..policy.strict_bands].iter().all(|&b| b));
             if finished {
+                work.returned();
                 return Ok(RealEigenSolution {
                     eigenvalues: values,
                     eigenvectors: vectors,
@@ -256,6 +289,7 @@ impl RealDavidson {
             }
             if !trusted || basis.cols() + corrections.cols() > capacity {
                 restarts += 1;
+                work.restart();
                 reduced = None;
                 if trusted && orthogonality_defect(&vectors) <= 1e-12 {
                     contractions += 1;
@@ -263,7 +297,7 @@ impl RealDavidson {
                     products = rotated_products;
                 } else {
                     basis = projection.run(&vectors, None, &mut gemm)?;
-                    products = apply(op, &basis, &mut applications)?;
+                    products = apply(op, &basis, &mut applications, &mut work)?;
                 }
             }
             let mut extra = projection.run(&corrections, Some(&basis), &mut gemm)?;
@@ -278,7 +312,7 @@ impl RealDavidson {
                     residuals,
                 });
             }
-            products = append(&products, &apply(op, &extra, &mut applications)?)?;
+            products = append(&products, &apply(op, &extra, &mut applications, &mut work)?)?;
             basis = append(&basis, &extra)?;
         }
         unreachable!("validated positive iteration limit")
@@ -366,7 +400,9 @@ fn apply(
     op: &dyn RealLinearOperator,
     x: &RealMatrix,
     count: &mut usize,
+    work: &mut crate::work_accounting::Trace,
 ) -> Result<RealMatrix, SolverError> {
+    work.apply(x.cols(), None);
     for pair in (0..x.cols()).step_by(2) {
         let a = norm(column(x, pair));
         let b = if pair + 1 < x.cols() {

@@ -306,3 +306,38 @@ Full protocol, work counts, raw-evidence locations and remaining-site profile:
 
 Full matrix, all candidates, commands, failures and raw-evidence locations:
 [real-gamma-r8-algebra-results.md](real-gamma-r8-algebra-results.md).
+## P31A — Davidson capacity (2026-11-07, Mac observation; default unchanged)
+
+Reopens A08/A13 only on the new 20–68-band premise in D1a/B17, derived from the
+prose note `docs/research/qe-study/qe-solvers-and-subspace.md`; no QE source read.
+Adds research multiplier 2..=12, default 6, to all solve paths and restart metadata.
+The absolute subspace floor remains 48. No solver/tolerance/default retuning.
+
+The uninstrumented T=1 sweep has 152 runs including paired tight references;
+137 converge and 15 fail, all failures at multiplier 2 in strict Si8/Si16.
+Si8 complex and real each converge 0/5 versus 5/5 at 6; Si16 complex converges
+1/5, real 4/5 versus 5/5 at 6. All failures report the unchanged 400-step Davidson
+limit. Median-of-condition wall ratios for 2/3/4 versus 6 are
+1.17475/1.05999/1.00160 (failed attempts are censored costs, not speedups).
+The last ratio is unresolved noise, not evidence of a 0.16% regression.
+Standard median delivered errors breach the prespecified 1.5x rule in three
+conditions at 2 and one at 3. Converged strict error is at most 1.16245e-11 Ha.
+
+Si32 strict 2/3/6: wall 143.9721/68.7006/64.9406 s, SCF counts 15/13/13;
+shrinking to 3 increases H work despite the same SCF count. **No smaller multiplier
+qualifies as a robust default; keep 6.** Small cases with the same effective
+capacity expose timing noise and must not be counted as algorithmic speedups.
+See [the study](davidson-capacity-study.md) for every row, perturbation distributions,
+restart/work accounting, named-site algebra attribution, actual verification logs,
+and scope limits. Raw data are in `P31A-evidence/`, not target or tests/reference;
+no new QE or dev08 performance claim. Future work needs a different algorithmic
+premise or independent dev08 evidence, not another unqualified capacity reduction.
+
+P31A mechanism check (same first perturbation, instrumented T=1 Si16): named
+algebra share falls 60.81% -> 54.07% (strict) and 44.42% -> 39.54% (standard) from
+6 to 2. Strict EVD steps rise 224 -> 2905, and absolute named algebra time rises
+5.6340 -> 20.1646 s. Coverage includes the incremental reduced-matrix extension;
+224/2905 EVD samples and 410/5026 extension calls exceed the 30-sample requirement.
+This supports repeated-work cost overwhelming cheaper per-step algebra, not a
+recommendation to reduce capacity. All 70 default comparisons are bit-identical;
+all 70 accounting histories agree; final workspace gates pass.

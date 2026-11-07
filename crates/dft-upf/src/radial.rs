@@ -309,6 +309,207 @@ pub fn spherical_density_transform(
     )
 }
 
+/// Research-only radial endpoint selection. Defaults preserve existing numerics.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LocalMesh {
+    #[default]
+    Baandi,
+    QeLike,
+}
+impl LocalMesh {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Baandi => "baandi",
+            Self::QeLike => "qe_like",
+        }
+    }
+}
+/// Research-only even-count quadrature; odd counts always use the existing rule.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RadialEvenRule {
+    #[default]
+    Simpson3_8,
+    SimpsonQuadraticEnd,
+}
+impl RadialEvenRule {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Simpson3_8 => "simpson_3_8",
+            Self::SimpsonQuadraticEnd => "simpson_quadratic_end",
+        }
+    }
+}
+fn integrate_rule(n: usize, f: impl Fn(usize) -> f64, rule: RadialEvenRule) -> f64 {
+    if rule == RadialEvenRule::Simpson3_8 || !n.is_multiple_of(2) || n < 4 {
+        return integrate(n, f);
+    }
+    integrate(n - 1, &f) + (-f(n - 3) + 8.0 * f(n - 2) + 5.0 * f(n - 1)) / 12.0
+}
+impl RadialMesh {
+    pub fn integrate_with_rule(
+        &self,
+        values: &[f64],
+        rule: RadialEvenRule,
+    ) -> Result<f64, RadialError> {
+        if rule == RadialEvenRule::Simpson3_8 {
+            return self.integrate(values);
+        }
+        if values.len() != self.r.len() || values.iter().any(|x| !x.is_finite()) {
+            return Err(RadialError::Argument(
+                "integrand length or non-finite values",
+            ));
+        }
+        finite(integrate_rule(
+            values.len(),
+            |i| values[i] * self.rab[i],
+            rule,
+        ))
+    }
+}
+/// Additive research view; the original LocalTransform implementation is unchanged.
+pub struct ConventionLocalTransform<'a> {
+    base: LocalTransform<'a>,
+    rule: RadialEvenRule,
+}
+impl ConventionLocalTransform<'_> {
+    pub fn effective_r_max(&self) -> f64 {
+        self.base.effective_r_max()
+    }
+    fn short_integral(&self, g: f64) -> f64 {
+        let b = &self.base;
+        integrate_rule(
+            b.n,
+            |i| {
+                let r = b.mesh.r[i];
+                (r * r * b.v[i] + b.z * r * libm::erf(r)) * bessel(0, g * r) * b.mesh.rab[i]
+            },
+            self.rule,
+        )
+    }
+    pub fn at_g(&self, g: f64) -> Result<f64, RadialError> {
+        if self.rule == RadialEvenRule::Simpson3_8 {
+            return self.base.at_g(g);
+        }
+        if !g.is_finite() || g <= 0.0 || !(g * self.effective_r_max()).is_finite() {
+            return Err(RadialError::Argument("G must be finite and positive"));
+        }
+        finite(
+            4.0 * PI / self.base.volume
+                * (self.short_integral(g) - self.base.z * (-g * g / 4.0).exp() / (g * g)),
+        )
+    }
+    pub fn alpha_z(&self) -> Result<f64, RadialError> {
+        if self.rule == RadialEvenRule::Simpson3_8 {
+            return self.base.alpha_z();
+        }
+        finite(
+            4.0 * PI / self.base.volume * self.short_integral(0.0)
+                + PI * self.base.z / self.base.volume,
+        )
+    }
+}
+impl Pseudopotential {
+    pub fn local_transform_with_conventions(
+        &self,
+        volume: f64,
+        local_mesh: LocalMesh,
+        rule: RadialEvenRule,
+    ) -> Result<ConventionLocalTransform<'_>, RadialError> {
+        let mut base = self.local_transform(volume, None)?;
+        if local_mesh == LocalMesh::QeLike {
+            let n = self
+                .mesh
+                .r
+                .iter()
+                .position(|&r| r > 10.0)
+                .map_or(self.mesh.r.len(), |i| i + 1);
+            base.n = 2 * n.div_ceil(2) - 1;
+            if base.n < 2 {
+                return Err(RadialError::Argument(
+                    "local mesh includes fewer than two points",
+                ));
+            }
+        }
+        Ok(ConventionLocalTransform { base, rule })
+    }
+    pub fn projector_transform_with_rule(
+        &self,
+        index: usize,
+        q: f64,
+        rule: RadialEvenRule,
+    ) -> Result<f64, RadialError> {
+        if rule == RadialEvenRule::Simpson3_8 {
+            return self.projector_transform(index, q);
+        }
+        let p = self
+            .projectors()
+            .get(index)
+            .ok_or(RadialError::Argument("projector index"))?;
+        projector_transform_with_rule(&self.mesh, p.l, &p.radial_times_r, q, rule)
+    }
+}
+
+pub fn projector_transform_with_rule(
+    mesh: &RadialMesh,
+    l: usize,
+    radial_times_r: &[f64],
+    q: f64,
+    rule: RadialEvenRule,
+) -> Result<f64, RadialError> {
+    if rule == RadialEvenRule::Simpson3_8 {
+        return projector_transform(mesh, l, radial_times_r, q);
+    }
+    let n = radial_times_r.len();
+    if l > 3
+        || !q.is_finite()
+        || q < 0.0
+        || n == 0
+        || n > mesh.r.len()
+        || radial_times_r.iter().any(|x| !x.is_finite())
+        || !(q * mesh.r[n - 1]).is_finite()
+    {
+        return Err(RadialError::Argument("projector samples, l or q"));
+    }
+    finite(
+        4.0 * PI
+            * integrate_rule(
+                n,
+                |i| mesh.r[i] * radial_times_r[i] * bessel(l, q * mesh.r[i]) * mesh.rab[i],
+                rule,
+            ),
+    )
+}
+
+pub fn spherical_density_transform_with_rule(
+    mesh: &RadialMesh,
+    rho: &[f64],
+    q: f64,
+    rule: RadialEvenRule,
+) -> Result<f64, RadialError> {
+    if rule == RadialEvenRule::Simpson3_8 {
+        return spherical_density_transform(mesh, rho, q);
+    }
+    if rho.len() != mesh.r.len()
+        || rho.iter().any(|v| !v.is_finite())
+        || !q.is_finite()
+        || q < 0.0
+        || !(q * mesh.r[mesh.r.len() - 1]).is_finite()
+    {
+        return Err(RadialError::Argument("density samples or q"));
+    }
+    finite(
+        4.0 * PI
+            * integrate_rule(
+                rho.len(),
+                |i| {
+                    let r = mesh.r[i];
+                    r * r * rho[i] * bessel(0, q * r) * mesh.rab[i]
+                },
+                rule,
+            ),
+    )
+}
+
 #[cfg(test)]
 mod core_tests {
     use super::*;
@@ -334,5 +535,53 @@ mod core_tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod convention_tests {
+    use super::*;
+    #[test]
+    fn polynomial_degree_and_odd_identity() {
+        for n in 3..20 {
+            for h in [0.125_f64, 1.0, 2.0] {
+                for degree in 0..=3 {
+                    let f = |i: usize| (i as f64 * h).powi(degree) * h;
+                    let exact = ((n - 1) as f64 * h).powi(degree + 1) / f64::from(degree + 1);
+                    let cubic = integrate_rule(n, f, RadialEvenRule::Simpson3_8);
+                    let quadratic = integrate_rule(n, f, RadialEvenRule::SimpsonQuadraticEnd);
+                    // Simpson panels integrate cubics; the one-interval quadratic
+                    // interpolant integrates quadratics and has +h^4/4 cubic error.
+                    let expected_error = if n % 2 == 0 && degree == 3 {
+                        h.powi(4) / 4.0
+                    } else {
+                        0.0
+                    };
+                    assert!((cubic - exact).abs() < 1e-12 * exact.max(1.0));
+                    assert!((quadratic - exact - expected_error).abs() < 1e-12 * exact.max(1.0));
+                    if n % 2 == 1 {
+                        assert_eq!(cubic.to_bits(), quadratic.to_bits());
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn specified_last_interval_weights() {
+        // Scale impulse samples by 12 so all expected arithmetic is exact binary.
+        for n in [4, 6, 10] {
+            for (offset, weight) in [(3, -1.0), (2, 8.0), (1, 5.0)] {
+                let impulse = |i| if i == n - offset { 12.0 } else { 0.0 };
+                let panel = integrate(n - 1, impulse);
+                assert_eq!(
+                    integrate_rule(n, impulse, RadialEvenRule::SimpsonQuadraticEnd) - panel,
+                    weight
+                );
+            }
+        }
+        assert_eq!(
+            integrate_rule(2, |i| i as f64, RadialEvenRule::SimpsonQuadraticEnd),
+            0.5
+        );
     }
 }

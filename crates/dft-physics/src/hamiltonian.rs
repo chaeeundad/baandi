@@ -1044,3 +1044,194 @@ mod fused_tests {
         }
     }
 }
+
+pub fn ionic_local_with_conventions(
+    density: &PlaneWaveBasis,
+    volume_bohr3: f64,
+    species: &[Species<'_>],
+    local_mesh: dft_upf::radial::LocalMesh,
+    rule: dft_upf::radial::RadialEvenRule,
+) -> Result<Vec<Complex64>, HamiltonianError> {
+    if local_mesh == dft_upf::radial::LocalMesh::Baandi
+        && rule == dft_upf::radial::RadialEvenRule::Simpson3_8
+    {
+        return ionic_local(density, volume_bohr3, species);
+    }
+
+    volume(volume_bohr3)?;
+    let mut result = vec![Complex64::default(); density.vectors().len()];
+    for s in species {
+        let local = s
+            .potential
+            .local_transform_with_conventions(volume_bohr3, local_mesh, rule)?;
+        // Keep LocalTransform's endpoint and quadrature, but hoist only the
+        // G-independent parenthesized expression. In particular, rab must
+        // still multiply AFTER j0: reassociation would change the bits.
+        let pp = s.potential;
+        let n = pp
+            .mesh()
+            .r()
+            .partition_point(|r| *r <= local.effective_r_max());
+        let mesh = dft_upf::radial::RadialMesh::new(
+            pp.mesh().r()[..n].to_vec(),
+            pp.mesh().rab()[..n].to_vec(),
+        )?;
+        let short: Vec<_> = mesh
+            .r()
+            .iter()
+            .zip(pp.local_hartree())
+            .map(|(&r, &v)| r * r * v + pp.z_valence() * r * libm::erf(r))
+            .collect();
+        let mut integrand = vec![0.0; n];
+        // At most one entry per G; reserve up front so misses never allocate.
+        let mut cache = std::collections::HashMap::with_capacity(density.vectors().len());
+        for (out, g) in result.iter_mut().zip(density.vectors()) {
+            let v = if g.miller == [0; 3] {
+                local.alpha_z()?
+            } else {
+                let key = g.norm_squared.to_bits();
+                if let Some(&v) = cache.get(&key) {
+                    v
+                } else {
+                    let q = g.norm_squared.sqrt();
+                    if !q.is_finite() || q <= 0.0 || !(q * local.effective_r_max()).is_finite() {
+                        return Err(dft_upf::radial::RadialError::Argument(
+                            "G must be finite and positive",
+                        )
+                        .into());
+                    }
+                    for ((value, &base), &r) in integrand.iter_mut().zip(&short).zip(mesh.r()) {
+                        *value = base * dft_upf::radial::spherical_bessel(0, q * r)?;
+                    }
+                    let v = 4.0 * std::f64::consts::PI / volume_bohr3
+                        * (mesh.integrate_with_rule(&integrand, rule)?
+                            - pp.z_valence() * (-q * q / 4.0).exp() / (q * q));
+                    if !v.is_finite() {
+                        return Err(dft_upf::radial::RadialError::Argument(
+                            "unrepresentable result",
+                        )
+                        .into());
+                    }
+                    cache.insert(key, v);
+                    v
+                }
+            };
+            *out += v * structure_factor(g.cartesian, s.positions_bohr)?;
+        }
+    }
+    if !result.iter().all(finite) {
+        return Err(HamiltonianError::NonFinite);
+    }
+    Ok(result)
+}
+
+impl NonlocalOperator {
+    pub fn new_with_rule(
+        basis: &PlaneWaveBasis,
+        volume_bohr3: f64,
+        species: &[Species<'_>],
+        rule: dft_upf::radial::RadialEvenRule,
+    ) -> Result<Self, HamiltonianError> {
+        if rule == dft_upf::radial::RadialEvenRule::Simpson3_8 {
+            return Self::new(basis, volume_bohr3, species);
+        }
+
+        volume(volume_bohr3)?;
+        let mut atoms = Vec::new();
+        let mut max_channels = 0;
+        for s in species {
+            let pp = s.potential;
+            let np = pp.projectors().len();
+            for i in 0..np {
+                for j in 0..np {
+                    if pp.projectors()[i].l() != pp.projectors()[j].l()
+                        && pp.dij_hartree()[i * np + j] != 0.0
+                    {
+                        return Err(HamiltonianError::AngularCoupling);
+                    }
+                }
+            }
+            let channels: Vec<_> = pp
+                .projectors()
+                .iter()
+                .enumerate()
+                .flat_map(|(i, p)| {
+                    let l = p.l() as isize;
+                    (-l..=l).map(move |m| (i, p.l(), m))
+                })
+                .collect();
+            let nc = channels.len();
+            max_channels = max_channels.max(nc);
+            let mut table = vec![vec![Complex64::default(); basis.momenta().len()]; nc];
+            // Exact squared-momentum keys only; no shell rounding or interpolation.
+            // Flat preallocated storage avoids allocation on cache misses, including
+            // generic k where nearly every momentum can have a different norm.
+            let ng = basis.momenta().len();
+            let mut radial_cache = std::collections::HashMap::with_capacity(ng);
+            let mut radial_values = vec![0.0; ng * np];
+            for (ig, g) in basis.momenta().iter().enumerate() {
+                let next = radial_cache.len();
+                let slot = match radial_cache.entry(g.norm_squared.to_bits()) {
+                    std::collections::hash_map::Entry::Occupied(entry) => *entry.get(),
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        for i in 0..np {
+                            radial_values[next * np + i] =
+                                pp.projector_transform_with_rule(i, g.norm_squared.sqrt(), rule)?;
+                        }
+                        entry.insert(next);
+                        next
+                    }
+                };
+                let radial = &radial_values[slot * np..(slot + 1) * np];
+                // Direction at zero is arbitrary: all l>0 radial transforms vanish.
+                let direction = if g.norm_squared == 0.0 {
+                    [0.0, 0.0, 1.0]
+                } else {
+                    g.cartesian
+                };
+                for (c, &(i, l, m)) in channels.iter().enumerate() {
+                    table[c][ig] = Complex64::new(0.0, -1.0).powu(l as u32)
+                        * real_spherical_harmonic(l, m, direction)?
+                        * radial[i]
+                        / volume_bohr3.sqrt();
+                }
+            }
+            let mut coupling = vec![0.0; nc * nc];
+            for (a, &(i, l, m)) in channels.iter().enumerate() {
+                for (b, &(j, ll, mm)) in channels.iter().enumerate() {
+                    if l == ll && m == mm {
+                        coupling[a * nc + b] = pp.dij_hartree()[i * np + j];
+                    }
+                }
+            }
+            for &r in s.positions_bohr {
+                let phases = basis
+                    .momenta()
+                    .iter()
+                    .map(|g| phase(g.cartesian, r))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let columns: Vec<Vec<_>> = table
+                    .iter()
+                    .map(|col| {
+                        col.iter()
+                            .zip(&phases)
+                            .map(|(p, phase)| p * phase)
+                            .collect()
+                    })
+                    .collect();
+                if !columns.iter().flatten().all(finite) {
+                    return Err(HamiltonianError::NonFinite);
+                }
+                atoms.push(AtomProjectors {
+                    columns,
+                    coupling: coupling.clone(),
+                });
+            }
+        }
+        Ok(Self {
+            basis: basis.momenta().to_vec(),
+            atoms,
+            max_channels,
+        })
+    }
+}

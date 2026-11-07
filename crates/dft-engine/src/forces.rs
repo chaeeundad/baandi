@@ -134,6 +134,14 @@ pub struct ForceState<'a> {
 }
 
 pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
+    if state.options.local_mesh != crate::LocalMesh::Baandi
+        || state.options.radial_even_rule != crate::RadialEvenRule::Simpson3_8
+    {
+        return Err(ScfError::InvalidInput(
+            "research pseudo conventions do not support analytic derivatives",
+        ));
+    }
+
     let start = std::time::Instant::now();
     use crate::force_identity::{ModelDescription, OccupationIdentity};
     let (identity, policy, density, points) = match &state.electronic {

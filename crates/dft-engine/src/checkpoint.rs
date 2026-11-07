@@ -322,6 +322,8 @@ pub(crate) fn options_identical(a: &ScfOptions, b: &ScfOptions) -> bool {
             threads,
             functional,
             pw92_prefactor,
+            local_mesh,
+            radial_even_rule,
             allow_functional_override,
             bands,
             extra_bands,

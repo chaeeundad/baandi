@@ -711,6 +711,8 @@ impl ScfSession {
                 converged: certified,
                 result: ScfResult {
                     pw92_prefactor: self.problem.options.pw92_prefactor,
+                    local_mesh: self.problem.options.local_mesh,
+                    radial_even_rule: self.problem.options.radial_even_rule,
                     gamma_real_used: self
                         .problem
                         .states

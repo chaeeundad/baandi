@@ -504,7 +504,50 @@ fn pw92_modified() -> String {
 fn is_pw92_modified(s: &str) -> bool {
     s == "modified"
 }
+impl Wire for dft_engine::LocalMesh {
+    type Repr = String;
+    fn encode(&self, _bytes: &mut Vec<u8>) -> Result<String, Error> {
+        Ok(self.name().into())
+    }
+    fn decode(w: String, _bytes: &[u8], _cursor: &mut usize) -> Result<Self, Error> {
+        match w.as_str() {
+            "baandi" => Ok(Self::Baandi),
+            "qe_like" => Ok(Self::QeLike),
+            _ => Err(invalid("invalid local_mesh option")),
+        }
+    }
+}
+fn default_local_mesh() -> String {
+    "baandi".into()
+}
+fn is_default_local_mesh(s: &str) -> bool {
+    s == "baandi"
+}
+impl Wire for dft_engine::RadialEvenRule {
+    type Repr = String;
+    fn encode(&self, _bytes: &mut Vec<u8>) -> Result<String, Error> {
+        Ok(self.name().into())
+    }
+    fn decode(w: String, _bytes: &[u8], _cursor: &mut usize) -> Result<Self, Error> {
+        match w.as_str() {
+            "simpson_3_8" => Ok(Self::Simpson3_8),
+            "simpson_quadratic_end" => Ok(Self::SimpsonQuadraticEnd),
+            _ => Err(invalid("invalid radial_even_rule option")),
+        }
+    }
+}
+fn default_radial_even_rule() -> String {
+    "simpson_3_8".into()
+}
+fn is_default_radial_even_rule(s: &str) -> bool {
+    s == "simpson_3_8"
+}
+
 wire_struct!(ScfOptions, WScfOptions {
+    #[serde(default = "default_radial_even_rule", skip_serializing_if = "is_default_radial_even_rule")]
+    radial_even_rule: dft_engine::RadialEvenRule,
+    #[serde(default = "default_local_mesh", skip_serializing_if = "is_default_local_mesh")]
+    local_mesh: dft_engine::LocalMesh,
     #[serde(default = "pw92_modified", skip_serializing_if = "is_pw92_modified")]
     pw92_prefactor: dft_engine::Pw92Prefactor,
     #[serde(default = "gamma_real_off", skip_serializing_if = "is_gamma_real_off")]
@@ -1848,6 +1891,57 @@ mod pw92_wire_tests {
             assert!(
                 ScfOptions::decode(serde_json::from_value(json).unwrap(), &bytes, &mut 0).is_err()
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod pseudo_wire_tests {
+    use super::*;
+    #[test]
+    fn defaults_legacy_and_research_roundtrip() {
+        for local_mesh in [dft_engine::LocalMesh::Baandi, dft_engine::LocalMesh::QeLike] {
+            for radial_even_rule in [
+                dft_engine::RadialEvenRule::Simpson3_8,
+                dft_engine::RadialEvenRule::SimpsonQuadraticEnd,
+            ] {
+                let options = ScfOptions {
+                    local_mesh,
+                    radial_even_rule,
+                    ..Default::default()
+                };
+                let mut bytes = Vec::new();
+                let mut json = serde_json::to_value(options.encode(&mut bytes).unwrap()).unwrap();
+                assert_eq!(
+                    json.get("local_mesh").is_none(),
+                    local_mesh == dft_engine::LocalMesh::Baandi
+                );
+                assert_eq!(
+                    json.get("radial_even_rule").is_none(),
+                    radial_even_rule == dft_engine::RadialEvenRule::Simpson3_8
+                );
+                let decoded = ScfOptions::decode(
+                    serde_json::from_value(json.clone()).unwrap(),
+                    &bytes,
+                    &mut 0,
+                )
+                .unwrap();
+                assert_eq!(decoded.local_mesh, local_mesh);
+                assert_eq!(decoded.radial_even_rule, radial_even_rule);
+                for key in ["local_mesh", "radial_even_rule"] {
+                    let old = json.clone();
+                    json[key] = serde_json::json!("unknown");
+                    assert!(
+                        ScfOptions::decode(
+                            serde_json::from_value(json.clone()).unwrap(),
+                            &bytes,
+                            &mut 0
+                        )
+                        .is_err()
+                    );
+                    json = old;
+                }
+            }
         }
     }
 }

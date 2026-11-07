@@ -285,3 +285,18 @@ Profile, si8 pure T=1, (a) 198 samples 5.423 s versus (b) 147 samples 4.122 s (s
 
 QE build for fairness: `~/fq/builds/orig-mpi-dfti/make.inc`: FFLAGS `-O3 -g -fallow-argument-mismatch -fopenmp`, CFLAGS `-O3`, MKL (gf_lp64, gnu_thread, core), DFTI FFT, no `-march=native`; AVX-512 only through MKL run-time dispatch. BAANDI on dev08 had never been built with RUSTFLAGS before this experiment. Ratio to QE best (real Gamma path 0.366 s) for si8 1e-8 one core with the native pure build: 4.122 / 0.366 = 11.3 (was 14.9 with the default pure build).
 
+
+## Part 8 (relayed by the dft5090/master session, 2026-11-07): QE FFT backend, MKL DFTI versus FFTW3
+
+Relayed text summary, not a stored raw run; reproduction needs the build recipe below. No new download was used: FFTW 3.3.10 and the QE source tarball already existed on dev08 (`~/fq/deps`, `~/fq/qe-orig.tar.gz`). QE 7.6 built under `/scr/mino/rustdft/qe-fftw3/` with the same options as the existing MKL-DFTI build (gfortran -O3 -fopenmp, MKL BLAS/LAPACK, ScaLAPACK, MPI) and only the FFT backend changed (`-D__FFTW3`, `-lfftw3`). pw.x sha256 `2e6b030c35127951315ff847116404f2112d9ec1b37f272404d194735359dbae`. Build notes: configure does not add `-D__FFTW3` (edit DFLAGS in make.inc), `external/{devxlib,mbd}` need their `.git` removed plus `install/git_devx`, `install/git_mbd` stamp files for a tarball tree, and `make clean` after a failed first build.
+
+si8, 1 MPI rank, conv_thr 1e-8, 5 runs each, total energy -62.64362757 Ry in all 20 runs:
+
+| Build | Path | Internal mean (s) | Spread | Iterations |
+| --- | --- | ---: | ---: | ---: |
+| MKL DFTI | complex k=0 | 0.6780 | 1.5 % | 14 |
+| MKL DFTI | real gamma | 0.3600 | 0.0 % | 12 |
+| FFTW3 | complex k=0 | 0.8980 | 9.1 % (one outlier 0.96 s, median 0.88) | 14 |
+| FFTW3 | real gamma | 0.4600 | 0.0 % | 12 |
+
+Conclusion (as relayed): MKL DFTI is 1.28 to 1.32 times faster than FFTW3 in QE on dev08, so the existing MKL-DFTI QE build with `K_POINTS gamma` remains QE's best configuration; the QE reference values (complex 0.684 s, real gamma 0.366 s) are reproduced (0.678 / 0.360). Real gamma over complex is 1.88 (MKL) and 1.95 (FFTW3), independent of the FFT backend. Five samples: directional for ratios, below the 30-sample rule.

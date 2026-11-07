@@ -717,6 +717,7 @@ impl ScfSession {
             self.outcome = Some(ScfOutcome {
                 converged: certified,
                 result: ScfResult {
+                    compat_mode: self.problem.options.compat_mode,
                     crystal_density_group: self.problem.options.crystal_density_group,
                     standard_stall_guard: self.problem.options.standard_stall_guard,
                     standard_density_forcing: self.problem.options.standard_density_forcing,

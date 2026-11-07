@@ -39,6 +39,8 @@ pub struct Config {
     pub basis: Basis,
     pub xc: Xc,
     #[serde(default)]
+    pub compat: Compat,
+    #[serde(default)]
     pub pseudo: Pseudo,
     #[serde(default)]
     pub symmetry: Symmetry,
@@ -50,6 +52,18 @@ pub struct Config {
     pub dos: Option<Dos>,
     pub relax: Option<crate::relax::Settings>,
 }
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Compat {
+    pub mode: Option<String>,
+}
+impl Compat {
+    pub fn reference(&self) -> bool {
+        self.mode.as_deref() == Some("reference")
+    }
+}
+pub const REFERENCE_SCOPE: &str = "compat.mode = \"reference\" is for unpolarized PBE energies and densities; spin-polarized PBE, LDA, analytic forces, stress and relaxation are unsupported";
+
 #[derive(Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum SymmetryMode {
@@ -946,13 +960,83 @@ impl Config {
         let mut records = Vec::new();
         normalize(&mut value, &mut records)?;
         let identities = preflight::normalize(&mut value)?;
+        let explicit_density_group = value
+            .get("symmetry")
+            .and_then(|s| s.get("density_group"))
+            .cloned();
         let mut config: Self = value.try_into()?;
+        match config.compat.mode.as_deref().unwrap_or("none") {
+            "none" => {}
+            "reference" => {
+                config.validate_reference_scope()?;
+                for (key, slot, expected) in [
+                    (
+                        "xc.pw92_prefactor",
+                        &mut config.xc.pw92_prefactor,
+                        "original",
+                    ),
+                    (
+                        "pseudo.local_mesh",
+                        &mut config.pseudo.local_mesh,
+                        "qe_like",
+                    ),
+                    (
+                        "pseudo.radial_even_rule",
+                        &mut config.pseudo.radial_even_rule,
+                        "simpson_quadratic_end",
+                    ),
+                ] {
+                    if let Some(actual) = slot.as_deref()
+                        && actual != expected
+                    {
+                        return Err(ConfigError::Invalid(format!(
+                            "compat.mode = \"reference\" conflicts with {key} = {actual:?}; requires {expected:?}"
+                        )));
+                    }
+                    *slot = Some(expected.into());
+                }
+                let expected = if config.symmetry.mode == SymmetryMode::Auto {
+                    "crystal"
+                } else {
+                    "mesh"
+                };
+                if let Some(actual) = explicit_density_group
+                    && actual.as_str() != Some(expected)
+                {
+                    return Err(ConfigError::Invalid(format!(
+                        "compat.mode = \"reference\" conflicts with symmetry.density_group = {actual}; requires {expected:?} for this symmetry.mode"
+                    )));
+                }
+                config.symmetry.density_group = if config.symmetry.mode == SymmetryMode::Auto {
+                    DensityGroup::Crystal
+                } else {
+                    DensityGroup::Mesh
+                };
+            }
+            _ => {
+                return Err(ConfigError::Invalid(
+                    "compat.mode must be none or reference".into(),
+                ));
+            }
+        }
         config.input_expressions = records;
         config.species_identity = identities;
         Ok(config)
     }
+    fn validate_reference_scope(&self) -> Result<(), ConfigError> {
+        if self.compat.reference()
+            && (self.xc.functional.engine() != dft_engine::Functional::Pbe
+                || self.collinear()
+                || self.relax.is_some()
+                || self.output.as_ref().is_some_and(|o| o.forces || o.stress))
+        {
+            return Err(ConfigError::Invalid(REFERENCE_SCOPE.into()));
+        }
+        Ok(())
+    }
     /// Validate active physical settings and cell geometry. SCF/output are type-checked only.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        self.validate_reference_scope()?;
         if self.symmetry.density_group == DensityGroup::Crystal {
             if self.symmetry.mode != SymmetryMode::Auto {
                 return Err(ConfigError::Invalid(

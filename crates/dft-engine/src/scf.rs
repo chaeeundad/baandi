@@ -128,8 +128,25 @@ impl Default for Mixing {
         }
     }
 }
+/// Provenance label only; the CLI resolves the existing numerical options.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CompatMode {
+    #[default]
+    None,
+    Reference,
+}
+impl CompatMode {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Reference => "reference",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ScfOptions {
+    pub compat_mode: CompatMode,
     /// Research density projector uses all crystal operations; requires enable_symmetry.
     pub crystal_density_group: bool,
     pub gamma_real: crate::GammaReal,
@@ -201,6 +218,7 @@ impl ScfOptions {
 impl Default for ScfOptions {
     fn default() -> Self {
         Self {
+            compat_mode: CompatMode::None,
             crystal_density_group: false,
             gamma_real: crate::GammaReal::Off,
             standard: None,
@@ -335,6 +353,7 @@ pub struct KPointSolution {
 
 #[derive(Debug)]
 pub struct ScfResult {
+    pub compat_mode: CompatMode,
     /// Density projection policy used to produce this state; derivatives are unsupported.
     pub crystal_density_group: bool,
     pub standard_stall_guard: bool,

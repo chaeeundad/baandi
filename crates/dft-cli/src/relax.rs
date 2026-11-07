@@ -415,6 +415,9 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
     let bytes = fs::read(input)?;
     let config = Config::parse(std::str::from_utf8(&bytes).map_err(|e| error(1, e))?)
         .map_err(|e| error(1, e))?;
+    if config.compat.reference() {
+        return Err(error(1, crate::config::REFERENCE_SCOPE));
+    }
     let settings = config.relax.clone().unwrap_or_default();
     settings.validate(config.system.atoms.len())?;
     let opts = options(&config)?;

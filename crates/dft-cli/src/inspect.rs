@@ -131,10 +131,13 @@ fn evidence(path: &Path) -> Result<Value, Error> {
         if value["schema_version"] != 1 || !value["convergence"]["converged"].is_boolean() {
             return Err("source: expected CLI results.json (schema_version=1), events.jsonl, or a BAANDICP checkpoint".into());
         }
-        Ok(
-            json!({"source":path,"state":if value["convergence"]["converged"]==true {"converged"} else {"not_converged"},
-            "convergence":value["convergence"],"energies":value["energies"],"preflight":value["preflight"]}),
-        )
+        let mut result = json!({"source":path,"state":if value["convergence"]["converged"]==true {"converged"} else {"not_converged"},
+            "convergence":value["convergence"],"energies":value["energies"],"preflight":value["preflight"]});
+        if let Some(compat) = value.get("compat").or_else(|| value["scf"].get("compat")) {
+            result["compat_mode"] = compat["compat_mode"].clone();
+            result["compat"] = compat.clone();
+        }
+        Ok(result)
     }
 }
 pub fn status(path: &Path) -> Result<(), Error> {

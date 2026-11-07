@@ -527,12 +527,12 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         )
         .map_err(|e| fail("basis.ecutwfc_ry", e, "correct the cutoff"))?;
         let n = basis.vectors().len();
-        if bands > n || (options.davidson_subspace.min(n) <= bands && bands != n) {
+        if !dft_engine::bands_fit_subspace(options.davidson_subspace, bands, n) {
             return Err(fail(
                 "scf.nbands / basis.ecutwfc_ry",
                 format!(
                     "{bands} bands incompatible with {n} plane waves and Davidson subspace {}",
-                    options.davidson_subspace
+                    options.davidson_subspace.max(6 * bands)
                 ),
                 "increase cutoff or reduce bands within occupation and subspace limits",
             ));

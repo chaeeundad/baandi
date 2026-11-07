@@ -223,6 +223,15 @@ impl Default for ScfOptions {
         }
     }
 }
+/// Whether `bands` fit a basis of `plane_waves` functions. The solvers raise the
+/// Davidson capacity to at least `6 * bands` (every solve path), so the check uses
+/// that effective capacity rather than the raw `davidson_subspace` option: a raw
+/// limit of 48 must not reject a 68-band calculation the solver can run.
+pub fn bands_fit_subspace(davidson_subspace: usize, bands: usize, plane_waves: usize) -> bool {
+    let capacity = davidson_subspace.max(6 * bands).min(plane_waves);
+    bands <= plane_waves && (capacity > bands || bands == plane_waves)
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PhaseTimings {
     pub potential: Duration,
@@ -745,10 +754,10 @@ impl ScfProblem {
             &pool,
             |_, point| {
                 let basis = options.basis(cell, point.fractional, 1.0)?;
-                if bands > basis.vectors().len()
-                    || (options.davidson_subspace.min(basis.vectors().len()) <= bands
-                        && bands != basis.vectors().len())
-                {
+                // The solvers raise the subspace to at least 6 x bands (see the
+                // `max(6 * bands)` capacity in every solve path), so the check uses
+                // the same effective capacity instead of the raw option.
+                if !bands_fit_subspace(options.davidson_subspace, bands, basis.vectors().len()) {
                     return Err(ScfError::InvalidInput(
                         "bands/subspace incompatible with k basis",
                     ));
@@ -1668,3 +1677,20 @@ mod threading_tests {
 
 #[path = "spectral_scf.rs"]
 mod spectral_scf;
+
+#[cfg(test)]
+mod bands_fit_tests {
+    use super::bands_fit_subspace;
+    #[test]
+    fn effective_capacity_is_at_least_six_times_bands() {
+        // 68 bands, 11877 plane waves, raw subspace 48: runnable (si32 benchmark).
+        assert!(bands_fit_subspace(48, 68, 11877));
+        assert!(bands_fit_subspace(48, 20, 2969));
+        // More bands than plane waves is still rejected.
+        assert!(!bands_fit_subspace(48, 100, 99));
+        // bands equal to the basis size stays allowed (full-space solve).
+        assert!(bands_fit_subspace(48, 50, 50));
+        // One plane wave more than the bands: capacity is the basis size, allowed.
+        assert!(bands_fit_subspace(48, 50, 51));
+    }
+}

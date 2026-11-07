@@ -476,3 +476,29 @@ default is adopted; no tolerance is relaxed.
 | PFFT-4 | Variants of PFFT-3 and of the old structure | rejected or neutral (O) | Index-table transpose instead of zero-fill plus scatter 0.896 / 0.943 (worse than PFFT-3); per-lane instead of batched rustfft calls +1 percent; dropping all per-lane scale passes in the old order 0.964 / 0.955 of the clone (not alternated); existing opt-in `PlaneFusedPlan` (A27) 1.024 / 0.983; lane-vectorised SoA slab kernels (four adjacent x slabs per group, plain Stockham 4x3x3 and 4x2x3x3) 0.916 / 0.961 and kernel at length 36 58.3 ns per lane against rustfft 62.0, at 72 147 against 103 | Layout is exhausted at about 0.87 to 0.91 on the Mac; further gain needs a faster kernel (vendor MKL 1D batches or SIMD kernels on dev08). A27 stays neutral, A29 not revived, A11 reconfirmed on the Mac (ML is its lane-vectorised form) |
 | PFFT-5 | Arithmetic projection of the QE gap from the relayed per-call times and the measured flop rates | analysis (E) | Per transform equivalent at 36^3 / 72x36x36: current 213.6 / 486.9 us (R), mirror 185 / 444 (E), unpruned MKL adapter 195.0 / 488.5 (R), QE 135 / 341 (R); kernel-only floor of pure rustfft 156 / 373 (E); MKL 1D stick pipeline at QE's flop rate 97 / 235 (E, +25 percent allowance) | Pure Rust layout reaches and beats the unpruned MKL adapter by 5 to 9 percent but stays 1.3 to 1.37x behind QE; exceeding QE needs MKL sticks or faster SIMD kernels, both needing dev08 microbenchmarks first |
 | PFFT-6 | Reading of the MKL adapter (`dft_mkl::Plan3d::transform`) | new evidence (code reading, unmeasured) | The adapter copies the input into its buffer and the result out around an in-place descriptor (two full-array copies per transform); the relayed MKL full figure 195.0 us at 36^3 includes them, QE's raw call is 135 us | Part of the 60 us difference between "MKL full" and QE is probably adapter overhead; check with a raw in-place call on dev08 before any MKL pair-path work (backlog B33) |
+
+## P38A band-count study (2026-11-07; Mac observations)
+
+Source `9d32045155007d893bfd9ccf86585167e7c2ab4d`; no production changes.
+Protocol, full condition tables and limitations: [band-count-policy.md](band-count-policy.md).
+Raw evidence: `P38A-evidence/`, external UPFs only. No dev08 speed acceptance.
+
+| ID | Attempt | Result | Numbers and lesson |
+| --- | --- | --- | --- |
+| P38A-1 | A19 reopened as a conditional multiplet study, extras 1–12, strict/standard, T=1, three repetitions | simple first-empty-multiplet oracle rejected; default remains four | Si8 strict main H: 2063 at four extras, 1253 at the six-member multiplet completion, 1024 at seven. Held-out Si16 first-empty multiplet has two members, but two extras cost 3205 H versus default 2657 (+20.62%, exceeding the 10% per-case gate), with 14 versus 12 SCF steps. Threshold sensitivity 1e-7 through 1e-4 Ha does not change either multiplicity. Converged-spectrum correlation is not a validated pre-SCF/first-iteration predictor. No auto option implemented. |
+| P38A-2 | Pre-SCF free-electron first-empty shell completion on the Si8 training case | rejected diagnostic | Shells end at bands 1/7/19, selecting three extras above 16 occupied; measured H is 2321 versus default 2063 (+12.51%). The free-electron shell differs from the physical first-empty group. No fitted policy or independent held-out success is claimed. |
+
+Completed 2026-11-08 (local date): 24 cases × two profiles × twelve counts ×
+three runs = 1728 samples; 1095 converge, 294 reject incompatible basis/band
+requests, 306 exhaust SCF budgets, and 33 diverge. Held-out syn-s2 strict extras
+1/2 reach energies +4.4165136e-3 Ha above default; completing its first-empty
+group does not restore the default fixed point. Five ambiguous spectrum rows
+were replayed with identical energy bits/density SHA-256 and checked at fixed
+density (maximum all-root residual 9.9977605473e-6 Ha, grouping threshold 1e-4 Ha).
+All 543 successful strict scans retain certificates (maximum certified residual
+9.9881473239e-10 Ha). All 70 supported default comparisons and cross-thread
+checks are bit-identical; 30 forced-real multi-k combinations reject unsupported
+inputs. Final workspace gates, release probe and evidence audit exit 0.
+Wall medians are loaded-Mac observations (load 2.6733–29.6738, including two
+concurrent T=1 collectors), not speed acceptance. Integer four stays unchanged;
+Phase B is not entered and no recommended automatic option is introduced.

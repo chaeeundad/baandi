@@ -3147,24 +3147,42 @@
     "started_at": "2026-11-07T21:49:57Z",
     "ended_at": "2026-11-07T21:58:24Z",
     "exit_code": 0,
-    "note": ""
+    "note": "merged (tests+docs); fixed fraction rule 0.375 fails preregistered bound on skewed Si16 complex (H +12.6 percent), not adopted; si8 real extra 6 also unstable"
   },
   {
     "run_id": "P44A-REFERENCE-MODE#1",
     "task_id": "P44A-REFERENCE-MODE",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "blocked",
     "codex_pid": 35159,
     "wrapper_pid": 35130,
-    "session_id": null,
+    "session_id": "01a1b806-08b0-7b43-ade8-a902b4239823",
     "branch": "task/P44A-REFERENCE-MODE",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P44A-REFERENCE-MODE",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P44A-REFERENCE-MODE.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P44A-REFERENCE-MODE/report.json",
     "started_at": "2026-11-07T21:59:25Z",
-    "ended_at": null,
-    "exit_code": null,
+    "ended_at": "2026-11-07T22:10:26Z",
+    "exit_code": 0,
+    "note": ""
+  },
+  {
+    "run_id": "P44A-REFERENCE-MODE#2",
+    "task_id": "P44A-REFERENCE-MODE",
+    "mode": "resume",
+    "role": "implementer",
+    "status": "done",
+    "codex_pid": 42192,
+    "wrapper_pid": 42180,
+    "session_id": "01a1b806-08b0-7b43-ade8-a902b4239823",
+    "branch": "task/P44A-REFERENCE-MODE",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P44A-REFERENCE-MODE",
+    "ticket": "/tmp/p44a-resume.md",
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P44A-REFERENCE-MODE/report.json",
+    "started_at": "2026-11-07T22:11:05Z",
+    "ended_at": "2026-11-07T22:16:06Z",
+    "exit_code": 0,
     "note": ""
   }
 ]

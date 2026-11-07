@@ -644,3 +644,27 @@ not dev08 wall acceptance. Workspace build/test/fmt/clippy exit 0; 70 exact
 default repeat pairs, 14 cross-thread groups and 30 expected forced-real
 multi-k rejections; evidence audit exit 0. Integer four remains unchanged,
 and no auto option is implemented or recommended. No QE source was read.
+
+## P45A atomic starting subspace (2026-11-08; stopped negative prototype)
+
+A07/B27 reopened on P41A's first-map sensitivity premise. Derived from stage 1
+of the own-words `qe-stage-by-stage.md`; no QE source read. Test-only UPF atomic
+orbitals, projector-rule radial transforms, real harmonics, rank-checked MGS
+and first-H Rayleigh–Ritz; no production/parser/default/tolerance changes.
+
+| ID | Attempt | Decision | Evidence and lesson |
+|---|---|---|---|
+| P45A-1 | Paired seeds 201–210, standard plus two tight references, Si8/Si16 complex and real | Strong cubic-cell improvement, insufficient for adoption | Si8 complex SCF 20/25/29 ->13/13/13, real 19/25.5/31 ->13/13/13; Si16 complex 17/21/26 ->9/9/9, real 15/20/21 ->9/9/9. H medians including initial H block: 1138.5/1197.5 ->658; 1863.5/1721.5 ->948. First-map pair density separation falls from 1.59e-3–3.86e-3 to <=4.13e-14 Bohr^-3/2. |
+| P45A-2 | Same frozen rule on externally archived skewed Si16, complex | Reject; mandatory stop before further controls or Phase B | Free-electron SCF 18/18/18 ->atomic 11/12/12: spread 0 ->1 violates the required >=50% reduction. Maximum energy error 9.283383e-10 ->2.094893e-9 Ha (2.2566x); density error 1.281516e-7 ->2.010910e-7 Bohr^-3/2 (1.5692x), both violate <=1.5x. First-map separation 1.147978e-13 ->2.598881e-5 Bohr^-3/2. Atomic starts remove the cubic pathology but introduce sensitivity in an already stable skewed cell. |
+
+Primary evidence: 120 completed SCFs (100 standard, 20 tight strict), all
+converged; strict reference energy plateaus <=8.243e-13 Ha. Initialization
+charges 32/64 H applications and separately records radial evaluations and
+Gram/rotation MACs. Quoted H totals are lower bounds on full setup work:
+MGS/EVD and radial overhead are not converted into H equivalents. No positive
+full-cost gate or performance acceptance is claimed; independent spread and
+accuracy failures already require stopping. One already-started real-skew
+control was interrupted; its one completed strict reference is excluded from
+the primary matrix. PseudoDojo Si/MgO and k222 controls were not run after the
+stop. Full protocol, arithmetic, failure logs and commands:
+[atomic-start-prototype.md](atomic-start-prototype.md), `P45A-evidence/`.

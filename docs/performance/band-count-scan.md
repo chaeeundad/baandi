@@ -1,6 +1,6 @@
 # Band-count scan (orchestrator, Mac, 2026-11-07): work versus extra bands
 
-Question raised by the dev08 QE sweep (tests/reference/perf/dev08_materials_qe_relayed.md, Q1 section; QE with nbnd equal to the occupied bands was 20 to 26 percent faster on si16 and si32, no gain on si8): how does BAANDI's work depend on the number of extra bands above the occupied ones? Method: `scripts/bench_scf.py` with `--extra-toml "nbands = N"`, one run per row, T=1, pure Rust release at main 2f1c, strict default profile, gamma_real off. Davidson steps and H vectors are deterministic counts (wall times were not used: the Mac was loaded by three concurrent builds, load average 8 to 12). Energies agree to about 1e-13 Ha across all rows of a case.
+Question raised by the dev08 QE sweep (tests/reference/perf/dev08_materials_qe_relayed.md, Q1 section; QE with nbnd equal to the occupied bands was 20 to 26 percent faster on si16 and si32, no gain on si8): how does BAANDI's work depend on the number of extra bands above the occupied ones? Method: `scripts/bench_scf.py` with `--extra-toml "nbands = N"`, one run per row, T=1, pure Rust release on main after P33A (working tree of that date), strict default profile, gamma_real off. Davidson steps and H vectors are deterministic counts (wall times were not used: the Mac was loaded by three concurrent builds, load average 8 to 12). Energies agree to about 1e-13 Ha across all rows of a case.
 
 | Case (occupied bands) | extra bands: Davidson steps / H vectors |
 | --- | --- |

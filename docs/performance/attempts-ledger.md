@@ -234,3 +234,17 @@ change A56's unlocked-root premise, not the A08/A13/A15/A21 algorithms.
 | PROF-1 | Where the 24% outside the five phases goes, si8 real Gamma + standard (30 runs JSON, 30 `sample` runs) | measurement only | wall 0.6148 s, engine setup 0.1269 s (20.6%), five phases 0.4698 s, remainder about 0.011 s engine glue and about 0.008 s process/output; inside setup `ionic_local` 86% (erf alone 42%), `NonlocalOperator::new` 10% | The gap is engine setup, not first-iteration or final-step cost. Setup is serial and unchanged at T=8 (0.127 s of 0.570 s). Cost scales with cell volume (si2 Gamma setup 46% of wall). No code changed. See profile-real-standard-si8.md. |
 | PROF-2 | Energy phase breakdown si8 (30 `sample` runs) and k444s symmetry-on | measurement only | si8 0.0535 s: nonlocal 51%, Hartree 21%, XC 12%, local 9%; k444s (10 k) energy 0.098 s = 18% of wall, about 86% k-independent and recomputed per k | Per-k audit repeats common terms; candidates C2 to C4 in the profile note. Samples attach caveat: first runs lost 0.1 s of setup until a suspended-start attach was used. |
 
+
+## P28B shared audit and energy-only Hartree (2026-11-07; append-only)
+
+Baseline/current main `534595c4d19346dc1fe6cdd5db87415635668f86`; candidate
+uncommitted. Mac portable release observations, 30 samples per variant/case,
+T=1 standard; si8 real Gamma without symmetry, k444s complex with symmetry.
+Full commands, binary hashes, raw timing samples and limitations:
+[optimization log, P28B](optimization-log.md#p28b-audit-shared-terms--shared-audit-and-energy-only-hartree-2026-11-07).
+
+| ID | Experiment | Status | Measured effect | Lesson / limits |
+| --- | --- | --- | --- | --- |
+| P28B-C2 | Evaluate common audit terms once per output density, preserve every per-k expression and weighted summation | implemented, local identity verified; dev08 pending | Energy phase k444s 0.1022862485 -> 0.0153458960 s (-85.00%); si8 0.0553770835 -> 0.0557856665 s (+0.74%, no Gamma saving claimed) | Removes K-fold common work; does not skip audits or repeat A43. Gamma has K=1, so C2 is a multi-k benefit. |
+| P28B-C3 | Add energy-only Hartree and share its forward density FFT with the local integral | implemented, local identity verified; dev08 pending | C2-only -> final energy phase si8 0.0557856665 -> 0.0459679575 s (-17.60%); k444s 0.0153458960 -> 0.0117628755 s (-23.35%). Combined baseline -> final -16.99% / -88.50% | Same frequency arithmetic and sums; retain the raw local FFT when Hartree's tiny-negative clamp changes input bits. Existing Hartree evaluator unchanged. |
+| P28B-validation | Legacy audit oracle, complete supported CLI matrix, spin/FD, generality | verified locally | 8 audit fixtures x 3 k points plus 4 Hartree grid fixtures: every field identical; 140 CLI combinations: 0 Ha delta, identical density/audits/history/counts; 60 unchanged gamma_real=on multi-k rejections; 3 spin/FD CLI pairs identical; 19 generality outcomes identical (16 converged, 3 pre-existing failures); workspace gates exit 0 | 40 final bench commands exit 0. Explicit optional historical-Si8-anchor bypass supports symmetry/real/standard baselines without changing baseline checks. Local raw outputs under target/p28b-evidence require preservation before target cleanup. No QE or remote acceptance claim. |

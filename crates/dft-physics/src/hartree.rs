@@ -84,3 +84,51 @@ pub fn evaluate(
         energy: Hartree(energy),
     })
 }
+
+/// Energy-only full-grid Coulomb evaluation and checked-density Fourier coefficients.
+/// Keeps the full evaluator's frequency arithmetic and accumulation order, but
+/// does not construct a potential or perform an inverse transform. The returned
+/// coefficients use `checked_density` (including its roundoff-negative clamp).
+pub fn energy_and_density_reciprocal(
+    n: &Array3<f64>,
+    cell: &Cell,
+    fft: &mut impl Fft3d,
+) -> Result<(Hartree, Array3<Complex64>), PhysicsError> {
+    let dims = fft.shape();
+    if n.shape() != dims || dims.contains(&0) {
+        return Err(PhysicsError::Shape);
+    }
+    let mut real = Array3::zeros(n.raw_dim());
+    for (z, &n) in real.iter_mut().zip(n) {
+        *z = Complex64::new(checked_density(n)?, 0.0);
+    }
+    let mut reciprocal = Array3::zeros(n.raw_dim());
+    fft.to_reciprocal(&real, &mut reciprocal)?;
+    let b = cell.reciprocal_columns_inverse_bohr();
+    let mut energy = 0.0;
+    for ((i, j, k), z) in reciprocal.indexed_iter() {
+        let indices = [i, j, k];
+        let m: [f64; 3] = std::array::from_fn(|a| {
+            if indices[a] <= (dims[a] - 1) / 2 {
+                indices[a] as f64
+            } else {
+                indices[a] as f64 - dims[a] as f64
+            }
+        });
+        let g2 = (0..3)
+            .map(|a| (0..3).map(|j| b[a][j] * m[j]).sum::<f64>().powi(2))
+            .sum::<f64>();
+        if !g2.is_finite() {
+            return Err(PhysicsError::Unrepresentable);
+        }
+        if (i, j, k) != (0, 0, 0) {
+            let kernel = 4.0 * PI / g2;
+            energy += kernel * z.norm_sqr();
+        }
+    }
+    energy *= 0.5 * cell.volume_bohr3();
+    if !energy.is_finite() {
+        return Err(PhysicsError::Unrepresentable);
+    }
+    Ok((Hartree(energy), reciprocal))
+}

@@ -132,6 +132,8 @@ def main(argv):
     ap.add_argument("--baseline")
     ap.add_argument("--record")
     ap.add_argument("--require-identical", action="store_true", help="fail unless the density is bit-identical to the baseline")
+    ap.add_argument("--skip-legacy-si8-anchor", action="store_true",
+                    help="skip the historical strict/complex Si8 absolute-energy anchor for opt-in profiles; baseline energy/density checks remain enabled")
     ap.add_argument("--note", default="")
     a = ap.parse_args(argv)
     if a.threads is not None and a.threads < 0:
@@ -153,7 +155,7 @@ def main(argv):
             print(e)
             return 3
         result[k] = r
-        if k == "si8" and abs(r["total_energy_ha"] - (-31.3218036010316)) > 1e-9:
+        if not a.skip_legacy_si8_anchor and k == "si8" and abs(r["total_energy_ha"] - (-31.3218036010316)) > 1e-9:
             status = 5
         b = base.get(k)
         de = abs(r["total_energy_ha"] - b["total_energy_ha"]) if b else None

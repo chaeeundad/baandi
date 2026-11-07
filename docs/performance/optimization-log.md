@@ -4065,3 +4065,341 @@ does not justify skipping a current residual; adaptive projection needs an
 orthogonality criterion after normalization. No speculative second optimization
 is adopted. The historical patch and pre-adoption snapshots remain for provenance;
 current default code and the architect acceptance report supersede their status.
+
+## P28B-AUDIT-SHARED-TERMS — shared audit and energy-only Hartree (2026-11-07)
+
+Scope: profile-real-standard-si8.md C2 and C3 only. Baseline/current main for
+this worktree: `534595c4d19346dc1fe6cdd5db87415635668f86`; candidate is the
+uncommitted diff on that commit. This is not a comparison with the older
+profile binary b59d10b. No C7 skipped audits, setup changes, nonlocal
+reassociation, or solver/default changes. Ledger check: this removes duplicated
+work in A10's adopted parallel audit; it does not repeat A43 or other rejected
+traversal/solver experiments. Motivation is the supplied 30-run Mac profile:
+2361 k444s audit samples, about 86% k-independent work at 10 irreducible k.
+No QE source was consulted.
+
+`prepare_shared` evaluates the common output-density Hartree, XC, local,
+charge, double-counting and Bregman terms once after density symmetrization.
+Each k still constructs its complete audit, including the original band-form,
+Harris-Foulkes and residual-bound expression order; `weighted_audits` is
+unchanged. The existing full evaluator remains byte-for-byte unchanged as the
+independent legacy oracle and existing public entry-point implementation.
+The new additive Hartree function uses the same per-frequency expression and
+ordered energy sum, retaining the density coefficients instead of building the
+potential and performing its inverse FFT. The existing Hartree source is an
+unchanged prefix of the extended file. For nonnegative density the common
+Hartree/local work uses one forward transform instead of two forwards and one
+inverse. At K k points this reduces those transforms from 3K to 1 per audit
+phase, and the common scalar/XC evaluations from K to 1. GGA's own transforms
+are unaffected. No new allocation occurs inside a k/orbital loop.
+
+Important identity boundary: Hartree's `checked_density` clamps tiny negative
+roundoff, while the legacy local integral uses raw density. The new code reuses
+the coefficients only when that clamp preserves every input bit; otherwise it
+performs the original local forward transform. The test includes negative
+roundoff and signed zero. Density floor, NLCC and original PW92 output-XC
+selection stay at their existing SCF call site.
+
+Validation on this Mac:
+
+- `scripts/check.sh`: exit 0; build, test, fmt, clippy all PASS.
+- `cargo test --release -p dft-engine --test audit_shared_identity`: exit 0.
+  Two tests: exhaustive EnergyAudit field comparison on eight fixtures, each
+  with three k points and nonuniform weights, and energy-only Hartree on four
+  odd/even skew grids. Includes LDA-PZ, LDA-PW, PBE, original PW92, NLCC,
+  density floor, coupled s/s/p synthetic projectors, negative roundoff, signed
+  zero, invalid density rejection, and weighted/total energies. Difference:
+  zero bits, 0 Ha for every energy field. Exhaustive destructuring makes a new
+  EnergyAudit field require an oracle update.
+- Full CLI matrix: 140 supported combinations, all identical energy bits,
+  density.bin SHA-256, every reported energy/audit field, scientific convergence
+  history, eigenvalues, occupations, SCF counts and solver work. Cases gamma,
+  k222s, k222, k444s, si8; budgets 1,2,4,8,12; symmetry off/auto; strict/standard;
+  gamma_real off plus on for gamma/si8. SCF counts range from 7 to 15.
+  The other 60 combinations (gamma_real=on with multiple k) fail closed with
+  identical exit 4 and error text before/after: they are not successful SCFs.
+- Forty final `bench_scf.py --require-identical` invocations: all exit 0,
+  covering the same 140 supported combinations against per-configuration,
+  same-HEAD baseline records. An additive plumbing flag,
+  `--skip-legacy-si8-anchor`, is used for symmetry/real/standard opt-ins whose
+  energies are not the historical strict/complex/no-symmetry Si8 anchor. It
+  changes neither baseline energy tolerance nor density comparison; the
+  independent matrix additionally requires exact energy bits and identical
+  iteration counts. Ordinary strict/complex/no-symmetry commands omit it.
+  `python3 -I -m unittest discover -s scripts/tests -p test_bench_scf.py`:
+  exit 0, three tests establish the unchanged default anchor and retained
+  energy/density failure checks with the explicit bypass.
+- Existing release collinear tests: 5 passed; existing symmetry tests with
+  DFT_SI_UPF/DFT_NC_DIR: 5 passed; existing finite_temperature library tests with
+  DFT_NC_DIR: 7 passed, including the real Al fixture. None were edited.
+  Three additional baseline/candidate CLI pairs (fixed spin, scalar FD, spin
+  FD) compare all scientific JSON fields and density bytes exactly.
+- `bench_suite.py --robustness --require-identical`: exit 0, 19 unchanged
+  outcomes, 16 converged; existing si-elongated, syn-s3 and syn-z14 failures
+  persist. Available energy bits, density hashes, iterations and operator
+  counts match exactly. No newly qualified material or improved convergence.
+- README/figure regeneration and `test_readme_figures.py`: exit 0, nine tests;
+  generated content unchanged. This ticket adds no external-reference claim.
+
+Failed verification attempts are retained in the local evidence: the first
+oracle compile used a nonexistent basis `len()` method (exit 101; corrected to
+`vectors().len()`); initial ignored material tests lacked external-UPF
+variables (exit 101; reruns above pass); the first full Cartesian matrix tried
+unsupported gamma_real=on meshes (bench exit 3, CLI exit 4); the historical Si8
+anchor rejected opt-in profiles despite exactly zero baseline differences
+(exit 5, resolved by the explicit plumbing flag). A temporary CLI comparison
+script assumed the fixed-occupation JSON shape for FD (Python KeyError,
+corrected to compare each actual schema). No numerical mismatch was accepted
+and no tolerance changed.
+
+Reproduction and raw evidence (local, excluded build artifacts):
+`target/p28b-evidence/` contains `matrix.json`, `rejections.json`,
+`bench-commands.json` (also retaining the initial anchor failure), 40 final
+bench logs/records, `suite-{before,after}.json`, `spin-fd.json`, complete CLI
+inputs/results/densities, verification logs, and the Python orchestration
+scripts. Invoke those scripts from the worktree root. UPFs remain external.
+Baseline/candidate binaries were copied to `/tmp/p28b-before` and
+`/tmp/p28b-after` before reusing the one existing target directory. The C2-only
+ablation was built temporarily, copied to `/tmp/p28b-c2`, and the final source
+restored and rebuilt; final binary hash exactly matches `/tmp/p28b-after`.
+No extra target directory or git commit was created.
+
+Binary SHA-256 (portable release, identical toolchain/build flags):
+
+| Binary | SHA-256 |
+| --- | --- |
+| Baseline | `4a76d4098700b30c5cb08ec856bfbb2fcfe5f4e4fe1e790eea169225d83cf701` |
+| C2 only | `a92916826b7a7f472610fb49a5d04c2f7e49c2f566bab0a853c9ecc044667985` |
+| C2 + C3 final | `30674882c2df7a55e229804dea704cb6089ccc85274b84f0428dc18faf60f949` |
+
+Remote acceptance remains the orchestrator's responsibility: compare these
+changes against this baseline on dev08, pure and MKL separately, at equal
+accuracy/core count, preserving all audit fields and densities. No dev08 or
+new QE measurements were run here. Central session/dashboard artifacts belong
+to the orchestrator and were not edited from this ticket worktree. Preserve
+local raw evidence before the normal post-merge target cleanup.
+
+### Mac timing observation (30 samples per condition)
+
+Energy-phase seconds from CLI `timings.phases.total_energy_s`. One discarded
+warmup per binary/case, followed by 30 samples each, reversing baseline/C2/final
+order each round. T=1, standard profile; si8 gamma_real=on, symmetry off;
+k444s gamma_real=off, symmetry auto (10 irreducible k). No builds or other
+verification jobs overlapped these timings. Shared-host observation only.
+
+Host: `Darwin Minhoui-Macmini.local 27.0.0 Darwin Kernel Version 27.0.0: Tue Aug 11 21:06:15 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_T8152 arm64`. Load averages before: [6.462890625, 10.8955078125, 8.05615234375]; after: [3.75927734375, 8.60888671875, 7.48681640625].
+
+| Case | Baseline median (s) | C2 only (s) | C2+C3 (s) | Combined energy-phase reduction |
+| --- | ---: | ---: | ---: | ---: |
+| si8 | 0.0553770835 | 0.0557856665 | 0.0459679575 | 16.99% |
+| k444s | 0.1022862485 | 0.0153458960 | 0.0117628755 | 88.50% |
+
+C2 has no duplicated k-independent work to remove at Gamma (observed +0.74%
+in its energy phase, not a speedup claim). At k444s C2 removes 85.00% of the
+energy-phase time. C3 then reduces the C2-only phase by 17.60% on si8 and
+23.35% on k444s. All three variants preserve the density hash and every
+scientific energy/history field throughout the timing series. These are
+energy-phase reductions, not end-to-end speedups or dev08 acceptance.
+
+Raw retained energy-phase samples in seconds (30 each; warmups excluded):
+
+```json
+{
+  "si8": {
+    "before": [
+      0.055022376,
+      0.055154124,
+      0.056054753,
+      0.056084708,
+      0.055149666,
+      0.055597997,
+      0.055305373,
+      0.055397208,
+      0.055373376,
+      0.055489708,
+      0.055478831,
+      0.055195041,
+      0.055048289,
+      0.055124085,
+      0.055460958,
+      0.055263708,
+      0.055536791,
+      0.055522289,
+      0.055433372,
+      0.055363499,
+      0.055238167,
+      0.055774333,
+      0.055725083,
+      0.055401582,
+      0.055355082,
+      0.05538225,
+      0.055205208,
+      0.055380791,
+      0.055215499,
+      0.055159875
+    ],
+    "c2": [
+      0.05571767,
+      0.055942084,
+      0.056164918,
+      0.056593789,
+      0.05574525,
+      0.055622917,
+      0.055923543,
+      0.055581456,
+      0.057456789,
+      0.055919209,
+      0.055770713,
+      0.055516208,
+      0.059065834,
+      0.05578025,
+      0.056089043,
+      0.055628207,
+      0.056566707,
+      0.055791083,
+      0.055519208,
+      0.055770416,
+      0.056059668,
+      0.055674708,
+      0.056372961,
+      0.055578625,
+      0.055844083,
+      0.056209748,
+      0.055917086,
+      0.055624666,
+      0.055395291,
+      0.055511916
+    ],
+    "after": [
+      0.046023791,
+      0.046113541,
+      0.045666332,
+      0.046390872,
+      0.04657625,
+      0.046274459,
+      0.04599975,
+      0.0457475,
+      0.046116541,
+      0.045717667,
+      0.045918792,
+      0.045931999,
+      0.045768583,
+      0.045893708,
+      0.046117707,
+      0.045624374,
+      0.046164209,
+      0.045759418,
+      0.045792251,
+      0.047242166,
+      0.046511167,
+      0.046693707,
+      0.046575209,
+      0.046017748,
+      0.046077415,
+      0.045782875,
+      0.045916041,
+      0.045659292,
+      0.045828499,
+      0.045936165
+    ]
+  },
+  "k444s": {
+    "before": [
+      0.102208208,
+      0.102306334,
+      0.10267475,
+      0.102292456,
+      0.10206175,
+      0.102407585,
+      0.102154833,
+      0.101853043,
+      0.102365793,
+      0.103177582,
+      0.101654917,
+      0.102711916,
+      0.102418667,
+      0.102413502,
+      0.102353334,
+      0.102248292,
+      0.102476584,
+      0.102217874,
+      0.103277999,
+      0.102089001,
+      0.101577459,
+      0.102174793,
+      0.102188918,
+      0.101794876,
+      0.102280041,
+      0.102877877,
+      0.101952792,
+      0.10240125,
+      0.102221585,
+      0.102406917
+    ],
+    "c2": [
+      0.015233917,
+      0.015311206,
+      0.015408249,
+      0.015304166,
+      0.015384915,
+      0.015216416,
+      0.015320583,
+      0.015273293,
+      0.015366959,
+      0.015409208,
+      0.015452334,
+      0.015311001,
+      0.015358875,
+      0.015389542,
+      0.01534275,
+      0.015410748,
+      0.01538475,
+      0.015226249,
+      0.015350375,
+      0.015450875,
+      0.015298747,
+      0.015261999,
+      0.015228043,
+      0.015468292,
+      0.0152925,
+      0.0154555,
+      0.015275248,
+      0.015245373,
+      0.015384417,
+      0.015349042
+    ],
+    "after": [
+      0.011804001,
+      0.011721001,
+      0.011769835,
+      0.011661291,
+      0.011809377,
+      0.011719292,
+      0.011716084,
+      0.011711583,
+      0.011763126,
+      0.011886708,
+      0.011868791,
+      0.011886624,
+      0.011884585,
+      0.011732294,
+      0.011662625,
+      0.011788167,
+      0.011763417,
+      0.011784709,
+      0.011771918,
+      0.011663874,
+      0.011701124,
+      0.01171879,
+      0.011751582,
+      0.011862165,
+      0.011681208,
+      0.011810043,
+      0.011741207,
+      0.011763458,
+      0.011720708,
+      0.011762625
+    ]
+  }
+}
+```

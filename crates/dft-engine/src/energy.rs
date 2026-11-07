@@ -91,6 +91,25 @@ pub fn local_energy(
     Ok(e)
 }
 
+fn local_energy_reciprocal(
+    ng: &Array3<Complex64>,
+    ionic_g: &Array3<Complex64>,
+    volume: f64,
+) -> Result<f64, ScfError> {
+    if ng.shape() != ionic_g.shape() || !volume.is_finite() || volume <= 0.0 {
+        return Err(ScfError::InvalidInput("local energy shape/volume"));
+    }
+    let e = volume
+        * ng.iter()
+            .zip(ionic_g)
+            .map(|(n, v)| (n.conj() * v).re)
+            .sum::<f64>();
+    if !e.is_finite() {
+        return Err(ScfError::NonFinite);
+    }
+    Ok(e)
+}
+
 /// All orbitals are normalized in basis order. Input fields must be those used
 /// for the supplied eigenpairs; output density must be built from these orbitals.
 pub struct AuditInput<'a> {
@@ -219,6 +238,178 @@ pub(crate) fn evaluate_with_core_xc(
         band_form,
         harris_foulkes,
         functional_difference_bound: rh.abs() + rx.abs() + eig_bound,
+    };
+    if [
+        audit.total_hartree(),
+        audit.band_sum,
+        audit.double_counting,
+        audit.band_form,
+        audit.harris_foulkes,
+        audit.functional_difference_bound,
+    ]
+    .iter()
+    .any(|v| !v.is_finite())
+    {
+        return Err(ScfError::NonFinite);
+    }
+    Ok(audit)
+}
+
+/// Common terms for one output density and the input fields that produced it.
+/// Rebuild every iteration; never reuse across density/potential updates.
+pub(crate) struct SharedAudit {
+    local: f64,
+    local_zero_mode: f64,
+    hartree: f64,
+    xc: f64,
+    double_counting: f64,
+    rh: f64,
+    rx: f64,
+    nlcc: Option<CoreXcLedger>,
+}
+
+pub(crate) fn prepare_shared(
+    a: &AuditInput<'_>,
+    fft: &mut FftPlan3d,
+    functional: Functional,
+    output_xc: Option<&xc::XcGrid>,
+    core: Option<&Array3<f64>>,
+) -> Result<SharedAudit, ScfError> {
+    let n = a.output_density;
+    if a.orbitals.len() != a.occupations.len()
+        || a.eigenvalues.len() != a.occupations.len()
+        || a.eigen_residuals.len() != a.occupations.len()
+        || n.shape() != a.grid.dims()
+        || a.input_density.shape() != n.shape()
+        || a.input_hartree.potential.shape() != n.shape()
+        || a.input_xc.potential.shape() != n.shape()
+    {
+        return Err(ScfError::InvalidInput("energy dimensions"));
+    }
+    if a.eigenvalues.iter().any(|v| !v.is_finite())
+        || a.eigen_residuals.iter().any(|r| !r.is_finite() || *r < 0.0)
+        || !a.ewald.is_finite()
+        || !a.input_hartree.energy.0.is_finite()
+        || !a.input_xc.energy.0.is_finite()
+        || !a.input_xc.potential_integral.0.is_finite()
+    {
+        return Err(ScfError::InvalidInput("invalid energy/eigenpair data"));
+    }
+    let volume = a.cell.volume_bohr3();
+    let weight = volume / n.len() as f64;
+    let (h, ng) = hartree::energy_and_density_reciprocal(n, a.cell, fft)?;
+    let owned_xc;
+    let x = if let Some(x) = output_xc {
+        x
+    } else {
+        owned_xc = functional.evaluate(n, a.cell, fft)?;
+        &owned_xc
+    };
+    // Hartree clamps tiny negative values; the old local integral does not.
+    // Retain its raw-density FFT whenever the clamp changes any input bit.
+    let local = if n.iter().any(|v| v.to_bits() != v.max(0.0).to_bits()) {
+        local_energy(n, a.ionic_g, volume, fft)?
+    } else {
+        local_energy_reciprocal(&ng, a.ionic_g, volume)?
+    };
+    let charge = n.sum() * weight;
+    let double_counting = weight
+        * n.iter()
+            .zip(&a.input_hartree.potential)
+            .zip(&a.input_xc.potential)
+            .map(|((n, h), x)| n * (h.re + x))
+            .sum::<f64>();
+    // Exact discrete functional remainders apply to LDA and GGA alike.
+    // No local-density Hessian or quadratic GGA bound is assumed.
+    // Bregman remainders. Hartree is quadratic, so its remainder is >=0.
+    let linear_h = weight
+        * n.iter()
+            .zip(a.input_density)
+            .zip(&a.input_hartree.potential)
+            .map(|((o, i), h)| (o - i) * h.re)
+            .sum::<f64>();
+    let linear_x = weight
+        * n.iter()
+            .zip(a.input_density)
+            .zip(&a.input_xc.potential)
+            .map(|((o, i), x)| (o - i) * x)
+            .sum::<f64>();
+    let rh = h.0 - a.input_hartree.energy.0 - linear_h;
+    let rx = x.energy.0 - a.input_xc.energy.0 - linear_x;
+    Ok(SharedAudit {
+        local,
+        local_zero_mode: charge * a.ionic_g[[0, 0, 0]].re,
+        hartree: h.0,
+        xc: x.energy.0,
+        double_counting,
+        rh,
+        rx,
+        nlcc: core_ledger(core, n, x, volume),
+    })
+}
+
+pub(crate) fn evaluate_shared(
+    a: AuditInput<'_>,
+    shared: &SharedAudit,
+) -> Result<EnergyAudit, ScfError> {
+    let n = a.output_density;
+    if a.orbitals.len() != a.occupations.len()
+        || a.eigenvalues.len() != a.occupations.len()
+        || a.eigen_residuals.len() != a.occupations.len()
+        || n.shape() != a.grid.dims()
+        || a.input_density.shape() != n.shape()
+        || a.input_hartree.potential.shape() != n.shape()
+        || a.input_xc.potential.shape() != n.shape()
+    {
+        return Err(ScfError::InvalidInput("energy dimensions"));
+    }
+    if a.eigenvalues.iter().any(|v| !v.is_finite())
+        || a.eigen_residuals.iter().any(|r| !r.is_finite() || *r < 0.0)
+        || !a.ewald.is_finite()
+        || !a.input_hartree.energy.0.is_finite()
+        || !a.input_xc.energy.0.is_finite()
+        || !a.input_xc.potential_integral.0.is_finite()
+    {
+        return Err(ScfError::InvalidInput("invalid energy/eigenpair data"));
+    }
+    let kinetic = kinetic::energy(a.basis, a.orbitals, a.occupations)?.0;
+    let mut nonlocal = 0.0;
+    for (c, f) in a.orbitals.iter().zip(a.occupations) {
+        let mut v = vec![Complex64::default(); c.len()];
+        a.nonlocal.apply(c, &mut v)?;
+        nonlocal += f * c.iter().zip(v).map(|(c, v)| (c.conj() * v).re).sum::<f64>();
+    }
+    let band_sum = a
+        .eigenvalues
+        .iter()
+        .zip(a.occupations)
+        .map(|(e, f)| e * f)
+        .sum::<f64>();
+    let harris_foulkes = band_sum - a.input_hartree.energy.0 + a.input_xc.energy.0
+        - a.input_xc.potential_integral.0
+        + a.ewald;
+    let band_form = band_sum - shared.double_counting + shared.hartree + shared.xc + a.ewald;
+    let eig_bound = a
+        .eigen_residuals
+        .iter()
+        .zip(a.occupations)
+        .map(|(r, f)| r * f)
+        .sum::<f64>();
+    let audit = EnergyAudit {
+        xc_floor: None,
+        nlcc: shared.nlcc.clone(),
+        kinetic,
+        local: shared.local,
+        local_zero_mode: shared.local_zero_mode,
+        nonlocal,
+        hartree: shared.hartree,
+        xc: shared.xc,
+        ewald: a.ewald,
+        band_sum,
+        double_counting: shared.double_counting,
+        band_form,
+        harris_foulkes,
+        functional_difference_bound: shared.rh.abs() + shared.rx.abs() + eig_bound,
     };
     if [
         audit.total_hartree(),

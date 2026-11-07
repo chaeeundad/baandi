@@ -22,8 +22,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P45A-ATOMIC-START-PROTOTYPE: 조사(시제품, 시험 코드만): 의사퍼텐셜의 원자 파동함수로 풀이 시작 부분공간을 만들면(QE 방식) 흔들기에 대한 SCF 궤적 불안정이 사라지는지 흔들기 분포로 측정",
-    "ref": "pid 46154, session no sessi, task/P45A-ATOMIC-START-PROTOTYPE",
+    "task": "P46A-ATOMIC-START-OPTION: 속도·안정성 기능: 원자 파동함수 시작 부분공간을 기본 꺼짐 옵션(`start_wavefunctions = atomic`)으로 구현하고, 새 계에서 미리 고정한 개정 기준(R2)으로 평가. P45A 시제품은 Si8 SCF 13회, Si16 9회로 흔들기에 안정",
+    "ref": "pid 56131, session no sessi, task/P46A-ATOMIC-START-OPTION",
     "updated": "2026-11-07"
   },
   {
@@ -1167,6 +1167,15 @@
     "state": "done",
     "task": "P44A-REFERENCE-MODE: 기능(사용자 승인): 참조 코드와 에너지를 맞추는 규약 네 가지를 한 줄 `[compat] mode = \"reference\"`로 켜는 스위치(이름에 다른 코드명을 쓰지 않음, 기본값 변경 없음, 충돌·범위 오류 처리, ADR 0038)",
     "ref": "pid 42192, session 01a1b806, task/P44A-REFERENCE-MODE",
+    "updated": "2026-11-07"
+  },
+  {
+    "id": "A131",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P45A-ATOMIC-START-PROTOTYPE: 조사(시제품, 시험 코드만): 의사퍼텐셜의 원자 파동함수로 풀이 시작 부분공간을 만들면(QE 방식) 흔들기에 대한 SCF 궤적 불안정이 사라지는지 흔들기 분포로 측정",
+    "ref": "pid 46154, session 01a1b817, task/P45A-ATOMIC-START-PROTOTYPE",
     "updated": "2026-11-07"
   }
 ]

@@ -3202,5 +3202,23 @@
     "ended_at": "2026-11-07T22:37:18Z",
     "exit_code": 0,
     "note": "merged (tests+docs); atomic start collapses the distribution on Si8 (13/13/13) and Si16 (9/9/9); frozen rule failed on skewed Si16 (spread 0 to 1, accuracy 2.26x): option implemented opt-in under revised rule R2 (P46A)"
+  },
+  {
+    "run_id": "P46A-ATOMIC-START-OPTION#1",
+    "task_id": "P46A-ATOMIC-START-OPTION",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 56131,
+    "wrapper_pid": 56103,
+    "session_id": null,
+    "branch": "task/P46A-ATOMIC-START-OPTION",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P46A-ATOMIC-START-OPTION",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P46A-ATOMIC-START-OPTION.md",
+    "report": null,
+    "started_at": "2026-11-07T22:42:19Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

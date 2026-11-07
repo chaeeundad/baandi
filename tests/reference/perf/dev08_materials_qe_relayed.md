@@ -367,3 +367,20 @@ BAANDI's research option `[symmetry] density_group = "crystal"` (k-point reducti
 Relayed by the dft5090/master session. Base `73f59e3`, candidate `56c4127` (branch `task/P33A-REAL-WORKSPACE-PARALLEL`), both `RUSTFLAGS="-C target-cpu=native"` (plain sha256 prefixes base `0982b8b22f6341ac`, candidate `762d897c2acc6787`; frame-pointer variants `dd4ecbf2e289cf67`, `40563e1646c66630`). gamma_real on, strict, pure native, round-robin alternation, 10 rounds: si8 T=1 3.132 s [3.115, 3.184] versus 2.831 s [2.818, 2.837] (-9.61 %, paired -9.56 %, candidate faster in 10 of 10 rounds); si8 T=8 2.552 versus 2.278 s (-10.72 %, paired -10.43 %, 10/10); si16 T=1 11.778 versus 10.649 s (-9.59 %, paired -9.61 %, 10/10). Intervals separate completely. Accuracy: bit-identical in all three (si8 T=1/T=8 -31.321803601031739 Ha, 15 SCF, 258 Davidson, 2014 H; si16 -63.129244421616882, 13/185/2895).
 Profile (si8 T=1 on strict, frame-pointer build, 15 runs): bucket shares of working samples base versus candidate: local FFT 32.5 vs 34.2 %, nonlocal 2.6* vs 5.0*, subspace algebra 46.4 vs 47.0 %, residual 0.8* vs 0.5*, other 17.6 vs 13.4 % (working samples 1177 vs 1101; `*` under 30 samples). memcpy self share 6.29 % (75 samples) versus 2.33 % (26 samples: below 30, direction only); memset 5.45 % (65) versus 6.98 % (78); sum 11.74 % versus 9.31 %.
 Reading: a change within noise on the Mac (1.1845 versus 1.1826 s) is a clear gain on the Xeon, in line with the 12.6 % memset plus memcpy share seen in the dev08 profile. Orchestrator decision: merged to main (gates: bit-identical, 30 of 30 rounds consistent, cause symbol matches the intent).
+
+# dev08 k444s: BAANDI auto+crystal versus QE sym, equal grid (relayed, 2026-11-07)
+
+Relayed by the dft5090/master session. main `b022b61` (P33A included), pure native sha256 `c4fba2eca3cece046fd9dfea4f69525bc8d5cfe7e1b210262a4613d56b2879e1`, rustc 1.99.1; k444s (shifted 4x4x4, 2-atom Si cell, 30 Ry), `[basis] fft_grid = [32,32,32]` forced, T=1, `taskset -c 0`, n=5. tight = energy_tolerance_ha 1e-12, density_residual_tolerance 1e-10.
+
+| BAANDI mode | tolerance | wall median (s) | min | max | SCF | Davidson | H vectors | energy (Ha) |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| off | default | 4.790 | 4.765 | 4.802 | 10 | 1686 | 10290 | -7.925976134331574 |
+| auto (mesh) | default | 1.688 | 1.683 | 1.763 | 10 | 524 | 3201 | -7.925976134331592 |
+| auto + density_group crystal | default | 1.698 | 1.672 | 1.707 | 10 | 532 | 3256 | -7.925991673321009 |
+| off | tight | 5.348 | 5.343 | 5.435 | 13 | 1889 | 12190 | -7.925976134331593 |
+| auto (mesh) | tight | 1.870 | 1.838 | 1.882 | 13 | 586 | 3794 | -7.925976134331563 |
+| auto + crystal | tight | 1.836 | 1.830 | 1.927 | 12 | 582 | 3686 | -7.925991673321009 |
+
+E(crystal) minus E(off) = -1.5538989435e-05 Ha (independent dev08 reproduction of the P34A value -1.5538989e-05; crystal energies are identical at both tolerances to the last digit).
+QE sym (same 32^3 grid, 10 irreducible points, np=1): -7.925994236779095 Ha, 7 SCF, accuracy 2.3e-12 Ry, wall median 0.805 s (n=3, min 0.801, max 0.875). BAANDI auto+crystal minus QE sym = 2.563458e-06 Ha = 1.2817e-06 Ha per atom, equal to the known convention offset of 1.27e-06 Ha per atom (batch-7 C). The earlier mismatched pair (auto mesh versus QE sym) was 1.810e-05 Ha, seven times the offset.
+Speed at equal grid, one core: QE sym 0.805 s; BAANDI auto+crystal 1.698 s (default tolerance, 2.11x slower) or 1.836 s (tight, 2.28x); BAANDI auto mesh 1.688 s (2.10x). Targets differ (QE conv_thr 1e-10 Ry versus BAANDI default energy tolerance 1e-8 Ha; tight is closer to QE). QE sym on its 25^3 grid takes 0.6225 s (BAANDI 3.1x), but the equal-grid comparison is the fair one. The crystal option costs +0.6 % here (Davidson 524 to 532). This case (2 atoms, k points reduced 64 to 10) is relatively favourable to BAANDI compared with the Gamma cases (2.8 to 17.8x).

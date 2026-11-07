@@ -274,20 +274,21 @@ fn rejects_unbalanced_nonzero_pair() {
     map.pack(&[1.], Some(&[1e-4]), &mut [C::default()]).unwrap();
 }
 
-/// Mac observation only; release command documented in the R2 report.
+/// Observation only (the machine that runs it; the printed label is `observation`); release command documented in the R2 report.
+/// Grids include a non-cubic 72x36x36 (the si16 grid) next to the cubic ones.
 #[test]
 #[ignore]
 fn pair_microbenchmark() {
     use std::{hint::black_box, time::Instant};
-    for size in [25, 36, 48] {
-        let shape = [size; 3];
-        let scale = 12. / size as f64;
-        let (indices, map) = fixture(shape, [[scale, 0., 0.], [0., scale, 0.], [0., 0., scale]]);
+    for shape in [[25, 25, 25], [36, 36, 36], [48, 48, 48], [72, 36, 36]] {
+        let points = shape[0] * shape[1] * shape[2];
+        let sc = shape.map(|d| 12. / d as f64);
+        let (indices, map) = fixture(shape, [[sc[0], 0., 0.], [0., sc[1], 0.], [0., 0., sc[2]]]);
         let n = map.len();
         let x = states(n, 2);
         let a = completed(&map, &x[..n]);
         let b = completed(&map, &x[n..]);
-        let potential: Vec<_> = (0..size * size * size)
+        let potential: Vec<_> = (0..points)
             .map(|i| 0.7 + 0.2 * (i as f64 * 0.19).cos())
             .collect();
         let mut pair = PairPlan::new(OrderedFusedPlan::new(shape, &indices).unwrap(), map).unwrap();
@@ -324,7 +325,10 @@ fn pair_microbenchmark() {
         }
         let med = samples.each_ref().map(|s| (s[14] + s[15]) * 0.5);
         println!(
-            "Mac observation grid={size}^3 n={n} samples=30 pair_us_per_band={:.6} single_us_per_band={:.6} ratio={:.6}",
+            "observation grid={}x{}x{} n={n} samples=30 pair_us_per_band={:.6} single_us_per_band={:.6} ratio={:.6}",
+            shape[0],
+            shape[1],
+            shape[2],
             med[0],
             med[1],
             med[0] / med[1]

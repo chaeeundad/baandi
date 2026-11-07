@@ -132,6 +132,8 @@ impl Default for Mixing {
 pub struct ScfOptions {
     pub gamma_real: crate::GammaReal,
     pub standard: Option<StandardProfile>,
+    /// Experimental standard-profile stagnation guard; never enabled by default.
+    pub standard_stall_guard: bool,
     pub hartree_mixing: bool,
     pub spectral_guard: crate::SpectralGuard,
     pub locking: dft_solvers::locking::Locking,
@@ -195,6 +197,7 @@ impl Default for ScfOptions {
         Self {
             gamma_real: crate::GammaReal::Off,
             standard: None,
+            standard_stall_guard: false,
             hartree_mixing: false,
             spectral_guard: crate::SpectralGuard::Off,
             locking: dft_solvers::locking::Locking::Off,
@@ -313,6 +316,7 @@ pub struct KPointSolution {
 
 #[derive(Debug)]
 pub struct ScfResult {
+    pub standard_stall_guard: bool,
     pub pw92_prefactor: crate::Pw92Prefactor,
     pub local_mesh: crate::LocalMesh,
     pub radial_even_rule: crate::RadialEvenRule,
@@ -578,6 +582,11 @@ impl ScfProblem {
             && let Some(reason) = gamma_real_exclusion
         {
             gamma_real.fallback(options.gamma_real, reason)?;
+        }
+        if options.standard_stall_guard && options.standard.is_none() {
+            return Err(ScfError::InvalidInput(
+                "standard_stall_guard requires the standard profile",
+            ));
         }
         if options
             .standard

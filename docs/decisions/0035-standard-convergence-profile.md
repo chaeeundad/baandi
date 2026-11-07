@@ -19,3 +19,34 @@ The independent Hartree metric remains opt-in: E4 did not meet a uniform
 reference and retain work-only reporting. No dev08 speed acceptance is claimed.
 See [implementation, evidence and limits](../performance/p17a-standard-profile.md).
 This status note does not alter the accepted decision.
+
+## Amendment: experimental standard stall guard (P29A, 2026-11-07)
+
+- Status: **Proposed**. The accepted profile and strict default above are unchanged.
+- Add `[scf] standard_stall_guard = "off" | "on"`, default `off`; `on` requires
+  the explicitly selected standard profile. Results remain uncertified. Persist
+  the enabled setting in result/checkpoint provenance; exact continuation rejects
+  a different setting. Omitted legacy wire fields mean `off`.
+- Inspect the last six completed standard-error records (five intervals). If
+  every newer error exceeds half the entry error, cap the next eigen tolerance
+  at 0.1 times the **window-entry** requested tolerance, retaining the existing
+  ordinary ratchet and 5e-14 Ha floor. Using the entry tolerance avoids repeatedly
+  compounding a cut while the same plateau occupies the window. No mixer changes,
+  mutable controller state, allocations or I/O are added to the numerical loop.
+- Evidence: ten perturbations on each of ten benchmark/material cases reproduce
+  the MKL-like pattern in 8/10 Si8 and 2/10 Si16 trajectories. Eight cases have
+  two strict references agreeing within 1e-12 Ha. With the guard, all 80 formerly
+  convergent trajectories still converge, and the 60 nonstagnating histories are
+  identical. Si8's maximum SCF count falls 32→27, but median H work rises 0.99%.
+- Negative result: neither tested factor (0.5, 0.1) passes the prespecified
+  work-saving selection rule. Held-out Si16 gains no SCF-count improvement;
+  elongated/slab remain nonconvergent and median H work rises 128.51%/141.33%.
+  Whole-set H work rises 49.61%. The switch is an experimental tail-robustness
+  option, **not recommended for general use or default promotion**, and is not
+  an accepted speed optimization. No parameters were retuned on held-out cases.
+- Accuracy: the largest measured absolute energy difference against the same
+  tight references is 3.164040e-9 Ha with the guard, versus 2.245319e-9 Ha without.
+  The standard stopping estimate is not a proof of total-energy accuracy. No
+  delivered-accuracy claim is possible for the two failed-reference stress cases.
+- Full protocol, distributions, two histories, held-out split, reproducible raw
+  evidence and limitations: [standard stall study](../performance/standard-stall-study.md).

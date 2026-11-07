@@ -93,6 +93,7 @@ pub struct ExportResult {
 }
 #[derive(Clone, Debug)]
 pub struct Checkpoint {
+    pub standard_stall_guard: bool,
     pub standard: Option<crate::StandardProfile>,
     pub hartree_mixing: bool,
     pub schema_version: u32,
@@ -313,6 +314,7 @@ pub(crate) fn options_identical(a: &ScfOptions, b: &ScfOptions) -> bool {
     macro_rules! bits { ($($f:ident),*) => { true $(&& a.$f.to_bits() == b.$f.to_bits())* }; }
     mixing
         && a.standard == b.standard
+        && a.standard_stall_guard == b.standard_stall_guard
         && a.hartree_mixing == b.hartree_mixing
         && solver
         && eq!(

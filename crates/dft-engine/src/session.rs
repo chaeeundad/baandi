@@ -369,13 +369,18 @@ impl ScfSession {
         }
         let standard = self.problem.options.standard;
         let mut tolerance = if standard.is_some() {
-            history.last().map_or(StandardProfile::CAP_HA, |r| {
+            let ordinary = history.last().map_or(StandardProfile::CAP_HA, |r| {
                 StandardProfile::ratchet(
                     r.requested_eigen_tolerance,
                     r.standard_error_ha.expect("standard history metric"),
                     self.problem.electrons,
                 )
-            })
+            });
+            if self.problem.options.standard_stall_guard {
+                StandardProfile::stall_guard(ordinary, history)
+            } else {
+                ordinary
+            }
         } else if self.problem.options.residual_eigen_schedule {
             // Residual is the normalized density L2 norm in atomic units.
             // 0.1 is an empirical scheduling coefficient in atomic units.
@@ -710,6 +715,7 @@ impl ScfSession {
             self.outcome = Some(ScfOutcome {
                 converged: certified,
                 result: ScfResult {
+                    standard_stall_guard: self.problem.options.standard_stall_guard,
                     pw92_prefactor: self.problem.options.pw92_prefactor,
                     local_mesh: self.problem.options.local_mesh,
                     radial_even_rule: self.problem.options.radial_even_rule,
@@ -1123,6 +1129,7 @@ impl ScfSession {
             None
         };
         Ok(Checkpoint {
+            standard_stall_guard: self.problem.options.standard_stall_guard,
             standard: self.problem.options.standard,
             hartree_mixing: self.problem.options.hartree_mixing,
             schema_version: SCHEMA_VERSION,
@@ -1243,6 +1250,7 @@ impl ScfSession {
             return Err(Rejection::Kind);
         }
         if checkpoint.standard != c.options.standard
+            || checkpoint.standard_stall_guard != c.options.standard_stall_guard
             || checkpoint.hartree_mixing != c.options.hartree_mixing
         {
             return Err(Rejection::Options);

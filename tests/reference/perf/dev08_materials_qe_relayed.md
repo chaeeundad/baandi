@@ -196,3 +196,43 @@ Energy difference on versus off: si8 strict 1.8e-14, si16 strict 1.2e-11, si32 s
 Reading: the real path gain at one thread grows with size (strict -6 %, -12 %, -18 %), but with eight threads the real path is 18 to 45 percent slower than the complex path and scales poorly in every combination. Mac check (this session, si8 strict T=8, 3 runs, median): off 1.106 s, on 1.310 s: the inversion reproduces on the Mac.
 
 First QE batch-7 C result: si8 real gamma conv_thr 1e-8, np=1 wall 0.4659 to 0.4739 s (5 runs); np=8 0.2516 to 0.2933 s, below the 0.3 s timer-resolution rule and therefore marked invalid. QE pw.x sha256 `07c7cd7935f42b15157500ab719a5c3948825d8ce8a4487d992d7501c659658f`.
+
+# dev08 batch-7 C: QE 7.6 real-wavefunction Gamma path, timers and conv_thr ladder (relayed, 2026-11-07)
+
+Relayed by the dft5090/master session. QE 7.6 (`pw.x` sha256 `07c7cd7935f42b15157500ab719a5c3948825d8ce8a4487d992d7501c659658f`), `K_POINTS gamma` (the regterg/rdiaghg real path is used), `verbosity='high'`, `disk_io='nowf'`, `nosym`/`noinv`, FFT grid equal to BAANDI's (`--fft-grid ours`), OMP/MKL threads 1, np=1, 5 runs, medians; times below 0.3 s are invalid under the 0.01 s timer-resolution rule (all np=8 si8 values except conv_thr 1e-12 are therefore not used).
+
+## Wall time and accuracy ladder (np=1)
+
+| Case | conv_thr (Ry) | wall median (s) | min | max | SCF | estimated accuracy (Ry) | etot from XML (Ha) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| si8 | 1e-8 | 0.4669 | 0.4656 | 0.4739 | 12 | 6.6e-09 | -31.32181378565385 |
+| si8 | 1e-9 | 0.5131 | 0.5120 | 0.5165 | 14 | 2.7e-10 | -31.32181378641102 |
+| si8 | 1e-10 | 0.5509 | 0.5496 | 0.5520 | 15 | 5.1e-11 | -31.32181378655076 |
+| si8 | 1e-12 | 0.6055 | 0.6024 | 0.6080 | 18 | 2.7e-13 | -31.32181378657689 |
+| si16 | 1e-8 | 1.4132 | 1.4101 | 1.4975 | 10 | 6.3e-09 | -63.12926478535374 |
+| si16 | 1e-9 | 1.6851 | 1.6838 | 1.6914 | 12 | 1.1e-10 | -63.12926478535374 |
+| si16 | 1e-10 | 1.8261 | 1.8224 | 1.8308 | 13 | 2.6e-11 | -63.12926478561818 |
+| si16 | 1e-12 | 1.9741 | 1.9726 | 1.9759 | 15 | 1.8e-13 | -63.12926478562362 |
+| si32 | 1e-8 | 5.03 (single run) | | | | | |
+
+Valid np=8 values: si8 conv_thr 1e-12 0.3383 s; si16 0.5559 / 0.5555 / 0.6481 / 0.6977 s for 1e-8 / 1e-9 / 1e-10 / 1e-12.
+
+## QE internal timers (wall seconds, call counts)
+
+si8 (nbnd 20, grid 36^3, SCF 12): electrons 0.31; c_bands 0.24 (12); regterg 0.23 (12); h_psi 0.18 (94); vloc_psi 0.17 (94); h_psi:calbec 0.01; add_vuspsi 0.00; rdiaghg 0.02 (93); regterg:over 0.01 (81); regterg:upda 0.00 (81); regterg:last 0.01 (34); g_psi 0.00 (81); sum_band 0.03; v_of_rho 0.03; mix_rho 0.02; fftw 0.13 (964); init_run 0.04; PWSCF total 0.37. (0.01 s quantization: low precision.)
+si16 (nbnd 36, grid 72x36x36, SCF 11): electrons 1.20; c_bands 1.02 (11); regterg 0.99 (11); h_psi 0.76 (148); vloc_psi 0.66 (148); h_psi:calbec 0.06; add_vuspsi 0.02; rdiaghg 0.11 (146); regterg:over 0.06 (136); regterg:upda 0.04 (136); regterg:last 0.03 (32); g_psi 0.01 (136); sum_band 0.11; v_of_rho 0.04; mix_rho 0.03; fftw 0.55 (1612 calls, 341 us each); init_run 0.09; PWSCF total 1.30.
+Shares of `electrons` (si16): local FFT (fftw) 45.8 %, nonlocal (calbec + add_vuspsi) 6.7 %, subspace algebra (rdiaghg + over + upda + last) 20.0 %, preconditioner 0.8 %, other (sum_band, v_of_rho, mix_rho, remainder) 17.5 %; h_psi alone is 63.3 % (the fftw timer also counts calls inside sum_band, so the first and last shares overlap).
+
+## BAANDI tight reference (strict tightened, gamma_real off, T=1)
+
+si8: 21 SCF, 427 Davidson steps, 2674 H vectors, 4.72 s, E = -31.321803601031771 Ha; si16: 18 / 276 / 3919, 19.74 s, E = -63.129244421617670 Ha; si32: 22 / 567 / 8995, 157.68 s, E = -126.703998096108023 Ha; all converged.
+
+## Wall-to-wall gap at one thread (QE conv_thr 1e-8 versus BAANDI standard, both about 1e-9 Ha delivered; orchestrator arithmetic from the relayed tables, wall including process start for both)
+
+| Case | QE real gamma (s) | BAANDI standard, best of real on/off (s) | BAANDI / QE |
+| --- | ---: | ---: | ---: |
+| si8 | 0.467 | 1.300 (on) | 2.8 |
+| si16 | 1.413 | 5.205 (on) | 3.7 |
+| si32 | 5.03 | 24.0 (on, 13 SCF) | 4.8 |
+
+The gap grows with system size (2.8, 3.7, 4.8). Earlier statements that compared BAANDI wall time with QE's internal 0.366 s timer overstated the si8 gap (3.6x); the wall-to-wall figure is 2.8x. Equal-accuracy caveat: BAANDI standard results are uncertified and SCF counts differ between the codes. The BAANDI standard rows are single trajectories (see docs/performance/standard-robust-gain.md: the median Si8 H-work gain of the standard profile is 1.78x, so the wall gap against a median trajectory would be larger).

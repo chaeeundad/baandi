@@ -137,17 +137,16 @@ pub(crate) fn solve_real_gamma(
     }
     let packed = if let Some(initial) = initial {
         let mut packed = RealMatrix::zeros(n, initial.cols()).map_err(SolverError::from)?;
-        for j in 0..initial.cols() {
-            if let Err(e) = half.pack(
-                initial.column(j),
-                &mut packed.as_mut_slice()[j * n..(j + 1) * n],
-            ) {
-                diagnostics.fallback(
-                    option,
-                    format!("warm start is not ORC-compatible (1e-14 absolute): {e}"),
-                )?;
-                return Ok(None);
-            }
+        if let Err(e) = pool.install(|| {
+            pair_columns(initial.as_slice(), packed.as_mut_slice(), n, &|src, dst| {
+                half.pack(src, dst)
+            })
+        }) {
+            diagnostics.fallback(
+                option,
+                format!("warm start is not ORC-compatible (1e-14 absolute): {e}"),
+            )?;
+            return Ok(None);
         }
         Some(packed)
     } else {
@@ -179,13 +178,18 @@ pub(crate) fn solve_real_gamma(
         )
     }?;
     let mut eigenvectors = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
-    for j in 0..bands {
-        op.h.borrow()
-            .half_sphere()
-            .unpack(
-                &result.eigenvectors.as_slice()[j * n..(j + 1) * n],
-                &mut eigenvectors.as_mut_slice()[j * n..(j + 1) * n],
-            )
+    {
+        let h = op.h.borrow();
+        let half = h.half_sphere();
+        op.pool
+            .install(|| {
+                pair_columns(
+                    result.eigenvectors.as_slice(),
+                    eigenvectors.as_mut_slice(),
+                    n,
+                    &|src, dst| half.unpack(src, dst),
+                )
+            })
             .map_err(|e| ScfError::Numerical(e.to_string()))?;
     }
     diagnostics.gamma_real_used = true;
@@ -203,4 +207,31 @@ pub(crate) fn solve_real_gamma(
         history: result.history,
         operator_applications: result.operator_applications,
     }))
+}
+
+// Boundary conversions use the same fixed pair partition as local application.
+// They need only disjoint output slices; all storage belongs to the caller.
+fn pair_columns<T: Sync, U: Send, E: Send>(
+    input: &[T],
+    output: &mut [U],
+    n: usize,
+    convert: &(impl Fn(&[T], &mut [U]) -> Result<(), E> + Sync),
+) -> Result<(), E> {
+    let pairs = (input.len() / n).div_ceil(2);
+    if pairs > 1 {
+        let split = (pairs / 2) * 2 * n;
+        let (li, ri) = input.split_at(split);
+        let (lo, ro) = output.split_at_mut(split);
+        let (a, b) = WorkerPool::join(
+            || pair_columns(li, lo, n, convert),
+            || pair_columns(ri, ro, n, convert),
+        );
+        a?;
+        b
+    } else {
+        for (src, dst) in input.chunks(n).zip(output.chunks_mut(n)) {
+            convert(src, dst)?;
+        }
+        Ok(())
+    }
 }

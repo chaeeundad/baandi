@@ -3100,17 +3100,17 @@
     "task_id": "P41A-TRAJECTORY-DIVERGENCE",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "done",
     "codex_pid": 92335,
     "wrapper_pid": 92307,
-    "session_id": null,
+    "session_id": "01a1b751-125f-7d42-ba14-b45fb29c8fc2",
     "branch": "task/P41A-TRAJECTORY-DIVERGENCE",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P41A-TRAJECTORY-DIVERGENCE",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P41A-TRAJECTORY-DIVERGENCE.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P41A-TRAJECTORY-DIVERGENCE/report.json",
     "started_at": "2026-11-07T18:41:45Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-07T19:36:06Z",
+    "exit_code": 0,
+    "note": "merged (tests+docs); loose Davidson solves amplify tiny perturbations (tight solves 9/9/9 SCF); orchestrator scan: closing the band set at a multiplet boundary stabilizes (si8 extra 8: 10/10/10)"
   }
 ]

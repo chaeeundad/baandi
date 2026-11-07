@@ -130,6 +130,12 @@ Common gates (details in the brief): energy within 1e-12 Ha of the stored baseli
 ### B18 Exploratory or low priority
 - Lane staging re-test on dev08 only (H-5; reopens A11 on its own clause); radial projector table (H-6, interpolation error 1e-8..1e-9 exceeds the 1e-12 Ha gate unless finer) or per-shell caching (exact, only symmetric k); truncated-potential wavefunction box for early SCF iterations (H-7, same family as A21, high risk); stick-major coefficient order (H-8, microseconds); scaled G=0 (G-H9, below 1%); real-structured states at other time-reversal-invariant k points (G-H8, speculative, QE does not do it); ParO, band-by-band CG, PPCG are not recommended (V section 3; no reduction of H applications).
 
+### B20 Setup and audit redundancy (profile-real-standard-si8.md, 2026-11-07; label O = Mac observation, E = estimate)
+- C1 `ionic_local`: 86% of engine setup (setup is 21% of si8 real/standard wall, 46% of si2 Gamma wall): G-independent `erf(r)` evaluated per (G, mesh point) and the radial integral repeated for every G of the density sphere although only about 525 of 23,871 |G|^2 are distinct (cubic si8). Precompute the per-species integrand part and memoize by exact bit pattern of |G|^2. Bit-identical, E: 0.10 s of 0.615 s. Extends the exact per-shell caching idea of B18 (H-6) with measured evidence; check the NLCC core-density transform for the same pattern.
+- C2 audit k-independent terms (Hartree, XC, local energy, charge, double counting, remainders) are recomputed for every k: k444s symmetry-on, 10 k, energy phase is 18% of wall, about 86% of it shared work (O: 0.076 s redundant of 0.539 s). Compute once, weight as now. Bit-identical.
+- C3 energy-only Hartree in the audit and reuse of its forward FFT for `local_energy` (3 transforms to 1): E 1.3% of si8. Bit-identical.
+- C4 nonlocal energy from projections only (about 3% of si8, rounding change 1e-16). C5 exact |q| memo in `NonlocalOperator::new` (2% at Gamma). C6 pair density for gamma_real (2-3%, rounding change, directional). C7 skip audit in non-converged standard iterations (8.7% si8, 18% k444s; changes history output, needs a decision). Details and ranking: [profile-real-standard-si8.md](profile-real-standard-si8.md).
+
 ### B12 MPI and GPU (blocked)
 - Out of scope (AGENTS.md); GPU design note exists (A32).
 

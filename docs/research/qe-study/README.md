@@ -6,3 +6,4 @@ Index (added as notes are written):
 - [fft-call-structure.md](fft-call-structure.md): FFT call structure of the wavefunction path (sticks, plane-fused pipeline, descriptor settings, what did not help), from the user's fastqe Phase 1 report.
 - [davidson-gemm-accounting.md](davidson-gemm-accounting.md): note 4, Codex analysis of rust-dft only; GEMM shape accounting and the adopted incremental-Gram optimization (no QE source read).
 - [qe-pseudo-treatment-differences.md](qe-pseudo-treatment-differences.md): ranked candidates for the BAANDI-versus-QE bulk energy offset (PW92 prefactor convention first), with BAANDI-side diagnostics.
+- [qe-radial-endpoint-convention.md](qe-radial-endpoint-convention.md): how QE chooses radial integration limits, odd counts and the end rule, and the distinct variants to score against the MgO residual.

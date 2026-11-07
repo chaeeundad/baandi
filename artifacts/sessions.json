@@ -3076,5 +3076,23 @@
     "ended_at": "2026-11-07T15:24:01Z",
     "exit_code": 0,
     "note": "merged; pure-Rust bit-identical (25/25); MKL runtime tests and speed pending on dev08"
+  },
+  {
+    "run_id": "P40A-MIXING-SURVEY#1",
+    "task_id": "P40A-MIXING-SURVEY",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 83634,
+    "wrapper_pid": 83606,
+    "session_id": null,
+    "branch": "task/P40A-MIXING-SURVEY",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P40A-MIXING-SURVEY",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P40A-MIXING-SURVEY.md",
+    "report": null,
+    "started_at": "2026-11-07T17:41:32Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

@@ -22,8 +22,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P36A-REAL-PERSISTENT-STATE: 속도: 실수 경로에서 SCF 반복마다 다시 만들던 해밀토니안·FFT 계획·작업 공간을 반복 사이에 유지하고, 두 번 나뉜 Ritz 회전을 한 병렬 구간으로 합침(결과는 비트까지 같아야 함)",
-    "ref": "pid 8861, session no sessi, task/P36A-REAL-PERSISTENT-STATE",
+    "task": "P37A-GENERALIZED-GRAM-STAGE0: 속도 조사(QE 방식 1단계, 측정만): QE처럼 직교화 없이 기저를 쌓는 일반화 Davidson이 우리 SCF 이력에서 수치적으로 안전한지(겹침 행렬의 순위·최소 고윳값·분해 실패율)와 대수 계산 절감량을 측정",
+    "ref": "pid 19557, session no sessi, task/P37A-GENERALIZED-GRAM-STAGE0",
     "updated": "2026-11-07"
   },
   {
@@ -32,7 +32,7 @@
     "role": "implementer",
     "state": "active",
     "task": "P36B-KPOINT-HYBRID-BUDGET: 속도: k점이 코어 수보다 적을 때(예: 기약 k점 10개, 코어 12~16개) 코어를 모두 쓰도록 안쪽 병렬 폭 조정, 대칭 지도 한 번만 계산(결과는 비트까지 같아야 함)",
-    "ref": "pid 9149, session no sessi, task/P36B-KPOINT-HYBRID-BUDGET",
+    "ref": "pid 34426, session no sessi, task/P36B-KPOINT-HYBRID-BUDGET",
     "updated": "2026-11-07"
   },
   {
@@ -1078,5 +1078,23 @@
     "task": "P35A-NONLOCAL-GROUP-OPTIN: 속도: dev08에서 모든 구성에서 3~8% 느린 것으로 확인된 밴드 묶음 비국소 연산(P15B)을 기본에서 빼고 벡터별 방식을 기본으로 복원(묶음 방식은 옵션으로 보존, 결과는 비트까지 같아야 함)",
     "ref": "pid 95350, session 01a1b5bb, task/P35A-NONLOCAL-GROUP-OPTIN",
     "updated": "2026-11-07"
+  },
+  {
+    "id": "A121",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P36A-REAL-PERSISTENT-STATE: 속도: 실수 경로에서 SCF 반복마다 다시 만들던 해밀토니안·FFT 계획·작업 공간을 반복 사이에 유지하고, 두 번 나뉜 Ritz 회전을 한 병렬 구간으로 합침(결과는 비트까지 같아야 함)",
+    "ref": "pid 8861, session 01a1b608, task/P36A-REAL-PERSISTENT-STATE",
+    "updated": "2026-11-07"
+  },
+  {
+    "id": "A124",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "planned",
+    "task": "P38A-BAND-COUNT-POLICY: 속도 조사: 점유 밴드 위에 얼마나 많은 빈 밴드를 둘지(현재 4개 고정)가 작업량에 미치는 영향을 여러 계에서 조사하고, 퇴화 껍질을 완성하는 자동 규칙(기본 꺼짐)을 평가",
+    "ref": "not started",
+    "updated": ""
   }
 ]

@@ -2824,5 +2824,23 @@
     "ended_at": "2026-11-07T07:29:03Z",
     "exit_code": 0,
     "note": "merged; Si8 median H-work gain 1.78x (CI 1.65-2.00), not 2.65x; research rule off, not recommended; evidence archived"
+  },
+  {
+    "run_id": "P30A-REAL-GAMMA-THREADS#1",
+    "task_id": "P30A-REAL-GAMMA-THREADS",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 39310,
+    "wrapper_pid": 39283,
+    "session_id": null,
+    "branch": "task/P30A-REAL-GAMMA-THREADS",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P30A-REAL-GAMMA-THREADS",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P30A-REAL-GAMMA-THREADS.md",
+    "report": null,
+    "started_at": "2026-11-07T07:49:47Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

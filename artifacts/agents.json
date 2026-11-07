@@ -20,6 +20,15 @@
   {
     "id": "A3",
     "agent": "Codex",
+    "role": "implementer",
+    "state": "active",
+    "task": "P30A-REAL-GAMMA-THREADS: 속도: 실수 Gamma 경로가 코어를 늘려도 빨라지지 않는(오히려 느려지는) 문제 수정. 밴드쌍 FFT 적용이 한 코어에서만 돌던 것을 풀(pool)에 분배(결과는 비트까지 같아야 함)",
+    "ref": "pid 39310, session no sessi, task/P30A-REAL-GAMMA-THREADS",
+    "updated": "2026-11-07"
+  },
+  {
+    "id": "A4",
+    "agent": "Codex",
     "role": "implementer (wrapper smoke test)",
     "state": "done",
     "task": "SMOKE: Backfilled before registry existed: PID not recorded",
@@ -27,7 +36,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A4",
+    "id": "A5",
     "agent": "Codex",
     "role": "implementer",
     "state": "blocked",
@@ -36,7 +45,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A5",
+    "id": "A6",
     "agent": "Codex",
     "role": "wrapper-test",
     "state": "done",
@@ -45,7 +54,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A6",
+    "id": "A7",
     "agent": "Codex",
     "role": "implementer (backend spike)",
     "state": "done",
@@ -54,7 +63,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A7",
+    "id": "A8",
     "agent": "Codex",
     "role": "implementer",
     "state": "killed",
@@ -63,7 +72,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A8",
+    "id": "A9",
     "agent": "Codex",
     "role": "implementer (P1A fix 1)",
     "state": "done",
@@ -72,7 +81,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A9",
+    "id": "A10",
     "agent": "Codex",
     "role": "implementer (P1B unblock)",
     "state": "done",
@@ -81,7 +90,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A10",
+    "id": "A11",
     "agent": "Codex",
     "role": "implementer (P4A eigensolver)",
     "state": "done",
@@ -90,7 +99,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A11",
+    "id": "A12",
     "agent": "Codex",
     "role": "implementer (P3A functionals)",
     "state": "done",
@@ -99,7 +108,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A12",
+    "id": "A13",
     "agent": "Codex",
     "role": "implementer (P2A UPF and radial)",
     "state": "done",
@@ -108,7 +117,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A13",
+    "id": "A14",
     "agent": "Codex",
     "role": "implementer (P2B fix 1)",
     "state": "done",
@@ -117,7 +126,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A14",
+    "id": "A15",
     "agent": "Codex",
     "role": "implementer (P5A retry 1)",
     "state": "done",
@@ -126,7 +135,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A15",
+    "id": "A16",
     "agent": "Codex",
     "role": "implementer (P5B CLI run)",
     "state": "done",
@@ -135,7 +144,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A16",
+    "id": "A17",
     "agent": "Codex",
     "role": "implementer (P2C real-world UPF)",
     "state": "done",
@@ -144,7 +153,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A17",
+    "id": "A18",
     "agent": "Codex",
     "role": "implementer (P5C functional string)",
     "state": "done",
@@ -153,7 +162,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A18",
+    "id": "A19",
     "agent": "Codex",
     "role": "implementer (P6A QE tooling)",
     "state": "done",
@@ -162,7 +171,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A19",
+    "id": "A20",
     "agent": "Codex",
     "role": "implementer (P6B verifier real format)",
     "state": "done",
@@ -171,7 +180,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A20",
+    "id": "A21",
     "agent": "Codex",
     "role": "implementer (P6D density compare)",
     "state": "done",
@@ -180,7 +189,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A21",
+    "id": "A22",
     "agent": "Codex",
     "role": "implementer (P6E docs refresh)",
     "state": "done",
@@ -189,7 +198,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A22",
+    "id": "A23",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -198,7 +207,7 @@
     "updated": "2026-11-02"
   },
   {
-    "id": "A23",
+    "id": "A24",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -207,7 +216,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A24",
+    "id": "A25",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -216,7 +225,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A25",
+    "id": "A26",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -225,7 +234,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A26",
+    "id": "A27",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -234,7 +243,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A27",
+    "id": "A28",
     "agent": "Codex",
     "role": "reviewer",
     "state": "done",
@@ -243,7 +252,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A28",
+    "id": "A29",
     "agent": "Codex",
     "role": "reviewer",
     "state": "done",
@@ -252,7 +261,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A29",
+    "id": "A30",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -261,7 +270,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A30",
+    "id": "A31",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -270,7 +279,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A31",
+    "id": "A32",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -279,7 +288,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A32",
+    "id": "A33",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -288,7 +297,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A33",
+    "id": "A34",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -297,7 +306,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A34",
+    "id": "A35",
     "agent": "Codex",
     "role": "implementer",
     "state": "blocked",
@@ -306,7 +315,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A35",
+    "id": "A36",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -315,7 +324,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A36",
+    "id": "A37",
     "agent": "Codex",
     "role": "implementer",
     "state": "failed",
@@ -324,7 +333,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A37",
+    "id": "A38",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -333,7 +342,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A38",
+    "id": "A39",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -342,7 +351,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A39",
+    "id": "A40",
     "agent": "Codex",
     "role": "implementer",
     "state": "blocked",
@@ -351,7 +360,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A40",
+    "id": "A41",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -360,7 +369,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A41",
+    "id": "A42",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -369,7 +378,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A42",
+    "id": "A43",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -378,7 +387,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A43",
+    "id": "A44",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -387,7 +396,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A44",
+    "id": "A45",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -396,7 +405,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A45",
+    "id": "A46",
     "agent": "Codex",
     "role": "reviewer",
     "state": "done",
@@ -405,7 +414,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A46",
+    "id": "A47",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -414,7 +423,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A47",
+    "id": "A48",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -423,7 +432,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A48",
+    "id": "A49",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -432,7 +441,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A49",
+    "id": "A50",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -441,7 +450,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A50",
+    "id": "A51",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -450,7 +459,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A51",
+    "id": "A52",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -459,7 +468,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A52",
+    "id": "A53",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -468,7 +477,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A53",
+    "id": "A54",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -477,7 +486,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A54",
+    "id": "A55",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -486,7 +495,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A55",
+    "id": "A56",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -495,7 +504,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A56",
+    "id": "A57",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -504,7 +513,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A57",
+    "id": "A58",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -513,7 +522,7 @@
     "updated": "2026-11-03"
   },
   {
-    "id": "A58",
+    "id": "A59",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -522,7 +531,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A59",
+    "id": "A60",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -531,7 +540,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A60",
+    "id": "A61",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -540,7 +549,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A61",
+    "id": "A62",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -549,7 +558,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A62",
+    "id": "A63",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -558,7 +567,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A63",
+    "id": "A64",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -567,7 +576,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A64",
+    "id": "A65",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -576,7 +585,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A65",
+    "id": "A66",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -585,7 +594,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A66",
+    "id": "A67",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -594,7 +603,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A67",
+    "id": "A68",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -603,7 +612,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A68",
+    "id": "A69",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -612,7 +621,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A69",
+    "id": "A70",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -621,7 +630,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A70",
+    "id": "A71",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -630,7 +639,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A71",
+    "id": "A72",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -639,7 +648,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A72",
+    "id": "A73",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -648,7 +657,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A73",
+    "id": "A74",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -657,7 +666,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A74",
+    "id": "A75",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -666,7 +675,7 @@
     "updated": "2026-11-04"
   },
   {
-    "id": "A75",
+    "id": "A76",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -675,7 +684,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A76",
+    "id": "A77",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -684,7 +693,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A77",
+    "id": "A78",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -693,7 +702,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A78",
+    "id": "A79",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -702,7 +711,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A79",
+    "id": "A80",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -711,7 +720,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A80",
+    "id": "A81",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -720,7 +729,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A81",
+    "id": "A82",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -729,7 +738,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A82",
+    "id": "A83",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -738,7 +747,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A83",
+    "id": "A84",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -747,7 +756,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A84",
+    "id": "A85",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -756,7 +765,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A85",
+    "id": "A86",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -765,7 +774,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A86",
+    "id": "A87",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -774,7 +783,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A87",
+    "id": "A88",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -783,7 +792,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A88",
+    "id": "A89",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -792,7 +801,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A89",
+    "id": "A90",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -801,7 +810,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A90",
+    "id": "A91",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -810,7 +819,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A91",
+    "id": "A92",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -819,7 +828,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A92",
+    "id": "A93",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -828,7 +837,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A93",
+    "id": "A94",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -837,7 +846,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A94",
+    "id": "A95",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -846,7 +855,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A95",
+    "id": "A96",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -855,7 +864,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A96",
+    "id": "A97",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -864,7 +873,7 @@
     "updated": "2026-11-05"
   },
   {
-    "id": "A97",
+    "id": "A98",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -873,7 +882,7 @@
     "updated": "2026-11-06"
   },
   {
-    "id": "A98",
+    "id": "A99",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -882,7 +891,7 @@
     "updated": "2026-11-06"
   },
   {
-    "id": "A99",
+    "id": "A100",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -891,7 +900,7 @@
     "updated": "2026-11-06"
   },
   {
-    "id": "A100",
+    "id": "A101",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -900,7 +909,7 @@
     "updated": "2026-11-06"
   },
   {
-    "id": "A101",
+    "id": "A102",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -909,7 +918,7 @@
     "updated": "2026-11-06"
   },
   {
-    "id": "A102",
+    "id": "A103",
     "agent": "Codex",
     "role": "implementer",
     "state": "failed",
@@ -918,7 +927,7 @@
     "updated": "2026-11-06"
   },
   {
-    "id": "A103",
+    "id": "A104",
     "agent": "Codex",
     "role": "implementer",
     "state": "failed",
@@ -927,7 +936,7 @@
     "updated": "2026-11-06"
   },
   {
-    "id": "A104",
+    "id": "A105",
     "agent": "Codex",
     "role": "implementer",
     "state": "failed",
@@ -936,7 +945,7 @@
     "updated": "2026-11-06"
   },
   {
-    "id": "A105",
+    "id": "A106",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -945,7 +954,7 @@
     "updated": "2026-11-07"
   },
   {
-    "id": "A106",
+    "id": "A107",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -954,7 +963,7 @@
     "updated": "2026-11-07"
   },
   {
-    "id": "A107",
+    "id": "A108",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -963,7 +972,7 @@
     "updated": "2026-11-07"
   },
   {
-    "id": "A108",
+    "id": "A109",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -972,7 +981,7 @@
     "updated": "2026-11-07"
   },
   {
-    "id": "A109",
+    "id": "A110",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -981,7 +990,7 @@
     "updated": "2026-11-07"
   },
   {
-    "id": "A110",
+    "id": "A111",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -990,7 +999,7 @@
     "updated": "2026-11-07"
   },
   {
-    "id": "A111",
+    "id": "A112",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",
@@ -999,7 +1008,7 @@
     "updated": "2026-11-07"
   },
   {
-    "id": "A112",
+    "id": "A113",
     "agent": "Codex",
     "role": "implementer",
     "state": "done",

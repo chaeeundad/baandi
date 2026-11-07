@@ -296,3 +296,66 @@ fn rejects_noninvariant_density_and_mismatched_mesh() {
     n[[0, 0, 1]] += 1e-4;
     assert!(p.step_kpoints(&n, None, 1e-8).is_err());
 }
+
+#[test]
+fn prepared_symmetry_rejects_a_different_engine_geometry() {
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.; 3])];
+    let full = monkhorst_pack([1; 3], [0.; 3]).unwrap();
+    let prepared = PreparedSymmetry::new(&cell, &atoms, &full, 1e-7, true).unwrap();
+    let pp = common::potential(2., 1., false, 401);
+    let refs = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let mut same = ScfProblem::new(&cell, &atoms, &refs, options()).unwrap();
+    same.enable_prepared_symmetry(&prepared).unwrap();
+    let shifted = [Atom::new("Xx", [0.1, 0., 0.])];
+    let mut different = ScfProblem::new(&cell, &shifted, &refs, options()).unwrap();
+    assert!(matches!(
+        different.enable_prepared_symmetry(&prepared),
+        Err(ScfError::InvalidInput(
+            "symmetry: prepared geometry differs from engine"
+        ))
+    ));
+}
+
+#[test]
+fn shared_spin_preparation_preserves_no_time_reversal_policy() {
+    use dft_engine::collinear::{CollinearProblem, SpinSector};
+    let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap();
+    let atoms = [Atom::new("Xx", [0.; 3])];
+    let full = monkhorst_pack([1; 3], [0.; 3]).unwrap();
+    let pp = common::potential_with_functional(1., 1., false, 401, "SLA PW");
+    let refs = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let mut problem = CollinearProblem::new(
+        &cell,
+        &atoms,
+        &refs,
+        ScfOptions {
+            functional: Functional::LdaPw,
+            bands: Some(4),
+            ..options()
+        },
+        &full,
+        SpinSector {
+            n_up: 1,
+            n_down: 0,
+            axis_cartesian: [0., 0., 1.],
+            initial_moment_seed: None,
+        },
+    )
+    .unwrap();
+    let antiunitary = PreparedSymmetry::new(&cell, &atoms, &full, 1e-7, true).unwrap();
+    assert!(matches!(
+        problem.enable_prepared_symmetry(&antiunitary),
+        Err(ScfError::InvalidInput(
+            "symmetry: collinear preparation must disable time reversal"
+        ))
+    ));
+    let spatial = PreparedSymmetry::new(&cell, &atoms, &full, 1e-7, false).unwrap();
+    problem.enable_prepared_symmetry(&spatial).unwrap();
+}

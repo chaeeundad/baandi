@@ -380,6 +380,77 @@ pub struct SpeciesPotential<'a> {
     pub potential: &'a Pseudopotential,
 }
 
+/// Immutable geometry-verified symmetry preparation shared with input adapters.
+/// Private fields prevent callers from supplying an unverified orbit map.
+#[derive(Debug)]
+pub struct PreparedSymmetry {
+    lattice: [[f64; 3]; 3],
+    atoms: Vec<Atom>,
+    full: Vec<KPoint>,
+    tolerance_bohr: f64,
+    time_reversal: bool,
+    map: dft_geometry::symmetry::KOrbitMap,
+    crystal_operations: Vec<dft_geometry::symmetry::SymmetryOperation>,
+}
+impl PreparedSymmetry {
+    pub fn new(
+        cell: &Cell,
+        atoms: &[Atom],
+        full: &[KPoint],
+        tolerance_bohr: f64,
+        time_reversal: bool,
+    ) -> Result<Self, ScfError> {
+        let crystal_operations = dft_geometry::symmetry::detect(cell, atoms, tolerance_bohr)
+            .map_err(|e| ScfError::Numerical(e.to_string()))?;
+        let map =
+            dft_geometry::symmetry::reduce_mesh(full, &crystal_operations, time_reversal, false)
+                .map_err(|e| ScfError::Numerical(e.to_string()))?;
+        Ok(Self {
+            lattice: cell.lattice_columns_bohr(),
+            atoms: atoms.to_vec(),
+            full: full.to_vec(),
+            tolerance_bohr,
+            time_reversal,
+            map,
+            crystal_operations,
+        })
+    }
+    /// Public configurations may change during relaxation. Reuse only for the
+    /// exact geometry, mesh and detection settings that produced this record.
+    pub fn matches(
+        &self,
+        cell: &Cell,
+        atoms: &[Atom],
+        full: &[KPoint],
+        tolerance_bohr: f64,
+        time_reversal: bool,
+    ) -> bool {
+        self.lattice == cell.lattice_columns_bohr()
+            && self.atoms == atoms
+            && self.full == full
+            && self.tolerance_bohr.to_bits() == tolerance_bohr.to_bits()
+            && self.time_reversal == time_reversal
+    }
+    pub fn map(&self) -> &dft_geometry::symmetry::KOrbitMap {
+        &self.map
+    }
+    pub fn density_operations(
+        &self,
+        crystal: bool,
+    ) -> Vec<dft_geometry::symmetry::SymmetryOperation> {
+        if crystal {
+            self.crystal_operations.clone()
+        } else {
+            self.map
+                .operations
+                .iter()
+                .filter(|o| !o.antiunitary)
+                .cloned()
+                .collect()
+        }
+    }
+}
+
 /// Cached ionic terms, Hamiltonian application plan, and density FFT plan.
 /// `step` is exposed for independent post-SCF fixed-point verification.
 pub struct ScfProblem {
@@ -800,8 +871,10 @@ impl ScfProblem {
         let ionic_real = ionic.mapv(|z| z.re);
         let pool =
             WorkerPool::new(options.threads).map_err(|e| ScfError::Numerical(e.to_string()))?;
-        let outer = options.threads.max(1).min(points.len());
-        let inner = (options.threads.max(1) / outer).max(1);
+        // Every k solve shares the persistent pool. A full-pool budget lets
+        // idle outer workers steal fixed inner pieces and gives each worker
+        // its own Hamiltonian scratch slot (no modulo-slot collisions).
+        let inner = options.threads.max(1);
         let mut construction_points = points.to_vec();
         let states = ordered_solves(
             &mut construction_points,
@@ -907,10 +980,21 @@ impl ScfProblem {
         tolerance_bohr: f64,
         time_reversal: bool,
     ) -> Result<(), ScfError> {
-        let ops = dft_geometry::symmetry::detect(&self.cell, &self.atoms, tolerance_bohr)
-            .map_err(|e| ScfError::Numerical(e.to_string()))?;
-        let map = dft_geometry::symmetry::reduce_mesh(full, &ops, time_reversal, false)
-            .map_err(|e| ScfError::Numerical(e.to_string()))?;
+        let prepared =
+            PreparedSymmetry::new(&self.cell, &self.atoms, full, tolerance_bohr, time_reversal)?;
+        self.enable_prepared_symmetry(&prepared)
+    }
+    /// Reuse an immutable verified map, rejecting a different engine geometry.
+    pub fn enable_prepared_symmetry(
+        &mut self,
+        prepared: &PreparedSymmetry,
+    ) -> Result<(), ScfError> {
+        if prepared.lattice != self.cell.lattice_columns_bohr() || prepared.atoms != self.atoms {
+            return Err(ScfError::InvalidInput(
+                "symmetry: prepared geometry differs from engine",
+            ));
+        }
+        let map = prepared.map();
         if self.states.len() != map.points.len()
             || self
                 .states
@@ -922,14 +1006,7 @@ impl ScfProblem {
                 "symmetry: engine k points differ from verified irreducible mesh",
             ));
         }
-        let ops: Vec<_> = if self.options.crystal_density_group {
-            ops
-        } else {
-            map.operations
-                .into_iter()
-                .filter(|o| !o.antiunitary)
-                .collect()
-        };
+        let ops = prepared.density_operations(self.options.crystal_density_group);
         if !dft_geometry::symmetry::preserves_fft_grid(self.grid.dims(), &ops) {
             return Err(ScfError::InvalidInput(
                 "symmetry.fft_grid: rotations/translations must preserve nonlinear XC quadrature; use compatible_fft_grid at setup",

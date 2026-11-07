@@ -757,7 +757,7 @@ fn threading_metadata_and_identical_outputs() {
             );
         }
         let mut reference = None;
-        for requested in [None, Some(0), Some(1), Some(2), Some(8)] {
+        for requested in [None, Some(0), Some(1), Some(2), Some(3), Some(8), Some(16)] {
             let name = format!("threads-{requested:?}");
             let suffix = requested.map_or(String::new(), |n| format!("\n[scf]\nthreads={n}"));
             let output = c.run(&suffix, Some(Path::new(&name)));
@@ -772,13 +772,20 @@ fn threading_metadata_and_identical_outputs() {
             let mut json = c.json(&name, "results.json");
             let requested = requested.unwrap_or(1);
             assert_eq!(json["threading"]["threads_requested"], requested);
-            assert_eq!(json["threading"]["threads_used"], requested.max(1).min(nk));
-            assert_eq!(json["threading"]["threads"], requested.max(1).min(nk));
+            assert_eq!(json["threading"]["threads_used"], requested.max(1));
+            assert_eq!(json["threading"]["threads"], requested.max(1));
             let outer = requested.max(1).min(nk);
-            let inner = requested.max(1) / outer;
+            let inner = requested.max(1);
             assert_eq!(json["threading"]["outer_threads"], outer);
             assert_eq!(json["threading"]["inner_threads"], inner);
-            assert!(outer * inner <= requested.max(1));
+            // Outer and inner tasks share one pool, not separate worker teams.
+            assert!(outer <= inner);
+            assert!(
+                json["threading"]["backend"]
+                    .as_str()
+                    .unwrap()
+                    .contains("persistent Rayon pool")
+            );
             assert_eq!(json["scf"]["threads"], requested);
             strip_times(&mut json);
             let object = json.as_object_mut().unwrap();

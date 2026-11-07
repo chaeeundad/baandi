@@ -515,7 +515,8 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         )
     })?;
     let points = config.resolved_points()?;
-    if let Some(map) = config.symmetry_map()? {
+    if let Some(symmetry) = config.prepared_symmetry()? {
+        let map = symmetry.map();
         warnings.push(format!(
             "symmetry.density_group={:?}: {} density operations; all must permute FFT grid {:?}",
             config.symmetry.density_group,

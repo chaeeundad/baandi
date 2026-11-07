@@ -30,3 +30,49 @@ fn defaults_mesh_weights_and_invalid_models() {
     ) + "\n[symmetry]\nmode='auto'\n";
     assert!(Config::parse(&invalid).unwrap().prepare().is_err());
 }
+
+#[test]
+fn preparation_is_shared_and_invalidated_by_physical_inputs() {
+    use std::sync::Arc;
+    let input = INPUT.replace(
+        "kpoints = [[0.0, 0.0, 0.0]]",
+        "kgrid = [4,4,4]\nkshift = [0.5,0.5,0.5]",
+    ) + "\n[symmetry]\nmode='auto'\n";
+    let mut config = Config::parse(&input).unwrap();
+    let first = config.prepared_symmetry().unwrap().unwrap();
+    config.validate().unwrap();
+    config.prepare().unwrap();
+    config.resolved_points().unwrap();
+    config.symmetry_json().unwrap();
+    config.density_operations().unwrap();
+    assert!(Arc::ptr_eq(
+        &first,
+        &config.prepared_symmetry().unwrap().unwrap()
+    ));
+    // Selecting the crystal density group reuses detection and k reduction.
+    config.symmetry.density_group = config::DensityGroup::Crystal;
+    assert_eq!(config.density_operations().unwrap().len(), 48);
+    assert!(Arc::ptr_eq(
+        &first,
+        &config.prepared_symmetry().unwrap().unwrap()
+    ));
+    config.symmetry.tolerance_bohr *= 2.;
+    let tolerance = config.prepared_symmetry().unwrap().unwrap();
+    assert!(!Arc::ptr_eq(&first, &tolerance));
+    config.basis.kgrid = Some([2, 2, 2]);
+    let mesh = config.prepared_symmetry().unwrap().unwrap();
+    assert!(!Arc::ptr_eq(&tolerance, &mesh));
+    assert_eq!(mesh.map().entries.len(), 8);
+    config.basis.ktime_reversal = Some(false);
+    let reversal = config.prepared_symmetry().unwrap().unwrap();
+    assert!(!Arc::ptr_eq(&mesh, &reversal));
+    config.system.atoms[1].fractional[0] += 0.01;
+    let atoms = config.prepared_symmetry().unwrap().unwrap();
+    assert!(!Arc::ptr_eq(&mesh, &atoms));
+    config.system.lattice_vectors[0][1] += 0.01;
+    let lattice = config.prepared_symmetry().unwrap().unwrap();
+    assert!(!Arc::ptr_eq(&atoms, &lattice));
+    config.symmetry.density_group = config::DensityGroup::Mesh;
+    config.symmetry.mode = SymmetryMode::Off;
+    assert!(config.prepared_symmetry().unwrap().is_none());
+}

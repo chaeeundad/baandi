@@ -230,3 +230,91 @@ fn spin_force_extension_v2_validates() {
             .success()
     );
 }
+
+/// Run with P36B_BASELINE_BINARY=/absolute/baseline and optionally
+/// P36B_CLI_EVIDENCE=/absolute/evidence cargo test --release -p dft-cli
+/// --test spin shared_symmetry_budget_matrix -- --ignored --nocapture.
+#[test]
+#[ignore = "release-only before/after symmetry and nine-budget matrix"]
+fn shared_symmetry_budget_matrix() {
+    fn scientific(mut value: serde_json::Value) -> String {
+        let object = value.as_object_mut().unwrap();
+        for key in [
+            "timings",
+            "preflight",
+            "tool",
+            "input_sha256",
+            "scf",
+            "threading",
+        ] {
+            object.remove(key);
+        }
+        // JSON serialization preserves round-trip floats, including signed zero.
+        serde_json::to_string(&value).unwrap()
+    }
+    for mode in ["spin", "fd", "spin_fd", "spin_fd_moment"] {
+        let c = Case::new();
+        let sector = match mode {
+            "fd" => "mode='unpolarized'",
+            "spin_fd" => "mode='collinear'",
+            "spin_fd_moment" => "mode='collinear'\ntotal_moment=0.3",
+            _ => "mode='collinear'\nn_up=1\nn_down=0",
+        };
+        let mut base = c.input(sector).replace(
+            "kpoints=[[0.0,0.0,0.0]]",
+            "kgrid=[2,2,2]\nkshift=[0.5,0.5,0.5]\nktime_reversal=false",
+        );
+        if mode == "fd" {
+            base = base.replace("ktime_reversal=false", "ktime_reversal=true");
+        }
+        if mode != "spin" {
+            base = base.replace("nbands=4", "nbands=12");
+            base.push_str("\n[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.01\nband_cap=12\n");
+        }
+        for symmetry in ["off", "auto"] {
+            let mut reference = None;
+            for threads in [1, 2, 3, 4, 6, 8, 10, 12, 16] {
+                let input = base.replace("[scf]", &format!("[scf]\nthreads={threads}"))
+                    + &format!("\n[symmetry]\nmode='{symmetry}'\n");
+                fs::write(c.dir.join("input.toml"), input).unwrap();
+                let mut binaries =
+                    vec![("candidate", PathBuf::from(env!("CARGO_BIN_EXE_dft-cli")))];
+                if let Some(path) = std::env::var_os("P36B_BASELINE_BINARY") {
+                    binaries.push(("baseline", PathBuf::from(path)));
+                }
+                for (arm, binary) in binaries {
+                    let label = format!("{mode}-{symmetry}-T{threads}-{arm}");
+                    let out = if let Some(path) = std::env::var_os("P36B_CLI_EVIDENCE") {
+                        PathBuf::from(path).join(&label)
+                    } else {
+                        c.dir.join(&label)
+                    };
+                    let result = Command::new(binary)
+                        .current_dir(&c.dir)
+                        .args(["run", "input.toml", "--output-dir"])
+                        .arg(&out)
+                        .output()
+                        .unwrap();
+                    assert!(
+                        result.status.success(),
+                        "{label}: {}",
+                        String::from_utf8_lossy(&result.stderr)
+                    );
+                    let result: serde_json::Value =
+                        serde_json::from_slice(&fs::read(out.join("results.json")).unwrap())
+                            .unwrap();
+                    let signature = (
+                        scientific(result),
+                        fs::read(out.join("density.bin")).unwrap(),
+                    );
+                    if let Some(expected) = &reference {
+                        assert_eq!(&signature, expected, "{label}");
+                    } else {
+                        reference = Some(signature);
+                    }
+                    println!("PASS {label}");
+                }
+            }
+        }
+    }
+}

@@ -2662,5 +2662,41 @@
     "ended_at": "2026-11-07T03:06:24Z",
     "exit_code": 0,
     "note": "merged; PW92 prefactor explains 96%/84% of offset"
+  },
+  {
+    "run_id": "P27B-PW92-ORIGINAL-OPTION#1",
+    "task_id": "P27B-PW92-ORIGINAL-OPTION",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 65465,
+    "wrapper_pid": 65443,
+    "session_id": null,
+    "branch": "task/P27B-PW92-ORIGINAL-OPTION",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P27B-PW92-ORIGINAL-OPTION",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P27B-PW92-ORIGINAL-OPTION.md",
+    "report": null,
+    "started_at": "2026-11-07T03:14:26Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
+  },
+  {
+    "run_id": "P27C-MGO-RESIDUAL-DIAG#1",
+    "task_id": "P27C-MGO-RESIDUAL-DIAG",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 65698,
+    "wrapper_pid": 65683,
+    "session_id": null,
+    "branch": "task/P27C-MGO-RESIDUAL-DIAG",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P27C-MGO-RESIDUAL-DIAG",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P27C-MGO-RESIDUAL-DIAG.md",
+    "report": null,
+    "started_at": "2026-11-07T03:14:46Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

@@ -352,6 +352,8 @@ wire_vec!([f64; 3]);
 wire_vec!([f64; 4]);
 wire_vec!(usize);
 wire_struct!(Checkpoint, WCheckpoint {
+    #[serde(default, skip_serializing_if = "is_false")]
+    standard_stall_guard: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     standard: Option<StandardProfile>,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -505,6 +507,8 @@ fn is_pw92_modified(s: &str) -> bool {
     s == "modified"
 }
 wire_struct!(ScfOptions, WScfOptions {
+    #[serde(default, skip_serializing_if = "is_false")]
+    standard_stall_guard: bool,
     #[serde(default = "pw92_modified", skip_serializing_if = "is_pw92_modified")]
     pw92_prefactor: dft_engine::Pw92Prefactor,
     #[serde(default = "gamma_real_off", skip_serializing_if = "is_gamma_real_off")]
@@ -1819,6 +1823,23 @@ pub fn restart(input: &Path, source: &Path, output: &Path, warm: bool) -> Result
 #[cfg(test)]
 mod pw92_wire_tests {
     use super::*;
+    #[test]
+    fn standard_stall_guard_wire_roundtrip_and_legacy_omission() {
+        for enabled in [false, true] {
+            let options = ScfOptions {
+                standard: Some(StandardProfile::default()),
+                standard_stall_guard: enabled,
+                ..Default::default()
+            };
+            let mut bytes = Vec::new();
+            let wire = options.encode(&mut bytes).unwrap();
+            let json = serde_json::to_value(wire).unwrap();
+            assert_eq!(json.get("standard_stall_guard").is_some(), enabled);
+            let decoded =
+                ScfOptions::decode(serde_json::from_value(json).unwrap(), &bytes, &mut 0).unwrap();
+            assert_eq!(decoded.standard_stall_guard, enabled);
+        }
+    }
     #[test]
     fn convention_roundtrip_legacy_default_and_rejection() {
         for prefactor in [

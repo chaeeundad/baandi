@@ -68,6 +68,9 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
     };
     if let Some(s) = &config.scf {
         o.standard = s.standard_profile().map_err(|e| error(1, e.to_string()))?;
+        o.standard_stall_guard = s
+            .standard_stall_guard()
+            .map_err(|e| error(1, e.to_string()))?;
         o.hartree_mixing = s.hartree_mixing().map_err(|e| error(1, e.to_string()))?;
         o.spectral_guard = s.spectral_guard().map_err(|e| error(1, e.to_string()))?;
         o.gamma_real = s.gamma_real().map_err(|e| error(1, e.to_string()))?;
@@ -134,6 +137,9 @@ fn options_json(o: &ScfOptions) -> Value {
         result["locking"] = json!("auto");
     }
     if let Some(p) = o.standard {
+        if o.standard_stall_guard {
+            result["standard_stall_guard"] = json!("on");
+        }
         result["convergence_profile"] = json!("standard");
         result["standard_threshold_ha"] = json!(p.threshold_ha);
         result["eigensolver_stopping_rule"] = json!("ritz_value_change");
@@ -539,6 +545,9 @@ pub fn execute_mode(
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
     if let Some(p) = opts.standard {
+        if opts.standard_stall_guard {
+            result["standard_stall_guard"] = json!("on");
+        }
         result["convergence_profile"] = json!("standard");
         result["certified"] = json!(false);
         result["standard_threshold_ha"] = json!(p.threshold_ha);

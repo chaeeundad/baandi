@@ -100,6 +100,9 @@ pub(crate) fn evidence(path: &Path) -> Result<Value, checkpoint_io::Error> {
         "preflight":"Not rerun: original configuration and pseudopotential files are not required for inspection."
     });
     if let Some(p) = cp.standard {
+        if cp.standard_stall_guard {
+            evidence["standard_stall_guard"] = json!("on");
+        }
         evidence["convergence_profile"] = json!("standard");
         evidence["certified"] = json!(false);
         evidence["standard_threshold_ha"] = json!(p.threshold_ha);

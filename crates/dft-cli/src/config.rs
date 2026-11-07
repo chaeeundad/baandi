@@ -433,6 +433,7 @@ pub struct Scf {
     pub gamma_real: Option<String>,
     pub convergence_profile: Option<String>,
     pub standard_threshold_ha: Option<f64>,
+    pub standard_stall_guard: Option<String>,
     pub mixing_metric: Option<String>,
     pub spectral_guard: Option<String>,
     pub locking: Option<String>,
@@ -462,6 +463,7 @@ impl Scf {
     }
 
     pub fn standard_profile(&self) -> Result<Option<dft_engine::StandardProfile>, ConfigError> {
+        self.standard_stall_guard()?;
         let threshold = self
             .standard_threshold_ha
             .unwrap_or(dft_engine::StandardProfile::default().threshold_ha);
@@ -480,6 +482,18 @@ impl Scf {
             })),
             _ => Err(ConfigError::Invalid(
                 "scf.convergence_profile must be strict or standard".into(),
+            )),
+        }
+    }
+    pub fn standard_stall_guard(&self) -> Result<bool, ConfigError> {
+        match self.standard_stall_guard.as_deref().unwrap_or("off") {
+            "off" => Ok(false),
+            "on" if self.convergence_profile.as_deref() == Some("standard") => Ok(true),
+            "on" => Err(ConfigError::Invalid(
+                "standard_stall_guard=on requires convergence_profile=standard".into(),
+            )),
+            _ => Err(ConfigError::Invalid(
+                "scf.standard_stall_guard must be off or on".into(),
             )),
         }
     }
@@ -967,6 +981,26 @@ impl Config {
 mod tests {
     use super::*;
     const EXAMPLE: &str = include_str!("../../../examples/si_lda.toml");
+    #[test]
+    fn standard_stall_guard_requires_explicit_standard_profile() {
+        for (settings, expected) in [
+            ("", Some(false)),
+            ("standard_stall_guard = \"off\"", Some(false)),
+            ("standard_stall_guard = \"on\"", None),
+            (
+                "convergence_profile = \"standard\"\nstandard_stall_guard = \"on\"",
+                Some(true),
+            ),
+            (
+                "convergence_profile = \"standard\"\nstandard_stall_guard = \"typo\"",
+                None,
+            ),
+        ] {
+            let scf: Scf = toml::from_str(settings).unwrap();
+            assert_eq!(scf.standard_stall_guard().ok(), expected);
+            assert_eq!(scf.standard_profile().is_ok(), expected.is_some());
+        }
+    }
     #[test]
     fn example_and_units_and_rows() {
         let input = Config::parse(EXAMPLE).unwrap();

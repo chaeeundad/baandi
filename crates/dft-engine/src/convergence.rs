@@ -23,6 +23,32 @@ impl StandardProfile {
     pub fn empty_threshold(tolerance: f64) -> f64 {
         (5.0 * tolerance).max(5e-6)
     }
+
+    /// Five completed intervals without a factor-two error reduction.
+    /// Cap against the window-entry tolerance, not the latest tolerance: this
+    /// prevents repeated cuts on every step of the same plateau. History alone
+    /// determines the action, including after an exact checkpoint continuation.
+    pub(crate) fn stall_guard(tolerance: f64, history: &[IterationRecord]) -> f64 {
+        const INTERVALS: usize = 5;
+        const TIGHTEN: f64 = 0.1;
+        if history.len() <= INTERVALS {
+            return tolerance;
+        }
+        let window = &history[history.len() - INTERVALS - 1..];
+        let Some(entry_error) = window[0].standard_error_ha else {
+            return tolerance;
+        };
+        if window[1..]
+            .iter()
+            .all(|r| r.standard_error_ha.is_some_and(|e| e > 0.5 * entry_error))
+        {
+            tolerance
+                .min(TIGHTEN * window[0].requested_eigen_tolerance)
+                .max(Self::FLOOR_HA)
+        } else {
+            tolerance
+        }
+    }
 }
 
 /// K maps a signed density to half its Hartree potential times voxel volume.
@@ -138,6 +164,75 @@ impl ResidualMetric for CoulombMetric {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn plateau_record() -> IterationRecord {
+        IterationRecord {
+            standard_error_ha: Some(1.0),
+            standard_redo: false,
+            iteration: 1,
+            energy: EnergyAudit {
+                xc_floor: None,
+                nlcc: None,
+                kinetic: 0.0,
+                local: 0.0,
+                local_zero_mode: 0.0,
+                nonlocal: 0.0,
+                hartree: 0.0,
+                xc: 0.0,
+                ewald: 0.0,
+                band_sum: 0.0,
+                double_counting: 0.0,
+                band_form: 0.0,
+                harris_foulkes: 0.0,
+                functional_difference_bound: 0.0,
+            },
+            energy_change: None,
+            density_residual: 1.0,
+            max_eigen_residual: 1.0,
+            requested_eigen_tolerance: 1e-4,
+            davidson_iterations: 2,
+            operator_applications: 0,
+            davidson_iterations_per_k: vec![],
+            operator_applications_per_k: vec![],
+            charge_error: 0.0,
+            input_charge_error: 0.0,
+            min_density: 0.0,
+            mixing_fraction: 1.0,
+            mixer_reset: false,
+            density_contraction: None,
+            mixing_history_used: None,
+            mixing_resets: 0,
+            mixing_raw_recovery: false,
+            fixed_point_certificate: None,
+            timings: PhaseTimings::default(),
+        }
+    }
+
+    #[test]
+    fn stall_window_progress_floor_and_no_repeated_compounding() {
+        let mut history = vec![plateau_record(); 6];
+        let tolerance = 1e-4;
+        assert_eq!(
+            StandardProfile::stall_guard(tolerance, &history[..5]),
+            tolerance
+        );
+        let tightened = StandardProfile::stall_guard(tolerance, &history);
+        assert!(tightened < tolerance);
+        // The same plateau cannot compound the cut before the window advances.
+        assert_eq!(StandardProfile::stall_guard(tightened, &history), tightened);
+        assert_eq!(
+            StandardProfile::stall_guard(StandardProfile::FLOOR_HA, &history),
+            StandardProfile::FLOOR_HA
+        );
+        history[3].standard_error_ha = Some(0.5);
+        assert_eq!(StandardProfile::stall_guard(tolerance, &history), tolerance);
+        history[3].standard_error_ha = None;
+        assert_eq!(StandardProfile::stall_guard(tolerance, &history), tolerance);
+        history[3].standard_error_ha = Some(0.49);
+        history[5].standard_error_ha = Some(2.0);
+        assert_eq!(StandardProfile::stall_guard(tolerance, &history), tolerance);
+    }
+
     #[test]
     fn signed_coulomb_energy_analytic_and_ratchet() {
         let side: f64 = 8.0;

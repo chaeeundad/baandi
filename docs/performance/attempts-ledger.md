@@ -594,3 +594,34 @@ that the production function body and artifacts/* are unchanged. Three
 superseded certificate-control groups and one duplicate parallel control are
 kept/accounted for without inflating the ten-seed sample size. Work remains
 uncommitted; archive raw evidence before cleanup.
+
+## P42A truncation-boundary study (2026-11-08; Mac count observations)
+
+A19/P38A reopened on the P41A perturbation-distribution premise, specifically
+last-requested-band closure rather than first-empty multiplet completion.
+No production/default/solver/tolerance change; no QE source read.
+
+| ID | Attempt | Decision | Evidence and lesson |
+|---|---|---|---|
+| P42A-1 | Ten P29A starts per extra count, two strict references, complex/real; own-density N+1 and wider spectral probes | Converged boundary closure is neither necessary nor sufficient for stable SCF counts; no auto option justified | Si8 complex extra=4 reproduces 20/25.5/32 SCFs, median H 1167.5. Extra=8 gives 10/10/10 and H 629 despite a wide-probe gap 8.48e-12 Ha inside a triplet. Extra=6 has gap 0.0719762645 Ha and complex 10/10/11, but real 24/25/30. Same final spectral gap does not determine both arithmetic-path trajectories. |
+| P42A-2 | Frozen descriptive oracle: first resolved gap >=4 extras, minimum over k relative gap >=0.05; fallback four, no probe cost charged | Fails per-case work bound even as an optimistic converged-spectrum diagnostic | Training cubic synthetic: H 98 ->112 (+14.29%). Held-out k222s: H 731 ->1083 (+48.15%), SCF 9 ->11; strict reference H +17.40%/+23.37%. Threshold not retuned. No first-loose predictor or recommended option follows. |
+| P42A-3 | Audit spectral completeness and equal-trajectory claims | Residual certification alone does not certify lowest-root completeness; equal counts are weaker than equal scalar histories | Narrow cold probes can omit roots despite <=1e-5 Ha residuals. Wide own-density probes retain disagreement/unknown flags. Si8 extra=8 has one integer-work sequence but ten distinct exact scalar histories. Do not rank unresolved roundoff splittings as physical gap ordering without the resolution sensitivity check. |
+
+Protocol, full coverage status, correlation/accuracy/failure tables and commands:
+[band-boundary-policy.md](band-boundary-policy.md), raw `P42A-evidence/`.
+All numbers above are local deterministic count observations, not dev08 wall
+acceptance. Phase B and ten-start ordinary strict candidate comparisons remain
+conditional on a justified rule; none was selected. The integer default stays four.
+
+P42A final coverage: 25 cases, 44 applicable case/path groups, 676 conditions,
+8,112 attempted starts. Standard: 4044 converged / 2716 unsuccessful; strict
+references: 810 certified / 542 unsuccessful. Of 404 converged reference pairs,
+396 meet the fixed 1e-12 Ha energy plateau. Wide gaps support 335 fully converged,
+reference-qualified condition correlations; missing/incomplete spectra remain
+unknown. Held-out diagnostic median H ratio = 1.000 and median spread change = 0
+on both paths; MgO H +37.87%, error ratios 5.9995/2.5067/2.8943, large synthetic
+real loses previously convergent seed 2. All recommendation conditions are not
+satisfied. Full evidence audit exit 0; workspace build/test/fmt/clippy exit 0;
+70 exact default repeat pairs plus 14 cross-thread groups pass, 30 unsupported
+forced-real multi-k inputs reject. The unchanged P29A harness exactly reproduces
+all ROW/END records for Si16 real extras 8 and 10. No production option added.

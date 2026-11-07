@@ -445,3 +445,23 @@ This supersedes P36B-2's ownership blocker; the earlier timing evidence is retai
 
 All task-owned executable copies outside target are removed after verification;
 raw evidence, hashes and cleanup manifest remain. No extra target directory.
+
+## P37A — generalized Gram stage 0 (2026-11-07; measurement only)
+
+Derived from the own-words `qe-stage-by-stage.md` and
+`qe-solvers-and-subspace.md`; no QE source read. Reopens B13/A16 only on Q2's
+relayed real-algebra premise; does not repeat A13 capacity-only tuning, A52
+CholeskyQR2, or P24A hard locking. Baseline
+`6c34eed6125c3e05338ddef486edcf1a8bb30c9b`, Mac pure Rust, T=1.
+
+| ID | Experiment | Status | Measured result | Lesson / limits |
+|---|---|---|---|---|
+| P37A-1 | Nonorthogonal unit-norm corrections; capacities 2/3/6; Cholesky and canonical fallback diagnostic on exact original SCF operators/starts | recommendation rejected by prespecified safety rule | 28 histories, 2,410 original solves, 67,257 diagnostic steps. Strict Si8 fallback at relative 1e-8: 64.60/64.57/34.83%; minimum relative Gram eigenvalues -2.429e-16/-1.175e-15/-1.388e-16. Strict Si16 2/3: fallback 41.39/36.98%, minima 3.537e-15/4.074e-15 | Fails <5% fallback and >=1e-12 strict minimum. Standard-only safety cannot override an all-profile rule. Diagnostic uses an independently rebuilt Gram; a cached-only production solver has no safety guarantee here. |
+| P37A-2 | A52 twenty-atom skew geometry, uniform and perturbed starts; current real strict path | no general module recommended | 2/3/6 fallback 0/1.08/2.03%; minimum relative eigenvalue 3.727e-6/5.768e-11/4.760e-10. Counted large-product/MGS MAC per step savings 20.97/44.99/18.99%; total MAC ratios 5.70/3.59/0.72. Diagnostic exhaustion 12/8/0 of 12 solves | A52 safety passes this assay, but cheap steps do not ensure convergence or lower total work. Does not explain the historical complex QR2 iteration regression. Six SCF steps remain a bounded, unconverged fixture. |
+| P37A-3 | Actual-call real solver GEMM/MGS accounting, generalized rectangle/packed-rotation/contraction dimensions; separate small-solve model | measured subset; full EVD count not certified | Strict capacity-6 MAC/step savings Si8/Si16 18.80/18.62%; standard Si8 45.54/50.28/50.32% at 2/3/6. All si-skew and si-slab rows miss 40%. 1,176 original/control scientific records identical; 25 production benchmark comparisons at T=1/2/4/8/12 give 0 Ha and identical densities | Small EVD is explicitly modeled, not an exact faer instruction count. No wall-time or dev08 claim. Production sources/defaults/artifacts/UPFs unchanged. |
+
+Per-case/profile/capacity spectra, percentiles, Cholesky failures, rank deficits,
+work tables, censored outcomes, fixed decision rule, exact commands and gate
+results: [generalized-gram-stage0.md](generalized-gram-stage0.md). Raw evidence:
+`P37A-evidence/`, including the superseded full-rebuild pilot. No module or
+default is adopted; no tolerance is relaxed.

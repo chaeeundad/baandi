@@ -575,3 +575,59 @@ fn recurrence_return_skips_final_application_but_limit_certifies() {
         assert!(r.converged.iter().all(|&x| x));
     }
 }
+
+#[test]
+fn reused_scratch_matches_rebuild_after_options_and_band_changes() {
+    let (a, diagonal, _) = fixture(1, 37);
+    let mut op = Operator {
+        a,
+        pool: WorkerPool::new(2).unwrap(),
+    };
+    let mut workspace = None;
+    let mut initial = None;
+    for (bands, cap, ritz, tolerance) in [
+        (3, 6, false, 1e-10),
+        (3, 6, false, 1e-11),
+        (4, 4, true, 1e-9),
+        (4, 6, false, 1e-10),
+        (3, 6, false, 1e-10),
+    ] {
+        let mut s = solver(bands);
+        s.tolerance = tolerance;
+        s.max_subspace = cap * bands;
+        let policy = BandTolerances {
+            strict_bands: bands,
+            buffer_tolerance: tolerance,
+        };
+        // A changing operator must not leave any reduced-matrix prefix or prior
+        // Ritz value in the scratch. Shape/executor changes also force resizing.
+        for i in 0..37 {
+            op.a[(i, i)] += 0.003 * (i as f64).sin();
+        }
+        let reused = s
+            .solve_reusing(
+                &op,
+                initial.as_ref(),
+                &diagonal,
+                policy,
+                ritz,
+                !ritz,
+                cap,
+                &mut workspace,
+            )
+            .unwrap();
+        let fresh = s
+            .solve_with_capacity_per_band(
+                &op,
+                initial.as_ref(),
+                &diagonal,
+                policy,
+                ritz,
+                !ritz,
+                cap,
+            )
+            .unwrap();
+        assert_eq!(format!("{reused:?}"), format!("{fresh:?}"));
+        initial = Some(reused.eigenvectors);
+    }
+}

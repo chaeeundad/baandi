@@ -172,6 +172,58 @@ impl RealGemmWorkspace {
             pool,
         })
     }
+    /// Rotate V and HV by the same Ritz coefficients in one parallel region.
+    /// Each side retains the original 256-row pieces and bounded kernel calls
+    /// (24 independent pieces for a 2969-row pair). The guard is unchanged.
+    pub fn rotate_pair(
+        &mut self,
+        v: RealMatrixRef<'_>,
+        hv: RealMatrixRef<'_>,
+        c: RealMatrixRef<'_>,
+        mut out_v: RealMatrixMut<'_>,
+        mut out_hv: RealMatrixMut<'_>,
+    ) -> Result<(), LinalgError> {
+        let (m, k, n) = (v.nrows(), v.ncols(), c.ncols());
+        if hv.nrows() != m
+            || hv.ncols() != k
+            || c.nrows() != k
+            || out_v.nrows() != m
+            || out_hv.nrows() != m
+            || out_v.ncols() != n
+            || out_hv.ncols() != n
+            || m > self.long
+            || k > self.short
+            || n > self.short
+        {
+            return Err(LinalgError::Dimension);
+        }
+        finite(v)?;
+        finite(hv)?;
+        finite(c)?;
+        if m == 0 || n == 0 {
+            return Ok(());
+        }
+        if k == 0 {
+            out_v.fill(0.);
+            out_hv.fill(0.);
+            return Ok(());
+        }
+        let parallel =
+            m.div_ceil(PANEL) >= 4 && m.saturating_mul(n).saturating_mul(k) >= PARALLEL_WORK;
+        if parallel {
+            self.pool.install(|| {
+                WorkerPool::join(
+                    || rotate(out_v.as_mut(), v, c, true),
+                    || rotate(out_hv.as_mut(), hv, c, true),
+                );
+            });
+        } else {
+            rotate(out_v.as_mut(), v, c, false);
+            rotate(out_hv.as_mut(), hv, c, false);
+        }
+        finite(out_v.as_ref())?;
+        finite(out_hv.as_ref())
+    }
     /// Overwrite output with A B or A^T B. Dimensions, capacity, and finiteness
     /// are checked. Zero reduction length produces zeros. Inputs may be views.
     pub fn multiply_into(

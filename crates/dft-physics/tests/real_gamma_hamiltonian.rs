@@ -295,3 +295,50 @@ fn large_parallel() {
         );
     }
 }
+
+#[test]
+fn persistent_hamiltonian_refreshes_potential_and_rejects_replacement() {
+    let rows = [[5., 0., 0.], [0.3, 6., 0.], [0.1, 0.2, 7.]];
+    let (basis, mut h) = fixture(rows, 2, 1.2);
+    let pool = WorkerPool::new(2).unwrap();
+    let mut cached = RealHamiltonian::from_complex(&h, &basis, 5, pool.clone()).unwrap();
+    let x = states(basis.vectors().len(), 3, 71);
+    let mut actual = RealMatrix::zeros(x.rows(), x.cols()).unwrap();
+    let mut expected = actual.clone();
+    cached.apply_block(&x, &mut actual).unwrap();
+    let old = actual.clone();
+    for offset in [0.125, -0.37, 0.0] {
+        let v = Array3::from_shape_fn(h.fft_grid().dims(), |(i, j, k)| {
+            offset + 0.2 * ((i + 3 * j + 7 * k) as f64).cos()
+        });
+        h.set_local_potential(v).unwrap();
+        assert!(cached.update_from_complex(&h, &basis));
+        let mut fresh = RealHamiltonian::from_complex(&h, &basis, 5, pool.clone()).unwrap();
+        cached.apply_block(&x, &mut actual).unwrap();
+        fresh.apply_block(&x, &mut expected).unwrap();
+        assert_eq!(
+            actual
+                .as_slice()
+                .iter()
+                .map(|v| v.to_bits())
+                .collect::<Vec<_>>(),
+            expected
+                .as_slice()
+                .iter()
+                .map(|v| v.to_bits())
+                .collect::<Vec<_>>()
+        );
+        assert_ne!(actual, old);
+    }
+    // Even equal reconstructed data have a different identity, preventing stale
+    // reuse for new cells/projectors and allocator address recycling.
+    for (rows, atoms, cutoff) in [
+        (rows, 2, 1.2),
+        (rows, 3, 1.2),
+        (rows, 2, 1.5),
+        ([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]], 2, 1.2),
+    ] {
+        let (b, replacement) = fixture(rows, atoms, cutoff);
+        assert!(!cached.update_from_complex(&replacement, &b));
+    }
+}

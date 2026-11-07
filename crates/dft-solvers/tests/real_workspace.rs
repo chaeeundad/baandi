@@ -945,3 +945,53 @@ fn localize_allocations() {
         );
     }
 }
+
+#[test]
+#[ignore = "persistent allocation gate: release --test-threads=1; backend limitation is not waived"]
+fn no_allocations_after_persistent_initial_h() {
+    use allocation_probe::{COUNT, TRACK};
+    use std::sync::atomic::Ordering;
+    let mut violations = Vec::new();
+    for (n, bands) in [(2969, 20), (11877, 68)] {
+        for threads in [1, 8] {
+            let op = CountingOperator(Synthetic {
+                n,
+                pool: WorkerPool::new(threads).unwrap(),
+            });
+            let diagonal: Vec<_> = (0..n).map(|i| 1. + i as f64 * 0.01).collect();
+            let solver = dft_solvers::RealDavidson {
+                bands,
+                tolerance: 1e-10,
+                max_iterations: 400,
+                max_subspace: 6 * bands,
+                seed: 42,
+            };
+            let policy = BandTolerances {
+                strict_bands: bands,
+                buffer_tolerance: 1e-10,
+            };
+            let mut workspace = None;
+            let first =
+                solver.solve_reusing(&op, None, &diagonal, policy, false, true, 6, &mut workspace);
+            TRACK.store(false, Ordering::SeqCst);
+            first.unwrap();
+            COUNT.store(0, Ordering::SeqCst);
+            let second =
+                solver.solve_reusing(&op, None, &diagonal, policy, false, true, 6, &mut workspace);
+            TRACK.store(false, Ordering::SeqCst);
+            let count = COUNT.load(Ordering::SeqCst);
+            let second = second.unwrap();
+            println!(
+                "PERSISTENT_ALLOC n={n} bands={bands} T={threads} allocations={count} steps={}",
+                second.iterations
+            );
+            if count != 0 {
+                violations.push((n, bands, threads, count));
+            }
+        }
+    }
+    assert!(
+        violations.is_empty(),
+        "backend allocations remain after reuse: {violations:?}"
+    );
+}

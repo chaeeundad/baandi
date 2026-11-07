@@ -383,6 +383,8 @@ pub struct SpeciesPotential<'a> {
 /// Cached ionic terms, Hamiltonian application plan, and density FFT plan.
 /// `step` is exposed for independent post-SCF fixed-point verification.
 pub struct ScfProblem {
+    #[cfg(test)]
+    force_real_rebuild: bool,
     force_model: crate::force_identity::ModelDescription,
     atoms: Vec<Atom>,
     symmetry: Option<dft_physics::symmetry::DensitySymmetrizer>,
@@ -408,6 +410,7 @@ pub struct ScfProblem {
     gamma_real_exclusion: Option<&'static str>,
 }
 struct KState {
+    real_solve: Option<crate::gamma_real::RealSolveState>,
     gamma_real: crate::GammaRealDiagnostics,
     point: KPoint,
     basis: PlaneWaveBasis,
@@ -837,6 +840,7 @@ impl ScfProblem {
                 let band_density =
                     crate::band_density::BandDensity::new(&k_grid, bands, inner, pool.clone())?;
                 Ok(KState {
+                    real_solve: None,
                     gamma_real: gamma_real.clone(),
                     point: KPoint {
                         fractional: basis.k_fractional(),
@@ -875,6 +879,8 @@ impl ScfProblem {
             states.iter().map(|s| s.point).collect(),
         );
         Ok(Self {
+            #[cfg(test)]
+            force_real_rebuild: false,
             gamma_real_exclusion,
             force_model,
             coulomb,
@@ -1033,6 +1039,12 @@ impl ScfProblem {
         certify: bool,
         mut finite: Option<&mut finite_temperature::OccupationWorkspace>,
     ) -> Result<ScfStep, ScfError> {
+        #[cfg(test)]
+        if self.force_real_rebuild {
+            for state in &mut self.states {
+                state.real_solve = None;
+            }
+        }
         if self.options.crystal_density_group && self.symmetry.is_none() {
             return Err(ScfError::InvalidInput(
                 "symmetry.density_group=crystal requires enabled auto symmetry",
@@ -1134,6 +1146,7 @@ impl ScfProblem {
                     self.gamma_real_exclusion
                         .or(finite.as_ref().map(|_| "Fermi-Dirac occupations")),
                     &mut state.gamma_real,
+                    &mut state.real_solve,
                 )?;
                 let solution = if let Some(solution) = real_solution {
                     solution
@@ -1209,6 +1222,7 @@ impl ScfProblem {
                         self.gamma_real_exclusion
                             .or(finite.as_ref().map(|_| "Fermi-Dirac occupations")),
                         &mut state.gamma_real,
+                        &mut state.real_solve,
                     )?;
                     let solution = if let Some(solution) = real_solution {
                         solution
@@ -1541,6 +1555,10 @@ mod tests {
                 );
             }
         }
+    }
+
+    mod persistent_real_state {
+        include!("../tests/common/persistent_real_state_unit.rs");
     }
 
     #[test]

@@ -502,3 +502,27 @@ inputs. Final workspace gates, release probe and evidence audit exit 0.
 Wall medians are loaded-Mac observations (load 2.6733–29.6738, including two
 concurrent T=1 collectors), not speed acceptance. Integer four stays unchanged;
 Phase B is not entered and no recommended automatic option is introduced.
+## P39A mirror-slab pair plan (2026-11-07; Mac observations, acceptance blocked)
+
+Source: [p39a-results.md](p39a-results.md), starting HEAD
+`f66e3966eceb5cedaca6411910f6738e3c8f4866`; raw evidence in `P39A-evidence/`.
+Derived from T1/PFFT-3 and its own-words FFT study-note context, not QE source.
+
+| ID | Attempt | Status | Evidence | Lesson |
+|---|---|---|---|---|
+| P39A-1 | Separate pure-Rust `PairFusedPlan`: plane-major sticks, mirror slab, batched rustfft, final 1/N; local and pair-density traits | implemented, uncommitted; not accepted | Ten shapes: maximum local relative error 2.703408120714201e-16, pair-density 4.821305842995627e-16; repeated/thread bits agree at T=1,2,4,8,12; six cold allocation probes count 0; stable numeric-buffer addresses. Complex/off 25 comparisons retain 0 Ha delta and identical density. Workspace build/test/fmt/clippy exit 0. | Backend cfg belongs in numerics (physics has no `mkl` feature). Complex/MKL aliases and shared fused modules stay unchanged. Engine density still uses completed complex orbitals. |
+| P39A-2 | Pair microbenchmark, 30 alternating samples at 25^3/36^3/48^3/72x36x36 | Mac observation only | Library to mirror us/band: 70.401→60.326, 223.668→180.353, 504.943→419.628, 389.631→334.583; ratios 0.857/0.806/0.831/0.859. No concurrent task builds; shared-host load, all raw samples retained. | Confirms layout benefit on this host; does not establish dev08 cache effects or QE parity. No SIMD/MKL/threading variant revived. |
+| P39A-3 | Strict/standard Si8/Si16 alternating end-to-end runs, T=1/8, five retained pairs; R5 snapshots across five budgets | **BLOCKED: strict Si16 benchmark energy gate fails** | Seven-system snapshot strict maximum delta 7.815970093361102e-13 Ha and all 14 profile groups deterministic. Exact benchmark-suite Si16 strict delta -1.438849039914203e-11 Ha at T=1/8 exceeds 1e-12 Ha. Snapshot Si16 and benchmark Si16 differ in seed/atom ordering. Main work and trajectories change; complete timing/work table in report. | Kernel norm agreement at roundoff does not guarantee finite-tolerance SCF energy agreement at 1e-12 Ha. Do not accept faster trajectories while the accuracy gate fails; no tolerance/seed/default tuning. Existing primitive count and standard slab absolute-cap failures are separately retained. |
+
+### P39A architect disposition and completed validation (2026-11-08)
+
+This supersedes P39A-3's acceptance block, without deleting its measured
+inter-trajectory delta. The architect replaced that gate with delivered accuracy
+against the same fixture's complex-tight reference: `abs(new-tight) <=
+max(2*abs(previous_real-tight), 2e-11 Ha)`, tight energy tolerance 1e-12 Ha,
+density residual 1e-10, gamma_real off. Production FFT/solver code and all
+measured real inputs are unchanged; component gates are unchanged.
+
+| ID | Follow-up | Status | Evidence | Lesson |
+|---|---|---|---|---|
+| P39A-4 | Recompute seven exact snapshot references and two exact CLI benchmark references, using the existing target tree; apply revised strict gate and unchanged standard relative criterion | **DONE, local ticket gates pass; dev08 performance pending** | All 11 strict rows (seven snapshot fixtures plus Si8/Si16 T1/T8) and six standard rows pass. Exact benchmark Si16 tight -6.31292444216179334e1 Ha; previous/new errors 1.49071865962469019e-11 / 5.18696197104873134e-13 Ha, cap 2.98143731924938037e-11 Ha. Largest new snapshot error 3.09086090055643581e-12 Ha, cap 2e-11 Ha. Full-precision energies/deltas and hex energies in p39a-results.md / delivered-accuracy.json. Revised summarize.py exit 0; workspace check exit 0; five-pair Mac tables already complete. | A reference-based delivered-accuracy gate distinguishes SCF trajectory spread from accuracy loss. Historical slab absolute-cap exceedance and primitive 10/12 count are pre-existing and explicitly excluded by the architect. Mac time ratios remain changed-work observations, not isolated FFT speedups or remote acceptance. |

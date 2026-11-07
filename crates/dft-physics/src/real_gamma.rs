@@ -2,9 +2,10 @@
 //! no engine caller or change to the complex traversal (ledger A43).
 use crate::hamiltonian::{Hamiltonian, NonlocalOperator};
 use dft_basis::{HalfSphere, PlaneWaveBasis};
+use dft_numerics::fused_pair_plan::RealPairPlan;
 use dft_numerics::{
-    PairMap, RealGemmWorkspace, RealMatrix, RealOp, fused::FusedPlan,
-    fused_pair::PairLocalWorkspace, pool::WorkerPool,
+    PairMap, RealGemmWorkspace, RealMatrix, RealOp, fused_pair::PairLocalWorkspace,
+    pool::WorkerPool,
 };
 use num_complex::Complex64;
 use std::sync::Arc;
@@ -173,7 +174,7 @@ pub struct RealHamiltonian {
     half: HalfSphere,
     kinetic: Vec<f64>,
     potential: Vec<f64>,
-    local: PairLocalWorkspace<FusedPlan>,
+    local: PairLocalWorkspace<RealPairPlan>,
     nonlocal: RealNonlocal,
     capacity: usize,
 }
@@ -192,7 +193,7 @@ impl RealHamiltonian {
         let half = HalfSphere::new(basis, grid)?;
         let map = PairMap::new(grid.dims(), grid.g_to_fft(), half.plus(), half.minus())?;
         let local = PairLocalWorkspace::new(map, capacity, pool.clone(), || {
-            FusedPlan::new(grid.dims(), grid.g_to_fft())
+            RealPairPlan::new(grid.dims(), grid.g_to_fft())
         })?;
         let mut kinetic = vec![0.; half.full_len()];
         kinetic[0] = source.kinetic_diagonal()[0];

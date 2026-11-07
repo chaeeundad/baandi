@@ -3190,17 +3190,17 @@
     "task_id": "P45A-ATOMIC-START-PROTOTYPE",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "done",
     "codex_pid": 46154,
     "wrapper_pid": 46139,
-    "session_id": null,
+    "session_id": "01a1b817-30ff-7e12-88eb-5a465c2d7b5d",
     "branch": "task/P45A-ATOMIC-START-PROTOTYPE",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P45A-ATOMIC-START-PROTOTYPE",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P45A-ATOMIC-START-PROTOTYPE.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P45A-ATOMIC-START-PROTOTYPE/report.json",
     "started_at": "2026-11-07T22:18:09Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-07T22:37:18Z",
+    "exit_code": 0,
+    "note": "merged (tests+docs); atomic start collapses the distribution on Si8 (13/13/13) and Si16 (9/9/9); frozen rule failed on skewed Si16 (spread 0 to 1, accuracy 2.26x): option implemented opt-in under revised rule R2 (P46A)"
   }
 ]

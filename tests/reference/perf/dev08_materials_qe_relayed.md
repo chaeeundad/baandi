@@ -384,3 +384,34 @@ Relayed by the dft5090/master session. main `b022b61` (P33A included), pure nati
 E(crystal) minus E(off) = -1.5538989435e-05 Ha (independent dev08 reproduction of the P34A value -1.5538989e-05; crystal energies are identical at both tolerances to the last digit).
 QE sym (same 32^3 grid, 10 irreducible points, np=1): -7.925994236779095 Ha, 7 SCF, accuracy 2.3e-12 Ry, wall median 0.805 s (n=3, min 0.801, max 0.875). BAANDI auto+crystal minus QE sym = 2.563458e-06 Ha = 1.2817e-06 Ha per atom, equal to the known convention offset of 1.27e-06 Ha per atom (batch-7 C). The earlier mismatched pair (auto mesh versus QE sym) was 1.810e-05 Ha, seven times the offset.
 Speed at equal grid, one core: QE sym 0.805 s; BAANDI auto+crystal 1.698 s (default tolerance, 2.11x slower) or 1.836 s (tight, 2.28x); BAANDI auto mesh 1.688 s (2.10x). Targets differ (QE conv_thr 1e-10 Ry versus BAANDI default energy tolerance 1e-8 Ha; tight is closer to QE). QE sym on its 25^3 grid takes 0.6225 s (BAANDI 3.1x), but the equal-grid comparison is the fair one. The crystal option costs +0.6 % here (Davidson 524 to 532). This case (2 atoms, k points reduced 64 to 10) is relatively favourable to BAANDI compared with the Gamma cases (2.8 to 17.8x).
+
+# dev08 batch-7 D: latest main b022b61 (P33A included), real path on/off, equal-accuracy gap to QE (relayed, 2026-11-07)
+
+Relayed by the dft5090/master session. main `b022b61`, pure native `c4fba2eca3cece046fd9dfea4f69525bc8d5cfe7e1b210262a4613d56b2879e1`, rustc 1.99.1; Si.pz-vbc.UPF `e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`; QE 7.6 `pw.x` `07c7cd7935f42b15157500ab719a5c3948825d8ce8a4487d992d7501c659658f`; si8, si16, si32 as defined earlier (Gamma, 30 Ry, lda-pz, Pulay beta 0.5); n=10 (si32 n=3); `taskset -c 0` or `0-7`; QE OMP/MKL 1, `disk_io=nowf`. Rows: wall median (s) with SCF / Davidson / H vectors (identical inside a row, and between T=1 and T=8).
+
+| Case | T | off strict | on strict | off standard | on standard |
+| --- | ---: | --- | --- | --- | --- |
+| si8 | 1 | 3.797 (15/279/2044) | 2.961 (15/258/2014) | 1.307 (15/77/772) | 1.323 (15/78/795) |
+| si8 | 8 | 2.465 | 2.464 | 0.920 | 1.200 |
+| si16 | 1 | 15.198 (12/182/2700) | 11.115 (13/185/2895) | 5.850 (14/76/1350) | 5.294 (15/70/1442) |
+| si16 | 8 | 7.450 | 6.975 | 3.129 | 3.802 |
+| si32 | 1 | 119.525 (13/352/5946) | 97.046 (14/426/6481) | 38.326 (15/67/2806) | 22.140 (13/63/2430) |
+| si32 | 8 | 50.552 | 50.284 | 16.857 | 14.828 |
+
+Same trajectory (equal SCF) between on and off: si8 all rows; not si16 (strict 12 vs 13, standard 14 vs 15) and not si32 (strict 13 vs 14, standard 15 vs 13).
+Real path on versus off wall ratio, b6a5416 / 72574f9 / b022b61: si8 strict T=1 -6.4 / -18.8 / -22.0 %, T=8 +38.6 / +0.5 / -0.04 %; si8 standard T=1 -0.6 / +1.1 / +1.2 %, T=8 +41.1 / +24.7 / +30.4 %; si16 strict T=1 -11.9 / -24.0 / -26.9 %, T=8 +45.2 / +0.3 / -6.4 %; si16 standard T=1 -11.3 / -8.8 / -9.5 %, T=8 +42.2 / +26.4 / +21.5 %; si32 strict T=1 -18.2 / -13.9 / -18.8 %, T=8 +34.9 / +13.3 / -0.5 %; si32 standard T=1 -37.4 / -41.8 / -42.2 %, T=8 +18.0 / -10.1 / -12.0 %. The strict T=8 inversion has disappeared at all three sizes; the standard T=8 inversion remains for si8 and si16 (trajectories differ, so the standard rows are not same-trajectory comparisons).
+Thread scaling T=1 to T=8 (off / on), b6a5416 to b022b61: si8 strict 1.53 to 1.54 / 1.03 to 1.20; si8 standard 1.42 / 1.00 to 1.10; si16 strict 2.03 to 2.04 / 1.23 to 1.59; si16 standard 1.87 / 1.16 to 1.39; si32 strict 2.35 to 2.36 / 1.42 to 1.93; si32 standard 2.28 to 2.27 / 1.21 to 1.49.
+
+## Equal-accuracy gap to QE real gamma (BAANDI T=1 versus QE np=1; each code against its own tight reference; BAANDI tight references unchanged because the complex path is bit-identical)
+
+| Case | BAANDI best setting | wall (s) | abs dE (Ha) | QE conv_thr (Ry) | QE wall (s) | QE abs dE (Ha) | QE faster by |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| si8 | T=1 off standard | 1.307 | 1.553e-09 | 1e-8 | 0.467 | 9.230e-10 | 2.80x |
+| si8 | T=1 on strict | 2.961 | 3.197e-14 | 1e-10 | 0.551 | 2.613e-11 | 5.37x |
+| si16 | T=1 on standard | 5.294 | 5.378e-10 | 1e-8 | 1.413 | 2.699e-10 | 3.75x |
+| si16 | T=1 on strict | 11.115 | 7.887e-13 | 1e-10 | 1.826 | 5.436e-12 | 6.09x |
+| si32 | T=1 on standard | 22.140 | 1.945e-09 | 1e-8 | 5.031 | 2.588e-10 | 4.40x |
+| si32 | T=1 on strict | 97.046 | 1.026e-11 | 1e-10 | 6.689 | 1.820e-11 | 14.51x |
+
+Gap change against the previous measurement (strict class / standard class): si8 6.83x to 5.37x / 2.80x to 2.80x; si16 8.28x to 6.09x / 4.15x to 3.75x; si32 17.82x to 14.51x / 7.62x to 4.40x. The growth of the gap with system size persists. Standard rows are single unperturbed trajectories (the median trajectory costs about 1.5 times more H work, see the P29A/P29B studies).
+Open items listed by the relaying session: the T=8 standard inversion (si8 +30.4 %, si16 +21.5 %); only about two of 17 pool threads busy at T=8 (unchanged by P30A; band-direction width at a single k point to be confirmed); si32 strict real path needs more work than off (SCF 13 to 14, Davidson 352 to 426) for unknown reasons.

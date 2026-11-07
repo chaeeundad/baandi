@@ -3057,6 +3057,24 @@
     "started_at": "2026-11-07T15:03:29Z",
     "ended_at": "2026-11-07T15:07:53Z",
     "exit_code": 0,
-    "note": "merged; mirror x-slab pair FFT 0.81-0.86x on Mac; strict tight-reference gate passed (si16 5.2e-13 vs 1.5e-11); dev08 to verify"
+    "note": "merged; dev08: pair FFT 0.50-0.70x, -2 to -19 percent per H vector; SCF distribution: si8 unchanged, si16 median +1 iteration, H work +4.5 percent"
+  },
+  {
+    "run_id": "P39B-MKL-ZERO-COPY#1",
+    "task_id": "P39B-MKL-ZERO-COPY",
+    "mode": "new",
+    "role": "implementer",
+    "status": "done",
+    "codex_pid": 71521,
+    "wrapper_pid": 71500,
+    "session_id": "01a1b696-7b2e-70a0-a456-c175d12ceb9c",
+    "branch": "task/P39B-MKL-ZERO-COPY",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P39B-MKL-ZERO-COPY",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P39B-MKL-ZERO-COPY.md",
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P39B-MKL-ZERO-COPY/report.json",
+    "started_at": "2026-11-07T15:17:57Z",
+    "ended_at": "2026-11-07T15:24:01Z",
+    "exit_code": 0,
+    "note": "merged; pure-Rust bit-identical (25/25); MKL runtime tests and speed pending on dev08"
   }
 ]

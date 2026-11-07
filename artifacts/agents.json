@@ -1107,12 +1107,12 @@
     "updated": "2026-11-07"
   },
   {
-    "id": "A126",
+    "id": "A124",
     "agent": "Codex",
     "role": "implementer",
-    "state": "planned",
+    "state": "done",
     "task": "P39B-MKL-ZERO-COPY: 속도(MKL 빌드): MKL FFT 래퍼가 변환마다 배열을 두 번 복사해 23~34% 느리던 것을 복사 없는 제자리 변환으로 교체(값은 비트까지 같음, dev08에서 확인)",
-    "ref": "not started",
-    "updated": ""
+    "ref": "pid 71521, session 01a1b696, task/P39B-MKL-ZERO-COPY",
+    "updated": "2026-11-07"
   }
 ]

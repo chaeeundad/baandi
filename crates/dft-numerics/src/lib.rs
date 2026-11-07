@@ -49,6 +49,35 @@ pub trait Fft3d {
         input: &Array3<Complex64>,
         output: &mut Array3<Complex64>,
     ) -> Result<(), FftError>;
+    /// Transform `data` in place, using reusable `scratch` for legacy backends.
+    /// Both arrays must have the planned shape and standard C layout; scratch
+    /// contents are unspecified afterwards. No allocation is performed. The
+    /// default invokes the unchanged arithmetic of to_real/to_reciprocal, then
+    /// copies the result back. Backends may override this to avoid all copies.
+    /// `inverse=true` is unscaled backward; false is forward scaled by 1/N.
+    fn transform_in_place(
+        &mut self,
+        data: &mut Array3<Complex64>,
+        scratch: &mut Array3<Complex64>,
+        inverse: bool,
+    ) -> Result<(), FftError> {
+        if data.shape() != self.shape()
+            || scratch.shape() != self.shape()
+            || !data.is_standard_layout()
+            || !scratch.is_standard_layout()
+        {
+            return Err(FftError::IncompatibleArray);
+        }
+        if inverse {
+            self.to_real(data, scratch)?;
+        } else {
+            self.to_reciprocal(data, scratch)?;
+        }
+        data.as_slice_mut()
+            .unwrap()
+            .copy_from_slice(scratch.as_slice().unwrap());
+        Ok(())
+    }
 }
 
 /// Precomputed lane dependencies for a reciprocal-space support, in axis order

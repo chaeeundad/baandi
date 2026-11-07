@@ -521,11 +521,12 @@ impl<F: crate::Fft3d> GridFusedPlan<F> {
         }
     }
     fn inverse(&mut self, c: &[C]) -> Result<(), FftError> {
-        self.reciprocal.fill(C::default());
+        self.real.fill(C::default());
         for (&index, &value) in self.indices.iter().zip(c) {
-            self.reciprocal[index] = value;
+            self.real[index] = value;
         }
-        self.fft.to_real(&self.reciprocal, &mut self.real)
+        self.fft
+            .transform_in_place(&mut self.real, &mut self.reciprocal, true)
     }
 }
 impl GridFusedPlan<crate::FftPlan3d> {
@@ -549,9 +550,10 @@ impl<F: crate::Fft3d> FusedOperator for GridFusedPlan<F> {
         for (z, &v) in self.real.iter_mut().zip(potential) {
             *z *= v;
         }
-        self.fft.to_reciprocal(&self.real, &mut self.reciprocal)?;
+        self.fft
+            .transform_in_place(&mut self.real, &mut self.reciprocal, false)?;
         for (dst, &index) in out.iter_mut().zip(&self.indices) {
-            *dst = self.reciprocal[index];
+            *dst = self.real[index];
         }
         Ok(())
     }

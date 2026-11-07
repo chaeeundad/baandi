@@ -356,6 +356,88 @@ fn density_pieces<P: PairDensityOperator + Send>(
     }
 }
 
+/// Pool-aware local application with one fixed band pair per piece. Each piece
+/// owns its FFT and pack/unpack scratch, independent of the worker count.
+/// Construction reserves the maximum block; applications allocate no storage.
+pub struct PairLocalWorkspace<P> {
+    pieces: Vec<PairPlan<P>>,
+    pool: Arc<WorkerPool>,
+    capacity: usize,
+    n: usize,
+    grid_len: usize,
+}
+impl<P: FusedOperator + Send> PairLocalWorkspace<P> {
+    /// Plans must use the ordered full-sphere indices of `map`.
+    pub fn new(
+        map: PairMap,
+        capacity: usize,
+        pool: Arc<WorkerPool>,
+        mut make_plan: impl FnMut() -> Result<P, FftError>,
+    ) -> Result<Self, FftError> {
+        let n = map.len;
+        if capacity.checked_mul(n).is_none() {
+            return Err(FftError::IncompatibleArray);
+        }
+        let grid_len = map.shape.iter().product();
+        let mut pieces = Vec::with_capacity(capacity.div_ceil(2));
+        for _ in 0..capacity.div_ceil(2) {
+            pieces.push(PairPlan::new(make_plan()?, map.clone())?);
+        }
+        Ok(Self {
+            pieces,
+            pool,
+            capacity,
+            n,
+            grid_len,
+        })
+    }
+
+    /// Preserve serial pair arithmetic, including the zero partner of an odd
+    /// tail. Disjoint output slices need neither locks nor a reduction.
+    pub fn apply_block(
+        &mut self,
+        bands: &[f64],
+        potential: &[f64],
+        out: &mut [f64],
+    ) -> Result<(), FftError> {
+        if !bands.len().is_multiple_of(self.n)
+            || bands.len() / self.n > self.capacity
+            || out.len() != bands.len()
+            || potential.len() != self.grid_len
+        {
+            return Err(FftError::IncompatibleArray);
+        }
+        let count = (bands.len() / self.n).div_ceil(2);
+        let pieces = &mut self.pieces[..count];
+        self.pool
+            .install(|| local_pieces(pieces, bands, potential, out, self.n))
+    }
+}
+fn local_pieces<P: FusedOperator + Send>(
+    pieces: &mut [PairPlan<P>],
+    bands: &[f64],
+    potential: &[f64],
+    out: &mut [f64],
+    n: usize,
+) -> Result<(), FftError> {
+    if pieces.len() > 1 {
+        let mid = pieces.len() / 2;
+        let (left, right) = pieces.split_at_mut(mid);
+        let (lb, rb) = bands.split_at(mid * 2 * n);
+        let (lo, ro) = out.split_at_mut(mid * 2 * n);
+        let (a, b) = WorkerPool::join(
+            || local_pieces(left, lb, potential, lo, n),
+            || local_pieces(right, rb, potential, ro, n),
+        );
+        a?;
+        b
+    } else if let Some(piece) = pieces.first_mut() {
+        piece.apply_block(bands, potential, out)
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -282,3 +282,16 @@ Full distributions, paired bootstrap, main-versus-certificate counts, mechanism,
 commands and limitations: [standard-robust-gain.md](standard-robust-gain.md).
 Raw evidence: `P29B-evidence/` (orchestrator archives before cleanup). These are
 local pure-Rust work observations, not a robust dev08 wall or QE speed claim.
+
+## P30A deterministic real Gamma pair scheduling (2026-11-07; Mac observations)
+
+Derived from `real-gamma-design.md` sections 6/12 (R7); no QE source read.
+Full protocol, work counts, raw-evidence locations and remaining-site profile:
+[real-gamma-r7-results.md](real-gamma-r7-results.md).
+
+| ID | Experiment | Status | Measured effect | Lesson / limits |
+| --- | --- | --- | --- | --- |
+| P30A-1 | One fixed pair per persistent-pool piece, private preallocated FFT/pack/unpack scratch; same pair partition for engine ORC boundary conversions | implemented; bit identity verified | Old serial pair output equals pooled output bit for bit on four shapes, both FFT backends, odd/even/empty/reused blocks and T=1,2,4,8,12. R5 four synthetic plus two Si fixtures retain pre-change energy/density/work bits at all five budgets; option-off 25 case/budget comparisons have 0 Ha difference and identical density/work. Workspace build/test/fmt/clippy exit 0. | No arithmetic, threshold, default, density grouping or complex-path change. Paired density is already pooled but is not used by the engine. No pool accessor added. Scratch scales with capacity, not worker count. |
+| P30A-2 | Same-HEAD real-on T=8 before/after; five retained runs per row | Mac observation; dev08 pending | Si8 strict 1.382801 -> 1.108805 s, standard 0.446245 -> 0.371749 s; Si16 strict 8.580309 -> 5.581573 s, standard 2.128872 -> 1.793700 s. Energy/density/main and certificate counts identical before/after. | Sequential before/after batches on shared host, not quiet-node acceptance. Specified Si16 is 1x1x2, not the relayed dev08 2x1x1 orientation. |
+| P30A-3 | On/off strict/standard, Si8/Si16, T=1,2,4,8, five samples after warmup | all four overall targets missed | Off vs on T1/T8: Si8 strict 2.192x/1.422x, standard 2.178x/1.424x; Si16 strict 2.417x/1.459x, standard 2.408x/1.441x. On/off T8 wall ratios 1.0001/1.1983/1.4976/1.3665, respectively. | Pair parallelism improves the real path but does not establish parity with complex or equally good scaling. All on/off work trajectories differ; no tolerance/algorithm change to conceal that. Remaining-site timing is reported separately; no guessed serial fractions. Default stays off. |
+| P30A-4 | Temporary named-site timing after missed target; three SCFs per case/profile, all sites >=45 calls, source restored afterward | diagnostic only | Si8 strict per SCF: H 0.293172 s of solver 1.036358 s; local pair 0.207341 s, H construction 0.039418 s (pair scratch 0.033034 s), kinetic 0.004962 s, coupling 0.000414 s, output addition/validation 0.002773 s. Full four-condition site table in report. | Largest measured remainder is solver outside H; it includes parallel algebra and serial work, not a measured all-serial fraction. MGS/EVD attribution remains unresolved; no guess substituted. `sample` unavailable (exit 255), named timing fallback used; diagnostic times are not acceptance timings. |

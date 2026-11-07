@@ -3,7 +3,8 @@
 use crate::hamiltonian::{Hamiltonian, NonlocalOperator};
 use dft_basis::{HalfSphere, PlaneWaveBasis};
 use dft_numerics::{
-    PairMap, PairPlan, RealGemmWorkspace, RealMatrix, RealOp, fused::FusedPlan, pool::WorkerPool,
+    PairMap, RealGemmWorkspace, RealMatrix, RealOp, fused::FusedPlan,
+    fused_pair::PairLocalWorkspace, pool::WorkerPool,
 };
 use num_complex::Complex64;
 use std::sync::Arc;
@@ -165,13 +166,13 @@ impl RealNonlocal {
 
 /// Snapshot of a complex Gamma H, acting on column-major ORC blocks.
 /// Scratch capacity is fixed at construction; nonzero paired band norms must
-/// differ by at most 1e3 (R2 debug assertion). Local pairs execute serially;
-/// GEMM uses the supplied persistent pool. No SCF dispatcher is installed.
+/// differ by at most 1e3 (R2 debug assertion). Fixed local pair pieces and GEMM
+/// share the supplied persistent pool.
 pub struct RealHamiltonian {
     half: HalfSphere,
     kinetic: Vec<f64>,
     potential: Vec<f64>,
-    local: PairPlan<FusedPlan>,
+    local: PairLocalWorkspace<FusedPlan>,
     nonlocal: RealNonlocal,
     capacity: usize,
 }
@@ -189,7 +190,9 @@ impl RealHamiltonian {
         let grid = source.fft_grid();
         let half = HalfSphere::new(basis, grid)?;
         let map = PairMap::new(grid.dims(), grid.g_to_fft(), half.plus(), half.minus())?;
-        let local = PairPlan::new(FusedPlan::new(grid.dims(), grid.g_to_fft())?, map)?;
+        let local = PairLocalWorkspace::new(map, capacity, pool.clone(), || {
+            FusedPlan::new(grid.dims(), grid.g_to_fft())
+        })?;
         let mut kinetic = vec![0.; half.full_len()];
         kinetic[0] = source.kinetic_diagonal()[0];
         for (i, &p) in half.plus().iter().enumerate().skip(1) {

@@ -136,7 +136,7 @@ fn ten_shapes_nonlocal_full_h_hermiticity_and_threads() {
         let mut hx = RealMatrix::zeros(n, m).unwrap();
         let mut hz = hx.clone();
         let mut reference_bits = Vec::new();
-        for threads in [1, 2, 4, 8] {
+        for threads in [1, 2, 4, 8, 12] {
             let pool = WorkerPool::new(threads).unwrap();
             let mut real = RealHamiltonian::from_complex(&h, &basis, m + 1, pool.clone()).unwrap();
             real.apply_block(&x, &mut hx).unwrap();
@@ -274,7 +274,7 @@ fn large_parallel() {
     let x = states(n, bands, 19);
     let mut y = x.clone();
     let mut expected = Vec::new();
-    for threads in [1, 2, 4, 8] {
+    for threads in [1, 2, 4, 8, 12] {
         let mut r = RealHamiltonian::from_complex(&h, &b, bands, WorkerPool::new(threads).unwrap())
             .unwrap();
         r.apply_block(&x, &mut y).unwrap();

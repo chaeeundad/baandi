@@ -95,6 +95,47 @@ fn check<P: PairDensityOperator + Send>(
     let mut pair = PairPlan::new(make(), map.clone()).unwrap();
     let mut got = vec![0.; x.len()];
     pair.apply_block(&x, &v, &mut got).unwrap();
+    // R7: old serial method is the byte-for-byte oracle. Reuse the same
+    // workspace at changing active widths, including an empty block and tails.
+    for threads in [1, 2, 4, 8, 12] {
+        let pool = WorkerPool::new(threads).unwrap();
+        let mut parallel = dft_numerics::fused_pair::PairLocalWorkspace::new(
+            map.clone(),
+            bands,
+            pool.clone(),
+            || Ok(make()),
+        )
+        .unwrap();
+        for width in [19, 0, 1, 2, 3, 8, 18, 19] {
+            let input = &x[..width * n];
+            let mut serial = vec![0.; input.len()];
+            let mut output = vec![0.; input.len()];
+            pair.apply_block(input, &v, &mut serial).unwrap();
+            pool.install(|| parallel.apply_block(input, &v, &mut output))
+                .unwrap();
+            assert!(
+                serial
+                    .iter()
+                    .zip(&output)
+                    .all(|(a, b)| a.to_bits() == b.to_bits())
+            );
+        }
+        assert!(
+            parallel
+                .apply_block(&x, &v[..v.len() - 1], &mut got)
+                .is_err()
+        );
+        assert!(
+            parallel
+                .apply_block(&x[..x.len() - 1], &v, &mut got)
+                .is_err()
+        );
+        assert_eq!(
+            pool.workers_created(),
+            if threads == 1 { 0 } else { threads }
+        );
+    }
+    pair.apply_block(&x, &v, &mut got).unwrap();
     let mut single = make();
     let mut expected = vec![0.; x.len()];
     let mut ref_density = vec![0.; grid];

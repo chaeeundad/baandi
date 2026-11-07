@@ -2794,17 +2794,17 @@
     "task_id": "P29A-STANDARD-STALL",
     "mode": "resume",
     "role": "implementer",
-    "status": "running",
+    "status": "done",
     "codex_pid": 24542,
     "wrapper_pid": 24530,
-    "session_id": null,
+    "session_id": "01a1b4a7-3f88-73f3-a383-56fd088207dd",
     "branch": "task/P29A-STANDARD-STALL",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P29A-STANDARD-STALL",
     "ticket": "/tmp/p29a-resume.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P29A-STANDARD-STALL/report.json",
     "started_at": "2026-11-07T06:45:13Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-07T07:01:43Z",
+    "exit_code": 0,
+    "note": "merged; stagnation reproduced on Mac (32/100); guard off by default, not recommended; evidence archived P29A-evidence.tar.gz"
   }
 ]

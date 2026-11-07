@@ -119,7 +119,10 @@ pub(crate) fn solve_real_gamma(
         }
         return Ok(None);
     }
-    let capacity = options.davidson_subspace.max(6 * bands).min(kinetic.len());
+    let capacity = options
+        .davidson_subspace
+        .max(options.davidson_capacity_per_band.saturating_mul(bands))
+        .min(kinetic.len());
     let real = match RealHamiltonian::from_complex(hamiltonian, basis, capacity, pool.clone()) {
         Ok(real) => real,
         Err(e) => {
@@ -167,17 +170,15 @@ pub(crate) fn solve_real_gamma(
     };
     // The SCF driver supplies the same ratcheted tolerance and band policy to
     // both representations. Standard returns remain explicitly uncertified.
-    let result = if options.standard.is_some() {
-        solver.solve_ritz_changes(&op, packed.as_ref(), &diagonal, policy)
-    } else {
-        solver.solve_with_band_tolerances_and_certification(
-            &op,
-            packed.as_ref(),
-            &diagonal,
-            policy,
-            certify,
-        )
-    }?;
+    let result = solver.solve_with_capacity_per_band(
+        &op,
+        packed.as_ref(),
+        &diagonal,
+        policy,
+        options.standard.is_some(),
+        certify && options.standard.is_none(),
+        options.davidson_capacity_per_band,
+    )?;
     let mut eigenvectors = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
     for j in 0..bands {
         op.h.borrow()

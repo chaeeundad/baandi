@@ -169,8 +169,10 @@ pub struct ScfOptions {
     pub free_electron_initial_guess: bool,
     pub max_iterations: usize,
     pub davidson_max_iterations: usize,
-    /// Minimum working capacity; the engine also reserves six columns per band.
+    /// Minimum working capacity, combined with the configured per-band floor.
     pub davidson_subspace: usize,
+    /// Research capacity floor per band, inclusive range 2..=12; default 6.
+    pub davidson_capacity_per_band: usize,
     pub seed: u64,
     pub divergence_factor: f64,
     pub divergence_patience: usize,
@@ -227,6 +229,7 @@ impl Default for ScfOptions {
             max_iterations: 200,
             davidson_max_iterations: 400,
             davidson_subspace: 48,
+            davidson_capacity_per_band: 6,
             seed: 2026,
             divergence_factor: 20.0,
             divergence_patience: 3,
@@ -234,11 +237,21 @@ impl Default for ScfOptions {
     }
 }
 /// Whether `bands` fit a basis of `plane_waves` functions. The solvers raise the
-/// Davidson capacity to at least `6 * bands` (every solve path), so the check uses
+/// Davidson capacity to at least `capacity_per_band * bands` (every solve path), so the check uses
 /// that effective capacity rather than the raw `davidson_subspace` option: a raw
 /// limit of 48 must not reject a 68-band calculation the solver can run.
-pub fn bands_fit_subspace(davidson_subspace: usize, bands: usize, plane_waves: usize) -> bool {
-    let capacity = davidson_subspace.max(6 * bands).min(plane_waves);
+pub fn bands_fit_subspace(
+    davidson_subspace: usize,
+    capacity_per_band: usize,
+    bands: usize,
+    plane_waves: usize,
+) -> bool {
+    if !(2..=12).contains(&capacity_per_band) {
+        return false;
+    }
+    let capacity = davidson_subspace
+        .max(capacity_per_band.saturating_mul(bands))
+        .min(plane_waves);
     bands <= plane_waves && (capacity > bands || bands == plane_waves)
 }
 
@@ -643,6 +656,11 @@ impl ScfProblem {
                 ));
             }
         }
+        if !(2..=12).contains(&options.davidson_capacity_per_band) {
+            return Err(ScfError::InvalidInput(
+                "davidson_capacity_per_band must be an integer from 2 to 12 (minimum 2 for a full correction block)",
+            ));
+        }
         if options.max_iterations == 0
             || options.davidson_max_iterations == 0
             || options.divergence_patience == 0
@@ -784,10 +802,14 @@ impl ScfProblem {
             &pool,
             |_, point| {
                 let basis = options.basis(cell, point.fractional, 1.0)?;
-                // The solvers raise the subspace to at least 6 x bands (see the
-                // `max(6 * bands)` capacity in every solve path), so the check uses
+                // The solvers apply the configured per-band capacity floor, so use
                 // the same effective capacity instead of the raw option.
-                if !bands_fit_subspace(options.davidson_subspace, bands, basis.vectors().len()) {
+                if !bands_fit_subspace(
+                    options.davidson_subspace,
+                    options.davidson_capacity_per_band,
+                    bands,
+                    basis.vectors().len(),
+                ) {
                     return Err(ScfError::InvalidInput(
                         "bands/subspace incompatible with k basis",
                     ));
@@ -1046,10 +1068,11 @@ impl ScfProblem {
             bands: self.occupations.len(),
             tolerance,
             max_iterations: self.options.davidson_max_iterations,
-            max_subspace: self
-                .options
-                .davidson_subspace
-                .max(6 * self.occupations.len()),
+            max_subspace: self.options.davidson_subspace.max(
+                self.options
+                    .davidson_capacity_per_band
+                    .saturating_mul(self.occupations.len()),
+            ),
             block_size: self.occupations.len(),
             seed: self.options.seed,
         };
@@ -1719,13 +1742,13 @@ mod bands_fit_tests {
     #[test]
     fn effective_capacity_is_at_least_six_times_bands() {
         // 68 bands, 11877 plane waves, raw subspace 48: runnable (si32 benchmark).
-        assert!(bands_fit_subspace(48, 68, 11877));
-        assert!(bands_fit_subspace(48, 20, 2969));
+        assert!(bands_fit_subspace(48, 6, 68, 11877));
+        assert!(bands_fit_subspace(48, 6, 20, 2969));
         // More bands than plane waves is still rejected.
-        assert!(!bands_fit_subspace(48, 100, 99));
+        assert!(!bands_fit_subspace(48, 6, 100, 99));
         // bands equal to the basis size stays allowed (full-space solve).
-        assert!(bands_fit_subspace(48, 50, 50));
+        assert!(bands_fit_subspace(48, 6, 50, 50));
         // One plane wave more than the bands: capacity is the basis size, allowed.
-        assert!(bands_fit_subspace(48, 50, 51));
+        assert!(bands_fit_subspace(48, 6, 50, 51));
     }
 }

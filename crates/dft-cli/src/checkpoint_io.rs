@@ -547,7 +547,15 @@ fn is_default_radial_even_rule(s: &str) -> bool {
     s == "simpson_3_8"
 }
 
+fn default_davidson_capacity_per_band() -> usize {
+    6
+}
+fn is_default_davidson_capacity_per_band(value: &usize) -> bool {
+    *value == 6
+}
 wire_struct!(ScfOptions, WScfOptions {
+    #[serde(default = "default_davidson_capacity_per_band", skip_serializing_if = "is_default_davidson_capacity_per_band")]
+    davidson_capacity_per_band: usize,
     #[serde(default = "default_radial_even_rule", skip_serializing_if = "is_default_radial_even_rule")]
     radial_even_rule: dft_engine::RadialEvenRule,
     #[serde(default = "default_local_mesh", skip_serializing_if = "is_default_local_mesh")]
@@ -1870,6 +1878,24 @@ pub fn restart(input: &Path, source: &Path, output: &Path, warm: bool) -> Result
 #[cfg(test)]
 mod pw92_wire_tests {
     use super::*;
+    #[test]
+    fn capacity_wire_roundtrip_and_legacy_omission() {
+        for multiplier in [2, 3, 4, 6, 12] {
+            let options = ScfOptions {
+                davidson_capacity_per_band: multiplier,
+                ..Default::default()
+            };
+            let mut bytes = Vec::new();
+            let json = serde_json::to_value(options.encode(&mut bytes).unwrap()).unwrap();
+            assert_eq!(
+                json.get("davidson_capacity_per_band").is_none(),
+                multiplier == 6
+            );
+            let decoded =
+                ScfOptions::decode(serde_json::from_value(json).unwrap(), &bytes, &mut 0).unwrap();
+            assert_eq!(decoded.davidson_capacity_per_band, multiplier);
+        }
+    }
     #[test]
     fn standard_stall_guard_wire_roundtrip_and_legacy_omission() {
         for enabled in [false, true] {

@@ -432,6 +432,7 @@ impl Config {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scf {
+    pub davidson_capacity_per_band: Option<usize>,
     pub gamma_real: Option<String>,
     pub convergence_profile: Option<String>,
     pub standard_threshold_ha: Option<f64>,
@@ -454,6 +455,13 @@ pub struct Scf {
     pub seed: Option<u64>,
 }
 impl Scf {
+    pub fn davidson_capacity_per_band(&self) -> Result<usize, ConfigError> {
+        let value = self.davidson_capacity_per_band.unwrap_or(6);
+        if !(2..=12).contains(&value) {
+            return Err(ConfigError::Invalid("scf.davidson_capacity_per_band must be an integer from 2 to 12 (minimum 2 for a full correction block)".into()));
+        }
+        Ok(value)
+    }
     pub fn gamma_real(&self) -> Result<dft_engine::GammaReal, ConfigError> {
         match self.gamma_real.as_deref().unwrap_or("off") {
             "off" => Ok(dft_engine::GammaReal::Off),
@@ -943,6 +951,7 @@ impl Config {
             s.spectral_guard()?;
             s.locking()?;
             s.gamma_real()?;
+            s.davidson_capacity_per_band()?;
             s.standard_profile()?;
             if s.standard_profile()?.is_some()
                 && self.output.as_ref().is_some_and(|o| o.forces || o.stress)
@@ -1001,6 +1010,23 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn capacity_config_range_and_integer_type() {
+        for value in ["0", "1", "13", "-1", "2.5", "\"2\""] {
+            let text = format!("davidson_capacity_per_band = {value}");
+            if let Ok(scf) = toml::from_str::<super::Scf>(&text) {
+                assert!(scf.davidson_capacity_per_band().is_err());
+            }
+        }
+        for value in 2..=12 {
+            let scf: super::Scf =
+                toml::from_str(&format!("davidson_capacity_per_band = {value}")).unwrap();
+            assert_eq!(scf.davidson_capacity_per_band().unwrap(), value);
+        }
+        let scf: super::Scf = toml::from_str("").unwrap();
+        assert_eq!(scf.davidson_capacity_per_band().unwrap(), 6);
+    }
+
     use super::*;
     const EXAMPLE: &str = include_str!("../../../examples/si_lda.toml");
     #[test]

@@ -22,8 +22,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P34A-SYMMETRY-FULL-GROUP-DENSITY: 검증 조사: 이동 메시에서 전체 결정 대칭 48개로 밀도를 대칭화하면(기본은 메시를 보존하는 12개) 참조 코드가 보인 -1.55e-5 Ha 차이가 재현되는지 연구 옵션(기본 꺼짐)으로 시험",
-    "ref": "pid 84449, session no sessi, task/P34A-SYMMETRY-FULL-GROUP-DENSITY",
+    "task": "P35A-NONLOCAL-GROUP-OPTIN: 속도: dev08에서 모든 구성에서 3~8% 느린 것으로 확인된 밴드 묶음 비국소 연산(P15B)을 기본에서 빼고 벡터별 방식을 기본으로 복원(묶음 방식은 옵션으로 보존, 결과는 비트까지 같아야 함)",
+    "ref": "pid 95350, session no sessi, task/P35A-NONLOCAL-GROUP-OPTIN",
     "updated": "2026-11-07"
   },
   {
@@ -1050,6 +1050,15 @@
     "state": "done",
     "task": "P33A-REAL-WORKSPACE-PARALLEL: 속도: 실수 경로 대수 계산 2차 개선. 루프 안에서 큰 행렬을 새로 만들고 0으로 채우던 것(전체 시간의 12.6%)을 한 번 만든 작업 공간 재사용으로 바꾸고, 직렬이던 대수 루프를 고정 분할로 풀에 분배(결과는 비트까지 같아야 함)",
     "ref": "pid 75510, session 01a1b569, task/P33A-REAL-WORKSPACE-PARALLEL",
+    "updated": "2026-11-07"
+  },
+  {
+    "id": "A118",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P34A-SYMMETRY-FULL-GROUP-DENSITY: 검증 조사: 이동 메시에서 전체 결정 대칭 48개로 밀도를 대칭화하면(기본은 메시를 보존하는 12개) 참조 코드가 보인 -1.55e-5 Ha 차이가 재현되는지 연구 옵션(기본 꺼짐)으로 시험",
+    "ref": "pid 84449, session 01a1b5aa, task/P34A-SYMMETRY-FULL-GROUP-DENSITY",
     "updated": "2026-11-07"
   }
 ]

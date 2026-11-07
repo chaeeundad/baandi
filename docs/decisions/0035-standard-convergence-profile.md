@@ -50,3 +50,37 @@ This status note does not alter the accepted decision.
   delivered-accuracy claim is possible for the two failed-reference stress cases.
 - Full protocol, distributions, two histories, held-out split, reproducible raw
   evidence and limitations: [standard stall study](../performance/standard-stall-study.md).
+
+## Amendment: robust gain evidence and density-forcing experiment (P29B, 2026-11-07)
+
+- Status: **Proposed**. The accepted standard profile and strict default remain
+  unchanged. This amendment does not promote a research rule.
+- Replace any interpretation of the Si8 historical single-run 2.65x H / 3.0x
+  dev08 wall figures as robust guarantees with explicit ensemble statistics.
+  Local ten-seed paired strict/standard total-H median ratio is 1.7849x
+  (95% paired bootstrap 1.6503–2.0044x); worst observed pair 1.4036x.
+  Mandatory strict certificates are included; main-only ratios are separately
+  reported. No robust dev08 wall measurement exists in this study.
+- One opt-in research key, `[scf] standard_density_forcing = "off" | "on"`,
+  defaults off. On requires standard and `standard_stall_guard=off`; unknown
+  values and invalid combinations reject. Off serialization stays omitted;
+  enabled result/options/checkpoint/inspection provenance is explicit and exact
+  restart rejects a changed setting. Standard results stay uncertified.
+- On applies `max(5e-14 Ha, min(ordinary_ratchet,
+  1 Ha * (previous_density_L2 / (1 Bohr^-3/2))^2))`. The first-step rule, ordinary
+  floor, stopping threshold, strict tolerances and certificate are unchanged.
+  The inexact-solve motivation and quadratic Rayleigh-error analogy are a
+  heuristic, not a theorem for Pulay SCF or an energy bound. No mutable state,
+  allocation or I/O is introduced in the numerical loop.
+- Training: four cases, seeds 1–5, H 8784→7359 (-16.22%), all 20 converged.
+  Freeze coefficient 1 before held-out evaluation; the conditional second
+  parameter was not tried. No held-out case/seed retuning.
+- Negative generalization: ten cases, held-out seeds 6–10, H 139332→146296
+  (+5.00%); whole-case holdouts +6.31%, successful-only +0.75%. Si8/Si16 improve
+  but k222s/Si-PBE/MgO-PBE regress; elongated/slab still fail. All 40 previously
+  successful held-out trajectories converge, max energy error 8.633592e-10 Ha.
+  **No tested rule beats standard on the declared held-out aggregate criterion;
+  leave this option experimental, off, and not recommended for general use.**
+- Full per-case distributions, accuracy, statistical definitions, failure
+  accounting, exact commands, gates and dev08 request:
+  [standard robust gain](../performance/standard-robust-gain.md).

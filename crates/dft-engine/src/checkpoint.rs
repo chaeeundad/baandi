@@ -94,6 +94,7 @@ pub struct ExportResult {
 #[derive(Clone, Debug)]
 pub struct Checkpoint {
     pub standard_stall_guard: bool,
+    pub standard_density_forcing: bool,
     pub standard: Option<crate::StandardProfile>,
     pub hartree_mixing: bool,
     pub schema_version: u32,
@@ -315,6 +316,7 @@ pub(crate) fn options_identical(a: &ScfOptions, b: &ScfOptions) -> bool {
     mixing
         && a.standard == b.standard
         && a.standard_stall_guard == b.standard_stall_guard
+        && a.standard_density_forcing == b.standard_density_forcing
         && a.hartree_mixing == b.hartree_mixing
         && solver
         && eq!(

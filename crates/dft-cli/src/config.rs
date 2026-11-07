@@ -436,6 +436,7 @@ pub struct Scf {
     pub convergence_profile: Option<String>,
     pub standard_threshold_ha: Option<f64>,
     pub standard_stall_guard: Option<String>,
+    pub standard_density_forcing: Option<String>,
     pub mixing_metric: Option<String>,
     pub spectral_guard: Option<String>,
     pub locking: Option<String>,
@@ -466,6 +467,7 @@ impl Scf {
 
     pub fn standard_profile(&self) -> Result<Option<dft_engine::StandardProfile>, ConfigError> {
         self.standard_stall_guard()?;
+        self.standard_density_forcing()?;
         let threshold = self
             .standard_threshold_ha
             .unwrap_or(dft_engine::StandardProfile::default().threshold_ha);
@@ -496,6 +498,22 @@ impl Scf {
             )),
             _ => Err(ConfigError::Invalid(
                 "scf.standard_stall_guard must be off or on".into(),
+            )),
+        }
+    }
+    pub fn standard_density_forcing(&self) -> Result<bool, ConfigError> {
+        match self.standard_density_forcing.as_deref().unwrap_or("off") {
+            "off" => Ok(false),
+            "on" if self.convergence_profile.as_deref() == Some("standard")
+                && !self.standard_stall_guard()? =>
+            {
+                Ok(true)
+            }
+            "on" => Err(ConfigError::Invalid(
+                "standard_density_forcing=on requires standard profile and stall guard off".into(),
+            )),
+            _ => Err(ConfigError::Invalid(
+                "scf.standard_density_forcing must be off or on".into(),
             )),
         }
     }
@@ -1002,6 +1020,30 @@ mod tests {
         ] {
             let scf: Scf = toml::from_str(settings).unwrap();
             assert_eq!(scf.standard_stall_guard().ok(), expected);
+            assert_eq!(scf.standard_profile().is_ok(), expected.is_some());
+        }
+    }
+    #[test]
+    fn standard_density_forcing_requires_explicit_standard_profile() {
+        for (settings, expected) in [
+            (
+                "convergence_profile = \"standard\"\nstandard_density_forcing = \"on\"\nstandard_stall_guard = \"on\"",
+                None,
+            ),
+            ("", Some(false)),
+            ("standard_density_forcing = \"off\"", Some(false)),
+            ("standard_density_forcing = \"on\"", None),
+            (
+                "convergence_profile = \"standard\"\nstandard_density_forcing = \"on\"",
+                Some(true),
+            ),
+            (
+                "convergence_profile = \"standard\"\nstandard_density_forcing = \"typo\"",
+                None,
+            ),
+        ] {
+            let scf: Scf = toml::from_str(settings).unwrap();
+            assert_eq!(scf.standard_density_forcing().ok(), expected);
             assert_eq!(scf.standard_profile().is_ok(), expected.is_some());
         }
     }

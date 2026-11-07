@@ -376,7 +376,9 @@ impl ScfSession {
                     self.problem.electrons,
                 )
             });
-            if self.problem.options.standard_stall_guard {
+            if self.problem.options.standard_density_forcing {
+                StandardProfile::density_forcing(ordinary, history)
+            } else if self.problem.options.standard_stall_guard {
                 StandardProfile::stall_guard(ordinary, history)
             } else {
                 ordinary
@@ -716,6 +718,7 @@ impl ScfSession {
                 converged: certified,
                 result: ScfResult {
                     standard_stall_guard: self.problem.options.standard_stall_guard,
+                    standard_density_forcing: self.problem.options.standard_density_forcing,
                     pw92_prefactor: self.problem.options.pw92_prefactor,
                     local_mesh: self.problem.options.local_mesh,
                     radial_even_rule: self.problem.options.radial_even_rule,
@@ -1130,6 +1133,7 @@ impl ScfSession {
         };
         Ok(Checkpoint {
             standard_stall_guard: self.problem.options.standard_stall_guard,
+            standard_density_forcing: self.problem.options.standard_density_forcing,
             standard: self.problem.options.standard,
             hartree_mixing: self.problem.options.hartree_mixing,
             schema_version: SCHEMA_VERSION,
@@ -1251,6 +1255,7 @@ impl ScfSession {
         }
         if checkpoint.standard != c.options.standard
             || checkpoint.standard_stall_guard != c.options.standard_stall_guard
+            || checkpoint.standard_density_forcing != c.options.standard_density_forcing
             || checkpoint.hartree_mixing != c.options.hartree_mixing
         {
             return Err(Rejection::Options);

@@ -134,6 +134,8 @@ pub struct ScfOptions {
     pub standard: Option<StandardProfile>,
     /// Experimental standard-profile stagnation guard; never enabled by default.
     pub standard_stall_guard: bool,
+    /// Experimental density-residual forcing cap; default off, standard only.
+    pub standard_density_forcing: bool,
     pub hartree_mixing: bool,
     pub spectral_guard: crate::SpectralGuard,
     pub locking: dft_solvers::locking::Locking,
@@ -198,6 +200,7 @@ impl Default for ScfOptions {
             gamma_real: crate::GammaReal::Off,
             standard: None,
             standard_stall_guard: false,
+            standard_density_forcing: false,
             hartree_mixing: false,
             spectral_guard: crate::SpectralGuard::Off,
             locking: dft_solvers::locking::Locking::Off,
@@ -317,6 +320,8 @@ pub struct KPointSolution {
 #[derive(Debug)]
 pub struct ScfResult {
     pub standard_stall_guard: bool,
+    /// Experimental density-residual forcing cap; default off, standard only.
+    pub standard_density_forcing: bool,
     pub pw92_prefactor: crate::Pw92Prefactor,
     pub local_mesh: crate::LocalMesh,
     pub radial_even_rule: crate::RadialEvenRule,
@@ -582,6 +587,13 @@ impl ScfProblem {
             && let Some(reason) = gamma_real_exclusion
         {
             gamma_real.fallback(options.gamma_real, reason)?;
+        }
+        if options.standard_density_forcing
+            && (options.standard.is_none() || options.standard_stall_guard)
+        {
+            return Err(ScfError::InvalidInput(
+                "standard_density_forcing requires standard and stall guard off",
+            ));
         }
         if options.standard_stall_guard && options.standard.is_none() {
             return Err(ScfError::InvalidInput(

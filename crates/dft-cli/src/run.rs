@@ -79,6 +79,9 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
         o.standard_stall_guard = s
             .standard_stall_guard()
             .map_err(|e| error(1, e.to_string()))?;
+        o.standard_density_forcing = s
+            .standard_density_forcing()
+            .map_err(|e| error(1, e.to_string()))?;
         o.hartree_mixing = s.hartree_mixing().map_err(|e| error(1, e.to_string()))?;
         o.spectral_guard = s.spectral_guard().map_err(|e| error(1, e.to_string()))?;
         o.gamma_real = s.gamma_real().map_err(|e| error(1, e.to_string()))?;
@@ -153,6 +156,9 @@ fn options_json(o: &ScfOptions) -> Value {
     if let Some(p) = o.standard {
         if o.standard_stall_guard {
             result["standard_stall_guard"] = json!("on");
+        }
+        if o.standard_density_forcing {
+            result["standard_density_forcing"] = json!("on");
         }
         result["convergence_profile"] = json!("standard");
         result["standard_threshold_ha"] = json!(p.threshold_ha);
@@ -561,6 +567,9 @@ pub fn execute_mode(
     if let Some(p) = opts.standard {
         if opts.standard_stall_guard {
             result["standard_stall_guard"] = json!("on");
+        }
+        if opts.standard_density_forcing {
+            result["standard_density_forcing"] = json!("on");
         }
         result["convergence_profile"] = json!("standard");
         result["certified"] = json!(false);

@@ -268,3 +268,17 @@ Protocol, failure treatment, commands and two full example histories:
 [standard-stall-study.md](standard-stall-study.md). Raw evidence is in the
 architect-approved worktree `P29A-evidence/`, never under `target/`; archive it
 before cleanup. This is not an accepted performance optimization or dev08 result.
+
+## P29B standard-profile robust gain (2026-11-07; Mac observations)
+
+| ID | Experiment | Status | Measured effect | Lesson / limits |
+| --- | --- | --- | --- | --- |
+| P29B-1 | Default strict and standard, same ten P29A seeds on ten benchmark/material cases, plus twenty repeated reference runs | measured | 80/100 converge in each arm; all 120 reference/standard histories match P29A. Si8 paired median total-H strict/standard 1.7849x [95% bootstrap 1.6503, 2.0044], worst pair 1.4036x; strict H median 2059.5, standard 1167.5. | Historical 2.65x H / 3.0x dev08 wall is one trajectory, not robust gain. Strict certificate work included; main-only counts separately retained. No gain/accuracy assigned to elongated/slab failures. |
+| P29B-2 | Residual-squared cap on ordinary Ritz ratchet, coefficient 1, four training cases x five seeds | research switch, default off | Training H 8784→7359 (-16.22%), all 20 converge, max energy error 1.213515e-9 Ha. Gamma/Si8 improve, skew/low regress. | One inexact-solve-inspired mechanism; not the rejected P29A delayed stall guard or A21 strict-schedule loosening. Conditional coefficient 0.1 not tested after training criterion passed; freeze before holdout. |
+| P29B-3 | Frozen density cap, held-out seeds 6–10; six whole-case holdouts and four training-case new-seed holdouts | general performance selection failed | All-set H 139332→146296 (+5.00%); successful-only 85631→86270 (+0.75%); whole-case holdouts +6.31%, new seeds of training cases -15.16%. Si8/Si16 H -23.08%/-13.55%; material Si/MgO +3.69%/+5.80%. All 40 prior successes remain; ten stress attempts still fail. Max error 8.633592e-10 Ha. | No rule beats standard on the held-out aggregate criterion. Improvements on large Si cells do not generalize; do not recommend as default. No parameter retuning on holdout. |
+| P29B-4 | Default-off identity and switch provenance/continuation | locally verified | Workspace build/test/fmt/clippy exit 0; 50 five-case/thread/profile bench comparisons exit 0, energy delta 0 Ha, identical density/SCF counts; exact continuation/mismatch and legacy wire tests pass. | Strict/certificate arithmetic untouched; standard uncertified. session.rs dispatcher and checkpoint/result/inspection edits are additive plumbing; no extra target directory or artifacts edits. |
+
+Full distributions, paired bootstrap, main-versus-certificate counts, mechanism,
+commands and limitations: [standard-robust-gain.md](standard-robust-gain.md).
+Raw evidence: `P29B-evidence/` (orchestrator archives before cleanup). These are
+local pure-Rust work observations, not a robust dev08 wall or QE speed claim.

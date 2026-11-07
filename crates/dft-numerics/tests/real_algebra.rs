@@ -294,3 +294,86 @@ fn strided_views_and_zero_reduction() {
     .unwrap();
     assert!(backing.as_slice().iter().all(|&v| v == 0.));
 }
+
+#[test]
+fn initialized_storage_and_evd_reuse() {
+    use dft_numerics::real::{RealEighWorkspace, symmetric_eigh};
+    let mut storage = fixture(9, 9);
+    let saved = storage.clone();
+    let pointer = storage.as_slice().as_ptr();
+    storage.reshape_within_storage(9, 2).unwrap();
+    assert_eq!(storage.as_slice(), &saved.as_slice()[..18]);
+    assert_eq!(storage.clone().as_slice().len(), 18);
+    storage.reshape_within_storage(9, 9).unwrap();
+    assert_eq!(storage, saved);
+    assert_eq!(storage.as_slice().as_ptr(), pointer);
+    assert!(storage.reshape_within_storage(10, 10).is_err());
+    let mut ws = RealEighWorkspace::new(33).unwrap();
+    let mut vectors = RealMatrix::zeros(33, 33).unwrap();
+    let mut values = vec![0.; 33];
+    for n in [33, 1, 17, 0, 9, 33] {
+        let mut a = fixture(n, n);
+        for j in 0..n {
+            for i in 0..j {
+                a[(i, j)] = a[(j, i)];
+            }
+        }
+        let expected = symmetric_eigh(&a).unwrap();
+        vectors.reshape_within_storage(n, n).unwrap();
+        vectors.as_mut_slice().fill(f64::NAN);
+        ws.solve_into(&a, &mut values[..n], &mut vectors).unwrap();
+        assert_eq!(&values[..n], expected.0);
+        assert_eq!(vectors, expected.1);
+    }
+}
+
+#[test]
+fn p32a_product_bits_and_poisoned_output() {
+    for (rows, width, cols) in [(1, 1, 1), (257, 17, 9), (1025, 33, 37), (513, 257, 5)] {
+        for op in [RealOp::Identity, RealOp::Transpose] {
+            let a = fixture(rows, width);
+            let b = fixture(if op == RealOp::Identity { width } else { rows }, cols);
+            let m = if op == RealOp::Identity { rows } else { width };
+            let mut expected = RealMatrix::zeros(m, cols).unwrap();
+            for row in (0..rows).step_by(256) {
+                let len = 256.min(rows - row);
+                if op == RealOp::Identity {
+                    shaped::<4, 4, 256>(
+                        expected.as_mut().subrows_mut(row, len),
+                        a.as_ref().subrows(row, len),
+                        b.as_ref(),
+                    );
+                } else {
+                    let mut part = RealMatrix::zeros(m, cols).unwrap();
+                    previous(
+                        part.as_mut(),
+                        a.as_ref().subrows(row, len).transpose(),
+                        b.as_ref().subrows(row, len),
+                    );
+                    for (dst, &src) in expected.as_mut_slice().iter_mut().zip(part.as_slice()) {
+                        *dst += src;
+                    }
+                }
+            }
+            for threads in [1, 2, 4, 8, 12] {
+                let mut ws = RealGemmWorkspace::with_pool(
+                    rows,
+                    width.max(cols),
+                    WorkerPool::new(threads).unwrap(),
+                )
+                .unwrap();
+                let mut actual = RealMatrix::zeros(m, cols).unwrap();
+                actual.as_mut_slice().fill(f64::NAN);
+                ws.multiply_into(a.as_ref(), op, b.as_ref(), actual.as_mut())
+                    .unwrap();
+                assert!(
+                    actual
+                        .as_slice()
+                        .iter()
+                        .zip(expected.as_slice())
+                        .all(|(a, b)| a.to_bits() == b.to_bits())
+                );
+            }
+        }
+    }
+}

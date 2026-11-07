@@ -3,7 +3,7 @@ use crate::{BandTolerances, RealLinearOperator, SolverError};
 use dft_numerics::{
     linalg::{DEPENDENCE_TOLERANCE, LinalgError},
     pool::WorkerPool,
-    real::{RealGemmWorkspace, RealMatrix, RealMatrixRef, RealOp, symmetric_eigh},
+    real::{RealEighWorkspace, RealGemmWorkspace, RealMatrix, RealMatrixRef, RealOp},
 };
 
 /// Same accuracy flags and work units as the complex EigenSolution.
@@ -153,8 +153,8 @@ impl RealDavidson {
         // Existing R1 adapter: 256-row panels, ordered sums, persistent pool.
         // 262144 complex MAC * 8 flops / 2 flops per real MAC = 1048576
         // real MAC per dispatch. This is a work estimate, not a speed claim.
-        let mut gemm = RealGemmWorkspace::with_pool(n, capacity, pool)?;
-        let mut projection = Projection::new(n, capacity)?;
+        let mut gemm = RealGemmWorkspace::with_pool(n, capacity, pool.clone())?;
+        let mut projection = Projection::with_pool(n, capacity, pool.clone())?;
         let mut rng = Random(self.seed);
         let mut basis = if let Some(x) = initial {
             if x.rows() != n || x.cols() > capacity {
@@ -201,21 +201,59 @@ impl RealDavidson {
         let mut restarts = 0;
         let mut contractions = 0;
         let mut certificates = 0;
-        let mut products = apply(op, &basis, &mut applications, &mut work)?;
-        let mut reduced = None;
+        let mut products = RealMatrix::zeros(n, capacity)?;
+        basis.reserve_storage(n * capacity);
+        products.reserve_storage(n * capacity);
+        let mut reduced = RealMatrix::zeros(capacity, capacity)?;
+        let mut reduced_width = 0;
+        let mut eigensolver = RealEighWorkspace::new(capacity)?;
+        let mut values = vec![0.; capacity];
+        let mut coefficients = RealMatrix::zeros(capacity, capacity)?;
+        let mut vectors = RealMatrix::zeros(n, capacity)?;
+        let mut rotated_products = RealMatrix::zeros(n, capacity)?;
+        let mut residual_block = RealMatrix::zeros(n, self.bands)?;
+        let mut residuals = vec![0.; self.bands];
+        let mut actual = RealMatrix::zeros(n, self.bands)?;
+        let mut corrections = RealMatrix::zeros(n, self.bands)?;
+        let mut extra = RealMatrix::zeros(n, capacity)?;
+        let mut extra_products = RealMatrix::zeros(n, capacity)?;
+        let mut random = RealMatrix::zeros(n, self.bands)?;
+        let mut selected = Vec::with_capacity(self.bands);
+        let mut converged = vec![false; self.bands];
+        let buffer = (0..self.bands).map(|j| j >= policy.strict_bands).collect();
         let mut previous = vec![f64::NAN; self.bands];
+        apply_into(op, &basis, &mut applications, &mut work, &mut products)?;
         let mut max_basis_dimension = 0;
         for iteration in 1..=self.max_iterations {
             max_basis_dimension = max_basis_dimension.max(basis.cols());
-            let small = reduced_matrix(&basis, &products, reduced.as_ref(), &mut gemm)?;
-            let (mut values, coefficients) = symmetric_eigh(&small)?;
-            reduced = Some(small);
-            values.truncate(self.bands);
+            let m = basis.cols();
+            reduced_matrix_into(&basis, &products, reduced_width, &mut gemm, &mut reduced)?;
+            reduced_width = m;
+            coefficients.reshape_within_storage(m, m)?;
+            eigensolver.solve_into(&reduced, &mut values[..m], &mut coefficients)?;
             let coefficients = coefficients.as_ref().subcols(0, self.bands);
-            let vectors = multiply(&basis, RealOp::Identity, coefficients, &mut gemm)?;
-            let rotated_products = multiply(&products, RealOp::Identity, coefficients, &mut gemm)?;
-            let (mut residual_block, mut residuals) =
-                residual(&vectors, &rotated_products, &values)?;
+            multiply_into(
+                &basis,
+                RealOp::Identity,
+                coefficients,
+                &mut gemm,
+                &mut vectors,
+            )?;
+            multiply_into(
+                &products,
+                RealOp::Identity,
+                coefficients,
+                &mut gemm,
+                &mut rotated_products,
+            )?;
+            residual_into(
+                &vectors,
+                &rotated_products,
+                &values[..self.bands],
+                &mut residual_block,
+                &mut residuals,
+                &pool,
+            )?;
             let mut certified = false;
             let mut trusted = true;
             if !ritz
@@ -224,35 +262,41 @@ impl RealDavidson {
                     || (iteration == self.max_iterations && meets_strict(&residuals)))
             {
                 certificates += 1;
-                let actual = apply(op, &vectors, &mut applications, &mut work)?;
-                (residual_block, residuals) = residual(&vectors, &actual, &values)?;
+                apply_into(op, &vectors, &mut applications, &mut work, &mut actual)?;
+                residual_into(
+                    &vectors,
+                    &actual,
+                    &values[..self.bands],
+                    &mut residual_block,
+                    &mut residuals,
+                    &pool,
+                )?;
                 certified = true;
                 trusted = meets_policy(&residuals);
             }
             let maximum = residuals.iter().copied().fold(0., f64::max);
             history.push(maximum);
             work.residuals(iteration, &residuals);
-            let converged: Vec<bool> = (0..self.bands)
-                .map(|j| {
-                    if ritz {
-                        iteration > 1 && (values[j] - previous[j]).abs() < threshold(j)
-                    } else {
-                        residuals[j] <= threshold(j)
-                    }
-                })
-                .collect();
-            previous.copy_from_slice(&values);
+            for (j, flag) in converged.iter_mut().enumerate() {
+                *flag = if ritz {
+                    iteration > 1 && (values[j] - previous[j]).abs() < threshold(j)
+                } else {
+                    residuals[j] <= threshold(j)
+                };
+            }
+            previous.copy_from_slice(&values[..self.bands]);
             let finished = converged.iter().all(|&b| b)
                 || (iteration == self.max_iterations
                     && converged[..policy.strict_bands].iter().all(|&b| b));
             if finished {
                 work.returned();
+                values.truncate(self.bands);
                 return Ok(RealEigenSolution {
                     eigenvalues: values,
                     eigenvectors: vectors,
                     residuals,
                     converged,
-                    buffer: (0..self.bands).map(|j| j >= policy.strict_bands).collect(),
+                    buffer,
                     residuals_certified: certified,
                     iterations: iteration,
                     history,
@@ -273,37 +317,44 @@ impl RealDavidson {
             if ritz && iteration == 1 && basis.cols() == n {
                 continue;
             }
-            let selected: Vec<_> = (0..self.bands)
-                .filter(|&j| !converged[j])
-                .take(self.bands.min(capacity - self.bands))
-                .collect();
-            let mut corrections = RealMatrix::zeros(n, selected.len())?;
-            for (k, &j) in selected.iter().enumerate() {
-                for ((dst, &r), &d) in column_mut(&mut corrections, k)
-                    .iter_mut()
-                    .zip(column(&residual_block, j))
-                    .zip(diagonal)
-                {
-                    *dst = precondition(r, d, values[j])?;
-                }
-            }
+            selected.clear();
+            selected.extend(
+                (0..self.bands)
+                    .filter(|&j| !converged[j])
+                    .take(self.bands.min(capacity - self.bands)),
+            );
+            corrections.reshape_within_storage(n, selected.len())?;
+            pool.install(|| {
+                column_work(corrections.as_mut_slice(), n, 0, &|k, dst| {
+                    let j = selected[k];
+                    for ((dst, &r), &d) in
+                        dst.iter_mut().zip(column(&residual_block, j)).zip(diagonal)
+                    {
+                        *dst = precondition(r, d, values[j])?;
+                    }
+                    Ok(())
+                })
+            })?;
             if !trusted || basis.cols() + corrections.cols() > capacity {
                 restarts += 1;
                 work.restart();
-                reduced = None;
+                reduced_width = 0;
                 if trusted && orthogonality_defect(&vectors) <= 1e-12 {
                     contractions += 1;
-                    basis = vectors;
-                    products = rotated_products;
+                    std::mem::swap(&mut basis, &mut vectors);
+                    std::mem::swap(&mut products, &mut rotated_products);
                 } else {
-                    basis = projection.run(&vectors, None, &mut gemm)?;
-                    products = apply(op, &basis, &mut applications, &mut work)?;
+                    projection.run_into(&vectors, None, &mut gemm, &mut basis)?;
+                    apply_into(op, &basis, &mut applications, &mut work, &mut products)?;
                 }
             }
-            let mut extra = projection.run(&corrections, Some(&basis), &mut gemm)?;
+            projection.run_into(&corrections, Some(&basis), &mut gemm, &mut extra)?;
             if extra.cols() == 0 {
-                let random = rng.block(n, self.bands.min(capacity - basis.cols()))?;
-                extra = projection.run(&random, Some(&basis), &mut gemm)?;
+                random.reshape_within_storage(n, self.bands.min(capacity - basis.cols()))?;
+                for value in random.as_mut_slice() {
+                    *value = rng.next();
+                }
+                projection.run_into(&random, Some(&basis), &mut gemm, &mut extra)?;
             }
             if extra.cols() == 0 {
                 return Err(SolverError::NotConverged {
@@ -312,8 +363,15 @@ impl RealDavidson {
                     residuals,
                 });
             }
-            products = append(&products, &apply(op, &extra, &mut applications, &mut work)?)?;
-            basis = append(&basis, &extra)?;
+            apply_into(
+                op,
+                &extra,
+                &mut applications,
+                &mut work,
+                &mut extra_products,
+            )?;
+            append_into(&mut products, &extra_products)?;
+            append_into(&mut basis, &extra)?;
         }
         unreachable!("validated positive iteration limit")
     }
@@ -387,6 +445,7 @@ fn precondition(r: f64, d: f64, lambda: f64) -> Result<f64, LinalgError> {
     finite(&[result])?;
     Ok(result)
 }
+#[cfg(test)]
 fn prefix(x: &RealMatrix, count: usize) -> Result<RealMatrix, LinalgError> {
     RealMatrix::new(x.rows(), count, x.as_slice()[..x.rows() * count].to_vec())
 }
@@ -396,12 +455,13 @@ fn append(a: &RealMatrix, b: &RealMatrix) -> Result<RealMatrix, LinalgError> {
     data.extend_from_slice(b.as_slice());
     RealMatrix::new(a.rows(), a.cols() + b.cols(), data)
 }
-fn apply(
+fn apply_into(
     op: &dyn RealLinearOperator,
     x: &RealMatrix,
     count: &mut usize,
     work: &mut crate::work_accounting::Trace,
-) -> Result<RealMatrix, SolverError> {
+    y: &mut RealMatrix,
+) -> Result<(), SolverError> {
     work.apply(x.cols(), None);
     for pair in (0..x.cols()).step_by(2) {
         let a = norm(column(x, pair));
@@ -415,42 +475,66 @@ fn apply(
             "paired H columns must have comparable norms"
         );
     }
-    let mut y = RealMatrix::zeros(x.rows(), x.cols())?;
-    op.apply_block(x, &mut y)?;
+    y.reshape_within_storage(x.rows(), x.cols())?;
+    op.apply_block(x, y)?;
     if y.rows() != x.rows() || y.cols() != x.cols() {
         return Err(LinalgError::Dimension.into());
     }
     finite(y.as_slice())?;
     *count += x.cols();
-    Ok(y)
+    Ok(())
 }
-fn multiply(
+fn append_into(a: &mut RealMatrix, b: &RealMatrix) -> Result<(), LinalgError> {
+    let old_len = a.as_slice().len();
+    a.reshape_within_storage(a.rows(), a.cols() + b.cols())?;
+    a.as_mut_slice()[old_len..].copy_from_slice(b.as_slice());
+    Ok(())
+}
+fn multiply_into(
     a: &RealMatrix,
     op: RealOp,
     b: RealMatrixRef<'_>,
     ws: &mut RealGemmWorkspace,
-) -> Result<RealMatrix, LinalgError> {
+    out: &mut RealMatrix,
+) -> Result<(), LinalgError> {
     let rows = if op == RealOp::Identity {
         a.rows()
     } else {
         a.cols()
     };
-    let mut out = RealMatrix::zeros(rows, b.ncols())?;
-    ws.multiply_into(a.as_ref(), op, b, out.as_mut())?;
-    Ok(out)
+    out.reshape_within_storage(rows, b.ncols())?;
+    ws.multiply_into(a.as_ref(), op, b, out.as_mut())
 }
+#[cfg(test)]
 fn reduced_matrix(
     v: &RealMatrix,
     hv: &RealMatrix,
     old: Option<&RealMatrix>,
     ws: &mut RealGemmWorkspace,
 ) -> Result<RealMatrix, LinalgError> {
-    let m = v.cols();
+    let mut out = RealMatrix::zeros(v.cols(), v.cols())?;
     let prefix = old.map_or(0, RealMatrix::cols);
-    let mut out = RealMatrix::zeros(m, m)?;
     if let Some(old) = old {
-        for j in 0..prefix {
-            column_mut(&mut out, j)[..prefix].copy_from_slice(column(old, j));
+        out.as_mut_slice()[..prefix * prefix].copy_from_slice(old.as_slice());
+    }
+    reduced_matrix_into(v, hv, prefix, ws, &mut out)?;
+    Ok(out)
+}
+fn reduced_matrix_into(
+    v: &RealMatrix,
+    hv: &RealMatrix,
+    prefix: usize,
+    ws: &mut RealGemmWorkspace,
+    out: &mut RealMatrix,
+) -> Result<(), LinalgError> {
+    let m = v.cols();
+    out.reshape_within_storage(m, m)?;
+    // Expand the contiguous leading dimension in place, last column first.
+    // Keep the exact compact layout passed to the old sequential EVD.
+    if prefix != m {
+        for j in (0..prefix).rev() {
+            out.as_mut_slice()
+                .copy_within(j * prefix..(j + 1) * prefix, j * m);
         }
     }
     // One old/new rectangle and the new square, in one GEMM. Preserve the
@@ -467,23 +551,98 @@ fn reduced_matrix(
             col[j] = entry;
         }
     }
-    Ok(out)
+    Ok(())
 }
-fn residual(
+// Fixed pieces of four whole columns, independent of the pool budget.
+// Every scalar reduction remains inside its original column, in its old order.
+fn column_work<F>(data: &mut [f64], n: usize, first: usize, f: &F) -> Result<(), LinalgError>
+where
+    F: Fn(usize, &mut [f64]) -> Result<(), LinalgError> + Sync,
+{
+    let count = data.len() / n;
+    if count > 4 {
+        let split = (count.div_ceil(4) / 2) * 4;
+        let (left, right) = data.split_at_mut(split * n);
+        let (a, b) = WorkerPool::join(
+            || column_work(left, n, first, f),
+            || column_work(right, n, first + split, f),
+        );
+        a?;
+        b
+    } else {
+        for (j, dst) in data.chunks_exact_mut(n).enumerate() {
+            f(first + j, dst)?;
+        }
+        Ok(())
+    }
+}
+fn residual_columns(
+    r: &mut [f64],
+    v: &[f64],
+    hv: &[f64],
+    values: &[f64],
+    norms: &mut [f64],
+    n: usize,
+) {
+    if values.len() > 4 {
+        let split = (values.len().div_ceil(4) / 2) * 4;
+        let (rl, rr) = r.split_at_mut(split * n);
+        let (nl, nr) = norms.split_at_mut(split);
+        WorkerPool::join(
+            || {
+                residual_columns(
+                    rl,
+                    &v[..split * n],
+                    &hv[..split * n],
+                    &values[..split],
+                    nl,
+                    n,
+                )
+            },
+            || {
+                residual_columns(
+                    rr,
+                    &v[split * n..],
+                    &hv[split * n..],
+                    &values[split..],
+                    nr,
+                    n,
+                )
+            },
+        );
+    } else {
+        for (j, &lambda) in values.iter().enumerate() {
+            let r = &mut r[j * n..(j + 1) * n];
+            for ((r, &h), &v) in r
+                .iter_mut()
+                .zip(&hv[j * n..(j + 1) * n])
+                .zip(&v[j * n..(j + 1) * n])
+            {
+                *r = h - lambda * v;
+            }
+            norms[j] = norm(r);
+        }
+    }
+}
+fn residual_into(
     v: &RealMatrix,
     hv: &RealMatrix,
     values: &[f64],
-) -> Result<(RealMatrix, Vec<f64>), LinalgError> {
-    let mut r = hv.clone();
-    let mut norms = Vec::with_capacity(values.len());
-    for (j, &lambda) in values.iter().enumerate() {
-        for (r, &v) in column_mut(&mut r, j).iter_mut().zip(column(v, j)) {
-            *r -= lambda * v;
-        }
-        norms.push(norm(column(&r, j)));
-    }
-    finite(&norms)?;
-    Ok((r, norms))
+    r: &mut RealMatrix,
+    norms: &mut [f64],
+    pool: &WorkerPool,
+) -> Result<(), LinalgError> {
+    pool.install(|| {
+        residual_columns(
+            r.as_mut_slice(),
+            v.as_slice(),
+            hv.as_slice(),
+            values,
+            norms,
+            v.rows(),
+        )
+    });
+    finite(norms)
 }
 fn orthogonality_defect(v: &RealMatrix) -> f64 {
     let mut defect = 0_f64;
@@ -502,6 +661,7 @@ fn orthogonality_defect(v: &RealMatrix) -> f64 {
 // Preallocated projection buffers; each pass is Q^T X, Q times overlaps,
 // subtraction, then two-pass MGS and normalization within the incoming block.
 struct Projection {
+    pool: std::sync::Arc<WorkerPool>,
     normalized: RealMatrix,
     overlap: RealMatrix,
     projected: RealMatrix,
@@ -509,8 +669,17 @@ struct Projection {
     column: Vec<f64>,
 }
 impl Projection {
+    #[cfg(test)]
     fn new(n: usize, cap: usize) -> Result<Self, LinalgError> {
+        Self::with_pool(n, cap, WorkerPool::new(1).unwrap())
+    }
+    fn with_pool(
+        n: usize,
+        cap: usize,
+        pool: std::sync::Arc<WorkerPool>,
+    ) -> Result<Self, LinalgError> {
         Ok(Self {
+            pool,
             normalized: RealMatrix::zeros(n, cap)?,
             overlap: RealMatrix::zeros(cap, cap)?,
             projected: RealMatrix::zeros(n, cap)?,
@@ -524,19 +693,35 @@ impl Projection {
         against: Option<&RealMatrix>,
         ws: &mut RealGemmWorkspace,
     ) -> Result<RealMatrix, LinalgError> {
+        let mut out = RealMatrix::zeros(self.output.rows(), self.output.cols())?;
+        self.run_into(x, against, ws, &mut out)?;
+        Ok(out)
+    }
+    fn run_into(
+        &mut self,
+        x: &RealMatrix,
+        against: Option<&RealMatrix>,
+        ws: &mut RealGemmWorkspace,
+        out: &mut RealMatrix,
+    ) -> Result<(), LinalgError> {
         finite(x.as_slice())?;
         let n = x.rows();
         let mut count = x.cols();
-        for j in 0..count {
-            let len = norm(column(x, j));
-            finite(&[len])?;
-            for (dst, &src) in column_mut(&mut self.normalized, j)
-                .iter_mut()
-                .zip(column(x, j))
-            {
-                *dst = if len == 0. { 0. } else { src / len };
-            }
-        }
+        self.pool.install(|| {
+            column_work(
+                &mut self.normalized.as_mut_slice()[..n * count],
+                n,
+                0,
+                &|j, dst| {
+                    let len = norm(column(x, j));
+                    finite(&[len])?;
+                    for (dst, &src) in dst.iter_mut().zip(column(x, j)) {
+                        *dst = if len == 0. { 0. } else { src / len };
+                    }
+                    Ok(())
+                },
+            )
+        })?;
         let against = against.filter(|q| q.cols() > 0);
         for pass in 0..if against.is_some() { 2 } else { 1 } {
             if pass > 0 {
@@ -557,12 +742,19 @@ impl Projection {
                     self.overlap.as_ref().submatrix(0, 0, q.cols(), count),
                     self.projected.as_mut().subcols_mut(0, count),
                 )?;
-                for (dst, src) in self.normalized.as_mut_slice()[..n * count]
-                    .iter_mut()
-                    .zip(&self.projected.as_slice()[..n * count])
-                {
-                    *dst -= src;
-                }
+                self.pool.install(|| {
+                    column_work(
+                        &mut self.normalized.as_mut_slice()[..n * count],
+                        n,
+                        0,
+                        &|j, dst| {
+                            for (dst, &src) in dst.iter_mut().zip(column(&self.projected, j)) {
+                                *dst -= src;
+                            }
+                            Ok(())
+                        },
+                    )
+                })?;
             }
             let mut kept = 0;
             for j in 0..count {
@@ -590,7 +782,11 @@ impl Projection {
             }
             count = kept;
         }
-        prefix(&self.output, count)
+        let cap = self.output.cols();
+        std::mem::swap(&mut self.output, out);
+        out.reshape_within_storage(n, count)?;
+        self.output.reshape_within_storage(n, cap)?;
+        Ok(())
     }
 }
 struct Random(u64);

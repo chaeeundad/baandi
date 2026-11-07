@@ -84,6 +84,17 @@ impl MklFftPlan3d {
     }
 }
 impl Fft3d for MklFftPlan3d {
+    fn transform_in_place(
+        &mut self,
+        data: &mut Array3<Complex64>,
+        scratch: &mut Array3<Complex64>,
+        inverse: bool,
+    ) -> Result<(), FftError> {
+        self.validate(data, scratch)?;
+        self.plan
+            .transform_in_place(data.as_slice_mut().unwrap(), inverse)?;
+        Ok(())
+    }
     fn shape(&self) -> [usize; 3] {
         self.shape
     }

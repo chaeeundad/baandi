@@ -119,6 +119,31 @@ impl Plan3d {
         }
         Ok(plan)
     }
+    /// Transform caller-owned C-order storage without copying or allocating.
+    /// The length must equal the planned size. `inverse` selects the unscaled
+    /// backward transform; forward uses the descriptor's existing 1/N scale.
+    /// On a DFTI error the contents of `data` are unspecified.
+    pub fn transform_in_place(
+        &mut self,
+        data: &mut [Complex64],
+        inverse: bool,
+    ) -> Result<(), Error> {
+        if !crate::valid_in_place_len(self.buffer.len(), data.len()) {
+            return Err(Error::Dimension);
+        }
+        // SAFETY: new() committed this in-place double-complex descriptor with
+        // contiguous C-order strides. The checked slice has exactly the planned
+        // length and Complex64 is two consecutive C doubles. Exclusive borrows
+        // of self and data prevent concurrent descriptor access and buffer aliasing;
+        // the caller storage lives through the call and DFTI retains no data pointer.
+        unsafe {
+            status(if inverse {
+                DftiComputeBackward(self.handle, data.as_mut_ptr().cast())
+            } else {
+                DftiComputeForward(self.handle, data.as_mut_ptr().cast())
+            })
+        }
+    }
     /// Input/output lengths must equal the plan size. Safe borrows prohibit
     /// overlap; Complex64 has the C layout of two consecutive f64 values.
     pub fn transform(

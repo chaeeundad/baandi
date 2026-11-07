@@ -173,3 +173,26 @@ Energy difference on versus off: strict 0.0 Ha; standard 2.27e-10 Ha (the strict
 Observation: on dev08 the real Gamma path gives only -6.4 percent wall time with strict (and -0.6 percent with standard), whereas the Mac observation was 1.53x (strict) and a clear gain with standard. Davidson steps rise by 14 percent (strict) and 10 percent (standard), H vectors by 4 and 12 percent. The Mac gain does NOT transfer to dev08 for this option; the standard-profile gain (3.0x) does. Open: where the real path loses on dev08 (real GEMM kernels, tile size, FFT pair on x86 AVX-512, step count); the D0 profile of docs/performance/diagonalization-plan.md must cover real on versus off.
 
 Note: `gamma_real_used` is only written to results.json when the option is not off (intentional, keeps off-path output unchanged); a missing key means off.
+
+# dev08 batch-7 B complete: si8, si16, si32, real Gamma path on/off, T=1 and T=8 (relayed, 2026-11-07)
+
+Relayed by the dft5090/master session. si8 and si16 from main `b6a5416` (pure native binary `5b827976e23902299a9cae9c86a8386a4870cb782e2812bb25a6bc2de67f3584`, 30 runs per row), si32 from main `8894b0b` (pure native `16cbfa76d5bb22252648fc3e1cab9f499b2297fc7aad13292b2d53aef50bed54`, 5 runs per row because one run is 24 to 120 s); rustc 1.99.1; `taskset -c 0` (T=1) or `0-7` (T=8), no other jobs. Si.pz-vbc.UPF SHA-256 `e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`. si16: 2x1x1 conventional cell, 16 atoms, 30 Ry, Gamma; si32: 2x2x1, 32 atoms, 68 bands, 11877 plane waves, grid 72x72x36. lda-pz, Pulay, beta 0.5, etol 1e-8, dens 1e-7. SCF / Davidson steps / H vectors are identical across repeats inside a row and between T=1 and T=8; energies are identical across repeats and thread counts.
+
+Wall time (s, median) with SCF / Davidson steps / H vectors:
+
+| Case | T | off strict | on strict | off standard | on standard |
+| --- | ---: | --- | --- | --- | --- |
+| si8 | 1 | 3.764 (15/279/2044) | 3.525 (15/319/2125) | 1.308 (15/77/772) | 1.300 (17/85/864) |
+| si8 | 8 | 2.466 | 3.417 | 0.924 | 1.304 |
+| si16 | 1 | 15.124 (12/182/2700) | 13.319 (13/216/3053) | 5.866 (14/76/1350) | 5.205 (15/81/1424) |
+| si16 | 8 | 7.456 | 10.823 | 3.143 | 4.470 |
+| si32 | 1 | 119.223 (13/352/5946) | 97.475 (13/359/5874) | 38.357 (15/67/2806) | 24.002 (13/60/2380) |
+| si32 | 8 | 50.735 | 68.437 | 16.845 | 19.869 |
+
+Real path on versus off, wall ratio (negative = on faster): T=1: si8 strict -6.4 %, standard -0.6 %; si16 strict -11.9 %, standard -11.3 %; si32 strict -18.2 %, standard -37.4 % (SCF 15 versus 13: different trajectories, read as total cost to the same criterion). T=8: si8 +38.6 % / +41.1 %, si16 +45.2 % / +42.2 %, si32 +34.9 % / +18.0 % (strict / standard; the si32 standard value is partly masked by two fewer SCF iterations).
+Thread scaling T=1 to T=8 (off strict / on strict / off standard / on standard): si8 1.53 / 1.03 / 1.42 / 1.00; si16 2.03 / 1.23 / 1.87 / 1.16; si32 2.35 / 1.42 / 2.28 / 1.21.
+Energy difference on versus off: si8 strict 1.8e-14, si16 strict 1.2e-11, si32 strict 4.5e-11 Ha (all below 1e-10); standard 2.3e-10, 2.9e-10, 9.3e-10 Ha.
+
+Reading: the real path gain at one thread grows with size (strict -6 %, -12 %, -18 %), but with eight threads the real path is 18 to 45 percent slower than the complex path and scales poorly in every combination. Mac check (this session, si8 strict T=8, 3 runs, median): off 1.106 s, on 1.310 s: the inversion reproduces on the Mac.
+
+First QE batch-7 C result: si8 real gamma conv_thr 1e-8, np=1 wall 0.4659 to 0.4739 s (5 runs); np=8 0.2516 to 0.2933 s, below the 0.3 s timer-resolution rule and therefore marked invalid. QE pw.x sha256 `07c7cd7935f42b15157500ab719a5c3948825d8ce8a4487d992d7501c659658f`.

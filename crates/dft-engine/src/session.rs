@@ -717,6 +717,7 @@ impl ScfSession {
             self.outcome = Some(ScfOutcome {
                 converged: certified,
                 result: ScfResult {
+                    crystal_density_group: self.problem.options.crystal_density_group,
                     standard_stall_guard: self.problem.options.standard_stall_guard,
                     standard_density_forcing: self.problem.options.standard_density_forcing,
                     pw92_prefactor: self.problem.options.pw92_prefactor,
@@ -1004,7 +1005,7 @@ impl ScfSession {
     ) -> Result<(), crate::checkpoint::Rejection> {
         use crate::checkpoint::Rejection as R;
         model.validate()?;
-        if self.problem.symmetry.is_some() {
+        if self.problem.symmetry.is_some() || self.problem.options.crystal_density_group {
             return Err(R::Boundary);
         }
         // Checkpoint v1 has neither cumulative spectral audit records nor the

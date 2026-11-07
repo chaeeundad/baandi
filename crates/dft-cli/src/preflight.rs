@@ -516,6 +516,12 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
     })?;
     let points = config.resolved_points()?;
     if let Some(map) = config.symmetry_map()? {
+        warnings.push(format!(
+            "symmetry.density_group={:?}: {} density operations; all must permute FFT grid {:?}",
+            config.symmetry.density_group,
+            config.density_operations()?.len(),
+            prepared.grid.dims()
+        ));
         warnings.push(format!("symmetry.mode=auto: {} full k points -> {} irreducible; {} mesh-preserving spatial operations; tolerance={} Bohr; magnetic spin swap/time reversal disabled without proof",map.entries.len(),map.points.len(),map.operations.iter().filter(|o|!o.antiunitary).count(),config.symmetry.tolerance_bohr));
     }
     let mut counts = Vec::new();

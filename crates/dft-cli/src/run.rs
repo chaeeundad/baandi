@@ -55,6 +55,8 @@ pub fn sha256(bytes: &[u8]) -> String {
 /// Resolve only user-exposed controls, preserving all other engine defaults.
 pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
     let mut o = ScfOptions {
+        crystal_density_group: config.symmetry.density_group
+            == crate::config::DensityGroup::Crystal,
         functional: config.xc.functional.engine(),
         local_mesh: config
             .pseudo

@@ -146,6 +146,11 @@ impl CollinearProblem {
         points: &[KPoint],
         sector: SpinSector,
     ) -> Result<Self, ScfError> {
+        if options.crystal_density_group {
+            return Err(ScfError::InvalidInput(
+                "symmetry.density_group=crystal does not support spin",
+            ));
+        }
         let functional = match options.functional {
             Functional::LdaPz => {
                 return Err(ScfError::InvalidInput(

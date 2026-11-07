@@ -134,6 +134,16 @@ pub struct ForceState<'a> {
 }
 
 pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
+    let crystal_density = match &state.electronic {
+        ElectronicState::Fixed(r) => r.crystal_density_group,
+        ElectronicState::FiniteTemperature(r) => r.state.crystal_density_group,
+        ElectronicState::Collinear(_) => false,
+    };
+    if state.options.crystal_density_group || crystal_density {
+        return Err(ScfError::InvalidInput(
+            "symmetry.density_group=crystal does not support forces or stress",
+        ));
+    }
     if state.options.local_mesh != crate::LocalMesh::Baandi
         || state.options.radial_even_rule != crate::RadialEvenRule::Simpson3_8
     {

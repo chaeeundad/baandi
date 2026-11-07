@@ -314,6 +314,7 @@ pub(crate) fn options_identical(a: &ScfOptions, b: &ScfOptions) -> bool {
     macro_rules! eq { ($($f:ident),*) => { true $(&& a.$f == b.$f)* }; }
     macro_rules! bits { ($($f:ident),*) => { true $(&& a.$f.to_bits() == b.$f.to_bits())* }; }
     mixing
+        && a.crystal_density_group == b.crystal_density_group
         && a.standard == b.standard
         && a.standard_stall_guard == b.standard_stall_guard
         && a.standard_density_forcing == b.standard_density_forcing
@@ -350,4 +351,20 @@ pub(crate) fn options_identical(a: &ScfOptions, b: &ScfOptions) -> bool {
             eigen_tolerance_decay,
             divergence_factor
         )
+}
+
+#[cfg(test)]
+mod density_group_tests {
+    use super::*;
+    #[test]
+    fn exact_restart_compares_density_group() {
+        let mesh = ScfOptions::default();
+        let crystal = ScfOptions {
+            crystal_density_group: true,
+            ..mesh.clone()
+        };
+        assert!(options_identical(&mesh, &mesh));
+        assert!(!options_identical(&mesh, &crystal));
+        assert!(!options_identical(&crystal, &mesh));
+    }
 }

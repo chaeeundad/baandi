@@ -12,7 +12,7 @@ pub type RealMatrixRef<'a> = MatRef<'a, f64>;
 pub type RealMatrixMut<'a> = MatMut<'a, f64>;
 
 /// Owned column-major storage; entry (i,j) is at i+j*rows.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub struct RealMatrix {
     rows: usize,
     cols: usize,
@@ -35,6 +35,22 @@ impl RealMatrix {
     pub fn zeros(rows: usize, cols: usize) -> Result<Self, LinalgError> {
         Self::new(rows, cols, vec![0.; length(rows, cols)?])
     }
+    /// Change the active contiguous shape within initialized storage. No allocation,
+    /// clearing or copying occurs; the caller must overwrite newly exposed entries.
+    pub fn reshape_within_storage(&mut self, rows: usize, cols: usize) -> Result<(), LinalgError> {
+        if length(rows, cols)? > self.data.len() {
+            return Err(LinalgError::Dimension);
+        }
+        self.rows = rows;
+        self.cols = cols;
+        Ok(())
+    }
+    /// Reserve initialized backing storage before a solve starts, preserving entries.
+    pub fn reserve_storage(&mut self, entries: usize) {
+        if entries > self.data.len() {
+            self.data.resize(entries, 0.);
+        }
+    }
     /// Row count.
     pub fn rows(&self) -> usize {
         self.rows
@@ -45,19 +61,37 @@ impl RealMatrix {
     }
     /// Contiguous column-major storage.
     pub fn as_slice(&self) -> &[f64] {
-        &self.data
+        &self.data[..self.rows * self.cols]
     }
     /// Mutable contiguous column-major storage.
     pub fn as_mut_slice(&mut self) -> &mut [f64] {
-        &mut self.data
+        &mut self.data[..self.rows * self.cols]
     }
     /// Borrow without copying or allocating.
     pub fn as_ref(&self) -> RealMatrixRef<'_> {
-        MatRef::from_column_major_slice(&self.data, self.rows, self.cols)
+        MatRef::from_column_major_slice(self.as_slice(), self.rows, self.cols)
     }
     /// Borrow exclusively without copying or allocating.
     pub fn as_mut(&mut self) -> RealMatrixMut<'_> {
-        MatMut::from_column_major_slice_mut(&mut self.data, self.rows, self.cols)
+        MatMut::from_column_major_slice_mut(
+            &mut self.data[..self.rows * self.cols],
+            self.rows,
+            self.cols,
+        )
+    }
+}
+impl Clone for RealMatrix {
+    fn clone(&self) -> Self {
+        Self {
+            rows: self.rows,
+            cols: self.cols,
+            data: self.as_slice().to_vec(),
+        }
+    }
+}
+impl PartialEq for RealMatrix {
+    fn eq(&self, other: &Self) -> bool {
+        self.rows == other.rows && self.cols == other.cols && self.as_slice() == other.as_slice()
     }
 }
 impl Index<(usize, usize)> for RealMatrix {
@@ -181,21 +215,11 @@ impl RealGemmWorkspace {
             } else {
                 work();
             }
-            out.fill(0.);
-            // Fixed ascending panel order, never a worker-dependent reduction.
-            for tile in tiles {
-                for j in 0..n {
-                    let src = &tile.as_slice()[j * tile.rows()..j * tile.rows() + m];
-                    if let Some(col) = out.as_mut().col_mut(j).try_as_col_major_mut() {
-                        for (dst, src) in col.as_slice_mut().iter_mut().zip(src) {
-                            *dst += src;
-                        }
-                    } else {
-                        for (i, src) in src.iter().enumerate() {
-                            out[(i, j)] += src;
-                        }
-                    }
-                }
+            let mut sum = || assemble(out.as_mut(), tiles, 0, parallel);
+            if parallel {
+                self.pool.install(sum);
+            } else {
+                sum();
             }
         } else {
             let mut work = || rotate(out.as_mut(), a, b, parallel);
@@ -267,6 +291,41 @@ fn gram(
         }
     }
 }
+// Output columns are independent. Four-column pieces and ascending panel sums
+// are fixed for every thread budget. Retain the initial +0 addition (including
+// its signed-zero behavior) while overwriting, rather than clearing, output.
+fn assemble(mut out: RealMatrixMut<'_>, tiles: &[RealMatrix], first: usize, parallel: bool) {
+    let count = out.ncols();
+    if parallel && count > 4 {
+        let split = (count.div_ceil(4) / 2) * 4;
+        let (left, right) = out.split_at_col_mut(split);
+        WorkerPool::join(
+            || assemble(left, tiles, first, true),
+            || assemble(right, tiles, first + split, true),
+        );
+    } else {
+        let m = out.nrows();
+        for j in 0..count {
+            for (t, tile) in tiles.iter().enumerate() {
+                let src =
+                    &tile.as_slice()[(first + j) * tile.rows()..(first + j) * tile.rows() + m];
+                if let Some(col) = out.as_mut().col_mut(j).try_as_col_major_mut() {
+                    for (dst, &value) in col.as_slice_mut().iter_mut().zip(src) {
+                        *dst = if t == 0 { 0. + value } else { *dst + value };
+                    }
+                } else {
+                    for (i, &value) in src.iter().enumerate() {
+                        out[(i, j)] = if t == 0 {
+                            0. + value
+                        } else {
+                            out[(i, j)] + value
+                        };
+                    }
+                }
+            }
+        }
+    }
+}
 fn rotate(mut out: RealMatrixMut<'_>, a: RealMatrixRef<'_>, b: RealMatrixRef<'_>, parallel: bool) {
     let count = a.nrows().div_ceil(PANEL);
     if parallel && count > 1 {
@@ -295,62 +354,101 @@ fn rotate(mut out: RealMatrixMut<'_>, a: RealMatrixRef<'_>, b: RealMatrixRef<'_>
 /// Symmetry uses the existing adapter's 1e-12 relative entrywise allowance,
 /// with unit absolute floor; faer consumes the lower triangle after validation.
 pub fn symmetric_eigh(a: &RealMatrix) -> Result<(Vec<f64>, RealMatrix), LinalgError> {
-    if a.rows != a.cols {
-        return Err(LinalgError::NotSquare);
-    }
-    finite(a.as_ref())?;
-    let allowed =
-        crate::linalg::HERMITIAN_TOLERANCE * a.data.iter().map(|v| v.abs()).fold(1., f64::max);
-    let mut defect: f64 = 0.;
-    for j in 0..a.cols {
-        for i in 0..j {
-            defect = defect.max((a[(i, j)] - a[(j, i)]).abs());
-        }
-    }
-    if defect > allowed {
-        return Err(LinalgError::NotHermitian { defect, allowed });
-    }
-    let n = a.rows;
-    let mut vectors = RealMatrix::zeros(n, n)?;
-    if n == 0 {
-        return Ok((vec![], vectors));
-    }
-    let mut diagonal = faer::diag::Diag::<f64>::zeros(n);
-    let scratch = faer::linalg::evd::self_adjoint_evd_scratch::<f64>(
-        n,
-        faer::linalg::evd::ComputeEigenvectors::Yes,
-        Par::Seq,
-        Default::default(),
-    );
-    let mut buffer = faer::dyn_stack::MemBuffer::new(scratch);
-    faer::linalg::evd::self_adjoint_evd(
-        a.as_ref(),
-        diagonal.as_mut(),
-        Some(vectors.as_mut()),
-        Par::Seq,
-        faer::dyn_stack::MemStack::new(&mut buffer),
-        Default::default(),
-    )
-    .map_err(|_| LinalgError::Decomposition)?;
-    let values: Vec<_> = (0..n).map(|i| diagonal[i]).collect();
-    if values.iter().any(|v| !v.is_finite()) {
-        return Err(LinalgError::NonFinite);
-    }
-    finite(vectors.as_ref())?;
-    for j in 0..n {
-        let mut pivot = 0;
-        for i in 1..n {
-            if vectors[(i, j)].abs() > vectors[(pivot, j)].abs() {
-                pivot = i;
-            }
-        }
-        if vectors[(pivot, j)].is_sign_negative() {
-            for i in 0..n {
-                vectors[(i, j)] = -vectors[(i, j)];
-            }
-        }
-    }
+    let mut ws = RealEighWorkspace::new(a.rows())?;
+    let mut values = vec![0.; a.rows()];
+    let mut vectors = RealMatrix::zeros(a.rows(), a.rows())?;
+    ws.solve_into(a, &mut values, &mut vectors)?;
     Ok((values, vectors))
+}
+/// Caller-owned EVD storage. Every active size is covered at construction;
+/// backend algorithm, strides and sequential arithmetic match symmetric_eigh.
+pub struct RealEighWorkspace {
+    capacity: usize,
+    diagonal: Vec<f64>,
+    buffer: faer::dyn_stack::MemBuffer,
+}
+impl RealEighWorkspace {
+    /// Reserve scratch for every possible active subspace size.
+    pub fn new(capacity: usize) -> Result<Self, LinalgError> {
+        length(capacity, capacity)?;
+        let requirements: Vec<_> = (1..=capacity)
+            .map(|n| {
+                faer::linalg::evd::self_adjoint_evd_scratch::<f64>(
+                    n,
+                    faer::linalg::evd::ComputeEigenvectors::Yes,
+                    Par::Seq,
+                    Default::default(),
+                )
+            })
+            .collect();
+        Ok(Self {
+            capacity,
+            diagonal: vec![0.; capacity],
+            buffer: faer::dyn_stack::MemBuffer::new(faer::dyn_stack::StackReq::any_of(
+                &requirements,
+            )),
+        })
+    }
+    /// Reuse output and scratch storage. The faer backend can still allocate
+    /// internal GEMM packing/bookkeeping; this is not a whole-call no-allocation
+    /// guarantee (see the P33A counting-allocator diagnostic).
+    pub fn solve_into(
+        &mut self,
+        a: &RealMatrix,
+        values: &mut [f64],
+        vectors: &mut RealMatrix,
+    ) -> Result<(), LinalgError> {
+        if a.rows != a.cols {
+            return Err(LinalgError::NotSquare);
+        }
+        finite(a.as_ref())?;
+        let allowed = crate::linalg::HERMITIAN_TOLERANCE
+            * a.as_slice().iter().map(|v| v.abs()).fold(1., f64::max);
+        let mut defect: f64 = 0.;
+        for j in 0..a.cols {
+            for i in 0..j {
+                defect = defect.max((a[(i, j)] - a[(j, i)]).abs());
+            }
+        }
+        if defect > allowed {
+            return Err(LinalgError::NotHermitian { defect, allowed });
+        }
+        let n = a.rows;
+        if n > self.capacity || values.len() != n || vectors.rows() != n || vectors.cols() != n {
+            return Err(LinalgError::Dimension);
+        }
+        if n == 0 {
+            return Ok(());
+        }
+        faer::linalg::evd::self_adjoint_evd(
+            a.as_ref(),
+            faer::diag::DiagMut::from_slice_mut(&mut self.diagonal[..n]),
+            Some(vectors.as_mut()),
+            Par::Seq,
+            faer::dyn_stack::MemStack::new(&mut self.buffer),
+            Default::default(),
+        )
+        .map_err(|_| LinalgError::Decomposition)?;
+        values.copy_from_slice(&self.diagonal[..n]);
+        if values.iter().any(|v| !v.is_finite()) {
+            return Err(LinalgError::NonFinite);
+        }
+        finite(vectors.as_ref())?;
+        for j in 0..n {
+            let mut pivot = 0;
+            for i in 1..n {
+                if vectors[(i, j)].abs() > vectors[(pivot, j)].abs() {
+                    pivot = i;
+                }
+            }
+            if vectors[(pivot, j)].is_sign_negative() {
+                for i in 0..n {
+                    vectors[(i, j)] = -vectors[(i, j)];
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

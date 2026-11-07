@@ -53,12 +53,9 @@ pub(super) fn execute(
             cap,
         )
         .map_err(engine_error)?;
-        if config.symmetry.mode == crate::config::SymmetryMode::Auto {
+        if let Some(symmetry) = config.prepared_symmetry().map_err(|e| error(1, e))? {
             problem
-                .enable_symmetry(
-                    &config.symmetry_full_mesh().map_err(|e| error(1, e))?,
-                    config.symmetry.tolerance_bohr,
-                )
+                .enable_prepared_symmetry(&symmetry)
                 .map_err(engine_error)?;
         }
         let r = problem.run().map_err(engine_error)?;
@@ -126,13 +123,9 @@ pub(super) fn execute(
             cap,
         )
         .map_err(engine_error)?;
-        if config.symmetry.mode == crate::config::SymmetryMode::Auto {
+        if let Some(symmetry) = config.prepared_symmetry().map_err(|e| error(1, e))? {
             problem
-                .enable_symmetry(
-                    &config.symmetry_full_mesh().map_err(|e| error(1, e))?,
-                    config.symmetry.tolerance_bohr,
-                    config.basis.time_reversal(),
-                )
+                .enable_prepared_symmetry(&symmetry)
                 .map_err(engine_error)?;
         }
         let r = problem.run().map_err(engine_error)?;

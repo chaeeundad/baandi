@@ -26,6 +26,8 @@ pub enum ConfigError {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(skip)]
+    symmetry_cache: std::cell::RefCell<Option<std::sync::Arc<dft_engine::PreparedSymmetry>>>,
     #[serde(default)]
     pub preflight: preflight::structure::Policy,
     #[serde(skip)]
@@ -82,27 +84,17 @@ impl Config {
     pub fn density_operations(
         &self,
     ) -> Result<Vec<dft_geometry::symmetry::SymmetryOperation>, ConfigError> {
-        let Some(map) = self.symmetry_map()? else {
-            return Ok(Vec::new());
-        };
-        if self.symmetry.density_group == DensityGroup::Crystal {
-            let atoms: Vec<_> = self
-                .system
-                .atoms
-                .iter()
-                .map(|a| dft_geometry::Atom::new(&a.species, a.fractional))
-                .collect();
-            dft_geometry::symmetry::detect(&self.cell()?, &atoms, self.symmetry.tolerance_bohr)
-                .map_err(|e| ConfigError::Invalid(e.to_string()))
-        } else {
-            Ok(map
-                .operations
-                .into_iter()
-                .filter(|o| !o.antiunitary)
-                .collect())
-        }
+        Ok(self.prepared_symmetry()?.map_or_else(Vec::new, |p| {
+            p.density_operations(self.symmetry.density_group == DensityGroup::Crystal)
+        }))
     }
     pub fn symmetry_map(&self) -> Result<Option<dft_geometry::symmetry::KOrbitMap>, ConfigError> {
+        Ok(self.prepared_symmetry()?.map(|p| p.map().clone()))
+    }
+    /// Shared by validation, preflight, result metadata and engine setup.
+    pub fn prepared_symmetry(
+        &self,
+    ) -> Result<Option<std::sync::Arc<dft_engine::PreparedSymmetry>>, ConfigError> {
         if self.symmetry.density_group == DensityGroup::Crystal
             && self.symmetry.mode != SymmetryMode::Auto
         {
@@ -125,12 +117,26 @@ impl Config {
             .iter()
             .map(|a| dft_geometry::Atom::new(&a.species, a.fractional))
             .collect();
-        let ops =
-            dft_geometry::symmetry::detect(&self.cell()?, &atoms, self.symmetry.tolerance_bohr)
-                .map_err(|e| fail(e.to_string()))?;
-        dft_geometry::symmetry::reduce_mesh(&full, &ops, self.basis.time_reversal(), false)
-            .map(Some)
-            .map_err(|e| fail(e.to_string()))
+        let cell = self.cell()?;
+        let tr = self.basis.time_reversal();
+        let mut cache = self.symmetry_cache.borrow_mut();
+        if let Some(prepared) = cache.as_ref()
+            && prepared.matches(&cell, &atoms, &full, self.symmetry.tolerance_bohr, tr)
+        {
+            return Ok(Some(prepared.clone()));
+        }
+        let prepared = std::sync::Arc::new(
+            dft_engine::PreparedSymmetry::new(
+                &cell,
+                &atoms,
+                &full,
+                self.symmetry.tolerance_bohr,
+                tr,
+            )
+            .map_err(|e| fail(e.to_string()))?,
+        );
+        *cache = Some(prepared.clone());
+        Ok(Some(prepared))
     }
     pub fn symmetry_full_mesh(&self) -> Result<Vec<dft_geometry::kpoints::KPoint>, ConfigError> {
         self.basis.resolve_kpoints()?; // Preserve all input consistency checks.

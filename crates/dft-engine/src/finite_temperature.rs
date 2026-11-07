@@ -195,6 +195,13 @@ impl FiniteTProblem {
         self.problem
             .enable_symmetry(full, tolerance_bohr, time_reversal)
     }
+    /// Reuse the same verified preparation as the input adapter.
+    pub fn enable_prepared_symmetry(
+        &mut self,
+        prepared: &PreparedSymmetry,
+    ) -> Result<(), ScfError> {
+        self.problem.enable_prepared_symmetry(prepared)
+    }
     pub fn run(mut self) -> Result<FiniteTResult, ScfError> {
         let p = &mut self.problem;
         let opts = p.options.clone();

@@ -130,8 +130,29 @@ impl CollinearProblem {
         full: &[KPoint],
         tolerance_bohr: f64,
     ) -> Result<(), ScfError> {
+        let prepared = PreparedSymmetry::new(
+            &self.channels[0].cell,
+            &self.channels[0].atoms,
+            full,
+            tolerance_bohr,
+            false,
+        )?;
+        self.enable_prepared_symmetry(&prepared)
+    }
+
+    /// Share one verified spatial map across both spin channels.
+    /// Antiunitary reduction remains unsupported for collinear models.
+    pub fn enable_prepared_symmetry(
+        &mut self,
+        prepared: &PreparedSymmetry,
+    ) -> Result<(), ScfError> {
+        if prepared.time_reversal {
+            return Err(ScfError::InvalidInput(
+                "symmetry: collinear preparation must disable time reversal",
+            ));
+        }
         for channel in &mut self.channels {
-            channel.enable_symmetry(full, tolerance_bohr, false)?;
+            channel.enable_prepared_symmetry(prepared)?;
         }
         Ok(())
     }

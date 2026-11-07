@@ -1098,7 +1098,10 @@ impl ScfProblem {
         self.step_kpoints_with_certification(n, initial, tolerance, true)
     }
 
-    fn step_kpoints_with_certification(
+    /// Measurement access to a fixed-potential map with explicit residual certification.
+    /// This does not change the SCF schedule or the ordinary session dispatcher.
+    #[doc(hidden)]
+    pub fn step_kpoints_with_certification(
         &mut self,
         n: &Array3<f64>,
         initial: Option<&[ComplexMatrix]>,

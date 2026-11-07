@@ -2698,5 +2698,41 @@
     "ended_at": "2026-11-07T03:22:06Z",
     "exit_code": 0,
     "note": "merged; MgO residual +1.28e-6 Ry not explained by radial conventions"
+  },
+  {
+    "run_id": "P28A-SETUP-IONIC-LOCAL#1",
+    "task_id": "P28A-SETUP-IONIC-LOCAL",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 84444,
+    "wrapper_pid": 84417,
+    "session_id": null,
+    "branch": "task/P28A-SETUP-IONIC-LOCAL",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P28A-SETUP-IONIC-LOCAL",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P28A-SETUP-IONIC-LOCAL.md",
+    "report": null,
+    "started_at": "2026-11-07T04:27:06Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
+  },
+  {
+    "run_id": "P28B-AUDIT-SHARED-TERMS#1",
+    "task_id": "P28B-AUDIT-SHARED-TERMS",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 84677,
+    "wrapper_pid": 84662,
+    "session_id": null,
+    "branch": "task/P28B-AUDIT-SHARED-TERMS",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P28B-AUDIT-SHARED-TERMS",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P28B-AUDIT-SHARED-TERMS.md",
+    "report": null,
+    "started_at": "2026-11-07T04:27:26Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

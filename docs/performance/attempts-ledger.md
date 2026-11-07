@@ -411,3 +411,23 @@ Notes and plan: [qe-stage-by-stage.md](../research/qe-study/qe-stage-by-stage.md
 | QPAR-1 | Per-stage and per-vector accounting, QE real Gamma si8/si16 timers (M) against dev08 D0 shares of BAANDI real strict T=1 (M) | analysis | QE: h_psi 49 / 58 %, algebra 11 / 18 %, init 11 / 7 % of PWSCF; about 800 H vectors on si8 from 964 FFT calls (D), 0.22 ms per vector. BAANDI: local FFT 31.9 %, nonlocal 3.0 %, algebra 48.3 %; 0.54 ms per H vector (D, 2.4x); algebra about 1.5 s against QE 0.05 s (D, 30x); complex path 0.61 ms per vector so pairing gained only about 1.2x per band instead of 2x (D, unconfirmed) | The H-vector count is at parity on the unperturbed standard trajectory (772 to 864 against about 800, M); the gap is per-vector FFT cost and algebra. The pair-path FFT figure needs a dev08 microbenchmark before any action (plan Q1) |
 | QPAR-2 | Core-count scaling QE np=8 against BAANDI T=8 (relayed batch-7 C/D tables) | analysis | QE 1 to 8 ranks: si16 2.54x, si32 2.97x. BAANDI best-of standard: 1.69x, 1.49x. Gap at one core 3.75 / 4.40, at eight cores 5.6 / 8.8 (D) | Gap grows with cores and size: decomposition over the plane-wave index (QE) against bands/pairs (BAANDI). QE's default layout for k meshes below half the z planes is plane-wave, not pools; its best k configuration (`-nk`) is unmeasured |
 | QPAR-3 | Reopen test for B13 (non-orthonormal generalized basis) | premise changed, not yet implemented | Backlog condition "algebra above 40 % of wall on a dev08 profile after native and standard": real strict D0 gives 48.3 % (T=1), 57.1 % (T=8); standard-profile share not measured | Reopens A16/B13 only as an isolated real-path module with the stage-0 rank diagnostic (A52 premise) and the Q1 standard D0; P24A, A13, P31A are not repeated (different structure: unconverged-only work, one rectangle, cheap steps) |
+
+## P37A — generalized Gram stage 0 (2026-11-07; measurement only)
+
+Derived from the own-words `qe-stage-by-stage.md` and
+`qe-solvers-and-subspace.md`; no QE source read. Reopens B13/A16 only on Q2's
+relayed real-algebra premise; does not repeat A13 capacity-only tuning, A52
+CholeskyQR2, or P24A hard locking. Baseline
+`6c34eed6125c3e05338ddef486edcf1a8bb30c9b`, Mac pure Rust, T=1.
+
+| ID | Experiment | Status | Measured result | Lesson / limits |
+|---|---|---|---|---|
+| P37A-1 | Nonorthogonal unit-norm corrections; capacities 2/3/6; Cholesky and canonical fallback diagnostic on exact original SCF operators/starts | recommendation rejected by prespecified safety rule | 28 histories, 2,410 original solves, 67,257 diagnostic steps. Strict Si8 fallback at relative 1e-8: 64.60/64.57/34.83%; minimum relative Gram eigenvalues -2.429e-16/-1.175e-15/-1.388e-16. Strict Si16 2/3: fallback 41.39/36.98%, minima 3.537e-15/4.074e-15 | Fails <5% fallback and >=1e-12 strict minimum. Standard-only safety cannot override an all-profile rule. Diagnostic uses an independently rebuilt Gram; a cached-only production solver has no safety guarantee here. |
+| P37A-2 | A52 twenty-atom skew geometry, uniform and perturbed starts; current real strict path | no general module recommended | 2/3/6 fallback 0/1.08/2.03%; minimum relative eigenvalue 3.727e-6/5.768e-11/4.760e-10. Counted large-product/MGS MAC per step savings 20.97/44.99/18.99%; total MAC ratios 5.70/3.59/0.72. Diagnostic exhaustion 12/8/0 of 12 solves | A52 safety passes this assay, but cheap steps do not ensure convergence or lower total work. Does not explain the historical complex QR2 iteration regression. Six SCF steps remain a bounded, unconverged fixture. |
+| P37A-3 | Actual-call real solver GEMM/MGS accounting, generalized rectangle/packed-rotation/contraction dimensions; separate small-solve model | measured subset; full EVD count not certified | Strict capacity-6 MAC/step savings Si8/Si16 18.80/18.62%; standard Si8 45.54/50.28/50.32% at 2/3/6. All si-skew and si-slab rows miss 40%. 1,176 original/control scientific records identical; 25 production benchmark comparisons at T=1/2/4/8/12 give 0 Ha and identical densities | Small EVD is explicitly modeled, not an exact faer instruction count. No wall-time or dev08 claim. Production sources/defaults/artifacts/UPFs unchanged. |
+
+Per-case/profile/capacity spectra, percentiles, Cholesky failures, rank deficits,
+work tables, censored outcomes, fixed decision rule, exact commands and gate
+results: [generalized-gram-stage0.md](generalized-gram-stage0.md). Raw evidence:
+`P37A-evidence/`, including the superseded full-rebuild pilot. No module or
+default is adopted; no tolerance is relaxed.

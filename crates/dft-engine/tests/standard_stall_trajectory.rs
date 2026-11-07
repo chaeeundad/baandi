@@ -173,6 +173,13 @@ fn sweep() {
                     q0_inverse_bohr: numbers(&text, "mixing_q0_inverse_bohr").unwrap()[0],
                 };
             }
+            // Optional real Gamma path (default off: the study was written for the complex
+            // path). `P29A_GAMMA_REAL=on` fails closed on ineligible cases, `auto` falls back.
+            match std::env::var("P29A_GAMMA_REAL").as_deref() {
+                Ok("on") => opts.gamma_real = dft_engine::GammaReal::On,
+                Ok("auto") => opts.gamma_real = dft_engine::GammaReal::Auto,
+                _ => {}
+            }
             if run < 2 {
                 let scale = if run == 0 { 1.0 } else { 0.1 };
                 opts.density_tolerance = 1e-9 * scale;

@@ -3183,7 +3183,7 @@
     "started_at": "2026-11-07T22:11:05Z",
     "ended_at": "2026-11-07T22:16:06Z",
     "exit_code": 0,
-    "note": ""
+    "note": "merged; [compat] mode = reference; six Si/MgO cases within 3.4e-8 Ry of the reference (1e-8 level); ADR 0038; defaults bit-identical"
   },
   {
     "run_id": "P45A-ATOMIC-START-PROTOTYPE#1",

@@ -3226,17 +3226,17 @@
     "task_id": "P46A-ATOMIC-START-OPTION",
     "mode": "resume",
     "role": "implementer",
-    "status": "running",
+    "status": "done",
     "codex_pid": 65946,
     "wrapper_pid": 65933,
-    "session_id": null,
+    "session_id": "01a1b82d-4e24-7643-8b21-923550054abd",
     "branch": "task/P46A-ATOMIC-START-OPTION",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P46A-ATOMIC-START-OPTION",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/msgs/P46A-r2-clarify.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P46A-ATOMIC-START-OPTION/report.json",
     "started_at": "2026-11-07T23:11:31Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-07T23:21:05Z",
+    "exit_code": 0,
+    "note": "merged opt-in atomic start (default bit-identical). R2 first failure si-k222: accuracy ratio 15.7x vs 3x (absolute 8.9e-10 Ha, default overshoots); si32 SCF 29->11, -58% time. Not recommended by frozen rule; remaining systems not run. evidence archived"
   }
 ]

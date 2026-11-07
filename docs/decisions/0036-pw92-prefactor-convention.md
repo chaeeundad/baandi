@@ -1,8 +1,9 @@
 # ADR 0036: explicit PW92 prefactor convention for unpolarized PBE
 
 - Date: 2026-11-07
-- Status: **Proposed**. The user decides the default. This implementation keeps
-  the existing modified default; this ADR does not assert approval of a new one.
+- Status: **Accepted (option 1), 2026-11-07**. The user accepted the recommendation:
+  `modified` stays the default and `original` stays an explicitly named option for
+  QE-equivalence comparisons.
 - Ticket: P27B-PW92-ORIGINAL-OPTION.
 
 ## Facts and sources

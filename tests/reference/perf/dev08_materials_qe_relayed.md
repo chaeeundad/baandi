@@ -236,3 +236,45 @@ si8: 21 SCF, 427 Davidson steps, 2674 H vectors, 4.72 s, E = -31.321803601031771
 | si32 | 5.03 | 24.0 (on, 13 SCF) | 4.8 |
 
 The gap grows with system size (2.8, 3.7, 4.8). Earlier statements that compared BAANDI wall time with QE's internal 0.366 s timer overstated the si8 gap (3.6x); the wall-to-wall figure is 2.8x. Equal-accuracy caveat: BAANDI standard results are uncertified and SCF counts differ between the codes. The BAANDI standard rows are single trajectories (see docs/performance/standard-robust-gain.md: the median Si8 H-work gain of the standard profile is 1.78x, so the wall gap against a median trajectory would be larger).
+
+# dev08 batch-7 C complete: equal-accuracy comparison BAANDI versus QE real gamma, one core (relayed, 2026-11-07)
+
+Relayed by the dft5090/master session; BAANDI T=1 pure native `8894b0b`, `taskset -c 0`, 30 runs (si32 5 runs); QE 7.6 `K_POINTS gamma`, np=1, OMP/MKL 1, 5-run medians. Each code is compared to its OWN tight reference because the absolute energies differ by a convention offset (BAANDI tight minus QE tight, default PW92 prefactor: si8 +1.019e-05, si16 +2.036e-05, si32 +4.073e-05 Ha, about 1.27e-06 Ha per atom, see the PW92 and radial-convention studies). Tight references: BAANDI strict tightened (energy 1e-12 Ha, density residual 1e-10, gamma_real off, T=1): si8 -31.321803601031771 (21 SCF, 427 Davidson steps, 2674 H vectors, 4.72 s), si16 -63.129244421617670 (18/276/3919, 19.74 s), si32 -126.703998096108023 (22/567/8995, 157.68 s); QE conv_thr 1e-12 Ry: si8 -31.32181378657689 (18 SCF), si16 -63.12926478562362 (15), si32 -126.7040388229817 (17); energies from `data-file-schema.xml`. Standard rows are `standard`, uncertified.
+
+## BAANDI delivered accuracy (T=1)
+
+| Case | Row | wall (s) | abs dE vs own tight (Ha) | density rel L2 | max abs drho | SCF | Davidson | H vectors |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| si8 | off strict | 3.764 | 1.350e-13 | 8.742e-08 | 2.028e-08 | 15 | 279 | 2044 |
+| si8 | on strict | 3.525 | 1.172e-13 | 1.066e-07 | 2.180e-08 | 15 | 319 | 2125 |
+| si8 | off standard | 1.308 | 1.553e-09 | 1.058e-05 | 1.707e-06 | 15 | 77 | 772 |
+| si8 | on standard | 1.300 | 1.326e-09 | 1.204e-05 | 2.452e-06 | 17 | 85 | 864 |
+| si16 | off strict | 15.124 | 1.707e-11 | 5.296e-07 | 9.461e-08 | 12 | 182 | 2700 |
+| si16 | on strict | 13.319 | 5.379e-12 | 2.811e-07 | 6.101e-08 | 13 | 216 | 3053 |
+| si16 | off standard | 5.866 | 1.268e-09 | 5.254e-06 | 9.420e-07 | 14 | 76 | 1350 |
+| si16 | on standard | 5.205 | 9.787e-10 | 5.377e-06 | 9.568e-07 | 15 | 81 | 1424 |
+| si32 | off strict | 119.223 | 2.942e-11 | 3.721e-07 | 6.149e-08 | 13 | 352 | 5946 |
+| si32 | on strict | 97.475 | 7.392e-11 | 5.534e-07 | 8.887e-08 | 13 | 359 | 5874 |
+| si32 | off standard | 38.357 | 7.067e-10 | 2.234e-06 | 3.469e-07 | 15 | 67 | 2806 |
+| si32 | on standard | 24.002 | 1.640e-09 | 4.218e-06 | 6.634e-07 | 13 | 60 | 2380 |
+
+Density differences are real-space `density.bin` against the same code's tight reference on the same FFT grid (electron counts 32/64/128 agree).
+
+## QE ladder (np=1, 5-run medians; abs dE against QE's own conv_thr 1e-12 result)
+
+| Case | conv_thr (Ry) | wall (s) | abs dE (Ha) | SCF | estimated accuracy (Ry) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| si8 | 1e-8 / 1e-9 / 1e-10 / 1e-12 | 0.467 / 0.513 / 0.551 / 0.606 | 9.230e-10 / 1.659e-10 / 2.613e-11 / 0 | 12 / 14 / 15 / 18 | 6.6e-9 / 2.7e-10 / 5.1e-11 / 2.7e-13 |
+| si16 | 1e-8 / 1e-9 / 1e-10 / 1e-12 | 1.413 / 1.685 / 1.826 / 1.974 | 2.699e-10 / 2.699e-10 / 5.436e-12 / 0 | 10 / 12 / 13 / 15 | 6.3e-9 / 1.1e-10 / 2.6e-11 / 1.8e-13 |
+| si32 | 1e-8 / 1e-9 / 1e-10 / 1e-12 | 5.031 / 6.676 / 6.689 / 7.867 | 2.588e-10 / 2.588e-10 / 1.820e-11 / 0 | 10 / 13 / 13 / 17 | 4.1e-9 / 6.9e-11 / 6.9e-11 / 7.4e-13 |
+
+QE np=8: si8 conv_thr 1e-8/1e-9/1e-10 0.252/0.258/0.273 s are below 0.3 s and INVALID; si8 1e-12 0.338 s, si16 0.556 to 0.698 s and si32 1.693 to 2.263 s are valid.
+
+## Equal-accuracy pairs, one core each
+
+Delivered error of about 1e-9 Ha (BAANDI off standard versus QE conv_thr 1e-8): si8 1.308 s (1.55e-09) vs 0.467 s (9.23e-10): QE 2.80x faster; si16 5.866 s (1.27e-09) vs 1.413 s (2.70e-10): 4.15x; si32 38.357 s (7.07e-10) vs 5.031 s (2.59e-10): 7.62x. With gamma_real on: 2.78x, 3.68x, 4.77x (but the si32 on-standard error 1.64e-09 is 6.3x worse than QE's).
+Delivered error of about 1e-11 Ha (BAANDI off strict versus QE conv_thr 1e-10): si8 3.764 s (1.35e-13) vs 0.551 s (2.61e-11): 6.83x; si16 15.124 s (1.71e-11) vs 1.826 s (5.44e-12): 8.28x; si32 119.223 s (2.94e-11) vs 6.689 s (1.82e-11): 17.82x.
+Cleanest pair (accuracy practically equal): si16 on strict 13.319 s / 5.379e-12 Ha versus QE conv_thr 1e-10 1.826 s / 5.436e-12 Ha: QE 7.29x faster (BAANDI 3053 H vectors; QE 148 h_psi block calls and 1612 FFT calls).
+Gap versus size (off strict): 6.83x, 8.28x, 17.82x for si8, si16, si32: the gap grows with the system size.
+
+Tool limitation: `scripts/compare_materials_qe.py --qe-density` rejects the `K_POINTS gamma` charge-density file (`unsupported gamma_only: expected 0`, half-sphere G set), so no code-to-code density comparison exists for the real path; density differences above are against BAANDI's own tight reference. A complex-path (`K_POINTS automatic 1 1 1`) comparison remains possible.

@@ -2878,5 +2878,23 @@
     "ended_at": "2026-11-07T08:38:01Z",
     "exit_code": 0,
     "note": "merged; Mac si8 strict gamma_real on 2.07x faster than off at T=1 (1.28 vs 2.64 s), 1.45x at T=8; evidence archived"
+  },
+  {
+    "run_id": "P33A-REAL-WORKSPACE-PARALLEL#1",
+    "task_id": "P33A-REAL-WORKSPACE-PARALLEL",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 75510,
+    "wrapper_pid": 75485,
+    "session_id": null,
+    "branch": "task/P33A-REAL-WORKSPACE-PARALLEL",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P33A-REAL-WORKSPACE-PARALLEL",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P33A-REAL-WORKSPACE-PARALLEL.md",
+    "report": null,
+    "started_at": "2026-11-07T09:48:56Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

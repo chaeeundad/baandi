@@ -1223,14 +1223,36 @@ impl ScfProblem {
         } else {
             None
         };
+        let shared_audit = energy::prepare_shared(
+            &AuditInput {
+                cell: &self.cell,
+                basis: &self.states[0].basis,
+                grid: &self.states[0].grid,
+                ionic_g: &self.ionic_g,
+                nonlocal: self.states[0].hamiltonian.nonlocal(),
+                orbitals: &orbitals[0],
+                occupations: finite.map_or(self.occupations.as_slice(), |w| w.block(0, 0)),
+                eigenvalues: &k_points[0].solution.eigenvalues,
+                eigen_residuals: &k_points[0].solution.residuals,
+                input_density: n,
+                output_density: &output,
+                input_hartree: &h,
+                input_xc: &x,
+                ewald: self.ewald.energy.0,
+            },
+            &mut self.fft,
+            self.options.functional,
+            output_xc.as_ref(),
+            self.core_density.as_ref(),
+        )?;
         let mut audits = Vec::new();
         ordered_chunks(
             &mut self.states,
             &mut self.worker_ffts,
             &self.pool,
-            |i, state, fft| {
+            |i, state, _fft| {
                 let k = &k_points[i];
-                let audit = energy::evaluate_with_core_xc(
+                let audit = energy::evaluate_shared(
                     AuditInput {
                         cell: &self.cell,
                         basis: &state.basis,
@@ -1247,10 +1269,7 @@ impl ScfProblem {
                         input_xc: &x,
                         ewald: self.ewald.energy.0,
                     },
-                    fft,
-                    self.options.functional,
-                    output_xc.as_ref(),
-                    self.core_density.as_ref(),
+                    &shared_audit,
                 )?;
                 Ok((state.point.weight, audit))
             },

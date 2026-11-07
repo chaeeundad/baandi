@@ -88,3 +88,71 @@ BAANDI main `946515e`, pure native build sha256 `7daad734656942b0e5d3f64abdedf0f
 | mgo-60 | 8.1385e-06 | 1.2679e-06 | 6.4 | 6.3394e-07 |
 
 These agree with the P27A fixed-density predictions (Si +7.97e-08, MgO +1.279e-06 Ry) to about 0.2 percent for MgO. Si's remainder falls with the cutoff (basis-convergence tail); MgO's remainder of 1.27e-06 Ry does not depend on the cutoff, so a second cutoff-independent term exists. P27C showed that BAANDI's local-potential alpha-Z term is very sensitive to the radial endpoint (about 8e-5 Ry for 0.5 Bohr), so a one-mesh-point endpoint convention difference would be enough; this is a hypothesis under study, not a finding.
+
+# dev08 standard profile versus strict, and versus QE at equal accuracy (relayed, 2026-11-07)
+
+Relayed text from the dft5090/master session; raw output on dev08 in `/scr/mino/rustdft/p4/` (BAANDI) and `/scr/mino/rustdft/p4qe/` (QE with `data-file-schema.xml`). BAANDI main `849e0ae` (without the later setup/audit speedups P28A/P28B), rustc 1.99.1; binaries pure default `0593835297aa9fc5ac8ed123620432a345bbc103b13fc38556823da694cd717a`, pure native `ed6700a0f52858de09ea461b7437e497c8e37a5612a34c5ee18a315de4b6c133`, MKL default `f66b219d30cb891610e08540cb7a8fc0874f68b5dad519ef2bf05e0e54a9eb39`, MKL native `84a8681a1d0dcf291aa0f38a2881a58eaef8e8c20a0e489b3a2ba4d28d1efc48`. Load below 0.30 before each combination, 3-run medians (two outliers re-measured with 9 runs). gamma_real was not used in this measurement (batch-7 B pending). Standard rows are labelled `standard`, never certified.
+
+Wall time in seconds (strict / standard / speed-up):
+
+| Case | Backend | Build | T | strict | standard | speed-up |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| si8 | pure | default | 1 | 5.0108 | 1.6567 | 3.03 |
+| si8 | pure | default | 8 | 3.6242 | 1.2024 | 3.01 |
+| si8 | pure | native | 1 | 3.8209 | 1.3342 (9 runs: 1.3195) | 2.86 |
+| si8 | pure | native | 8 | 2.4963 | 0.9209 | 2.71 |
+| si8 | MKL | default | 1 | 4.3793 | 2.3648 | 1.85 |
+| si8 | MKL | default | 8 | 3.2754 | 1.7068 | 1.92 |
+| si8 | MKL | native | 1 | 4.1156 | 2.2799 | 1.81 |
+| si8 | MKL | native | 8 | 3.0818 | 1.6635 | 1.85 |
+| k444s | pure | default | 1 | 5.2623 | 2.9678 | 1.77 |
+| k444s | pure | default | 8 | 0.9829 | 0.6295 (9 runs: 0.5963) | 1.56 |
+| k444s | pure | native | 1 | 4.1358 | 2.4020 | 1.72 |
+| k444s | pure | native | 8 | 0.8802 | 0.5418 | 1.63 |
+| k444s | MKL | default | 1 | 3.9841 | 2.3574 | 1.69 |
+| k444s | MKL | default | 8 | 0.8375 | 0.5362 | 1.56 |
+| k444s | MKL | native | 1 | 3.7765 | 2.2464 | 1.68 |
+| k444s | MKL | native | 8 | 0.7911 | 0.5098 | 1.55 |
+
+Spread below 5 percent except the two re-measured entries. Best combination: si8 pure native standard T=8 at 0.9209 s. Default and native builds give bit-identical energies and density hashes in all eight case/backend/profile combinations; density hashes are identical across thread counts. Note: this run had no k-point symmetry and the Mac observations of the standard profile (3.2x on si8) are confirmed on dev08 for the pure build (3.0x).
+
+Work counts at T=1 (SCF iterations / Davidson steps / H vector applications):
+
+| Case | Backend | strict | standard | ops reduction |
+| --- | --- | --- | --- | ---: |
+| si8 | pure | 15 / 279 / 2044 | 15 / 77 / 772 | 2.65 |
+| si8 | MKL | 15 / 302 / 2139 | **27** / 110 / 1297 | 1.65 |
+| k444s | pure (= MKL) | 10 / 1686 / 10290 | 9 / 866 / 5864 | 1.76 |
+
+**Anomaly:** with the MKL build the standard profile on si8 needs 27 SCF iterations instead of 15 (identical for T = 1 and 8, default and native builds; energies equal in all of them), halving the profile's gain (1.85x versus 3.0x for pure). k444s shows no such effect (10 to 9 on both backends). Open: per-iteration histories (density residual, standard error estimate, eigen thresholds) for si8 standard, MKL versus pure, requested from dev08.
+
+Total energies (Ha) strict / standard / difference: si8 pure -31.321803601031636 / -31.321803599478528 / 1.553e-09; si8 MKL -31.32180360103142 / -31.321803598673775 / 2.358e-09; k444s pure -7.92597612664809 / -7.92597612651481 / 1.333e-10; k444s MKL -7.9259761266480915 / -7.925976126514809 / 1.333e-10.
+
+## QE conv_thr ladder on si8 (N=1, nowf, 3 runs; total energy from `data-file-schema.xml` in Ha, error against the conv_thr 1e-14 result of the same path)
+
+| Path | conv_thr (Ry) | total energy (Ha) | abs error (Ha) | internal time (s) | iterations |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| complex k=0 | 1e-6 | -31.32181368954285 | 9.703e-08 | 0.4600 | 9 |
+| complex k=0 | 1e-8 | -31.32181378461762 | 1.955e-09 | 0.6800 | 14 |
+| complex k=0 | 1e-10 | -31.32181378656577 | 7.141e-12 | 0.8400 | 17 |
+| complex k=0 | 1e-12 | -31.32181378657216 | 7.496e-13 | 0.9133 | 20 |
+| complex k=0 | 1e-14 | -31.32181378657291 | 0 | 1.6167 | 43 |
+| real gamma | 1e-6 | -31.32181341221784 | 3.744e-07 | 0.2500 | 8 |
+| real gamma | 1e-8 | -31.32181378453889 | 2.040e-09 | 0.3667 | 12 |
+| real gamma | 1e-10 | -31.32181378656565 | 1.312e-11 | 0.4500 | 15 |
+| real gamma | 1e-12 | -31.32181378657835 | 4.192e-13 | 0.5033 | 18 |
+| real gamma | 1e-14 | -31.32181378657877 | 0 | 0.9100 | 42 |
+
+The two QE paths' conv_thr 1e-14 energies differ by 5.858e-12 Ha. (QE's 8-digit stdout prints the same energy for every conv_thr from 1e-8 up, hence the XML.)
+
+## Equal-accuracy comparison (si8, N=1 unless noted)
+
+| Code / setting | energy error (Ha) | time (s) |
+| --- | ---: | ---: |
+| QE real gamma, conv_thr 1e-8 | 2.040e-09 | 0.3667 |
+| QE complex k=0, conv_thr 1e-8 | 1.955e-09 | 0.6800 |
+| BAANDI standard, pure native, T=1 | 1.553e-09 | 1.3342 (9 runs 1.3195) |
+| BAANDI standard, MKL native, T=1 | 2.358e-09 | 2.2799 |
+| BAANDI standard, pure native, T=8 | 1.553e-09 | 0.9209 |
+
+At the same delivered-accuracy class (about 2e-9 Ha) QE real gamma is 3.6 times faster than BAANDI standard pure native on one core, and 2.5 times faster than BAANDI on eight cores; BAANDI is 1.9 times behind QE complex k=0 on one core. (BAANDI's gamma_real path and the setup/audit speedups were not in this measurement.)

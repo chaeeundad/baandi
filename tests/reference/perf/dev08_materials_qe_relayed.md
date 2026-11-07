@@ -278,3 +278,34 @@ Cleanest pair (accuracy practically equal): si16 on strict 13.319 s / 5.379e-12 
 Gap versus size (off strict): 6.83x, 8.28x, 17.82x for si8, si16, si32: the gap grows with the system size.
 
 Tool limitation: `scripts/compare_materials_qe.py --qe-density` rejects the `K_POINTS gamma` charge-density file (`unsupported gamma_only: expected 0`, half-sphere G set), so no code-to-code density comparison exists for the real path; density differences above are against BAANDI's own tight reference. A complex-path (`K_POINTS automatic 1 1 1`) comparison remains possible.
+
+# dev08 re-measurement after P30A (pool-distributed pair FFT) and P32A (real algebra kernels), main 72574f9 (relayed, 2026-11-07)
+
+Relayed by the dft5090/master session. main `72574f9`, pure native `d9b64928cbe9ffbb84324677bf812823b29b94318dcbe6680ecced40fb03035b`, rustc 1.99.1, n=10 per row, `taskset -c 0` (T=1) or `0-7` (T=8), start load average 1.44 (earlier measurements 0.16 to 0.44: a confounder). Compared with `8894b0b` (results identical to `b6a5416`).
+
+**Correction of an earlier statement:** the real path (gamma_real on) is NOT bit-identical to the previous implementation after P32A, because the GEMM blocking and slice loops change the summation order; Davidson then converges in a different number of steps. Only the complex path (gamma_real off) is bit-identical (8 rows, energy difference 0, same SCF/Davidson/H counts). Real-path changes: si8 strict energy difference 8.53e-14 Ha (Davidson steps 319 to 258, H vectors 2125 to 2014); si16 strict 4.59e-12 Ha (216 to 185, 3053 to 2895); si8 standard 7.85e-11 Ha (SCF 17 to 15, 85 to 78, 864 to 795); si16 standard 4.41e-10 Ha (81 to 70, 1424 to 1442). All within the strict 1e-10 Ha gate or the standard delivered-accuracy class; future regression checks must compare the real path against the new numbers, not the old ones.
+
+| Case | T | row | wall median (s) | min | max | SCF | Davidson | H vectors | energy (Ha) |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| si8 | 1 | off strict | 3.861 | 3.831 | 3.927 | 15 | 279 | 2044 | -31.321803601031636 |
+| si8 | 1 | on strict | 3.134 | 3.126 | 3.178 | 15 | 258 | 2014 | -31.321803601031739 |
+| si8 | 1 | off standard | 1.337 | 1.331 | 1.380 | 15 | 77 | 772 | -31.321803599478528 |
+| si8 | 1 | on standard | 1.352 | 1.348 | 1.392 | 15 | 78 | 795 | -31.321803599784658 |
+| si8 | 8 | off strict | 2.513 | 2.468 | 2.562 | 15 | 279 | 2044 | -31.321803601031636 |
+| si8 | 8 | on strict | 2.525 | 2.508 | 2.613 | 15 | 258 | 2014 | -31.321803601031739 |
+| si8 | 8 | off standard | 0.943 | 0.910 | 0.967 | 15 | 77 | 772 | -31.321803599478528 |
+| si8 | 8 | on standard | 1.176 | 1.158 | 1.210 | 15 | 78 | 795 | -31.321803599784658 |
+| si16 | 1 | off strict | 15.392 | 15.286 | 15.517 | 12 | 182 | 2700 | -63.129244421600596 |
+| si16 | 1 | on strict | 11.694 | 11.669 | 11.740 | 13 | 185 | 2895 | -63.129244421616882 |
+| si16 | 1 | off standard | 5.949 | 5.931 | 6.009 | 14 | 76 | 1350 | -63.129244420349295 |
+| si16 | 1 | on standard | 5.423 | 5.412 | 5.464 | 15 | 70 | 1442 | -63.129244421079889 |
+| si16 | 8 | off strict | 7.552 | 7.494 | 7.582 | 12 | 182 | 2700 | -63.129244421600596 |
+| si16 | 8 | on strict | 7.576 | 7.524 | 7.594 | 13 | 185 | 2895 | -63.129244421616882 |
+| si16 | 8 | off standard | 3.186 | 3.165 | 3.227 | 14 | 76 | 1350 | -63.129244420349295 |
+| si16 | 8 | on standard | 4.028 | 4.016 | 4.064 | 15 | 70 | 1442 | -63.129244421079889 |
+
+Same trajectory (SCF equal) between on and off: si8 both profiles (15 = 15; Davidson and H counts differ); si16 strict 12 versus 13 and standard 14 versus 15 differ.
+Real path on versus off, wall ratio, previous (before P30A/P32A) to now: T=1: si8 strict -6.4 % to -18.8 %, si8 standard -0.6 % to +1.1 %, si16 strict -11.9 % to -24.0 %, si16 standard -11.3 % to -8.8 %; T=8: si8 strict +38.6 % to +0.5 %, si8 standard +41.1 % to +24.7 %, si16 strict +45.2 % to +0.3 %, si16 standard +42.2 % to +26.4 %.
+Thread scaling T=1 to T=8, previous to now (off / on): si8 strict 1.53 to 1.54 / 1.03 to 1.24; si8 standard 1.42 to 1.42 / 1.00 to 1.15; si16 strict 2.03 to 2.04 / 1.23 to 1.54; si16 standard 1.87 to 1.87 / 1.16 to 1.35.
+The T=8 inversion has practically disappeared for strict (+0.5 %, +0.3 %: a tie) and shrunk but remains for standard (+24.7 %, +26.4 %). The Mac observation (off 1.19 s, on 0.82 s at T=8) does not carry over: on dev08 strict T=8 is a tie.
+Open: the complex path (off) is 1.3 to 2.6 percent slower in all eight rows with identical work counts; the load difference is a confounder and an alternating-run control (8894b0b versus 72574f9, 10 each, same session) is running. si32 n=3 is running.

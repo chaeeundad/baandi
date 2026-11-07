@@ -422,3 +422,29 @@ or new QE run. The unchanged zero-allocation requirement remains a blocker.
 |---|---|---|---|---|
 | P36A-1 | B21: retain real Hamiltonian/pair plans/nonlocal image and Davidson GEMM/projection/EVD/matrix scratch per k state; refresh potential, invalidate on operator identity or solve-storage settings | numerical identity verified; allocation gate blocked | 70/70 final snapshots match baseline (seven systems, strict/standard, T=1/2/4/8/12); 25/25 complex/off comparisons preserve energy/density/work; full SCF forced-rebuild oracle passes; check.sh exit 0. Alternating five-triple Mac Si8 strict T=8: baseline 0.752295 s, workspace-only 0.711260 s; standard T=8: 0.337523 -> 0.300506 s. Reused-workspace allocation probe still counts 70/72 allocations at 2969x20 T=1/8 and 1499/1502 at 11877x68 (exit 101); isolated EVD sizes 20/40/88/160 count 0/32/88/121, real GEMMs 0 | Per-SCF ownership removes repeat numerical-storage construction but cannot provide the backend's opaque EVD packing storage. Do not claim an allocation-free loop or acceptance. Shared-host outliers are retained; dev08 must decide speed |
 | P36A-2 | B22 V/HV only: one real Ritz rotation region containing the two existing fixed-panel trees; no arithmetic/tile/guard change | bit-identical; performance provisional and mixed | Si8 strict workspace-only -> paired: T=4 0.719752 -> 0.727408 s, T=8 0.711260 -> 0.699368 s; five alternating measured triples. Pair-kernel bit oracle passes all five budgets, zero/boundary/Si8 shapes and poisoned output. 2969 rows retain 12 panels each, now 24 independent pieces in one region | Ports A45 without repeating A49's finer tiles. Small individual effects are not established by five samples; no standalone rotation speedup or default acceptance is claimed. Audit/nonlocal overlap and P36B budget changes remain outside this ticket |
+
+## P38A band-count study (2026-11-07; Mac observations)
+
+Source `9d32045155007d893bfd9ccf86585167e7c2ab4d`; no production changes.
+Protocol, full condition tables and limitations: [band-count-policy.md](band-count-policy.md).
+Raw evidence: `P38A-evidence/`, external UPFs only. No dev08 speed acceptance.
+
+| ID | Attempt | Result | Numbers and lesson |
+| --- | --- | --- | --- |
+| P38A-1 | A19 reopened as a conditional multiplet study, extras 1–12, strict/standard, T=1, three repetitions | simple first-empty-multiplet oracle rejected; default remains four | Si8 strict main H: 2063 at four extras, 1253 at the six-member multiplet completion, 1024 at seven. Held-out Si16 first-empty multiplet has two members, but two extras cost 3205 H versus default 2657 (+20.62%, exceeding the 10% per-case gate), with 14 versus 12 SCF steps. Threshold sensitivity 1e-7 through 1e-4 Ha does not change either multiplicity. Converged-spectrum correlation is not a validated pre-SCF/first-iteration predictor. No auto option implemented. |
+| P38A-2 | Pre-SCF free-electron first-empty shell completion on the Si8 training case | rejected diagnostic | Shells end at bands 1/7/19, selecting three extras above 16 occupied; measured H is 2321 versus default 2063 (+12.51%). The free-electron shell differs from the physical first-empty group. No fitted policy or independent held-out success is claimed. |
+
+Completed 2026-11-08 (local date): 24 cases × two profiles × twelve counts ×
+three runs = 1728 samples; 1095 converge, 294 reject incompatible basis/band
+requests, 306 exhaust SCF budgets, and 33 diverge. Held-out syn-s2 strict extras
+1/2 reach energies +4.4165136e-3 Ha above default; completing its first-empty
+group does not restore the default fixed point. Five ambiguous spectrum rows
+were replayed with identical energy bits/density SHA-256 and checked at fixed
+density (maximum all-root residual 9.9977605473e-6 Ha, grouping threshold 1e-4 Ha).
+All 543 successful strict scans retain certificates (maximum certified residual
+9.9881473239e-10 Ha). All 70 supported default comparisons and cross-thread
+checks are bit-identical; 30 forced-real multi-k combinations reject unsupported
+inputs. Final workspace gates, release probe and evidence audit exit 0.
+Wall medians are loaded-Mac observations (load 2.6733–29.6738, including two
+concurrent T=1 collectors), not speed acceptance. Integer four stays unchanged;
+Phase B is not entered and no recommended automatic option is introduced.

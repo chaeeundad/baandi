@@ -213,10 +213,22 @@ impl Basis {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Xc {
+    pub pw92_prefactor: Option<String>,
     pub density_floor: Option<f64>,
     pub functional: Functional,
     #[serde(default)]
     pub allow_functional_override: bool,
+}
+impl Xc {
+    pub fn prefactor(&self) -> Result<dft_engine::Pw92Prefactor, ConfigError> {
+        match self.pw92_prefactor.as_deref().unwrap_or("modified") {
+            "modified" => Ok(dft_engine::Pw92Prefactor::Modified),
+            "original" => Ok(dft_engine::Pw92Prefactor::Original),
+            _ => Err(ConfigError::Invalid(
+                "xc.pw92_prefactor must be modified or original".into(),
+            )),
+        }
+    }
 }
 #[derive(Debug, Deserialize)]
 pub enum Functional {
@@ -850,6 +862,13 @@ impl Config {
     }
     /// Validate active physical settings and cell geometry. SCF/output are type-checked only.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.xc.prefactor()? == dft_engine::Pw92Prefactor::Original
+            && (self.xc.functional.engine() != dft_engine::Functional::Pbe || self.collinear())
+        {
+            return Err(ConfigError::Invalid(
+                "xc.pw92_prefactor=original requires unpolarized PBE".into(),
+            ));
+        }
         self.finite_temperature()?;
         if let Some(relax) = &self.relax {
             relax

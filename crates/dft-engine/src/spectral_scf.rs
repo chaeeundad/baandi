@@ -11,7 +11,7 @@ impl ScfProblem {
     ) -> Result<(Option<Vec<ComplexMatrix>>, bool), ScfError> {
         let start = Instant::now();
         let h = hartree::evaluate(input, &self.cell, &mut self.fft)?;
-        let x = self.options.functional.evaluate_with_floor(
+        let x = self.options.evaluate_xc(
             input,
             self.core_density.as_ref(),
             &mut self.xc_density,

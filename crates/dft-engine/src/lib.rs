@@ -13,7 +13,7 @@ pub mod input {
 pub const EXECUTION_THREADS: usize = 1;
 
 pub mod functional;
-pub use functional::Functional;
+pub use functional::{Functional, Pw92Prefactor};
 
 mod band_density;
 

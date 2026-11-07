@@ -212,3 +212,158 @@ The byte-reader lint fix changed no formulas or tolerances; the six-case
 release diagnostic was rerun afterward. Only the new test and this document
 are changed. README, shared dashboard/registry artifacts and production files
 are outside this ticket's owned scope and remain untouched.
+
+## P27B: 2026-11-07 explicit convention and self-consistent results
+
+The optional `[xc] pw92_prefactor = "original"` now selects unpolarized PW92
+A=0.031091 inside PBE. Omission and `"modified"` retain A=0.0310907 through the
+unchanged xcx path. LDA, collinear PBE and unknown values reject the option.
+[ADR 0036](../decisions/0036-pw92-prefactor-convention.md) is Proposed; the
+recommendation is to retain modified as default. Neither convention is claimed
+more correct. No QE source was accessed; no new QE run was performed.
+
+### Self-consistent energies
+
+Same six inputs, UPF hashes, cutoffs, grids, NLCC, density floors and strict
+convergence settings as P27A above. The existing smoke runner supplies external
+UPF paths and checks hashes, convergence, certificates and electron counts.
+Only the explicit convention changes in each paired calculation.
+
+| Case | Modified total (Ha) | Original total (Ha) | Change (Ry) | P27A prediction requested (Ry) | Original iterations |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| si-20 | -8.462317836906042 | -8.462318887031506 | -2.1002509278389425e-6 | -2.1002e-6 | 15 |
+| si-30 | -8.462329006518452 | -8.46233005664336 | -2.100249815839561e-6 | -2.1002e-6 | 15 |
+| si-40 | -8.462336822426911 | -8.462337872551002 | -2.100248181591269e-6 | -2.1002e-6 | 15 |
+| mgo-40 | -76.05088085171062 | -76.05088428700304 | -6.870584854823392e-6 | -6.8706e-6 | 18 |
+| mgo-50 | -76.0509692404303 | -76.05097267573814 | -6.870615663956414e-6 | -6.8706e-6 | 19 |
+| mgo-60 | -76.05097717077302 | -76.05098060606232 | -6.870578602047317e-6 | -6.8706e-6 | 19 |
+
+Against the *unrounded*, same-cutoff P27A fixed-density predictions, si-20
+changes by another -2.8422e-14 Ry and mgo-40 by -2.3910e-12 Ry. These are
+consistent with first-order stationarity within the SCF/roundoff resolution;
+we do not claim those tiny remainders as resolved density-response energies.
+Using the rounded relayed BAANDI-minus-QE totals from P27A gives residuals
++7.9749072e-8 Ry (si-20) and +1.2794151e-6 Ry (mgo-40). The MgO residual remains
+unexplained by this ticket. No radial-mesh change or attribution is made.
+
+### Fixed gates and observations
+
+- 20,000 deterministic random points, rs=0.1..20 and exchange reduced
+  gradient s=0..3, including sigma=0: maximum relative errors against xcx
+  correlation are 3.7601554e-14 (energy/electron), 1.6216984e-14 (density
+  derivative) and 1.3035022e-14 (sigma derivative), each below 1e-12.
+- Original analytic derivatives versus independent central energy differences:
+  maximum relative errors 6.4058202e-10 and 2.0810671e-9 for density and sigma.
+  The fixed cap is 1e-7; steps of 1e-5 times natural density/sigma scales balance
+  second-order truncation and f64 subtraction. The analytic continuation near
+  sigma=0 permits a centered test without taking square roots of sigma.
+- Two skew grids: modified total XC error 0 Ha; maximum potential error
+  2.2204460e-16 Ha. Original directional energy derivative errors are
+  1.2427036e-10 and 9.9432684e-11 Ha (cap 1e-7 times max(1,|derivative|)).
+- All six reconstructed real combined-density grids: modified total XC error
+  0 Ha, potential error at most 6.6613381e-16 Ha (both caps 1e-12).
+- Synthetic two-ion nonlocal PBE fixture, original convention: three Cartesian
+  force differences at h=0.0025 Bohr have maximum error 3.3044003e-8 Ha/Bohr
+  (existing cap 1e-6); all six stress components at strain h=0.0005 have maximum
+  error 2.8668675e-10 Ha/Bohr^3 (existing cap 1e-7). Three step sizes show
+  second-order convergence. This is a synthetic fixed-basis derivative oracle,
+  not a real-material force/stress or cutoff-convergence claim.
+- Five default LDA benchmark cases (gamma, k222s, k222, k444s, si8), each at
+  thread budgets 1,2,4,8,12: energy difference 0 Ha and density byte-identical
+  to the pre-plumbing executable, with unchanged iteration counts. Timings
+  overlapped builds/other tests and support no performance claim.
+- Exact checkpoint restoration rejects both original-to-modified and
+  modified-to-original with `Rejection::Options`; same-convention restoration
+  succeeds. Explicit WarmStart with a new calculation ID succeeds. Wire tests
+  verify original round-trip, omitted modified, legacy default and unknown-value
+  rejection. Existing NLCC/floor checkpoint exclusions are unchanged.
+
+### Reproduction
+
+All builds use this worktree's single `target/`. Build the baseline CLI from
+base commit `6606cc8c8a14b5f8bf0620fd020bf4895f06c842` before implementation
+and retain its executable outside the worktree (here `/tmp/p27b-baseline-cli`).
+The baseline executable was retained before option plumbing; the new unused
+physics module may have been compiled during that build, but no existing
+numerical path or caller had been changed. No git metadata was written.
+
+```sh
+export PATH=/opt/homebrew/opt/rustup/bin:$PATH
+cargo build --offline --release -p dft-cli
+cargo test --offline -p dft-physics --test pbe_pw92_oracles -- --nocapture
+DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex \
+PW92_WORK=/tmp/p27b-materials-final PW92_BASELINE_CLI=/tmp/p27b-baseline-cli \
+cargo test --offline --release -p dft-physics --test pbe_pw92_materials \
+  -- --ignored --nocapture
+cargo test --offline --release -p dft-cli --test pw92_prefactor_config \
+  -- --include-ignored --nocapture
+```
+
+The real-file test skips explicitly when DFT_NC_DIR or required files are
+absent; malformed configured inputs and failed SCFs fail. With
+PW92_BASELINE_CLI it additionally compares each default PBE energy and density
+against the pre-change executable. Explicit modified versus omission is always
+checked. Raw inputs, outputs, density binaries and comparison JSON are retained
+in PW92_WORK, outside the repository; they are temporary evidence. This section
+preserves the measured summary. UPFs were read in place, never copied.
+
+Benchmark: `python3 -I scripts/bench_scf.py --binary target/release/dft-cli
+--upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF
+--cases gamma,k222s,k222,k444s,si8 --repeats 1 --threads T
+--baseline /tmp/p27b-baseline.json --require-identical`, for T=1,2,4,8,12.
+The baseline JSON was produced with the retained baseline executable, T=1,
+using `--record /tmp/p27b-baseline.json`.
+
+Initial integration tests exposed missing original-path scratch allocation
+(exit 101), corrected before material results. The restart test fixture then
+needed its actual PBE/cutoff model identity and a distinct warm-start calculation
+ID (exit 101); production restart checks correctly rejected the inconsistent
+fixture. The initial workspace check exited 1 for that fixture. No tolerance or
+production restart check was relaxed. The final verification record follows.
+
+### Final verification record
+
+All following final commands exited 0 on this Mac. All four check.sh runs
+reported PASS for build, test, fmt and clippy; gates were not relaxed.
+
+| Command | Exit | Result |
+| --- | ---: | --- |
+| `cargo test --offline -p dft-physics --test pbe_pw92_oracles -- --nocapture` | 0 | Two point/grid oracle tests passed |
+| Six-material release test with PW92_BASELINE_CLI, command above | 0 | All six original SCFs converged; real-grid gates passed; baseline default and explicit-modified energy/density identical; 114.90 s including extra SCFs |
+| Release CLI convention suite with `--include-ignored --nocapture` | 0 | Config, exact/warm restart and force/stress tests passed |
+| `scripts/check.sh` | 0 | All workspace gates passed, including convention wire tests |
+| `scripts/check.sh dft-physics` | 0 | All gates passed |
+| `scripts/check.sh dft-engine` | 0 | All gates passed |
+| `scripts/check.sh dft-cli` | 0 | All gates passed |
+| `bench_scf.py --require-identical`, command above, T=1,2,4,8,12 | 0 each | 25 energy/density comparisons passed |
+| `python3 -I scripts/tests/test_readme_figures.py` | 0 | Nine tests passed; existing unclosed-file ResourceWarnings only |
+| Real-file release test with DFT_NC_DIR unset | 0 | Explicit missing-variable SKIP |
+| Real-file release test with DFT_NC_DIR=/tmp/p27b-missing-upfs | 0 | Explicit missing-files SKIP |
+| `git diff --check` | 0 | No whitespace errors |
+
+A separate JSON comparison of the six default versus baseline outputs also
+confirmed exact equality of all `energies`, `total_energy`, `eigenvalues`,
+`occupations`, `kpoints`, `electrons`, `bands` and `band_gap` records.
+Execution timing is intentionally excluded from numerical identity.
+
+Executable SHA-256:
+
+- Retained baseline: `95639033c78e5eac20f1f7adcaacb1eb6d0b260eda7f5eb65c641205aeca22dd`.
+- Implemented release CLI: `a7fb625ef1dd23a989b739dc86debe6966c9b5b7098197ab2cd4d81fab8624f4`.
+
+Original-convention density SHA-256 in case order:
+
+- si-20: `8a676fde37d52ea96d44635f985742c1542890cb011a4c70736dd31f418e3b4d`.
+- si-30: `3075c2f1428bf571aed7af0a011cfc46a762968ecb8387977409bf3e78888223`.
+- si-40: `009cc0100343de79f649d6a0cf2d7b9f32a806820c09829f65713ec812d77f92`.
+- mgo-40: `4d775867de0b829f987447e01eb39308add84a4b7def646a35cf0b8edbe4631c`.
+- mgo-50: `30ad9bca77fd6aec82e1fc08b5b7988c58bf942e0d3d65e352ade3845e0b937d`.
+- mgo-60: `ae962911d612041b6a059a3bfcae0b928dec6474d7865a84777231d325a04f91`.
+
+Additional engine/CLI files contain option plumbing only: engine `lib.rs`,
+`force_identity.rs`, `forces.rs`, `stress.rs`, `spectral_scf.rs`, and CLI
+`checkpoint_io.rs` (including wire tests). The derivative implementations are
+unchanged apart from selecting the new XC path. No existing physics numerical
+path was edited. README, real-gamma-r5-results.md, pseudopotentials and shared
+orchestrator dashboard/session artifacts remain untouched per ticket scope.
+Changes are uncommitted on `task/P27B-PW92-ORIGINAL-OPTION` for review.

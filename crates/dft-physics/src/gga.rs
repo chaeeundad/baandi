@@ -163,3 +163,153 @@ pub fn stress_metric(
         })
     }))
 }
+
+// Separate opt-in assembly preserves every operation of the legacy path.
+pub fn evaluate_pw92(
+    prefactor: crate::pbe_pw92::Pw92Prefactor,
+    n: &Array3<f64>,
+    cell: &Cell,
+    fft: &mut impl Fft3d,
+) -> Result<XcGrid, PhysicsError> {
+    if n.is_empty() || n.shape() != fft.shape() {
+        return Err(PhysicsError::Shape);
+    }
+    if let Some(&x) = n.iter().find(|x| !x.is_finite() || **x < 0.0) {
+        return Err(PhysicsError::GgaDensity(x));
+    }
+    let gradients = (0..3)
+        .map(|a| derivative(n, cell, a, fft))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut sigma = vec![0.0; n.len()];
+    for g in &gradients {
+        for (s, x) in sigma.iter_mut().zip(g) {
+            *s += x * x;
+        }
+    }
+    let rho: Vec<_> = n
+        .iter()
+        .map(|&x| if x <= DENSITY_THRESHOLD { 0.0 } else { x })
+        .collect();
+    for (s, r) in sigma.iter_mut().zip(&rho) {
+        if *r == 0.0 {
+            *s = 0.0;
+        }
+    }
+    let input = XcInput::gga(&rho, &sigma);
+    let eval = |id| {
+        Functional::new(id, Spin::Unpolarized)
+            .and_then(|f| f.eval(n.len(), &input))
+            .map_err(|e| PhysicsError::Xc(e.to_string()))
+    };
+    let x = eval(FunctionalId::GgaXPbe)?;
+    let c = correlation_grid(&rho, &sigma, prefactor);
+    let weight = cell.volume_bohr3() / n.len() as f64;
+    // ndarray uses multiple accumulators, reducing long-grid summation error.
+    let energy = weight
+        * Array1::from_iter(
+            rho.iter()
+                .zip(&x.exc)
+                .zip(&c.exc)
+                .map(|((n, x), c)| n * (x + c)),
+        )
+        .sum();
+    let mut potential = Array3::zeros(n.raw_dim());
+    for ((v, x), c) in potential.iter_mut().zip(&x.vrho).zip(&c.vrho) {
+        *v = x + c;
+    }
+    for (axis, mut flux) in gradients.into_iter().enumerate() {
+        for ((f, x), c) in flux.iter_mut().zip(&x.vsigma).zip(&c.vsigma) {
+            *f *= 2.0 * (x + c);
+        }
+        potential -= &derivative(&flux, cell, axis, fft)?;
+    }
+    let integral = weight * (n * &potential).sum();
+    if !energy.is_finite() || !integral.is_finite() || potential.iter().any(|v| !v.is_finite()) {
+        return Err(PhysicsError::Unrepresentable);
+    }
+    Ok(XcGrid {
+        potential,
+        energy: Hartree(energy),
+        potential_integral: Hartree(integral),
+    })
+}
+
+/// Explicit gradient-metric contribution at fixed fractional density samples.
+/// Density/volume response is accounted for separately through the XC potential.
+pub fn stress_metric_pw92(
+    prefactor: crate::pbe_pw92::Pw92Prefactor,
+    n: &Array3<f64>,
+    cell: &Cell,
+    fft: &mut impl Fft3d,
+) -> Result<[[f64; 3]; 3], PhysicsError> {
+    let gradients = (0..3)
+        .map(|a| derivative(n, cell, a, fft))
+        .collect::<Result<Vec<_>, _>>()?;
+    let rho: Vec<_> = n
+        .iter()
+        .map(|&v| if v <= DENSITY_THRESHOLD { 0. } else { v })
+        .collect();
+    let sigma: Vec<f64> = (0..n.len())
+        .map(|i| {
+            if rho[i] == 0. {
+                0.
+            } else {
+                gradients
+                    .iter()
+                    .map(|g| g.as_slice().unwrap()[i].powi(2))
+                    .sum()
+            }
+        })
+        .collect();
+    let input = XcInput::gga(&rho, &sigma);
+    let eval = |id| {
+        Functional::new(id, Spin::Unpolarized)
+            .and_then(|f| f.eval(n.len(), &input))
+            .map_err(|e| PhysicsError::Xc(e.to_string()))
+    };
+    let x = eval(FunctionalId::GgaXPbe)?;
+    let c = correlation_grid(&rho, &sigma, prefactor);
+    Ok(std::array::from_fn(|a| {
+        std::array::from_fn(|b| {
+            -2. / n.len() as f64
+                * gradients[a]
+                    .iter()
+                    .zip(&gradients[b])
+                    .enumerate()
+                    .map(|(i, (a, b))| (x.vsigma[i] + c.vsigma[i]) * a * b)
+                    .sum::<f64>()
+        })
+    }))
+}
+
+struct CorrelationGrid {
+    exc: Vec<f64>,
+    vrho: Vec<f64>,
+    vsigma: Vec<f64>,
+}
+fn correlation_grid(
+    rho: &[f64],
+    sigma: &[f64],
+    prefactor: crate::pbe_pw92::Pw92Prefactor,
+) -> CorrelationGrid {
+    let mut c = CorrelationGrid {
+        exc: Vec::with_capacity(rho.len()),
+        vrho: Vec::with_capacity(rho.len()),
+        vsigma: Vec::with_capacity(rho.len()),
+    };
+    for (&n, &s) in rho.iter().zip(sigma) {
+        let point = if n == 0.0 {
+            crate::pbe_pw92::Correlation {
+                exc: 0.0,
+                vrho: 0.0,
+                vsigma: 0.0,
+            }
+        } else {
+            crate::pbe_pw92::correlation(n, s, prefactor)
+        };
+        c.exc.push(point.exc);
+        c.vrho.push(point.vrho);
+        c.vsigma.push(point.vsigma);
+    }
+    c
+}

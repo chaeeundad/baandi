@@ -132,7 +132,7 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
     let core_density = dft_physics::density::core_density(&db, &dg, volume, &species, &mut fft)?;
     let (energy, integral, core_potential, mut xc) = if densities.len() == 1 {
         let mut scratch = Array3::zeros(dims);
-        let result = state.options.functional.evaluate_with_floor(
+        let result = state.options.evaluate_xc(
             &density,
             core_density.as_ref(),
             &mut scratch,
@@ -148,7 +148,16 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
             combined.mapv_inplace(|v| v.max(floor));
         }
         let metric = if state.options.functional == Functional::Pbe {
-            dft_physics::gga::stress_metric(&combined, state.cell, &mut fft)?
+            if state.options.pw92_prefactor == crate::Pw92Prefactor::Original {
+                dft_physics::gga::stress_metric_pw92(
+                    state.options.pw92_prefactor,
+                    &combined,
+                    state.cell,
+                    &mut fft,
+                )?
+            } else {
+                dft_physics::gga::stress_metric(&combined, state.cell, &mut fft)?
+            }
         } else {
             [[0.; 3]; 3]
         };

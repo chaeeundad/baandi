@@ -169,6 +169,7 @@ impl RealNonlocal {
 /// differ by at most 1e3 (R2 debug assertion). Fixed local pair pieces and GEMM
 /// share the supplied persistent pool.
 pub struct RealHamiltonian {
+    source_identity: Arc<()>,
     half: HalfSphere,
     kinetic: Vec<f64>,
     potential: Vec<f64>,
@@ -201,6 +202,7 @@ impl RealHamiltonian {
         }
         let nonlocal = RealNonlocal::new(source.nonlocal(), &half, capacity, pool)?;
         Ok(Self {
+            source_identity: source.operator_identity(),
             half,
             kinetic,
             potential: source.local_potential_values().to_vec(),
@@ -208,6 +210,20 @@ impl RealHamiltonian {
             nonlocal,
             capacity,
         })
+    }
+    /// Refresh only the local samples when immutable operator data match.
+    /// False asks the owner to rebuild; no scratch or cached data is changed.
+    pub fn update_from_complex(&mut self, source: &Hamiltonian, basis: &PlaneWaveBasis) -> bool {
+        if !Arc::ptr_eq(&self.source_identity, &source.operator_identity())
+            || source.basis_momenta() != basis.momenta()
+            || basis.k_fractional() != [0.; 3]
+            || self.potential.len() != source.local_potential_values().len()
+        {
+            return false;
+        }
+        self.potential
+            .copy_from_slice(source.local_potential_values());
+        true
     }
     /// ORC mapping for conversion at the library boundary.
     pub fn half_sphere(&self) -> &HalfSphere {

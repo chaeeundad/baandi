@@ -47,6 +47,7 @@ fn problem(kind: usize, opts: ScfOptions) -> ScfProblem {
     )
     .unwrap()
 }
+#[allow(dead_code)]
 fn run(kind: usize, mode: GammaReal, threads: usize, seed: u64) -> ScfResult {
     problem(kind, options(mode, threads, seed)).run().unwrap()
 }
@@ -78,59 +79,76 @@ fn snapshots() {
     let pp =
         dft_upf::parse_upf(&std::fs::read_to_string(std::env::var("DFT_SI_UPF").unwrap()).unwrap())
             .unwrap();
-    for threads in [1, 2, 4, 8, 12] {
-        for kind in 0..4 {
-            save(
-                &format!("synthetic-{kind}"),
-                threads,
-                run(kind, GammaReal::On, threads, 2026),
-            );
-        }
-        for si8 in [false, true] {
-            let a = 10.261_212_856_717_933;
-            let cell = if si8 {
-                Cell::from_user_rows_bohr([[a, 0., 0.], [0., a, 0.], [0., 0., a]]).unwrap()
-            } else {
-                common::cell()
-            };
-            let positions = if si8 {
-                vec![
-                    [0., 0., 0.],
-                    [0., 0.5, 0.5],
-                    [0.5, 0., 0.5],
-                    [0.5, 0.5, 0.],
-                    [0.25, 0.25, 0.25],
-                    [0.25, 0.75, 0.75],
-                    [0.75, 0.25, 0.75],
-                    [0.75, 0.75, 0.25],
-                ]
-            } else {
-                vec![[0.; 3], [0.25; 3]]
-            };
-            let atoms: Vec<_> = positions.into_iter().map(|p| Atom::new("Si", p)).collect();
-            let r = ScfProblem::new(
-                &cell,
-                &atoms,
-                &[SpeciesPotential {
-                    label: "Si",
-                    potential: &pp,
-                }],
-                ScfOptions {
-                    gamma_real: GammaReal::On,
-                    threads,
-                    cutoff_hartree: 15.,
-                    max_iterations: 100,
-                    mixing: dft_engine::Mixing::Pulay {
-                        beta: 0.5,
-                        history: 6,
+    for standard in [false, true] {
+        for threads in [1, 2, 4, 8, 12] {
+            for kind in 0..4 {
+                save(&format!("synthetic-{kind}-standard-{standard}"), threads, {
+                    let mut o = options(GammaReal::On, threads, 2026);
+                    o.standard = standard.then(dft_engine::StandardProfile::default);
+                    problem(kind, o).run().unwrap()
+                });
+            }
+            for size in [2, 8, 16] {
+                let si8 = size != 2;
+                let a = 10.261_212_856_717_933;
+                let cell = if si8 {
+                    Cell::from_user_rows_bohr([
+                        [a, 0., 0.],
+                        [0., a, 0.],
+                        [0., 0., if size == 16 { 2. * a } else { a }],
+                    ])
+                    .unwrap()
+                } else {
+                    common::cell()
+                };
+                let positions = if si8 {
+                    vec![
+                        [0., 0., 0.],
+                        [0., 0.5, 0.5],
+                        [0.5, 0., 0.5],
+                        [0.5, 0.5, 0.],
+                        [0.25, 0.25, 0.25],
+                        [0.25, 0.75, 0.75],
+                        [0.75, 0.25, 0.75],
+                        [0.75, 0.75, 0.25],
+                    ]
+                } else {
+                    vec![[0.; 3], [0.25; 3]]
+                };
+                let positions = if size == 16 {
+                    positions
+                        .into_iter()
+                        .flat_map(|p| [[p[0], p[1], p[2] / 2.], [p[0], p[1], (p[2] + 1.) / 2.]])
+                        .collect()
+                } else {
+                    positions
+                };
+                let atoms: Vec<_> = positions.into_iter().map(|p| Atom::new("Si", p)).collect();
+                let r = ScfProblem::new(
+                    &cell,
+                    &atoms,
+                    &[SpeciesPotential {
+                        label: "Si",
+                        potential: &pp,
+                    }],
+                    ScfOptions {
+                        gamma_real: GammaReal::On,
+                        standard: standard.then(dft_engine::StandardProfile::default),
+                        threads,
+                        cutoff_hartree: 15.,
+                        max_iterations: 100,
+                        mixing: dft_engine::Mixing::Pulay {
+                            beta: 0.5,
+                            history: 6,
+                        },
+                        ..Default::default()
                     },
-                    ..Default::default()
-                },
-            )
-            .unwrap()
-            .run()
-            .unwrap();
-            save(if si8 { "si8" } else { "primitive" }, threads, r);
+                )
+                .unwrap()
+                .run()
+                .unwrap();
+                save(&format!("si{size}-standard-{standard}"), threads, r);
+            }
         }
     }
 }

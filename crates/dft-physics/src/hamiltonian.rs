@@ -363,6 +363,7 @@ struct Scratch {
 /// Immutable physical data with interior scratch reuse; intentionally not Sync.
 /// Local grid values are in Ha and must use the internally derived grid dimensions.
 pub struct Hamiltonian {
+    identity: Arc<()>,
     data: HamiltonianData,
     scratch: RefCell<Vec<Worker>>,
     pool: Arc<WorkerPool>,
@@ -401,6 +402,7 @@ impl Hamiltonian {
             }),
         }]);
         Ok(Self {
+            identity: Arc::new(()),
             data: HamiltonianData {
                 grid,
                 kinetic: basis
@@ -474,6 +476,12 @@ impl Hamiltonian {
         }
         self.data.potential.assign(potential);
         Ok(())
+    }
+    /// Stable identity of the immutable cell/basis/kinetic/projector data.
+    /// Potential updates preserve it; constructing another operator creates a
+    /// distinct token. Retaining the token prevents address-reuse ambiguity.
+    pub fn operator_identity(&self) -> Arc<()> {
+        self.identity.clone()
     }
     /// Read-only basis identity for isolated operator adapters.
     pub fn basis_momenta(&self) -> &[GVector] {

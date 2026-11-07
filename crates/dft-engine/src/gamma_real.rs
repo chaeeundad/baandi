@@ -51,6 +51,28 @@ impl GammaRealDiagnostics {
     }
 }
 
+/// Owned by one KState. The immutable Hamiltonian token guards physical data;
+/// the key guards scratch sizing and solver options. Per-iteration tolerances
+/// and certification policy are deliberately supplied afresh, not cached.
+pub(crate) struct RealSolveState {
+    op: Operator,
+    key: RealSolveKey,
+    workspace: Option<dft_solvers::real_davidson::RealDavidsonWorkspace>,
+}
+
+#[derive(PartialEq, Eq)]
+struct RealSolveKey {
+    bands: usize,
+    capacity: usize,
+    threads: usize,
+    max_iterations: usize,
+    subspace: usize,
+    capacity_per_band: usize,
+    seed: u64,
+    standard_threshold: Option<u64>,
+    option: GammaReal,
+}
+
 struct Operator {
     h: RefCell<RealHamiltonian>,
     n: usize,
@@ -96,6 +118,7 @@ pub(crate) fn solve_real_gamma(
     pool: Arc<WorkerPool>,
     exclusion: Option<&str>,
     diagnostics: &mut GammaRealDiagnostics,
+    state: &mut Option<RealSolveState>,
 ) -> Result<Option<EigenSolution>, ScfError> {
     let option = options.gamma_real;
     let reason = if option == GammaReal::Off {
@@ -114,6 +137,7 @@ pub(crate) fn solve_real_gamma(
         None
     };
     if let Some(reason) = reason {
+        *state = None;
         if diagnostics.fallback_reason.as_deref() != Some(reason) {
             diagnostics.fallback(option, reason)?;
         }
@@ -123,13 +147,43 @@ pub(crate) fn solve_real_gamma(
         .davidson_subspace
         .max(options.davidson_capacity_per_band.saturating_mul(bands))
         .min(kinetic.len());
-    let real = match RealHamiltonian::from_complex(hamiltonian, basis, capacity, pool.clone()) {
-        Ok(real) => real,
-        Err(e) => {
-            diagnostics.fallback(option, format!("real Hamiltonian construction: {e}"))?;
-            return Ok(None);
-        }
+    let key = RealSolveKey {
+        bands,
+        capacity,
+        threads: options.threads,
+        max_iterations: options.davidson_max_iterations,
+        subspace: options.davidson_subspace,
+        capacity_per_band: options.davidson_capacity_per_band,
+        seed: options.seed,
+        standard_threshold: options.standard.map(|p| p.threshold_ha.to_bits()),
+        option,
     };
+    let reusable = state.as_mut().is_some_and(|state| {
+        state.key == key
+            && Arc::ptr_eq(&state.op.pool, &pool)
+            && state.op.h.get_mut().update_from_complex(hamiltonian, basis)
+    });
+    if !reusable {
+        let real = match RealHamiltonian::from_complex(hamiltonian, basis, capacity, pool.clone()) {
+            Ok(real) => real,
+            Err(e) => {
+                *state = None;
+                diagnostics.fallback(option, format!("real Hamiltonian construction: {e}"))?;
+                return Ok(None);
+            }
+        };
+        *state = Some(RealSolveState {
+            op: Operator {
+                n: real.half_sphere().full_len(),
+                h: RefCell::new(real),
+                pool: pool.clone(),
+            },
+            key,
+            workspace: None,
+        });
+    }
+    let state = state.as_mut().unwrap();
+    let real = state.op.h.borrow();
     let half = real.half_sphere();
     let n = half.full_len();
     let mut diagonal = vec![0.; n];
@@ -162,21 +216,19 @@ pub(crate) fn solve_real_gamma(
         max_subspace: capacity,
         seed: options.seed,
     };
-    let op = Operator {
-        h: RefCell::new(real),
-        n,
-        pool,
-    };
+    drop(real);
+    let op = &state.op;
     // The SCF driver supplies the same ratcheted tolerance and band policy to
     // both representations. Standard returns remain explicitly uncertified.
-    let result = solver.solve_with_capacity_per_band(
-        &op,
+    let result = solver.solve_reusing(
+        op,
         packed.as_ref(),
         &diagonal,
         policy,
         options.standard.is_some(),
         certify && options.standard.is_none(),
         options.davidson_capacity_per_band,
+        &mut state.workspace,
     )?;
     let mut eigenvectors = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
     {
@@ -235,4 +287,9 @@ fn pair_columns<T: Sync, U: Send, E: Send>(
         }
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    include!("../tests/common/persistent_real_invalidation_unit.rs");
 }

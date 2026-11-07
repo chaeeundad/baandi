@@ -2841,7 +2841,7 @@
     "started_at": "2026-11-07T07:49:47Z",
     "ended_at": "2026-11-07T08:08:06Z",
     "exit_code": 0,
-    "note": ""
+    "note": "merged; pair FFT over pool, bit-identical; Mac T=8 improved but still short of complex path; evidence archived"
   },
   {
     "run_id": "P31A-DAVIDSON-CAPACITY#1",

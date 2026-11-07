@@ -22,8 +22,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P43A-BAND-FRACTION-RULE: 속도·안정성: 점유 밴드 수에 비례하는 빈 밴드(약 0.375배)가 큰 Gamma 셀의 SCF 불안정을 없앤다는 가설을 새 계(si32, 기울어진 16원자 등)에서 미리 정한 기준으로 검증하고, 통과하면 자동 규칙(기본 꺼짐) 추가",
-    "ref": "pid 28819, session no sessi, task/P43A-BAND-FRACTION-RULE",
+    "task": "P44A-REFERENCE-MODE: 기능(사용자 승인): 참조 코드와 에너지를 맞추는 규약 네 가지를 한 줄 `[compat] mode = \"reference\"`로 켜는 스위치(이름에 다른 코드명을 쓰지 않음, 기본값 변경 없음, 충돌·범위 오류 처리, ADR 0038)",
+    "ref": "pid 35159, session no sessi, task/P44A-REFERENCE-MODE",
     "updated": "2026-11-07"
   },
   {
@@ -1149,6 +1149,15 @@
     "state": "done",
     "task": "P42A-BAND-BOUNDARY-POLICY: 속도·안정성: 밴드 집합이 퇴화 묶음 한가운데서 끊기는 것이 SCF 불안정의 원인이라는 발견(si8 빈 밴드 8개에서 SCF 10회 고정)을 여러 계에서 확인하고, 에너지 간격에서 끊는 자동 규칙(기본 꺼짐)을 평가",
     "ref": "pid 13886, session 01a1b78b, task/P42A-BAND-BOUNDARY-POLICY",
+    "updated": "2026-11-07"
+  },
+  {
+    "id": "A129",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P43A-BAND-FRACTION-RULE: 속도·안정성: 점유 밴드 수에 비례하는 빈 밴드(약 0.375배)가 큰 Gamma 셀의 SCF 불안정을 없앤다는 가설을 새 계(si32, 기울어진 16원자 등)에서 미리 정한 기준으로 검증하고, 통과하면 자동 규칙(기본 꺼짐) 추가",
+    "ref": "pid 28819, session 01a1b7fd, task/P43A-BAND-FRACTION-RULE",
     "updated": "2026-11-07"
   }
 ]

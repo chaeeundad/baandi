@@ -2920,7 +2920,7 @@
     "task_id": "P35A-NONLOCAL-GROUP-OPTIN",
     "mode": "new",
     "role": "implementer",
-    "status": "blocked",
+    "status": "done",
     "codex_pid": 95350,
     "wrapper_pid": 95322,
     "session_id": "01a1b5bb-716b-73b1-8b7d-c730a444a696",
@@ -2931,6 +2931,6 @@
     "started_at": "2026-11-07T11:18:42Z",
     "ended_at": "2026-11-07T11:19:55Z",
     "exit_code": 0,
-    "note": ""
+    "note": "closed without code: P15B grouped nonlocal was never in main (branch only); main already uses the vector path; dev08 verdict recorded in ledger A58b"
   }
 ]

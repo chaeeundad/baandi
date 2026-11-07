@@ -1056,7 +1056,7 @@
     "id": "A118",
     "agent": "Codex",
     "role": "implementer",
-    "state": "blocked",
+    "state": "done",
     "task": "P35A-NONLOCAL-GROUP-OPTIN: 속도: dev08에서 모든 구성에서 3~8% 느린 것으로 확인된 밴드 묶음 비국소 연산(P15B)을 기본에서 빼고 벡터별 방식을 기본으로 복원(묶음 방식은 옵션으로 보존, 결과는 비트까지 같아야 함)",
     "ref": "pid 95350, session 01a1b5bb, task/P35A-NONLOCAL-GROUP-OPTIN",
     "updated": "2026-11-07"

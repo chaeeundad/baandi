@@ -383,3 +383,9 @@ energy and density identical. Default path: 100 case/thread/profile/symmetry
 combinations retain energy/density bits and work counts. Raw evidence lives in
 `P34A-evidence/`; [study and reproduction](../validation/symmetry-full-group.md).
 No dev08 timing or default recommendation follows from this experiment.
+
+## P15B dev08 verdict (2026-11-07)
+
+| ID | Attempt | Result | Numbers and lesson | Source |
+| --- | --- | --- | --- | --- |
+| A58b | dev08 isolation of A58 (band-shared nonlocal, branch `task/P15B-NONLOCAL-BLOCK`, commit 963f94c, base ce64b57), pure/MKL x default/native | rejected; NOT in main | bit-identical (8/8) but slower in every configuration, candidate faster in 0 of 60 paired rounds: si8 T=1 +6.05 %, T=4 +8.46 %, T=8 +7.20 %, T=16 +7.55 %, k444s T=1 +4.74 %, T=8 +2.77 %; sampling: nonlocal bucket 12.4 % to 17.0 %, explains 93 % of the increase. Main never contained this code (branch only), so no revert was needed; ticket P35A closed without a code change. Lesson: fewer projector reads (3.2x) do not pay on this Xeon; judge nonlocal changes on dev08 with paired alternation. | tests/reference/perf/dev08_materials_qe_relayed.md section (6) |

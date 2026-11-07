@@ -532,3 +532,18 @@ measured real inputs are unchanged; component gates are unchanged.
 | ID | Attempt | Status | Evidence | Lesson |
 |---|---|---|---|---|
 | P39B-1 | Add checked Plan3d in-place entry, allocation-free Fft3d fallback with caller scratch, and GridFusedPlan dispatch | Local implementation and gates complete; dev08 runtime/performance pending | Baseline 010b4e73; pure Rust 25/25 SCFs at T=1,2,4,8,12: energy delta 0 Ha, energy bits/density hashes/work counts equal. Workspace gates and MKL feature all-target check/clippy exit 0. Per MKL FFT: two copies removed, 32N bytes copied payload (1492992 bytes at 36^3). [p39b-results.md](p39b-results.md) contains commands, hashes and durable comparison table. | New premise from relayed raw FFT rates: wrapper/raw 191.13/147.25 us at 36^3, 486.30/323.29 us at 72x36x36; 25^3 neutral. These motivate the patch but are not patch timings. Does not repeat A34/A35; no algorithm/thread/default change. Vendor alignment-dependent bits still require remote tests. |
+
+## P40A mixing distribution survey (2026-11-08; append-only)
+
+Source HEAD `49877d03a0ef8476cffc2fafd45021c6fe1d3d43`; Mac pure-Rust
+observations, measurement-only test and documents. Derived from the own-words
+stage 2/5 note `docs/research/qe-study/qe-stage-by-stage.md`, never QE source.
+Premise change against P17A-5: P29A/P29B's 20–34-SCF spread makes a single
+trajectory an invalid evidence unit. A21's tolerance factors and A22's RMM
+algorithm are not retried. Protocol and decision rule were archived before
+measuring; no default, tolerance, production source or accessor changes.
+
+| ID | Attempt | Outcome | Measured evidence | Lesson / source |
+|---|---|---|---|---|
+| P40A-1 | A default; B beta 0.5; C beta 0.7/history 8; D beta 0.5/history 8; E existing Hartree metric; F C+Hartree selected by frozen B–D distribution ranking | All alternatives case-dependent; no candidate universal default | 2,244 SCFs, 10 cases, complex plus real on seven Gamma cases, ten paired starts per profile plus two tight references per arm/path. 1,716 converge; 528 failures remain confined to elongated/slab, no new failures. C standard improves 8/10 complex and 5/7 real case medians, but strict only 6/10 and 2/7, with >10% regressions. | Uniform-default rule requires >=70% improved cases, no >10% regression, no new failures and <=1.5x delivered error in both profiles/paths. Every alternative fails available-case criteria as well as lacking stress-case references. `mixing-survey.md`; `P40A-evidence/analysis.json`. |
+| P40A-2 | F distribution and paired hierarchical bootstrap (20,000 case/seed resamples) | Standard work gain is conditional; strict regressions and accuracy limits prevent adoption | Standard paired SCF complex -28.205% [-35.282,-22.222], real -22.222% [-40.000,0.000]; total H including failures complex -20.166% [-26.786,-10.673], real -12.429% [-21.455,-0.803]. Si8 standard medians complex/real 25.5/27.5→16/16, strict 14/14→16/16 (+14.29%). E alone Si8 complex standard max error 2.245319e-9→1.666601e-8 Ha. | Do not infer strict improvement or accuracy from standard SCF savings. F is adaptively selected, intervals exploratory, no wall-time or dev08 acceptance. Tight cross-arm max delta 7.247536e-13 Ha; strict default error can exceed 1e-12 Ha despite certification. All workspace gates exit 0; 25/25 same-source benchmark repeat pairs preserve energy, density and work. |

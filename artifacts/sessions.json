@@ -2734,5 +2734,23 @@
     "ended_at": "2026-11-07T04:42:04Z",
     "exit_code": 0,
     "note": "merged; bit-identical; energy phase si8 -17%, k444s -88% (Mac); raw evidence lost to cleanup, summaries in optimization-log"
+  },
+  {
+    "run_id": "P27D-RADIAL-CONVENTION-SCORE#1",
+    "task_id": "P27D-RADIAL-CONVENTION-SCORE",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 4412,
+    "wrapper_pid": 4386,
+    "session_id": null,
+    "branch": "task/P27D-RADIAL-CONVENTION-SCORE",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P27D-RADIAL-CONVENTION-SCORE",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P27D-RADIAL-CONVENTION-SCORE.md",
+    "report": null,
+    "started_at": "2026-11-07T05:50:45Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

@@ -2866,17 +2866,17 @@
     "task_id": "P32A-REAL-ALGEBRA-SPEED",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "blocked",
     "codex_pid": 52559,
     "wrapper_pid": 52534,
-    "session_id": null,
+    "session_id": "01a1b50f-4f76-7fe2-afe9-2f37a29e021b",
     "branch": "task/P32A-REAL-ALGEBRA-SPEED",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P32A-REAL-ALGEBRA-SPEED",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P32A-REAL-ALGEBRA-SPEED.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P32A-REAL-ALGEBRA-SPEED/report.json",
     "started_at": "2026-11-07T08:10:41Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-07T08:38:01Z",
+    "exit_code": 0,
+    "note": "merged; Mac si8 strict gamma_real on 2.07x faster than off at T=1 (1.28 vs 2.64 s), 1.45x at T=8; evidence archived"
   }
 ]

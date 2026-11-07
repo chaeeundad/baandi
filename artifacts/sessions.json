@@ -2812,17 +2812,17 @@
     "task_id": "P29B-STANDARD-ROBUST-GAIN",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "done",
     "codex_pid": 29802,
     "wrapper_pid": 29772,
-    "session_id": null,
+    "session_id": "01a1b4dd-a0b8-70e1-b754-692cb4ca1c96",
     "branch": "task/P29B-STANDARD-ROBUST-GAIN",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P29B-STANDARD-ROBUST-GAIN",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P29B-STANDARD-ROBUST-GAIN.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P29B-STANDARD-ROBUST-GAIN/report.json",
     "started_at": "2026-11-07T07:16:25Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-07T07:29:03Z",
+    "exit_code": 0,
+    "note": "merged; Si8 median H-work gain 1.78x (CI 1.65-2.00), not 2.65x; research rule off, not recommended; evidence archived"
   }
 ]

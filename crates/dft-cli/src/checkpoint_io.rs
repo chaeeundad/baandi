@@ -427,7 +427,19 @@ wire_struct!(Orbitals, WOrbitals {
     cols: usize,
     coefficients: Vec<f64>,
 });
+use dft_engine::AtomicStartReport;
+wire_struct!(AtomicStartReport, WAtomicStartReport {
+    atomic_orbitals: usize,
+    initial_h_applications: usize,
+    gram_rotation_macs: usize,
+    mgs_projection_macs: usize,
+    radial_samples: usize,
+    evd_orders: Vec<usize>,
+    fallback_reason: Option<String>,
+});
 wire_struct!(ContinuationState, WContinuationState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    atomic_start: Option<dft_engine::AtomicStartReport>,
     options: ScfOptions,
     completion: CompletionMode,
     config: ExecutionConfig,
@@ -468,6 +480,25 @@ impl Wire for StandardProfile {
         }
         Ok(Self { threshold_ha })
     }
+}
+impl Wire for dft_engine::StartWavefunctions {
+    type Repr = String;
+    fn encode(&self, _bytes: &mut Vec<u8>) -> Result<String, Error> {
+        Ok(self.name().into())
+    }
+    fn decode(w: String, _bytes: &[u8], _cursor: &mut usize) -> Result<Self, Error> {
+        match w.as_str() {
+            "free_electron" => Ok(Self::FreeElectron),
+            "atomic" => Ok(Self::Atomic),
+            _ => Err(invalid("invalid start_wavefunctions option")),
+        }
+    }
+}
+fn free_electron_start() -> String {
+    "free_electron".into()
+}
+fn is_free_electron_start(s: &str) -> bool {
+    s == "free_electron"
 }
 impl Wire for dft_engine::GammaReal {
     type Repr = String;
@@ -573,6 +604,8 @@ fn is_default_davidson_capacity_per_band(value: &usize) -> bool {
     *value == 6
 }
 wire_struct!(ScfOptions, WScfOptions {
+    #[serde(default = "free_electron_start", skip_serializing_if = "is_free_electron_start")]
+    start_wavefunctions: dft_engine::StartWavefunctions,
     #[serde(default = "compat_none", skip_serializing_if = "is_compat_none")]
     compat_mode: dft_engine::CompatMode,
     #[serde(default, skip_serializing_if = "is_false")]

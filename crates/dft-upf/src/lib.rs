@@ -2,7 +2,8 @@
 mod parser;
 pub mod radial;
 pub use parser::{
-    HeaderFacts, Projector, Pseudopotential, UpfError, from_file, header_facts, parse_upf,
+    AtomicWavefunction, HeaderFacts, Projector, Pseudopotential, UpfError, from_file, header_facts,
+    parse_upf,
 };
 
 /// Whether a UPF label explicitly specifies Slater exchange and PZ correlation

@@ -495,6 +495,7 @@ impl Config {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scf {
+    pub start_wavefunctions: Option<String>,
     pub davidson_capacity_per_band: Option<usize>,
     pub gamma_real: Option<String>,
     pub convergence_profile: Option<String>,
@@ -524,6 +525,19 @@ impl Scf {
             return Err(ConfigError::Invalid("scf.davidson_capacity_per_band must be an integer from 2 to 12 (minimum 2 for a full correction block)".into()));
         }
         Ok(value)
+    }
+    pub fn start_wavefunctions(&self) -> Result<dft_engine::StartWavefunctions, ConfigError> {
+        match self
+            .start_wavefunctions
+            .as_deref()
+            .unwrap_or("free_electron")
+        {
+            "free_electron" => Ok(dft_engine::StartWavefunctions::FreeElectron),
+            "atomic" => Ok(dft_engine::StartWavefunctions::Atomic),
+            _ => Err(ConfigError::Invalid(
+                "scf.start_wavefunctions must be free_electron or atomic".into(),
+            )),
+        }
     }
     pub fn gamma_real(&self) -> Result<dft_engine::GammaReal, ConfigError> {
         match self.gamma_real.as_deref().unwrap_or("off") {
@@ -1097,6 +1111,7 @@ impl Config {
             s.spectral_guard()?;
             s.locking()?;
             s.gamma_real()?;
+            s.start_wavefunctions()?;
             s.davidson_capacity_per_band()?;
             s.standard_profile()?;
             if s.standard_profile()?.is_some()

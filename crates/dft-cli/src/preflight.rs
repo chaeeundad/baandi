@@ -151,6 +151,8 @@ pub struct StructureAtom {
 
 #[derive(Debug, Serialize)]
 pub struct Report {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub atomic_start: Option<serde_json::Value>,
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     pub compat: Option<serde_json::Value>,
     pub findings_schema_version: u32,
@@ -170,6 +172,9 @@ pub struct Report {
 }
 impl Report {
     pub fn print(&self) {
+        if let Some(atomic) = &self.atomic_start {
+            eprintln!("atomic_start: {atomic}");
+        }
         for finding in &self.findings {
             eprintln!("{finding}");
         }
@@ -269,6 +274,8 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
     let mut overrides = Vec::new();
     let mut charges = BTreeMap::new();
     let mut elements = BTreeMap::new();
+    let mut atomic_counts = std::collections::BTreeMap::new();
+    let mut atomic_fallback = None;
     for (label, path) in &config.pseudopotentials {
         let segment = if label
             .bytes()
@@ -381,6 +388,12 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
                 fix_hint: "Increase cutoff and test convergence; the UPF suggestion is not a convergence certificate.".into(),
             });
             warnings.push(format!("basis.ecutwfc_ry: {} Ry is below {} suggested wfc_cutoff = {suggested} Ry; increase cutoff and test convergence", config.basis.ecutwfc_ry, path.display()));
+        }
+        match p.atomic_wavefunctions() {
+            Some(w) if !w.is_empty() && w.iter().all(|c| c.l <= 3) => {
+                atomic_counts.insert(label, w.iter().map(|c| 2 * c.l + 1).sum::<usize>());
+            }
+            _ => atomic_fallback = Some("missing or unsupported PP_PSWFC atomic orbitals"),
         }
         elements.insert(label, p.element().trim().to_owned());
         charges.insert(label, p.z_valence());
@@ -636,6 +649,22 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
                 })
                 .collect(),
         },
+        atomic_start: (options.start_wavefunctions == dft_engine::StartWavefunctions::Atomic).then(
+            || {
+                let reason = if sector.is_some() {
+                    Some("spin-polarized occupations")
+                } else if finite {
+                    Some("Fermi-Dirac occupations")
+                } else {
+                    atomic_fallback
+                };
+                serde_json::json!({"requested": "atomic", "fallback_reason": reason,
+                "atomic_orbitals_used": reason.map(|_| 0),
+                "atomic_orbitals_available_per_k": if reason.is_some() { 0 } else {
+                    config.system.atoms.iter().map(|a| atomic_counts[&a.species]).sum::<usize>()
+                }, "supplied_initial_vectors_take_precedence": true})
+            },
+        ),
         compat: crate::run::reference_metadata(&options),
         schema_version: 1,
         valid: true,

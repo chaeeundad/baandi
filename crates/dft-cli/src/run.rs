@@ -94,6 +94,9 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
         o.davidson_capacity_per_band = s
             .davidson_capacity_per_band()
             .map_err(|e| error(1, e.to_string()))?;
+        o.start_wavefunctions = s
+            .start_wavefunctions()
+            .map_err(|e| error(1, e.to_string()))?;
         o.gamma_real = s.gamma_real().map_err(|e| error(1, e.to_string()))?;
         o.locking = s.locking().map_err(|e| error(1, e.to_string()))?;
         o.threads = s.threads.unwrap_or(1);
@@ -172,6 +175,9 @@ fn options_json(o: &ScfOptions) -> Value {
     }
     if o.pw92_prefactor == dft_engine::Pw92Prefactor::Original {
         result["pw92_prefactor"] = json!(o.pw92_prefactor.name());
+    }
+    if o.start_wavefunctions == dft_engine::StartWavefunctions::Atomic {
+        result["start_wavefunctions"] = json!(o.start_wavefunctions.name());
     }
     if o.gamma_real != dft_engine::GammaReal::Off {
         result["gamma_real"] = json!(o.gamma_real.name());
@@ -607,6 +613,17 @@ pub fn execute_mode(
     }
     if dft_engine::work_accounting::ENABLED {
         result["davidson_work"] = json!(davidson_work);
+    }
+    if opts.start_wavefunctions == dft_engine::StartWavefunctions::Atomic {
+        let a = &r.atomic_start;
+        result["atomic_start"] = json!({
+            "requested": opts.start_wavefunctions.name(), "fallback_reason": a.fallback_reason,
+            "atomic_orbitals_used": a.atomic_orbitals,
+            "initial_h_applications": a.initial_h_applications,
+            "gram_rotation_complex_macs": a.gram_rotation_macs,
+            "mgs_projection_complex_macs": a.mgs_projection_macs,
+            "radial_samples": a.radial_samples, "evd_orders": a.evd_orders
+        });
     }
     if opts.gamma_real != dft_engine::GammaReal::Off {
         result["gamma_real_used"] = json!(r.gamma_real_used);

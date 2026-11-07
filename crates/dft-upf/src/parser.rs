@@ -46,6 +46,15 @@ impl Projector {
         self.cutoff
     }
 }
+/// Atomic pseudo-wavefunction, chi(r) = r R(r), on the full radial mesh.
+/// Occupation is informational and does not weight an atomic starting basis.
+#[derive(Debug, Clone)]
+pub struct AtomicWavefunction {
+    pub l: usize,
+    pub occupation: Option<f64>,
+    pub label: Option<String>,
+    pub radial_times_r: Vec<f64>,
+}
 #[derive(Debug)]
 pub struct Pseudopotential {
     element: String,
@@ -54,6 +63,7 @@ pub struct Pseudopotential {
     pub(crate) mesh: crate::radial::RadialMesh,
     pub(crate) local: Vec<f64>,
     projectors: Vec<Projector>,
+    atomic_wavefunctions: Option<Vec<AtomicWavefunction>>,
     dij: Vec<f64>,
     raw: upf::UpfData,
 }
@@ -64,6 +74,9 @@ impl Pseudopotential {
     /// 3 with their original index/order and every sample preserved.
     pub fn raw(&self) -> &upf::UpfData {
         &self.raw
+    }
+    pub fn atomic_wavefunctions(&self) -> Option<&[AtomicWavefunction]> {
+        self.atomic_wavefunctions.as_deref()
     }
     pub fn element(&self) -> &str {
         &self.element
@@ -571,12 +584,27 @@ pub fn parse_upf(text: &str) -> Result<Pseudopotential, UpfError> {
     if raw.rhoatom.values.iter().any(|v| !v.is_finite()) {
         return Err(invalid("PP_RHOATOM", "non-finite sample"));
     }
+    let mut atomic_wavefunctions = raw.pswfc.as_ref().map(|_| Vec::new());
     if let Some(wfc) = &raw.pswfc {
         use upf::model::PpChiNode;
-        for node in &wfc.orbitals {
+        for (i, node) in wfc.orbitals.iter().enumerate() {
             let w = match node {
                 PpChiNode::Chi1(w) | PpChiNode::Chi2(w) | PpChiNode::Chi3(w) => w,
             };
+            let tag = find(&format!("PP_CHI.{}", i + 1))?;
+            let l = attr(tag, "l")?
+                .trim()
+                .parse::<usize>()
+                .map_err(|_| invalid("PP_CHI/l", "expected nonnegative integer"))?;
+            atomic_wavefunctions
+                .as_mut()
+                .unwrap()
+                .push(AtomicWavefunction {
+                    l,
+                    occupation: w.occupation,
+                    label: tag.attrs.get("label").cloned(),
+                    radial_times_r: w.values.clone(),
+                });
             if w.values.len() != header.mesh_size
                 || w.values.iter().any(|v| !v.is_finite())
                 || w.occupation.is_some_and(|x| !x.is_finite() || x < 0.0)
@@ -695,6 +723,7 @@ pub fn parse_upf(text: &str) -> Result<Pseudopotential, UpfError> {
             .map(|v| Hartree::from(Rydberg(v)).0)
             .collect(),
         projectors,
+        atomic_wavefunctions,
         dij,
         raw: original,
     })

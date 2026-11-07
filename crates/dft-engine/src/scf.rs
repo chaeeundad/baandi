@@ -1,3 +1,6 @@
+#[path = "atomic_start.rs"]
+mod atomic_start;
+pub use atomic_start::{AtomicStartReport, StartWavefunctions};
 #[path = "convergence.rs"]
 mod convergence;
 use convergence::CoulombMetric;
@@ -146,6 +149,7 @@ impl CompatMode {
 
 #[derive(Clone, Debug)]
 pub struct ScfOptions {
+    pub start_wavefunctions: StartWavefunctions,
     pub compat_mode: CompatMode,
     /// Research density projector uses all crystal operations; requires enable_symmetry.
     pub crystal_density_group: bool,
@@ -218,6 +222,7 @@ impl ScfOptions {
 impl Default for ScfOptions {
     fn default() -> Self {
         Self {
+            start_wavefunctions: StartWavefunctions::FreeElectron,
             compat_mode: CompatMode::None,
             crystal_density_group: false,
             gamma_real: crate::GammaReal::Off,
@@ -353,6 +358,7 @@ pub struct KPointSolution {
 
 #[derive(Debug)]
 pub struct ScfResult {
+    pub atomic_start: AtomicStartReport,
     pub compat_mode: CompatMode,
     /// Density projection policy used to produce this state; derivatives are unsupported.
     pub crystal_density_group: bool,
@@ -473,6 +479,8 @@ impl PreparedSymmetry {
 /// Cached ionic terms, Hamiltonian application plan, and density FFT plan.
 /// `step` is exposed for independent post-SCF fixed-point verification.
 pub struct ScfProblem {
+    atomic_species: Option<Vec<atomic_start::AtomicSpecies>>,
+    atomic_start: AtomicStartReport,
     #[cfg(test)]
     force_real_rebuild: bool,
     force_model: crate::force_identity::ModelDescription,
@@ -945,6 +953,36 @@ impl ScfProblem {
                 })
             },
         )?;
+        let mut atomic_start = AtomicStartReport::default();
+        let atomic_species = if options.start_wavefunctions == StartWavefunctions::Atomic {
+            let reason = if channel.is_some() {
+                Some("spin-polarized occupations")
+            } else if species.iter().any(|s| {
+                s.potential
+                    .atomic_wavefunctions()
+                    .is_none_or(|w| w.is_empty())
+            }) {
+                Some("missing PP_PSWFC atomic orbitals")
+            } else if species.iter().any(|s| {
+                s.potential
+                    .atomic_wavefunctions()
+                    .unwrap()
+                    .iter()
+                    .any(|w| w.l > 3)
+            }) {
+                Some("atomic angular momentum above l=3 is unsupported")
+            } else {
+                None
+            };
+            atomic_start.fallback_reason = reason.map(str::to_owned);
+            if reason.is_none() {
+                Some(atomic_start::prepare(&species)?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let worker_ffts = (0..options.threads.max(1).min(states.len()))
             .map(|_| FftPlan3d::new(grid.dims()))
             .collect::<Result<Vec<_>, _>>()?;
@@ -974,6 +1012,8 @@ impl ScfProblem {
             #[cfg(test)]
             force_real_rebuild: false,
             gamma_real_exclusion,
+            atomic_species,
+            atomic_start,
             force_model,
             coulomb,
             cell: cell.clone(),
@@ -996,6 +1036,9 @@ impl ScfProblem {
             setup_time: start.elapsed(),
             minimum_gap,
         })
+    }
+    pub fn atomic_start_report(&self) -> &AtomicStartReport {
+        &self.atomic_start
     }
     /// Enable only a geometry-verified reduction of the supplied full mesh.
     /// No fields, local constraints or Hubbard terms exist in this SCF model.
@@ -1185,6 +1228,53 @@ impl ScfProblem {
                 Ok(())
             },
         )?;
+        // Only a cold map may create atomic vectors. Existing restart/warm
+        // vectors pass unchanged through both solver bridges.
+        let atomic_initial = if self.options.start_wavefunctions == StartWavefunctions::Atomic {
+            if initial.is_some() {
+                if self.atomic_start.initial_h_applications == 0
+                    && self.atomic_start.fallback_reason.is_none()
+                {
+                    self.atomic_start.fallback_reason =
+                        Some("supplied initial vectors retained".into());
+                }
+                None
+            } else if finite.is_some() {
+                self.atomic_start.fallback_reason = Some("Fermi-Dirac occupations".into());
+                None
+            } else if let Some(species) = &self.atomic_species {
+                let mut guesses = Vec::with_capacity(self.states.len());
+                for state in &self.states {
+                    let span = atomic_start::span(
+                        &self.cell,
+                        &state.basis,
+                        &state.grid,
+                        species,
+                        &self.options,
+                        self.occupations.len(),
+                    )?;
+                    let (guess, report) = atomic_start::ritz(
+                        &span,
+                        &state.hamiltonian,
+                        self.occupations.len(),
+                        state.point.fractional == [0.; 3],
+                    )?;
+                    self.atomic_start.atomic_orbitals += report.atomic_orbitals;
+                    self.atomic_start.initial_h_applications += report.initial_h_applications;
+                    self.atomic_start.gram_rotation_macs += report.gram_rotation_macs;
+                    self.atomic_start.mgs_projection_macs += report.mgs_projection_macs;
+                    self.atomic_start.radial_samples += report.radial_samples;
+                    self.atomic_start.evd_orders.extend(report.evd_orders);
+                    guesses.push(guess);
+                }
+                Some(guesses)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let initial = initial.or(atomic_initial.as_deref());
         let mut timings = PhaseTimings {
             potential: start.elapsed(),
             ..Default::default()

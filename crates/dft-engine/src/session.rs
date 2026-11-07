@@ -717,6 +717,7 @@ impl ScfSession {
             self.outcome = Some(ScfOutcome {
                 converged: certified,
                 result: ScfResult {
+                    atomic_start: self.problem.atomic_start.clone(),
                     compat_mode: self.problem.options.compat_mode,
                     crystal_density_group: self.problem.options.crystal_density_group,
                     standard_stall_guard: self.problem.options.standard_stall_guard,
@@ -1094,6 +1095,9 @@ impl ScfSession {
             }
             let c = self.continuation.as_ref().ok_or(Rejection::Boundary)?;
             Some(ContinuationState {
+                atomic_start: (self.problem.options.start_wavefunctions
+                    == StartWavefunctions::Atomic)
+                    .then(|| self.problem.atomic_start.clone()),
                 options: self.problem.options.clone(),
                 completion: self.completion,
                 config: self.config.clone(),
@@ -1318,6 +1322,7 @@ impl ScfSession {
         session.check_checkpoint_model(model)?;
         session.initialize().map_err(|_| Rejection::Mixer)?;
         session.import_electronic(&checkpoint.electronic_state)?;
+        session.problem.atomic_start = c.atomic_start.clone().unwrap_or_default();
         let state = session.continuation.as_mut().unwrap();
         state
             .mixer

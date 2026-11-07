@@ -625,3 +625,22 @@ satisfied. Full evidence audit exit 0; workspace build/test/fmt/clippy exit 0;
 70 exact default repeat pairs plus 14 cross-thread groups pass, 30 unsupported
 forced-real multi-k inputs reject. The unchanged P29A harness exactly reproduces
 all ROW/END records for Si16 real extras 8 and 10. No production option added.
+
+## P43A fixed occupied-band fraction (2026-11-08; stopped negative study)
+
+A19/P38A reopened on P41A loose-density sensitivity and the P42A ensemble
+premise, with a frozen f=0.375 before measurement. No solver/default change.
+
+| ID | Attempt | Decision | Evidence and lesson |
+|---|---|---|---|
+| P43A-1 | New skewed 16-atom Si Gamma cell, 32 occupied; extra=max(4,ceil(3*occupied/8))=12 versus 4; new P29A density seeds 101–110, real and complex, two strict references per count/path | Reject; stop before further systems and Phase B | Complex standard SCF 18/18/18 ->17/17/17, median total H 1612 ->1815 (+12.593%, beyond frozen +10% gate). Real SCF 19/19/19 ->17/17/17, H 1753 ->1814.5 (+3.508%). All 40 standard starts converge, all eight strict references certify; all accuracy ratios <=1.5. Increasing buffers reduces steps but increases work on a new already-stable cell. No retuning or path-specific exception. |
+
+Full protocol, units, accuracy, strict work, commands and scope:
+[band-fraction-rule.md](band-fraction-rule.md). Raw evidence in
+`P43A-evidence/`. Si32, elongated Si12, MgO and Si8/Si16 consistency reruns
+were not run after the mandatory stop; they are not passes. No existing
+8-atom synthetic benchmark fixture was found. These are Mac count observations,
+not dev08 wall acceptance. Workspace build/test/fmt/clippy exit 0; 70 exact
+default repeat pairs, 14 cross-thread groups and 30 expected forced-real
+multi-k rejections; evidence audit exit 0. Integer four remains unchanged,
+and no auto option is implemented or recommended. No QE source was read.

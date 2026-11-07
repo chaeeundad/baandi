@@ -73,3 +73,18 @@ The xc term alone carries 102 percent (Si) and 85 percent (MgO) of the total ene
 Density comparison in G space (fixed script, all six cases exit 0, status REPORTED, acceptance not assessed): the G sets are identical in every case (only_ours 0, only_qe 0); largest coefficient difference 1.5e-09 to 6.4e-09 (all at Miller [1,1,1]); rho(G=0) difference at most 8.3e-17; relative L2 difference 1.0e-07 to 1.6e-07; integrated electrons within 1.1e-14 of the integer.
 
 Eigenvalues from QE's `data-file-schema.xml` (full precision) versus BAANDI, largest |difference| in Ha: si-20 2.0026e-07, si-30 1.8929e-07, si-40 2.0445e-07, mgo-40 5.5721e-07, mgo-50 5.4659e-07, mgo-60 5.6127e-07 (k points 32 for Si, 14 for MgO, bands 8 and 12). The stdout-based differences of about 2e-06 Ha were dominated by QE's four-decimal printing. `scripts/compare_materials_qe.py` still reads eigenvalues from stdout; reading the XML would raise its precision by about a factor of ten (open item).
+
+## Addendum 2 (relayed, 2026-11-07): effect of `[xc] pw92_prefactor = "original"` on the six cases
+
+BAANDI main `946515e`, pure native build sha256 `7daad734656942b0e5d3f64abdedf0f60238aa1b92a32aec38c73ba0a5fb7896`; QE values as in the table above. The runner `run_materials_smoke.py` has no extra-key argument, so the relaying session copied the generated working inputs, inserted the single line `pw92_prefactor = "original"` below `[xc]`, and called `dft-cli run` directly; the "off" side was run the same way and its energies are bit-identical to the runner results reported earlier. 12 runs, all exit 0, SCF counts unchanged (Si 15/15/15, MgO 18/19/19). Raw output: `/scr/mino/rustdft/pw92/<case>_{off,original}/`.
+
+| Case | BAANDI minus QE, option off (Ry) | option original (Ry) | reduction factor | remaining per atom (Ha) |
+| --- | ---: | ---: | ---: | ---: |
+| si-20 | 2.1762e-06 | 7.5937e-08 | 28.7 | 3.7968e-08 |
+| si-30 | 2.1470e-06 | 4.6713e-08 | 46.0 | 2.3357e-08 |
+| si-40 | 2.1451e-06 | 4.4898e-08 | 47.8 | 2.2449e-08 |
+| mgo-40 | 8.1466e-06 | 1.2760e-06 | 6.4 | 6.3800e-07 |
+| mgo-50 | 8.1391e-06 | 1.2685e-06 | 6.4 | 6.3426e-07 |
+| mgo-60 | 8.1385e-06 | 1.2679e-06 | 6.4 | 6.3394e-07 |
+
+These agree with the P27A fixed-density predictions (Si +7.97e-08, MgO +1.279e-06 Ry) to about 0.2 percent for MgO. Si's remainder falls with the cutoff (basis-convergence tail); MgO's remainder of 1.27e-06 Ry does not depend on the cutoff, so a second cutoff-independent term exists. P27C showed that BAANDI's local-potential alpha-Z term is very sensitive to the radial endpoint (about 8e-5 Ry for 0.5 Bohr), so a one-mesh-point endpoint convention difference would be enough; this is a hypothesis under study, not a finding.

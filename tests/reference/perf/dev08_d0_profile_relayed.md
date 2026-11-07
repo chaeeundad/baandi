@@ -29,3 +29,24 @@ Threads at T=8: both configurations keep 17 threads; the CLI reports `threads_re
 ## Orchestrator reading
 
 With the real path on, the subspace algebra (real_davidson::run, dft_numerics::real, element-wise indexing with bounds checks, memcpy, small-tile GEMM calls) takes about 60 % of the working time at one thread and 66 % at eight, while FFT plus nonlocal fall to about 20 %. The planned D0 gate (FFT plus nonlocal below 60 percent moves algebra work forward) is met for both paths; for the real path algebra clearly dominates. Single-thread real versus complex GEMM backends differ.
+
+# dev08 profile of the real path after P30A/P32A (main 72574f9, relayed 2026-11-07)
+
+Relayed by the dft5090/master session. eu-stack 20 ms sampling, 20 runs accumulated per configuration; si8 strict, gamma_real on, pure native frame-pointer build (sha256 `a7381682f97c05b369c3de527556ccb07450fbde3a14e66e5e522153a4b22e3f`, `-C target-cpu=native -C force-frame-pointers=yes`), `taskset -c 0` / `0-7`; sampled wall 3.14 to 3.17 s versus 3.134 s unsampled (no sampling overhead this time). Raw stacks: `/scr/mino/rustdft/d0b/stacks_si8_T{1,8}_on_strict.txt` on dev08. `*` = fewer than 30 samples, do not quote.
+
+| Bucket (share of working samples) | T=1 on, 8894b0b | T=1 on, 72574f9 | T=8 on, 8894b0b | T=8 on, 72574f9 |
+| --- | ---: | ---: | ---: | ---: |
+| a local FFT | 17.8 % | 31.9 % | 20.9 % | 30.7 % |
+| b nonlocal | 2.0 %* | 3.0 % | 2.1 %* | 3.7 % |
+| c subspace algebra | 60.2 % | 48.3 % | 66.4 % | 57.1 % |
+| d residual and correction | 2.8 %* | 1.0 %* | 4.1 %* | 0.4 %* |
+| f unattributable GEMM | 0.0 % | 0.2 %* | 0.0 % | 0.3 %* |
+| e other | 17.2 % | 15.5 % | 6.5 %* | 7.8 % |
+| working samples | 495 | 1713 | 292 | 1014 |
+| all-thread samples | 500 | 1733 | 2267 | 6481 |
+| waiting share | 1.0 % | 1.2 % | 87.1 % | 84.4 % |
+
+Top symbols T=1 (self share of all samples): 12.00 % `dft_numerics::real`, 10.10 % `perform_fft_f64`, 9.98 % `x86::f64::avx::matmul_1_4_dyn`, 8.25 % `FusedOperator::apply_local`, 6.98 % memset, 6.00 % `real_davidson::run`, 5.65 % memcpy, 3.69 % `nano_gemm::copy_millikernel`, 3.58 % `fused`, 2.48 % `matmul_imp`, 2.19 % `qr_algorithm`, 2.02 % `hamiltonian::add`, 1.90 % `cbrt`. T=8: futex 81.39 %, then `matmul_1_4_dyn` 1.99 %, `real` 1.76 %, FFT 1.48 %.
+Changed by P32A: `IndexMut::index_mut` (10.6 %) left the top 15; `matmul_2_4_16` 7.2 % to 1.7 % while `matmul_1_4_dyn` rose to 10 %; memset 3.2 % to 7.0 % and memcpy 5.8 % to 5.65 % together 12.6 % (larger than the FFT kernel symbol); cbrt (XC) 1.9 %.
+Parallel width at T=8 (per-thread waiting share over 20 runs): 8894b0b on strict median 95.9 %, 72574f9 on strict median 89.5 % (180 thread records), 8894b0b off strict median 80.6 %; threads with under 50 % waiting are 11 % in all three, about two of 17. The CLI reports `outer_threads 1, inner_threads 8, threads_used 1`.
+Reading: algebra is still about half of the real path's working time (FFT plus nonlocal 34.9 %), zero-fill and copies take 12.6 %, and only about two worker threads are busy at T=8 in every configuration, which limits the thread scaling to about 1.24x.

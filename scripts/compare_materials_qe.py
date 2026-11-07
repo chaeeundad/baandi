@@ -38,6 +38,16 @@ def parse_output(text):
         ('xc', r'Exchange-correlation\s*=\s*([^\n]+)', str),
     ]:
         # QE appends smearing information to its k-count record; fixed only here.
+        if key == 'xc':
+            # QE 7.6 prints this record twice when input_dft is set (once in the
+            # enforced-functional banner, once in the summary). Accept repeats only
+            # when every value is identical; differing values stay an error.
+            found = match(text, r'^\s*' + pattern + r'\s*$', key, multiple=True)
+            values = {m.group(1).strip() for m in re.finditer(
+                r'^\s*' + pattern + r'\s*$', text, re.MULTILINE)}
+            require(len(values) == 1, f'conflicting {key} records: {sorted(values)}')
+            q[key] = found.group(1)
+            continue
         q[key] = cast(match(text, r'^\s*' + pattern + r'\s*$', key).group(1))
     match(text, r'^\s*JOB DONE\.\s*$', 'JOB DONE')
     g = match(text, r'^\s*Dense\s+grid:[^\n]*FFT dimensions:\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*$', 'FFT grid')

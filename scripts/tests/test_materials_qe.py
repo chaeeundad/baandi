@@ -181,6 +181,18 @@ class MaterialsTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(main(['--ours',str(self.source),'--qe-out',str(self.qe),'--json',str(self.source)]),1)
 
+    def test_repeated_identical_xc_record_accepted_conflicting_rejected(self):
+        # QE 7.6 prints the functional twice when input_dft is set.
+        self.prepare_comparison()
+        good = self.qe.read_text()
+        line = 'Exchange-correlation = SLA PW PBX PBC'
+        self.assertIn(line, good)
+        repeated = good.replace(line, line + '\n' + line, 1)
+        self.assertEqual(parse_output(repeated)['xc'], parse_output(good)['xc'])
+        conflicting = good.replace(line, line + '\nExchange-correlation = SLA PZ', 1)
+        with self.assertRaises(Error):
+            parse_output(conflicting)
+
     def test_density_reuses_independent_transform(self):
         self.prepare_comparison()
         self.r.update(electrons=2,bands=3,occupations=[2,0,0])

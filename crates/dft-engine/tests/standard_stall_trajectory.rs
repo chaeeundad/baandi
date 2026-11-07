@@ -173,6 +173,10 @@ fn sweep() {
                     q0_inverse_bohr: numbers(&text, "mixing_q0_inverse_bohr").unwrap()[0],
                 };
             }
+            // Optional number of extra bands above the occupied ones (default: engine default).
+            if let Ok(v) = std::env::var("P29A_EXTRA_BANDS") {
+                opts.extra_bands = v.parse().expect("P29A_EXTRA_BANDS must be an integer");
+            }
             // Optional real Gamma path (default off: the study was written for the complex
             // path). `P29A_GAMMA_REAL=on` fails closed on ineligible cases, `auto` falls back.
             match std::env::var("P29A_GAMMA_REAL").as_deref() {

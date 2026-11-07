@@ -1,0 +1,14 @@
+# Band count at the truncation boundary: SCF stability scan (orchestrator, Mac, 2026-11-08)
+
+Follow-up of P41A (docs/performance/trajectory-divergence.md: tight solves remove the SCF-count variance; the first loose solve leaves order-one occupied-subspace defects) and of the band-count scan (band-count-scan.md, P38A). Hypothesis tested: the instability comes from the band set ending INSIDE a degenerate multiplet (the last requested band is not separated from the next band). Method: the P29A perturbation harness (`crates/dft-engine/tests/standard_stall_trajectory.rs`, new environment variable `P29A_EXTRA_BANDS`, with `P29A_GAMMA_REAL=on` for the real path), 1e-10 relative start-density perturbations, 10 standard-profile starts plus 2 strict references, pure Rust release, T=1, Mac observation (SCF counts and H work are deterministic counts).
+
+| Case / path | extra bands (total bands) | standard SCF (10 starts, sorted) | median | H work median (standard) | strict run 0 / run 1 SCF |
+| --- | --- | --- | ---: | ---: | --- |
+| si8 complex | 4 (20, default) | 20 21 21 21 25 26 26 27 27 32 | 25.5 | n/a here | 18 / 20 |
+| si8 complex | **8 (24)** | 10 10 10 10 10 10 10 10 10 10 | **10** | n/a here | 13 / 14 |
+| si16 real | 4 (36, default; dev08 distribution) | 15 15 15 18 18 20 20 22 25 25 | 19 | 1687 | n/a |
+| si16 real | 6 (38) | 16 16 16 16 16 16 17 18 18 19 | 16 | 1522.5 | 17 / 20 |
+| si16 real | 8 (40) | 28 29 30 41 44 45 46 47 48 50 | **44.5** | 4127 | 16 / 19 |
+| si16 real | **12 (44)** | 10 10 10 10 10 10 10 10 10 10 | **10** | **1151** | 13 / 15 |
+
+Reading (observation): (1) with the band set closed at a suitable boundary (si8 extra 8, si16 extra 12) all ten perturbed standard runs follow the SAME trajectory (SCF 10 in every run, the reference code's own count on si16), i.e. the instability disappears completely, and the work falls (si16 H median 1687 to 1151, -32 %; si8 SCF 25.5 to 10); (2) a different total band count can be much WORSE than the default (si16 extra 8: median 44.5, range 28 to 50, H work 2.4 times the default), consistent with the cut falling inside another multiplet; (3) the effect is not monotonic in the number of extra bands, so a fixed integer cannot be right for all cells, while the quantity that decides it is local to the top of the band set. This reopens the band-count policy of P38A with a different premise: P38A judged rules on H vectors in the strict profile (first-empty multiplet completion), whereas this scan judges the standard-profile SCF stability and H work on perturbation distributions and the multiplet at the truncation boundary. Not established: the strict-profile effect in general (strict SCF 13 to 15 versus 18 to 20 here), cells without symmetry degeneracies (k222 and the PseudoDojo Si are already stable at the default), the dev08 wall-time effect, and a rule that finds a good boundary without knowing the converged spectrum.

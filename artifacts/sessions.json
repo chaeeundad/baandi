@@ -2895,7 +2895,7 @@
     "started_at": "2026-11-07T09:48:56Z",
     "ended_at": "2026-11-07T10:16:18Z",
     "exit_code": 0,
-    "note": "not merged: bit-identical but Mac effect within noise, zero-allocation gate unmet (EVD backend); docs/ledger merged; code on branch task/P33A-REAL-WORKSPACE-PARALLEL (56c4127); evidence archived"
+    "note": "merged after dev08: -9.6 to -10.7 percent real path, bit-identical; evidence archived"
   },
   {
     "run_id": "P34A-SYMMETRY-FULL-GROUP-DENSITY#1",

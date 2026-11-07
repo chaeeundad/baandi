@@ -341,3 +341,21 @@ algebra share falls 60.81% -> 54.07% (strict) and 44.42% -> 39.54% (standard) fr
 This supports repeated-work cost overwhelming cheaper per-step algebra, not a
 recommendation to reduce capacity. All 70 default comparisons are bit-identical;
 all 70 accounting histories agree; final workspace gates pass.
+
+## P33A — real Davidson workspace and column scheduling (2026-11-07)
+
+Starting main `73f59e347e5b6eb74d8cfdbbe8ce87d55f7132c2`; candidate uncommitted.
+Motivation is the relayed post-P32A profile (48.3% algebra, 12.6% memset/memcpy),
+not a repeat of A49/P32A arithmetic-changing call shapes or A52 factorization.
+
+| ID | Experiment | Status | Measured effect | Lesson / limits |
+|---|---|---|---|---|
+| P33A-1 | Reuse initialized V/HV, reduced matrix, Ritz/correction/residual/projection and EVD buffers; preserve compact EVD layout | implemented, whole-task acceptance blocked | 30/30 before/after R5 snapshots byte-identical across T=1,2,4,8,12; all 25 off comparisons retain 0 Ha delta, density and work counts; 8 original fixed-operator tests pass; workspace build/test/fmt/clippy exit 0 | Eliminates solver-owned step allocations; does not establish an allocation-free EVD backend. |
+| P33A-2 | Fixed four-column residual/correction/normalization/subtraction and ordered Gram assembly | local observations, not accepted performance | Si8 strict T8 0.762807 -> 0.746050 s workspace-only -> 0.751955 s final. Si16 strict T8 2.710891 -> 2.650844 s workspace-only -> 2.614851 s final, same 14 SCF / 264 Davidson / 3254 H vectors | Five measured runs after warmup per row; effects are small/mixed and do not prove a general gain on a shared Mac. No dev08 utilization claim. |
+| P33A-3 | Counting allocator enabled after initial H through solver return; independent EVD/GEMM isolation | BLOCKED: gate 5 fails, test exit 101 | T1 cold solves 2969/20: 91 allocations; 11877/68: 1499. Preallocated EVD sizes 20/40/88/160: 0/32/88/121; direct real AB and A^T B: 0 each | Caller-owned EVD scratch does not cover internal general-GEMM packing/bookkeeping. A library scratch API is needed; do not claim no allocation from a source-only buffer audit or silently change arithmetic. Zero-allocation assertion remains unchanged. |
+| P33A-4 | Resolve `matmul_1_4_dyn` interpretation and remaining serial work | investigation complete within stated scope | AVX f64 first dimension counts four-lane row vectors; normal 4x4xK rotation calls select this symbol. Synthetic final T8 measured EVD+MGS shares: 11.79% (2969/20), 8.26% (11877/68) | Not evidence of a missed per-column GEMM loop. Serial shares are lower bounds from wrapper timings, not SCF Amdahl fractions; restart/validation remainder is not separately attributed. |
+
+All 16 Si8/Si16 strict/standard timing rows, workspace-only ablation, routine
+counts, exact failed gate, commands and backend follow-up scope:
+[real-gamma-r9-workspace-results.md](real-gamma-r9-workspace-results.md).
+Raw evidence stays in `P33A-evidence/`; no artifacts or QE source changes.

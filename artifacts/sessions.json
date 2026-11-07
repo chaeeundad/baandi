@@ -2884,17 +2884,17 @@
     "task_id": "P33A-REAL-WORKSPACE-PARALLEL",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "done",
     "codex_pid": 75510,
     "wrapper_pid": 75485,
-    "session_id": null,
+    "session_id": "01a1b569-4278-7181-8b26-bf418150a14c",
     "branch": "task/P33A-REAL-WORKSPACE-PARALLEL",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P33A-REAL-WORKSPACE-PARALLEL",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P33A-REAL-WORKSPACE-PARALLEL.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P33A-REAL-WORKSPACE-PARALLEL/report.json",
     "started_at": "2026-11-07T09:48:56Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-07T10:16:18Z",
+    "exit_code": 0,
+    "note": "not merged: bit-identical but Mac effect within noise, zero-allocation gate unmet (EVD backend); docs/ledger merged; code on branch task/P33A-REAL-WORKSPACE-PARALLEL (56c4127); evidence archived"
   }
 ]

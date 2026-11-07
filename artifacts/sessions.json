@@ -3112,5 +3112,23 @@
     "ended_at": "2026-11-07T19:36:06Z",
     "exit_code": 0,
     "note": "merged (tests+docs); loose Davidson solves amplify tiny perturbations (tight solves 9/9/9 SCF); orchestrator scan: closing the band set at a multiplet boundary stabilizes (si8 extra 8: 10/10/10)"
+  },
+  {
+    "run_id": "P42A-BAND-BOUNDARY-POLICY#1",
+    "task_id": "P42A-BAND-BOUNDARY-POLICY",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 13886,
+    "wrapper_pid": 13860,
+    "session_id": null,
+    "branch": "task/P42A-BAND-BOUNDARY-POLICY",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P42A-BAND-BOUNDARY-POLICY",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P42A-BAND-BOUNDARY-POLICY.md",
+    "report": null,
+    "started_at": "2026-11-07T19:45:25Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

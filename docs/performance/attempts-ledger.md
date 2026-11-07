@@ -668,3 +668,47 @@ control was interrupted; its one completed strict reference is excluded from
 the primary matrix. PseudoDojo Si/MgO and k222 controls were not run after the
 stop. Full protocol, arithmetic, failure logs and commands:
 [atomic-start-prototype.md](atomic-start-prototype.md), `P45A-evidence/`.
+
+## P46A atomic-start option (2026-11-08; R2 evaluation pending)
+
+A07/P45A reopened by explicit architect authorization for a default-off option
+and a new preregistered rule on new systems. This does not overturn the P45A
+negative verdict or select a default from silicon. Derived from P45A and its
+own-words stage-1 note; no QE source read.
+
+| ID | Attempt | Current result | Lesson |
+|---|---|---|---|
+| P46A-1 | Production PP_PSWFC data, first-density atomic Ritz start, both existing Davidson initial-vector paths | P45A consistency: ten standard seeds 201–210 each give Si8 13/13/13 and Si16 9/9/9 on complex and real Gamma | The test-only span ports without changing density, mixing or tolerances. Initial H count 32/64; Gram/rotation MACs 4,940,416/37,856,000; MGS MACs 5,890,496/47,698,560. These are separate work units, not a total-work acceptance. |
+| P46A-2 | Synthetic deficient span, plane-wave completion, missing PSWFC, spin, FD and restart contracts | Completion exposed unreserved append capacity; fixed by reserving requested bands before appending. Gamma completion uses conjugate cosine/sine pairs. | P45A full-rank silicon did not qualify completion. Rank deficiency rejects; supplied warm vectors bypass construction. Defaults remain numerically unchanged. |
+
+[Protocol and implementation](atomic-start-option.md); raw `P46A-evidence/`.
+New-system R2 evaluation has not begun: the ticket's si32 sample-count conflict
+and dimensional conversion of MACs into the total H-work bound require a
+preregistered resolution. No recommended-option or dev08 speed claim is made.
+
+P46A local gates: workspace build/test/fmt/clippy exit 0; 70 pre-hook/option-build
+default identity pairs (0 Ha difference, identical density SHA-256), 30 expected
+forced-real multi-k rejections, and 48 atomic whole-SCF cross-thread density
+fingerprint matches. All 48 P45A consistency SCFs converge; reference plateaus
+<=3.980e-13 Ha. Evidence verifier exits 0. These are implementation/consistency
+checks, not new-system R2 acceptance. Changes remain uncommitted.
+
+### P46A R2 clarification and completed stop (2026-11-08)
+
+Architect clarification before data: si32 uses five standard + one tight strict
+per arm; other cases ten + two. Cost is median single-thread whole-SCF wall,
+paired alternating order, same Mac/build; H/MAC diagnostics remain separate.
+
+| ID | System and observed result | R2 outcome |
+|---|---|---|
+| P46A-3 | si32 real: SCF 19/29/47 -> 11/11/11, median wall 14.786158 -> 6.205336042 s; maximum atomic standard energy error 1.681144112808397e-11 Ha | No failed evaluable condition; both strict references certify, single-reference strict-error ratio unavailable |
+| P46A-4 | k444s: SCF 10 -> 9, median wall 1.233611104 -> 1.255154646 s (+1.7464%); maximum atomic energy error 2.2710011648996442e-10 Ha, 1.01965 times default | Observed per-system gates pass; timing increase is a local observation |
+| P46A-5 | k222: SCF 10 -> 9, median wall 0.3089391875 -> 0.2814508955 s; maximum energy error 5.6632920575339085e-11 -> 8.8816420884541e-10 Ha (15.68283 times) | Reject recommendation under frozen factor-3 accuracy bound; mandatory stop |
+
+60 native SCFs completed (50 standard, 10 certified strict references). No
+convergence loss. No later MgO/Si-material/low-symmetry data collected, and no
+retuning. Whole-SCF wall includes startup: fewer H applications do not remove
+radial/MGS/EVD costs. Non-isolated Mac observations only; no dev08 acceptance.
+Full records and automatic stop marker: `P46A-evidence/r2/`; protocol and
+limitations: [atomic-start-option.md](atomic-start-option.md). Default unchanged;
+the architect-authorized opt-in code remains uncommitted for review.

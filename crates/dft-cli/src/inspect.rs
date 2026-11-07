@@ -24,7 +24,19 @@ fn source(path: &Path) -> PathBuf {
 fn evidence(path: &Path) -> Result<Value, Error> {
     let path = source(path);
     if crate::checkpoint_inspect::recognizes(&path)? {
-        return crate::checkpoint_inspect::evidence(&path);
+        let mut result = crate::checkpoint_inspect::evidence(&path)?;
+        let cp = crate::checkpoint_io::read(&path)?;
+        if let Some(c) = &cp.continuation
+            && c.options.start_wavefunctions == dft_engine::StartWavefunctions::Atomic
+        {
+            result["start_wavefunctions"] = json!(c.options.start_wavefunctions.name());
+            if let Some(a) = &c.atomic_start {
+                result["atomic_start"] = json!({"atomic_orbitals_used": a.atomic_orbitals,
+                    "initial_h_applications": a.initial_h_applications,
+                    "fallback_reason": a.fallback_reason});
+            }
+        }
+        return Ok(result);
     }
     if path.extension().is_some_and(|e| e == "jsonl") {
         let mut reader = BufReader::new(File::open(&path)?);
@@ -133,6 +145,9 @@ fn evidence(path: &Path) -> Result<Value, Error> {
         }
         let mut result = json!({"source":path,"state":if value["convergence"]["converged"]==true {"converged"} else {"not_converged"},
             "convergence":value["convergence"],"energies":value["energies"],"preflight":value["preflight"]});
+        if let Some(atomic) = value.get("atomic_start") {
+            result["atomic_start"] = atomic.clone();
+        }
         if let Some(compat) = value.get("compat").or_else(|| value["scf"].get("compat")) {
             result["compat_mode"] = compat["compat_mode"].clone();
             result["compat"] = compat.clone();

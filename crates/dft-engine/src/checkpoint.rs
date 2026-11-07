@@ -56,6 +56,7 @@ pub struct ElectronicState {
 }
 #[derive(Clone, Debug)]
 pub struct ContinuationState {
+    pub atomic_start: Option<crate::AtomicStartReport>,
     pub options: ScfOptions,
     pub completion: CompletionMode,
     pub config: ExecutionConfig,
@@ -336,6 +337,7 @@ pub(crate) fn options_identical(a: &ScfOptions, b: &ScfOptions) -> bool {
             grid_override,
             residual_eigen_schedule,
             free_electron_initial_guess,
+            start_wavefunctions,
             max_iterations,
             davidson_max_iterations,
             davidson_subspace,

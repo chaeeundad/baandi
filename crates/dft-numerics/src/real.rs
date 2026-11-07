@@ -74,6 +74,16 @@ impl IndexMut<(usize, usize)> for RealMatrix {
     }
 }
 fn finite(a: RealMatrixRef<'_>) -> Result<(), LinalgError> {
+    if let Some(a) = a.try_as_col_major() {
+        return if a
+            .col_iter()
+            .all(|col| col.as_slice().iter().all(|x| x.is_finite()))
+        {
+            Ok(())
+        } else {
+            Err(LinalgError::NonFinite)
+        };
+    }
     for j in 0..a.ncols() {
         for i in 0..a.nrows() {
             if !a[(i, j)].is_finite() {
@@ -175,8 +185,15 @@ impl RealGemmWorkspace {
             // Fixed ascending panel order, never a worker-dependent reduction.
             for tile in tiles {
                 for j in 0..n {
-                    for i in 0..m {
-                        out[(i, j)] += tile[(i, j)];
+                    let src = &tile.as_slice()[j * tile.rows()..j * tile.rows() + m];
+                    if let Some(col) = out.as_mut().col_mut(j).try_as_col_major_mut() {
+                        for (dst, src) in col.as_slice_mut().iter_mut().zip(src) {
+                            *dst += src;
+                        }
+                    } else {
+                        for (i, src) in src.iter().enumerate() {
+                            out[(i, j)] += src;
+                        }
                     }
                 }
             }
@@ -191,19 +208,23 @@ impl RealGemmWorkspace {
         finite(out.as_ref())
     }
 }
-// faer 0.24's generic large GEMM may allocate backend packing buffers.
-// Keep each backend call within its 16^3 allocation-free nano-GEMM path,
-// including strided views, on every architecture. Fixed microtiles and
-// ascending k blocks retain thread-independent arithmetic. This is a storage
-// contract, not a performance-tuned default for an engine caller.
-fn bounded_matmul(mut out: RealMatrixMut<'_>, a: RealMatrixRef<'_>, b: RealMatrixRef<'_>) {
-    const MICRO: usize = 16;
-    for j in (0..out.ncols()).step_by(MICRO) {
-        let n = MICRO.min(out.ncols() - j);
-        for i in (0..out.nrows()).step_by(MICRO) {
-            let m = MICRO.min(out.nrows() - i);
-            for k in (0..a.ncols()).step_by(MICRO) {
-                let len = MICRO.min(a.ncols() - k);
+// General faer GEMM allocates opaque packing buffers. These call shapes stay
+// within its allocation-free 4096-MAC nano-GEMM branch. Rotation uses the full
+// reduction panel instead of repeated 16-term updates; Gram retains the shape
+// that won its separate panel benchmark. Neither grouping depends on workers.
+fn bounded_matmul(
+    mut out: RealMatrixMut<'_>,
+    a: RealMatrixRef<'_>,
+    b: RealMatrixRef<'_>,
+    transpose: bool,
+) {
+    let (rows, cols, reduction) = if transpose { (16, 16, 16) } else { (4, 4, 256) };
+    for j in (0..out.ncols()).step_by(cols) {
+        let n = cols.min(out.ncols() - j);
+        for i in (0..out.nrows()).step_by(rows) {
+            let m = rows.min(out.nrows() - i);
+            for k in (0..a.ncols()).step_by(reduction) {
+                let len = reduction.min(a.ncols() - k);
                 matmul(
                     out.as_mut().submatrix_mut(i, j, m, n),
                     if k == 0 { Accum::Replace } else { Accum::Add },
@@ -241,6 +262,7 @@ fn gram(
                 tile.as_mut().submatrix_mut(0, 0, m, n),
                 a.subrows(row, len).transpose(),
                 b.subrows(row, len),
+                true,
             );
         }
     }
@@ -257,7 +279,12 @@ fn rotate(mut out: RealMatrixMut<'_>, a: RealMatrixRef<'_>, b: RealMatrixRef<'_>
     } else {
         for row in (0..a.nrows()).step_by(PANEL) {
             let len = PANEL.min(a.nrows() - row);
-            bounded_matmul(out.as_mut().subrows_mut(row, len), a.subrows(row, len), b);
+            bounded_matmul(
+                out.as_mut().subrows_mut(row, len),
+                a.subrows(row, len),
+                b,
+                false,
+            );
         }
     }
 }

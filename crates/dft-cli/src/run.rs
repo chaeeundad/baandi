@@ -56,6 +56,14 @@ pub fn sha256(bytes: &[u8]) -> String {
 pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
     let mut o = ScfOptions {
         functional: config.xc.functional.engine(),
+        local_mesh: config
+            .pseudo
+            .local_mesh()
+            .map_err(|e| error(1, e.to_string()))?,
+        radial_even_rule: config
+            .pseudo
+            .radial_even_rule()
+            .map_err(|e| error(1, e.to_string()))?,
         pw92_prefactor: config.xc.prefactor().map_err(|e| error(1, e.to_string()))?,
         allow_functional_override: config.xc.allow_functional_override,
         cutoff_hartree: config.basis.ecutwfc_ry / 2.,
@@ -124,6 +132,12 @@ fn options_json(o: &ScfOptions) -> Value {
         "residual_eigen_schedule":o.residual_eigen_schedule,"free_electron_initial_guess":o.free_electron_initial_guess,"initial_eigen_tolerance":o.initial_eigen_tolerance,"eigen_tolerance_decay":o.eigen_tolerance_decay,"max_iterations":o.max_iterations,
         "davidson_max_iterations":o.davidson_max_iterations,"davidson_subspace":o.davidson_subspace,"davidson_subspace_min_per_band":6,"seed":o.seed,
         "divergence_factor":o.divergence_factor,"divergence_patience":o.divergence_patience});
+    if o.local_mesh != dft_engine::LocalMesh::Baandi
+        || o.radial_even_rule != dft_engine::RadialEvenRule::Simpson3_8
+    {
+        result["pseudo"] =
+            json!({"local_mesh":o.local_mesh.name(),"radial_even_rule":o.radial_even_rule.name()});
+    }
     if o.pw92_prefactor == dft_engine::Pw92Prefactor::Original {
         result["pw92_prefactor"] = json!(o.pw92_prefactor.name());
     }
@@ -576,6 +590,12 @@ pub fn execute_mode(
         .map(|((&residual, &buffer), &converged)| json!({"residual_ha":residual,"buffer":buffer,"converged":converged}))
         .collect::<Vec<_>>());
     // Preserve the legacy LDA schema unless an override was explicitly enabled.
+    if opts.local_mesh != dft_engine::LocalMesh::Baandi
+        || opts.radial_even_rule != dft_engine::RadialEvenRule::Simpson3_8
+    {
+        result["pseudo"] =
+            json!({"local_mesh":r.local_mesh.name(),"radial_even_rule":r.radial_even_rule.name()});
+    }
     if opts.pw92_prefactor == dft_engine::Pw92Prefactor::Original {
         result["pw92_prefactor"] = json!(r.pw92_prefactor.name());
     }

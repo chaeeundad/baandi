@@ -141,6 +141,8 @@ pub struct ScfOptions {
     pub threads: usize,
     pub functional: Functional,
     pub pw92_prefactor: crate::Pw92Prefactor,
+    pub local_mesh: crate::LocalMesh,
+    pub radial_even_rule: crate::RadialEvenRule,
     pub allow_functional_override: bool,
     pub cutoff_hartree: f64,
     pub bands: Option<usize>,
@@ -200,6 +202,8 @@ impl Default for ScfOptions {
             threads: 1,
             functional: Functional::LdaPz,
             pw92_prefactor: crate::Pw92Prefactor::Modified,
+            local_mesh: crate::LocalMesh::Baandi,
+            radial_even_rule: crate::RadialEvenRule::Simpson3_8,
             allow_functional_override: false,
             cutoff_hartree: 5.0,
             bands: None,
@@ -301,6 +305,8 @@ pub struct KPointSolution {
 #[derive(Debug)]
 pub struct ScfResult {
     pub pw92_prefactor: crate::Pw92Prefactor,
+    pub local_mesh: crate::LocalMesh,
+    pub radial_even_rule: crate::RadialEvenRule,
     pub gamma_real_used: bool,
     pub gamma_real_fallback_reason: Option<String>,
     pub(crate) force_identity: crate::force_identity::ForceIdentity,
@@ -707,18 +713,21 @@ impl ScfProblem {
                 positions_bohr: r,
             })
             .collect();
-        let ionic_g = dg.scatter(&hamiltonian::ionic_local(
+        let ionic_g = dg.scatter(&hamiltonian::ionic_local_with_conventions(
             &density_basis,
             cell.volume_bohr3(),
             &species,
+            options.local_mesh,
+            options.radial_even_rule,
         )?)?;
         let mut fft = FftPlan3d::new(grid.dims())?;
-        let core_density = dft_physics::density::core_density(
+        let core_density = dft_physics::data::core_density_with_rule(
             &density_basis,
             &dg,
             cell.volume_bohr3(),
             &species,
             &mut fft,
+            options.radial_even_rule,
         )?;
         let xc_density = Array3::zeros(
             if core_density.is_some() || options.pw92_prefactor == crate::Pw92Prefactor::Original {
@@ -758,7 +767,12 @@ impl ScfProblem {
                     cell,
                     &basis,
                     ionic_real.clone(),
-                    NonlocalOperator::new(&basis, cell.volume_bohr3(), &species)?,
+                    NonlocalOperator::new_with_rule(
+                        &basis,
+                        cell.volume_bohr3(),
+                        &species,
+                        options.radial_even_rule,
+                    )?,
                 )?
                 .with_band_pool(inner, pool.clone())?;
                 let band_density =

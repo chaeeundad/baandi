@@ -37,6 +37,8 @@ pub struct Config {
     pub basis: Basis,
     pub xc: Xc,
     #[serde(default)]
+    pub pseudo: Pseudo,
+    #[serde(default)]
     pub symmetry: Symmetry,
     pub spin: Option<SpinConfig>,
     pub occupations: Option<Occupations>,
@@ -862,6 +864,8 @@ impl Config {
     }
     /// Validate active physical settings and cell geometry. SCF/output are type-checked only.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        self.pseudo.local_mesh()?;
+        self.pseudo.radial_even_rule()?;
         if self.xc.prefactor()? == dft_engine::Pw92Prefactor::Original
             && (self.xc.functional.engine() != dft_engine::Functional::Pbe || self.collinear())
         {
@@ -1162,4 +1166,32 @@ pub struct Dos {
     pub nbands: Option<usize>,
     pub eigen_tolerance_ha: Option<f64>,
     pub max_iterations: Option<usize>,
+}
+
+/// Independent research options; omission preserves the existing conventions.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Pseudo {
+    pub local_mesh: Option<String>,
+    pub radial_even_rule: Option<String>,
+}
+impl Pseudo {
+    pub fn local_mesh(&self) -> Result<dft_engine::LocalMesh, ConfigError> {
+        match self.local_mesh.as_deref().unwrap_or("baandi") {
+            "baandi" => Ok(dft_engine::LocalMesh::Baandi),
+            "qe_like" => Ok(dft_engine::LocalMesh::QeLike),
+            _ => Err(ConfigError::Invalid(
+                "pseudo.local_mesh must be baandi or qe_like".into(),
+            )),
+        }
+    }
+    pub fn radial_even_rule(&self) -> Result<dft_engine::RadialEvenRule, ConfigError> {
+        match self.radial_even_rule.as_deref().unwrap_or("simpson_3_8") {
+            "simpson_3_8" => Ok(dft_engine::RadialEvenRule::Simpson3_8),
+            "simpson_quadratic_end" => Ok(dft_engine::RadialEvenRule::SimpsonQuadraticEnd),
+            _ => Err(ConfigError::Invalid(
+                "pseudo.radial_even_rule must be simpson_3_8 or simpson_quadratic_end".into(),
+            )),
+        }
+    }
 }

@@ -43,6 +43,14 @@ pub struct StressResult {
 /// Complete analytic derivative at fixed Miller set. Explicitly does not claim
 /// cutoff convergence; `stress` additionally estimates the cutoff correction.
 pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
+    if state.options.local_mesh != crate::LocalMesh::Baandi
+        || state.options.radial_even_rule != crate::RadialEvenRule::Simpson3_8
+    {
+        return Err(ScfError::InvalidInput(
+            "research pseudo conventions do not support analytic derivatives",
+        ));
+    }
+
     let start = std::time::Instant::now();
     // Shared force path enforces the independent setup identity, active ledger,
     // strict tolerances and fresh certificate before accepting the state.

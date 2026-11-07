@@ -46,3 +46,6 @@ pub use dft_solvers::locking::Locking;
 
 pub mod gamma_real;
 pub use gamma_real::{GammaReal, GammaRealDiagnostics};
+
+/// Research radial conventions; default variants retain the legacy path.
+pub use dft_upf::radial::{LocalMesh, RadialEvenRule};

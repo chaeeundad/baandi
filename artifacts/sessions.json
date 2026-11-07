@@ -3082,17 +3082,17 @@
     "task_id": "P40A-MIXING-SURVEY",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "done",
     "codex_pid": 83634,
     "wrapper_pid": 83606,
-    "session_id": null,
+    "session_id": "01a1b719-ed84-7840-a752-0ffaa6c0e963",
     "branch": "task/P40A-MIXING-SURVEY",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P40A-MIXING-SURVEY",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P40A-MIXING-SURVEY.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P40A-MIXING-SURVEY/report.json",
     "started_at": "2026-11-07T17:41:32Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-07T18:08:39Z",
+    "exit_code": 0,
+    "note": "merged (tests+docs); survey: all five mixing alternatives case-dependent, no universal default; standard SCF -28 percent (complex) for beta0.7/hist8+Hartree metric but strict worsens on Si8; evidence archived"
   }
 ]

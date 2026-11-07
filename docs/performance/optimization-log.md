@@ -4065,3 +4065,183 @@ does not justify skipping a current residual; adaptive projection needs an
 orthogonality criterion after normalization. No speculative second optimization
 is adopted. The historical patch and pre-adoption snapshots remain for provenance;
 current default code and the architect acceptance report supersede their status.
+
+## P28A setup exact-shell memoization (2026-11-07)
+
+Pre-change evidence: architect profile `profile-real-standard-si8.md`, PROF-1,
+30 si8 sample runs (3319 construct samples): engine setup 0.1269 s, local
+transform 86%, nonlocal construction 10%. Baseline/current main for this
+isolated task is 534595c4d19346dc1fe6cdd5db87415635668f86. C1/C5 extend
+B18's exact shell cache; no rejected traversal, interpolation, solver or
+threading idea is retried. No QE source was read. Implementation and measured
+results follow below. Ticket ownership restricts changes to the two constructor
+bodies, the regression test, and append-only performance records; registry,
+dashboard, baseline and generated README artifacts remain orchestrator-owned.
+
+Implementation: C1 caches by `norm_squared.to_bits()` within each species and
+precomputes `r*r*V + Z*r*erf(r)`. It reuses the public `RadialMesh::integrate`
+with the original default-cutoff prefix, so compensated Simpson/3/8/trapezoid
+panels remain in their original order. The `rab` multiplication stays after the
+Bessel multiplication (precombining it would reassociate floating arithmetic).
+G=0 still calls `alpha_z`. C5 uses an exact squared-q key, a reserved HashMap
+and flat `N_G * N_projectors` scratch. Each radial transform is unchanged;
+angular factors, phases and D expansion are unchanged. Both maps reserve their
+maximum entry count before traversing G; no per-G allocation, I/O, logging,
+unsafe or new dependency. Extra temporary storage is O(N_G) for C1 and
+O(N_G * N_projectors) for C5, released when setup returns. These caches do
+not rely on cubic symmetry and never merge nearby unequal bit patterns.
+
+The regression test preserves the original local loop and nonlocal constructor
+as its oracle. It compares every real/imaginary component and D entry by
+`to_bits`, plus channel counts and scratch dimensions: cubic, skewed, elongated
+and slab cells, every atom count 1–8, two synthetic species, repeated s/p/d/f
+channels, off-diagonal same-l D, Gamma, symmetric shifted k and generic k
+(96 combinations). Ten additional local meshes cover 2-point trapezoid,
+3/8 panels, odd/even Simpson lengths and the default 10-Bohr cutoff; a nearly
+cubic metric exercises nearby unequal norms and empty projectors are checked.
+
+Validation development failures (not hidden): two release test invocations
+exited 101 because the new empty-projector fixture emitted an empty PP_DIJ
+text node rejected by the UPF reader. The fixture now uses the established
+`<PP_NONLOCAL/>` representation; no production parser was changed. The first
+setup timing driver exited 4 upon requesting `gamma_real="on"` for k444s;
+the CLI correctly rejected this ineligible path. The completed Gamma/si8
+samples were preserved; k444s was rerun with the complex path and symmetry
+auto, matching the profile's eligible configuration. No failed run is included
+in the medians.
+
+### Measured setup times (shared Mac observations, not dev08 acceptance)
+
+Uninstrumented portable release builds, one thread. Thirty alternating triples
+(before/C1/C1+C5, reversed on odd repetitions) per case, no builds from this task during
+the timing batch. Other host activity was not controlled. All three variants had identical energy, density bytes and
+SCF count in every repetition. Inputs use `bench_scf.case_input`, 30 Ry,
+standard convergence; real Gamma on for gamma/si8, complex with symmetry auto
+for k444s. The benchmark helper's usual phase summary does not record setup,
+so the driver reads `timings.engine_setup_s` directly from each CLI results.json.
+Only the existing target directory was used; each executable was copied to
+`/private/tmp/p28a-setup/{before,c1,after}` before the next rebuild. Baseline
+and current main coincide at the task HEAD. C1 ablation temporarily restored
+only the original nonlocal-constructor body. Final source restores C1+C5.
+
+| Case | Before (s) | C1 only (s) | C1+C5 (s) | Setup reduction |
+|---|---:|---:|---:|---:|
+| gamma | 0.032649792 | 0.005270334 | 0.001974292 | 93.95% |
+| si8 | 0.151553291 | 0.025463604 | 0.008021958 | 94.71% |
+| k444s | 0.084302459 | 0.051255020 | 0.028515374 | 66.17% |
+
+Platform: macOS-27.0.1-arm64-arm-64bit. Load averages (1/5/15 min): start [6.82666015625, 5.49853515625, 3.33203125], end [11.58642578125, 8.6767578125, 4.9814453125]. Shared host load is a material limitation; these are setup medians, not an SCF wall-time or remote speed claim. Both C1 and incremental C5 reduce setup on all three measured inputs.
+
+Binary and UPF SHA-256:
+
+```json
+{
+  "binary": {
+    "before": "66436a2c3bcf1124e6826d8b510e8fbfed673d88f8d6c92dcb9c349a466f3005",
+    "c1": "d95fe8c4669d9fa730abf4f669dca769838d08c9ba9c48ccd9915d45a64e8197",
+    "after": "55e359f48407e91d375657fb9262c865c9190ce2cf163720d69dd8bd0611f6e0"
+  },
+  "upf": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+}
+```
+
+Raw engine_setup_s samples, in acquisition order within each variant (seconds):
+
+```json
+{"gamma": {"before": [0.065278667, 0.033552083, 0.032985417, 0.03281625, 0.032612542, 0.032696583, 0.032576875, 0.032593833, 0.032677083, 0.03265375, 0.032645834, 0.032685125, 0.032550916, 0.032934958, 0.032561791, 0.032508792, 0.0324025, 0.032316708, 0.032501625, 0.032720875, 0.0325605, 0.032923667, 0.032821041, 0.032693, 0.032727125, 0.032491333, 0.03248725, 0.0326005, 0.032595375, 0.03285375], "c1": [0.017728916, 0.005353125, 0.00528375, 0.005256542, 0.005281417, 0.005239875, 0.005288, 0.0052915, 0.005283667, 0.005285209, 0.0052795, 0.005227459, 0.00525775, 0.005274166, 0.005283167, 0.00524275, 0.005235792, 0.005217583, 0.00527525, 0.005256875, 0.005266125, 0.005272292, 0.005268375, 0.005242875, 0.005290375, 0.005257083, 0.005243542, 0.005215834, 0.005295167, 0.005257583], "after": [0.004083834, 0.002778792, 0.001987625, 0.001956208, 0.001956792, 0.00191375, 0.002007667, 0.001969208, 0.002002792, 0.001993625, 0.001955792, 0.001952042, 0.002009291, 0.001928542, 0.001986541, 0.00197575, 0.00198225, 0.001915875, 0.002008542, 0.001929625, 0.001951459, 0.001979416, 0.00199425, 0.002004209, 0.001972833, 0.001901208, 0.001969917, 0.001931334, 0.001953375, 0.002004542]}}
+{"si8": {"before": [0.130922208, 0.130698875, 0.13191475, 0.130989834, 0.130918541, 0.130853292, 0.130665459, 0.133492375, 0.129950333, 0.132192709, 0.131819708, 0.130886791, 0.134756416, 0.201026833, 0.186364792, 0.166807416, 0.285144125, 0.255891667, 0.221303333, 0.14958575, 0.148813791, 0.173376375, 0.159052334, 0.19275825, 0.154983708, 0.160664125, 0.228827416, 0.203490958, 0.234661416, 0.153520833], "c1": [0.02065625, 0.020597458, 0.020648917, 0.020515666, 0.020473542, 0.020440291, 0.020589208, 0.020910667, 0.020793125, 0.020725125, 0.020709167, 0.020703291, 0.021185417, 0.029937584, 0.039421666, 0.039182459, 0.048965458, 0.044860083, 0.030484834, 0.026886917, 0.02303675, 0.029871625, 0.025280958, 0.027048, 0.025701375, 0.02787425, 0.0570435, 0.04060625, 0.026108625, 0.02564625], "after": [0.006912958, 0.006860333, 0.006919833, 0.00690425, 0.00690075, 0.006875666, 0.00681, 0.006940541, 0.007028916, 0.0069935, 0.006854209, 0.006885917, 0.00690775, 0.008117334, 0.010209833, 0.015335042, 0.007643292, 0.008099041, 0.012680458, 0.008504208, 0.008715542, 0.0097505, 0.009127125, 0.01037525, 0.017856584, 0.012367833, 0.011542542, 0.014164958, 0.007944875, 0.009032125]}}
+{"k444s": {"before": [0.077612166, 0.092153458, 0.118911, 0.089112417, 0.085888708, 0.090503792, 0.084234292, 0.084403167, 0.087900625, 0.084951084, 0.0889575, 0.079786875, 0.0816245, 0.080153958, 0.076875625, 0.097573459, 0.09283975, 0.084358208, 0.091228792, 0.078221125, 0.073728291, 0.073272875, 0.091990541, 0.073091333, 0.076407, 0.0808555, 0.077238417, 0.072058042, 0.084246709, 0.084492958], "c1": [0.055857708, 0.044934792, 0.047977917, 0.0513015, 0.046307583, 0.053244625, 0.056018667, 0.050627667, 0.055509792, 0.053016083, 0.070567292, 0.0556625, 0.053541666, 0.050498125, 0.058140167, 0.05578825, 0.050840458, 0.052542917, 0.077045792, 0.044964042, 0.048284709, 0.047004417, 0.063474375, 0.049675, 0.051208541, 0.048847417, 0.045354958, 0.0533615, 0.047658333, 0.0446235], "after": [0.028985583, 0.029869167, 0.026353667, 0.028411333, 0.036754416, 0.031146084, 0.033856666, 0.040460542, 0.035326417, 0.043086834, 0.028650042, 0.029908, 0.033779833, 0.029745791, 0.026146334, 0.027214709, 0.028550541, 0.028202834, 0.02645025, 0.028824583, 0.028732041, 0.025278334, 0.025825, 0.028480208, 0.02502625, 0.025747792, 0.02621825, 0.025220625, 0.027332208, 0.0249965]}}
+```
+
+### SCF identity evidence
+
+Five strict/default-complex `bench_scf.py` cases at T=1,2,4,8,12: all 25
+before/after pairs passed `--require-identical`, energy differences exactly
+0 Ha, density SHA-256 identical, SCF iterations, operator applications,
+Davidson iterations and certificate work all equal. Explicit assertions check
+zero energy difference and equal counts in addition to the helper's 1e-12 Ha
+tolerance. These gate runs overlapped the debug build/tests; their wall times
+are deliberately not used as performance evidence. The separate 270-run
+standard-profile timing batch also compares energy, density and SCF counts.
+
+Reproduction (each command below ran with exit 0 for every T; the driver and
+complete console reports remain in `/private/tmp/p28a-setup/`):
+
+```sh
+# PATH includes /opt/homebrew/opt/rustup/bin; one existing target directory.
+cargo build --release -p dft-cli --offline
+# Save each executable before rebuilding the next variant.
+for t in 1 2 4 8 12; do
+  python3 -I scripts/bench_scf.py --binary /private/tmp/p28a-setup/before \
+    --upf ../pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 \
+    --threads "$t" --repeats 1 --record "/private/tmp/p28a-setup/before-T$t.json"
+  python3 -I scripts/bench_scf.py --binary /private/tmp/p28a-setup/after \
+    --upf ../pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 \
+    --threads "$t" --repeats 1 --baseline "/private/tmp/p28a-setup/before-T$t.json" \
+    --record "/private/tmp/p28a-setup/after-T$t.json" --require-identical
+done
+```
+
+Stored invariant fields (before = after; energies Ha):
+
+```json
+{"threads": 1, "case": "gamma", "total_energy_ha": -7.29553046821076, "density_sha256": "6077d62f5ddcf7d003e61b29f12e83d73e0dc332a208097da0836dfb63ec1b26", "iterations": 10, "operator_applications": 281, "davidson_iterations": 41, "certificate_applications": 38, "certificate_iterations": 8, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 1, "case": "k222s", "total_energy_ha": -7.9194234124690865, "density_sha256": "9e311684370831efd1f4e5a3f3fd41479dcadfc4794b51e2db0183f05e7e9104", "iterations": 10, "operator_applications": 1266, "davidson_iterations": 204, "certificate_applications": 113, "certificate_iterations": 21, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 1, "case": "k222", "total_energy_ha": -7.831230057121135, "density_sha256": "21238c7026d96860233edfc427807389029229e7ce26162b5025d471e255bdbe", "iterations": 10, "operator_applications": 2543, "davidson_iterations": 408, "certificate_applications": 208, "certificate_iterations": 24, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 1, "case": "k444s", "total_energy_ha": -7.9259761266480915, "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660", "iterations": 10, "operator_applications": 10290, "davidson_iterations": 1686, "certificate_applications": 891, "certificate_iterations": 141, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 1, "case": "si8", "total_energy_ha": -31.32180360103127, "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e", "iterations": 15, "operator_applications": 2063, "davidson_iterations": 283, "certificate_applications": 202, "certificate_iterations": 62, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 2, "case": "gamma", "total_energy_ha": -7.29553046821076, "density_sha256": "6077d62f5ddcf7d003e61b29f12e83d73e0dc332a208097da0836dfb63ec1b26", "iterations": 10, "operator_applications": 281, "davidson_iterations": 41, "certificate_applications": 38, "certificate_iterations": 8, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 2, "case": "k222s", "total_energy_ha": -7.9194234124690865, "density_sha256": "9e311684370831efd1f4e5a3f3fd41479dcadfc4794b51e2db0183f05e7e9104", "iterations": 10, "operator_applications": 1266, "davidson_iterations": 204, "certificate_applications": 113, "certificate_iterations": 21, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 2, "case": "k222", "total_energy_ha": -7.831230057121135, "density_sha256": "21238c7026d96860233edfc427807389029229e7ce26162b5025d471e255bdbe", "iterations": 10, "operator_applications": 2543, "davidson_iterations": 408, "certificate_applications": 208, "certificate_iterations": 24, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 2, "case": "k444s", "total_energy_ha": -7.9259761266480915, "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660", "iterations": 10, "operator_applications": 10290, "davidson_iterations": 1686, "certificate_applications": 891, "certificate_iterations": 141, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 2, "case": "si8", "total_energy_ha": -31.32180360103127, "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e", "iterations": 15, "operator_applications": 2063, "davidson_iterations": 283, "certificate_applications": 202, "certificate_iterations": 62, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 4, "case": "gamma", "total_energy_ha": -7.29553046821076, "density_sha256": "6077d62f5ddcf7d003e61b29f12e83d73e0dc332a208097da0836dfb63ec1b26", "iterations": 10, "operator_applications": 281, "davidson_iterations": 41, "certificate_applications": 38, "certificate_iterations": 8, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 4, "case": "k222s", "total_energy_ha": -7.9194234124690865, "density_sha256": "9e311684370831efd1f4e5a3f3fd41479dcadfc4794b51e2db0183f05e7e9104", "iterations": 10, "operator_applications": 1266, "davidson_iterations": 204, "certificate_applications": 113, "certificate_iterations": 21, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 4, "case": "k222", "total_energy_ha": -7.831230057121135, "density_sha256": "21238c7026d96860233edfc427807389029229e7ce26162b5025d471e255bdbe", "iterations": 10, "operator_applications": 2543, "davidson_iterations": 408, "certificate_applications": 208, "certificate_iterations": 24, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 4, "case": "k444s", "total_energy_ha": -7.9259761266480915, "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660", "iterations": 10, "operator_applications": 10290, "davidson_iterations": 1686, "certificate_applications": 891, "certificate_iterations": 141, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 4, "case": "si8", "total_energy_ha": -31.32180360103127, "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e", "iterations": 15, "operator_applications": 2063, "davidson_iterations": 283, "certificate_applications": 202, "certificate_iterations": 62, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 8, "case": "gamma", "total_energy_ha": -7.29553046821076, "density_sha256": "6077d62f5ddcf7d003e61b29f12e83d73e0dc332a208097da0836dfb63ec1b26", "iterations": 10, "operator_applications": 281, "davidson_iterations": 41, "certificate_applications": 38, "certificate_iterations": 8, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 8, "case": "k222s", "total_energy_ha": -7.9194234124690865, "density_sha256": "9e311684370831efd1f4e5a3f3fd41479dcadfc4794b51e2db0183f05e7e9104", "iterations": 10, "operator_applications": 1266, "davidson_iterations": 204, "certificate_applications": 113, "certificate_iterations": 21, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 8, "case": "k222", "total_energy_ha": -7.831230057121135, "density_sha256": "21238c7026d96860233edfc427807389029229e7ce26162b5025d471e255bdbe", "iterations": 10, "operator_applications": 2543, "davidson_iterations": 408, "certificate_applications": 208, "certificate_iterations": 24, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 8, "case": "k444s", "total_energy_ha": -7.9259761266480915, "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660", "iterations": 10, "operator_applications": 10290, "davidson_iterations": 1686, "certificate_applications": 891, "certificate_iterations": 141, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 8, "case": "si8", "total_energy_ha": -31.32180360103127, "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e", "iterations": 15, "operator_applications": 2063, "davidson_iterations": 283, "certificate_applications": 202, "certificate_iterations": 62, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 12, "case": "gamma", "total_energy_ha": -7.29553046821076, "density_sha256": "6077d62f5ddcf7d003e61b29f12e83d73e0dc332a208097da0836dfb63ec1b26", "iterations": 10, "operator_applications": 281, "davidson_iterations": 41, "certificate_applications": 38, "certificate_iterations": 8, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 12, "case": "k222s", "total_energy_ha": -7.9194234124690865, "density_sha256": "9e311684370831efd1f4e5a3f3fd41479dcadfc4794b51e2db0183f05e7e9104", "iterations": 10, "operator_applications": 1266, "davidson_iterations": 204, "certificate_applications": 113, "certificate_iterations": 21, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 12, "case": "k222", "total_energy_ha": -7.831230057121135, "density_sha256": "21238c7026d96860233edfc427807389029229e7ce26162b5025d471e255bdbe", "iterations": 10, "operator_applications": 2543, "davidson_iterations": 408, "certificate_applications": 208, "certificate_iterations": 24, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 12, "case": "k444s", "total_energy_ha": -7.9259761266480915, "density_sha256": "767602ec4395d37bf7a9da12cf4a2a399c3fee89d7cdf4129a05b39dee127660", "iterations": 10, "operator_applications": 10290, "davidson_iterations": 1686, "certificate_applications": 891, "certificate_iterations": 141, "delta_energy_ha": 0.0, "identical": true}
+{"threads": 12, "case": "si8", "total_energy_ha": -31.32180360103127, "density_sha256": "826e1046923c4674f619f1ce2dbac27906bb9c6b66ae09b02aa1687d7680766e", "iterations": 15, "operator_applications": 2063, "davidson_iterations": 283, "certificate_applications": 202, "certificate_iterations": 62, "delta_energy_ha": 0.0, "identical": true}
+```
+
+### Final gates and handoff
+
+- `cargo test --release -p dft-physics --test setup_memo_identity -- --nocapture`:
+  exit 0, 2 tests passed, 0 failed, 96 component combinations plus ten mesh
+  cases, 0.07 s test runtime. The new tests also pass in the debug workspace gate.
+- `scripts/check.sh` (no crate argument means the entire workspace): exit 0;
+  build, test, fmt and clippy (`-D warnings`) all PASS.
+- `python3 -I /private/tmp/p28a-setup/verify.py gates`: exit 0; all ten
+  `bench_scf.py` invocations exit 0, explicit 25/25 exact-value assertions pass.
+- `python3 -I /private/tmp/p28a-setup/verify.py timing`: initial exit 4 for
+  ineligible k444s input as described above; corrected k444s continuation
+  exit 0, completing 30 successful triples for each of the three cases.
+- `python3 -I scripts/make_readme_figures.py`: exit 0, generated files unchanged.
+- `python3 -I scripts/tests/test_readme_figures.py`: exit 0, nine tests passed
+  (existing unclosed-file ResourceWarnings in the QE comparison reader).
+- `git diff --check`: exit 0. An explicit source comparison verifies that all
+  production text outside the two owned functions is identical to baseline.
+
+No remote server or QE execution was performed, no new reference-code numbers
+are claimed, and no git metadata was written. Source and tests are left
+uncommitted on `task/P28A-SETUP-IONIC-LOCAL`. Timing values remain Mac
+observations; dev08 pure/MKL identity and setup medians should be collected by
+the orchestrator before any portable performance acceptance claim. Recommended
+remote reproduction: these same five cases and thread budgets, before/after
+with identical build flags and UPF hash, quiet-node 30-run setup medians on
+gamma/si8/k444s, plus the component regression test. No policy/default changes.
+
+The narrowed ticket does not own dashboard/session JSON, README generator
+extensions, `tests/reference`, or the backlog. The delegating orchestrator owns
+the running registry and final dashboard upload; these were not edited here.
+Existing README artifacts were regenerated and checked without a diff. Adding
+a new README performance result requires the orchestrator to promote this
+stored evidence into the reference/generator workflow under separate ownership.

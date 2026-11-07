@@ -3130,5 +3130,23 @@
     "ended_at": "2026-11-07T21:13:51Z",
     "exit_code": 0,
     "note": "merged (tests+docs); gap at last band neither necessary nor sufficient; stability depends on extra bands relative to occupied count in Gamma-only cells (si8>=6, si16>=10); evidence archived"
+  },
+  {
+    "run_id": "P43A-BAND-FRACTION-RULE#1",
+    "task_id": "P43A-BAND-FRACTION-RULE",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 28819,
+    "wrapper_pid": 28804,
+    "session_id": null,
+    "branch": "task/P43A-BAND-FRACTION-RULE",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P43A-BAND-FRACTION-RULE",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P43A-BAND-FRACTION-RULE.md",
+    "report": null,
+    "started_at": "2026-11-07T21:49:57Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

@@ -22,8 +22,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P42A-BAND-BOUNDARY-POLICY: 속도·안정성: 밴드 집합이 퇴화 묶음 한가운데서 끊기는 것이 SCF 불안정의 원인이라는 발견(si8 빈 밴드 8개에서 SCF 10회 고정)을 여러 계에서 확인하고, 에너지 간격에서 끊는 자동 규칙(기본 꺼짐)을 평가",
-    "ref": "pid 13886, session no sessi, task/P42A-BAND-BOUNDARY-POLICY",
+    "task": "P43A-BAND-FRACTION-RULE: 속도·안정성: 점유 밴드 수에 비례하는 빈 밴드(약 0.375배)가 큰 Gamma 셀의 SCF 불안정을 없앤다는 가설을 새 계(si32, 기울어진 16원자 등)에서 미리 정한 기준으로 검증하고, 통과하면 자동 규칙(기본 꺼짐) 추가",
+    "ref": "pid 28819, session no sessi, task/P43A-BAND-FRACTION-RULE",
     "updated": "2026-11-07"
   },
   {
@@ -1140,6 +1140,15 @@
     "state": "done",
     "task": "P41A-TRAJECTORY-DIVERGENCE: 진단(측정만): 시작점을 아주 조금 흔들면 BAANDI의 SCF 궤적이 크게 달라지는(QE는 거의 안 달라짐) 원인을 반복별 기록, 허용치를 조여 보는 대조 실험, 흔들기 크기 대조로 찾음",
     "ref": "pid 92335, session 01a1b751, task/P41A-TRAJECTORY-DIVERGENCE",
+    "updated": "2026-11-07"
+  },
+  {
+    "id": "A128",
+    "agent": "Codex",
+    "role": "implementer",
+    "state": "done",
+    "task": "P42A-BAND-BOUNDARY-POLICY: 속도·안정성: 밴드 집합이 퇴화 묶음 한가운데서 끊기는 것이 SCF 불안정의 원인이라는 발견(si8 빈 밴드 8개에서 SCF 10회 고정)을 여러 계에서 확인하고, 에너지 간격에서 끊는 자동 규칙(기본 꺼짐)을 평가",
+    "ref": "pid 13886, session 01a1b78b, task/P42A-BAND-BOUNDARY-POLICY",
     "updated": "2026-11-07"
   }
 ]

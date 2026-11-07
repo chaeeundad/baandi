@@ -485,7 +485,28 @@ fn gamma_real_off() -> String {
 fn is_gamma_real_off(s: &str) -> bool {
     s == "off"
 }
+impl Wire for dft_engine::Pw92Prefactor {
+    type Repr = String;
+    fn encode(&self, _bytes: &mut Vec<u8>) -> Result<String, Error> {
+        Ok(self.name().into())
+    }
+    fn decode(w: String, _bytes: &[u8], _cursor: &mut usize) -> Result<Self, Error> {
+        match w.as_str() {
+            "modified" => Ok(Self::Modified),
+            "original" => Ok(Self::Original),
+            _ => Err(invalid("invalid pw92_prefactor option")),
+        }
+    }
+}
+fn pw92_modified() -> String {
+    "modified".into()
+}
+fn is_pw92_modified(s: &str) -> bool {
+    s == "modified"
+}
 wire_struct!(ScfOptions, WScfOptions {
+    #[serde(default = "pw92_modified", skip_serializing_if = "is_pw92_modified")]
+    pw92_prefactor: dft_engine::Pw92Prefactor,
     #[serde(default = "gamma_real_off", skip_serializing_if = "is_gamma_real_off")]
     gamma_real: dft_engine::GammaReal,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1793,4 +1814,40 @@ pub fn restart(input: &Path, source: &Path, output: &Path, warm: bool) -> Result
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod pw92_wire_tests {
+    use super::*;
+    #[test]
+    fn convention_roundtrip_legacy_default_and_rejection() {
+        for prefactor in [
+            dft_engine::Pw92Prefactor::Modified,
+            dft_engine::Pw92Prefactor::Original,
+        ] {
+            let options = ScfOptions {
+                pw92_prefactor: prefactor,
+                ..Default::default()
+            };
+            let mut bytes = Vec::new();
+            let wire = options.encode(&mut bytes).unwrap();
+            let mut json = serde_json::to_value(wire).unwrap();
+            if prefactor == dft_engine::Pw92Prefactor::Modified {
+                assert!(json.get("pw92_prefactor").is_none());
+            } else {
+                assert_eq!(json["pw92_prefactor"], "original");
+            }
+            let decoded = ScfOptions::decode(
+                serde_json::from_value(json.clone()).unwrap(),
+                &bytes,
+                &mut 0,
+            )
+            .unwrap();
+            assert_eq!(decoded.pw92_prefactor, prefactor);
+            json["pw92_prefactor"] = serde_json::json!("unknown");
+            assert!(
+                ScfOptions::decode(serde_json::from_value(json).unwrap(), &bytes, &mut 0).is_err()
+            );
+        }
+    }
 }

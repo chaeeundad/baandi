@@ -321,6 +321,7 @@ pub(crate) fn options_identical(a: &ScfOptions, b: &ScfOptions) -> bool {
             locking,
             threads,
             functional,
+            pw92_prefactor,
             allow_functional_override,
             bands,
             extra_bands,

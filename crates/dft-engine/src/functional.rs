@@ -131,3 +131,59 @@ impl Functional {
 #[cfg(test)]
 #[path = "floor_tests.rs"]
 mod floor_tests;
+
+pub use dft_physics::pbe_pw92::Pw92Prefactor;
+
+impl crate::ScfOptions {
+    /// Default delegates directly to the unchanged library-based implementation.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn evaluate_xc(
+        &self,
+        n: &Array3<f64>,
+        core: Option<&Array3<f64>>,
+        scratch: &mut Array3<f64>,
+        cell: &Cell,
+        fft: &mut FftPlan3d,
+        floor: Option<f64>,
+    ) -> Result<xc::XcGrid, PhysicsError> {
+        if self.pw92_prefactor == Pw92Prefactor::Modified {
+            return self
+                .functional
+                .evaluate_with_floor(n, core, scratch, cell, fft, floor);
+        }
+        if self.functional != Functional::Pbe {
+            return Err(PhysicsError::Xc(
+                "pw92_prefactor=original requires unpolarized PBE".into(),
+            ));
+        }
+        if scratch.shape() != n.shape()
+            || core.is_some_and(|c| c.shape() != n.shape())
+            || floor.is_some_and(|f| !f.is_finite() || f <= 0.0)
+        {
+            return Err(PhysicsError::Shape);
+        }
+        for (i, (out, &v)) in scratch.iter_mut().zip(n).enumerate() {
+            let total = v + core.map_or(0.0, |c| c.as_slice().unwrap()[i]);
+            if !total.is_finite() {
+                return Err(PhysicsError::Density(total));
+            }
+            *out = floor.map_or(total, |f| total.max(f));
+        }
+        let mut result = gga::evaluate_pw92(self.pw92_prefactor, scratch, cell, fft)?;
+        if let Some(floor) = floor {
+            for (i, (v, &valence)) in result.potential.iter_mut().zip(n).enumerate() {
+                if valence + core.map_or(0.0, |c| c.as_slice().unwrap()[i]) < floor {
+                    *v = 0.0;
+                }
+            }
+        }
+        result.potential_integral = Hartree(
+            cell.volume_bohr3() / n.len() as f64
+                * n.iter()
+                    .zip(&result.potential)
+                    .map(|(n, v)| n * v)
+                    .sum::<f64>(),
+        );
+        Ok(result)
+    }
+}

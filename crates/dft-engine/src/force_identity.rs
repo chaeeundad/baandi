@@ -56,6 +56,7 @@ pub(crate) struct ModelDescription {
     cutoff: u64,
     strain_reference: Option<[[u64; 3]; 3]>,
     functional: Functional,
+    pw92_prefactor: crate::Pw92Prefactor,
     pub(crate) grid: [usize; 3],
     pub(crate) floor: Option<f64>,
     pub(crate) symmetry: Vec<SymmetryOperation>,
@@ -107,6 +108,7 @@ impl ModelDescription {
                 .as_ref()
                 .map(|c| c.lattice_columns_bohr().map(|r| r.map(f64::to_bits))),
             functional: options.functional,
+            pw92_prefactor: options.pw92_prefactor,
             grid,
             floor: None,
             symmetry: Vec::new(),

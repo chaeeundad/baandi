@@ -140,6 +140,7 @@ pub struct ScfOptions {
     /// Independent k-point workers; zero means one, capped at the k-point count.
     pub threads: usize,
     pub functional: Functional,
+    pub pw92_prefactor: crate::Pw92Prefactor,
     pub allow_functional_override: bool,
     pub cutoff_hartree: f64,
     pub bands: Option<usize>,
@@ -198,6 +199,7 @@ impl Default for ScfOptions {
             eigensolver: dft_solvers::SolverChoice::default(),
             threads: 1,
             functional: Functional::LdaPz,
+            pw92_prefactor: crate::Pw92Prefactor::Modified,
             allow_functional_override: false,
             cutoff_hartree: 5.0,
             bands: None,
@@ -298,6 +300,7 @@ pub struct KPointSolution {
 
 #[derive(Debug)]
 pub struct ScfResult {
+    pub pw92_prefactor: crate::Pw92Prefactor,
     pub gamma_real_used: bool,
     pub gamma_real_fallback_reason: Option<String>,
     pub(crate) force_identity: crate::force_identity::ForceIdentity,
@@ -541,6 +544,13 @@ impl ScfProblem {
         minimum_gap: Option<f64>,
         channel: Option<usize>,
     ) -> Result<Self, ScfError> {
+        if options.pw92_prefactor == crate::Pw92Prefactor::Original
+            && (options.functional != Functional::Pbe || channel.is_some())
+        {
+            return Err(ScfError::InvalidInput(
+                "pw92_prefactor=original requires unpolarized PBE",
+            ));
+        }
         let gamma_real_exclusion = if channel.is_some() {
             Some("spin-polarized solve")
         } else if points.len() != 1 {
@@ -710,11 +720,13 @@ impl ScfProblem {
             &species,
             &mut fft,
         )?;
-        let xc_density = Array3::zeros(if core_density.is_some() {
-            grid.dims()
-        } else {
-            [0; 3]
-        });
+        let xc_density = Array3::zeros(
+            if core_density.is_some() || options.pw92_prefactor == crate::Pw92Prefactor::Original {
+                grid.dims()
+            } else {
+                [0; 3]
+            },
+        );
         let mut ionic = Array3::zeros(grid.dims());
         fft.to_real(&ionic_g, &mut ionic)?;
         let scale = ionic.iter().map(|z| z.re.abs()).fold(1.0, f64::max);
@@ -960,7 +972,7 @@ impl ScfProblem {
             ));
         }
         let h = hartree::evaluate(n, &self.cell, &mut self.fft)?;
-        let x = self.options.functional.evaluate_with_floor(
+        let x = self.options.evaluate_xc(
             n,
             self.core_density.as_ref(),
             &mut self.xc_density,
@@ -1196,8 +1208,11 @@ impl ScfProblem {
         }
         timings.density = start.elapsed();
         let start = Instant::now();
-        let output_xc = if self.core_density.is_some() || self.density_floor.is_some() {
-            Some(self.options.functional.evaluate_with_floor(
+        let output_xc = if self.core_density.is_some()
+            || self.density_floor.is_some()
+            || self.options.pw92_prefactor == crate::Pw92Prefactor::Original
+        {
+            Some(self.options.evaluate_xc(
                 &output,
                 self.core_density.as_ref(),
                 &mut self.xc_density,

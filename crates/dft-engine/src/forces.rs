@@ -393,8 +393,7 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
         let potential = if densities.len() == 1 {
             state
                 .options
-                .functional
-                .evaluate_with_floor(
+                .evaluate_xc(
                     &density,
                     Some(&core_density),
                     &mut scratch,

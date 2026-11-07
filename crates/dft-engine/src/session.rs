@@ -710,6 +710,7 @@ impl ScfSession {
             self.outcome = Some(ScfOutcome {
                 converged: certified,
                 result: ScfResult {
+                    pw92_prefactor: self.problem.options.pw92_prefactor,
                     gamma_real_used: self
                         .problem
                         .states

@@ -128,6 +128,35 @@ pub struct AuditInput<'a> {
     pub input_xc: &'a xc::XcGrid,
     pub ewald: f64,
 }
+/// Sum over plane waves of Re(conj(c) V_nl c) for every band; halves split
+/// across the worker pool (bands are independent).
+fn band_nonlocal(
+    nonlocal: &NonlocalOperator,
+    orbitals: &[Vec<Complex64>],
+    out: &mut [f64],
+) -> Result<(), ScfError> {
+    match orbitals.len() {
+        0 => Ok(()),
+        1 => {
+            let c = &orbitals[0];
+            let mut v = vec![Complex64::default(); c.len()];
+            nonlocal.apply(c, &mut v)?;
+            out[0] = c.iter().zip(v).map(|(c, v)| (c.conj() * v).re).sum::<f64>();
+            Ok(())
+        }
+        n => {
+            let half = n / 2;
+            let (left, right) = out.split_at_mut(half);
+            let (ol, or) = orbitals.split_at(half);
+            let (a, b) = dft_numerics::pool::WorkerPool::join(
+                || band_nonlocal(nonlocal, ol, left),
+                || band_nonlocal(nonlocal, or, right),
+            );
+            a?;
+            b
+        }
+    }
+}
 pub fn evaluate(a: AuditInput<'_>, fft: &mut FftPlan3d) -> Result<EnergyAudit, ScfError> {
     evaluate_with_functional(a, fft, Functional::LdaPz)
 }
@@ -178,11 +207,13 @@ pub(crate) fn evaluate_with_core_xc(
     let kinetic = kinetic::energy(a.basis, a.orbitals, a.occupations)?.0;
     let local = local_energy(n, a.ionic_g, volume, fft)?;
     let charge = n.sum() * weight;
+    // Per-band <c|V_nl|c> in parallel (each band's own arithmetic unchanged),
+    // accumulated in ascending band order: bit-identical to the serial loop.
+    let mut partial = vec![0.0; a.orbitals.len()];
+    band_nonlocal(a.nonlocal, a.orbitals, &mut partial)?;
     let mut nonlocal = 0.0;
-    for (c, f) in a.orbitals.iter().zip(a.occupations) {
-        let mut v = vec![Complex64::default(); c.len()];
-        a.nonlocal.apply(c, &mut v)?;
-        nonlocal += f * c.iter().zip(v).map(|(c, v)| (c.conj() * v).re).sum::<f64>();
+    for (s, f) in partial.iter().zip(a.occupations) {
+        nonlocal += f * s;
     }
     let band_sum = a
         .eigenvalues
@@ -373,11 +404,13 @@ pub(crate) fn evaluate_shared(
         return Err(ScfError::InvalidInput("invalid energy/eigenpair data"));
     }
     let kinetic = kinetic::energy(a.basis, a.orbitals, a.occupations)?.0;
+    // Per-band <c|V_nl|c> in parallel (each band's own arithmetic unchanged),
+    // accumulated in ascending band order: bit-identical to the serial loop.
+    let mut partial = vec![0.0; a.orbitals.len()];
+    band_nonlocal(a.nonlocal, a.orbitals, &mut partial)?;
     let mut nonlocal = 0.0;
-    for (c, f) in a.orbitals.iter().zip(a.occupations) {
-        let mut v = vec![Complex64::default(); c.len()];
-        a.nonlocal.apply(c, &mut v)?;
-        nonlocal += f * c.iter().zip(v).map(|(c, v)| (c.conj() * v).re).sum::<f64>();
+    for (s, f) in partial.iter().zip(a.occupations) {
+        nonlocal += f * s;
     }
     let band_sum = a
         .eigenvalues

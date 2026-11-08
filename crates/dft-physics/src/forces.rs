@@ -26,32 +26,46 @@ pub fn local_or_core(
         return Err(HamiltonianError::NonFinite);
     }
     let mut output = Vec::new();
+    // Radial values depend only on (potential, |G|): reuse them across atoms of
+    // one species and across G vectors with the identical |G| bit pattern.
+    let mut per_potential: std::collections::HashMap<usize, Vec<f64>> =
+        std::collections::HashMap::new();
     for s in species {
-        let local = s.potential.local_transform(volume, None)?;
-        let radial: Vec<f64> = basis
-            .vectors()
-            .iter()
-            .map(|g| {
-                if g.miller == [0; 3] {
-                    return Ok(0.0);
-                }
-                if core {
-                    s.potential.core_density().map_or(Ok(0.0), |n| {
-                        dft_upf::radial::spherical_density_transform(
-                            s.potential.mesh(),
-                            n,
-                            g.norm_squared.sqrt(),
-                        )
-                        .map(|v| v / volume)
-                    })
-                } else {
-                    local.at_g(g.norm_squared.sqrt())
-                }
-            })
-            .collect::<Result<_, _>>()?;
+        let potential_id = s.potential as *const _ as *const () as usize;
+        // `?` inside the computation prevents the entry API.
+        #[allow(clippy::map_entry)]
+        if !per_potential.contains_key(&potential_id) {
+            let local = s.potential.local_transform(volume, None)?;
+            let mut shells: std::collections::HashMap<u64, f64> = std::collections::HashMap::new();
+            let radial: Vec<f64> = basis
+                .vectors()
+                .iter()
+                .map(|g| {
+                    if g.miller == [0; 3] {
+                        return Ok(0.0);
+                    }
+                    let q = g.norm_squared.sqrt();
+                    if let Some(v) = shells.get(&q.to_bits()) {
+                        return Ok(*v);
+                    }
+                    let v = if core {
+                        s.potential.core_density().map_or(Ok(0.0), |n| {
+                            dft_upf::radial::spherical_density_transform(s.potential.mesh(), n, q)
+                                .map(|v| v / volume)
+                        })
+                    } else {
+                        local.at_g(q)
+                    }?;
+                    shells.insert(q.to_bits(), v);
+                    Ok(v)
+                })
+                .collect::<Result<_, HamiltonianError>>()?;
+            per_potential.insert(potential_id, radial);
+        }
+        let radial = &per_potential[&potential_id];
         for &position in s.positions_bohr {
             let mut force = [0.0; 3];
-            for ((g, &v), &field) in basis.vectors().iter().zip(&radial).zip(field) {
+            for ((g, &v), &field) in basis.vectors().iter().zip(radial).zip(field) {
                 let product = field.conj() * v * structure_factor(g.cartesian, &[position])?;
                 for (axis, value) in force.iter_mut().enumerate() {
                     *value -= volume * g.cartesian[axis] * product.im;

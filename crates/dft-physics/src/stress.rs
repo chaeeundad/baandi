@@ -77,14 +77,23 @@ pub fn local_or_core(
         return Err(HamiltonianError::Volume);
     }
     let mut out = [[0.; 3]; 3];
+    // The radial value and its derivative depend only on (potential, |G|):
+    // atoms of one species and G vectors on one shell share them. Keyed by the
+    // exact bit pattern of |G|, so a hit returns the identical f64 results.
+    let mut cache: std::collections::HashMap<(usize, u64), (f64, f64)> =
+        std::collections::HashMap::new();
     for s in species {
         let pp = s.potential;
         let mesh = pp.mesh();
         let local = pp.local_transform(volume, None)?;
         let count = mesh.r().partition_point(|r| *r <= local.effective_r_max());
+        let potential_id = pp as *const _ as *const () as usize;
         for (g, f) in basis.vectors().iter().zip(field) {
             let q = g.norm_squared.sqrt();
-            let (v, prime) = if core {
+            let key = (potential_id, q.to_bits());
+            let (v, prime) = if let Some(hit) = cache.get(&key) {
+                *hit
+            } else if core {
                 let Some(n) = pp.core_density() else { continue };
                 let v = dft_upf::radial::spherical_density_transform(mesh, n, q)? / volume;
                 let values = mesh
@@ -93,7 +102,9 @@ pub fn local_or_core(
                     .zip(n)
                     .map(|(&r, &n)| Ok(-r * r * r * n * spherical_bessel(1, q * r)?))
                     .collect::<Result<Vec<_>, RadialError>>()?;
-                (v, 4. * PI / volume * mesh.integrate(&values)?)
+                let pair = (v, 4. * PI / volume * mesh.integrate(&values)?);
+                cache.insert(key, pair);
+                pair
             } else if q == 0. {
                 (local.alpha_z()?, 0.)
             } else {
@@ -110,7 +121,9 @@ pub fn local_or_core(
                 let prime = 4. * PI / volume
                     * (integrate_prefix(mesh, values)?
                         + pp.z_valence() * (-q * q / 4.).exp() * (0.5 / q + 2. / q.powi(3)));
-                (local.at_g(q)?, prime)
+                let pair = (local.at_g(q)?, prime);
+                cache.insert(key, pair);
+                pair
             };
             let product = (f.conj() * structure_factor(g.cartesian, s.positions_bohr)?).re;
             for (a, row) in out.iter_mut().enumerate() {
@@ -226,6 +239,8 @@ pub fn nonlocal(
     let operator = NonlocalOperator::new(basis, volume, species)?;
     let mut out = [[0.; 3]; 3];
     let mut atom_index = 0;
+    let mut metrics: std::collections::HashMap<usize, Vec<Vec<[[Complex64; 3]; 3]>>> =
+        std::collections::HashMap::new();
     for s in species {
         let pp = s.potential;
         let channels: Vec<_> = pp
@@ -235,35 +250,53 @@ pub fn nonlocal(
             .flat_map(|(i, p)| (-(p.l() as isize)..=p.l() as isize).map(move |m| (i, p.l(), m)))
             .collect();
         let nc = channels.len();
-        let mut metric = vec![vec![[[Complex64::default(); 3]; 3]; basis.vectors().len()]; nc];
-        for (ig, g) in basis.momenta().iter().enumerate() {
-            let q = g.norm_squared.sqrt();
-            if q == 0. {
-                continue;
-            }
-            for (c, &(i, l, m)) in channels.iter().enumerate() {
-                let p = &pp.projectors()[i];
-                let radial = pp.projector_transform(i, q)?;
-                let prime = 4.
-                    * PI
-                    * integrate_prefix(
-                        pp.mesh(),
-                        p.radial_times_r()
-                            .iter()
-                            .zip(pp.mesh().r())
-                            .map(|(&u, &r)| Ok(r * r * u * bessel_prime(l, q * r)?))
-                            .collect::<Result<Vec<_>, RadialError>>()?,
-                    )?;
-                let (y, dy) = harmonic(l, m, g.cartesian);
-                let phase = Complex64::new(0., -1.).powu(l as u32) / volume.sqrt();
-                for (a, row) in metric[c][ig].iter_mut().enumerate() {
-                    for (b, d) in dy.iter().enumerate() {
-                        row[b] =
-                            -phase * g.cartesian[a] * (prime * y * g.cartesian[b] / q + radial * d);
+        let potential_id = pp as *const _ as *const () as usize;
+        // `?` inside the computation prevents the entry API.
+        #[allow(clippy::map_entry)]
+        if !metrics.contains_key(&potential_id) {
+            let mut radials: std::collections::HashMap<(u64, usize), (f64, f64)> =
+                std::collections::HashMap::new();
+            let mut metric = vec![vec![[[Complex64::default(); 3]; 3]; basis.vectors().len()]; nc];
+            for (ig, g) in basis.momenta().iter().enumerate() {
+                let q = g.norm_squared.sqrt();
+                if q == 0. {
+                    continue;
+                }
+                for (c, &(i, l, m)) in channels.iter().enumerate() {
+                    let p = &pp.projectors()[i];
+                    // Radial value and derivative depend only on (|G|, projector):
+                    // reuse them across G vectors with the identical |G| bit pattern.
+                    let (radial, prime) = if let Some(hit) = radials.get(&(q.to_bits(), i)) {
+                        *hit
+                    } else {
+                        let radial = pp.projector_transform(i, q)?;
+                        let prime = 4.
+                            * PI
+                            * integrate_prefix(
+                                pp.mesh(),
+                                p.radial_times_r()
+                                    .iter()
+                                    .zip(pp.mesh().r())
+                                    .map(|(&u, &r)| Ok(r * r * u * bessel_prime(l, q * r)?))
+                                    .collect::<Result<Vec<_>, RadialError>>()?,
+                            )?;
+                        radials.insert((q.to_bits(), i), (radial, prime));
+                        (radial, prime)
+                    };
+                    let (y, dy) = harmonic(l, m, g.cartesian);
+                    let phase = Complex64::new(0., -1.).powu(l as u32) / volume.sqrt();
+                    for (a, row) in metric[c][ig].iter_mut().enumerate() {
+                        for (b, d) in dy.iter().enumerate() {
+                            row[b] = -phase
+                                * g.cartesian[a]
+                                * (prime * y * g.cartesian[b] / q + radial * d);
+                        }
                     }
                 }
             }
+            metrics.insert(potential_id, metric);
         }
+        let metric = &metrics[&potential_id];
         for position in s.positions_bohr {
             let atom = &operator.atoms()[atom_index];
             atom_index += 1;

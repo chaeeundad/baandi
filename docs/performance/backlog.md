@@ -178,3 +178,20 @@ Ranking by expected gain / risk; acceptance only on dev08. Premises and ledger c
 - **B31 `PairFusedPlan` mirror x-slab pair plan, pure Rust, real path only (rank 1 of the FFT items, ready; ticket T1 in the document).** New plan type, no edit of `fused.rs`; unnormalised transforms, per-slab fused inverse/V/forward in a 31 KB buffer, batched rustfft calls on sticks, pair density from the same inverse half. O: 0.867 (36^3) and 0.911 (72x36x36) of the library pair apply, nine shapes 0.66 to 0.90, difference to the library 5e-16 relative; E: SCF 3 to 5 percent. Gate: energy 1e-12 Ha, complex path bit-identical, determinism across T, generality set. Refines B28.
 - **B32 Lane-vectorised FFT kernels for the pair path (needs-measurement on dev08).** SIMD across slabs, four to eight lanes, radix 2/3/4/5; the Mac prototype only reaches rustfft parity at length 36 (58.3 vs 62.0 ns) and is slower at 72. Run first on dev08 (`target-cpu=native`); adopt only if at least 1.3x faster than rustfft at lengths 25 to 72. Pure-Rust kernel-only floor is 156 / 373 us per transform equivalent against QE 135 / 341 (E), so this is the only pure-Rust route to exceed QE.
 - **B33 MKL raw in-place pair path, then 1D batched stick pipeline (revives B08 with new evidence; needs a dev08 microbenchmark).** The relayed "MKL full 195 us" includes two adapter copies; QE's raw call is 135 us. Step 1: raw in-place DFTI pair path without copies or full-grid zero fill (E: near QE per call); step 2: 1D batched strided stick pipeline with plan-owned descriptors (E: 97 / 235 us per transform equivalent, 0.72 / 0.69 of QE). The `mkl` feature currently routes the real path through `GridFusedPlan`.
+
+## B34 — early-SCF fp32 H (P47B, 2026-11-08; measurement completed)
+
+**No implementation ticket recommended by the frozen 10% median wall-saving
+rule.** [The feasibility study](fp32-feasibility.md) measures ordinary/native
+single-thread rustfft and faer, physical-state H errors and standard-history
+eligibility. Even an intentionally generous ceiling that credits all eligible
+Davidson time to H remains below 10% on the equally weighted Si8/Si16/Si32
+median. The f32 lane fallback itself is slower than production fused f64 H.
+The standard Ritz screen is 1e-5 Ha; moving it to 1e-7 Ha conflicts with measured
+projected-root errors, and strict certificates must remain entirely fp64.
+
+Reopen only with new evidence from a generic fused-f32 precision experiment or
+a different measured hardware/workload premise. Include conversion and cached-H
+rebuild costs, physical-state/correction-vector accuracy, complete fp64
+certificate isolation and trajectory changes. No default, production option or
+optimization was adopted. Standalone Davidson GEMM speedups are not H savings.

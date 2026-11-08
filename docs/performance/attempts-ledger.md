@@ -712,3 +712,16 @@ radial/MGS/EVD costs. Non-isolated Mac observations only; no dev08 acceptance.
 Full records and automatic stop marker: `P46A-evidence/r2/`; protocol and
 limitations: [atomic-start-option.md](atomic-start-option.md). Default unchanged;
 the architect-authorized opt-in code remains uncommitted for review.
+
+## P47B — fp32 H feasibility (2026-11-08; measurement only, Mac observations)
+
+| ID | Attempt | Verdict | Evidence and lesson |
+|---|---|---|---|
+| P47B-1 | f32/f64 rustfft lanes, real-pair H and sequential faer nonlocal/Davidson shapes; ordinary and native release; physical early/converged Si8/Si16/Si32 snapshots; standard histories with P14A counts | **Do not recommend implementation under the frozen 10% median wall-saving rule** | The actual fused plan is f64-only, so the explicitly allowed lane fallback measures precision ratios, not a production fused speedup. The fp64 experiment matches production H to about 3e-15 Ha; fp32 orthogonal residual noise reaches about 1.2e-6 Ha and projected Ritz errors about 3.1e-7 Ha. Use 1e-5 Ha only as an empirical standard/Ritz eligibility screen; 1e-7 Ha is already below measured root errors. All nine current standard histories converge and independent counts match exactly. Even crediting all eligible diagonalization time to H leaves the median wall ceiling below 10% in both builds. The implemented f32 lane H does not beat production fused f64 H. Full shapes, paired times, exact upper-ceiling percentages, commands and limitations: [fp32-feasibility.md](fp32-feasibility.md), raw `P47B-evidence/`. No production option or source change, no fp32 certificate, no QE or dev08 run. |
+
+This precision experiment does not reopen A11/A28/A34/A43 traversal/threading
+proposals. Revisiting it needs a new measured fused-f32 or hardware premise,
+not a tighter eligibility threshold chosen to make the bound pass. Davidson
+GEMM ratios are reported but not credited to H-only savings. The ceiling is a
+fixed-trajectory precision-transfer model, not a theorem about an unimplemented
+kernel or a mixed-precision SCF trajectory.

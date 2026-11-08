@@ -22,8 +22,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P47A-PRECONDITIONER-VARIANTS: 속도 실험: Davidson 전처리기 두 가지(TPA, Ritz 이동 분모)를 꺼진 옵션으로 넣고, 여러 계에서 H 적용 수와 반복 수가 줄어드는지 미리 정한 기준으로 측정",
-    "ref": "pid 72455, session no sessi, task/P47A-PRECONDITIONER-VARIANTS",
+    "task": "P47B-FP32-FEASIBILITY: 속도 타당성 조사(코드 변경 없음): 초반 SCF에서 단정밀도(fp32) H 적용이 얼마나 빠르고 정확한지, 전체 시간을 얼마나 줄일 수 있는지 상한을 측정",
+    "ref": "pid 72660, session no sessi, task/P47B-FP32-FEASIBILITY",
     "updated": "2026-11-08"
   },
   {
@@ -31,8 +31,8 @@
     "agent": "Codex",
     "role": "implementer",
     "state": "active",
-    "task": "P47B-FP32-FEASIBILITY: 속도 타당성 조사(코드 변경 없음): 초반 SCF에서 단정밀도(fp32) H 적용이 얼마나 빠르고 정확한지, 전체 시간을 얼마나 줄일 수 있는지 상한을 측정",
-    "ref": "pid 72660, session no sessi, task/P47B-FP32-FEASIBILITY",
+    "task": "P47A-PRECONDITIONER-VARIANTS: 속도 실험: Davidson 전처리기 두 가지(TPA, Ritz 이동 분모)를 꺼진 옵션으로 넣고, 여러 계에서 H 적용 수와 반복 수가 줄어드는지 미리 정한 기준으로 측정",
+    "ref": "pid 86787, session no sessi, task/P47A-PRECONDITIONER-VARIANTS",
     "updated": "2026-11-08"
   },
   {

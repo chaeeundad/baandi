@@ -362,6 +362,8 @@ impl Fft3d for RustFftPlan3d {
     }
 }
 
+/// True when this build runs the real Davidson products through MKL dgemm.
+pub const MKL_BACKEND: bool = cfg!(feature = "mkl");
 /// Per-call-site dgemm timers (site, calls, nanoseconds summed over threads, flops);
 /// empty unless built with the `dgemm-timers` feature.
 pub fn dgemm_site_report() -> Vec<(&'static str, u64, u64, u64)> {

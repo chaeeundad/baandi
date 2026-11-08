@@ -827,7 +827,7 @@ struct Projection {
     projected: RealMatrix,
     output: RealMatrix,
     column: Vec<f64>,
-    /// Research switch (`BAANDI_MGS=blocked`): panel-wise block Gram-Schmidt.
+    /// Panel-wise block Gram-Schmidt (default on MKL builds, `BAANDI_MGS` overrides).
     blocked: bool,
 }
 impl Projection {
@@ -846,7 +846,13 @@ impl Projection {
             overlap: RealMatrix::zeros(cap, cap)?,
             projected: RealMatrix::zeros(n, cap)?,
             output: RealMatrix::zeros(n, cap)?,
-            blocked: std::env::var("BAANDI_MGS").as_deref() == Ok("blocked"),
+            // Blocked Gram-Schmidt is the default on MKL builds only (dev08
+            // evidence MGS-B R2); `BAANDI_MGS=classic` or `blocked` overrides.
+            blocked: match std::env::var("BAANDI_MGS").as_deref() {
+                Ok("blocked") => true,
+                Ok("classic") => false,
+                _ => dft_numerics::MKL_BACKEND,
+            },
             column: vec![0.; n],
         })
     }

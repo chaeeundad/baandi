@@ -306,6 +306,15 @@ const SITES: [(&str, DgemmSite); 6] = [
     ("other", DgemmSite::Other),
 ];
 #[cfg(feature = "dgemm-timers")]
+static FLOPS: [std::sync::atomic::AtomicU64; 6] = [
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+];
+#[cfg(feature = "dgemm-timers")]
 static TIMERS: [(std::sync::atomic::AtomicU64, std::sync::atomic::AtomicU64); 6] = [
     (
         std::sync::atomic::AtomicU64::new(0),
@@ -332,9 +341,9 @@ static TIMERS: [(std::sync::atomic::AtomicU64, std::sync::atomic::AtomicU64); 6]
         std::sync::atomic::AtomicU64::new(0),
     ),
 ];
-/// (site, calls, nanoseconds summed over threads, flop count is not recorded).
+/// (site, calls, nanoseconds summed over threads, flops 2 m n k summed).
 /// Empty unless the `dgemm-timers` feature is enabled.
-pub fn dgemm_site_report() -> Vec<(&'static str, u64, u64)> {
+pub fn dgemm_site_report() -> Vec<(&'static str, u64, u64, u64)> {
     #[cfg(feature = "dgemm-timers")]
     {
         SITES
@@ -345,6 +354,7 @@ pub fn dgemm_site_report() -> Vec<(&'static str, u64, u64)> {
                     *name,
                     TIMERS[i].0.load(std::sync::atomic::Ordering::Relaxed),
                     TIMERS[i].1.load(std::sync::atomic::Ordering::Relaxed),
+                    FLOPS[i].load(std::sync::atomic::Ordering::Relaxed),
                 )
             })
             .collect()
@@ -418,6 +428,10 @@ pub fn dgemm_at(
     #[cfg(feature = "dgemm-timers")]
     {
         let index = SITES.iter().position(|(_, s)| *s == site).unwrap_or(5);
+        FLOPS[index].fetch_add(
+            2 * (m as u64) * (n as u64) * (k as u64),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         TIMERS[index]
             .0
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);

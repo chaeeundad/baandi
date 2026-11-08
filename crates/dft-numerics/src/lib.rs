@@ -362,9 +362,9 @@ impl Fft3d for RustFftPlan3d {
     }
 }
 
-/// Per-call-site dgemm timers (site, calls, nanoseconds summed over threads);
+/// Per-call-site dgemm timers (site, calls, nanoseconds summed over threads, flops);
 /// empty unless built with the `dgemm-timers` feature.
-pub fn dgemm_site_report() -> Vec<(&'static str, u64, u64)> {
+pub fn dgemm_site_report() -> Vec<(&'static str, u64, u64, u64)> {
     #[cfg(feature = "dgemm-timers")]
     {
         dft_mkl::dgemm_site_report()

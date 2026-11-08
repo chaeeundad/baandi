@@ -280,10 +280,11 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 fn main() -> ExitCode {
     let code = real_main();
     if std::env::var_os("BAANDI_DGEMM_TIMERS").is_some() {
-        for (site, calls, nanos) in dft_numerics::dgemm_site_report() {
+        for (site, calls, nanos, flops) in dft_numerics::dgemm_site_report() {
             eprintln!(
-                "dgemm-timer {site} calls {calls} seconds {:.6}",
-                nanos as f64 * 1e-9
+                "dgemm-timer {site} calls {calls} seconds {:.6} gflops_total {:.3}",
+                nanos as f64 * 1e-9,
+                flops as f64 * 1e-9
             );
         }
     }

@@ -37,4 +37,4 @@ D. A small microbenchmark set at the dominant shapes (single-core MKL dgemm, FFT
 4. Re-run the table after each adopted change; the table is a standing artifact (`stage-decomposition-results.md`).
 
 ## 5. Status
-Plan written; dev08 request sent 2026-11-08; no data yet.
+Plan written; dev08 request sent 2026-11-08. Received: (A) QE timers, (D) ceilings (see tests/reference/perf/dev08_stage_decomposition_relayed.md); (B) BAANDI stage profile and (C) counters pending.

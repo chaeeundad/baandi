@@ -466,31 +466,40 @@ impl RealDavidson {
             pool.install(|| {
                 column_work(corrections.as_mut_slice(), n, 0, &|k, dst| {
                     let j = selected[k];
-                    let scale = if preconditioner == crate::DavidsonPreconditioner::Tpa {
-                        crate::kinetic_scale(
-                            column(vectors, j)
-                                .iter()
-                                .zip(diagonal)
-                                .map(|(&c, &t)| (c * c, t)),
-                        )?
-                    } else {
-                        0.1
-                    };
-                    for ((dst, &r), &d) in
-                        dst.iter_mut().zip(column(residual_block, j)).zip(diagonal)
-                    {
-                        *dst = match preconditioner {
-                            crate::DavidsonPreconditioner::Default => {
-                                precondition(r, d, values[j])?
+                    // The default damping keeps the original tight loop; research
+                    // variants take their own loops (no per-element dispatch).
+                    match preconditioner {
+                        crate::DavidsonPreconditioner::Default => {
+                            for ((dst, &r), &d) in
+                                dst.iter_mut().zip(column(residual_block, j)).zip(diagonal)
+                            {
+                                *dst = precondition(r, d, values[j])?;
                             }
-                            crate::DavidsonPreconditioner::Tpa => -r * crate::tpa_weight(d, scale),
-                            crate::DavidsonPreconditioner::RitzShift => {
+                        }
+                        crate::DavidsonPreconditioner::Tpa => {
+                            let scale = crate::kinetic_scale(
+                                column(vectors, j)
+                                    .iter()
+                                    .zip(diagonal)
+                                    .map(|(&c, &t)| (c * c, t)),
+                            )?;
+                            for ((dst, &r), &d) in
+                                dst.iter_mut().zip(column(residual_block, j)).zip(diagonal)
+                            {
+                                *dst = -r * crate::tpa_weight(d, scale);
+                                finite(&[*dst])?;
+                            }
+                        }
+                        crate::DavidsonPreconditioner::RitzShift => {
+                            for ((dst, &r), &d) in
+                                dst.iter_mut().zip(column(residual_block, j)).zip(diagonal)
+                            {
                                 let delta = d - values[j];
                                 finite(&[delta])?;
-                                -r / delta.max(0.1)
+                                *dst = -r / delta.max(0.1);
+                                finite(&[*dst])?;
                             }
-                        };
-                        finite(&[*dst])?;
+                        }
                     }
                     Ok(())
                 })

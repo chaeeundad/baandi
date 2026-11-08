@@ -818,6 +818,8 @@ fn orthogonality_defect(v: &RealMatrix) -> f64 {
 
 // Preallocated projection buffers; each pass is Q^T X, Q times overlaps,
 // subtraction, then two-pass MGS and normalization within the incoming block.
+/// Panel width of the blocked Gram-Schmidt switch.
+const BLOCK_COLUMNS: usize = 16;
 struct Projection {
     pool: std::sync::Arc<WorkerPool>,
     normalized: RealMatrix,
@@ -825,6 +827,8 @@ struct Projection {
     projected: RealMatrix,
     output: RealMatrix,
     column: Vec<f64>,
+    /// Research switch (`BAANDI_MGS=blocked`): panel-wise block Gram-Schmidt.
+    blocked: bool,
 }
 impl Projection {
     #[cfg(test)]
@@ -842,6 +846,7 @@ impl Projection {
             overlap: RealMatrix::zeros(cap, cap)?,
             projected: RealMatrix::zeros(n, cap)?,
             output: RealMatrix::zeros(n, cap)?,
+            blocked: std::env::var("BAANDI_MGS").as_deref() == Ok("blocked"),
             column: vec![0.; n],
         })
     }
@@ -928,27 +933,107 @@ impl Projection {
                 })?;
             }
             let mut kept = 0;
-            for j in 0..count {
-                self.column.copy_from_slice(column(&self.normalized, j));
-                for _ in 0..2 {
-                    for k in 0..kept {
-                        let p = dot(&self.column, column(&self.output, k));
-                        for (dst, &src) in self.column.iter_mut().zip(column(&self.output, k)) {
-                            *dst -= p * src;
+            if self.blocked {
+                // Panels of BLOCK_COLUMNS columns: two block projections against
+                // the kept columns (GEMM), then the same two-pass MGS and rank
+                // floor inside the panel.
+                let mut start = 0;
+                while start < count {
+                    let w = BLOCK_COLUMNS.min(count - start);
+                    for _ in 0..2 {
+                        if kept == 0 {
+                            break;
+                        }
+                        ws.multiply_slices_into(
+                            dft_numerics::GemmSite::Other,
+                            self.output.as_slice(),
+                            n,
+                            kept,
+                            n,
+                            RealOp::Transpose,
+                            &self.normalized.as_slice()[start * n..(start + w) * n],
+                            w,
+                            n,
+                            self.overlap.as_mut().submatrix_mut(0, 0, kept, w),
+                        )?;
+                        let overlap_rows = self.overlap.rows();
+                        ws.multiply_slices_into(
+                            dft_numerics::GemmSite::Other,
+                            self.output.as_slice(),
+                            n,
+                            kept,
+                            n,
+                            RealOp::Identity,
+                            self.overlap.as_slice(),
+                            w,
+                            overlap_rows,
+                            self.projected.as_mut().subcols_mut(0, w),
+                        )?;
+                        let projected = &self.projected;
+                        self.pool.install(|| {
+                            column_work(
+                                &mut self.normalized.as_mut_slice()[start * n..(start + w) * n],
+                                n,
+                                0,
+                                &|j, dst| {
+                                    for (dst, &src) in dst.iter_mut().zip(column(projected, j)) {
+                                        *dst -= src;
+                                    }
+                                    Ok(())
+                                },
+                            )
+                        })?;
+                    }
+                    let panel_start = kept;
+                    for jj in start..start + w {
+                        self.column.copy_from_slice(column(&self.normalized, jj));
+                        for _ in 0..2 {
+                            for k in panel_start..kept {
+                                let p = dot(&self.column, column(&self.output, k));
+                                for (dst, &src) in
+                                    self.column.iter_mut().zip(column(&self.output, k))
+                                {
+                                    *dst -= p * src;
+                                }
+                            }
+                        }
+                        let len = norm(&self.column);
+                        finite(&[len])?;
+                        if len > DEPENDENCE_TOLERANCE {
+                            for (dst, &src) in column_mut(&mut self.output, kept)
+                                .iter_mut()
+                                .zip(&self.column)
+                            {
+                                *dst = src / len;
+                            }
+                            kept += 1;
                         }
                     }
+                    start += w;
                 }
-                let len = norm(&self.column);
-                finite(&[len])?;
-                // Same relative rank floor as complex MGS; no CholeskyQR2.
-                if len > DEPENDENCE_TOLERANCE {
-                    for (dst, &src) in column_mut(&mut self.output, kept)
-                        .iter_mut()
-                        .zip(&self.column)
-                    {
-                        *dst = src / len;
+            } else {
+                for j in 0..count {
+                    self.column.copy_from_slice(column(&self.normalized, j));
+                    for _ in 0..2 {
+                        for k in 0..kept {
+                            let p = dot(&self.column, column(&self.output, k));
+                            for (dst, &src) in self.column.iter_mut().zip(column(&self.output, k)) {
+                                *dst -= p * src;
+                            }
+                        }
                     }
-                    kept += 1;
+                    let len = norm(&self.column);
+                    finite(&[len])?;
+                    // Same relative rank floor as complex MGS; no CholeskyQR2.
+                    if len > DEPENDENCE_TOLERANCE {
+                        for (dst, &src) in column_mut(&mut self.output, kept)
+                            .iter_mut()
+                            .zip(&self.column)
+                        {
+                            *dst = src / len;
+                        }
+                        kept += 1;
+                    }
                 }
             }
             count = kept;

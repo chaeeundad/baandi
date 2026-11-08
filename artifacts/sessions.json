@@ -3238,5 +3238,41 @@
     "ended_at": "2026-11-07T23:21:05Z",
     "exit_code": 0,
     "note": "merged opt-in atomic start (default bit-identical). R2 first failure si-k222: accuracy ratio 15.7x vs 3x (absolute 8.9e-10 Ha, default overshoots); si32 SCF 29->11, -58% time. Not recommended by frozen rule; remaining systems not run. evidence archived"
+  },
+  {
+    "run_id": "P47A-PRECONDITIONER-VARIANTS#1",
+    "task_id": "P47A-PRECONDITIONER-VARIANTS",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 72455,
+    "wrapper_pid": 72425,
+    "session_id": null,
+    "branch": "task/P47A-PRECONDITIONER-VARIANTS",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P47A-PRECONDITIONER-VARIANTS",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P47A-PRECONDITIONER-VARIANTS.md",
+    "report": null,
+    "started_at": "2026-11-08T00:52:42Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
+  },
+  {
+    "run_id": "P47B-FP32-FEASIBILITY#1",
+    "task_id": "P47B-FP32-FEASIBILITY",
+    "mode": "new",
+    "role": "implementer",
+    "status": "running",
+    "codex_pid": 72660,
+    "wrapper_pid": 72645,
+    "session_id": null,
+    "branch": "task/P47B-FP32-FEASIBILITY",
+    "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P47B-FP32-FEASIBILITY",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/P47B-FP32-FEASIBILITY.md",
+    "report": null,
+    "started_at": "2026-11-08T00:52:54Z",
+    "ended_at": null,
+    "exit_code": null,
+    "note": ""
   }
 ]

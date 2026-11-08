@@ -146,6 +146,29 @@ const PANEL: usize = 256;
 // This is a scheduling heuristic, not a measured real-path speed claim.
 const PARALLEL_WORK: usize = 1_048_576;
 
+/// Call site of a real Davidson product (labels the optional per-site dgemm timers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GemmSite {
+    Rotate,
+    Gram,
+    ProjectionOverlap,
+    ProjectionApply,
+    Reduced,
+    Other,
+}
+#[cfg(feature = "mkl")]
+impl From<GemmSite> for dft_mkl::DgemmSite {
+    fn from(site: GemmSite) -> Self {
+        match site {
+            GemmSite::Rotate => Self::Rotate,
+            GemmSite::Gram => Self::Gram,
+            GemmSite::ProjectionOverlap => Self::ProjectionOverlap,
+            GemmSite::ProjectionApply => Self::ProjectionApply,
+            GemmSite::Reduced => Self::Reduced,
+            GemmSite::Other => Self::Other,
+        }
+    }
+}
 /// Kernel used for the rotation products Q C (research switch; default Legacy).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RotateKernel {
@@ -239,7 +262,19 @@ impl RealGemmWorkspace {
                 let parallel = count >= 4 && m.saturating_mul(n).saturating_mul(k) >= PARALLEL_WORK;
                 let tiles_v = &mut self.tiles[..count];
                 let mut ov = MatMut::from_column_major_slice_mut(out_v, m, n);
-                let mut work = || dgemm_panels(ov.as_mut(), v, m, c, k, k, tiles_v, parallel);
+                let mut work = || {
+                    dgemm_panels(
+                        GemmSite::Rotate,
+                        ov.as_mut(),
+                        v,
+                        m,
+                        c,
+                        k,
+                        k,
+                        tiles_v,
+                        parallel,
+                    )
+                };
                 if parallel {
                     self.pool.install(&mut work);
                 } else {
@@ -247,7 +282,19 @@ impl RealGemmWorkspace {
                 }
                 let tiles_h = &mut self.tiles[..count];
                 let mut oh = MatMut::from_column_major_slice_mut(out_hv, m, n);
-                let mut work = || dgemm_panels(oh.as_mut(), hv, m, c, k, k, tiles_h, parallel);
+                let mut work = || {
+                    dgemm_panels(
+                        GemmSite::Rotate,
+                        oh.as_mut(),
+                        hv,
+                        m,
+                        c,
+                        k,
+                        k,
+                        tiles_h,
+                        parallel,
+                    )
+                };
                 if parallel {
                     self.pool.install(&mut work);
                 } else {
@@ -276,6 +323,7 @@ impl RealGemmWorkspace {
     #[allow(clippy::too_many_arguments)]
     pub fn multiply_slices_into(
         &mut self,
+        site: GemmSite,
         a: &[f64],
         a_rows: usize,
         a_cols: usize,
@@ -286,6 +334,8 @@ impl RealGemmWorkspace {
         ldb: usize,
         #[cfg_attr(not(feature = "mkl"), allow(unused_mut))] mut out: RealMatrixMut<'_>,
     ) -> Result<(), LinalgError> {
+        #[cfg(not(feature = "mkl"))]
+        let _ = site;
         let fallback = |ws: &mut Self, out: RealMatrixMut<'_>| {
             ws.multiply_into(
                 MatRef::from_column_major_slice_with_stride(a, a_rows, a_cols, lda),
@@ -335,7 +385,7 @@ impl RealGemmWorkspace {
                 let parallel = count >= 4 && m.saturating_mul(n).saturating_mul(k) >= PARALLEL_WORK;
                 if op == RealOp::Transpose {
                     let tiles = &mut self.tiles[..count];
-                    let mut work = || gram_dgemm(tiles, 0, a, lda, b, ldb, k, m, n, parallel);
+                    let mut work = || gram_dgemm(site, tiles, 0, a, lda, b, ldb, k, m, n, parallel);
                     if parallel {
                         self.pool.install(work);
                     } else {
@@ -350,7 +400,7 @@ impl RealGemmWorkspace {
                 } else {
                     let tiles = &mut self.tiles[..count];
                     let mut work =
-                        || dgemm_panels(out.as_mut(), a, lda, b, ldb, k, tiles, parallel);
+                        || dgemm_panels(site, out.as_mut(), a, lda, b, ldb, k, tiles, parallel);
                     if parallel {
                         self.pool.install(work);
                     } else {
@@ -620,6 +670,7 @@ fn rotate_legacy(
 #[cfg(feature = "mkl")]
 #[allow(clippy::too_many_arguments)]
 fn dgemm_panels(
+    site: GemmSite,
     mut out: RealMatrixMut<'_>,
     a: &[f64],
     lda: usize,
@@ -636,8 +687,8 @@ fn dgemm_panels(
         let (left, right) = out.split_at_row_mut(split);
         let (tl, tr) = tiles.split_at_mut(half);
         WorkerPool::join(
-            || dgemm_panels(left, a, lda, b, ldb, k, tl, true),
-            || dgemm_panels(right, &a[split..], lda, b, ldb, k, tr, true),
+            || dgemm_panels(site, left, a, lda, b, ldb, k, tl, true),
+            || dgemm_panels(site, right, &a[split..], lda, b, ldb, k, tr, true),
         );
     } else {
         let n = out.ncols();
@@ -645,8 +696,19 @@ fn dgemm_panels(
             let row = t * PANEL;
             let len = PANEL.min(out.nrows() - row);
             let buffer = &mut tile.as_mut_slice_full()[..len * n];
-            dft_mkl::dgemm(false, len, n, k, &a[row..], lda, b, ldb, buffer)
-                .expect("checked dgemm shapes");
+            dft_mkl::dgemm_at(
+                site.into(),
+                false,
+                len,
+                n,
+                k,
+                &a[row..],
+                lda,
+                b,
+                ldb,
+                buffer,
+            )
+            .expect("checked dgemm shapes");
             for j in 0..n {
                 for i in 0..len {
                     out[(row + i, j)] = buffer[j * len + i];
@@ -660,6 +722,7 @@ fn dgemm_panels(
 #[cfg(feature = "mkl")]
 #[allow(clippy::too_many_arguments)]
 fn gram_dgemm(
+    site: GemmSite,
     tiles: &mut [RealMatrix],
     start: usize,
     a: &[f64],
@@ -675,15 +738,30 @@ fn gram_dgemm(
         let half = tiles.len() / 2;
         let (left, right) = tiles.split_at_mut(half);
         WorkerPool::join(
-            || gram_dgemm(left, start, a, lda, b, ldb, k_total, m, n, true),
-            || gram_dgemm(right, start + half, a, lda, b, ldb, k_total, m, n, true),
+            || gram_dgemm(site, left, start, a, lda, b, ldb, k_total, m, n, true),
+            || {
+                gram_dgemm(
+                    site,
+                    right,
+                    start + half,
+                    a,
+                    lda,
+                    b,
+                    ldb,
+                    k_total,
+                    m,
+                    n,
+                    true,
+                )
+            },
         );
     } else {
         for (t, tile) in tiles.iter_mut().enumerate() {
             let row = (start + t) * PANEL;
             let len = PANEL.min(k_total - row);
             tile.reshape_within_storage(m, n).expect("tile capacity");
-            dft_mkl::dgemm(
+            dft_mkl::dgemm_at(
+                site.into(),
                 true,
                 m,
                 n,

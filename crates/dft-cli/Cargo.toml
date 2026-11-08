@@ -13,6 +13,8 @@ workspace = true
 default = []
 # Optional Intel MKL backend (ADR 0019): enables dft-numerics/mkl for every crate in the build.
 mkl = ["dft-numerics/mkl"]
+# MKL build with per-call-site dgemm timers printed to stderr when BAANDI_DGEMM_TIMERS is set.
+dgemm-timers = ["dft-numerics/dgemm-timers"]
 
 [dependencies]
 dft-numerics = { path = "../dft-numerics" }

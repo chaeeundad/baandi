@@ -284,6 +284,91 @@ pub fn dgemm(
     ldb: usize,
     c: &mut [f64],
 ) -> Result<(), Error> {
+    dgemm_at(DgemmSite::Other, transpose_a, m, n, k, a, lda, b, ldb, c)
+}
+
+/// Call sites of the real Davidson algebra, for the optional per-site timers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DgemmSite {
+    Rotate,
+    Gram,
+    ProjectionOverlap,
+    ProjectionApply,
+    Reduced,
+    Other,
+}
+const SITES: [(&str, DgemmSite); 6] = [
+    ("rotate", DgemmSite::Rotate),
+    ("gram", DgemmSite::Gram),
+    ("projection_overlap", DgemmSite::ProjectionOverlap),
+    ("projection_apply", DgemmSite::ProjectionApply),
+    ("reduced", DgemmSite::Reduced),
+    ("other", DgemmSite::Other),
+];
+#[cfg(feature = "dgemm-timers")]
+static TIMERS: [(std::sync::atomic::AtomicU64, std::sync::atomic::AtomicU64); 6] = [
+    (
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ),
+    (
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ),
+    (
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ),
+    (
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ),
+    (
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ),
+    (
+        std::sync::atomic::AtomicU64::new(0),
+        std::sync::atomic::AtomicU64::new(0),
+    ),
+];
+/// (site, calls, nanoseconds summed over threads, flop count is not recorded).
+/// Empty unless the `dgemm-timers` feature is enabled.
+pub fn dgemm_site_report() -> Vec<(&'static str, u64, u64)> {
+    #[cfg(feature = "dgemm-timers")]
+    {
+        SITES
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| {
+                (
+                    *name,
+                    TIMERS[i].0.load(std::sync::atomic::Ordering::Relaxed),
+                    TIMERS[i].1.load(std::sync::atomic::Ordering::Relaxed),
+                )
+            })
+            .collect()
+    }
+    #[cfg(not(feature = "dgemm-timers"))]
+    {
+        let _ = SITES;
+        Vec::new()
+    }
+}
+/// `dgemm` with a call-site tag (timed only with the `dgemm-timers` feature).
+#[allow(clippy::too_many_arguments)]
+pub fn dgemm_at(
+    site: DgemmSite,
+    transpose_a: bool,
+    m: usize,
+    n: usize,
+    k: usize,
+    a: &[f64],
+    lda: usize,
+    b: &[f64],
+    ldb: usize,
+    c: &mut [f64],
+) -> Result<(), Error> {
     let _ = crate::keep::anchor();
     let limit = c_int::MAX as usize;
     if m > limit || n > limit || k > limit || lda > limit || ldb > limit {
@@ -304,6 +389,10 @@ pub fn dgemm(
     {
         return Err(Error::Dimension);
     }
+    #[cfg(feature = "dgemm-timers")]
+    let started = std::time::Instant::now();
+    #[cfg(not(feature = "dgemm-timers"))]
+    let _ = site;
     // SAFETY: checked LP64 dimensions; A and B hold at least the addressed
     // (cols - 1) * ld + rows elements with ld >= rows; C is exactly m x n
     // contiguous with ldc = m >= 1; immutable inputs cannot overlap the uniquely
@@ -324,6 +413,17 @@ pub fn dgemm(
             0.0,
             c.as_mut_ptr(),
             m as c_int,
+        );
+    }
+    #[cfg(feature = "dgemm-timers")]
+    {
+        let index = SITES.iter().position(|(_, s)| *s == site).unwrap_or(5);
+        TIMERS[index]
+            .0
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        TIMERS[index].1.fetch_add(
+            started.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
         );
     }
     Ok(())

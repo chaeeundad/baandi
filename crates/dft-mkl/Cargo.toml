@@ -19,6 +19,8 @@ undocumented_unsafe_blocks = "deny"
 [features]
 default = []
 mkl = []
+# Per-call-site dgemm timers (measurement builds only).
+dgemm-timers = []
 
 [dependencies]
 num-complex.workspace = true

@@ -278,6 +278,18 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 fn main() -> ExitCode {
+    let code = real_main();
+    if std::env::var_os("BAANDI_DGEMM_TIMERS").is_some() {
+        for (site, calls, nanos) in dft_numerics::dgemm_site_report() {
+            eprintln!(
+                "dgemm-timer {site} calls {calls} seconds {:.6}",
+                nanos as f64 * 1e-9
+            );
+        }
+    }
+    code
+}
+fn real_main() -> ExitCode {
     let cli = Cli::parse();
     let post = match &cli.command {
         Command::Relax {

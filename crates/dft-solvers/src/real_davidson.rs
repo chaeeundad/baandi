@@ -692,6 +692,7 @@ fn reduced_matrix_into(
     // old prefix exactly; the newly computed upper triangle defines symmetry.
     let rows = v.rows();
     ws.multiply_slices_into(
+        dft_numerics::GemmSite::Reduced,
         v.as_slice(),
         rows,
         v.cols(),
@@ -888,6 +889,7 @@ impl Projection {
             }
             if let Some(q) = against {
                 ws.multiply_slices_into(
+                    dft_numerics::GemmSite::ProjectionOverlap,
                     q.as_slice(),
                     q.rows(),
                     q.cols(),
@@ -900,6 +902,7 @@ impl Projection {
                 )?;
                 let overlap_rows = self.overlap.rows();
                 ws.multiply_slices_into(
+                    dft_numerics::GemmSite::ProjectionApply,
                     q.as_slice(),
                     q.rows(),
                     q.cols(),

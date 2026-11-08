@@ -7,7 +7,7 @@ pub use fused_pair_plan::PairFusedPlan;
 pub mod linalg;
 pub mod real;
 pub use real::{
-    RealGemmWorkspace, RealMatrix, RealMatrixMut, RealMatrixRef, RealOp, RotateKernel,
+    GemmSite, RealGemmWorkspace, RealMatrix, RealMatrixMut, RealMatrixRef, RealOp, RotateKernel,
     symmetric_eigh,
 };
 #[cfg(feature = "mkl")]
@@ -359,6 +359,19 @@ impl Fft3d for RustFftPlan3d {
         output: &mut Array3<Complex64>,
     ) -> Result<(), FftError> {
         self.transform(input, output, false)
+    }
+}
+
+/// Per-call-site dgemm timers (site, calls, nanoseconds summed over threads);
+/// empty unless built with the `dgemm-timers` feature.
+pub fn dgemm_site_report() -> Vec<(&'static str, u64, u64)> {
+    #[cfg(feature = "dgemm-timers")]
+    {
+        dft_mkl::dgemm_site_report()
+    }
+    #[cfg(not(feature = "dgemm-timers"))]
+    {
+        Vec::new()
     }
 }
 

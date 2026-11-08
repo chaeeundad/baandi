@@ -280,7 +280,13 @@ fn rejects_unbalanced_nonzero_pair() {
 #[ignore]
 fn pair_microbenchmark() {
     use std::{hint::black_box, time::Instant};
-    for shape in [[25, 25, 25], [36, 36, 36], [48, 48, 48], [72, 36, 36]] {
+    for shape in [
+        [25, 25, 25],
+        [36, 36, 36],
+        [48, 48, 48],
+        [72, 36, 36],
+        [72, 72, 36],
+    ] {
         let points = shape[0] * shape[1] * shape[2];
         let sc = shape.map(|d| 12. / d as f64);
         let (indices, map) = fixture(shape, [[sc[0], 0., 0.], [0., sc[1], 0.], [0., 0., sc[2]]]);

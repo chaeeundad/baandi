@@ -3255,42 +3255,42 @@
     "started_at": "2026-11-08T00:52:42Z",
     "ended_at": "2026-11-08T01:05:20Z",
     "exit_code": 0,
-    "note": ""
+    "note": "merged (option default off, bit-identical). Si8 strict steps 318->268/266, H 2022->1944/1843 but Si8 standard SCF count rose (TPA seed 402 21->28, ritz_shift seed 401 28->29): not recommended under rule R1 (amended for zero-baseline ratio). Codex stopped by out-of-credits before the final report; remaining systems not run"
   },
   {
     "run_id": "P47B-FP32-FEASIBILITY#1",
     "task_id": "P47B-FP32-FEASIBILITY",
     "mode": "new",
     "role": "implementer",
-    "status": "running",
+    "status": "failed",
     "codex_pid": 72660,
     "wrapper_pid": 72645,
-    "session_id": null,
+    "session_id": "01a1b8a4-dde5-7861-bcd8-aa9d4ec02f97",
     "branch": "task/P47B-FP32-FEASIBILITY",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P47B-FP32-FEASIBILITY",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/P47B-FP32-FEASIBILITY.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P47B-FP32-FEASIBILITY/report.json",
     "started_at": "2026-11-08T00:52:54Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-08T01:13:00Z",
+    "exit_code": 1,
+    "note": "merged (docs+harness). Median wall-saving ceiling 6.78% ordinary / 6.18% native at eligibility 1e-5 Ha, below the frozen 10% rule: no implementation ticket. Codex stopped by out-of-credits after writing the doc"
   },
   {
     "run_id": "P47A-PRECONDITIONER-VARIANTS#2",
     "task_id": "P47A-PRECONDITIONER-VARIANTS",
     "mode": "resume",
     "role": "implementer",
-    "status": "running",
+    "status": "failed",
     "codex_pid": 86787,
     "wrapper_pid": 86775,
-    "session_id": null,
+    "session_id": "01a1b8a4-afc9-7bf1-9f01-32f0ab42db58",
     "branch": "task/P47A-PRECONDITIONER-VARIANTS",
     "worktree": "/Users/mino/Develop/rust-dft/../rust-dft-wt/P47A-PRECONDITIONER-VARIANTS",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/msgs/P47A-r-amend.md",
-    "report": null,
+    "report": "/Users/mino/Develop/rust-dft/.delegate/P47A-PRECONDITIONER-VARIANTS/report.json",
     "started_at": "2026-11-08T01:11:09Z",
-    "ended_at": null,
-    "exit_code": null,
-    "note": ""
+    "ended_at": "2026-11-08T01:12:58Z",
+    "exit_code": 1,
+    "note": "merged (option default off, bit-identical). Si8 strict steps 318->268/266, H 2022->1944/1843 but Si8 standard SCF count rose (TPA seed 402 21->28, ritz_shift seed 401 28->29): not recommended under rule R1 (amended for zero-baseline ratio). Codex stopped by out-of-credits before the final report; remaining systems not run"
   }
 ]

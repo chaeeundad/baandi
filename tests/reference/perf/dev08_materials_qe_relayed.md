@@ -510,3 +510,16 @@ QE si8 (SCF / h_psi / etot Ha / wall median s): seed 1 12 / 85 / -31.32181378420
 QE si16: all 10 seeds 10 SCF and 148 h_psi (identical trajectory); wall min 1.417, median 1.420, max 1.426 s (unperturbed 1.413 s, +0.5 %); energy spread 2.789e-11 Ha (e.g. seed 1 -63.129264783543412 Ha).
 Same-basis gap (both codes at the median trajectory): si8 BAANDI 1.355 s versus QE 0.467 s: 2.90x; si16 4.000 s versus 1.420 s: 2.82x (short-trajectory gap 2.31x and 2.11x). Worst-trajectory gap si8: 1435 H x 1.13784 ms = 1.633 s versus QE worst 0.512 s: 3.19x.
 Trajectory sensitivity differs: BAANDI standard SCF range si8 20 to 32 (median 25.5), H-work max/min 1.51x; si16 15 to 25 (median 19.0), 1.47x; QE si8 12 to 15 (median 12), work max/min 1.12x; QE si16 no variation (1.00x). The perturbation changed the QE energy by 9.978e-10 Ha (si8; the same order as QE's delivered error 9.23e-10) and 2.789e-11 Ha (si16), below the conv_thr of 5e-9 Ha.
+
+---
+Relayed 2026-11-08 by the dev08 master session (not produced by the orchestrator; commands, hashes and raw-data location are in the section itself). Only the key tables are kept here; raw data lives on dev08 under /scr/mino/rustdft/gap2/ and gap2mkl/.
+
+## dev08 QE parity re-measurement at 88cb469 (2026-11-08)
+Identification: commit 88cb469; rustc 1.99.1; Xeon Gold 6230 2.10 GHz; pure native binary sha256 1ca91f8f5bc43cc1a6f10efac3e3b5fb5e7faaa7851a812b2940432d079aa9b5; MKL native binary sha256 6d06763447974ee197e0d142454f4bc5fe881d1ce0014e6558d1cfaa53181d57; build RUSTFLAGS="-C target-cpu=native", CARGO_TARGET_DIR=/scr/...; MKL 2026.1 sequential; taskset -c 0 (T=1) / 0-7 (T=8); UPF Si.pz-vbc.UPF sha256 e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217; QE 7.6 pw.x sha256 07c7cd7935f42b15157500ab719a5c3948825d8ce8a4487d992d7501c659658f (MKL DFTI, K_POINTS gamma, disk_io nowf); si8/si16/si32 Gamma, 30 Ry, lda-pz; n=10 (si8, si16), n=3 (si32).
+
+STANDARD median-trajectory estimate, 1 core (gap vs QE median, equal accuracy class): si8 real 1.372 s vs QE 0.467 s = 2.94x (complex path 4.15x); si16 real 4.039 s vs 1.420 s = 2.84x (complex 5.30x). si32 has no perturbation harness case.
+STANDARD short trajectory, 1 core, gamma_real on: si8 2.34x, si16 2.13x, si32 3.17x (off: 2.82x, 4.12x, 7.67x). 8 cores real: si8 0.930 s, si16 2.023 s, si32 9.589 s.
+STRICT certified, 1 core, gamma_real on / off, gap vs QE 1e-10: si8 4.20x / 6.81x; si16 5.27x / 8.26x; si32 7.29x / 17.87x (si32 real 91.119 s at 367e884 to 48.772 s, SCF 14 to 11, Davidson 426 to 217, H 6481 to 4669). 8 cores real strict: si8 1.811 s, si16 5.717 s, si32 22.891 s.
+MKL vs pure native, T=1: MKL wins complex strict si16 (-11.4%) and si8 (-3.1%); pure wins the real path. si8 complex standard on MKL needs 27 SCF vs 15 (the known stall).
+Symmetry (pure native, n=5, T=1): k222s -16.6% (auto vs off), k444s -59.4%; k444s QE symmetry comparison in the 2026-11-07 section (2.11x).
+Forces and stress pass (si8 strict, real on): SCF 2.310 s; forces +2.794 s (2.21x SCF); stress +20.177 s (9.73x SCF); both 25.267 s (10.94x). gamma_real off both: 31.78 s. QE on the same case: forces and stress add 5.8% (0.467 to 0.494 s; timers forces 0.01 s, stress 0.02 s). results.json timings.total_s covers only the SCF. Forces/stress require the strict profile (config.rs:1118).

@@ -690,10 +690,16 @@ fn reduced_matrix_into(
     }
     // One old/new rectangle and the new square, in one GEMM. Preserve the
     // old prefix exactly; the newly computed upper triangle defines symmetry.
-    ws.multiply_into(
-        v.as_ref(),
+    let rows = v.rows();
+    ws.multiply_slices_into(
+        v.as_slice(),
+        rows,
+        v.cols(),
+        rows,
         RealOp::Transpose,
-        hv.as_ref().subcols(prefix, m - prefix),
+        &hv.as_slice()[prefix * rows..],
+        m - prefix,
+        rows,
         out.as_mut().subcols_mut(prefix, m - prefix),
     )?;
     for j in prefix..m {
@@ -881,16 +887,27 @@ impl Projection {
                 std::mem::swap(&mut self.normalized, &mut self.output);
             }
             if let Some(q) = against {
-                ws.multiply_into(
-                    q.as_ref(),
+                ws.multiply_slices_into(
+                    q.as_slice(),
+                    q.rows(),
+                    q.cols(),
+                    q.rows(),
                     RealOp::Transpose,
-                    self.normalized.as_ref().subcols(0, count),
+                    self.normalized.as_slice(),
+                    count,
+                    n,
                     self.overlap.as_mut().submatrix_mut(0, 0, q.cols(), count),
                 )?;
-                ws.multiply_into(
-                    q.as_ref(),
+                let overlap_rows = self.overlap.rows();
+                ws.multiply_slices_into(
+                    q.as_slice(),
+                    q.rows(),
+                    q.cols(),
+                    q.rows(),
                     RealOp::Identity,
-                    self.overlap.as_ref().submatrix(0, 0, q.cols(), count),
+                    self.overlap.as_slice(),
+                    count,
+                    overlap_rows,
                     self.projected.as_mut().subcols_mut(0, count),
                 )?;
                 self.pool.install(|| {

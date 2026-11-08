@@ -193,3 +193,19 @@ accuracy bounds; increased SCF count is the decisive failure. Stop before later
 seeds/systems as required. No floor, tolerance, capacity or default was retuned.
 Do not repeat this mechanism without a new premise addressing its increased
 SCF work. See [derivation, amendment and evidence](preconditioner-variants.md).
+## B34 — early-SCF fp32 H (P47B, 2026-11-08; measurement completed)
+
+**No implementation ticket recommended by the frozen 10% median wall-saving
+rule.** [The feasibility study](fp32-feasibility.md) measures ordinary/native
+single-thread rustfft and faer, physical-state H errors and standard-history
+eligibility. Even an intentionally generous ceiling that credits all eligible
+Davidson time to H remains below 10% on the equally weighted Si8/Si16/Si32
+median. The f32 lane fallback itself is slower than production fused f64 H.
+The standard Ritz screen is 1e-5 Ha; moving it to 1e-7 Ha conflicts with measured
+projected-root errors, and strict certificates must remain entirely fp64.
+
+Reopen only with new evidence from a generic fused-f32 precision experiment or
+a different measured hardware/workload premise. Include conversion and cached-H
+rebuild costs, physical-state/correction-vector accuracy, complete fp64
+certificate isolation and trajectory changes. No default, production option or
+optimization was adopted. Standalone Davidson GEMM speedups are not H savings.

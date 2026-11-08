@@ -7,7 +7,8 @@ pub use fused_pair_plan::PairFusedPlan;
 pub mod linalg;
 pub mod real;
 pub use real::{
-    RealGemmWorkspace, RealMatrix, RealMatrixMut, RealMatrixRef, RealOp, symmetric_eigh,
+    RealGemmWorkspace, RealMatrix, RealMatrixMut, RealMatrixRef, RealOp, RotateKernel,
+    symmetric_eigh,
 };
 #[cfg(feature = "mkl")]
 pub mod mkl_backend;

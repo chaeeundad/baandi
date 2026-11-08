@@ -141,6 +141,15 @@ const PANEL: usize = 256;
 // This is a scheduling heuristic, not a measured real-path speed claim.
 const PARALLEL_WORK: usize = 1_048_576;
 
+/// Kernel used for the rotation products Q C (research switch; default Legacy).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RotateKernel {
+    /// Bounded 4 x 4 faer nano-GEMM calls (original, bit-preserving).
+    #[default]
+    Legacy,
+    /// 8 x 4 register-tile kernel with one ascending-p chain per element.
+    Blocked,
+}
 /// Reusable fixed-panel Gram scratch and shared executor. Construction allocates;
 /// multiply_into neither allocates numerical storage nor creates worker threads.
 /// The faer backend stays sequential within each panel, including MKL builds.
@@ -148,6 +157,9 @@ pub struct RealGemmWorkspace {
     long: usize,
     short: usize,
     tiles: Vec<RealMatrix>,
+    /// Right operand packed in column blocks of four for the rotation kernel.
+    pack: Vec<f64>,
+    kernel: RotateKernel,
     pool: Arc<WorkerPool>,
 }
 impl RealGemmWorkspace {
@@ -169,8 +181,16 @@ impl RealGemmWorkspace {
             long,
             short,
             tiles,
+            pack: vec![0.; short.div_ceil(4) * 4 * short],
+            kernel: match std::env::var("BAANDI_ROTATE_KERNEL").as_deref() {
+                Ok("blocked") => RotateKernel::Blocked,
+                _ => RotateKernel::Legacy,
+            },
             pool,
         })
+    }
+    pub fn set_rotate_kernel(&mut self, kernel: RotateKernel) {
+        self.kernel = kernel;
     }
     /// Rotate V and HV by the same Ritz coefficients in one parallel region.
     /// Each side retains the original 256-row pieces and bounded kernel calls
@@ -210,16 +230,30 @@ impl RealGemmWorkspace {
         }
         let parallel =
             m.div_ceil(PANEL) >= 4 && m.saturating_mul(n).saturating_mul(k) >= PARALLEL_WORK;
-        if parallel {
+        if self.kernel == RotateKernel::Blocked {
+            pack_columns(&mut self.pack, c);
+            let pack = &self.pack[..n.div_ceil(4) * 4 * k];
+            if parallel {
+                self.pool.install(|| {
+                    WorkerPool::join(
+                        || rotate(out_v.as_mut(), v, pack, k, true),
+                        || rotate(out_hv.as_mut(), hv, pack, k, true),
+                    );
+                });
+            } else {
+                rotate(out_v.as_mut(), v, pack, k, false);
+                rotate(out_hv.as_mut(), hv, pack, k, false);
+            }
+        } else if parallel {
             self.pool.install(|| {
                 WorkerPool::join(
-                    || rotate(out_v.as_mut(), v, c, true),
-                    || rotate(out_hv.as_mut(), hv, c, true),
+                    || rotate_legacy(out_v.as_mut(), v, c, true),
+                    || rotate_legacy(out_hv.as_mut(), hv, c, true),
                 );
             });
         } else {
-            rotate(out_v.as_mut(), v, c, false);
-            rotate(out_hv.as_mut(), hv, c, false);
+            rotate_legacy(out_v.as_mut(), v, c, false);
+            rotate_legacy(out_hv.as_mut(), hv, c, false);
         }
         finite(out_v.as_ref())?;
         finite(out_hv.as_ref())
@@ -274,7 +308,7 @@ impl RealGemmWorkspace {
                 sum();
             }
         } else {
-            let mut work = || rotate(out.as_mut(), a, b, parallel);
+            let mut work = || rotate_legacy(out.as_mut(), a, b, parallel);
             if parallel {
                 self.pool.install(work);
             } else {
@@ -378,14 +412,19 @@ fn assemble(mut out: RealMatrixMut<'_>, tiles: &[RealMatrix], first: usize, para
         }
     }
 }
-fn rotate(mut out: RealMatrixMut<'_>, a: RealMatrixRef<'_>, b: RealMatrixRef<'_>, parallel: bool) {
+fn rotate_legacy(
+    mut out: RealMatrixMut<'_>,
+    a: RealMatrixRef<'_>,
+    b: RealMatrixRef<'_>,
+    parallel: bool,
+) {
     let count = a.nrows().div_ceil(PANEL);
     if parallel && count > 1 {
         let split = (count / 2) * PANEL;
         let (left, right) = out.split_at_row_mut(split);
         WorkerPool::join(
-            || rotate(left, a.subrows(0, split), b, true),
-            || rotate(right, a.subrows(split, a.nrows() - split), b, true),
+            || rotate_legacy(left, a.subrows(0, split), b, true),
+            || rotate_legacy(right, a.subrows(split, a.nrows() - split), b, true),
         );
     } else {
         for row in (0..a.nrows()).step_by(PANEL) {
@@ -396,6 +435,97 @@ fn rotate(mut out: RealMatrixMut<'_>, a: RealMatrixRef<'_>, b: RealMatrixRef<'_>
                 b,
                 false,
             );
+        }
+    }
+}
+/// Pack the k x n right operand into column blocks of four: block jb holds, for
+/// each reduction index p, the four values b(p, 4 jb ..= 4 jb + 3) (zero padded).
+fn pack_columns(pack: &mut [f64], b: RealMatrixRef<'_>) {
+    let (k, n) = (b.nrows(), b.ncols());
+    for jb in 0..n.div_ceil(4) {
+        let block = &mut pack[jb * k * 4..(jb + 1) * k * 4];
+        for c in 0..4 {
+            let j = jb * 4 + c;
+            if j < n {
+                for p in 0..k {
+                    block[p * 4 + c] = b[(p, j)];
+                }
+            } else {
+                for p in 0..k {
+                    block[p * 4 + c] = 0.;
+                }
+            }
+        }
+    }
+}
+/// Fused multiply-add where the target has it (single instruction, so the
+/// kernel stays fast); otherwise separate multiply and add. The choice is a
+/// compile-time property of the build, never of the thread budget.
+#[inline(always)]
+fn fma(a: f64, b: f64, acc: f64) -> f64 {
+    if cfg!(any(target_feature = "fma", target_arch = "aarch64")) {
+        a.mul_add(b, acc)
+    } else {
+        acc + a * b
+    }
+}
+// Rotation C = A B with a fixed arithmetic order: every output element is one
+// ascending-p chain acc += a(i,p) b(p,j) starting from +0, so it does not depend
+// on the row partition, the thread budget or the tile it falls into. The 8 x 4
+// register tile keeps 32 accumulators; A columns are contiguous.
+fn rotate(
+    mut out: RealMatrixMut<'_>,
+    a: RealMatrixRef<'_>,
+    pack: &[f64],
+    k: usize,
+    parallel: bool,
+) {
+    let count = a.nrows().div_ceil(PANEL);
+    if parallel && count > 1 {
+        let split = (count / 2) * PANEL;
+        let (left, right) = out.split_at_row_mut(split);
+        WorkerPool::join(
+            || rotate(left, a.subrows(0, split), pack, k, true),
+            || rotate(right, a.subrows(split, a.nrows() - split), pack, k, true),
+        );
+    } else {
+        let rows = a.nrows();
+        let n = out.ncols();
+        for ib in (0..rows).step_by(8) {
+            let rr = 8.min(rows - ib);
+            for jb in 0..n.div_ceil(4) {
+                let nc = 4.min(n - jb * 4);
+                let block = &pack[jb * k * 4..(jb + 1) * k * 4];
+                let mut acc = [[0_f64; 8]; 4];
+                if rr == 8 {
+                    for p in 0..k {
+                        let column = a.col(p).try_as_col_major().expect("contiguous column");
+                        let av: &[f64; 8] = column.as_slice()[ib..ib + 8].try_into().unwrap();
+                        let bv: &[f64; 4] = block[p * 4..p * 4 + 4].try_into().unwrap();
+                        for c in 0..4 {
+                            for r in 0..8 {
+                                acc[c][r] = fma(av[r], bv[c], acc[c][r]);
+                            }
+                        }
+                    }
+                } else {
+                    for p in 0..k {
+                        let column = a.col(p).try_as_col_major().expect("contiguous column");
+                        let av = &column.as_slice()[ib..ib + rr];
+                        let bv = &block[p * 4..p * 4 + 4];
+                        for c in 0..4 {
+                            for (r, &x) in av.iter().enumerate() {
+                                acc[c][r] = fma(x, bv[c], acc[c][r]);
+                            }
+                        }
+                    }
+                }
+                for c in 0..nc {
+                    for r in 0..rr {
+                        out[(ib + r, jb * 4 + c)] = 0. + acc[c][r];
+                    }
+                }
+            }
         }
     }
 }

@@ -165,6 +165,9 @@ pub struct RealGemmWorkspace {
     /// Right operand packed in column blocks of four for the rotation kernel.
     pack: Vec<f64>,
     kernel: RotateKernel,
+    /// MKL builds: rotation through dgemm unless `BAANDI_MKL_DGEMM=off` (A/B switch).
+    #[cfg(feature = "mkl")]
+    dgemm_rotation: bool,
     pool: Arc<WorkerPool>,
 }
 impl RealGemmWorkspace {
@@ -191,6 +194,8 @@ impl RealGemmWorkspace {
                 Ok("blocked") => RotateKernel::Blocked,
                 _ => RotateKernel::Legacy,
             },
+            #[cfg(feature = "mkl")]
+            dgemm_rotation: std::env::var("BAANDI_MKL_DGEMM").as_deref() != Ok("off"),
             pool,
         })
     }
@@ -219,7 +224,8 @@ impl RealGemmWorkspace {
         }
         #[cfg(feature = "mkl")]
         {
-            if m <= self.long
+            if self.dgemm_rotation
+                && m <= self.long
                 && k <= self.short
                 && n <= self.short
                 && m > 0

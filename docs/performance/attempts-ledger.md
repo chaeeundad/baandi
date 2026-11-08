@@ -712,3 +712,31 @@ radial/MGS/EVD costs. Non-isolated Mac observations only; no dev08 acceptance.
 Full records and automatic stop marker: `P46A-evidence/r2/`; protocol and
 limitations: [atomic-start-option.md](atomic-start-option.md). Default unchanged;
 the architect-authorized opt-in code remains uncommitted for review.
+
+## P47A — switchable kinetic preconditioners (2026-11-08)
+
+| ID | Mechanism | Status | Measured result | Lesson |
+|---|---|---|---|---|
+| P47A-1 | Per-band mean-kinetic TPA damping; positive-clipped kinetic Ritz denominator, floor 0.1 Ha; default unchanged | Screening stopped, no recommendation | Si8 complex strict, including certificate: default/TPA/ritz_shift steps 318/268/266, H vectors 2022/1944/1843, SCF 14/14/14. All certify. Tight-reference energy differences 0/4.973799150320701e-14/4.618527782440651e-14 Ha. | The frozen 1.5-times-default strict error test cannot pass for either variant when the computed baseline difference is zero. This is a reference-resolution limitation, not evidence of physical accuracy degradation. Stop before the standard ensembles or broader performance suite; do not add a post-hoc error floor. |
+
+A14's potential/nonlocal diagonal augmentation is not repeated: only the damping
+or denominator sign clipping changes, retaining kinetic h_diag. The default
+already subtracts the Ritz value. Constants and rule R were documented before
+measurement in [preconditioner-variants.md](preconditioner-variants.md).
+Counts are local reproducible observations, not dev08 acceptance or QE results.
+Raw commands and observations: task worktree `P47A-evidence/`.
+
+### P47A architect amendment and resumed result (R1)
+
+The architect explicitly amended only strict accuracy to
+max(1.5 * default error, 1e-12 Ha), after only Si8 complex strict selection
+evidence had been seen. P47A-1's zero-error ratio stop is superseded, not a
+physics failure. Identity/determinism outputs existed separately; no standard
+five-start performance ensemble had been evaluated for selection.
+
+| ID | Mechanism | Status | Measured result | Lesson |
+|---|---|---|---|---|
+| P47A-2 | Same fixed TPA and positive-clipped Ritz options, unchanged standard accuracy and SCF gates | Both rejected for recommendation under R1; default unchanged | Independent tight run: 20 SCF, -31.3218036010317320 Ha. Both strict variants pass R1. Si8 standard TPA seed 402: SCF 21 -> 28, steps 95 -> 87, H 1011 -> 1276, errors 1.454594666938647e-9 -> 3.293294525974488e-10 Ha. Ritz_shift seed 401: SCF 28 -> 29, steps 100 -> 90, H 1253 -> 1283, errors 8.097416070995678e-10 -> 1.508126956650813e-10 Ha. | All starts converge and accuracy passes; SCF counts increase. Reduced Davidson steps alone do not establish reduced total work. Stop each variant at its first failure; later seeds and systems intentionally unrun. No retuning. |
+
+Raw: `P47A-evidence/si8-amended-screen.log`; protocol, timing limitations and
+unreached generality gates: [preconditioner-variants.md](preconditioner-variants.md).

@@ -342,6 +342,7 @@ pub(crate) fn options_identical(a: &ScfOptions, b: &ScfOptions) -> bool {
             davidson_max_iterations,
             davidson_subspace,
             davidson_capacity_per_band,
+            preconditioner,
             seed,
             divergence_patience
         )

@@ -220,7 +220,7 @@ pub(crate) fn solve_real_gamma(
     let op = &state.op;
     // The SCF driver supplies the same ratcheted tolerance and band policy to
     // both representations. Standard returns remain explicitly uncertified.
-    let result = solver.solve_reusing(
+    let result = solver.solve_reusing_with_preconditioner(
         op,
         packed.as_ref(),
         &diagonal,
@@ -229,6 +229,7 @@ pub(crate) fn solve_real_gamma(
         certify && options.standard.is_none(),
         options.davidson_capacity_per_band,
         &mut state.workspace,
+        options.preconditioner,
     )?;
     let mut eigenvectors = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
     {

@@ -75,6 +75,14 @@ impl ScfSession {
         self.check_control_version()?;
         let prepared = prepare_policy(&self.problem.options, self.iteration, floors, changes)
             .map_err(ControlError::Policy)?;
+        if prepared.options().preconditioner != dft_solvers::DavidsonPreconditioner::Default
+            && !matches!(
+                prepared.options().eigensolver,
+                dft_solvers::SolverChoice::Davidson
+            )
+        {
+            return Err(ControlError::PrepareFailed);
+        }
         let mixer = if prepared.resets_history() {
             let c = self
                 .continuation

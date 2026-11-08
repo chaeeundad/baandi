@@ -603,7 +603,29 @@ fn default_davidson_capacity_per_band() -> usize {
 fn is_default_davidson_capacity_per_band(value: &usize) -> bool {
     *value == 6
 }
+impl Wire for dft_engine::DavidsonPreconditioner {
+    type Repr = String;
+    fn encode(&self, _bytes: &mut Vec<u8>) -> Result<String, Error> {
+        Ok(self.name().into())
+    }
+    fn decode(w: String, _bytes: &[u8], _cursor: &mut usize) -> Result<Self, Error> {
+        match w.as_str() {
+            "default" => Ok(Self::Default),
+            "tpa" => Ok(Self::Tpa),
+            "ritz_shift" => Ok(Self::RitzShift),
+            _ => Err(invalid("invalid preconditioner option")),
+        }
+    }
+}
+fn default_preconditioner() -> String {
+    "default".into()
+}
+fn is_default_preconditioner(s: &str) -> bool {
+    s == "default"
+}
 wire_struct!(ScfOptions, WScfOptions {
+    #[serde(default = "default_preconditioner", skip_serializing_if = "is_default_preconditioner")]
+    preconditioner: dft_engine::DavidsonPreconditioner,
     #[serde(default = "free_electron_start", skip_serializing_if = "is_free_electron_start")]
     start_wavefunctions: dft_engine::StartWavefunctions,
     #[serde(default = "compat_none", skip_serializing_if = "is_compat_none")]
@@ -2121,3 +2143,7 @@ mod pseudo_wire_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/preconditioner/wire.rs"]
+mod preconditioner_tests;

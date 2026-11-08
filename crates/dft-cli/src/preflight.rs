@@ -432,6 +432,15 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         ));
     }
     let sector = config.spin_sector(electrons)?;
+    if options.preconditioner != dft_engine::DavidsonPreconditioner::Default
+        && (sector.is_some() || finite)
+    {
+        return Err(fail(
+            "scf.preconditioner",
+            "nondefault preconditioner requires fixed unpolarized occupations",
+            "use preconditioner = default",
+        ));
+    }
     if sector.is_some()
         && (config.bands.is_some()
             || config.dos.is_some()

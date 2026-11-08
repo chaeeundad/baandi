@@ -69,6 +69,18 @@ pub trait LinearOperator {
 }
 /// Transform residual columns, using the matching Ritz values; overwrite output.
 pub trait Preconditioner {
+    /// Davidson supplies current Ritz vectors and selected column indices.
+    /// Other preconditioners retain their original residual-only contract.
+    fn apply_with_vectors(
+        &self,
+        eigenvalues: &[f64],
+        residuals: &ComplexMatrix,
+        _vectors: &ComplexMatrix,
+        _selected: &[usize],
+        output: &mut ComplexMatrix,
+    ) -> Result<(), SolverError> {
+        self.apply(eigenvalues, residuals, output)
+    }
     fn apply(
         &self,
         eigenvalues: &[f64],
@@ -111,13 +123,68 @@ pub trait RealLinearOperator {
     }
 }
 
+/// Switchable kinetic Davidson damping; legacy entry points retain Default.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DavidsonPreconditioner {
+    #[default]
+    Default,
+    Tpa,
+    RitzShift,
+}
+impl DavidsonPreconditioner {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Tpa => "tpa",
+            Self::RitzShift => "ritz_shift",
+        }
+    }
+}
+
+/// Ordered expectation of kinetic energy, with the existing 0.1 Ha floor.
+fn kinetic_scale(weights: impl Iterator<Item = (f64, f64)>) -> Result<f64, LinalgError> {
+    let (mut norm, mut mean) = (0.0, 0.0);
+    for (weight, kinetic) in weights {
+        if !weight.is_finite() || weight < 0.0 || !kinetic.is_finite() || kinetic < 0.0 {
+            return Err(LinalgError::NonFinite);
+        }
+        norm += weight;
+        mean += weight * kinetic;
+    }
+    let scale = mean / norm;
+    if !scale.is_finite() {
+        return Err(LinalgError::NonFinite);
+    }
+    Ok(scale.max(0.1))
+}
+
+/// Positive TPA damping. Reciprocal evaluation avoids polynomial overflow.
+fn tpa_weight(kinetic: f64, scale: f64) -> f64 {
+    let x = kinetic / scale;
+    if x <= 1.0 {
+        let p = 27.0 + x * (18.0 + x * (12.0 + x * 8.0));
+        p / (p + 16.0 * x * x * x * x)
+    } else {
+        let y = scale / kinetic;
+        let p = y * (8.0 + y * (12.0 + y * (18.0 + y * 27.0)));
+        p / (p + 16.0)
+    }
+}
+
 /// Correction -r/(d-lambda), with sign-preserving denominator floor (zero takes +).
 #[derive(Debug, Clone)]
 pub struct DiagonalPreconditioner {
     diagonal: Vec<f64>,
     denominator_floor: f64,
+    variant: DavidsonPreconditioner,
 }
 impl DiagonalPreconditioner {
+    /// Select a research variant; its constants are fixed independently of the legacy floor.
+    pub fn with_variant(mut self, variant: DavidsonPreconditioner) -> Self {
+        self.variant = variant;
+        self
+    }
+
     /// The positive floor has the same units as the diagonal/eigenvalues.
     pub fn new(diagonal: Vec<f64>, denominator_floor: f64) -> Result<Self, SolverError> {
         if diagonal.iter().any(|d| !d.is_finite())
@@ -131,16 +198,63 @@ impl DiagonalPreconditioner {
         Ok(Self {
             diagonal,
             denominator_floor,
+            variant: DavidsonPreconditioner::Default,
         })
     }
 }
 impl Preconditioner for DiagonalPreconditioner {
+    fn apply_with_vectors(
+        &self,
+        eigenvalues: &[f64],
+        residuals: &ComplexMatrix,
+        vectors: &ComplexMatrix,
+        selected: &[usize],
+        output: &mut ComplexMatrix,
+    ) -> Result<(), SolverError> {
+        if self.variant != DavidsonPreconditioner::Tpa {
+            return self.apply(eigenvalues, residuals, output);
+        }
+        if residuals.rows() != self.diagonal.len()
+            || vectors.rows() != residuals.rows()
+            || selected.len() != residuals.cols()
+            || eigenvalues.len() != residuals.cols()
+            || output.rows() != residuals.rows()
+            || output.cols() != residuals.cols()
+            || selected.iter().any(|&j| j >= vectors.cols())
+        {
+            return Err(LinalgError::Dimension.into());
+        }
+        residuals.validate_finite()?;
+        if eigenvalues.iter().any(|x| !x.is_finite()) {
+            return Err(LinalgError::NonFinite.into());
+        }
+        for (k, &j) in selected.iter().enumerate() {
+            let scale = kinetic_scale(
+                vectors
+                    .column(j)
+                    .iter()
+                    .zip(&self.diagonal)
+                    .map(|(c, &t)| (c.norm_sqr(), t)),
+            )?;
+            for (i, &t) in self.diagonal.iter().enumerate() {
+                output[(i, k)] = -residuals[(i, k)] * tpa_weight(t, scale);
+            }
+        }
+        output.validate_finite()?;
+        Ok(())
+    }
+
     fn apply(
         &self,
         eigenvalues: &[f64],
         residuals: &ComplexMatrix,
         output: &mut ComplexMatrix,
     ) -> Result<(), SolverError> {
+        if self.variant == DavidsonPreconditioner::Tpa {
+            return Err(SolverError::InvalidParameter(
+                "TPA requires current Ritz vectors",
+            ));
+        }
         if residuals.rows() != self.diagonal.len()
             || eigenvalues.len() != residuals.cols()
             || output.rows() != residuals.rows()
@@ -158,7 +272,9 @@ impl Preconditioner for DiagonalPreconditioner {
                 if !delta.is_finite() {
                     return Err(LinalgError::NonFinite.into());
                 }
-                let denom = if delta < 0.0 {
+                let denom = if self.variant == DavidsonPreconditioner::RitzShift {
+                    delta.max(0.1)
+                } else if delta < 0.0 {
                     -delta.abs().max(self.denominator_floor)
                 } else {
                     delta.max(self.denominator_floor)
@@ -835,7 +951,7 @@ impl Davidson {
                 let mut output = ComplexMatrix::zeros(n, corrections.cols())?;
                 {
                     let _phase = dft_numerics::pool::analysis::Span::serial("preconditioner");
-                    p.apply(&shifts, &corrections, &mut output)?;
+                    p.apply_with_vectors(&shifts, &corrections, &vectors, &selected, &mut output)?;
                 }
                 if output.rows() != n || output.cols() != corrections.cols() {
                     return Err(LinalgError::Dimension.into());

@@ -255,9 +255,8 @@ impl RealGemmWorkspace {
                 && m > 0
                 && PANEL.min(m) * n <= self.short * self.short
             {
-                if v.iter().chain(hv).chain(c).any(|x| !x.is_finite()) {
-                    return Err(LinalgError::NonFinite);
-                }
+                // Non-finite inputs are caught by the output scan below: a NaN or
+                // infinity in A, B propagates to every dependent entry of C.
                 let count = m.div_ceil(PANEL);
                 let parallel = count >= 4 && m.saturating_mul(n).saturating_mul(k) >= PARALLEL_WORK;
                 let tiles_v = &mut self.tiles[..count];
@@ -376,12 +375,9 @@ impl RealGemmWorkspace {
                 && out.nrows() == m
                 && out.ncols() == n
             {
-                let used_a =
-                    (0..a_cols).all(|j| a[j * lda..j * lda + a_rows].iter().all(|x| x.is_finite()));
-                let used_b = (0..n).all(|j| b[j * ldb..j * ldb + k].iter().all(|x| x.is_finite()));
-                if !used_a || !used_b {
-                    return Err(LinalgError::NonFinite);
-                }
+                // Inputs are not scanned: a non-finite input makes the output
+                // non-finite (NaN and infinity propagate through every product and
+                // sum), and the output scan below rejects it.
                 let parallel = count >= 4 && m.saturating_mul(n).saturating_mul(k) >= PARALLEL_WORK;
                 if op == RealOp::Transpose {
                     let tiles = &mut self.tiles[..count];
@@ -440,9 +436,7 @@ impl RealGemmWorkspace {
         {
             return Err(LinalgError::Dimension);
         }
-        finite(v)?;
-        finite(hv)?;
-        finite(c)?;
+        // Inputs are not scanned; non-finite values propagate to the outputs, which are checked.
         if m == 0 || n == 0 {
             return Ok(());
         }
@@ -505,8 +499,7 @@ impl RealGemmWorkspace {
         {
             return Err(LinalgError::Dimension);
         }
-        finite(a)?;
-        finite(b)?;
+        // Inputs are not scanned; non-finite values propagate to the checked output.
         if m == 0 || n == 0 {
             return Ok(());
         }

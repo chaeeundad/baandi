@@ -56,3 +56,14 @@ Program PWSCF v.7.6, pw.x sha256 07c7cd7935f42b15157500ab719a5c3948825d8ce8a4487
 | S10 | v_of_rho | 0.030 | 0.040 | 0.090 |
 | S11 | mix_rho | 0.020 | 0.030 | 0.070 |
 Rules: fftw is inside vloc_psi and sum_band, so it is a reference value and not added; regterg:over and :upda are S4, regterg:last is S6. QE timers have 0.01 s quantization: S0, S7, S10, S11 of si8 and si16 are not usable as ratios; si32 values (>= 0.03 s) are safe.
+
+## (D) Ceilings, single core (relayed 2026-11-08)
+Xeon Gold 6230 2.10 GHz, taskset -c 0, oneMKL 2026.1 sequential layer, best of 7, load < 0.30; benchmark crates outside the repository (/scr/mino/rustdft/{dgemmbench,fftbench}), RUSTFLAGS target-cpu=native. Shapes: real basis d = 1480 / 2958 / 5939 (si8 / si16 / si32), bands 20 / 36 / 68, subspace s = 6b = 96 / 216 / 408, projector channels n_proj = 4 per atom = 32 / 64 / 128.
+
+D1 single-core MKL dgemm (GFLOP/s; square 2000^3 reference 98.47): si8 rotate 74.3, gram 76.9, reduced 100.6, nonlocal project 88.9, apply 90.0; si16 rotate 76.6, gram 87.7, reduced 83.9, project 80.5, apply 81.7; si32 rotate 83.8, gram 101.2, reduced 89.1, project 93.2, apply 82.2. All dominant Davidson and nonlocal shapes reach 75 to 103 percent of the square ceiling.
+
+D2 one 3D FFT at production grids (microseconds): 25^3 MKL in place 76.09, Plan3d::transform 75.39, FFTW3 60.38; 36^3 147.81 / 193.98 (copy share 23.8%) / 128.58; 72x36x36 327.59 / 494.93 (33.8%) / 292.05; 72x72x36 727.19 / 1098.86 (33.8%) / 667.32. FFTW3 (GPL, reference only) is 8 to 21 percent faster than MKL.
+
+D3 BAANDI pair transform (microseconds per band; library plan / mirror plan / single): 25^3 105.4 / 79.2 / 216.4; 36^3 239.1 / 127.8 / 497.2; 48^3 709.8 / 425.9 / 1365.7; 72x36x36 556.7 / 276.2 / 1064.4. 72x72x36 is not in the test list (added to `pair_microbenchmark` afterwards). Library-plan numbers vary 5 to 12 percent between sessions (cache interference); use ratios within one run.
+
+D4 mirror vs ceilings (us per transform): 36^3 mirror 127.8, MKL 147.8, FFTW3 128.6, QE fftw timer 135 (0.130 s / 964 calls); 72x36x36 mirror 276.2, MKL 327.6, FFTW3 292.1, QE 341; 72x72x36 MKL 727.2, FFTW3 667.3, QE 762, mirror not measured. BAANDI's mirror pair transform is 14 to 16 percent faster than the MKL in-place call and 19 to 23 percent faster than QE's per-call FFT time; the FFT transform itself is no longer a cause of the gap (limits: different processes for MKL/FFTW3 and the pair microbenchmark).

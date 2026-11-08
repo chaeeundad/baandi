@@ -369,15 +369,16 @@ impl RealDavidson {
             reduced_width = m;
             coefficients.reshape_within_storage(m, m)?;
             eigensolver.solve_into(reduced, &mut values[..m], coefficients)?;
-            let coefficients = coefficients.as_ref().subcols(0, self.bands);
             vectors.reshape_within_storage(n, self.bands)?;
             rotated_products.reshape_within_storage(n, self.bands)?;
-            gemm.rotate_pair(
-                basis.as_ref(),
-                products.as_ref(),
-                coefficients,
-                vectors.as_mut(),
-                rotated_products.as_mut(),
+            gemm.rotate_pair_slices(
+                basis.as_slice(),
+                products.as_slice(),
+                m,
+                &coefficients.as_slice()[..m * self.bands],
+                self.bands,
+                vectors.as_mut_slice(),
+                rotated_products.as_mut_slice(),
             )?;
             residual_into(
                 vectors,

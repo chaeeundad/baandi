@@ -23,6 +23,22 @@ unsafe extern "C" {
     fn DftiFreeDescriptor(handle: *mut *mut c_void) -> c_long;
     fn DftiErrorMessage(status: c_long) -> *const c_char;
     fn DftiErrorClass(status: c_long, class: c_long) -> c_long;
+    fn cblas_dgemm(
+        layout: c_int,
+        ta: c_int,
+        tb: c_int,
+        m: c_int,
+        n: c_int,
+        k: c_int,
+        alpha: f64,
+        a: *const f64,
+        lda: c_int,
+        b: *const f64,
+        ldb: c_int,
+        beta: f64,
+        c: *mut f64,
+        ldc: c_int,
+    );
     fn cblas_zgemm(
         layout: c_int,
         ta: c_int,
@@ -246,6 +262,67 @@ pub fn gemm(
             b.rows as c_int,
             (&zero as *const Complex64).cast(),
             c.as_mut_ptr().cast(),
+            m as c_int,
+        );
+    }
+    Ok(())
+}
+
+/// Real C = op(A) B into a contiguous m x n column-major C, without allocation.
+/// `a` is stored column-major with leading dimension `lda` (m x k, or k x m when
+/// `transpose_a`); `b` is k x n with leading dimension `ldb`. Zero-sized
+/// products return zeros. Storage lengths and leading dimensions are checked.
+#[allow(clippy::too_many_arguments)]
+pub fn dgemm(
+    transpose_a: bool,
+    m: usize,
+    n: usize,
+    k: usize,
+    a: &[f64],
+    lda: usize,
+    b: &[f64],
+    ldb: usize,
+    c: &mut [f64],
+) -> Result<(), Error> {
+    let _ = crate::keep::anchor();
+    let limit = c_int::MAX as usize;
+    if m > limit || n > limit || k > limit || lda > limit || ldb > limit {
+        return Err(Error::Dimension);
+    }
+    if m.checked_mul(n) != Some(c.len()) {
+        return Err(Error::Dimension);
+    }
+    if m == 0 || n == 0 || k == 0 {
+        c.fill(0.0);
+        return Ok(());
+    }
+    let (a_rows, a_cols) = if transpose_a { (k, m) } else { (m, k) };
+    if lda < a_rows
+        || ldb < k
+        || a.len() < (a_cols - 1).saturating_mul(lda).saturating_add(a_rows)
+        || b.len() < (n - 1).saturating_mul(ldb).saturating_add(k)
+    {
+        return Err(Error::Dimension);
+    }
+    // SAFETY: checked LP64 dimensions; A and B hold at least the addressed
+    // (cols - 1) * ld + rows elements with ld >= rows; C is exactly m x n
+    // contiguous with ldc = m >= 1; immutable inputs cannot overlap the uniquely
+    // borrowed output; the scalars are passed by value.
+    unsafe {
+        cblas_dgemm(
+            102,
+            if transpose_a { 112 } else { 111 },
+            111,
+            m as c_int,
+            n as c_int,
+            k as c_int,
+            1.0,
+            a.as_ptr(),
+            lda as c_int,
+            b.as_ptr(),
+            ldb as c_int,
+            0.0,
+            c.as_mut_ptr(),
             m as c_int,
         );
     }

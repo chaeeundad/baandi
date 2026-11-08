@@ -63,6 +63,11 @@ impl RealMatrix {
     pub fn as_slice(&self) -> &[f64] {
         &self.data[..self.rows * self.cols]
     }
+    /// Whole backing storage regardless of the active shape (scratch tiles).
+    #[allow(dead_code)]
+    pub(crate) fn as_mut_slice_full(&mut self) -> &mut [f64] {
+        &mut self.data
+    }
     /// Mutable contiguous column-major storage.
     pub fn as_mut_slice(&mut self) -> &mut [f64] {
         &mut self.data[..self.rows * self.cols]
@@ -188,6 +193,73 @@ impl RealGemmWorkspace {
             },
             pool,
         })
+    }
+    /// Slice form of `rotate_pair`: `v`, `hv` are m x k, `c` is k x n and the
+    /// outputs m x n, all contiguous column-major. With the `mkl` feature each
+    /// 256-row panel is one single-thread dgemm (panel grouping fixed, so the
+    /// result does not depend on the thread budget); otherwise this is the
+    /// ordinary `rotate_pair`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rotate_pair_slices(
+        &mut self,
+        v: &[f64],
+        hv: &[f64],
+        k: usize,
+        c: &[f64],
+        n: usize,
+        out_v: &mut [f64],
+        out_hv: &mut [f64],
+    ) -> Result<(), LinalgError> {
+        if k == 0 || n == 0 || !v.len().is_multiple_of(k) || c.len() != k * n {
+            return Err(LinalgError::Dimension);
+        }
+        let m = v.len() / k;
+        if hv.len() != m * k || out_v.len() != m * n || out_hv.len() != m * n {
+            return Err(LinalgError::Dimension);
+        }
+        #[cfg(feature = "mkl")]
+        {
+            if m <= self.long
+                && k <= self.short
+                && n <= self.short
+                && m > 0
+                && PANEL.min(m) * n <= self.short * self.short
+            {
+                if v.iter().chain(hv).chain(c).any(|x| !x.is_finite()) {
+                    return Err(LinalgError::NonFinite);
+                }
+                let count = m.div_ceil(PANEL);
+                let parallel = count >= 4 && m.saturating_mul(n).saturating_mul(k) >= PARALLEL_WORK;
+                let tiles_v = &mut self.tiles[..count];
+                let mut ov = MatMut::from_column_major_slice_mut(out_v, m, n);
+                let mut work = || dgemm_panels(ov.as_mut(), v, m, c, k, tiles_v, parallel);
+                if parallel {
+                    self.pool.install(&mut work);
+                } else {
+                    work();
+                }
+                let tiles_h = &mut self.tiles[..count];
+                let mut oh = MatMut::from_column_major_slice_mut(out_hv, m, n);
+                let mut work = || dgemm_panels(oh.as_mut(), hv, m, c, k, tiles_h, parallel);
+                if parallel {
+                    self.pool.install(&mut work);
+                } else {
+                    work();
+                }
+                return if out_v.iter().chain(out_hv.iter()).all(|x| x.is_finite()) {
+                    Ok(())
+                } else {
+                    Err(LinalgError::NonFinite)
+                };
+            }
+        }
+        self.rotate_pair(
+            MatRef::from_column_major_slice(v, m, k),
+            MatRef::from_column_major_slice(hv, m, k),
+            MatRef::from_column_major_slice(c, k, n),
+            MatMut::from_column_major_slice_mut(out_v, m, n),
+            MatMut::from_column_major_slice_mut(out_hv, m, n),
+        )
     }
     pub fn set_rotate_kernel(&mut self, kernel: RotateKernel) {
         self.kernel = kernel;
@@ -435,6 +507,44 @@ fn rotate_legacy(
                 b,
                 false,
             );
+        }
+    }
+}
+/// Row panels of C = A B, each one sequential dgemm into a private tile that is
+/// then copied into place; panels are independent, their grouping is fixed.
+#[cfg(feature = "mkl")]
+fn dgemm_panels(
+    mut out: RealMatrixMut<'_>,
+    a: &[f64],
+    lda: usize,
+    b: &[f64],
+    k: usize,
+    tiles: &mut [RealMatrix],
+    parallel: bool,
+) {
+    let count = out.nrows().div_ceil(PANEL);
+    if parallel && count > 1 {
+        let half = count / 2;
+        let split = half * PANEL;
+        let (left, right) = out.split_at_row_mut(split);
+        let (tl, tr) = tiles.split_at_mut(half);
+        WorkerPool::join(
+            || dgemm_panels(left, a, lda, b, k, tl, true),
+            || dgemm_panels(right, &a[split..], lda, b, k, tr, true),
+        );
+    } else {
+        let n = out.ncols();
+        for (t, tile) in tiles.iter_mut().enumerate().take(count) {
+            let row = t * PANEL;
+            let len = PANEL.min(out.nrows() - row);
+            let buffer = &mut tile.as_mut_slice_full()[..len * n];
+            dft_mkl::dgemm(false, len, n, k, &a[row..], lda, b, k, buffer)
+                .expect("checked dgemm shapes");
+            for j in 0..n {
+                for i in 0..len {
+                    out[(row + i, j)] = buffer[j * len + i];
+                }
+            }
         }
     }
 }

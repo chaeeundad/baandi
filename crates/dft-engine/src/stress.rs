@@ -6,6 +6,11 @@ use crate::{
 use dft_basis::FftGridSpec;
 use dft_physics::{data::*, hamiltonian::Species, stress as terms};
 pub type Tensor = terms::Tensor;
+/// Standard-profile residual threshold of the cutoff-scan SCF runs, Ha. The
+/// scan differences enter the estimate scaled by 2c/(3 V dc), about 1e-2 per Ha
+/// for a 30 Ry silicon cell, so a 1e-9 Ha scan energy error moves the estimate
+/// by about 1e-11 Ha/Bohr^3, orders below its reported uncertainty.
+const SCAN_THRESHOLD_HA: f64 = 1e-9;
 type Blocks<'a> = Vec<(&'a crate::KPointSolution, &'a [f64])>;
 pub type StressState<'a> = ForceState<'a>;
 #[derive(Debug)]
@@ -387,7 +392,16 @@ pub fn stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
         options.strain_reference = None;
         options.grid_override = Some(scan_dims);
         options.cutoff_hartree = c + delta;
-        energies[i] = energy_at(state, state.cell, options)?;
+        // Standard profile first; a scan that fails to converge there (stall,
+        // exhausted budget) is repeated with the caller's strict settings.
+        let mut fast = options.clone();
+        fast.standard = Some(crate::StandardProfile {
+            threshold_ha: SCAN_THRESHOLD_HA,
+        });
+        energies[i] = match energy_at(state, state.cell, fast) {
+            Ok(e) => e,
+            Err(_) => energy_at(state, state.cell, options)?,
+        };
     }
     let estimates = [0, 1].map(|i| {
         2. * c / (3. * state.cell.volume_bohr3()) * (energies[i + 1] - energies[0]) / steps[i]

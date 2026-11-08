@@ -208,6 +208,33 @@ impl RealDavidson {
         capacity_per_band: usize,
         workspace: &mut Option<RealDavidsonWorkspace>,
     ) -> Result<RealEigenSolution, SolverError> {
+        self.solve_reusing_with_preconditioner(
+            op,
+            initial,
+            diagonal,
+            policy,
+            ritz,
+            certify,
+            capacity_per_band,
+            workspace,
+            crate::DavidsonPreconditioner::Default,
+        )
+    }
+
+    /// Research damping selection; the old entry point is bit-preserving.
+    #[allow(clippy::too_many_arguments)]
+    pub fn solve_reusing_with_preconditioner(
+        &self,
+        op: &dyn RealLinearOperator,
+        initial: Option<&RealMatrix>,
+        diagonal: &[f64],
+        policy: BandTolerances,
+        ritz: bool,
+        certify: bool,
+        capacity_per_band: usize,
+        workspace: &mut Option<RealDavidsonWorkspace>,
+        preconditioner: crate::DavidsonPreconditioner,
+    ) -> Result<RealEigenSolution, SolverError> {
         if !(2..=12).contains(&capacity_per_band) {
             return Err(SolverError::InvalidParameter(
                 "davidson_capacity_per_band must be an integer from 2 to 12 (minimum 2 for a full correction block)",
@@ -439,10 +466,31 @@ impl RealDavidson {
             pool.install(|| {
                 column_work(corrections.as_mut_slice(), n, 0, &|k, dst| {
                     let j = selected[k];
+                    let scale = if preconditioner == crate::DavidsonPreconditioner::Tpa {
+                        crate::kinetic_scale(
+                            column(vectors, j)
+                                .iter()
+                                .zip(diagonal)
+                                .map(|(&c, &t)| (c * c, t)),
+                        )?
+                    } else {
+                        0.1
+                    };
                     for ((dst, &r), &d) in
                         dst.iter_mut().zip(column(residual_block, j)).zip(diagonal)
                     {
-                        *dst = precondition(r, d, values[j])?;
+                        *dst = match preconditioner {
+                            crate::DavidsonPreconditioner::Default => {
+                                precondition(r, d, values[j])?
+                            }
+                            crate::DavidsonPreconditioner::Tpa => -r * crate::tpa_weight(d, scale),
+                            crate::DavidsonPreconditioner::RitzShift => {
+                                let delta = d - values[j];
+                                finite(&[delta])?;
+                                -r / delta.max(0.1)
+                            }
+                        };
+                        finite(&[*dst])?;
                     }
                     Ok(())
                 })

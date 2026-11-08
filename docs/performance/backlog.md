@@ -178,3 +178,18 @@ Ranking by expected gain / risk; acceptance only on dev08. Premises and ledger c
 - **B31 `PairFusedPlan` mirror x-slab pair plan, pure Rust, real path only (rank 1 of the FFT items, ready; ticket T1 in the document).** New plan type, no edit of `fused.rs`; unnormalised transforms, per-slab fused inverse/V/forward in a 31 KB buffer, batched rustfft calls on sticks, pair density from the same inverse half. O: 0.867 (36^3) and 0.911 (72x36x36) of the library pair apply, nine shapes 0.66 to 0.90, difference to the library 5e-16 relative; E: SCF 3 to 5 percent. Gate: energy 1e-12 Ha, complex path bit-identical, determinism across T, generality set. Refines B28.
 - **B32 Lane-vectorised FFT kernels for the pair path (needs-measurement on dev08).** SIMD across slabs, four to eight lanes, radix 2/3/4/5; the Mac prototype only reaches rustfft parity at length 36 (58.3 vs 62.0 ns) and is slower at 72. Run first on dev08 (`target-cpu=native`); adopt only if at least 1.3x faster than rustfft at lengths 25 to 72. Pure-Rust kernel-only floor is 156 / 373 us per transform equivalent against QE 135 / 341 (E), so this is the only pure-Rust route to exceed QE.
 - **B33 MKL raw in-place pair path, then 1D batched stick pipeline (revives B08 with new evidence; needs a dev08 microbenchmark).** The relayed "MKL full 195 us" includes two adapter copies; QE's raw call is 135 us. Step 1: raw in-place DFTI pair path without copies or full-grid zero fill (E: near QE per call); step 2: 1D batched strided stick pipeline with plan-owned descriptors (E: 97 / 235 us per transform equivalent, 0.72 / 0.69 of QE). The `mkl` feature currently routes the real path through `GridFusedPlan`.
+
+## P47A preconditioner follow-up (2026-11-08, amended rule R1)
+
+TPA mean-kinetic damping and positive-clipped kinetic Ritz denominators have
+switchable implementations. The architect explicitly superseded the original
+zero-baseline strict-ratio stop with a 1e-12 Ha strict accuracy floor. Both
+variants pass that amended accuracy condition against a separate tighter run.
+
+Neither is recommended: resumed Si8 standard screening rejects TPA at seed 402
+(SCF 21 -> 28; H vectors 1011 -> 1276) and ritz_shift at seed 401 (SCF 28 -> 29;
+H vectors 1253 -> 1283). All starts converge and satisfy unchanged standard
+accuracy bounds; increased SCF count is the decisive failure. Stop before later
+seeds/systems as required. No floor, tolerance, capacity or default was retuned.
+Do not repeat this mechanism without a new premise addressing its increased
+SCF work. See [derivation, amendment and evidence](preconditioner-variants.md).

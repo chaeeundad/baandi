@@ -26,6 +26,9 @@ fn evidence(path: &Path) -> Result<Value, Error> {
     if crate::checkpoint_inspect::recognizes(&path)? {
         let mut result = crate::checkpoint_inspect::evidence(&path)?;
         let cp = crate::checkpoint_io::read(&path)?;
+        if let Some(c) = &cp.continuation {
+            result["preconditioner"] = json!(c.options.preconditioner.name());
+        }
         if let Some(c) = &cp.continuation
             && c.options.start_wavefunctions == dft_engine::StartWavefunctions::Atomic
         {
@@ -145,6 +148,10 @@ fn evidence(path: &Path) -> Result<Value, Error> {
         }
         let mut result = json!({"source":path,"state":if value["convergence"]["converged"]==true {"converged"} else {"not_converged"},
             "convergence":value["convergence"],"energies":value["energies"],"preflight":value["preflight"]});
+        result["preconditioner"] = value["scf"]
+            .get("preconditioner")
+            .cloned()
+            .unwrap_or(json!("default"));
         if let Some(atomic) = value.get("atomic_start") {
             result["atomic_start"] = atomic.clone();
         }

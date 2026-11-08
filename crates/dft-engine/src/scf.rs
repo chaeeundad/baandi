@@ -1,6 +1,7 @@
 #[path = "atomic_start.rs"]
 mod atomic_start;
 pub use atomic_start::{AtomicStartReport, StartWavefunctions};
+pub use dft_solvers::DavidsonPreconditioner;
 #[path = "convergence.rs"]
 mod convergence;
 use convergence::CoulombMetric;
@@ -196,6 +197,8 @@ pub struct ScfOptions {
     pub davidson_subspace: usize,
     /// Research capacity floor per band, inclusive range 2..=12; default 6.
     pub davidson_capacity_per_band: usize,
+    /// Experimental kinetic Davidson damping; default preserves legacy arithmetic.
+    pub preconditioner: dft_solvers::DavidsonPreconditioner,
     pub seed: u64,
     pub divergence_factor: f64,
     pub divergence_patience: usize,
@@ -256,6 +259,7 @@ impl Default for ScfOptions {
             davidson_max_iterations: 400,
             davidson_subspace: 48,
             davidson_capacity_per_band: 6,
+            preconditioner: dft_solvers::DavidsonPreconditioner::Default,
             seed: 2026,
             divergence_factor: 20.0,
             divergence_patience: 3,
@@ -694,6 +698,14 @@ impl ScfProblem {
         {
             return Err(ScfError::InvalidInput(
                 "pw92_prefactor=original requires unpolarized PBE",
+            ));
+        }
+        if options.preconditioner != dft_solvers::DavidsonPreconditioner::Default
+            && (channel.is_some()
+                || !matches!(options.eigensolver, dft_solvers::SolverChoice::Davidson))
+        {
+            return Err(ScfError::InvalidInput(
+                "nondefault preconditioner requires unpolarized Davidson",
             ));
         }
         let gamma_real_exclusion = if channel.is_some() {
@@ -1187,6 +1199,13 @@ impl ScfProblem {
                 state.real_solve = None;
             }
         }
+        if finite.is_some()
+            && self.options.preconditioner != dft_solvers::DavidsonPreconditioner::Default
+        {
+            return Err(ScfError::InvalidInput(
+                "nondefault preconditioner does not support finite occupations",
+            ));
+        }
         if self.options.crystal_density_group && self.symmetry.is_none() {
             return Err(ScfError::InvalidInput(
                 "symmetry.density_group=crystal requires enabled auto symmetry",
@@ -1312,7 +1331,8 @@ impl ScfProblem {
                 let preconditioner = DiagonalPreconditioner::new(
                     state.hamiltonian.kinetic_diagonal().to_vec(),
                     0.1,
-                )?;
+                )?
+                .with_variant(self.options.preconditioner);
                 let guess = if initial.is_none() && self.options.free_electron_initial_guess {
                     Some(free_electron_guess(
                         state.hamiltonian.kinetic_diagonal(),
@@ -1388,7 +1408,8 @@ impl ScfProblem {
                     let preconditioner = DiagonalPreconditioner::new(
                         state.hamiltonian.kinetic_diagonal().to_vec(),
                         0.1,
-                    )?;
+                    )?
+                    .with_variant(self.options.preconditioner);
                     let guess = if initial.is_none() && free_guess {
                         Some(free_electron_guess(
                             state.hamiltonian.kinetic_diagonal(),

@@ -497,6 +497,7 @@ impl Config {
 pub struct Scf {
     pub start_wavefunctions: Option<String>,
     pub davidson_capacity_per_band: Option<usize>,
+    pub preconditioner: Option<String>,
     pub gamma_real: Option<String>,
     pub convergence_profile: Option<String>,
     pub standard_threshold_ha: Option<f64>,
@@ -519,6 +520,17 @@ pub struct Scf {
     pub seed: Option<u64>,
 }
 impl Scf {
+    pub fn preconditioner(&self) -> Result<dft_engine::DavidsonPreconditioner, ConfigError> {
+        match self.preconditioner.as_deref().unwrap_or("default") {
+            "default" => Ok(dft_engine::DavidsonPreconditioner::Default),
+            "tpa" => Ok(dft_engine::DavidsonPreconditioner::Tpa),
+            "ritz_shift" => Ok(dft_engine::DavidsonPreconditioner::RitzShift),
+            _ => Err(ConfigError::Invalid(
+                "scf.preconditioner must be default, tpa, or ritz_shift".into(),
+            )),
+        }
+    }
+
     pub fn davidson_capacity_per_band(&self) -> Result<usize, ConfigError> {
         let value = self.davidson_capacity_per_band.unwrap_or(6);
         if !(2..=12).contains(&value) {
@@ -1113,6 +1125,7 @@ impl Config {
             s.gamma_real()?;
             s.start_wavefunctions()?;
             s.davidson_capacity_per_band()?;
+            s.preconditioner()?;
             s.standard_profile()?;
             if s.standard_profile()?.is_some()
                 && self.output.as_ref().is_some_and(|o| o.forces || o.stress)

@@ -791,6 +791,18 @@ impl ScfSession {
             record.mixer_reset = true;
             record.mixing_resets = *mixing_resets;
         }
+        // Experimental guard (BAANDI_MIX_GROWTH_RESET=<factor>, default off): a density
+        // residual that grew by more than the factor since the previous iteration means
+        // the Pulay history produced a bad step and is ill-conditioned; drop it.
+        if let Some(limit) = growth_reset_limit() {
+            let record = history.last_mut().unwrap();
+            if record.density_contraction.is_some_and(|c| c > limit) && !record.mixer_reset {
+                mixer.reset();
+                *mixing_resets += 1;
+                record.mixer_reset = true;
+                record.mixing_resets = *mixing_resets;
+            }
+        }
         let mut mixed = mixer
             .mix(
                 n.as_slice().unwrap(),
@@ -1376,4 +1388,14 @@ impl ScfSession {
         session.import_electronic(&checkpoint.electronic_state)?;
         Ok(session)
     }
+}
+
+fn growth_reset_limit() -> Option<f64> {
+    static LIMIT: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
+    *LIMIT.get_or_init(|| {
+        std::env::var("BAANDI_MIX_GROWTH_RESET")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v > 1.0)
+    })
 }

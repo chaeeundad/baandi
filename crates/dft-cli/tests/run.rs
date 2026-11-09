@@ -106,9 +106,9 @@ fn verify(large: bool) {
     let mut first = c.json("results", "results.json");
     // Legacy fields plus the additive preflight report, checked on CLI output.
     // Legacy fields plus additive per-band accuracy, checked on actual output.
-    // 24 legacy keys plus gamma_real_used and gamma_real_fallback_reason, which the
-    // default Auto mode (ADR 0040) records.
-    assert_eq!(first.as_object().unwrap().len(), 26);
+    // 24 legacy keys plus gamma_real_used and gamma_real_fallback_reason (default Auto
+    // mode, ADR 0040) and atomic_start (default atomic start, ADR 0042).
+    assert_eq!(first.as_object().unwrap().len(), 27);
     assert!(first.get("kpoints").is_none());
     for key in [
         "preflight",
@@ -617,6 +617,8 @@ fn expressions_preserve_energy_and_record_resolutions() {
         // Recorded by the default Auto mode (ADR 0040).
         "gamma_real_used",
         "gamma_real_fallback_reason",
+        // Recorded by the default atomic start (ADR 0042).
+        "atomic_start",
     ];
     let keys: std::collections::BTreeSet<_> = plain
         .as_object()

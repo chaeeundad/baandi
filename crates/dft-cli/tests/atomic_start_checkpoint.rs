@@ -21,11 +21,18 @@ fn old_checkpoint_defaults_and_atomic_wire_roundtrip() {
     let mut cp = s
         .checkpoint(CheckpointKind::ExactContinuation, m, e)
         .unwrap();
+    // The default is now Atomic (ADR 0042); the legacy wire format is the free-electron header.
+    cp.continuation
+        .as_mut()
+        .unwrap()
+        .options
+        .start_wavefunctions = StartWavefunctions::FreeElectron;
+    cp.continuation.as_mut().unwrap().atomic_start = None;
     let bytes = io::encode(&cp).unwrap();
     let len = u64::from_le_bytes(bytes[8..16].try_into().unwrap()) as usize;
     let header = std::str::from_utf8(&bytes[24..24 + len]).unwrap();
     assert!(!header.contains("start_wavefunctions"));
-    assert!(!header.contains("atomic_start"));
+    assert!(!header.contains("atomic_start"), "{header}");
     let old = io::decode(&bytes).unwrap();
     assert_eq!(
         old.continuation.unwrap().options.start_wavefunctions,

@@ -10,3 +10,5 @@ M1a to M1e are implemented and pass on simulated ranks (Mac, correctness only): 
 First dev08 gate (ledger MPI-M1-GATE1): 1.19x at 4 ranks and 1.31x at 8 ranks on si32 strict against the thread path's 2.43x. The extra Davidson iterations (91 to 121) came from Cholesky panel orthonormalisation dropping near-dependent corrections; fixed with a distributed MGS panel (matches serial iteration counts on simulated ranks). Re-measure; the replicated non-Davidson stages are the next Amdahl limit.
 
 Gate re-run (ledger MPI-M1-GATE2): best MPI 1.35x (np=4 x T=2) against threads 2.49x on 8 cores; extra Davidson iterations traced to one cluster-cut empty band at SCF step 10; Mac reproduction suggests sensitivity, not a bug. Results.json now carries per-collective time (`parallel.collectives`).
+
+Ledger MPI-M1-GATE3: perturbed seeds 601-610 are the standard MPI scaling case (unperturbed si32 is anomalously easy); the extra Davidson iterations were sensitivity; communication is at most 13 percent of wall, so the remaining gap is non-scaling compute.

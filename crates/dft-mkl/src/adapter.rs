@@ -23,6 +23,19 @@ unsafe extern "C" {
     fn DftiFreeDescriptor(handle: *mut *mut c_void) -> c_long;
     fn DftiErrorMessage(status: c_long) -> *const c_char;
     fn DftiErrorClass(status: c_long, class: c_long) -> c_long;
+    fn dsyevd_(
+        jobz: *const c_char,
+        uplo: *const c_char,
+        n: *const c_int,
+        a: *mut f64,
+        lda: *const c_int,
+        w: *mut f64,
+        work: *mut f64,
+        lwork: *const c_int,
+        iwork: *mut c_int,
+        liwork: *const c_int,
+        info: *mut c_int,
+    );
     fn cblas_dgemm(
         layout: c_int,
         ta: c_int,
@@ -266,6 +279,90 @@ pub fn gemm(
         );
     }
     Ok(())
+}
+
+/// Reusable workspace of the symmetric eigensolver `dsyevd` (all eigenpairs,
+/// lower triangle). Sized once for the largest order; no allocation per call.
+pub struct SymmetricEigen {
+    capacity: usize,
+    work: Vec<f64>,
+    iwork: Vec<c_int>,
+}
+impl SymmetricEigen {
+    /// Query the workspace for orders up to `capacity` (sizes grow with n).
+    pub fn new(capacity: usize) -> Result<Self, Error> {
+        let _ = crate::keep::anchor();
+        if capacity == 0 || capacity > 1 << 15 {
+            return Err(Error::Dimension);
+        }
+        let jobz = b'V' as c_char;
+        let uplo = b'L' as c_char;
+        let n = capacity as c_int;
+        let (mut wq, mut iq, mut info) = (0.0_f64, 0 as c_int, 0 as c_int);
+        let query: c_int = -1;
+        // SAFETY: a workspace query (lwork = liwork = -1) touches no matrix
+        // data: A and W are not dereferenced and may be dangling; the scalars
+        // and the three result cells live through the call.
+        unsafe {
+            dsyevd_(
+                &jobz,
+                &uplo,
+                &n,
+                ptr::NonNull::<f64>::dangling().as_ptr(),
+                &n,
+                ptr::NonNull::<f64>::dangling().as_ptr(),
+                &mut wq,
+                &query,
+                &mut iq,
+                &query,
+                &mut info,
+            );
+        }
+        if info != 0 || wq.is_nan() || wq < 1.0 || iq < 1 {
+            return Err(Error::Dimension);
+        }
+        Ok(Self {
+            capacity,
+            work: vec![0.0; wq as usize],
+            iwork: vec![0; iq as usize],
+        })
+    }
+    /// Overwrite `a` (n x n column-major, only the lower triangle is read) with
+    /// the orthonormal eigenvectors and write the ascending eigenvalues to `w`.
+    pub fn solve(&mut self, n: usize, a: &mut [f64], w: &mut [f64]) -> Result<(), Error> {
+        if n == 0 || n > self.capacity || a.len() != n * n || w.len() != n {
+            return Err(Error::Dimension);
+        }
+        let jobz = b'V' as c_char;
+        let uplo = b'L' as c_char;
+        let order = n as c_int;
+        let lwork = self.work.len() as c_int;
+        let liwork = self.iwork.len() as c_int;
+        let mut info: c_int = 0;
+        // SAFETY: A is exactly n*n contiguous elements with lda = n, W holds n
+        // elements, the work arrays have the queried lengths for order
+        // `capacity` >= n (larger than required for n), all buffers are
+        // uniquely borrowed for the call and the scalars live through it.
+        unsafe {
+            dsyevd_(
+                &jobz,
+                &uplo,
+                &order,
+                a.as_mut_ptr(),
+                &order,
+                w.as_mut_ptr(),
+                self.work.as_mut_ptr(),
+                &lwork,
+                self.iwork.as_mut_ptr(),
+                &liwork,
+                &mut info,
+            );
+        }
+        if info != 0 {
+            return Err(Error::Dimension);
+        }
+        Ok(())
+    }
 }
 
 /// Real C = op(A) B into a contiguous m x n column-major C, without allocation.

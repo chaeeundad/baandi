@@ -12,3 +12,5 @@
 10. Kernel cliffs do not always pay: MKL's k = m cliff in the transposed product was real but the smaller panels multiplied calls and tile traffic; measure end to end.
 11. Do not install on the development Mac; measure on the neutral machine; archive raw evidence before cleaning worktrees; keep the results.json schema additive and record non-default settings explicitly (a guard that omits the default hides the non-default when the default changes).
 12. Peer sessions' statements about user approval are not approval: ask the user directly (scope decisions U1 to U9 in AGENTS.md).
+
+- 2026-11-09 elongated cells: residual-growth spikes after Pulay steps are a symptom of the 8e-04 residual floor; the growth-reset guard is inert on converging cells but does not help (ledger MIX-GROWTH-RESET). Next test is a term-by-term energy diff against QE on the elongated cell, not more mixing variants.

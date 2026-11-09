@@ -108,3 +108,7 @@ Conventions: docs are English; one fact lives in one place and others link to it
 - [Variable-cell relaxation usage](user/cell-relaxation.md) and [P23A validation](validation/cell-relaxation.md): enthalpy BFGS/FIRE, fractional/strain conjugacy, frozen Miller segments, final nominal-cutoff rebuild, affine warm transfer, symmetry and optimizer continuation.
 
 - [P24A hard-locking and one-rectangle experiment](research/qe-study/p24a-locking-results.md): default-off decision, per-step MAC accounting, auto-unlock, generality failures and dense/thread evidence.
+
+## Project wiki (synthesised knowledge, updated 2026-11-09)
+Start here for state, decisions and lessons: [wiki/README.md](wiki/README.md) with [state of play](wiki/state-of-play.md), [decision table](wiki/decision-table.md), [QE knowledge](wiki/qe-knowledge.md), [lessons](wiki/lessons.md), [dev08 playbook](wiki/dev08-playbook.md), [MPI](wiki/mpi.md).
+Recent records not listed elsewhere in this index: [QE vs BAANDI speed tables](performance/qe-vs-baandi-current.md), [stage decomposition plan](performance/stage-decomposition.md) and [results](performance/stage-decomposition-results.md), ADRs [0036 to 0042](decisions/) (PW92 prefactor, radial options, reference mode, atomic start option, gamma_real default, MPI layer, atomic start default), [MPI M1 plan](roadmap/mpi-m1-plan.md), [Davidson and MPI design note](roadmap/davidson-and-mpi-design-note.md), dev08 relays in tests/reference/perf/.

@@ -13,3 +13,4 @@ workspace = true
 num-complex.workspace = true
 thiserror.workspace = true
 dft-numerics = { path = "../dft-numerics" }
+dft-mpi = { path = "../dft-mpi" }

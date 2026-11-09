@@ -1,4 +1,5 @@
 //! Backend-independent dense and matrix-free Hermitian eigensolvers.
+pub mod distributed;
 #[path = "mixing/kerker.rs"]
 pub mod kerker;
 pub mod locking;

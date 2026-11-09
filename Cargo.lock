@@ -566,6 +566,7 @@ dependencies = [
 name = "dft-solvers"
 version = "0.1.0"
 dependencies = [
+ "dft-mpi",
  "dft-numerics",
  "num-complex",
  "thiserror 2.0.21",

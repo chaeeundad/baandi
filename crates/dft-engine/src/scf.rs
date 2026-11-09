@@ -750,7 +750,7 @@ impl ScfProblem {
         }
         if channel.is_some() && (options.standard.is_some() || options.hartree_mixing) {
             return Err(ScfError::InvalidInput(
-                "standard profile and Hartree metric currently require unpolarized SCF",
+                "standard profile and Hartree metric currently require closed-shell fixed occupations (not collinear spin or Fermi-Dirac smearing runs); use the strict profile with smearing",
             ));
         }
         if options.standard.is_some()

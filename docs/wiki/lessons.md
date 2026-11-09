@@ -18,3 +18,5 @@
 - 2026-11-09 MPI: hybrid (threads>=2) runs silently used the serial solver on every rank because the communicator was thread-local and the solve moved to a pool thread (ledger MPI-M1-THREADBUG). Any scaling row must prove the distributed branch ran.
 
 - 2026-11-10 reporting: the strict-class history omits the fixed-point certificate re-solves (about a third of the Davidson work on si32); use results.json `convergence.work` (recorded + certificate) for total work. Apply calls are bimodal (median 1 column, 66 percent single-column), which caps pair-level MPI parallelism (ledger MPI-M1-CEILING).
+
+- 2026-11-10 si-elongated is a small-gap cell (gap about 1e-4 Ha, near-degenerate triplet cut by fixed occupations); QE also limit-cycles for 123 iterations there. Do not tune mixing for it; use smearing (ledger ELONGATED-GAP). si-slab to be checked with the same lens.

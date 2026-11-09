@@ -18,3 +18,6 @@ Davidson algebra was 64 to 86 percent of the gap before the atomic start; FFT is
 3. Remaining gap in per-step cost after the atomic start (Davidson count ratio to QE 3.6x on si32 strict).
 4. QE-equal-target table with `local_mesh = "qe_like_g0"` (closes the Si.pz-vbc energy offset, ADR 0037 addendum).
 5. Parked by the user (2026-11-09): the idea of starting from the density of a similar system (no design exists; the Hanyang session never discussed it).
+
+## Update 2026-11-10: hard cells
+si-elongated and si-slab (the non-converging cells) are fixed-occupation problems whose integer cut lies inside a near or exactly degenerate cluster at the Fermi level; QE limit-cycles on the first (137 iterations) and fails on the second (200). BAANDI with Fermi-Dirac smearing (strict profile) converges both in 20 to 35 iterations. Do not tune mixing for them (ledger ELONGATED-GAP, ELONGATED-SMEARING, SLAB-SMEARING). MPI M1 is correct but slower than threads on one node (ledger MPI-M1-GATE5, MPI-M1-CEILING); decision on M2 pending with the user.

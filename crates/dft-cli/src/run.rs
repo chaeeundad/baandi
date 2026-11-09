@@ -637,7 +637,16 @@ pub fn execute_mode(
     }
     result["gamma_real_used"] = json!(r.gamma_real_used);
     if crate::parallel::size() > 1 {
-        result["parallel"] = json!({"model": "mpi_row_block", "ranks": crate::parallel::size(), "rank": crate::parallel::rank()});
+        result["parallel"] = json!({
+            "model": "mpi_row_block",
+            "ranks": crate::parallel::size(),
+            "rank": crate::parallel::rank(),
+            "distributed_solves": dft_engine::parallel::distributed_solves(),
+            "collectives": dft_engine::parallel::collective_stats()
+                .into_iter()
+                .map(|(op, calls, seconds)| json!({"op": op, "calls": calls, "seconds": seconds}))
+                .collect::<Vec<_>>(),
+        });
     }
     result["gamma_real_fallback_reason"] = json!(r.gamma_real_fallback_reason);
     if let Some(report) = &r.spectral_completeness {

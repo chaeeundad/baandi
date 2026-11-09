@@ -7,7 +7,7 @@ use std::{
     cell::RefCell,
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
 };
 
@@ -18,6 +18,32 @@ thread_local! {
     static COMM: RefCell<Option<Shared>> = const { RefCell::new(None) };
 }
 static DISTRIBUTED_SOLVES: AtomicUsize = AtomicUsize::new(0);
+// Per-operation call counts and wall nanoseconds spent inside collectives
+// (allgatherv, tree_sum, bcast, alltoall, barrier), process-wide.
+static CALLS: [AtomicUsize; 5] = [const { AtomicUsize::new(0) }; 5];
+static NANOS: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
+const OPS: [&str; 5] = ["allgatherv", "tree_sum", "bcast", "alltoall", "barrier"];
+
+/// (operation, calls, seconds) for every collective used so far.
+pub fn collective_stats() -> Vec<(&'static str, usize, f64)> {
+    (0..5)
+        .map(|i| {
+            (
+                OPS[i],
+                CALLS[i].load(Ordering::Relaxed),
+                NANOS[i].load(Ordering::Relaxed) as f64 * 1e-9,
+            )
+        })
+        .collect()
+}
+
+fn timed<R>(op: usize, f: impl FnOnce() -> R) -> R {
+    let start = std::time::Instant::now();
+    let r = f();
+    CALLS[op].fetch_add(1, Ordering::Relaxed);
+    NANOS[op].fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    r
+}
 
 /// Register (or clear) the communicator of the calling thread.
 pub fn set_communicator(comm: Option<Shared>) {
@@ -57,7 +83,7 @@ impl Collective for SharedComm {
         self.0.size()
     }
     fn barrier(&self) -> Result<(), MpiError> {
-        self.0.barrier()
+        timed(4, || self.0.barrier())
     }
     fn allgatherv_f64(
         &self,
@@ -65,15 +91,15 @@ impl Collective for SharedComm {
         counts: &[usize],
         out: &mut [f64],
     ) -> Result<(), MpiError> {
-        self.0.allgatherv_f64(local, counts, out)
+        timed(0, || self.0.allgatherv_f64(local, counts, out))
     }
     fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), MpiError> {
-        self.0.tree_sum_f64(local, out)
+        timed(1, || self.0.tree_sum_f64(local, out))
     }
     fn bcast_f64(&self, data: &mut [f64], root: usize) -> Result<(), MpiError> {
-        self.0.bcast_f64(data, root)
+        timed(2, || self.0.bcast_f64(data, root))
     }
     fn alltoall_f64(&self, send: &[f64], block: usize, recv: &mut [f64]) -> Result<(), MpiError> {
-        self.0.alltoall_f64(send, block, recv)
+        timed(3, || self.0.alltoall_f64(send, block, recv))
     }
 }

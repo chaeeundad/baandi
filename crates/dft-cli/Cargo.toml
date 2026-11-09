@@ -14,6 +14,8 @@ default = []
 # Optional Intel MKL backend (ADR 0019): enables dft-numerics/mkl for every crate in the build.
 mkl = ["dft-numerics/mkl"]
 # MKL build with per-call-site dgemm timers printed to stderr when BAANDI_DGEMM_TIMERS is set.
+# MPI row-block parallel layer (ADR 0041): links Open MPI through dft-mpi; the default build links nothing.
+mpi = ["dft-mpi/mpi"]
 dgemm-timers = ["dft-numerics/dgemm-timers"]
 
 [dependencies]
@@ -29,5 +31,6 @@ dft-geometry = { path = "../dft-geometry" }
 dft-units = { path = "../dft-units" }
 dft-upf = { path = "../dft-upf" }
 dft-engine = { path = "../dft-engine" }
+dft-mpi = { path = "../dft-mpi" }
 
 dft-physics = { path = "../dft-physics" }

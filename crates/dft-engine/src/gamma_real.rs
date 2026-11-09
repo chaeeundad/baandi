@@ -123,6 +123,7 @@ pub(crate) fn solve_real_gamma(
     state: &mut Option<RealSolveState>,
 ) -> Result<Option<EigenSolution>, ScfError> {
     let option = options.gamma_real;
+    let comm = crate::parallel::SharedComm::active();
     let reason = if option == GammaReal::Off {
         Some("option off")
     } else if let Some(reason) = exclusion {
@@ -135,6 +136,10 @@ pub(crate) fn solve_real_gamma(
         Some("spectral guard enabled")
     } else if !matches!(options.eigensolver, dft_solvers::SolverChoice::Davidson) {
         Some("hybrid/RMM eigensolver")
+    } else if comm.is_some()
+        && options.preconditioner != dft_solvers::DavidsonPreconditioner::Default
+    {
+        Some("distributed Davidson supports the default preconditioner only")
     } else {
         None
     };
@@ -222,17 +227,31 @@ pub(crate) fn solve_real_gamma(
     let op = &state.op;
     // The SCF driver supplies the same ratcheted tolerance and band policy to
     // both representations. Standard returns remain explicitly uncertified.
-    let result = solver.solve_reusing_with_preconditioner(
-        op,
-        packed.as_ref(),
-        &diagonal,
-        policy,
-        options.standard.is_some(),
-        certify && options.standard.is_none(),
-        options.davidson_capacity_per_band,
-        &mut state.workspace,
-        options.preconditioner,
-    )?;
+    let result = if let Some(comm) = &comm {
+        crate::parallel::count_distributed_solve();
+        solver.solve_distributed(
+            comm,
+            op,
+            packed.as_ref(),
+            &diagonal,
+            policy,
+            options.standard.is_some(),
+            certify && options.standard.is_none(),
+            options.davidson_capacity_per_band,
+        )?
+    } else {
+        solver.solve_reusing_with_preconditioner(
+            op,
+            packed.as_ref(),
+            &diagonal,
+            policy,
+            options.standard.is_some(),
+            certify && options.standard.is_none(),
+            options.davidson_capacity_per_band,
+            &mut state.workspace,
+            options.preconditioner,
+        )?
+    };
     let mut eigenvectors = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
     {
         let h = op.h.borrow();

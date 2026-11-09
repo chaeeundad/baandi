@@ -278,6 +278,19 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 fn main() -> ExitCode {
+    // MPI lives for the whole process; without feature `mpi` this is a one-rank stand-in.
+    let universe = match dft_mpi::Universe::init() {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("error: MPI initialisation: {e}");
+            return ExitCode::from(5);
+        }
+    };
+    let world = universe.world();
+    dft_cli::parallel::set(world.rank(), world.size());
+    if world.size() > 1 {
+        dft_engine::parallel::set_communicator(Some(std::sync::Arc::new(world)));
+    }
     let code = real_main();
     if std::env::var_os("BAANDI_DGEMM_TIMERS").is_some() {
         for (site, calls, nanos, flops) in dft_numerics::dgemm_site_report() {

@@ -45,6 +45,7 @@ pub use stress::{StressResult, StressState, stress};
 pub use dft_solvers::locking::Locking;
 
 pub mod gamma_real;
+pub mod parallel;
 pub use gamma_real::{GammaReal, GammaRealDiagnostics};
 
 /// Research radial conventions; default variants retain the legacy path.

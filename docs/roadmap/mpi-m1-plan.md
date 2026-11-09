@@ -18,3 +18,6 @@ Contract: [ADR 0041](../decisions/0041-mpi-parallel-layer.md) (staged, determini
 
 ## Not in M1
 Distributed 3D FFT (M3), spin, finite temperature, forces and stress, k-point parallelism (option D, a separate small step), multi-node (not measurable on dev08).
+
+## Status 2026-11-09
+M1a, M1b done. M1c (`distributed_davidson.rs`), M1d (`dft_engine::parallel`, branch in `gamma_real.rs`) and M1e (`dft-cli --features mpi`) implemented and tested on simulated ranks; the dev08 smoke run and the pre-registered scaling gate are the open items (ledger row MPI-M1CDE).

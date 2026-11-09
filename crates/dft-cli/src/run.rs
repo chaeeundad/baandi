@@ -431,6 +431,11 @@ pub fn execute_mode(
                 .unwrap_or("results"),
         )
     });
+    let out = if crate::parallel::rank() > 0 {
+        out.join(format!("rank{}", crate::parallel::rank()))
+    } else {
+        out
+    };
     fs::create_dir_all(&out)?;
     protect_outputs(&out, &inputs)?;
     volumetric_out::preflight(&config, &out).map_err(|e| error(5, e))?;
@@ -631,6 +636,9 @@ pub fn execute_mode(
         });
     }
     result["gamma_real_used"] = json!(r.gamma_real_used);
+    if crate::parallel::size() > 1 {
+        result["parallel"] = json!({"model": "mpi_row_block", "ranks": crate::parallel::size(), "rank": crate::parallel::rank()});
+    }
     result["gamma_real_fallback_reason"] = json!(r.gamma_real_fallback_reason);
     if let Some(report) = &r.spectral_completeness {
         result["spectral_completeness"] = spectral_json(report);

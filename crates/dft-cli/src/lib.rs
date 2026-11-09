@@ -54,6 +54,7 @@ pub fn grid_report(config: &Config, input: &PreparedInput) -> String {
     text
 }
 
+pub mod parallel;
 pub mod run;
 
 pub mod inspect;

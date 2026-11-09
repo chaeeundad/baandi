@@ -485,6 +485,7 @@ dependencies = [
  "dft-basis",
  "dft-engine",
  "dft-geometry",
+ "dft-mpi",
  "dft-numerics",
  "dft-physics",
  "dft-units",
@@ -502,6 +503,7 @@ version = "0.1.0"
 dependencies = [
  "dft-basis",
  "dft-geometry",
+ "dft-mpi",
  "dft-numerics",
  "dft-physics",
  "dft-solvers",

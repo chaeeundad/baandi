@@ -14,3 +14,5 @@ Gate re-run (ledger MPI-M1-GATE2): best MPI 1.35x (np=4 x T=2) against threads 2
 Ledger MPI-M1-GATE3: perturbed seeds 601-610 are the standard MPI scaling case (unperturbed si32 is anomalously easy); the extra Davidson iterations were sensitivity; communication is at most 13 percent of wall, so the remaining gap is non-scaling compute.
 
 Ledger MPI-M1-GATE4: the distributed Davidson scales only 1.28x at 4 ranks; the replicated stages (24 percent of wall) are the smaller Amdahl term. Reduced matrix is now incremental and per-stage timers are in results.json `parallel.stages`; next measurement attributes the non-BLAS 21.8 s.
+
+Ledger MPI-M1-GATE5: M1 granularity limit found (column pairs divided over ranks with the remainder on the first ranks; late iterations apply few columns). Further scaling needs a distributed FFT (M2). Decision pending with the user: stop at M1 or invest in M2.

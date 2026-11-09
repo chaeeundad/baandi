@@ -209,3 +209,7 @@ a different measured hardware/workload premise. Include conversion and cached-H
 rebuild costs, physical-state/correction-vector accuracy, complete fp64
 certificate isolation and trajectory changes. No default, production option or
 optimization was adopted. Standalone Davidson GEMM speedups are not H savings.
+
+## Free second vector for single-column applies (idea, 2026-11-10, not tried)
+
+Evidence: on si32 strict (perturbed seed 601) 66.4 percent of Davidson apply calls carry exactly one correction column (median 1, mean 11.4; ledger MPI-M1-CEILING). The paired real FFT transforms two columns for the price of one, so a single-column call pays for a second column and discards it. Idea: when the correction block has an odd number of columns, fill the free slot with a useful second direction (for example the previous step's correction for the same band, a conjugate-direction term as in LOBPCG, or the next unconverged-but-buffer band) so the subspace grows faster per H application. Cost per call is unchanged; benefit is fewer Davidson iterations in the long single-band tail. Needs: a switchable module, the perturbed-start distribution protocol on several systems (generality rule), the certificate and accuracy classes unchanged, and a check that it does not reduce the orthogonality margin. Not an MPI feature; applies to the threads-only path.

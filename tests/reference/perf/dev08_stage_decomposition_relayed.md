@@ -88,3 +88,6 @@ Builds cli-mkl 5888b7ffd977ca35, cli-pure f4abf74610faf557 (native). All 24 defa
 
 ## Consolidated QE vs BAANDI table at 8114447 (relayed 2026-11-09)
 See docs/performance/qe-vs-baandi-current.md for the full tables (18 cells, thread scaling, energy offset probe). Raw data on dev08: /scr/mino/rustdft/qenp_out.txt, final8_out.txt, probe_out.txt, stageA/.
+
+## QE best-start table (relayed 2026-11-09)
+QE 7.6 with startingwfc='atomic', 1/4/8 cores, n=3: faster than the default start in 18 of 18 cells; the 18-cell comparison with both QE columns is in docs/performance/qe-vs-baandi-current.md (update section). Raw: /scr/mino/rustdft/qestart_out.txt, qehard/.

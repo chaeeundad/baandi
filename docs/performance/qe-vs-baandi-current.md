@@ -49,3 +49,15 @@ The offset is +1.273e-6 Ha per atom to four figures in every case (perfectly siz
 1. QE is 2.1x to 3.5x faster in the standard class and 3.3x to 8.1x in the strict class (wall); the strict class includes BAANDI's residual certificate, which QE does not do.
 2. The ratio grows with the system size and with the number of cores in the strict class (si32 strict 6.1x at 1 core, 8.1x at 8 cores).
 3. Unperturbed single starts; a perturbed-start table for si32 (seeds 501 to 505, both codes) is pending.
+
+## Update 2026-11-09 (later): QE best start (startingwfc = atomic) is the headline
+dev08 found that QE's default start (atomic+random wavefunctions, free-atom potential) is not its best: `startingwfc = 'atomic'` is faster in all 18 cells and freezes the SCF count (si32 1e-10: 8 SCF and 35 h_psi calls at 1, 4 and 8 cores; default start 13 SCF, 186 h_psi). The project target is the comparison against QE's best configuration, so the ratios against QE best are the headline; the default-start ratios above are the out-of-the-box line. BAANDI columns unchanged (8114447).
+| case | class | cores | QE default | QE atomic (best) | BAANDI best | ratio vs QE best | ratio vs QE default |
+|---|---|---|---|---|---|---|---|
+| si8 | standard | 1 / 4 / 8 | 0.469 / 0.262 / 0.295 | 0.456 / 0.245 / 0.233 | 1.005 / 0.792 / 0.803 | 2.2x / 3.2x / 3.4x | 2.1x / 3.0x / 2.7x |
+| si8 | strict | 1 / 4 / 8 | 0.552 / 0.282 / 0.284 | 0.533 / 0.281 / 0.265 | 1.827 / 1.343 / 1.409 | 3.4x / 4.8x / 5.3x | 3.3x / 4.8x / 5.0x |
+| si16 | standard | 1 / 4 / 8 | 1.413 / 0.609 / 0.565 | 1.080 / 0.451 / 0.402 | 2.939 / 1.794 / 1.684 | 2.7x / 4.0x / 4.2x | 2.1x / 2.9x / 3.0x |
+| si16 | strict | 1 / 4 / 8 | 1.831 / 0.703 / 0.688 | 1.330 / 0.535 / 0.463 | 7.523 / 4.362 / 4.103 | 5.7x / 8.2x / 8.9x | 4.1x / 6.2x / 6.0x |
+| si32 | standard | 1 / 4 / 8 | 5.028 / 1.961 / 1.700 | 3.000 / 0.953 / 0.722 | 14.037 / 6.776 / 5.904 | 4.7x / 7.1x / 8.2x | 2.8x / 3.5x / 3.5x |
+| si32 | strict | 1 / 4 / 8 | 6.700 / 2.440 / 1.984 | 3.518 / 1.106 / 0.827 | 40.753 / 18.677 / 16.001 | 11.6x / 16.9x / 19.4x | 6.1x / 7.7x / 8.1x |
+Against QE best: minimum 2.2x, median 5.0x, maximum 19.4x. QE's atomic start also improves its thread scaling (si32 1e-10, 1 to 8 cores 4.26x, identical work at every core count) against BAANDI's best of 2.55x. QE's SCF count does not survive hard geometries (si-skew 51 / 180 iterations, si-elongated 137 and a non-converged 1e-10 run, si-slab non-converged at 200 iterations, fixed occupations, ecut 8 Ry robustness cells); BAANDI's numbers on those cells are being measured.

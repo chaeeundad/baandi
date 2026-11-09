@@ -56,6 +56,10 @@ impl World {
         out.copy_from_slice(local);
         Ok(())
     }
+    /// Fixed-order tree sum (single rank: the input).
+    pub fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), MpiError> {
+        self.ordered_sum_f64(local, out)
+    }
     /// All-to-all with equal blocks of `block` items per rank pair.
     pub fn alltoall_f64(
         &self,

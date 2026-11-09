@@ -17,6 +17,14 @@ M1: option A inside the real Davidson (threads inside each rank, MPI across rank
 M2: option B for the dense algebra, only if M1 leaves the algebra as the limit (Amdahl check from the dev08 phase timers).
 M3: option C only if a measured need (large cells beyond the memory of one rank).
 
+## Revision 2026-11-09 after the dev08 collective measurements and the Amdahl check
+Measured (Open MPI 5.0.8, shared memory, one socket, us per call, P = 2 / 4 / 8): Allgatherv 11877 x 19 columns 82 / 254 / 400, 11877 x 68 columns 303 / 952 / 1982; Allreduce 408 x 68 44 / 80 / 129; allgather-plus-rank-ordered-sum (`ordered_sum`) 49 / 204 / 497 (1.1x / 2.6x / 3.8x the Allreduce; 6.3x across two sockets at P = 8); Alltoall of a 2.99 MB si32 FFT grid 115 / 72 / 51. Consequences:
+1. Option A alone (band-parallel H, replicated algebra) is bounded by Amdahl: the H application is about 40 to 55 percent of the strict wall, so at most about 1.8x at 8 ranks, less than the 2.55x that threads already give (threads also parallelise the algebra). A is therefore not a stand-alone milestone.
+2. M1 is redefined as the layout B-lite: the basis and products are stored as plane-wave row blocks, the algebra (rotation, Gram, projection, reduced matrix) is local GEMM on the local rows plus small reductions, and the H application is distributed by column pairs with an all-to-all transpose of the correction block between the two layouts per Davidson step (volume about 2 x 1.8 MB per step, about 0.1 ms per transpose, a few percent of the run); the FFT stays local per column pair (no distributed 3D FFT).
+3. Reductions: `ordered_sum` costs 3.8x an Allreduce at P = 8 and would be about 19 percent of an ideally scaled si32 strict wall; the deterministic replacement is `World::tree_sum_f64` (fixed binomial-tree association, 2 log2(P) small messages), which keeps bit-reproducibility for a fixed rank count; its cost is to be measured against Allreduce; the reduced-matrix eigenproblem stays replicated per rank (about 5 percent of the T=1 wall, serial: it becomes the Amdahl floor and is addressed by dsyevd and by the subspace size, not by MPI).
+4. Keep ranks inside one socket while P <= 8 (cross-socket reductions cost 1.15 to 1.9x).
+5. Multi-node evidence is not obtainable on dev08 (shared memory and TCP only); M3 stays a design item.
+
 ## Determinism contract
 - Rank count 1: bit-identical to the threads-only path (a hard gate).
 - Fixed rank count and thread count: bit-reproducible (reductions in a fixed order: allgather then a local ordered sum, never an order-undefined MPI_Allreduce on floating-point data; row blocks and band shares are fixed functions of rank count).

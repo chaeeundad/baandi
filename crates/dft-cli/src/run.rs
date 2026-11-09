@@ -178,9 +178,9 @@ fn options_json(o: &ScfOptions) -> Value {
     if o.pw92_prefactor == dft_engine::Pw92Prefactor::Original {
         result["pw92_prefactor"] = json!(o.pw92_prefactor.name());
     }
-    if o.start_wavefunctions == dft_engine::StartWavefunctions::Atomic {
-        result["start_wavefunctions"] = json!(o.start_wavefunctions.name());
-    }
+    // Always recorded: the default is atomic (ADR 0042), so omitting the default
+    // would hide the non-default free_electron.
+    result["start_wavefunctions"] = json!(o.start_wavefunctions.name());
     if o.start_density != dft_engine::StartDensity::Uniform {
         result["start_density"] = json!(o.start_density.name());
     }

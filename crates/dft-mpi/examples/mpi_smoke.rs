@@ -38,6 +38,37 @@ fn main() {
     }
     assert_eq!(sum[0].to_bits(), expect[0].to_bits());
     assert_eq!(sum[1].to_bits(), expect[1].to_bits());
+    // Tree sum: the same bits on every rank, equal to the locally simulated tree.
+    let vals: Vec<f64> = (0..size)
+        .map(|r| 0.1 * (r as f64 + 1.0) + 1e-9 * (r * r) as f64)
+        .collect();
+    let mut tree = [0.0];
+    world
+        .tree_sum_f64(&[vals[rank]], &mut tree)
+        .expect("tree_sum");
+    let mut acc = vals.clone();
+    let mut step = 1;
+    while step < size {
+        for r in (0..size).step_by(2 * step) {
+            if r + step < size {
+                acc[r] += acc[r + step];
+            }
+        }
+        step <<= 1;
+    }
+    assert_eq!(tree[0].to_bits(), acc[0].to_bits(), "tree order");
+    let mine_bits = [f64::from_bits(tree[0].to_bits())];
+    let mut all_bits = vec![0.0; size];
+    world
+        .allgatherv_f64(&mine_bits, &vec![1; size], &mut all_bits)
+        .expect("allgather bits");
+    for b in &all_bits {
+        assert_eq!(
+            b.to_bits(),
+            tree[0].to_bits(),
+            "tree result differs between ranks"
+        );
+    }
     // Broadcast.
     let mut b = [0.0; 4];
     if rank == 0 {

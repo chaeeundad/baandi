@@ -549,11 +549,7 @@ impl Scf {
         }
     }
     pub fn start_wavefunctions(&self) -> Result<dft_engine::StartWavefunctions, ConfigError> {
-        match self
-            .start_wavefunctions
-            .as_deref()
-            .unwrap_or("free_electron")
-        {
+        match self.start_wavefunctions.as_deref().unwrap_or("atomic") {
             "free_electron" => Ok(dft_engine::StartWavefunctions::FreeElectron),
             "atomic" => Ok(dft_engine::StartWavefunctions::Atomic),
             _ => Err(ConfigError::Invalid(

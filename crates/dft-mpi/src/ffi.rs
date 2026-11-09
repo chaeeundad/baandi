@@ -39,6 +39,23 @@ unsafe extern "C" {
         recvtype: Handle,
         comm: Handle,
     ) -> c_int;
+    fn MPI_Send(
+        buf: *const c_void,
+        count: c_int,
+        datatype: Handle,
+        dest: c_int,
+        tag: c_int,
+        comm: Handle,
+    ) -> c_int;
+    fn MPI_Recv(
+        buf: *mut c_void,
+        count: c_int,
+        datatype: Handle,
+        source: c_int,
+        tag: c_int,
+        comm: Handle,
+        status: *mut c_void,
+    ) -> c_int;
     fn MPI_Alltoall(
         sendbuf: *const c_void,
         sendcount: c_int,
@@ -215,6 +232,57 @@ impl World {
             *o = s;
         }
         Ok(())
+    }
+    /// Fixed-order binomial-tree sum: at step s = 1, 2, 4, ... a rank with bit s set
+    /// sends its partial sum to rank - s, which adds the incoming partial AFTER its
+    /// own (acc = acc + incoming); rank 0 then broadcasts. For a fixed rank count
+    /// the association is a fixed function of the rank, so every rank returns
+    /// the same bits on every run, with 2 log2(P) small messages instead of the
+    /// P-fold data volume of `ordered_sum_f64`.
+    pub fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), MpiError> {
+        if out.len() != local.len() {
+            return Err(MpiError::Shape("tree_sum lengths"));
+        }
+        let (rank, size) = (self.rank(), self.size());
+        let n = count(local.len(), "tree_sum count")?;
+        out.copy_from_slice(local);
+        let mut incoming = vec![0.0; local.len()];
+        let mut step = 1;
+        while step < size {
+            if rank & step != 0 {
+                // SAFETY: `out` holds n doubles, borrowed for the blocking call.
+                check("MPI_Send", unsafe {
+                    MPI_Send(
+                        out.as_ptr().cast(),
+                        n,
+                        self.double(),
+                        (rank - step) as c_int,
+                        7001,
+                        self.comm(),
+                    )
+                })?;
+                break;
+            } else if rank + step < size {
+                // SAFETY: `incoming` holds n doubles; the null status pointer is
+                // MPI_STATUS_IGNORE in the Open MPI ABI.
+                check("MPI_Recv", unsafe {
+                    MPI_Recv(
+                        incoming.as_mut_ptr().cast(),
+                        n,
+                        self.double(),
+                        (rank + step) as c_int,
+                        7001,
+                        self.comm(),
+                        std::ptr::null_mut(),
+                    )
+                })?;
+                for (a, b) in out.iter_mut().zip(&incoming) {
+                    *a += *b;
+                }
+            }
+            step <<= 1;
+        }
+        self.bcast_f64(out, 0)
     }
     pub fn alltoall_f64(
         &self,

@@ -7,8 +7,10 @@ use dft_upf::radial::{projector_transform_with_rule, real_spherical_harmonic};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum StartWavefunctions {
-    #[default]
     FreeElectron,
+    /// Default (ADR 0042): atomic-orbital subspace with Rayleigh-Ritz; falls back to
+    /// the free-electron start with a recorded reason when it does not apply.
+    #[default]
     Atomic,
 }
 impl StartWavefunctions {

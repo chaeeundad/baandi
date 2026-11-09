@@ -230,7 +230,7 @@ impl ScfOptions {
 impl Default for ScfOptions {
     fn default() -> Self {
         Self {
-            start_wavefunctions: StartWavefunctions::FreeElectron,
+            start_wavefunctions: StartWavefunctions::default(),
             start_density: StartDensity::Uniform,
             compat_mode: CompatMode::None,
             crystal_density_group: false,

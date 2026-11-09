@@ -494,6 +494,25 @@ impl Wire for dft_engine::StartWavefunctions {
         }
     }
 }
+impl Wire for dft_engine::StartDensity {
+    type Repr = String;
+    fn encode(&self, _bytes: &mut Vec<u8>) -> Result<String, Error> {
+        Ok(self.name().into())
+    }
+    fn decode(w: String, _bytes: &[u8], _cursor: &mut usize) -> Result<Self, Error> {
+        match w.as_str() {
+            "uniform" => Ok(Self::Uniform),
+            "atomic" => Ok(Self::Atomic),
+            _ => Err(invalid("invalid start_density option")),
+        }
+    }
+}
+fn uniform_start() -> String {
+    "uniform".into()
+}
+fn is_uniform_start(s: &str) -> bool {
+    s == "uniform"
+}
 fn free_electron_start() -> String {
     "free_electron".into()
 }
@@ -629,6 +648,8 @@ wire_struct!(ScfOptions, WScfOptions {
     preconditioner: dft_engine::DavidsonPreconditioner,
     #[serde(default = "free_electron_start", skip_serializing_if = "is_free_electron_start")]
     start_wavefunctions: dft_engine::StartWavefunctions,
+    #[serde(default = "uniform_start", skip_serializing_if = "is_uniform_start")]
+    start_density: dft_engine::StartDensity,
     #[serde(default = "compat_none", skip_serializing_if = "is_compat_none")]
     compat_mode: dft_engine::CompatMode,
     #[serde(default, skip_serializing_if = "is_false")]

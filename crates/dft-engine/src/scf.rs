@@ -1,7 +1,10 @@
 #[path = "atomic_start.rs"]
 mod atomic_start;
+#[path = "start_density.rs"]
+mod start_density;
 pub use atomic_start::{AtomicStartReport, StartWavefunctions};
 pub use dft_solvers::DavidsonPreconditioner;
+pub use start_density::StartDensity;
 #[path = "convergence.rs"]
 mod convergence;
 use convergence::CoulombMetric;
@@ -151,6 +154,8 @@ impl CompatMode {
 #[derive(Clone, Debug)]
 pub struct ScfOptions {
     pub start_wavefunctions: StartWavefunctions,
+    /// Starting density (default uniform, bit-identical to the original start).
+    pub start_density: StartDensity,
     pub compat_mode: CompatMode,
     /// Research density projector uses all crystal operations; requires enable_symmetry.
     pub crystal_density_group: bool,
@@ -226,6 +231,7 @@ impl Default for ScfOptions {
     fn default() -> Self {
         Self {
             start_wavefunctions: StartWavefunctions::FreeElectron,
+            start_density: StartDensity::Uniform,
             compat_mode: CompatMode::None,
             crystal_density_group: false,
             gamma_real: crate::GammaReal::default(),
@@ -483,6 +489,7 @@ impl PreparedSymmetry {
 /// Cached ionic terms, Hamiltonian application plan, and density FFT plan.
 /// `step` is exposed for independent post-SCF fixed-point verification.
 pub struct ScfProblem {
+    start_density: Option<Array3<f64>>,
     atomic_species: Option<Vec<atomic_start::AtomicSpecies>>,
     atomic_start: AtomicStartReport,
     #[cfg(test)]
@@ -897,6 +904,18 @@ impl ScfProblem {
             &mut fft,
             options.radial_even_rule,
         )?;
+        let start_density = if options.start_density == StartDensity::Atomic {
+            start_density::atomic_superposition(
+                cell,
+                &density_basis,
+                &dg,
+                &species,
+                &mut fft,
+                electrons,
+            )?
+        } else {
+            None
+        };
         let xc_density = Array3::zeros(
             if core_density.is_some() || options.pw92_prefactor == crate::Pw92Prefactor::Original {
                 grid.dims()
@@ -1024,6 +1043,7 @@ impl ScfProblem {
             #[cfg(test)]
             force_real_rebuild: false,
             gamma_real_exclusion,
+            start_density,
             atomic_species,
             atomic_start,
             force_model,
@@ -1146,6 +1166,13 @@ impl ScfProblem {
     }
     pub fn uniform_density(&self) -> Array3<f64> {
         Array3::from_elem(self.grid.dims(), self.electrons / self.cell.volume_bohr3())
+    }
+    /// First SCF input density: the atomic superposition when requested and
+    /// available, otherwise the uniform density.
+    pub fn starting_density(&self) -> Array3<f64> {
+        self.start_density
+            .clone()
+            .unwrap_or_else(|| self.uniform_density())
     }
     pub fn step(
         &mut self,

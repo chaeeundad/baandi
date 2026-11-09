@@ -98,6 +98,7 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
         o.start_wavefunctions = s
             .start_wavefunctions()
             .map_err(|e| error(1, e.to_string()))?;
+        o.start_density = s.start_density().map_err(|e| error(1, e.to_string()))?;
         o.gamma_real = s.gamma_real().map_err(|e| error(1, e.to_string()))?;
         o.locking = s.locking().map_err(|e| error(1, e.to_string()))?;
         o.threads = s.threads.unwrap_or(1);
@@ -179,6 +180,9 @@ fn options_json(o: &ScfOptions) -> Value {
     }
     if o.start_wavefunctions == dft_engine::StartWavefunctions::Atomic {
         result["start_wavefunctions"] = json!(o.start_wavefunctions.name());
+    }
+    if o.start_density != dft_engine::StartDensity::Uniform {
+        result["start_density"] = json!(o.start_density.name());
     }
     // Always recorded: the default is Auto (ADR 0040), so omitting the default
     // would hide the non-default `off`.

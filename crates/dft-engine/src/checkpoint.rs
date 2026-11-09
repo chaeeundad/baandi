@@ -338,6 +338,7 @@ pub(crate) fn options_identical(a: &ScfOptions, b: &ScfOptions) -> bool {
             residual_eigen_schedule,
             free_electron_initial_guess,
             start_wavefunctions,
+            start_density,
             max_iterations,
             davidson_max_iterations,
             davidson_subspace,

@@ -331,7 +331,7 @@ impl ScfSession {
         let start = Instant::now();
         let mut mixer = self.make_mixer(&self.problem.options.mixing)?;
         // Validate mixer parameters even if a future system converges immediately.
-        let n = self.problem.uniform_density();
+        let n = self.problem.starting_density();
         mixer.mix(
             n.as_slice().unwrap(),
             n.as_slice().unwrap(),

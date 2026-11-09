@@ -496,6 +496,7 @@ impl Config {
 #[serde(deny_unknown_fields)]
 pub struct Scf {
     pub start_wavefunctions: Option<String>,
+    pub start_density: Option<String>,
     pub davidson_capacity_per_band: Option<usize>,
     pub preconditioner: Option<String>,
     pub gamma_real: Option<String>,
@@ -537,6 +538,15 @@ impl Scf {
             return Err(ConfigError::Invalid("scf.davidson_capacity_per_band must be an integer from 2 to 12 (minimum 2 for a full correction block)".into()));
         }
         Ok(value)
+    }
+    pub fn start_density(&self) -> Result<dft_engine::StartDensity, ConfigError> {
+        match self.start_density.as_deref().unwrap_or("uniform") {
+            "uniform" => Ok(dft_engine::StartDensity::Uniform),
+            "atomic" => Ok(dft_engine::StartDensity::Atomic),
+            _ => Err(ConfigError::Invalid(
+                "scf.start_density must be uniform or atomic".into(),
+            )),
+        }
     }
     pub fn start_wavefunctions(&self) -> Result<dft_engine::StartWavefunctions, ConfigError> {
         match self
@@ -1124,6 +1134,7 @@ impl Config {
             s.locking()?;
             s.gamma_real()?;
             s.start_wavefunctions()?;
+            s.start_density()?;
             s.davidson_capacity_per_band()?;
             s.preconditioner()?;
             s.standard_profile()?;

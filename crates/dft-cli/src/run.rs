@@ -839,6 +839,10 @@ pub fn execute_mode(
         writeln!(console, "HOMO/LUMO gap: direct {:.12} Ha = {:.12} eV at k{}; indirect {:.12} Ha = {:.12} eV (HOMO k{}, LUMO k{})",
             direct.1, from_hartree(direct.1, EnergyUnit::ElectronVolt), direct.0,
             lumo.1-homo.1, from_hartree(lumo.1-homo.1, EnergyUnit::ElectronVolt), homo.0, lumo.0).unwrap();
+        if !outcome.converged && lumo.1 - homo.1 < 1e-3 {
+            // Evidence: ledger ELONGATED-GAP / ELONGATED-SMEARING / SLAB-SMEARING.
+            writeln!(console, "hint: the HOMO/LUMO gap is {:.3e} Ha (below 1e-3 Ha) at fixed occupations; an integer occupation cut inside a (near-)degenerate level cluster can stall the SCF. Use [occupations] mode = \"fermi_dirac\" with a smearing width above the cluster splitting (strict profile, band_cap above the occupied count).", lumo.1 - homo.1).unwrap();
+        }
     }
     writeln!(
         console,

@@ -954,6 +954,16 @@ empty-state coverage fails with an instruction to increase the cap. The
 reported top-band diagnostics are not bounds on infinitely many omitted bands;
 repeat with at least four more bands and compare F/density.
 
+When to use it for an insulator-like cell: if fixed occupations stall (density residual
+floors around 1e-3, the SCF wanders) and the printed HOMO/LUMO gap is below about
+1e-3 Ha, the integer occupation cut lies inside a (near-)degenerate level cluster and
+the fixed-occupation problem is ill-conditioned (elongated and slab-like cells; the
+same cells defeat Quantum ESPRESSO, see ledger rows ELONGATED-GAP, ELONGATED-SMEARING and
+SLAB-SMEARING). Use FD with a width above the cluster splitting (0.02 to 0.1 eV converged
+both measured cells in 20 to 35 iterations) with the strict profile, and `band_cap` at least
+occupied bands + 5. The standard profile is not available with smearing. A non-converged
+fixed-occupation run prints a hint when the final gap is below 1e-3 Ha.
+
 For collinear FD, omit channel counts and `total_moment` for one shared mu and
 free moment, or supply `total_moment` (possibly fractional) or matching
 `n_up`/`n_down` for two roots. Positive-temperature sector endpoints reject.

@@ -33,5 +33,8 @@ Single rank versus threads (bit-identical); two to eight ranks versus single ran
 - Therefore the adapter is an own thin FFI crate `dft-mpi` (declarations only, linked at build time from `MPI_ROOT`/`mpicc -show` like `dft-mkl` with `MKLROOT`), not rsmpi, whose build script needs a working `mpicc` even for `cargo check`.
 - Multi-core comparisons against QE so far are MPI (QE) against threads (BAANDI); they become like for like only after M1.
 
+## dev08 MPI facts (relayed 2026-11-09)
+Open MPI 5.0.8, user-built at ~/fq/deps (2026-10-19) with the ~/fq/tc gcc; `mpicc -show` = gcc with -I/-L/-rpath of ~/fq/deps and -lmpi; no Intel MPI or MPICH. BTL components: self, sm, tcp only; PML ob1 (plus cm, monitoring, v); no UCX, no InfiniBand component. Topology: 2 x Xeon Gold 6230, 20 cores per socket, 2 threads per core, 80 logical CPUs, two NUMA nodes (node0 = CPUs 0 to 19 and 40 to 59, node1 = 20 to 39 and 60 to 79); numactl not installed. Consequence: M0 to M2 (one node, shared-memory transport) are measurable on dev08; M3 and any multi-node scaling are not (a TCP number over Ethernet is not representative of a cluster interconnect) and must not be reported as scaling evidence from this machine.
+
 ## Open items
 MPI environment on dev08 (implementation, version, launcher, interconnect), hybrid defaults (ranks times threads) and pinning rules.

@@ -28,5 +28,10 @@ Real Gamma path, unpolarized fixed occupation first; k meshes through D; spin, f
 ## Validation
 Single rank versus threads (bit-identical); two to eight ranks versus single rank (accuracy classes, counts); perturbed-start distributions as for MKL-R1 and MGS-B; scaling measured on dev08 only (Mac observations excluded).
 
+## Decisions of 2026-11-09 (user)
+- No MPI installation on the development Mac; all MPI measurements and runs happen on dev08 through the master session (neutral machine). The Mac only type-checks.
+- Therefore the adapter is an own thin FFI crate `dft-mpi` (declarations only, linked at build time from `MPI_ROOT`/`mpicc -show` like `dft-mkl` with `MKLROOT`), not rsmpi, whose build script needs a working `mpicc` even for `cargo check`.
+- Multi-core comparisons against QE so far are MPI (QE) against threads (BAANDI); they become like for like only after M1.
+
 ## Open items
-MPI environment on dev08 (implementation, version, launcher, interconnect), MPI on the Mac for development (not installed), crate or own adapter, hybrid defaults (ranks times threads) and pinning rules.
+MPI environment on dev08 (implementation, version, launcher, interconnect), hybrid defaults (ranks times threads) and pinning rules.

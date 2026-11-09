@@ -315,12 +315,18 @@ pub enum LocalMesh {
     #[default]
     Baandi,
     QeLike,
+    /// `QeLike` endpoint plus the reference code's G=0 convention: the constant
+    /// is the plain mesh integral of r (r V + Z), which omits the first interval
+    /// [0, r_1] of a mesh that does not start at r = 0 (BAANDI integrates the
+    /// Coulomb part analytically and includes it).
+    QeLikeG0,
 }
 impl LocalMesh {
     pub fn name(self) -> &'static str {
         match self {
             Self::Baandi => "baandi",
             Self::QeLike => "qe_like",
+            Self::QeLikeG0 => "qe_like_g0",
         }
     }
 }
@@ -370,6 +376,7 @@ impl RadialMesh {
 pub struct ConventionLocalTransform<'a> {
     base: LocalTransform<'a>,
     rule: RadialEvenRule,
+    g0_plain: bool,
 }
 impl ConventionLocalTransform<'_> {
     pub fn effective_r_max(&self) -> f64 {
@@ -399,6 +406,19 @@ impl ConventionLocalTransform<'_> {
         )
     }
     pub fn alpha_z(&self) -> Result<f64, RadialError> {
+        if self.g0_plain {
+            let b = &self.base;
+            // Plain mesh integral of r (r V + Z), no analytic head or tail.
+            let plain = integrate_rule(
+                b.n,
+                |i| {
+                    let r = b.mesh.r[i];
+                    r * (r * b.v[i] + b.z) * b.mesh.rab[i]
+                },
+                self.rule,
+            );
+            return finite(4.0 * PI / b.volume * plain);
+        }
         if self.rule == RadialEvenRule::Simpson3_8 {
             return self.base.alpha_z();
         }
@@ -416,7 +436,7 @@ impl Pseudopotential {
         rule: RadialEvenRule,
     ) -> Result<ConventionLocalTransform<'_>, RadialError> {
         let mut base = self.local_transform(volume, None)?;
-        if local_mesh == LocalMesh::QeLike {
+        if local_mesh != LocalMesh::Baandi {
             let n = self
                 .mesh
                 .r
@@ -430,7 +450,11 @@ impl Pseudopotential {
                 ));
             }
         }
-        Ok(ConventionLocalTransform { base, rule })
+        Ok(ConventionLocalTransform {
+            base,
+            rule,
+            g0_plain: local_mesh == LocalMesh::QeLikeG0,
+        })
     }
     pub fn projector_transform_with_rule(
         &self,

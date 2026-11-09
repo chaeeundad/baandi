@@ -567,6 +567,7 @@ impl Wire for dft_engine::LocalMesh {
         match w.as_str() {
             "baandi" => Ok(Self::Baandi),
             "qe_like" => Ok(Self::QeLike),
+            "qe_like_g0" => Ok(Self::QeLikeG0),
             _ => Err(invalid("invalid local_mesh option")),
         }
     }

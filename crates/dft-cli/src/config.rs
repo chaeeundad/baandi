@@ -1504,8 +1504,9 @@ impl Pseudo {
         match self.local_mesh.as_deref().unwrap_or("baandi") {
             "baandi" => Ok(dft_engine::LocalMesh::Baandi),
             "qe_like" => Ok(dft_engine::LocalMesh::QeLike),
+            "qe_like_g0" => Ok(dft_engine::LocalMesh::QeLikeG0),
             _ => Err(ConfigError::Invalid(
-                "pseudo.local_mesh must be baandi or qe_like".into(),
+                "pseudo.local_mesh must be baandi, qe_like or qe_like_g0".into(),
             )),
         }
     }

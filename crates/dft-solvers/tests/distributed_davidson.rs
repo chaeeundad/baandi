@@ -114,3 +114,30 @@ fn distributed_is_reproducible_at_fixed_rank_count() {
     assert_eq!(bits(&a[0].eigenvectors), bits(&b[0].eigenvectors));
     assert_eq!(a[0].iterations, b[0].iterations);
 }
+
+#[test]
+#[ignore = "diagnostic: prints iteration counts"]
+fn iteration_counts() {
+    for (n, bands) in [(260usize, 9usize), (500, 20), (700, 32)] {
+        let (op, diag) = fixture(n);
+        let s = solver(bands);
+        let serial = s.solve(&op, None, &diag).unwrap();
+        let d = simulate(2, |c| {
+            s.solve_distributed(c, &op, None, &diag, policy(bands), false, true, 6)
+                .unwrap()
+        });
+        println!(
+            "serial hist {:?}\n   dist hist {:?}",
+            serial.history, d[0].history
+        );
+        println!(
+            "n={n} bands={bands} serial it={} apps={} restarts={} | P2 it={} apps={} restarts={}",
+            serial.iterations,
+            serial.operator_applications,
+            serial.restarts,
+            d[0].iterations,
+            d[0].operator_applications,
+            d[0].restarts
+        );
+    }
+}

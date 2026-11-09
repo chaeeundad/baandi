@@ -17,9 +17,6 @@ use dft_numerics::{
     real::{RealEighWorkspace, RealGemmWorkspace, RealMatrix},
 };
 
-/// Pivot floor of the panel Cholesky (relative to unit-norm columns).
-const PANEL_PIVOT: f64 = 1e-16;
-
 fn comm_error(e: dft_mpi::MpiError) -> SolverError {
     SolverError::Application(e.to_string())
 }
@@ -105,72 +102,48 @@ fn apply_distributed<C: Collective>(
     local_rows(layout, &RealMatrix::new(n, w, products)?)
 }
 
-/// Inverse of an upper-triangular matrix (small, replicated).
-fn upper_inverse(r: &RealMatrix) -> RealMatrix {
-    let k = r.rows();
-    let mut inv = RealMatrix::zeros(k, k).unwrap();
-    for j in 0..k {
-        inv[(j, j)] = 1.0 / r[(j, j)];
-        for i in (0..j).rev() {
-            let mut s = 0.0;
-            for p in i + 1..=j {
-                s += r[(i, p)] * inv[(p, j)];
+/// Sequential modified Gram-Schmidt inside the panel (two passes per column), the
+/// distributed counterpart of the serial solver's in-block orthogonalisation:
+/// a column is dropped only when its remaining relative norm is at most the
+/// dependence tolerance, so near-dependent corrections are kept exactly as in the
+/// serial solver (a Gram-matrix Cholesky would discard them). Each reduction is a
+/// deterministic tree sum of a short vector.
+fn mgs_panel<C: Collective>(comm: &C, x: &RealMatrix) -> Result<RealMatrix, SolverError> {
+    let rows = x.rows();
+    let mut kept: Vec<f64> = Vec::new(); // column-major, `count` columns of `rows`
+    let mut count = 0usize;
+    for j in 0..x.cols() {
+        let mut v = column_of(x, j).to_vec();
+        for _ in 0..2 {
+            if count > 0 {
+                let mut local = vec![0.0; count];
+                for (c, q) in local.iter_mut().zip(kept.chunks(rows)) {
+                    *c = q.iter().zip(&v).map(|(a, b)| a * b).sum();
+                }
+                let mut sums = vec![0.0; count];
+                comm.tree_sum_f64(&local, &mut sums).map_err(comm_error)?;
+                for (c, q) in sums.iter().zip(kept.chunks(rows)) {
+                    for (vi, qi) in v.iter_mut().zip(q) {
+                        *vi -= c * qi;
+                    }
+                }
             }
-            inv[(i, j)] = -s / r[(i, i)];
         }
-    }
-    inv
-}
-
-/// One CholeskyQR pass on a block of unit-ish columns: returns the orthonormalised
-/// kept columns (columns whose pivot falls below the floor are dropped).
-fn cholesky_qr_pass<C: Collective>(
-    comm: &C,
-    ws: &mut RealGemmWorkspace,
-    x: &RealMatrix,
-) -> Result<RealMatrix, SolverError> {
-    let w = x.cols();
-    let mut g = RealMatrix::zeros(w, w)?;
-    gram(comm, ws, x, x, &mut g)?;
-    let mut kept: Vec<usize> = Vec::new();
-    let mut l = RealMatrix::zeros(w, w)?; // l[(a, b)], a, b indexes into `kept`
-    for j in 0..w {
-        let mut row = vec![0.0; kept.len()];
-        for (b, &kb) in kept.iter().enumerate() {
-            let mut s = g[(j, kb)];
-            for p in 0..b {
-                s -= row[p] * l[(b, p)];
-            }
-            row[b] = s / l[(b, b)];
-        }
-        let diag = g[(j, j)] - row.iter().map(|v| v * v).sum::<f64>();
-        if diag <= PANEL_PIVOT * g[(j, j)].max(PANEL_PIVOT) || !diag.is_finite() {
+        let local = [v.iter().map(|a| a * a).sum::<f64>()];
+        let mut total = [0.0];
+        comm.tree_sum_f64(&local, &mut total).map_err(comm_error)?;
+        let len = total[0].sqrt();
+        if !len.is_finite() || len <= DEPENDENCE_TOLERANCE {
             continue;
         }
-        let a = kept.len();
-        for (b, v) in row.iter().enumerate() {
-            l[(a, b)] = *v;
-        }
-        l[(a, a)] = diag.sqrt();
-        kept.push(j);
+        kept.extend(v.iter().map(|a| a / len));
+        count += 1;
     }
-    let k = kept.len();
-    let mut r = RealMatrix::zeros(k, k)?;
-    for a in 0..k {
-        for b in 0..=a {
-            r[(b, a)] = l[(a, b)];
-        }
-    }
-    let rinv = upper_inverse(&r);
-    let rows = x.rows();
-    let mut selected = RealMatrix::zeros(rows, k)?;
-    for (c, &j) in kept.iter().enumerate() {
-        selected.as_mut_slice()[c * rows..(c + 1) * rows]
-            .copy_from_slice(&x.as_slice()[j * rows..(j + 1) * rows]);
-    }
-    let mut out = RealMatrix::zeros(rows, k)?;
-    rotate_local(ws, &selected, &rinv, &mut out)?;
-    Ok(out)
+    Ok(RealMatrix::new(rows, count, kept)?)
+}
+
+fn column_of(x: &RealMatrix, j: usize) -> &[f64] {
+    &x.as_slice()[j * x.rows()..(j + 1) * x.rows()]
 }
 
 /// Normalise the columns, project twice against `against` (block Gram-Schmidt),
@@ -214,11 +187,17 @@ fn orthonormalize<C: Collective>(
             y[(i, c)] = x[(i, j)] / len;
         }
     }
-    let y = cholesky_qr_pass(comm, ws, &y)?;
-    if y.cols() == 0 {
-        return Ok(y);
+    let mut y = mgs_panel(comm, &y)?;
+    // Renormalising a nearly dependent column amplifies rounding error along the
+    // basis; one more projection plus a panel pass (nothing drops now) restores
+    // orthogonality to working precision.
+    if let Some(q) = against.filter(|q| q.cols() > 0 && y.cols() > 0) {
+        let mut overlap = RealMatrix::zeros(q.cols(), y.cols())?;
+        let mut scratch = RealMatrix::zeros(rows, y.cols())?;
+        project_out(comm, ws, q, &mut y, &mut overlap, &mut scratch)?;
+        y = mgs_panel(comm, &y)?;
     }
-    cholesky_qr_pass(comm, ws, &y)
+    Ok(y)
 }
 
 fn append_columns(a: &mut RealMatrix, b: &RealMatrix) -> Result<(), SolverError> {

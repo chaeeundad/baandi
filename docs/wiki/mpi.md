@@ -6,3 +6,5 @@ Design: row-block basis with local algebra and tree reductions, H on column pair
 
 ## Status 2026-11-09 (update)
 M1a to M1e are implemented and pass on simulated ranks (Mac, correctness only): `dft_solvers::distributed_davidson` (`RealDavidson::solve_distributed`), `dft_engine::parallel` (thread-local communicator; the engine takes the distributed branch only when the registered communicator has two or more ranks and the preconditioner is the default), and `dft-cli --features mpi`. Non-root ranks write to `<output>/rank<r>/`. Open: dev08 build and smoke run, then the pre-registered scaling gate (ledger row MPI-M1CDE). Non-Davidson stages are replicated per rank in M1.
+
+First dev08 gate (ledger MPI-M1-GATE1): 1.19x at 4 ranks and 1.31x at 8 ranks on si32 strict against the thread path's 2.43x. The extra Davidson iterations (91 to 121) came from Cholesky panel orthonormalisation dropping near-dependent corrections; fixed with a distributed MGS panel (matches serial iteration counts on simulated ranks). Re-measure; the replicated non-Davidson stages are the next Amdahl limit.

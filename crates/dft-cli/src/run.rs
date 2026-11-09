@@ -180,9 +180,9 @@ fn options_json(o: &ScfOptions) -> Value {
     if o.start_wavefunctions == dft_engine::StartWavefunctions::Atomic {
         result["start_wavefunctions"] = json!(o.start_wavefunctions.name());
     }
-    if o.gamma_real != dft_engine::GammaReal::Off {
-        result["gamma_real"] = json!(o.gamma_real.name());
-    }
+    // Always recorded: the default is Auto (ADR 0040), so omitting the default
+    // would hide the non-default `off`.
+    result["gamma_real"] = json!(o.gamma_real.name());
     if o.locking == dft_engine::Locking::Auto {
         result["locking"] = json!("auto");
     }
@@ -626,10 +626,8 @@ pub fn execute_mode(
             "radial_samples": a.radial_samples, "evd_orders": a.evd_orders
         });
     }
-    if opts.gamma_real != dft_engine::GammaReal::Off {
-        result["gamma_real_used"] = json!(r.gamma_real_used);
-        result["gamma_real_fallback_reason"] = json!(r.gamma_real_fallback_reason);
-    }
+    result["gamma_real_used"] = json!(r.gamma_real_used);
+    result["gamma_real_fallback_reason"] = json!(r.gamma_real_fallback_reason);
     if let Some(report) = &r.spectral_completeness {
         result["spectral_completeness"] = spectral_json(report);
     }

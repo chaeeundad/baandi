@@ -29,6 +29,8 @@ impl fmt::Display for MpiError {
 }
 impl std::error::Error for MpiError {}
 
+mod collective;
+pub use collective::{Collective, SimRank, simulate, tree_associate};
 #[cfg(feature = "mpi")]
 mod ffi;
 #[cfg(feature = "mpi")]

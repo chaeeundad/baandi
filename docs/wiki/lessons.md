@@ -16,3 +16,5 @@
 - 2026-11-09 elongated cells: residual-growth spikes after Pulay steps are a symptom of the 8e-04 residual floor; the growth-reset guard is inert on converging cells but does not help (ledger MIX-GROWTH-RESET). Next test is a term-by-term energy diff against QE on the elongated cell, not more mixing variants.
 
 - 2026-11-09 MPI: hybrid (threads>=2) runs silently used the serial solver on every rank because the communicator was thread-local and the solve moved to a pool thread (ledger MPI-M1-THREADBUG). Any scaling row must prove the distributed branch ran.
+
+- 2026-11-10 reporting: the strict-class history omits the fixed-point certificate re-solves (about a third of the Davidson work on si32); use results.json `convergence.work` (recorded + certificate) for total work. Apply calls are bimodal (median 1 column, 66 percent single-column), which caps pair-level MPI parallelism (ledger MPI-M1-CEILING).

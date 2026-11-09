@@ -12,8 +12,10 @@ use std::{cell::RefCell, sync::Arc};
 /// On fails closed; Auto records why a complex solve was selected.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum GammaReal {
-    #[default]
     Off,
+    /// Default (ADR 0040): the real path when the problem qualifies, otherwise
+    /// the complex path with the reason recorded.
+    #[default]
     Auto,
     On,
 }

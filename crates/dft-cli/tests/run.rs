@@ -106,7 +106,9 @@ fn verify(large: bool) {
     let mut first = c.json("results", "results.json");
     // Legacy fields plus the additive preflight report, checked on CLI output.
     // Legacy fields plus additive per-band accuracy, checked on actual output.
-    assert_eq!(first.as_object().unwrap().len(), 24);
+    // 24 legacy keys plus gamma_real_used and gamma_real_fallback_reason, which the
+    // default Auto mode (ADR 0040) records.
+    assert_eq!(first.as_object().unwrap().len(), 26);
     assert!(first.get("kpoints").is_none());
     for key in [
         "preflight",
@@ -612,6 +614,9 @@ fn expressions_preserve_energy_and_record_resolutions() {
         "threading",
         "memory_estimate",
         "units",
+        // Recorded by the default Auto mode (ADR 0040).
+        "gamma_real_used",
+        "gamma_real_fallback_reason",
     ];
     let keys: std::collections::BTreeSet<_> = plain
         .as_object()
@@ -1058,11 +1063,18 @@ fn observed_file_mirror_is_exact_and_logs_are_never_overwritten() {
 #[test]
 fn final_spectral_guard_is_additive_and_audits_only_reported_state() {
     let c = Case::new(false);
-    status(&c.run("", Some(Path::new("off"))), 0);
+    // Pinned to the complex path: the guard forces it, and bit-identical energies are the claim.
+    status(
+        &c.run("[scf]\ngamma_real='off'\n", Some(Path::new("off"))),
+        0,
+    );
     let off = c.json("off", "results.json");
     assert_eq!(off["scf"]["spectral_guard"], "off");
     assert!(off.get("spectral_completeness").is_none());
-    let run = c.run("[scf]\nspectral_guard='final'\n", Some(Path::new("final")));
+    let run = c.run(
+        "[scf]\nspectral_guard='final'\ngamma_real='off'\n",
+        Some(Path::new("final")),
+    );
     status(&run, 0);
     let guarded = c.json("final", "results.json");
     assert_eq!(guarded["schema_version"], off["schema_version"]);

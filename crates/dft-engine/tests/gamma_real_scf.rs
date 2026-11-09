@@ -94,7 +94,7 @@ fn calibrate_complex_noise() {
 }
 #[test]
 fn off_is_default() {
-    assert_eq!(ScfOptions::default().gamma_real, GammaReal::Off);
+    assert_eq!(ScfOptions::default().gamma_real, GammaReal::Auto);
 }
 
 #[test]

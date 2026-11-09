@@ -552,7 +552,7 @@ impl Scf {
         }
     }
     pub fn gamma_real(&self) -> Result<dft_engine::GammaReal, ConfigError> {
-        match self.gamma_real.as_deref().unwrap_or("off") {
+        match self.gamma_real.as_deref().unwrap_or("auto") {
             "off" => Ok(dft_engine::GammaReal::Off),
             "auto" => Ok(dft_engine::GammaReal::Auto),
             "on" => Ok(dft_engine::GammaReal::On),

@@ -48,6 +48,8 @@ fn options(functional: Functional) -> ScfOptions {
         density_tolerance: 1e-10,
         energy_tolerance: 1e-11,
         max_iterations: 200,
+        // Spin runs use the complex path; the unpolarized reference must too.
+        gamma_real: dft_engine::GammaReal::Off,
         ..Default::default()
     }
 }

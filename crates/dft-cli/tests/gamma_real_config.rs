@@ -13,7 +13,7 @@ use dft_engine::{
 fn key_validation_and_engine_plumbing() {
     let text = include_str!("../../../examples/si_lda.toml");
     let config = Config::parse(text).unwrap();
-    assert_eq!(run::options(&config).unwrap().gamma_real, GammaReal::Off);
+    assert_eq!(run::options(&config).unwrap().gamma_real, GammaReal::Auto);
     for (key, value) in [
         ("off", GammaReal::Off),
         ("auto", GammaReal::Auto),
@@ -40,6 +40,8 @@ fn checkpoint_optional_option_and_roundtrip() {
     let mut cp = s
         .checkpoint(CheckpointKind::ExactContinuation, model, execution)
         .unwrap();
+    // The default is now Auto; the legacy wire format is the Off header.
+    cp.continuation.as_mut().unwrap().options.gamma_real = GammaReal::Off;
     let old = checkpoint_io::encode(&cp).unwrap();
     let h = u64::from_le_bytes(old[8..16].try_into().unwrap()) as usize;
     let header: serde_json::Value = serde_json::from_slice(&old[24..24 + h]).unwrap();

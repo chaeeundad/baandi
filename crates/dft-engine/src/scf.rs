@@ -228,7 +228,7 @@ impl Default for ScfOptions {
             start_wavefunctions: StartWavefunctions::FreeElectron,
             compat_mode: CompatMode::None,
             crystal_density_group: false,
-            gamma_real: crate::GammaReal::Off,
+            gamma_real: crate::GammaReal::default(),
             standard: None,
             standard_stall_guard: false,
             standard_density_forcing: false,

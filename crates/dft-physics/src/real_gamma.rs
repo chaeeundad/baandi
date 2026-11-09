@@ -77,6 +77,9 @@ pub struct RealNonlocal {
     image: RealMatrix,
     gemm: RealGemmWorkspace,
     capacity: usize,
+    /// MKL builds, `BAANDI_MKL_NONLOCAL=on` (default off, A/B switch): both
+    /// projector products go through dgemm panels with the panel grouping fixed.
+    dgemm_products: bool,
 }
 impl RealNonlocal {
     /// Copy the public complex columns and each atom's row-major D block.
@@ -115,6 +118,7 @@ impl RealNonlocal {
             image: RealMatrix::zeros(n, capacity)?,
             gemm: RealGemmWorkspace::with_pool(n, count.max(capacity), pool)?,
             capacity,
+            dgemm_products: std::env::var("BAANDI_MKL_NONLOCAL").as_deref() == Ok("on"),
         })
     }
     /// Add the nonlocal image to caller-owned output; no allocation on application.
@@ -131,12 +135,28 @@ impl RealNonlocal {
         {
             return Err(RealGammaError::NonFinite);
         }
-        self.gemm.multiply_into(
-            self.projectors.as_ref(),
-            RealOp::Transpose,
-            x.as_ref(),
-            self.projections.as_mut().subcols_mut(0, m),
-        )?;
+        let count = self.projectors.cols();
+        if self.dgemm_products {
+            self.gemm.multiply_slices_wide_into(
+                dft_numerics::GemmSite::Other,
+                self.projectors.as_slice(),
+                n,
+                count,
+                n,
+                RealOp::Transpose,
+                x.as_slice(),
+                m,
+                n,
+                self.projections.as_mut().subcols_mut(0, m),
+            )?;
+        } else {
+            self.gemm.multiply_into(
+                self.projectors.as_ref(),
+                RealOp::Transpose,
+                x.as_ref(),
+                self.projections.as_mut().subcols_mut(0, m),
+            )?;
+        }
         for atom in &self.coupling {
             for band in 0..m {
                 for j in 0..atom.count {
@@ -149,12 +169,27 @@ impl RealNonlocal {
                 }
             }
         }
-        self.gemm.multiply_into(
-            self.projectors.as_ref(),
-            RealOp::Identity,
-            self.weights.as_ref().subcols(0, m),
-            self.image.as_mut().subcols_mut(0, m),
-        )?;
+        if self.dgemm_products {
+            self.gemm.multiply_slices_wide_into(
+                dft_numerics::GemmSite::Other,
+                self.projectors.as_slice(),
+                n,
+                count,
+                n,
+                RealOp::Identity,
+                &self.weights.as_slice()[..count * m],
+                m,
+                count,
+                self.image.as_mut().subcols_mut(0, m),
+            )?;
+        } else {
+            self.gemm.multiply_into(
+                self.projectors.as_ref(),
+                RealOp::Identity,
+                self.weights.as_ref().subcols(0, m),
+                self.image.as_mut().subcols_mut(0, m),
+            )?;
+        }
         for (y, v) in y.as_mut_slice().iter_mut().zip(self.image.as_slice()) {
             *y += v;
         }

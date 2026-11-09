@@ -331,8 +331,47 @@ impl RealGemmWorkspace {
         b: &[f64],
         b_cols: usize,
         ldb: usize,
+        out: RealMatrixMut<'_>,
+    ) -> Result<(), LinalgError> {
+        self.multiply_slices_impl(site, false, a, a_rows, a_cols, lda, op, b, b_cols, ldb, out)
+    }
+    /// As `multiply_slices_into`, but a non-transposed product with a long output
+    /// (the nonlocal back-application P W, rows of the output are the long
+    /// dimension) is also taken through dgemm: only the per-panel scratch bound
+    /// applies, not the whole-output bound.
+    #[allow(clippy::too_many_arguments)]
+    pub fn multiply_slices_wide_into(
+        &mut self,
+        site: GemmSite,
+        a: &[f64],
+        a_rows: usize,
+        a_cols: usize,
+        lda: usize,
+        op: RealOp,
+        b: &[f64],
+        b_cols: usize,
+        ldb: usize,
+        out: RealMatrixMut<'_>,
+    ) -> Result<(), LinalgError> {
+        self.multiply_slices_impl(site, true, a, a_rows, a_cols, lda, op, b, b_cols, ldb, out)
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn multiply_slices_impl(
+        &mut self,
+        site: GemmSite,
+        wide: bool,
+        a: &[f64],
+        a_rows: usize,
+        a_cols: usize,
+        lda: usize,
+        op: RealOp,
+        b: &[f64],
+        b_cols: usize,
+        ldb: usize,
         #[cfg_attr(not(feature = "mkl"), allow(unused_mut))] mut out: RealMatrixMut<'_>,
     ) -> Result<(), LinalgError> {
+        #[cfg(not(feature = "mkl"))]
+        let _ = wide;
         #[cfg(not(feature = "mkl"))]
         let _ = site;
         let fallback = |ws: &mut Self, out: RealMatrixMut<'_>| {
@@ -368,7 +407,7 @@ impl RealGemmWorkspace {
                 && a_rows <= self.long
                 && a_cols <= self.short
                 && n <= self.short
-                && m * n <= self.short * self.short
+                && ((wide && op == RealOp::Identity) || m * n <= self.short * self.short)
                 && PANEL.min(m) * n <= self.short * self.short
                 && lda >= a_rows
                 && ldb >= k

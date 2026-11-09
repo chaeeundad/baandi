@@ -260,3 +260,47 @@ fn clustered_distribution() {
         }
     }
 }
+
+struct Counting {
+    inner: Operator,
+    calls: std::sync::atomic::AtomicUsize,
+}
+impl RealLinearOperator for Counting {
+    fn dimension(&self) -> usize {
+        self.inner.a.rows()
+    }
+    fn worker_pool(&self) -> Option<Arc<WorkerPool>> {
+        Some(self.inner.pool.clone())
+    }
+    fn apply(&self, x: &[f64], y: &mut [f64]) -> Result<(), SolverError> {
+        self.calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.inner.apply(x, y)
+    }
+}
+
+#[test]
+fn operator_columns_are_divided_among_ranks() {
+    let (n, bands) = (400usize, 16usize);
+    let (inner, diag) = fixture(n);
+    let op = Counting {
+        inner,
+        calls: 0.into(),
+    };
+    let s = solver(bands);
+    let serial = s.solve(&op, None, &diag).unwrap();
+    let serial_calls = op.calls.swap(0, std::sync::atomic::Ordering::Relaxed);
+    let d = simulate(4, |c| {
+        s.solve_distributed(c, &op, None, &diag, policy(bands), false, true, 6)
+            .unwrap()
+    });
+    let total = op.calls.load(std::sync::atomic::Ordering::Relaxed);
+    println!(
+        "serial apply calls {serial_calls} (reported {}) ; 4 ranks total {total} (reported {})",
+        serial.operator_applications, d[0].operator_applications
+    );
+    assert!(
+        total <= serial_calls + serial_calls / 5 + 8,
+        "columns are applied redundantly"
+    );
+}

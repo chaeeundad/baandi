@@ -3,6 +3,7 @@
 //! threading one through every option struct. Unset or one rank means the
 //! threads-only path, which is bit-identical to a build without MPI.
 use dft_mpi::{Collective, MpiError};
+pub use dft_solvers::distributed_davidson::stage_seconds;
 use std::{
     cell::RefCell,
     sync::{

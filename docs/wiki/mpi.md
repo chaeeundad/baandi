@@ -12,3 +12,5 @@ First dev08 gate (ledger MPI-M1-GATE1): 1.19x at 4 ranks and 1.31x at 8 ranks on
 Gate re-run (ledger MPI-M1-GATE2): best MPI 1.35x (np=4 x T=2) against threads 2.49x on 8 cores; extra Davidson iterations traced to one cluster-cut empty band at SCF step 10; Mac reproduction suggests sensitivity, not a bug. Results.json now carries per-collective time (`parallel.collectives`).
 
 Ledger MPI-M1-GATE3: perturbed seeds 601-610 are the standard MPI scaling case (unperturbed si32 is anomalously easy); the extra Davidson iterations were sensitivity; communication is at most 13 percent of wall, so the remaining gap is non-scaling compute.
+
+Ledger MPI-M1-GATE4: the distributed Davidson scales only 1.28x at 4 ranks; the replicated stages (24 percent of wall) are the smaller Amdahl term. Reduced matrix is now incremental and per-stage timers are in results.json `parallel.stages`; next measurement attributes the non-BLAS 21.8 s.

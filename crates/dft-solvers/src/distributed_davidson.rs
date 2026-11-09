@@ -21,6 +21,37 @@ fn comm_error(e: dft_mpi::MpiError) -> SolverError {
     SolverError::Application(e.to_string())
 }
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
+
+const STAGES: [&str; 8] = [
+    "reduced_gram",
+    "reduced_eigen",
+    "rotate",
+    "residual",
+    "orthonormalize",
+    "apply_total",
+    "apply_operator",
+    "other_solve",
+];
+static STAGE_NANOS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+
+/// Wall seconds of this process in each stage of the distributed solver (cheap
+/// per-stage accumulation, no I/O in the loop; read once for the run report).
+pub fn stage_seconds() -> Vec<(&'static str, f64)> {
+    (0..8)
+        .map(|i| {
+            (
+                STAGES[i],
+                STAGE_NANOS[i].load(Ordering::Relaxed) as f64 * 1e-9,
+            )
+        })
+        .collect()
+}
+fn stage_add(i: usize, start: Instant) {
+    STAGE_NANOS[i].fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+}
+
 struct Layout {
     n: usize,
     rows: RowBlock,
@@ -67,6 +98,7 @@ fn apply_distributed<C: Collective>(
     op: &dyn RealLinearOperator,
     x_local: &RealMatrix,
 ) -> Result<RealMatrix, SolverError> {
+    let apply_start = Instant::now();
     let w = x_local.cols();
     let n = layout.n;
     let full = gather_full(comm, layout, x_local)?;
@@ -79,7 +111,9 @@ fn apply_distributed<C: Collective>(
     let mut mine = RealMatrix::zeros(n, owned)?;
     if owned > 0 {
         let x = RealMatrix::new(n, owned, full.as_slice()[first * n..last * n].to_vec())?;
+        let op_start = Instant::now();
         op.apply_block(&x, &mut mine)?;
+        stage_add(6, op_start);
         if mine.rows() != n
             || mine.cols() != owned
             || mine.as_slice().iter().any(|v| !v.is_finite())
@@ -99,7 +133,9 @@ fn apply_distributed<C: Collective>(
     let mut products = vec![0.0; n * w];
     comm.allgatherv_f64(mine.as_slice(), &col_counts, &mut products)
         .map_err(comm_error)?;
-    local_rows(layout, &RealMatrix::new(n, w, products)?)
+    let out = local_rows(layout, &RealMatrix::new(n, w, products)?);
+    stage_add(5, apply_start);
+    out
 }
 
 /// Sequential modified Gram-Schmidt inside the panel (two passes per column), the
@@ -316,6 +352,8 @@ impl crate::RealDavidson {
         let mut history = Vec::with_capacity(self.max_iterations);
         let (mut restarts, mut contractions, mut certificates) = (0usize, 0usize, 0usize);
         let mut previous = vec![f64::NAN; bands];
+        let mut reduced_width = 0usize;
+        let mut reduced_prev = RealMatrix::zeros(1, 1)?;
         let mut max_basis = 0usize;
         let buffer: Vec<bool> = (0..bands).map(|j| j >= policy.strict_bands).collect();
 
@@ -323,22 +361,44 @@ impl crate::RealDavidson {
             let m = basis.cols();
             max_basis = max_basis.max(m);
             // Reduced matrix V^T HV (replicated), symmetrised from the upper triangle.
+            // Incremental, as in the serial solver: only the columns added since the last
+            // iteration are formed (m x new products); the rest is reused.
+            let t0 = Instant::now();
             let mut reduced = RealMatrix::zeros(m, m)?;
-            gram(comm, &mut ws, &basis, &products, &mut reduced)?;
-            for j in 0..m {
-                for i in j + 1..m {
-                    let v = reduced[(j, i)];
-                    reduced[(i, j)] = v;
+            for c in 0..reduced_width {
+                for r in 0..reduced_width {
+                    reduced[(r, c)] = reduced_prev[(r, c)];
                 }
             }
+            let fresh = m - reduced_width;
+            let mut fresh_products = RealMatrix::zeros(nl, fresh)?;
+            fresh_products
+                .as_mut_slice()
+                .copy_from_slice(&products.as_slice()[reduced_width * nl..m * nl]);
+            let mut block = RealMatrix::zeros(m, fresh)?;
+            gram(comm, &mut ws, &basis, &fresh_products, &mut block)?;
+            for c in reduced_width..m {
+                for r in 0..=c {
+                    let v = block[(r, c - reduced_width)];
+                    reduced[(r, c)] = v;
+                    reduced[(c, r)] = v;
+                }
+            }
+            reduced_width = m;
+            stage_add(0, t0);
+            reduced_prev = reduced.clone();
             let mut values = vec![0.0; m];
             let mut coefficients = RealMatrix::zeros(m, m)?;
+            let t0 = Instant::now();
             eig.solve_into(&reduced, &mut values, &mut coefficients)?;
+            stage_add(1, t0);
+            let t0 = Instant::now();
             let lowest = RealMatrix::new(m, bands, coefficients.as_slice()[..m * bands].to_vec())?;
             let mut vectors = RealMatrix::zeros(nl, bands)?;
             let mut rotated = RealMatrix::zeros(nl, bands)?;
             rotate_local(&mut ws, &basis, &lowest, &mut vectors)?;
             rotate_local(&mut ws, &products, &lowest, &mut rotated)?;
+            stage_add(2, t0);
             let residual_of = |hv: &RealMatrix,
                                v: &RealMatrix,
                                comm: &C|
@@ -355,7 +415,9 @@ impl crate::RealDavidson {
                     .collect();
                 Ok((r, norms))
             };
+            let t0 = Instant::now();
             let (mut residual_block, mut residuals) = residual_of(&rotated, &vectors, comm)?;
+            stage_add(3, t0);
             let mut certified = false;
             let mut trusted = true;
             if !ritz
@@ -432,6 +494,7 @@ impl crate::RealDavidson {
             }
             if !trusted || basis.cols() + corrections.cols() > capacity {
                 restarts += 1;
+                reduced_width = 0;
                 let mut defect = RealMatrix::zeros(bands, bands)?;
                 gram(comm, &mut ws, &vectors, &vectors, &mut defect)?;
                 let mut worst = 0.0_f64;
@@ -450,7 +513,9 @@ impl crate::RealDavidson {
                     applications += basis.cols();
                 }
             }
+            let t0 = Instant::now();
             let mut extra = orthonormalize(comm, &mut ws, Some(&basis), &corrections)?;
+            stage_add(4, t0);
             if extra.cols() == 0 {
                 let w = bands.min(capacity - basis.cols());
                 let random = RealMatrix::new(n, w, (0..n * w).map(|_| rng.next()).collect())?;

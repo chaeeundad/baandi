@@ -642,6 +642,10 @@ pub fn execute_mode(
             "ranks": crate::parallel::size(),
             "rank": crate::parallel::rank(),
             "distributed_solves": dft_engine::parallel::distributed_solves(),
+            "stages": dft_engine::parallel::stage_seconds()
+                .into_iter()
+                .map(|(name, seconds)| json!({"stage": name, "seconds": seconds}))
+                .collect::<Vec<_>>(),
             "collectives": dft_engine::parallel::collective_stats()
                 .into_iter()
                 .map(|(op, calls, seconds)| json!({"op": op, "calls": calls, "seconds": seconds}))

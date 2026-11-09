@@ -877,7 +877,8 @@ pub fn symmetric_eigh(a: &RealMatrix) -> Result<(Vec<f64>, RealMatrix), LinalgEr
 /// backend algorithm, strides and sequential arithmetic match symmetric_eigh.
 pub struct RealEighWorkspace {
     capacity: usize,
-    /// MKL `dsyevd` instead of faer when built with `mkl` and `BAANDI_MKL_EVD=on`.
+    /// MKL `dsyevd` instead of faer when built with `mkl`, unless `BAANDI_MKL_EVD=off`
+    /// (default on after the dev08 distribution evidence, ledger MKL-EVD).
     #[cfg(feature = "mkl")]
     mkl: Option<dft_mkl::SymmetricEigen>,
     diagonal: Vec<f64>,
@@ -900,7 +901,7 @@ impl RealEighWorkspace {
         Ok(Self {
             capacity,
             #[cfg(feature = "mkl")]
-            mkl: (std::env::var("BAANDI_MKL_EVD").as_deref() == Ok("on"))
+            mkl: (std::env::var("BAANDI_MKL_EVD").as_deref() != Ok("off"))
                 .then(|| dft_mkl::SymmetricEigen::new(capacity).ok())
                 .flatten(),
             diagonal: vec![0.; capacity],

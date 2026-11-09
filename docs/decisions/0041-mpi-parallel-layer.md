@@ -25,6 +25,9 @@ Measured (Open MPI 5.0.8, shared memory, one socket, us per call, P = 2 / 4 / 8)
 4. Keep ranks inside one socket while P <= 8 (cross-socket reductions cost 1.15 to 1.9x).
 5. Multi-node evidence is not obtainable on dev08 (shared memory and TCP only); M3 stays a design item.
 
+## Reduction rule (decided 2026-11-09 from the dev08 Rust measurements)
+Rust `tree_sum_f64` against `ordered_sum_f64` (us per call, 408 x 68 block): P=2 94 against 78, P=4 154 against 247, P=8 228 against 454; 68 x 68: 17 / 13, 29 / 38, 45 / 87; 16 x 68: 6.7 / 4.5, 11.8 / 12.3, 14.1 / 28.3; MPI_Allreduce (C, not deterministic by contract) 43.6 / 90 / 127 for 408 x 68. The tree is the single deterministic reduction for every rank count (its P=2 penalty is 16 us per 408 x 68 call, about 20 ms per run); `ordered_sum_f64` stays as a reference and test oracle. The two differ by 1 ulp at P=8 (identical at P=2 and 4), so the rule never switches between them by size or rank count: for a fixed rank count the result is one fixed function. Measured at the new default (si32 strict, MKL, unperturbed): T=8 8.179 s (QE 8 ranks 0.827 s), SCF 10, Davidson 91, H columns 3397; the Davidson count against QE falls from 12.1x to 3.6x, so the algebra and per-step cost remain the larger gap.
+
 ## Determinism contract
 - Rank count 1: bit-identical to the threads-only path (a hard gate).
 - Fixed rank count and thread count: bit-reproducible (reductions in a fixed order: allgather then a local ordered sum, never an order-undefined MPI_Allreduce on floating-point data; row blocks and band shares are fixed functions of rank count).

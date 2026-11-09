@@ -387,21 +387,49 @@ pub fn stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
     }
     // Recompute the center too: one grid adequate for the largest cutoff
     // isolates basis effects from FFT-grid changes. Production SCF is unchanged.
-    for (i, delta) in [0., steps[0], steps[1]].into_iter().enumerate() {
+    // The three scan SCF runs are independent and their results do not depend on
+    // the thread budget, so they run concurrently with a third of the budget each
+    // (rounded up); the energies are unchanged bit for bit.
+    let budget = state.options.threads.max(1);
+    let per_scan = budget.div_ceil(3).max(1);
+    let run_scan = |delta: f64| -> Result<f64, ScfError> {
         let mut options = state.options.clone();
         options.strain_reference = None;
         options.grid_override = Some(scan_dims);
         options.cutoff_hartree = c + delta;
+        options.threads = per_scan;
         // Standard profile first; a scan that fails to converge there (stall,
         // exhausted budget) is repeated with the caller's strict settings.
         let mut fast = options.clone();
         fast.standard = Some(crate::StandardProfile {
             threshold_ha: SCAN_THRESHOLD_HA,
         });
-        energies[i] = match energy_at(state, state.cell, fast) {
-            Ok(e) => e,
-            Err(_) => energy_at(state, state.cell, options)?,
-        };
+        match energy_at(state, state.cell, fast) {
+            Ok(e) => Ok(e),
+            Err(_) => energy_at(state, state.cell, options),
+        }
+    };
+    if budget >= 3 {
+        let results: Vec<Result<f64, ScfError>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = [0., steps[0], steps[1]]
+                .into_iter()
+                .map(|delta| {
+                    let run = &run_scan;
+                    scope.spawn(move || run(delta))
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| h.join().expect("scan thread"))
+                .collect()
+        });
+        for (i, r) in results.into_iter().enumerate() {
+            energies[i] = r?;
+        }
+    } else {
+        for (i, delta) in [0., steps[0], steps[1]].into_iter().enumerate() {
+            energies[i] = run_scan(delta)?;
+        }
     }
     let estimates = [0, 1].map(|i| {
         2. * c / (3. * state.cell.volume_bohr3()) * (energies[i + 1] - energies[0]) / steps[i]

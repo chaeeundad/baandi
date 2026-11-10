@@ -337,3 +337,143 @@ fn serial_clustered_counts() {
     }
     println!("SERIALCOUNTS{line}");
 }
+
+// ---- M2c: Davidson directly on an arbitrary (non-contiguous) row partition ----
+use dft_mpi::Collective;
+use dft_solvers::distributed_davidson::DistributedRealOperator;
+
+fn owner(r: usize, ranks: usize) -> usize {
+    (r / 3 + r % 2 + r / 17) % ranks
+}
+
+struct RowsOp<'a> {
+    a: &'a RealMatrix,
+    ranks: usize,
+    rows: Vec<usize>,
+    pool: Arc<WorkerPool>,
+}
+impl<'a> RowsOp<'a> {
+    fn new(a: &'a RealMatrix, rank: usize, ranks: usize) -> Self {
+        let rows = (0..a.rows()).filter(|&r| owner(r, ranks) == rank).collect();
+        Self {
+            a,
+            ranks,
+            rows,
+            pool: WorkerPool::new(1).unwrap(),
+        }
+    }
+}
+impl DistributedRealOperator for RowsOp<'_> {
+    fn global_len(&self) -> usize {
+        self.a.rows()
+    }
+    fn local_rows(&self) -> &[usize] {
+        &self.rows
+    }
+    fn worker_pool(&self) -> Option<Arc<WorkerPool>> {
+        Some(self.pool.clone())
+    }
+    fn apply_block<C: Collective>(
+        &mut self,
+        comm: &C,
+        x: &RealMatrix,
+        y: &mut RealMatrix,
+    ) -> Result<(), SolverError> {
+        let n = self.a.rows();
+        let m = x.cols();
+        let rows_of =
+            |r: usize| -> Vec<usize> { (0..n).filter(|&i| owner(i, self.ranks) == r).collect() };
+        let counts: Vec<usize> = (0..self.ranks).map(|r| rows_of(r).len() * m).collect();
+        let mut flat = vec![0.0; n * m];
+        comm.allgatherv_f64(x.as_slice(), &counts, &mut flat)
+            .unwrap();
+        let mut full = vec![0.0; n * m];
+        let mut at = 0;
+        for r in 0..self.ranks {
+            let rows_r = rows_of(r);
+            let c = rows_r.len();
+            for j in 0..m {
+                for (k, &g) in rows_r.iter().enumerate() {
+                    full[j * n + g] = flat[at + j * c + k];
+                }
+            }
+            at += c * m;
+        }
+        for j in 0..m {
+            for (l, &gr) in self.rows.iter().enumerate() {
+                y[(l, j)] = (0..n).map(|k| self.a[(gr, k)] * full[j * n + k]).sum();
+            }
+        }
+        Ok(())
+    }
+}
+
+fn bits_of(m: &RealMatrix) -> Vec<u64> {
+    m.as_slice().iter().map(|x| x.to_bits()).collect()
+}
+
+fn check_rows_case(op: &Operator, diag: &[f64], bands: usize, pol: BandTolerances, tol: f64) {
+    let n = op.dimension();
+    let s = RealDavidson {
+        bands,
+        tolerance: tol,
+        max_iterations: 400,
+        max_subspace: 6 * bands,
+        seed: 42,
+    };
+    let serial = s.solve_with_band_tolerances(op, None, diag, pol).unwrap();
+    for ranks in [2usize, 3, 4, 5] {
+        let run = || {
+            simulate(ranks, |comm| {
+                let mut rop = RowsOp::new(&op.a, comm.rank(), ranks);
+                let dl: Vec<f64> = rop.rows.iter().map(|&r| diag[r]).collect();
+                s.solve_distributed_rows(comm, &mut rop, None, &dl, pol, false, true, 6)
+                    .unwrap()
+            })
+        };
+        let results = run();
+        for r in &results {
+            for (a, b) in r.eigenvalues.iter().zip(&serial.eigenvalues) {
+                assert!((a - b).abs() < 1e-9, "P={ranks}: {a} vs {b}");
+            }
+            for j in 0..pol.strict_bands {
+                let col = &r.eigenvectors.as_slice()[j * n..(j + 1) * n];
+                let mut y = vec![0.0; n];
+                op.apply(col, &mut y).unwrap();
+                let res: f64 = y
+                    .iter()
+                    .zip(col)
+                    .map(|(y, c)| (y - r.eigenvalues[j] * c).powi(2))
+                    .sum::<f64>()
+                    .sqrt();
+                assert!(res < 1e-8, "P={ranks} band {j} residual {res}");
+            }
+            assert_eq!(bits_of(&r.eigenvectors), bits_of(&results[0].eigenvectors));
+            assert_eq!(r.eigenvalues, results[0].eigenvalues);
+        }
+        let again = run();
+        assert_eq!(
+            bits_of(&results[0].eigenvectors),
+            bits_of(&again[0].eigenvectors),
+            "not reproducible at P={ranks}"
+        );
+    }
+}
+
+#[test]
+fn rows_solver_matches_serial_on_a_scattered_partition() {
+    let (op, diag) = fixture(260);
+    check_rows_case(&op, &diag, 9, policy(9), 1e-11);
+}
+
+#[test]
+fn rows_solver_matches_serial_on_clustered_spectra() {
+    for group in [1usize, 4] {
+        let (op, diag) = spectrum_fixture(64, group);
+        let pol = BandTolerances {
+            strict_bands: 4,
+            buffer_tolerance: 1e-5,
+        };
+        check_rows_case(&op, &diag, 6, pol, 1e-9);
+    }
+}

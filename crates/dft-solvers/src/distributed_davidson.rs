@@ -7,7 +7,7 @@
 //! construction); this solver is used for two or more ranks.
 use crate::{
     BandTolerances, RealLinearOperator, SolverError,
-    distributed::{RowBlock, column_norms_squared, gram, project_out, rotate_local},
+    distributed::{column_norms_squared, gram, project_out, rotate_local},
     real_davidson::{RealEigenSolution, free_electron_initial_guess},
 };
 use dft_mpi::{Collective, block_counts, block_displacements};
@@ -16,6 +16,28 @@ use dft_numerics::{
     pool::WorkerPool,
     real::{RealEighWorkspace, RealGemmWorkspace, RealMatrix},
 };
+
+/// A real symmetric operator whose basis rows are distributed over the ranks of a
+/// communicator (M2c). Local row `l` of this rank is global (ORC) row
+/// `local_rows()[l]`; the rank partitions must cover `0..global_len()` exactly once.
+pub trait DistributedRealOperator {
+    fn global_len(&self) -> usize;
+    fn local_rows(&self) -> &[usize];
+    fn worker_pool(&self) -> Option<std::sync::Arc<WorkerPool>> {
+        None
+    }
+    fn inner_threads(&self) -> usize {
+        1
+    }
+    /// y_local = H x_local for the local rows; every rank calls with the same column
+    /// count (the call contains collectives).
+    fn apply_block<C: Collective>(
+        &mut self,
+        comm: &C,
+        x_local: &RealMatrix,
+        y_local: &mut RealMatrix,
+    ) -> Result<(), SolverError>;
+}
 
 fn comm_error(e: dft_mpi::MpiError) -> SolverError {
     SolverError::Application(e.to_string())
@@ -52,16 +74,42 @@ fn stage_add(i: usize, start: Instant) {
     STAGE_NANOS[i].fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 }
 
+/// Row partition: `index[r]` lists the global row of every local row of rank `r`
+/// (contiguous blocks for M1, the stick partition for M2c). Algebra helpers only
+/// use the local row count; the partition matters at the replicated interface.
 struct Layout {
     n: usize,
-    rows: RowBlock,
+    rank: usize,
     counts: Vec<usize>,
-    displs: Vec<usize>,
+    index: Vec<Vec<usize>>,
+}
+impl Layout {
+    fn nl(&self) -> usize {
+        self.counts[self.rank]
+    }
+    fn contiguous(n: usize, rank: usize, ranks: usize) -> Self {
+        let counts = block_counts(n, ranks);
+        let displs = block_displacements(&counts);
+        let index = (0..ranks)
+            .map(|r| (displs[r]..displs[r] + counts[r]).collect())
+            .collect();
+        Self {
+            n,
+            rank,
+            counts,
+            index,
+        }
+    }
 }
 
-/// Rows of a replicated matrix owned by this rank, as a row block.
+/// Rows of a replicated matrix owned by this rank.
 fn local_rows(layout: &Layout, full: &RealMatrix) -> Result<RealMatrix, SolverError> {
-    layout.rows.scatter(full)
+    let mine = &layout.index[layout.rank];
+    let mut data = Vec::with_capacity(mine.len() * full.cols());
+    for column in full.as_slice().chunks(full.rows().max(1)).take(full.cols()) {
+        data.extend(mine.iter().map(|&r| column[r]));
+    }
+    Ok(RealMatrix::new(mine.len(), full.cols(), data)?)
 }
 
 /// Gather the full n x w matrix on every rank from the row blocks (one allgatherv).
@@ -80,8 +128,9 @@ fn gather_full<C: Collective>(
     for (r, &rc) in layout.counts.iter().enumerate() {
         for j in 0..w {
             let src = &flat[at + j * rc..at + (j + 1) * rc];
-            data[j * layout.n + layout.displs[r]..j * layout.n + layout.displs[r] + rc]
-                .copy_from_slice(src);
+            for (&g, &v) in layout.index[r].iter().zip(src) {
+                data[j * layout.n + g] = v;
+            }
         }
         at += rc * w;
     }
@@ -271,12 +320,144 @@ impl crate::RealDavidson {
         capacity_per_band: usize,
     ) -> Result<RealEigenSolution, SolverError> {
         let n = op.dimension();
+        if diagonal.len() != n {
+            return Err(SolverError::InvalidParameter("bands or diagonal length"));
+        }
+        let layout = Layout::contiguous(n, comm.rank(), comm.size());
+        let nl = layout.nl();
+        let offset = layout.index[comm.rank()].first().copied().unwrap_or(0);
+        let diag_local = &diagonal[offset..offset + nl];
+        let pool = match op.worker_pool() {
+            Some(p) => p,
+            None => WorkerPool::new(op.inner_threads())
+                .map_err(|e| SolverError::Application(e.to_string()))?,
+        };
+        let mut apply = |x: &RealMatrix| apply_distributed(comm, &layout, op, x);
+        self.solve_core(
+            comm,
+            &layout,
+            pool,
+            &mut apply,
+            initial,
+            diag_local,
+            Some(diagonal),
+            policy,
+            ritz,
+            certify,
+            capacity_per_band,
+        )
+    }
+
+    /// Distributed solve directly on the row partition of a distributed operator
+    /// (M2c): the basis and the products stay row-distributed, H is the operator's
+    /// own distributed apply (no gather of the block, no product allgather), and
+    /// the eigenvectors are gathered to the replicated interface only at the end,
+    /// in global (ORC) row order. `initial` is the replicated start (global rows),
+    /// `diagonal_local` the preconditioner diagonal on the operator's local rows.
+    /// All ranks must call it together with the same replicated arguments.
+    #[allow(clippy::too_many_arguments)]
+    pub fn solve_distributed_rows<C: Collective, O: DistributedRealOperator>(
+        &self,
+        comm: &C,
+        op: &mut O,
+        initial: Option<&RealMatrix>,
+        diagonal_local: &[f64],
+        policy: BandTolerances,
+        ritz: bool,
+        certify: bool,
+        capacity_per_band: usize,
+    ) -> Result<RealEigenSolution, SolverError> {
+        let n = op.global_len();
+        let mine: Vec<usize> = op.local_rows().to_vec();
+        if diagonal_local.len() != mine.len() || mine.iter().any(|&r| r >= n) {
+            return Err(SolverError::InvalidParameter("bands or diagonal length"));
+        }
+        // Setup (once per solve): every rank learns the row lists of all ranks.
+        let ranks = comm.size();
+        let mut counts_f = vec![0.0; ranks];
+        comm.allgatherv_f64(&[mine.len() as f64], &vec![1; ranks], &mut counts_f)
+            .map_err(comm_error)?;
+        let counts: Vec<usize> = counts_f.iter().map(|&c| c as usize).collect();
+        if counts.iter().sum::<usize>() != n {
+            return Err(SolverError::InvalidParameter(
+                "row partition does not cover the basis",
+            ));
+        }
+        let mut flat = vec![0.0; n];
+        let mine_f: Vec<f64> = mine.iter().map(|&r| r as f64).collect();
+        comm.allgatherv_f64(&mine_f, &counts, &mut flat)
+            .map_err(comm_error)?;
+        let mut at = 0;
+        let index: Vec<Vec<usize>> = counts
+            .iter()
+            .map(|&c| {
+                let v = flat[at..at + c].iter().map(|&r| r as usize).collect();
+                at += c;
+                v
+            })
+            .collect();
+        let layout = Layout {
+            n,
+            rank: comm.rank(),
+            counts,
+            index,
+        };
+        let pool = match op.worker_pool() {
+            Some(p) => p,
+            None => WorkerPool::new(op.inner_threads())
+                .map_err(|e| SolverError::Application(e.to_string()))?,
+        };
+        let nl = layout.nl();
+        let mut apply = |x: &RealMatrix| -> Result<RealMatrix, SolverError> {
+            let start = Instant::now();
+            let mut y = RealMatrix::zeros(nl, x.cols())?;
+            op.apply_block(comm, x, &mut y)?;
+            stage_add(5, start);
+            stage_add(6, start);
+            if y.as_slice().iter().any(|v| !v.is_finite()) {
+                return Err(SolverError::Application(
+                    "operator returned an invalid block".into(),
+                ));
+            }
+            Ok(y)
+        };
+        self.solve_core(
+            comm,
+            &layout,
+            pool,
+            &mut apply,
+            initial,
+            diagonal_local,
+            None,
+            policy,
+            ritz,
+            certify,
+            capacity_per_band,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn solve_core<C: Collective>(
+        &self,
+        comm: &C,
+        layout: &Layout,
+        pool: std::sync::Arc<WorkerPool>,
+        apply: &mut dyn FnMut(&RealMatrix) -> Result<RealMatrix, SolverError>,
+        initial: Option<&RealMatrix>,
+        diag_local: &[f64],
+        full_diagonal: Option<&[f64]>,
+        policy: BandTolerances,
+        ritz: bool,
+        certify: bool,
+        capacity_per_band: usize,
+    ) -> Result<RealEigenSolution, SolverError> {
+        let n = layout.n;
         if !(2..=12).contains(&capacity_per_band) {
             return Err(SolverError::InvalidParameter(
                 "davidson_capacity_per_band must be 2 to 12",
             ));
         }
-        if diagonal.len() != n || self.bands == 0 || self.bands > n {
+        if self.bands == 0 || self.bands > n {
             return Err(SolverError::InvalidParameter("bands or diagonal length"));
         }
         if !self.tolerance.is_finite()
@@ -293,38 +474,41 @@ impl crate::RealDavidson {
         }
         let bands = self.bands;
         let capacity = self.max_subspace.max(bands * capacity_per_band).min(n);
-        let ranks = comm.size();
-        let rank = comm.rank();
-        let counts = block_counts(n, ranks);
-        let displs = block_displacements(&counts);
-        let layout = Layout {
-            n,
-            rows: RowBlock::new(n, rank, ranks),
-            counts: counts.clone(),
-            displs,
-        };
-        let nl = layout.rows.local_rows();
-        let diag_local = &diagonal[layout.rows.offset()..layout.rows.offset() + nl];
-        let pool = match op.worker_pool() {
-            Some(p) => p,
-            None => WorkerPool::new(op.inner_threads())
-                .map_err(|e| SolverError::Application(e.to_string()))?,
-        };
-        let mut ws = RealGemmWorkspace::with_pool(counts[0].max(1), capacity.max(1), pool)?;
+        let nl = layout.nl();
+        let max_rows = layout.counts.iter().copied().max().unwrap_or(1);
+        let mut ws = RealGemmWorkspace::with_pool(max_rows.max(1), capacity.max(1), pool)?;
         let mut eig = RealEighWorkspace::new(capacity)?;
         let mut rng = Rng(self.seed);
 
         // Initial basis.
         let start = match initial {
             Some(x) => x.clone(),
-            None => free_electron_initial_guess(diagonal, bands)?,
+            None => {
+                let full: Vec<f64> = match full_diagonal {
+                    Some(d) => d.to_vec(),
+                    None => {
+                        let mut flat = vec![0.0; n];
+                        comm.allgatherv_f64(diag_local, &layout.counts, &mut flat)
+                            .map_err(comm_error)?;
+                        let mut d = vec![0.0; n];
+                        let mut at = 0;
+                        for (r, &c) in layout.counts.iter().enumerate() {
+                            for (&g, &v) in layout.index[r].iter().zip(&flat[at..at + c]) {
+                                d[g] = v;
+                            }
+                            at += c;
+                        }
+                        d
+                    }
+                };
+                free_electron_initial_guess(&full, bands)?
+            }
         };
-        let mut basis = orthonormalize(comm, &mut ws, None, &local_rows(&layout, &start)?)?;
+        let mut basis = orthonormalize(comm, &mut ws, None, &local_rows(layout, &start)?)?;
         while basis.cols() < bands {
             let w = bands - basis.cols();
             let random = RealMatrix::new(n, w, (0..n * w).map(|_| rng.next()).collect())?;
-            let extra =
-                orthonormalize(comm, &mut ws, Some(&basis), &local_rows(&layout, &random)?)?;
+            let extra = orthonormalize(comm, &mut ws, Some(&basis), &local_rows(layout, &random)?)?;
             if extra.cols() == 0 {
                 return Err(SolverError::InvalidParameter(
                     "unable to complete initial basis",
@@ -333,7 +517,7 @@ impl crate::RealDavidson {
             append_columns(&mut basis, &extra)?;
         }
         let mut applications = 0usize;
-        let mut products = apply_distributed(comm, &layout, op, &basis)?;
+        let mut products = apply(&basis)?;
         applications += basis.cols();
 
         let threshold = |j: usize| {
@@ -426,7 +610,7 @@ impl crate::RealDavidson {
                     || (iteration == self.max_iterations && meets_strict(&residuals)))
             {
                 certificates += 1;
-                let actual = apply_distributed(comm, &layout, op, &vectors)?;
+                let actual = apply(&vectors)?;
                 applications += bands;
                 (residual_block, residuals) = residual_of(&actual, &vectors, comm)?;
                 certified = true;
@@ -448,7 +632,7 @@ impl crate::RealDavidson {
                 || (iteration == self.max_iterations
                     && converged[..policy.strict_bands].iter().all(|&b| b));
             if finished {
-                let full = gather_full(comm, &layout, &vectors)?;
+                let full = gather_full(comm, layout, &vectors)?;
                 return Ok(RealEigenSolution {
                     eigenvalues: values[..bands].to_vec(),
                     eigenvectors: full,
@@ -509,7 +693,7 @@ impl crate::RealDavidson {
                     products = rotated.clone();
                 } else {
                     basis = orthonormalize(comm, &mut ws, None, &vectors)?;
-                    products = apply_distributed(comm, &layout, op, &basis)?;
+                    products = apply(&basis)?;
                     applications += basis.cols();
                 }
             }
@@ -519,8 +703,7 @@ impl crate::RealDavidson {
             if extra.cols() == 0 {
                 let w = bands.min(capacity - basis.cols());
                 let random = RealMatrix::new(n, w, (0..n * w).map(|_| rng.next()).collect())?;
-                extra =
-                    orthonormalize(comm, &mut ws, Some(&basis), &local_rows(&layout, &random)?)?;
+                extra = orthonormalize(comm, &mut ws, Some(&basis), &local_rows(layout, &random)?)?;
             }
             if extra.cols() == 0 {
                 return Err(SolverError::NotConverged {
@@ -529,7 +712,7 @@ impl crate::RealDavidson {
                     residuals,
                 });
             }
-            let extra_products = apply_distributed(comm, &layout, op, &extra)?;
+            let extra_products = apply(&extra)?;
             applications += extra.cols();
             append_columns(&mut products, &extra_products)?;
             append_columns(&mut basis, &extra)?;

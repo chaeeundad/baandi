@@ -108,3 +108,39 @@ fn distributed_with_threads_takes_the_distributed_path_and_keeps_iterations() {
 fn total_davidson(r: &ScfResult) -> usize {
     r.history.iter().map(|h| h.davidson_iterations).sum()
 }
+
+fn run_m2(kind: usize, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult {
+    parallel::set_m2_override(Some(true));
+    let r = run(kind, comm);
+    parallel::set_m2_override(None);
+    r
+}
+
+#[test]
+fn m2c_stick_row_scf_matches_threads_only() {
+    // Cubic and skewed cells; the M2c path is selected per thread (no env mutation).
+    assert!(!parallel::m2_enabled(), "M2 must be off by default");
+    for kind in 0..2 {
+        let serial = run(kind, None);
+        for ranks in [2usize, 3] {
+            let before = parallel::distributed_rows_solves();
+            let results = simulate(ranks, |comm: &SimRank| {
+                run_m2(kind, Some(Arc::new(comm.clone())))
+            });
+            assert!(
+                parallel::distributed_rows_solves() > before,
+                "M2c path not taken"
+            );
+            for r in &results {
+                let de = (r.total_hartree() - serial.total_hartree()).abs();
+                println!("M2c kind {kind} P={ranks}: dE {de:e} Ha");
+                assert!(de < 5e-9, "kind {kind} P={ranks}: dE {de:e}");
+                assert_eq!(
+                    r.total_hartree().to_bits(),
+                    results[0].total_hartree().to_bits(),
+                    "ranks disagree"
+                );
+            }
+        }
+    }
+}

@@ -18,6 +18,11 @@ thread_local! {
     // simulator registers one per simulated rank.
     static COMM: RefCell<Option<Shared>> = const { RefCell::new(None) };
 }
+thread_local! {
+    // Test-only per-thread override of BAANDI_MPI_M2 (simulated ranks run on their own threads).
+    static M2_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+static DISTRIBUTED_ROWS_SOLVES: AtomicUsize = AtomicUsize::new(0);
 static DISTRIBUTED_SOLVES: AtomicUsize = AtomicUsize::new(0);
 // Per-operation call counts and wall nanoseconds spent inside collectives
 // (allgatherv, tree_sum, bcast, alltoall, barrier), process-wide.
@@ -44,6 +49,28 @@ fn timed<R>(op: usize, f: impl FnOnce() -> R) -> R {
     CALLS[op].fetch_add(1, Ordering::Relaxed);
     NANOS[op].fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
     r
+}
+
+/// Stick-row distributed Davidson (MPI stage M2c) requested: `BAANDI_MPI_M2=on`
+/// (default off) unless overridden for the calling thread by `set_m2_override`.
+pub fn m2_enabled() -> bool {
+    M2_OVERRIDE
+        .with(|o| o.get())
+        .unwrap_or_else(|| std::env::var("BAANDI_MPI_M2").is_ok_and(|v| v == "on"))
+}
+
+/// Override `BAANDI_MPI_M2` for the calling thread (tests); `None` restores the environment.
+pub fn set_m2_override(value: Option<bool>) {
+    M2_OVERRIDE.with(|o| o.set(value));
+}
+
+/// Number of eigensolves that ran on the M2c stick-row path in this process.
+pub fn distributed_rows_solves() -> usize {
+    DISTRIBUTED_ROWS_SOLVES.load(Ordering::Relaxed)
+}
+
+pub(crate) fn count_distributed_rows_solve() {
+    DISTRIBUTED_ROWS_SOLVES.fetch_add(1, Ordering::Relaxed);
 }
 
 /// Register (or clear) the communicator of the calling thread.

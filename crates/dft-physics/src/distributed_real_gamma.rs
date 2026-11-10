@@ -133,6 +133,8 @@ pub struct DistributedRealHamiltonian {
     weights: RealMatrix,
     image: RealMatrix,
     gemm: RealGemmWorkspace,
+    source_identity: Arc<()>,
+    pool: Arc<WorkerPool>,
 }
 
 impl DistributedRealHamiltonian {
@@ -300,13 +302,32 @@ impl DistributedRealHamiltonian {
             reduced: RealMatrix::zeros(count, capacity)?,
             weights: RealMatrix::zeros(count, capacity)?,
             image: RealMatrix::zeros(n_loc, capacity)?,
-            gemm: RealGemmWorkspace::with_pool(n_loc, count.max(capacity), pool)?,
+            gemm: RealGemmWorkspace::with_pool(n_loc, count.max(capacity), pool.clone())?,
+            source_identity: source.operator_identity(),
+            pool,
             projectors,
             coupling,
             count,
             rows,
             fft,
         })
+    }
+
+    /// Refresh the local potential from the updated complex Hamiltonian of the same
+    /// operator (same basis, projectors and kinetic term), as
+    /// `RealHamiltonian::update_from_complex` does; false when `source` is another
+    /// operator (the caller rebuilds).
+    pub fn update_from_complex(&mut self, source: &Hamiltonian, basis: &PlaneWaveBasis) -> bool {
+        if !Arc::ptr_eq(&self.source_identity, &source.operator_identity())
+            || source.basis_momenta() != basis.momenta()
+            || basis.k_fractional() != [0.; 3]
+            || self.potential.len() != source.local_potential_values().len()
+        {
+            return false;
+        }
+        self.potential
+            .copy_from_slice(source.local_potential_values());
+        true
     }
 
     /// ORC row indices owned by this rank, ascending; local row l is ORC row `local_rows()[l]`.
@@ -545,5 +566,26 @@ impl DistributedRealHamiltonian {
             }
         }
         Ok(())
+    }
+}
+
+impl dft_solvers::distributed_davidson::DistributedRealOperator for DistributedRealHamiltonian {
+    fn global_len(&self) -> usize {
+        self.n_global
+    }
+    fn local_rows(&self) -> &[usize] {
+        &self.rows
+    }
+    fn worker_pool(&self) -> Option<Arc<WorkerPool>> {
+        Some(self.pool.clone())
+    }
+    fn apply_block<K: Collective>(
+        &mut self,
+        comm: &K,
+        x_local: &RealMatrix,
+        y_local: &mut RealMatrix,
+    ) -> Result<(), dft_solvers::SolverError> {
+        DistributedRealHamiltonian::apply_block(self, comm, x_local, y_local)
+            .map_err(|e| dft_solvers::SolverError::Application(e.to_string()))
     }
 }

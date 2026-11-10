@@ -2,8 +2,12 @@
 //! Completion is the only output boundary; downstream physics stays complex.
 use crate::{ScfError, ScfOptions};
 use dft_basis::PlaneWaveBasis;
+use dft_mpi::Collective;
 use dft_numerics::{RealMatrix, linalg::ComplexMatrix, pool::WorkerPool};
-use dft_physics::{hamiltonian::Hamiltonian, real_gamma::RealHamiltonian};
+use dft_physics::{
+    distributed_real_gamma::DistributedRealHamiltonian, hamiltonian::Hamiltonian,
+    real_gamma::RealHamiltonian,
+};
 use dft_solvers::{
     BandTolerances, EigenSolution, RealLinearOperator, SolverError, real_davidson::RealDavidson,
 };
@@ -60,6 +64,9 @@ pub(crate) struct RealSolveState {
     op: Operator,
     key: RealSolveKey,
     workspace: Option<dft_solvers::real_davidson::RealDavidsonWorkspace>,
+    /// Stick-distributed Hamiltonian of this rank (MPI stage M2c), built only when
+    /// `parallel::m2_enabled()` and a communicator with two or more ranks is active.
+    dist: Option<DistributedRealHamiltonian>,
 }
 
 #[derive(PartialEq, Eq)]
@@ -187,9 +194,31 @@ pub(crate) fn solve_real_gamma(
             },
             key,
             workspace: None,
+            dist: None,
         });
     }
     let state = state.as_mut().unwrap();
+    // M2c: the distributed Hamiltonian follows the SCF potential like the serial one.
+    match comm.as_ref().filter(|_| crate::parallel::m2_enabled()) {
+        Some(c) => {
+            let fresh = state
+                .dist
+                .as_mut()
+                .is_some_and(|d| d.update_from_complex(hamiltonian, basis));
+            if !fresh {
+                state.dist = DistributedRealHamiltonian::new(
+                    hamiltonian,
+                    basis,
+                    capacity,
+                    c.rank(),
+                    c.size(),
+                    pool.clone(),
+                )
+                .ok();
+            }
+        }
+        None => state.dist = None,
+    }
     let real = state.op.h.borrow();
     let half = real.half_sphere();
     let n = half.full_len();
@@ -225,9 +254,24 @@ pub(crate) fn solve_real_gamma(
     };
     drop(real);
     let op = &state.op;
+    let dist = state.dist.as_mut();
     // The SCF driver supplies the same ratcheted tolerance and band policy to
     // both representations. Standard returns remain explicitly uncertified.
-    let result = if let Some(comm) = &comm {
+    let result = if let (Some(comm), Some(dist)) = (&comm, dist) {
+        crate::parallel::count_distributed_solve();
+        crate::parallel::count_distributed_rows_solve();
+        let local_diagonal: Vec<f64> = dist.local_rows().iter().map(|&r| diagonal[r]).collect();
+        solver.solve_distributed_rows(
+            comm,
+            dist,
+            packed.as_ref(),
+            &local_diagonal,
+            policy,
+            options.standard.is_some(),
+            certify && options.standard.is_none(),
+            options.davidson_capacity_per_band,
+        )?
+    } else if let Some(comm) = &comm {
         crate::parallel::count_distributed_solve();
         solver.solve_distributed(
             comm,

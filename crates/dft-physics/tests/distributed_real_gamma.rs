@@ -101,6 +101,7 @@ struct Counting<'a> {
     inner: &'a SimRank,
     alltoall: Counter<usize>,
     tree: Counter<usize>,
+    gather: Counter<usize>,
 }
 impl Collective for Counting<'_> {
     fn rank(&self) -> usize {
@@ -113,6 +114,7 @@ impl Collective for Counting<'_> {
         self.inner.barrier()
     }
     fn allgatherv_f64(&self, l: &[f64], c: &[usize], o: &mut [f64]) -> Result<(), MpiError> {
+        self.gather.set(self.gather.get() + 1);
         self.inner.allgatherv_f64(l, c, o)
     }
     fn tree_sum_f64(&self, l: &[f64], o: &mut [f64]) -> Result<(), MpiError> {
@@ -148,6 +150,7 @@ fn distributed(
             inner: comm,
             alltoall: Counter::new(0),
             tree: Counter::new(0),
+            gather: Counter::new(0),
         };
         let xl = d.extract_local(x).unwrap();
         let mut yl = RealMatrix::zeros(xl.rows(), xl.cols()).unwrap();
@@ -276,4 +279,199 @@ fn row_partition_is_a_permutation_and_apply_does_not_reallocate() {
         }
         assert_eq!(p, y.as_slice().as_ptr());
     });
+}
+
+// ---- M2c: Davidson on the stick partition with the distributed H ----
+use dft_solvers::{BandTolerances, RealDavidson, RealLinearOperator, SolverError};
+
+struct SerialOp {
+    h: std::cell::RefCell<RealHamiltonian>,
+    n: usize,
+    pool: std::sync::Arc<WorkerPool>,
+}
+impl RealLinearOperator for SerialOp {
+    fn dimension(&self) -> usize {
+        self.n
+    }
+    fn worker_pool(&self) -> Option<std::sync::Arc<WorkerPool>> {
+        Some(self.pool.clone())
+    }
+    fn apply(&self, x: &[f64], y: &mut [f64]) -> Result<(), SolverError> {
+        let mut xi = RealMatrix::zeros(self.n, 1).unwrap();
+        xi.as_mut_slice().copy_from_slice(x);
+        let mut yo = RealMatrix::zeros(self.n, 1).unwrap();
+        self.apply_block(&xi, &mut yo)?;
+        y.copy_from_slice(yo.as_slice());
+        Ok(())
+    }
+    fn apply_block(&self, x: &RealMatrix, y: &mut RealMatrix) -> Result<(), SolverError> {
+        self.h
+            .borrow_mut()
+            .apply_block(x, y)
+            .map_err(|e| SolverError::Application(e.to_string()))
+    }
+}
+
+fn orc_diagonal(h: &Hamiltonian, plus: &[u32]) -> Vec<f64> {
+    let n = 2 * plus.len() - 1;
+    let mut d = vec![0.; n];
+    d[0] = h.kinetic_diagonal()[0];
+    for (i, &p) in plus.iter().enumerate().skip(1) {
+        d[2 * i - 1] = h.kinetic_diagonal()[p as usize];
+        d[2 * i] = d[2 * i - 1];
+    }
+    d
+}
+
+#[test]
+fn davidson_on_stick_partition_matches_serial_and_reports_collectives() {
+    let cases = [
+        ([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]], 2),
+        ([[6.4, 0.4, 0.2], [1., 7.3, 0.3], [0.5, 0.7, 8.4]], 3),
+    ];
+    let bands = 6;
+    let solver = RealDavidson {
+        bands,
+        tolerance: 1e-10,
+        max_iterations: 300,
+        max_subspace: 6 * bands,
+        seed: 42,
+    };
+    let pol = BandTolerances {
+        strict_bands: bands,
+        buffer_tolerance: 1e-10,
+    };
+    for (rows, atoms) in cases {
+        let (basis, h) = fixture(rows, atoms, 4.0);
+        let pool = WorkerPool::new(1).unwrap();
+        let real = RealHamiltonian::from_complex(&h, &basis, 6 * bands, pool.clone()).unwrap();
+        let n = real.half_sphere().full_len();
+        let diag = orc_diagonal(&h, real.half_sphere().plus());
+        let op = SerialOp {
+            h: std::cell::RefCell::new(real),
+            n,
+            pool,
+        };
+        let serial = solver
+            .solve_with_band_tolerances(&op, None, &diag, pol)
+            .unwrap();
+        for ranks in 2..=5usize {
+            let run = || {
+                simulate(ranks, |comm| {
+                    let (basis, h) = fixture(rows, atoms, 4.0);
+                    let mut d = DistributedRealHamiltonian::new(
+                        &h,
+                        &basis,
+                        6 * bands,
+                        comm.rank(),
+                        ranks,
+                        WorkerPool::new(1).unwrap(),
+                    )
+                    .unwrap();
+                    let dl: Vec<f64> = d.local_rows().iter().map(|&r| diag[r]).collect();
+                    let counting = Counting {
+                        inner: comm,
+                        alltoall: Counter::new(0),
+                        tree: Counter::new(0),
+                        gather: Counter::new(0),
+                    };
+                    let r = solver
+                        .solve_distributed_rows(&counting, &mut d, None, &dl, pol, false, true, 6)
+                        .unwrap();
+                    let rows_counts = (
+                        counting.gather.get(),
+                        counting.tree.get(),
+                        counting.alltoall.get(),
+                    );
+                    // The M1 path (gather the block, apply H to owned pairs, gather products).
+                    let counting1 = Counting {
+                        inner: comm,
+                        alltoall: Counter::new(0),
+                        tree: Counter::new(0),
+                        gather: Counter::new(0),
+                    };
+                    let real = RealHamiltonian::from_complex(
+                        &h,
+                        &basis,
+                        6 * bands,
+                        WorkerPool::new(1).unwrap(),
+                    )
+                    .unwrap();
+                    let op1 = SerialOp {
+                        h: std::cell::RefCell::new(real),
+                        n,
+                        pool: WorkerPool::new(1).unwrap(),
+                    };
+                    let r1 = solver
+                        .solve_distributed(&counting1, &op1, None, &diag, pol, false, true, 6)
+                        .unwrap();
+                    let m1_counts = (
+                        counting1.gather.get(),
+                        counting1.tree.get(),
+                        counting1.alltoall.get(),
+                    );
+                    (r, rows_counts, r1.iterations, m1_counts)
+                })
+            };
+            let results = run();
+            let bits =
+                |m: &RealMatrix| m.as_slice().iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+            for (r, rc, it1, m1c) in &results {
+                for (a, b) in r.eigenvalues.iter().zip(&serial.eigenvalues) {
+                    assert!((a - b).abs() < 1e-9, "P={ranks}: {a} vs {b}");
+                }
+                for j in 0..bands {
+                    let col = &r.eigenvectors.as_slice()[j * n..(j + 1) * n];
+                    let mut y = vec![0.; n];
+                    op.apply(col, &mut y).unwrap();
+                    let res = y
+                        .iter()
+                        .zip(col)
+                        .map(|(y, c)| (y - r.eigenvalues[j] * c).powi(2))
+                        .sum::<f64>()
+                        .sqrt();
+                    assert!(res < 1e-8, "P={ranks} band {j} residual {res}");
+                }
+                assert_eq!(bits(&r.eigenvectors), bits(&results[0].0.eigenvectors));
+                // Gathers: setup (counts, row lists) plus the final eigenvector gather,
+                // independent of the iteration count.
+                assert!(rc.0 <= 4, "allgatherv calls {}", rc.0);
+                let it = r.iterations as f64;
+                if std::ptr::eq(r, &results[0].0) {
+                    println!(
+                        "M2c n={n} P={ranks}: it={} rows (allgatherv,tree_sum,alltoall)/iteration = ({:.2},{:.2},{:.2}) total {:?}; M1 it={} per iteration = ({:.2},{:.2},{:.2}) total {:?}",
+                        r.iterations,
+                        rc.0 as f64 / it,
+                        rc.1 as f64 / it,
+                        rc.2 as f64 / it,
+                        rc,
+                        it1,
+                        m1c.0 as f64 / *it1 as f64,
+                        m1c.1 as f64 / *it1 as f64,
+                        m1c.2 as f64 / *it1 as f64,
+                        m1c
+                    );
+                }
+            }
+            let again = run();
+            assert_eq!(
+                bits(&results[0].0.eigenvectors),
+                bits(&again[0].0.eigenvectors),
+                "not reproducible at P={ranks}"
+            );
+        }
+    }
+}
+
+#[test]
+fn distributed_update_from_complex_follows_the_potential() {
+    let (basis, h) = fixture([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]], 2, 1.2);
+    let mut d =
+        DistributedRealHamiltonian::new(&h, &basis, 4, 0, 1, WorkerPool::new(1).unwrap()).unwrap();
+    assert!(d.update_from_complex(&h, &basis));
+    let (_, other) = fixture([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]], 2, 1.2);
+    assert!(
+        !d.update_from_complex(&other, &basis),
+        "a different operator must be rebuilt"
+    );
 }

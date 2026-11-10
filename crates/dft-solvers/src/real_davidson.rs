@@ -1,9 +1,11 @@
 //! Isolated ORC Davidson; no complex-path dispatch or arithmetic is changed.
 use crate::bordered::MAX_STREAK;
-use crate::davidson_stages::{B1Count, B5Count, Stage, Timers, b1_add, b5_add};
+use crate::davidson_stages::{
+    AlgebraCount, B1Count, B5Count, Stage, Timers, algebra_add, b1_add, b5_add,
+};
 pub use crate::davidson_stages::{
-    B1Counters, B1Mode, B5Counters, ResearchOptions, SketchKind, StageSeconds, WIDTH_LABELS,
-    b1_counters, b5_counters, stage_seconds,
+    AlgebraCounters, B1Counters, B1Mode, B5Counters, ResearchOptions, SketchKind, StageSeconds,
+    WIDTH_LABELS, algebra_counters, b1_counters, b5_counters, stage_seconds,
 };
 use crate::{BandTolerances, RealLinearOperator, SolverError};
 use dft_numerics::{
@@ -372,6 +374,7 @@ impl RealDavidson {
         // B6 (`BAANDI_B6=on`, default off): cache P^T V per basis column so the
         // return certificate skips its first projector product.
         let mut b6 = B6Cache::activate(b6_scratch, op, capacity, self.bands, options.b6);
+        projection.narrow = options.narrow_proj;
         let timers = Timers::new(options.stage_timers);
         let second_vector = SecondVector::from_env();
         let b1_active = options.b1.acts_on(ritz) && second_vector == SecondVector::Off;
@@ -481,7 +484,14 @@ impl RealDavidson {
             max_basis_dimension = max_basis_dimension.max(basis.cols());
             let m = basis.cols();
             let t = timers.start();
-            reduced_matrix_into(basis, products, reduced_width, gemm, reduced)?;
+            reduced_matrix_into(
+                basis,
+                products,
+                reduced_width,
+                gemm,
+                reduced,
+                options.narrow_reduced,
+            )?;
             timers.stop(t, Stage::Reduced);
             let prefix = reduced_width;
             reduced_width = m;
@@ -490,7 +500,13 @@ impl RealDavidson {
             // B5: one appended column on an unbroken base -> bordered update.
             let bordered = match b5.as_mut() {
                 Some(b) if prefix + 1 == m && b.order == prefix && b.streak < MAX_STREAK => {
-                    let done = b.update(gemm, reduced, &mut values[..m], coefficients)?;
+                    let done = b.update(
+                        gemm,
+                        reduced,
+                        &mut values[..m],
+                        coefficients,
+                        options.b5_parallel.then_some(&*pool),
+                    )?;
                     if !done {
                         b5_add(B5Count::Declined);
                     }
@@ -553,28 +569,22 @@ impl RealDavidson {
                     }
                     vectors.reshape_within_storage(n, k)?;
                     rotated_products.reshape_within_storage(n, k)?;
-                    let t = timers.start();
-                    gemm.rotate_pair_slices(
-                        basis.as_slice(),
-                        products.as_slice(),
-                        m,
-                        &b1.coeff[..m * k],
-                        k,
-                        vectors.as_mut_slice(),
-                        rotated_products.as_mut_slice(),
-                    )?;
-                    timers.stop(t, Stage::Rotate);
                     residual_block.reshape_within_storage(n, k)?;
-                    let t = timers.start();
-                    residual_into(
+                    // Narrow iterations never restart, so H X is never needed.
+                    ritz_and_residuals(
+                        options.ritz_fused,
+                        gemm,
+                        basis,
+                        products,
+                        &b1.coeff[..m * k],
+                        &b1.set_values[..k],
                         vectors,
                         rotated_products,
-                        &b1.set_values[..k],
                         residual_block,
                         &mut b1.set_norms[..k],
                         &pool,
+                        timers,
                     )?;
-                    timers.stop(t, Stage::Residual);
                     if !ritz {
                         residuals.copy_from_slice(&b1.est);
                     }
@@ -598,34 +608,30 @@ impl RealDavidson {
             }
             let mut certified = false;
             let mut trusted = true;
+            // Whether `rotated_products` holds H X of this iteration (always on
+            // the unfused path; RITZ-FUSED forms it only for a contraction).
+            let mut hx_formed = false;
             if !narrow {
                 for (j, c) in column_of.iter_mut().enumerate() {
                     *c = j;
                 }
                 vectors.reshape_within_storage(n, self.bands)?;
                 rotated_products.reshape_within_storage(n, self.bands)?;
-                let t = timers.start();
-                gemm.rotate_pair_slices(
-                    basis.as_slice(),
-                    products.as_slice(),
-                    m,
-                    &coefficients.as_slice()[..m * self.bands],
-                    self.bands,
-                    vectors.as_mut_slice(),
-                    rotated_products.as_mut_slice(),
-                )?;
-                timers.stop(t, Stage::Rotate);
                 residual_block.reshape_within_storage(n, self.bands)?;
-                let t = timers.start();
-                residual_into(
+                hx_formed = ritz_and_residuals(
+                    options.ritz_fused,
+                    gemm,
+                    basis,
+                    products,
+                    &coefficients.as_slice()[..m * self.bands],
+                    &values[..self.bands],
                     vectors,
                     rotated_products,
-                    &values[..self.bands],
                     residual_block,
                     residuals,
                     &pool,
+                    timers,
                 )?;
-                timers.stop(t, Stage::Residual);
                 if sketching && let Some(b1) = b1.as_ref() {
                     let missed = (0..self.bands)
                         .filter(|&j| b1.est[j] < 0.5 * threshold(j) && residuals[j] > threshold(j))
@@ -820,6 +826,18 @@ impl RealDavidson {
                 reduced_width = 0;
                 if trusted && orthogonality_defect(vectors) <= 1e-12 {
                     contractions += 1;
+                    if !hx_formed {
+                        let t = timers.start();
+                        gemm.rotate_slices(
+                            products.as_slice(),
+                            m,
+                            &coefficients.as_slice()[..m * self.bands],
+                            self.bands,
+                            rotated_products.as_mut_slice(),
+                        )?;
+                        timers.stop(t, Stage::Rotate);
+                        algebra_add(AlgebraCount::DeferredHx);
+                    }
                     std::mem::swap(basis, vectors);
                     std::mem::swap(products, rotated_products);
                     if let Some(c) = b6.as_mut() {
@@ -1261,7 +1279,7 @@ fn reduced_matrix(
     if let Some(old) = old {
         out.as_mut_slice()[..prefix * prefix].copy_from_slice(old.as_slice());
     }
-    reduced_matrix_into(v, hv, prefix, ws, &mut out)?;
+    reduced_matrix_into(v, hv, prefix, ws, &mut out, false)?;
     Ok(out)
 }
 fn reduced_matrix_into(
@@ -1270,6 +1288,7 @@ fn reduced_matrix_into(
     prefix: usize,
     ws: &mut RealGemmWorkspace,
     out: &mut RealMatrix,
+    narrow: bool,
 ) -> Result<(), LinalgError> {
     let m = v.cols();
     out.reshape_within_storage(m, m)?;
@@ -1284,18 +1303,31 @@ fn reduced_matrix_into(
     // One old/new rectangle and the new square, in one GEMM. Preserve the
     // old prefix exactly; the newly computed upper triangle defines symmetry.
     let rows = v.rows();
-    ws.multiply_slices_into(
-        dft_numerics::GemmSite::Reduced,
-        v.as_slice(),
-        rows,
-        v.cols(),
-        rows,
-        RealOp::Transpose,
-        &hv.as_slice()[prefix * rows..],
-        m - prefix,
-        rows,
-        out.as_mut().subcols_mut(prefix, m - prefix),
-    )?;
+    if narrow && prefix > 0 && m - prefix <= NARROW_WIDTH {
+        // NARROW-REDUCED: one streaming dot per entry of the border.
+        algebra_add(AlgebraCount::NarrowReduced);
+        ws.narrow_transpose_into(
+            v.as_slice(),
+            rows,
+            m,
+            &hv.as_slice()[prefix * rows..m * rows],
+            m - prefix,
+            out.as_mut().subcols_mut(prefix, m - prefix),
+        )?;
+    } else {
+        ws.multiply_slices_into(
+            dft_numerics::GemmSite::Reduced,
+            v.as_slice(),
+            rows,
+            v.cols(),
+            rows,
+            RealOp::Transpose,
+            &hv.as_slice()[prefix * rows..],
+            m - prefix,
+            rows,
+            out.as_mut().subcols_mut(prefix, m - prefix),
+        )?;
+    }
     for j in prefix..m {
         let (earlier, current) = out.as_mut_slice().split_at_mut(j * m);
         for (col, &entry) in earlier.chunks_exact_mut(m).zip(&current[..j]) {
@@ -1395,6 +1427,89 @@ fn residual_into(
     });
     finite(norms)
 }
+/// Ritz vectors X = V C and residuals R = H V C - X diag(values) with their
+/// norms. RITZ-FUSED (`fused`): one pass over V and HV without storing H X
+/// (bit-identical; returns false, H X not formed). Otherwise, or when the
+/// research rotation kernel declines the fused form: the pair rotation into
+/// `vectors` and `rotated_products`, then the residual (returns true).
+#[allow(clippy::too_many_arguments)]
+fn ritz_and_residuals(
+    fused: bool,
+    gemm: &mut RealGemmWorkspace,
+    basis: &RealMatrix,
+    products: &RealMatrix,
+    c: &[f64],
+    values: &[f64],
+    vectors: &mut RealMatrix,
+    rotated_products: &mut RealMatrix,
+    residual_block: &mut RealMatrix,
+    norms: &mut [f64],
+    pool: &WorkerPool,
+    timers: Timers,
+) -> Result<bool, SolverError> {
+    let m = basis.cols();
+    let k = values.len();
+    let t = timers.start();
+    if fused
+        && gemm.rotate_residual_slices(
+            basis.as_slice(),
+            products.as_slice(),
+            m,
+            c,
+            k,
+            values,
+            vectors.as_mut_slice(),
+            residual_block.as_mut_slice(),
+        )?
+    {
+        timers.stop(t, Stage::Rotate);
+        algebra_add(AlgebraCount::Fused);
+        let t = timers.start();
+        residual_norms(residual_block, norms, pool)?;
+        timers.stop(t, Stage::Residual);
+        return Ok(false);
+    }
+    gemm.rotate_pair_slices(
+        basis.as_slice(),
+        products.as_slice(),
+        m,
+        c,
+        k,
+        vectors.as_mut_slice(),
+        rotated_products.as_mut_slice(),
+    )?;
+    timers.stop(t, Stage::Rotate);
+    let t = timers.start();
+    residual_into(
+        vectors,
+        rotated_products,
+        values,
+        residual_block,
+        norms,
+        pool,
+    )?;
+    timers.stop(t, Stage::Residual);
+    Ok(true)
+}
+/// Column norms of a residual block, the same per-column `norm` and the same
+/// fixed four-column pieces as `residual_columns`.
+fn residual_norms(r: &RealMatrix, norms: &mut [f64], pool: &WorkerPool) -> Result<(), LinalgError> {
+    fn pieces(r: &[f64], norms: &mut [f64], n: usize) {
+        if norms.len() > 4 {
+            let split = (norms.len().div_ceil(4) / 2) * 4;
+            let (rl, rr) = r.split_at(split * n);
+            let (nl, nr) = norms.split_at_mut(split);
+            WorkerPool::join(|| pieces(rl, nl, n), || pieces(rr, nr, n));
+        } else {
+            for (j, out) in norms.iter_mut().enumerate() {
+                *out = norm(&r[j * n..(j + 1) * n]);
+            }
+        }
+    }
+    let n = r.rows();
+    pool.install(|| pieces(&r.as_slice()[..n * norms.len()], norms, n));
+    finite(norms)
+}
 fn orthogonality_defect(v: &RealMatrix) -> f64 {
     let mut defect = 0_f64;
     for j in 0..v.cols() {
@@ -1413,6 +1528,12 @@ fn orthogonality_defect(v: &RealMatrix) -> f64 {
 // subtraction, then two-pass MGS and normalization within the incoming block.
 /// Panel width of the blocked Gram-Schmidt switch.
 const BLOCK_COLUMNS: usize = 16;
+/// Widest block the NARROW kernels take (projection and reduced border); wider
+/// blocks keep the panel GEMM, which is efficient there. A kernel-shape choice,
+/// not a physical parameter: in the faer microbenchmark at n = 11877, m = 408
+/// (`dft-numerics/tests/algebra_stream.rs stream_timing`) the narrow kernels
+/// win 2.3x at one column, 1.3x at four and break even at eight.
+pub const NARROW_WIDTH: usize = 4;
 struct Projection {
     pool: std::sync::Arc<WorkerPool>,
     normalized: RealMatrix,
@@ -1431,6 +1552,10 @@ struct Projection {
     /// a column was dropped). Skipping it saves two of the four streams of the
     /// basis per append.
     dgks: Option<f64>,
+    /// NARROW-PROJ (`ResearchOptions::narrow_proj`, set per solve): blocks of
+    /// at most `NARROW_WIDTH` columns use the streaming dot and fused update
+    /// kernels of the GEMM workspace instead of the panel GEMMs.
+    narrow: bool,
 }
 /// DGKS keep ratio: one pass suffices when every column kept at least this
 /// fraction of its unit input norm.
@@ -1497,6 +1622,7 @@ impl Projection {
             },
             wide: std::env::var("BAANDI_WIDE_DOT").as_deref() != Ok("off"),
             dgks: dgks_keep(),
+            narrow: false,
             column: vec![0.; n],
         })
     }
@@ -1550,7 +1676,29 @@ impl Projection {
                 // becomes input, and the old input storage becomes output.
                 std::mem::swap(&mut self.normalized, &mut self.output);
             }
-            if let Some(q) = against {
+            if let Some(q) = against
+                && self.narrow
+                && count <= NARROW_WIDTH
+            {
+                // NARROW-PROJ: S = Q^T X by streaming dots, then X -= Q S in
+                // one pass (Q read twice per projection, no tiles or copies).
+                algebra_add(AlgebraCount::NarrowProjection);
+                ws.narrow_transpose_into(
+                    q.as_slice(),
+                    n,
+                    q.cols(),
+                    &self.normalized.as_slice()[..n * count],
+                    count,
+                    self.overlap.as_mut().submatrix_mut(0, 0, q.cols(), count),
+                )?;
+                ws.narrow_subtract(
+                    q.as_slice(),
+                    n,
+                    q.cols(),
+                    self.overlap.as_ref().submatrix(0, 0, q.cols(), count),
+                    self.normalized.as_mut().subcols_mut(0, count),
+                )?;
+            } else if let Some(q) = against {
                 ws.multiply_slices_into(
                     dft_numerics::GemmSite::ProjectionOverlap,
                     q.as_slice(),

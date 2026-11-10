@@ -623,7 +623,8 @@ pub fn execute_mode(
                 "davidson_stages":davidson_stages_json(),
                 "b1":b1_json(),
                 "b5":{"mode":std::env::var("BAANDI_B5").unwrap_or_else(|_| "off".into()),"bordered":dft_engine::b5_counters().bordered,"declined":dft_engine::b5_counters().declined,"full":dft_engine::b5_counters().full},
-                "ortho":{"mode":std::env::var("BAANDI_ORTHO").unwrap_or_else(|_| "two-pass".into()),"second_pass_skipped":dft_engine::ortho_counters().0,"second_pass_repeated":dft_engine::ortho_counters().1},
+                "ortho":{"mode":std::env::var("BAANDI_ORTHO").unwrap_or_else(|_| "dgks:0.1 (default)".into()),"second_pass_skipped":dft_engine::ortho_counters().0,"second_pass_repeated":dft_engine::ortho_counters().1},
+                "algebra_stream":algebra_stream_json(),
                 "h_vectors_recorded":r.history.iter().map(|h|h.operator_applications).sum::<usize>(),
                 "certificate_h_vectors":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.operator_applications).sum::<usize>(),
                 "note":"recorded = per-iteration solves in history; certificate = fixed-point certificate re-solves, reported only inside each history entry's fixed_point_certificate; total work is the sum"}},"energies":energies,
@@ -1118,6 +1119,20 @@ fn b1_json() -> serde_json::Value {
         "solves":c.solves,"narrow_iterations":c.narrow_iterations,"full_iterations":c.full_iterations,
         "narrow_columns":c.narrow_columns,"avoided_columns":c.avoided_columns,"fallbacks":c.fallbacks,
         "sketch_estimates":c.sketch_estimates,"sketch_disagreements":c.sketch_disagreements
+    })
+}
+
+/// Algebra-stream switches of the real Davidson and how often each acted
+/// (docs/performance/requests/algebra-stream.md).
+fn algebra_stream_json() -> serde_json::Value {
+    let c = dft_engine::algebra_counters();
+    let mode = |name: &str| std::env::var(name).unwrap_or_else(|_| "off".into());
+    json!({
+        "ritz_fused":mode("BAANDI_RITZ_FUSED"),"narrow_proj":mode("BAANDI_NARROW_PROJ"),
+        "narrow_reduced":mode("BAANDI_NARROW_REDUCED"),
+        "fused_iterations":c.fused_iterations,"deferred_hx":c.deferred_hx,
+        "narrow_projections":c.narrow_projections,"narrow_reduced_borders":c.narrow_reduced,
+        "b5_parallel_updates":c.b5_parallel
     })
 }
 

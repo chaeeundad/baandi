@@ -14,6 +14,10 @@
 //!   secular equation (module `bordered`), with a full solve on any doubt and
 //!   after `bordered::MAX_STREAK` updates in a row.
 //!
+//! * Algebra-stream switches (`BAANDI_RITZ_FUSED`, `BAANDI_NARROW_PROJ`,
+//!   `BAANDI_NARROW_REDUCED`, `BAANDI_B5=par`; default off): counters in
+//!   [`algebra_counters`] show how often each one acted.
+//!
 //! The counters are cumulative for the process (all solves, all threads) and are
 //! read once at the reporting boundary through [`stage_seconds`] and
 //! [`b1_counters`].
@@ -76,6 +80,21 @@ pub struct ResearchOptions {
     pub stage_timers: bool,
     /// B6 cached projector products for the return certificate (`BAANDI_B6=on`).
     pub b6: bool,
+    /// B5 bordered update with the column-parallel coefficient product and
+    /// root-parallel secular solve (`BAANDI_B5=par`; implies `b5`).
+    pub b5_parallel: bool,
+    /// RITZ-FUSED (`BAANDI_RITZ_FUSED=on`): Ritz vectors and residual vectors
+    /// in one pass over V and HV; H X is formed only for a contraction restart.
+    /// Bit-identical to the default path.
+    pub ritz_fused: bool,
+    /// NARROW-PROJ (`BAANDI_NARROW_PROJ=on`): blocks of at most
+    /// `real_davidson::NARROW_WIDTH` columns are projected against the basis by
+    /// streaming dot products and one fused update pass (rounding class).
+    pub narrow_proj: bool,
+    /// NARROW-REDUCED (`BAANDI_NARROW_REDUCED=on`): the border of the reduced
+    /// matrix for at most `NARROW_WIDTH` new columns by the same streaming dot
+    /// kernel (rounding class).
+    pub narrow_reduced: bool,
 }
 impl ResearchOptions {
     /// `BAANDI_B1` and `BAANDI_DAVIDSON_STAGES=on`, read once per solve.
@@ -86,7 +105,11 @@ impl ResearchOptions {
                 Ok("count") => SketchKind::Count,
                 _ => SketchKind::Dense,
             },
-            b5: std::env::var("BAANDI_B5").as_deref() == Ok("on"),
+            b5: matches!(std::env::var("BAANDI_B5").as_deref(), Ok("on") | Ok("par")),
+            b5_parallel: std::env::var("BAANDI_B5").as_deref() == Ok("par"),
+            ritz_fused: std::env::var("BAANDI_RITZ_FUSED").as_deref() == Ok("on"),
+            narrow_proj: std::env::var("BAANDI_NARROW_PROJ").as_deref() == Ok("on"),
+            narrow_reduced: std::env::var("BAANDI_NARROW_REDUCED").as_deref() == Ok("on"),
             stage_timers: std::env::var("BAANDI_DAVIDSON_STAGES").as_deref() == Ok("on"),
             b6: std::env::var("BAANDI_B6").as_deref() != Ok("off"),
         }
@@ -297,5 +320,43 @@ pub fn b5_counters() -> B5Counters {
         bordered: g(B5Count::Bordered),
         declined: g(B5Count::Declined),
         full: g(B5Count::Full),
+    }
+}
+
+/// Cumulative algebra-stream counters (all zero when the switches are off).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AlgebraCounters {
+    /// Iterations whose Ritz vectors and residuals came from the fused pass.
+    pub fused_iterations: u64,
+    /// Contraction restarts that formed H X late (fused iterations only).
+    pub deferred_hx: u64,
+    /// Projection passes taken by the narrow kernel.
+    pub narrow_projections: u64,
+    /// Reduced-matrix borders taken by the narrow kernel.
+    pub narrow_reduced: u64,
+    /// Bordered updates whose coefficient product ran column-parallel.
+    pub b5_parallel: u64,
+}
+static ALGEBRA_COUNTS: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum AlgebraCount {
+    Fused = 0,
+    DeferredHx = 1,
+    NarrowProjection = 2,
+    NarrowReduced = 3,
+    B5Parallel = 4,
+}
+#[inline]
+pub(crate) fn algebra_add(counter: AlgebraCount) {
+    ALGEBRA_COUNTS[counter as usize].fetch_add(1, Relaxed);
+}
+pub fn algebra_counters() -> AlgebraCounters {
+    let g = |c: AlgebraCount| ALGEBRA_COUNTS[c as usize].load(Relaxed);
+    AlgebraCounters {
+        fused_iterations: g(AlgebraCount::Fused),
+        deferred_hx: g(AlgebraCount::DeferredHx),
+        narrow_projections: g(AlgebraCount::NarrowProjection),
+        narrow_reduced: g(AlgebraCount::NarrowReduced),
+        b5_parallel: g(AlgebraCount::B5Parallel),
     }
 }

@@ -24,8 +24,10 @@
 //! Any conditioning doubt returns `false` and the caller runs the full dense
 //! solve: a root without convergence, a non-finite value, broken interlacing,
 //! or recomputed weights that differ from z by more than 1e-9 ||z||.
+use crate::davidson_stages::{AlgebraCount, algebra_add};
 use dft_numerics::{
     linalg::LinalgError,
+    pool::WorkerPool,
     real::{RealGemmWorkspace, RealMatrix, RealOp},
 };
 
@@ -55,6 +57,8 @@ pub(crate) struct Bordered {
     origin: Vec<f64>,
     tau: Vec<f64>,
     order_of: Vec<(f64, usize)>,
+    /// Coefficient product of the parallel form (n0 x m, contiguous).
+    product: Vec<f64>,
 }
 impl Bordered {
     pub(crate) fn new(capacity: usize) -> Self {
@@ -73,6 +77,7 @@ impl Bordered {
             origin: vec![0.; capacity + 1],
             tau: vec![0.; capacity + 1],
             order_of: Vec::with_capacity(capacity),
+            product: vec![0.; capacity * capacity],
         }
     }
     pub(crate) fn invalidate(&mut self) {
@@ -90,12 +95,19 @@ impl Bordered {
     /// Try the bordered update for the m x m reduced matrix `t` (its leading
     /// (m-1) x (m-1) block must be the matrix of the stored base). On success
     /// writes `values[..m]` and `coefficients` (m x m) and returns true.
+    /// With `parallel` (`BAANDI_B5=par`) the secular roots, the weights and
+    /// the eigenvector columns are computed per root on the pool (each root's
+    /// arithmetic is unchanged, so they are bit-identical to the serial form)
+    /// and the coefficient product runs in fixed column groups
+    /// (`multiply_column_groups`; bit-identical on the faer path, a fixed
+    /// different dgemm grouping on MKL). Thread-count independent.
     pub(crate) fn update(
         &mut self,
         gemm: &mut RealGemmWorkspace,
         t: &RealMatrix,
         values: &mut [f64],
         coefficients: &mut RealMatrix,
+        parallel: Option<&WorkerPool>,
     ) -> Result<bool, LinalgError> {
         let m = t.rows();
         let n0 = m - 1;
@@ -164,62 +176,23 @@ impl Bordered {
             }
         }
         // Secular roots r = 0..=kk; root r lies between poles r-1 and r.
-        let pole = |r: usize| theta[poles[r]];
         let lower = poles.first().map_or(d, |&p| theta[p].min(d)) - z_norm - tol;
         let upper = poles.last().map_or(d, |&p| theta[p].max(d)) + z_norm + tol;
-        for r in 0..=kk {
-            if kk == 0 {
-                self.origin[0] = d;
-                self.tau[0] = 0.;
-                break;
-            }
-            let (origin, mut lo, mut hi) = if r == 0 {
-                (pole(0), lower - pole(0), 0.)
-            } else if r == kk {
-                (pole(kk - 1), 0., upper - pole(kk - 1))
-            } else {
-                let half = 0.5 * (pole(r) - pole(r - 1));
-                let (f, _, _) = secular(pole(r - 1), half, d, theta, z, poles);
-                if f >= 0. {
-                    (pole(r - 1), 0., half)
-                } else {
-                    (pole(r), -half, 0.)
-                }
-            };
-            let mut tau = 0.5 * (lo + hi);
-            let mut done = false;
-            for _ in 0..MAX_ROOT_STEPS {
-                let (f, df, size) = secular(origin, tau, d, theta, z, poles);
-                if !f.is_finite() || !df.is_finite() {
-                    return Ok(false);
-                }
-                if f.abs() <= 8. * f64::EPSILON * size {
-                    done = true;
-                    break;
-                }
-                if f < 0. {
-                    lo = tau;
-                } else {
-                    hi = tau;
-                }
-                let newton = tau - f / df;
-                let next = if newton > lo && newton < hi {
-                    newton
-                } else {
-                    0.5 * (lo + hi)
-                };
-                if (hi - lo) <= 2. * f64::EPSILON * lo.abs().max(hi.abs()) || next == tau {
-                    tau = next;
-                    done = true;
-                    break;
-                }
-                tau = next;
-            }
-            if !done {
-                return Ok(false);
-            }
-            self.origin[r] = origin;
-            self.tau[r] = tau;
+        let roots = Roots {
+            d,
+            theta,
+            z,
+            poles,
+            lower,
+            upper,
+        };
+        let (origin, tau) = (&mut self.origin[..=kk], &mut self.tau[..=kk]);
+        let solved = match parallel {
+            Some(pool) => pool.install(|| roots.solve_range(0, origin, tau, true)),
+            None => roots.solve_range(0, origin, tau, false),
+        };
+        if !solved {
+            return Ok(false);
         }
         // Root minus pole, accurate relative to the nearer pole.
         let gap = |r: usize, k: usize, o: &[f64], t: &[f64]| (o[r] - theta[k]) + t[r];
@@ -235,17 +208,24 @@ impl Bordered {
         // Loewner weights: z_hat_k^2 = -(l_k - p_k)(l_K - p_k) prod_{j != k, j < K}
         // (l_j - p_k) / (p_j - p_k), every factor positive by interlacing.
         let mut worst = 0_f64;
+        let weights = Weights {
+            theta,
+            z,
+            poles,
+            origin: &self.origin[..=kk],
+            tau: &self.tau[..=kk],
+        };
+        // Signed weights per pole number into the scratch `y`, then placed.
+        let scratch = &mut self.y[..kk];
+        let w_ok = match parallel {
+            Some(pool) => pool.install(|| weights.range(0, scratch, true)),
+            None => weights.range(0, scratch, false),
+        };
+        if !w_ok {
+            return Ok(false);
+        }
         for (q, &k) in poles.iter().enumerate() {
-            let mut w = -gap(q, k, &self.origin, &self.tau) * gap(kk, k, &self.origin, &self.tau);
-            for (j, &p) in poles.iter().enumerate() {
-                if j != q {
-                    w *= gap(j, k, &self.origin, &self.tau) / (theta[p] - theta[k]);
-                }
-            }
-            if !(w.is_finite() && w >= 0.) {
-                return Ok(false);
-            }
-            let zh = w.sqrt().copysign(z[k]);
+            let zh = self.y[q];
             worst = worst.max((zh - z[k]).abs());
             self.z_hat[k] = zh;
         }
@@ -265,45 +245,50 @@ impl Bordered {
         }
         self.order_of
             .sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
-        let y = &mut self.y[..m * m];
-        y.fill(0.);
-        for (col, &(value, id)) in self.order_of.iter().enumerate() {
+        for (col, &(value, _)) in self.order_of.iter().enumerate() {
             values[col] = value;
-            let dst = &mut y[col * m..(col + 1) * m];
-            if id < n0 {
-                dst[id] = 1.;
-            } else {
-                let r = id - n0 - 1;
-                let mut sum = 1.;
-                for &k in poles.iter() {
-                    let v = self.z_hat[k] / gap(r, k, &self.origin, &self.tau);
-                    dst[k] = v;
-                    sum += v * v;
-                }
-                dst[n0] = 1.;
-                let inv = 1. / sum.sqrt();
-                for v in dst.iter_mut() {
-                    *v *= inv;
-                }
-            }
+        }
+        let vectors = Vectors {
+            theta,
+            poles,
+            z_hat: &self.z_hat[..n0],
+            origin: &self.origin[..=kk],
+            tau: &self.tau[..=kk],
+            order_of: &self.order_of,
+            n0,
+        };
+        let y = &mut self.y[..m * m];
+        match parallel {
+            Some(pool) => pool.install(|| vectors.columns(0, y, true)),
+            None => vectors.columns(0, y, false),
         }
         if !values[..m].iter().all(|v| v.is_finite()) || !y.iter().all(|v| v.is_finite()) {
             return Ok(false);
         }
         // C' = [[C_rot, 0], [0, 1]] Y.
         coefficients.reshape_within_storage(m, m)?;
-        gemm.multiply_slices_into(
-            dft_numerics::GemmSite::Other,
-            &self.rotated[..n0 * n0],
-            n0,
-            n0,
-            n0,
-            RealOp::Identity,
-            y,
-            m,
-            m,
-            coefficients.as_mut().submatrix_mut(0, 0, n0, m),
-        )?;
+        if parallel.is_some() {
+            algebra_add(AlgebraCount::B5Parallel);
+            let product = &mut self.product[..n0 * m];
+            gemm.multiply_column_groups(&self.rotated[..n0 * n0], n0, n0, n0, y, m, m, product)?;
+            let out = coefficients.as_mut_slice();
+            for col in 0..m {
+                out[col * m..col * m + n0].copy_from_slice(&product[col * n0..(col + 1) * n0]);
+            }
+        } else {
+            gemm.multiply_slices_into(
+                dft_numerics::GemmSite::Other,
+                &self.rotated[..n0 * n0],
+                n0,
+                n0,
+                n0,
+                RealOp::Identity,
+                y,
+                m,
+                m,
+                coefficients.as_mut().submatrix_mut(0, 0, n0, m),
+            )?;
+        }
         let out = coefficients.as_mut_slice();
         for col in 0..m {
             out[col * m + n0] = y[col * m + n0];
@@ -325,6 +310,189 @@ impl Bordered {
             return Ok(false);
         }
         Ok(true)
+    }
+}
+
+/// Root minus pole, accurate relative to the nearer pole.
+fn gap_of(origin: &[f64], tau: &[f64], theta: &[f64], r: usize, k: usize) -> f64 {
+    (origin[r] - theta[k]) + tau[r]
+}
+/// Pieces of a parallel range (fixed, so the split never depends on the thread
+/// count; each item's arithmetic is serial and unchanged).
+const PIECE: usize = 16;
+/// Secular roots: root r between poles r-1 and r, as origin + tau.
+struct Roots<'a> {
+    d: f64,
+    theta: &'a [f64],
+    z: &'a [f64],
+    poles: &'a [usize],
+    lower: f64,
+    upper: f64,
+}
+impl Roots<'_> {
+    /// Roots `first..first + origin.len()`; false if any root failed.
+    fn solve_range(
+        &self,
+        first: usize,
+        origin: &mut [f64],
+        tau: &mut [f64],
+        parallel: bool,
+    ) -> bool {
+        if parallel && origin.len() > PIECE {
+            let split = (origin.len().div_ceil(PIECE) / 2) * PIECE;
+            let (ol, or) = origin.split_at_mut(split);
+            let (tl, tr) = tau.split_at_mut(split);
+            let (a, b) = WorkerPool::join(
+                || self.solve_range(first, ol, tl, true),
+                || self.solve_range(first + split, or, tr, true),
+            );
+            return a && b;
+        }
+        for (i, (o, t)) in origin.iter_mut().zip(tau.iter_mut()).enumerate() {
+            match self.root(first + i) {
+                Some((origin, tau)) => {
+                    *o = origin;
+                    *t = tau;
+                }
+                None => return false,
+            }
+        }
+        true
+    }
+    /// Newton steps safeguarded by bisection inside a shrinking bracket.
+    fn root(&self, r: usize) -> Option<(f64, f64)> {
+        let (d, theta, z, poles) = (self.d, self.theta, self.z, self.poles);
+        let kk = poles.len();
+        if kk == 0 {
+            return Some((d, 0.));
+        }
+        let pole = |r: usize| theta[poles[r]];
+        let (origin, mut lo, mut hi) = if r == 0 {
+            (pole(0), self.lower - pole(0), 0.)
+        } else if r == kk {
+            (pole(kk - 1), 0., self.upper - pole(kk - 1))
+        } else {
+            let half = 0.5 * (pole(r) - pole(r - 1));
+            let (f, _, _) = secular(pole(r - 1), half, d, theta, z, poles);
+            if f >= 0. {
+                (pole(r - 1), 0., half)
+            } else {
+                (pole(r), -half, 0.)
+            }
+        };
+        let mut tau = 0.5 * (lo + hi);
+        for _ in 0..MAX_ROOT_STEPS {
+            let (f, df, size) = secular(origin, tau, d, theta, z, poles);
+            if !f.is_finite() || !df.is_finite() {
+                return None;
+            }
+            if f.abs() <= 8. * f64::EPSILON * size {
+                return Some((origin, tau));
+            }
+            if f < 0. {
+                lo = tau;
+            } else {
+                hi = tau;
+            }
+            let newton = tau - f / df;
+            let next = if newton > lo && newton < hi {
+                newton
+            } else {
+                0.5 * (lo + hi)
+            };
+            if (hi - lo) <= 2. * f64::EPSILON * lo.abs().max(hi.abs()) || next == tau {
+                return Some((origin, next));
+            }
+            tau = next;
+        }
+        None
+    }
+}
+/// Loewner weights z_hat_k^2 = -(l_k - p_k)(l_K - p_k) prod_{j != k, j < K}
+/// (l_j - p_k) / (p_j - p_k), every factor positive by interlacing.
+struct Weights<'a> {
+    theta: &'a [f64],
+    z: &'a [f64],
+    poles: &'a [usize],
+    origin: &'a [f64],
+    tau: &'a [f64],
+}
+impl Weights<'_> {
+    /// Signed weights of pole numbers `first..first + out.len()`; false on a
+    /// non-finite or negative square.
+    fn range(&self, first: usize, out: &mut [f64], parallel: bool) -> bool {
+        if parallel && out.len() > PIECE {
+            let split = (out.len().div_ceil(PIECE) / 2) * PIECE;
+            let (l, r) = out.split_at_mut(split);
+            let (a, b) = WorkerPool::join(
+                || self.range(first, l, true),
+                || self.range(first + split, r, true),
+            );
+            return a && b;
+        }
+        let kk = self.poles.len();
+        let gap = |r: usize, k: usize| gap_of(self.origin, self.tau, self.theta, r, k);
+        for (i, dst) in out.iter_mut().enumerate() {
+            let q = first + i;
+            let k = self.poles[q];
+            let mut w = -gap(q, k) * gap(kk, k);
+            for (j, &p) in self.poles.iter().enumerate() {
+                if j != q {
+                    w *= gap(j, k) / (self.theta[p] - self.theta[k]);
+                }
+            }
+            if !(w.is_finite() && w >= 0.) {
+                return false;
+            }
+            *dst = w.sqrt().copysign(self.z[k]);
+        }
+        true
+    }
+}
+/// Eigenvectors of the arrowhead matrix in the ascending order of `order_of`.
+struct Vectors<'a> {
+    theta: &'a [f64],
+    poles: &'a [usize],
+    z_hat: &'a [f64],
+    origin: &'a [f64],
+    tau: &'a [f64],
+    order_of: &'a [(f64, usize)],
+    n0: usize,
+}
+impl Vectors<'_> {
+    /// Columns `first..` of Y (n0 + 1 rows each) into `y`.
+    fn columns(&self, first: usize, y: &mut [f64], parallel: bool) {
+        let m = self.n0 + 1;
+        let count = y.len() / m;
+        if parallel && count > PIECE {
+            let split = (count.div_ceil(PIECE) / 2) * PIECE;
+            let (l, r) = y.split_at_mut(split * m);
+            WorkerPool::join(
+                || self.columns(first, l, true),
+                || self.columns(first + split, r, true),
+            );
+            return;
+        }
+        for (i, dst) in y.chunks_exact_mut(m).enumerate() {
+            let id = self.order_of[first + i].1;
+            dst.fill(0.);
+            if id < self.n0 {
+                dst[id] = 1.;
+            } else {
+                let r = id - self.n0 - 1;
+                let mut sum = 1.;
+                for &k in self.poles {
+                    let v = self.z_hat[k] / gap_of(self.origin, self.tau, self.theta, r, k);
+                    dst[k] = v;
+                    sum += v * v;
+                }
+                dst[self.n0] = 1.;
+                let inv = 1. / sum.sqrt();
+                for v in dst.iter_mut() {
+                    *v *= inv;
+                }
+            }
+        }
     }
 }
 
@@ -421,10 +589,37 @@ mod tests {
             let mut gemm = RealGemmWorkspace::with_pool(m, m, WorkerPool::new(1).unwrap()).unwrap();
             let mut values = vec![0.; m];
             let mut c = RealMatrix::zeros(m, m).unwrap();
-            if !b.update(&mut gemm, &t, &mut values, &mut c).unwrap() {
+            if !b.update(&mut gemm, &t, &mut values, &mut c, None).unwrap() {
                 continue;
             }
             used += 1;
+            // BAANDI_B5=par: same roots and vectors bit for bit at every pool
+            // size; the product is bit-identical on faer, a fixed different
+            // dgemm grouping on MKL.
+            for threads in [1, 3, 8] {
+                let pool = WorkerPool::new(threads).unwrap();
+                let mut pg = RealGemmWorkspace::with_pool(m, m, pool.clone()).unwrap();
+                let mut pb = Bordered::new(m);
+                pb.store(&bv, &bc);
+                let mut pv = vec![0.; m];
+                let mut pc = RealMatrix::zeros(m, m).unwrap();
+                assert!(
+                    pb.update(&mut pg, &t, &mut pv, &mut pc, Some(&pool))
+                        .unwrap()
+                );
+                assert!(
+                    pv.iter()
+                        .zip(&values)
+                        .all(|(a, b)| a.to_bits() == b.to_bits())
+                );
+                for (a, b) in pc.as_slice().iter().zip(c.as_slice()) {
+                    if dft_numerics::MKL_BACKEND {
+                        assert!((a - b).abs() <= 1e-13, "case {case}: {a} vs {b}");
+                    } else {
+                        assert_eq!(a.to_bits(), b.to_bits(), "case {case} threads {threads}");
+                    }
+                }
+            }
             let (ev, _) = symmetric_eigh(&t).unwrap();
             let norm = t.as_slice().iter().fold(1_f64, |a, &x| a.max(x.abs()));
             for (a, e) in values.iter().zip(&ev) {
@@ -460,7 +655,9 @@ mod tests {
     #[ignore = "timing observation, release"]
     fn bordered_timing() {
         let mut state = 5;
-        println!("order | full solve ms | bordered update ms (median of 7)");
+        println!(
+            "order | full solve ms | bordered update ms | par T=4 ms | par T=8 ms (median of 7)"
+        );
         for m in [96, 204, 306, 408] {
             let n0 = m - 1;
             // Ritz-like base: spread values, then one new coupled column.
@@ -484,18 +681,39 @@ mod tests {
             let mut b = Bordered::new(m);
             let mut eig = dft_numerics::real::RealEighWorkspace::new(m).unwrap();
             let (mut tf, mut tb) = (Vec::new(), Vec::new());
+            let mut tp = [Vec::new(), Vec::new()];
+            let pools = [WorkerPool::new(4).unwrap(), WorkerPool::new(8).unwrap()];
+            let mut pgs: Vec<_> = pools
+                .iter()
+                .map(|p| RealGemmWorkspace::with_pool(m, m, p.clone()).unwrap())
+                .collect();
             for _ in 0..7 {
                 let s = std::time::Instant::now();
                 eig.solve_into(&t, &mut values, &mut c).unwrap();
                 tf.push(s.elapsed().as_secs_f64() * 1e3);
                 b.store(&bv, &bc);
                 let s = std::time::Instant::now();
-                assert!(b.update(&mut gemm, &t, &mut values, &mut c).unwrap());
+                assert!(b.update(&mut gemm, &t, &mut values, &mut c, None).unwrap());
                 tb.push(s.elapsed().as_secs_f64() * 1e3);
+                for (i, pool) in pools.iter().enumerate() {
+                    b.store(&bv, &bc);
+                    let s = std::time::Instant::now();
+                    assert!(
+                        b.update(&mut pgs[i], &t, &mut values, &mut c, Some(pool))
+                            .unwrap()
+                    );
+                    tp[i].push(s.elapsed().as_secs_f64() * 1e3);
+                }
             }
             tf.sort_by(f64::total_cmp);
             tb.sort_by(f64::total_cmp);
-            println!("{m} | {:.3} | {:.3}", tf[3], tb[3]);
+            for t in tp.iter_mut() {
+                t.sort_by(f64::total_cmp);
+            }
+            println!(
+                "{m} | {:.3} | {:.3} | {:.3} | {:.3}",
+                tf[3], tb[3], tp[0][3], tp[1][3]
+            );
         }
     }
 }

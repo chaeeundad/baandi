@@ -450,6 +450,255 @@ impl RealGemmWorkspace {
     pub fn set_rotate_kernel(&mut self, kernel: RotateKernel) {
         self.kernel = kernel;
     }
+    /// RITZ-FUSED (algebra-stream item 2): Ritz vectors X = V C into `out_v` and
+    /// residual vectors R = HV C - X diag(values) into `out_r`, without storing
+    /// H X: each 256-row panel of HV C lives only in that panel's tile and is
+    /// combined at once with the panel of X (still in cache). Every panel product
+    /// is the call `rotate_pair_slices` makes for that panel and the residual is
+    /// the same expression `h - lambda v`, so X and R are bit-identical to
+    /// `rotate_pair_slices` followed by the elementwise residual (faer path, unit
+    /// test; MKL: the same dgemm calls into the same tiles). Returns `Ok(false)`
+    /// without touching the outputs when the research `Blocked` rotation kernel
+    /// is selected or a 256-row panel of H X does not fit one tile (very few
+    /// columns against a narrow workspace); the caller then takes the unfused
+    /// path.
+    #[allow(clippy::too_many_arguments)]
+    pub fn rotate_residual_slices(
+        &mut self,
+        v: &[f64],
+        hv: &[f64],
+        k: usize,
+        c: &[f64],
+        n: usize,
+        values: &[f64],
+        out_v: &mut [f64],
+        out_r: &mut [f64],
+    ) -> Result<bool, LinalgError> {
+        if k == 0 || n == 0 || !v.len().is_multiple_of(k) || c.len() != k * n || values.len() != n {
+            return Err(LinalgError::Dimension);
+        }
+        let m = v.len() / k;
+        if hv.len() != m * k
+            || out_v.len() != m * n
+            || out_r.len() != m * n
+            || m > self.long
+            || k > self.short
+            || n > self.short
+        {
+            return Err(LinalgError::Dimension);
+        }
+        if m == 0 {
+            return Ok(true);
+        }
+        let count = m.div_ceil(PANEL);
+        let parallel = count >= 4 && m.saturating_mul(n).saturating_mul(k) >= PARALLEL_WORK;
+        // A panel of H X must fit one tile (the bound of the MKL rotation).
+        if PANEL.min(m) * n > self.short * self.short {
+            return Ok(false);
+        }
+        #[cfg(feature = "mkl")]
+        let mkl = self.dgemm_rotation;
+        #[cfg(not(feature = "mkl"))]
+        let mkl = false;
+        if !mkl && self.kernel == RotateKernel::Blocked {
+            return Ok(false);
+        }
+        let tiles = &mut self.tiles[..count];
+        let job = FusedPanels {
+            v,
+            hv,
+            m,
+            k,
+            c,
+            values,
+            mkl,
+        };
+        let ov = MatMut::from_column_major_slice_mut(out_v, m, n);
+        let or = MatMut::from_column_major_slice_mut(out_r, m, n);
+        if parallel {
+            self.pool
+                .install(|| fused_panels(&job, ov, or, 0, tiles, true));
+        } else {
+            fused_panels(&job, ov, or, 0, tiles, false);
+        }
+        if out_v.iter().chain(out_r.iter()).all(|x| x.is_finite()) {
+            Ok(true)
+        } else {
+            Err(LinalgError::NonFinite)
+        }
+    }
+    /// One side of `rotate_pair_slices`: out = A C with the kernel that call uses
+    /// for each side (bit-identical to the corresponding output of the pair).
+    /// Used to form H X late, only when a contraction restart needs it.
+    pub fn rotate_slices(
+        &mut self,
+        a: &[f64],
+        k: usize,
+        c: &[f64],
+        n: usize,
+        out: &mut [f64],
+    ) -> Result<(), LinalgError> {
+        if k == 0 || n == 0 || !a.len().is_multiple_of(k) || c.len() != k * n {
+            return Err(LinalgError::Dimension);
+        }
+        let m = a.len() / k;
+        if out.len() != m * n || m > self.long || k > self.short || n > self.short {
+            return Err(LinalgError::Dimension);
+        }
+        if m == 0 {
+            return Ok(());
+        }
+        let count = m.div_ceil(PANEL);
+        let parallel = count >= 4 && m.saturating_mul(n).saturating_mul(k) >= PARALLEL_WORK;
+        #[cfg(feature = "mkl")]
+        {
+            if self.dgemm_rotation && PANEL.min(m) * n <= self.short * self.short {
+                let tiles = &mut self.tiles[..count];
+                let mut o = MatMut::from_column_major_slice_mut(out, m, n);
+                let mut work =
+                    || dgemm_panels(GemmSite::Rotate, o.as_mut(), a, m, c, k, k, tiles, parallel);
+                if parallel {
+                    self.pool.install(&mut work);
+                } else {
+                    work();
+                }
+                return finite(MatRef::from_column_major_slice(out, m, n));
+            }
+        }
+        let av = MatRef::from_column_major_slice(a, m, k);
+        let cv = MatRef::from_column_major_slice(c, k, n);
+        let mut o = MatMut::from_column_major_slice_mut(out, m, n);
+        if self.kernel == RotateKernel::Blocked {
+            pack_columns(&mut self.pack, cv);
+            let pack = &self.pack[..n.div_ceil(4) * 4 * k];
+            if parallel {
+                self.pool.install(|| rotate(o.as_mut(), av, pack, k, true));
+            } else {
+                rotate(o.as_mut(), av, pack, k, false);
+            }
+        } else if parallel {
+            self.pool
+                .install(|| rotate_legacy(o.as_mut(), av, cv, true));
+        } else {
+            rotate_legacy(o.as_mut(), av, cv, false);
+        }
+        finite(o.as_ref())
+    }
+    /// NARROW (algebra-stream item 1): out (mq x k) = Q^T X for a narrow block X
+    /// (n x k, contiguous; Q n x mq contiguous). Every entry is one eight-lane
+    /// dot product in a fixed order, streaming each column of Q once from memory
+    /// (the block stays in cache); columns of Q are processed in fixed pieces on
+    /// the pool, so the result does not depend on the thread count. Rounding
+    /// differs from the panel GEMM (rounding class).
+    #[allow(clippy::too_many_arguments)]
+    pub fn narrow_transpose_into(
+        &self,
+        q: &[f64],
+        n: usize,
+        mq: usize,
+        x: &[f64],
+        k: usize,
+        mut out: RealMatrixMut<'_>,
+    ) -> Result<(), LinalgError> {
+        if q.len() < n * mq || x.len() < n * k || out.nrows() != mq || out.ncols() != k {
+            return Err(LinalgError::Dimension);
+        }
+        if mq == 0 || k == 0 {
+            return Ok(());
+        }
+        let parallel = mq > NARROW_PIECE && n.saturating_mul(mq).saturating_mul(k) >= PARALLEL_WORK;
+        if parallel {
+            self.pool
+                .install(|| narrow_dots(q, n, x, k, out.as_mut(), 0, true));
+        } else {
+            narrow_dots(q, n, x, k, out.as_mut(), 0, false);
+        }
+        finite(out.as_ref())
+    }
+    /// NARROW: X -= Q S for a narrow S (mq x k). Every entry subtracts
+    /// s_jc q_ij in ascending j, one rounded multiply and one rounded subtraction
+    /// each (no fused multiply-add), so the arithmetic of an entry does not depend
+    /// on the row blocks; rows go in fixed blocks of `NARROW_ROWS` on the pool.
+    /// Q is read once per call; the block of X stays in cache.
+    pub fn narrow_subtract(
+        &self,
+        q: &[f64],
+        n: usize,
+        mq: usize,
+        s: RealMatrixRef<'_>,
+        mut x: RealMatrixMut<'_>,
+    ) -> Result<(), LinalgError> {
+        if q.len() < n * mq || s.nrows() != mq || x.nrows() != n || x.ncols() != s.ncols() {
+            return Err(LinalgError::Dimension);
+        }
+        if n == 0 || mq == 0 || s.ncols() == 0 {
+            return Ok(());
+        }
+        let parallel =
+            n > NARROW_ROWS && n.saturating_mul(mq).saturating_mul(s.ncols()) >= PARALLEL_WORK;
+        if parallel {
+            self.pool
+                .install(|| narrow_update(q, n, mq, s, x.as_mut(), 0, true));
+        } else {
+            narrow_update(q, n, mq, s, x.as_mut(), 0, false);
+        }
+        finite(x.as_ref())
+    }
+    /// B5 parallel form (`BAANDI_B5=par`): out (rows x n, contiguous) = A B with
+    /// the output columns in fixed groups of `COLUMN_GROUP` (a multiple of the
+    /// four-column micro tile) computed in parallel on the pool. Each group's
+    /// arithmetic is fixed (faer: the row panels of `rotate_legacy`; MKL: one
+    /// sequential dgemm per group), so the result does not depend on the thread
+    /// count.
+    #[allow(clippy::too_many_arguments)]
+    pub fn multiply_column_groups(
+        &mut self,
+        a: &[f64],
+        rows: usize,
+        k: usize,
+        lda: usize,
+        b: &[f64],
+        n: usize,
+        ldb: usize,
+        out: &mut [f64],
+    ) -> Result<(), LinalgError> {
+        if out.len() != rows * n
+            || lda < rows
+            || ldb < k
+            || (k > 0 && a.len() < (k - 1) * lda + rows)
+            || (n > 0 && b.len() < (n - 1) * ldb + k)
+        {
+            return Err(LinalgError::Dimension);
+        }
+        if rows == 0 || n == 0 {
+            return Ok(());
+        }
+        if k == 0 {
+            out.fill(0.);
+            return Ok(());
+        }
+        #[cfg(feature = "mkl")]
+        let mkl = self.dgemm_rotation;
+        #[cfg(not(feature = "mkl"))]
+        let mkl = false;
+        let job = GroupJob {
+            a,
+            rows,
+            k,
+            lda,
+            b,
+            ldb,
+            mkl,
+        };
+        let parallel =
+            n > COLUMN_GROUP && rows.saturating_mul(n).saturating_mul(k) >= PARALLEL_WORK;
+        if parallel {
+            self.pool.install(|| column_groups(&job, out, 0, true));
+        } else {
+            column_groups(&job, out, 0, false);
+        }
+        finite(MatRef::from_column_major_slice(out, rows, n))
+    }
     /// Rotate V and HV by the same Ritz coefficients in one parallel region.
     /// Each side retains the original 256-row pieces and bounded kernel calls
     /// (24 independent pieces for a 2969-row pair). The guard is unchanged.
@@ -697,6 +946,307 @@ fn rotate_legacy(
         }
     }
 }
+/// Inputs of the fused Ritz-and-residual panels (slices with leading dimension m).
+struct FusedPanels<'a> {
+    v: &'a [f64],
+    hv: &'a [f64],
+    m: usize,
+    k: usize,
+    c: &'a [f64],
+    values: &'a [f64],
+    #[cfg_attr(not(feature = "mkl"), allow(dead_code))]
+    mkl: bool,
+}
+/// Panels `first..` of the fused rotation; the split is the panel split of
+/// `rotate_legacy` / `dgemm_panels`, the per-panel work is fixed.
+fn fused_panels(
+    job: &FusedPanels<'_>,
+    out_v: RealMatrixMut<'_>,
+    out_r: RealMatrixMut<'_>,
+    first: usize,
+    tiles: &mut [RealMatrix],
+    parallel: bool,
+) {
+    let count = out_v.nrows().div_ceil(PANEL);
+    if parallel && count > 1 {
+        let half = count / 2;
+        let split = half * PANEL;
+        let (lv, rv) = out_v.split_at_row_mut(split);
+        let (lr, rr) = out_r.split_at_row_mut(split);
+        let (tl, tr) = tiles.split_at_mut(half);
+        WorkerPool::join(
+            || fused_panels(job, lv, lr, first, tl, true),
+            || fused_panels(job, rv, rr, first + half, tr, true),
+        );
+        return;
+    }
+    let (mut out_v, mut out_r) = (out_v, out_r);
+    let n = out_v.ncols();
+    let cv = MatRef::from_column_major_slice(job.c, job.k, n);
+    let v = MatRef::from_column_major_slice(job.v, job.m, job.k);
+    let hv = MatRef::from_column_major_slice(job.hv, job.m, job.k);
+    for (t, tile) in tiles.iter_mut().enumerate().take(count) {
+        let local = t * PANEL;
+        let row = (first + t) * PANEL;
+        let len = PANEL.min(out_v.nrows() - local);
+        let buffer = &mut tile.as_mut_slice_full()[..len * n];
+        #[cfg(feature = "mkl")]
+        if job.mkl {
+            // The two dgemm calls of `rotate_pair_slices` for this panel, the
+            // same tile, the same shapes.
+            dft_mkl::dgemm_at(
+                GemmSite::Rotate.into(),
+                false,
+                len,
+                n,
+                job.k,
+                &job.v[row..],
+                job.m,
+                job.c,
+                job.k,
+                buffer,
+            )
+            .expect("checked dgemm shapes");
+            for j in 0..n {
+                out_v
+                    .as_mut()
+                    .col_mut(j)
+                    .subrows_mut(local, len)
+                    .try_as_col_major_mut()
+                    .expect("contiguous column")
+                    .as_slice_mut()
+                    .copy_from_slice(&buffer[j * len..(j + 1) * len]);
+            }
+            dft_mkl::dgemm_at(
+                GemmSite::Rotate.into(),
+                false,
+                len,
+                n,
+                job.k,
+                &job.hv[row..],
+                job.m,
+                job.c,
+                job.k,
+                buffer,
+            )
+            .expect("checked dgemm shapes");
+            combine_residual(&mut out_r, &out_v, buffer, local, len, job.values);
+            continue;
+        }
+        bounded_matmul(
+            out_v.as_mut().subrows_mut(local, len),
+            v.subrows(row, len),
+            cv,
+            false,
+        );
+        bounded_matmul(
+            MatMut::from_column_major_slice_mut(buffer, len, n),
+            hv.subrows(row, len),
+            cv,
+            false,
+        );
+        combine_residual(&mut out_r, &out_v, buffer, local, len, job.values);
+    }
+}
+/// r = h - lambda v for one panel (the residual expression of the solver).
+fn combine_residual(
+    out_r: &mut RealMatrixMut<'_>,
+    out_v: &RealMatrixMut<'_>,
+    h: &[f64],
+    local: usize,
+    len: usize,
+    values: &[f64],
+) {
+    for (j, &lambda) in values.iter().enumerate() {
+        let hc = &h[j * len..(j + 1) * len];
+        let vc = out_v
+            .as_ref()
+            .col(j)
+            .subrows(local, len)
+            .try_as_col_major()
+            .expect("contiguous column")
+            .as_slice();
+        let rc = out_r
+            .as_mut()
+            .col_mut(j)
+            .subrows_mut(local, len)
+            .try_as_col_major_mut()
+            .expect("contiguous column")
+            .as_slice_mut();
+        for ((r, &hval), &v) in rc.iter_mut().zip(hc).zip(vc) {
+            *r = hval - lambda * v;
+        }
+    }
+}
+/// Fixed column pieces of the narrow transpose product.
+const NARROW_PIECE: usize = 16;
+/// Fixed row blocks of the narrow update (8 KiB of one column).
+const NARROW_ROWS: usize = 1024;
+/// Output column group of `multiply_column_groups` (multiple of four).
+const COLUMN_GROUP: usize = 32;
+/// Eight independent lanes (element i adds into lane i % 8, ascending), combined
+/// pairwise: a fixed order, so the value does not depend on the caller.
+fn dot8(x: &[f64], y: &[f64]) -> f64 {
+    const L: usize = 8;
+    let mut s = [0.; L];
+    let ((cx, tx), (cy, ty)) = (x.as_chunks::<L>(), y.as_chunks::<L>());
+    for (a, b) in cx.iter().zip(cy) {
+        for k in 0..L {
+            s[k] += a[k] * b[k];
+        }
+    }
+    for ((s, &a), &b) in s.iter_mut().zip(tx).zip(ty) {
+        *s += a * b;
+    }
+    ((s[0] + s[4]) + (s[2] + s[6])) + ((s[1] + s[5]) + (s[3] + s[7]))
+}
+fn narrow_dots(
+    q: &[f64],
+    n: usize,
+    x: &[f64],
+    k: usize,
+    out: RealMatrixMut<'_>,
+    first: usize,
+    parallel: bool,
+) {
+    let rows = out.nrows();
+    if parallel && rows > NARROW_PIECE {
+        let split = (rows.div_ceil(NARROW_PIECE) / 2) * NARROW_PIECE;
+        let (top, bottom) = out.split_at_row_mut(split);
+        WorkerPool::join(
+            || narrow_dots(q, n, x, k, top, first, true),
+            || narrow_dots(q, n, x, k, bottom, first + split, true),
+        );
+        return;
+    }
+    let mut out = out;
+    for j in 0..rows {
+        let qj = &q[(first + j) * n..(first + j + 1) * n];
+        for c in 0..k {
+            out[(j, c)] = dot8(qj, &x[c * n..(c + 1) * n]);
+        }
+    }
+}
+fn narrow_update(
+    q: &[f64],
+    n: usize,
+    mq: usize,
+    s: RealMatrixRef<'_>,
+    x: RealMatrixMut<'_>,
+    first: usize,
+    parallel: bool,
+) {
+    let rows = x.nrows();
+    if parallel && rows > NARROW_ROWS {
+        let split = (rows.div_ceil(NARROW_ROWS) / 2) * NARROW_ROWS;
+        let (top, bottom) = x.split_at_row_mut(split);
+        WorkerPool::join(
+            || narrow_update(q, n, mq, s, top, first, true),
+            || narrow_update(q, n, mq, s, bottom, first + split, true),
+        );
+        return;
+    }
+    let mut x = x;
+    for start in (0..rows).step_by(NARROW_ROWS) {
+        let len = NARROW_ROWS.min(rows - start);
+        let lo = first + start;
+        let col = |j: usize| &q[j * n + lo..j * n + lo + len];
+        let mut j = 0;
+        while j + 4 <= mq {
+            let (q0, q1, q2, q3) = (col(j), col(j + 1), col(j + 2), col(j + 3));
+            for c in 0..s.ncols() {
+                let (s0, s1, s2, s3) = (s[(j, c)], s[(j + 1, c)], s[(j + 2, c)], s[(j + 3, c)]);
+                let xc = x
+                    .as_mut()
+                    .col_mut(c)
+                    .subrows_mut(start, len)
+                    .try_as_col_major_mut()
+                    .expect("contiguous column")
+                    .as_slice_mut();
+                for i in 0..len {
+                    let mut t = xc[i];
+                    t -= s0 * q0[i];
+                    t -= s1 * q1[i];
+                    t -= s2 * q2[i];
+                    t -= s3 * q3[i];
+                    xc[i] = t;
+                }
+            }
+            j += 4;
+        }
+        while j < mq {
+            let qj = col(j);
+            for c in 0..s.ncols() {
+                let sj = s[(j, c)];
+                let xc = x
+                    .as_mut()
+                    .col_mut(c)
+                    .subrows_mut(start, len)
+                    .try_as_col_major_mut()
+                    .expect("contiguous column")
+                    .as_slice_mut();
+                for (xv, &qv) in xc.iter_mut().zip(qj) {
+                    *xv -= sj * qv;
+                }
+            }
+            j += 1;
+        }
+    }
+}
+struct GroupJob<'a> {
+    a: &'a [f64],
+    rows: usize,
+    k: usize,
+    lda: usize,
+    b: &'a [f64],
+    ldb: usize,
+    #[cfg_attr(not(feature = "mkl"), allow(dead_code))]
+    mkl: bool,
+}
+/// Column groups `first..` (in units of columns) of A B into `out` (contiguous).
+fn column_groups(job: &GroupJob<'_>, out: &mut [f64], first: usize, parallel: bool) {
+    let n = out.len() / job.rows;
+    if parallel && n > COLUMN_GROUP {
+        let split = (n.div_ceil(COLUMN_GROUP) / 2) * COLUMN_GROUP;
+        let (left, right) = out.split_at_mut(split * job.rows);
+        WorkerPool::join(
+            || column_groups(job, left, first, true),
+            || column_groups(job, right, first + split, true),
+        );
+        return;
+    }
+    let a = MatRef::from_column_major_slice_with_stride(job.a, job.rows, job.k, job.lda);
+    for g in (0..n).step_by(COLUMN_GROUP) {
+        let w = COLUMN_GROUP.min(n - g);
+        let col = first + g;
+        let dst = &mut out[g * job.rows..(g + w) * job.rows];
+        let b = &job.b[col * job.ldb..];
+        #[cfg(feature = "mkl")]
+        if job.mkl {
+            dft_mkl::dgemm_at(
+                GemmSite::Other.into(),
+                false,
+                job.rows,
+                w,
+                job.k,
+                job.a,
+                job.lda,
+                b,
+                job.ldb,
+                dst,
+            )
+            .expect("checked dgemm shapes");
+            continue;
+        }
+        let bv = MatRef::from_column_major_slice_with_stride(b, job.k, w, job.ldb);
+        rotate_legacy(
+            MatMut::from_column_major_slice_mut(dst, job.rows, w),
+            a,
+            bv,
+            false,
+        );
+    }
+}
 /// Row panels of C = A B, each one sequential dgemm into a private tile that is
 /// then copied into place; panels are independent, their grouping is fixed.
 #[cfg(feature = "mkl")]
@@ -741,9 +1291,22 @@ fn dgemm_panels(
                 buffer,
             )
             .expect("checked dgemm shapes");
+            // Column copies (contiguous when the output has unit row stride);
+            // the same values as an element loop, without per-element checks.
             for j in 0..n {
-                for i in 0..len {
-                    out[(row + i, j)] = buffer[j * len + i];
+                let src = &buffer[j * len..(j + 1) * len];
+                match out
+                    .as_mut()
+                    .col_mut(j)
+                    .subrows_mut(row, len)
+                    .try_as_col_major_mut()
+                {
+                    Some(dst) => dst.as_slice_mut().copy_from_slice(src),
+                    None => {
+                        for (i, &v) in src.iter().enumerate() {
+                            out[(row + i, j)] = v;
+                        }
+                    }
                 }
             }
         }

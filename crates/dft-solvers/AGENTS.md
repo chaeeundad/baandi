@@ -41,6 +41,12 @@ B6 cached projector products for the return certificate `BAANDI_B6=on` (operator
 through the `RealLinearOperator` default methods; test `tests/b6_certificate.rs`).
 Micro switches read at construction: `BAANDI_WIDE_DOT=on` (eight-lane MGS dot, rounding
 class); see docs/performance/requests/micro-stack.md.
+Algebra-stream switches (docs/performance/requests/algebra-stream.md, test
+`tests/algebra_stream.rs`): `BAANDI_RITZ_FUSED=on` (Ritz vectors and residuals in one
+pass, H X formed only for a contraction; bit-identical when on), `BAANDI_NARROW_PROJ=on`
+and `BAANDI_NARROW_REDUCED=on` (blocks of at most `NARROW_WIDTH` columns by streaming
+dot kernels; rounding class), `BAANDI_B5=par` (B5 with root-parallel secular solve and
+column-group parallel product; bit-identical to `BAANDI_B5=on` on faer).
 All default off and bit-identical when off. Tests: `tests/b1_selected_roots.rs`,
 `tests/b5_reduced_eigen.rs`; B4 harness `tests/b4_inner_iterations.rs` (ignored).
 Plan and pre-registered rules: docs/performance/requests/b1-b4-b5-davidson.md.

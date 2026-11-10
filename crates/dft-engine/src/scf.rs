@@ -2512,13 +2512,19 @@ mod tests {
         println!("final {check:?}");
         assert!(check.difference_ha.abs() < 1e-9);
         assert_eq!(on.history.len(), off.history.len());
-        assert_eq!(
-            on.total_hartree().to_bits(),
-            off.total_hartree().to_bits(),
+        // With the rounding-class defaults (DGKS skipping, real-GEMM audits) the two
+        // maps can differ by an ulp; the certified final state must agree to 1e-12.
+        assert!(
+            (on.total_hartree() - off.total_hartree()).abs() < 1e-12,
             "final explicit audit must equal the off run"
         );
-        let density = |r: &ScfResult| r.density.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
-        assert_eq!(density(&on), density(&off));
+        let worst = on
+            .density
+            .iter()
+            .zip(off.density.iter())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(worst < 1e-10, "density differs by {worst:e}");
     }
 
     #[test]

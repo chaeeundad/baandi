@@ -210,6 +210,82 @@ impl Drop for Plan3d {
     }
 }
 
+/// HAPPLY lanes (`BAANDI_PAIR_FFT=pruned` in MKL builds): one in-place
+/// double-complex descriptor for `count` contiguous 1D transforms of length
+/// `len` (lane `j` occupies elements `j*len .. (j+1)*len`). Both directions are
+/// UNSCALED (DFTI default scales 1.0), matching rustfft's `process`. Send but
+/// not Sync, like `Plan3d`. No buffer is owned; transforms act on caller storage.
+pub struct Plan1dBatch {
+    handle: *mut c_void,
+    total: usize,
+    not_sync: PhantomData<Cell<()>>,
+}
+// SAFETY: as for Plan3d: unique descriptor ownership, no thread affinity, and
+// every operation takes &mut self.
+unsafe impl Send for Plan1dBatch {}
+impl Plan1dBatch {
+    pub fn new(len: usize, count: usize) -> Result<Self, Error> {
+        let _ = crate::keep::anchor();
+        let total = len
+            .checked_mul(count)
+            .filter(|&n| len > 0 && count > 0 && n <= isize::MAX as usize / size_of::<Complex64>())
+            .ok_or(Error::Dimension)?;
+        let n: c_long = len.try_into().map_err(|_| Error::Dimension)?;
+        let howmany: c_long = count.try_into().map_err(|_| Error::Dimension)?;
+        let mut plan = Self {
+            handle: ptr::null_mut(),
+            total,
+            not_sync: PhantomData,
+        };
+        // SAFETY: writable handle; rank 1 passes its length as one C long by
+        // value; DOUBLE=36, COMPLEX=32. PLACEMENT=11 with INPLACE=43 (C int);
+        // NUMBER_OF_TRANSFORMS=7 and INPUT_DISTANCE=14 / OUTPUT_DISTANCE=15 take
+        // C long values. Lengths validated above; Drop frees a created descriptor
+        // even when a later configuration call fails.
+        unsafe {
+            status(DftiCreateDescriptor(&mut plan.handle, 36, 32, 1, n))?;
+            status(DftiSetValue(plan.handle, 11, 43 as c_int))?;
+            status(DftiSetValue(plan.handle, 7, howmany))?;
+            status(DftiSetValue(plan.handle, 14, n))?;
+            status(DftiSetValue(plan.handle, 15, n))?;
+            status(DftiCommitDescriptor(plan.handle))?;
+        }
+        Ok(plan)
+    }
+    /// Unscaled in-place transforms of exactly `len * count` elements;
+    /// `inverse` selects the backward (+i) sign. On a DFTI error the contents
+    /// of `data` are unspecified.
+    pub fn transform_in_place(
+        &mut self,
+        data: &mut [Complex64],
+        inverse: bool,
+    ) -> Result<(), Error> {
+        if data.len() != self.total {
+            return Err(Error::Dimension);
+        }
+        // SAFETY: committed in-place batch descriptor whose lanes cover exactly
+        // `total` contiguous Complex64 values (two C doubles each); the slice has
+        // that length and is uniquely borrowed for the call; DFTI keeps no pointer.
+        unsafe {
+            status(if inverse {
+                DftiComputeBackward(self.handle, data.as_mut_ptr().cast())
+            } else {
+                DftiComputeForward(self.handle, data.as_mut_ptr().cast())
+            })
+        }
+    }
+}
+impl Drop for Plan1dBatch {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            // SAFETY: descriptor owned exclusively here; freed exactly once.
+            unsafe {
+                DftiFreeDescriptor(&mut self.handle);
+            }
+        }
+    }
+}
+
 /// Borrowed contiguous column-major matrix, with checked storage dimensions.
 #[derive(Clone, Copy)]
 pub struct Matrix<'a> {

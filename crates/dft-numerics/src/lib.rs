@@ -1,5 +1,6 @@
 //! Reusable complex FFTs with explicit plane-wave normalization.
 pub mod fused;
+pub mod fused_fold;
 pub mod fused_pair;
 pub mod fused_pair_plan;
 pub use fused_pair::{PairDensityOperator, PairDensityWorkspace, PairMap, PairPlan};

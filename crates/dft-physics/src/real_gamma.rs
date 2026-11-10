@@ -2,9 +2,10 @@
 //! no engine caller or change to the complex traversal (ledger A43).
 use crate::hamiltonian::{Hamiltonian, NonlocalOperator};
 use dft_basis::{HalfSphere, PlaneWaveBasis};
+use dft_numerics::fused_fold::FoldedRealPlan;
 use dft_numerics::fused_pair_plan::RealPairPlan;
 use dft_numerics::{
-    PairMap, RealGemmWorkspace, RealMatrix, RealOp, fused_pair::PairLocalWorkspace,
+    FftPlan3d, PairMap, RealGemmWorkspace, RealMatrix, RealOp, fused_pair::PairLocalWorkspace,
     pool::WorkerPool,
 };
 use num_complex::Complex64;
@@ -276,6 +277,74 @@ impl RealNonlocal {
 
     /// Coupling and back product from `self.projections` (first `m` columns).
     fn add_from_projections(&mut self, y: &mut RealMatrix, m: usize) -> Result<(), RealGammaError> {
+        self.image_from_projections(m)?;
+        self.add_image(y)
+    }
+
+    /// HAPPLY-OVERLAP: P^T X, coupling and back product into the private image
+    /// (the arithmetic of `add_block_core` without touching Y).
+    fn image_block(&mut self, x: &RealMatrix) -> Result<(), RealGammaError> {
+        let n = self.projectors.rows();
+        let m = x.cols();
+        if x.rows() != n || m > self.capacity {
+            return Err(RealGammaError::Shape);
+        }
+        let count = self.projectors.cols();
+        if self.dgemm_products {
+            self.gemm.multiply_slices_wide_into(
+                dft_numerics::GemmSite::Other,
+                self.projectors.as_slice(),
+                n,
+                count,
+                n,
+                RealOp::Transpose,
+                x.as_slice(),
+                m,
+                n,
+                self.projections.as_mut().subcols_mut(0, m),
+            )?;
+        } else {
+            self.gemm.multiply_into(
+                self.projectors.as_ref(),
+                RealOp::Transpose,
+                x.as_ref(),
+                self.projections.as_mut().subcols_mut(0, m),
+            )?;
+        }
+        self.image_from_projections(m)
+    }
+
+    /// HAPPLY-OVERLAP with caller projections (B6): the arithmetic of
+    /// `add_block_with_projections` without touching Y.
+    fn image_with_projections(
+        &mut self,
+        projections: &[f64],
+        m: usize,
+    ) -> Result<(), RealGammaError> {
+        let count = self.projectors.cols();
+        if m > self.capacity || projections.len() != count * m {
+            return Err(RealGammaError::Shape);
+        }
+        if projections.iter().any(|x| !x.is_finite()) {
+            return Err(RealGammaError::NonFinite);
+        }
+        self.projections.as_mut_slice()[..count * m].copy_from_slice(projections);
+        self.image_from_projections(m)
+    }
+
+    /// Y += image (first `Y.cols()` columns), then the output scan.
+    fn add_image(&self, y: &mut RealMatrix) -> Result<(), RealGammaError> {
+        for (y, v) in y.as_mut_slice().iter_mut().zip(self.image.as_slice()) {
+            *y += v;
+        }
+        if y.as_slice().iter().any(|x| !x.is_finite()) {
+            return Err(RealGammaError::NonFinite);
+        }
+        Ok(())
+    }
+
+    /// Coupling and back product into `self.image` (first `m` columns).
+    fn image_from_projections(&mut self, m: usize) -> Result<(), RealGammaError> {
         let n = self.projectors.rows();
         let count = self.projectors.cols();
         for atom in &self.coupling {
@@ -311,12 +380,6 @@ impl RealNonlocal {
                 self.image.as_mut().subcols_mut(0, m),
             )?;
         }
-        for (y, v) in y.as_mut_slice().iter_mut().zip(self.image.as_slice()) {
-            *y += v;
-        }
-        if y.as_slice().iter().any(|x| !x.is_finite()) {
-            return Err(RealGammaError::NonFinite);
-        }
         Ok(())
     }
 }
@@ -337,12 +400,51 @@ pub struct RealHamiltonian {
     /// kinetic term without a per-element modulo and no repeated input scans in
     /// the nonlocal add (X is scanned once at entry, Y once at the end).
     lean: bool,
+    pool: Arc<WorkerPool>,
+    /// HAPPLY-OVERLAP (opt-in `BAANDI_HAPPLY_OVERLAP=on`, default off;
+    /// bit-identical): the local part and the nonlocal image run as the two
+    /// branches of one pool join (the nonlocal GEMMs keep their fixed panel
+    /// grouping), then Y += kinetic and Y += image in the serial order.
+    overlap: bool,
+    /// HAPPLY-FOLD (opt-in `BAANDI_HAPPLY_FOLD=on`, default off; rounding
+    /// class for odd blocks, even blocks unchanged): the odd tail column goes
+    /// through the half-length folded transform instead of a pair with a zero
+    /// partner. `None` when off or when the last grid axis is odd.
+    fold: Option<FoldedRealPlan<FftPlan3d>>,
+    grid_shape: [usize; 3],
+    grid_indices: Vec<[usize; 3]>,
 }
 impl RealHamiltonian {
     /// Test hook: force APPLY-LEAN on or off regardless of the environment.
     pub fn set_apply_lean(&mut self, on: bool) {
         self.lean = on;
     }
+    /// Test hook: force HAPPLY-OVERLAP on or off regardless of the environment.
+    pub fn set_apply_overlap(&mut self, on: bool) {
+        self.overlap = on;
+    }
+    /// Test hook: force HAPPLY-FOLD on or off regardless of the environment.
+    /// Returns whether the fold is active (false for an odd last grid axis).
+    /// Building the plan allocates; call it outside numerical loops.
+    pub fn set_apply_fold(&mut self, on: bool) -> Result<bool, RealGammaError> {
+        self.fold = if on {
+            match self.fold.take() {
+                Some(plan) => Some(plan),
+                None => FoldedRealPlan::new(
+                    self.grid_shape,
+                    &self.grid_indices,
+                    self.half.plus(),
+                    self.half.minus(),
+                )?,
+            }
+        } else {
+            None
+        };
+        Ok(self.fold.is_some())
+    }
+}
+fn env_on(name: &str) -> bool {
+    std::env::var(name).as_deref() == Ok("on")
 }
 impl RealHamiltonian {
     /// Snapshot potential and public projectors; reject a mismatched or non-Gamma basis.
@@ -367,8 +469,8 @@ impl RealHamiltonian {
             kinetic[2 * i - 1] = source.kinetic_diagonal()[p as usize];
             kinetic[2 * i] = kinetic[2 * i - 1];
         }
-        let nonlocal = RealNonlocal::new(source.nonlocal(), &half, capacity, pool)?;
-        Ok(Self {
+        let nonlocal = RealNonlocal::new(source.nonlocal(), &half, capacity, pool.clone())?;
+        let mut h = Self {
             source_identity: source.operator_identity(),
             half,
             kinetic,
@@ -377,7 +479,14 @@ impl RealHamiltonian {
             nonlocal,
             capacity,
             lean: std::env::var("BAANDI_APPLY_LEAN").as_deref() != Ok("off"),
-        })
+            pool,
+            overlap: env_on("BAANDI_HAPPLY_OVERLAP"),
+            fold: None,
+            grid_shape: grid.dims(),
+            grid_indices: grid.g_to_fft().to_vec(),
+        };
+        h.set_apply_fold(env_on("BAANDI_HAPPLY_FOLD"))?;
+        Ok(h)
     }
     /// Refresh only the local samples when immutable operator data match.
     /// False asks the owner to rebuild; no scratch or cached data is changed.
@@ -413,8 +522,10 @@ impl RealHamiltonian {
         if x.as_slice().iter().any(|x| !x.is_finite()) {
             return Err(RealGammaError::NonFinite);
         }
-        self.local
-            .apply_block(x.as_slice(), &self.potential, y.as_mut_slice())?;
+        if self.overlap {
+            return self.apply_overlapped(x, None, y);
+        }
+        self.apply_local(x, y)?;
         if self.lean {
             self.add_kinetic(x, y);
             return self.nonlocal.add_block_core(x, y);
@@ -423,6 +534,51 @@ impl RealHamiltonian {
             *y += self.kinetic[j % self.kinetic.len()] * x;
         }
         self.nonlocal.add_block(x, y)
+    }
+    /// Local part into Y (overwrite): pairs on the leading even columns, and
+    /// with HAPPLY-FOLD the odd tail through the folded plan; the two run as
+    /// the branches of one pool join (disjoint outputs, serial arithmetic each).
+    fn apply_local(&mut self, x: &RealMatrix, y: &mut RealMatrix) -> Result<(), RealGammaError> {
+        local_part(
+            &mut self.local,
+            self.fold.as_mut(),
+            &self.pool,
+            x,
+            &self.potential,
+            y,
+        )
+    }
+    /// HAPPLY-OVERLAP: local part and nonlocal image in one pool join, then
+    /// the kinetic and nonlocal additions in the serial order (bit-identical
+    /// to the non-overlapped path for any thread budget).
+    fn apply_overlapped(
+        &mut self,
+        x: &RealMatrix,
+        projections: Option<&[f64]>,
+        y: &mut RealMatrix,
+    ) -> Result<(), RealGammaError> {
+        let m = x.cols();
+        let Self {
+            local,
+            fold,
+            pool,
+            potential,
+            nonlocal,
+            ..
+        } = self;
+        let (local_result, image_result) = pool.install(|| {
+            WorkerPool::join(
+                || local_part(local, fold.as_mut(), pool, x, potential, y),
+                || match projections {
+                    None => nonlocal.image_block(x),
+                    Some(p) => nonlocal.image_with_projections(p, m),
+                },
+            )
+        });
+        local_result?;
+        image_result?;
+        self.add_kinetic(x, y);
+        self.nonlocal.add_image(y)
     }
     /// APPLY-LEAN kinetic term: the same `y += t x` per element, column by column
     /// instead of an integer modulo per element (bit-identical).
@@ -475,8 +631,10 @@ impl RealHamiltonian {
         if x.as_slice().iter().any(|x| !x.is_finite()) {
             return Err(RealGammaError::NonFinite);
         }
-        self.local
-            .apply_block(x.as_slice(), &self.potential, y.as_mut_slice())?;
+        if self.overlap {
+            return self.apply_overlapped(x, Some(projections), y);
+        }
+        self.apply_local(x, y)?;
         if self.lean {
             self.add_kinetic(x, y);
         } else {
@@ -486,6 +644,45 @@ impl RealHamiltonian {
         }
         self.nonlocal.add_block_with_projections(projections, y)
     }
+}
+
+/// Local potential image of a block (overwrite). Without a fold plan this is
+/// exactly `PairLocalWorkspace::apply_block`. With one, an odd block keeps the
+/// pairs (0,1), (2,3), ... for its leading columns and sends the tail column
+/// through the folded plan; the outputs are disjoint, so the join changes no bit.
+fn local_part(
+    local: &mut PairLocalWorkspace<RealPairPlan>,
+    fold: Option<&mut FoldedRealPlan<FftPlan3d>>,
+    pool: &WorkerPool,
+    x: &RealMatrix,
+    potential: &[f64],
+    y: &mut RealMatrix,
+) -> Result<(), RealGammaError> {
+    let m = x.cols();
+    let fold = match fold {
+        Some(f) if m % 2 == 1 => f,
+        _ => {
+            local.apply_block(x.as_slice(), potential, y.as_mut_slice())?;
+            return Ok(());
+        }
+    };
+    let n = x.rows();
+    let split = (m - 1) * n;
+    let (xp, xt) = x.as_slice().split_at(split);
+    let (yp, yt) = y.as_mut_slice().split_at_mut(split);
+    if split == 0 {
+        fold.apply_local_real(xt, potential, yt)?;
+        return Ok(());
+    }
+    let (a, b) = pool.install(|| {
+        WorkerPool::join(
+            || local.apply_block(xp, potential, yp),
+            || fold.apply_local_real(xt, potential, yt),
+        )
+    });
+    a?;
+    b?;
+    Ok(())
 }
 
 #[cfg(test)]

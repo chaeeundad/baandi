@@ -600,6 +600,7 @@ pub fn execute_mode(
                 "davidson_iterations_recorded":r.history.iter().map(|h|h.davidson_iterations).sum::<usize>(),
                 "certificate_davidson_iterations":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.davidson_iterations).sum::<usize>(),
                 "certificate_solves":r.history.iter().filter(|h|h.fixed_point_certificate.is_some()).count(),
+                "second_vector_columns":dft_engine::second_vector_columns(),
                 "h_vectors_recorded":r.history.iter().map(|h|h.operator_applications).sum::<usize>(),
                 "certificate_h_vectors":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.operator_applications).sum::<usize>(),
                 "note":"recorded = per-iteration solves in history; certificate = fixed-point certificate re-solves, reported only inside each history entry's fixed_point_certificate; total work is the sum"}},"energies":energies,

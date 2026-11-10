@@ -581,6 +581,16 @@ enum SecondVector {
     ConvergedBand,
     /// Unpreconditioned residual of the worst strict band.
     WorstResidual,
+    /// As `WorstResidual`, but only when the correction block has exactly one
+    /// column (the single-column tail); never in wider blocks.
+    WorstResidualTail,
+}
+static SECOND_VECTOR_COLUMNS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+/// Number of second-vector columns inserted so far in this process (for the run
+/// report: lets a measurement check that the gate itself fired).
+pub fn second_vector_columns() -> usize {
+    SECOND_VECTOR_COLUMNS.load(std::sync::atomic::Ordering::Relaxed)
 }
 impl SecondVector {
     fn from_env() -> Self {
@@ -588,6 +598,7 @@ impl SecondVector {
             Ok("v1") => Self::PreviousCorrection,
             Ok("v2") => Self::ConvergedBand,
             Ok("v3") => Self::WorstResidual,
+            Ok("v4") => Self::WorstResidualTail,
             _ => Self::Off,
         }
     }
@@ -633,6 +644,7 @@ fn add_second_vector(
             has_previous[j] = true;
         }
         if let Some(col) = column_extra {
+            SECOND_VECTOR_COLUMNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             corrections.reshape_within_storage(n, k + 1)?;
             corrections.as_mut_slice()[k * n..(k + 1) * n].copy_from_slice(&col);
         }
@@ -641,18 +653,24 @@ fn add_second_vector(
     if k.is_multiple_of(2) || k >= c.bands {
         return Ok(());
     }
+    if variant == SecondVector::WorstResidualTail && k != 1 {
+        return Ok(());
+    }
     let chosen = match variant {
         SecondVector::ConvergedBand => (0..c.bands)
             .filter(|&j| c.converged[j])
             .max_by(|&a, &b| c.residuals[a].total_cmp(&c.residuals[b])),
-        SecondVector::WorstResidual => (0..c.strict_bands.min(c.bands))
-            .max_by(|&a, &b| c.residuals[a].total_cmp(&c.residuals[b])),
+        SecondVector::WorstResidual | SecondVector::WorstResidualTail => {
+            (0..c.strict_bands.min(c.bands))
+                .max_by(|&a, &b| c.residuals[a].total_cmp(&c.residuals[b]))
+        }
         _ => None,
     };
     let Some(j) = chosen else {
         return Ok(());
     };
     corrections.reshape_within_storage(n, k + 1)?;
+    SECOND_VECTOR_COLUMNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dst = &mut corrections.as_mut_slice()[k * n..(k + 1) * n];
     let r = column(c.residual_block, j);
     match variant {

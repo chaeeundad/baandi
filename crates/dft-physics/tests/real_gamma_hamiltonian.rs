@@ -184,6 +184,81 @@ fn ten_shapes_nonlocal_full_h_hermiticity_and_threads() {
         "max H relative={max_h:e}; nonlocal relative={max_nl:e}; Hermiticity relative={max_sym:e}"
     );
 }
+/// B6 physics half: for X = V C the cached projections (P^T V) C reproduce
+/// H X without the first projector product, to rounding (relative 1e-13), on a
+/// skewed two-species cell with s, p, d, f projectors; shape errors are typed.
+#[test]
+fn cached_projections_reproduce_apply() {
+    let (basis, h) = fixture([[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]], 5, 1.2);
+    let n = basis.vectors().len();
+    let (m, k) = (6, 4);
+    let pool = WorkerPool::new(2).unwrap();
+    let mut real = RealHamiltonian::from_complex(&h, &basis, m, pool).unwrap();
+    let count = real.projector_count();
+    assert!(count > 0);
+    let v = states(n, m, 11);
+    let mut hv = RealMatrix::zeros(n, m).unwrap();
+    real.apply_block(&v, &mut hv).unwrap();
+    let pv = real.last_projections(m).unwrap().to_vec();
+    assert_eq!(pv.len(), count * m);
+    // X = V C with a fixed dense C (m x k, column-major).
+    let c: Vec<f64> = (0..m * k).map(|i| ((i * 5 + 1) as f64).cos()).collect();
+    let mut x = RealMatrix::zeros(n, k).unwrap();
+    for j in 0..k {
+        for i in 0..m {
+            let cij = c[j * m + i];
+            for r in 0..n {
+                x.as_mut_slice()[j * n + r] += cij * v.as_slice()[i * n + r];
+            }
+        }
+    }
+    let mut pc = vec![0.; count * k];
+    for j in 0..k {
+        for i in 0..m {
+            for p in 0..count {
+                pc[j * count + p] += pv[i * count + p] * c[j * m + i];
+            }
+        }
+    }
+    let mut reference = RealMatrix::zeros(n, k).unwrap();
+    real.apply_block(&x, &mut reference).unwrap();
+    let direct = real.last_projections(k).unwrap().to_vec();
+    let scale = direct.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let diff = direct
+        .iter()
+        .zip(&pc)
+        .map(|(a, b)| (a - b) * (a - b))
+        .sum::<f64>()
+        .sqrt();
+    assert!(diff <= 1e-13 * scale, "projections {diff:e} of {scale:e}");
+    let mut cached = RealMatrix::zeros(n, k).unwrap();
+    real.apply_block_with_projections(&x, &pc, &mut cached)
+        .unwrap();
+    let norm = reference
+        .as_slice()
+        .iter()
+        .map(|v| v * v)
+        .sum::<f64>()
+        .sqrt();
+    let err = reference
+        .as_slice()
+        .iter()
+        .zip(cached.as_slice())
+        .map(|(a, b)| (a - b) * (a - b))
+        .sum::<f64>()
+        .sqrt()
+        / norm;
+    println!("B6 cached-projection H relative={err:e}, projections={count}");
+    assert!(err < 1e-13, "relative {err:e}");
+    // Supplying the direct projections reproduces apply_block bit for bit.
+    real.apply_block_with_projections(&x, &direct, &mut cached)
+        .unwrap();
+    assert_eq!(cached.as_slice(), reference.as_slice());
+    assert!(
+        real.apply_block_with_projections(&x, &pc[..count], &mut cached)
+            .is_err()
+    );
+}
 #[test]
 fn empty_nonlocal_and_invalid_blocks() {
     let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap();

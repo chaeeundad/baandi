@@ -610,6 +610,16 @@ pub fn execute_mode(
         "threading":{"threads":opts.threads.max(1),"threads_requested":opts.threads,"threads_used":opts.threads.max(1),"outer_threads":opts.threads.max(1).min(r.k_points.len()),"inner_threads":opts.threads.max(1),"backend":"persistent Rayon pool shared by k points and fixed inner pieces; sequential faer and serial FFT per worker"},
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
+    if let Some(c) = &r.energy_identity {
+        // B2 (BAANDI_ENERGY_IDENTITY=on): history energies of non-final iterations
+        // use the band-sum identity; the final energy is the explicit audit.
+        result["convergence"]["work"]["energy_identity"] = json!({
+            "history_energy_form":"band_sum_identity (non-final iterations)",
+            "final_energy_form":"explicit_audit",
+            "identity_nonlocal_ha":c.identity_nonlocal_ha,
+            "audit_nonlocal_ha":c.audit_nonlocal_ha,
+            "difference_ha":c.difference_ha});
+    }
     if let Some(p) = opts.standard {
         if opts.standard_stall_guard {
             result["standard_stall_guard"] = json!("on");

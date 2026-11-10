@@ -385,6 +385,9 @@ pub struct ScfResult {
     pub certified: bool,
     pub spectral_completeness: Option<crate::SpectralReport>,
     pub energy: EnergyAudit,
+    /// B2 (`BAANDI_ENERGY_IDENTITY=on`): identity against explicit nonlocal
+    /// energy at the final state; `energy` always holds the explicit audit.
+    pub energy_identity: Option<energy::EnergyIdentityCheck>,
     /// First k point, retained for Gamma API compatibility; see `k_points`.
     pub eigenvalues: Vec<f64>,
     pub occupations: Vec<f64>,
@@ -494,6 +497,8 @@ pub struct ScfProblem {
     atomic_start: AtomicStartReport,
     #[cfg(test)]
     force_real_rebuild: bool,
+    #[cfg(test)]
+    force_energy_identity: bool,
     force_model: crate::force_identity::ModelDescription,
     atoms: Vec<Atom>,
     symmetry: Option<dft_physics::symmetry::DensitySymmetrizer>,
@@ -517,6 +522,22 @@ pub struct ScfProblem {
     setup_time: Duration,
     minimum_gap: Option<f64>,
     gamma_real_exclusion: Option<&'static str>,
+    /// POTENTIAL-REUSE: Hartree/XC fields of a density built by the certificate
+    /// pre-screen, consumed by the next map only if its input density is
+    /// bit-identical (a deterministic function of the same inputs, so reuse is
+    /// exact). Always taken (and dropped on mismatch) by the next map.
+    reused_fields: Option<ReusedFields>,
+    /// Per-worker FFT plans of the certificate pre-screen, created on first use.
+    screen_ffts: Vec<FftPlan3d>,
+    /// B2: set by the session for ordinary (non-certificate) maps when
+    /// `BAANDI_ENERGY_IDENTITY=on`; integer occupations only.
+    energy_identity: bool,
+}
+struct ReusedFields {
+    density: Array3<f64>,
+    hartree: hartree::HartreeGrid,
+    xc: xc::XcGrid,
+    effective: Array3<f64>,
 }
 struct KState {
     real_solve: Option<crate::gamma_real::RealSolveState>,
@@ -582,6 +603,26 @@ fn ordered_solves_at<T: Send, R: Send>(
     Ok(results)
 }
 
+/// Cluster matrix sums sum_r conj(psi_i) dV psi_j of the certificate pre-screen,
+/// one serial sum per entry, entries split over the pool (order-independent).
+fn cluster_entries(psi: &[&[Complex64]], delta: &[f64], entries: &mut [(usize, usize, Complex64)]) {
+    if entries.len() <= 2 {
+        for (i, j, out) in entries.iter_mut() {
+            let mut sum = Complex64::default();
+            for ((a, b), d) in psi[*i].iter().zip(psi[*j]).zip(delta) {
+                sum += a.conj() * b * *d;
+            }
+            *out = sum;
+        }
+        return;
+    }
+    let (left, right) = entries.split_at_mut(entries.len() / 2);
+    WorkerPool::join(
+        || cluster_entries(psi, delta, left),
+        || cluster_entries(psi, delta, right),
+    );
+}
+
 /// Bound live partial results by the workspace count. Fold each completed
 /// chunk in ascending global k order before starting the next chunk; neither
 /// chunk boundaries nor completion order can change floating-point association.
@@ -629,6 +670,9 @@ pub struct ScfStep {
     pub density: Array3<f64>,
     pub energy: EnergyAudit,
     pub timings: PhaseTimings,
+    /// True when `energy.nonlocal` comes from the band-sum identity (B2,
+    /// `BAANDI_ENERGY_IDENTITY=on`, non-final iterations only).
+    pub nonlocal_from_identity: bool,
 }
 impl ScfProblem {
     /// Dispatch evidence in input k order for the latest solve.
@@ -1042,7 +1086,12 @@ impl ScfProblem {
         Ok(Self {
             #[cfg(test)]
             force_real_rebuild: false,
+            #[cfg(test)]
+            force_energy_identity: false,
             gamma_real_exclusion,
+            reused_fields: None,
+            screen_ffts: Vec::new(),
+            energy_identity: false,
             start_density,
             atomic_species,
             atomic_start,
@@ -1234,6 +1283,38 @@ impl ScfProblem {
         Ok((h, x, effective))
     }
 
+    /// Explicit k-weighted nonlocal energy of a map's orbitals with the audit's
+    /// arithmetic (B2 final-state audit): equals the `nonlocal` field an
+    /// explicit audit of the same map would report, bit for bit.
+    pub(crate) fn explicit_nonlocal_energy(
+        &self,
+        k_points: &[KPointSolution],
+    ) -> Result<f64, ScfError> {
+        if k_points.len() != self.states.len() {
+            return Err(ScfError::InvalidInput("one solution per k point"));
+        }
+        let mut values = Vec::with_capacity(k_points.len());
+        for (state, k) in self.states.iter().zip(k_points) {
+            let vectors = &k.solution.eigenvectors;
+            let orbitals: Vec<_> = (0..vectors.cols())
+                .map(|b| vectors.column(b).to_vec())
+                .collect();
+            let nonlocal = state.hamiltonian.nonlocal();
+            let occupations = self.occupations.as_slice();
+            let orbitals = orbitals.as_slice();
+            let value = self.pool.install(move || {
+                energy::explicit_nonlocal_energy(nonlocal, orbitals, occupations)
+            })?;
+            values.push((state.point.weight, value));
+        }
+        Ok(values.iter().map(|(w, v)| w * v).sum())
+    }
+
+    /// Drop fields kept by `certificate_shift_estimate` (POTENTIAL-REUSE).
+    pub(crate) fn clear_reused_fields(&mut self) {
+        self.reused_fields = None;
+    }
+
     /// First-order estimate (Ha) of the occupied-eigenvalue change that the
     /// fixed-point certificate would measure when it re-solves at `density`.
     ///
@@ -1250,18 +1331,33 @@ impl ScfProblem {
     /// unoccupied band are skipped (their shifts are then not bounded). The value
     /// is therefore a lower estimate of the true maximum, never an upper bound.
     /// It never certifies anything; it can only predict a certain failure.
+    ///
+    /// With `keep_fields` the Hartree/XC fields built here are kept for the next
+    /// map (`step_*`) at the same density (POTENTIAL-REUSE), so a certificate
+    /// solve that follows a passing screen does not build them again.
     pub(crate) fn certificate_shift_estimate(
         &mut self,
         density: &Array3<f64>,
         k_points: &[KPointSolution],
+        keep_fields: bool,
     ) -> Result<Option<f64>, ScfError> {
         const CLUSTER_GAP_HA: f64 = 1e-3;
         const MAX_CLUSTER: usize = 24;
+        self.reused_fields = None;
         if k_points.len() != self.states.len() {
             return Ok(None);
         }
-        let (_, _, effective) = self.input_fields(density)?;
-        let effective = effective.as_standard_layout().into_owned();
+        let (h, x, effective) = self.input_fields(density)?;
+        let standard = effective.as_standard_layout().into_owned();
+        if keep_fields {
+            self.reused_fields = Some(ReusedFields {
+                density: density.clone(),
+                hartree: h,
+                xc: x,
+                effective,
+            });
+        }
+        let effective = standard;
         let target = effective.as_slice().expect("standard layout");
         let points = target.len();
         let weight = self.cell.volume_bohr3() / points as f64;
@@ -1270,6 +1366,7 @@ impl ScfProblem {
         let mut delta = vec![0.0; points];
         let mut integrals = vec![0.0; bands];
         let mut psi: Vec<Array3<Complex64>> = Vec::new();
+        let mut entries: Vec<(usize, usize, Complex64)> = Vec::new();
         for (state, k) in self.states.iter().zip(k_points) {
             let current = state.hamiltonian.local_potential_values();
             let eigenvalues = &k.solution.eigenvalues;
@@ -1300,29 +1397,52 @@ impl ScfProblem {
                 }
                 // Cluster: build diag(eps) + M with M_ij = mean_r conj(psi_i) dV psi_j.
                 psi.resize_with(size, || Array3::zeros(state.grid.dims()));
-                for (slot, b) in psi.iter_mut().zip(start..end) {
-                    self.fft.to_real(
-                        &state.grid.scatter(k.solution.eigenvectors.column(b))?,
-                        slot,
-                    )?;
+                // One band transform per pool worker (own FFT plan each) and the
+                // cluster entries split over the pool; every transform and every
+                // entry keeps its serial arithmetic, so the estimate is bit-identical
+                // for any thread count.
+                if self.screen_ffts.is_empty() {
+                    self.screen_ffts = (0..self.options.threads.max(1))
+                        .map(|_| FftPlan3d::new(self.grid.dims()))
+                        .collect::<Result<Vec<_>, _>>()?;
                 }
+                let vectors = &k.solution.eigenvectors;
+                let grid = &state.grid;
+                let mut jobs: Vec<_> = psi.iter_mut().zip(start..end).collect();
+                ordered_chunks(
+                    &mut jobs,
+                    &mut self.screen_ffts,
+                    &self.pool,
+                    |_, (slot, b), fft| {
+                        fft.to_real(&grid.scatter(vectors.column(*b))?, slot)?;
+                        Ok(())
+                    },
+                    |()| {},
+                )?;
+                drop(jobs);
+                entries.clear();
+                for j in 0..size {
+                    for i in 0..=j {
+                        entries.push((i, j, Complex64::default()));
+                    }
+                }
+                let slices: Vec<&[Complex64]> = psi
+                    .iter()
+                    .map(|p| p.as_slice().expect("standard layout"))
+                    .collect();
+                let (slices, delta) = (slices.as_slice(), delta.as_slice());
+                let entries_slice = entries.as_mut_slice();
+                self.pool
+                    .install(move || cluster_entries(slices, delta, entries_slice));
                 let mut matrix = ComplexMatrix::zeros(size, size)
                     .map_err(|e| ScfError::Numerical(e.to_string()))?;
-                for j in 0..size {
-                    let pj = psi[j].as_slice().expect("standard layout");
-                    for i in 0..=j {
-                        let pi = psi[i].as_slice().expect("standard layout");
-                        let mut sum = Complex64::default();
-                        for ((a, b), d) in pi.iter().zip(pj).zip(&delta) {
-                            sum += a.conj() * b * *d;
-                        }
-                        let mut value = sum / points as f64;
-                        if i == j {
-                            value = Complex64::new(value.re + eigenvalues[start + i], 0.0);
-                        }
-                        matrix.column_mut(j)[i] = value;
-                        matrix.column_mut(i)[j] = value.conj();
+                for &(i, j, sum) in &entries {
+                    let mut value = sum / points as f64;
+                    if i == j {
+                        value = Complex64::new(value.re + eigenvalues[start + i], 0.0);
                     }
+                    matrix.column_mut(j)[i] = value;
+                    matrix.column_mut(i)[j] = value.conj();
                 }
                 let (shifted, _) = dft_numerics::linalg::hermitian_eigh(&matrix)
                     .map_err(|e| ScfError::Numerical(e.to_string()))?;
@@ -1379,7 +1499,18 @@ impl ScfProblem {
                 "symmetry.density: input breaks the selected symmetry; use full mesh",
             ));
         }
-        let (h, x, effective) = self.input_fields(n)?;
+        let (h, x, effective) = match self.reused_fields.take() {
+            Some(r)
+                if r.density.shape() == n.shape()
+                    && r.density
+                        .iter()
+                        .zip(n.iter())
+                        .all(|(a, b)| a.to_bits() == b.to_bits()) =>
+            {
+                (r.hartree, r.xc, r.effective)
+            }
+            _ => self.input_fields(n)?,
+        };
         ordered_solves(
             &mut self.states,
             self.options.threads,
@@ -1697,6 +1828,8 @@ impl ScfProblem {
             output_xc.as_ref(),
             self.core_density.as_ref(),
         )?;
+        // B2: Fermi-Dirac occupations fall back to the explicit audit.
+        let identity = self.energy_identity && finite.is_none();
         let mut audits = Vec::new();
         ordered_chunks(
             &mut self.states,
@@ -1704,7 +1837,7 @@ impl ScfProblem {
             &self.pool,
             |i, state, _fft| {
                 let k = &k_points[i];
-                let audit = energy::evaluate_shared(
+                let audit = energy::evaluate_shared_with(
                     AuditInput {
                         cell: &self.cell,
                         basis: &state.basis,
@@ -1722,12 +1855,16 @@ impl ScfProblem {
                         ewald: self.ewald.energy.0,
                     },
                     &shared_audit,
+                    !identity,
                 )?;
                 Ok((state.point.weight, audit))
             },
             |audit| audits.push(audit),
         )?;
         let mut energy = energy::weighted_audits(&audits);
+        if identity {
+            energy::apply_band_sum_identity(&mut energy);
+        }
         energy.xc_floor = self.density_floor.map(|floor| energy::XcFloorAudit {
             density_floor: floor,
             input_negative_charge: self.negative_charge(n),
@@ -1741,6 +1878,7 @@ impl ScfProblem {
             density: output,
             energy,
             timings,
+            nonlocal_from_identity: identity,
         })
     }
     /// Original success-only API; exhausted budgets remain errors.
@@ -1956,7 +2094,7 @@ mod tests {
         }
         let step = problem.step_kpoints(&n, warm.as_deref(), 1e-11).unwrap();
         let estimate = problem
-            .certificate_shift_estimate(&step.density, &step.k_points)
+            .certificate_shift_estimate(&step.density, &step.k_points, false)
             .unwrap()
             .unwrap();
         let warm: Vec<_> = step
@@ -1981,6 +2119,162 @@ mod tests {
             (estimate - actual).abs() <= 2e-3 * actual + 1e-13,
             "estimate {estimate:e} actual {actual:e}"
         );
+    }
+
+    /// POTENTIAL-REUSE: the certificate solve that follows a screen at the same
+    /// density gives bit-identical eigenvalues, density and energy whether or not
+    /// it reuses the screen's Hartree/XC fields; the kept fields are consumed by
+    /// that one map and never survive it. The estimate itself (pool-parallel
+    /// cluster transforms and entries) is bit-identical for 1 and 4 threads.
+    #[test]
+    fn certificate_potential_reuse_is_bit_identical() {
+        let potential = pool_fixture::potential(8.0, 1.0, true, 101);
+        // Cubic: the occupied p shell is a threefold cluster (matrix path).
+        let cell = Cell::from_user_rows_bohr([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]]).unwrap();
+        let run = |keep: bool, threads: usize| {
+            let mut problem = ScfProblem::new(
+                &cell,
+                &[Atom::new("Xx", [0.0, 0.0, 0.0])],
+                &[SpeciesPotential {
+                    label: "Xx",
+                    potential: &potential,
+                }],
+                ScfOptions {
+                    threads,
+                    cutoff_hartree: 3.0,
+                    bands: Some(6),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let mut n = problem.uniform_density();
+            let mut warm: Option<Vec<ComplexMatrix>> = None;
+            for _ in 0..4 {
+                let step = problem.step_kpoints(&n, warm.as_deref(), 1e-9).unwrap();
+                warm = Some(
+                    step.k_points
+                        .iter()
+                        .map(|k| k.solution.eigenvectors.clone())
+                        .collect(),
+                );
+                n.zip_mut_with(&step.density, |a, b| *a += 0.5 * (b - *a));
+            }
+            let step = problem.step_kpoints(&n, warm.as_deref(), 1e-9).unwrap();
+            let estimate = problem
+                .certificate_shift_estimate(&step.density, &step.k_points, keep)
+                .unwrap()
+                .unwrap();
+            assert_eq!(problem.reused_fields.is_some(), keep);
+            let warm: Vec<_> = step
+                .k_points
+                .iter()
+                .map(|k| k.solution.eigenvectors.clone())
+                .collect();
+            let check = problem
+                .step_kpoints(&step.density, Some(&warm), 1e-10)
+                .unwrap();
+            assert!(
+                problem.reused_fields.is_none(),
+                "kept fields must be consumed"
+            );
+            let eig: Vec<u64> = check.k_points[0]
+                .solution
+                .eigenvalues
+                .iter()
+                .map(|e| e.to_bits())
+                .collect();
+            let density: Vec<u64> = check.density.iter().map(|v| v.to_bits()).collect();
+            (
+                estimate.to_bits(),
+                eig,
+                density,
+                check.energy.total_hartree().to_bits(),
+            )
+        };
+        let reference = run(true, 1);
+        assert_eq!(reference, run(false, 1));
+        assert_eq!(reference, run(true, 4));
+    }
+
+    /// B2: one map with the band-sum identity differs from the explicit audit
+    /// only in `nonlocal` (to rounding of the eigenpairs), every other audit field
+    /// is bit-identical, and the explicit final-state audit reproduces the
+    /// explicit map's nonlocal energy bit for bit. A full SCF with the identity
+    /// in non-final iterations reaches the same certified state and energy.
+    #[test]
+    fn energy_identity_matches_explicit_audit() {
+        let potential = pool_fixture::potential(8.0, 1.0, true, 101);
+        let cell =
+            Cell::from_user_rows_bohr([[6., 0., 0.], [0.4, 6.2, 0.], [0.3, 0., 5.8]]).unwrap();
+        let make = || {
+            ScfProblem::new(
+                &cell,
+                &[Atom::new("Xx", [0.0, 0.0, 0.0])],
+                &[SpeciesPotential {
+                    label: "Xx",
+                    potential: &potential,
+                }],
+                ScfOptions {
+                    threads: 1,
+                    cutoff_hartree: 3.0,
+                    bands: Some(6),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+        };
+        let mut problem = make();
+        let n = problem.uniform_density();
+        let explicit = problem.step_kpoints(&n, None, 1e-10).unwrap();
+        let mut problem = make();
+        problem.energy_identity = true;
+        let identity = problem.step_kpoints(&n, None, 1e-10).unwrap();
+        assert!(identity.nonlocal_from_identity && !explicit.nonlocal_from_identity);
+        let (a, b) = (&explicit.energy, &identity.energy);
+        for (x, y) in [
+            (a.kinetic, b.kinetic),
+            (a.local, b.local),
+            (a.hartree, b.hartree),
+            (a.xc, b.xc),
+            (a.band_sum, b.band_sum),
+            (a.double_counting, b.double_counting),
+            (a.band_form, b.band_form),
+        ] {
+            assert_eq!(x.to_bits(), y.to_bits());
+        }
+        let difference = b.nonlocal - a.nonlocal;
+        println!(
+            "nonlocal explicit {:.15e} identity {:.15e} difference {difference:.3e}",
+            a.nonlocal, b.nonlocal
+        );
+        assert!(a.nonlocal.abs() > 1e-3, "fixture needs a nonlocal term");
+        assert!(
+            difference.abs() < 1e-9,
+            "identity difference {difference:e}"
+        );
+        // The identity total is the band-structure form by construction.
+        assert!((b.total_hartree() - b.band_form).abs() < 1e-11);
+        let audit = problem
+            .explicit_nonlocal_energy(&identity.k_points)
+            .unwrap();
+        assert_eq!(audit.to_bits(), a.nonlocal.to_bits());
+
+        let off = make().run().unwrap();
+        let mut on = make();
+        on.force_energy_identity = true;
+        let on = on.run().unwrap();
+        assert!(off.energy_identity.is_none());
+        let check = on.energy_identity.clone().expect("identity report");
+        println!("final {check:?}");
+        assert!(check.difference_ha.abs() < 1e-9);
+        assert_eq!(on.history.len(), off.history.len());
+        assert_eq!(
+            on.total_hartree().to_bits(),
+            off.total_hartree().to_bits(),
+            "final explicit audit must equal the off run"
+        );
+        let density = |r: &ScfResult| r.density.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        assert_eq!(density(&on), density(&off));
     }
 
     #[test]

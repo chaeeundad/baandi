@@ -408,6 +408,12 @@ impl ScfSession {
                     .powf((iteration - 1) as f64))
             .max(0.1 * self.problem.options.eigen_tolerance)
         };
+        // B2: ordinary maps may take the nonlocal energy from the band-sum
+        // identity; the flag is cleared again before any certificate work.
+        let identity = crate::energy::energy_identity_requested();
+        #[cfg(test)]
+        let identity = identity || self.problem.force_energy_identity;
+        self.problem.energy_identity = identity;
         let mut step = self
             .problem
             .step_kpoints_with_certification(
@@ -574,23 +580,26 @@ impl ScfSession {
         }
         // Certify the returned output density itself, not just the input
         // fixed-point residual. A small-gap response can amplify that residual.
+        self.problem.energy_identity = false;
         let mut rescued = None;
         let mut unable_to_verify = false;
         // Opt-in pre-screen (BAANDI_CERT_SCREEN=on): predict a certain failure of the
         // occupied-eigenvalue criterion from first-order perturbation theory before
         // paying for the tight re-solve. It can only reject; passing still needs
         // the full solve below. `trace` prints the bound and runs the solve anyway.
+        let screen_start = Instant::now();
         let screen = if converged && standard.is_none() {
             match cert_screen_mode() {
                 CertScreen::Off => None,
                 mode => self
                     .problem
-                    .certificate_shift_estimate(&step.density, &step.k_points)?
+                    .certificate_shift_estimate(&step.density, &step.k_points, potential_reuse())?
                     .map(|bound| (mode, bound)),
             }
         } else {
             None
         };
+        let screen_seconds = screen_start.elapsed().as_secs_f64();
         let screened = screen.and_then(|(mode, bound)| {
             (mode == CertScreen::On && bound > CERT_SCREEN_MARGIN * CERT_EIGENVALUE_LIMIT_HA)
                 .then_some(bound)
@@ -697,7 +706,7 @@ impl ScfSession {
                 .fold(0.0, f64::max);
             if let Some((_, bound)) = screen {
                 eprintln!(
-                    "CERT-SCREEN iter={iteration} bound={bound:.4e} actual={occupied_eigenvalue_change:.4e} density={density_residual:.4e} davidson={}",
+                    "CERT-SCREEN iter={iteration} bound={bound:.4e} actual={occupied_eigenvalue_change:.4e} density={density_residual:.4e} screen_s={screen_seconds:.6} davidson={}",
                     check
                         .k_points
                         .iter()
@@ -782,10 +791,26 @@ impl ScfSession {
         } else {
             false
         };
+        // Fields kept by the screen belong to this certificate only.
+        self.problem.clear_reused_fields();
         if certified
             || unable_to_verify
             || (retain_last && iteration == self.problem.options.max_iterations)
         {
+            // B2: the final state always carries the explicit nonlocal audit.
+            let energy_identity = if step.nonlocal_from_identity {
+                let audit = self.problem.explicit_nonlocal_energy(&step.k_points)?;
+                let identity = step.energy.nonlocal;
+                step.energy.nonlocal = audit;
+                step.nonlocal_from_identity = false;
+                Some(crate::energy::EnergyIdentityCheck {
+                    identity_nonlocal_ha: identity,
+                    audit_nonlocal_ha: audit,
+                    difference_ha: identity - audit,
+                })
+            } else {
+                None
+            };
             let gap_hartree = if certified {
                 self.problem.check_gap(&step.k_points)?
             } else {
@@ -830,6 +855,7 @@ impl ScfSession {
                     k_points: step.k_points,
                     gap_hartree,
                     energy: step.energy,
+                    energy_identity,
                     eigenvalues: step.solution.eigenvalues,
                     occupations: self.problem.occupations.clone(),
                     orbitals: step.solution.eigenvectors,
@@ -1482,6 +1508,15 @@ fn cert_screen_mode() -> CertScreen {
         Ok("trace") => CertScreen::Trace,
         _ => CertScreen::Off,
     })
+}
+
+/// POTENTIAL-REUSE: with the screen active (`on` or `trace`), the Hartree/XC
+/// fields it builds for the output density are reused by the certificate solve
+/// at that same density. Bit-identical either way; `BAANDI_POTENTIAL_REUSE=off`
+/// disables the reuse for A/B checks. Without the screen nothing is kept.
+fn potential_reuse() -> bool {
+    static MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| std::env::var("BAANDI_POTENTIAL_REUSE").as_deref() != Ok("off"))
 }
 
 fn growth_reset_limit() -> Option<f64> {

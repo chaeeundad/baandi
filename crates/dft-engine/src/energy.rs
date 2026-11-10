@@ -27,6 +27,15 @@ pub struct EnergyAudit {
     /// sum f_b ||H c_b-eps_b c_b|| (normalized orbitals).
     pub functional_difference_bound: f64,
 }
+/// B2 consistency report at the final state: the nonlocal energy from the
+/// band-sum identity against the explicit audit on the same orbitals (Ha).
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnergyIdentityCheck {
+    pub identity_nonlocal_ha: f64,
+    pub audit_nonlocal_ha: f64,
+    /// identity minus audit; also the change of the total energy.
+    pub difference_ha: f64,
+}
 #[derive(Clone, Debug)]
 pub struct XcFloorAudit {
     pub density_floor: f64,
@@ -188,21 +197,67 @@ fn expectation_tree(
 /// Per-band Re<c|V_nl|c>. Unoccupied bands contribute exactly zero to the
 /// occupation-weighted sum, so the fast path leaves their entry at zero.
 fn band_nonlocal_partials(a: &AuditInput<'_>) -> Result<Vec<f64>, ScfError> {
-    let mut partial = vec![0.0; a.orbitals.len()];
+    nonlocal_partials(a.nonlocal, a.orbitals, a.occupations)
+}
+
+fn nonlocal_partials(
+    nonlocal: &NonlocalOperator,
+    orbitals: &[Vec<Complex64>],
+    occupations: &[f64],
+) -> Result<Vec<f64>, ScfError> {
+    let mut partial = vec![0.0; orbitals.len()];
     if fast_nonlocal_energy() {
-        let selected: Vec<usize> = (0..a.orbitals.len())
-            .filter(|&b| a.occupations[b] != 0.0)
+        let selected: Vec<usize> = (0..orbitals.len())
+            .filter(|&b| occupations[b] != 0.0)
             .collect();
-        let bands: Vec<&[Complex64]> = selected.iter().map(|&b| a.orbitals[b].as_slice()).collect();
+        let bands: Vec<&[Complex64]> = selected.iter().map(|&b| orbitals[b].as_slice()).collect();
         let mut values = vec![0.0; bands.len()];
-        expectation_tree(a.nonlocal, &bands, &mut values)?;
+        expectation_tree(nonlocal, &bands, &mut values)?;
         for (&b, v) in selected.iter().zip(values) {
             partial[b] = v;
         }
     } else {
-        band_nonlocal(a.nonlocal, a.orbitals, &mut partial)?;
+        band_nonlocal(nonlocal, orbitals, &mut partial)?;
     }
     Ok(partial)
+}
+
+/// Explicit occupation-weighted nonlocal energy sum_b f_b <c_b|V_nl|c_b> of one
+/// k point, with exactly the arithmetic (and `BAANDI_NL_ENERGY` choice) of the
+/// audit, so the result equals the audit's `nonlocal` field bit for bit.
+pub(crate) fn explicit_nonlocal_energy(
+    nonlocal: &NonlocalOperator,
+    orbitals: &[Vec<Complex64>],
+    occupations: &[f64],
+) -> Result<f64, ScfError> {
+    if orbitals.len() != occupations.len() {
+        return Err(ScfError::InvalidInput("energy dimensions"));
+    }
+    let partial = nonlocal_partials(nonlocal, orbitals, occupations)?;
+    let mut sum = 0.0;
+    for (s, f) in partial.iter().zip(occupations) {
+        sum += f * s;
+    }
+    Ok(sum)
+}
+
+/// `BAANDI_ENERGY_IDENTITY=on` (B2, default off, bit-identical when off): in
+/// non-final SCF iterations of the integer-occupation spin-unpolarized driver
+/// the nonlocal energy comes from the band-sum identity
+/// sum_b f_b eps_b = E_kin + E_nl + integral V_eff,in n_out (exact for
+/// Rayleigh-quotient eigenvalues of H[V_in]) instead of projector work. The
+/// total energy of such an iteration then equals the band-structure form
+/// (`band_form`). The explicit audit stays at the certificate solve and the
+/// final state.
+pub(crate) fn energy_identity_requested() -> bool {
+    static MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| std::env::var("BAANDI_ENERGY_IDENTITY").as_deref() == Ok("on"))
+}
+
+/// Replace the nonlocal term of a k-weighted audit by the band-sum identity
+/// E_nl = sum f eps - E_kin - integral V_loc n_out - integral (V_H + V_xc)[n_in] n_out.
+pub(crate) fn apply_band_sum_identity(audit: &mut EnergyAudit) {
+    audit.nonlocal = audit.band_sum - audit.kinetic - audit.local - audit.double_counting;
 }
 pub fn evaluate(a: AuditInput<'_>, fft: &mut FftPlan3d) -> Result<EnergyAudit, ScfError> {
     evaluate_with_functional(a, fft, Functional::LdaPz)
@@ -425,9 +480,20 @@ pub(crate) fn prepare_shared(
     })
 }
 
+#[allow(dead_code)] // exercised by tests/audit_shared_identity.rs
 pub(crate) fn evaluate_shared(
     a: AuditInput<'_>,
     shared: &SharedAudit,
+) -> Result<EnergyAudit, ScfError> {
+    evaluate_shared_with(a, shared, true)
+}
+
+/// As `evaluate_shared`; without `explicit_nonlocal` the nonlocal term is left
+/// at zero for `apply_band_sum_identity` on the k-weighted sum (no projector work).
+pub(crate) fn evaluate_shared_with(
+    a: AuditInput<'_>,
+    shared: &SharedAudit,
+    explicit_nonlocal: bool,
 ) -> Result<EnergyAudit, ScfError> {
     let n = a.output_density;
     if a.orbitals.len() != a.occupations.len()
@@ -452,10 +518,12 @@ pub(crate) fn evaluate_shared(
     let kinetic = kinetic::energy(a.basis, a.orbitals, a.occupations)?.0;
     // Per-band <c|V_nl|c> in parallel (each band's own arithmetic unchanged),
     // accumulated in ascending band order: bit-identical to the serial loop.
-    let partial = band_nonlocal_partials(&a)?;
     let mut nonlocal = 0.0;
-    for (s, f) in partial.iter().zip(a.occupations) {
-        nonlocal += f * s;
+    if explicit_nonlocal {
+        let partial = band_nonlocal_partials(&a)?;
+        for (s, f) in partial.iter().zip(a.occupations) {
+            nonlocal += f * s;
+        }
     }
     let band_sum = a
         .eigenvalues

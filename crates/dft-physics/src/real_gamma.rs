@@ -157,6 +157,55 @@ impl RealNonlocal {
                 self.projections.as_mut().subcols_mut(0, m),
             )?;
         }
+        self.add_from_projections(y, m)
+    }
+
+    /// Number of projector columns (rows of the projection block P^T X).
+    pub fn projector_count(&self) -> usize {
+        self.projectors.cols()
+    }
+
+    /// Projections P^T X of the first `m` columns of the most recent
+    /// application, column-major (`projector_count()` rows per column). B6:
+    /// a solver may cache these for its basis vectors.
+    pub fn last_projections(&self, m: usize) -> Result<&[f64], RealGammaError> {
+        if m > self.capacity {
+            return Err(RealGammaError::Shape);
+        }
+        Ok(&self.projections.as_slice()[..self.projectors.cols() * m])
+    }
+
+    /// B6 (`BAANDI_B6=on` callers): add the nonlocal image of a block whose
+    /// projections P^T X the caller already holds (column-major, `projector_count()`
+    /// rows, `y.cols()` columns), skipping the first projector product. For
+    /// X = V C with cached P^T V the supplied block is (P^T V) C, which equals
+    /// P^T (V C) to rounding (different summation order; not bit-identical).
+    pub fn add_block_with_projections(
+        &mut self,
+        projections: &[f64],
+        y: &mut RealMatrix,
+    ) -> Result<(), RealGammaError> {
+        let n = self.projectors.rows();
+        let m = y.cols();
+        let count = self.projectors.cols();
+        if y.rows() != n || m > self.capacity || projections.len() != count * m {
+            return Err(RealGammaError::Shape);
+        }
+        if projections
+            .iter()
+            .chain(y.as_slice())
+            .any(|x| !x.is_finite())
+        {
+            return Err(RealGammaError::NonFinite);
+        }
+        self.projections.as_mut_slice()[..count * m].copy_from_slice(projections);
+        self.add_from_projections(y, m)
+    }
+
+    /// Coupling and back product from `self.projections` (first `m` columns).
+    fn add_from_projections(&mut self, y: &mut RealMatrix, m: usize) -> Result<(), RealGammaError> {
+        let n = self.projectors.rows();
+        let count = self.projectors.cols();
         for atom in &self.coupling {
             for band in 0..m {
                 for j in 0..atom.count {
@@ -287,6 +336,42 @@ impl RealHamiltonian {
             *y += self.kinetic[j % self.kinetic.len()] * x;
         }
         self.nonlocal.add_block(x, y)
+    }
+    /// Number of nonlocal projector columns.
+    pub fn projector_count(&self) -> usize {
+        self.nonlocal.projector_count()
+    }
+    /// Projections P^T X of the most recent `apply_block` (first `m` columns,
+    /// column-major); see `RealNonlocal::last_projections`.
+    pub fn last_projections(&self, m: usize) -> Result<&[f64], RealGammaError> {
+        self.nonlocal.last_projections(m)
+    }
+    /// B6: overwrite Y with H X where the caller supplies P^T X (for X = V C,
+    /// the cached (P^T V) C). Local and kinetic parts are applied as in
+    /// `apply_block`; only the first nonlocal product is skipped. Equal to
+    /// `apply_block` to rounding, not bit for bit.
+    pub fn apply_block_with_projections(
+        &mut self,
+        x: &RealMatrix,
+        projections: &[f64],
+        y: &mut RealMatrix,
+    ) -> Result<(), RealGammaError> {
+        if x.rows() != self.half.full_len()
+            || y.rows() != x.rows()
+            || y.cols() != x.cols()
+            || x.cols() > self.capacity
+        {
+            return Err(RealGammaError::Shape);
+        }
+        if x.as_slice().iter().any(|x| !x.is_finite()) {
+            return Err(RealGammaError::NonFinite);
+        }
+        self.local
+            .apply_block(x.as_slice(), &self.potential, y.as_mut_slice())?;
+        for (j, (x, y)) in x.as_slice().iter().zip(y.as_mut_slice()).enumerate() {
+            *y += self.kinetic[j % self.kinetic.len()] * x;
+        }
+        self.nonlocal.add_block_with_projections(projections, y)
     }
 }
 

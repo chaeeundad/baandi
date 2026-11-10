@@ -1715,7 +1715,7 @@ impl ScfProblem {
                 None
             } else if let Some(species) = &self.atomic_species {
                 let mut guesses = Vec::with_capacity(self.states.len());
-                for state in &self.states {
+                for state in &mut self.states {
                     let span = atomic_start::span(
                         &self.cell,
                         &state.basis,
@@ -1724,11 +1724,27 @@ impl ScfProblem {
                         &self.options,
                         self.occupations.len(),
                     )?;
+                    // ATOMIC-REAL: H Q on the real Gamma path when eligible.
+                    let hq = if crate::gamma_real::atomic_real() {
+                        crate::gamma_real::atomic_apply_real(
+                            &state.hamiltonian,
+                            &state.basis,
+                            span.vectors(),
+                            self.occupations.len(),
+                            &self.options,
+                            &self.pool,
+                            self.gamma_real_exclusion,
+                            &mut state.real_solve,
+                        )?
+                    } else {
+                        None
+                    };
                     let (guess, report) = atomic_start::ritz(
                         &span,
                         &state.hamiltonian,
                         self.occupations.len(),
                         state.point.fractional == [0.; 3],
+                        hq,
                     )?;
                     self.atomic_start.atomic_orbitals += report.atomic_orbitals;
                     self.atomic_start.initial_h_applications += report.initial_h_applications;
@@ -1951,12 +1967,16 @@ impl ScfProblem {
                 let orbitals: Vec<_> = (0..vectors.cols())
                     .map(|b| vectors.column(b).to_vec())
                     .collect();
+                // DENSITY-PAIR applies only to Hermitian-completed vectors of
+                // this step's real Gamma solve; the M2 path builds its density
+                // from the distributed eigenvectors.
                 if !m2 {
-                    state.band_density.compute(
+                    state.band_density.compute_with(
                         &orbitals,
                         finite.map_or(occupations.as_slice(), |w| w.block(0, i)),
                         &state.grid,
                         volume,
+                        state.gamma_real.gamma_real_used,
                     )?;
                 }
                 Ok(orbitals)
@@ -2044,7 +2064,13 @@ impl ScfProblem {
             &self.pool,
             |i, state, _fft| {
                 let k = &k_points[i];
-                let audit = energy::evaluate_shared_with(
+                // NL-ENERGY-REAL: values of this step's real solve, if computed.
+                let partials = state
+                    .real_solve
+                    .as_ref()
+                    .filter(|_| state.gamma_real.gamma_real_used)
+                    .and_then(|r| r.nonlocal_partials());
+                let audit = energy::evaluate_shared_with_partials(
                     AuditInput {
                         cell: &self.cell,
                         basis: &state.basis,
@@ -2063,6 +2089,7 @@ impl ScfProblem {
                     },
                     &shared_audit,
                     !identity && m2_nonlocal.is_none(),
+                    partials,
                 )?;
                 Ok((state.point.weight, audit))
             },

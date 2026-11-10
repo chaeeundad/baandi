@@ -259,6 +259,74 @@ fn cached_projections_reproduce_apply() {
             .is_err()
     );
 }
+/// NL-ENERGY-REAL: real per-column nonlocal expectation values agree with the
+/// complex projector sums of the completed vectors to rounding, for any thread
+/// budget bit for bit.
+#[test]
+fn real_nonlocal_expectation_matches_complex() {
+    let (basis, h) = fixture([[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]], 5, 1.2);
+    let n = basis.vectors().len();
+    let m = 7;
+    let x = states(n, m, 21);
+    let mut reference: Option<Vec<f64>> = None;
+    for threads in [1, 3] {
+        let mut real =
+            RealHamiltonian::from_complex(&h, &basis, m, WorkerPool::new(threads).unwrap())
+                .unwrap();
+        let mut values = vec![0.; m];
+        real.nonlocal_expectation_values(&x, &mut values).unwrap();
+        let full = complete(real.half_sphere(), &x);
+        let columns: Vec<&[Complex64]> = (0..m).map(|j| full.column(j)).collect();
+        let mut expected = vec![0.; m];
+        h.nonlocal()
+            .expectation_values(&columns, &mut expected)
+            .unwrap();
+        for (a, b) in values.iter().zip(&expected) {
+            assert!((a - b).abs() <= 1e-13 * b.abs().max(1e-3), "{a:e} vs {b:e}");
+        }
+        assert!(values.iter().any(|v| v.abs() > 1e-6));
+        match &reference {
+            None => reference = Some(values),
+            Some(r) => assert_eq!(r, &values),
+        }
+    }
+}
+/// APPLY-LEAN (`BAANDI_APPLY_LEAN=on`) is bit-identical to the default apply,
+/// for plain and cached-projection applications, and rejects non-finite input
+/// with the same error.
+#[test]
+fn apply_lean_is_bit_identical() {
+    let (basis, h) = fixture([[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]], 5, 1.2);
+    let n = basis.vectors().len();
+    for m in [1, 2, 5] {
+        let mut real =
+            RealHamiltonian::from_complex(&h, &basis, m, WorkerPool::new(2).unwrap()).unwrap();
+        let x = states(n, m, 3 + m);
+        let mut plain = RealMatrix::zeros(n, m).unwrap();
+        let mut lean = RealMatrix::zeros(n, m).unwrap();
+        real.set_apply_lean(false);
+        real.apply_block(&x, &mut plain).unwrap();
+        let projections = real.last_projections(m).unwrap().to_vec();
+        let mut plain_cached = RealMatrix::zeros(n, m).unwrap();
+        real.apply_block_with_projections(&x, &projections, &mut plain_cached)
+            .unwrap();
+        real.set_apply_lean(true);
+        real.apply_block(&x, &mut lean).unwrap();
+        assert_eq!(plain.as_slice(), lean.as_slice());
+        assert_eq!(real.last_projections(m).unwrap(), projections.as_slice());
+        let mut lean_cached = RealMatrix::zeros(n, m).unwrap();
+        real.apply_block_with_projections(&x, &projections, &mut lean_cached)
+            .unwrap();
+        assert_eq!(plain_cached.as_slice(), lean_cached.as_slice());
+        let mut bad = x.clone();
+        bad.as_mut_slice()[n / 2] = f64::NAN;
+        for on in [false, true] {
+            real.set_apply_lean(on);
+            let err = real.apply_block(&bad, &mut lean).unwrap_err().to_string();
+            assert_eq!(err, dft_physics::RealGammaError::NonFinite.to_string());
+        }
+    }
+}
 #[test]
 fn empty_nonlocal_and_invalid_blocks() {
     let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap();

@@ -192,15 +192,30 @@ pub(super) fn span(
     Ok(AtomicSpan { q, report })
 }
 
+impl AtomicSpan {
+    /// Orthonormal span columns (ATOMIC-REAL applies H to them on the real path).
+    pub(super) fn vectors(&self) -> &ComplexMatrix {
+        &self.q
+    }
+}
+
+/// `hq`: H Q already computed (ATOMIC-REAL); `None` applies the complex H.
 pub(super) fn ritz(
     span: &AtomicSpan,
     h: &Hamiltonian,
     bands: usize,
     gamma: bool,
+    hq: Option<ComplexMatrix>,
 ) -> Result<(ComplexMatrix, AtomicStartReport), ScfError> {
     let q = &span.q;
-    let mut hq = ComplexMatrix::zeros(q.rows(), q.cols()).map_err(numerical)?;
-    h.apply_block(q, &mut hq)?;
+    let hq = match hq.filter(|m| m.rows() == q.rows() && m.cols() == q.cols()) {
+        Some(hq) => hq,
+        None => {
+            let mut hq = ComplexMatrix::zeros(q.rows(), q.cols()).map_err(numerical)?;
+            h.apply_block(q, &mut hq)?;
+            hq
+        }
+    };
     let mut small = gemm(q, MatrixOp::Adjoint, &hq, MatrixOp::Identity).map_err(numerical)?;
     for j in 0..small.cols() {
         for i in 0..=j {

@@ -607,6 +607,65 @@ impl crate::fused_pair::PairDensityOperator for OrderedFusedPlan {
         Ok(())
     }
 }
+impl crate::fused_pair::SplitPairDensity for OrderedFusedPlan {
+    fn accumulate_density_pair_split(
+        &mut self,
+        phi: &[C],
+        weights: [f64; 2],
+        volume: f64,
+        a: &mut [f64],
+        b: &mut [f64],
+    ) -> Result<(), FftError> {
+        self.validate(phi, a.len())?;
+        crate::fused_pair::validate_density(weights, volume)?;
+        if b.len() != a.len() {
+            return Err(FftError::IncompatibleArray);
+        }
+        if weights == [0.; 2] {
+            return Ok(());
+        }
+        self.inverse_xy(phi);
+        let [nx, ny, nz] = self.shape;
+        for xy in 0..nx * ny {
+            self.inverse_z(xy);
+            let range = xy * nz..(xy + 1) * nz;
+            for ((value, a), b) in self.kernels.lane[..nz]
+                .iter()
+                .zip(&mut a[range.clone()])
+                .zip(&mut b[range])
+            {
+                *a += weights[0] * (value.re * value.re) / volume;
+                *b += weights[1] * (value.im * value.im) / volume;
+            }
+        }
+        Ok(())
+    }
+}
+impl<F: crate::Fft3d> crate::fused_pair::SplitPairDensity for GridFusedPlan<F> {
+    fn accumulate_density_pair_split(
+        &mut self,
+        phi: &[C],
+        weights: [f64; 2],
+        volume: f64,
+        a: &mut [f64],
+        b: &mut [f64],
+    ) -> Result<(), FftError> {
+        self.validate(phi, a.len())?;
+        crate::fused_pair::validate_density(weights, volume)?;
+        if b.len() != a.len() {
+            return Err(FftError::IncompatibleArray);
+        }
+        if weights == [0.; 2] {
+            return Ok(());
+        }
+        self.inverse(phi)?;
+        for ((value, a), b) in self.real.iter().zip(a.iter_mut()).zip(b.iter_mut()) {
+            *a += weights[0] * (value.re * value.re) / volume;
+            *b += weights[1] * (value.im * value.im) / volume;
+        }
+        Ok(())
+    }
+}
 impl<F: crate::Fft3d> crate::fused_pair::PairDensityOperator for GridFusedPlan<F> {
     fn accumulate_density_pair(
         &mut self,

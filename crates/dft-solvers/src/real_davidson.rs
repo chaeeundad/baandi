@@ -77,6 +77,8 @@ pub struct RealDavidsonWorkspace {
     b1: Option<B1Scratch>,
     /// B5 base decomposition and scratch, allocated at the first B5 solve.
     b5: Option<crate::bordered::Bordered>,
+    /// B6 projector-product cache, allocated at the first B6-active solve.
+    b6: Option<B6Cache>,
 }
 impl RealDavidsonWorkspace {
     fn new(
@@ -109,6 +111,7 @@ impl RealDavidsonWorkspace {
             column_of: (0..bands).collect(),
             b1: None,
             b5: None,
+            b6: None,
             n,
             bands,
             capacity,
@@ -363,8 +366,12 @@ impl RealDavidson {
             column_of,
             b1: b1_scratch,
             b5: b5_scratch,
+            b6: b6_scratch,
             ..
         } = workspace.as_mut().unwrap();
+        // B6 (`BAANDI_B6=on`, default off): cache P^T V per basis column so the
+        // return certificate skips its first projector product.
+        let mut b6 = B6Cache::activate(b6_scratch, op, capacity, self.bands, options.b6);
         let timers = Timers::new(options.stage_timers);
         let second_vector = SecondVector::from_env();
         let b1_active = options.b1.acts_on(ritz) && second_vector == SecondVector::Off;
@@ -454,6 +461,9 @@ impl RealDavidson {
         let mut result_residuals = vec![0.; self.bands];
         let mut result_converged = vec![false; self.bands];
         apply_into(op, basis, &mut applications, &mut work, products, timers)?;
+        if let Some(c) = b6.as_mut() {
+            c.load(op, 0, basis.cols());
+        }
         if let Some(sk) = b1.as_mut().and_then(|b| b.sketch.as_mut()) {
             let t = timers.start();
             sk.refresh(gemm, basis, products)?;
@@ -628,7 +638,23 @@ impl RealDavidson {
                         || (iteration == self.max_iterations && meets_strict(residuals)))
                 {
                     certificates += 1;
-                    apply_into(op, vectors, &mut applications, &mut work, actual, timers)?;
+                    match b6.as_mut().filter(|c| c.covers(m)) {
+                        Some(c) => {
+                            let pc = c.rotate(coefficients.as_slice(), m, self.bands);
+                            apply_with_projections_into(
+                                op,
+                                vectors,
+                                pc,
+                                &mut applications,
+                                &mut work,
+                                actual,
+                                timers,
+                            )?
+                        }
+                        None => {
+                            apply_into(op, vectors, &mut applications, &mut work, actual, timers)?
+                        }
+                    }
                     let t = timers.start();
                     residual_into(
                         vectors,
@@ -796,6 +822,10 @@ impl RealDavidson {
                     contractions += 1;
                     std::mem::swap(basis, vectors);
                     std::mem::swap(products, rotated_products);
+                    if let Some(c) = b6.as_mut() {
+                        // Same rotation as the basis: P^T V <- (P^T V) C.
+                        c.contract(coefficients.as_slice(), m, self.bands);
+                    }
                     if let Some(sk) = b1.as_mut().and_then(|b| b.sketch.as_mut()) {
                         // Same rotation as the basis: A <- A C, B <- B C.
                         sk.contract(self.bands);
@@ -805,6 +835,9 @@ impl RealDavidson {
                     projection.run_into(vectors, None, gemm, basis)?;
                     timers.stop(t, Stage::Orthonormalize);
                     apply_into(op, basis, &mut applications, &mut work, products, timers)?;
+                    if let Some(c) = b6.as_mut() {
+                        c.load(op, 0, basis.cols());
+                    }
                     if let Some(sk) = b1.as_mut().and_then(|b| b.sketch.as_mut()) {
                         let t = timers.start();
                         sk.refresh(gemm, basis, products)?;
@@ -839,6 +872,9 @@ impl RealDavidson {
                 extra_products,
                 timers,
             )?;
+            if let Some(c) = b6.as_mut() {
+                c.load(op, basis.cols(), extra.cols());
+            }
             if let Some(sk) = b1.as_mut().and_then(|b| b.sketch.as_mut()) {
                 let t = timers.start();
                 sk.append(gemm, basis.cols(), extra, extra_products)?;
@@ -1019,6 +1055,32 @@ fn dot(x: &[f64], y: &[f64]) -> f64 {
     }
     (sums[0] + sums[1]) + (sums[2] + sums[3])
 }
+fn mgs_dot(wide: bool, x: &[f64], y: &[f64]) -> f64 {
+    if wide && x.len() == y.len() {
+        dot_wide(x, y)
+    } else {
+        dot(x, y)
+    }
+}
+/// WIDE-DOT: eight independent lanes (element i adds into lane i % 8, in
+/// ascending order) combined pairwise. The four-lane `dot` is bound by the
+/// latency of its four ordered add chains; eight chains let the core overlap
+/// them (Mac observation 5 -> 10 elements/ns at n = 11877). Differs from `dot`
+/// by rounding only; independent of the thread count (serial per column).
+fn dot_wide(x: &[f64], y: &[f64]) -> f64 {
+    const L: usize = 8;
+    let mut s = [0.; L];
+    let ((cx, tx), (cy, ty)) = (x.as_chunks::<L>(), y.as_chunks::<L>());
+    for (a, b) in cx.iter().zip(cy) {
+        for k in 0..L {
+            s[k] += a[k] * b[k];
+        }
+    }
+    for ((s, &a), &b) in s.iter_mut().zip(tx).zip(ty) {
+        *s += a * b;
+    }
+    ((s[0] + s[4]) + (s[2] + s[6])) + ((s[1] + s[5]) + (s[3] + s[7]))
+}
 fn precondition(r: f64, d: f64, lambda: f64) -> Result<f64, LinalgError> {
     let delta = d - lambda;
     if !delta.is_finite() {
@@ -1076,6 +1138,110 @@ fn apply_into(
     *count += x.cols();
     timers.stop(clock, Stage::HApply);
     Ok(())
+}
+/// `apply_into` for the B6 certificate: the operator receives P^T X.
+fn apply_with_projections_into(
+    op: &dyn RealLinearOperator,
+    x: &RealMatrix,
+    projections: &[f64],
+    count: &mut usize,
+    work: &mut crate::work_accounting::Trace,
+    y: &mut RealMatrix,
+    timers: Timers,
+) -> Result<(), SolverError> {
+    let clock = timers.start();
+    work.apply(x.cols(), None);
+    y.reshape_within_storage(x.rows(), x.cols())?;
+    op.apply_block_with_projections(x, projections, y)?;
+    if y.rows() != x.rows() || y.cols() != x.cols() {
+        return Err(LinalgError::Dimension.into());
+    }
+    finite(y.as_slice())?;
+    *count += x.cols();
+    timers.stop(clock, Stage::HApply);
+    Ok(())
+}
+/// B6 cache: P^T V for the live basis columns (column-major, `count` rows).
+/// Every basis change updates it (append: copied from the operator; contraction:
+/// the same rotation; rebuild: reloaded); any missing copy invalidates it, and
+/// an invalid cache falls back to the plain apply. Products use fixed-order
+/// loops, so results do not depend on the thread count.
+struct B6Cache {
+    count: usize,
+    pv: Vec<f64>,
+    pc: Vec<f64>,
+    cols: usize,
+    valid: bool,
+}
+impl B6Cache {
+    fn activate<'a>(
+        slot: &'a mut Option<B6Cache>,
+        op: &dyn RealLinearOperator,
+        capacity: usize,
+        bands: usize,
+        enabled: bool,
+    ) -> Option<&'a mut B6Cache> {
+        let count = op.projector_count();
+        if !enabled || count == 0 {
+            return None;
+        }
+        if slot
+            .as_ref()
+            .is_none_or(|c| c.count != count || c.pv.len() != count * capacity)
+        {
+            *slot = Some(B6Cache {
+                count,
+                pv: vec![0.; count * capacity],
+                pc: vec![0.; count * bands],
+                cols: 0,
+                valid: false,
+            });
+        }
+        let cache = slot.as_mut().unwrap();
+        cache.cols = 0;
+        cache.valid = false;
+        Some(cache)
+    }
+    /// Columns `first..first + k` of the basis were just applied by `op`.
+    fn load(&mut self, op: &dyn RealLinearOperator, first: usize, k: usize) {
+        if first == 0 {
+            self.valid = true;
+        }
+        let range = first * self.count..(first + k) * self.count;
+        self.valid = self.valid
+            && first == self.cols
+            && range.end <= self.pv.len()
+            && op.copy_last_projections(k, &mut self.pv[range]);
+        self.cols = first + k;
+    }
+    fn covers(&self, m: usize) -> bool {
+        self.valid && self.cols == m
+    }
+    /// pc = pv[:, :m] * C[:, :bands] (C column-major, leading dimension m).
+    fn rotate(&mut self, c: &[f64], m: usize, bands: usize) -> &[f64] {
+        let count = self.count;
+        for b in 0..bands {
+            let out = &mut self.pc[b * count..(b + 1) * count];
+            out.fill(0.);
+            for k in 0..m {
+                let factor = c[b * m + k];
+                for (o, &p) in out.iter_mut().zip(&self.pv[k * count..(k + 1) * count]) {
+                    *o += p * factor;
+                }
+            }
+        }
+        &self.pc[..bands * count]
+    }
+    fn contract(&mut self, c: &[f64], m: usize, bands: usize) {
+        if !self.covers(m) {
+            self.valid = false;
+            return;
+        }
+        self.rotate(c, m, bands);
+        let len = bands * self.count;
+        self.pv[..len].copy_from_slice(&self.pc[..len]);
+        self.cols = bands;
+    }
 }
 fn append_into(a: &mut RealMatrix, b: &RealMatrix) -> Result<(), LinalgError> {
     let old_len = a.as_slice().len();
@@ -1256,6 +1422,49 @@ struct Projection {
     column: Vec<f64>,
     /// Panel-wise block Gram-Schmidt (default on MKL builds, `BAANDI_MGS` overrides).
     blocked: bool,
+    /// WIDE-DOT (opt-in `BAANDI_WIDE_DOT=on`, default off): the in-block MGS
+    /// dot products use eight lane accumulators (`dot_wide`), rounding class.
+    wide: bool,
+    /// ORTHO-DGKS (opt-in `BAANDI_ORTHO=dgks`, default off; rounding class):
+    /// the second projection pass against the basis runs only when a column of
+    /// the block lost more than 1 - 1/sqrt(2) of its norm in the first pass (or
+    /// a column was dropped). Skipping it saves two of the four streams of the
+    /// basis per append.
+    dgks: Option<f64>,
+}
+/// DGKS keep ratio: one pass suffices when every column kept at least this
+/// fraction of its unit input norm.
+const DGKS_KEEP: f64 = std::f64::consts::FRAC_1_SQRT_2;
+/// `BAANDI_ORTHO=dgks` (keep ratio 1/sqrt(2)) or `dgks:<ratio>` with a ratio
+/// in [1e-3, 1] (after one classical pass the residual overlap with the basis
+/// is about eps sqrt(m) / ratio relative, so 1e-3 still stays below the 1e-12
+/// orthogonality gate of the contraction); anything else: always two passes.
+fn dgks_keep() -> Option<f64> {
+    let value = std::env::var("BAANDI_ORTHO").ok()?;
+    if value == "dgks" {
+        return Some(DGKS_KEEP);
+    }
+    let ratio: f64 = value.strip_prefix("dgks:")?.parse().ok()?;
+    (1e-3..=1.0).contains(&ratio).then_some(ratio)
+}
+#[derive(Clone, Copy)]
+enum OrthoCount {
+    Skipped = 0,
+    Repeated = 1,
+}
+static ORTHO_COUNTS: [std::sync::atomic::AtomicUsize; 2] = [
+    std::sync::atomic::AtomicUsize::new(0),
+    std::sync::atomic::AtomicUsize::new(0),
+];
+fn ortho_add(c: OrthoCount, n: usize) {
+    ORTHO_COUNTS[c as usize].fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+}
+/// ORTHO-DGKS counters of this process: (second passes skipped, repeated).
+pub fn ortho_counters() -> (usize, usize) {
+    (
+        ORTHO_COUNTS[0].load(std::sync::atomic::Ordering::Relaxed),
+        ORTHO_COUNTS[1].load(std::sync::atomic::Ordering::Relaxed),
+    )
 }
 impl Projection {
     #[cfg(test)]
@@ -1280,6 +1489,8 @@ impl Projection {
                 Ok("classic") => false,
                 _ => dft_numerics::MKL_BACKEND,
             },
+            wide: std::env::var("BAANDI_WIDE_DOT").as_deref() == Ok("on"),
+            dgks: dgks_keep(),
             column: vec![0.; n],
         })
     }
@@ -1319,7 +1530,15 @@ impl Projection {
             )
         })?;
         let against = against.filter(|q| q.cols() > 0);
+        let mut skip_second = false;
         for pass in 0..if against.is_some() { 2 } else { 1 } {
+            if pass > 0 && skip_second {
+                // ORTHO-DGKS: the first pass kept every column with at least
+                // 1/sqrt(2) of its (unit) input norm, so a second projection
+                // cannot be needed (Daniel-Gragg-Kaufman-Stewart criterion).
+                ortho_add(OrthoCount::Skipped, 1);
+                break;
+            }
             if pass > 0 {
                 // Both buffers have the same capacity; the previous MGS result
                 // becomes input, and the old input storage becomes output.
@@ -1366,6 +1585,7 @@ impl Projection {
                 })?;
             }
             let mut kept = 0;
+            let mut min_len = f64::INFINITY;
             if self.blocked {
                 // Panels of BLOCK_COLUMNS columns: two block projections against
                 // the kept columns (GEMM), then the same two-pass MGS and rank
@@ -1422,7 +1642,7 @@ impl Projection {
                         self.column.copy_from_slice(column(&self.normalized, jj));
                         for _ in 0..2 {
                             for k in panel_start..kept {
-                                let p = dot(&self.column, column(&self.output, k));
+                                let p = mgs_dot(self.wide, &self.column, column(&self.output, k));
                                 for (dst, &src) in
                                     self.column.iter_mut().zip(column(&self.output, k))
                                 {
@@ -1432,6 +1652,7 @@ impl Projection {
                         }
                         let len = norm(&self.column);
                         finite(&[len])?;
+                        min_len = min_len.min(len);
                         if len > DEPENDENCE_TOLERANCE {
                             for (dst, &src) in column_mut(&mut self.output, kept)
                                 .iter_mut()
@@ -1449,7 +1670,7 @@ impl Projection {
                     self.column.copy_from_slice(column(&self.normalized, j));
                     for _ in 0..2 {
                         for k in 0..kept {
-                            let p = dot(&self.column, column(&self.output, k));
+                            let p = mgs_dot(self.wide, &self.column, column(&self.output, k));
                             for (dst, &src) in self.column.iter_mut().zip(column(&self.output, k)) {
                                 *dst -= p * src;
                             }
@@ -1457,6 +1678,7 @@ impl Projection {
                     }
                     let len = norm(&self.column);
                     finite(&[len])?;
+                    min_len = min_len.min(len);
                     // Same relative rank floor as complex MGS; no CholeskyQR2.
                     if len > DEPENDENCE_TOLERANCE {
                         for (dst, &src) in column_mut(&mut self.output, kept)
@@ -1467,6 +1689,15 @@ impl Projection {
                         }
                         kept += 1;
                     }
+                }
+            }
+            if pass == 0
+                && against.is_some()
+                && let Some(keep) = self.dgks
+            {
+                skip_second = kept == count && min_len >= keep;
+                if !skip_second {
+                    ortho_add(OrthoCount::Repeated, 1);
                 }
             }
             count = kept;
@@ -1731,6 +1962,63 @@ impl Random {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// ORTHO-DGKS: skipping the second pass keeps the block orthonormal and
+    /// orthogonal to the basis to rounding; a block that loses most of its norm
+    /// still gets the second pass. Classic and blocked MGS.
+    #[test]
+    fn dgks_projection_stays_orthonormal() {
+        let n = 301;
+        for blocked in [false, true] {
+            for (mix, expect_repeat) in [(0.0, false), (0.999, true)] {
+                let mut ws =
+                    RealGemmWorkspace::with_pool(n, 24, WorkerPool::new(1).unwrap()).unwrap();
+                let mut projection = Projection::new(n, 24).unwrap();
+                projection.blocked = blocked;
+                let q = projection
+                    .run(&Random(3).block(n, 12).unwrap(), None, &mut ws)
+                    .unwrap();
+                let mut x = Random(9).block(n, 5).unwrap();
+                // Optionally make the block nearly lie in span(q).
+                for j in 0..5 {
+                    for i in 0..n {
+                        x[(i, j)] = (1. - mix) * x[(i, j)] + mix * q[(i, j)];
+                    }
+                }
+                let plain = projection.run(&x, Some(&q), &mut ws).unwrap();
+                projection.dgks = Some(DGKS_KEEP);
+                let (skipped, repeated) = ortho_counters();
+                let fast = projection.run(&x, Some(&q), &mut ws).unwrap();
+                let (s2, r2) = ortho_counters();
+                if expect_repeat {
+                    assert!(r2 > repeated);
+                } else {
+                    assert!(s2 > skipped);
+                }
+                assert_eq!(fast.cols(), plain.cols());
+                let mut both = RealMatrix::zeros(n, q.cols() + fast.cols()).unwrap();
+                let split = q.as_slice().len();
+                both.as_mut_slice()[..split].copy_from_slice(q.as_slice());
+                both.as_mut_slice()[split..].copy_from_slice(fast.as_slice());
+                assert!(orthogonality_defect(&both) <= 1e-13, "{blocked} {mix}");
+            }
+        }
+    }
+    /// WIDE-DOT agrees with the four-lane dot to rounding for every tail length.
+    #[test]
+    fn wide_dot_matches_dot_to_rounding() {
+        for len in [0, 1, 3, 7, 8, 9, 15, 16, 17, 1001, 11877] {
+            let x: Vec<f64> = (0..len).map(|i| ((i + 1) as f64 * 0.37).sin()).collect();
+            let y: Vec<f64> = (0..len).map(|i| ((i + 2) as f64 * 1.91).cos()).collect();
+            let bound: f64 = x.iter().zip(&y).map(|(a, b)| (a * b).abs()).sum();
+            let (a, b) = (dot(&x, &y), dot_wide(&x, &y));
+            assert!(
+                (a - b).abs() <= 4. * f64::EPSILON * bound,
+                "{len}: {a:e} {b:e}"
+            );
+            assert_eq!(mgs_dot(false, &x, &y).to_bits(), a.to_bits());
+            assert_eq!(mgs_dot(true, &x, &y).to_bits(), b.to_bits());
+        }
+    }
     #[test]
     fn incremental_prefix_and_projection_rank() {
         let n = 257;

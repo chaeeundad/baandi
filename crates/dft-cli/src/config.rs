@@ -519,7 +519,7 @@ pub struct Scf {
     pub extra_bands: Option<usize>,
     pub eigen_tolerance: Option<f64>,
     pub seed: Option<u64>,
-    /// C1 cutoff ladder: "off" (default) or "on"; `BAANDI_CUTOFF_LADDER` overrides.
+    /// C1 cutoff ladder: "on" (default since the adoption rule, 2026-11-10; dev08 C1: -28 to -36 percent at realistic displacements, -4 percent at the 1e-7 Bohr protocol, correctness clean) or "off"; `BAANDI_CUTOFF_LADDER` overrides. Ineligible runs fall back automatically.
     pub cutoff_ladder: Option<String>,
     /// Coarse cutoff as a fraction of ecutwfc, in (0, 1); default 0.5.
     pub cutoff_ladder_fraction: Option<f64>,
@@ -529,10 +529,7 @@ impl Scf {
     /// `BAANDI_CUTOFF_LADDER` (off, on or a fraction) overrides the file for A/B runs.
     pub fn cutoff_ladder(scf: Option<&Self>) -> Result<Option<f64>, ConfigError> {
         let fraction = scf.and_then(|s| s.cutoff_ladder_fraction).unwrap_or(0.5);
-        let file = match scf
-            .and_then(|s| s.cutoff_ladder.as_deref())
-            .unwrap_or("off")
-        {
+        let file = match scf.and_then(|s| s.cutoff_ladder.as_deref()).unwrap_or("on") {
             "off" => None,
             "on" => Some(fraction),
             _ => {

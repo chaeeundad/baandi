@@ -4,6 +4,7 @@ use dft_basis::FftGridSpec;
 use dft_numerics::Fft3d;
 // Re-export through the physics adapter for orchestration without a new dependency.
 pub use dft_numerics::fused::{FusedOperator, FusedPlan};
+pub use dft_numerics::fused_pair::SplitPairDensity;
 use ndarray::Array3;
 use num_complex::Complex64;
 

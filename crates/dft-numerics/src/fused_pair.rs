@@ -19,6 +19,23 @@ pub trait PairDensityOperator: FusedOperator {
     ) -> Result<(), FftError>;
 }
 
+/// DENSITY-PAIR (engine switch `BAANDI_DENSITY_PAIR=on`): one inverse transform
+/// of the combined coefficients `c_a + i c_b` of two real functions, with each
+/// band's density added into its own grid: `a += weights[0] Re(psi)^2 / volume`,
+/// `b += weights[1] Im(psi)^2 / volume`. Grid order and units match
+/// `FusedOperator::accumulate_density`; per band the value equals the
+/// single-band kernel to rounding (the dropped part is rounding noise).
+pub trait SplitPairDensity: FusedOperator {
+    fn accumulate_density_pair_split(
+        &mut self,
+        phi: &[C],
+        weights: [f64; 2],
+        volume: f64,
+        a: &mut [f64],
+        b: &mut [f64],
+    ) -> Result<(), FftError>;
+}
+
 /// Validated full-sphere mirror table, independent of the basis crate.
 #[derive(Clone)]
 pub struct PairMap {

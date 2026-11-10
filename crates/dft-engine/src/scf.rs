@@ -1772,11 +1772,14 @@ impl ScfProblem {
                 let orbitals: Vec<_> = (0..vectors.cols())
                     .map(|b| vectors.column(b).to_vec())
                     .collect();
-                state.band_density.compute(
+                // DENSITY-PAIR applies only to Hermitian-completed vectors of
+                // this step's real Gamma solve.
+                state.band_density.compute_with(
                     &orbitals,
                     finite.map_or(occupations.as_slice(), |w| w.block(0, i)),
                     &state.grid,
                     volume,
+                    state.gamma_real.gamma_real_used,
                 )?;
                 Ok(orbitals)
             },

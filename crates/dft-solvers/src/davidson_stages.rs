@@ -74,6 +74,8 @@ pub struct ResearchOptions {
     /// B5 bordered update of the reduced eigenproblem (`BAANDI_B5=on`).
     pub b5: bool,
     pub stage_timers: bool,
+    /// B6 cached projector products for the return certificate (`BAANDI_B6=on`).
+    pub b6: bool,
 }
 impl ResearchOptions {
     /// `BAANDI_B1` and `BAANDI_DAVIDSON_STAGES=on`, read once per solve.
@@ -86,6 +88,7 @@ impl ResearchOptions {
             },
             b5: std::env::var("BAANDI_B5").as_deref() == Ok("on"),
             stage_timers: std::env::var("BAANDI_DAVIDSON_STAGES").as_deref() == Ok("on"),
+            b6: std::env::var("BAANDI_B6").as_deref() == Ok("on"),
         }
     }
 }

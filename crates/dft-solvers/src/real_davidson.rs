@@ -77,6 +77,8 @@ pub struct RealDavidsonWorkspace {
     b1: Option<B1Scratch>,
     /// B5 base decomposition and scratch, allocated at the first B5 solve.
     b5: Option<crate::bordered::Bordered>,
+    /// B6 projector-product cache, allocated at the first B6-active solve.
+    b6: Option<B6Cache>,
 }
 impl RealDavidsonWorkspace {
     fn new(
@@ -109,6 +111,7 @@ impl RealDavidsonWorkspace {
             column_of: (0..bands).collect(),
             b1: None,
             b5: None,
+            b6: None,
             n,
             bands,
             capacity,
@@ -363,8 +366,12 @@ impl RealDavidson {
             column_of,
             b1: b1_scratch,
             b5: b5_scratch,
+            b6: b6_scratch,
             ..
         } = workspace.as_mut().unwrap();
+        // B6 (`BAANDI_B6=on`, default off): cache P^T V per basis column so the
+        // return certificate skips its first projector product.
+        let mut b6 = B6Cache::activate(b6_scratch, op, capacity, self.bands, options.b6);
         let timers = Timers::new(options.stage_timers);
         let second_vector = SecondVector::from_env();
         let b1_active = options.b1.acts_on(ritz) && second_vector == SecondVector::Off;
@@ -454,6 +461,9 @@ impl RealDavidson {
         let mut result_residuals = vec![0.; self.bands];
         let mut result_converged = vec![false; self.bands];
         apply_into(op, basis, &mut applications, &mut work, products, timers)?;
+        if let Some(c) = b6.as_mut() {
+            c.load(op, 0, basis.cols());
+        }
         if let Some(sk) = b1.as_mut().and_then(|b| b.sketch.as_mut()) {
             let t = timers.start();
             sk.refresh(gemm, basis, products)?;
@@ -628,7 +638,23 @@ impl RealDavidson {
                         || (iteration == self.max_iterations && meets_strict(residuals)))
                 {
                     certificates += 1;
-                    apply_into(op, vectors, &mut applications, &mut work, actual, timers)?;
+                    match b6.as_mut().filter(|c| c.covers(m)) {
+                        Some(c) => {
+                            let pc = c.rotate(coefficients.as_slice(), m, self.bands);
+                            apply_with_projections_into(
+                                op,
+                                vectors,
+                                pc,
+                                &mut applications,
+                                &mut work,
+                                actual,
+                                timers,
+                            )?
+                        }
+                        None => {
+                            apply_into(op, vectors, &mut applications, &mut work, actual, timers)?
+                        }
+                    }
                     let t = timers.start();
                     residual_into(
                         vectors,
@@ -796,6 +822,10 @@ impl RealDavidson {
                     contractions += 1;
                     std::mem::swap(basis, vectors);
                     std::mem::swap(products, rotated_products);
+                    if let Some(c) = b6.as_mut() {
+                        // Same rotation as the basis: P^T V <- (P^T V) C.
+                        c.contract(coefficients.as_slice(), m, self.bands);
+                    }
                     if let Some(sk) = b1.as_mut().and_then(|b| b.sketch.as_mut()) {
                         // Same rotation as the basis: A <- A C, B <- B C.
                         sk.contract(self.bands);
@@ -805,6 +835,9 @@ impl RealDavidson {
                     projection.run_into(vectors, None, gemm, basis)?;
                     timers.stop(t, Stage::Orthonormalize);
                     apply_into(op, basis, &mut applications, &mut work, products, timers)?;
+                    if let Some(c) = b6.as_mut() {
+                        c.load(op, 0, basis.cols());
+                    }
                     if let Some(sk) = b1.as_mut().and_then(|b| b.sketch.as_mut()) {
                         let t = timers.start();
                         sk.refresh(gemm, basis, products)?;
@@ -839,6 +872,9 @@ impl RealDavidson {
                 extra_products,
                 timers,
             )?;
+            if let Some(c) = b6.as_mut() {
+                c.load(op, basis.cols(), extra.cols());
+            }
             if let Some(sk) = b1.as_mut().and_then(|b| b.sketch.as_mut()) {
                 let t = timers.start();
                 sk.append(gemm, basis.cols(), extra, extra_products)?;
@@ -1076,6 +1112,110 @@ fn apply_into(
     *count += x.cols();
     timers.stop(clock, Stage::HApply);
     Ok(())
+}
+/// `apply_into` for the B6 certificate: the operator receives P^T X.
+fn apply_with_projections_into(
+    op: &dyn RealLinearOperator,
+    x: &RealMatrix,
+    projections: &[f64],
+    count: &mut usize,
+    work: &mut crate::work_accounting::Trace,
+    y: &mut RealMatrix,
+    timers: Timers,
+) -> Result<(), SolverError> {
+    let clock = timers.start();
+    work.apply(x.cols(), None);
+    y.reshape_within_storage(x.rows(), x.cols())?;
+    op.apply_block_with_projections(x, projections, y)?;
+    if y.rows() != x.rows() || y.cols() != x.cols() {
+        return Err(LinalgError::Dimension.into());
+    }
+    finite(y.as_slice())?;
+    *count += x.cols();
+    timers.stop(clock, Stage::HApply);
+    Ok(())
+}
+/// B6 cache: P^T V for the live basis columns (column-major, `count` rows).
+/// Every basis change updates it (append: copied from the operator; contraction:
+/// the same rotation; rebuild: reloaded); any missing copy invalidates it, and
+/// an invalid cache falls back to the plain apply. Products use fixed-order
+/// loops, so results do not depend on the thread count.
+struct B6Cache {
+    count: usize,
+    pv: Vec<f64>,
+    pc: Vec<f64>,
+    cols: usize,
+    valid: bool,
+}
+impl B6Cache {
+    fn activate<'a>(
+        slot: &'a mut Option<B6Cache>,
+        op: &dyn RealLinearOperator,
+        capacity: usize,
+        bands: usize,
+        enabled: bool,
+    ) -> Option<&'a mut B6Cache> {
+        let count = op.projector_count();
+        if !enabled || count == 0 {
+            return None;
+        }
+        if slot
+            .as_ref()
+            .is_none_or(|c| c.count != count || c.pv.len() != count * capacity)
+        {
+            *slot = Some(B6Cache {
+                count,
+                pv: vec![0.; count * capacity],
+                pc: vec![0.; count * bands],
+                cols: 0,
+                valid: false,
+            });
+        }
+        let cache = slot.as_mut().unwrap();
+        cache.cols = 0;
+        cache.valid = false;
+        Some(cache)
+    }
+    /// Columns `first..first + k` of the basis were just applied by `op`.
+    fn load(&mut self, op: &dyn RealLinearOperator, first: usize, k: usize) {
+        if first == 0 {
+            self.valid = true;
+        }
+        let range = first * self.count..(first + k) * self.count;
+        self.valid = self.valid
+            && first == self.cols
+            && range.end <= self.pv.len()
+            && op.copy_last_projections(k, &mut self.pv[range]);
+        self.cols = first + k;
+    }
+    fn covers(&self, m: usize) -> bool {
+        self.valid && self.cols == m
+    }
+    /// pc = pv[:, :m] * C[:, :bands] (C column-major, leading dimension m).
+    fn rotate(&mut self, c: &[f64], m: usize, bands: usize) -> &[f64] {
+        let count = self.count;
+        for b in 0..bands {
+            let out = &mut self.pc[b * count..(b + 1) * count];
+            out.fill(0.);
+            for k in 0..m {
+                let factor = c[b * m + k];
+                for (o, &p) in out.iter_mut().zip(&self.pv[k * count..(k + 1) * count]) {
+                    *o += p * factor;
+                }
+            }
+        }
+        &self.pc[..bands * count]
+    }
+    fn contract(&mut self, c: &[f64], m: usize, bands: usize) {
+        if !self.covers(m) {
+            self.valid = false;
+            return;
+        }
+        self.rotate(c, m, bands);
+        let len = bands * self.count;
+        self.pv[..len].copy_from_slice(&self.pc[..len]);
+        self.cols = bands;
+    }
 }
 fn append_into(a: &mut RealMatrix, b: &RealMatrix) -> Result<(), LinalgError> {
     let old_len = a.as_slice().len();

@@ -108,6 +108,30 @@ impl RealLinearOperator for Operator {
             .apply_block(x, y)
             .map_err(|e| SolverError::Application(e.to_string()))
     }
+    // B6 hooks (used by the solver only with `BAANDI_B6=on`).
+    fn projector_count(&self) -> usize {
+        self.h.borrow().projector_count()
+    }
+    fn copy_last_projections(&self, m: usize, out: &mut [f64]) -> bool {
+        match self.h.borrow().last_projections(m) {
+            Ok(p) if p.len() == out.len() => {
+                out.copy_from_slice(p);
+                true
+            }
+            _ => false,
+        }
+    }
+    fn apply_block_with_projections(
+        &self,
+        x: &RealMatrix,
+        projections: &[f64],
+        y: &mut RealMatrix,
+    ) -> Result<(), SolverError> {
+        self.h
+            .borrow_mut()
+            .apply_block_with_projections(x, projections, y)
+            .map_err(|e| SolverError::Application(e.to_string()))
+    }
 }
 
 /// Try the real path without modifying an incompatible warm start. Construction

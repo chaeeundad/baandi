@@ -126,6 +126,26 @@ pub trait RealLinearOperator {
         }
         Ok(())
     }
+    /// B6 (`BAANDI_B6=on`): number of nonlocal projector columns whose products
+    /// P^T X this operator exposes; 0 means unsupported (the default).
+    fn projector_count(&self) -> usize {
+        0
+    }
+    /// B6: copy P^T X of the latest `apply_block` (first `m` columns,
+    /// column-major, `projector_count()` rows) into `out`; false if unavailable.
+    fn copy_last_projections(&self, _m: usize, _out: &mut [f64]) -> bool {
+        false
+    }
+    /// B6: H X where the caller supplies P^T X; operators without support
+    /// ignore the projections and apply H as usual.
+    fn apply_block_with_projections(
+        &self,
+        x: &dft_numerics::real::RealMatrix,
+        _projections: &[f64],
+        y: &mut dft_numerics::real::RealMatrix,
+    ) -> Result<(), SolverError> {
+        self.apply_block(x, y)
+    }
 }
 
 /// Switchable kinetic Davidson damping; legacy entry points retain Default.

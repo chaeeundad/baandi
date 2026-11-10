@@ -335,3 +335,16 @@ Release validation (calibration must precede real comparisons):
 `cargo test --release -p dft-engine --test gamma_real_scf -- --include-ignored --nocapture`.
 See `docs/performance/real-gamma-r5-results.md` for fixed comparison thresholds,
 Mac observations, failed exploratory commands and outstanding dev08 acceptance.
+
+## C1 cutoff ladder
+
+`cutoff_ladder.rs` (child of `scf`, default off) builds a second problem at
+`fraction * cutoff` without a fixed grid, drives an ordinary session to a
+density residual of 1e-4 (no coarse certificate), prolongs orbitals by Miller
+index and density by Fourier zero padding, and finishes through the Track A
+import (`initialize_electronic`) with the unchanged strict session. Only the
+full-cutoff certificate converges; ineligible problems run `direct_min::finish`
+with a recorded reason. Session accessors `warm_state`/`problem_ref` are
+crate-private and read-only. Fast gates: `cargo test -p dft-engine --test cutoff_ladder`.
+`ScfProblem::atomic_superposition_density` (C3 relax predictor) exposes the
+atomic start density built with `start_density = Atomic`; no arithmetic changed.

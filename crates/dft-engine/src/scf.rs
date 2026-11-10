@@ -11,6 +11,9 @@ use convergence::CoulombMetric;
 pub use convergence::StandardProfile;
 #[path = "collinear.rs"]
 pub mod collinear;
+/// C1 cutoff ladder (coarse-cutoff start, full-cutoff finish); opt-in.
+#[path = "cutoff_ladder.rs"]
+pub mod cutoff_ladder;
 /// Track A pre-converger; a child of `scf` for read access to problem internals.
 #[path = "direct_min.rs"]
 pub mod direct_min;
@@ -1221,6 +1224,12 @@ impl ScfProblem {
     }
     /// First SCF input density: the atomic superposition when requested and
     /// available, otherwise the uniform density.
+    /// The superposition of atomic charges at this problem's positions (built
+    /// only with `start_density = Atomic`; None otherwise or when a species has
+    /// no atomic charge samples). Charge equals the electron count.
+    pub fn atomic_superposition_density(&self) -> Option<&Array3<f64>> {
+        self.start_density.as_ref()
+    }
     pub fn starting_density(&self) -> Array3<f64> {
         self.start_density
             .clone()

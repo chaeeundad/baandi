@@ -519,8 +519,43 @@ pub struct Scf {
     pub extra_bands: Option<usize>,
     pub eigen_tolerance: Option<f64>,
     pub seed: Option<u64>,
+    /// C1 cutoff ladder: "off" (default) or "on"; `BAANDI_CUTOFF_LADDER` overrides.
+    pub cutoff_ladder: Option<String>,
+    /// Coarse cutoff as a fraction of ecutwfc, in (0, 1); default 0.5.
+    pub cutoff_ladder_fraction: Option<f64>,
 }
 impl Scf {
+    /// Coarse-cutoff fraction when the ladder is on. The environment variable
+    /// `BAANDI_CUTOFF_LADDER` (off, on or a fraction) overrides the file for A/B runs.
+    pub fn cutoff_ladder(scf: Option<&Self>) -> Result<Option<f64>, ConfigError> {
+        let fraction = scf.and_then(|s| s.cutoff_ladder_fraction).unwrap_or(0.5);
+        let file = match scf
+            .and_then(|s| s.cutoff_ladder.as_deref())
+            .unwrap_or("off")
+        {
+            "off" => None,
+            "on" => Some(fraction),
+            _ => {
+                return Err(ConfigError::Invalid(
+                    "scf.cutoff_ladder must be off or on".into(),
+                ));
+            }
+        };
+        let chosen = match std::env::var("BAANDI_CUTOFF_LADDER").as_deref() {
+            Ok("off") => None,
+            Ok("on") => Some(fraction),
+            Ok(v) => Some(v.parse::<f64>().map_err(|_| {
+                ConfigError::Invalid("BAANDI_CUTOFF_LADDER must be off, on or a fraction".into())
+            })?),
+            Err(_) => file,
+        };
+        if chosen.is_some_and(|f| !(f.is_finite() && f > 0.0 && f < 1.0)) {
+            return Err(ConfigError::Invalid(
+                "scf.cutoff_ladder_fraction must be in (0, 1)".into(),
+            ));
+        }
+        Ok(chosen)
+    }
     pub fn preconditioner(&self) -> Result<dft_engine::DavidsonPreconditioner, ConfigError> {
         match self.preconditioner.as_deref().unwrap_or("default") {
             "default" => Ok(dft_engine::DavidsonPreconditioner::Default),

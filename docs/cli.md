@@ -697,6 +697,22 @@ the proposal before any feasibility reset; `mixer_reset` identifies that reset.
 A small filtered residual never proves convergence. Density samples are in
 electrons/Bohr^3; the existing normalized SCF residual is in Bohr^-3/2.
 No metallic convergence is supported or implied.
+### Optional cutoff ladder (C1)
+
+`[scf] cutoff_ladder = "on"` (default `"off"`; `BAANDI_CUTOFF_LADDER=on|off|<fraction>`
+overrides the file) runs the first part of `dft-cli run` at a reduced cutoff
+`cutoff_ladder_fraction` x ecutwfc (default 0.5, open interval (0, 1)) on the
+smaller FFT grid that cutoff implies, until the coarse density residual is at or
+below 1e-4 Bohr^-3/2 (at most 30 coarse iterations), then prolongs density
+(Fourier zero padding) and orbitals (copy by Miller index) exactly into the full
+basis and finishes with the unchanged strict SCF at the full cutoff. History,
+work counters, energy audit and certificate in `results.json` are the
+full-cutoff ones; the `cutoff_ladder` block reports the coarse stage (`used`,
+`fallback_reason`, grids, plane waves, iterations, H vectors and their
+full-grid equivalents, seconds). Eligible only for one exact Gamma point on the
+real path with fixed uniform occupations, strict profile, no symmetry projector
+or strain reference, outside observe/agent modes; otherwise the ordinary SCF runs
+and the reason is recorded. Evidence: `docs/performance/requests/c1-cutoff-ladder.md`.
 ### P7PC band accuracy fields
 
 `results.json.band_accuracy` describes the legacy first-k eigenvalue list.

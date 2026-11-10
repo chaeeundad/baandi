@@ -1,0 +1,40 @@
+# Track A stage 0 kill-rule medians, Mac release pure Rust T=1, perturbed seeds 601-603 (+-1e-7 Bohr); 2026-11-10T08:38Z
+# command: TRACK_A_SEEDS=601,602,603 TRACK_A_CASES=syn-skew2,syn-fcc,syn-lowsym6,mgo8,si16,si32 cargo test --release -p dft-engine --test direct_min -- --ignored --nocapture --test-threads=1
+test track_a_stage0_bench ... case | occ | min_iter | min_evals | min_cols | H-eq/band | grad_Ha | stop | start | dE_min_Ha | handoff_iter | handoff_cols(hist+cert) | total_A_cols | strict_iter | strict_cols(hist+cert) | strict_atomic_cols | dE_cert_Ha | certified(handoff/strict) | ratio_A/S | wall_min_s | wall_handoff_s | wall_strict_s
+gradient_tolerance_ha = 1e-6, threads = 1
+  syn-skew2@601 density fnv64: handoff 72510dba82decb51 strict fc2757127165e68d minimizer 607bbceab1626369
+syn-skew2@601 | 2 | 51 | 96 | 192 | 96.0 | 7.73e-7 | GradientTolerance | free_electron_perturbed | 1.161e-12 (E_min bits bff8660c57fb39b9) | 2 | 39+19 | 250 | 13 | 171+16 | 0 | -2.220e-15 | true/true | 1.337 | 0.00 | 0.00 | 0.01
+  syn-skew2@602 density fnv64: handoff 3a4c0329cb71c13e strict fee6cdffa0169b5f minimizer 94670d8ad972a1d9
+syn-skew2@602 | 2 | 51 | 97 | 194 | 97.0 | 8.09e-7 | GradientTolerance | free_electron_perturbed | 1.298e-12 (E_min bits bff8660c57a531b5) | 2 | 40+19 | 253 | 13 | 171+16 | 0 | 2.442e-15 | true/true | 1.353 | 0.00 | 0.00 | 0.00
+  syn-skew2@603 density fnv64: handoff 7f593090052618d5 strict eeb33a52ccf60dff minimizer 02fab545f3d112e7
+syn-skew2@603 | 2 | 51 | 97 | 194 | 97.0 | 6.91e-7 | GradientTolerance | free_electron_perturbed | 9.759e-13 (E_min bits bff8660c57f6911f) | 2 | 39+19 | 252 | 13 | 171+16 | 0 | 7.994e-15 | true/true | 1.348 | 0.00 | 0.00 | 0.00
+  syn-fcc@601 density fnv64: handoff 2cb4fd2fc0c5b6f0 strict 1f579911d7b40886 minimizer 3a293d578ef50bbb
+syn-fcc@601 | 4 | 141 | 278 | 1112 | 278.0 | 8.26e-7 | GradientTolerance | free_electron_perturbed | 1.165e-11 (E_min bits c012c801bc595277) | 5 | 170+36 | 1318 | 23 | 668+39 | 0 | -1.243e-14 | true/true | 1.864 | 0.10 | 0.01 | 0.04
+  syn-fcc@602 density fnv64: handoff 29651148f1d8ab7d strict ac63fd0cbc692d49 minimizer ccb5a2514809e2e0
+syn-fcc@602 | 4 | 176 | 347 | 1388 | 347.0 | 9.18e-7 | GradientTolerance | free_electron_perturbed | 2.991e-12 (E_min bits c012c801bc5978a8) | 5 | 181+36 | 1605 | 23 | 690+110 | 0 | 2.665e-14 | true/true | 2.006 | 0.12 | 0.01 | 0.04
+  syn-fcc@603 density fnv64: handoff abc9630040bec2a7 strict 5d4f919421c7a4d7 minimizer 925324c0ec1671cb
+syn-fcc@603 | 4 | 142 | 280 | 1120 | 280.0 | 8.75e-7 | GradientTolerance | free_electron_perturbed | 3.682e-11 (E_min bits c012c801bc58e3da) | 6 | 181+34 | 1335 | 23 | 665+38 | 0 | -3.553e-15 | true/true | 1.899 | 0.09 | 0.01 | 0.04
+  syn-lowsym6@601 density fnv64: handoff 9aa05f576b86591e strict 0676a7a8f4736dec minimizer ad67ef0e4e663aad
+syn-lowsym6@601 | 6 | 121 | 202 | 1212 | 202.0 | 8.83e-7 | GradientTolerance | free_electron_perturbed | 5.952e-12 (E_min bits c01183b8bb04c563) | 3 | 165+55 | 1432 | 16 | 777+58 | 0 | -4.086e-14 | true/true | 1.715 | 0.07 | 0.01 | 0.04
+  syn-lowsym6@602 density fnv64: handoff b6ba71e2f10f5952 strict 3e017dde035a64d9 minimizer 0b39a69bd6ca21b8
+syn-lowsym6@602 | 6 | 120 | 201 | 1206 | 201.0 | 9.33e-7 | GradientTolerance | free_electron_perturbed | 8.781e-12 (E_min bits c01183b8b9ed88bb) | 3 | 181+55 | 1442 | 16 | 777+58 | 0 | -1.066e-14 | true/true | 1.727 | 0.07 | 0.01 | 0.04
+  syn-lowsym6@603 density fnv64: handoff a20fd883b4c7850a strict 76044c9ce6227099 minimizer c4d05b1836a85165
+syn-lowsym6@603 | 6 | 119 | 201 | 1206 | 201.0 | 9.93e-7 | GradientTolerance | free_electron_perturbed | 8.434e-12 (E_min bits c01183b8bc13dff6) | 3 | 178+56 | 1440 | 16 | 777+58 | 0 | -2.487e-14 | true/true | 1.725 | 0.07 | 0.01 | 0.04
+  mgo8@601 density fnv64: handoff 95fb55bdbf04a34c strict 4602015cd75ea8b2 minimizer 3cb372a844267128
+mgo8@601 | 32 | 32 | 60 | 1956 | 61.1 | 3.27e-6 | LineSearchFailed | atomic | 1.216e-11 (E_min bits c072ff6d07dfd2ac) | 5 | 583+626 | 3165 | 15 | 2053+293 | 36 | 2.274e-12 | true/true | 1.349 | 3.18 | 1.86 | 3.86
+  mgo8@602 density fnv64: handoff 0cb4ab6d6784409c strict dc8c588b3f3076e9 minimizer ae288032846d8865
+mgo8@602 | 32 | 37 | 71 | 2308 | 72.1 | 2.72e-6 | LineSearchFailed | atomic | 1.046e-11 (E_min bits c072ff6d07dfd2ca) | 4 | 468+481 | 3257 | 15 | 2053+293 | 36 | 2.274e-12 | true/true | 1.388 | 3.28 | 1.42 | 3.17
+  mgo8@603 density fnv64: handoff 67358878914da5cf strict 93dcfd6536e1b988 minimizer a8d90c471eae8cb5
+mgo8@603 | 32 | 34 | 66 | 2148 | 67.1 | 3.42e-6 | LineSearchFailed | atomic | 1.086e-11 (E_min bits c072ff6d07dfd2af) | 5 | 601+633 | 3382 | 15 | 2053+293 | 36 | 8.754e-12 | true/true | 1.442 | 3.84 | 1.86 | 3.92
+  si16@601 density fnv64: handoff 58bffc19637e560e strict 4f30c6725d95d0d1 minimizer 00eb1e3d6f808e9a
+si16@601 | 32 | 42 | 87 | 2848 | 89.0 | 1.64e-6 | LineSearchFailed | atomic | -3.480e-11 (E_min bits c04f908b14ca0520) | 2 | 395+231 | 3474 | 10 | 1816+347 | 64 | -3.566e-11 | true/true | 1.606 | 2.41 | 0.98 | 3.35
+  si16@602 density fnv64: handoff 132b9077deaecad8 strict a8ce38f32fd3e4b6 minimizer 77ae31e1bc84f58d
+si16@602 | 32 | 40 | 85 | 2784 | 87.0 | 1.31e-6 | LineSearchFailed | atomic | 4.050e-13 (E_min bits c04f908b14ca0508) | 2 | 405+206 | 3395 | 11 | 2023+238 | 64 | -5.471e-13 | true/true | 1.502 | 2.26 | 0.98 | 3.48
+  si16@603 density fnv64: handoff 3479b5fb22b656a2 strict 9313e98d12e72804 minimizer 6305c6e4d555af43
+si16@603 | 32 | 35 | 63 | 2080 | 65.0 | 8.31e-7 | GradientTolerance | atomic | 8.598e-13 (E_min bits c04f908b14ca0526) | 2 | 404+283 | 2767 | 11 | 2029+239 | 64 | 3.034e-12 | true/true | 1.220 | 1.74 | 1.10 | 3.36
+  si32@601 density fnv64: handoff 0bc5db3e2eb3ee77 strict 7edb5c1ad85dcea3 minimizer 0ce83ef9036b66f5
+si32@601 | 64 | 40 | 83 | 5440 | 85.0 | 1.59e-6 | LineSearchFailed | atomic | 2.359e-12 (E_min bits c05fad0e4e07d4be) | 2 | 677+439 | 6556 | 11 | 4156+1067 | 128 | 1.421e-13 | true/true | 1.255 | 10.68 | 7.08 | 29.36
+  si32@602 density fnv64: handoff 24f6ca68e01b5c22 strict c125de80948ceda7 minimizer f88486f4a99bd040
+si32@602 | 64 | 40 | 88 | 5760 | 90.0 | 1.27e-6 | LineSearchFailed | atomic | 9.379e-13 (E_min bits c05fad0e4e07d4e4) | 6 | 1808+2582 | 10150 | 11 | 4140+1044 | 128 | 9.663e-13 | true/true | 1.958 | 12.76 | 21.04 | 29.07
+  si32@603 density fnv64: handoff 747f0c8414f8f5c9 strict 1673819565ab1e86 minimizer 7705ebc63195bb04
+si32@603 | 64 | 37 | 74 | 4864 | 76.0 | 1.26e-6 | LineSearchFailed | atomic | 2.046e-12 (E_min bits c05fad0e4e07d3f6) | 2 | 689+556 | 6109 | 11 | 4154+1050 | 128 | 2.586e-12 | true/true | 1.174 | 11.68 | 8.93 | 27.47

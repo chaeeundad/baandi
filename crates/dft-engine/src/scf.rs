@@ -11,6 +11,9 @@ use convergence::CoulombMetric;
 pub use convergence::StandardProfile;
 #[path = "collinear.rs"]
 pub mod collinear;
+/// Track A pre-converger; a child of `scf` for read access to problem internals.
+#[path = "direct_min.rs"]
+pub mod direct_min;
 #[path = "finite_temperature.rs"]
 pub mod finite_temperature;
 #[path = "replay_capture.rs"]

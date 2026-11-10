@@ -1251,6 +1251,19 @@ impl ScfSession {
             result,
         })
     }
+    /// Track A hand-off hook (direct minimization pre-converger, `scf::direct_min`):
+    /// ordinary initialization, then the same density/orbital validation and import
+    /// as `warm_start`. Needed because `warm_start` requires host identity digests
+    /// and rejects NLCC, and `initialize_density_transfer` drops the orbitals.
+    /// Nothing is certified here; only the unchanged strict steps can converge.
+    pub(crate) fn initialize_electronic(
+        &mut self,
+        state: &crate::checkpoint::ElectronicState,
+    ) -> Result<(), ScfError> {
+        self.initialize()?;
+        self.import_electronic(state)
+            .map_err(|e| ScfError::Numerical(format!("direct_min hand-off state rejected: {e}")))
+    }
     fn import_electronic(
         &mut self,
         state: &crate::checkpoint::ElectronicState,

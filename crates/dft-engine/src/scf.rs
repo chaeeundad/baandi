@@ -1843,7 +1843,13 @@ impl ScfProblem {
             &self.pool,
             |i, state, _fft| {
                 let k = &k_points[i];
-                let audit = energy::evaluate_shared_with(
+                // NL-ENERGY-REAL: values of this step's real solve, if computed.
+                let partials = state
+                    .real_solve
+                    .as_ref()
+                    .filter(|_| state.gamma_real.gamma_real_used)
+                    .and_then(|r| r.nonlocal_partials());
+                let audit = energy::evaluate_shared_with_partials(
                     AuditInput {
                         cell: &self.cell,
                         basis: &state.basis,
@@ -1862,6 +1868,7 @@ impl ScfProblem {
                     },
                     &shared_audit,
                     !identity,
+                    partials,
                 )?;
                 Ok((state.point.weight, audit))
             },

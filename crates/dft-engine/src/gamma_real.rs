@@ -67,6 +67,23 @@ pub(crate) struct RealSolveState {
     /// Stick-distributed Hamiltonian of this rank (MPI stage M2c), built only when
     /// `parallel::m2_enabled()` and a communicator with two or more ranks is active.
     dist: Option<DistributedRealHamiltonian>,
+    /// NL-ENERGY-REAL: per-band <x|V_nl|x> (Ha) of the latest real solve.
+    nl_values: Vec<f64>,
+    nl_valid: bool,
+}
+impl RealSolveState {
+    /// NL-ENERGY-REAL values of the latest solve of this state, if computed.
+    pub(crate) fn nonlocal_partials(&self) -> Option<&[f64]> {
+        self.nl_valid.then_some(self.nl_values.as_slice())
+    }
+}
+/// NL-ENERGY-REAL (opt-in `BAANDI_NL_ENERGY_REAL=on`, default off; rounding
+/// class): on the real Gamma path the audit's per-band nonlocal energies come
+/// from one real projector product of the returned ORC vectors (P^T X by the
+/// nonlocal GEMM) instead of the complex projector sums over the full sphere.
+pub(crate) fn nl_energy_real() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("BAANDI_NL_ENERGY_REAL").as_deref() == Ok("on"))
 }
 
 #[derive(PartialEq, Eq)]
@@ -219,9 +236,12 @@ pub(crate) fn solve_real_gamma(
             key,
             workspace: None,
             dist: None,
+            nl_values: Vec::new(),
+            nl_valid: false,
         });
     }
     let state = state.as_mut().unwrap();
+    state.nl_valid = false;
     // M2c: the distributed Hamiltonian follows the SCF potential like the serial one.
     match comm.as_ref().filter(|_| crate::parallel::m2_enabled()) {
         Some(c) => {
@@ -320,6 +340,16 @@ pub(crate) fn solve_real_gamma(
             options.preconditioner,
         )?
     };
+    // NL-ENERGY-REAL: nonlocal expectation values of the returned real vectors
+    // for the energy audit of this map (threads-only path).
+    if comm.is_none() && nl_energy_real() {
+        state.nl_values.resize(bands, 0.0);
+        state.nl_valid = op
+            .h
+            .borrow_mut()
+            .nonlocal_expectation_values(&result.eigenvectors, &mut state.nl_values)
+            .is_ok();
+    }
     let mut eigenvectors = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
     {
         let h = op.h.borrow();

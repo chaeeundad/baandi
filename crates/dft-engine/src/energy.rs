@@ -497,6 +497,18 @@ pub(crate) fn evaluate_shared_with(
     shared: &SharedAudit,
     explicit_nonlocal: bool,
 ) -> Result<EnergyAudit, ScfError> {
+    evaluate_shared_with_partials(a, shared, explicit_nonlocal, None)
+}
+
+/// As `evaluate_shared_with`; `partials` (NL-ENERGY-REAL) supplies per-band
+/// <c|V_nl|c> computed on the real Gamma path for exactly these orbitals, used
+/// in place of the projector sums (zero-occupation entries are ignored).
+pub(crate) fn evaluate_shared_with_partials(
+    a: AuditInput<'_>,
+    shared: &SharedAudit,
+    explicit_nonlocal: bool,
+    partials: Option<&[f64]>,
+) -> Result<EnergyAudit, ScfError> {
     let n = a.output_density;
     if a.orbitals.len() != a.occupations.len()
         || a.eigenvalues.len() != a.occupations.len()
@@ -522,7 +534,14 @@ pub(crate) fn evaluate_shared_with(
     // accumulated in ascending band order: bit-identical to the serial loop.
     let mut nonlocal = 0.0;
     if explicit_nonlocal {
-        let partial = band_nonlocal_partials(&a)?;
+        let partial = match partials.filter(|p| p.len() == a.occupations.len()) {
+            Some(p) => p
+                .iter()
+                .zip(a.occupations)
+                .map(|(&v, &f)| if f != 0.0 { v } else { 0.0 })
+                .collect(),
+            None => band_nonlocal_partials(&a)?,
+        };
         for (s, f) in partial.iter().zip(a.occupations) {
             nonlocal += f * s;
         }

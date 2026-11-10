@@ -1055,6 +1055,33 @@ fn dot(x: &[f64], y: &[f64]) -> f64 {
     }
     (sums[0] + sums[1]) + (sums[2] + sums[3])
 }
+fn mgs_dot(wide: bool, x: &[f64], y: &[f64]) -> f64 {
+    if wide && x.len() == y.len() {
+        dot_wide(x, y)
+    } else {
+        dot(x, y)
+    }
+}
+/// WIDE-DOT: eight independent lanes (element i adds into lane i % 8, in
+/// ascending order) combined pairwise. The four-lane `dot` is bound by the
+/// latency of its four ordered add chains; eight chains let the core overlap
+/// them (Mac observation 5 -> 10 elements/ns at n = 11877). Differs from `dot`
+/// by rounding only; independent of the thread count (serial per column).
+fn dot_wide(x: &[f64], y: &[f64]) -> f64 {
+    const L: usize = 8;
+    let mut s = [0.; L];
+    let (cx, cy) = (x.chunks_exact(L), y.chunks_exact(L));
+    let (tx, ty) = (cx.remainder(), cy.remainder());
+    for (a, b) in cx.zip(cy) {
+        for k in 0..L {
+            s[k] += a[k] * b[k];
+        }
+    }
+    for ((s, &a), &b) in s.iter_mut().zip(tx).zip(ty) {
+        *s += a * b;
+    }
+    ((s[0] + s[4]) + (s[2] + s[6])) + ((s[1] + s[5]) + (s[3] + s[7]))
+}
 fn precondition(r: f64, d: f64, lambda: f64) -> Result<f64, LinalgError> {
     let delta = d - lambda;
     if !delta.is_finite() {
@@ -1396,6 +1423,9 @@ struct Projection {
     column: Vec<f64>,
     /// Panel-wise block Gram-Schmidt (default on MKL builds, `BAANDI_MGS` overrides).
     blocked: bool,
+    /// WIDE-DOT (opt-in `BAANDI_WIDE_DOT=on`, default off): the in-block MGS
+    /// dot products use eight lane accumulators (`dot_wide`), rounding class.
+    wide: bool,
 }
 impl Projection {
     #[cfg(test)]
@@ -1420,6 +1450,7 @@ impl Projection {
                 Ok("classic") => false,
                 _ => dft_numerics::MKL_BACKEND,
             },
+            wide: std::env::var("BAANDI_WIDE_DOT").as_deref() == Ok("on"),
             column: vec![0.; n],
         })
     }
@@ -1562,7 +1593,7 @@ impl Projection {
                         self.column.copy_from_slice(column(&self.normalized, jj));
                         for _ in 0..2 {
                             for k in panel_start..kept {
-                                let p = dot(&self.column, column(&self.output, k));
+                                let p = mgs_dot(self.wide, &self.column, column(&self.output, k));
                                 for (dst, &src) in
                                     self.column.iter_mut().zip(column(&self.output, k))
                                 {
@@ -1589,7 +1620,7 @@ impl Projection {
                     self.column.copy_from_slice(column(&self.normalized, j));
                     for _ in 0..2 {
                         for k in 0..kept {
-                            let p = dot(&self.column, column(&self.output, k));
+                            let p = mgs_dot(self.wide, &self.column, column(&self.output, k));
                             for (dst, &src) in self.column.iter_mut().zip(column(&self.output, k)) {
                                 *dst -= p * src;
                             }
@@ -1871,6 +1902,19 @@ impl Random {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// WIDE-DOT agrees with the four-lane dot to rounding for every tail length.
+    #[test]
+    fn wide_dot_matches_dot_to_rounding() {
+        for len in [0, 1, 3, 7, 8, 9, 15, 16, 17, 1001, 11877] {
+            let x: Vec<f64> = (0..len).map(|i| ((i + 1) as f64 * 0.37).sin()).collect();
+            let y: Vec<f64> = (0..len).map(|i| ((i + 2) as f64 * 1.91).cos()).collect();
+            let bound: f64 = x.iter().zip(&y).map(|(a, b)| (a * b).abs()).sum();
+            let (a, b) = (dot(&x, &y), dot_wide(&x, &y));
+            assert!((a - b).abs() <= 4. * f64::EPSILON * bound, "{len}: {a:e} {b:e}");
+            assert_eq!(mgs_dot(false, &x, &y).to_bits(), a.to_bits());
+            assert_eq!(mgs_dot(true, &x, &y).to_bits(), b.to_bits());
+        }
+    }
     #[test]
     fn incremental_prefix_and_projection_rank() {
         let n = 257;

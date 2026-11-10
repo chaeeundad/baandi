@@ -135,6 +135,17 @@ impl RealNonlocal {
         {
             return Err(RealGammaError::NonFinite);
         }
+        self.add_block_core(x, y)
+    }
+    /// `add_block` without the input scans (APPLY-LEAN: the caller scanned X; a
+    /// non-finite Y entry survives the addition and fails the final output scan
+    /// in `add_from_projections` with the same error).
+    fn add_block_core(&mut self, x: &RealMatrix, y: &mut RealMatrix) -> Result<(), RealGammaError> {
+        let n = self.projectors.rows();
+        let m = x.cols();
+        if x.rows() != n || y.rows() != n || y.cols() != m || m > self.capacity {
+            return Err(RealGammaError::Shape);
+        }
         let count = self.projectors.cols();
         if self.dgemm_products {
             self.gemm.multiply_slices_wide_into(
@@ -202,6 +213,67 @@ impl RealNonlocal {
         self.add_from_projections(y, m)
     }
 
+    /// NL-ENERGY-REAL (engine switch `BAANDI_NL_ENERGY_REAL=on`): per column the
+    /// nonlocal expectation x^T P D P^T x in Ha from one projector product
+    /// (no back product, no output block). Per column the sum runs over atoms,
+    /// then i, then j of d_ij p_i p_j, as the complex `expectation_values`;
+    /// equal to it to rounding (ORC packing is an isometry), independent of the
+    /// thread count (fixed-order GEMM, serial per-column sums).
+    pub fn expectation_values(
+        &mut self,
+        x: &RealMatrix,
+        out: &mut [f64],
+    ) -> Result<(), RealGammaError> {
+        let n = self.projectors.rows();
+        let m = x.cols();
+        if x.rows() != n || out.len() != m || m > self.capacity {
+            return Err(RealGammaError::Shape);
+        }
+        let count = self.projectors.cols();
+        if self.dgemm_products {
+            self.gemm.multiply_slices_wide_into(
+                dft_numerics::GemmSite::Other,
+                self.projectors.as_slice(),
+                n,
+                count,
+                n,
+                RealOp::Transpose,
+                x.as_slice(),
+                m,
+                n,
+                self.projections.as_mut().subcols_mut(0, m),
+            )?;
+        } else {
+            self.gemm.multiply_into(
+                self.projectors.as_ref(),
+                RealOp::Transpose,
+                x.as_ref(),
+                self.projections.as_mut().subcols_mut(0, m),
+            )?;
+        }
+        for (band, value) in out.iter_mut().enumerate() {
+            let p = &self.projections.as_slice()[band * count..(band + 1) * count];
+            let mut energy = 0.0;
+            for atom in &self.coupling {
+                let nc = atom.count;
+                for i in 0..nc {
+                    for j in 0..nc {
+                        let d = atom.values[i * nc + j];
+                        if d == 0.0 {
+                            continue;
+                        }
+                        energy += d * (p[atom.start + i] * p[atom.start + j]);
+                    }
+                }
+            }
+            *value = energy;
+        }
+        if out.iter().any(|v| !v.is_finite()) {
+            return Err(RealGammaError::NonFinite);
+        }
+        Ok(())
+    }
+
     /// Coupling and back product from `self.projections` (first `m` columns).
     fn add_from_projections(&mut self, y: &mut RealMatrix, m: usize) -> Result<(), RealGammaError> {
         let n = self.projectors.rows();
@@ -261,6 +333,16 @@ pub struct RealHamiltonian {
     local: PairLocalWorkspace<RealPairPlan>,
     nonlocal: RealNonlocal,
     capacity: usize,
+    /// APPLY-LEAN (opt-in `BAANDI_APPLY_LEAN=on`, default off; bit-identical):
+    /// kinetic term without a per-element modulo and no repeated input scans in
+    /// the nonlocal add (X is scanned once at entry, Y once at the end).
+    lean: bool,
+}
+impl RealHamiltonian {
+    /// Test hook: force APPLY-LEAN on or off regardless of the environment.
+    pub fn set_apply_lean(&mut self, on: bool) {
+        self.lean = on;
+    }
 }
 impl RealHamiltonian {
     /// Snapshot potential and public projectors; reject a mismatched or non-Gamma basis.
@@ -294,6 +376,7 @@ impl RealHamiltonian {
             local,
             nonlocal,
             capacity,
+            lean: std::env::var("BAANDI_APPLY_LEAN").as_deref() == Ok("on"),
         })
     }
     /// Refresh only the local samples when immutable operator data match.
@@ -332,14 +415,40 @@ impl RealHamiltonian {
         }
         self.local
             .apply_block(x.as_slice(), &self.potential, y.as_mut_slice())?;
+        if self.lean {
+            self.add_kinetic(x, y);
+            return self.nonlocal.add_block_core(x, y);
+        }
         for (j, (x, y)) in x.as_slice().iter().zip(y.as_mut_slice()).enumerate() {
             *y += self.kinetic[j % self.kinetic.len()] * x;
         }
         self.nonlocal.add_block(x, y)
     }
+    /// APPLY-LEAN kinetic term: the same `y += t x` per element, column by column
+    /// instead of an integer modulo per element (bit-identical).
+    fn add_kinetic(&self, x: &RealMatrix, y: &mut RealMatrix) {
+        let n = self.kinetic.len();
+        for (xc, yc) in x.as_slice().chunks(n).zip(y.as_mut_slice().chunks_mut(n)) {
+            for ((y, &x), &t) in yc.iter_mut().zip(xc).zip(&self.kinetic) {
+                *y += t * x;
+            }
+        }
+    }
     /// Number of nonlocal projector columns.
     pub fn projector_count(&self) -> usize {
         self.nonlocal.projector_count()
+    }
+    /// NL-ENERGY-REAL: per-column nonlocal expectation values (Ha) of an ORC
+    /// block; see `RealNonlocal::expectation_values`.
+    pub fn nonlocal_expectation_values(
+        &mut self,
+        x: &RealMatrix,
+        out: &mut [f64],
+    ) -> Result<(), RealGammaError> {
+        if x.rows() != self.half.full_len() {
+            return Err(RealGammaError::Shape);
+        }
+        self.nonlocal.expectation_values(x, out)
     }
     /// Projections P^T X of the most recent `apply_block` (first `m` columns,
     /// column-major); see `RealNonlocal::last_projections`.
@@ -368,8 +477,12 @@ impl RealHamiltonian {
         }
         self.local
             .apply_block(x.as_slice(), &self.potential, y.as_mut_slice())?;
-        for (j, (x, y)) in x.as_slice().iter().zip(y.as_mut_slice()).enumerate() {
-            *y += self.kinetic[j % self.kinetic.len()] * x;
+        if self.lean {
+            self.add_kinetic(x, y);
+        } else {
+            for (j, (x, y)) in x.as_slice().iter().zip(y.as_mut_slice()).enumerate() {
+                *y += self.kinetic[j % self.kinetic.len()] * x;
+            }
         }
         self.nonlocal.add_block_with_projections(projections, y)
     }

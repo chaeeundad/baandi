@@ -81,3 +81,6 @@ Read `docs/performance/README.md` before changing any hot path (Hamiltonian appl
 
 ## Report format
 Final message follows `docs/schemas/report.schema.json`: status, changed files, commands with exit codes, numerical outputs with units, limitations, open questions, commit.
+
+## Adoption rule (user, 2026-11-10; replaces the per-change percentage thresholds of earlier pre-registrations)
+Be aggressive: every change that measurably improves speed on dev08 is adopted, even by 1 to 3 percent, and improvements are collected and stacked. Nothing is rejected for a small gain. A change is rejected only for (a) physical hard-coding (a constant, threshold or branch tuned to one system or material instead of a general rule), or (b) a correctness failure (accuracy classes strict 1e-10 Ha and standard 5e-9 Ha, certificate, convergence, thread-count independence of results). dev08 measurement is the priority: implement first, measure on dev08 through the master session at once, adopt as the default when the median wall improves and nothing regresses beyond run-to-run noise. Defaults stay switchable by an environment variable for A/B checks and rollback. Per-change percentage thresholds in the plans and requests under docs/performance/requests and docs/roadmap are superseded by this rule; their correctness and identity clauses stand.

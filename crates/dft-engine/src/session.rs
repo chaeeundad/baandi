@@ -1513,13 +1513,16 @@ enum CertScreen {
     Trace,
 }
 
-/// `BAANDI_CERT_SCREEN=on|trace` (default off, bit-identical when off).
+/// Certificate screen: default ON since the user's adopt-what-improves rule
+/// (2026-11-10; dev08 ledger SINGLE-NODE-AB1: bit-identical density and energy in
+/// 40 of 40 pairs, -19 percent wall on si32 strict). `BAANDI_CERT_SCREEN=off`
+/// restores the unscreened path, `trace` prints the estimates.
 fn cert_screen_mode() -> CertScreen {
     static MODE: std::sync::OnceLock<CertScreen> = std::sync::OnceLock::new();
     *MODE.get_or_init(|| match std::env::var("BAANDI_CERT_SCREEN").as_deref() {
-        Ok("on") => CertScreen::On,
+        Ok("off") => CertScreen::Off,
         Ok("trace") => CertScreen::Trace,
-        _ => CertScreen::Off,
+        _ => CertScreen::On,
     })
 }
 

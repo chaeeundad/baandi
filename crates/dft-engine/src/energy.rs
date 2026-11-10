@@ -166,12 +166,14 @@ fn band_nonlocal(
         }
     }
 }
-/// `BAANDI_NL_ENERGY=fast` (default off, bit-identical when off): the nonlocal
-/// energy of the audit comes from projections only, for occupied bands only,
-/// blocks of bands sharing each pass over a projector column.
+/// Fast nonlocal audit energy: default ON since the user's adopt-what-improves rule
+/// (2026-11-10; dev08 ledger SINGLE-NODE-AB1: energy within 6.3e-13 Ha, wall
+/// better in all eight cells). The nonlocal energy comes from projections only,
+/// for occupied bands only, blocks of bands sharing each pass over a projector
+/// column. `BAANDI_NL_ENERGY=exact` restores the band-by-band operator application.
 fn fast_nonlocal_energy() -> bool {
     static MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| std::env::var("BAANDI_NL_ENERGY").as_deref() == Ok("fast"))
+    *MODE.get_or_init(|| std::env::var("BAANDI_NL_ENERGY").as_deref() != Ok("exact"))
 }
 
 fn expectation_tree(

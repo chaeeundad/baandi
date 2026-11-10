@@ -77,7 +77,7 @@ pub struct RealNonlocal {
     image: RealMatrix,
     gemm: RealGemmWorkspace,
     capacity: usize,
-    /// MKL builds, `BAANDI_MKL_NONLOCAL=on` (default off, A/B switch): both
+    /// MKL builds, default ON since the user's adopt-what-improves rule (2026-11-10; dev08 NONLOCAL-DGEMM-AB: all 40 seed pairs faster, -6.4/-4.2 percent at T=1, -2.0/-1.5 percent at T=8); `BAANDI_MKL_NONLOCAL=off` restores the Rust kernel: both
     /// projector products go through dgemm panels with the panel grouping fixed.
     dgemm_products: bool,
 }
@@ -118,7 +118,7 @@ impl RealNonlocal {
             image: RealMatrix::zeros(n, capacity)?,
             gemm: RealGemmWorkspace::with_pool(n, count.max(capacity), pool)?,
             capacity,
-            dgemm_products: std::env::var("BAANDI_MKL_NONLOCAL").as_deref() == Ok("on"),
+            dgemm_products: std::env::var("BAANDI_MKL_NONLOCAL").as_deref() != Ok("off"),
         })
     }
     /// Add the nonlocal image to caller-owned output; no allocation on application.

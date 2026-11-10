@@ -1435,12 +1435,18 @@ struct Projection {
 /// DGKS keep ratio: one pass suffices when every column kept at least this
 /// fraction of its unit input norm.
 const DGKS_KEEP: f64 = std::f64::consts::FRAC_1_SQRT_2;
-/// `BAANDI_ORTHO=dgks` (keep ratio 1/sqrt(2)) or `dgks:<ratio>` with a ratio
-/// in [1e-3, 1] (after one classical pass the residual overlap with the basis
-/// is about eps sqrt(m) / ratio relative, so 1e-3 still stays below the 1e-12
-/// orthogonality gate of the contraction); anything else: always two passes.
+/// Default DGKS keep ratio (0.1): ON since the adoption rule (dev08 MICRO-ORTHO:
+/// -4.9 to -9.7 percent wall on MKL in every cell, every seed improving, equal
+/// Davidson and H counts, energies inside the classes). `BAANDI_ORTHO=off` restores
+/// two passes always; `dgks` selects the classical 1/sqrt(2) rule and `dgks:<ratio>`
+/// a ratio in [1e-3, 1] (after one classical pass the residual overlap with the
+/// basis is about eps sqrt(m) / ratio relative, so 1e-3 still stays below the 1e-12
+/// orthogonality gate of the contraction).
+const DGKS_DEFAULT: f64 = 0.1;
 fn dgks_keep() -> Option<f64> {
-    let value = std::env::var("BAANDI_ORTHO").ok()?;
+    let Ok(value) = std::env::var("BAANDI_ORTHO") else {
+        return Some(DGKS_DEFAULT);
+    };
     if value == "dgks" {
         return Some(DGKS_KEEP);
     }

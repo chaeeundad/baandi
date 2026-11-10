@@ -215,10 +215,10 @@ fn distributed_h_matches_serial_on_1_to_8_ranks() {
                 if ranks == 1 {
                     bit_one_rank &= got.as_slice() == want.as_slice();
                 }
-                // Fixed collective counts: 2*ceil(m/2) FFT transposes plus 2 mirror
-                // exchanges (none on one rank) alltoalls, one tree_sum per apply.
-                let pairs = m.div_ceil(2);
-                let a2a = 2 * pairs + if ranks > 1 { 2 } else { 0 };
+                // Fixed collective counts (M2d batched transposes): 2 FFT transposes
+                // for the whole block plus 2 mirror exchanges (none on one rank)
+                // alltoalls, one tree_sum per apply. Unbatched: 2*ceil(m/2) + 2.
+                let a2a = 2 + if ranks > 1 { 2 } else { 0 };
                 for (meas, pred) in measured.iter().zip(&predicted) {
                     assert_eq!(*pred, (a2a, 1));
                     assert_eq!(*meas, (a2a, 1), "case {case} m {m} ranks {ranks}");
@@ -474,4 +474,195 @@ fn distributed_update_from_complex_follows_the_potential() {
         !d.update_from_complex(&other, &basis),
         "a different operator must be rebuilt"
     );
+}
+
+// ---- M2d: batched transposes, distributed density and nonlocal energies ----
+
+/// H x on `ranks` simulated ranks with batched or per-pair transposes:
+/// (global result, alltoall calls per rank).
+fn apply_mode(
+    rows: [[f64; 3]; 3],
+    atoms: usize,
+    x: &RealMatrix,
+    ranks: usize,
+    batched: bool,
+) -> (Vec<f64>, Vec<usize>) {
+    let parts = simulate(ranks, |comm| {
+        let (basis, h) = fixture(rows, atoms, 1.2);
+        let mut d = DistributedRealHamiltonian::new(
+            &h,
+            &basis,
+            16,
+            comm.rank(),
+            ranks,
+            WorkerPool::new(1).unwrap(),
+        )
+        .unwrap();
+        d.set_batched(batched);
+        let counting = Counting {
+            inner: comm,
+            alltoall: Counter::new(0),
+            tree: Counter::new(0),
+            gather: Counter::new(0),
+        };
+        let xl = d.extract_local(x).unwrap();
+        let mut yl = RealMatrix::zeros(xl.rows(), xl.cols()).unwrap();
+        d.apply_block(&counting, &xl, &mut yl).unwrap();
+        assert_eq!(counting.alltoall.get(), d.collectives_per_apply(x.cols()).0);
+        let mut global = RealMatrix::zeros(x.rows(), x.cols()).unwrap();
+        d.scatter_local(&yl, &mut global).unwrap();
+        (d.local_rows().to_vec(), global, counting.alltoall.get())
+    });
+    let n = x.rows();
+    let mut y = vec![0.; n * x.cols()];
+    for (rows, global, _) in &parts {
+        for c in 0..x.cols() {
+            for &r in rows {
+                y[c * n + r] = global.as_slice()[c * n + r];
+            }
+        }
+    }
+    (y, parts.iter().map(|p| p.2).collect())
+}
+
+#[test]
+fn batched_transposes_equal_per_pair_transposes_bitwise() {
+    let cases = [
+        ([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]], 2),
+        ([[6.4, 0.4, 0.2], [1., 7.3, 0.3], [0.5, 0.7, 8.4]], 4),
+        ([[4.2, 0., 0.], [0., 5.2, 0.], [0., 0., 14.2]], 3),
+    ];
+    for (case, (rows, atoms)) in cases.into_iter().enumerate() {
+        let (basis, _) = fixture(rows, atoms, 1.2);
+        let n = basis.vectors().len();
+        for m in [1, 3, 16] {
+            let x = block(n, m, 31 + m);
+            for ranks in [1, 2, 3, 5, 8] {
+                let (yb, cb) = apply_mode(rows, atoms, &x, ranks, true);
+                let (yu, cu) = apply_mode(rows, atoms, &x, ranks, false);
+                let mirror = if ranks > 1 { 2 } else { 0 };
+                assert!(cb.iter().all(|&c| c == 2 + mirror));
+                assert!(cu.iter().all(|&c| c == 2 * m.div_ceil(2) + mirror));
+                let bits = yb.iter().zip(&yu).all(|(a, b)| a.to_bits() == b.to_bits());
+                let den = yu.iter().map(|v| v * v).sum::<f64>().sqrt();
+                let err = yb
+                    .iter()
+                    .zip(&yu)
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum::<f64>()
+                    .sqrt()
+                    / den;
+                assert!(err <= 1e-14, "case {case} m {m} ranks {ranks}: {err:e}");
+                println!(
+                    "case {case} m {m} P={ranks}: alltoall per apply batched {} unbatched {}, bit-identical {bits}",
+                    cb[0], cu[0]
+                );
+                assert!(bits, "batching must not change any bit");
+            }
+        }
+    }
+}
+
+#[test]
+fn distributed_band_densities_and_nonlocal_energies_match_serial() {
+    use dft_basis::HalfSphere;
+    use dft_numerics::{Fft3d, FftPlan3d};
+    use num_complex::Complex64 as C;
+    let cases = [
+        ([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]], 2),
+        ([[6.4, 0.4, 0.2], [1., 7.3, 0.3], [0.5, 0.7, 8.4]], 4),
+        ([[4.2, 0., 0.], [0., 5.2, 0.], [0., 0., 14.2]], 3),
+    ];
+    for (case, (rows, atoms)) in cases.into_iter().enumerate() {
+        let (basis, h) = fixture(rows, atoms, 1.2);
+        let grid = h.fft_grid().clone();
+        let half = HalfSphere::new(&basis, &grid).unwrap();
+        let n = half.full_len();
+        let volume = Cell::from_user_rows_bohr(rows).unwrap().volume_bohr3();
+        let m = 5;
+        let x = block(n, m, 77);
+        let weights = [2., 2., 1.5, 0.5, 2.];
+        // Serial reference: complex coefficients, full-grid FFT, |psi|^2.
+        let mut fft = FftPlan3d::new(grid.dims()).unwrap();
+        let mut want = vec![0.; grid.dims().iter().product()];
+        let mut want_nl = vec![0.; m];
+        for b in 0..m {
+            let mut c = vec![C::default(); n];
+            half.unpack(&x.as_slice()[b * n..(b + 1) * n], &mut c)
+                .unwrap();
+            let full = grid.scatter(&c).unwrap();
+            let mut field = Array3::<C>::zeros(grid.dims());
+            fft.to_real(&full, &mut field).unwrap();
+            for (w, v) in want.iter_mut().zip(field.iter()) {
+                *w += weights[b] * v.norm_sqr() / volume;
+            }
+            h.nonlocal()
+                .expectation_values(&[&c], &mut want_nl[b..b + 1])
+                .unwrap();
+        }
+        let scale = want.iter().fold(0f64, |a, v| a.max(v.abs()));
+        let mut previous: Option<Vec<f64>> = None;
+        for ranks in 1..=6 {
+            let run = || {
+                simulate(ranks, |comm| {
+                    let (basis, h) = fixture(rows, atoms, 1.2);
+                    let mut d = DistributedRealHamiltonian::new(
+                        &h,
+                        &basis,
+                        8,
+                        comm.rank(),
+                        ranks,
+                        WorkerPool::new(1).unwrap(),
+                    )
+                    .unwrap();
+                    let xl = d.extract_local(&x).unwrap();
+                    let points = d.plane_points();
+                    let mut contrib = vec![0.; m * points];
+                    d.band_densities(comm, &xl, &weights, volume, &mut contrib)
+                        .unwrap();
+                    let mut local = vec![0.; points];
+                    for b in 0..m {
+                        for (l, c) in local.iter_mut().zip(&contrib[b * points..]) {
+                            *l += c;
+                        }
+                    }
+                    let mut full = vec![0.; grid.dims().iter().product()];
+                    d.gather_planes(comm, &local, &mut full).unwrap();
+                    let offsets = d.plane_grid_offsets();
+                    for (p, &o) in offsets.iter().enumerate() {
+                        assert_eq!(full[o].to_bits(), local[p].to_bits());
+                    }
+                    let mut nl = vec![0.; m];
+                    d.nonlocal_band_energies(comm, &xl, &mut nl).unwrap();
+                    (full, nl)
+                })
+            };
+            let parts = run();
+            let again = run();
+            for (r, (full, nl)) in parts.iter().enumerate() {
+                assert_eq!(full, &parts[0].0, "replicated density on rank {r}");
+                assert_eq!(nl, &parts[0].1, "replicated energies on rank {r}");
+                assert_eq!(full, &again[r].0, "bit reproducibility");
+                assert_eq!(nl, &again[r].1, "bit reproducibility");
+            }
+            let (full, nl) = &parts[0];
+            let err = full
+                .iter()
+                .zip(&want)
+                .fold(0f64, |a, (g, w)| a.max((g - w).abs()))
+                / scale;
+            let nl_err = nl
+                .iter()
+                .zip(&want_nl)
+                .fold(0f64, |a, (g, w)| a.max((g - w).abs() / w.abs().max(1e-300)));
+            println!("case {case} P={ranks}: density rel {err:e}, nonlocal rel {nl_err:e}");
+            assert!(err < 1e-13, "case {case} P={ranks}: density {err:e}");
+            assert!(nl_err < 1e-12, "case {case} P={ranks}: nonlocal {nl_err:e}");
+            // The plane split is a pure permutation: same bits for any rank count.
+            if let Some(p) = &previous {
+                assert_eq!(p, full, "density independent of the rank count");
+            }
+            previous = Some(full.clone());
+        }
+    }
 }

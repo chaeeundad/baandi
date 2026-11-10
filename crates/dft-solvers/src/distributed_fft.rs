@@ -18,8 +18,13 @@
 //! (sizes differ by at most one; ranks beyond n0 own none).
 //!
 //! Transpose: one `alltoall_f64` per direction with equal blocks of
-//! 2*max_sticks*max_planes f64; shorter (rank, plane-range) pairs are zero-padded
-//! and the padding is never read. Per-plane work reuses the serial order of
+//! 2*max_sticks*max_planes f64 per transformed vector; shorter (rank, plane-range)
+//! pairs are zero-padded and the padding is never read. Batches (M2d): the `_batch`
+//! entry points transform np vectors with ONE alltoall per direction (block
+//! 2*max_sticks*max_planes*np, destination-major, vector-minor); every vector's
+//! arithmetic is exactly that of the single-vector path, so a batch is bit-identical
+//! to np single calls. Transpose buffers grow to the widest batch seen and are then
+//! reused (no allocation once the widest batch has occurred). Per-plane work reuses the serial order of
 //! operations (clear, fill, batched 1D FFT along the second axis, 1D FFT along
 //! z), so each plane's slab is expected to be bit-identical to the serial plan's
 //! for any rank count (tests assert bit identity for one rank only). The 1/N
@@ -136,8 +141,9 @@ pub struct DistributedPairFft {
     plane_starts: Vec<usize>,
     rank: usize,
     planes: Vec<usize>,
-    // (index in the middle batch, complex offset of the stick in the rank-block layout).
-    occupied: Vec<(usize, usize)>,
+    // (index in the middle batch, owner rank, complex offset of the stick inside
+    // one vector's rank block).
+    occupied: Vec<(usize, usize, usize)>,
     sticks: Vec<C>,
     middle: Vec<C>,
     slab: Vec<C>,
@@ -200,7 +206,8 @@ impl DistributedPairFft {
             .map(|(s, &(z, y))| {
                 (
                     planes.binary_search(&z).unwrap() * n[1] + y,
-                    owner[s] * block + local_index[s] * max_planes,
+                    owner[s],
+                    local_index[s] * max_planes,
                 )
             })
             .collect::<Vec<_>>();
@@ -284,49 +291,89 @@ impl DistributedPairFft {
         &mut self.slab
     }
 
-    fn all_to_all<K: Collective>(&mut self, comm: &K) -> Result<(), DistFftError> {
+    fn all_to_all<K: Collective>(&mut self, comm: &K, np: usize) -> Result<(), DistFftError> {
         if comm.size() != self.ranks || comm.rank() != self.rank {
             return Err(MpiError::Shape("communicator differs from the plan").into());
         }
         if self.block > 0 {
-            comm.alltoall_f64(&self.send, 2 * self.block, &mut self.recv)?;
+            let len = 2 * self.block * self.ranks * np;
+            comm.alltoall_f64(
+                &self.send[..len],
+                2 * self.block * np,
+                &mut self.recv[..len],
+            )?;
         }
         Ok(())
     }
 
+    /// Grow the transpose buffers to batches of `np` vectors (no-op once grown).
+    fn reserve_batch(&mut self, np: usize) {
+        let len = 2 * self.block * self.ranks * np;
+        if self.send.len() < len {
+            self.send.resize(len, 0.);
+            self.recv.resize(len, 0.);
+        }
+    }
+
+    /// Complex offset of vector t's block for rank q in a batch of `np`.
+    fn base(&self, q: usize, t: usize, np: usize) -> usize {
+        (q * np + t) * self.block
+    }
+
     /// Step 1 of G->r: 1D transforms on local sticks and the transpose.
     pub fn begin_to_real<K: Collective>(&mut self, comm: &K, c: &[C]) -> Result<(), DistFftError> {
-        if c.len() != self.scatter.len() {
+        self.begin_to_real_batch(comm, c, 1)
+    }
+
+    /// Step 1 of G->r for `np` vectors stored one after another in `c` (each
+    /// `local_len` long): ONE transpose for all of them.
+    pub fn begin_to_real_batch<K: Collective>(
+        &mut self,
+        comm: &K,
+        c: &[C],
+        np: usize,
+    ) -> Result<(), DistFftError> {
+        let ll = self.scatter.len();
+        if c.len() != ll * np {
             return Err(FftError::IncompatibleArray.into());
         }
-        self.sticks.fill(C::default());
-        for (&i, &v) in self.scatter.iter().zip(c) {
-            self.sticks[i] = v;
-        }
-        if !self.sticks.is_empty() {
-            self.inverse[0].process_with_scratch(&mut self.sticks, &mut self.scratch);
-        }
+        self.reserve_batch(np);
         let (nx, mp) = (self.n[0], self.max_planes);
-        for q in 0..self.ranks {
-            let (x0, x1) = (self.plane_starts[q], self.plane_starts[q + 1]);
-            for sp in 0..self.local_sticks {
-                let base = 2 * (q * self.block + sp * mp);
-                for (xi, x) in (x0..x1).enumerate() {
-                    let v = self.sticks[sp * nx + x];
-                    self.send[base + 2 * xi] = v.re;
-                    self.send[base + 2 * xi + 1] = v.im;
+        for t in 0..np {
+            self.sticks.fill(C::default());
+            for (&i, &v) in self.scatter.iter().zip(&c[t * ll..(t + 1) * ll]) {
+                self.sticks[i] = v;
+            }
+            if !self.sticks.is_empty() {
+                self.inverse[0].process_with_scratch(&mut self.sticks, &mut self.scratch);
+            }
+            for q in 0..self.ranks {
+                let (x0, x1) = (self.plane_starts[q], self.plane_starts[q + 1]);
+                let qb = self.base(q, t, np);
+                for sp in 0..self.local_sticks {
+                    let base = 2 * (qb + sp * mp);
+                    for (xi, x) in (x0..x1).enumerate() {
+                        let v = self.sticks[sp * nx + x];
+                        self.send[base + 2 * xi] = v.re;
+                        self.send[base + 2 * xi + 1] = v.im;
+                    }
                 }
             }
         }
-        self.all_to_all(comm)
+        self.all_to_all(comm, np)
     }
 
     /// Step 2 of G->r for owned plane i: 2D transform; result in `plane()`.
     pub fn to_real_plane(&mut self, i: usize) {
+        self.to_real_plane_in(0, 1, i)
+    }
+
+    /// Step 2 of G->r for vector t of a batch of `np`, owned plane i.
+    pub fn to_real_plane_in(&mut self, t: usize, np: usize, i: usize) {
         let [_, ny, nz] = self.n;
         self.middle.fill(C::default());
-        for &(m, off) in &self.occupied {
-            let k = 2 * (off + i);
+        for &(m, owner, off) in &self.occupied {
+            let k = 2 * ((owner * np + t) * self.block + off + i);
             self.middle[m] = C::new(self.recv[k], self.recv[k + 1]);
         }
         if !self.middle.is_empty() {
@@ -343,6 +390,11 @@ impl DistributedPairFft {
 
     /// r->G for owned plane i from `plane()`; results are staged for the transpose.
     pub fn to_reciprocal_plane(&mut self, i: usize) {
+        self.to_reciprocal_plane_in(0, 1, i)
+    }
+
+    /// r->G of vector t of a batch of `np`, owned plane i (staged for the transpose).
+    pub fn to_reciprocal_plane_in(&mut self, t: usize, np: usize, i: usize) {
         let [_, ny, nz] = self.n;
         self.forward[2].process_with_scratch(&mut self.slab, &mut self.scratch);
         for (k, &z) in self.planes.iter().enumerate() {
@@ -353,8 +405,8 @@ impl DistributedPairFft {
         if !self.middle.is_empty() {
             self.forward[1].process_with_scratch(&mut self.middle, &mut self.scratch);
         }
-        for &(m, off) in &self.occupied {
-            let k = 2 * (off + i);
+        for &(m, owner, off) in &self.occupied {
+            let k = 2 * ((owner * np + t) * self.block + off + i);
             self.send[k] = self.middle[m].re;
             self.send[k + 1] = self.middle[m].im;
         }
@@ -366,26 +418,41 @@ impl DistributedPairFft {
         comm: &K,
         out: &mut [C],
     ) -> Result<(), DistFftError> {
-        if out.len() != self.scatter.len() {
+        self.finish_to_reciprocal_batch(comm, out, 1)
+    }
+
+    /// Batched `finish_to_reciprocal`: ONE transpose back for `np` vectors; `out`
+    /// receives the np local coefficient vectors one after another.
+    pub fn finish_to_reciprocal_batch<K: Collective>(
+        &mut self,
+        comm: &K,
+        out: &mut [C],
+        np: usize,
+    ) -> Result<(), DistFftError> {
+        let ll = self.scatter.len();
+        if out.len() != ll * np || self.send.len() < 2 * self.block * self.ranks * np {
             return Err(FftError::IncompatibleArray.into());
         }
-        self.all_to_all(comm)?;
+        self.all_to_all(comm, np)?;
         let (nx, mp) = (self.n[0], self.max_planes);
-        for q in 0..self.ranks {
-            let x0 = self.plane_starts[q];
-            for sp in 0..self.local_sticks {
-                let base = 2 * (q * self.block + sp * mp);
-                for xi in 0..self.plane_starts[q + 1] - x0 {
-                    self.sticks[sp * nx + x0 + xi] =
-                        C::new(self.recv[base + 2 * xi], self.recv[base + 2 * xi + 1]);
+        for t in 0..np {
+            for q in 0..self.ranks {
+                let x0 = self.plane_starts[q];
+                let qb = self.base(q, t, np);
+                for sp in 0..self.local_sticks {
+                    let base = 2 * (qb + sp * mp);
+                    for xi in 0..self.plane_starts[q + 1] - x0 {
+                        self.sticks[sp * nx + x0 + xi] =
+                            C::new(self.recv[base + 2 * xi], self.recv[base + 2 * xi + 1]);
+                    }
                 }
             }
-        }
-        if !self.sticks.is_empty() {
-            self.forward[0].process_with_scratch(&mut self.sticks, &mut self.scratch);
-        }
-        for (o, &i) in out.iter_mut().zip(&self.scatter) {
-            *o = self.sticks[i] / self.total as f64;
+            if !self.sticks.is_empty() {
+                self.forward[0].process_with_scratch(&mut self.sticks, &mut self.scratch);
+            }
+            for (o, &i) in out[t * ll..(t + 1) * ll].iter_mut().zip(&self.scatter) {
+                *o = self.sticks[i] / self.total as f64;
+            }
         }
         Ok(())
     }
@@ -403,21 +470,90 @@ impl DistributedPairFft {
             return Err(FftError::IncompatibleArray.into());
         }
         self.begin_to_real(comm, c)?;
-        let (ny, nz) = (self.n[1], self.n[2]);
-        for i in 0..self.plane_count() {
-            self.to_real_plane(i);
-            for y in 0..ny {
-                let start = self.grid_start(i, y);
-                for (a, &v) in self.slab[y * nz..(y + 1) * nz]
-                    .iter_mut()
-                    .zip(&potential[start..start + nz])
-                {
-                    *a *= v;
-                }
-            }
-            self.to_reciprocal_plane(i);
-        }
+        self.multiply_planes(potential, 1);
         self.finish_to_reciprocal(comm, out)
+    }
+
+    /// `apply_local` for `np` vectors stored one after another in `data`
+    /// (overwritten by the result) with one transpose per direction; bit-identical
+    /// to np calls of `apply_local`.
+    pub fn apply_local_batch<K: Collective>(
+        &mut self,
+        comm: &K,
+        data: &mut [C],
+        potential: &[f64],
+        np: usize,
+    ) -> Result<(), DistFftError> {
+        if potential.len() != self.total {
+            return Err(FftError::IncompatibleArray.into());
+        }
+        self.begin_to_real_batch(comm, data, np)?;
+        self.multiply_planes(potential, np);
+        self.finish_to_reciprocal_batch(comm, data, np)
+    }
+
+    fn multiply_planes(&mut self, potential: &[f64], np: usize) {
+        let (ny, nz) = (self.n[1], self.n[2]);
+        for t in 0..np {
+            for i in 0..self.plane_count() {
+                self.to_real_plane_in(t, np, i);
+                for y in 0..ny {
+                    let start = self.grid_start(i, y);
+                    for (a, &v) in self.slab[y * nz..(y + 1) * nz]
+                        .iter_mut()
+                        .zip(&potential[start..start + nz])
+                    {
+                        *a *= v;
+                    }
+                }
+                self.to_reciprocal_plane_in(t, np, i);
+            }
+        }
+    }
+
+    /// Grid points on this rank's planes (`plane_count * rows * shape[2]`): the
+    /// length of a plane-local field ordered [plane][row][z].
+    pub fn plane_points(&self) -> usize {
+        self.plane_count() * self.n[1] * self.n[2]
+    }
+
+    /// Assemble a full row-major grid field from every rank's plane-local field
+    /// (one allgatherv; the copy into the grid is a pure permutation, so the
+    /// result does not depend on the rank count). `scratch` grows to the grid size
+    /// on first use.
+    pub fn gather_planes<K: Collective>(
+        &self,
+        comm: &K,
+        local: &[f64],
+        scratch: &mut Vec<f64>,
+        full: &mut [f64],
+    ) -> Result<(), DistFftError> {
+        if comm.size() != self.ranks || comm.rank() != self.rank {
+            return Err(MpiError::Shape("communicator differs from the plan").into());
+        }
+        if local.len() != self.plane_points() || full.len() != self.total {
+            return Err(FftError::IncompatibleArray.into());
+        }
+        let (ny, nz) = (self.n[1], self.n[2]);
+        let counts: Vec<usize> = self
+            .plane_starts
+            .windows(2)
+            .map(|w| (w[1] - w[0]) * ny * nz)
+            .collect();
+        scratch.resize(self.total, 0.);
+        comm.allgatherv_f64(local, &counts, scratch)?;
+        // Plane x of the concatenation starts at x*ny*nz for every rank count.
+        for x in 0..self.n[0] {
+            for y in 0..ny {
+                let start = if self.first == 0 {
+                    (x * self.shape[1] + y) * nz
+                } else {
+                    (y * self.shape[1] + x) * nz
+                };
+                full[start..start + nz].copy_from_slice(&scratch[(x * ny + y) * nz..][..nz]);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -613,6 +749,59 @@ mod tests {
                 if ranks == 1 {
                     assert_eq!(got, want, "one rank is bit-identical to PairFusedPlan");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn batched_apply_equals_single_calls_bitwise_and_gather_assembles_the_grid() {
+        for (shape, idx) in cases() {
+            let n = shape.iter().product::<usize>();
+            let mut s = 5;
+            let pot: Vec<f64> = (0..n).map(|_| 1.0 + lcg(&mut s)).collect();
+            let field: Vec<f64> = (0..n).map(|_| lcg(&mut s)).collect();
+            let np = 3;
+            let vecs: Vec<Vec<C>> = (0..np)
+                .map(|t| random_c(idx.len(), 40 + t as u64))
+                .collect();
+            for ranks in 1..=5 {
+                let res = simulate(ranks, |comm| {
+                    let mut p = DistributedPairFft::new(shape, &idx, comm.rank(), ranks).unwrap();
+                    let ll = p.local_len();
+                    let mut single = vec![C::default(); ll * np];
+                    for t in 0..np {
+                        let local: Vec<C> =
+                            p.local_positions().iter().map(|&g| vecs[t][g]).collect();
+                        p.apply_local(comm, &local, &pot, &mut single[t * ll..(t + 1) * ll])
+                            .unwrap();
+                    }
+                    let vecs = &vecs;
+                    let mut batch: Vec<C> = (0..np)
+                        .flat_map(|t| p.local_positions().iter().map(move |&g| vecs[t][g]))
+                        .collect();
+                    p.apply_local_batch(comm, &mut batch, &pot, np).unwrap();
+                    // Plane-local copy of a known field, gathered back.
+                    let mut local = Vec::with_capacity(p.plane_points());
+                    for i in 0..p.plane_count() {
+                        for y in 0..p.rows() {
+                            let st = p.grid_start(i, y);
+                            local.extend_from_slice(&field[st..st + shape[2]]);
+                        }
+                    }
+                    let mut scratch = Vec::new();
+                    let mut full = vec![0.; n];
+                    p.gather_planes(comm, &local, &mut scratch, &mut full)
+                        .unwrap();
+                    (single == batch, full == field)
+                });
+                assert!(
+                    res.iter().all(|r| r.0),
+                    "{shape:?} P={ranks}: batch differs"
+                );
+                assert!(
+                    res.iter().all(|r| r.1),
+                    "{shape:?} P={ranks}: gather differs"
+                );
             }
         }
     }

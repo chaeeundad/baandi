@@ -23,7 +23,7 @@ deps = ["dft-units", "dft-geometry", "dft-numerics", "dft-basis", "dft-upf", "df
 [crates.dft-solvers]    # eigensolvers, mixers, SCF driver pieces
 deps = ["dft-numerics"]
 [crates.dft-engine]     # orchestration and energy audit
-deps = ["dft-physics", "dft-solvers", "dft-basis", "dft-geometry", "dft-upf", "dft-numerics"]   # numerics only to name RealMatrix in the real Gamma bridge (P26E)
+deps = ["dft-physics", "dft-solvers", "dft-basis", "dft-geometry", "dft-upf", "dft-numerics", "dft-mpi"]   # numerics only to name RealMatrix in the real Gamma bridge (P26E); dft-mpi for the communicator registry (ADR 0041)
 [crates.dft-cli]        # I/O only, no numerics
 deps = ["dft-engine", "dft-units", "dft-geometry", "dft-basis", "dft-upf", "dft-physics", "dft-solvers", "dft-numerics"]   # direct deps on lower crates allowed until dft-engine exists
 [crates.baandi-mcp]    # MCP stdio adapter (ADRs 0028, 0029); serde/serde_json only, no SDK or async runtime

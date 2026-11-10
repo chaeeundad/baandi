@@ -144,3 +144,129 @@ fn m2c_stick_row_scf_matches_threads_only() {
         }
     }
 }
+
+// ---- M2d: distributed density, XC, nonlocal energy on the M2 path ----
+
+fn m2_count(name: &str) -> usize {
+    parallel::m2_stats()
+        .0
+        .into_iter()
+        .find(|(n, _)| n == name)
+        .map_or(0, |(_, v)| v)
+}
+
+fn run_m2_profile(
+    kind: usize,
+    comm: Option<Arc<dyn Collective + Send + Sync>>,
+    standard: bool,
+) -> ScfResult {
+    parallel::set_m2_override(Some(true));
+    parallel::set_communicator(comm);
+    let rows = if kind == 0 {
+        [[4., 0., 0.], [0., 4., 0.], [0., 0., 4.]]
+    } else {
+        [[5., 0., 0.], [0.5, 4., 0.], [0.2, 0.4, 6.]]
+    };
+    let cell = Cell::from_user_rows_bohr(rows).unwrap();
+    let atoms = vec![Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let pp = common::potential(2., 1., true, 401);
+    let opts = ScfOptions {
+        gamma_real: GammaReal::Auto,
+        cutoff_hartree: 2.5,
+        bands: Some(5),
+        threads: 1,
+        eigen_tolerance: 1e-10,
+        standard: standard.then(dft_engine::StandardProfile::default),
+        ..Default::default()
+    };
+    let result = ScfProblem::new(
+        &cell,
+        &atoms,
+        &[SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }],
+        opts,
+    )
+    .unwrap()
+    .run()
+    .unwrap();
+    parallel::set_communicator(None);
+    parallel::set_m2_override(None);
+    result
+}
+
+#[test]
+fn m2d_distributed_scf_stages_match_threads_only() {
+    // Two cell shapes, strict (1e-10 Ha) and standard (5e-9 Ha) classes, 2..4 ranks.
+    for (standard, limit) in [(false, 1e-10), (true, 5e-9)] {
+        for kind in 0..2 {
+            let serial = run_m2_profile(kind, None, standard);
+            for ranks in [2usize, 3, 4] {
+                let names = [
+                    "rows_solves",
+                    "batched_applies",
+                    "band_density_builds",
+                    "density_builds",
+                    "xc_evaluations",
+                    "nonlocal_energy_audits",
+                ];
+                let before: Vec<usize> = names.iter().map(|n| m2_count(n)).collect();
+                let go = || {
+                    simulate(ranks, |comm: &SimRank| {
+                        run_m2_profile(kind, Some(Arc::new(comm.clone())), standard)
+                    })
+                };
+                let results = go();
+                for (name, b) in names.iter().zip(&before) {
+                    assert!(m2_count(name) > *b, "M2d counter {name} did not move");
+                }
+                let again = go();
+                for (r, res) in results.iter().enumerate() {
+                    let de = (res.total_hartree() - serial.total_hartree()).abs();
+                    println!(
+                        "M2d standard={standard} kind {kind} P={ranks} rank {r}: dE {de:e} Ha, iterations {} vs {}",
+                        res.history.len(),
+                        serial.history.len()
+                    );
+                    assert!(de < limit, "kind {kind} P={ranks}: dE {de:e}");
+                    assert_eq!(
+                        res.total_hartree().to_bits(),
+                        results[0].total_hartree().to_bits(),
+                        "ranks disagree"
+                    );
+                    assert_eq!(
+                        res.total_hartree().to_bits(),
+                        again[r].total_hartree().to_bits(),
+                        "not bit-reproducible at fixed rank count"
+                    );
+                    assert!(
+                        res.density
+                            .iter()
+                            .zip(&again[r].density)
+                            .all(|(a, b)| a.to_bits() == b.to_bits()),
+                        "density not bit-reproducible at fixed rank count"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn m2_off_and_one_rank_keep_the_threads_only_bits() {
+    // M2 requested on one rank (no communicator) must be the threads-only path.
+    let serial = run(0, None);
+    let one = run_m2_profile(0, None, false);
+    assert_eq!(
+        serial.total_hartree().to_bits(),
+        one.total_hartree().to_bits()
+    );
+    assert!(
+        serial
+            .density
+            .iter()
+            .zip(&one.density)
+            .all(|(a, b)| a.to_bits() == b.to_bits())
+    );
+}

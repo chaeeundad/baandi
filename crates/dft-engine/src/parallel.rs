@@ -59,6 +59,32 @@ pub fn m2_enabled() -> bool {
         .unwrap_or_else(|| std::env::var("BAANDI_MPI_M2").is_ok_and(|v| v == "on"))
 }
 
+/// (counter name, value) list and (stage name, seconds) list.
+pub type M2Stats = (Vec<(String, usize)>, Vec<(String, f64)>);
+
+/// Proof-of-branch counters and stage seconds of the M2 path in this process:
+/// (counters, stages). Counters: `rows_solves` (M2c eigensolves), the distributed
+/// operator's `batched_applies` / `unbatched_applies` / `applied_columns` /
+/// `band_density_builds` / `nonlocal_energy_evaluations`, and the engine's M2d
+/// `density_builds` / `xc_evaluations` / `nonlocal_energy_audits` /
+/// `screen_integrals`. Stages: operator `apply_*`, `band_densities`,
+/// `nonlocal_energy`, `gather_planes` and engine `density`, `xc`,
+/// `nonlocal_energy`, `screen_integrals` (engine stages include the operator
+/// work they call; operator stages are named `op.*`).
+pub fn m2_stats() -> M2Stats {
+    let (op_counts, op_stages) = dft_physics::distributed_real_gamma::m2_counters();
+    let (engine_counts, engine_stages) = crate::m2::stats();
+    let mut counts = vec![("rows_solves".to_string(), distributed_rows_solves())];
+    counts.extend(op_counts.into_iter().map(|(n, v)| (n.to_string(), v)));
+    counts.extend(engine_counts.into_iter().map(|(n, v)| (n.to_string(), v)));
+    let mut stages: Vec<(String, f64)> = engine_stages
+        .into_iter()
+        .map(|(n, v)| (n.to_string(), v))
+        .collect();
+    stages.extend(op_stages.into_iter().map(|(n, v)| (format!("op.{n}"), v)));
+    (counts, stages)
+}
+
 /// Override `BAANDI_MPI_M2` for the calling thread (tests); `None` restores the environment.
 pub fn set_m2_override(value: Option<bool>) {
     M2_OVERRIDE.with(|o| o.set(value));

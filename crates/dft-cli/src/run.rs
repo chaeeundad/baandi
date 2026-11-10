@@ -658,8 +658,19 @@ pub fn execute_mode(
     }
     result["gamma_real_used"] = json!(r.gamma_real_used);
     if crate::parallel::size() > 1 {
+        let m2_on = dft_engine::parallel::m2_enabled();
+        let (m2_counts, m2_stages) = dft_engine::parallel::m2_stats();
         result["parallel"] = json!({
-            "model": "mpi_row_block",
+            "model": if m2_on { "mpi_stick_rows" } else { "mpi_row_block" },
+            "m2": {
+                "enabled": m2_on,
+                "batched_transposes": std::env::var("BAANDI_M2_BATCH").as_deref() != Ok("off"),
+                "counters": m2_counts.into_iter().map(|(n, v)| (n, json!(v))).collect::<serde_json::Map<_, _>>(),
+                "stages": m2_stages
+                    .into_iter()
+                    .map(|(name, seconds)| json!({"stage": name, "seconds": seconds}))
+                    .collect::<Vec<_>>(),
+            },
             "ranks": crate::parallel::size(),
             "rank": crate::parallel::rank(),
             "distributed_solves": dft_engine::parallel::distributed_solves(),

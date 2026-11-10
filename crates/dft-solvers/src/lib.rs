@@ -147,7 +147,9 @@ impl DavidsonPreconditioner {
 }
 
 /// Ordered expectation of kinetic energy, with the existing 0.1 Ha floor.
-fn kinetic_scale(weights: impl Iterator<Item = (f64, f64)>) -> Result<f64, LinalgError> {
+/// Weighted mean kinetic energy (Ha) with a 0.1 Ha floor; public for the Track A
+/// direct minimizer (`dft_engine::scf::direct_min`), arithmetic unchanged.
+pub fn kinetic_scale(weights: impl Iterator<Item = (f64, f64)>) -> Result<f64, LinalgError> {
     let (mut norm, mut mean) = (0.0, 0.0);
     for (weight, kinetic) in weights {
         if !weight.is_finite() || weight < 0.0 || !kinetic.is_finite() || kinetic < 0.0 {
@@ -164,7 +166,8 @@ fn kinetic_scale(weights: impl Iterator<Item = (f64, f64)>) -> Result<f64, Linal
 }
 
 /// Positive TPA damping. Reciprocal evaluation avoids polynomial overflow.
-fn tpa_weight(kinetic: f64, scale: f64) -> f64 {
+/// Public for the Track A direct minimizer; arithmetic unchanged.
+pub fn tpa_weight(kinetic: f64, scale: f64) -> f64 {
     let x = kinetic / scale;
     if x <= 1.0 {
         let p = 27.0 + x * (18.0 + x * (12.0 + x * 8.0));

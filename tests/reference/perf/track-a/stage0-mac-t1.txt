@@ -1,0 +1,15 @@
+# Track A stage 0, Mac (Apple Silicon), release, pure Rust; commit base 5ced577 + uncommitted branch; 2026-11-10T08:36Z
+# command: TRACK_A_THREADS=1 cargo test --release -p dft-engine --test direct_min -- --ignored --nocapture --test-threads=1
+# Si UPF sha256: e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217; Mg/O PseudoDojo sha256: 15cdd9380687a47a1f4bc4ab5fe1f0c6d9c50891350fd8534c8f292b3ce0be14 2a543889f6522e2a1f94e2c2ff1477e61cb89f25c67b27c54940e8263ec6fb11
+test track_a_stage0_bench ... case | occ | min_iter | min_evals | min_cols | H-eq/band | grad_Ha | stop | start | dE_min_Ha | handoff_iter | handoff_cols(hist+cert) | total_A_cols | strict_iter | strict_cols(hist+cert) | strict_atomic_cols | dE_cert_Ha | certified(handoff/strict) | ratio_A/S | wall_min_s | wall_handoff_s | wall_strict_s
+gradient_tolerance_ha = 1e-6, threads = 1
+syn-skew2 | 2 | 53 | 101 | 202 | 101.0 | 7.13e-7 | GradientTolerance | free_electron_perturbed | 9.832e-13 (E_min bits bff8660c57c83701) | 2 | 39+18 | 259 | 13 | 171+16 | 0 | 5.107e-15 | true/true | 1.385 | 0.00 | 0.00 | 0.00
+syn-fcc | 4 | 141 | 278 | 1112 | 278.0 | 9.09e-7 | GradientTolerance | free_electron_perturbed | 3.645e-11 (E_min bits c012c801bc58e548) | 5 | 164+36 | 1312 | 22 | 647+38 | 0 | -5.240e-14 | true/true | 1.915 | 0.11 | 0.01 | 0.04
+syn-lowsym6 | 6 | 120 | 204 | 1224 | 204.0 | 8.83e-7 | GradientTolerance | free_electron_perturbed | 6.364e-12 (E_min bits c01183b8bb0700de) | 3 | 181+55 | 1460 | 16 | 777+58 | 0 | -2.132e-14 | true/true | 1.749 | 0.07 | 0.01 | 0.04
+si-skew | 4 | 27 | 49 | 204 | 51.0 | 9.72e-7 | GradientTolerance | atomic | 4.849e-13 (E_min bits c01d0091aa94c462) | 2 | 87+31 | 322 | 21 | 550+64 | 8 | -1.865e-14 | true/true | 0.524 | 0.06 | 0.01 | 0.10
+si-elongated | 8 | 35 | 65 | 536 | 67.0 | 2.54e-2 | Stagnated | atomic | 1.208e-1 (E_min bits c02e08dd25068640) | 100 | 2849+0 | 3385 | 100 | 2802+0 | 16 | 1.322e-1 | false/false | 1.208 | 0.04 | 0.25 | 0.25
+si-slab | 8 | 32 | 60 | 496 | 62.0 | 9.77e-7 | GradientTolerance | atomic | 2.865e-2 (E_min bits c02e4cee070f526f) | 100 | 3442+0 | 3938 | 100 | 3850+0 | 16 | -5.252e-2 | false/false | 1.023 | 0.06 | 0.36 | 0.40
+si8 | 16 | 26 | 44 | 736 | 46.0 | 8.54e-7 | GradientTolerance | atomic | 5.365e-13 (E_min bits c03f5261b88629fb) | 2 | 262+146 | 1144 | 11 | 1134+185 | 32 | -3.553e-14 | true/true | 0.867 | 0.29 | 0.22 | 0.69
+si16 | 32 | 37 | 78 | 2560 | 80.0 | 1.52e-6 | LineSearchFailed | atomic | 1.052e-12 (E_min bits c04f908b14ca03cc) | 2 | 418+179 | 3157 | 10 | 1746+207 | 64 | -1.847e-13 | true/true | 1.616 | 1.83 | 0.90 | 2.46
+mgo8 | 32 | 36 | 71 | 2308 | 72.1 | 4.55e-6 | LineSearchFailed | atomic | 1.279e-11 (E_min bits c072ff6d07dfd2bd) | 5 | 660+679 | 3647 | 15 | 2053+293 | 36 | 4.889e-12 | true/true | 1.555 | 2.95 | 1.53 | 2.64
+si32 | 64 | 38 | 76 | 4992 | 78.0 | 2.73e-6 | LineSearchFailed | atomic | 4.320e-12 (E_min bits c05fad0e4e07cce6) | 2 | 581+438 | 6011 | 10 | 3540+394 | 128 | 5.400e-13 | true/true | 1.528 | 9.51 | 5.50 | 16.74

@@ -44,6 +44,15 @@ fn pseudo(ls: &[usize]) -> dft_upf::Pseudopotential {
 <PP_MESH dx="0.15" mesh="{n}" xmin="0" rmax="12" zmesh="1"><PP_R>{}</PP_R><PP_RAB>{}</PP_RAB></PP_MESH><PP_LOCAL>{}</PP_LOCAL><PP_NONLOCAL>{beta}<PP_DIJ>{dij}</PP_DIJ></PP_NONLOCAL><PP_RHOATOM>{}</PP_RHOATOM></UPF>"#,ls.len(),a(&|r|r),a(&|_|0.15),a(&|_|0.),a(&|_|0.))).unwrap()
 }
 fn fixture(rows: [[f64; 3]; 3], atoms: usize, cutoff: f64) -> (PlaneWaveBasis, Hamiltonian) {
+    fixture_with(rows, atoms, cutoff, &[0, 0, 1, 1, 2, 2, 3, 3], &[0, 1])
+}
+fn fixture_with(
+    rows: [[f64; 3]; 3],
+    atoms: usize,
+    cutoff: f64,
+    first: &[usize],
+    second: &[usize],
+) -> (PlaneWaveBasis, Hamiltonian) {
     let cell = Cell::from_user_rows_bohr(rows).unwrap();
     let basis = PlaneWaveBasis::new(&cell, Hartree(cutoff)).unwrap();
     let grid = FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None).unwrap();
@@ -56,8 +65,8 @@ fn fixture(rows: [[f64; 3]; 3], atoms: usize, cutoff: f64) -> (PlaneWaveBasis, H
             ])
         })
         .collect();
-    let p = pseudo(&[0, 0, 1, 1, 2, 2, 3, 3]);
-    let q = pseudo(&[0, 1]);
+    let p = pseudo(first);
+    let q = pseudo(second);
     let split = atoms.div_ceil(2);
     let nl = NonlocalOperator::new(
         &basis,
@@ -327,6 +336,136 @@ fn apply_lean_is_bit_identical() {
         }
     }
 }
+fn bits(x: &RealMatrix) -> Vec<u64> {
+    x.as_slice().iter().map(|v| v.to_bits()).collect()
+}
+/// HAPPLY-OVERLAP (`BAANDI_HAPPLY_OVERLAP=on`): local part and nonlocal image
+/// in one pool join are bit-identical to the serial order, for plain and
+/// cached-projection applications, widths 1..8 and pool budgets 1, 2, 4; the
+/// stored projections are unchanged and non-finite input is rejected alike.
+#[test]
+fn apply_overlap_is_bit_identical() {
+    for rows in [
+        [[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]],
+        [[4., 0., 0.], [0., 5., 0.], [0., 0., 14.]],
+    ] {
+        let (basis, h) = fixture(rows, 5, 1.2);
+        let n = basis.vectors().len();
+        for m in [1, 2, 5, 8] {
+            let x = states(n, m, 5 + m);
+            let mut reference: Option<(Vec<u64>, Vec<u64>)> = None;
+            for threads in [1, 2, 4] {
+                let mut real =
+                    RealHamiltonian::from_complex(&h, &basis, m, WorkerPool::new(threads).unwrap())
+                        .unwrap();
+                let mut plain = RealMatrix::zeros(n, m).unwrap();
+                let mut over = RealMatrix::zeros(n, m).unwrap();
+                real.set_apply_overlap(false);
+                real.apply_block(&x, &mut plain).unwrap();
+                let projections = real.last_projections(m).unwrap().to_vec();
+                let mut plain_cached = RealMatrix::zeros(n, m).unwrap();
+                real.apply_block_with_projections(&x, &projections, &mut plain_cached)
+                    .unwrap();
+                real.set_apply_overlap(true);
+                real.apply_block(&x, &mut over).unwrap();
+                assert_eq!(bits(&plain), bits(&over), "m={m} T={threads}");
+                assert_eq!(real.last_projections(m).unwrap(), projections.as_slice());
+                let mut over_cached = RealMatrix::zeros(n, m).unwrap();
+                real.apply_block_with_projections(&x, &projections, &mut over_cached)
+                    .unwrap();
+                assert_eq!(bits(&plain_cached), bits(&over_cached));
+                match &reference {
+                    None => reference = Some((bits(&over), bits(&over_cached))),
+                    Some((a, b)) => {
+                        assert_eq!(a, &bits(&over));
+                        assert_eq!(b, &bits(&over_cached));
+                    }
+                }
+                let mut bad = x.clone();
+                bad.as_mut_slice()[n / 3] = f64::INFINITY;
+                let err = real.apply_block(&bad, &mut over).unwrap_err().to_string();
+                assert_eq!(err, dft_physics::RealGammaError::NonFinite.to_string());
+                let mut bad_p = projections.clone();
+                bad_p[0] = f64::NAN;
+                assert!(
+                    real.apply_block_with_projections(&x, &bad_p, &mut over)
+                        .is_err()
+                );
+            }
+        }
+    }
+}
+/// HAPPLY-FOLD (`BAANDI_HAPPLY_FOLD=on`): even blocks are bit-identical to the
+/// pair path; the odd tail column agrees with the zero-partner pair and with
+/// the complex H to relative 1e-13 (rounding class); output bits do not depend
+/// on the pool budget, and fold plus overlap equals fold alone bit for bit.
+#[test]
+fn apply_fold_matches_pairs() {
+    let mut active = 0;
+    let mut max_err = 0.0_f64;
+    for rows in [
+        [[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]],
+        [[4., 0., 0.], [0., 5., 0.], [0., 0., 14.]],
+        [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],
+        [[7., 0., 0.], [0., 8., 0.], [0.3, 0., 18.]],
+    ] {
+        let (basis, h) = fixture(rows, 4, 1.2);
+        let n = basis.vectors().len();
+        for m in [1, 2, 3, 6, 7] {
+            let x = states(n, m, 9 + m);
+            let mut reference: Option<Vec<u64>> = None;
+            for threads in [1, 2, 4] {
+                let mut real =
+                    RealHamiltonian::from_complex(&h, &basis, m, WorkerPool::new(threads).unwrap())
+                        .unwrap();
+                real.set_apply_overlap(false);
+                let mut pair = RealMatrix::zeros(n, m).unwrap();
+                real.set_apply_fold(false).unwrap();
+                real.apply_block(&x, &mut pair).unwrap();
+                if !real.set_apply_fold(true).unwrap() {
+                    assert!(!h.fft_grid().dims()[2].is_multiple_of(2));
+                    continue;
+                }
+                active += 1;
+                let mut fold = RealMatrix::zeros(n, m).unwrap();
+                real.apply_block(&x, &mut fold).unwrap();
+                if m % 2 == 0 {
+                    assert_eq!(bits(&pair), bits(&fold));
+                } else {
+                    // Leading pairs are untouched; only the tail column moves.
+                    assert_eq!(bits(&pair)[..(m - 1) * n], bits(&fold)[..(m - 1) * n]);
+                    let tail = |a: &RealMatrix| a.as_slice()[(m - 1) * n..].to_vec();
+                    let (p, f) = (tail(&pair), tail(&fold));
+                    let norm = p.iter().map(|v| v * v).sum::<f64>().sqrt();
+                    let err = p
+                        .iter()
+                        .zip(&f)
+                        .map(|(a, b)| (a - b) * (a - b))
+                        .sum::<f64>()
+                        .sqrt()
+                        / norm;
+                    max_err = max_err.max(err);
+                    assert!(err < 1e-13, "m={m}: relative {err:e}");
+                }
+                let cx = complete(real.half_sphere(), &x);
+                let rhx = complete(real.half_sphere(), &fold);
+                let mut chx = ComplexMatrix::zeros(n, m).unwrap();
+                h.apply_block(&cx, &mut chx).unwrap();
+                assert!(relative(rhx.as_slice(), chx.as_slice()) < 1e-13);
+                real.set_apply_overlap(true);
+                let mut both = RealMatrix::zeros(n, m).unwrap();
+                real.apply_block(&x, &mut both).unwrap();
+                assert_eq!(bits(&fold), bits(&both));
+                match &reference {
+                    None => reference = Some(bits(&fold)),
+                    Some(r) => assert_eq!(r, &bits(&fold), "m={m} T={threads}"),
+                }
+            }
+        }
+    }
+    println!("fold active cases={active}, max tail relative={max_err:e}");
+    assert!(active > 0);
+}
 #[test]
 fn empty_nonlocal_and_invalid_blocks() {
     let cell = Cell::from_user_rows_bohr([[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]]).unwrap();
@@ -400,6 +539,61 @@ fn timing_blocks() {
             b.vectors().len(),
             h.fft_grid().dims()
         );
+    }
+}
+
+/// HAPPLY microbenchmark (Mac observation only; dev08 decides). Widths 1, 2,
+/// 16, 68 at T=1 and T=4; variants base / overlap / fold / fold+overlap in
+/// rotating order, 30 rounds, median microseconds per apply call. Fixture:
+/// cubic 16 Bohr, 32 atoms with 8 projectors each (s,s,p,p), Ec 15.6 Ha.
+/// cargo test --release -p dft-physics --test real_gamma_hamiltonian happly_widths -- --ignored --nocapture --test-threads=1
+#[test]
+#[ignore]
+fn happly_widths() {
+    use std::{hint::black_box, time::Instant};
+    let length = 16.;
+    let (b, h) = fixture_with(
+        [[length, 0., 0.], [0., length, 0.], [0., 0., length]],
+        32,
+        15.6,
+        &[0, 0, 1, 1],
+        &[0, 0, 1, 1],
+    );
+    let n = b.vectors().len();
+    println!("rows={n} grid={:?}", h.fft_grid().dims());
+    let names = ["base", "overlap", "fold", "fold+overlap"];
+    for threads in [1, 4] {
+        let mut r =
+            RealHamiltonian::from_complex(&h, &b, 68, WorkerPool::new(threads).unwrap()).unwrap();
+        println!("T={threads} projectors={}", r.projector_count());
+        for width in [1, 2, 16, 68] {
+            let x = states(n, width, 3);
+            let mut y = x.clone();
+            let mut samples = vec![Vec::new(); 4];
+            let rounds = if width >= 16 { 12 } else { 30 };
+            for round in 0..rounds {
+                for k in 0..4 {
+                    let v = (k + round) % 4;
+                    r.set_apply_overlap(v % 2 == 1);
+                    r.set_apply_fold(v >= 2).unwrap();
+                    r.apply_block(&x, &mut y).unwrap();
+                    let start = Instant::now();
+                    r.apply_block(black_box(&x), black_box(&mut y)).unwrap();
+                    samples[v].push(start.elapsed().as_secs_f64() * 1e6);
+                }
+            }
+            let median = |s: &mut Vec<f64>| {
+                s.sort_by(f64::total_cmp);
+                s[s.len() / 2]
+            };
+            let base = median(&mut samples[0]);
+            let mut line = format!("T={threads} width={width} base={base:.1}us");
+            for v in 1..4 {
+                let t = median(&mut samples[v]);
+                line += &format!(" {}={t:.1}us ({:.3})", names[v], t / base);
+            }
+            println!("{line}");
+        }
     }
 }
 

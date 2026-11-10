@@ -137,3 +137,10 @@ shapes test 1–20 atoms, mixed species, repeated s/p/d/f radial channels, off-d
 couplings and odd/even bands. The large test crosses the actual parallel GEMM
 threshold and compares every output bit at T=1,2,4,8. See
 `docs/performance/real-gamma-r3-timing.md` for observations and scope limits.
+
+Opt-in apply switches (2026-11-11, docs/performance/requests/h-apply.md):
+`BAANDI_HAPPLY_OVERLAP=on` (local and nonlocal image in one pool join,
+bit-identical) and `BAANDI_HAPPLY_FOLD=on` (odd tail column through the
+half-length folded transform of `dft_numerics::fused_fold`, rounding class);
+tests `apply_overlap_is_bit_identical`, `apply_fold_matches_pairs`, ignored
+microbenchmark `happly_widths`.

@@ -87,7 +87,7 @@ impl RealSolveState {
 /// nonlocal GEMM) instead of the complex projector sums over the full sphere.
 pub(crate) fn nl_energy_real() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("BAANDI_NL_ENERGY_REAL").as_deref() == Ok("on"))
+    *ON.get_or_init(|| std::env::var("BAANDI_NL_ENERGY_REAL").as_deref() != Ok("off"))
 }
 
 #[derive(PartialEq, Eq)]
@@ -212,7 +212,7 @@ fn ensure_state(
 /// ATOMIC-REAL (opt-in `BAANDI_ATOMIC_REAL=on`, default off; rounding class).
 pub(crate) fn atomic_real() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("BAANDI_ATOMIC_REAL").as_deref() == Ok("on"))
+    *ON.get_or_init(|| std::env::var("BAANDI_ATOMIC_REAL").as_deref() != Ok("off"))
 }
 
 /// ATOMIC-REAL: H Q for the atomic-start Ritz step through the real Gamma

@@ -1489,7 +1489,7 @@ impl Projection {
                 Ok("classic") => false,
                 _ => dft_numerics::MKL_BACKEND,
             },
-            wide: std::env::var("BAANDI_WIDE_DOT").as_deref() == Ok("on"),
+            wide: std::env::var("BAANDI_WIDE_DOT").as_deref() != Ok("off"),
             dgks: dgks_keep(),
             column: vec![0.; n],
         })

@@ -376,7 +376,7 @@ impl RealHamiltonian {
             local,
             nonlocal,
             capacity,
-            lean: std::env::var("BAANDI_APPLY_LEAN").as_deref() == Ok("on"),
+            lean: std::env::var("BAANDI_APPLY_LEAN").as_deref() != Ok("off"),
         })
     }
     /// Refresh only the local samples when immutable operator data match.

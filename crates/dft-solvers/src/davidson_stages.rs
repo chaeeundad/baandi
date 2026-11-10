@@ -88,7 +88,7 @@ impl ResearchOptions {
             },
             b5: std::env::var("BAANDI_B5").as_deref() == Ok("on"),
             stage_timers: std::env::var("BAANDI_DAVIDSON_STAGES").as_deref() == Ok("on"),
-            b6: std::env::var("BAANDI_B6").as_deref() == Ok("on"),
+            b6: std::env::var("BAANDI_B6").as_deref() != Ok("off"),
         }
     }
 }

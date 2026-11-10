@@ -337,8 +337,15 @@ fn thread_identity(full: bool) {
 
 #[test]
 fn default_options_are_the_default_path() {
-    // The environment switches are unset in the test process.
-    assert_eq!(ResearchOptions::from_env(), ResearchOptions::default());
+    // The environment switches are unset in the test process; B6 is on by default
+    // since the adoption rule (dev08 MICRO-ARM1), everything else is off.
+    assert_eq!(
+        ResearchOptions::from_env(),
+        ResearchOptions {
+            b6: true,
+            ..ResearchOptions::default()
+        }
+    );
     default_path(false);
 }
 #[test]

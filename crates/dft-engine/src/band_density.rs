@@ -13,7 +13,7 @@ use std::sync::{Arc, OnceLock};
 /// result does not depend on the thread count. Rounding class, not bit-identical.
 fn density_pair() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("BAANDI_DENSITY_PAIR").as_deref() == Ok("on"))
+    *ON.get_or_init(|| std::env::var("BAANDI_DENSITY_PAIR").as_deref() != Ok("off"))
 }
 /// DENSITY-REDUCE (opt-in `BAANDI_DENSITY_REDUCE=on`, default off): the band sum
 /// runs over fixed grid blocks (pool-parallel) with every point still summed in
@@ -21,7 +21,7 @@ fn density_pair() -> bool {
 /// grids) are neither cleared again nor added. Bit-identical to the default.
 fn density_reduce() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("BAANDI_DENSITY_REDUCE").as_deref() == Ok("on"))
+    *ON.get_or_init(|| std::env::var("BAANDI_DENSITY_REDUCE").as_deref() != Ok("off"))
 }
 /// Grid points per reduction block (fixed; independent of the thread budget).
 const REDUCE_BLOCK: usize = 4096;

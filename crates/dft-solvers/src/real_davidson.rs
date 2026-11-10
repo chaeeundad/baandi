@@ -1,4 +1,10 @@
 //! Isolated ORC Davidson; no complex-path dispatch or arithmetic is changed.
+use crate::bordered::MAX_STREAK;
+use crate::davidson_stages::{B1Count, B5Count, Stage, Timers, b1_add, b5_add};
+pub use crate::davidson_stages::{
+    B1Counters, B1Mode, B5Counters, ResearchOptions, SketchKind, StageSeconds, WIDTH_LABELS,
+    b1_counters, b5_counters, stage_seconds,
+};
 use crate::{BandTolerances, RealLinearOperator, SolverError};
 use dft_numerics::{
     linalg::{DEPENDENCE_TOLERANCE, LinalgError},
@@ -65,6 +71,12 @@ pub struct RealDavidsonWorkspace {
     selected: Vec<usize>,
     converged: Vec<bool>,
     previous: Vec<f64>,
+    /// Column of each root in the Ritz and residual blocks of the iteration.
+    column_of: Vec<usize>,
+    /// B1 scratch, allocated at the first B1-active solve only.
+    b1: Option<B1Scratch>,
+    /// B5 base decomposition and scratch, allocated at the first B5 solve.
+    b5: Option<crate::bordered::Bordered>,
 }
 impl RealDavidsonWorkspace {
     fn new(
@@ -94,6 +106,9 @@ impl RealDavidsonWorkspace {
             selected: Vec::with_capacity(bands),
             converged: vec![false; bands],
             previous: vec![f64::NAN; bands],
+            column_of: (0..bands).collect(),
+            b1: None,
+            b5: None,
             n,
             bands,
             capacity,
@@ -235,6 +250,50 @@ impl RealDavidson {
         workspace: &mut Option<RealDavidsonWorkspace>,
         preconditioner: crate::DavidsonPreconditioner,
     ) -> Result<RealEigenSolution, SolverError> {
+        self.solve_research(
+            op,
+            initial,
+            diagonal,
+            policy,
+            ritz,
+            certify,
+            capacity_per_band,
+            workspace,
+            preconditioner,
+            ResearchOptions::from_env(),
+        )
+    }
+
+    /// Research entry point with explicit switches (the other entry points read
+    /// them from the environment, see `davidson_stages`). With
+    /// `ResearchOptions::default()` this is the default path, bit for bit.
+    ///
+    /// B1 (selected-root products): in a narrow iteration only the roots that
+    /// can receive a correction get Ritz vectors, H images and residual vectors;
+    /// restart, return, the iteration limit and wide iterations (at least half
+    /// the bands) take the all-band path. Standard (Ritz-change) solves use the
+    /// exact Ritz-value flags. Strict (residual) solves flag a root converged for
+    /// one iteration when its sketch estimate ||S H V c - theta S V c|| is below
+    /// half its threshold; every other root gets an explicit residual. A return
+    /// is always decided on the all-band path with explicit residuals and the
+    /// unchanged certification. In narrow iterations `history` holds, for
+    /// standard solves, the largest residual of the corrected roots and, for
+    /// strict solves, the largest of the explicit residuals and the estimates.
+    /// B1 is inactive while `BAANDI_SECOND_VECTOR` is set.
+    #[allow(clippy::too_many_arguments)]
+    pub fn solve_research(
+        &self,
+        op: &dyn RealLinearOperator,
+        initial: Option<&RealMatrix>,
+        diagonal: &[f64],
+        policy: BandTolerances,
+        ritz: bool,
+        certify: bool,
+        capacity_per_band: usize,
+        workspace: &mut Option<RealDavidsonWorkspace>,
+        preconditioner: crate::DavidsonPreconditioner,
+        options: ResearchOptions,
+    ) -> Result<RealEigenSolution, SolverError> {
         if !(2..=12).contains(&capacity_per_band) {
             return Err(SolverError::InvalidParameter(
                 "davidson_capacity_per_band must be an integer from 2 to 12 (minimum 2 for a full correction block)",
@@ -301,8 +360,42 @@ impl RealDavidson {
             selected,
             converged,
             previous,
+            column_of,
+            b1: b1_scratch,
+            b5: b5_scratch,
             ..
         } = workspace.as_mut().unwrap();
+        let timers = Timers::new(options.stage_timers);
+        let second_vector = SecondVector::from_env();
+        let b1_active = options.b1.acts_on(ritz) && second_vector == SecondVector::Off;
+        let sketching = b1_active && !ritz;
+        if b1_active {
+            b1_add(B1Count::Solves, 1);
+            if b1_scratch
+                .as_ref()
+                .is_none_or(|s| !s.matches(self.seed, sketching, options.sketch))
+            {
+                *b1_scratch = Some(B1Scratch::new(
+                    n,
+                    self.bands,
+                    capacity,
+                    self.seed,
+                    sketching.then_some(options.sketch),
+                )?);
+            }
+        }
+        let mut b1 = if b1_active { b1_scratch.as_mut() } else { None };
+        if options.b5 && b5_scratch.is_none() {
+            *b5_scratch = Some(crate::bordered::Bordered::new(capacity));
+        }
+        let mut b5 = if options.b5 {
+            b5_scratch.as_mut()
+        } else {
+            None
+        };
+        if let Some(b) = b5.as_mut() {
+            b.invalidate();
+        }
         previous.fill(f64::NAN);
         selected.clear();
         let mut rng = Random(self.seed);
@@ -360,8 +453,12 @@ impl RealDavidson {
         let mut result_vectors = RealMatrix::zeros(n, self.bands)?;
         let mut result_residuals = vec![0.; self.bands];
         let mut result_converged = vec![false; self.bands];
-        apply_into(op, basis, &mut applications, &mut work, products)?;
-        let second_vector = SecondVector::from_env();
+        apply_into(op, basis, &mut applications, &mut work, products, timers)?;
+        if let Some(sk) = b1.as_mut().and_then(|b| b.sketch.as_mut()) {
+            let t = timers.start();
+            sk.refresh(gemm, basis, products)?;
+            timers.stop(t, Stage::Sketch);
+        }
         let mut previous_corrections = if second_vector == SecondVector::PreviousCorrection {
             vec![0.; n * self.bands]
         } else {
@@ -370,57 +467,198 @@ impl RealDavidson {
         let mut has_previous = vec![false; self.bands];
         let mut max_basis_dimension = 0;
         for iteration in 1..=self.max_iterations {
+            let iteration_clock = timers.start();
             max_basis_dimension = max_basis_dimension.max(basis.cols());
             let m = basis.cols();
+            let t = timers.start();
             reduced_matrix_into(basis, products, reduced_width, gemm, reduced)?;
+            timers.stop(t, Stage::Reduced);
+            let prefix = reduced_width;
             reduced_width = m;
             coefficients.reshape_within_storage(m, m)?;
-            eigensolver.solve_into(reduced, &mut values[..m], coefficients)?;
-            vectors.reshape_within_storage(n, self.bands)?;
-            rotated_products.reshape_within_storage(n, self.bands)?;
-            gemm.rotate_pair_slices(
-                basis.as_slice(),
-                products.as_slice(),
-                m,
-                &coefficients.as_slice()[..m * self.bands],
-                self.bands,
-                vectors.as_mut_slice(),
-                rotated_products.as_mut_slice(),
-            )?;
-            residual_into(
-                vectors,
-                rotated_products,
-                &values[..self.bands],
-                residual_block,
-                residuals,
-                &pool,
-            )?;
+            let t = timers.start();
+            // B5: one appended column on an unbroken base -> bordered update.
+            let bordered = match b5.as_mut() {
+                Some(b) if prefix + 1 == m && b.order == prefix && b.streak < MAX_STREAK => {
+                    let done = b.update(gemm, reduced, &mut values[..m], coefficients)?;
+                    if !done {
+                        b5_add(B5Count::Declined);
+                    }
+                    done
+                }
+                _ => false,
+            };
+            if !bordered {
+                eigensolver.solve_into(reduced, &mut values[..m], coefficients)?;
+            }
+            if let Some(b) = b5.as_mut() {
+                if bordered {
+                    b5_add(B5Count::Bordered);
+                    b.streak += 1;
+                } else {
+                    b5_add(B5Count::Full);
+                    b.streak = 0;
+                }
+                b.store(&values[..m], coefficients);
+            }
+            timers.stop(t, Stage::Eigen);
+            // B1: plan a narrow iteration (never at the iteration limit).
+            let mut narrow = false;
+            if let Some(b1) = b1.as_mut() {
+                if let Some(sk) = b1.sketch.as_mut() {
+                    let t = timers.start();
+                    sk.estimate(gemm, coefficients, m, &values[..self.bands], &mut b1.est)?;
+                    timers.stop(t, Stage::Sketch);
+                    b1_add(B1Count::Estimates, self.bands);
+                }
+                b1.set.clear();
+                if iteration < self.max_iterations {
+                    if ritz {
+                        if !(iteration == 1 && basis.cols() == n) {
+                            b1.set.extend(
+                                (0..self.bands)
+                                    .filter(|&j| {
+                                        !(iteration > 1
+                                            && (values[j] - previous[j]).abs() < threshold(j))
+                                    })
+                                    .take(self.bands.min(capacity - self.bands)),
+                            );
+                        }
+                    } else {
+                        let est = &b1.est;
+                        b1.set
+                            .extend((0..self.bands).filter(|&j| est[j] >= 0.5 * threshold(j)));
+                    }
+                    narrow = !b1.set.is_empty()
+                        && 2 * b1.set.len() < self.bands
+                        && basis.cols() + b1.set.len() <= capacity;
+                }
+                if narrow {
+                    let k = b1.set.len();
+                    for (slot, &j) in b1.set.iter().enumerate() {
+                        b1.coeff[slot * m..(slot + 1) * m]
+                            .copy_from_slice(&coefficients.as_slice()[j * m..(j + 1) * m]);
+                        b1.set_values[slot] = values[j];
+                        column_of[j] = slot;
+                    }
+                    vectors.reshape_within_storage(n, k)?;
+                    rotated_products.reshape_within_storage(n, k)?;
+                    let t = timers.start();
+                    gemm.rotate_pair_slices(
+                        basis.as_slice(),
+                        products.as_slice(),
+                        m,
+                        &b1.coeff[..m * k],
+                        k,
+                        vectors.as_mut_slice(),
+                        rotated_products.as_mut_slice(),
+                    )?;
+                    timers.stop(t, Stage::Rotate);
+                    residual_block.reshape_within_storage(n, k)?;
+                    let t = timers.start();
+                    residual_into(
+                        vectors,
+                        rotated_products,
+                        &b1.set_values[..k],
+                        residual_block,
+                        &mut b1.set_norms[..k],
+                        &pool,
+                    )?;
+                    timers.stop(t, Stage::Residual);
+                    if !ritz {
+                        residuals.copy_from_slice(&b1.est);
+                    }
+                    for (slot, &j) in b1.set.iter().enumerate() {
+                        residuals[j] = b1.set_norms[slot];
+                    }
+                    // Strict: if every explicit residual passes, all roots are
+                    // flagged converged; a return is decided on the full path.
+                    if !ritz && b1.set.iter().all(|&j| residuals[j] <= threshold(j)) {
+                        narrow = false;
+                        b1_add(B1Count::Fallbacks, 1);
+                    }
+                }
+                if narrow {
+                    b1_add(B1Count::Narrow, 1);
+                    b1_add(B1Count::NarrowColumns, b1.set.len());
+                    b1_add(B1Count::Avoided, self.bands - b1.set.len());
+                } else {
+                    b1_add(B1Count::Full, 1);
+                }
+            }
             let mut certified = false;
             let mut trusted = true;
-            if !ritz
-                && (certify || iteration == self.max_iterations)
-                && (meets_policy(residuals)
-                    || (iteration == self.max_iterations && meets_strict(residuals)))
-            {
-                certificates += 1;
-                apply_into(op, vectors, &mut applications, &mut work, actual)?;
+            if !narrow {
+                for (j, c) in column_of.iter_mut().enumerate() {
+                    *c = j;
+                }
+                vectors.reshape_within_storage(n, self.bands)?;
+                rotated_products.reshape_within_storage(n, self.bands)?;
+                let t = timers.start();
+                gemm.rotate_pair_slices(
+                    basis.as_slice(),
+                    products.as_slice(),
+                    m,
+                    &coefficients.as_slice()[..m * self.bands],
+                    self.bands,
+                    vectors.as_mut_slice(),
+                    rotated_products.as_mut_slice(),
+                )?;
+                timers.stop(t, Stage::Rotate);
+                residual_block.reshape_within_storage(n, self.bands)?;
+                let t = timers.start();
                 residual_into(
                     vectors,
-                    actual,
+                    rotated_products,
                     &values[..self.bands],
                     residual_block,
                     residuals,
                     &pool,
                 )?;
-                certified = true;
-                trusted = meets_policy(residuals);
+                timers.stop(t, Stage::Residual);
+                if sketching && let Some(b1) = b1.as_ref() {
+                    let missed = (0..self.bands)
+                        .filter(|&j| b1.est[j] < 0.5 * threshold(j) && residuals[j] > threshold(j))
+                        .count();
+                    b1_add(B1Count::Disagreements, missed);
+                }
+                if !ritz
+                    && (certify || iteration == self.max_iterations)
+                    && (meets_policy(residuals)
+                        || (iteration == self.max_iterations && meets_strict(residuals)))
+                {
+                    certificates += 1;
+                    apply_into(op, vectors, &mut applications, &mut work, actual, timers)?;
+                    let t = timers.start();
+                    residual_into(
+                        vectors,
+                        actual,
+                        &values[..self.bands],
+                        residual_block,
+                        residuals,
+                        &pool,
+                    )?;
+                    timers.stop(t, Stage::Residual);
+                    certified = true;
+                    trusted = meets_policy(residuals);
+                }
             }
-            let maximum = residuals.iter().copied().fold(0., f64::max);
+            let maximum = match b1.as_ref() {
+                Some(b1) if narrow && ritz => {
+                    b1.set.iter().map(|&j| residuals[j]).fold(0., f64::max)
+                }
+                _ => residuals.iter().copied().fold(0., f64::max),
+            };
             history.push(maximum);
             work.residuals(iteration, residuals);
             for (j, flag) in converged.iter_mut().enumerate() {
                 *flag = if ritz {
                     iteration > 1 && (values[j] - previous[j]).abs() < threshold(j)
+                } else if narrow {
+                    // Not in the explicit set: the sketch estimate is below
+                    // half the threshold.
+                    b1.as_ref().is_some_and(|b| b.est[j] < 0.5 * threshold(j))
+                        || residuals[j] <= threshold(j)
                 } else {
                     residuals[j] <= threshold(j)
                 };
@@ -429,7 +667,13 @@ impl RealDavidson {
             let finished = converged.iter().all(|&b| b)
                 || (iteration == self.max_iterations
                     && converged[..policy.strict_bands].iter().all(|&b| b));
+            if narrow && finished {
+                return Err(SolverError::Application(
+                    "B1 internal error: narrow iteration reached a return".into(),
+                ));
+            }
             if finished {
+                timers.iteration(iteration_clock, 0);
                 work.returned();
                 result_values.copy_from_slice(&values[..self.bands]);
                 result_vectors
@@ -454,6 +698,7 @@ impl RealDavidson {
                 });
             }
             if iteration == self.max_iterations {
+                timers.iteration(iteration_clock, 0);
                 result_residuals.copy_from_slice(residuals);
                 return Err(SolverError::NotConverged {
                     iterations: iteration,
@@ -462,6 +707,7 @@ impl RealDavidson {
                 });
             }
             if ritz && iteration == 1 && basis.cols() == n {
+                timers.iteration(iteration_clock, 0);
                 continue;
             }
             selected.clear();
@@ -471,28 +717,33 @@ impl RealDavidson {
                     .take(self.bands.min(capacity - self.bands)),
             );
             corrections.reshape_within_storage(n, selected.len())?;
+            let t = timers.start();
+            let column_slots: &[usize] = &column_of[..];
             pool.install(|| {
                 column_work(corrections.as_mut_slice(), n, 0, &|k, dst| {
                     let j = selected[k];
+                    // Column of root j in the Ritz and residual blocks (j on the
+                    // all-band path, its slot in a B1 narrow iteration).
+                    let c = column_slots[j];
                     // The default damping keeps the original tight loop; research
                     // variants take their own loops (no per-element dispatch).
                     match preconditioner {
                         crate::DavidsonPreconditioner::Default => {
                             for ((dst, &r), &d) in
-                                dst.iter_mut().zip(column(residual_block, j)).zip(diagonal)
+                                dst.iter_mut().zip(column(residual_block, c)).zip(diagonal)
                             {
                                 *dst = precondition(r, d, values[j])?;
                             }
                         }
                         crate::DavidsonPreconditioner::Tpa => {
                             let scale = crate::kinetic_scale(
-                                column(vectors, j)
+                                column(vectors, c)
                                     .iter()
                                     .zip(diagonal)
                                     .map(|(&c, &t)| (c * c, t)),
                             )?;
                             for ((dst, &r), &d) in
-                                dst.iter_mut().zip(column(residual_block, j)).zip(diagonal)
+                                dst.iter_mut().zip(column(residual_block, c)).zip(diagonal)
                             {
                                 *dst = -r * crate::tpa_weight(d, scale);
                                 finite(&[*dst])?;
@@ -500,7 +751,7 @@ impl RealDavidson {
                         }
                         crate::DavidsonPreconditioner::RitzShift => {
                             for ((dst, &r), &d) in
-                                dst.iter_mut().zip(column(residual_block, j)).zip(diagonal)
+                                dst.iter_mut().zip(column(residual_block, c)).zip(diagonal)
                             {
                                 let delta = d - values[j];
                                 finite(&[delta])?;
@@ -512,6 +763,7 @@ impl RealDavidson {
                     Ok(())
                 })
             })?;
+            timers.stop(t, Stage::Precondition);
             if second_vector != SecondVector::Off {
                 add_second_vector(
                     second_vector,
@@ -532,6 +784,11 @@ impl RealDavidson {
                 )?;
             }
             if !trusted || basis.cols() + corrections.cols() > capacity {
+                if narrow {
+                    return Err(SolverError::Application(
+                        "B1 internal error: narrow iteration reached a restart".into(),
+                    ));
+                }
                 restarts += 1;
                 work.restart();
                 reduced_width = 0;
@@ -539,11 +796,23 @@ impl RealDavidson {
                     contractions += 1;
                     std::mem::swap(basis, vectors);
                     std::mem::swap(products, rotated_products);
+                    if let Some(sk) = b1.as_mut().and_then(|b| b.sketch.as_mut()) {
+                        // Same rotation as the basis: A <- A C, B <- B C.
+                        sk.contract(self.bands);
+                    }
                 } else {
+                    let t = timers.start();
                     projection.run_into(vectors, None, gemm, basis)?;
-                    apply_into(op, basis, &mut applications, &mut work, products)?;
+                    timers.stop(t, Stage::Orthonormalize);
+                    apply_into(op, basis, &mut applications, &mut work, products, timers)?;
+                    if let Some(sk) = b1.as_mut().and_then(|b| b.sketch.as_mut()) {
+                        let t = timers.start();
+                        sk.refresh(gemm, basis, products)?;
+                        timers.stop(t, Stage::Sketch);
+                    }
                 }
             }
+            let t = timers.start();
             projection.run_into(corrections, Some(basis), gemm, extra)?;
             if extra.cols() == 0 {
                 random.reshape_within_storage(n, self.bands.min(capacity - basis.cols()))?;
@@ -552,7 +821,9 @@ impl RealDavidson {
                 }
                 projection.run_into(random, Some(basis), gemm, extra)?;
             }
+            timers.stop(t, Stage::Orthonormalize);
             if extra.cols() == 0 {
+                timers.iteration(iteration_clock, 0);
                 result_residuals.copy_from_slice(residuals);
                 return Err(SolverError::NotConverged {
                     iterations: iteration,
@@ -560,9 +831,22 @@ impl RealDavidson {
                     residuals: result_residuals,
                 });
             }
-            apply_into(op, extra, &mut applications, &mut work, extra_products)?;
+            apply_into(
+                op,
+                extra,
+                &mut applications,
+                &mut work,
+                extra_products,
+                timers,
+            )?;
+            if let Some(sk) = b1.as_mut().and_then(|b| b.sketch.as_mut()) {
+                let t = timers.start();
+                sk.append(gemm, basis.cols(), extra, extra_products)?;
+                timers.stop(t, Stage::Sketch);
+            }
             append_into(products, extra_products)?;
             append_into(basis, extra)?;
+            timers.iteration(iteration_clock, corrections.cols());
         }
         unreachable!("validated positive iteration limit")
     }
@@ -767,7 +1051,9 @@ fn apply_into(
     count: &mut usize,
     work: &mut crate::work_accounting::Trace,
     y: &mut RealMatrix,
+    timers: Timers,
 ) -> Result<(), SolverError> {
+    let clock = timers.start();
     work.apply(x.cols(), None);
     for pair in (0..x.cols()).step_by(2) {
         let a = norm(column(x, pair));
@@ -788,6 +1074,7 @@ fn apply_into(
     }
     finite(y.as_slice())?;
     *count += x.cols();
+    timers.stop(clock, Stage::HApply);
     Ok(())
 }
 fn append_into(a: &mut RealMatrix, b: &RealMatrix) -> Result<(), LinalgError> {
@@ -1190,6 +1477,242 @@ impl Projection {
         self.output.reshape_within_storage(n, cap)?;
         Ok(())
     }
+}
+/// Rows of the B1 strict sketch (capped by the subspace capacity, because the
+/// shared GEMM workspace bounds the short dimension). Relative estimate error is
+/// about 1/sqrt(2 s): 6 percent at s = 128.
+const SKETCH_ROWS: usize = 128;
+/// Stream offset of the sketch generator, so the solver's own random fallback
+/// sequence is unchanged by B1.
+const SKETCH_STREAM: u64 = 0x5b1c_e7c4_2f6a_9d01;
+
+/// Scratch of B1 (selected-root products); allocated once per workspace.
+struct B1Scratch {
+    seed: u64,
+    /// Strict-profile sketch; absent for Ritz-change solves.
+    sketch: Option<Sketch>,
+    /// Sketch estimates per root (strict), in Ha.
+    est: Vec<f64>,
+    /// Gathered Ritz coefficients of the narrow set, m x k.
+    coeff: Vec<f64>,
+    /// Roots formed explicitly in a narrow iteration, ascending.
+    set: Vec<usize>,
+    set_values: Vec<f64>,
+    set_norms: Vec<f64>,
+}
+impl B1Scratch {
+    fn new(
+        n: usize,
+        bands: usize,
+        capacity: usize,
+        seed: u64,
+        sketch: Option<SketchKind>,
+    ) -> Result<Self, SolverError> {
+        Ok(Self {
+            seed,
+            sketch: match sketch {
+                Some(kind) => Some(Sketch::new(n, bands, capacity, seed, kind)?),
+                None => None,
+            },
+            est: vec![0.; bands],
+            coeff: vec![0.; capacity * bands],
+            set: Vec::with_capacity(bands),
+            set_values: vec![0.; bands],
+            set_norms: vec![0.; bands],
+        })
+    }
+    fn matches(&self, seed: u64, sketching: bool, kind: SketchKind) -> bool {
+        self.seed == seed
+            && match &self.sketch {
+                Some(s) => sketching && s.kind() == kind,
+                None => !sketching,
+            }
+    }
+}
+
+/// Fixed-seed sign sketch S (s x N) with the running products A = S V and
+/// B = S (H V), one column per basis column. Dense form (proposal): entries
+/// +-1/sqrt(s), stored transposed as N x s, s N multiply-adds per column. Count
+/// form (CountSketch): one +-1 entry per coordinate in a seeded bucket, N adds
+/// per column; same expectation and the same variance bound 2 ||x||^4 / s of
+/// ||S x||^2. All products use fixed-order loops or the fixed-order kernels of
+/// the shared GEMM workspace, so estimates do not depend on the thread budget.
+struct Sketch {
+    rows: usize,
+    /// Requested form (the identity is used for small spaces of either kind).
+    kind: SketchKind,
+    form: SketchForm,
+    /// S V and S H V, s x capacity (live width = basis width).
+    a: RealMatrix,
+    b: RealMatrix,
+    /// S V C and S H V C for the first `bands` Ritz coefficients, s x bands.
+    ac: RealMatrix,
+    bc: RealMatrix,
+}
+impl Sketch {
+    fn new(
+        n: usize,
+        bands: usize,
+        capacity: usize,
+        seed: u64,
+        kind: SketchKind,
+    ) -> Result<Self, SolverError> {
+        // The dense form is bounded by the GEMM workspace's short dimension;
+        // the count form is not. When the space is no larger than the sketch,
+        // S is the identity (exact residual norms; no sketch error at all).
+        let rows = match kind {
+            SketchKind::Dense => SKETCH_ROWS.min(capacity),
+            SketchKind::Count => SKETCH_ROWS.min(n),
+        };
+        let mut rng = Random(seed ^ SKETCH_STREAM);
+        let form = match kind {
+            _ if n <= rows => SketchForm::Count {
+                bucket: (0..n).collect(),
+                sign: vec![1.; n],
+            },
+            SketchKind::Dense => {
+                let scale = 1. / (rows as f64).sqrt();
+                let mut transposed = RealMatrix::zeros(n, rows)?;
+                for v in transposed.as_mut_slice() {
+                    *v = if rng.next() < 0. { -scale } else { scale };
+                }
+                SketchForm::Dense(transposed)
+            }
+            SketchKind::Count => {
+                let mut bucket = Vec::with_capacity(n);
+                let mut sign = Vec::with_capacity(n);
+                for _ in 0..n {
+                    // next() is uniform in [-0.5, 0.5).
+                    let b = ((rng.next() + 0.5) * rows as f64) as usize;
+                    bucket.push(b.min(rows - 1));
+                    sign.push(if rng.next() < 0. { -1. } else { 1. });
+                }
+                SketchForm::Count { bucket, sign }
+            }
+        };
+        Ok(Self {
+            rows,
+            kind,
+            form,
+            a: RealMatrix::zeros(rows, capacity)?,
+            b: RealMatrix::zeros(rows, capacity)?,
+            ac: RealMatrix::zeros(rows, bands)?,
+            bc: RealMatrix::zeros(rows, bands)?,
+        })
+    }
+    fn kind(&self) -> SketchKind {
+        self.kind
+    }
+    /// out[:, first..first + k] = S X for the k columns of `x`.
+    fn project(
+        form: &SketchForm,
+        gemm: &mut RealGemmWorkspace,
+        x: &RealMatrix,
+        out: &mut RealMatrix,
+        first: usize,
+    ) -> Result<(), LinalgError> {
+        if x.cols() == 0 {
+            return Ok(());
+        }
+        let transposed = match form {
+            SketchForm::Dense(t) => t,
+            SketchForm::Count { bucket, sign } => {
+                let (n, rows) = (x.rows(), out.rows());
+                for c in 0..x.cols() {
+                    let dst = &mut out.as_mut_slice()[(first + c) * rows..(first + c + 1) * rows];
+                    dst.fill(0.);
+                    for ((&v, &b), &s) in column(x, c)[..n].iter().zip(bucket).zip(sign) {
+                        dst[b] += s * v;
+                    }
+                }
+                return finite(&out.as_slice()[first * rows..(first + x.cols()) * rows]);
+            }
+        };
+        let (n, rows) = (transposed.rows(), transposed.cols());
+        gemm.multiply_slices_into(
+            dft_numerics::GemmSite::Other,
+            transposed.as_slice(),
+            n,
+            rows,
+            n,
+            RealOp::Transpose,
+            x.as_slice(),
+            x.cols(),
+            n,
+            out.as_mut().submatrix_mut(0, first, rows, x.cols()),
+        )
+    }
+    /// Recompute A and B for the whole basis (start and non-contracting restart).
+    fn refresh(
+        &mut self,
+        gemm: &mut RealGemmWorkspace,
+        basis: &RealMatrix,
+        products: &RealMatrix,
+    ) -> Result<(), LinalgError> {
+        Self::project(&self.form, gemm, basis, &mut self.a, 0)?;
+        Self::project(&self.form, gemm, products, &mut self.b, 0)
+    }
+    /// Append the sketches of new basis columns starting at column `first`.
+    fn append(
+        &mut self,
+        gemm: &mut RealGemmWorkspace,
+        first: usize,
+        extra: &RealMatrix,
+        extra_products: &RealMatrix,
+    ) -> Result<(), LinalgError> {
+        Self::project(&self.form, gemm, extra, &mut self.a, first)?;
+        Self::project(&self.form, gemm, extra_products, &mut self.b, first)
+    }
+    /// Contraction restart: the basis becomes V C[:, :bands], so A and B become
+    /// the products formed by the last `estimate`.
+    fn contract(&mut self, bands: usize) {
+        let len = self.rows * bands;
+        self.a.as_mut_slice()[..len].copy_from_slice(&self.ac.as_slice()[..len]);
+        self.b.as_mut_slice()[..len].copy_from_slice(&self.bc.as_slice()[..len]);
+    }
+    /// est_j = || B c_j - theta_j A c_j || for the first `bands` Ritz pairs.
+    fn estimate(
+        &mut self,
+        gemm: &mut RealGemmWorkspace,
+        coefficients: &RealMatrix,
+        m: usize,
+        values: &[f64],
+        est: &mut [f64],
+    ) -> Result<(), LinalgError> {
+        let rows = self.rows;
+        let bands = values.len();
+        for (side, out) in [(&self.a, &mut self.ac), (&self.b, &mut self.bc)] {
+            gemm.multiply_slices_into(
+                dft_numerics::GemmSite::Other,
+                side.as_slice(),
+                rows,
+                m,
+                rows,
+                RealOp::Identity,
+                coefficients.as_slice(),
+                bands,
+                m,
+                out.as_mut(),
+            )?;
+        }
+        for (j, (e, &theta)) in est.iter_mut().zip(values).enumerate() {
+            let a = &self.ac.as_slice()[j * rows..(j + 1) * rows];
+            let b = &self.bc.as_slice()[j * rows..(j + 1) * rows];
+            let mut sums = [0.; 4];
+            for (i, (&b, &a)) in b.iter().zip(a).enumerate() {
+                let r = b - theta * a;
+                sums[i % 4] += r * r;
+            }
+            *e = ((sums[0] + sums[1]) + (sums[2] + sums[3])).sqrt();
+        }
+        finite(est)
+    }
+}
+enum SketchForm {
+    /// S^T, N x s.
+    Dense(RealMatrix),
+    /// Bucket and sign of every coordinate.
+    Count { bucket: Vec<usize>, sign: Vec<f64> },
 }
 struct Random(u64);
 impl Random {

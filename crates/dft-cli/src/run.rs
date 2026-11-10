@@ -601,6 +601,9 @@ pub fn execute_mode(
                 "certificate_davidson_iterations":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.davidson_iterations).sum::<usize>(),
                 "certificate_solves":r.history.iter().filter(|h|h.fixed_point_certificate.is_some()).count(),
                 "second_vector_columns":dft_engine::second_vector_columns(),
+                "davidson_stages":davidson_stages_json(),
+                "b1":b1_json(),
+                "b5":{"mode":std::env::var("BAANDI_B5").unwrap_or_else(|_| "off".into()),"bordered":dft_engine::b5_counters().bordered,"declined":dft_engine::b5_counters().declined,"full":dft_engine::b5_counters().full},
                 "h_vectors_recorded":r.history.iter().map(|h|h.operator_applications).sum::<usize>(),
                 "certificate_h_vectors":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.operator_applications).sum::<usize>(),
                 "note":"recorded = per-iteration solves in history; certificate = fixed-point certificate re-solves, reported only inside each history entry's fixed_point_certificate; total work is the sum"}},"energies":energies,
@@ -1046,6 +1049,32 @@ fn stress_table(s: &dft_engine::stress::StressResult) -> String {
         }
     }
     text
+}
+
+/// Real-Davidson stage timers (`BAANDI_DAVIDSON_STAGES=on`; zeros otherwise),
+/// cumulative over the process, seconds.
+fn davidson_stages_json() -> serde_json::Value {
+    let s = dft_engine::stage_seconds();
+    let labels = dft_engine::DAVIDSON_WIDTH_LABELS;
+    json!({
+        "timed_solves":s.timed_solves,
+        "iteration_s_by_correction_width":labels.iter().zip(s.width_seconds).map(|(l,v)|(l.to_string(),json!(v))).collect::<serde_json::Map<_,_>>(),
+        "iterations_by_correction_width":labels.iter().zip(s.width_iterations).map(|(l,v)|(l.to_string(),json!(v))).collect::<serde_json::Map<_,_>>(),
+        "stage_s":{"reduced":s.reduced,"eigen":s.eigen,"rotate":s.rotate,"residual":s.residual,"orthonormalize":s.orthonormalize,"h_apply":s.h_apply,"sketch":s.sketch,"precondition":s.precondition},
+        "note":"BAANDI_DAVIDSON_STAGES=on; serial real Davidson only; width 0 = returning iteration; h_apply includes certificate and restart applications"
+    })
+}
+
+/// B1 selected-root counters (`BAANDI_B1`; zeros when off), cumulative.
+fn b1_json() -> serde_json::Value {
+    let c = dft_engine::b1_counters();
+    json!({
+        "mode":std::env::var("BAANDI_B1").unwrap_or_else(|_| "off".into()),
+        "sketch":std::env::var("BAANDI_B1_SKETCH").unwrap_or_else(|_| "dense".into()),
+        "solves":c.solves,"narrow_iterations":c.narrow_iterations,"full_iterations":c.full_iterations,
+        "narrow_columns":c.narrow_columns,"avoided_columns":c.avoided_columns,"fallbacks":c.fallbacks,
+        "sketch_estimates":c.sketch_estimates,"sketch_disagreements":c.sketch_disagreements
+    })
 }
 
 #[cfg(test)]

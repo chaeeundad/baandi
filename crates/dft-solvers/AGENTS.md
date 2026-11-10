@@ -30,3 +30,13 @@ Fast fixed-operator tests: `cargo test -p dft-solvers --test real_davidson`.
 Parallel dispatch and timing observation (ignored in debug):
 `cargo test --release -p dft-solvers --test real_davidson -- --include-ignored --nocapture --test-threads=1`.
 Evidence and limitations: `docs/performance/real-gamma-r4-notes.md`.
+
+## Research switches of the real Davidson (2026-11-10)
+
+`RealDavidson::solve_research` takes `ResearchOptions` explicitly; every other
+entry point reads them from the environment (`davidson_stages.rs`): stage timers
+`BAANDI_DAVIDSON_STAGES=on`, B1 selected-root products `BAANDI_B1=standard|strict|on`
+with `BAANDI_B1_SKETCH=count`, B5 bordered eigen-update `BAANDI_B5=on` (`bordered.rs`).
+All default off and bit-identical when off. Tests: `tests/b1_selected_roots.rs`,
+`tests/b5_reduced_eigen.rs`; B4 harness `tests/b4_inner_iterations.rs` (ignored).
+Plan and pre-registered rules: docs/performance/requests/b1-b4-b5-davidson.md.

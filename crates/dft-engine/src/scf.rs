@@ -1271,19 +1271,176 @@ impl ScfProblem {
         n: &Array3<f64>,
     ) -> Result<(hartree::HartreeGrid, xc::XcGrid, Array3<f64>), ScfError> {
         let h = hartree::evaluate(n, &self.cell, &mut self.fft)?;
-        let x = self.options.evaluate_xc(
-            n,
-            self.core_density.as_ref(),
-            &mut self.xc_density,
-            &self.cell,
-            &mut self.fft,
-            self.density_floor,
-        )?;
+        // M2d: pointwise LDA XC split over ranks (bit-identical potential).
+        let m2_xc = crate::m2::active().and_then(|comm| {
+            crate::m2::xc(
+                &comm,
+                &self.options,
+                n,
+                self.core_density.as_ref(),
+                self.density_floor,
+                self.cell.volume_bohr3(),
+            )
+        });
+        let x = match m2_xc {
+            Some(x) => x?,
+            None => self.options.evaluate_xc(
+                n,
+                self.core_density.as_ref(),
+                &mut self.xc_density,
+                &self.cell,
+                &mut self.fft,
+                self.density_floor,
+            )?,
+        };
         let mut effective = self.ionic_real.clone();
         for ((v, h), x) in effective.iter_mut().zip(&h.potential).zip(&x.potential) {
             *v += h.re + x;
         }
         Ok((h, x, effective))
+    }
+
+    /// M2d: occupation-weighted output density of the latest solve from the
+    /// distributed ORC eigenvectors (stick FFT on each rank's planes, planes
+    /// assembled with one allgatherv). None when the M2 path is not active for this
+    /// map (then the replicated `BandDensity` runs). Every rank takes the same
+    /// branch: the conditions are replicated data.
+    fn m2_density(
+        &mut self,
+        k_points: &[KPointSolution],
+        integer_occupations: bool,
+    ) -> Result<Option<Array3<f64>>, ScfError> {
+        for state in &mut self.states {
+            if let Some(d) = state
+                .real_solve
+                .as_mut()
+                .and_then(|r| r.m2_density.as_mut())
+            {
+                d.valid = false;
+            }
+        }
+        let Some(comm) = crate::m2::active() else {
+            return Ok(None);
+        };
+        if !integer_occupations || self.states.len() != 1 || k_points.len() != 1 {
+            return Ok(None);
+        }
+        let start = Instant::now();
+        let dims = self.grid.dims();
+        let volume = self.cell.volume_bohr3();
+        let occupations = &self.occupations;
+        let state = &mut self.states[0];
+        let weight = state.point.weight;
+        let grid_dims = state.grid.dims();
+        let Some(rs) = state.real_solve.as_mut() else {
+            return Ok(None);
+        };
+        let (Some(dist), Some(x)) = (rs.dist.as_mut(), rs.m2_local.as_ref()) else {
+            return Ok(None);
+        };
+        let bands = x.cols();
+        if dist.grid_shape() != dims
+            || grid_dims != dims
+            || bands != occupations.len()
+            || k_points[0].solution.eigenvectors.cols() != bands
+        {
+            return Ok(None);
+        }
+        let err = |e: dft_physics::distributed_real_gamma::DistributedRealError| {
+            ScfError::Numerical(format!("M2 density: {e}"))
+        };
+        // Occupied prefix: later bands contribute exactly zero.
+        let m = occupations
+            .iter()
+            .rposition(|&f| f != 0.0)
+            .map_or(0, |i| i + 1);
+        let n_loc = x.rows();
+        let mut xm =
+            dft_numerics::RealMatrix::zeros(n_loc, m).map_err(dft_solvers::SolverError::from)?;
+        xm.as_mut_slice()
+            .copy_from_slice(&x.as_slice()[..n_loc * m]);
+        let md = rs
+            .m2_density
+            .get_or_insert_with(|| crate::m2::M2Density::new(dist.plane_grid_offsets()));
+        let points = md.points;
+        md.bands = bands;
+        md.contributions.clear();
+        md.contributions.resize(bands * points, 0.);
+        dist.band_densities(
+            &comm,
+            &xm,
+            &occupations[..m],
+            volume,
+            &mut md.contributions[..m * points],
+        )
+        .map_err(err)?;
+        // Ascending band order on the planes, as the replicated fold.
+        let mut local = vec![0.0; points];
+        for b in 0..m {
+            for (l, c) in local
+                .iter_mut()
+                .zip(&md.contributions[b * points..(b + 1) * points])
+            {
+                *l += c;
+            }
+        }
+        let mut full = Array3::zeros(dims);
+        dist.gather_planes(&comm, &local, full.as_slice_mut().unwrap())
+            .map_err(err)?;
+        if full.iter().any(|n: &f64| !n.is_finite()) {
+            return Err(ScfError::NonFinite);
+        }
+        let mut output = Array3::zeros(dims);
+        for (out, n) in output.iter_mut().zip(&full) {
+            *out += weight * n;
+        }
+        md.valid = true;
+        crate::m2::add(crate::m2::Stage::Density, start);
+        crate::m2::count(crate::m2::Count::Density);
+        Ok(Some(output))
+    }
+
+    /// M2d: occupation-weighted nonlocal energy sum_b f_b x_b^T P D P^T x_b of the
+    /// latest M2 solve (one tree_sum); None when no M2 eigenvectors are held.
+    fn m2_nonlocal_energy(&mut self) -> Result<Option<f64>, ScfError> {
+        let Some(comm) = crate::m2::active() else {
+            return Ok(None);
+        };
+        if self.states.len() != 1 {
+            return Ok(None);
+        }
+        let start = Instant::now();
+        let occupations = &self.occupations;
+        let Some(rs) = self.states[0].real_solve.as_mut() else {
+            return Ok(None);
+        };
+        let (Some(dist), Some(x)) = (rs.dist.as_mut(), rs.m2_local.as_ref()) else {
+            return Ok(None);
+        };
+        if x.cols() != occupations.len() {
+            return Ok(None);
+        }
+        let m = occupations
+            .iter()
+            .rposition(|&f| f != 0.0)
+            .map_or(0, |i| i + 1);
+        let n_loc = x.rows();
+        let mut xm =
+            dft_numerics::RealMatrix::zeros(n_loc, m).map_err(dft_solvers::SolverError::from)?;
+        xm.as_mut_slice()
+            .copy_from_slice(&x.as_slice()[..n_loc * m]);
+        let mut values = vec![0.0; m];
+        dist.nonlocal_band_energies(&comm, &xm, &mut values)
+            .map_err(|e| ScfError::Numerical(format!("M2 nonlocal energy: {e}")))?;
+        let mut sum = 0.0;
+        for (v, f) in values.iter().zip(occupations) {
+            if *f != 0.0 {
+                sum += f * v;
+            }
+        }
+        crate::m2::add(crate::m2::Stage::NonlocalEnergy, start);
+        crate::m2::count(crate::m2::Count::NonlocalEnergy);
+        Ok(Some(sum))
     }
 
     /// Explicit k-weighted nonlocal energy of a map's orbitals with the audit's
@@ -1370,7 +1527,7 @@ impl ScfProblem {
         let mut integrals = vec![0.0; bands];
         let mut psi: Vec<Array3<Complex64>> = Vec::new();
         let mut entries: Vec<(usize, usize, Complex64)> = Vec::new();
-        for (state, k) in self.states.iter().zip(k_points) {
+        for (state, k) in self.states.iter_mut().zip(k_points) {
             let current = state.hamiltonian.local_potential_values();
             let eigenvalues = &k.solution.eigenvalues;
             if current.len() != points || eigenvalues.len() != bands {
@@ -1379,9 +1536,19 @@ impl ScfProblem {
             for ((d, t), c) in delta.iter_mut().zip(target).zip(current) {
                 *d = t - c;
             }
-            state
-                .band_density
-                .weighted_integrals(&delta, &mut integrals);
+            match (
+                crate::m2::active(),
+                state
+                    .real_solve
+                    .as_mut()
+                    .and_then(|r| r.m2_density.as_mut())
+                    .filter(|d| d.valid),
+            ) {
+                (Some(comm), Some(d)) => d.weighted_integrals(&comm, &delta, &mut integrals)?,
+                _ => state
+                    .band_density
+                    .weighted_integrals(&delta, &mut integrals),
+            }
             let mut start = 0;
             while start < bands {
                 let mut end = start + 1;
@@ -1760,6 +1927,9 @@ impl ScfProblem {
             w.evaluate(self.electrons)?;
         }
         let start = Instant::now();
+        // M2d: distributed density on the M2 path (None: replicated band density).
+        let m2_output = self.m2_density(&k_points, finite.is_none())?;
+        let m2 = m2_output.is_some();
         let occupations = &self.occupations;
         let finite = finite.as_deref();
         let volume = self.cell.volume_bohr3();
@@ -1772,29 +1942,48 @@ impl ScfProblem {
                 let orbitals: Vec<_> = (0..vectors.cols())
                     .map(|b| vectors.column(b).to_vec())
                     .collect();
-                state.band_density.compute(
-                    &orbitals,
-                    finite.map_or(occupations.as_slice(), |w| w.block(0, i)),
-                    &state.grid,
-                    volume,
-                )?;
+                if !m2 {
+                    state.band_density.compute(
+                        &orbitals,
+                        finite.map_or(occupations.as_slice(), |w| w.block(0, i)),
+                        &state.grid,
+                        volume,
+                    )?;
+                }
                 Ok(orbitals)
             },
         )?;
-        let mut output = Array3::zeros(self.grid.dims());
-        // Every k workspace owns its density output. Fold in fixed k order after
-        // all jobs finish; no allocated partial arrays or worker locks.
-        for state in &self.states {
-            for (out, n) in output.iter_mut().zip(state.band_density.density()) {
-                *out += state.point.weight * n;
+        let mut output = if let Some(output) = m2_output {
+            output
+        } else {
+            let mut output = Array3::zeros(self.grid.dims());
+            // Every k workspace owns its density output. Fold in fixed k order after
+            // all jobs finish; no allocated partial arrays or worker locks.
+            for state in &self.states {
+                for (out, n) in output.iter_mut().zip(state.band_density.density()) {
+                    *out += state.point.weight * n;
+                }
             }
-        }
+            output
+        };
         if let Some(symmetry) = &mut self.symmetry {
             symmetry.apply(&mut output, &mut self.fft)?;
         }
         timings.density = start.elapsed();
         let start = Instant::now();
-        let output_xc = if self.core_density.is_some()
+        let m2_xc = crate::m2::active().and_then(|comm| {
+            crate::m2::xc(
+                &comm,
+                &self.options,
+                &output,
+                self.core_density.as_ref(),
+                self.density_floor,
+                volume,
+            )
+        });
+        let output_xc = if let Some(x) = m2_xc {
+            Some(x?)
+        } else if self.core_density.is_some()
             || self.density_floor.is_some()
             || self.options.pw92_prefactor == crate::Pw92Prefactor::Original
         {
@@ -1833,6 +2022,12 @@ impl ScfProblem {
         )?;
         // B2: Fermi-Dirac occupations fall back to the explicit audit.
         let identity = self.energy_identity && finite.is_none();
+        // M2d: nonlocal energy from the distributed projections (one tree_sum).
+        let m2_nonlocal = if m2 && !identity {
+            self.m2_nonlocal_energy()?
+        } else {
+            None
+        };
         let mut audits = Vec::new();
         ordered_chunks(
             &mut self.states,
@@ -1858,12 +2053,15 @@ impl ScfProblem {
                         ewald: self.ewald.energy.0,
                     },
                     &shared_audit,
-                    !identity,
+                    !identity && m2_nonlocal.is_none(),
                 )?;
                 Ok((state.point.weight, audit))
             },
             |audit| audits.push(audit),
         )?;
+        if let (Some(value), Some((_, audit))) = (m2_nonlocal, audits.first_mut()) {
+            audit.nonlocal = value;
+        }
         let mut energy = energy::weighted_audits(&audits);
         if identity {
             energy::apply_band_sum_identity(&mut energy);

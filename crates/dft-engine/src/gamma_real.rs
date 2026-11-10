@@ -66,7 +66,11 @@ pub(crate) struct RealSolveState {
     workspace: Option<dft_solvers::real_davidson::RealDavidsonWorkspace>,
     /// Stick-distributed Hamiltonian of this rank (MPI stage M2c), built only when
     /// `parallel::m2_enabled()` and a communicator with two or more ranks is active.
-    dist: Option<DistributedRealHamiltonian>,
+    pub(crate) dist: Option<DistributedRealHamiltonian>,
+    /// Local rows (stick partition) of the eigenvectors of the latest solve when
+    /// it ran on the M2 path; None after any other solve (M2d density/energy).
+    pub(crate) m2_local: Option<RealMatrix>,
+    pub(crate) m2_density: Option<crate::m2::M2Density>,
 }
 
 #[derive(PartialEq, Eq)]
@@ -195,9 +199,12 @@ pub(crate) fn solve_real_gamma(
             key,
             workspace: None,
             dist: None,
+            m2_local: None,
+            m2_density: None,
         });
     }
     let state = state.as_mut().unwrap();
+    state.m2_local = None;
     // M2c: the distributed Hamiltonian follows the SCF potential like the serial one.
     match comm.as_ref().filter(|_| crate::parallel::m2_enabled()) {
         Some(c) => {
@@ -215,9 +222,16 @@ pub(crate) fn solve_real_gamma(
                     pool.clone(),
                 )
                 .ok();
+                state.m2_density = None;
+            }
+            if let Some(d) = state.dist.as_mut() {
+                d.set_batched(crate::m2::batched_transposes());
             }
         }
-        None => state.dist = None,
+        None => {
+            state.dist = None;
+            state.m2_density = None;
+        }
     }
     let real = state.op.h.borrow();
     let half = real.half_sphere();
@@ -261,7 +275,7 @@ pub(crate) fn solve_real_gamma(
         crate::parallel::count_distributed_solve();
         crate::parallel::count_distributed_rows_solve();
         let local_diagonal: Vec<f64> = dist.local_rows().iter().map(|&r| diagonal[r]).collect();
-        solver.solve_distributed_rows(
+        let result = solver.solve_distributed_rows(
             comm,
             dist,
             packed.as_ref(),
@@ -270,7 +284,13 @@ pub(crate) fn solve_real_gamma(
             options.standard.is_some(),
             certify && options.standard.is_none(),
             options.davidson_capacity_per_band,
-        )?
+        )?;
+        // M2d: keep this rank's rows for the distributed density and energy.
+        state.m2_local = Some(
+            dist.extract_local(&result.eigenvectors)
+                .map_err(|e| ScfError::Numerical(e.to_string()))?,
+        );
+        result
     } else if let Some(comm) = &comm {
         crate::parallel::count_distributed_solve();
         solver.solve_distributed(

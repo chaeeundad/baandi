@@ -576,7 +576,68 @@ impl ScfSession {
         // fixed-point residual. A small-gap response can amplify that residual.
         let mut rescued = None;
         let mut unable_to_verify = false;
-        let certified = if converged && standard.is_some() {
+        // Opt-in pre-screen (BAANDI_CERT_SCREEN=on): predict a certain failure of the
+        // occupied-eigenvalue criterion from first-order perturbation theory before
+        // paying for the tight re-solve. It can only reject; passing still needs
+        // the full solve below. `trace` prints the bound and runs the solve anyway.
+        let screen = if converged && standard.is_none() {
+            match cert_screen_mode() {
+                CertScreen::Off => None,
+                mode => self
+                    .problem
+                    .certificate_shift_estimate(&step.density, &step.k_points)?
+                    .map(|bound| (mode, bound)),
+            }
+        } else {
+            None
+        };
+        let screened = screen.and_then(|(mode, bound)| {
+            (mode == CertScreen::On && bound > CERT_SCREEN_MARGIN * CERT_EIGENVALUE_LIMIT_HA)
+                .then_some(bound)
+        });
+        let certified = if let Some(bound) = screened {
+            // Certain failure: the next SCF iteration continues exactly as after a
+            // failed solve (that solve's result is discarded either way). The record
+            // carries the step's own residuals, zero solver work, the first-order
+            // eigenvalue-shift bound and the SCF density residual; zero Davidson
+            // iterations marks it as screened, not solved.
+            self.certificate_attempted = true;
+            let k = step.k_points.len();
+            history.last_mut().unwrap().fixed_point_certificate = Some(FixedPointCertificate {
+                strict_residuals_per_k: step
+                    .k_points
+                    .iter()
+                    .map(|k| {
+                        k.solution
+                            .residuals
+                            .iter()
+                            .zip(&k.solution.buffer)
+                            .filter_map(|(&r, &buffer)| (!buffer).then_some(r))
+                            .collect()
+                    })
+                    .collect(),
+                buffer_residuals_per_k: step
+                    .k_points
+                    .iter()
+                    .map(|k| {
+                        k.solution
+                            .residuals
+                            .iter()
+                            .zip(&k.solution.buffer)
+                            .filter_map(|(&r, &buffer)| buffer.then_some(r))
+                            .collect()
+                    })
+                    .collect(),
+                density_residual: residual,
+                occupied_eigenvalue_change: bound,
+                davidson_iterations: 0,
+                operator_applications: 0,
+                davidson_iterations_per_k: vec![0; k],
+                operator_applications_per_k: vec![0; k],
+                timings: PhaseTimings::default(),
+            });
+            false
+        } else if converged && standard.is_some() {
             // Standard convergence is explicitly uncertified. An independently
             // requested spectral audit remains a separate, charged operation.
             let mut passed = true;
@@ -634,8 +695,18 @@ impl ScfSession {
                 .filter(|(_, f)| **f > 0.0)
                 .map(|((a, b), _)| (a - b).abs())
                 .fold(0.0, f64::max);
+            if let Some((_, bound)) = screen {
+                eprintln!(
+                    "CERT-SCREEN iter={iteration} bound={bound:.4e} actual={occupied_eigenvalue_change:.4e} density={density_residual:.4e} davidson={}",
+                    check
+                        .k_points
+                        .iter()
+                        .map(|k| k.solution.iterations)
+                        .sum::<usize>()
+                );
+            }
             let mut passed = density_residual <= self.problem.options.density_tolerance
-                && occupied_eigenvalue_change <= 1e-7;
+                && occupied_eigenvalue_change <= CERT_EIGENVALUE_LIMIT_HA;
             if passed && self.problem.density_floor.is_some() {
                 let clipped = self
                     .problem
@@ -1388,6 +1459,29 @@ impl ScfSession {
         session.import_electronic(&checkpoint.electronic_state)?;
         Ok(session)
     }
+}
+
+/// Largest occupied-eigenvalue change (Ha) the fixed-point certificate accepts.
+const CERT_EIGENVALUE_LIMIT_HA: f64 = 1e-7;
+/// The pre-screen rejects only above this multiple of the limit, so its
+/// second-order modelling error (about 1e-9 Ha) is far inside the margin.
+const CERT_SCREEN_MARGIN: f64 = 1.02;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CertScreen {
+    Off,
+    On,
+    Trace,
+}
+
+/// `BAANDI_CERT_SCREEN=on|trace` (default off, bit-identical when off).
+fn cert_screen_mode() -> CertScreen {
+    static MODE: std::sync::OnceLock<CertScreen> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| match std::env::var("BAANDI_CERT_SCREEN").as_deref() {
+        Ok("on") => CertScreen::On,
+        Ok("trace") => CertScreen::Trace,
+        _ => CertScreen::Off,
+    })
 }
 
 fn growth_reset_limit() -> Option<f64> {

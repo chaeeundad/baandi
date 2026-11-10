@@ -68,6 +68,22 @@ impl BandDensity {
     pub(crate) fn density(&self) -> &Array3<f64> {
         &self.density
     }
+    /// out[b] = sum over grid points of (band b's occupation-weighted density
+    /// from the latest `compute`) times `field`, in ascending band order. The
+    /// caller applies the grid weight and divides by the occupation. Read-only.
+    pub(crate) fn weighted_integrals(&self, field: &[f64], out: &mut [f64]) {
+        let mut band = 0;
+        for worker in &self.workers {
+            for contribution in &worker.contributions {
+                if band < out.len() {
+                    out[band] = contribution
+                        .as_slice()
+                        .map_or(f64::NAN, |c| c.iter().zip(field).map(|(a, b)| a * b).sum());
+                }
+                band += 1;
+            }
+        }
+    }
 }
 fn transform(
     workers: &mut [Worker],

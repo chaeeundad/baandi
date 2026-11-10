@@ -157,6 +157,53 @@ fn band_nonlocal(
         }
     }
 }
+/// `BAANDI_NL_ENERGY=fast` (default off, bit-identical when off): the nonlocal
+/// energy of the audit comes from projections only, for occupied bands only,
+/// blocks of bands sharing each pass over a projector column.
+fn fast_nonlocal_energy() -> bool {
+    static MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| std::env::var("BAANDI_NL_ENERGY").as_deref() == Ok("fast"))
+}
+
+fn expectation_tree(
+    nonlocal: &NonlocalOperator,
+    bands: &[&[Complex64]],
+    out: &mut [f64],
+) -> Result<(), ScfError> {
+    const LEAF: usize = 8;
+    if bands.len() <= LEAF {
+        return Ok(nonlocal.expectation_values(bands, out)?);
+    }
+    let half = bands.len() / 2;
+    let (left, right) = out.split_at_mut(half);
+    let (bl, br) = bands.split_at(half);
+    let (a, b) = dft_numerics::pool::WorkerPool::join(
+        || expectation_tree(nonlocal, bl, left),
+        || expectation_tree(nonlocal, br, right),
+    );
+    a?;
+    b
+}
+
+/// Per-band Re<c|V_nl|c>. Unoccupied bands contribute exactly zero to the
+/// occupation-weighted sum, so the fast path leaves their entry at zero.
+fn band_nonlocal_partials(a: &AuditInput<'_>) -> Result<Vec<f64>, ScfError> {
+    let mut partial = vec![0.0; a.orbitals.len()];
+    if fast_nonlocal_energy() {
+        let selected: Vec<usize> = (0..a.orbitals.len())
+            .filter(|&b| a.occupations[b] != 0.0)
+            .collect();
+        let bands: Vec<&[Complex64]> = selected.iter().map(|&b| a.orbitals[b].as_slice()).collect();
+        let mut values = vec![0.0; bands.len()];
+        expectation_tree(a.nonlocal, &bands, &mut values)?;
+        for (&b, v) in selected.iter().zip(values) {
+            partial[b] = v;
+        }
+    } else {
+        band_nonlocal(a.nonlocal, a.orbitals, &mut partial)?;
+    }
+    Ok(partial)
+}
 pub fn evaluate(a: AuditInput<'_>, fft: &mut FftPlan3d) -> Result<EnergyAudit, ScfError> {
     evaluate_with_functional(a, fft, Functional::LdaPz)
 }
@@ -209,8 +256,7 @@ pub(crate) fn evaluate_with_core_xc(
     let charge = n.sum() * weight;
     // Per-band <c|V_nl|c> in parallel (each band's own arithmetic unchanged),
     // accumulated in ascending band order: bit-identical to the serial loop.
-    let mut partial = vec![0.0; a.orbitals.len()];
-    band_nonlocal(a.nonlocal, a.orbitals, &mut partial)?;
+    let partial = band_nonlocal_partials(&a)?;
     let mut nonlocal = 0.0;
     for (s, f) in partial.iter().zip(a.occupations) {
         nonlocal += f * s;
@@ -406,8 +452,7 @@ pub(crate) fn evaluate_shared(
     let kinetic = kinetic::energy(a.basis, a.orbitals, a.occupations)?.0;
     // Per-band <c|V_nl|c> in parallel (each band's own arithmetic unchanged),
     // accumulated in ascending band order: bit-identical to the serial loop.
-    let mut partial = vec![0.0; a.orbitals.len()];
-    band_nonlocal(a.nonlocal, a.orbitals, &mut partial)?;
+    let partial = band_nonlocal_partials(&a)?;
     let mut nonlocal = 0.0;
     for (s, f) in partial.iter().zip(a.occupations) {
         nonlocal += f * s;

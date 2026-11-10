@@ -1212,6 +1212,133 @@ impl ScfProblem {
         self.step_with_occupations(n, initial, tolerance, certify, None)
     }
 
+    /// Hartree and XC fields of an input density and the effective local
+    /// potential built from them (ionic + Hartree + XC), in Ha.
+    fn input_fields(
+        &mut self,
+        n: &Array3<f64>,
+    ) -> Result<(hartree::HartreeGrid, xc::XcGrid, Array3<f64>), ScfError> {
+        let h = hartree::evaluate(n, &self.cell, &mut self.fft)?;
+        let x = self.options.evaluate_xc(
+            n,
+            self.core_density.as_ref(),
+            &mut self.xc_density,
+            &self.cell,
+            &mut self.fft,
+            self.density_floor,
+        )?;
+        let mut effective = self.ionic_real.clone();
+        for ((v, h), x) in effective.iter_mut().zip(&h.potential).zip(&x.potential) {
+            *v += h.re + x;
+        }
+        Ok((h, x, effective))
+    }
+
+    /// First-order estimate (Ha) of the occupied-eigenvalue change that the
+    /// fixed-point certificate would measure when it re-solves at `density`.
+    ///
+    /// The certificate compares the occupied eigenvalues of the Hamiltonian built
+    /// from `density` with those of the step just taken (potential of its input
+    /// density). With dV the change of the effective local potential, the shifts
+    /// of a group of bands that is separated from all other bands by more than
+    /// `CLUSTER_GAP_HA` are, to first order, the eigenvalues of
+    /// diag(eps) + <psi_i|dV|psi_j> over that group (degenerate perturbation
+    /// theory); a single band needs only its diagonal element, which the stored
+    /// per-band densities of the step provide. Coupling between groups is second
+    /// order, about |dV|^2 / gap (1e-9 Ha or less for shifts near the limit), so
+    /// the caller applies a margin. Groups larger than `MAX_CLUSTER` or holding an
+    /// unoccupied band are skipped (their shifts are then not bounded). The value
+    /// is therefore a lower estimate of the true maximum, never an upper bound.
+    /// It never certifies anything; it can only predict a certain failure.
+    pub(crate) fn certificate_shift_estimate(
+        &mut self,
+        density: &Array3<f64>,
+        k_points: &[KPointSolution],
+    ) -> Result<Option<f64>, ScfError> {
+        const CLUSTER_GAP_HA: f64 = 1e-3;
+        const MAX_CLUSTER: usize = 24;
+        if k_points.len() != self.states.len() {
+            return Ok(None);
+        }
+        let (_, _, effective) = self.input_fields(density)?;
+        let effective = effective.as_standard_layout().into_owned();
+        let target = effective.as_slice().expect("standard layout");
+        let points = target.len();
+        let weight = self.cell.volume_bohr3() / points as f64;
+        let bands = self.occupations.len();
+        let mut bound = 0.0_f64;
+        let mut delta = vec![0.0; points];
+        let mut integrals = vec![0.0; bands];
+        let mut psi: Vec<Array3<Complex64>> = Vec::new();
+        for (state, k) in self.states.iter().zip(k_points) {
+            let current = state.hamiltonian.local_potential_values();
+            let eigenvalues = &k.solution.eigenvalues;
+            if current.len() != points || eigenvalues.len() != bands {
+                return Ok(None);
+            }
+            for ((d, t), c) in delta.iter_mut().zip(target).zip(current) {
+                *d = t - c;
+            }
+            state
+                .band_density
+                .weighted_integrals(&delta, &mut integrals);
+            let mut start = 0;
+            while start < bands {
+                let mut end = start + 1;
+                while end < bands && eigenvalues[end] - eigenvalues[end - 1] < CLUSTER_GAP_HA {
+                    end += 1;
+                }
+                let size = end - start;
+                if self.occupations[start..end].iter().any(|f| *f <= 0.0) || size > MAX_CLUSTER {
+                    start = end;
+                    continue;
+                }
+                if size == 1 {
+                    bound = bound.max((integrals[start] * weight / self.occupations[start]).abs());
+                    start = end;
+                    continue;
+                }
+                // Cluster: build diag(eps) + M with M_ij = mean_r conj(psi_i) dV psi_j.
+                psi.resize_with(size, || Array3::zeros(state.grid.dims()));
+                for (slot, b) in psi.iter_mut().zip(start..end) {
+                    self.fft.to_real(
+                        &state.grid.scatter(k.solution.eigenvectors.column(b))?,
+                        slot,
+                    )?;
+                }
+                let mut matrix = ComplexMatrix::zeros(size, size)
+                    .map_err(|e| ScfError::Numerical(e.to_string()))?;
+                for j in 0..size {
+                    let pj = psi[j].as_slice().expect("standard layout");
+                    for i in 0..=j {
+                        let pi = psi[i].as_slice().expect("standard layout");
+                        let mut sum = Complex64::default();
+                        for ((a, b), d) in pi.iter().zip(pj).zip(&delta) {
+                            sum += a.conj() * b * *d;
+                        }
+                        let mut value = sum / points as f64;
+                        if i == j {
+                            value = Complex64::new(value.re + eigenvalues[start + i], 0.0);
+                        }
+                        matrix.column_mut(j)[i] = value;
+                        matrix.column_mut(i)[j] = value.conj();
+                    }
+                }
+                let (shifted, _) = dft_numerics::linalg::hermitian_eigh(&matrix)
+                    .map_err(|e| ScfError::Numerical(e.to_string()))?;
+                for (k, lambda) in shifted.iter().enumerate() {
+                    bound = bound.max((lambda - eigenvalues[start + k]).abs());
+                }
+                start = end;
+            }
+        }
+        if bound.is_finite() {
+            Ok(Some(bound))
+        } else {
+            Ok(None)
+        }
+    }
+
     fn step_with_occupations(
         &mut self,
         n: &Array3<f64>,
@@ -1252,19 +1379,7 @@ impl ScfProblem {
                 "symmetry.density: input breaks the selected symmetry; use full mesh",
             ));
         }
-        let h = hartree::evaluate(n, &self.cell, &mut self.fft)?;
-        let x = self.options.evaluate_xc(
-            n,
-            self.core_density.as_ref(),
-            &mut self.xc_density,
-            &self.cell,
-            &mut self.fft,
-            self.density_floor,
-        )?;
-        let mut effective = self.ionic_real.clone();
-        for ((v, h), x) in effective.iter_mut().zip(&h.potential).zip(&x.potential) {
-            *v += h.re + x;
-        }
+        let (h, x, effective) = self.input_fields(n)?;
         ordered_solves(
             &mut self.states,
             self.options.threads,
@@ -1800,6 +1915,72 @@ mod tests {
 
     mod persistent_real_state {
         include!("../tests/common/persistent_real_state_unit.rs");
+    }
+
+    /// The first-order estimate of the certificate's occupied-eigenvalue change
+    /// (singles and a threefold-degenerate occupied cluster at an s + p atom in a
+    /// cubic cell) agrees with the real re-solve once the SCF is nearly converged.
+    #[test]
+    fn certificate_shift_estimate_matches_resolve() {
+        let potential = pool_fixture::potential(8.0, 1.0, true, 101);
+        let cell = Cell::from_user_rows_bohr([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]]).unwrap();
+        let mut problem = ScfProblem::new(
+            &cell,
+            &[Atom::new("Xx", [0.0, 0.0, 0.0])],
+            &[SpeciesPotential {
+                label: "Xx",
+                potential: &potential,
+            }],
+            ScfOptions {
+                threads: 1,
+                cutoff_hartree: 3.0,
+                bands: Some(6),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let occupied = problem.occupations.iter().filter(|f| **f > 0.0).count();
+        assert!(occupied >= 3, "need an s + p occupied set");
+        let mut n = problem.uniform_density();
+        let mut warm: Option<Vec<ComplexMatrix>> = None;
+        for _ in 0..14 {
+            let step = problem.step_kpoints(&n, warm.as_deref(), 1e-11).unwrap();
+            warm = Some(
+                step.k_points
+                    .iter()
+                    .map(|k| k.solution.eigenvectors.clone())
+                    .collect(),
+            );
+            let out = step.density;
+            n.zip_mut_with(&out, |a, b| *a += 0.5 * (b - *a));
+        }
+        let step = problem.step_kpoints(&n, warm.as_deref(), 1e-11).unwrap();
+        let estimate = problem
+            .certificate_shift_estimate(&step.density, &step.k_points)
+            .unwrap()
+            .unwrap();
+        let warm: Vec<_> = step
+            .k_points
+            .iter()
+            .map(|k| k.solution.eigenvectors.clone())
+            .collect();
+        let check = problem
+            .step_kpoints(&step.density, Some(&warm), 1e-11)
+            .unwrap();
+        let actual = check
+            .k_points
+            .iter()
+            .zip(&step.k_points)
+            .flat_map(|(a, b)| a.solution.eigenvalues.iter().zip(&b.solution.eigenvalues))
+            .take(occupied)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0, f64::max);
+        println!("estimate {estimate:.6e} actual {actual:.6e}");
+        assert!(actual > 1e-12, "fixture must still move: {actual}");
+        assert!(
+            (estimate - actual).abs() <= 2e-3 * actual + 1e-13,
+            "estimate {estimate:e} actual {actual:e}"
+        );
     }
 
     #[test]

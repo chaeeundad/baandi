@@ -36,7 +36,11 @@ Evidence and limitations: `docs/performance/real-gamma-r4-notes.md`.
 `RealDavidson::solve_research` takes `ResearchOptions` explicitly; every other
 entry point reads them from the environment (`davidson_stages.rs`): stage timers
 `BAANDI_DAVIDSON_STAGES=on`, B1 selected-root products `BAANDI_B1=standard|strict|on`
-with `BAANDI_B1_SKETCH=count`, B5 bordered eigen-update `BAANDI_B5=on` (`bordered.rs`).
+with `BAANDI_B1_SKETCH=count`, B5 bordered eigen-update `BAANDI_B5=on` (`bordered.rs`),
+B6 cached projector products for the return certificate `BAANDI_B6=on` (operators opt in
+through the `RealLinearOperator` default methods; test `tests/b6_certificate.rs`).
+Micro switches read at construction: `BAANDI_WIDE_DOT=on` (eight-lane MGS dot, rounding
+class); see docs/performance/requests/micro-stack.md.
 All default off and bit-identical when off. Tests: `tests/b1_selected_roots.rs`,
 `tests/b5_reduced_eigen.rs`; B4 harness `tests/b4_inner_iterations.rs` (ignored).
 Plan and pre-registered rules: docs/performance/requests/b1-b4-b5-davidson.md.

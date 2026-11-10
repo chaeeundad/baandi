@@ -431,11 +431,10 @@ pub(crate) fn solve_real_gamma(
     // for the energy audit of this map (threads-only path).
     if comm.is_none() && nl_energy_real() {
         state.nl_values.resize(bands, 0.0);
-        state.nl_valid = op
-            .h
-            .borrow_mut()
-            .nonlocal_expectation_values(&result.eigenvectors, &mut state.nl_values)
-            .is_ok();
+        state.nl_valid =
+            op.h.borrow_mut()
+                .nonlocal_expectation_values(&result.eigenvectors, &mut state.nl_values)
+                .is_ok();
     }
     let mut eigenvectors = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
     {
@@ -501,8 +500,8 @@ mod atomic_real_tests {
     use super::*;
     use dft_geometry::Cell;
     use dft_physics::data::Array3;
-    use dft_physics::hamiltonian::NonlocalOperator;
     use dft_physics::data::Complex64;
+    use dft_physics::hamiltonian::NonlocalOperator;
 
     /// ATOMIC-REAL: H Q through the real Hamiltonian equals the complex apply to
     /// rounding for Hermitian-completed Q, leaves a state the solve reuses, and
@@ -544,7 +543,11 @@ mod atomic_real_tests {
         let hq = atomic_apply_real(&h, &basis, &q, 4, &options, &pool, None, &mut state)
             .unwrap()
             .expect("eligible");
-        let scale = expected.as_slice().iter().map(|z| z.norm()).fold(0., f64::max);
+        let scale = expected
+            .as_slice()
+            .iter()
+            .map(|z| z.norm())
+            .fold(0., f64::max);
         let worst = hq
             .as_slice()
             .iter()

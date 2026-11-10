@@ -174,7 +174,10 @@ fn b6_certificate_matches_plain_apply() {
             assert_eq!(op.cached_calls.get(), cached.certification_attempts);
             assert!(cached.residuals_certified && plain.residuals_certified);
             assert_eq!(cached.eigenvalues, plain.eigenvalues);
-            assert_eq!(cached.eigenvectors.as_slice(), plain.eigenvectors.as_slice());
+            assert_eq!(
+                cached.eigenvectors.as_slice(),
+                plain.eigenvectors.as_slice()
+            );
             assert_eq!(cached.iterations, plain.iterations);
             assert_eq!(cached.operator_applications, plain.operator_applications);
             assert_eq!(cached.certification_attempts, plain.certification_attempts);

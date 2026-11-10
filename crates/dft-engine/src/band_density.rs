@@ -437,9 +437,15 @@ mod tests {
             &[0., 2., 2., 2., 2., 0., 0., 0., 0.],
         ];
         for occupations in sets {
-            let mut plain =
-                BandDensity::with_switches(&grid, bands, 1, WorkerPool::new(1).unwrap(), false, false)
-                    .unwrap();
+            let mut plain = BandDensity::with_switches(
+                &grid,
+                bands,
+                1,
+                WorkerPool::new(1).unwrap(),
+                false,
+                false,
+            )
+            .unwrap();
             let expected = plain
                 .compute_with(&coefficients, occupations, &grid, volume, true)
                 .unwrap()

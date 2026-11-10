@@ -511,8 +511,13 @@ fn initial_block(
             &problem.options,
             problem.occupations.len(),
         )?;
-        let (guess, report) =
-            atomic_start::ritz(&span, &state.hamiltonian, problem.occupations.len(), true, None)?;
+        let (guess, report) = atomic_start::ritz(
+            &span,
+            &state.hamiltonian,
+            problem.occupations.len(),
+            true,
+            None,
+        )?;
         let mut ok = true;
         for j in 0..m {
             if half

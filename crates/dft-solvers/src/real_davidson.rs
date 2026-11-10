@@ -1070,9 +1070,8 @@ fn mgs_dot(wide: bool, x: &[f64], y: &[f64]) -> f64 {
 fn dot_wide(x: &[f64], y: &[f64]) -> f64 {
     const L: usize = 8;
     let mut s = [0.; L];
-    let (cx, cy) = (x.chunks_exact(L), y.chunks_exact(L));
-    let (tx, ty) = (cx.remainder(), cy.remainder());
-    for (a, b) in cx.zip(cy) {
+    let ((cx, tx), (cy, ty)) = (x.as_chunks::<L>(), y.as_chunks::<L>());
+    for (a, b) in cx.iter().zip(cy) {
         for k in 0..L {
             s[k] += a[k] * b[k];
         }
@@ -1910,7 +1909,10 @@ mod tests {
             let y: Vec<f64> = (0..len).map(|i| ((i + 2) as f64 * 1.91).cos()).collect();
             let bound: f64 = x.iter().zip(&y).map(|(a, b)| (a * b).abs()).sum();
             let (a, b) = (dot(&x, &y), dot_wide(&x, &y));
-            assert!((a - b).abs() <= 4. * f64::EPSILON * bound, "{len}: {a:e} {b:e}");
+            assert!(
+                (a - b).abs() <= 4. * f64::EPSILON * bound,
+                "{len}: {a:e} {b:e}"
+            );
             assert_eq!(mgs_dot(false, &x, &y).to_bits(), a.to_bits());
             assert_eq!(mgs_dot(true, &x, &y).to_bits(), b.to_bits());
         }

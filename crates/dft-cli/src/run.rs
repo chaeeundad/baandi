@@ -634,7 +634,7 @@ pub fn execute_mode(
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
     if let Some(l) = &ladder_report {
-        result["cutoff_ladder"] = json!({
+        result["convergence"]["work"]["cutoff_ladder"] = json!({
             "used":l.used,"fallback_reason":l.fallback_reason,"fraction":l.fraction,
             "coarse_cutoff_ha":l.coarse_cutoff_hartree,"coarse_fft_grid":l.coarse_grid,
             "fine_fft_grid":l.fine_grid,"coarse_plane_waves":l.coarse_plane_waves,

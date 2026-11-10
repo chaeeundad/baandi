@@ -52,6 +52,9 @@ impl Case {
         )
         .unwrap();
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_dft-cli"));
+        // These legacy-output tests pin the pre-ladder path (the C1 cutoff ladder is
+        // on by default since 2026-11-10 and has its own tests).
+        cmd.env("BAANDI_CUTOFF_LADDER", "off");
         cmd.current_dir(&self.dir).args(["run", "input.toml"]);
         if let Some(dir) = override_dir {
             cmd.arg("--output-dir").arg(dir);
@@ -826,6 +829,9 @@ fn baandi() -> Command {
         paths.extend(std::env::split_paths(&path));
     }
     command.env("PATH", std::env::join_paths(paths).unwrap());
+    // Legacy-output comparison across CLI modes: pin the pre-ladder path (the
+    // observe/agent modes do not run the C1 ladder).
+    command.env("BAANDI_CUTOFF_LADDER", "off");
     command
 }
 

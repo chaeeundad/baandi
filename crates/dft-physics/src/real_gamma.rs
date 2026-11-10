@@ -28,7 +28,7 @@ pub enum RealGammaError {
     Algebra(#[from] dft_numerics::linalg::LinalgError),
 }
 
-fn pack_projector(
+pub(crate) fn pack_projector(
     half: &HalfSphere,
     beta: &[Complex64],
     out: &mut [f64],

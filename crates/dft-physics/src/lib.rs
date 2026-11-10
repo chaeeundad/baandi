@@ -1,6 +1,7 @@
 //! Gamma-only functionals and pseudopotential operators in Hartree atomic units.
 pub mod data;
 pub mod density;
+pub mod distributed_real_gamma;
 pub mod ewald;
 pub mod forces;
 pub mod gga;

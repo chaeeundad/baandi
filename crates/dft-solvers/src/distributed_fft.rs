@@ -40,6 +40,87 @@ pub enum DistFftError {
     Mpi(#[from] MpiError),
 }
 
+struct Partition {
+    first: usize,
+    n: [usize; 3],
+    sticks: Vec<(usize, usize)>,
+    planes: Vec<usize>,
+    slots: Vec<usize>,
+    owner: Vec<usize>,
+    local_index: Vec<usize>,
+    counts: Vec<usize>,
+}
+
+/// Stick partition shared by `new` and `position_owners` (inputs already validated).
+fn partition(shape: [usize; 3], indices: &[[usize; 3]], ranks: usize) -> Partition {
+    let supports: [_; 2] = std::array::from_fn(|a| {
+        indices
+            .iter()
+            .map(|p| (p[2], p[1 - a]))
+            .collect::<BTreeSet<_>>()
+    });
+    let first = usize::from(supports[1].len() < supports[0].len());
+    let n = [shape[first], shape[1 - first], shape[2]];
+    let sticks: Vec<(usize, usize)> = supports[first].iter().copied().collect();
+    let planes: Vec<usize> = sticks
+        .iter()
+        .map(|p| p.0)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let mut len = vec![0usize; sticks.len()];
+    let slots: Vec<usize> = indices
+        .iter()
+        .map(|p| {
+            let s = sticks.binary_search(&(p[2], p[1 - first])).unwrap();
+            len[s] += 1;
+            s
+        })
+        .collect();
+    // Balanced greedy assignment by stick length.
+    let mut order: Vec<usize> = (0..sticks.len()).collect();
+    order.sort_by(|&a, &b| len[b].cmp(&len[a]).then(a.cmp(&b)));
+    let mut load = vec![0usize; ranks];
+    let mut owner = vec![0usize; sticks.len()];
+    for &s in &order {
+        let r = (0..ranks).min_by_key(|&r| (load[r], r)).unwrap();
+        owner[s] = r;
+        load[r] += len[s];
+    }
+    let mut local_index = vec![0usize; sticks.len()];
+    let mut counts = vec![0usize; ranks];
+    for s in 0..sticks.len() {
+        local_index[s] = counts[owner[s]];
+        counts[owner[s]] += 1;
+    }
+    Partition {
+        first,
+        n,
+        sticks,
+        planes,
+        slots,
+        owner,
+        local_index,
+        counts,
+    }
+}
+
+/// Owning rank of every global coefficient position (same partition as `new`).
+pub fn position_owners(
+    shape: [usize; 3],
+    indices: &[[usize; 3]],
+    ranks: usize,
+) -> Result<Vec<usize>, DistFftError> {
+    if ranks == 0 || shape.contains(&0) {
+        return Err(FftError::InvalidGrid.into());
+    }
+    if indices.iter().any(|p| (0..3).any(|d| p[d] >= shape[d])) {
+        return Err(FftError::IncompatibleArray.into());
+    }
+    let part = partition(shape, indices, ranks);
+    Ok(part.slots.iter().map(|&s| part.owner[s]).collect())
+}
+
 pub struct DistributedPairFft {
     shape: [usize; 3],
     first: usize,
@@ -85,46 +166,16 @@ impl DistributedPairFft {
         if indices.iter().any(|p| (0..3).any(|d| p[d] >= shape[d])) {
             return Err(FftError::IncompatibleArray.into());
         }
-        let supports: [_; 2] = std::array::from_fn(|a| {
-            indices
-                .iter()
-                .map(|p| (p[2], p[1 - a]))
-                .collect::<BTreeSet<_>>()
-        });
-        let first = usize::from(supports[1].len() < supports[0].len());
-        let n = [shape[first], shape[1 - first], shape[2]];
-        let sticks: Vec<(usize, usize)> = supports[first].iter().copied().collect();
-        let planes: Vec<usize> = sticks
-            .iter()
-            .map(|p| p.0)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        let mut len = vec![0usize; sticks.len()];
-        let slots: Vec<usize> = indices
-            .iter()
-            .map(|p| {
-                let s = sticks.binary_search(&(p[2], p[1 - first])).unwrap();
-                len[s] += 1;
-                s
-            })
-            .collect();
-        // Balanced greedy assignment by stick length.
-        let mut order: Vec<usize> = (0..sticks.len()).collect();
-        order.sort_by(|&a, &b| len[b].cmp(&len[a]).then(a.cmp(&b)));
-        let mut load = vec![0usize; ranks];
-        let mut owner = vec![0usize; sticks.len()];
-        for &s in &order {
-            let r = (0..ranks).min_by_key(|&r| (load[r], r)).unwrap();
-            owner[s] = r;
-            load[r] += len[s];
-        }
-        let mut local_index = vec![0usize; sticks.len()];
-        let mut counts = vec![0usize; ranks];
-        for s in 0..sticks.len() {
-            local_index[s] = counts[owner[s]];
-            counts[owner[s]] += 1;
-        }
+        let Partition {
+            first,
+            n,
+            sticks,
+            planes,
+            slots,
+            owner,
+            local_index,
+            counts,
+        } = partition(shape, indices, ranks);
         let max_sticks = counts.iter().copied().max().unwrap_or(0);
         let plane_starts: Vec<usize> = (0..=ranks)
             .map(|r| r * (n[0] / ranks) + r.min(n[0] % ranks))

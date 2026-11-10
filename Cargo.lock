@@ -552,6 +552,7 @@ version = "0.1.0"
 dependencies = [
  "dft-basis",
  "dft-geometry",
+ "dft-mpi",
  "dft-numerics",
  "dft-solvers",
  "dft-units",

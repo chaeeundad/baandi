@@ -149,6 +149,8 @@ impl AtomProjectors {
         &self.coupling
     }
 }
+/// Band vectors sharing one pass over a projector column in `expectation_values`.
+const EXPECTATION_BLOCK: usize = 4;
 /// O(N_G * N_projectors) storage, never an N_G by N_G matrix.
 pub struct NonlocalOperator {
     basis: Vec<GVector>,
@@ -288,6 +290,73 @@ impl NonlocalOperator {
                 }
             }
         }
+    }
+    /// Re <x|V_nl|x> for every vector of `bands`, from the projections alone (no
+    /// back-application, no output vector). Up to `EXPECTATION_BLOCK` vectors share
+    /// each pass over a projector column, and each vector keeps its own two
+    /// accumulators per column, so a value never depends on how the bands are
+    /// grouped or on the thread count. Rounding differs from `apply` followed by a
+    /// dot product (different summation order); the difference is a few ulp.
+    pub fn expectation_values(
+        &self,
+        bands: &[&[Complex64]],
+        out: &mut [f64],
+    ) -> Result<(), HamiltonianError> {
+        if bands.len() != out.len() || bands.iter().any(|x| x.len() != self.basis.len()) {
+            return Err(HamiltonianError::Shape);
+        }
+        let mut done = 0;
+        while done < bands.len() {
+            let take = (bands.len() - done).min(EXPECTATION_BLOCK);
+            let (group, result) = (&bands[done..done + take], &mut out[done..done + take]);
+            match take {
+                4 => self.expectation_block::<4>(group, result),
+                3 => self.expectation_block::<3>(group, result),
+                2 => self.expectation_block::<2>(group, result),
+                _ => self.expectation_block::<1>(group, result),
+            }
+            done += take;
+        }
+        if out.iter().any(|v| !v.is_finite()) {
+            return Err(HamiltonianError::NonFinite);
+        }
+        Ok(())
+    }
+    fn expectation_block<const B: usize>(&self, bands: &[&[Complex64]], out: &mut [f64]) {
+        let mut energy = [0.0_f64; B];
+        let mut projections = vec![[Complex64::default(); B]; self.max_channels];
+        for atom in &self.atoms {
+            let nc = atom.columns.len();
+            for (p, col) in projections.iter_mut().zip(&atom.columns) {
+                let mut re = [0.0_f64; B];
+                let mut im = [0.0_f64; B];
+                let n = col.len();
+                let xs: [&[Complex64]; B] = std::array::from_fn(|k| &bands[k][..n]);
+                for (g, b) in col.iter().enumerate() {
+                    for k in 0..B {
+                        let c = xs[k][g];
+                        re[k] += b.re * c.re + b.im * c.im;
+                        im[k] += b.re * c.im - b.im * c.re;
+                    }
+                }
+                for k in 0..B {
+                    p[k] = Complex64::new(re[k], im[k]);
+                }
+            }
+            // E_k += Re sum_ij conj(p_i) D_ij p_j (D is real).
+            for i in 0..nc {
+                for j in 0..nc {
+                    let d = atom.coupling[i * nc + j];
+                    if d == 0.0 {
+                        continue;
+                    }
+                    for k in 0..B {
+                        energy[k] += d * (projections[i][k].conj() * projections[j][k]).re;
+                    }
+                }
+            }
+        }
+        out.copy_from_slice(&energy);
     }
     /// Projection storage required by `apply_into`.
     pub fn scratch_len(&self) -> usize {
@@ -878,6 +947,43 @@ mod fused_tests {
             legacy_nonlocal(&op, &x, &mut a, &mut scratch);
             op.add(&x, &mut b, &mut scratch);
             assert_eq!(bits(&a), bits(&b));
+        }
+    }
+
+    #[test]
+    fn expectation_blocks_match_apply_and_ignore_grouping() {
+        for (atoms, rows, channels) in [(4, 257, 1), (8, 513, 3), (5, 1537, 4), (3, 259, 0)] {
+            let op = nonlocal_fixture(atoms, rows, channels);
+            let owned: Vec<_> = (0..7).map(|b| vector(rows, 100 + b)).collect();
+            let bands: Vec<&[Complex64]> = owned.iter().map(|v| v.as_slice()).collect();
+            // Reference: back-application followed by the dot product.
+            let mut scratch = vec![Complex64::default(); 2 * channels];
+            let reference: Vec<f64> = bands
+                .iter()
+                .map(|x| {
+                    let mut y = vec![Complex64::default(); rows];
+                    op.add(x, &mut y, &mut scratch);
+                    x.iter().zip(&y).map(|(c, v)| (c.conj() * v).re).sum()
+                })
+                .collect();
+            let mut alone = [0.0; 7];
+            for b in 0..7 {
+                op.expectation_block::<1>(&bands[b..b + 1], &mut alone[b..b + 1]);
+            }
+            let mut grouped = [0.0; 7];
+            op.expectation_block::<4>(&bands[..4], &mut grouped[..4]);
+            op.expectation_block::<3>(&bands[4..], &mut grouped[4..]);
+            for b in 0..7 {
+                // Grouping never changes a band's bits.
+                assert_eq!(alone[b].to_bits(), grouped[b].to_bits());
+                let scale = reference[b].abs().max(1.0);
+                assert!(
+                    (alone[b] - reference[b]).abs() <= 1e-12 * scale * (rows as f64).sqrt(),
+                    "{atoms} {rows} {channels} band {b}: {} vs {}",
+                    alone[b],
+                    reference[b]
+                );
+            }
         }
     }
 

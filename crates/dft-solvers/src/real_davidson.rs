@@ -361,6 +361,13 @@ impl RealDavidson {
         let mut result_residuals = vec![0.; self.bands];
         let mut result_converged = vec![false; self.bands];
         apply_into(op, basis, &mut applications, &mut work, products)?;
+        let second_vector = SecondVector::from_env();
+        let mut previous_corrections = if second_vector == SecondVector::PreviousCorrection {
+            vec![0.; n * self.bands]
+        } else {
+            Vec::new()
+        };
+        let mut has_previous = vec![false; self.bands];
         let mut max_basis_dimension = 0;
         for iteration in 1..=self.max_iterations {
             max_basis_dimension = max_basis_dimension.max(basis.cols());
@@ -505,6 +512,25 @@ impl RealDavidson {
                     Ok(())
                 })
             })?;
+            if second_vector != SecondVector::Off {
+                add_second_vector(
+                    second_vector,
+                    n,
+                    SecondVectorContext {
+                        selected,
+                        converged,
+                        residuals,
+                        strict_bands: policy.strict_bands,
+                        bands: self.bands,
+                        values: &values[..self.bands],
+                        diagonal,
+                        residual_block,
+                    },
+                    corrections,
+                    previous_corrections.as_mut_slice(),
+                    has_previous.as_mut_slice(),
+                )?;
+            }
             if !trusted || basis.cols() + corrections.cols() > capacity {
                 restarts += 1;
                 work.restart();
@@ -544,6 +570,102 @@ impl RealDavidson {
 
 /// Lowest kinetic coordinate units; ties retain ORC half-list order (0, cos, sin).
 /// The diagonal is kinetic, not the full Hamiltonian diagonal.
+/// Experimental (docs/roadmap/second-vector-plan.md): fill the free slot of an
+/// odd-sized correction block. Off unless `BAANDI_SECOND_VECTOR=v1|v2|v3`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SecondVector {
+    Off,
+    /// Previous correction of the selected band with the largest residual.
+    PreviousCorrection,
+    /// Preconditioned residual of the converged band with the largest residual.
+    ConvergedBand,
+    /// Unpreconditioned residual of the worst strict band.
+    WorstResidual,
+}
+impl SecondVector {
+    fn from_env() -> Self {
+        match std::env::var("BAANDI_SECOND_VECTOR").as_deref() {
+            Ok("v1") => Self::PreviousCorrection,
+            Ok("v2") => Self::ConvergedBand,
+            Ok("v3") => Self::WorstResidual,
+            _ => Self::Off,
+        }
+    }
+}
+struct SecondVectorContext<'a> {
+    selected: &'a [usize],
+    converged: &'a [bool],
+    residuals: &'a [f64],
+    strict_bands: usize,
+    bands: usize,
+    values: &'a [f64],
+    diagonal: &'a [f64],
+    residual_block: &'a RealMatrix,
+}
+fn add_second_vector(
+    variant: SecondVector,
+    n: usize,
+    c: SecondVectorContext<'_>,
+    corrections: &mut RealMatrix,
+    previous: &mut [f64],
+    has_previous: &mut [bool],
+) -> Result<(), SolverError> {
+    let k = c.selected.len();
+    // V1 remembers this iteration's corrections for the next one.
+    if variant == SecondVector::PreviousCorrection {
+        let stored: Vec<(usize, usize)> = c.selected.iter().copied().enumerate().collect();
+        let mut extra: Option<usize> = None;
+        if k % 2 == 1 && k < c.bands {
+            extra = c
+                .selected
+                .iter()
+                .copied()
+                .filter(|&j| has_previous[j])
+                .max_by(|&a, &b| c.residuals[a].total_cmp(&c.residuals[b]));
+        }
+        let mut column_extra = None;
+        if let Some(j) = extra {
+            column_extra = Some(previous[j * n..(j + 1) * n].to_vec());
+        }
+        for (slot, j) in stored {
+            previous[j * n..(j + 1) * n]
+                .copy_from_slice(&corrections.as_slice()[slot * n..(slot + 1) * n]);
+            has_previous[j] = true;
+        }
+        if let Some(col) = column_extra {
+            corrections.reshape_within_storage(n, k + 1)?;
+            corrections.as_mut_slice()[k * n..(k + 1) * n].copy_from_slice(&col);
+        }
+        return Ok(());
+    }
+    if k.is_multiple_of(2) || k >= c.bands {
+        return Ok(());
+    }
+    let chosen = match variant {
+        SecondVector::ConvergedBand => (0..c.bands)
+            .filter(|&j| c.converged[j])
+            .max_by(|&a, &b| c.residuals[a].total_cmp(&c.residuals[b])),
+        SecondVector::WorstResidual => (0..c.strict_bands.min(c.bands))
+            .max_by(|&a, &b| c.residuals[a].total_cmp(&c.residuals[b])),
+        _ => None,
+    };
+    let Some(j) = chosen else {
+        return Ok(());
+    };
+    corrections.reshape_within_storage(n, k + 1)?;
+    let dst = &mut corrections.as_mut_slice()[k * n..(k + 1) * n];
+    let r = column(c.residual_block, j);
+    match variant {
+        SecondVector::ConvergedBand => {
+            for ((dst, &r), &d) in dst.iter_mut().zip(r).zip(c.diagonal) {
+                *dst = precondition(r, d, c.values[j])?;
+            }
+        }
+        _ => dst.copy_from_slice(r),
+    }
+    Ok(())
+}
+
 pub fn free_electron_initial_guess(
     kinetic: &[f64],
     bands: usize,

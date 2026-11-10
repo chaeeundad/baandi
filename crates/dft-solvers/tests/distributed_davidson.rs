@@ -304,3 +304,24 @@ fn operator_columns_are_divided_among_ranks() {
         "columns are applied redundantly"
     );
 }
+
+#[test]
+#[ignore = "diagnostic: serial iteration counts of clustered cases (set BAANDI_SECOND_VECTOR)"]
+fn serial_clustered_counts() {
+    let (n, bands, strict) = (800usize, 68usize, 65usize);
+    let mut line = String::new();
+    for group in [1usize, 3, 4, 6] {
+        for shift in [0usize, 1, 2] {
+            let (mut op, _) = spectrum_fixture(n, group);
+            for i in 0..n {
+                op.a[(i, i)] += 0.001 * (shift * (i % 7)) as f64;
+            }
+            let diag: Vec<f64> = (0..n).map(|i| op.a[(i, i)]).collect();
+            let s = RealDavidson { bands, tolerance: 1e-9, max_iterations: 400, max_subspace: 6 * bands, seed: 42 };
+            let pol = BandTolerances { strict_bands: strict, buffer_tolerance: 1e-5 };
+            let r = s.solve_with_band_tolerances(&op, None, &diag, pol).unwrap();
+            line += &format!(" g{group}s{shift}:{}/{}", r.iterations, r.operator_applications);
+        }
+    }
+    println!("SERIALCOUNTS{line}");
+}

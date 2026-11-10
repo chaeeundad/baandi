@@ -570,7 +570,9 @@ version = "0.1.0"
 dependencies = [
  "dft-mpi",
  "dft-numerics",
+ "ndarray",
  "num-complex",
+ "rustfft",
  "thiserror 2.0.21",
 ]
 

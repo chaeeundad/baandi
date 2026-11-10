@@ -24,3 +24,6 @@ M1 divides the H application over column pairs. On si32 strict 66 percent of app
 - dev08 is one node (shared memory and TCP only): the scaling gate measures the algorithm, not network behaviour.
 - The paired real FFT pairs two columns per transform; the distributed version keeps pairing (a single-column call still pays a pair), unless the second-vector work (docs/roadmap/second-vector-plan.md) changes the call mix.
 - The plan fixes interfaces only; the grid slab partition, the stick balancing rule and the FFT backend per rank (MKL DFTI, rustfft) are decided in M2a with measurements on the transform sizes of si16 and si32.
+
+## Status
+- M2a implemented (2026-11-10): `crates/dft-solvers/src/distributed_fft.rs` (`DistributedPairFft`); gate tests pass with simulated ranks 1..8 (G->r field vs serial FftPlan3d worst rel 3.1e-16; apply_local bit-identical to PairFusedPlan for all rank counts tested; round trip <= 6.7e-16).

@@ -604,6 +604,7 @@ pub fn execute_mode(
                 "davidson_stages":davidson_stages_json(),
                 "b1":b1_json(),
                 "b5":{"mode":std::env::var("BAANDI_B5").unwrap_or_else(|_| "off".into()),"bordered":dft_engine::b5_counters().bordered,"declined":dft_engine::b5_counters().declined,"full":dft_engine::b5_counters().full},
+                "ortho":{"mode":std::env::var("BAANDI_ORTHO").unwrap_or_else(|_| "two-pass".into()),"second_pass_skipped":dft_engine::ortho_counters().0,"second_pass_repeated":dft_engine::ortho_counters().1},
                 "h_vectors_recorded":r.history.iter().map(|h|h.operator_applications).sum::<usize>(),
                 "certificate_h_vectors":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.operator_applications).sum::<usize>(),
                 "note":"recorded = per-iteration solves in history; certificate = fixed-point certificate re-solves, reported only inside each history entry's fixed_point_certificate; total work is the sum"}},"energies":energies,

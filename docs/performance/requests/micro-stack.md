@@ -44,3 +44,20 @@ Arms (each against OFF = all seven unset, with the current defaults CERT_SCREEN,
 ## What to send back
 
 Per run: wall, phase timers (`density_s`, `potential_s`, `total_energy_s`, `diagonalization_s`), `convergence.work` (Davidson and H vectors recorded plus certificate), energy (17 digits), density SHA, exit code; binary sha256, commit, build command, uptime before and after, interleave order.
+
+## Orthonormalization stage (coordinator priority, 2026-11-10): `BAANDI_ORTHO`
+
+Trigger: dev08 stage profile (MKL, new defaults, si32 strict): orthonormalize is the largest non-H Davidson stage (33.1 percent T=1, 34.5 T=8; standard 36 / 45). The cost is streaming the basis: each projection pass reads Q twice (overlap Q^T X and apply Q S), and every append runs two passes.
+
+Implemented (dft-solvers real_davidson.rs, `Projection::run_into`; default off, bit-identical when off):
+- `BAANDI_ORTHO=dgks`: the second projection pass against the basis (and its in-block MGS) runs only if some column of the block kept less than 1/sqrt(2) of its unit input norm after the first pass, or was dropped (Daniel-Gragg-Kaufman-Stewart). Rounding class, NOT bit-identical (the skipped pass changes the appended vectors at rounding).
+- `BAANDI_ORTHO=dgks:<ratio>`, ratio in [1e-3, 1]: same rule with a looser keep ratio. After one classical pass the remaining overlap with the basis is about eps sqrt(m)/ratio relative (about 4e-14 at ratio 0.1, m = 408), far below the 1e-12 orthogonality gate that every contraction checks (a failing gate rebuilds the basis, so the fallback is automatic). The ratio is a numerical-analysis bound, not a material parameter. Rounding class.
+- Counters in `convergence.work.ortho` (`second_pass_skipped`, `second_pass_repeated`) show how often the rule fired.
+
+Mac observations (pure Rust, T=1, seed 601, one run each; counts exact):
+- `dgks` (1/sqrt 2): fires rarely (si16 15 skipped / 138 repeated, si32 10 / 303): Davidson corrections usually lose more than 30 percent of their norm to the basis. Diagonalization si32 18.88 -> 18.50 s.
+- `dgks:0.1`: si16 138 / 15, si32 256 / 56; diagonalization si32 18.76 -> 16.05 s (-14 percent), wall 22.78 -> 19.81 s; with `BAANDI_MGS=blocked` (the MKL default) 17.36 -> 15.55 s (-10 percent). Energy within 4.4e-13 Ha, SCF 12, Davidson 307-308 + 18, H 4908-4909 + 443 (unchanged within one iteration).
+- `dgks:0.01`: si32 302 / 11 skipped, diagonalization 16.19 s (no further gain over 0.1).
+- Variants (b) fused single-column overlap/apply and (c) other basis-streaming cuts: not implemented; with `dgks:0.1` most appends already stream the basis twice instead of four times.
+
+dev08 arms (same cells, seeds and clauses as above): OFF, `BAANDI_ORTHO=dgks`, `BAANDI_ORTHO=dgks:0.1`, MKL and pure builds, si16/si32 strict and standard, T=1 and T=8; report `convergence.work.ortho`, the orthonormalize stage time (`BAANDI_DAVIDSON_STAGES=on` runs), contraction and restart counts, certificate verdicts. Correctness clause 3 (rounding class) applies; additionally every run must keep the same convergence outcome and no contraction may fail its orthogonality gate more often than OFF.

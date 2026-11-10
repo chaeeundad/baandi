@@ -1425,6 +1425,46 @@ struct Projection {
     /// WIDE-DOT (opt-in `BAANDI_WIDE_DOT=on`, default off): the in-block MGS
     /// dot products use eight lane accumulators (`dot_wide`), rounding class.
     wide: bool,
+    /// ORTHO-DGKS (opt-in `BAANDI_ORTHO=dgks`, default off; rounding class):
+    /// the second projection pass against the basis runs only when a column of
+    /// the block lost more than 1 - 1/sqrt(2) of its norm in the first pass (or
+    /// a column was dropped). Skipping it saves two of the four streams of the
+    /// basis per append.
+    dgks: Option<f64>,
+}
+/// DGKS keep ratio: one pass suffices when every column kept at least this
+/// fraction of its unit input norm.
+const DGKS_KEEP: f64 = std::f64::consts::FRAC_1_SQRT_2;
+/// `BAANDI_ORTHO=dgks` (keep ratio 1/sqrt(2)) or `dgks:<ratio>` with a ratio
+/// in [1e-3, 1] (after one classical pass the residual overlap with the basis
+/// is about eps sqrt(m) / ratio relative, so 1e-3 still stays below the 1e-12
+/// orthogonality gate of the contraction); anything else: always two passes.
+fn dgks_keep() -> Option<f64> {
+    let value = std::env::var("BAANDI_ORTHO").ok()?;
+    if value == "dgks" {
+        return Some(DGKS_KEEP);
+    }
+    let ratio: f64 = value.strip_prefix("dgks:")?.parse().ok()?;
+    (1e-3..=1.0).contains(&ratio).then_some(ratio)
+}
+#[derive(Clone, Copy)]
+enum OrthoCount {
+    Skipped = 0,
+    Repeated = 1,
+}
+static ORTHO_COUNTS: [std::sync::atomic::AtomicUsize; 2] = [
+    std::sync::atomic::AtomicUsize::new(0),
+    std::sync::atomic::AtomicUsize::new(0),
+];
+fn ortho_add(c: OrthoCount, n: usize) {
+    ORTHO_COUNTS[c as usize].fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+}
+/// ORTHO-DGKS counters of this process: (second passes skipped, repeated).
+pub fn ortho_counters() -> (usize, usize) {
+    (
+        ORTHO_COUNTS[0].load(std::sync::atomic::Ordering::Relaxed),
+        ORTHO_COUNTS[1].load(std::sync::atomic::Ordering::Relaxed),
+    )
 }
 impl Projection {
     #[cfg(test)]
@@ -1450,6 +1490,7 @@ impl Projection {
                 _ => dft_numerics::MKL_BACKEND,
             },
             wide: std::env::var("BAANDI_WIDE_DOT").as_deref() == Ok("on"),
+            dgks: dgks_keep(),
             column: vec![0.; n],
         })
     }
@@ -1489,7 +1530,15 @@ impl Projection {
             )
         })?;
         let against = against.filter(|q| q.cols() > 0);
+        let mut skip_second = false;
         for pass in 0..if against.is_some() { 2 } else { 1 } {
+            if pass > 0 && skip_second {
+                // ORTHO-DGKS: the first pass kept every column with at least
+                // 1/sqrt(2) of its (unit) input norm, so a second projection
+                // cannot be needed (Daniel-Gragg-Kaufman-Stewart criterion).
+                ortho_add(OrthoCount::Skipped, 1);
+                break;
+            }
             if pass > 0 {
                 // Both buffers have the same capacity; the previous MGS result
                 // becomes input, and the old input storage becomes output.
@@ -1536,6 +1585,7 @@ impl Projection {
                 })?;
             }
             let mut kept = 0;
+            let mut min_len = f64::INFINITY;
             if self.blocked {
                 // Panels of BLOCK_COLUMNS columns: two block projections against
                 // the kept columns (GEMM), then the same two-pass MGS and rank
@@ -1602,6 +1652,7 @@ impl Projection {
                         }
                         let len = norm(&self.column);
                         finite(&[len])?;
+                        min_len = min_len.min(len);
                         if len > DEPENDENCE_TOLERANCE {
                             for (dst, &src) in column_mut(&mut self.output, kept)
                                 .iter_mut()
@@ -1627,6 +1678,7 @@ impl Projection {
                     }
                     let len = norm(&self.column);
                     finite(&[len])?;
+                    min_len = min_len.min(len);
                     // Same relative rank floor as complex MGS; no CholeskyQR2.
                     if len > DEPENDENCE_TOLERANCE {
                         for (dst, &src) in column_mut(&mut self.output, kept)
@@ -1637,6 +1689,15 @@ impl Projection {
                         }
                         kept += 1;
                     }
+                }
+            }
+            if pass == 0
+                && against.is_some()
+                && let Some(keep) = self.dgks
+            {
+                skip_second = kept == count && min_len >= keep;
+                if !skip_second {
+                    ortho_add(OrthoCount::Repeated, 1);
                 }
             }
             count = kept;
@@ -1901,6 +1962,47 @@ impl Random {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// ORTHO-DGKS: skipping the second pass keeps the block orthonormal and
+    /// orthogonal to the basis to rounding; a block that loses most of its norm
+    /// still gets the second pass. Classic and blocked MGS.
+    #[test]
+    fn dgks_projection_stays_orthonormal() {
+        let n = 301;
+        for blocked in [false, true] {
+            for (mix, expect_repeat) in [(0.0, false), (0.999, true)] {
+                let mut ws =
+                    RealGemmWorkspace::with_pool(n, 24, WorkerPool::new(1).unwrap()).unwrap();
+                let mut projection = Projection::new(n, 24).unwrap();
+                projection.blocked = blocked;
+                let q = projection
+                    .run(&Random(3).block(n, 12).unwrap(), None, &mut ws)
+                    .unwrap();
+                let mut x = Random(9).block(n, 5).unwrap();
+                // Optionally make the block nearly lie in span(q).
+                for j in 0..5 {
+                    for i in 0..n {
+                        x[(i, j)] = (1. - mix) * x[(i, j)] + mix * q[(i, j)];
+                    }
+                }
+                let plain = projection.run(&x, Some(&q), &mut ws).unwrap();
+                projection.dgks = Some(DGKS_KEEP);
+                let (skipped, repeated) = ortho_counters();
+                let fast = projection.run(&x, Some(&q), &mut ws).unwrap();
+                let (s2, r2) = ortho_counters();
+                if expect_repeat {
+                    assert!(r2 > repeated);
+                } else {
+                    assert!(s2 > skipped);
+                }
+                assert_eq!(fast.cols(), plain.cols());
+                let mut both = RealMatrix::zeros(n, q.cols() + fast.cols()).unwrap();
+                let split = q.as_slice().len();
+                both.as_mut_slice()[..split].copy_from_slice(q.as_slice());
+                both.as_mut_slice()[split..].copy_from_slice(fast.as_slice());
+                assert!(orthogonality_defect(&both) <= 1e-13, "{blocked} {mix}");
+            }
+        }
+    }
     /// WIDE-DOT agrees with the four-lane dot to rounding for every tail length.
     #[test]
     fn wide_dot_matches_dot_to_rounding() {

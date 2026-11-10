@@ -2494,7 +2494,14 @@ mod tests {
         let audit = problem
             .explicit_nonlocal_energy(&identity.k_points)
             .unwrap();
-        assert_eq!(audit.to_bits(), a.nonlocal.to_bits());
+        // NL_ENERGY_REAL (default on since the adoption rule) computes the step audit
+        // from a real projector GEMM; the explicit function sums complex projections:
+        // the two agree to rounding, not bit for bit.
+        assert!(
+            (audit - a.nonlocal).abs() < 1e-13,
+            "{audit:e} {:e}",
+            a.nonlocal
+        );
 
         let off = make().run().unwrap();
         let mut on = make();

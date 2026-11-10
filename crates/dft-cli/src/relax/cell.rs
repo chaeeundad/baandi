@@ -362,6 +362,7 @@ pub(super) fn execute(
                 consecutive: 0,
                 status: "running".into(),
                 failures: initial_failures,
+                extrapolation: Vec::new(),
             },
         }
     };
@@ -758,6 +759,9 @@ mod tests {
                 step_length_bohr: 0.,
                 scf_iterations: 0,
                 provenance: "analytic oracle".into(),
+                scf_h_vectors: None,
+                start_fallback: None,
+                start_clipped_fraction: None,
             }
         };
         for dofs in [Dofs::Full, Dofs::Isotropic, Dofs::XyzDiagonal] {

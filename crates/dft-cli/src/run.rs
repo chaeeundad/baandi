@@ -514,10 +514,29 @@ pub fn execute_mode(
     }
     let electrons = problem.electron_count();
     let setup = start.elapsed().as_secs_f64();
+    let ladder = crate::config::Scf::cutoff_ladder(config.scf.as_ref())
+        .map_err(|e| error(1, e.to_string()))?;
+    let mut ladder_report = None;
     let outcome = if mode.observe || mode.agent {
         crate::telemetry::drive(problem, mode, &out)?
     } else {
-        match problem.run_outcome() {
+        let run = match ladder {
+            Some(fraction) => dft_engine::cutoff_ladder::run_ladder(
+                problem,
+                &refs,
+                &dft_engine::cutoff_ladder::CutoffLadderOptions {
+                    fraction,
+                    ..Default::default()
+                },
+                true,
+            )
+            .map(|l| {
+                ladder_report = Some(l.report);
+                l.outcome
+            }),
+            None => problem.run_outcome(),
+        };
+        match run {
             Ok(outcome) => outcome,
             Err(e) => {
                 if (density_floor.is_some() || opts.standard.is_some() || opts.hartree_mixing)
@@ -613,6 +632,19 @@ pub fn execute_mode(
         "threading":{"threads":opts.threads.max(1),"threads_requested":opts.threads,"threads_used":opts.threads.max(1),"outer_threads":opts.threads.max(1).min(r.k_points.len()),"inner_threads":opts.threads.max(1),"backend":"persistent Rayon pool shared by k points and fixed inner pieces; sequential faer and serial FFT per worker"},
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
+    if let Some(l) = &ladder_report {
+        result["cutoff_ladder"] = json!({
+            "used":l.used,"fallback_reason":l.fallback_reason,"fraction":l.fraction,
+            "coarse_cutoff_ha":l.coarse_cutoff_hartree,"coarse_fft_grid":l.coarse_grid,
+            "fine_fft_grid":l.fine_grid,"coarse_plane_waves":l.coarse_plane_waves,
+            "fine_plane_waves":l.fine_plane_waves,"coarse_iterations":l.coarse_iterations,
+            "coarse_final_density_residual":l.coarse_final_density_residual,
+            "coarse_davidson_iterations":l.coarse_davidson_iterations,
+            "coarse_h_vectors":l.coarse_h_vectors,"coarse_start_h_vectors":l.coarse_start_h_vectors,
+            "coarse_h_full_grid_equivalents":l.coarse_h_equivalents(),
+            "coarse_setup_s":l.coarse_setup.as_secs_f64(),"coarse_stage_s":l.coarse_time.as_secs_f64(),
+            "note":"coarse stage supplies the start only; convergence, energy audit and certificate are at the full cutoff (history and work above are full-cutoff only)"});
+    }
     if let Some(c) = &r.energy_identity {
         // B2 (BAANDI_ENERGY_IDENTITY=on): history energies of non-final iterations
         // use the band-sum identity; the final energy is the explicit audit.

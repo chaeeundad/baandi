@@ -32,6 +32,114 @@ pub struct Fixed {
 fn all_components() -> [bool; 3] {
     [true; 3]
 }
+/// C3 start-state predictor between ionic steps (ions mode only). The SCF
+/// density is split as n = n_at(R) + d, with n_at the superposition of atomic
+/// charges that moves rigidly with the atoms; only the bonding part d is
+/// carried over (first order) or extrapolated along the ionic path (second
+/// order). `none` keeps the plain previous-density warm transfer bit-identical.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Extrapolation {
+    #[default]
+    None,
+    FirstOrder,
+    SecondOrder,
+}
+impl Extrapolation {
+    /// `BAANDI_RELAX_EXTRAPOLATION` (none, first_order, second_order) overrides
+    /// the input file for A/B runs.
+    fn effective(self) -> Result<Self, RunError> {
+        match std::env::var("BAANDI_RELAX_EXTRAPOLATION").as_deref() {
+            Err(_) => Ok(self),
+            Ok("none") => Ok(Self::None),
+            Ok("first_order") => Ok(Self::FirstOrder),
+            Ok("second_order") => Ok(Self::SecondOrder),
+            Ok(_) => Err(error(
+                1,
+                "BAANDI_RELAX_EXTRAPOLATION must be none, first_order or second_order",
+            )),
+        }
+    }
+}
+/// One accepted ionic step of the predictor history: Cartesian positions and
+/// the bonding part d = n_scf - n_at on the FFT grid.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HistoryEntry {
+    positions: Vec<f64>,
+    bonding: Vec<f64>,
+}
+/// Predicted bonding density for the next step from up to three previous
+/// steps (newest last). Second order fits the new displacement s = R_new - R_k
+/// by a u + b v with u = R_k - R_{k-1}, v = R_{k-1} - R_{k-2} (least squares)
+/// and applies the same combination to d. A Gram determinant below 1e-10 of
+/// |u|^2 |v|^2 (nearly parallel steps) drops the v term. Returns the predicted
+/// d and the start kind.
+fn predict(
+    history: &[HistoryEntry],
+    new_positions: &[f64],
+    mode: Extrapolation,
+) -> Option<(Vec<f64>, &'static str)> {
+    let k = history.last()?;
+    if mode == Extrapolation::FirstOrder || history.len() == 1 {
+        return Some((k.bonding.clone(), "extrapolated_first_order"));
+    }
+    let dot = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(x, y)| x * y).sum::<f64>();
+    let diff = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(x, y)| x - y).collect::<Vec<_>>();
+    let k1 = &history[history.len() - 2];
+    let s = diff(new_positions, &k.positions);
+    let u = diff(&k.positions, &k1.positions);
+    let uu = dot(&u, &u);
+    if uu == 0. {
+        return Some((k.bonding.clone(), "extrapolated_first_order"));
+    }
+    let (a, b) = if history.len() >= 3 {
+        let k2 = &history[history.len() - 3];
+        let v = diff(&k1.positions, &k2.positions);
+        let (vv, uv, su, sv) = (dot(&v, &v), dot(&u, &v), dot(&s, &u), dot(&s, &v));
+        let det = uu * vv - uv * uv;
+        if vv > 0. && det > 1e-10 * uu * vv {
+            ((su * vv - sv * uv) / det, (sv * uu - su * uv) / det)
+        } else {
+            (su / uu, 0.)
+        }
+    } else {
+        (dot(&s, &u) / uu, 0.)
+    };
+    let mut d = k.bonding.clone();
+    for ((x, now), before) in d.iter_mut().zip(&k.bonding).zip(&k1.bonding) {
+        *x += a * (now - before);
+    }
+    if b != 0. {
+        let k2 = &history[history.len() - 3];
+        for ((x, now), before) in d.iter_mut().zip(&k1.bonding).zip(&k2.bonding) {
+            *x += b * (now - before);
+        }
+    }
+    Some((d, "extrapolated_second_order"))
+}
+/// Append d = n_scf - n_at of an accepted step (at most three kept). Without
+/// n_at (predictor off, or no atomic charge data) the history is cleared, so a
+/// later prediction never mixes steps across a gap.
+fn push_history(
+    history: &mut Vec<HistoryEntry>,
+    positions: &[f64],
+    density: &[f64],
+    n_at: Option<Vec<f64>>,
+) {
+    match n_at {
+        Some(n_at) if n_at.len() == density.len() => {
+            if history.len() == 3 {
+                history.remove(0);
+            }
+            history.push(HistoryEntry {
+                positions: positions.to_vec(),
+                bonding: density.iter().zip(&n_at).map(|(n, a)| n - a).collect(),
+            });
+        }
+        _ => history.clear(),
+    }
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
@@ -49,6 +157,8 @@ pub struct Settings {
     pub max_displacement_bohr: f64,
     pub trust_radius_bohr: f64,
     pub warm_start: bool,
+    /// C3 predictor; acts only with `warm_start` in ions mode. Default none.
+    pub start_extrapolation: Extrapolation,
     pub fixed: Vec<Fixed>,
 }
 impl Default for Settings {
@@ -68,6 +178,7 @@ impl Default for Settings {
             max_displacement_bohr: 0.2,
             trust_radius_bohr: 0.2,
             warm_start: true,
+            start_extrapolation: Extrapolation::None,
             fixed: vec![],
         }
     }
@@ -128,6 +239,16 @@ struct Frame {
     step_length_bohr: f64,
     scf_iterations: usize,
     provenance: String,
+    /// H vector applications of this step's SCF (solves plus certificates).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scf_h_vectors: Option<usize>,
+    /// Why a requested extrapolated start was replaced by the plain warm density.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    start_fallback: Option<String>,
+    /// Charge fraction removed by clipping negative samples of an extrapolated
+    /// start (then renormalised); absent when nothing was clipped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    start_clipped_fraction: Option<f64>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -140,7 +261,12 @@ struct Restart {
     consecutive: usize,
     status: String,
     failures: Vec<Value>,
+    /// C3 predictor history (at most three entries); empty when extrapolation is off.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    extrapolation: Vec<HistoryEntry>,
 }
+/// Frame, converged density and (C3) the atomic superposition at its positions.
+type Evaluated = (Frame, Vec<f64>, Option<Vec<f64>>);
 struct Context {
     config: Config,
     cell: Cell,
@@ -169,15 +295,24 @@ impl Context {
             .collect()
     }
     fn problem(&self) -> Result<ScfProblem, RunError> {
+        self.problem_with(false)
+    }
+    /// `atomic` also builds the atomic-charge superposition (C3 predictor). It
+    /// sets only the cold start density, which a warm transfer replaces.
+    fn problem_with(&self, atomic: bool) -> Result<ScfProblem, RunError> {
         let points = self.config.resolved_points().map_err(|e| error(1, e))?;
+        let mut opts = self.opts.clone();
+        if atomic {
+            opts.start_density = dft_engine::StartDensity::Atomic;
+        }
         let mut p = if self.config.basis.legacy_gamma() {
-            ScfProblem::new(&self.cell, &self.atoms(), &self.refs(), self.opts.clone())
+            ScfProblem::new(&self.cell, &self.atoms(), &self.refs(), opts)
         } else {
             ScfProblem::with_kpoints(
                 &self.cell,
                 &self.atoms(),
                 &self.refs(),
-                self.opts.clone(),
+                opts,
                 &points,
                 dft_engine::OccupationPolicy::Insulator {
                     minimum_gap_hartree: 1e-7,
@@ -205,17 +340,81 @@ impl Context {
         warm: Option<(&ScfProblem, &[f64])>,
         settings: &Settings,
     ) -> Result<(Frame, Vec<f64>), RunError> {
-        let problem = self.problem()?;
+        self.evaluate_with(positions, length, warm, None, false, settings)
+            .map(|(frame, density, _)| (frame, density))
+    }
+    /// `predicted`: bonding density d and start kind for a C3 start
+    /// n_at(R_new) + d (used only with a warm transfer); `atomic`: also return
+    /// n_at at these positions for the predictor history.
+    fn evaluate_with(
+        &self,
+        positions: Vec<f64>,
+        length: f64,
+        warm: Option<(&ScfProblem, &[f64])>,
+        predicted: Option<(&[f64], &'static str)>,
+        atomic: bool,
+        settings: &Settings,
+    ) -> Result<Evaluated, RunError> {
+        let atomic_here = atomic && warm.is_some();
+        let problem = self.problem_with(atomic_here)?;
+        let n_at: Option<Vec<f64>> = if !atomic {
+            None
+        } else if atomic_here {
+            problem
+                .atomic_superposition_density()
+                .map(|a| a.iter().copied().collect())
+        } else {
+            // A cold evaluation keeps its own start; n_at is built aside.
+            self.problem_with(true)?
+                .atomic_superposition_density()
+                .map(|a| a.iter().copied().collect())
+        };
         let mut density = problem.uniform_density();
         let mut session =
             ScfSession::new(problem, CompletionMode::Strict, ExecutionConfig::default())
                 .map_err(|e| error(4, e))?;
+        let mut provenance = if warm.is_some() {
+            "warm_transfer"
+        } else {
+            "fresh"
+        };
+        let mut start_fallback = None;
+        let mut start_clipped_fraction = None;
         if let Some((source, values)) = warm {
             if values.len() != density.len() {
                 return Err(error(4, "warm_transfer: density size mismatch"));
             }
             for (d, v) in density.iter_mut().zip(values) {
                 *d = *v;
+            }
+            if let Some((bonding, kind)) = predicted {
+                match &n_at {
+                    Some(n_at) if n_at.len() == bonding.len() && n_at.len() == density.len() => {
+                        // Project onto the feasible set the same way the atomic
+                        // start does: clip negative samples, restore the charge.
+                        let mut start: Vec<f64> =
+                            n_at.iter().zip(bonding).map(|(a, d)| a + d).collect();
+                        let total: f64 = start.iter().sum();
+                        let negative: f64 = start.iter().filter(|v| **v < 0.).sum();
+                        start.iter_mut().for_each(|v| *v = v.max(0.));
+                        let kept: f64 = start.iter().sum();
+                        if total.is_finite() && total > 0. && kept > 0. {
+                            for (d, v) in density.iter_mut().zip(&start) {
+                                *d = v * (total / kept);
+                            }
+                            provenance = kind;
+                            if negative < 0. {
+                                start_clipped_fraction = Some(-negative / total);
+                            }
+                        } else {
+                            start_fallback = Some("extrapolated density not finite".to_string());
+                        }
+                    }
+                    Some(_) => start_fallback = Some("predictor size mismatch".into()),
+                    None => {
+                        start_fallback = Some("no atomic charge density (PP_RHOATOM)".into());
+                    }
+                }
             }
             if settings.mode == cell::Mode::Ions {
                 session.initialize_density_transfer(source, &density)
@@ -304,14 +503,23 @@ impl Context {
             max_force_ha_bohr: projected.iter().map(|v| v.abs()).fold(0., f64::max),
             step_length_bohr: length,
             scf_iterations: state.history.len(),
-            provenance: if warm.is_some() {
-                "warm_transfer"
-            } else {
-                "fresh"
-            }
-            .into(),
+            provenance: provenance.into(),
+            scf_h_vectors: Some(
+                state
+                    .history
+                    .iter()
+                    .map(|h| {
+                        h.operator_applications
+                            + h.fixed_point_certificate
+                                .as_ref()
+                                .map_or(0, |c| c.operator_applications)
+                    })
+                    .sum(),
+            ),
+            start_fallback,
+            start_clipped_fraction,
         };
-        Ok((frame, state.density.iter().copied().collect()))
+        Ok((frame, state.density.iter().copied().collect(), n_at))
     }
 }
 // Decimal JSON parsing need not preserve binary64. Encode every floating state
@@ -418,7 +626,8 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
     if config.compat.reference() {
         return Err(error(1, crate::config::REFERENCE_SCOPE));
     }
-    let settings = config.relax.clone().unwrap_or_default();
+    let mut settings = config.relax.clone().unwrap_or_default();
+    settings.start_extrapolation = settings.start_extrapolation.effective()?;
     settings.validate(config.system.atoms.len())?;
     let opts = options(&config)?;
     if opts.standard.is_some()
@@ -536,6 +745,7 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
         return cell::execute(ctx, settings, identity, out, resume);
     }
     let n = ctx.config.system.atoms.len() * 3;
+    let extrapolate = settings.warm_start && settings.start_extrapolation != Extrapolation::None;
     let restart_path = out.join("restart.json");
     let mut state = if resume {
         load(&restart_path, &identity, n)?
@@ -549,14 +759,14 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
             .collect();
         let mut failures = Vec::new();
         let initial = ctx
-            .evaluate(positions.clone(), 0., None, &settings)
+            .evaluate_with(positions.clone(), 0., None, None, extrapolate, &settings)
             .or_else(|e| {
                 failures.push(
                     json!({"step":0,"attempt":1,"positions_bohr":positions,"reason":e.to_string()}),
                 );
-                ctx.evaluate(positions.clone(), 0., None, &settings)
+                ctx.evaluate_with(positions.clone(), 0., None, None, extrapolate, &settings)
             });
-        let (frame, density) = match initial {
+        let (frame, density, n_at) = match initial {
             Ok(v) => v,
             Err(e) => {
                 failures.push(
@@ -570,6 +780,8 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
                 return Err(e);
             }
         };
+        let mut extrapolation = Vec::new();
+        push_history(&mut extrapolation, &frame.positions, &density, n_at);
         Restart {
             version: 1,
             identity,
@@ -579,6 +791,7 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
             consecutive: 0,
             status: "running".into(),
             failures,
+            extrapolation,
         }
     };
     ctx.position(&state.frames.last().unwrap().fractional);
@@ -628,15 +841,34 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
                 .fold(0., f64::max);
             let warm = (attempt == 0 && settings.warm_start)
                 .then_some((&source, state.density.as_slice()));
-            match ctx.evaluate(positions.clone(), length, warm, &settings) {
-                Ok((frame, density)) => {
-                    accepted = Some((frame, density, attempt));
+            let predicted = if extrapolate && warm.is_some() {
+                predict(
+                    &state.extrapolation,
+                    &positions,
+                    settings.start_extrapolation,
+                )
+            } else {
+                None
+            };
+            match ctx.evaluate_with(
+                positions.clone(),
+                length,
+                warm,
+                predicted.as_ref().map(|(d, kind)| (d.as_slice(), *kind)),
+                extrapolate,
+                &settings,
+            ) {
+                Ok((frame, density, n_at)) => {
+                    accepted = Some((frame, density, n_at, attempt));
                     break;
                 }
                 Err(e) => state.failures.push(json!({"step":state.frames.len(),"attempt":attempt+1,"positions_bohr":positions,"fractional":fractional,"reason":e.to_string()})),
             }
         }
-        if let Some((frame, density, attempt)) = accepted {
+        if let Some((frame, density, n_at, attempt)) = accepted {
+            if extrapolate {
+                push_history(&mut state.extrapolation, &frame.positions, &density, n_at);
+            }
             let delta = frame.energy_ha - last.energy_ha;
             if frame.max_force_ha_bohr < settings.force_tol_ha_bohr
                 && delta.abs() < settings.energy_tol_ha
@@ -865,4 +1097,83 @@ fn outputs(
         state.status
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod extrapolation_tests {
+    use super::*;
+    /// A bonding density linear in the positions, d = d0 + M R (four grid samples).
+    fn bonding(r: &[f64]) -> Vec<f64> {
+        let m = [[0.3, -0.2], [1.1, 0.4], [-0.7, 0.9], [0.05, -0.6]];
+        let d0 = [0.01, -0.02, 0.03, 0.0];
+        (0..4)
+            .map(|g| d0[g] + m[g][0] * r[0] + m[g][1] * r[1])
+            .collect()
+    }
+    fn entry(r: [f64; 2]) -> HistoryEntry {
+        HistoryEntry {
+            positions: r.to_vec(),
+            bonding: bonding(&r),
+        }
+    }
+    #[test]
+    fn second_order_is_exact_when_the_step_lies_in_the_span_of_the_last_two() {
+        // A curved ionic path R(t) = (t, t^2/2): s = R(3) - R(2) lies in the span
+        // of u = R(2) - R(1) and v = R(1) - R(0), so the fit is exact and the
+        // prediction equals d(R(3)) up to rounding.
+        let path = |t: f64| [t, 0.5 * t * t];
+        let history: Vec<_> = (0..3).map(|t| entry(path(t as f64))).collect();
+        let (d, kind) = predict(&history, &path(3.), Extrapolation::SecondOrder).unwrap();
+        assert_eq!(kind, "extrapolated_second_order");
+        for (p, e) in d.iter().zip(bonding(&path(3.))) {
+            assert!((p - e).abs() < 1e-12, "{p} vs {e}");
+        }
+        // First order carries d_k unchanged.
+        let (d1, kind1) = predict(&history, &path(3.), Extrapolation::FirstOrder).unwrap();
+        assert_eq!(kind1, "extrapolated_first_order");
+        assert_eq!(d1, history[2].bonding);
+    }
+    #[test]
+    fn short_or_degenerate_histories_reduce_the_order() {
+        assert!(predict(&[], &[0., 0.], Extrapolation::SecondOrder).is_none());
+        let one = [entry([0., 0.])];
+        let (d, kind) = predict(&one, &[1., 0.], Extrapolation::SecondOrder).unwrap();
+        assert_eq!(
+            (d, kind),
+            (one[0].bonding.clone(), "extrapolated_first_order")
+        );
+        // Two steps on a straight line: one-term fit, exact for linear d.
+        let two = [entry([0., 0.]), entry([1., 1.])];
+        let (d, _) = predict(&two, &[2.5, 2.5], Extrapolation::SecondOrder).unwrap();
+        for (p, e) in d.iter().zip(bonding(&[2.5, 2.5])) {
+            assert!((p - e).abs() < 1e-12);
+        }
+        // Three collinear steps: the Gram determinant vanishes, the v term is
+        // dropped and the one-term fit is still exact.
+        let three = [entry([0., 0.]), entry([1., 0.]), entry([3., 0.])];
+        let (d, _) = predict(&three, &[4., 0.], Extrapolation::SecondOrder).unwrap();
+        for (p, e) in d.iter().zip(bonding(&[4., 0.])) {
+            assert!((p - e).abs() < 1e-12);
+        }
+        // A repeated position falls back to first order.
+        let same = [entry([1., 0.]), entry([1., 0.])];
+        let (_, kind) = predict(&same, &[2., 0.], Extrapolation::SecondOrder).unwrap();
+        assert_eq!(kind, "extrapolated_first_order");
+    }
+    #[test]
+    fn history_keeps_three_and_clears_without_atomic_density() {
+        let mut h = Vec::new();
+        for i in 0..5 {
+            push_history(&mut h, &[i as f64], &[1., 2.], Some(vec![0.5, 0.5]));
+        }
+        assert_eq!(h.len(), 3);
+        assert_eq!(h[0].positions, vec![2.]);
+        assert_eq!(h[2].bonding, vec![0.5, 1.5]);
+        push_history(&mut h, &[9.], &[1., 2.], None);
+        assert!(h.is_empty());
+        let settings: Settings = toml::from_str("start_extrapolation = \"second_order\"").unwrap();
+        assert_eq!(settings.start_extrapolation, Extrapolation::SecondOrder);
+        assert_eq!(Settings::default().start_extrapolation, Extrapolation::None);
+        assert!(toml::from_str::<Settings>("start_extrapolation = \"cubic\"").is_err());
+    }
 }

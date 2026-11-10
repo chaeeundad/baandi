@@ -77,6 +77,20 @@ Frame provenance is `warm_transfer`, never exact SCF replay; `warm_start=false`
 uses fresh SCFs throughout. The additive engine entry point is
 `ScfSession::initialize_density_transfer(source_problem, initial_density)`.
 
+Optional start extrapolation (C3, ions mode with `warm_start=true`):
+`start_extrapolation = "none"` (default, the transfer above), `"first_order"` or
+`"second_order"`, overridden by `BAANDI_RELAX_EXTRAPOLATION`. The transferred
+density becomes n_at(R_new) + d, where n_at is the superposition of the UPF
+atomic charges (`PP_RHOATOM`) and d = n_scf - n_at of the previous step (first
+order) or its least-squares extrapolation along the last three ionic steps
+(second order). Negative samples of the prediction are clipped and the charge
+restored (`start_clipped_fraction` per frame); without atomic charges the plain
+density is used (`start_fallback`). Provenance is `extrapolated_first_order` or
+`extrapolated_second_order`; certificates and forces are unchanged. The history
+is stored in restart.json, so a same-build resume is exact. Every frame records
+`scf_h_vectors`. Evidence and dev08 request:
+`docs/performance/requests/c3-ionic-extrapolation.md`.
+
 If a candidate SCF fails or exhausts its budget, the driver retries exactly once
 from a fresh density at half the proposed displacement from the last good state.
 If that also fails, the result status is `failed`, the failure records retain

@@ -1089,6 +1089,15 @@ impl ScfSession {
             .map(|o| &o.result.density)
             .or_else(|| self.continuation.as_ref().map(|c| &c.n))
     }
+    /// C1 ladder hand-off: next input density and warm orbitals at an active boundary.
+    pub(crate) fn warm_state(&self) -> Option<(&Array3<f64>, Option<&[ComplexMatrix]>)> {
+        self.continuation
+            .as_ref()
+            .map(|c| (&c.n, c.previous.as_deref()))
+    }
+    pub(crate) fn problem_ref(&self) -> &ScfProblem {
+        &self.problem
+    }
     pub fn events(&mut self) -> Option<&mut EventQueue> {
         self.events.as_mut()
     }

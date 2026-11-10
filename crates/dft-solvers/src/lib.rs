@@ -1,4 +1,6 @@
 //! Backend-independent dense and matrix-free Hermitian eigensolvers.
+mod bordered;
+pub mod davidson_stages;
 pub mod distributed;
 pub mod distributed_davidson;
 pub mod distributed_fft;

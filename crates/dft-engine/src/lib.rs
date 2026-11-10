@@ -46,7 +46,10 @@ pub use dft_solvers::locking::Locking;
 
 pub mod gamma_real;
 pub mod parallel;
-pub use dft_solvers::real_davidson::second_vector_columns;
+pub use dft_solvers::real_davidson::{
+    WIDTH_LABELS as DAVIDSON_WIDTH_LABELS, b1_counters, b5_counters, second_vector_columns,
+    stage_seconds,
+};
 pub use gamma_real::{GammaReal, GammaRealDiagnostics};
 
 /// Research radial conventions; default variants retain the legacy path.

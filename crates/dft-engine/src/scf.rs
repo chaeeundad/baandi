@@ -1785,25 +1785,12 @@ impl ScfProblem {
         // eigen tolerance is above the floor 0.1 * eigen_tolerance (every step except
         // the last ones and the certificate re-solve) only the occupied bands are
         // converged strictly; the first empty band takes the buffer threshold.
-        let occupied_count = self.occupations.iter().filter(|&&f| f > 0.0).count();
-        let first_empty_strict = !(empty_loose()
-            && self.options.standard.is_none()
-            && tolerance > 0.1 * self.options.eigen_tolerance * (1.0 + 1e-9));
-        let policy = BandTolerances {
-            strict_bands: (occupied_count + usize::from(first_empty_strict))
-                .min(self.occupations.len())
-                .max(1),
-            buffer_tolerance: if self.options.standard.is_some() {
-                StandardProfile::empty_threshold(tolerance)
-            } else if empty_loose() && tolerance > 0.1 * self.options.eigen_tolerance * (1.0 + 1e-9)
-            {
-                // BAANDI_BUFFER_TOL (default 1e-3): the buffer floor in steps above the
-                // tolerance floor.
-                tolerance.max(buffer_loose_floor())
-            } else {
-                tolerance.max(1e-5)
-            },
-        };
+        let policy = band_tolerances(
+            self.occupations.iter().filter(|&&f| f > 0.0).count(),
+            self.occupations.len(),
+            tolerance,
+            &self.options,
+        );
         // A single k point still has an intra-k budget. Keep its complete solve
         // resident on that pool, so each band/GEMM phase does not enter from
         // the external caller and wait on a LockLatch again.
@@ -2193,6 +2180,33 @@ impl ScfProblem {
             });
         }
         Ok(Some(gap))
+    }
+}
+/// Band-tolerance policy shared by every Davidson driver (unpolarized, collinear
+/// spin, finite temperature): occupied bands strict; in steps whose eigen
+/// tolerance is above its floor (0.1 x eigen_tolerance) the first empty band takes
+/// the buffer threshold (EMPTY_LOOSE) and the buffer floor is BUFFER_TOL; the
+/// standard profile uses its own empty-state threshold.
+pub(crate) fn band_tolerances(
+    occupied_count: usize,
+    bands: usize,
+    tolerance: f64,
+    options: &ScfOptions,
+) -> BandTolerances {
+    let intermediate = empty_loose()
+        && options.standard.is_none()
+        && tolerance > 0.1 * options.eigen_tolerance * (1.0 + 1e-9);
+    BandTolerances {
+        strict_bands: (occupied_count + usize::from(!intermediate))
+            .min(bands)
+            .max(1),
+        buffer_tolerance: if options.standard.is_some() {
+            StandardProfile::empty_threshold(tolerance)
+        } else if intermediate {
+            tolerance.max(buffer_loose_floor())
+        } else {
+            tolerance.max(1e-5)
+        },
     }
 }
 /// Empty-band looseness: default ON since the adoption rule (dev08 EMPTY-LOOSE:

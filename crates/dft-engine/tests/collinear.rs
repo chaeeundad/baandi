@@ -161,11 +161,9 @@ fn zero_moment_reduces_to_same_unpolarized_functional() {
         );
         assert!(de <= 1e-10);
         assert!(dn <= 1e-9);
-        // Reduction rule: the energy and density agree to the tolerances above; the
-        // iteration counts differ by at most 3 because the unpolarized driver now has
-        // the adopted speed defaults (loose first empty and buffer bands in
-        // intermediate steps, B1, DGKS ...) that the spin driver does not use.
-        assert!(r.history.len().abs_diff(u.history.len()) <= 3);
+        // Frozen reduction rule: at most one iteration for independent rounding
+        // and the additional spin/strict-empty-band convergence gate.
+        assert!(r.history.len().abs_diff(u.history.len()) <= 1);
     }
 }
 #[test]

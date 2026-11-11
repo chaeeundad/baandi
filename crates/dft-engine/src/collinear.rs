@@ -328,10 +328,12 @@ impl CollinearProblem {
                 block_size: bands,
                 seed: p.options.seed,
             };
-            let policy = BandTolerances {
-                strict_bands: (p.occupations.iter().filter(|&&f| f > 0.0).count() + 1).min(bands),
-                buffer_tolerance: tolerance.max(1e-5),
-            };
+            let policy = crate::scf::band_tolerances(
+                p.occupations.iter().filter(|&&f| f > 0.0).count(),
+                bands,
+                tolerance,
+                &p.options,
+            );
             for (((v, &ion), &h), &x) in self
                 .effective
                 .iter_mut()

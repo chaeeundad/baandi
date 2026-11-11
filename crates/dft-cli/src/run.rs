@@ -646,7 +646,7 @@ pub fn execute_mode(
                 "second_vector_columns":dft_engine::second_vector_columns(),
                 "davidson_stages":davidson_stages_json(),
                 "b1":b1_json(),
-                "b5":{"mode":dft_numerics::switches::text(dft_numerics::switches::Id::B5).unwrap_or("off"),"bordered":dft_engine::b5_counters().bordered,"declined":dft_engine::b5_counters().declined,"full":dft_engine::b5_counters().full},
+                "b5":{"mode":dft_numerics::switches::choice(dft_numerics::switches::Id::B5),"bordered":dft_engine::b5_counters().bordered,"declined":dft_engine::b5_counters().declined,"full":dft_engine::b5_counters().full},
                 "ortho":{"mode":dft_numerics::switches::text(dft_numerics::switches::Id::ORTHO).unwrap_or("dgks:0.1 (default)"),"second_pass_skipped":dft_engine::ortho_counters().0,"second_pass_repeated":dft_engine::ortho_counters().1},
                 "algebra_stream":algebra_stream_json(),
                 "h_vectors_recorded":r.history.iter().map(|h|h.operator_applications).sum::<usize>(),
@@ -1138,8 +1138,8 @@ fn davidson_stages_json() -> serde_json::Value {
 fn b1_json() -> serde_json::Value {
     let c = dft_engine::b1_counters();
     json!({
-        "mode":dft_numerics::switches::text(dft_numerics::switches::Id::B1).unwrap_or("off"),
-        "sketch":dft_numerics::switches::text(dft_numerics::switches::Id::B1_SKETCH).unwrap_or("dense"),
+        "mode":dft_numerics::switches::choice(dft_numerics::switches::Id::B1),
+        "sketch":dft_numerics::switches::choice(dft_numerics::switches::Id::B1_SKETCH),
         "solves":c.solves,"narrow_iterations":c.narrow_iterations,"full_iterations":c.full_iterations,
         "narrow_columns":c.narrow_columns,"avoided_columns":c.avoided_columns,"fallbacks":c.fallbacks,
         "sketch_estimates":c.sketch_estimates,"sketch_disagreements":c.sketch_disagreements

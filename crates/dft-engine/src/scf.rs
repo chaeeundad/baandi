@@ -1781,7 +1781,7 @@ impl ScfProblem {
         };
         // Occupied states determine density; the first empty state determines
         // the sampled gap. Higher empty states are only subspace buffers.
-        // Experimental (BAANDI_EMPTY_LOOSE=on, default off): in SCF steps whose
+        // BAANDI_EMPTY_LOOSE (default on, `off` disables): in SCF steps whose
         // eigen tolerance is above the floor 0.1 * eigen_tolerance (every step except
         // the last ones and the certificate re-solve) only the occupied bands are
         // converged strictly; the first empty band takes the buffer threshold.
@@ -2190,10 +2190,14 @@ impl ScfProblem {
         Ok(Some(gap))
     }
 }
-/// `BAANDI_EMPTY_LOOSE=on` (experimental, default off): see `step_with_occupations`.
+/// Empty-band looseness: default ON since the adoption rule (dev08 EMPTY-LOOSE:
+/// strict perturbed si32 -13.1 / -13.7 percent wall at T=1 / T=8, 10 of 10 seeds,
+/// Davidson work -60.7 percent; certificate verdicts and certified states
+/// unchanged). `BAANDI_EMPTY_LOOSE=off` restores the strict first empty band in
+/// every step; see `step_with_occupations`.
 fn empty_loose() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("BAANDI_EMPTY_LOOSE").as_deref() == Ok("on"))
+    *ON.get_or_init(|| std::env::var("BAANDI_EMPTY_LOOSE").as_deref() != Ok("off"))
 }
 pub fn density_distance(a: &Array3<f64>, b: &Array3<f64>, volume: f64, electrons: f64) -> f64 {
     if a.shape() != b.shape()

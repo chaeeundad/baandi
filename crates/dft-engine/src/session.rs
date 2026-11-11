@@ -396,7 +396,7 @@ impl ScfSession {
             // 0.1 is an empirical scheduling coefficient in atomic units.
             history
                 .last()
-                .map_or(1e-2, |r| 0.1 * r.density_residual)
+                .map_or(1e-2, |r| schedule_factor() * r.density_residual)
                 .min(1e-2)
                 .max(0.1 * self.problem.options.eigen_tolerance)
         } else {
@@ -1551,5 +1551,19 @@ fn growth_reset_limit() -> Option<f64> {
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .filter(|v| v.is_finite() && *v > 1.0)
+    })
+}
+
+/// Coefficient of the residual-driven eigen tolerance schedule (tolerance =
+/// factor x density residual). Default 0.1 (the established empirical value);
+/// `BAANDI_EIGEN_FACTOR=<x>` (0.001 to 1) is an experiment switch for dev08 A/B.
+fn schedule_factor() -> f64 {
+    static FACTOR: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
+    *FACTOR.get_or_init(|| {
+        std::env::var("BAANDI_EIGEN_FACTOR")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && (1e-3..=1.0).contains(v))
+            .unwrap_or(0.1)
     })
 }

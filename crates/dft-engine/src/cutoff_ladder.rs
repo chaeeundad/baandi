@@ -14,13 +14,28 @@
 //!
 //! The result of the calculation is the full-cutoff session's: its energy audit,
 //! eigenpairs and fixed-point certificate are all at the full cutoff; the coarse
-//! stage supplies only the start state (density and warm orbitals). The mixer
-//! history starts empty at the full cutoff (histories do not translate between
-//! bases).
+//! stage supplies only the start state (density and warm orbitals). By default
+//! the mixer history starts empty at the full cutoff: absolute (input, residual)
+//! pairs do not translate between the two maps, whose fixed points differ.
+//!
+//! S2 (`secant_pairs > 0`, `BAANDI_LADDER_SECANT`, default off): the DIFFERENCE
+//! pairs of the coarse Pulay history do translate to first order (dr_i is the
+//! response of the residual map to dx_i, dominated by the low-G dielectric
+//! response that the coarse grid holds). The last h of them are prolonged with
+//! the same exact Fourier embedding as the density and seeded into the fine
+//! mixer as a closed block of differences (never differenced against a fine
+//! pair). The first fine step is a plain evaluation at the prolonged density;
+//! its mix uses the seeded least squares with the unchanged spectral cut, and
+//! the seeds age out first as fine differences arrive.
 //!
 //! Scope: one exact Gamma point on the real (ORC) path, fixed uniform integer
-//! occupations, no symmetry projector, no frozen-Miller strain reference, strict
-//! profile only. Everything else runs the ordinary SCF with a recorded reason.
+//! occupations, no symmetry projector, no frozen-Miller strain reference. The
+//! strict profile always; the standard profile only with `standard = true`
+//! (`BAANDI_CUTOFF_LADDER_STANDARD=on`, S1, default off): its coarse stage runs
+//! the standard profile at E1 (uncertified, stopped by the same residual rule)
+//! and the full-cutoff standard session is unchanged except for the first-step
+//! eigen tolerance (`StandardSeed`). Everything else runs the ordinary SCF with
+//! a recorded reason.
 //!
 //! General rule for the coarse level (no per-system constant): E1 is a stated
 //! fraction of the full cutoff (default 0.5, the design's pre-registered arm);
@@ -31,6 +46,19 @@ use super::*;
 use crate::checkpoint::{ElectronicState, Orbitals};
 use std::collections::HashMap;
 
+/// First-step eigen tolerance of the full-cutoff standard session after a
+/// ladder hand-off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StandardSeed {
+    /// The ratchet cap, exactly as a cold standard session (the first-iteration
+    /// redo rule then tightens it if the start is already good).
+    Cap,
+    /// The tolerance the coarse standard session would have used next:
+    /// ratchet(last coarse tolerance, last coarse Coulomb error, N_e). The fine
+    /// session's own ratchet takes over from its first record.
+    Coarse,
+}
+
 /// Ladder controls. Off unless a caller runs `run_ladder`.
 #[derive(Clone, Debug)]
 pub struct CutoffLadderOptions {
@@ -40,24 +68,62 @@ pub struct CutoffLadderOptions {
     pub coarse_density_residual: f64,
     /// Budget of coarse iterations; the state reached is handed off either way.
     pub coarse_max_iterations: usize,
+    /// S1: the standard profile is eligible (`BAANDI_CUTOFF_LADDER_STANDARD=on`;
+    /// default off).
+    pub standard: bool,
+    /// S1: first-step tolerance rule of the fine standard session
+    /// (`BAANDI_LADDER_STANDARD_SEED=cap|coarse`; default coarse).
+    pub standard_seed: StandardSeed,
+    /// S2: number h of coarse Pulay difference pairs prolonged into the fine
+    /// mixer; 0 is off (`BAANDI_LADDER_SECANT=off|on|<h>`, on means 4; default off).
+    pub secant_pairs: usize,
+}
+fn env_switch(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_ascii_lowercase())
 }
 impl Default for CutoffLadderOptions {
+    /// Pre-registered values (fraction 0.5, residual 1e-4, budget 30) and the
+    /// S1/S2 experiment switches read from the environment (an invalid value
+    /// means off / the default).
     fn default() -> Self {
         Self {
-            fraction: 0.5,
-            coarse_density_residual: 1e-4,
-            coarse_max_iterations: 30,
+            standard: env_switch("BAANDI_CUTOFF_LADDER_STANDARD").as_deref() == Some("on"),
+            standard_seed: match env_switch("BAANDI_LADDER_STANDARD_SEED").as_deref() {
+                Some("cap") => StandardSeed::Cap,
+                _ => StandardSeed::Coarse,
+            },
+            secant_pairs: match env_switch("BAANDI_LADDER_SECANT").as_deref() {
+                Some("on") => 4,
+                Some(v) => v.parse().ok().filter(|h| *h <= 64).unwrap_or(0),
+                None => 0,
+            },
+            ..Self::baseline()
         }
     }
 }
 impl CutoffLadderOptions {
+    /// The pre-registered ladder with both experiment switches off (no
+    /// environment read): the strict-only ladder as adopted.
+    pub fn baseline() -> Self {
+        Self {
+            fraction: 0.5,
+            coarse_density_residual: 1e-4,
+            coarse_max_iterations: 30,
+            standard: false,
+            standard_seed: StandardSeed::Coarse,
+            secant_pairs: 0,
+        }
+    }
     pub fn validate(&self) -> Result<(), ScfError> {
         if !(self.fraction.is_finite() && self.fraction > 0.0 && self.fraction < 1.0)
             || !(self.coarse_density_residual.is_finite() && self.coarse_density_residual > 0.0)
             || self.coarse_max_iterations == 0
+            || self.secant_pairs > 64
         {
             return Err(ScfError::InvalidInput(
-                "cutoff_ladder: fraction in (0,1), positive residual and budget required",
+                "cutoff_ladder: fraction in (0,1), positive residual and budget, secant <= 64 required",
             ));
         }
         Ok(())
@@ -87,6 +153,15 @@ pub struct CutoffLadderReport {
     pub coarse_start_h_vectors: usize,
     pub coarse_setup: Duration,
     pub coarse_time: Duration,
+    /// The full-cutoff session runs the standard profile (S1).
+    pub standard: bool,
+    /// First-step eigen tolerance given to the fine standard session (Ha);
+    /// None means the cap (cold-start rule).
+    pub standard_seed_ha: Option<f64>,
+    /// S2: requested and seeded difference pairs, and why none were seeded.
+    pub secant_requested: usize,
+    pub secant_seeded: usize,
+    pub secant_fallback: Option<String>,
 }
 impl CutoffLadderReport {
     /// Coarse H columns scaled by the FFT grid ratio (H cost per column is
@@ -116,7 +191,7 @@ pub fn ineligibility(problem: &ScfProblem, ladder: &CutoffLadderOptions) -> Opti
     if o.gamma_real == crate::GammaReal::Off {
         return Some("gamma_real off".into());
     }
-    if o.standard.is_some() {
+    if o.standard.is_some() && !ladder.standard {
         return Some("standard profile".into());
     }
     if o.locking != dft_solvers::locking::Locking::Off
@@ -240,13 +315,24 @@ fn coarse_problem(
     Ok(coarse)
 }
 
+/// What the coarse stage hands to the full cutoff.
+struct CoarseState {
+    density: Array3<f64>,
+    orbitals: ComplexMatrix,
+    basis: PlaneWaveBasis,
+    /// Pulay memory of the coarse session (only when S2 asks for it).
+    mixer: Option<crate::checkpoint::MixerState>,
+    /// Standard profile: the tolerance the coarse ratchet would use next.
+    standard_next: Option<f64>,
+}
+
 /// Coarse stage: drive the ordinary session at E1 and return its next input
 /// density and the warm orbitals of its last solve.
 fn coarse_stage(
     coarse: ScfProblem,
     ladder: &CutoffLadderOptions,
     report: &mut CutoffLadderReport,
-) -> Result<(Array3<f64>, ComplexMatrix, PlaneWaveBasis), ScfError> {
+) -> Result<CoarseState, ScfError> {
     let basis = coarse.states[0].basis.clone();
     let mut session = ScfSession::new(
         coarse,
@@ -281,6 +367,20 @@ fn coarse_stage(
         })
         .sum();
     report.coarse_start_h_vectors = session.problem_ref().atomic_start.initial_h_applications;
+    let standard_next = history.last().and_then(|r| {
+        r.standard_error_ha.map(|e| {
+            StandardProfile::ratchet(
+                r.requested_eigen_tolerance,
+                e,
+                session.problem_ref().electrons,
+            )
+        })
+    });
+    let mixer = if ladder.secant_pairs > 0 {
+        session.mixer_state()
+    } else {
+        None
+    };
     let (density, orbitals) = match session.warm_state() {
         Some((n, Some(orbitals))) if orbitals.len() == 1 => (n.clone(), orbitals[0].clone()),
         _ => {
@@ -294,7 +394,54 @@ fn coarse_stage(
             )
         }
     };
-    Ok((density, orbitals, basis))
+    Ok(CoarseState {
+        density,
+        orbitals,
+        basis,
+        mixer,
+        standard_next,
+    })
+}
+
+/// Prolonged difference pairs (dx_i, dr_i), oldest first.
+type SecantPairs = (Vec<Vec<f64>>, Vec<Vec<f64>>);
+
+/// S2: the last `h` difference pairs (dx, dr) of the coarse Pulay memory,
+/// oldest first, each prolonged to the fine grid by the exact Fourier
+/// embedding. Differences are formed inside the coarse history only.
+fn prolonged_secant_pairs(
+    mixer: Option<&crate::checkpoint::MixerState>,
+    coarse_dims: [usize; 3],
+    fine_dims: [usize; 3],
+    h: usize,
+) -> Result<SecantPairs, String> {
+    let Some(crate::checkpoint::MixerState::Pulay(state)) = mixer else {
+        return Err("coarse mixer is not plain Pulay".into());
+    };
+    let size = coarse_dims.iter().product::<usize>();
+    let pairs = state.inputs.len().min(state.residuals.len());
+    if pairs < 2 {
+        return Err("coarse history has no difference pair".into());
+    }
+    let first = (pairs - 1).saturating_sub(h);
+    let prolong = |a: &[f64], b: &[f64]| -> Result<Vec<f64>, String> {
+        if a.len() != size || b.len() != size {
+            return Err("coarse history size differs from the coarse grid".into());
+        }
+        let d = Array3::from_shape_vec(coarse_dims, a.iter().zip(b).map(|(x, y)| x - y).collect())
+            .map_err(|e| e.to_string())?;
+        Ok(prolong_density(&d, fine_dims)
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .collect())
+    };
+    let mut dx = Vec::with_capacity(pairs - 1 - first);
+    let mut dr = Vec::with_capacity(pairs - 1 - first);
+    for i in first..pairs - 1 {
+        dx.push(prolong(&state.inputs[i + 1], &state.inputs[i])?);
+        dr.push(prolong(&state.residuals[i + 1], &state.residuals[i])?);
+    }
+    Ok((dx, dr))
 }
 
 /// Result of a ladder run: the full-cutoff outcome and the coarse-stage report.
@@ -313,6 +460,8 @@ pub fn run_ladder(
     retain_last: bool,
 ) -> Result<LadderOutcome, ScfError> {
     let mut report = CutoffLadderReport {
+        standard: fine.options.standard.is_some(),
+        secant_requested: ladder.secant_pairs,
         fraction: ladder.fraction,
         coarse_cutoff_hartree: fine.options.cutoff_hartree * ladder.fraction,
         fine_grid: fine.grid.dims(),
@@ -330,24 +479,89 @@ pub fn run_ladder(
             report.coarse_setup = setup.elapsed();
             report.coarse_grid = coarse.grid.dims();
             report.coarse_plane_waves = coarse.states[0].basis.vectors().len();
-            coarse_stage(coarse, ladder, &mut report)
-                .and_then(|(n, c, basis)| hand_off(&fine, &basis, &n, &c))
+            coarse_stage(coarse, ladder, &mut report).and_then(|c| {
+                hand_off(&fine, &c.basis, &c.density, &c.orbitals).map(|state| (state, c))
+            })
         }
         Err(e) => Err(e),
     };
-    report.coarse_time = setup.elapsed();
-    let electronic = match start {
-        Ok(state) => {
+    let (electronic, seeds) = match start {
+        Ok((state, coarse)) => {
             report.used = true;
-            Some(state)
+            if fine.options.standard.is_some() && ladder.standard_seed == StandardSeed::Coarse {
+                report.standard_seed_ha = coarse.standard_next;
+            }
+            let seeds = if ladder.secant_pairs > 0 {
+                match prolonged_secant_pairs(
+                    coarse.mixer.as_ref(),
+                    report.coarse_grid,
+                    fine.grid.dims(),
+                    ladder.secant_pairs,
+                ) {
+                    Ok(pairs) => Some(pairs),
+                    Err(reason) => {
+                        report.secant_fallback = Some(reason);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            (Some(state), seeds)
         }
         Err(e) => {
             report.fallback_reason = Some(format!("coarse stage: {e}"));
-            None
+            (None, None)
         }
     };
-    let outcome = direct_min::finish(fine, electronic.as_ref(), retain_last)?;
+    report.coarse_time = setup.elapsed();
+    let Some(electronic) = electronic else {
+        let outcome = direct_min::finish(fine, None, retain_last)?;
+        return Ok(LadderOutcome { outcome, report });
+    };
+    let outcome = finish_from(fine, &electronic, seeds, retain_last, &mut report)?;
     Ok(LadderOutcome { outcome, report })
+}
+
+/// `direct_min::finish` from the prolonged state, plus the optional S1
+/// standard first-step tolerance and S2 mixer seeds (each recorded; a rejected
+/// seed is a recorded fallback, never an error). Only the session's own
+/// convergence rule ends the run.
+fn finish_from(
+    fine: ScfProblem,
+    start: &ElectronicState,
+    seeds: Option<SecantPairs>,
+    retain_last: bool,
+    report: &mut CutoffLadderReport,
+) -> Result<ScfOutcome, ScfError> {
+    if report.standard_seed_ha.is_none() && seeds.is_none() {
+        return direct_min::finish(fine, Some(start), retain_last);
+    }
+    let completion = if retain_last {
+        CompletionMode::RetainLast
+    } else {
+        CompletionMode::Strict
+    };
+    let mut session = ScfSession::new(fine, completion, crate::events::ExecutionConfig::default())?;
+    session.initialize_electronic(start)?;
+    if let Some(t) = report.standard_seed_ha {
+        session.seed_standard_tolerance(t)?;
+    }
+    if let Some((dx, dr)) = seeds {
+        match session.seed_mixer_differences(&dx, &dr) {
+            Ok(()) => report.secant_seeded = dx.len(),
+            Err(e) => report.secant_fallback = Some(e.to_string()),
+        }
+    }
+    while session.step()?.status == StepStatus::Ready {}
+    if !retain_last && session.result().is_none() {
+        return Err(ScfError::NotConverged {
+            history: session.history().to_vec(),
+        });
+    }
+    session
+        .into_result()
+        .ok_or(ScfError::InvalidInput("result unavailable"))
 }
 
 /// Prolonged density and orbitals as the start state of the full-cutoff session,

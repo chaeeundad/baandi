@@ -346,5 +346,12 @@ import (`initialize_electronic`) with the unchanged strict session. Only the
 full-cutoff certificate converges; ineligible problems run `direct_min::finish`
 with a recorded reason. Session accessors `warm_state`/`problem_ref` are
 crate-private and read-only. Fast gates: `cargo test -p dft-engine --test cutoff_ladder`.
+S1/S2 switches (default off, `CutoffLadderOptions::baseline()` reads no environment):
+`standard` makes the standard profile eligible (fine first-step tolerance via
+`seed_standard_tolerance`); `secant_pairs` seeds the fine Pulay mixer through
+`seed_mixer_differences` (closed block of prolonged coarse differences, carried
+by `PulayState.seed_dx/seed_dr`). A pending standard seed makes an exact
+checkpoint reject before the first step. Count bench (ignored, release):
+`cargo test --release -p dft-engine --test cutoff_ladder ladder_standard_secant_bench -- --ignored --nocapture --test-threads=1`.
 `ScfProblem::atomic_superposition_density` (C3 relax predictor) exposes the
 atomic start density built with `start_density = Atomic`; no arithmetic changed.

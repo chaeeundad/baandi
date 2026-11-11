@@ -323,6 +323,18 @@ pub trait MixerHistory: DensityMixer {
     fn used_raw_recovery(&self) -> bool {
         false
     }
+    /// Seed an empty history with difference pairs from a related map (see
+    /// `PulayMixer::seed_differences`). Mixers without that memory reject.
+    fn seed_differences(
+        &mut self,
+        _dx: &[Vec<f64>],
+        _dr: &[Vec<f64>],
+        _mean: f64,
+    ) -> Result<(), SolverError> {
+        Err(SolverError::InvalidParameter(
+            "mixer does not accept seeded differences",
+        ))
+    }
 }
 impl MixerHistory for crate::mixing::LinearMixer {
     fn checkpoint(&self) -> Result<MixerState, SolverError> {
@@ -352,6 +364,14 @@ impl MixerHistory for PulayMixer {
 
     fn history_len(&self) -> usize {
         self.history_len()
+    }
+    fn seed_differences(
+        &mut self,
+        dx: &[Vec<f64>],
+        dr: &[Vec<f64>],
+        mean: f64,
+    ) -> Result<(), SolverError> {
+        PulayMixer::seed_differences(self, dx, dr, mean)
     }
 }
 impl<P: ResidualPreconditioner> MixerHistory for PreconditionedPulay<P> {

@@ -929,6 +929,10 @@ wire_struct!(PulayState, WPulayState {
     inputs: Vec<Vec<f64>>,
     residuals: Vec<Vec<f64>>,
     mean: Option<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    seed_dx: Vec<Vec<f64>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    seed_dr: Vec<Vec<f64>>,
 });
 wire_struct!(MixingDiagnostics, WMixingDiagnostics {
     residual_norm: f64,

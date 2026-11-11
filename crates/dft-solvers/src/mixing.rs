@@ -66,6 +66,12 @@ pub struct PulayMixer {
     metric_vectors: Vec<Vec<f64>>,
     metric_r: Vec<f64>,
     pairs: Vec<(Vec<f64>, Vec<f64>)>,
+    /// Seeded difference pairs (dx, dr), oldest first, from another map (the
+    /// cutoff-ladder hand-off). They are stored as differences and form a closed
+    /// block: no difference is ever formed between a seed and an absolute pair,
+    /// so a cross-map difference never enters the Gram matrix. They precede the
+    /// window differences and age out first (seeds + window <= capacity).
+    seeds: Vec<(Vec<f64>, Vec<f64>)>,
     mean: Option<f64>,
 }
 /// A positive semidefinite density metric. Applies its symmetric kernel to
@@ -81,6 +87,7 @@ impl Clone for PulayMixer {
             beta: self.beta,
             capacity: self.capacity,
             pairs: self.pairs.clone(),
+            seeds: self.seeds.clone(),
             mean: self.mean,
             metric: self.metric.as_ref().map(|m| m.duplicate()),
             metric_vectors: self.metric_vectors.clone(),
@@ -102,6 +109,7 @@ impl PulayMixer {
             metric_vectors: Vec::new(),
             metric_r: Vec::new(),
             pairs: Vec::new(),
+            seeds: Vec::new(),
             mean: None,
         })
     }
@@ -112,6 +120,47 @@ impl PulayMixer {
     pub fn history_len(&self) -> usize {
         self.pairs.len()
     }
+    /// Number of seeded difference pairs still in the window.
+    pub fn seeded_len(&self) -> usize {
+        self.seeds.len()
+    }
+    /// Seed an EMPTY history with difference pairs (dx_i, dr_i), oldest first,
+    /// taken from a related map (secant recycling across the cutoff-ladder
+    /// hand-off). `mean` is the prescribed density mean of the coming `mix`
+    /// calls. At most `capacity` pairs are kept (the newest). The seeds enter the
+    /// least squares like ordinary differences (same spectral cut) and are
+    /// dropped oldest first as new differences arrive.
+    pub fn seed_differences(
+        &mut self,
+        dx: &[Vec<f64>],
+        dr: &[Vec<f64>],
+        mean: f64,
+    ) -> Result<(), SolverError> {
+        let size = dx.first().map_or(0, Vec::len);
+        if !self.pairs.is_empty()
+            || !self.seeds.is_empty()
+            || dx.len() != dr.len()
+            || !mean.is_finite()
+            || mean <= 0.0
+            || size == 0
+            || dx
+                .iter()
+                .chain(dr)
+                .any(|v| v.len() != size || v.iter().any(|x| !x.is_finite()))
+        {
+            return Err(SolverError::InvalidParameter(
+                "seed_differences: empty history, equal finite pairs and positive mean required",
+            ));
+        }
+        let skip = dx.len().saturating_sub(self.capacity);
+        self.seeds = dx[skip..]
+            .iter()
+            .cloned()
+            .zip(dr[skip..].iter().cloned())
+            .collect();
+        self.mean = Some(mean);
+        Ok(())
+    }
 }
 impl Default for PulayMixer {
     fn default() -> Self {
@@ -121,11 +170,15 @@ impl Default for PulayMixer {
 impl DensityMixer for PulayMixer {
     fn reset(&mut self) {
         self.pairs.clear();
+        self.seeds.clear();
         self.mean = None;
     }
     fn mix(&mut self, input: &[f64], output: &[f64], mean: f64) -> Result<Vec<f64>, SolverError> {
         validate(input, output, mean, self.beta)?;
-        if self.mean != Some(mean) || self.pairs.first().is_some_and(|p| p.0.len() != input.len()) {
+        if self.mean != Some(mean)
+            || self.pairs.first().is_some_and(|p| p.0.len() != input.len())
+            || self.seeds.first().is_some_and(|p| p.0.len() != input.len())
+        {
             self.reset();
         }
         self.mean = Some(mean);
@@ -140,22 +193,37 @@ impl DensityMixer for PulayMixer {
         if self.pairs.len() > self.capacity + 1 {
             self.pairs.remove(0);
         }
+        while !self.seeds.is_empty() && self.seeds.len() + self.pairs.len() - 1 > self.capacity {
+            self.seeds.remove(0);
+        }
         let mut next: Vec<_> = input
             .iter()
             .zip(&r)
             .map(|(a, r)| a + self.beta * r)
             .collect();
-        let m = self.pairs.len() - 1;
+        let m = self.seeds.len() + self.pairs.len() - 1;
         if m > 0 {
+            // Seeded differences first (older), then the window differences of the
+            // absolute pairs; never a difference between the two blocks.
             let dx: Vec<Vec<f64>> = self
-                .pairs
-                .windows(2)
-                .map(|p| p[1].0.iter().zip(&p[0].0).map(|(a, b)| a - b).collect())
+                .seeds
+                .iter()
+                .map(|s| s.0.clone())
+                .chain(
+                    self.pairs
+                        .windows(2)
+                        .map(|p| p[1].0.iter().zip(&p[0].0).map(|(a, b)| a - b).collect()),
+                )
                 .collect();
             let dr: Vec<Vec<f64>> = self
-                .pairs
-                .windows(2)
-                .map(|p| p[1].1.iter().zip(&p[0].1).map(|(a, b)| a - b).collect())
+                .seeds
+                .iter()
+                .map(|s| s.1.clone())
+                .chain(
+                    self.pairs
+                        .windows(2)
+                        .map(|p| p[1].1.iter().zip(&p[0].1).map(|(a, b)| a - b).collect()),
+                )
                 .collect();
             let dot = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(a, b)| a * b).sum::<f64>();
             let weighted = &mut self.metric_vectors;
@@ -293,6 +361,9 @@ pub struct PulayState {
     pub inputs: Vec<Vec<f64>>,
     pub residuals: Vec<Vec<f64>>,
     pub mean: Option<f64>,
+    /// Seeded difference pairs (oldest first); empty unless seeded.
+    pub seed_dx: Vec<Vec<f64>>,
+    pub seed_dr: Vec<Vec<f64>>,
 }
 impl PulayMixer {
     pub fn checkpoint(&self) -> PulayState {
@@ -302,6 +373,8 @@ impl PulayMixer {
             inputs: self.pairs.iter().map(|p| p.0.clone()).collect(),
             residuals: self.pairs.iter().map(|p| p.1.clone()).collect(),
             mean: self.mean,
+            seed_dx: self.seeds.iter().map(|p| p.0.clone()).collect(),
+            seed_dr: self.seeds.iter().map(|p| p.1.clone()).collect(),
         }
     }
     pub fn restore(&mut self, state: &PulayState, size: usize) -> Result<(), SolverError> {
@@ -310,11 +383,16 @@ impl PulayMixer {
             || state.inputs.len() != state.residuals.len()
             || state.inputs.len() > self.capacity.saturating_add(1)
             || state.mean.is_some_and(|v| !v.is_finite() || v <= 0.0)
-            || (!state.inputs.is_empty() && state.mean.is_none())
+            || ((!state.inputs.is_empty() || !state.seed_dx.is_empty()) && state.mean.is_none())
+            || state.seed_dx.len() != state.seed_dr.len()
+            || (!state.seed_dx.is_empty()
+                && state.seed_dx.len() + state.inputs.len().saturating_sub(1) > self.capacity)
             || state
                 .inputs
                 .iter()
                 .chain(&state.residuals)
+                .chain(&state.seed_dx)
+                .chain(&state.seed_dr)
                 .any(|v| v.len() != size || v.iter().any(|x| !x.is_finite()))
         {
             return Err(SolverError::InvalidParameter("invalid Pulay checkpoint"));
@@ -324,6 +402,12 @@ impl PulayMixer {
             .iter()
             .cloned()
             .zip(state.residuals.iter().cloned())
+            .collect();
+        self.seeds = state
+            .seed_dx
+            .iter()
+            .cloned()
+            .zip(state.seed_dr.iter().cloned())
             .collect();
         self.mean = state.mean;
         Ok(())
@@ -367,5 +451,141 @@ mod metric_tests {
         }
         p.restore(&state, 3).unwrap();
         assert_eq!(result, p.mix(&x1, &y1, 2.).unwrap());
+    }
+}
+
+#[cfg(test)]
+mod seed_tests {
+    use super::*;
+    /// Linear fixed-point map with three zero-mean modes (rates 0.2, 0.6, 0.9).
+    fn map(x: &[f64]) -> Vec<f64> {
+        let rates = [0.2, 0.6, 0.9, 0.9];
+        let mut y: Vec<_> = x
+            .iter()
+            .zip(rates)
+            .map(|(v, a)| 1.0 + a * (v - 1.0))
+            .collect();
+        // Keep the charge: the last sample absorbs the mean change.
+        let defect = y.iter().sum::<f64>() - x.iter().sum::<f64>();
+        y[3] -= defect;
+        y
+    }
+    fn residual(x: &[f64]) -> Vec<f64> {
+        map(x).iter().zip(x).map(|(a, b)| a - b).collect()
+    }
+    fn error(x: &[f64]) -> f64 {
+        x.iter().map(|v| (v - 1.0).abs()).fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn exact_seeds_of_the_same_map_reach_the_fixed_point_in_one_step() {
+        // Differences of the SAME linear map span its three modes, so the first
+        // seeded least squares is exact (Anderson on a linear map).
+        let probes = [
+            [1.3, 0.8, 1.1, 0.8],
+            [1.1, 1.2, 0.7, 1.0],
+            [0.9, 1.0, 1.25, 0.85],
+            [1.05, 0.9, 1.0, 1.05],
+        ];
+        let dx: Vec<Vec<f64>> = probes
+            .windows(2)
+            .map(|p| p[1].iter().zip(&p[0]).map(|(a, b)| a - b).collect())
+            .collect();
+        let dr: Vec<Vec<f64>> = probes
+            .windows(2)
+            .map(|p| {
+                residual(&p[1])
+                    .iter()
+                    .zip(residual(&p[0]))
+                    .map(|(a, b)| a - b)
+                    .collect()
+            })
+            .collect();
+        let start = [1.2, 0.85, 0.9, 1.05];
+        let mut seeded = PulayMixer::new(0.3, 6).unwrap();
+        seeded.seed_differences(&dx, &dr, 1.0).unwrap();
+        assert_eq!(seeded.seeded_len(), 3);
+        let one = seeded.mix(&start, &map(&start), 1.0).unwrap();
+        let mut cold = PulayMixer::new(0.3, 6).unwrap();
+        let cold_one = cold.mix(&start, &map(&start), 1.0).unwrap();
+        println!(
+            "seeded first-step error {:.3e}, cold {:.3e}",
+            error(&one),
+            error(&cold_one)
+        );
+        assert!(error(&one) < 1e-12);
+        assert!(error(&cold_one) > 1e-2);
+        assert!((one.iter().sum::<f64>() - 4.0).abs() < 1e-14);
+    }
+
+    #[test]
+    fn seeds_never_difference_against_new_pairs_and_age_out() {
+        // A seed that would be catastrophic if differenced against the first
+        // fine pair (huge absolute offset) has no effect: only its own dx, dr enter.
+        let mut p = PulayMixer::new(0.3, 3).unwrap();
+        let dx = vec![vec![0.1, -0.1, 0.0, 0.0], vec![0.0, 0.05, -0.05, 0.0]];
+        let dr = vec![vec![-0.08, 0.06, 0.02, 0.0], vec![0.0, -0.02, 0.0, 0.02]];
+        p.seed_differences(&dx, &dr, 1.0).unwrap();
+        let x0 = [1.2, 0.85, 0.9, 1.05];
+        let r0 = residual(&x0);
+        let out = p.mix(&x0, &map(&x0), 1.0).unwrap();
+        // Hand-computed least squares on the two seeds only.
+        let dot = |a: &[f64], b: &[f64]| a.iter().zip(b).map(|(x, y)| x * y).sum::<f64>();
+        let g = [
+            [dot(&dr[0], &dr[0]), dot(&dr[0], &dr[1])],
+            [dot(&dr[1], &dr[0]), dot(&dr[1], &dr[1])],
+        ];
+        let b = [dot(&dr[0], &r0), dot(&dr[1], &r0)];
+        let det = g[0][0] * g[1][1] - g[0][1] * g[1][0];
+        let gamma = [
+            (b[0] * g[1][1] - g[0][1] * b[1]) / det,
+            (g[0][0] * b[1] - g[1][0] * b[0]) / det,
+        ];
+        for i in 0..4 {
+            let expected = x0[i] + 0.3 * r0[i]
+                - gamma[0] * (dx[0][i] + 0.3 * dr[0][i])
+                - gamma[1] * (dx[1][i] + 0.3 * dr[1][i]);
+            assert!(
+                (out[i] - expected).abs() < 1e-13,
+                "{i}: {} {expected}",
+                out[i]
+            );
+        }
+        // Capacity 3: after the second fine pair (one fine difference) both seeds
+        // fit; the third pair (two differences) drops the oldest seed, etc.
+        let mut x = out;
+        let mut seen = vec![p.seeded_len()];
+        for _ in 0..4 {
+            let y = map(&x);
+            x = p.mix(&x, &y, 1.0).unwrap();
+            seen.push(p.seeded_len());
+        }
+        assert_eq!(seen, vec![2, 2, 1, 0, 0]);
+        // Checkpoint/restore carries the seeds exactly.
+        let mut q = PulayMixer::new(0.3, 3).unwrap();
+        q.seed_differences(&dx, &dr, 1.0).unwrap();
+        let state = q.checkpoint();
+        assert_eq!(state.seed_dx, dx);
+        let mut restored = PulayMixer::new(0.3, 3).unwrap();
+        restored.restore(&state, 4).unwrap();
+        assert_eq!(
+            q.mix(&x0, &map(&x0), 1.0).unwrap(),
+            restored.mix(&x0, &map(&x0), 1.0).unwrap()
+        );
+        // Seeding needs an empty history; reset and a changed mean clear seeds.
+        assert!(q.seed_differences(&dx, &dr, 1.0).is_err());
+        q.reset();
+        assert_eq!(q.seeded_len(), 0);
+        q.seed_differences(&dx, &dr, 1.0).unwrap();
+        q.mix(&[2.0; 4], &[2.0; 4], 2.0).unwrap();
+        assert_eq!(q.seeded_len(), 0);
+        // Mismatched or invalid seeds reject.
+        let mut r = PulayMixer::new(0.3, 3).unwrap();
+        assert!(r.seed_differences(&dx, &dr[..1], 1.0).is_err());
+        assert!(r.seed_differences(&dx, &dr, 0.0).is_err());
+        // More seeds than capacity keep the newest.
+        let many = vec![dx[0].clone(); 5];
+        r.seed_differences(&many, &many, 1.0).unwrap();
+        assert_eq!(r.seeded_len(), 3);
     }
 }

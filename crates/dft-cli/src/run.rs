@@ -645,6 +645,9 @@ pub fn execute_mode(
             "coarse_h_vectors":l.coarse_h_vectors,"coarse_start_h_vectors":l.coarse_start_h_vectors,
             "coarse_h_full_grid_equivalents":l.coarse_h_equivalents(),
             "coarse_setup_s":l.coarse_setup.as_secs_f64(),"coarse_stage_s":l.coarse_time.as_secs_f64(),
+            "standard":l.standard,"standard_seed_ha":l.standard_seed_ha,
+            "secant_requested":l.secant_requested,"secant_seeded":l.secant_seeded,
+            "secant_fallback":l.secant_fallback,
             "note":"coarse stage supplies the start only; convergence, energy audit and certificate are at the full cutoff (history and work above are full-cutoff only)"});
     }
     if let Some(c) = &r.energy_identity {

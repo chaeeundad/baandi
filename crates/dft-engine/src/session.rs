@@ -62,6 +62,9 @@ pub struct ScfSession {
     events: Option<EventQueue>,
     certificate_attempted: bool,
     spectral_report: Option<crate::SpectralReport>,
+    /// Standard profile only: eigen tolerance of the first step instead of the
+    /// cap (cutoff-ladder hand-off; set before the first step, crate-private).
+    standard_seed: Option<f64>,
 }
 impl ScfSession {
     pub(crate) fn prepare_boundary_policy(
@@ -186,6 +189,7 @@ impl ScfSession {
             state_version: 0,
             events,
             certificate_attempted: false,
+            standard_seed: None,
         })
     }
     pub fn initialize(&mut self) -> Result<(), ScfError> {
@@ -377,7 +381,8 @@ impl ScfSession {
         }
         let standard = self.problem.options.standard;
         let mut tolerance = if standard.is_some() {
-            let ordinary = history.last().map_or(StandardProfile::CAP_HA, |r| {
+            let first = self.standard_seed.unwrap_or(StandardProfile::CAP_HA);
+            let ordinary = history.last().map_or(first, |r| {
                 StandardProfile::ratchet(
                     r.requested_eigen_tolerance,
                     r.standard_error_ha.expect("standard history metric"),
@@ -1098,6 +1103,46 @@ impl ScfSession {
     pub(crate) fn problem_ref(&self) -> &ScfProblem {
         &self.problem
     }
+    /// Mixer memory of the current continuation (None before initialization or
+    /// for opaque mixers). Read-only; used by the cutoff ladder.
+    pub(crate) fn mixer_state(&self) -> Option<crate::checkpoint::MixerState> {
+        self.continuation
+            .as_ref()
+            .and_then(|c| c.mixer.checkpoint().ok())
+    }
+    /// Cutoff-ladder hand-off: seed the empty mixer of a just initialized session
+    /// with difference pairs (dx, dr) of a related map, oldest first.
+    pub(crate) fn seed_mixer_differences(
+        &mut self,
+        dx: &[Vec<f64>],
+        dr: &[Vec<f64>],
+    ) -> Result<(), ScfError> {
+        if self.status != StepStatus::Ready || self.iteration != 0 {
+            return Err(ScfError::InvalidInput(
+                "seed_mixer_differences: only before the first step",
+            ));
+        }
+        let mean = self.problem.electrons / self.problem.cell.volume_bohr3();
+        let c = self
+            .continuation
+            .as_mut()
+            .ok_or(ScfError::InvalidInput("seed_mixer_differences: no session"))?;
+        c.mixer
+            .seed_differences(dx, dr, mean)
+            .map_err(|e| ScfError::Numerical(format!("seed_mixer_differences: {e}")))
+    }
+    /// Cutoff-ladder hand-off: first-step eigen tolerance of the standard
+    /// profile (clamped to the ratchet's [floor, cap]). Ignored by strict.
+    pub(crate) fn seed_standard_tolerance(&mut self, tolerance: f64) -> Result<(), ScfError> {
+        if self.iteration != 0 || !tolerance.is_finite() || tolerance <= 0.0 {
+            return Err(ScfError::InvalidInput(
+                "seed_standard_tolerance: positive value before the first step",
+            ));
+        }
+        self.standard_seed =
+            Some(tolerance.clamp(StandardProfile::FLOOR_HA, StandardProfile::CAP_HA));
+        Ok(())
+    }
     pub fn events(&mut self) -> Option<&mut EventQueue> {
         self.events.as_mut()
     }
@@ -1220,6 +1265,10 @@ impl ScfSession {
                 return Err(Rejection::Boundary);
             }
             let c = self.continuation.as_ref().ok_or(Rejection::Boundary)?;
+            // A pending first-step standard seed is not part of checkpoint v1.
+            if self.standard_seed.is_some() && c.history.is_empty() {
+                return Err(Rejection::Boundary);
+            }
             Some(ContinuationState {
                 atomic_start: (self.problem.options.start_wavefunctions
                     == StartWavefunctions::Atomic)

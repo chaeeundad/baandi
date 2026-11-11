@@ -713,6 +713,14 @@ full-grid equivalents, seconds). Eligible only for one exact Gamma point on the
 real path with fixed uniform occupations, strict profile, no symmetry projector
 or strain reference, outside observe/agent modes; otherwise the ordinary SCF runs
 and the reason is recorded. Evidence: `docs/performance/requests/c1-cutoff-ladder.md`.
+Experiment switches (default off; `docs/performance/requests/ladder-standard-secant.md`):
+`BAANDI_CUTOFF_LADDER_STANDARD=on` makes the standard profile eligible (coarse
+stage in the standard profile, unchanged full-cutoff standard session; the first
+fine step uses the tolerance the coarse ratchet would use next, or the cap with
+`BAANDI_LADDER_STANDARD_SEED=cap`); `BAANDI_LADDER_SECANT=on|<h>` (on means 4)
+seeds the full-cutoff Pulay mixer with the last h coarse difference pairs,
+prolonged like the density. The block then also reports `standard`,
+`standard_seed_ha`, `secant_requested`, `secant_seeded` and `secant_fallback`.
 ### P7PC band accuracy fields
 
 `results.json.band_accuracy` describes the legacy first-k eigenvalue list.

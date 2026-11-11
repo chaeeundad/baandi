@@ -16,3 +16,5 @@ Ledger MPI-M1-GATE3: perturbed seeds 601-610 are the standard MPI scaling case (
 Ledger MPI-M1-GATE4: the distributed Davidson scales only 1.28x at 4 ranks; the replicated stages (24 percent of wall) are the smaller Amdahl term. Reduced matrix is now incremental and per-stage timers are in results.json `parallel.stages`; next measurement attributes the non-BLAS 21.8 s.
 
 Ledger MPI-M1-GATE5: M1 granularity limit found (column pairs divided over ranks with the remainder on the first ranks; late iterations apply few columns). Further scaling needs a distributed FFT (M2). Decision pending with the user: stop at M1 or invest in M2.
+
+Ledger MPI-SCALING-BEYOND-8: M2d reaches parity with threads at np=8 on one socket; beyond 8 ranks the replicated stages double per rank (memory-bandwidth sharing) and np=16 is 60 percent slower, on one socket as on two; the socket boundary and communication are not the cause. MPI work is frozen at M2d until a multi-node resource exists.

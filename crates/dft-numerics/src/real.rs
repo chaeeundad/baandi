@@ -214,12 +214,12 @@ impl RealGemmWorkspace {
             short,
             tiles,
             pack: vec![0.; short.div_ceil(4) * 4 * short],
-            kernel: match std::env::var("BAANDI_ROTATE_KERNEL").as_deref() {
-                Ok("blocked") => RotateKernel::Blocked,
+            kernel: match crate::switches::choice(crate::switches::Id::ROTATE_KERNEL) {
+                "blocked" => RotateKernel::Blocked,
                 _ => RotateKernel::Legacy,
             },
             #[cfg(feature = "mkl")]
-            dgemm_rotation: std::env::var("BAANDI_MKL_DGEMM").as_deref() != Ok("off"),
+            dgemm_rotation: crate::switches::on(crate::switches::Id::MKL_DGEMM),
             pool,
         })
     }
@@ -1503,7 +1503,7 @@ impl RealEighWorkspace {
         Ok(Self {
             capacity,
             #[cfg(feature = "mkl")]
-            mkl: (std::env::var("BAANDI_MKL_EVD").as_deref() != Ok("off"))
+            mkl: crate::switches::on(crate::switches::Id::MKL_EVD)
                 .then(|| dft_mkl::SymmetricEigen::new(capacity).ok())
                 .flatten(),
             diagonal: vec![0.; capacity],

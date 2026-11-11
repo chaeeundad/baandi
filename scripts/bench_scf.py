@@ -108,6 +108,13 @@ def run_case(binary, upf, key, repeats, threads=None, extra_toml=()):
         ph = r["timings"]["phases"]
         history = r["convergence"]["history"]
         certificates = [h["fixed_point_certificate"] for h in history if h.get("fixed_point_certificate")]
+        # Switch manifest (scf.switches): every BAANDI_* variable set for this run
+        # must be a known switch that the binary accepted from the environment.
+        switches = r.get("scf", {}).get("switches", {})
+        for name in sorted(k for k in os.environ if k.startswith("BAANDI_")):
+            entry = switches.get(name)
+            if switches and (entry is None or entry["source"] != "env"):
+                raise RuntimeError(f"{key}: {name} is set but results.json reports {entry}")
 
         return {"operator_applications": sum(h["operator_applications"] for h in history),
                 "davidson_iterations": sum(h["davidson_iterations"] for h in history),
@@ -118,7 +125,8 @@ def run_case(binary, upf, key, repeats, threads=None, extra_toml=()):
                 "engine_total_median_s": statistics.median(engines),
                 "phase_medians_s": {key: statistics.median(p[key] for p in phases) for key in ph},
                 "iterations": len(r["convergence"]["history"]), "total_energy_ha": r["total_energy"]["ha"],
-                "density_sha256": sha256(os.path.join(last, "density.bin"))}
+                "density_sha256": sha256(os.path.join(last, "density.bin")),
+                "switches_not_default": {n: e["value"] for n, e in switches.items() if e["source"] != "default"}}
 
 
 def main(argv):

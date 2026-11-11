@@ -93,7 +93,7 @@ pub enum MklPairPlan {
 #[cfg(feature = "mkl")]
 impl MklPairPlan {
     pub fn new(shape: [usize; 3], indices: &[[usize; 3]]) -> Result<Self, FftError> {
-        if std::env::var("BAANDI_PAIR_FFT").as_deref() == Ok("pruned") {
+        if crate::switches::choice(crate::switches::Id::PAIR_FFT) == "pruned" {
             Ok(Self::Pruned(PairFusedPlan::with_lanes(shape, indices)?))
         } else {
             Ok(Self::Grid(crate::fused::FusedPlan::new(shape, indices)?))
@@ -448,8 +448,8 @@ mod tests {
                 .sqrt();
             assert!(diff <= 1e-14 * norm, "{shape:?} density {diff:e}");
         }
-        // SAFETY of the environment read: tests in this module do not set it.
-        if std::env::var("BAANDI_PAIR_FFT").is_err() {
+        // The switch is read once per process; tests in this module do not set it.
+        if crate::switches::text(crate::switches::Id::PAIR_FFT).is_none() {
             assert!(matches!(
                 MklPairPlan::new([6, 6, 6], &[[0, 0, 0]]).unwrap(),
                 MklPairPlan::Grid(_)

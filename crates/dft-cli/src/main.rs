@@ -292,7 +292,7 @@ fn main() -> ExitCode {
         dft_engine::parallel::set_communicator(Some(std::sync::Arc::new(world)));
     }
     let code = real_main();
-    if std::env::var_os("BAANDI_DGEMM_TIMERS").is_some() {
+    if dft_numerics::switches::present(dft_numerics::switches::Id::DGEMM_TIMERS) {
         for (site, calls, nanos, flops) in dft_numerics::dgemm_site_report() {
             eprintln!(
                 "dgemm-timer {site} calls {calls} seconds {:.6} gflops_total {:.3}",

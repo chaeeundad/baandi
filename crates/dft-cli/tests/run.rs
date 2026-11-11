@@ -597,6 +597,21 @@ fn expressions_preserve_energy_and_record_resolutions() {
     c.text = c.text.replace("0.13,0.21,0.32", "0.25,0.21,0.32");
     status(&c.run("", Some(Path::new("plain"))), 0);
     let plain = c.json("plain", "results.json");
+    // Switch manifest (work order A1): the whole table, effective value and source.
+    let switches = plain["scf"]["switches"].as_object().unwrap();
+    assert_eq!(switches.len(), 38);
+    let ladder = &switches["BAANDI_CUTOFF_LADDER"];
+    assert_eq!(
+        (&ladder["value"], &ladder["source"]),
+        (&serde_json::json!("off"), &serde_json::json!("env"))
+    );
+    if std::env::var_os("BAANDI_BUFFER_TOL").is_none() {
+        let tol = &switches["BAANDI_BUFFER_TOL"];
+        assert_eq!(
+            (&tol["value"], &tol["source"]),
+            (&serde_json::json!(1e-3), &serde_json::json!("default"))
+        );
+    }
     let expected_keys = [
         "band_accuracy",
         "preflight",

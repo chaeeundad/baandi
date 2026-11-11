@@ -208,7 +208,31 @@ fn options_json(o: &ScfOptions) -> Value {
     if o.hartree_mixing || o.standard.is_some() {
         result["mixing_metric"] = json!(if o.hartree_mixing { "hartree" } else { "l2" });
     }
+    // Switch manifest (work order A1): every BAANDI_* switch with its effective
+    // value and source, so a result shows which combination produced it.
+    result["switches"] = switches_json();
     result
+}
+/// `scf.switches`: name -> {value, source, default, allowed, meaning}. Values are
+/// strings, numbers, booleans or null (null: unset override / two-pass ORTHO /
+/// no growth reset); source is `default`, `env`, or `invalid -> <fallback>`.
+fn switches_json() -> Value {
+    use dft_numerics::switches::{self, Value as V};
+    let mut m = serde_json::Map::new();
+    for e in switches::manifest() {
+        let value = match e.value {
+            V::Choice(s) => json!(s),
+            V::Number(x) => json!(x),
+            V::Raw(s) => json!(s),
+            V::Present(b) => json!(b),
+        };
+        m.insert(
+            e.switch.name.into(),
+            json!({"value":value,"source":e.source.as_str(),"default":e.switch.default,
+                "allowed":e.switch.allowed,"meaning":e.switch.meaning}),
+        );
+    }
+    Value::Object(m)
 }
 fn energy_json(e: &EnergyAudit) -> Value {
     let mut m = serde_json::Map::new();
@@ -546,7 +570,7 @@ pub fn execute_mode(
                     let history: Vec<_> = history.iter().map(history_json).collect();
                     let mut failure = json!({
                         "convergence":{"converged":false,"iterations":history.len(),"history":history},
-                        "failure":e.to_string()});
+                        "failure":e.to_string(),"scf":options_json(&opts)});
                     if let Some(p) = opts.standard {
                         failure["convergence_profile"] = json!("standard");
                         failure["certified"] = json!(false);
@@ -622,8 +646,8 @@ pub fn execute_mode(
                 "second_vector_columns":dft_engine::second_vector_columns(),
                 "davidson_stages":davidson_stages_json(),
                 "b1":b1_json(),
-                "b5":{"mode":std::env::var("BAANDI_B5").unwrap_or_else(|_| "off".into()),"bordered":dft_engine::b5_counters().bordered,"declined":dft_engine::b5_counters().declined,"full":dft_engine::b5_counters().full},
-                "ortho":{"mode":std::env::var("BAANDI_ORTHO").unwrap_or_else(|_| "dgks:0.1 (default)".into()),"second_pass_skipped":dft_engine::ortho_counters().0,"second_pass_repeated":dft_engine::ortho_counters().1},
+                "b5":{"mode":dft_numerics::switches::text(dft_numerics::switches::Id::B5).unwrap_or("off"),"bordered":dft_engine::b5_counters().bordered,"declined":dft_engine::b5_counters().declined,"full":dft_engine::b5_counters().full},
+                "ortho":{"mode":dft_numerics::switches::text(dft_numerics::switches::Id::ORTHO).unwrap_or("dgks:0.1 (default)"),"second_pass_skipped":dft_engine::ortho_counters().0,"second_pass_repeated":dft_engine::ortho_counters().1},
                 "algebra_stream":algebra_stream_json(),
                 "h_vectors_recorded":r.history.iter().map(|h|h.operator_applications).sum::<usize>(),
                 "certificate_h_vectors":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.operator_applications).sum::<usize>(),
@@ -698,7 +722,7 @@ pub fn execute_mode(
             "model": if m2_on { "mpi_stick_rows" } else { "mpi_row_block" },
             "m2": {
                 "enabled": m2_on,
-                "batched_transposes": std::env::var("BAANDI_M2_BATCH").as_deref() != Ok("off"),
+                "batched_transposes": dft_numerics::switches::on(dft_numerics::switches::Id::M2_BATCH),
                 "counters": m2_counts.into_iter().map(|(n, v)| (n, json!(v))).collect::<serde_json::Map<_, _>>(),
                 "stages": m2_stages
                     .into_iter()
@@ -1114,8 +1138,8 @@ fn davidson_stages_json() -> serde_json::Value {
 fn b1_json() -> serde_json::Value {
     let c = dft_engine::b1_counters();
     json!({
-        "mode":std::env::var("BAANDI_B1").unwrap_or_else(|_| "off".into()),
-        "sketch":std::env::var("BAANDI_B1_SKETCH").unwrap_or_else(|_| "dense".into()),
+        "mode":dft_numerics::switches::text(dft_numerics::switches::Id::B1).unwrap_or("off"),
+        "sketch":dft_numerics::switches::text(dft_numerics::switches::Id::B1_SKETCH).unwrap_or("dense"),
         "solves":c.solves,"narrow_iterations":c.narrow_iterations,"full_iterations":c.full_iterations,
         "narrow_columns":c.narrow_columns,"avoided_columns":c.avoided_columns,"fallbacks":c.fallbacks,
         "sketch_estimates":c.sketch_estimates,"sketch_disagreements":c.sketch_disagreements
@@ -1126,10 +1150,11 @@ fn b1_json() -> serde_json::Value {
 /// (docs/performance/requests/algebra-stream.md).
 fn algebra_stream_json() -> serde_json::Value {
     let c = dft_engine::algebra_counters();
-    let mode = |name: &str| std::env::var(name).unwrap_or_else(|_| "off".into());
+    use dft_numerics::switches::Id;
+    let mode = |id: Id| dft_numerics::switches::text(id).unwrap_or("off");
     json!({
-        "ritz_fused":mode("BAANDI_RITZ_FUSED"),"narrow_proj":mode("BAANDI_NARROW_PROJ"),
-        "narrow_reduced":mode("BAANDI_NARROW_REDUCED"),
+        "ritz_fused":mode(Id::RITZ_FUSED),"narrow_proj":mode(Id::NARROW_PROJ),
+        "narrow_reduced":mode(Id::NARROW_REDUCED),
         "fused_iterations":c.fused_iterations,"deferred_hx":c.deferred_hx,
         "narrow_projections":c.narrow_projections,"narrow_reduced_borders":c.narrow_reduced,
         "b5_parallel_updates":c.b5_parallel

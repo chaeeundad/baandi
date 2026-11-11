@@ -932,11 +932,11 @@ pub fn second_vector_columns() -> usize {
 }
 impl SecondVector {
     fn from_env() -> Self {
-        match std::env::var("BAANDI_SECOND_VECTOR").as_deref() {
-            Ok("v1") => Self::PreviousCorrection,
-            Ok("v2") => Self::ConvergedBand,
-            Ok("v3") => Self::WorstResidual,
-            Ok("v4") => Self::WorstResidualTail,
+        match dft_numerics::switches::choice(dft_numerics::switches::Id::SECOND_VECTOR) {
+            "v1" => Self::PreviousCorrection,
+            "v2" => Self::ConvergedBand,
+            "v3" => Self::WorstResidual,
+            "v4" => Self::WorstResidualTail,
             _ => Self::Off,
         }
     }
@@ -1558,7 +1558,9 @@ struct Projection {
     narrow: bool,
 }
 /// DGKS keep ratio: one pass suffices when every column kept at least this
-/// fraction of its unit input norm.
+/// fraction of its unit input norm (`BAANDI_ORTHO=dgks`, parsed in the switches
+/// module; the tests use the constant directly).
+#[cfg(test)]
 const DGKS_KEEP: f64 = std::f64::consts::FRAC_1_SQRT_2;
 /// Default DGKS keep ratio (0.1): ON since the adoption rule (dev08 MICRO-ORTHO:
 /// -4.9 to -9.7 percent wall on MKL in every cell, every seed improving, equal
@@ -1567,16 +1569,9 @@ const DGKS_KEEP: f64 = std::f64::consts::FRAC_1_SQRT_2;
 /// a ratio in [1e-3, 1] (after one classical pass the residual overlap with the
 /// basis is about eps sqrt(m) / ratio relative, so 1e-3 still stays below the 1e-12
 /// orthogonality gate of the contraction).
-const DGKS_DEFAULT: f64 = 0.1;
+/// The default ratio 0.1 and the parsing live in `dft_numerics::switches` (`ORTHO`).
 fn dgks_keep() -> Option<f64> {
-    let Ok(value) = std::env::var("BAANDI_ORTHO") else {
-        return Some(DGKS_DEFAULT);
-    };
-    if value == "dgks" {
-        return Some(DGKS_KEEP);
-    }
-    let ratio: f64 = value.strip_prefix("dgks:")?.parse().ok()?;
-    (1e-3..=1.0).contains(&ratio).then_some(ratio)
+    dft_numerics::switches::number(dft_numerics::switches::Id::ORTHO)
 }
 #[derive(Clone, Copy)]
 enum OrthoCount {
@@ -1615,12 +1610,12 @@ impl Projection {
             output: RealMatrix::zeros(n, cap)?,
             // Blocked Gram-Schmidt is the default on MKL builds only (dev08
             // evidence MGS-B R2); `BAANDI_MGS=classic` or `blocked` overrides.
-            blocked: match std::env::var("BAANDI_MGS").as_deref() {
-                Ok("blocked") => true,
-                Ok("classic") => false,
+            blocked: match dft_numerics::switches::choice(dft_numerics::switches::Id::MGS) {
+                "blocked" => true,
+                "classic" => false,
                 _ => dft_numerics::MKL_BACKEND,
             },
-            wide: std::env::var("BAANDI_WIDE_DOT").as_deref() != Ok("off"),
+            wide: dft_numerics::switches::on(dft_numerics::switches::Id::WIDE_DOT),
             dgks: dgks_keep(),
             narrow: false,
             column: vec![0.; n],

@@ -38,7 +38,7 @@ pub(crate) fn active() -> Option<SharedComm> {
 
 /// `BAANDI_M2_BATCH=off` restores the per-pair FFT transposes of M2b/M2c (A/B).
 pub(crate) fn batched_transposes() -> bool {
-    std::env::var("BAANDI_M2_BATCH").as_deref() != Ok("off")
+    dft_numerics::switches::on(dft_numerics::switches::Id::M2_BATCH)
 }
 
 /// Per-band plane-local density contributions of the latest M2 density build.

@@ -78,26 +78,27 @@ pub struct CutoffLadderOptions {
     /// mixer; 0 is off (`BAANDI_LADDER_SECANT=off|on|<h>`, on means 4; default off).
     pub secant_pairs: usize,
 }
-fn env_switch(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|v| v.trim().to_ascii_lowercase())
-}
 impl Default for CutoffLadderOptions {
     /// Pre-registered values (fraction 0.5, residual 1e-4, budget 30) and the
     /// S1/S2 experiment switches read from the environment (an invalid value
     /// means off / the default).
     fn default() -> Self {
         Self {
-            standard: env_switch("BAANDI_CUTOFF_LADDER_STANDARD").as_deref() == Some("on"),
-            standard_seed: match env_switch("BAANDI_LADDER_STANDARD_SEED").as_deref() {
-                Some("cap") => StandardSeed::Cap,
+            standard: dft_numerics::switches::on(
+                dft_numerics::switches::Id::CUTOFF_LADDER_STANDARD,
+            ),
+            standard_seed: match dft_numerics::switches::choice(
+                dft_numerics::switches::Id::LADDER_STANDARD_SEED,
+            ) {
+                "cap" => StandardSeed::Cap,
                 _ => StandardSeed::Coarse,
             },
-            secant_pairs: match env_switch("BAANDI_LADDER_SECANT").as_deref() {
-                Some("on") => 4,
-                Some(v) => v.parse().ok().filter(|h| *h <= 64).unwrap_or(0),
-                None => 0,
+            secant_pairs: match dft_numerics::switches::choice(
+                dft_numerics::switches::Id::LADDER_SECANT,
+            ) {
+                "off" => 0,
+                "on" => 4,
+                v => v.parse().unwrap_or(0),
             },
             ..Self::baseline()
         }

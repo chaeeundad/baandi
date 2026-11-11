@@ -134,6 +134,25 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
             "iteration count and tolerances must be positive and finite",
         ));
     }
+    // Default mixing coefficient by class (dev08 mixing study, ledger MIXING-STUDY):
+    // strict Gamma-only runs 0.3 (si32 -10.2 percent, si16 -4.3 percent on both
+    // protocols, 10 of 10 geometries), everything else 0.5 (standard class: si8 +23 percent
+    // at 0.3; k meshes and multi-species cells 4 to 8 percent better at 0.5).
+    // An explicit mixing_beta, or a mixing method other than pulay, is never overridden.
+    let explicit = config.scf.as_ref().is_some_and(|s| {
+        s.mixing_beta.is_some() || s.mixing.as_deref().is_some_and(|m| m != "pulay")
+    });
+    if !explicit {
+        let single_k = config.resolved_points().is_ok_and(|p| p.len() == 1);
+        let beta = if o.standard.is_none() && single_k {
+            0.3
+        } else {
+            0.5
+        };
+        if let dft_engine::Mixing::Pulay { history, .. } = o.mixing {
+            o.mixing = dft_engine::Mixing::Pulay { beta, history };
+        }
+    }
     Ok(o)
 }
 pub(crate) fn reference_metadata(o: &ScfOptions) -> Option<Value> {

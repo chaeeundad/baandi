@@ -120,12 +120,16 @@ fn legacy_defaults_are_unchanged() {
         Id::HAPPLY_OVERLAP,
         Id::HAPPLY_FOLD,
         Id::SECOND_VECTOR,
+        Id::CUTOFF_LADDER_STANDARD,
     ] {
         assert!(!on(id), "{id:?} must default off");
     }
     let value = |id: Id| switches::resolve(switches::switch(id), None).0;
     assert_eq!(value(Id::NL_ENERGY), Value::Choice("fast"));
     assert_eq!(value(Id::B1_SKETCH), Value::Choice("count"));
+    assert_eq!(value(Id::LADDER_STANDARD_SEED), Value::Choice("coarse"));
+    assert_eq!(value(Id::LADDER_SECANT), Value::Choice("off"));
+    assert_eq!(value(Id::STANDARD_STOP), Value::Choice("plain"));
     assert_eq!(value(Id::ROTATE_KERNEL), Value::Choice("legacy"));
     assert_eq!(value(Id::PAIR_FFT), Value::Choice("grid"));
     assert_eq!(
@@ -143,5 +147,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::CUTOFF_LADDER), Value::Raw(None));
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
-    assert_eq!(TABLE.len(), 38);
+    assert_eq!(TABLE.len(), 42);
 }

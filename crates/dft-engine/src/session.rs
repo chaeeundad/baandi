@@ -553,7 +553,22 @@ impl ScfSession {
             timings: step.timings,
         };
         let converged = if let Some(p) = standard {
-            standard_error_ha.is_some_and(|e| e < p.threshold_ha)
+            standard_error_ha.is_some_and(|e| {
+                e < p.threshold_ha
+                    || (dft_numerics::switches::choice(dft_numerics::switches::Id::STANDARD_STOP)
+                        == "confirm"
+                        && history
+                            .last()
+                            .and_then(|r| r.standard_error_ha)
+                            .is_some_and(|previous| {
+                                // Confirmed stop (offline fit on 60 dev08 trajectories, ledger
+                                // STANDARD-STOP): within 2x the threshold, the previous step
+                                // within 20x, and a contraction of at least 3.3x.
+                                e < 2.0 * p.threshold_ha
+                                    && previous <= 20.0 * p.threshold_ha
+                                    && e <= 0.3 * previous
+                            }))
+            })
         } else {
             converged(&record, &self.problem.options)
         };

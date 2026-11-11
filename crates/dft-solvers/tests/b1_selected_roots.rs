@@ -226,10 +226,10 @@ fn default_path(full: bool) {
         let a = s
             .solve_with_band_tolerances(&op, None, &diag, policy)
             .unwrap();
-        let b = run(&s, &op, &diag, policy, false, ResearchOptions::default());
+        let b = run(&s, &op, &diag, policy, false, ResearchOptions::from_env());
         assert_eq!(a, b, "{name}");
         let a = s.solve_ritz_changes(&op, None, &diag, policy).unwrap();
-        let b = run(&s, &op, &diag, policy, true, ResearchOptions::default());
+        let b = run(&s, &op, &diag, policy, true, ResearchOptions::from_env());
         assert_eq!(a, b, "{name}");
     }
 }
@@ -343,6 +343,8 @@ fn default_options_are_the_default_path() {
         ResearchOptions::from_env(),
         ResearchOptions {
             b6: true,
+            b1: B1Mode::On,
+            sketch: SketchKind::Count,
             ..ResearchOptions::default()
         }
     );

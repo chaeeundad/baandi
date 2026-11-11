@@ -43,8 +43,12 @@ impl B1Mode {
         match std::env::var("BAANDI_B1").as_deref() {
             Ok("standard") => Self::Standard,
             Ok("strict") => Self::Strict,
-            Ok("on") => Self::On,
-            _ => Self::Off,
+            Ok("off") => Self::Off,
+            // Default ON with the count sketch since the adoption rule (dev08
+            // B1-PART-B: work identical to off in all 240 runs, si32 strict -4.2 / -2.0
+            // percent at T=1 / T=8, si32 standard -1.7 / -0.8; si16 strict +1.1 / +0.9
+            // percent is unresolved at 4 and 3 of 10 seeds). `BAANDI_B1=off` disables.
+            _ => Self::On,
         }
     }
     /// Whether the mode acts on a solve with this convergence semantics.
@@ -102,8 +106,8 @@ impl ResearchOptions {
         Self {
             b1: B1Mode::from_env(),
             sketch: match std::env::var("BAANDI_B1_SKETCH").as_deref() {
-                Ok("count") => SketchKind::Count,
-                _ => SketchKind::Dense,
+                Ok("dense") => SketchKind::Dense,
+                _ => SketchKind::Count,
             },
             b5: matches!(std::env::var("BAANDI_B5").as_deref(), Ok("on") | Ok("par")),
             b5_parallel: std::env::var("BAANDI_B5").as_deref() == Ok("par"),

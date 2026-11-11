@@ -49,12 +49,12 @@ impl Extrapolation {
     /// `BAANDI_RELAX_EXTRAPOLATION` (none, first_order, second_order) overrides
     /// the input file for A/B runs.
     fn effective(self) -> Result<Self, RunError> {
-        match std::env::var("BAANDI_RELAX_EXTRAPOLATION").as_deref() {
-            Err(_) => Ok(self),
-            Ok("none") => Ok(Self::None),
-            Ok("first_order") => Ok(Self::FirstOrder),
-            Ok("second_order") => Ok(Self::SecondOrder),
-            Ok(_) => Err(error(
+        match dft_numerics::switches::text(dft_numerics::switches::Id::RELAX_EXTRAPOLATION) {
+            None => Ok(self),
+            Some("none") => Ok(Self::None),
+            Some("first_order") => Ok(Self::FirstOrder),
+            Some("second_order") => Ok(Self::SecondOrder),
+            Some(_) => Err(error(
                 1,
                 "BAANDI_RELAX_EXTRAPOLATION must be none, first_order or second_order",
             )),

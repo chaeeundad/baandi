@@ -155,7 +155,10 @@ fn entry<'a>(entries: &'a [Value], id: &str) -> Result<&'a Value> {
         .ok_or_else(|| format!("unknown registry id: {id}").into())
 }
 fn env_path(name: &str) -> Result<Option<PathBuf>> {
-    match std::env::var_os(name) {
+    checked_path(name, std::env::var_os(name))
+}
+fn checked_path(name: &str, value: Option<std::ffi::OsString>) -> Result<Option<PathBuf>> {
+    match value {
         Some(v) => {
             let p = PathBuf::from(v);
             if !p.is_absolute() {
@@ -167,7 +170,10 @@ fn env_path(name: &str) -> Result<Option<PathBuf>> {
     }
 }
 fn cache_dir() -> Result<PathBuf> {
-    if let Some(p) = env_path("BAANDI_PSEUDO_DIR")? {
+    if let Some(p) = checked_path(
+        "BAANDI_PSEUDO_DIR",
+        dft_numerics::switches::os(dft_numerics::switches::Id::PSEUDO_DIR).map(ToOwned::to_owned),
+    )? {
         return Ok(p);
     }
     let base = if cfg!(target_os = "macos") {

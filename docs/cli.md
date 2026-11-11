@@ -122,6 +122,14 @@ positions. `scf` records `cutoff_hartree`, `nbands` (null means automatic),
 `bands` is the resolved band count. The scheduled eigen tolerance has a floor
 of 0.1 times `eigen_tolerance`.
 
+`scf.switches` (also in the failure record of a diverged or unconverged run)
+is the switch manifest: one object per `BAANDI_*` environment switch with
+`value` (effective value: string, number, boolean, or null), `source`
+(`default`, `env`, `invalid -> default`, `invalid -> off` for `BAANDI_ORTHO`,
+`invalid -> error` for input overrides), `default`, `allowed` and `meaning`.
+The table lives in `crates/dft-numerics/src/switches.rs`; every switch is read
+once per process there and nowhere else.
+
 Each history/last-iteration record has `iteration`, `energies`,
 `delta_energy_ha` (null initially), `density_residual`,
 `max_eigen_residual_ha`, `requested_eigen_tolerance_ha`, `davidson_iterations`,

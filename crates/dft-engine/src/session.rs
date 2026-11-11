@@ -1528,10 +1528,12 @@ enum CertScreen {
 /// restores the unscreened path, `trace` prints the estimates.
 fn cert_screen_mode() -> CertScreen {
     static MODE: std::sync::OnceLock<CertScreen> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| match std::env::var("BAANDI_CERT_SCREEN").as_deref() {
-        Ok("off") => CertScreen::Off,
-        Ok("trace") => CertScreen::Trace,
-        _ => CertScreen::On,
+    *MODE.get_or_init(|| {
+        match dft_numerics::switches::choice(dft_numerics::switches::Id::CERT_SCREEN) {
+            "off" => CertScreen::Off,
+            "trace" => CertScreen::Trace,
+            _ => CertScreen::On,
+        }
     })
 }
 
@@ -1541,16 +1543,13 @@ fn cert_screen_mode() -> CertScreen {
 /// disables the reuse for A/B checks. Without the screen nothing is kept.
 fn potential_reuse() -> bool {
     static MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| std::env::var("BAANDI_POTENTIAL_REUSE").as_deref() != Ok("off"))
+    *MODE.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::POTENTIAL_REUSE))
 }
 
 fn growth_reset_limit() -> Option<f64> {
     static LIMIT: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
     *LIMIT.get_or_init(|| {
-        std::env::var("BAANDI_MIX_GROWTH_RESET")
-            .ok()
-            .and_then(|v| v.parse::<f64>().ok())
-            .filter(|v| v.is_finite() && *v > 1.0)
+        dft_numerics::switches::number(dft_numerics::switches::Id::MIX_GROWTH_RESET)
     })
 }
 
@@ -1560,10 +1559,6 @@ fn growth_reset_limit() -> Option<f64> {
 fn schedule_factor() -> f64 {
     static FACTOR: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
     *FACTOR.get_or_init(|| {
-        std::env::var("BAANDI_EIGEN_FACTOR")
-            .ok()
-            .and_then(|v| v.parse::<f64>().ok())
-            .filter(|v| v.is_finite() && (1e-3..=1.0).contains(v))
-            .unwrap_or(0.1)
+        dft_numerics::switches::number(dft_numerics::switches::Id::EIGEN_FACTOR).unwrap_or(0.1)
     })
 }

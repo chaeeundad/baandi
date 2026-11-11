@@ -173,7 +173,9 @@ fn band_nonlocal(
 /// column. `BAANDI_NL_ENERGY=exact` restores the band-by-band operator application.
 fn fast_nonlocal_energy() -> bool {
     static MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| std::env::var("BAANDI_NL_ENERGY").as_deref() != Ok("exact"))
+    *MODE.get_or_init(|| {
+        dft_numerics::switches::choice(dft_numerics::switches::Id::NL_ENERGY) != "exact"
+    })
 }
 
 fn expectation_tree(
@@ -253,7 +255,7 @@ pub(crate) fn explicit_nonlocal_energy(
 /// final state.
 pub(crate) fn energy_identity_requested() -> bool {
     static MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| std::env::var("BAANDI_ENERGY_IDENTITY").as_deref() == Ok("on"))
+    *MODE.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::ENERGY_IDENTITY))
 }
 
 /// Replace the nonlocal term of a k-weighted audit by the band-sum identity

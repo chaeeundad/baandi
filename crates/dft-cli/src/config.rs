@@ -538,13 +538,13 @@ impl Scf {
                 ));
             }
         };
-        let chosen = match std::env::var("BAANDI_CUTOFF_LADDER").as_deref() {
-            Ok("off") => None,
-            Ok("on") => Some(fraction),
-            Ok(v) => Some(v.parse::<f64>().map_err(|_| {
+        let chosen = match dft_numerics::switches::text(dft_numerics::switches::Id::CUTOFF_LADDER) {
+            Some("off") => None,
+            Some("on") => Some(fraction),
+            Some(v) => Some(v.parse::<f64>().map_err(|_| {
                 ConfigError::Invalid("BAANDI_CUTOFF_LADDER must be off, on or a fraction".into())
             })?),
-            Err(_) => file,
+            None => file,
         };
         if chosen.is_some_and(|f| !(f.is_finite() && f > 0.0 && f < 1.0)) {
             return Err(ConfigError::Invalid(

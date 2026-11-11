@@ -40,10 +40,10 @@ pub enum B1Mode {
 }
 impl B1Mode {
     pub fn from_env() -> Self {
-        match std::env::var("BAANDI_B1").as_deref() {
-            Ok("standard") => Self::Standard,
-            Ok("strict") => Self::Strict,
-            Ok("off") => Self::Off,
+        match dft_numerics::switches::choice(dft_numerics::switches::Id::B1) {
+            "standard" => Self::Standard,
+            "strict" => Self::Strict,
+            "off" => Self::Off,
             // Default ON with the count sketch since the adoption rule (dev08
             // B1-PART-B: work identical to off in all 240 runs, si32 strict -4.2 / -2.0
             // percent at T=1 / T=8, si32 standard -1.7 / -0.8; si16 strict +1.1 / +0.9
@@ -105,21 +105,21 @@ impl ResearchOptions {
     pub fn from_env() -> Self {
         Self {
             b1: B1Mode::from_env(),
-            sketch: match std::env::var("BAANDI_B1_SKETCH").as_deref() {
-                Ok("dense") => SketchKind::Dense,
+            sketch: match dft_numerics::switches::choice(dft_numerics::switches::Id::B1_SKETCH) {
+                "dense" => SketchKind::Dense,
                 _ => SketchKind::Count,
             },
             // B5 default ON since the adoption rule (dev08 B5-PART-C: 160 runs, zero
             // violations, mechanism fires on 53 percent of strict Davidson eigenproblems,
             // si32 strict T=1 -0.77 percent 10/10 seeds, nothing regresses);
             // `BAANDI_B5=off` disables, `par` threads the update.
-            b5: !matches!(std::env::var("BAANDI_B5").as_deref(), Ok("off")),
-            b5_parallel: std::env::var("BAANDI_B5").as_deref() == Ok("par"),
-            ritz_fused: std::env::var("BAANDI_RITZ_FUSED").as_deref() == Ok("on"),
-            narrow_proj: std::env::var("BAANDI_NARROW_PROJ").as_deref() == Ok("on"),
-            narrow_reduced: std::env::var("BAANDI_NARROW_REDUCED").as_deref() == Ok("on"),
-            stage_timers: std::env::var("BAANDI_DAVIDSON_STAGES").as_deref() == Ok("on"),
-            b6: std::env::var("BAANDI_B6").as_deref() != Ok("off"),
+            b5: dft_numerics::switches::choice(dft_numerics::switches::Id::B5) != "off",
+            b5_parallel: dft_numerics::switches::choice(dft_numerics::switches::Id::B5) == "par",
+            ritz_fused: dft_numerics::switches::on(dft_numerics::switches::Id::RITZ_FUSED),
+            narrow_proj: dft_numerics::switches::on(dft_numerics::switches::Id::NARROW_PROJ),
+            narrow_reduced: dft_numerics::switches::on(dft_numerics::switches::Id::NARROW_REDUCED),
+            stage_timers: dft_numerics::switches::on(dft_numerics::switches::Id::DAVIDSON_STAGES),
+            b6: dft_numerics::switches::on(dft_numerics::switches::Id::B6),
         }
     }
 }

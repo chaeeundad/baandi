@@ -119,7 +119,7 @@ impl RealNonlocal {
             image: RealMatrix::zeros(n, capacity)?,
             gemm: RealGemmWorkspace::with_pool(n, count.max(capacity), pool)?,
             capacity,
-            dgemm_products: std::env::var("BAANDI_MKL_NONLOCAL").as_deref() != Ok("off"),
+            dgemm_products: dft_numerics::switches::on(dft_numerics::switches::Id::MKL_NONLOCAL),
         })
     }
     /// Add the nonlocal image to caller-owned output; no allocation on application.
@@ -443,9 +443,6 @@ impl RealHamiltonian {
         Ok(self.fold.is_some())
     }
 }
-fn env_on(name: &str) -> bool {
-    std::env::var(name).as_deref() == Ok("on")
-}
 impl RealHamiltonian {
     /// Snapshot potential and public projectors; reject a mismatched or non-Gamma basis.
     pub fn from_complex(
@@ -478,14 +475,16 @@ impl RealHamiltonian {
             local,
             nonlocal,
             capacity,
-            lean: std::env::var("BAANDI_APPLY_LEAN").as_deref() != Ok("off"),
+            lean: dft_numerics::switches::on(dft_numerics::switches::Id::APPLY_LEAN),
             pool,
-            overlap: env_on("BAANDI_HAPPLY_OVERLAP"),
+            overlap: dft_numerics::switches::on(dft_numerics::switches::Id::HAPPLY_OVERLAP),
             fold: None,
             grid_shape: grid.dims(),
             grid_indices: grid.g_to_fft().to_vec(),
         };
-        h.set_apply_fold(env_on("BAANDI_HAPPLY_FOLD"))?;
+        h.set_apply_fold(dft_numerics::switches::on(
+            dft_numerics::switches::Id::HAPPLY_FOLD,
+        ))?;
         Ok(h)
     }
     /// Refresh only the local samples when immutable operator data match.

@@ -59,7 +59,7 @@ fn timed<R>(op: usize, f: impl FnOnce() -> R) -> R {
 pub fn m2_enabled() -> bool {
     M2_OVERRIDE
         .with(|o| o.get())
-        .unwrap_or_else(|| !std::env::var("BAANDI_MPI_M2").is_ok_and(|v| v == "off"))
+        .unwrap_or_else(|| dft_numerics::switches::on(dft_numerics::switches::Id::MPI_M2))
 }
 
 /// (counter name, value) list and (stage name, seconds) list.

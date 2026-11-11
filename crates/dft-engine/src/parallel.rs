@@ -51,12 +51,15 @@ fn timed<R>(op: usize, f: impl FnOnce() -> R) -> R {
     r
 }
 
-/// Stick-row distributed Davidson (MPI stage M2c) requested: `BAANDI_MPI_M2=on`
-/// (default off) unless overridden for the calling thread by `set_m2_override`.
+/// Stick-row distributed Davidson with distributed density/XC/energy (MPI stages
+/// M2c and M2d): default ON with two or more ranks since the adoption rule (dev08
+/// MPI-M2D: np=8 12.782 s against M1 18.366 s and the threads-only 12.585 s, zero
+/// violations); `BAANDI_MPI_M2=off` selects the M1 path. Overridable for the
+/// calling thread by `set_m2_override` (tests).
 pub fn m2_enabled() -> bool {
     M2_OVERRIDE
         .with(|o| o.get())
-        .unwrap_or_else(|| std::env::var("BAANDI_MPI_M2").is_ok_and(|v| v == "on"))
+        .unwrap_or_else(|| !std::env::var("BAANDI_MPI_M2").is_ok_and(|v| v == "off"))
 }
 
 /// (counter name, value) list and (stage name, seconds) list.

@@ -119,7 +119,10 @@ fn run_m2(kind: usize, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfRe
 #[test]
 fn m2c_stick_row_scf_matches_threads_only() {
     // Cubic and skewed cells; the M2c path is selected per thread (no env mutation).
-    assert!(!parallel::m2_enabled(), "M2 must be off by default");
+    assert!(
+        parallel::m2_enabled(),
+        "M2 is on by default since the adoption rule"
+    );
     for kind in 0..2 {
         let serial = run(kind, None);
         for ranks in [2usize, 3] {

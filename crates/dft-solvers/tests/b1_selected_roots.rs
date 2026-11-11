@@ -345,6 +345,7 @@ fn default_options_are_the_default_path() {
             b6: true,
             b1: B1Mode::On,
             sketch: SketchKind::Count,
+            b5: true,
             ..ResearchOptions::default()
         }
     );

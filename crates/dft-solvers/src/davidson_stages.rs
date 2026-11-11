@@ -109,7 +109,11 @@ impl ResearchOptions {
                 Ok("dense") => SketchKind::Dense,
                 _ => SketchKind::Count,
             },
-            b5: matches!(std::env::var("BAANDI_B5").as_deref(), Ok("on") | Ok("par")),
+            // B5 default ON since the adoption rule (dev08 B5-PART-C: 160 runs, zero
+            // violations, mechanism fires on 53 percent of strict Davidson eigenproblems,
+            // si32 strict T=1 -0.77 percent 10/10 seeds, nothing regresses);
+            // `BAANDI_B5=off` disables, `par` threads the update.
+            b5: !matches!(std::env::var("BAANDI_B5").as_deref(), Ok("off")),
             b5_parallel: std::env::var("BAANDI_B5").as_deref() == Ok("par"),
             ritz_fused: std::env::var("BAANDI_RITZ_FUSED").as_deref() == Ok("on"),
             narrow_proj: std::env::var("BAANDI_NARROW_PROJ").as_deref() == Ok("on"),

@@ -1797,8 +1797,8 @@ impl ScfProblem {
                 StandardProfile::empty_threshold(tolerance)
             } else if empty_loose() && tolerance > 0.1 * self.options.eigen_tolerance * (1.0 + 1e-9)
             {
-                // Experiment (BAANDI_BUFFER_TOL, default 1e-5 = unchanged): the buffer
-                // floor in steps above the tolerance floor.
+                // BAANDI_BUFFER_TOL (default 1e-3): the buffer floor in steps above the
+                // tolerance floor.
                 tolerance.max(buffer_loose_floor())
             } else {
                 tolerance.max(1e-5)
@@ -2204,8 +2204,11 @@ fn empty_loose() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var("BAANDI_EMPTY_LOOSE").as_deref() != Ok("off"))
 }
-/// `BAANDI_BUFFER_TOL=<x>` (1e-5 to 1e-1, default 1e-5): residual floor of the
-/// empty buffer bands in SCF steps whose eigen tolerance is above its floor.
+/// Residual floor of the empty buffer bands in SCF steps whose eigen tolerance is
+/// above its floor: default 1e-3 since the adoption rule (dev08 BUFFER-TOL: si32
+/// strict perturbed -7.54 percent wall, 10 of 10 seeds, optimum interior: 1e-2 is
+/// past the turn; certificates stay strict). `BAANDI_BUFFER_TOL=<x>` (1e-5 to
+/// 1e-1) overrides; 1e-5 restores the old floor.
 fn buffer_loose_floor() -> f64 {
     static FLOOR: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
     *FLOOR.get_or_init(|| {
@@ -2213,7 +2216,7 @@ fn buffer_loose_floor() -> f64 {
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
             .filter(|v| v.is_finite() && (1e-5..=1e-1).contains(v))
-            .unwrap_or(1e-5)
+            .unwrap_or(1e-3)
     })
 }
 pub fn density_distance(a: &Array3<f64>, b: &Array3<f64>, volume: f64, electrons: f64) -> f64 {

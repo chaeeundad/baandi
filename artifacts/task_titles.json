@@ -130,5 +130,11 @@
   "P47B-FP32-FEASIBILITY": "속도 타당성 조사(코드 변경 없음): 초반 SCF에서 단정밀도(fp32) H 적용이 얼마나 빠르고 정확한지, 전체 시간을 얼마나 줄일 수 있는지 상한을 측정",
   "STR1-STRESS-RADIAL-CACHE": "속도 개선(직접 구현): 응력·힘 계산에서 같은 껍질(|G|)·같은 종의 방사 변환을 한 번만 계산해 재사용. 결과는 비트 단위로 동일, Mac에서 Si8 힘+응력 8.07초→5.04초",
   "STR2-PULAY-SCAN-STANDARD": "속도 개선(직접 구현): 응력의 컷오프 미분 추정 스캔 SCF를 표준 프로파일로 실행(실패 시 엄격으로 재시도). dev08에서 Pulay 부분 2.4~2.8배, 응력 포함 실행 −47~−51%",
-  "REG1-DEFAULT-LOOP-RESTORE": "회귀 수정(직접 구현): P47A가 실수 Davidson 기본 반복문에 넣은 분기를 되돌림. dev08 기본 SCF −6%"
+  "REG1-DEFAULT-LOOP-RESTORE": "회귀 수정(직접 구현): P47A가 실수 Davidson 기본 반복문에 넣은 분기를 되돌림. dev08 기본 SCF −6%",
+  "P48A-SCALING-PROFILE": "원자 수(8~64)에 따른 단계별 시간·GEMM 효율 측정과 스케일링 지수 분석",
+  "P48B-PACKED-GEMM": "순수 Rust 빌드 행렬곱을 패킹·캐시 블로킹 BLAS-3 커널로 교체",
+  "P48C-COMPLEX-NONLOCAL-GEMM": "k-point 경로 비국소 연산자를 밴드 블록 GEMM으로 변환",
+  "P48D-BLOCKED-ORTHO": "Davidson 보정 블록 내부 직교화를 블록화(GEMM)하되 rank 판정은 유지",
+  "P48E-WIDTH-FLOOR": "Davidson 1열 스텝 제거(최소 보정 폭), 수렴 판정은 그대로",
+  "P48F-THREAD-PHASES": "8스레드에서 직렬로 남은 단계(퍼텐셜·혼합·에너지 등) 결정적 병렬화"
 }

@@ -61,6 +61,50 @@ impl StandardProfile {
             tolerance
         }
     }
+
+    /// Residual guard (`BAANDI_STANDARD_RESIDUAL_GUARD`, default off): a
+    /// second-order energy-error estimate from the per-band residual norms of
+    /// the latest eigensolve, in Ha:
+    ///
+    ///   B = c * sum_k w_k sum_i f_i ||r_ik||^2,   c = 1 Ha^-1.
+    ///
+    /// Derivation (general, no material input): for a normalized Ritz vector x
+    /// with Ritz value theta and residual r = (H - theta) x, the eigenvector
+    /// error is delta ~ (H - lambda)^-1 r and both the Ritz value and the
+    /// orbital (Kohn-Sham) energy functional, being stationary at the exact
+    /// eigenvector, carry an error of second order,
+    /// |theta - lambda| <= ||r||^2 / delta_gap (Kato-Temple), where delta_gap
+    /// is the distance to the rest of the spectrum. The band-energy error is the
+    /// occupation- and k-weighted sum of these terms. The density-based Coulomb
+    /// estimator does not see this term because it measures input/output
+    /// density mismatch only. `c` stands for 1 / delta_gap with the gap scale
+    /// set to the atomic unit (1 Ha); it is a units choice, not a fit. Empty
+    /// bands (f_i = 0) do not contribute.
+    pub fn residual_energy_bound<'a>(
+        points: impl IntoIterator<Item = (f64, &'a [f64])>,
+        occupations: &[f64],
+    ) -> f64 {
+        const C_PER_HA: f64 = 1.0;
+        C_PER_HA
+            * points
+                .into_iter()
+                .map(|(weight, residuals)| {
+                    weight
+                        * residuals
+                            .iter()
+                            .zip(occupations)
+                            .filter(|(_, f)| **f > 0.0)
+                            .map(|(r, f)| f * r * r)
+                            .sum::<f64>()
+                })
+                .sum::<f64>()
+    }
+
+    /// The guarded stop: the ordinary stop decision AND the residual bound
+    /// below the class threshold. It can only delay a stop, never cause one.
+    pub fn residual_guard(stop: bool, bound_ha: f64, threshold_ha: f64) -> bool {
+        stop && bound_ha < threshold_ha
+    }
 }
 
 /// K maps a signed density to half its Hartree potential times voxel volume.
@@ -281,5 +325,39 @@ mod tests {
             StandardProfile::FLOOR_HA
         );
         assert_eq!(StandardProfile::ratchet(0.005, 0.032, 32.0), 0.0001);
+    }
+
+    #[test]
+    fn residual_energy_bound_is_weighted_sum_of_occupied_squares() {
+        // Two k points (weights 0.25, 0.75), bands f = [2, 2, 0]; the empty
+        // band's large residual must not count. Units: residual Ha, bound Ha.
+        let occ = [2.0, 2.0, 0.0];
+        let k0 = [1e-5, 2e-5, 1.0];
+        let k1 = [3e-5, 0.0, 1.0];
+        let b = StandardProfile::residual_energy_bound([(0.25, &k0[..]), (0.75, &k1[..])], &occ);
+        let expected = 0.25 * 2.0 * (1e-10 + 4e-10) + 0.75 * 2.0 * 9e-10;
+        assert!((b - expected).abs() <= 1e-24, "{b} vs {expected}");
+        assert_eq!(
+            StandardProfile::residual_energy_bound(std::iter::empty(), &occ),
+            0.0
+        );
+        // The dev08 case that motivated the guard: 16 doubly occupied bands
+        // with residual 3.65e-5 Ha give 4.3e-8 Ha, above the 5e-9 class.
+        let r = [3.65e-5; 16];
+        let b = StandardProfile::residual_energy_bound([(1.0, &r[..])], &[2.0; 16]);
+        assert!((b - 32.0 * 3.65e-5 * 3.65e-5).abs() < 1e-20);
+        assert!(!StandardProfile::residual_guard(true, b, 5e-9));
+    }
+
+    #[test]
+    fn residual_guard_can_only_delay_a_stop() {
+        for stop in [false, true] {
+            for bound in [0.0, 1e-12, 4.9e-9, 5e-9, 1e-6, f64::INFINITY, f64::NAN] {
+                let guarded = StandardProfile::residual_guard(stop, bound, 5e-9);
+                // Never stops where the ordinary rule would continue.
+                assert!(!guarded || stop, "stop={stop} bound={bound}");
+                assert_eq!(guarded, stop && bound < 5e-9);
+            }
+        }
     }
 }

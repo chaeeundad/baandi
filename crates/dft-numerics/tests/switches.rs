@@ -130,6 +130,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::LADDER_STANDARD_SEED), Value::Choice("coarse"));
     assert_eq!(value(Id::LADDER_SECANT), Value::Choice("off"));
     assert_eq!(value(Id::STANDARD_STOP), Value::Choice("plain"));
+    assert_eq!(value(Id::STANDARD_RESIDUAL_GUARD), Value::Choice("off"));
     assert_eq!(value(Id::ROTATE_KERNEL), Value::Choice("legacy"));
     assert_eq!(value(Id::PAIR_FFT), Value::Choice("grid"));
     assert_eq!(
@@ -147,5 +148,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::CUTOFF_LADDER), Value::Raw(None));
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
-    assert_eq!(TABLE.len(), 42);
+    assert_eq!(TABLE.len(), 43);
 }

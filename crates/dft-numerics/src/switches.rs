@@ -162,6 +162,8 @@ table! {
     }, "off", "off, on (4), 1..64 difference pairs", "secant pairs carried across the ladder hand-off (S2)";
     STANDARD_STOP: Kind::Choice { allowed: &["plain", "confirm"], default: "plain" }, "plain",
         "plain, confirm", "standard-class stop rule: plain threshold, or confirm (also stop when the estimator is within 2x the threshold, the previous step within 20x, and it contracted by 0.3 or better)";
+    STANDARD_RESIDUAL_GUARD: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "standard-class stop also requires sum_k w_k sum_occupied f_i |r_i|^2 (Ha, second-order band-energy bound) below the threshold";
     DENSITY_PAIR: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "two bands per inverse transform in the density build";
     DENSITY_REDUCE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",

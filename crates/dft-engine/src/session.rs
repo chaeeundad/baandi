@@ -553,7 +553,7 @@ impl ScfSession {
             timings: step.timings,
         };
         let converged = if let Some(p) = standard {
-            standard_error_ha.is_some_and(|e| {
+            let stop = standard_error_ha.is_some_and(|e| {
                 e < p.threshold_ha
                     || (dft_numerics::switches::choice(dft_numerics::switches::Id::STANDARD_STOP)
                         == "confirm"
@@ -568,7 +568,24 @@ impl ScfSession {
                                     && previous <= 20.0 * p.threshold_ha
                                     && e <= 0.3 * previous
                             }))
-            })
+            });
+            // Residual guard (default off; StandardProfile::residual_energy_bound):
+            // the Coulomb estimator does not see the second-order band-energy
+            // error of loose eigensolves, so also require that bound below the
+            // class threshold. Only evaluated when the density rule already stops.
+            if stop
+                && dft_numerics::switches::on(dft_numerics::switches::Id::STANDARD_RESIDUAL_GUARD)
+            {
+                let bound = StandardProfile::residual_energy_bound(
+                    step.k_points
+                        .iter()
+                        .map(|k| (k.point.weight, k.solution.residuals.as_slice())),
+                    &self.problem.occupations,
+                );
+                StandardProfile::residual_guard(stop, bound, p.threshold_ha)
+            } else {
+                stop
+            }
         } else {
             converged(&record, &self.problem.options)
         };

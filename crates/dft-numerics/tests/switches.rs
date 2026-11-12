@@ -108,6 +108,8 @@ fn legacy_defaults_are_unchanged() {
         Id::APPLY_LEAN,
         Id::MKL_DGEMM,
         Id::MKL_EVD,
+        Id::CUTOFF_LADDER_STANDARD,
+        Id::STANDARD_RESIDUAL_GUARD,
     ] {
         assert!(on(id), "{id:?} must default on");
     }
@@ -120,7 +122,6 @@ fn legacy_defaults_are_unchanged() {
         Id::HAPPLY_OVERLAP,
         Id::HAPPLY_FOLD,
         Id::SECOND_VECTOR,
-        Id::CUTOFF_LADDER_STANDARD,
     ] {
         assert!(!on(id), "{id:?} must default off");
     }
@@ -130,7 +131,6 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::LADDER_STANDARD_SEED), Value::Choice("coarse"));
     assert_eq!(value(Id::LADDER_SECANT), Value::Choice("off"));
     assert_eq!(value(Id::STANDARD_STOP), Value::Choice("plain"));
-    assert_eq!(value(Id::STANDARD_RESIDUAL_GUARD), Value::Choice("off"));
     assert_eq!(value(Id::ROTATE_KERNEL), Value::Choice("legacy"));
     assert_eq!(value(Id::PAIR_FFT), Value::Choice("grid"));
     assert_eq!(

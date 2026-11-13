@@ -106,6 +106,7 @@ Common gates (details in the brief): energy within 1e-12 Ha of the stored baseli
 ### B08 MKL pruned stick pipeline and matrix-product nonlocal (H-3, H-2; old B08, B07)
 - Pruned stick FFT with plan-owned descriptors, sequential layer: per vector FFT about 0.3-0.4 -> 0.2-0.25 ms (estimate; QE with MKL pays the full 7.2 Mflop per band at 136 us); brings H per vector to or below QE's 0.38 ms with H-1. Nonlocal as one ZGEMM per block (QE 42 us per band vs ours about 0.2 ms) after H-1 only if a gap remains; changes rounding (A55 rule).
 - Avoids A29 (keep the 60% rule), A34 (threads in FFT), A11/A28.
+- 2026-11-13: the k-path part (nonlocal as one GEMM pair per band block) is implemented as P48C behind `BAANDI_NONLOCAL_BLOCK` (ledger P48C-NONLOCAL-BLOCK); open follow-ups: reuse Pk in `expectation_values`, avoid the packed copy by storing the columns contiguously (touches every `columns()` user), dev08 verdict.
 
 ### B10 Starting density and wavefunctions (S-3, S-4, V-8)
 - Atomic charge superposition start (needs UPF atomic-density section; BAANDI starts from a uniform density), free-electron-subspace or atomic-plus-random Rayleigh-Ritz start: first iteration 9/10 steps vs QE 3/4; 3-5% (S-9.4), more on many-k (first iteration 12.6% of k444s H vectors). QE also skips the first small solve when the start is Ritz (V 2.4).

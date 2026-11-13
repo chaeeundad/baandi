@@ -225,8 +225,11 @@ table! {
     // Numerics (dft-numerics).
     ROTATE_KERNEL: Kind::Choice { allowed: &["legacy", "blocked"], default: "legacy" }, "legacy",
         "legacy, blocked", "rotation kernel of the tiled workspace";
-    PURE_GEMM: Kind::Choice { allowed: &["nano", "packed"], default: "nano" }, "nano", "nano, packed",
-        "pure-Rust real GEMM panels: nano tiles or one packed product per panel (P48B)";
+    PURE_GEMM: Kind::Choice {
+        allowed: &["nano", "packed"],
+        default: if crate::MKL_BACKEND { "nano" } else { "packed" },
+    }, if crate::MKL_BACKEND { "nano" } else { "packed" }, "nano, packed",
+        "pure-Rust real GEMM panels: nano tiles or one packed product per panel (P48B; default packed in pure builds, nano on MKL builds where dgemm replaces these sites)";
     MKL_DGEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "rotation panels by MKL dgemm (MKL builds)";
     MKL_EVD: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",

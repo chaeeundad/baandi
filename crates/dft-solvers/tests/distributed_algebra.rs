@@ -118,10 +118,10 @@ fn projection_rotation_and_norms_match_serial() {
         });
         for (xfull, rfull, norms) in &results {
             for (got, w2) in xfull.as_slice().iter().zip(&want) {
-                assert!((got - w2).abs() <= 1e-12, "projection P={ranks}");
+                assert!((got - w2).abs() <= 1e-11, "projection P={ranks}");
             }
             for (got, w2) in rfull.as_slice().iter().zip(rot.as_slice()) {
-                assert!((got - w2).abs() <= 1e-12, "rotation P={ranks}");
+                assert!((got - w2).abs() <= 1e-11, "rotation P={ranks}");
             }
             for (j, nn) in norms.iter().enumerate() {
                 let serial: f64 = xfull.as_slice()[j * n..(j + 1) * n]

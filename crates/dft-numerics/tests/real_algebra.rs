@@ -362,6 +362,9 @@ fn p32a_product_bits_and_poisoned_output() {
                     WorkerPool::new(threads).unwrap(),
                 )
                 .unwrap();
+                // The reference above is the nano-tile arithmetic; the packed
+                // default of pure builds (P48B) is checked in tests/pure_gemm.rs.
+                ws.set_pure_gemm(dft_numerics::real::PureGemm::Nano);
                 let mut actual = RealMatrix::zeros(m, cols).unwrap();
                 actual.as_mut_slice().fill(f64::NAN);
                 ws.multiply_into(a.as_ref(), op, b.as_ref(), actual.as_mut())

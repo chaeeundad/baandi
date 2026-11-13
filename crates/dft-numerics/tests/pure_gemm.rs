@@ -291,10 +291,16 @@ fn packed_is_bit_identical_across_thread_budgets() {
 }
 
 #[test]
-fn default_follows_switch_and_is_nano() {
+fn default_follows_switch_and_backend() {
     let ws = RealGemmWorkspace::with_pool(8, 4, WorkerPool::new(1).unwrap()).unwrap();
-    // The test process does not set BAANDI_PURE_GEMM.
-    assert_eq!(ws.pure_gemm(), PureGemm::Nano);
+    // The test process does not set BAANDI_PURE_GEMM: pure builds default to
+    // packed (dev08 A/B 2026-11-14), MKL builds keep nano.
+    let default = if dft_numerics::MKL_BACKEND {
+        PureGemm::Nano
+    } else {
+        PureGemm::Packed
+    };
+    assert_eq!(ws.pure_gemm(), default);
     let expected = if cfg!(target_arch = "x86_64") {
         PureGemm::Library
     } else {

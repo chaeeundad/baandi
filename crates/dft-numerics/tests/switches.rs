@@ -133,7 +133,14 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::LADDER_SECANT), Value::Choice("off"));
     assert_eq!(value(Id::STANDARD_STOP), Value::Choice("plain"));
     assert_eq!(value(Id::ROTATE_KERNEL), Value::Choice("legacy"));
-    assert_eq!(value(Id::PURE_GEMM), Value::Choice("nano"));
+    assert_eq!(
+        value(Id::PURE_GEMM),
+        Value::Choice(if dft_numerics::MKL_BACKEND {
+            "nano"
+        } else {
+            "packed"
+        })
+    );
     assert_eq!(
         value(Id::ORTHO_BLOCK),
         Value::Choice(if dft_numerics::MKL_BACKEND {

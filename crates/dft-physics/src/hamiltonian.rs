@@ -159,6 +159,26 @@ const EXPECTATION_BLOCK: usize = 4;
 /// material, a thread budget or a run, so the bits of a band depend only on
 /// the band block, not on how panels are distributed over workers.
 const NONLOCAL_BAND_PANEL: usize = 32;
+/// P48C shape gate of `BAANDI_NONLOCAL_BLOCK=auto` (the default): the block
+/// path is used when the packed projector matrix of one k point,
+/// n_pw x n_projectors x 16 bytes, is at least a quarter of a fixed 1 MiB L2
+/// (256 KiB). Below it the fixed GEMM call and packing cost outweighs the
+/// BLAS-1 per-band loops (dev08 2026-11-13: tiny cells lost 1 to 1.5 % at
+/// T=8). A data-size rule with a fixed hardware-shape constant, the same style
+/// as P48D's `ORTHO_PANEL_DOUBLES` (1 MiB is the smallest per-core L2 of the
+/// measurement hosts); it never depends on a material, a thread budget or the
+/// host, so the path choice (and every rounded bit) is the same everywhere.
+pub const NONLOCAL_BLOCK_GATE_BYTES: usize = (1 << 20) / 4;
+
+/// P48C auto-gate decision from shapes only: `true` when the packed projector
+/// matrix of `basis_len` plane waves by `projectors` channels reaches
+/// `NONLOCAL_BLOCK_GATE_BYTES`.
+pub fn nonlocal_block_gate(basis_len: usize, projectors: usize) -> bool {
+    basis_len
+        .saturating_mul(projectors)
+        .saturating_mul(size_of::<Complex64>())
+        >= NONLOCAL_BLOCK_GATE_BYTES
+}
 
 /// P48C packed projector matrix B (n x p, column-major, channels in atom
 /// order, each atom's channels as in `AtomProjectors::columns`). A copy of
@@ -177,7 +197,8 @@ pub struct NonlocalOperator {
 }
 impl NonlocalOperator {
     /// Shared tail of the constructors: the packed block matrix is built only
-    /// when `BAANDI_NONLOCAL_BLOCK=on`, so the default path carries no copy.
+    /// when the `BAANDI_NONLOCAL_BLOCK` mode selects the block path, so the
+    /// per-band path carries no copy.
     fn assemble(basis: Vec<GVector>, atoms: Vec<AtomProjectors>, max_channels: usize) -> Self {
         let mut op = Self {
             basis,
@@ -185,14 +206,29 @@ impl NonlocalOperator {
             max_channels,
             block: None,
         };
-        op.set_block(dft_numerics::switches::on(
+        op.set_block_mode(dft_numerics::switches::choice(
             dft_numerics::switches::Id::NONLOCAL_BLOCK,
         ));
         op
     }
+    /// Total projector channels (columns of the packed matrix).
+    pub fn projector_count(&self) -> usize {
+        self.atoms.iter().map(|a| a.columns.len()).sum()
+    }
+    /// Apply a `BAANDI_NONLOCAL_BLOCK` mode: `on` always uses the block path,
+    /// `off` never, `auto` (any other value) uses it when
+    /// `nonlocal_block_gate(n_pw, n_projectors)` holds. Depends on shapes only.
+    pub fn set_block_mode(&mut self, mode: &str) {
+        let on = match mode {
+            "on" => true,
+            "off" => false,
+            _ => nonlocal_block_gate(self.basis.len(), self.projector_count()),
+        };
+        self.set_block(on);
+    }
     /// Enable or disable the P48C block path (builds or drops the packed copy
     /// of the projector columns). Test and experiment hook; the engine uses the
-    /// `BAANDI_NONLOCAL_BLOCK` default read at construction.
+    /// `BAANDI_NONLOCAL_BLOCK` mode read at construction.
     pub fn set_block(&mut self, on: bool) {
         if !on {
             self.block = None;
@@ -202,7 +238,7 @@ impl NonlocalOperator {
             return;
         }
         let n = self.basis.len();
-        let count: usize = self.atoms.iter().map(|a| a.columns.len()).sum();
+        let count = self.projector_count();
         let mut packed = Vec::with_capacity(n * count);
         for atom in &self.atoms {
             for col in &atom.columns {
@@ -711,7 +747,7 @@ impl Hamiltonian {
             .expect("Hamiltonian stores standard layout")
     }
     /// P48C test and experiment hook: enable or disable the block nonlocal
-    /// path regardless of `BAANDI_NONLOCAL_BLOCK`, resizing every worker's
+    /// path regardless of `BAANDI_NONLOCAL_BLOCK` (and of its auto gate), resizing every worker's
     /// panel scratch (allocation here, never during application).
     pub fn set_nonlocal_block(&mut self, on: bool) -> Result<(), HamiltonianError> {
         self.data.nonlocal.set_block(on);
@@ -1789,6 +1825,87 @@ mod block_tests {
         assert_eq!(off.nonlocal().block_bytes(), 0);
         let p: usize = h.nonlocal().atoms().iter().map(|a| a.columns().len()).sum();
         assert_eq!(h.nonlocal().block_bytes(), n * p * 16);
+    }
+
+    /// Operator with a dummy basis of `n` vectors and `atoms` x `channels`
+    /// projector columns, packed copy not built.
+    fn shaped(n: usize, atoms: usize, channels: usize) -> NonlocalOperator {
+        NonlocalOperator {
+            basis: vec![
+                GVector {
+                    miller: [0; 3],
+                    cartesian: [0.0; 3],
+                    norm_squared: 0.0,
+                };
+                n
+            ],
+            max_channels: channels,
+            block: None,
+            atoms: (0..atoms)
+                .map(|a| AtomProjectors {
+                    columns: (0..channels).map(|c| vector(n, a * channels + c)).collect(),
+                    coupling: vec![0.0; channels * channels],
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn auto_gate_depends_only_on_shapes() {
+        // 256 KiB = 16384 complex entries: n p = 16384 is the first gated shape.
+        assert_eq!(NONLOCAL_BLOCK_GATE_BYTES, 262_144);
+        assert!(nonlocal_block_gate(2048, 8));
+        assert!(!nonlocal_block_gate(2047, 8));
+        assert!(!nonlocal_block_gate(749, 8)); // si2, 30 Ry: 95,872 B
+        assert!(nonlocal_block_gate(1495, 21)); // MgO, 80 Ry: 502,320 B
+        assert!(!nonlocal_block_gate(0, 0));
+        for (n, atoms, channels, expected) in [(2048, 2, 4, true), (2047, 2, 4, false)] {
+            let mut op = shaped(n, atoms, channels);
+            for mode in ["auto", "off", "on", "auto"] {
+                op.set_block_mode(mode);
+                let want = match mode {
+                    "on" => true,
+                    "off" => false,
+                    _ => expected,
+                };
+                assert_eq!(op.block_enabled(), want, "n {n} mode {mode}");
+            }
+        }
+        // The decision is made on the operator before any thread budget
+        // exists and is unchanged by the Hamiltonian's band threads.
+        for threads in [1, 2, 4, 8] {
+            let mut h = hamiltonian(threads, false);
+            let n = h.dimension();
+            let p = h.nonlocal().projector_count();
+            let expected = nonlocal_block_gate(n, p);
+            assert!(!expected, "fixture must be below the gate (n {n}, p {p})");
+            h.data.nonlocal.set_block_mode("auto");
+            assert_eq!(h.nonlocal().block_enabled(), expected, "T={threads}");
+        }
+    }
+
+    #[test]
+    fn below_gate_auto_is_bit_identical_to_off() {
+        for threads in [1, 2, 4, 8] {
+            let off = hamiltonian(threads, false);
+            let mut auto = hamiltonian(threads, false);
+            auto.data.nonlocal.set_block_mode("auto");
+            assert!(!auto.nonlocal().block_enabled());
+            assert_eq!(auto.nonlocal().block_bytes(), 0);
+            let n = off.dimension();
+            for width in [1, 2, 7, 33, 64] {
+                let x = block(n, width);
+                let mut expected = ComplexMatrix::zeros(n, width).unwrap();
+                let mut y = ComplexMatrix::zeros(n, width).unwrap();
+                off.apply_block(&x, &mut expected).unwrap();
+                auto.apply_block(&x, &mut y).unwrap();
+                assert_eq!(
+                    bits(expected.as_slice()),
+                    bits(y.as_slice()),
+                    "width {width} T={threads}"
+                );
+            }
+        }
     }
 
     /// Mac observation only (dev08 decides): nonlocal of m bands, per-band

@@ -190,7 +190,27 @@ fix.
   path does not use this kernel (complex sites belong to P48C).
 
 
-## P48C — complex (k-point) nonlocal as two GEMMs per band panel (2026-11-13, opt-in)
+## P48C — complex (k-point) nonlocal as two GEMMs per band panel (2026-11-13, default auto)
+
+**Update 2026-11-13 (dev08 verdict, ledger P48C-NONLOCAL-BLOCK-DEV08):
+default `BAANDI_NONLOCAL_BLOCK=auto` with a shape gate.** dev08 (seeds
+601-610, paired) showed T=1 wins of 1.1 to 5.4 % on k444s, mgo-40 and
+si-k222s, T=8 a win on mgo-40 (-1 %) and a loss of 1 to 1.5 % on the tiny Si
+cells (fixed GEMM cost, wall 0.27 s). Rule: per k point, the block path is
+used when the packed projector matrix n_pw x n_projectors x 16 bytes is at
+least a quarter of a fixed 1 MiB L2 (`NONLOCAL_BLOCK_GATE_BYTES` = 262,144 B,
+`hamiltonian::nonlocal_block_gate`). A data-size rule with a fixed
+hardware-shape constant in the style of P48D's `ORTHO_PANEL_DOUBLES`, not a
+material constant; it depends only on n_pw and n_projectors, never on the
+thread budget or host, so a run's path choice and bits are the same at every
+T. Below the gate the operator never builds the packed copy and keeps the
+per-band path bit for bit (unit test `below_gate_auto_is_bit_identical_to_off`,
+widths 1/2/7/33/64, T=1/2/4/8; `auto_gate_depends_only_on_shapes`). Values:
+`auto` (default, gate), `on` (always block), `off` (never). Gate numbers:
+si2 30 Ry (si-k222s, k444s; n about 749, p = 2 x 4 = 8): 95,872 B, below,
+per-band path (forgoes the 1-2 % T=1 win to avoid the T=8 loss); mgo-40
+(n 1495, p = Mg 8 + O 13 = 21): 502,320 B, above, block path. dev08
+re-check requested (auto vs off).
 
 Ticket `tickets/P48C-COMPLEX-NONLOCAL-GEMM.md`, work order P48 sections 1-2.
 Base `3fea9e81586e7237228e2e89a518461faf7dcccd` (= main at the time); branch

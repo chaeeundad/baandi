@@ -56,12 +56,21 @@ Ladder effect (si32 standard T=1, ladder on against off, each arm against its ow
 
 Eight cores (M2c, si32, BAANDI T=8 against QE np=8): strict unperturbed 6.334 / 0.845 s; b1e-7 +19.1 % / +1.7 % (sensitivity ratio 11.2); f1e-3 +51.4 % / +152.6 % (ratio 0.34). Standard unperturbed 3.968 / 0.740 s; b1e-7 +20.0 % / +1.1 % (ratio 18.1); f1e-3 +44.3 % / +141.9 % (ratio 0.31). QE's MPI absorbs the extra work of displaced geometries worse (np=1 to np=8 speed-up 3.44 at f1e-3 against 4.08 unperturbed) while BAANDI's thread speed-up barely changes (2.08 against 1.95). Ladder at f1e-2 (si32 standard T=1): on 11.894 s (SCF 11, H 2449) against off 15.233 s (SCF 22, H 4393): the ladder gains most on the hardest geometry (-21.9 %). Threads against MPI, f1e-3, strict: 9.589 / 2.134 = 4.49x; standard 5.726 / 1.792 = 3.20x.
 
-## Headline (decision of 2026-11-11, realistic amplitude f1e-3), si32 Gamma, one core
-| class | BAANDI | QE (atomic start, nbnd 68, conv_thr 1e-8 / 1e-10) | BAANDI / QE |
-|---|---|---|---|
-| standard | 10.443 | 6.124 | 1.71x |
-| strict | 19.935 | 7.347 | 2.71x |
-Other cells need BAANDI at f1e-3 (queued); the QE f1e-3 medians are in the table above.
+## Headline (decision of 2026-11-11: realistic amplitude f1e-3 = +-0.001 fractional per component), all cells
+BAANDI main 38048b9 (MKL, `cli-f3-mkl`), same displaced coordinates as the QE re-measurement (seeds 601-610; si64 601-603), density SHA T=1 equals T=8 in every cell, no nonconvergence, standard error against the strict reference at most 3.747e-9 Ha.
+| cell | class | BAANDI T=1 | QE np=1 | ratio | BAANDI T=8 | QE np=8 | ratio (threads against MPI) |
+|---|---|---|---|---|---|---|---|
+| si8 | standard | 0.607 | 0.441 | 1.38x | 0.569 | 0.272 | 2.09x |
+| si8 | strict | 0.917 | 0.531 | 1.73x | 0.788 | 0.306 | 2.58x |
+| si16 | standard | 2.580 | 1.300 | 1.98x | 1.841 | 0.504 | 3.65x |
+| si16 | strict | 4.305 | 1.669 | 2.58x | 2.672 | 0.631 | 4.23x |
+| si32 | standard | 10.372 | 5.948 | 1.74x | 5.749 | 1.737 | 3.31x |
+| si32 | strict | 19.955 | 7.413 | 2.69x | 9.586 | 2.138 | 4.48x |
+| si64 | standard | 46.272 | 26.548 | 1.74x | 24.042 | 6.449 | 3.73x |
+| si64 | strict | 110.388 | 30.467 | 3.62x | 49.086 | 7.497 | 6.55x |
+At the realistic amplitude the one-core gap is 1.4x to 3.6x (b1e-7 column: 1.4x to 4.4x); the standard class is at 1.4x to 2.0x for every size. Thread against thread (QE OpenMP scales 1.78x against 4.18x for MPI at si32 strict unperturbed) the T=8 ratios shrink by about 2.3x. Work counts f1e-3 (SCF / Davidson / H): si32 standard 10 / 53 / 2266, strict 11 / 128.5 / 4716; si64 standard 10 / 59 / 4385, strict 11 / 176 / 10068.
+
+Where the displacement cost comes from (si32, stage timers, seeds 601-603): not narrow blocks. Width-1 steps take under 4 percent of the increase (strict even falls from 13 to 12); the growth is in wide correction blocks (9-64 and 65+ columns) and therefore in dense eigen (+140 percent strict), rotate (+104) and orthonormalize (+98) which scale with the number of Davidson iterations, faster than h_apply (+57). It is simply more iterations to converge, not a degenerate cluster or per-column cost.
 
 ## Band-count effect on QE (si32, atomic start): QE default nbnd is 3.9 to 7.3 percent faster than nbnd = 68 for unperturbed and b1e-7 geometries. For displaced geometries it can reverse: si8 1e-10 f1e-3 with nbnd 20 needs 13.0 h_psi calls against 26.5 with the default nbnd 16 (wall 0.531 against 0.559 s), because QE without buffer bands runs Davidson twice as long. The fair comparison uses BAANDI's band count.
 

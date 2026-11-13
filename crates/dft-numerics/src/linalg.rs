@@ -680,7 +680,7 @@ pub fn orthonormalize_into(
 
 pub mod accounting;
 mod tiled;
-pub use tiled::{GemmWorkspace, ProjectionWorkspace};
+pub use tiled::{GemmWorkspace, ProjectionWorkspace, complex_gemm_slices_into};
 
 #[cfg(test)]
 mod column_storage_tests {

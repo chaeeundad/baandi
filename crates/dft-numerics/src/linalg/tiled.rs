@@ -488,6 +488,67 @@ impl GemmWorkspace {
         }
     }
 }
+/// P48C: C = op(A) B for borrowed contiguous column-major slices, one
+/// sequential backend call (MKL zgemm on MKL builds, faer `matmul` with
+/// `Par::Seq` otherwise). `a` is `a_rows` x `a_cols`; `adjoint_a` selects A^H;
+/// `b` has `b_cols` columns and as many rows as op(A) has columns; `out` is the
+/// contiguous m x `b_cols` result and is overwritten (beta = 0). The result
+/// depends only on the operands and their shapes, never on a thread budget,
+/// so callers obtain thread-count-independent bits by fixing the shapes of
+/// their calls. Inputs are not scanned; a non-finite input propagates into the
+/// output, which the caller scans. Operands must not alias the output.
+#[allow(clippy::too_many_arguments)] // two borrowed operands with their shapes
+pub fn complex_gemm_slices_into(
+    a: &[Complex64],
+    a_rows: usize,
+    a_cols: usize,
+    adjoint_a: bool,
+    b: &[Complex64],
+    b_cols: usize,
+    out: &mut [Complex64],
+) -> Result<(), LinalgError> {
+    let (m, k) = if adjoint_a {
+        (a_cols, a_rows)
+    } else {
+        (a_rows, a_cols)
+    };
+    let n = b_cols;
+    if a_rows.checked_mul(a_cols) != Some(a.len())
+        || k.checked_mul(n) != Some(b.len())
+        || m.checked_mul(n) != Some(out.len())
+    {
+        return Err(LinalgError::Dimension);
+    }
+    crate::pool::analysis::logical_gemm(m, n, k);
+    crate::pool::analysis::executed_gemm(m, n, k);
+    #[cfg(feature = "mkl")]
+    {
+        let ma = dft_mkl::Matrix::new(a, a_rows, a_cols).map_err(|_| LinalgError::Dimension)?;
+        let mb = dft_mkl::Matrix::new(b, k, n).map_err(|_| LinalgError::Dimension)?;
+        dft_mkl::gemm(ma, adjoint_a, mb, false, out).map_err(|_| LinalgError::Dimension)
+    }
+    #[cfg(not(feature = "mkl"))]
+    {
+        if m == 0 || n == 0 {
+            return Ok(());
+        }
+        if k == 0 {
+            out.fill(Complex64::default());
+            return Ok(());
+        }
+        let a = faer::MatRef::from_column_major_slice(a, a_rows, a_cols);
+        let b = faer::MatRef::from_column_major_slice(b, k, n);
+        let mut c = faer::MatMut::from_column_major_slice_mut(out, m, n);
+        let one = Complex64::new(1.0, 0.0);
+        if adjoint_a {
+            matmul(&mut c, Accum::Replace, a.adjoint(), b, one, Par::Seq);
+        } else {
+            matmul(&mut c, Accum::Replace, a, b, one, Par::Seq);
+        }
+        Ok(())
+    }
+}
+
 fn shape(a: &ComplexMatrix, op: MatrixOp) -> (usize, usize) {
     match op {
         MatrixOp::Identity => (a.rows, a.cols),

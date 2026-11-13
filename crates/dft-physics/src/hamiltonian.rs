@@ -151,13 +151,152 @@ impl AtomProjectors {
 }
 /// Band vectors sharing one pass over a projector column in `expectation_values`.
 const EXPECTATION_BLOCK: usize = 4;
+/// P48C (`BAANDI_NONLOCAL_BLOCK=on`): fixed column panel of the block
+/// nonlocal. A band block of width m is applied in ceil(m / 32) panels of at
+/// most 32 bands (the last one narrower); each panel is two GEMMs whose shapes
+/// depend only on the basis size, the projector count and the panel width.
+/// A data-layout constant like the 256-row GEMM panel: it never depends on a
+/// material, a thread budget or a run, so the bits of a band depend only on
+/// the band block, not on how panels are distributed over workers.
+const NONLOCAL_BAND_PANEL: usize = 32;
+
+/// P48C packed projector matrix B (n x p, column-major, channels in atom
+/// order, each atom's channels as in `AtomProjectors::columns`). A copy of
+/// the existing columns made once at construction; no radial recomputation.
+struct BlockProjectors {
+    packed: Vec<Complex64>,
+    count: usize,
+}
+
 /// O(N_G * N_projectors) storage, never an N_G by N_G matrix.
 pub struct NonlocalOperator {
     basis: Vec<GVector>,
     atoms: Vec<AtomProjectors>,
     max_channels: usize,
+    block: Option<BlockProjectors>,
 }
 impl NonlocalOperator {
+    /// Shared tail of the constructors: the packed block matrix is built only
+    /// when `BAANDI_NONLOCAL_BLOCK=on`, so the default path carries no copy.
+    fn assemble(basis: Vec<GVector>, atoms: Vec<AtomProjectors>, max_channels: usize) -> Self {
+        let mut op = Self {
+            basis,
+            atoms,
+            max_channels,
+            block: None,
+        };
+        op.set_block(dft_numerics::switches::on(
+            dft_numerics::switches::Id::NONLOCAL_BLOCK,
+        ));
+        op
+    }
+    /// Enable or disable the P48C block path (builds or drops the packed copy
+    /// of the projector columns). Test and experiment hook; the engine uses the
+    /// `BAANDI_NONLOCAL_BLOCK` default read at construction.
+    pub fn set_block(&mut self, on: bool) {
+        if !on {
+            self.block = None;
+            return;
+        }
+        if self.block.is_some() {
+            return;
+        }
+        let n = self.basis.len();
+        let count: usize = self.atoms.iter().map(|a| a.columns.len()).sum();
+        let mut packed = Vec::with_capacity(n * count);
+        for atom in &self.atoms {
+            for col in &atom.columns {
+                packed.extend_from_slice(&col[..n]);
+            }
+        }
+        self.block = Some(BlockProjectors { packed, count });
+    }
+    /// Whether band blocks of width >= 2 use the P48C two-GEMM path.
+    pub fn block_enabled(&self) -> bool {
+        self.block.is_some()
+    }
+    /// Bytes of the packed projector copy (zero when the block path is off).
+    pub fn block_bytes(&self) -> usize {
+        self.block
+            .as_ref()
+            .map_or(0, |b| b.packed.len() * size_of::<Complex64>())
+    }
+    /// Per-worker scratch of one band panel: projections and weights
+    /// (p x 32 each) and the image (n x 32); zero when the block path is off.
+    fn block_scratch_len(&self) -> usize {
+        self.block.as_ref().map_or(0, |b| {
+            (2 * b.count + self.basis.len()) * NONLOCAL_BAND_PANEL
+        })
+    }
+    /// Y += B D B^H X for one panel of `w` <= 32 bands: `x` and `y` are the
+    /// contiguous n x w column-major panels. Pk = B^H X and the image B W are
+    /// single sequential GEMMs of fixed shape; W = D Pk uses each atom's
+    /// coupling block with the per-band order of `add` (sum over j ascending).
+    /// Rounding class against `add` (different summation order).
+    fn add_block_panel(
+        &self,
+        x: &[Complex64],
+        y: &mut [Complex64],
+        w: usize,
+        scratch: &mut [Complex64],
+    ) -> Result<(), HamiltonianError> {
+        let Some(block) = self.block.as_ref() else {
+            return Err(HamiltonianError::Shape);
+        };
+        let n = self.basis.len();
+        let p = block.count;
+        if x.len() != n * w || y.len() != n * w || w > NONLOCAL_BAND_PANEL {
+            return Err(HamiltonianError::Shape);
+        }
+        if p == 0 {
+            return Ok(());
+        }
+        let (projections, rest) = scratch.split_at_mut(p * NONLOCAL_BAND_PANEL);
+        let (weights, image) = rest.split_at_mut(p * NONLOCAL_BAND_PANEL);
+        let (projections, weights, image) = (
+            &mut projections[..p * w],
+            &mut weights[..p * w],
+            &mut image[..n * w],
+        );
+        dft_numerics::linalg::complex_gemm_slices_into(
+            &block.packed,
+            n,
+            p,
+            true,
+            x,
+            w,
+            projections,
+        )
+        .map_err(|_| HamiltonianError::Shape)?;
+        for band in 0..w {
+            let pk = &projections[band * p..(band + 1) * p];
+            let wk = &mut weights[band * p..(band + 1) * p];
+            let mut start = 0;
+            for atom in &self.atoms {
+                let nc = atom.columns.len();
+                for i in 0..nc {
+                    wk[start + i] = (0..nc)
+                        .map(|j| atom.coupling[i * nc + j] * pk[start + j])
+                        .sum();
+                }
+                start += nc;
+            }
+        }
+        dft_numerics::linalg::complex_gemm_slices_into(
+            &block.packed,
+            n,
+            p,
+            false,
+            weights,
+            w,
+            image,
+        )
+        .map_err(|_| HamiltonianError::Shape)?;
+        for (out, v) in y.iter_mut().zip(image.iter()) {
+            *out += v;
+        }
+        Ok(())
+    }
     /// Build projectors at q=k+G from the basis momenta, including exp(-i q.tau).
     /// Gamma uses exactly the same radial/angular and structure-factor path.
     pub fn new(
@@ -257,11 +396,11 @@ impl NonlocalOperator {
                 });
             }
         }
-        Ok(Self {
-            basis: basis.momenta().to_vec(),
+        Ok(Self::assemble(
+            basis.momenta().to_vec(),
             atoms,
             max_channels,
-        })
+        ))
     }
     pub fn atoms(&self) -> &[AtomProjectors] {
         &self.atoms
@@ -428,6 +567,8 @@ struct Worker {
 struct Scratch {
     fft: FusedPlan,
     projections: Vec<Complex64>,
+    /// P48C band-panel scratch (empty when the block path is off).
+    block: Vec<Complex64>,
 }
 /// Immutable physical data with interior scratch reuse; intentionally not Sync.
 /// Local grid values are in Ha and must use the internally derived grid dimensions.
@@ -468,6 +609,7 @@ impl Hamiltonian {
             scratch: std::sync::Mutex::new(Scratch {
                 fft: FusedPlan::new(dims, grid.g_to_fft())?,
                 projections: vec![Complex64::default(); 2 * nonlocal.max_channels],
+                block: vec![Complex64::default(); nonlocal.block_scratch_len()],
             }),
         }]);
         Ok(Self {
@@ -510,6 +652,7 @@ impl Hamiltonian {
                 scratch: std::sync::Mutex::new(Scratch {
                     fft: FusedPlan::new(dims, self.data.grid.g_to_fft())?,
                     projections: vec![Complex64::default(); 2 * self.data.nonlocal.max_channels],
+                    block: vec![Complex64::default(); self.data.nonlocal.block_scratch_len()],
                 }),
             });
         }
@@ -567,6 +710,21 @@ impl Hamiltonian {
             .as_slice()
             .expect("Hamiltonian stores standard layout")
     }
+    /// P48C test and experiment hook: enable or disable the block nonlocal
+    /// path regardless of `BAANDI_NONLOCAL_BLOCK`, resizing every worker's
+    /// panel scratch (allocation here, never during application).
+    pub fn set_nonlocal_block(&mut self, on: bool) -> Result<(), HamiltonianError> {
+        self.data.nonlocal.set_block(on);
+        let len = self.data.nonlocal.block_scratch_len();
+        for worker in self.scratch.get_mut().iter_mut() {
+            let scratch = worker
+                .scratch
+                .get_mut()
+                .map_err(|_| HamiltonianError::Busy)?;
+            scratch.block = vec![Complex64::default(); len];
+        }
+        Ok(())
+    }
     /// Read-only access for term-by-term orbital energy audits.
     pub fn nonlocal(&self) -> &NonlocalOperator {
         &self.data.nonlocal
@@ -576,11 +734,13 @@ impl Hamiltonian {
     }
 }
 impl HamiltonianData {
+    /// `nonlocal = false` leaves the nonlocal term to the P48C block phase.
     fn apply_with(
         &self,
         x: &[Complex64],
         y: &mut [Complex64],
         scratch: &mut Scratch,
+        nonlocal: bool,
     ) -> Result<(), HamiltonianError> {
         if x.len() != self.kinetic.len() || y.len() != x.len() {
             return Err(HamiltonianError::Shape);
@@ -596,7 +756,9 @@ impl HamiltonianData {
         for (i, value) in y.iter_mut().enumerate() {
             *value += self.kinetic[i] * x[i];
         }
-        self.nonlocal.add(x, y, &mut scratch.projections);
+        if nonlocal {
+            self.nonlocal.add(x, y, &mut scratch.projections);
+        }
         if !y.iter().all(finite) {
             return Err(HamiltonianError::NonFinite);
         }
@@ -629,6 +791,7 @@ impl LinearOperator for Hamiltonian {
                     .scratch
                     .get_mut()
                     .map_err(|_| application(HamiltonianError::Busy))?,
+                true,
             )
             .map_err(application)
     }
@@ -640,7 +803,31 @@ impl LinearOperator for Hamiltonian {
             .scratch
             .try_borrow_mut()
             .map_err(|_| application(HamiltonianError::Busy))?;
-        let _region = Span::region("hamiltonian", scratch.len().min(x.cols()).max(1));
+        // P48C: blocks of two or more bands take the nonlocal term out of the
+        // per-band phase and apply it once per fixed band panel afterwards.
+        // Single-column calls keep the per-band path bit for bit.
+        let block = self.data.nonlocal.block_enabled() && x.cols() >= 2;
+        {
+            let _region = Span::region("hamiltonian", scratch.len().min(x.cols()).max(1));
+            self.local_phase(&mut scratch, x, y, !block)?;
+        }
+        if block {
+            self.nonlocal_block(&mut scratch, x, y)?;
+        }
+        Ok(())
+    }
+}
+
+impl Hamiltonian {
+    /// Kinetic + local (and, with `nonlocal`, the per-band nonlocal) term of
+    /// every column, distributed over the worker slots exactly as before P48C.
+    fn local_phase(
+        &self,
+        scratch: &mut [Worker],
+        x: &ComplexMatrix,
+        y: &mut ComplexMatrix,
+        nonlocal: bool,
+    ) -> Result<(), SolverError> {
         if scratch.len() == 1 || x.cols() <= 1 {
             for j in 0..x.cols() {
                 let _piece = Piece::new();
@@ -652,6 +839,7 @@ impl LinearOperator for Hamiltonian {
                             .scratch
                             .get_mut()
                             .map_err(|_| application(HamiltonianError::Busy))?,
+                        nonlocal,
                     )
                     .map_err(|e| SolverError::Application(format!("band index {j}: {e}")))?;
             }
@@ -667,13 +855,101 @@ impl LinearOperator for Hamiltonian {
             let scratch = &mut scratch[..count];
             return self
                 .pool
-                .install(|| apply_static_workers(data, scratch, x, output, 0, x.cols()));
+                .install(|| apply_static_workers(data, scratch, x, output, 0, x.cols(), nonlocal));
         }
         let scratch = &scratch[..];
         let data = &self.data;
         self.pool
-            .install(|| apply_workers(data, scratch, x, output, 0, x.cols()))
+            .install(|| apply_workers(data, scratch, x, output, 0, x.cols(), nonlocal))
     }
+
+    /// P48C block phase: Y += B D B^H X in fixed panels of
+    /// `NONLOCAL_BAND_PANEL` bands. Panels are split statically over the worker
+    /// slots; a panel's arithmetic never depends on which slot runs it, so the
+    /// result is identical at every thread budget.
+    fn nonlocal_block(
+        &self,
+        scratch: &mut [Worker],
+        x: &ComplexMatrix,
+        y: &mut ComplexMatrix,
+    ) -> Result<(), SolverError> {
+        let (n, m) = (x.rows(), x.cols());
+        let panels = m.div_ceil(NONLOCAL_BAND_PANEL);
+        let count = scratch.len().min(panels).max(1);
+        let _region = Span::region("nonlocal_block", count);
+        let data = &self.data;
+        let workers = &mut scratch[..count];
+        let input = x.as_slice();
+        let output = y.as_mut_slice();
+        if count == 1 {
+            nonlocal_panels(data, workers, input, output, n, m, 0, panels)
+        } else {
+            self.pool
+                .install(|| nonlocal_panels(data, workers, input, output, n, m, 0, panels))
+        }
+        .map_err(application)?;
+        for j in 0..m {
+            if !y.column(j).iter().all(finite) {
+                return Err(SolverError::Application(format!(
+                    "band index {j}: {}",
+                    HamiltonianError::NonFinite
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+// P48C: panels [first, end) of the band block; `y` holds exactly their columns.
+#[allow(clippy::too_many_arguments)] // block operands plus a fixed panel range
+fn nonlocal_panels(
+    data: &HamiltonianData,
+    workers: &mut [Worker],
+    x: &[Complex64],
+    y: &mut [Complex64],
+    n: usize,
+    m: usize,
+    first: usize,
+    end: usize,
+) -> Result<(), HamiltonianError> {
+    if workers.len() == 1 {
+        let scratch = workers[0]
+            .scratch
+            .get_mut()
+            .map_err(|_| HamiltonianError::Busy)?;
+        let mut offset = 0;
+        for panel in first..end {
+            let _piece = Piece::new();
+            let column = panel * NONLOCAL_BAND_PANEL;
+            let w = NONLOCAL_BAND_PANEL.min(m - column);
+            data.nonlocal.add_block_panel(
+                &x[column * n..(column + w) * n],
+                &mut y[offset..offset + w * n],
+                w,
+                &mut scratch.block,
+            )?;
+            offset += w * n;
+        }
+        return Ok(());
+    }
+    let left_count = workers.len() / 2;
+    let middle = first + (end - first) * left_count / workers.len();
+    let (left, right) = workers.split_at_mut(left_count);
+    let (left_output, right_output) = y.split_at_mut((middle - first) * NONLOCAL_BAND_PANEL * n);
+    let (left, right) = WorkerPool::join(
+        || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                nonlocal_panels(data, left, x, left_output, n, m, first, middle)
+            }))
+        },
+        || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                nonlocal_panels(data, right, x, right_output, n, m, middle, end)
+            }))
+        },
+    );
+    left.map_err(|_| HamiltonianError::Busy)??;
+    right.map_err(|_| HamiltonianError::Busy)?
 }
 
 // Disjoint column-major output slices need neither a mutex nor a copy.
@@ -685,6 +961,7 @@ fn apply_workers(
     y: &mut [Complex64],
     first: usize,
     end: usize,
+    nonlocal: bool,
 ) -> Result<(), SolverError> {
     // One fixed band per piece. Scratch belongs to a worker slot and is
     // allocated at Hamiltonian construction, never per band. No nested work
@@ -697,7 +974,7 @@ fn apply_workers(
             .map_err(|_| application(HamiltonianError::Busy))?;
         let _piece = Piece::new();
         return data
-            .apply_with(x.column(first), y, &mut scratch)
+            .apply_with(x.column(first), y, &mut scratch, nonlocal)
             .map_err(|e| SolverError::Application(format!("band index {first}: {e}")));
     }
     let middle = first + (end - first) / 2;
@@ -705,12 +982,12 @@ fn apply_workers(
     let (left, right) = WorkerPool::join(
         || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                apply_workers(data, workers, x, left_output, first, middle)
+                apply_workers(data, workers, x, left_output, first, middle, nonlocal)
             }))
         },
         || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                apply_workers(data, workers, x, right_output, middle, end)
+                apply_workers(data, workers, x, right_output, middle, end, nonlocal)
             }))
         },
     );
@@ -725,6 +1002,7 @@ fn apply_static_workers(
     y: &mut [Complex64],
     first: usize,
     end: usize,
+    nonlocal: bool,
 ) -> Result<(), SolverError> {
     if workers.len() == 1 {
         let _piece = Piece::new();
@@ -734,8 +1012,13 @@ fn apply_static_workers(
             .map_err(|_| application(HamiltonianError::Busy))?;
         for j in first..end {
             let offset = (j - first) * x.rows();
-            data.apply_with(x.column(j), &mut y[offset..offset + x.rows()], scratch)
-                .map_err(|e| SolverError::Application(format!("band index {j}: {e}")))?;
+            data.apply_with(
+                x.column(j),
+                &mut y[offset..offset + x.rows()],
+                scratch,
+                nonlocal,
+            )
+            .map_err(|e| SolverError::Application(format!("band index {j}: {e}")))?;
         }
         return Ok(());
     }
@@ -746,12 +1029,12 @@ fn apply_static_workers(
     let (left, right) = WorkerPool::join(
         || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                apply_static_workers(data, left, x, left_output, first, middle)
+                apply_static_workers(data, left, x, left_output, first, middle, nonlocal)
             }))
         },
         || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                apply_static_workers(data, right, x, right_output, middle, end)
+                apply_static_workers(data, right, x, right_output, middle, end, nonlocal)
             }))
         },
     );
@@ -867,6 +1150,7 @@ mod fused_tests {
         let nonlocal = NonlocalOperator {
             basis: basis.momenta().to_vec(),
             max_channels: channels,
+            block: None,
             atoms: vec![AtomProjectors {
                 columns: (0..channels)
                     .map(|i| vector(basis.vectors().len(), i))
@@ -917,6 +1201,7 @@ mod fused_tests {
         NonlocalOperator {
             basis: Vec::new(),
             max_channels: channels,
+            block: None,
             atoms: (0..atoms)
                 .map(|a| AtomProjectors {
                     columns: (0..channels)
@@ -1342,10 +1627,248 @@ impl NonlocalOperator {
                 });
             }
         }
-        Ok(Self {
-            basis: basis.momenta().to_vec(),
+        Ok(Self::assemble(
+            basis.momenta().to_vec(),
             atoms,
             max_channels,
-        })
+        ))
+    }
+}
+
+#[cfg(test)]
+mod block_tests {
+    //! P48C: block nonlocal (two GEMMs per fixed band panel) against the
+    //! per-band path; thread-count independence; width-1 bit identity.
+    use super::*;
+
+    fn vector(n: usize, seed: usize) -> Vec<Complex64> {
+        (0..n)
+            .map(|i| {
+                Complex64::new(
+                    ((i * 17 + seed) as f64).sin(),
+                    ((i * 31 + seed) as f64).cos(),
+                )
+            })
+            .collect()
+    }
+    fn bits(v: &[Complex64]) -> Vec<(u64, u64)> {
+        v.iter().map(|z| (z.re.to_bits(), z.im.to_bits())).collect()
+    }
+    /// Skewed cell at a general k; atoms with 4, 0, 9 and 1 channels and
+    /// off-diagonal couplings inside each atom (mixed projector structure).
+    fn hamiltonian(threads: usize, block: bool) -> Hamiltonian {
+        let cell =
+            Cell::from_user_rows_bohr([[5., 0., 0.], [0.7, 6., 0.], [0.2, 0.3, 7.]]).unwrap();
+        let basis =
+            PlaneWaveBasis::at_k(&cell, dft_units::Hartree(4.), [0.25, -0.25, 0.125]).unwrap();
+        let n = basis.vectors().len();
+        let channels = [4usize, 0, 9, 1];
+        let atoms = channels
+            .iter()
+            .enumerate()
+            .map(|(a, &nc)| AtomProjectors {
+                columns: (0..nc)
+                    .map(|c| vector(n, 7 * a + c).into_iter().map(|z| z * 0.05).collect())
+                    .collect(),
+                coupling: (0..nc * nc)
+                    .map(|i| {
+                        if i / nc == i % nc {
+                            0.7 - 0.1 * a as f64
+                        } else if (i / nc + i % nc) % 3 == 0 {
+                            0.03
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect(),
+            })
+            .collect();
+        let nonlocal = NonlocalOperator {
+            basis: basis.momenta().to_vec(),
+            atoms,
+            max_channels: 9,
+            block: None,
+        };
+        let grid = FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None).unwrap();
+        let potential = Array3::from_shape_vec(
+            grid.dims(),
+            vector(grid.dims().iter().product(), 4)
+                .iter()
+                .map(|z| 0.1 * z.re)
+                .collect(),
+        )
+        .unwrap();
+        let mut h = Hamiltonian::new(&cell, &basis, potential, nonlocal)
+            .unwrap()
+            .with_band_threads(threads)
+            .unwrap();
+        h.set_nonlocal_block(block).unwrap();
+        h
+    }
+    fn block(n: usize, width: usize) -> ComplexMatrix {
+        let mut x = ComplexMatrix::zeros(n, width).unwrap();
+        for j in 0..width {
+            x.column_mut(j).copy_from_slice(&vector(n, 1000 + 13 * j));
+        }
+        x
+    }
+
+    #[test]
+    fn block_nonlocal_matches_per_band_and_is_thread_independent() {
+        let reference = hamiltonian(1, false);
+        let n = reference.dimension();
+        let mut worst = 0.0_f64;
+        for width in [1, 2, 7, 33, 64] {
+            let x = block(n, width);
+            let mut expected = ComplexMatrix::zeros(n, width).unwrap();
+            reference.apply_block(&x, &mut expected).unwrap();
+            // Nonlocal image alone (per band), the scale of the rounding change.
+            let mut image = vec![Complex64::default(); n];
+            let mut first: Option<Vec<(u64, u64)>> = None;
+            for threads in [1, 2, 4, 8] {
+                let h = hamiltonian(threads, true);
+                assert!(h.nonlocal().block_enabled());
+                let mut y = ComplexMatrix::zeros(n, width).unwrap();
+                h.apply_block(&x, &mut y).unwrap();
+                let b = bits(y.as_slice());
+                match &first {
+                    None => first = Some(b),
+                    Some(f) => assert_eq!(f, &b, "width {width} T={threads}"),
+                }
+                if width == 1 {
+                    assert_eq!(bits(expected.as_slice()), bits(y.as_slice()));
+                }
+                for j in 0..width {
+                    reference.nonlocal().apply(x.column(j), &mut image).unwrap();
+                    let scale = image.iter().map(|z| z.norm()).fold(0.0, f64::max);
+                    for (a, e) in y.column(j).iter().zip(expected.column(j)) {
+                        let relative = (a - e).norm() / scale;
+                        worst = worst.max(relative);
+                        assert!(
+                            relative <= 1e-14,
+                            "width {width} T={threads} band {j}: {relative:e}"
+                        );
+                    }
+                }
+            }
+        }
+        println!("P48C block vs per-band: max |dy| / max|V_nl x| = {worst:e}");
+    }
+
+    #[test]
+    fn block_nonlocal_is_relative_per_entry() {
+        // Per entry against |y_i| as well (y = T + V_loc + V_nl applied).
+        let reference = hamiltonian(1, false);
+        let h = hamiltonian(4, true);
+        let n = reference.dimension();
+        let x = block(n, 7);
+        let mut expected = ComplexMatrix::zeros(n, 7).unwrap();
+        let mut y = ComplexMatrix::zeros(n, 7).unwrap();
+        reference.apply_block(&x, &mut expected).unwrap();
+        h.apply_block(&x, &mut y).unwrap();
+        let mut worst = 0.0_f64;
+        for (a, e) in y.as_slice().iter().zip(expected.as_slice()) {
+            if e.norm() > 0.0 {
+                worst = worst.max((a - e).norm() / e.norm());
+            }
+        }
+        println!("P48C per-entry relative max = {worst:e}");
+        assert!(worst <= 1e-14, "{worst:e}");
+    }
+
+    #[test]
+    fn block_nonlocal_rejects_nonfinite_and_reports_memory() {
+        let h = hamiltonian(2, true);
+        let n = h.dimension();
+        let mut x = block(n, 5);
+        let mut y = ComplexMatrix::zeros(n, 5).unwrap();
+        x.column_mut(3)[2].re = f64::NAN;
+        assert!(h.apply_block(&x, &mut y).is_err());
+        let off = hamiltonian(2, false);
+        assert!(!off.nonlocal().block_enabled());
+        assert_eq!(off.nonlocal().block_bytes(), 0);
+        let p: usize = h.nonlocal().atoms().iter().map(|a| a.columns().len()).sum();
+        assert_eq!(h.nonlocal().block_bytes(), n * p * 16);
+    }
+
+    /// Mac observation only (dev08 decides): nonlocal of m bands, per-band
+    /// `add` against the block panels; GFLOP/s of the block path counts
+    /// 16 n p m real flops (two complex GEMMs).
+    #[test]
+    #[ignore = "cargo test --release -p dft-physics --lib nonlocal_block_microbench -- --ignored --nocapture"]
+    fn nonlocal_block_microbench() {
+        use std::{hint::black_box, time::Instant};
+        println!("label,n,p,m,per_band_us,block_us,ratio,block_gflops,per_band_gflops");
+        for (label, atoms, channels, n) in [
+            ("si2-k30Ry", 2, 4, 749),
+            ("mgo-40-class", 2, 13, 1495),
+            ("si16-class", 16, 4, 5990),
+            ("si64-class", 64, 4, 23960),
+        ] {
+            let mut op = NonlocalOperator {
+                basis: vec![
+                    GVector {
+                        miller: [0; 3],
+                        cartesian: [0.0; 3],
+                        norm_squared: 0.0,
+                    };
+                    n
+                ],
+                max_channels: channels,
+                block: None,
+                atoms: (0..atoms)
+                    .map(|a| AtomProjectors {
+                        columns: (0..channels).map(|c| vector(n, a * channels + c)).collect(),
+                        coupling: (0..channels * channels)
+                            .map(|i| if i % (channels + 1) == 0 { 0.7 } else { 0.03 })
+                            .collect(),
+                    })
+                    .collect(),
+            };
+            op.set_block(true);
+            let p = atoms * channels;
+            let mut scratch = vec![Complex64::default(); op.block_scratch_len()];
+            let mut small = vec![Complex64::default(); 2 * channels];
+            for m in [4usize, 8, 16, 32] {
+                let x: Vec<Complex64> = (0..m).flat_map(|j| vector(n, 500 + j)).collect();
+                let mut y = vec![Complex64::default(); n * m];
+                let reps = (2e8 / (16.0 * (n * p * m) as f64)).ceil() as usize;
+                let mut times = [0.0; 2];
+                for (mode, time) in times.iter_mut().enumerate() {
+                    let mut samples = Vec::new();
+                    for _ in 0..5 {
+                        let start = Instant::now();
+                        for _ in 0..reps {
+                            if mode == 0 {
+                                for j in 0..m {
+                                    black_box(&op).add(
+                                        &x[j * n..(j + 1) * n],
+                                        &mut y[j * n..(j + 1) * n],
+                                        &mut small,
+                                    );
+                                }
+                            } else {
+                                black_box(&op)
+                                    .add_block_panel(&x, &mut y, m, &mut scratch)
+                                    .unwrap();
+                            }
+                            black_box(&y);
+                        }
+                        samples.push(start.elapsed().as_secs_f64() * 1e6 / reps as f64);
+                    }
+                    samples.sort_by(f64::total_cmp);
+                    *time = samples[2];
+                }
+                let flops = 16.0 * (n * p * m) as f64;
+                println!(
+                    "{label},{n},{p},{m},{:.2},{:.2},{:.2},{:.2},{:.2}",
+                    times[0],
+                    times[1],
+                    times[0] / times[1],
+                    flops / times[1] / 1e3,
+                    flops / times[0] / 1e3
+                );
+            }
+        }
     }
 }

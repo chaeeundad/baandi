@@ -1,6 +1,77 @@
 # Optimization log (newest first)
 
 
+## P48C — complex (k-point) nonlocal as two GEMMs per band panel (2026-11-13, opt-in)
+
+Ticket `tickets/P48C-COMPLEX-NONLOCAL-GEMM.md`, work order P48 sections 1-2.
+Base `3fea9e81586e7237228e2e89a518461faf7dcccd` (= main at the time); branch
+uncommitted. Switch `BAANDI_NONLOCAL_BLOCK=on|off`, default **off** until a
+dev08 A/B. Not derived from a QE note.
+
+**New premise against A43 and A58b.** A43 (blocked row traversal) and A58b
+(band-shared projector reads) both changed the traversal order of hand-written
+BLAS-1 loops and kept the per-band dot/axpy arithmetic; both lost on dev08.
+P48C replaces BLAS-1 by BLAS-3: for a panel of up to 32 bands,
+Pk = B^H X (p x w) and the image B (D Pk) (n x w) are two library GEMMs
+(MKL zgemm on MKL builds, faer `matmul` sequential otherwise), so B is read
+once per panel at GEMM speed instead of twice per band. The real Gamma
+analogue (NONLOCAL-DGEMM-AB) was the GEMM change that did win (-6.4 / -4.2
+percent at T=1).
+
+**Change.** `NonlocalOperator` keeps a packed copy of its projector columns
+(n x p column-major, atom order) built once at construction when the switch
+is on. `Hamiltonian::apply_block` with width >= 2 runs kinetic + local per
+band as before (same worker distribution) without the nonlocal term, then a
+block phase applies the nonlocal in fixed panels of 32 bands (last panel
+narrower), panels split statically over the worker slots. Each panel is one
+sequential GEMM per product over the full reduction length: the panel shapes
+depend only on n, p and the panel width, never on T, so the bits do not
+depend on the thread count. Coupling W = D Pk keeps the per-band order of
+`add`. Width-1 calls and `apply` keep the per-band path (bit-identical).
+`expectation_values` unchanged (it may reuse Pk later; not done).
+New GEMM entry `dft_numerics::linalg::complex_gemm_slices_into` (tiled.rs).
+Per-worker panel scratch (2p + n) x 32 complex, allocated at construction.
+
+**Memory (when on).** Packed B = n p 16 bytes per k (a second copy of the
+existing projector columns): si2 30 Ry (n about 750, p = 8) 96 kB per k,
+3.1 MB for 32 k; mgo-40 (n = 1495, p = 2 x (Mg 4 + O 5 radial projectors,
+expanded over m) about 21 to 26) 0.50 to 0.62 MB per k, 16 to 20 MB for
+32 k. Panel scratch per worker slot (2p + n) x 32 x 16 bytes: 0.39 MB (si2),
+0.79 MB (mgo-40), comparable to the per-worker FFT scratch (36^3 x 16 =
+0.75 MB for mgo-40). No on-the-fly packing was needed.
+
+**Identity (Mac, pure build, O).**
+- Switch off: `bench_scf.py --require-identical` against a same-HEAD build
+  (base 3fea9e8): gamma, k222s, k222, k444s, si8 at T=1 and T=8, all
+  `dE 0.00e+00`, density identical.
+- Switch on: same cases dE <= 2.66e-15 Ha, iterations identical, Gamma cases
+  density identical (real path untouched); k cases density differs from off
+  (rounding class) and is identical at T=1 and T=8. mgo-40 (PBE, 3x3x3,
+  80 Ry): total energy identical to the last digit (-76.05088085171083 Ha),
+  SCF 18/18, Davidson 1061/1061, density SHA 2d656d16... equal at T=1 and T=8.
+- Unit tests (`hamiltonian::block_tests`): widths 1, 2, 7, 33, 64 at
+  T=1,2,4,8, skewed cell, general k, atoms with 4/0/9/1 channels and
+  off-diagonal D: bits identical across T, width 1 bit-identical to off,
+  max |dy| / max|V_nl x| = 2.4e-15 (gate 1e-14), per-entry relative
+  1.2e-15 (gate 1e-14).
+- `compare_kpoints_qe.py` on k222_c, k222s_c, k444s_c: PASS off and on with
+  the default tolerances.
+- `bench_suite.py --robustness --threads 4`: same status per case off/on
+  (16 pass, the 3 known nonconverged unchanged), iterations and operator
+  applications identical, max |dE| 2.7e-15 Ha over converged cases.
+
+**Mac observations (O, not acceptance).** Microbench `nonlocal_block_microbench`
+(release, pure): block 35 to 50 GFLOP/s against 16.3 to 16.5 for per-band;
+ratio 2.3 to 3.1x for m = 4..32 across si2 (749 x 8), mgo-40 class (1495 x 26),
+si16 class (5990 x 64), si64 class (23960 x 256). SCF wall, two pairs:
+mgo-40 T=1 6.07/6.07 -> 5.86/5.81 s (-3.8 %), T=8 1.81/1.81 -> 1.76/1.77 s
+(-2 %); k444s T=1 2.189 -> 2.184 s (single run, noise).
+
+**Limits.** MKL path compiled and clippy-checked only (no MKL on the Mac);
+no dev08 number; acceptance pending the dev08 request in the ticket report.
+The ticket's measurement list (k222, syn-p3 with a k mesh, si16-k222) is not
+measured beyond the suite runs above.
+
 ## P24A — hard locking and one-rectangle reduced H (2026-11-06)
 
 Derived from `qe-solvers-and-subspace.md`, hypotheses 2 and 5; notes only,

@@ -109,8 +109,15 @@ fn product(
     out
 }
 
-const SHAPES: [(usize, usize, usize); 9] = [
+// (300, 1, 4), (5, 1, 1), (1, 9, 3): one-row or one-column views whose stride
+// is not 1 (A^T of a single column); the first packed version took them for
+// contiguous and panicked (robustness suite syn-s1, syn-fft-primes,
+// syn-cubic-degenerate).
+const SHAPES: [(usize, usize, usize); 12] = [
     (1, 1, 1),
+    (300, 1, 4),
+    (5, 1, 1),
+    (1, 9, 3),
     (7, 5, 3),
     (9, 6, 5),
     (255, 7, 5),

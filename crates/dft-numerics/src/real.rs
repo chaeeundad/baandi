@@ -955,7 +955,9 @@ static ZERO_COLUMN: [f64; KC] = [0.; KC];
 /// written) when a column of `b` is not contiguous; the caller then uses the
 /// nano path.
 fn simd_gemm(mut out: RealMatrixMut<'_>, a: RealMatrixRef<'_>, b: RealMatrixRef<'_>) -> bool {
-    if b.nrows() > 1 && b.ncols() > 0 && b.col(0).try_as_col_major().is_none() {
+    // Same stride test as `ColRef::try_as_col_major` (shape shortcuts such as
+    // "one row is always contiguous" are wrong for faer views).
+    if b.row_stride() != 1 {
         return false;
     }
     let (m, n, k) = (out.nrows(), out.ncols(), a.ncols());
@@ -1020,13 +1022,17 @@ fn pack_strip(
     pc: usize,
     kc: usize,
 ) {
-    if a.nrows() <= 1 || a.col(0).try_as_col_major().is_some() {
+    // Branch on the strides themselves (the exact test faer's
+    // `try_as_col_major` / `try_as_row_major` apply), not on the shape: a
+    // one-row transposed view has row stride != 1 and must not take the
+    // column branch (P48B robustness-suite panic, syn-s1 and friends).
+    if a.row_stride() == 1 {
         for (p, dst) in strip.as_chunks_mut::<MR>().0.iter_mut().enumerate() {
             let col = a.col(pc + p).try_as_col_major().expect("contiguous column");
             dst[..rows].copy_from_slice(&col.as_slice()[i..i + rows]);
             dst[rows..].fill(0.);
         }
-    } else if a.row(0).try_as_row_major().is_some() {
+    } else if a.col_stride() == 1 {
         // Transposed view (A^T of a column-major A): rows are contiguous.
         for r in 0..MR {
             if r < rows {

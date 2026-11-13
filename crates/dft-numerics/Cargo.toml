@@ -23,6 +23,10 @@ rustfft.workspace = true
 thiserror.workspace = true
 faer.workspace = true
 rayon = "=1.12.0"
+# P48B packed real GEMM kernel: safe SIMD dispatch (already in the lockfile
+# through faer). Default features off so that the feature set seen by faer, and
+# with it faer's own x86 dispatch, is unchanged.
+pulp = { version = "=0.22.3", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 ndrustfft.workspace = true

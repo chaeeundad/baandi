@@ -134,6 +134,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::LADDER_SECANT), Value::Choice("off"));
     assert_eq!(value(Id::STANDARD_STOP), Value::Choice("plain"));
     assert_eq!(value(Id::ROTATE_KERNEL), Value::Choice("legacy"));
+    assert_eq!(value(Id::PURE_GEMM), Value::Choice("nano"));
     assert_eq!(value(Id::PAIR_FFT), Value::Choice("grid"));
     assert_eq!(
         value(Id::MGS),

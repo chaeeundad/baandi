@@ -76,6 +76,119 @@ this ticket's files; not changed.
 Commands: `cargo test -p dft-solvers --lib ortho`; `BAANDI_ORTHO_BLOCK=on|off
 python3 -I scripts/bench_suite.py --upf <Si UPF> --threads 1 --cases ...`;
 paired runs with `BAANDI_DAVIDSON_STAGES=on` (driver in the session scratchpad).
+## P48B — packed pure-Rust real GEMM (2026-11-13, opt-in)
+
+Ticket `tickets/P48B-PACKED-GEMM.md`, work order P48 sections 1-2. Base
+`92b26ae` (main at the time); branch WIP commit `f70deda` plus uncommitted
+fixes. Switch `BAANDI_PURE_GEMM=nano|packed`, default **nano** until a dev08
+A/B. Not derived from a QE note. MKL builds are unchanged.
+
+**New premise against ROT1 and A49.** ROT1 (blocked rotation in
+auto-vectorised plain Rust) lost to the faer nano micro-kernels on NEON and
+AVX-512. Its lesson was that a faster rotation needs real SIMD micro-kernels
+or a packed library GEMM. P48B is exactly that, and nothing else: it does not
+use finer faer sub-tiles (A49).
+
+**Change.** `bounded_matmul` (`dft-numerics/src/real.rs`) is the single entry
+point of every real GEMM site: Gram/projection, reduced matrix, rotation pair,
+Ritz/residual and column groups. The real Gamma nonlocal P^T X and P W also go
+through `RealGemmWorkspace`, so no change in dft-physics was needed. Under
+`packed`, each panel of the existing shape-only decomposition is computed by a
+packed kernel:
+- **x86_64:** one faer `matmul` with `Par::Seq` per panel (at most 256 rows or
+  256 reduction terms), which runs faer's private packed x86 GEMM (AVX-512 on
+  dev08).
+- **aarch64:** our own 8x4 register-tile kernel (MR=8, NR=4, KC reduction
+  block) written with pulp's safe NEON wrappers (`vfmaq_n_f64`, no `unsafe` of
+  ours). Each output entry is one ascending fused multiply-add chain over the
+  reduction, continued across KC blocks. The A strip is packed on the stack;
+  B columns are read in place.
+
+The faer route was not used on aarch64 because faer's general GEMM there
+allocated 6520 times in the measured steady state (counting allocator), while
+our kernel allocates nothing. Panel shapes depend only on the matrix shapes,
+never on T, and partial sums are combined in ascending panel order as before,
+so the bits do not depend on the thread count. Across CPU families the last
+bits can differ, as with MKL. `pulp =0.22.3` (MIT, already in Cargo.lock
+through faer) became a direct dependency with default features off, so the
+feature set that faer sees is unchanged (`docs/dependencies.md`).
+
+**Bug found by the robustness suite and fixed.** The first version chose the
+packing branch by shape ("a one-row view is contiguous"). For a one-row
+transposed view (A^T of a single column, row stride != 1) that is false, and
+the kernel panicked ("contiguous column"). syn-s1, syn-fft-primes and
+syn-cubic-degenerate failed with exit 4. The fix branches on the strides
+themselves (`row_stride() == 1` / `col_stride() == 1`, the exact test faer's
+`try_as_*_major` applies), in `pack_strip` and on the B side of `simd_gemm`.
+Regression shapes (300,1,4), (5,1,1) and (1,9,3) were added to
+`tests/pure_gemm.rs`; they reproduce the panic on `f70deda` and pass after the
+fix.
+
+**Tests (`crates/dft-numerics/tests/`).**
+- `pure_gemm.rs`:
+  - Packed and simd agree with nano within the two-order bound 2 k eps
+    sum|a||b| per entry, on random and ill-conditioned inputs, for 12 shapes,
+    both A B and A^T B. The worst ratio is 10.3 eps sum|a||b|. The ticket asked
+    for "4 ulp per entry"; that is not a valid bound for two summation orders
+    of k terms with cancellation, so the standard bound is used.
+  - The NEON kernel equals an exact ascending fused-chain reference bit for
+    bit.
+  - Every site gives bit-identical results at T=1, 2, 4, 8 for every kernel.
+  - The default is nano, and the switch is honoured.
+- `pure_gemm_alloc.rs` (release only; it is `#[ignore]` in debug because debug
+  faer allocates and the test takes about 1 min): a counting global allocator
+  over every thread, run on benchmark shapes after a warm-up inside one pool
+  installation. Result: 0 allocations for nano, packed and simd at T=1 and T=4
+  (Mac). Outside an installation the rayon executor allocates 1 block per 63
+  outside injections; that is an executor property, the same for nano.
+- `scripts/check.sh dft-numerics` and the workspace `scripts/check.sh`: PASS on
+  all four gates.
+
+**Identity and accuracy (Mac, O).**
+- Switch off: `bench_scf --require-identical` against a `92b26ae` build, cases
+  gamma and si8 at T=1, 2, 4, 8: dE 0, density identical.
+- Switch on: gamma dE 8.9e-16 Ha, si8 dE 5.5e-13 Ha. **si8 takes 10 SCF steps
+  instead of 9** (H 930 -> 967): a rounding-level trajectory change, energy
+  inside the strict class. Density SHA is identical at T=1, 2, 4, 8.
+- si16-gamma / si32-gamma (`bench_suite`, T=1 and 8):
+  - si16: energy differs by 4e-15 Ha; SCF 8/8, H 1521/1521.
+  - si32: energy differs by 1.17e-12 Ha; SCF 8/8, H 3002/3002. This is inside
+    the 1e-10 strict class but just above the 1e-12 cross-path check.
+  - Density SHA is equal at T=1 and T=8 within each mode.
+- `bench_suite --robustness --threads 4` off vs packed (after the fix):
+  - Every status is the same (16 pass, 3 known nonconverged).
+  - Max |dE| over converged unique-solution cases is 5.4e-13 Ha (si8). The
+    other cases are at most 9e-15.
+  - syn-s2 converges to a different fixed point (dE 5.0e-3 Ha, SCF 23 -> 27).
+    This is its documented fixed-point multiplicity (ledger lesson 11: 1e-14
+    displacements already move it by up to 4.4e-3 Ha), not a packed defect.
+  - The nonconverged cases end at different points, as expected.
+  - Packed T=4 and packed T=1 suite densities are identical in 19/19 cases.
+
+**Mac observations (O, not acceptance; host load average 5 to 12).**
+- Microbench `pure_gemm_microbench`, T=1, GFLOP/s (nano / packed / faer
+  library):
+  - rotation si16-si64: 25-28 / 41-49 / 53-57
+  - Gram: 21-24 / 43-47 / 47-53
+  - narrow Gram (n=4): 13 / 21 / 22
+  - reduced: 23 / 45-49 / 53-55
+  - nonlocal: 23-30 / 42-49 / 49-59
+- SCF wall, three alternating runs, median off -> packed:
+  - si32-gamma T=1: 11.23 -> 10.40 s (-7 %)
+  - si32-gamma T=8: 3.39 -> 3.22 s (-5 %)
+  - si16-gamma T=1: 2.16 -> 2.04 s
+  - si16-gamma T=8: 0.70 -> 0.68 s
+  - The single runs scatter by up to 25 %.
+
+**Limits.**
+- The x86_64 packed path (faer's packed GEMM per panel) has not been run
+  anywhere: its allocation test, its thread identity and its GFLOP/s need
+  dev08.
+- No MKL comparison on the Mac, so the ticket's 60 % of MKL target is
+  unmeasured.
+- No strict/standard seeds 601-610, si64, k444s or mgo-40 runs here. The k
+  path does not use this kernel (complex sites belong to P48C).
+
 
 ## P48C — complex (k-point) nonlocal as two GEMMs per band panel (2026-11-13, opt-in)
 

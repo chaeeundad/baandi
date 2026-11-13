@@ -1528,6 +1528,20 @@ fn orthogonality_defect(v: &RealMatrix) -> f64 {
 // subtraction, then two-pass MGS and normalization within the incoming block.
 /// Panel width of the blocked Gram-Schmidt switch.
 const BLOCK_COLUMNS: usize = 16;
+/// ORTHO-BLOCK (P48D) cache budget: half of a 1 MiB L2, in doubles. A fixed
+/// hardware-shape constant, not a measured or material parameter: 1 MiB is the
+/// smallest per-core L2 of the measurement hosts (dev08 Xeon Gold 6230; Apple
+/// cores have more). It is a constant rather than a runtime query so that the
+/// panel decomposition, and with it every rounded result, is the same on every
+/// host and at every thread count.
+const ORTHO_PANEL_DOUBLES: usize = (1 << 20) / 2 / std::mem::size_of::<f64>();
+/// ORTHO-BLOCK panel width for vectors of `n` rows: the largest multiple of four
+/// with `n * width` doubles inside half of the L2 (`ORTHO_PANEL_DOUBLES`), at
+/// least four. The in-panel scalar MGS then streams its columns from L2, and the
+/// projection against earlier panels is a GEMM. Depends on `n` only.
+fn ortho_panel_width(n: usize) -> usize {
+    (ORTHO_PANEL_DOUBLES / n.max(1) / 4 * 4).max(4)
+}
 /// Widest block the NARROW kernels take (projection and reduced border); wider
 /// blocks keep the panel GEMM, which is efficient there. A kernel-shape choice,
 /// not a physical parameter: in the faer microbenchmark at n = 11877, m = 408
@@ -1552,6 +1566,10 @@ struct Projection {
     /// a column was dropped). Skipping it saves two of the four streams of the
     /// basis per append.
     dgks: Option<f64>,
+    /// ORTHO-BLOCK (P48D, `BAANDI_ORTHO_BLOCK=on`, default off; rounding class):
+    /// panel Gram-Schmidt of the correction block with the shape-rule panel
+    /// width `ortho_panel_width(n)` on every build (overrides `BAANDI_MGS`).
+    block_ortho: bool,
     /// NARROW-PROJ (`ResearchOptions::narrow_proj`, set per solve): blocks of
     /// at most `NARROW_WIDTH` columns use the streaming dot and fused update
     /// kernels of the GEMM workspace instead of the panel GEMMs.
@@ -1617,6 +1635,7 @@ impl Projection {
             },
             wide: dft_numerics::switches::on(dft_numerics::switches::Id::WIDE_DOT),
             dgks: dgks_keep(),
+            block_ortho: dft_numerics::switches::on(dft_numerics::switches::Id::ORTHO_BLOCK),
             narrow: false,
             column: vec![0.; n],
         })
@@ -1735,13 +1754,24 @@ impl Projection {
             }
             let mut kept = 0;
             let mut min_len = f64::INFINITY;
-            if self.blocked {
-                // Panels of BLOCK_COLUMNS columns: two block projections against
-                // the kept columns (GEMM), then the same two-pass MGS and rank
-                // floor inside the panel.
+            // ORTHO-BLOCK (P48D) replaces the fixed 16-column panel (and the
+            // classic sweep) by the shape-rule width; otherwise MGS-B or classic.
+            let panel = if self.block_ortho {
+                Some(ortho_panel_width(n))
+            } else if self.blocked {
+                Some(BLOCK_COLUMNS)
+            } else {
+                None
+            };
+            if let Some(panel) = panel {
+                // Panels of `panel` columns: two block projections against the
+                // kept columns (GEMM), then the same two-pass MGS and rank floor
+                // inside the panel. Every column is projected twice against every
+                // earlier kept column, as in the classic sweep; only the order of
+                // the floating-point sums differs (rounding class).
                 let mut start = 0;
                 while start < count {
-                    let w = BLOCK_COLUMNS.min(count - start);
+                    let w = panel.min(count - start);
                     for _ in 0..2 {
                         if kept == 0 {
                             break;
@@ -1759,7 +1789,18 @@ impl Projection {
                             self.overlap.as_mut().submatrix_mut(0, 0, kept, w),
                         )?;
                         let overlap_rows = self.overlap.rows();
-                        ws.multiply_slices_into(
+                        // ORTHO-BLOCK: the long product also goes through the
+                        // per-panel dgemm when n w exceeds the square workspace
+                        // bound (MKL builds; same fixed 256-row panels, so the
+                        // result does not depend on the thread count). MGS-B keeps
+                        // its original call.
+                        let apply = if self.block_ortho {
+                            RealGemmWorkspace::multiply_slices_wide_into
+                        } else {
+                            RealGemmWorkspace::multiply_slices_into
+                        };
+                        apply(
+                            ws,
                             dft_numerics::GemmSite::Other,
                             self.output.as_slice(),
                             n,
@@ -2149,6 +2190,163 @@ mod tests {
                 both.as_mut_slice()[..split].copy_from_slice(q.as_slice());
                 both.as_mut_slice()[split..].copy_from_slice(fast.as_slice());
                 assert!(orthogonality_defect(&both) <= 1e-13, "{blocked} {mix}");
+            }
+        }
+    }
+    /// ORTHO-BLOCK panel width: shape rule only (n), multiple of four, >= 4.
+    #[test]
+    fn ortho_panel_width_rule() {
+        assert_eq!(ortho_panel_width(0), ORTHO_PANEL_DOUBLES);
+        assert_eq!(ortho_panel_width(1024), 64);
+        assert_eq!(ortho_panel_width(5939), 8);
+        assert_eq!(ortho_panel_width(20_000), 4);
+        assert_eq!(ortho_panel_width(1 << 30), 4);
+        for n in [1, 7, 301, 2048, 4097, 11877, 65537] {
+            let w = ortho_panel_width(n);
+            assert!(w >= 4 && w.is_multiple_of(4));
+            assert!(w == 4 || n * w <= ORTHO_PANEL_DOUBLES);
+        }
+    }
+    /// One projection of `x` against `q` with the variant (MGS-B, ORTHO-BLOCK);
+    /// returns the output and the orthogonality defect of [q, output].
+    fn project_variant(
+        x: &RealMatrix,
+        q: Option<&RealMatrix>,
+        variant: (bool, bool),
+        threads: usize,
+        dgks: Option<f64>,
+    ) -> (RealMatrix, f64) {
+        let n = x.rows();
+        let cap = 96;
+        let pool = WorkerPool::new(threads).unwrap();
+        let mut ws = RealGemmWorkspace::with_pool(n, cap, pool.clone()).unwrap();
+        let mut projection = Projection::with_pool(n, cap, pool).unwrap();
+        (projection.blocked, projection.block_ortho) = variant;
+        projection.dgks = dgks;
+        let out = projection.run(x, q, &mut ws).unwrap();
+        let mut both = RealMatrix::zeros(n, q.map_or(0, |q| q.cols()) + out.cols()).unwrap();
+        let split = q.map_or(0, |q| q.as_slice().len());
+        if let Some(q) = q {
+            both.as_mut_slice()[..split].copy_from_slice(q.as_slice());
+        }
+        both.as_mut_slice()[split..].copy_from_slice(out.as_slice());
+        let defect = orthogonality_defect(&both);
+        (out, defect)
+    }
+    /// Test blocks: random, nearly dependent (columns mixed from a few
+    /// directions plus a perturbation of relative size 1e-9, 3e-12, 1e-12 or
+    /// 1e-13, around the 1e-12 rank floor)
+    /// and exactly dependent (repeated and zero columns).
+    fn ortho_inputs(n: usize, m: usize) -> Vec<(&'static str, RealMatrix)> {
+        let random = Random(41).block(n, m).unwrap();
+        let base = Random(43).block(n, 5).unwrap();
+        let noise = Random(47).block(n, m).unwrap();
+        let mix = |eps: f64| {
+            let mut x = RealMatrix::zeros(n, m).unwrap();
+            for j in 0..m {
+                for i in 0..n {
+                    let k = j % 5;
+                    let l = (j * 7 + 3) % 5;
+                    x[(i, j)] = base[(i, k)] + 0.5 * base[(i, l)] + eps * noise[(i, j)];
+                }
+            }
+            x
+        };
+        let mut exact = random.clone();
+        for j in (1..m).step_by(3) {
+            for i in 0..n {
+                exact[(i, j)] = if j % 2 == 0 {
+                    0.
+                } else {
+                    exact[(i, j - 1)] * 2.
+                };
+            }
+        }
+        vec![
+            ("random", random),
+            ("near-1e-9", mix(1e-9)),
+            ("near-1e-13", mix(1e-13)),
+            ("near-1e-12", mix(1e-12)),
+            ("near-3e-12", mix(3e-12)),
+            ("exact", exact),
+        ]
+    }
+    /// ORTHO-BLOCK keeps the rank decisions and orthonormality of the classic
+    /// sweep: same kept-column counts on random, nearly and exactly dependent
+    /// blocks (with and without a basis, DGKS on and off), defect inside the
+    /// 1e-12 contraction gate, and outputs equal to the classic sweep to rounding
+    /// on well-conditioned blocks. Widths cross several panels (n = 2048: 32).
+    #[test]
+    fn ortho_block_keeps_rank_and_orthonormality() {
+        let n = 2048;
+        let m = 70;
+        let pool = WorkerPool::new(1).unwrap();
+        let mut ws = RealGemmWorkspace::with_pool(n, 96, pool.clone()).unwrap();
+        let q = Projection::with_pool(n, 96, pool)
+            .unwrap()
+            .run(&Random(5).block(n, 20).unwrap(), None, &mut ws)
+            .unwrap();
+        for (name, x) in ortho_inputs(n, m) {
+            for basis in [None, Some(&q)] {
+                // DGKS acts only with a basis.
+                let rules: &[Option<f64>] = if basis.is_some() {
+                    &[None, Some(0.1)]
+                } else {
+                    &[None]
+                };
+                for &dgks in rules {
+                    let (classic, d0) = project_variant(&x, basis, (false, false), 1, dgks);
+                    let (mgsb, d1) = project_variant(&x, basis, (true, false), 1, dgks);
+                    let (block, d2) = project_variant(&x, basis, (false, true), 1, dgks);
+                    let tag = format!("{name} basis={} dgks={dgks:?}", basis.is_some());
+                    eprintln!(
+                        "ORTHO-BLOCK {tag}: kept classic/mgs-b/block {}/{}/{} of {m}, \
+                         defect {d0:.2e}/{d1:.2e}/{d2:.2e}",
+                        classic.cols(),
+                        mgsb.cols(),
+                        block.cols()
+                    );
+                    assert_eq!(block.cols(), classic.cols(), "{tag}");
+                    assert_eq!(mgsb.cols(), classic.cols(), "{tag}");
+                    assert!(
+                        d2 <= 1e-12,
+                        "{tag}: defect {d2:e} (classic {d0:e}, mgs-b {d1:e})"
+                    );
+                    if name == "random" {
+                        let diff = block
+                            .as_slice()
+                            .iter()
+                            .zip(classic.as_slice())
+                            .fold(0_f64, |a, (x, y)| a.max((x - y).abs()));
+                        assert!(diff <= 1e-12, "{tag}: max |block - classic| {diff:e}");
+                    }
+                }
+            }
+        }
+    }
+    /// ORTHO-BLOCK results are bit-identical at 1, 2, 4 and 8 workers (the
+    /// panel GEMMs run above the parallel threshold at n = 4096).
+    #[test]
+    fn ortho_block_thread_independent() {
+        let n = 4096;
+        let pool = WorkerPool::new(1).unwrap();
+        let mut ws = RealGemmWorkspace::with_pool(n, 96, pool.clone()).unwrap();
+        let q = Projection::with_pool(n, 96, pool)
+            .unwrap()
+            .run(&Random(7).block(n, 24).unwrap(), None, &mut ws)
+            .unwrap();
+        for (name, x) in ortho_inputs(n, 66) {
+            let (reference, _) = project_variant(&x, Some(&q), (false, true), 1, Some(0.1));
+            for threads in [2, 4, 8] {
+                let (out, _) = project_variant(&x, Some(&q), (false, true), threads, Some(0.1));
+                assert_eq!(out.cols(), reference.cols(), "{name} T={threads}");
+                assert!(
+                    out.as_slice()
+                        .iter()
+                        .zip(reference.as_slice())
+                        .all(|(a, b)| a.to_bits() == b.to_bits()),
+                    "{name} T={threads}"
+                );
             }
         }
     }

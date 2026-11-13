@@ -1,6 +1,6 @@
 # QE 7.6 vs BAANDI, consolidated speed table at 8114447 (2026-11-09)
 
-> SUPERSEDED headline: the like-for-like table after the 2026-11 adoption round is `qe-vs-baandi-2026-11-11.md` (same day, same node, both codes on the same displaced coordinates). This file keeps the 2026-11-09 numbers.
+> SUPERSEDED headline: the like-for-like table after the 2026-11 adoption round is `qe-vs-baandi-2026-11-11.md`; si32 and si64 against QE at equal band counts: `qe-vs-baandi-2026-11-13.md`. This file keeps the 2026-11-09 numbers.
 
 **Pinning (verified on dev08, `lscpu -e`, sysfs sibling lists, `--report-bindings`): QE runs are MPI (Open MPI 5.0.8, `mpirun -np N`, default binding: one rank per physical core on package 0). BAANDI runs are threads (`taskset -c 0-(N-1)`). Both occupy the same N physical cores of socket 0 / NUMA node 0, no hyper-thread siblings (those are CPUs 40 to 47). The comparison is MPI-QE against thread-BAANDI at equal physical-core count, not at equal parallel model.**
 

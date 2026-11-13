@@ -1,6 +1,82 @@
 # Optimization log (newest first)
 
 
+## P48D — blocked orthonormalization of the correction block (2026-11-13, opt-in)
+
+Ticket `tickets/P48D-BLOCKED-ORTHO.md`, work order P48 sections 1-2. Base
+`92b26ae` (= main at the time); branch uncommitted. Switch
+`BAANDI_ORTHO_BLOCK=on|off`, default **off** until a dev08 A/B. Not derived
+from a QE note. Motivation (P48A, M, relayed): si64 strict T=1 orthonormalize
+34.6 s pure / 18.3 s MKL (of 233 / 97 s); 62 of 194 steps have a correction
+block of 65+ columns.
+
+**Change (algorithm fixed in the ticket before data).** Inside
+`real_davidson.rs::Projection::run_into`, after the projection against the
+basis, the correction block is orthonormalized in panels of b columns: for each
+panel, S = Q_acc^T P and P -= Q_acc S against all earlier kept columns of the
+block (two GEMM pairs, through `RealGemmWorkspace::multiply_slices_into` for the
+overlap and `multiply_slices_wide_into` for the long product), then the
+unchanged scalar two-sweep MGS inside the panel with the unchanged
+`DEPENDENCE_TOLERANCE` test. Every column is projected twice against every
+earlier kept column, as in the classic sweep, so each rank decision is the same
+predicate on the same column after the same projections in exact arithmetic;
+only the summation order changes (rounding class). No Cholesky (A52 not
+repeated). DGKS (`BAANDI_ORTHO`, outer second pass) is untouched.
+
+Panel width (shape rule, `ortho_panel_width(n)`): the largest multiple of four
+with n b doubles inside half of a 1 MiB L2, at least 4. The 1 MiB is a fixed
+constant (smallest per-core L2 of the measurement hosts, dev08 Xeon Gold 6230),
+not a runtime query, so the decomposition and the bits do not depend on the
+host or T. n is the real coordinate count (= plane waves of the full
+sphere): si8 2969 -> b = 20, si16 5915 -> 8, si32 11877 -> 4, si64 -> 4; small
+cells get b >= block width, i.e. exactly the classic in-panel
+sweep (bit-identical to the pure default there). With the switch on the width
+rule replaces both `BAANDI_MGS` variants (MKL default MGS-B used b = 16).
+
+**Relation to MGS-B.** MGS-B (default on MKL builds since MGS-B R2) is the same
+left-looking structure with a fixed 16-column panel. P48D therefore changes, on
+MKL builds, only the panel width (16 -> 8 at si16, 4 at si32 and si64) and the dgemm gate
+of the long product; on pure builds it replaces the classic serial sweep. The
+pure GEMM is still the nano-tile path until P48B lands; P48D calls the existing
+entry points only and inherits P48B automatically.
+
+**Evidence (Mac O, pure release, shared host load about 6, strict default
+profile, bench_suite inputs seed 1).**
+
+| check | result |
+|---|---|
+| unit, rank decisions (n 2048, 70 columns, 5 panels of 32) | kept-column counts identical classic / MGS-B / ORTHO-BLOCK on random (70), near-dependent 1e-9 (70), 3e-12 (70), 1e-12 (22 without basis, 21 with basis), 1e-13 (5), exactly dependent (47); with and without a 20-column basis, DGKS off and 0.1; defect <= 1.55e-15 (gate 1e-12); random block equals classic to <= 1e-12 |
+| unit, threads (n 4096, 66 columns) | output bits identical at 1, 2, 4, 8 workers on all six inputs |
+| switch off | code path unchanged (bit-identical by construction) |
+| suite on vs off, T=1 | si-gamma, si-high, si-low, si-skew, si-slab, si-k222s, si-k444s, si8-gamma, syn-* : bit-identical (b >= block width, or complex path) |
+| si16 strict | dE 3.6e-14 Ha, SCF/H/Davidson 8/1521/50 both, density SHA on identical at T=1,2,4,8 (dd0cd467c42734b0) |
+| si32 strict | dE 8.3e-13 Ha, 8/3002/52 both, SHA on identical T=1,2,4,8 (046241976b1d46db); `BAANDI_MGS=blocked` gives the same energy to all printed digits |
+| si64 strict T=8 | dE 1.2e-12 Ha, SCF 8/8, H 6747 -> 6751, Davidson 176 -> 178 |
+| pre-existing nonconvergence (both modes) | si-slab, si-elongated, syn-s3, syn-z14 (bit-identical), syn-100-bands (100 iterations both, H 46268 vs 48291, energies 2.5e-4 Ha apart while unconverged) |
+
+Stage timers (`BAANDI_DAVIDSON_STAGES=on`), paired rounds, seconds:
+
+| case | off orthonormalize | on orthonormalize | off wall | on wall |
+|---|---|---|---|---|
+| si32 T=1 (3 rounds) | 1.302 / 1.959 / 1.441 | 1.226 / 1.341 / 1.274 | 8.49 / 12.43 / 9.42 | 8.38 / 9.09 / 8.69 |
+| si32 T=8 (3 rounds) | 0.666 / 0.759 / 0.709 | 0.401 / 0.493 / 0.438 | 3.09 / 3.55 / 3.36 | 2.74 / 3.33 / 3.00 |
+| si64 T=8 (2 rounds) | 7.371 / 7.601 | 4.572 / 3.978 | 28.87 / 30.14 | 28.44 / 25.49 |
+| si32 `BAANDI_MGS=blocked` (b 16), switch off, T=1 / T=8 | 1.239 / 0.445 | | 8.68 / 3.03 | |
+
+Reading (O): on the pure Mac build the gain is the in-block work becoming
+GEMM that runs on the pool (T=8 orthonormalize -35 to -48 percent); the width
+rule itself (b = 4 at si32) does not beat MGS-B's 16 there on the Mac. The MKL
+question (b = 8 / 4 against MGS-B's 16) is open and only dev08 can answer it.
+
+Limits: Mac wall is noisy (other builds running); no MKL build, no perturbed
+seeds, no dev08. Complex path: the in-block MGS of the complex projection lives
+in `dft-numerics/src/linalg/tiled.rs` (not `dft-solvers/src/lib.rs`), outside
+this ticket's files; not changed.
+
+Commands: `cargo test -p dft-solvers --lib ortho`; `BAANDI_ORTHO_BLOCK=on|off
+python3 -I scripts/bench_suite.py --upf <Si UPF> --threads 1 --cases ...`;
+paired runs with `BAANDI_DAVIDSON_STAGES=on` (driver in the session scratchpad).
+
 ## P48C — complex (k-point) nonlocal as two GEMMs per band panel (2026-11-13, opt-in)
 
 Ticket `tickets/P48C-COMPLEX-NONLOCAL-GEMM.md`, work order P48 sections 1-2.

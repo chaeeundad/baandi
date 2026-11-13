@@ -202,6 +202,8 @@ table! {
         default: if crate::MKL_BACKEND { "blocked" } else { "classic" },
     }, if crate::MKL_BACKEND { "blocked" } else { "classic" }, "blocked, classic",
         "Gram-Schmidt variant (default blocked on MKL builds, classic otherwise)";
+    ORTHO_BLOCK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "panel Gram-Schmidt of the correction block, L2 shape-rule panel width (P48D; overrides MGS)";
     WIDE_DOT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "wide dot products in the orthogonalization";
     // Physics (dft-physics).

@@ -531,3 +531,46 @@ fn reusable_evd_matches_allocating_adapter_and_preserves_storage() {
         Err(LinalgError::NotHermitian { .. })
     ));
 }
+
+/// P48F: the pooled schedule returns the serial bits (vectors and dropped
+/// columns) at pool sizes 1, 2, 3 and 8, with zero, dependent and nearly
+/// dependent columns, with and without an `against` block.
+#[test]
+fn pooled_orthonormalize_is_bit_identical() {
+    let value = |i: usize, j: usize, s: u64| {
+        let mut z = (i as u64 * 7919 + j as u64 * 104_729 + s).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        z ^= z >> 31;
+        let a = (z % 2001) as f64 / 1000.0 - 1.0;
+        let b = ((z >> 20) % 2001) as f64 / 1000.0 - 1.0;
+        Complex64::new(a, b)
+    };
+    let rows = 97;
+    let mut block = matrix(rows, 37, |i, j| value(i, j, 1));
+    for i in 0..rows {
+        block[(i, 5)] = Complex64::new(0.0, 0.0);
+        block[(i, 17)] = block[(i, 3)] * 2.0 - block[(i, 11)];
+        block[(i, 23)] = block[(i, 2)] + value(i, 23, 9) * 1e-13;
+    }
+    let against = orthonormalize(&matrix(rows, 6, |i, j| value(i, j, 2)), None)
+        .unwrap()
+        .vectors;
+    for other in [None, Some(&against)] {
+        let serial = orthonormalize(&block, other).unwrap();
+        assert!(serial.dropped.contains(&5) && serial.dropped.contains(&17));
+        for threads in [1, 2, 3, 8] {
+            let pool = crate::pool::WorkerPool::new(threads).unwrap();
+            let pooled = orthonormalize_pooled(&block, other, &pool).unwrap();
+            assert_eq!(pooled.dropped, serial.dropped);
+            assert_eq!(pooled.vectors.cols(), serial.vectors.cols());
+            for (a, b) in pooled
+                .vectors
+                .as_slice()
+                .iter()
+                .zip(serial.vectors.as_slice())
+            {
+                assert_eq!(a.re.to_bits(), b.re.to_bits());
+                assert_eq!(a.im.to_bits(), b.im.to_bits());
+            }
+        }
+    }
+}

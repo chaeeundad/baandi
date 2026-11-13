@@ -140,6 +140,26 @@ fn verify(large: bool) {
         assert!(!first[key].is_null(), "{key}");
     }
     assert_eq!(first["convergence"]["converged"], true);
+    // P48F: the closure of the time budget adds up to total_s.
+    let closure = &first["timings"]["closure"];
+    let parts: f64 = [
+        "setup_s",
+        "phases_s",
+        "certificate_outside_phases_s",
+        "step_overhead_s",
+        "ladder_coarse_s",
+        "remainder_s",
+    ]
+    .iter()
+    .map(|k| closure[*k].as_f64().unwrap())
+    .sum();
+    let total = first["timings"]["total_s"].as_f64().unwrap();
+    assert!(
+        (parts - total).abs() <= 1e-9 * total.max(1.0),
+        "{parts} {total}"
+    );
+    assert!(first["timings"]["certificate"]["blocks"].as_u64().unwrap() >= 1);
+    assert!(first["timings"]["steps_s"].as_f64().unwrap() > 0.0);
     let occupied = first["occupations"]
         .as_array()
         .unwrap()
@@ -599,7 +619,7 @@ fn expressions_preserve_energy_and_record_resolutions() {
     let plain = c.json("plain", "results.json");
     // Switch manifest (work order A1): the whole table, effective value and source.
     let switches = plain["scf"]["switches"].as_object().unwrap();
-    assert_eq!(switches.len(), 45);
+    assert_eq!(switches.len(), 46);
     let ladder = &switches["BAANDI_CUTOFF_LADDER"];
     assert_eq!(
         (&ladder["value"], &ladder["source"]),

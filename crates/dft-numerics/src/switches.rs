@@ -176,6 +176,8 @@ table! {
         "MPI stick-row (M2) path; off selects the M1 row-block path";
     M2_BATCH: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "batched FFT transposes of the M2 path";
+    PHASE_THREADS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P48F: thread the atomic start (span build, two-pass Gram-Schmidt right-looking) on the SCF pool; bit-identical";
     // Solvers (dft-solvers).
     B1: Kind::Choice { allowed: &["on", "off", "standard", "strict"], default: "on" }, "on",
         "on, off, standard, strict", "B1 selected-root Davidson iterations";

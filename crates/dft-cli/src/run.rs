@@ -288,6 +288,50 @@ fn energy_json(e: &EnergyAudit) -> Value {
 fn phase_json(t: &PhaseTimings) -> Value {
     json!({"potential_s":t.potential.as_secs_f64(),"diagonalization_s":t.diagonalization.as_secs_f64(),"density_s":t.density.as_secs_f64(),"total_energy_s":t.energy.as_secs_f64(),"mixing_s":t.mixing.as_secs_f64()})
 }
+/// P48F: additive timing blocks that close the time budget of a run.
+/// total = setup + phases + certificate outside phases + step overhead +
+/// ladder coarse stage + remainder (fine-session start, result assembly).
+/// `clock` is the process clock accumulated during the SCF (coarse stage
+/// included); the coarse part is subtracted for the fine-session values.
+fn closed_timings(
+    phases: &PhaseTimings,
+    history: &[IterationRecord],
+    setup: f64,
+    total: f64,
+    clock: dft_engine::phase_clock::PhaseClock,
+    ladder: Option<&dft_engine::cutoff_ladder::CutoffLadderReport>,
+) -> Value {
+    let coarse = ladder.map(|l| l.coarse_clock).unwrap_or_default();
+    let fine = clock.since(&coarse);
+    let cert_phases: f64 = history
+        .iter()
+        .filter_map(|h| h.fixed_point_certificate.as_ref())
+        .map(|c| phase_sum(&c.timings))
+        .fold(0.0, |a, b| a + b);
+    let cert_wall = fine.certificate.as_secs_f64();
+    let cert_outside = (cert_wall - cert_phases).max(0.0);
+    let phases_s = phase_sum(phases);
+    let steps = fine.steps.as_secs_f64();
+    let ladder_s = ladder.map_or(0.0, |l| l.coarse_time.as_secs_f64());
+    let step_overhead = steps - phases_s - cert_outside;
+    let remainder = total - setup - ladder_s - steps;
+    json!({
+        "certificate":{"blocks":fine.certificate_blocks,"wall_s":cert_wall,"screen_s":fine.screen.as_secs_f64(),
+            "phases_s":cert_phases,"outside_phases_s":cert_outside,
+            "note":"wall of the certificate blocks (screen, re-solve, checks); phases_s is already inside timings.phases"},
+        "atomic_start_s":fine.atomic_start.as_secs_f64(),
+        "steps_s":steps,
+        "ladder_coarse":ladder.filter(|l| l.coarse_time > std::time::Duration::ZERO).map(|l| json!({
+            "setup_s":l.coarse_setup.as_secs_f64(),"session_s":l.coarse_session.as_secs_f64(),
+            "prolong_s":l.coarse_prolong.as_secs_f64(),"total_s":l.coarse_time.as_secs_f64(),
+            "phases":phase_json(&l.coarse_phases),"phases_sum_s":phase_sum(&l.coarse_phases),
+            "atomic_start_s":l.coarse_clock.atomic_start.as_secs_f64(),"steps_s":l.coarse_clock.steps.as_secs_f64(),
+            "certificate_s":l.coarse_clock.certificate.as_secs_f64()})),
+        "closure":{"setup_s":setup,"phases_s":phases_s,"certificate_outside_phases_s":cert_outside,
+            "step_overhead_s":step_overhead,"ladder_coarse_s":ladder_s,"remainder_s":remainder,"total_s":total,
+            "note":"total = setup + phases + certificate_outside_phases + step_overhead + ladder_coarse + remainder; atomic_start_s is inside phases (potential of the first map)"}
+    })
+}
 fn phase_sum(t: &PhaseTimings) -> f64 {
     (t.potential + t.diagonalization + t.density + t.energy + t.mixing).as_secs_f64()
 }
@@ -557,6 +601,7 @@ pub fn execute_mode(
     }
     let electrons = problem.electron_count();
     let setup = start.elapsed().as_secs_f64();
+    let clock_start = dft_engine::phase_clock::snapshot();
     let ladder = crate::config::Scf::cutoff_ladder(config.scf.as_ref())
         .map_err(|e| error(1, e.to_string()))?;
     let mut ladder_report = None;
@@ -635,6 +680,14 @@ pub fn execute_mode(
         }
     }
     let total = start.elapsed().as_secs_f64();
+    let timings = closed_timings(
+        &phases,
+        &r.history,
+        setup,
+        total,
+        dft_engine::phase_clock::snapshot().since(&clock_start),
+        ladder_report.as_ref(),
+    );
     let energies = energy_json(&r.energy);
     let davidson_work: Vec<_> = dft_engine::work_accounting::take()
         .into_iter()
@@ -673,7 +726,8 @@ pub fn execute_mode(
                 "note":"recorded = per-iteration solves in history; certificate = fixed-point certificate re-solves, reported only inside each history entry's fixed_point_certificate; total work is the sum"}},"energies":energies,
         "total_energy":{"ha":r.energy.total_hartree(),"ry":from_hartree(r.energy.total_hartree(), EnergyUnit::Rydberg),"ev":from_hartree(r.energy.total_hartree(), EnergyUnit::ElectronVolt)},
         "eigenvalues":{"ha":r.eigenvalues,"ev":r.eigenvalues.iter().map(|e|from_hartree(*e, EnergyUnit::ElectronVolt)).collect::<Vec<_>>()},
-        "timings":{"phases":phase_json(&phases),"setup_s":setup,"engine_setup_s":r.setup_time.as_secs_f64(),"engine_total_s":r.total_time.as_secs_f64(),"total_s":total,"fft_hpsi":"included in enclosing phases; not separately measured"},
+        "timings":{"phases":phase_json(&phases),"setup_s":setup,"engine_setup_s":r.setup_time.as_secs_f64(),"engine_total_s":r.total_time.as_secs_f64(),"total_s":total,"fft_hpsi":"included in enclosing phases; not separately measured",
+            "certificate":timings["certificate"],"atomic_start_s":timings["atomic_start_s"],"steps_s":timings["steps_s"],"ladder_coarse":timings["ladder_coarse"],"closure":timings["closure"]},
         "threading":{"threads":opts.threads.max(1),"threads_requested":opts.threads,"threads_used":opts.threads.max(1),"outer_threads":opts.threads.max(1).min(r.k_points.len()),"inner_threads":opts.threads.max(1),"backend":"persistent Rayon pool shared by k points and fixed inner pieces; sequential faer and serial FFT per worker"},
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});

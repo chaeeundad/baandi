@@ -624,6 +624,7 @@ impl ScfSession {
         // occupied-eigenvalue criterion from first-order perturbation theory before
         // paying for the tight re-solve. It can only reject; passing still needs
         // the full solve below. `trace` prints the bound and runs the solve anyway.
+        let certificate_clock = Instant::now();
         let screen_start = Instant::now();
         let screen = if converged && standard.is_none() {
             match cert_screen_mode() {
@@ -637,6 +638,9 @@ impl ScfSession {
             None
         };
         let screen_seconds = screen_start.elapsed().as_secs_f64();
+        if screen.is_some() {
+            crate::phase_clock::add_screen(screen_seconds);
+        }
         let screened = screen.and_then(|(mode, bound)| {
             (mode == CertScreen::On && bound > CERT_SCREEN_MARGIN * CERT_EIGENVALUE_LIMIT_HA)
                 .then_some(bound)
@@ -830,6 +834,9 @@ impl ScfSession {
         };
         // Fields kept by the screen belong to this certificate only.
         self.problem.clear_reused_fields();
+        if self.certificate_attempted {
+            crate::phase_clock::add_certificate(certificate_clock);
+        }
         if certified
             || unable_to_verify
             || (retain_last && iteration == self.problem.options.max_iterations)
@@ -1014,7 +1021,9 @@ impl ScfSession {
             return Err(error);
         }
         self.certificate_attempted = false;
+        let clock = Instant::now();
         let result = self.advance();
+        crate::phase_clock::add_steps(clock);
         match &result {
             Ok(status) => {
                 self.status = *status;

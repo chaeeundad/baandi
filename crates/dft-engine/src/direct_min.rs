@@ -510,6 +510,7 @@ fn initial_block(
             species,
             &problem.options,
             problem.occupations.len(),
+            None,
         )?;
         let (guess, report) = atomic_start::ritz(
             &span,

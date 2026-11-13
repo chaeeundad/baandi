@@ -65,6 +65,10 @@ pub(super) struct AtomicSpan {
     report: AtomicStartReport,
 }
 
+/// `pool` (P48F, `BAANDI_PHASE_THREADS=on`): build the columns and run the
+/// two-pass Gram-Schmidt on the SCF pool. Every column is computed by the
+/// same elementwise arithmetic and `orthonormalize_pooled` reproduces the
+/// serial bits, so the span is identical with and without the pool.
 pub(super) fn span(
     cell: &Cell,
     basis: &PlaneWaveBasis,
@@ -72,6 +76,7 @@ pub(super) fn span(
     species: &[AtomicSpecies],
     options: &ScfOptions,
     bands: usize,
+    pool: Option<&dft_numerics::pool::WorkerPool>,
 ) -> Result<AtomicSpan, ScfError> {
     let npw = basis.vectors().len();
     let count = species
@@ -82,9 +87,10 @@ pub(super) fn span(
         atomic_orbitals: count,
         ..Default::default()
     };
-    let __t = std::time::Instant::now();
-    let mut raw = ComplexMatrix::zeros(npw, count).map_err(numerical)?;
-    let mut col = 0;
+    // Radial transforms per orbital (cached by |G|^2), then one descriptor per
+    // column in the established column order: species, orbital, position, m.
+    let mut radials = Vec::new();
+    let mut columns = Vec::with_capacity(count);
     for sp in species {
         for c in &sp.orbitals {
             let mut cache = std::collections::BTreeMap::new();
@@ -112,27 +118,47 @@ pub(super) fn span(
             let il = Complex64::new(0.0, -1.0).powu(c.l as u32);
             for &pos in &sp.positions_bohr {
                 for m in -(c.l as isize)..=c.l as isize {
-                    for (i, g) in basis.momenta().iter().enumerate() {
-                        let y = if g.norm_squared == 0.0 {
-                            if c.l == 0 {
-                                1.0 / (4.0 * std::f64::consts::PI).sqrt()
-                            } else {
-                                0.0
-                            }
-                        } else {
-                            real_spherical_harmonic(c.l, m, g.cartesian).map_err(numerical)?
-                        };
-                        let phase = hamiltonian::structure_factor(g.cartesian, &[pos])?;
-                        raw[(i, col)] = il * phase * (radial[i] * y);
-                    }
-                    col += 1;
+                    columns.push((radials.len(), c.l, m, pos, il));
                 }
             }
+            radials.push(radial);
         }
     }
-    eprintln!("TMP raw {:.4}", __t.elapsed().as_secs_f64()); let __t = std::time::Instant::now();
-    let ortho = orthonormalize(&raw, None).map_err(numerical)?;
-    eprintln!("TMP ortho {:.4}", __t.elapsed().as_secs_f64()); let __t = std::time::Instant::now();
+    let fill = |j: usize, column: &mut [Complex64]| -> Result<(), ScfError> {
+        let (r, l, m, pos, il) = columns[j];
+        let radial = &radials[r];
+        for (i, g) in basis.momenta().iter().enumerate() {
+            let y = if g.norm_squared == 0.0 {
+                if l == 0 {
+                    1.0 / (4.0 * std::f64::consts::PI).sqrt()
+                } else {
+                    0.0
+                }
+            } else {
+                real_spherical_harmonic(l, m, g.cartesian).map_err(numerical)?
+            };
+            let phase = hamiltonian::structure_factor(g.cartesian, &[pos])?;
+            column[i] = il * phase * (radial[i] * y);
+        }
+        Ok(())
+    };
+    let mut raw = ComplexMatrix::zeros(npw, count).map_err(numerical)?;
+    let ortho = match pool {
+        Some(pool) if npw > 0 => {
+            pool.install(|| {
+                dft_numerics::pool::for_each_chunk_mut(raw.as_mut_slice(), npw, &|first, column| {
+                    fill(first / npw, column)
+                })
+            })?;
+            dft_numerics::linalg::orthonormalize_pooled(&raw, None, pool).map_err(numerical)?
+        }
+        _ => {
+            for j in 0..count {
+                fill(j, raw.column_mut(j))?;
+            }
+            orthonormalize(&raw, None).map_err(numerical)?
+        }
+    };
     if !ortho.dropped.is_empty() {
         return Err(ScfError::InvalidInput(
             "rank deficient atomic starting orbitals",
@@ -189,7 +215,6 @@ pub(super) fn span(
             }
         }
     }
-    eprintln!("TMP extra {:.4} cols {}", __t.elapsed().as_secs_f64(), q.cols());
     if q.cols() < bands {
         return Err(ScfError::InvalidInput("insufficient atomic starting rank"));
     }
@@ -220,9 +245,7 @@ pub(super) fn ritz(
             hq
         }
     };
-    let __t = std::time::Instant::now();
     let mut small = gemm(q, MatrixOp::Adjoint, &hq, MatrixOp::Identity).map_err(numerical)?;
-    eprintln!("TMP qhq {:.4}", __t.elapsed().as_secs_f64()); let __t = std::time::Instant::now();
     for j in 0..small.cols() {
         for i in 0..=j {
             let v = (small[(i, j)] + small[(j, i)].conj()) * 0.5;
@@ -241,13 +264,11 @@ pub(super) fn ritz(
         }
     }
     let (_, rot) = hermitian_eigh(&small).map_err(numerical)?;
-    eprintln!("TMP eigh {:.4}", __t.elapsed().as_secs_f64()); let __t = std::time::Instant::now();
     let mut selected = ComplexMatrix::zeros(q.cols(), bands).map_err(numerical)?;
     for j in 0..bands {
         selected.column_mut(j).copy_from_slice(rot.column(j));
     }
     let guess = gemm(q, MatrixOp::Identity, &selected, MatrixOp::Identity).map_err(numerical)?;
-    eprintln!("TMP guess {:.4}", __t.elapsed().as_secs_f64());
     let mut report = span.report.clone();
     report.initial_h_applications = q.cols();
     report.gram_rotation_macs = q.rows() * q.cols() * (q.cols() + bands);

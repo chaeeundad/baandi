@@ -121,7 +121,6 @@ fn legacy_defaults_are_unchanged() {
         Id::DAVIDSON_STAGES,
         Id::HAPPLY_OVERLAP,
         Id::HAPPLY_FOLD,
-        Id::ORTHO_BLOCK,
         Id::PHASE_THREADS,
         Id::SECOND_VECTOR,
     ] {
@@ -135,6 +134,14 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::STANDARD_STOP), Value::Choice("plain"));
     assert_eq!(value(Id::ROTATE_KERNEL), Value::Choice("legacy"));
     assert_eq!(value(Id::PURE_GEMM), Value::Choice("nano"));
+    assert_eq!(
+        value(Id::ORTHO_BLOCK),
+        Value::Choice(if dft_numerics::MKL_BACKEND {
+            "off"
+        } else {
+            "on"
+        })
+    );
     assert_eq!(value(Id::PAIR_FFT), Value::Choice("grid"));
     assert_eq!(value(Id::NONLOCAL_BLOCK), Value::Choice("auto"));
     assert_eq!(

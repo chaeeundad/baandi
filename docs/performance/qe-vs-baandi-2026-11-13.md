@@ -33,14 +33,33 @@ Unperturbed BAANDI (3fea9e8, same build) against the QE unperturbed medians, one
 ## Threads against threads (the T=8 column above is threads against MPI)
 QE si32 strict unperturbed: np=1 3.484 s, np=1 with OMP 8 threads 1.957 s (1.78x), np=8 MPI 0.833 s (4.18x). QE's OpenMP scaling is 43 percent of its MPI scaling, so BAANDI T=8 against QE np=8 compares BAANDI threads with QE's best mode. Thread against thread (si32 strict): 7.519 / 1.957 = 3.84 instead of 8.74.
 
-## Displacement sensitivity (si32 strict, T=1 / np=1, seeds 601-605, increase over unperturbed; M2 partial)
-| amplitude | BAANDI | QE | sensitivity ratio (BAANDI / QE) |
+## Displacement sensitivity, M2 (si32 Gamma, BAANDI T=1 / QE np=1, same geometries, seeds 601-605, wall seconds and increase over unperturbed)
+| class | amplitude | BAANDI | increase | SCF / H | QE | increase | it / h_psi | sensitivity ratio (BAANDI / QE) |
+|---|---|---|---|---|---|---|---|---|
+| strict | unperturbed | 12.326 | - | 8 / 2900 | 3.444 | - | 8 / 35 | - |
+| strict | b1e-7 | 15.197 | +23.3 % | 9 / 3556 | 3.470 | +0.8 % | 8 / 35 | 29.1 |
+| strict | b1e-5 | 17.119 | +38.9 % | 10 / 4082 | 4.946 | +43.6 % | 10 / 109 | 0.89 |
+| strict | b1e-3 | 18.467 | +49.8 % | 10 / 4467 | 5.948 | +72.7 % | 11 / 163 | 0.68 |
+| strict | f1e-4 | 19.608 | +59.1 % | 11 / 4795 | 6.981 | +102.7 % | 13 / 193 | 0.58 |
+| strict | f1e-3 | 19.935 | +61.7 % | 11 / 4656 | 7.347 | +113.3 % | 14 / 222 | 0.54 |
+| strict | f1e-2 | 26.103 | +111.8 % | 15 / 6416 | 8.142 | +136.4 % | 17 / 221 | 0.82 |
+| standard | unperturbed | 6.270 | - | 5 / 1119 | 2.937 | - | 7 / 28 | - |
+| standard | b1e-7 | 8.178 | +30.4 % | 7 / 1704 | 2.953 | +0.6 % | 7 / 28 | 50.7 |
+| standard | b1e-5 | 8.938 | +42.5 % | 9 / 1954 | 3.764 | +28.2 % | 8 / 67 | 1.51 |
+| standard | b1e-3 | 9.074 | +44.7 % | 9 / 1963 | 5.222 | +77.8 % | 10 / 135 | 0.57 |
+| standard | f1e-4 | 9.213 | +46.9 % | 9 / 1986 | 5.436 | +85.1 % | 10 / 142 | 0.55 |
+| standard | f1e-3 | 10.443 | +66.6 % | 10 / 2305 | 6.124 | +108.6 % | 11 / 180 | 0.61 |
+| standard | f1e-2 | 11.875 | +89.4 % | 11 / 2449 | 6.346 | +116.1 % | 13 / 160 | 0.77 |
+No nonconvergence; BAANDI standard error against the strict reference of the same coordinates is at most 3.879e-9 Ha at every amplitude (limit 5e-9). BAANDI is far more sensitive than QE only in the narrow regime where the symmetry has just been broken (b1e-7, b1e-5 for standard); from b1e-3 on QE is 1.2 to 1.9 times more sensitive. BAANDI's cost at +-1e-7 Bohr fell from 63 percent (before the adoption round) to 23.3 percent. f1e-2 (about 0.2 Bohr in this cell) is a physically large displacement; f1e-4 and f1e-3 are the representative amplitudes.
+
+Ladder effect (si32 standard T=1, ladder on against off, each arm against its own unperturbed): the ladder lowers the unperturbed baseline strongly (6.29 against 7.30 s, SCF 5 against 10), so its percentage increase is larger at every amplitude (b1e-7 +30.1 against +13.6 %, f1e-3 +65.6 against +56.2 %), yet the absolute wall is lower with the ladder at every amplitude except b1e-5 (8.933 against 8.707 s). Quote absolute times, not only increases. The growth of BAANDI's wall with amplitude is work growth (si32 standard SCF 5 to 9, Davidson iterations 24 to 59, H columns 1119 to 1954 at b1e-5), mostly narrower correction blocks (columns per Davidson iteration 46.6 to 33.1); the cost per H column does not rise (-6 % standard, +9.5 % strict).
+
+## Headline (decision of 2026-11-11, realistic amplitude f1e-3), si32 Gamma, one core
+| class | BAANDI | QE (atomic start, nbnd 68, conv_thr 1e-8 / 1e-10) | BAANDI / QE |
 |---|---|---|---|
-| b1e-7 | +23.3 % | +0.8 % | 29.1 |
-| b1e-5 | +38.9 % | +43.6 % | 0.89 |
-| b1e-3 | +49.8 % | +72.7 % | 0.68 |
-| f1e-4 | +59.1 % | +102.7 % | 0.58 |
-BAANDI is much more sensitive than QE only in the narrow regime where the symmetry has just been broken (b1e-7); at amplitudes closer to a real structure QE becomes the more sensitive code (QE si32 1e-10 f1e-3: +112.8 %). BAANDI's cost at +-1e-7 Bohr fell from 63 percent (before the adoption round) to 23.3 percent. The remaining M2 rows (f1e-3, f1e-2, standard, ladder on/off, T=8/np=8) are pending.
+| standard | 10.443 | 6.124 | 1.71x |
+| strict | 19.935 | 7.347 | 2.71x |
+Other cells need BAANDI at f1e-3 (queued); the QE f1e-3 medians are in the table above.
 
 ## Band-count effect on QE (si32, atomic start): QE default nbnd is 3.9 to 7.3 percent faster than nbnd = 68 for unperturbed and b1e-7 geometries. For displaced geometries it can reverse: si8 1e-10 f1e-3 with nbnd 20 needs 13.0 h_psi calls against 26.5 with the default nbnd 16 (wall 0.531 against 0.559 s), because QE without buffer bands runs Davidson twice as long. The fair comparison uses BAANDI's band count.
 

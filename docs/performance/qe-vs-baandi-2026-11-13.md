@@ -23,7 +23,7 @@ Standard has almost caught QE's growth rate (S1 and the residual guard); strict 
 BAANDI minus QE is +4.07e-5 Ha (si32) and +8.15e-5 Ha (si64), +1.27e-6 Ha per atom at both sizes: the known discretisation offset, not a convergence error.
 
 ## Caveats
-1. The si32 QE wall here (5.00 s at 1e-8) is larger than the 2.993 s of `qe-vs-baandi-2026-11-11.md`; the earlier runs may have used QE's default band count (64) against BAANDI's 68. The new numbers use equal band counts, so ratios in the two tables must not be mixed. To be confirmed by master (nbnd in the old input).
+1. The si32 QE wall here (5.00 s at 1e-8, QE's own PWSCF timer 4.96 s wall) is larger than the 2.993 s of `qe-vs-baandi-2026-11-11.md`. Master compared the inputs: the 11-07 input of the old run already used nbnd 68 and the same grid, cutoff and settings, and the timer definition is not the cause. The cause is not identified (candidates: node state at the time, QE build, startingwfc, repetitions). Do not mix the QE values of the two tables; the QE re-measurement (request qe-remeasure-2026-11-13) is the fix.
 2. Perturbed ratios are not available for si64 on the QE side; the ratios above are unperturbed. BAANDI perturbed (+-1e-7 Bohr, seeds 601-610) medians at 3fea9e8 are slower: si32 standard 8.17 s, strict 15.14 s, si64 standard 38.94 s, strict 96.97 s (T=1); see ledger P48A-SCALING. The realistic-amplitude headline is pending the displacement scan (work order M2).
 3. Since this build the following were merged but not yet measured against QE: P48B (pure GEMM, off), P48C (auto, helps k-point cells only), P48D (blocked orthonormalization, off), P48F (phase threading, off); dev08 A/B for all four is queued.
 

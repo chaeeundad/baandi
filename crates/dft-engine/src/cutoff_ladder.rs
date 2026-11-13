@@ -153,7 +153,18 @@ pub struct CutoffLadderReport {
     /// H columns of the coarse atomic start (counted in the coarse basis).
     pub coarse_start_h_vectors: usize,
     pub coarse_setup: Duration,
+    /// Setup, coarse session and prolongation together (unchanged meaning).
     pub coarse_time: Duration,
+    /// P48F diagnostics, parts of `coarse_time`: wall of the coarse session
+    /// (initialization and steps) and of the hand-off (orbital and density
+    /// prolongation with its checks; S2 secant pairs are not included).
+    pub coarse_session: Duration,
+    pub coarse_prolong: Duration,
+    /// Phase timings summed over the coarse history (certificates included).
+    pub coarse_phases: PhaseTimings,
+    /// Process clocks accumulated inside the coarse session (atomic start,
+    /// step wall, certificate blocks).
+    pub coarse_clock: crate::phase_clock::PhaseClock,
     /// The full-cutoff session runs the standard profile (S1).
     pub standard: bool,
     /// First-step eigen tolerance given to the fine standard session (Ha);
@@ -335,6 +346,8 @@ fn coarse_stage(
     report: &mut CutoffLadderReport,
 ) -> Result<CoarseState, ScfError> {
     let basis = coarse.states[0].basis.clone();
+    let session_start = Instant::now();
+    let clock = crate::phase_clock::snapshot();
     let mut session = ScfSession::new(
         coarse,
         CompletionMode::RetainLast,
@@ -354,7 +367,18 @@ fn coarse_stage(
             break;
         }
     }
+    report.coarse_session = session_start.elapsed();
+    report.coarse_clock = crate::phase_clock::snapshot().since(&clock);
     let history = session.history();
+    for t in history.iter().flat_map(|r| {
+        std::iter::once(&r.timings).chain(r.fixed_point_certificate.as_ref().map(|c| &c.timings))
+    }) {
+        report.coarse_phases.potential += t.potential;
+        report.coarse_phases.diagonalization += t.diagonalization;
+        report.coarse_phases.density += t.density;
+        report.coarse_phases.energy += t.energy;
+        report.coarse_phases.mixing += t.mixing;
+    }
     report.coarse_iterations = history.len();
     report.coarse_final_density_residual = history.last().map_or(f64::NAN, |r| r.density_residual);
     report.coarse_davidson_iterations = history.iter().map(|r| r.davidson_iterations).sum();
@@ -481,7 +505,10 @@ pub fn run_ladder(
             report.coarse_grid = coarse.grid.dims();
             report.coarse_plane_waves = coarse.states[0].basis.vectors().len();
             coarse_stage(coarse, ladder, &mut report).and_then(|c| {
-                hand_off(&fine, &c.basis, &c.density, &c.orbitals).map(|state| (state, c))
+                let prolong = Instant::now();
+                let state = hand_off(&fine, &c.basis, &c.density, &c.orbitals);
+                report.coarse_prolong = prolong.elapsed();
+                state.map(|state| (state, c))
             })
         }
         Err(e) => Err(e),

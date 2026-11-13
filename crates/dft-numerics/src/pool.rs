@@ -78,10 +78,73 @@ impl WorkerPool {
     }
 }
 
+/// P48F: apply `work(first, chunk)` to consecutive chunks of `items` with
+/// `chunk` elements each (the last may be shorter), `first` being the index of
+/// the chunk's first element. Call inside [`WorkerPool::install`]; outside a
+/// pool the chunks run in order on the caller. Chunk boundaries depend on
+/// `chunk` only, never on the thread count, and each chunk is handled by one
+/// worker, so any result that depends only on a chunk's own elements is
+/// independent of the schedule. The first error in chunk order is returned.
+pub fn for_each_chunk_mut<T: Send, E: Send>(
+    items: &mut [T],
+    chunk: usize,
+    work: &(impl Fn(usize, &mut [T]) -> Result<(), E> + Sync),
+) -> Result<(), E> {
+    fn split<T: Send, E: Send>(
+        items: &mut [T],
+        first: usize,
+        chunk: usize,
+        work: &(impl Fn(usize, &mut [T]) -> Result<(), E> + Sync),
+    ) -> Result<(), E> {
+        let chunks = items.len().div_ceil(chunk);
+        if chunks > 1 {
+            let mid = (chunks / 2) * chunk;
+            let (left, right) = items.split_at_mut(mid);
+            let (a, b) = WorkerPool::join(
+                || split(left, first, chunk, work),
+                || split(right, first + mid, chunk, work),
+            );
+            a?;
+            b
+        } else if items.is_empty() {
+            Ok(())
+        } else {
+            work(first, items)
+        }
+    }
+    split(items, 0, chunk.max(1), work)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
+
+    #[test]
+    fn chunks_are_fixed_and_complete() {
+        for threads in [1, 2, 3, 8] {
+            let pool = WorkerPool::new(threads).unwrap();
+            let mut items: Vec<usize> = vec![0; 103];
+            pool.install(|| {
+                for_each_chunk_mut(&mut items, 10, &|first, chunk: &mut [usize]| {
+                    for (i, x) in chunk.iter_mut().enumerate() {
+                        *x = first * 1000 + i;
+                    }
+                    Ok::<(), ()>(())
+                })
+            })
+            .unwrap();
+            for (i, x) in items.iter().enumerate() {
+                assert_eq!(*x, (i / 10) * 10 * 1000 + i % 10);
+            }
+            let failed = pool.install(|| {
+                for_each_chunk_mut(&mut items, 10, &|first, _: &mut [usize]| {
+                    if first >= 50 { Err(first) } else { Ok(()) }
+                })
+            });
+            assert_eq!(failed, Err(50));
+        }
+    }
 
     fn empty_region(tasks: usize) {
         if tasks <= 1 {

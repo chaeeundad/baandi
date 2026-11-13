@@ -1714,6 +1714,7 @@ impl ScfProblem {
                 self.atomic_start.fallback_reason = Some("Fermi-Dirac occupations".into());
                 None
             } else if let Some(species) = &self.atomic_species {
+                let atomic_clock = Instant::now();
                 let mut guesses = Vec::with_capacity(self.states.len());
                 for state in &mut self.states {
                     let span = atomic_start::span(
@@ -1723,6 +1724,8 @@ impl ScfProblem {
                         species,
                         &self.options,
                         self.occupations.len(),
+                        dft_numerics::switches::on(dft_numerics::switches::Id::PHASE_THREADS)
+                            .then_some(&*self.pool),
                     )?;
                     // ATOMIC-REAL: H Q on the real Gamma path when eligible.
                     let hq = if crate::gamma_real::atomic_real() {
@@ -1754,6 +1757,7 @@ impl ScfProblem {
                     self.atomic_start.evd_orders.extend(report.evd_orders);
                     guesses.push(guess);
                 }
+                crate::phase_clock::add_atomic_start(atomic_clock);
                 Some(guesses)
             } else {
                 None

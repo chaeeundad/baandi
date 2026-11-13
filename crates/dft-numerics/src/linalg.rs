@@ -392,6 +392,126 @@ pub fn orthonormalize(
         dropped,
     })
 }
+/// P48F (`BAANDI_PHASE_THREADS=on`): [`orthonormalize`] with the identical
+/// arithmetic, scheduled on `pool`. Output bits equal the serial routine at
+/// every pool size.
+///
+/// Why identical: each column receives exactly the serial sequence of
+/// operations (normalize by its original norm; first pass against `against`
+/// then against accepted columns 0..count in index order; second pass the
+/// same; final norm, drop or accept), and every operation reads only that
+/// column and already-final vectors. Only the order across columns changes:
+/// first passes run right-looking, i.e. once a group of columns is accepted,
+/// every later column takes its first-pass projections against that group in
+/// parallel (one worker per column, no split reduction). The second pass of a
+/// column needs all earlier columns final, so it stays sequential; at most
+/// half of the projections are serial.
+///
+/// `GROUP` (columns finalized between parallel updates) and `CHUNK` (columns
+/// per task) are scheduling constants only: no value changes a result.
+pub fn orthonormalize_pooled(
+    block: &ComplexMatrix,
+    against: Option<&ComplexMatrix>,
+    pool: &crate::pool::WorkerPool,
+) -> Result<Orthonormalized, LinalgError> {
+    const GROUP: usize = 8;
+    const CHUNK: usize = 2;
+    block.validate_finite()?;
+    if let Some(q) = against {
+        q.validate_finite()?;
+        if q.rows != block.rows {
+            return Err(LinalgError::Dimension);
+        }
+    }
+    let (m, n) = (block.rows, block.cols);
+    if m == 0 || n <= GROUP {
+        return orthonormalize(block, against);
+    }
+    let originals: Vec<f64> = (0..n).map(|j| norm(block.column(j))).collect();
+    if originals.iter().any(|x| !x.is_finite()) {
+        return Err(LinalgError::NonFinite);
+    }
+    let mut work = block.data[..m * n].to_vec();
+    // Normalization and the first-pass projections against `against`.
+    pool.install(|| {
+        crate::pool::for_each_chunk_mut(&mut work, m * CHUNK, &|first, cols| {
+            for (c, v) in cols.chunks_mut(m).enumerate() {
+                let original = originals[first / m + c];
+                if original == 0.0 {
+                    continue;
+                }
+                for z in v.iter_mut() {
+                    *z /= original;
+                }
+                if let Some(q) = against {
+                    for k in 0..q.cols {
+                        subtract_projection(v, q.column(k));
+                    }
+                }
+            }
+            Ok::<(), LinalgError>(())
+        })
+    })?;
+    let mut data: Vec<Complex64> = Vec::with_capacity(m * n);
+    let mut dropped = Vec::new();
+    let mut count = 0;
+    let mut start = 0;
+    while start < n {
+        let end = (start + GROUP).min(n);
+        let group_first = count;
+        for j in start..end {
+            if originals[j] == 0.0 {
+                dropped.push(j);
+                continue;
+            }
+            let v = &mut work[j * m..(j + 1) * m];
+            // Rest of the first pass: columns accepted inside this group.
+            for k in group_first..count {
+                subtract_projection(v, &data[k * m..(k + 1) * m]);
+            }
+            if let Some(q) = against {
+                for k in 0..q.cols {
+                    subtract_projection(v, q.column(k));
+                }
+            }
+            for k in 0..count {
+                subtract_projection(v, &data[k * m..(k + 1) * m]);
+            }
+            let remaining = norm(v);
+            if !remaining.is_finite() {
+                return Err(LinalgError::NonFinite);
+            }
+            if remaining <= DEPENDENCE_TOLERANCE {
+                dropped.push(j);
+            } else {
+                data.extend(v.iter().map(|z| z / remaining));
+                count += 1;
+            }
+        }
+        if count > group_first && end < n {
+            let accepted = &data[group_first * m..count * m];
+            pool.install(|| {
+                crate::pool::for_each_chunk_mut(&mut work[end * m..], m * CHUNK, &|first, cols| {
+                    for (c, v) in cols.chunks_mut(m).enumerate() {
+                        if originals[end + first / m + c] == 0.0 {
+                            continue;
+                        }
+                        for q in accepted.chunks_exact(m) {
+                            subtract_projection(v, q);
+                        }
+                    }
+                    Ok::<(), LinalgError>(())
+                })
+            })?;
+        }
+        start = end;
+    }
+    Ok(Orthonormalized {
+        vectors: ComplexMatrix::new(m, count, data)?,
+        dropped,
+    })
+}
+
 fn subtract_projection(v: &mut [Complex64], q: &[Complex64]) {
     let mut sums = [Complex64::new(0.0, 0.0); 4];
     let (qc, qr) = q.as_chunks::<4>();

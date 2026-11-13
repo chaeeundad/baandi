@@ -122,6 +122,7 @@ fn legacy_defaults_are_unchanged() {
         Id::HAPPLY_OVERLAP,
         Id::HAPPLY_FOLD,
         Id::ORTHO_BLOCK,
+        Id::PHASE_THREADS,
         Id::SECOND_VECTOR,
     ] {
         assert!(!on(id), "{id:?} must default off");
@@ -151,5 +152,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::CUTOFF_LADDER), Value::Raw(None));
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
-    assert_eq!(TABLE.len(), 46);
+    assert_eq!(TABLE.len(), 47);
 }

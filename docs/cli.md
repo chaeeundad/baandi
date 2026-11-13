@@ -105,7 +105,7 @@ Pretty JSON uses the following top-level keys:
 | `convergence` | `converged`, `iterations`, `last_iteration`, full `history` |
 | `energies` | all audit terms, each `{ha, ry}` |
 | `eigenvalues` | arrays `ha`, `ev` in band order |
-| `timings` | `phases`, `setup_s`, `engine_setup_s`, `engine_total_s`, `total_s`, `fft_hpsi` availability note |
+| `timings` | `phases`, `setup_s`, `engine_setup_s`, `engine_total_s`, `total_s`, `fft_hpsi` availability note; P48F additive blocks: `certificate` (blocks, wall_s, screen_s, phases_s already inside `phases`, outside_phases_s), `atomic_start_s` (inside `phases.potential_s`), `steps_s` (wall of the SCF steps), `ladder_coarse` (null without a used cutoff ladder; setup_s, session_s, prolong_s, total_s, coarse phases, atomic_start_s, steps_s, certificate_s) and `closure` (total = setup + phases + certificate outside phases + step overhead + ladder coarse + remainder) |
 | `threading` | `threads=1`, backend description |
 | `memory_estimate` | array payload bytes and unavailable peak-RSS note |
 | `units` | units summary |

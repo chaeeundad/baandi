@@ -28,6 +28,7 @@ pub use events::{ExecutionConfig, ExecutionMode};
 pub use session::{CompletionMode, ScfSession, StepReport, StepStatus};
 
 pub mod diagnostics;
+pub mod phase_clock;
 
 pub mod checkpoint;
 

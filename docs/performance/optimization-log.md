@@ -1,5 +1,44 @@
 # Optimization log (newest first)
 
+## P48F — closed time budget and threaded atomic start (2026-11-13, opt-in)
+
+Ticket `tickets/P48F-THREAD-PHASES.md`, work order P48 sections 1-2. Base
+`b7cb5d5` (= main); branch uncommitted. Not derived from a QE note.
+Motivation (P48A-OTHER, M, relayed): "other" is 21-37 % of the T=8 wall and is
+setup + ladder coarse stage + certificate solves; the coarse stage speeds up
+only 1.44-2.33x T=1 -> T=8.
+
+1. Diagnostics (no numerical change, always on): process clocks in
+   `dft-engine/src/phase_clock.rs` (relaxed atomics: step wall, certificate
+   block wall and count, certificate screen, atomic start), coarse-stage split
+   in `CutoffLadderReport` (`coarse_session`, `coarse_prolong`,
+   `coarse_phases`, `coarse_clock`), and additive `timings` blocks in
+   results.json (`certificate`, `atomic_start_s`, `steps_s`, `ladder_coarse`,
+   `closure`). Every existing key keeps its meaning; the closure adds up to
+   `total_s` exactly (CLI test).
+2. Cause found on the Mac (O, si64 standard): the coarse stage starts with the
+   atomic start, which is nearly serial (two-pass MGS of 8409 x 256 complex
+   columns 0.50 s at T=1 and T=8; Q^H HQ 0.11 s; raw columns 0.05 s; only H Q
+   is threaded). The fine session starts from the prolonged state and never
+   pays it, which is why the coarse stage scales worse than the fine one.
+3. `BAANDI_PHASE_THREADS=on` (default off): parallel column build and a
+   right-looking schedule of the unchanged two-pass MGS
+   (`linalg::orthonormalize_pooled`, `pool::for_each_chunk_mut`). Output bits
+   equal the serial routine at every pool size (scheduling only).
+
+| Case (Mac, O, load about 8) | off | on |
+| --- | --- | --- |
+| si64 std T=8, atomic start (2 pairs, median) | 0.906 s | 0.687 s |
+| si64 std T=8, coarse stage | 3.197 s | 3.043 s |
+| si32 std T=8, atomic start (1 pair) | 0.134 s | 0.119 s |
+
+Equivalence: density SHA-256 identical off/on and across T for si32 standard
+(T=1/2/4/8, `ed8234bf...`), si32 strict (T=1/8, `28af5abd...`), si16 strict
+(T=1/2/4/8), si16 standard, si8-k222, si-skew, si-slab. Not done (proposed):
+column-group GEMMs for Q^H HQ and Q rot (rounding class), threaded reduced
+EVD (faer parallel EVD is not thread-count independent: needs a fixed
+decomposition), coarse width-1 threshold (real.rs, P48B).
+
 
 ## P48D — blocked orthonormalization of the correction block (2026-11-13, opt-in)
 

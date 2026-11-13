@@ -178,6 +178,45 @@ pub enum RotateKernel {
     /// 8 x 4 register-tile kernel with one ascending-p chain per element.
     Blocked,
 }
+/// Pure-Rust product computed inside each fixed panel (`BAANDI_PURE_GEMM`,
+/// P48B). The panel decomposition (256 output rows for A B, 256 reduction terms
+/// for A^T B, summed in ascending panel order) is the same for every kernel and
+/// depends only on the shapes, so every kernel gives results that do not depend
+/// on the thread count. MKL builds with dgemm enabled keep dgemm for the sites
+/// it covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PureGemm {
+    /// Bounded faer nano-GEMM calls (16 x 16 x 16 for A^T B, 4 x 4 x 256 for
+    /// A B) inside each panel: the original arithmetic (default).
+    #[default]
+    Nano,
+    /// One packed product per panel with the architecture's kernel: `Library`
+    /// on x86_64, `Simd` elsewhere (see those variants for the reason).
+    Packed,
+    /// One faer `matmul` (`Par::Seq`) per panel. On x86_64 with AVX2 or
+    /// AVX-512 faer runs it through its private x86 GEMM, which packs into a
+    /// thread-local buffer created on a thread's first call and reused after
+    /// that (no steady-state allocation). On other targets faer's backend
+    /// allocates packing storage on every call, so this variant is used there
+    /// only by tests and benchmarks.
+    Library,
+    /// Own register-tiled kernel through `pulp` (safe SIMD dispatch): every
+    /// output entry is one ascending fused multiply-add chain over the whole
+    /// reduction starting from +0, so its value does not depend on the tile,
+    /// the reduction block, the panel or the vector width; packing storage is
+    /// a fixed stack array (no allocation).
+    Simd,
+}
+impl PureGemm {
+    /// The kernel actually run for this variant on this target.
+    pub fn resolve(self) -> Self {
+        match self {
+            Self::Packed if cfg!(target_arch = "x86_64") => Self::Library,
+            Self::Packed => Self::Simd,
+            other => other,
+        }
+    }
+}
 /// Reusable fixed-panel Gram scratch and shared executor. Construction allocates;
 /// multiply_into neither allocates numerical storage nor creates worker threads.
 /// The faer backend stays sequential within each panel, including MKL builds.
@@ -188,6 +227,8 @@ pub struct RealGemmWorkspace {
     /// Right operand packed in column blocks of four for the rotation kernel.
     pack: Vec<f64>,
     kernel: RotateKernel,
+    /// Product inside each panel (`BAANDI_PURE_GEMM`).
+    pure: PureGemm,
     /// MKL builds: rotation through dgemm unless `BAANDI_MKL_DGEMM=off` (A/B
     /// switch; adopted as default after the dev08 distribution check).
     #[cfg(feature = "mkl")]
@@ -217,6 +258,10 @@ impl RealGemmWorkspace {
             kernel: match crate::switches::choice(crate::switches::Id::ROTATE_KERNEL) {
                 "blocked" => RotateKernel::Blocked,
                 _ => RotateKernel::Legacy,
+            },
+            pure: match crate::switches::choice(crate::switches::Id::PURE_GEMM) {
+                "packed" => PureGemm::Packed,
+                _ => PureGemm::Nano,
             },
             #[cfg(feature = "mkl")]
             dgemm_rotation: crate::switches::on(crate::switches::Id::MKL_DGEMM),
@@ -450,6 +495,15 @@ impl RealGemmWorkspace {
     pub fn set_rotate_kernel(&mut self, kernel: RotateKernel) {
         self.kernel = kernel;
     }
+    /// Select the per-panel pure-Rust product (tests and A/B; the default
+    /// comes from `BAANDI_PURE_GEMM`).
+    pub fn set_pure_gemm(&mut self, pure: PureGemm) {
+        self.pure = pure;
+    }
+    /// The per-panel pure-Rust product in use (as selected, not resolved).
+    pub fn pure_gemm(&self) -> PureGemm {
+        self.pure
+    }
     /// RITZ-FUSED (algebra-stream item 2): Ritz vectors X = V C into `out_v` and
     /// residual vectors R = HV C - X diag(values) into `out_r`, without storing
     /// H X: each 256-row panel of HV C lives only in that panel's tile and is
@@ -512,6 +566,7 @@ impl RealGemmWorkspace {
             c,
             values,
             mkl,
+            pure: self.pure,
         };
         let ov = MatMut::from_column_major_slice_mut(out_v, m, n);
         let or = MatMut::from_column_major_slice_mut(out_r, m, n);
@@ -568,6 +623,7 @@ impl RealGemmWorkspace {
         let av = MatRef::from_column_major_slice(a, m, k);
         let cv = MatRef::from_column_major_slice(c, k, n);
         let mut o = MatMut::from_column_major_slice_mut(out, m, n);
+        let pure = self.pure;
         if self.kernel == RotateKernel::Blocked {
             pack_columns(&mut self.pack, cv);
             let pack = &self.pack[..n.div_ceil(4) * 4 * k];
@@ -578,9 +634,9 @@ impl RealGemmWorkspace {
             }
         } else if parallel {
             self.pool
-                .install(|| rotate_legacy(o.as_mut(), av, cv, true));
+                .install(|| rotate_legacy(o.as_mut(), av, cv, pure, true));
         } else {
-            rotate_legacy(o.as_mut(), av, cv, false);
+            rotate_legacy(o.as_mut(), av, cv, pure, false);
         }
         finite(o.as_ref())
     }
@@ -689,6 +745,7 @@ impl RealGemmWorkspace {
             b,
             ldb,
             mkl,
+            pure: self.pure,
         };
         let parallel =
             n > COLUMN_GROUP && rows.saturating_mul(n).saturating_mul(k) >= PARALLEL_WORK;
@@ -735,6 +792,7 @@ impl RealGemmWorkspace {
         }
         let parallel =
             m.div_ceil(PANEL) >= 4 && m.saturating_mul(n).saturating_mul(k) >= PARALLEL_WORK;
+        let pure = self.pure;
         if self.kernel == RotateKernel::Blocked {
             pack_columns(&mut self.pack, c);
             let pack = &self.pack[..n.div_ceil(4) * 4 * k];
@@ -752,13 +810,13 @@ impl RealGemmWorkspace {
         } else if parallel {
             self.pool.install(|| {
                 WorkerPool::join(
-                    || rotate_legacy(out_v.as_mut(), v, c, true),
-                    || rotate_legacy(out_hv.as_mut(), hv, c, true),
+                    || rotate_legacy(out_v.as_mut(), v, c, pure, true),
+                    || rotate_legacy(out_hv.as_mut(), hv, c, pure, true),
                 );
             });
         } else {
-            rotate_legacy(out_v.as_mut(), v, c, false);
-            rotate_legacy(out_hv.as_mut(), hv, c, false);
+            rotate_legacy(out_v.as_mut(), v, c, pure, false);
+            rotate_legacy(out_hv.as_mut(), hv, c, pure, false);
         }
         finite(out_v.as_ref())?;
         finite(out_hv.as_ref())
@@ -797,13 +855,14 @@ impl RealGemmWorkspace {
         }
         let count = if op == RealOp::Transpose { k } else { m }.div_ceil(PANEL);
         let parallel = count >= 4 && m.saturating_mul(n).saturating_mul(k) >= PARALLEL_WORK;
+        let pure = self.pure;
         if op == RealOp::Transpose {
             let tiles = &mut self.tiles[..count];
             for tile in tiles.iter_mut() {
                 // Restore the full scratch shape (a dgemm Gram reshapes tiles).
                 tile.reshape_within_storage(self.short, self.short)?;
             }
-            let mut work = || gram(tiles, 0, a, b, m, n, parallel);
+            let mut work = || gram(tiles, 0, a, b, m, n, pure, parallel);
             if parallel {
                 self.pool.install(work);
             } else {
@@ -816,7 +875,7 @@ impl RealGemmWorkspace {
                 sum();
             }
         } else {
-            let mut work = || rotate_legacy(out.as_mut(), a, b, parallel);
+            let mut work = || rotate_legacy(out.as_mut(), a, b, pure, parallel);
             if parallel {
                 self.pool.install(work);
             } else {
@@ -826,16 +885,29 @@ impl RealGemmWorkspace {
         finite(out.as_ref())
     }
 }
-// General faer GEMM allocates opaque packing buffers. These call shapes stay
-// within its allocation-free 4096-MAC nano-GEMM branch. Rotation uses the full
-// reduction panel instead of repeated 16-term updates; Gram retains the shape
-// that won its separate panel benchmark. Neither grouping depends on workers.
+// One panel product out = a b (a may be a transposed view).
+// Nano (default): general faer GEMM allocates opaque packing buffers on some
+// targets. These call shapes stay within its allocation-free 4096-MAC nano-GEMM
+// branch. Rotation uses the full reduction panel instead of repeated 16-term
+// updates; Gram retains the shape that won its separate panel benchmark.
+// Neither grouping depends on workers.
+// Packed (P48B): the whole panel product in one packed kernel call (see
+// `PureGemm`); the panel itself is the same, so thread independence holds.
 fn bounded_matmul(
     mut out: RealMatrixMut<'_>,
     a: RealMatrixRef<'_>,
     b: RealMatrixRef<'_>,
     transpose: bool,
+    pure: PureGemm,
 ) {
+    match pure.resolve() {
+        PureGemm::Library => {
+            matmul(out, Accum::Replace, a, b, 1., Par::Seq);
+            return;
+        }
+        PureGemm::Simd if simd_gemm(out.as_mut(), a, b) => return,
+        _ => {}
+    }
     let (rows, cols, reduction) = if transpose { (16, 16, 16) } else { (4, 4, 256) };
     for j in (0..out.ncols()).step_by(cols) {
         let n = cols.min(out.ncols() - j);
@@ -856,6 +928,197 @@ fn bounded_matmul(
     }
 }
 
+// ---- P48B packed register-tile kernel (`PureGemm::Simd`) ----
+//
+// Blocking rule (stated, not tuned on one CPU). The register tile is MR x NR
+// with NR = 4 output columns and MR = 8 rows: 4 x 4 accumulators of two lanes
+// (NEON) plus four operand vectors and four broadcasts stay within the 32
+// vector registers. The left operand is packed per MR-row strip and per
+// reduction block of KC = 256 terms into a stack array of MR x KC doubles
+// (16 KiB), which stays in any current L1d (32 to 128 KiB) while the strip is
+// reused against every four-column group of the right operand; the right
+// operand is read in place (contiguous columns, four sequential streams). The
+// panel (256 rows or 256 reduction terms) is the caller's fixed decomposition.
+// Every output entry is one ascending chain acc = fma(a(i,p), b(p,j), acc) from
+// +0 over the whole reduction (a later reduction block reloads the stored
+// partial, which is exact), so the value does not depend on MR, NR, KC, the
+// panel, the thread count or the instruction set: every target with IEEE fused
+// multiply-add gives the same bits. aarch64 uses NEON vector values (safe
+// `core::arch` arithmetic, loads through `bytemuck`); other targets use the
+// portable form of the same chain (a reference there: x86_64 runs `Library`).
+const KC: usize = 256;
+const NR: usize = 4;
+const MR: usize = 8;
+static ZERO_COLUMN: [f64; KC] = [0.; KC];
+
+/// Panel product through the register-tile kernel. Returns false (nothing
+/// written) when a column of `b` is not contiguous; the caller then uses the
+/// nano path.
+fn simd_gemm(mut out: RealMatrixMut<'_>, a: RealMatrixRef<'_>, b: RealMatrixRef<'_>) -> bool {
+    if b.nrows() > 1 && b.ncols() > 0 && b.col(0).try_as_col_major().is_none() {
+        return false;
+    }
+    let (m, n, k) = (out.nrows(), out.ncols(), a.ncols());
+    if m == 0 || n == 0 {
+        return true;
+    }
+    if k == 0 {
+        out.fill(0.);
+        return true;
+    }
+    let mut strip = [0_f64; MR * KC];
+    for pc in (0..k).step_by(KC) {
+        let kc = KC.min(k - pc);
+        let strip = &mut strip[..MR * kc];
+        for i in (0..m).step_by(MR) {
+            let rows = MR.min(m - i);
+            pack_strip(strip, a, i, rows, pc, kc);
+            for j in (0..n).step_by(NR) {
+                let cols = NR.min(n - j);
+                let column = |c: usize| -> &[f64] {
+                    if c < cols {
+                        &b.col(j + c)
+                            .try_as_col_major()
+                            .expect("checked contiguous column")
+                            .as_slice()[pc..pc + kc]
+                    } else {
+                        &ZERO_COLUMN[..kc]
+                    }
+                };
+                let columns = [column(0), column(1), column(2), column(3)];
+                let mut tile = [[0_f64; MR]; NR];
+                if pc > 0 {
+                    for (c, col) in tile.iter_mut().enumerate().take(cols) {
+                        for (r, value) in col.iter_mut().enumerate().take(rows) {
+                            *value = out[(i + r, j + c)];
+                        }
+                    }
+                }
+                let tile = register_tile(strip, columns, tile);
+                for (c, col) in tile.iter().enumerate().take(cols) {
+                    match out.as_mut().col_mut(j + c).try_as_col_major_mut() {
+                        Some(dst) => dst.as_slice_mut()[i..i + rows].copy_from_slice(&col[..rows]),
+                        None => {
+                            for (r, &value) in col.iter().enumerate().take(rows) {
+                                out[(i + r, j + c)] = value;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    true
+}
+/// Pack rows i..i+rows, reduction terms pc..pc+kc of `a` term-major
+/// (strip[p * MR + r]), zero padding rows rows..MR.
+fn pack_strip(
+    strip: &mut [f64],
+    a: RealMatrixRef<'_>,
+    i: usize,
+    rows: usize,
+    pc: usize,
+    kc: usize,
+) {
+    if a.nrows() <= 1 || a.col(0).try_as_col_major().is_some() {
+        for (p, dst) in strip.as_chunks_mut::<MR>().0.iter_mut().enumerate() {
+            let col = a.col(pc + p).try_as_col_major().expect("contiguous column");
+            dst[..rows].copy_from_slice(&col.as_slice()[i..i + rows]);
+            dst[rows..].fill(0.);
+        }
+    } else if a.row(0).try_as_row_major().is_some() {
+        // Transposed view (A^T of a column-major A): rows are contiguous.
+        for r in 0..MR {
+            if r < rows {
+                let row = a.row(i + r).try_as_row_major().expect("contiguous row");
+                for (dst, &x) in strip
+                    .as_chunks_mut::<MR>()
+                    .0
+                    .iter_mut()
+                    .zip(&row.as_slice()[pc..pc + kc])
+                {
+                    dst[r] = x;
+                }
+            } else {
+                for dst in strip.as_chunks_mut::<MR>().0.iter_mut() {
+                    dst[r] = 0.;
+                }
+            }
+        }
+    } else {
+        for (p, dst) in strip.as_chunks_mut::<MR>().0.iter_mut().enumerate() {
+            for (r, d) in dst.iter_mut().enumerate() {
+                *d = if r < rows { a[(i + r, pc + p)] } else { 0. };
+            }
+        }
+    }
+}
+/// tile[c][r] = fma chain over p of strip[p * MR + r] * columns[c][p],
+/// continuing from the given partial values.
+#[inline(always)]
+fn register_tile(strip: &[f64], columns: [&[f64]; NR], tile: [[f64; MR]; NR]) -> [[f64; MR]; NR] {
+    #[cfg(target_arch = "aarch64")]
+    if let Some(simd) = pulp::aarch64::Neon::try_new() {
+        return pulp::Simd::vectorize(simd, || neon_tile(simd, strip, columns, tile));
+    }
+    portable_tile(strip, columns, tile)
+}
+/// NEON form: accumulators are native two-lane vectors (`pulp`'s safe
+/// wrappers of the `core::arch` intrinsics; value casts by `bytemuck`).
+#[cfg(target_arch = "aarch64")]
+#[inline(always)]
+fn neon_tile(
+    simd: pulp::aarch64::Neon,
+    strip: &[f64],
+    columns: [&[f64]; NR],
+    tile: [[f64; MR]; NR],
+) -> [[f64; MR]; NR] {
+    use core::arch::aarch64::float64x2_t;
+    use pulp::bytemuck::cast;
+    const V: usize = MR / 2;
+    let neon = simd.neon;
+    let mut acc: [[float64x2_t; V]; NR] = tile.map(cast::<[f64; MR], [float64x2_t; V]>);
+    let kc = strip.len() / MR;
+    let [b0, b1, b2, b3] = columns;
+    let (b0, b1, b2, b3) = (&b0[..kc], &b1[..kc], &b2[..kc], &b3[..kc]);
+    for ((((ap, &x0), &x1), &x2), &x3) in strip
+        .as_chunks::<MR>()
+        .0
+        .iter()
+        .zip(b0)
+        .zip(b1)
+        .zip(b2)
+        .zip(b3)
+    {
+        let av = cast::<[f64; MR], [float64x2_t; V]>(*ap);
+        for v in 0..V {
+            acc[0][v] = neon.vfmaq_n_f64(acc[0][v], av[v], x0);
+            acc[1][v] = neon.vfmaq_n_f64(acc[1][v], av[v], x1);
+            acc[2][v] = neon.vfmaq_n_f64(acc[2][v], av[v], x2);
+            acc[3][v] = neon.vfmaq_n_f64(acc[3][v], av[v], x3);
+        }
+    }
+    acc.map(cast::<[float64x2_t; V], [f64; MR]>)
+}
+/// Portable form of the same chain (targets without the NEON form).
+#[inline(always)]
+fn portable_tile(
+    strip: &[f64],
+    columns: [&[f64]; NR],
+    mut tile: [[f64; MR]; NR],
+) -> [[f64; MR]; NR] {
+    for (p, ap) in strip.as_chunks::<MR>().0.iter().enumerate() {
+        for (c, col) in tile.iter_mut().enumerate() {
+            let x = columns[c][p];
+            for (acc, &a) in col.iter_mut().zip(ap) {
+                *acc = a.mul_add(x, *acc);
+            }
+        }
+    }
+    tile
+}
+
+#[allow(clippy::too_many_arguments)]
 fn gram(
     tiles: &mut [RealMatrix],
     start: usize,
@@ -863,14 +1126,15 @@ fn gram(
     b: RealMatrixRef<'_>,
     m: usize,
     n: usize,
+    pure: PureGemm,
     parallel: bool,
 ) {
     if parallel && tiles.len() > 1 {
         let half = tiles.len() / 2;
         let (left, right) = tiles.split_at_mut(half);
         WorkerPool::join(
-            || gram(left, start, a, b, m, n, true),
-            || gram(right, start + half, a, b, m, n, true),
+            || gram(left, start, a, b, m, n, pure, true),
+            || gram(right, start + half, a, b, m, n, pure, true),
         );
     } else {
         for (t, tile) in tiles.iter_mut().enumerate() {
@@ -881,6 +1145,7 @@ fn gram(
                 a.subrows(row, len).transpose(),
                 b.subrows(row, len),
                 true,
+                pure,
             );
         }
     }
@@ -924,6 +1189,7 @@ fn rotate_legacy(
     mut out: RealMatrixMut<'_>,
     a: RealMatrixRef<'_>,
     b: RealMatrixRef<'_>,
+    pure: PureGemm,
     parallel: bool,
 ) {
     let count = a.nrows().div_ceil(PANEL);
@@ -931,8 +1197,8 @@ fn rotate_legacy(
         let split = (count / 2) * PANEL;
         let (left, right) = out.split_at_row_mut(split);
         WorkerPool::join(
-            || rotate_legacy(left, a.subrows(0, split), b, true),
-            || rotate_legacy(right, a.subrows(split, a.nrows() - split), b, true),
+            || rotate_legacy(left, a.subrows(0, split), b, pure, true),
+            || rotate_legacy(right, a.subrows(split, a.nrows() - split), b, pure, true),
         );
     } else {
         for row in (0..a.nrows()).step_by(PANEL) {
@@ -942,6 +1208,7 @@ fn rotate_legacy(
                 a.subrows(row, len),
                 b,
                 false,
+                pure,
             );
         }
     }
@@ -956,6 +1223,7 @@ struct FusedPanels<'a> {
     values: &'a [f64],
     #[cfg_attr(not(feature = "mkl"), allow(dead_code))]
     mkl: bool,
+    pure: PureGemm,
 }
 /// Panels `first..` of the fused rotation; the split is the panel split of
 /// `rotate_legacy` / `dgemm_panels`, the per-panel work is fixed.
@@ -1038,12 +1306,14 @@ fn fused_panels(
             v.subrows(row, len),
             cv,
             false,
+            job.pure,
         );
         bounded_matmul(
             MatMut::from_column_major_slice_mut(buffer, len, n),
             hv.subrows(row, len),
             cv,
             false,
+            job.pure,
         );
         combine_residual(&mut out_r, &out_v, buffer, local, len, job.values);
     }
@@ -1202,6 +1472,7 @@ struct GroupJob<'a> {
     ldb: usize,
     #[cfg_attr(not(feature = "mkl"), allow(dead_code))]
     mkl: bool,
+    pure: PureGemm,
 }
 /// Column groups `first..` (in units of columns) of A B into `out` (contiguous).
 fn column_groups(job: &GroupJob<'_>, out: &mut [f64], first: usize, parallel: bool) {
@@ -1243,6 +1514,7 @@ fn column_groups(job: &GroupJob<'_>, out: &mut [f64], first: usize, parallel: bo
             MatMut::from_column_major_slice_mut(dst, job.rows, w),
             a,
             bv,
+            job.pure,
             false,
         );
     }

@@ -17,6 +17,7 @@ The toolchain is Rust 1.99.1, edition 2024, workspace resolver 3.
 | ndarray | 0.17.2 | MIT OR Apache-2.0 | dft-basis, dft-numerics, dft-physics |
 | ndrustfft | 0.6.2 | MIT | dft-numerics (dev-dependency, test oracle) |
 | num-complex | 0.4.6 | MIT OR Apache-2.0 | dft-basis, dft-numerics, dft-physics, dft-solvers |
+| pulp | 0.22.3 | MIT | dft-numerics (P48B promotion from transitive, default features off) |
 | rayon | 1.12.0 | MIT OR Apache-2.0 | dft-numerics (P10J promotion from transitive) |
 | rustfft | 6.4.1 | MIT OR Apache-2.0 | dft-numerics |
 | serde | 1.0.229 | MIT OR Apache-2.0 | dft-cli |
@@ -201,3 +202,18 @@ no native runtime or platform-specific binding is required. All executor,
 borrowed output splitting and pool integration code written here is safe Rust;
 no `unsafe` block is introduced in our code. Unsafe implementation details stay
 inside the existing reviewed dependencies.
+
+## P48B pulp (packed pure-Rust GEMM)
+
+pulp 0.22.3 (MIT, by the faer author; already in Cargo.lock through faer-traits and
+gemm-common) is now a direct dependency of dft-numerics, pinned `=0.22.3` with
+`default-features = false, features = ["std"]`. No new package is fetched. It is
+used for two things only: the safe NEON wrappers (`pulp::aarch64::Neon`, whose
+token proves the target feature, so `vfmaq_n_f64` is called without our own
+`unsafe`) and the re-exported `bytemuck` value casts between `[f64; 8]` and
+NEON vectors. Default features stay off so that the feature set seen by faer is
+unchanged: enabling pulp's `x86-v4` would switch faer's own x86 dispatch to
+AVX-512 and change the rounding of the default path on dev08. Apple Silicon:
+build, tests and Clippy pass on this Mac (aarch64). x86_64 does not use pulp at
+run time (the packed kernel there is faer's matmul), but it compiles there.
+

@@ -121,7 +121,6 @@ fn legacy_defaults_are_unchanged() {
         Id::DAVIDSON_STAGES,
         Id::HAPPLY_OVERLAP,
         Id::HAPPLY_FOLD,
-        Id::NONLOCAL_BLOCK,
         Id::ORTHO_BLOCK,
         Id::SECOND_VECTOR,
     ] {
@@ -135,6 +134,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::STANDARD_STOP), Value::Choice("plain"));
     assert_eq!(value(Id::ROTATE_KERNEL), Value::Choice("legacy"));
     assert_eq!(value(Id::PAIR_FFT), Value::Choice("grid"));
+    assert_eq!(value(Id::NONLOCAL_BLOCK), Value::Choice("auto"));
     assert_eq!(
         value(Id::MGS),
         Value::Choice(if dft_numerics::MKL_BACKEND {

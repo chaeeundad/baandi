@@ -215,8 +215,8 @@ table! {
         "overlap local and nonlocal parts of the H apply";
     HAPPLY_FOLD: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "fold the local potential into the pair FFT";
-    NONLOCAL_BLOCK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "complex (k-point) nonlocal of a band block by two GEMMs (P48C)";
+    NONLOCAL_BLOCK: Kind::Choice { allowed: &["auto", "on", "off"], default: "auto" }, "auto", "auto, on, off",
+        "complex (k-point) nonlocal of a band block by two GEMMs (P48C; auto: when n_pw x n_projectors x 16 B >= 256 KiB)";
     // Numerics (dft-numerics).
     ROTATE_KERNEL: Kind::Choice { allowed: &["legacy", "blocked"], default: "legacy" }, "legacy",
         "legacy, blocked", "rotation kernel of the tiled workspace";

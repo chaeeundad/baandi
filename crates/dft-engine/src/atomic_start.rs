@@ -82,6 +82,7 @@ pub(super) fn span(
         atomic_orbitals: count,
         ..Default::default()
     };
+    let __t = std::time::Instant::now();
     let mut raw = ComplexMatrix::zeros(npw, count).map_err(numerical)?;
     let mut col = 0;
     for sp in species {
@@ -129,7 +130,9 @@ pub(super) fn span(
             }
         }
     }
+    eprintln!("TMP raw {:.4}", __t.elapsed().as_secs_f64()); let __t = std::time::Instant::now();
     let ortho = orthonormalize(&raw, None).map_err(numerical)?;
+    eprintln!("TMP ortho {:.4}", __t.elapsed().as_secs_f64()); let __t = std::time::Instant::now();
     if !ortho.dropped.is_empty() {
         return Err(ScfError::InvalidInput(
             "rank deficient atomic starting orbitals",
@@ -186,6 +189,7 @@ pub(super) fn span(
             }
         }
     }
+    eprintln!("TMP extra {:.4} cols {}", __t.elapsed().as_secs_f64(), q.cols());
     if q.cols() < bands {
         return Err(ScfError::InvalidInput("insufficient atomic starting rank"));
     }
@@ -216,7 +220,9 @@ pub(super) fn ritz(
             hq
         }
     };
+    let __t = std::time::Instant::now();
     let mut small = gemm(q, MatrixOp::Adjoint, &hq, MatrixOp::Identity).map_err(numerical)?;
+    eprintln!("TMP qhq {:.4}", __t.elapsed().as_secs_f64()); let __t = std::time::Instant::now();
     for j in 0..small.cols() {
         for i in 0..=j {
             let v = (small[(i, j)] + small[(j, i)].conj()) * 0.5;
@@ -235,11 +241,13 @@ pub(super) fn ritz(
         }
     }
     let (_, rot) = hermitian_eigh(&small).map_err(numerical)?;
+    eprintln!("TMP eigh {:.4}", __t.elapsed().as_secs_f64()); let __t = std::time::Instant::now();
     let mut selected = ComplexMatrix::zeros(q.cols(), bands).map_err(numerical)?;
     for j in 0..bands {
         selected.column_mut(j).copy_from_slice(rot.column(j));
     }
     let guess = gemm(q, MatrixOp::Identity, &selected, MatrixOp::Identity).map_err(numerical)?;
+    eprintln!("TMP guess {:.4}", __t.elapsed().as_secs_f64());
     let mut report = span.report.clone();
     report.initial_h_applications = q.cols();
     report.gram_rotation_macs = q.rows() * q.cols() * (q.cols() + bands);

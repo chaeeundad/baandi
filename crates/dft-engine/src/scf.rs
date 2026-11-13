@@ -926,6 +926,7 @@ impl ScfProblem {
                 "strain reference requires a frozen FFT grid",
             ));
         }
+        let __t = Instant::now();
         let gamma = options.basis(cell, [0.; 3], 1.0)?;
         let density_basis = options.basis(cell, [0.; 3], 4.0)?;
         let grid = FftGridSpec::new(&gamma, &density_basis, options.grid_override)?;
@@ -938,6 +939,7 @@ impl ScfProblem {
                 positions_bohr: r,
             })
             .collect();
+        eprintln!("TMPS bases {:.4}", __t.elapsed().as_secs_f64()); let __t = Instant::now();
         let ionic_g = dg.scatter(&hamiltonian::ionic_local_with_conventions(
             &density_basis,
             cell.volume_bohr3(),
@@ -945,6 +947,7 @@ impl ScfProblem {
             options.local_mesh,
             options.radial_even_rule,
         )?)?;
+        eprintln!("TMPS ionic {:.4}", __t.elapsed().as_secs_f64()); let __t = Instant::now();
         let mut fft = FftPlan3d::new(grid.dims())?;
         let core_density = dft_physics::data::core_density_with_rule(
             &density_basis,
@@ -954,6 +957,7 @@ impl ScfProblem {
             &mut fft,
             options.radial_even_rule,
         )?;
+        eprintln!("TMPS core {:.4}", __t.elapsed().as_secs_f64()); let __t = Instant::now();
         let start_density = if options.start_density == StartDensity::Atomic {
             start_density::atomic_superposition(
                 cell,
@@ -966,6 +970,7 @@ impl ScfProblem {
         } else {
             None
         };
+        eprintln!("TMPS startdens {:.4}", __t.elapsed().as_secs_f64()); let __t = Instant::now();
         let xc_density = Array3::zeros(
             if core_density.is_some() || options.pw92_prefactor == crate::Pw92Prefactor::Original {
                 grid.dims()
@@ -986,6 +991,7 @@ impl ScfProblem {
         // idle outer workers steal fixed inner pieces and gives each worker
         // its own Hamiltonian scratch slot (no modulo-slot collisions).
         let inner = options.threads.max(1);
+        eprintln!("TMPS ionicfft+pool {:.4}", __t.elapsed().as_secs_f64()); let __t = Instant::now();
         let mut construction_points = points.to_vec();
         let states = ordered_solves(
             &mut construction_points,
@@ -1034,6 +1040,7 @@ impl ScfProblem {
                 })
             },
         )?;
+        eprintln!("TMPS states {:.4}", __t.elapsed().as_secs_f64()); let __t = Instant::now();
         let mut atomic_start = AtomicStartReport::default();
         let atomic_species = if options.start_wavefunctions == StartWavefunctions::Atomic {
             let reason = if channel.is_some() {
@@ -1067,7 +1074,9 @@ impl ScfProblem {
         let worker_ffts = (0..options.threads.max(1).min(states.len()))
             .map(|_| FftPlan3d::new(grid.dims()))
             .collect::<Result<Vec<_>, _>>()?;
+        eprintln!("TMPS atomprep+ffts {:.4}", __t.elapsed().as_secs_f64()); let __t = Instant::now();
         let ewald = ewald::energy(cell, &ions, EwaldOptions::default())?;
+        eprintln!("TMPS ewald {:.4}", __t.elapsed().as_secs_f64()); let __t = Instant::now();
         let occupations = (0..bands)
             .map(|b| {
                 if b < occupied {
@@ -1081,6 +1090,7 @@ impl ScfProblem {
             .standard
             .map(|_| CoulombMetric::new(cell, options.cutoff_hartree, grid.dims()))
             .transpose()?;
+        eprintln!("TMPS coulomb {:.4}", __t.elapsed().as_secs_f64()); let __t = Instant::now();
         let force_model = crate::force_identity::ModelDescription::new(
             cell,
             atoms,
@@ -1089,6 +1099,7 @@ impl ScfProblem {
             grid.dims(),
             states.iter().map(|s| s.point).collect(),
         );
+        eprintln!("TMPS model {:.4}", __t.elapsed().as_secs_f64());
         Ok(Self {
             #[cfg(test)]
             force_real_rebuild: false,
@@ -1725,6 +1736,7 @@ impl ScfProblem {
                         self.occupations.len(),
                     )?;
                     // ATOMIC-REAL: H Q on the real Gamma path when eligible.
+                    let __t = std::time::Instant::now();
                     let hq = if crate::gamma_real::atomic_real() {
                         crate::gamma_real::atomic_apply_real(
                             &state.hamiltonian,
@@ -1739,6 +1751,7 @@ impl ScfProblem {
                     } else {
                         None
                     };
+                    eprintln!("TMP hq {:.4}", __t.elapsed().as_secs_f64());
                     let (guess, report) = atomic_start::ritz(
                         &span,
                         &state.hamiltonian,

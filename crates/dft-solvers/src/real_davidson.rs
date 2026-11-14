@@ -479,13 +479,7 @@ impl RealDavidson {
         };
         let mut has_previous = vec![false; self.bands];
         let mut max_basis_dimension = 0;
-        let gap_trace = std::env::var_os("TMP_GAP_TRACE").is_some();
-        if gap_trace {
-            eprintln!("GAPSOLVE n={} bands={} cap={} strict={} ritz={} init={}", n, self.bands, capacity, policy.strict_bands, ritz, basis.cols());
-        }
         for iteration in 1..=self.max_iterations {
-            let mut gt_restart = 0usize;
-            let mut gt_bordered = false;
             let iteration_clock = timers.start();
             max_basis_dimension = max_basis_dimension.max(basis.cols());
             let m = basis.cols();
@@ -523,7 +517,6 @@ impl RealDavidson {
             if !bordered {
                 eigensolver.solve_into(reduced, &mut values[..m], coefficients)?;
             }
-            gt_bordered = bordered;
             if let Some(b) = b5.as_mut() {
                 if bordered {
                     b5_add(B5Count::Bordered);
@@ -712,9 +705,6 @@ impl RealDavidson {
                 ));
             }
             if finished {
-                if gap_trace {
-                    eprintln!("GAPIT it={} m={} prefix={} bord={} narrow={} krot={} cert={} sel=0 restart=0 kept=0 rep=0 end=1", iteration, m, prefix, gt_bordered as u8, narrow as u8, if narrow { b1.as_ref().map_or(0, |b| b.set.len()) } else { self.bands }, certified as u8);
-                }
                 timers.iteration(iteration_clock, 0);
                 work.returned();
                 result_values.copy_from_slice(&values[..self.bands]);
@@ -835,7 +825,6 @@ impl RealDavidson {
                 work.restart();
                 reduced_width = 0;
                 if trusted && orthogonality_defect(vectors) <= 1e-12 {
-                    gt_restart = 1;
                     contractions += 1;
                     if !hx_formed {
                         let t = timers.start();
@@ -860,7 +849,6 @@ impl RealDavidson {
                         sk.contract(self.bands);
                     }
                 } else {
-                    gt_restart = 2;
                     let t = timers.start();
                     projection.run_into(vectors, None, gemm, basis)?;
                     timers.stop(t, Stage::Orthonormalize);
@@ -875,8 +863,6 @@ impl RealDavidson {
                     }
                 }
             }
-            let gt_rep0 = ortho_counters().1;
-            let gt_against = basis.cols();
             let t = timers.start();
             projection.run_into(corrections, Some(basis), gemm, extra)?;
             if extra.cols() == 0 {
@@ -911,9 +897,6 @@ impl RealDavidson {
                 let t = timers.start();
                 sk.append(gemm, basis.cols(), extra, extra_products)?;
                 timers.stop(t, Stage::Sketch);
-            }
-            if gap_trace {
-                eprintln!("GAPIT it={} m={} prefix={} bord={} narrow={} krot={} cert={} sel={} restart={} kept={} rep={} against={} end=0", iteration, m, prefix, gt_bordered as u8, narrow as u8, if narrow { b1.as_ref().map_or(0, |b| b.set.len()) } else { self.bands }, certified as u8, corrections.cols(), gt_restart, extra.cols(), ortho_counters().1 - gt_rep0, gt_against);
             }
             append_into(products, extra_products)?;
             append_into(basis, extra)?;

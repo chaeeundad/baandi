@@ -126,14 +126,13 @@ fn legacy_defaults_are_unchanged() {
         Id::PROJECT_WIDE,
         Id::B1_NARROW,
         Id::SINGLE_PATH,
-        Id::M2_DGEMM,
-        Id::M2_LEAN,
     ] {
         assert!(!on(id), "{id:?} must default off");
     }
+    assert!(on(Id::M2_DGEMM) && on(Id::M2_LEAN));
     assert_eq!(
         switches::resolve(switches::switch(Id::M2_ORTHO), None).0,
-        Value::Choice("classic")
+        Value::Choice("serial")
     );
     assert_eq!(
         switches::resolve(switches::switch(Id::M2_FFT), None).0,

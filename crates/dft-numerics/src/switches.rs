@@ -184,15 +184,15 @@ table! {
         "batched FFT transposes of the M2 path";
     PHASE_THREADS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P48F: thread the atomic start (span build, two-pass Gram-Schmidt right-looking) on the SCF pool; bit-identical";
-    // MPI entry cost (docs/performance/mpi-entry-cost-analysis.md); all default off.
-    M2_DGEMM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // MPI entry cost (docs/performance/mpi-entry-cost-analysis.md). Adopted 2026-11-15 on dev08 A/B: M2_DGEMM, M2_ORTHO=serial and M2_LEAN default on; M2_FFT stays rust (neutral).
+    M2_DGEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "distributed Davidson rotations and projections and the M2 nonlocal products through the per-panel dgemm at any width (MKL builds: rounding class; pure builds bit-identical)";
-    M2_ORTHO: Kind::Choice { allowed: &["classic", "serial"], default: "classic" }, "classic",
+    M2_ORTHO: Kind::Choice { allowed: &["classic", "serial"], default: "serial" }, "serial",
         "classic, serial",
         "distributed Davidson orthonormalization: classic (three basis projections, two whole-block sweeps) or serial (the serial solver's order: one projection, DGKS second pass, panel Gram-Schmidt; rounding class)";
     M2_FFT: Kind::Choice { allowed: &["rust", "mkl"], default: "rust" }, "rust", "rust, mkl",
         "1D kernels of the M2 distributed FFT (mkl: MKL DFTI batch lanes on MKL builds, rounding class; pure builds stay rustfft)";
-    M2_LEAN: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    M2_LEAN: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "distributed Davidson residuals and corrections by slice loops without per-element index checks; bit-identical";
     // Solvers (dft-solvers).
     B1: Kind::Choice { allowed: &["on", "off", "standard", "strict"], default: "on" }, "on",
@@ -506,17 +506,14 @@ mod tests {
     }
 
     #[test]
-    fn mpi_entry_cost_switches_default_off() {
+    fn mpi_entry_cost_switches_defaults() {
         use Source::*;
         for id in [Id::M2_DGEMM, Id::M2_LEAN] {
-            assert_eq!(eval(id, None), (Value::Choice("off"), Default));
-            assert_eq!(eval(id, Some("on")), (Value::Choice("on"), Env));
-            assert_eq!(
-                eval(id, Some("1")),
-                (Value::Choice("off"), InvalidToDefault)
-            );
+            assert_eq!(eval(id, None), (Value::Choice("on"), Default));
+            assert_eq!(eval(id, Some("off")), (Value::Choice("off"), Env));
+            assert_eq!(eval(id, Some("1")), (Value::Choice("on"), InvalidToDefault));
         }
-        assert_eq!(eval(Id::M2_ORTHO, None).0, Value::Choice("classic"));
+        assert_eq!(eval(Id::M2_ORTHO, None).0, Value::Choice("serial"));
         assert_eq!(
             eval(Id::M2_ORTHO, Some("serial")).0,
             Value::Choice("serial")

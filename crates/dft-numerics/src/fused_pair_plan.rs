@@ -82,6 +82,39 @@ impl PairLanes for MklLanes {
     }
 }
 
+/// Lane kernels chosen at run time (MPI M2 distributed FFT, `BAANDI_M2_FFT`):
+/// rustfft, or MKL DFTI batch lanes when `vendor` is requested on an MKL build.
+/// A pure build has no vendor lanes and always uses rustfft (bit-identical to
+/// `RustLanes`).
+pub enum BackendLanes {
+    Rust(RustLanes),
+    #[cfg(feature = "mkl")]
+    Mkl(MklLanes),
+}
+impl BackendLanes {
+    /// Plan lanes of lengths `n` with `counts[a]` lanes per buffer of axis `a`.
+    pub fn plan(n: [usize; 3], counts: [usize; 3], vendor: bool) -> Result<Self, FftError> {
+        #[cfg(feature = "mkl")]
+        if vendor {
+            return Ok(Self::Mkl(MklLanes::plan(n, counts)?));
+        }
+        let _ = vendor;
+        Ok(Self::Rust(RustLanes::plan(n, counts)?))
+    }
+    /// True when the MKL lanes are active.
+    pub fn is_vendor(&self) -> bool {
+        !matches!(self, Self::Rust(_))
+    }
+    /// Unscaled in-place transforms of all lanes of the axis buffer `data`.
+    pub fn run(&mut self, axis: usize, inverse: bool, data: &mut [C]) -> Result<(), FftError> {
+        match self {
+            Self::Rust(l) => l.run(axis, inverse, data),
+            #[cfg(feature = "mkl")]
+            Self::Mkl(l) => l.run(axis, inverse, data),
+        }
+    }
+}
+
 /// MKL builds: the existing full-grid plan (default, unchanged bits) or, with
 /// `BAANDI_PAIR_FFT=pruned` read at construction, the mirror-slab pair plan on
 /// MKL 1D lanes (rounding class).

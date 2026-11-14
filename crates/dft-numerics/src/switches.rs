@@ -184,6 +184,16 @@ table! {
         "batched FFT transposes of the M2 path";
     PHASE_THREADS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P48F: thread the atomic start (span build, two-pass Gram-Schmidt right-looking) on the SCF pool; bit-identical";
+    // MPI entry cost (docs/performance/mpi-entry-cost-analysis.md); all default off.
+    M2_DGEMM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "distributed Davidson rotations and projections and the M2 nonlocal products through the per-panel dgemm at any width (MKL builds: rounding class; pure builds bit-identical)";
+    M2_ORTHO: Kind::Choice { allowed: &["classic", "serial"], default: "classic" }, "classic",
+        "classic, serial",
+        "distributed Davidson orthonormalization: classic (three basis projections, two whole-block sweeps) or serial (the serial solver's order: one projection, DGKS second pass, panel Gram-Schmidt; rounding class)";
+    M2_FFT: Kind::Choice { allowed: &["rust", "mkl"], default: "rust" }, "rust", "rust, mkl",
+        "1D kernels of the M2 distributed FFT (mkl: MKL DFTI batch lanes on MKL builds, rounding class; pure builds stay rustfft)";
+    M2_LEAN: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "distributed Davidson residuals and corrections by slice loops without per-element index checks; bit-identical";
     // Solvers (dft-solvers).
     B1: Kind::Choice { allowed: &["on", "off", "standard", "strict"], default: "on" }, "on",
         "on, off, standard, strict", "B1 selected-root Davidson iterations";
@@ -493,5 +503,29 @@ mod tests {
         assert_eq!(eval(Id::CUTOFF_LADDER, Some("x")).1, InvalidToError);
         assert_eq!(eval(Id::PSEUDO_DIR, Some("relative")).1, InvalidToError);
         assert_eq!(eval(Id::DGEMM_TIMERS, Some("")).0, Value::Present(true));
+    }
+
+    #[test]
+    fn mpi_entry_cost_switches_default_off() {
+        use Source::*;
+        for id in [Id::M2_DGEMM, Id::M2_LEAN] {
+            assert_eq!(eval(id, None), (Value::Choice("off"), Default));
+            assert_eq!(eval(id, Some("on")), (Value::Choice("on"), Env));
+            assert_eq!(
+                eval(id, Some("1")),
+                (Value::Choice("off"), InvalidToDefault)
+            );
+        }
+        assert_eq!(eval(Id::M2_ORTHO, None).0, Value::Choice("classic"));
+        assert_eq!(
+            eval(Id::M2_ORTHO, Some("serial")).0,
+            Value::Choice("serial")
+        );
+        assert_eq!(eval(Id::M2_FFT, None).0, Value::Choice("rust"));
+        assert_eq!(eval(Id::M2_FFT, Some("mkl")).0, Value::Choice("mkl"));
+        assert_eq!(
+            eval(Id::M2_FFT, Some("fftw")),
+            (Value::Choice("rust"), InvalidToDefault)
+        );
     }
 }

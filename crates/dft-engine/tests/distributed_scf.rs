@@ -273,3 +273,55 @@ fn m2_off_and_one_rank_keep_the_threads_only_bits() {
             .all(|(a, b)| a.to_bits() == b.to_bits())
     );
 }
+
+/// MPI entry cost: the distributed solver with every tuning switch on
+/// (`BAANDI_M2_ORTHO=serial` with the serial panel and DGKS rules, `M2_DGEMM`,
+/// `M2_LEAN`; forced per simulated rank) stays within the accuracy classes of the
+/// threads-only run on two cell shapes, strict and standard, 2 and 3 ranks; every
+/// rank agrees bit for bit and a fixed rank count is bit-reproducible.
+#[test]
+fn m2_tuned_solver_matches_threads_only() {
+    use dft_solvers::distributed_davidson::{DistributedTuning, set_tuning_override};
+    let tuned = DistributedTuning {
+        serial_ortho: true,
+        wide_gemm: true,
+        lean: true,
+        ..DistributedTuning::from_env()
+    };
+    for (standard, limit) in [(false, 1e-10), (true, 5e-9)] {
+        for kind in 0..2 {
+            let serial = run_m2_profile(kind, None, standard);
+            for ranks in [2usize, 3] {
+                let go = || {
+                    simulate(ranks, |comm: &SimRank| {
+                        set_tuning_override(Some(tuned));
+                        let r = run_m2_profile(kind, Some(Arc::new(comm.clone())), standard);
+                        set_tuning_override(None);
+                        r
+                    })
+                };
+                let results = go();
+                let again = go();
+                for (r, res) in results.iter().enumerate() {
+                    let de = (res.total_hartree() - serial.total_hartree()).abs();
+                    println!(
+                        "tuned standard={standard} kind {kind} P={ranks} rank {r}: dE {de:e} Ha, Davidson {} vs {}",
+                        total_davidson(res),
+                        total_davidson(&serial)
+                    );
+                    assert!(de < limit, "kind {kind} P={ranks}: dE {de:e}");
+                    assert_eq!(
+                        res.total_hartree().to_bits(),
+                        results[0].total_hartree().to_bits(),
+                        "ranks disagree"
+                    );
+                    assert_eq!(
+                        res.total_hartree().to_bits(),
+                        again[r].total_hartree().to_bits(),
+                        "not bit-reproducible at fixed rank count"
+                    );
+                }
+            }
+        }
+    }
+}

@@ -487,6 +487,18 @@ fn apply_mode(
     ranks: usize,
     batched: bool,
 ) -> (Vec<f64>, Vec<usize>) {
+    apply_mode_with(rows, atoms, x, ranks, batched, false)
+}
+
+/// `apply_mode` with the nonlocal dgemm route (`BAANDI_M2_DGEMM`) forced.
+fn apply_mode_with(
+    rows: [[f64; 3]; 3],
+    atoms: usize,
+    x: &RealMatrix,
+    ranks: usize,
+    batched: bool,
+    dgemm: bool,
+) -> (Vec<f64>, Vec<usize>) {
     let parts = simulate(ranks, |comm| {
         let (basis, h) = fixture(rows, atoms, 1.2);
         let mut d = DistributedRealHamiltonian::new(
@@ -499,6 +511,7 @@ fn apply_mode(
         )
         .unwrap();
         d.set_batched(batched);
+        d.set_dgemm(dgemm);
         let counting = Counting {
             inner: comm,
             alltoall: Counter::new(0),
@@ -558,6 +571,44 @@ fn batched_transposes_equal_per_pair_transposes_bitwise() {
                     cb[0], cu[0]
                 );
                 assert!(bits, "batching must not change any bit");
+            }
+        }
+    }
+}
+
+/// `BAANDI_M2_DGEMM=on` (nonlocal products through `multiply_slices_wide_into`):
+/// bit-identical on pure builds (the same product), within 1e-14 relative on MKL
+/// builds (per-panel dgemm), for 1..5 ranks, cubic, skewed and elongated cells.
+#[test]
+fn nonlocal_dgemm_route_matches_the_default_route() {
+    let cases = [
+        ([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]], 2),
+        ([[6.4, 0.4, 0.2], [1., 7.3, 0.3], [0.5, 0.7, 8.4]], 4),
+        ([[4.2, 0., 0.], [0., 5.2, 0.], [0., 0., 14.2]], 3),
+    ];
+    for (case, (rows, atoms)) in cases.into_iter().enumerate() {
+        let (basis, _) = fixture(rows, atoms, 1.2);
+        let n = basis.vectors().len();
+        for m in [1, 3, 16] {
+            let x = block(n, m, 57 + m);
+            for ranks in [1, 2, 3, 5] {
+                let (y0, _) = apply_mode_with(rows, atoms, &x, ranks, true, false);
+                let (y1, _) = apply_mode_with(rows, atoms, &x, ranks, true, true);
+                let den = y0.iter().map(|v| v * v).sum::<f64>().sqrt();
+                let err = y1
+                    .iter()
+                    .zip(&y0)
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum::<f64>()
+                    .sqrt()
+                    / den;
+                assert!(err <= 1e-14, "case {case} m {m} ranks {ranks}: {err:e}");
+                if !dft_numerics::MKL_BACKEND {
+                    assert!(
+                        y0.iter().zip(&y1).all(|(a, b)| a.to_bits() == b.to_bits()),
+                        "pure build: the dgemm route is the same product"
+                    );
+                }
             }
         }
     }

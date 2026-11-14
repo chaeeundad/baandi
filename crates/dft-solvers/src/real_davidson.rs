@@ -1540,7 +1540,7 @@ fn orthogonality_defect(v: &RealMatrix) -> f64 {
 // Preallocated projection buffers; each pass is Q^T X, Q times overlaps,
 // subtraction, then two-pass MGS and normalization within the incoming block.
 /// Panel width of the blocked Gram-Schmidt switch.
-const BLOCK_COLUMNS: usize = 16;
+pub(crate) const BLOCK_COLUMNS: usize = 16;
 /// ORTHO-BLOCK (P48D) cache budget: half of a 1 MiB L2, in doubles. A fixed
 /// hardware-shape constant, not a measured or material parameter: 1 MiB is the
 /// smallest per-core L2 of the measurement hosts (dev08 Xeon Gold 6230; Apple
@@ -1552,7 +1552,7 @@ const ORTHO_PANEL_DOUBLES: usize = (1 << 20) / 2 / std::mem::size_of::<f64>();
 /// with `n * width` doubles inside half of the L2 (`ORTHO_PANEL_DOUBLES`), at
 /// least four. The in-panel scalar MGS then streams its columns from L2, and the
 /// projection against earlier panels is a GEMM. Depends on `n` only.
-fn ortho_panel_width(n: usize) -> usize {
+pub(crate) fn ortho_panel_width(n: usize) -> usize {
     (ORTHO_PANEL_DOUBLES / n.max(1) / 4 * 4).max(4)
 }
 /// Widest block the NARROW kernels take (projection and reduced border); wider
@@ -1610,7 +1610,7 @@ const DGKS_KEEP: f64 = std::f64::consts::FRAC_1_SQRT_2;
 /// basis is about eps sqrt(m) / ratio relative, so 1e-3 still stays below the 1e-12
 /// orthogonality gate of the contraction).
 /// The default ratio 0.1 and the parsing live in `dft_numerics::switches` (`ORTHO`).
-fn dgks_keep() -> Option<f64> {
+pub(crate) fn dgks_keep() -> Option<f64> {
     dft_numerics::switches::number(dft_numerics::switches::Id::ORTHO)
 }
 #[derive(Clone, Copy)]

@@ -7,7 +7,7 @@
 //! construction); this solver is used for two or more ranks.
 use crate::{
     BandTolerances, RealLinearOperator, SolverError,
-    distributed::{column_norms_squared, gram, project_out, rotate_local},
+    distributed::{column_norms_squared, gram, project_out_with, rotate_local_with},
     real_davidson::{RealEigenSolution, free_electron_initial_guess},
 };
 use dft_mpi::{Collective, block_counts, block_displacements};
@@ -187,6 +187,223 @@ fn apply_distributed<C: Collective>(
     out
 }
 
+/// Run-time choices of the distributed solver (MPI entry cost,
+/// docs/performance/mpi-entry-cost-analysis.md). `from_env` reads the switches;
+/// `Default` is the classic M1/M2 code (all off). Every choice is a function of
+/// replicated data only, so all ranks take the same branches.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct DistributedTuning {
+    /// `BAANDI_M2_DGEMM=on`: rotations and basis projections through
+    /// `multiply_slices_wide_into` (per-panel dgemm at any width on MKL builds;
+    /// bit-identical on pure builds).
+    pub wide_gemm: bool,
+    /// `BAANDI_M2_ORTHO=serial`: orthonormalize in the order of the serial solver
+    /// (one basis projection per pass, the DGKS second-pass rule, panel
+    /// Gram-Schmidt with the serial panel rule) instead of three projections and
+    /// two whole-block column sweeps. Rounding class.
+    pub serial_ortho: bool,
+    /// DGKS keep ratio of the serial order (`BAANDI_ORTHO`); `None` = two passes.
+    pub dgks: Option<f64>,
+    /// Panel rule of the serial order: `Some(0)` = ORTHO-BLOCK shape rule on the
+    /// widest local row count, `Some(w)` = fixed width w (MGS-B), `None` = the
+    /// whole block as one panel (the classic sweep).
+    pub panel: Option<usize>,
+    /// `BAANDI_M2_LEAN=on`: residual and correction blocks by slice loops
+    /// (bit-identical).
+    pub lean: bool,
+}
+impl DistributedTuning {
+    /// The switches of this process; the serial-order panel and DGKS rules are the
+    /// serial solver's (`BAANDI_ORTHO_BLOCK`, `BAANDI_MGS`, `BAANDI_ORTHO`).
+    pub fn from_env() -> Self {
+        use dft_numerics::switches::{Id, choice, on};
+        let panel = if on(Id::ORTHO_BLOCK) {
+            Some(0)
+        } else {
+            match choice(Id::MGS) {
+                "blocked" => Some(crate::real_davidson::BLOCK_COLUMNS),
+                _ => None,
+            }
+        };
+        Self {
+            wide_gemm: on(Id::M2_DGEMM),
+            serial_ortho: choice(Id::M2_ORTHO) == "serial",
+            dgks: crate::real_davidson::dgks_keep(),
+            panel,
+            lean: on(Id::M2_LEAN),
+        }
+    }
+    /// The tuning of the calling thread: the test override when set
+    /// (`set_tuning_override`), else the switches (`from_env`).
+    pub fn current() -> Self {
+        TUNING_OVERRIDE
+            .with(|t| t.get())
+            .unwrap_or_else(Self::from_env)
+    }
+    /// Panel width for local blocks of at most `max_rows` rows (same on every rank).
+    fn panel_width(&self, max_rows: usize) -> usize {
+        match self.panel {
+            Some(0) => crate::real_davidson::ortho_panel_width(max_rows),
+            Some(w) => w,
+            None => usize::MAX,
+        }
+    }
+}
+
+thread_local! {
+    // Test-only per-thread override of the switches (simulated ranks run on their
+    // own threads, so each rank sets it inside its closure).
+    static TUNING_OVERRIDE: std::cell::Cell<Option<DistributedTuning>> =
+        const { std::cell::Cell::new(None) };
+}
+
+/// Override the distributed solver's switches for the calling thread (tests);
+/// `None` restores the environment.
+pub fn set_tuning_override(tuning: Option<DistributedTuning>) {
+    TUNING_OVERRIDE.with(|t| t.set(tuning));
+}
+
+/// Serial-order orthonormalization (`BAANDI_M2_ORTHO=serial`), the distributed
+/// counterpart of the serial solver's projection: normalise (one reduction);
+/// per pass project once against `against` (one Gram reduction, local rotation)
+/// and run the panel Gram-Schmidt; the second pass is skipped when the DGKS rule
+/// holds (every column kept and the smallest kept norm at least `dgks`). Without
+/// `against` one pass. Rank decisions use the same relative floor as the serial
+/// solver and depend on reduced values only (identical on every rank).
+fn orthonormalize_serial<C: Collective>(
+    comm: &C,
+    ws: &mut RealGemmWorkspace,
+    against: Option<&RealMatrix>,
+    block: &RealMatrix,
+    tuning: &DistributedTuning,
+    panel: usize,
+) -> Result<RealMatrix, SolverError> {
+    let rows = block.rows();
+    let mut x = block.clone();
+    let norms = column_norms_squared(comm, &x)?;
+    for (j, nn) in norms.iter().enumerate() {
+        let len = nn.sqrt();
+        for v in x.as_mut_slice()[j * rows..(j + 1) * rows].iter_mut() {
+            *v = if len == 0.0 { 0.0 } else { *v / len };
+        }
+    }
+    let against = against.filter(|q| q.cols() > 0);
+    let mut skip_second = false;
+    for pass in 0..if against.is_some() { 2 } else { 1 } {
+        if (pass > 0 && skip_second) || x.cols() == 0 {
+            break;
+        }
+        let count = x.cols();
+        if let Some(q) = against {
+            let mut overlap = RealMatrix::zeros(q.cols(), count)?;
+            let mut scratch = RealMatrix::zeros(rows, count)?;
+            project_out_with(
+                comm,
+                ws,
+                q,
+                &mut x,
+                &mut overlap,
+                &mut scratch,
+                tuning.wide_gemm,
+            )?;
+        }
+        let (y, min_len) = panel_gram_schmidt(comm, ws, &x, panel, tuning.wide_gemm)?;
+        if pass == 0
+            && against.is_some()
+            && let Some(keep) = tuning.dgks
+        {
+            skip_second = y.cols() == count && min_len >= keep;
+        }
+        x = y;
+    }
+    Ok(x)
+}
+
+/// Panel Gram-Schmidt of a row-distributed block: panels of `panel` columns; each
+/// panel is projected twice against the columns already kept (Gram reduction plus
+/// local rotation), then every column of the panel is orthogonalised twice
+/// against the panel's earlier kept columns (one reduction of the dot products
+/// per pass, as `mgs_panel`) and normalised (one reduction); a column whose
+/// remaining norm is not above the dependence tolerance is dropped. With one
+/// panel covering the block this is exactly `mgs_panel`. Returns the kept columns
+/// and the smallest remaining norm seen (dropped columns included).
+fn panel_gram_schmidt<C: Collective>(
+    comm: &C,
+    ws: &mut RealGemmWorkspace,
+    x: &RealMatrix,
+    panel: usize,
+    wide: bool,
+) -> Result<(RealMatrix, f64), SolverError> {
+    let (rows, cols) = (x.rows(), x.cols());
+    let mut out = RealMatrix::zeros(rows, cols)?;
+    let mut kept = 0usize;
+    let mut min_len = f64::INFINITY;
+    let mut start = 0;
+    while start < cols {
+        let w = panel.max(1).min(cols - start);
+        let mut p = RealMatrix::new(
+            rows,
+            w,
+            x.as_slice()[start * rows..(start + w) * rows].to_vec(),
+        )?;
+        if kept > 0 {
+            let q = RealMatrix::new(rows, kept, out.as_slice()[..kept * rows].to_vec())?;
+            let mut overlap = RealMatrix::zeros(kept, w)?;
+            let mut scratch = RealMatrix::zeros(rows, w)?;
+            for _ in 0..2 {
+                project_out_with(comm, ws, &q, &mut p, &mut overlap, &mut scratch, wide)?;
+            }
+        }
+        let first = kept;
+        let mut local = Vec::with_capacity(w);
+        let mut sums = Vec::with_capacity(w);
+        let mut v = vec![0.0; rows];
+        for jj in 0..w {
+            v.copy_from_slice(column_of(&p, jj));
+            for _ in 0..2 {
+                let k = kept - first;
+                if k > 0 {
+                    local.clear();
+                    for c in first..kept {
+                        let q = &out.as_slice()[c * rows..(c + 1) * rows];
+                        local.push(q.iter().zip(&v).map(|(a, b)| a * b).sum::<f64>());
+                    }
+                    sums.clear();
+                    sums.resize(k, 0.0);
+                    comm.tree_sum_f64(&local, &mut sums).map_err(comm_error)?;
+                    for (c, s) in (first..kept).zip(&sums) {
+                        let q = &out.as_slice()[c * rows..(c + 1) * rows];
+                        for (vi, qi) in v.iter_mut().zip(q) {
+                            *vi -= s * qi;
+                        }
+                    }
+                }
+            }
+            let local_norm = [v.iter().map(|a| a * a).sum::<f64>()];
+            let mut total = [0.0];
+            comm.tree_sum_f64(&local_norm, &mut total)
+                .map_err(comm_error)?;
+            let len = total[0].sqrt();
+            if len.is_finite() {
+                min_len = min_len.min(len);
+            }
+            if !len.is_finite() || len <= DEPENDENCE_TOLERANCE {
+                continue;
+            }
+            for (o, a) in out.as_mut_slice()[kept * rows..(kept + 1) * rows]
+                .iter_mut()
+                .zip(&v)
+            {
+                *o = a / len;
+            }
+            kept += 1;
+        }
+        start += w;
+    }
+    out.reshape_within_storage(rows, kept)?;
+    Ok((out, min_len))
+}
+
 /// Sequential modified Gram-Schmidt inside the panel (two passes per column), the
 /// distributed counterpart of the serial solver's in-block orthogonalisation:
 /// a column is dropped only when its remaining relative norm is at most the
@@ -239,6 +456,7 @@ fn orthonormalize<C: Collective>(
     ws: &mut RealGemmWorkspace,
     against: Option<&RealMatrix>,
     block: &RealMatrix,
+    wide: bool,
 ) -> Result<RealMatrix, SolverError> {
     let rows = block.rows();
     let mut x = block.clone();
@@ -254,7 +472,7 @@ fn orthonormalize<C: Collective>(
         for _ in 0..2 {
             let mut overlap = RealMatrix::zeros(q.cols(), x.cols())?;
             let mut scratch = RealMatrix::zeros(rows, x.cols())?;
-            project_out(comm, ws, q, &mut x, &mut overlap, &mut scratch)?;
+            project_out_with(comm, ws, q, &mut x, &mut overlap, &mut scratch, wide)?;
         }
     }
     // Drop columns that vanished after the projection, renormalise the others.
@@ -279,10 +497,26 @@ fn orthonormalize<C: Collective>(
     if let Some(q) = against.filter(|q| q.cols() > 0 && y.cols() > 0) {
         let mut overlap = RealMatrix::zeros(q.cols(), y.cols())?;
         let mut scratch = RealMatrix::zeros(rows, y.cols())?;
-        project_out(comm, ws, q, &mut y, &mut overlap, &mut scratch)?;
+        project_out_with(comm, ws, q, &mut y, &mut overlap, &mut scratch, wide)?;
         y = mgs_panel(comm, &y)?;
     }
     Ok(y)
+}
+
+/// The orthonormalization selected by `tuning` (classic or serial order).
+fn orthonormalize_tuned<C: Collective>(
+    comm: &C,
+    ws: &mut RealGemmWorkspace,
+    against: Option<&RealMatrix>,
+    block: &RealMatrix,
+    tuning: &DistributedTuning,
+    panel: usize,
+) -> Result<RealMatrix, SolverError> {
+    if tuning.serial_ortho {
+        orthonormalize_serial(comm, ws, against, block, tuning, panel)
+    } else {
+        orthonormalize(comm, ws, against, block, tuning.wide_gemm)
+    }
 }
 
 fn append_columns(a: &mut RealMatrix, b: &RealMatrix) -> Result<(), SolverError> {
@@ -345,6 +579,7 @@ impl crate::RealDavidson {
             ritz,
             certify,
             capacity_per_band,
+            DistributedTuning::current(),
         )
     }
 
@@ -366,6 +601,34 @@ impl crate::RealDavidson {
         ritz: bool,
         certify: bool,
         capacity_per_band: usize,
+    ) -> Result<RealEigenSolution, SolverError> {
+        self.solve_distributed_rows_tuned(
+            comm,
+            op,
+            initial,
+            diagonal_local,
+            policy,
+            ritz,
+            certify,
+            capacity_per_band,
+            DistributedTuning::current(),
+        )
+    }
+
+    /// `solve_distributed_rows` with explicit run-time choices (tests and A/B);
+    /// the plain entry point reads them from the switches.
+    #[allow(clippy::too_many_arguments)]
+    pub fn solve_distributed_rows_tuned<C: Collective, O: DistributedRealOperator>(
+        &self,
+        comm: &C,
+        op: &mut O,
+        initial: Option<&RealMatrix>,
+        diagonal_local: &[f64],
+        policy: BandTolerances,
+        ritz: bool,
+        certify: bool,
+        capacity_per_band: usize,
+        tuning: DistributedTuning,
     ) -> Result<RealEigenSolution, SolverError> {
         let n = op.global_len();
         let mine: Vec<usize> = op.local_rows().to_vec();
@@ -433,6 +696,7 @@ impl crate::RealDavidson {
             ritz,
             certify,
             capacity_per_band,
+            tuning,
         )
     }
 
@@ -450,6 +714,7 @@ impl crate::RealDavidson {
         ritz: bool,
         certify: bool,
         capacity_per_band: usize,
+        tuning: DistributedTuning,
     ) -> Result<RealEigenSolution, SolverError> {
         let n = layout.n;
         if !(2..=12).contains(&capacity_per_band) {
@@ -479,6 +744,8 @@ impl crate::RealDavidson {
         let mut ws = RealGemmWorkspace::with_pool(max_rows.max(1), capacity.max(1), pool)?;
         let mut eig = RealEighWorkspace::new(capacity)?;
         let mut rng = Rng(self.seed);
+        let panel = tuning.panel_width(max_rows.max(1));
+        let wide = tuning.wide_gemm;
 
         // Initial basis.
         let start = match initial {
@@ -504,11 +771,25 @@ impl crate::RealDavidson {
                 free_electron_initial_guess(&full, bands)?
             }
         };
-        let mut basis = orthonormalize(comm, &mut ws, None, &local_rows(layout, &start)?)?;
+        let mut basis = orthonormalize_tuned(
+            comm,
+            &mut ws,
+            None,
+            &local_rows(layout, &start)?,
+            &tuning,
+            panel,
+        )?;
         while basis.cols() < bands {
             let w = bands - basis.cols();
             let random = RealMatrix::new(n, w, (0..n * w).map(|_| rng.next()).collect())?;
-            let extra = orthonormalize(comm, &mut ws, Some(&basis), &local_rows(layout, &random)?)?;
+            let extra = orthonormalize_tuned(
+                comm,
+                &mut ws,
+                Some(&basis),
+                &local_rows(layout, &random)?,
+                &tuning,
+                panel,
+            )?;
             if extra.cols() == 0 {
                 return Err(SolverError::InvalidParameter(
                     "unable to complete initial basis",
@@ -580,17 +861,31 @@ impl crate::RealDavidson {
             let lowest = RealMatrix::new(m, bands, coefficients.as_slice()[..m * bands].to_vec())?;
             let mut vectors = RealMatrix::zeros(nl, bands)?;
             let mut rotated = RealMatrix::zeros(nl, bands)?;
-            rotate_local(&mut ws, &basis, &lowest, &mut vectors)?;
-            rotate_local(&mut ws, &products, &lowest, &mut rotated)?;
+            rotate_local_with(&mut ws, &basis, &lowest, &mut vectors, wide)?;
+            rotate_local_with(&mut ws, &products, &lowest, &mut rotated, wide)?;
             stage_add(2, t0);
             let residual_of = |hv: &RealMatrix,
                                v: &RealMatrix,
                                comm: &C|
              -> Result<(RealMatrix, Vec<f64>), SolverError> {
                 let mut r = RealMatrix::zeros(nl, bands)?;
-                for j in 0..bands {
-                    for i in 0..nl {
-                        r[(i, j)] = hv[(i, j)] - values[j] * v[(i, j)];
+                if tuning.lean {
+                    // M2_LEAN: the same element expression by column slices.
+                    for (j, &lambda) in values.iter().enumerate().take(bands) {
+                        let (h, x) = (column_of(hv, j), column_of(v, j));
+                        for ((r, &h), &x) in r.as_mut_slice()[j * nl..(j + 1) * nl]
+                            .iter_mut()
+                            .zip(h)
+                            .zip(x)
+                        {
+                            *r = h - lambda * x;
+                        }
+                    }
+                } else {
+                    for j in 0..bands {
+                        for i in 0..nl {
+                            r[(i, j)] = hv[(i, j)] - values[j] * v[(i, j)];
+                        }
                     }
                 }
                 let norms = column_norms_squared(comm, &r)?
@@ -665,15 +960,30 @@ impl crate::RealDavidson {
                 .take(bands.min(capacity - bands))
                 .collect();
             let mut corrections = RealMatrix::zeros(nl, selected.len())?;
+            let precondition = |d: f64, lambda: f64, r: f64| {
+                let delta = d - lambda;
+                let denominator = if delta < 0.0 {
+                    -delta.abs().max(0.1)
+                } else {
+                    delta.max(0.1)
+                };
+                -r / denominator
+            };
             for (k, &j) in selected.iter().enumerate() {
-                for i in 0..nl {
-                    let delta = diag_local[i] - values[j];
-                    let denominator = if delta < 0.0 {
-                        -delta.abs().max(0.1)
-                    } else {
-                        delta.max(0.1)
-                    };
-                    corrections[(i, k)] = -residual_block[(i, j)] / denominator;
+                if tuning.lean {
+                    let r = column_of(&residual_block, j);
+                    for ((c, &d), &r) in corrections.as_mut_slice()[k * nl..(k + 1) * nl]
+                        .iter_mut()
+                        .zip(diag_local)
+                        .zip(r)
+                    {
+                        *c = precondition(d, values[j], r);
+                    }
+                } else {
+                    for i in 0..nl {
+                        corrections[(i, k)] =
+                            precondition(diag_local[i], values[j], residual_block[(i, j)]);
+                    }
                 }
             }
             if !trusted || basis.cols() + corrections.cols() > capacity {
@@ -692,18 +1002,26 @@ impl crate::RealDavidson {
                     basis = vectors.clone();
                     products = rotated.clone();
                 } else {
-                    basis = orthonormalize(comm, &mut ws, None, &vectors)?;
+                    basis = orthonormalize_tuned(comm, &mut ws, None, &vectors, &tuning, panel)?;
                     products = apply(&basis)?;
                     applications += basis.cols();
                 }
             }
             let t0 = Instant::now();
-            let mut extra = orthonormalize(comm, &mut ws, Some(&basis), &corrections)?;
+            let mut extra =
+                orthonormalize_tuned(comm, &mut ws, Some(&basis), &corrections, &tuning, panel)?;
             stage_add(4, t0);
             if extra.cols() == 0 {
                 let w = bands.min(capacity - basis.cols());
                 let random = RealMatrix::new(n, w, (0..n * w).map(|_| rng.next()).collect())?;
-                extra = orthonormalize(comm, &mut ws, Some(&basis), &local_rows(layout, &random)?)?;
+                extra = orthonormalize_tuned(
+                    comm,
+                    &mut ws,
+                    Some(&basis),
+                    &local_rows(layout, &random)?,
+                    &tuning,
+                    panel,
+                )?;
             }
             if extra.cols() == 0 {
                 return Err(SolverError::NotConverged {

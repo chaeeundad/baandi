@@ -50,3 +50,15 @@ column-group parallel product; bit-identical to `BAANDI_B5=on` on faer).
 All default off and bit-identical when off. Tests: `tests/b1_selected_roots.rs`,
 `tests/b5_reduced_eigen.rs`; B4 harness `tests/b4_inner_iterations.rs` (ignored).
 Plan and pre-registered rules: docs/performance/requests/b1-b4-b5-davidson.md.
+
+## MPI entry-cost switches (2026-11-14)
+
+`distributed_davidson::DistributedTuning` (read by `from_env`/`current`, forced in
+tests with `solve_distributed_rows_tuned` or the per-thread `set_tuning_override`):
+`BAANDI_M2_ORTHO=serial` (serial-order orthonormalization: one projection per pass,
+DGKS rule, panel Gram-Schmidt with the serial panel rule; rounding class),
+`BAANDI_M2_DGEMM=on` (`rotate_local_with`/`project_out_with` wide route; bit-identical
+on pure builds), `BAANDI_M2_LEAN=on` (bit-identical slice loops). `BAANDI_M2_FFT=mkl`
+selects MKL lanes in `DistributedPairFft` (`with_lanes`). All default off; they apply
+to the M1 and M2 distributed solvers. Analysis and dev08 request:
+docs/performance/mpi-entry-cost-analysis.md.

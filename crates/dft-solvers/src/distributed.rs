@@ -114,6 +114,23 @@ pub fn rotate_local(
     c: &RealMatrix,
     out: &mut RealMatrix,
 ) -> Result<(), SolverError> {
+    rotate_local_with(ws, a, c, out, false)
+}
+
+/// `rotate_local` with the GEMM route chosen: `wide` (`BAANDI_M2_DGEMM=on`) takes
+/// `multiply_slices_wide_into`, so on MKL builds the product reaches the
+/// per-panel dgemm for any output size (only the fixed 256-row panel bound
+/// applies) instead of falling back to the pure kernel once rows x cols exceeds
+/// the square workspace bound; on pure builds both routes are the same product
+/// (bit-identical). Panels are fixed by the shapes, so the result does not
+/// depend on the thread count.
+pub fn rotate_local_with(
+    ws: &mut RealGemmWorkspace,
+    a: &RealMatrix,
+    c: &RealMatrix,
+    out: &mut RealMatrix,
+    wide: bool,
+) -> Result<(), SolverError> {
     if c.rows() != a.cols() || out.rows() != a.rows() || out.cols() != c.cols() {
         return Err(SolverError::InvalidParameter("rotate dimensions"));
     }
@@ -121,7 +138,13 @@ pub fn rotate_local(
         out.as_mut_slice().fill(0.0);
         return Ok(());
     }
-    ws.multiply_slices_into(
+    let product = if wide {
+        RealGemmWorkspace::multiply_slices_wide_into
+    } else {
+        RealGemmWorkspace::multiply_slices_into
+    };
+    product(
+        ws,
         GemmSite::Other,
         a.as_slice(),
         a.rows(),
@@ -147,8 +170,21 @@ pub fn project_out<C: Collective>(
     overlap: &mut RealMatrix,
     scratch: &mut RealMatrix,
 ) -> Result<(), SolverError> {
+    project_out_with(comm, ws, q, x, overlap, scratch, false)
+}
+
+/// `project_out` with the rotation route of `rotate_local_with`.
+pub fn project_out_with<C: Collective>(
+    comm: &C,
+    ws: &mut RealGemmWorkspace,
+    q: &RealMatrix,
+    x: &mut RealMatrix,
+    overlap: &mut RealMatrix,
+    scratch: &mut RealMatrix,
+    wide: bool,
+) -> Result<(), SolverError> {
     gram(comm, ws, q, x, overlap)?;
-    rotate_local(ws, q, overlap, scratch)?;
+    rotate_local_with(ws, q, overlap, scratch, wide)?;
     for (dst, &src) in x.as_mut_slice().iter_mut().zip(scratch.as_slice()) {
         *dst -= src;
     }

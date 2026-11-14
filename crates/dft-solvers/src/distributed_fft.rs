@@ -29,12 +29,15 @@
 //! z), so each plane's slab is expected to be bit-identical to the serial plan's
 //! for any rank count (tests assert bit identity for one rank only). The 1/N
 //! factor is applied at the end of the reciprocal direction.
+//! 1D kernels (MPI entry cost, `BAANDI_M2_FFT`): rustfft by default; `mkl` selects
+//! MKL DFTI batch lanes (one descriptor per lane buffer, as `PairFusedPlan<MklLanes>`)
+//! on MKL builds, a rounding change; pure builds always use rustfft.
 //! No allocation after construction; no unsafe; no logging.
 use dft_mpi::{Collective, MpiError};
 use dft_numerics::FftError;
+use dft_numerics::fused_pair_plan::BackendLanes;
 use num_complex::Complex64 as C;
-use rustfft::{Fft, FftPlanner};
-use std::{collections::BTreeSet, sync::Arc};
+use std::collections::BTreeSet;
 use thiserror::Error;
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -147,19 +150,33 @@ pub struct DistributedPairFft {
     sticks: Vec<C>,
     middle: Vec<C>,
     slab: Vec<C>,
-    scratch: Vec<C>,
     send: Vec<f64>,
     recv: Vec<f64>,
-    inverse: [Arc<dyn Fft<f64>>; 3],
-    forward: [Arc<dyn Fft<f64>>; 3],
+    /// 1D kernels: rustfft (default) or MKL DFTI batch lanes (`BAANDI_M2_FFT=mkl`
+    /// on MKL builds). Lane buffers: local sticks, middle batch, plane slab.
+    lanes: BackendLanes,
 }
 
 impl DistributedPairFft {
+    /// Plan with the 1D kernels of `BAANDI_M2_FFT` (read once per process).
     pub fn new(
         shape: [usize; 3],
         indices: &[[usize; 3]],
         rank: usize,
         ranks: usize,
+    ) -> Result<Self, DistFftError> {
+        let vendor = dft_numerics::switches::choice(dft_numerics::switches::Id::M2_FFT) == "mkl";
+        Self::with_lanes(shape, indices, rank, ranks, vendor)
+    }
+
+    /// Plan with rustfft lanes (`vendor` false) or MKL DFTI batch lanes (`vendor`
+    /// true on an MKL build; a pure build has none and uses rustfft, bit-identical).
+    pub fn with_lanes(
+        shape: [usize; 3],
+        indices: &[[usize; 3]],
+        rank: usize,
+        ranks: usize,
+        vendor: bool,
     ) -> Result<Self, DistFftError> {
         let total = shape
             .iter()
@@ -211,16 +228,8 @@ impl DistributedPairFft {
                 )
             })
             .collect::<Vec<_>>();
-        let mut planner = FftPlanner::new();
-        let inverse = n.map(|d| planner.plan_fft_inverse(d));
-        let forward = n.map(|d| planner.plan_fft_forward(d));
-        let scratch = inverse
-            .iter()
-            .chain(&forward)
-            .map(|p| p.get_inplace_scratch_len())
-            .max()
-            .unwrap();
         let local_sticks = counts[rank];
+        let lanes = BackendLanes::plan(n, [local_sticks, planes.len(), n[1]], vendor)?;
         Ok(Self {
             shape,
             first,
@@ -237,13 +246,11 @@ impl DistributedPairFft {
             middle: vec![C::default(); planes.len() * n[1]],
             sticks: vec![C::default(); local_sticks * n[0]],
             slab: vec![C::default(); n[1] * n[2]],
-            scratch: vec![C::default(); scratch],
             planes,
             occupied,
             send: vec![0.; 2 * block * ranks],
             recv: vec![0.; 2 * block * ranks],
-            inverse,
-            forward,
+            lanes,
         })
     }
 
@@ -268,6 +275,10 @@ impl DistributedPairFft {
     }
     pub fn first_axis(&self) -> usize {
         self.first
+    }
+    /// True when the MKL DFTI lanes are active (`BAANDI_M2_FFT=mkl` on an MKL build).
+    pub fn vendor_lanes(&self) -> bool {
+        self.lanes.is_vendor()
     }
     /// Offset into a row-major (shape) grid of the z-line at (plane i, row y); the
     /// line has `shape[2]` entries and matches `plane()[y*nz..]`.
@@ -345,7 +356,7 @@ impl DistributedPairFft {
                 self.sticks[i] = v;
             }
             if !self.sticks.is_empty() {
-                self.inverse[0].process_with_scratch(&mut self.sticks, &mut self.scratch);
+                self.lanes.run(0, true, &mut self.sticks)?;
             }
             for q in 0..self.ranks {
                 let (x0, x1) = (self.plane_starts[q], self.plane_starts[q + 1]);
@@ -364,12 +375,12 @@ impl DistributedPairFft {
     }
 
     /// Step 2 of G->r for owned plane i: 2D transform; result in `plane()`.
-    pub fn to_real_plane(&mut self, i: usize) {
+    pub fn to_real_plane(&mut self, i: usize) -> Result<(), DistFftError> {
         self.to_real_plane_in(0, 1, i)
     }
 
     /// Step 2 of G->r for vector t of a batch of `np`, owned plane i.
-    pub fn to_real_plane_in(&mut self, t: usize, np: usize, i: usize) {
+    pub fn to_real_plane_in(&mut self, t: usize, np: usize, i: usize) -> Result<(), DistFftError> {
         let [_, ny, nz] = self.n;
         self.middle.fill(C::default());
         for &(m, owner, off) in &self.occupied {
@@ -377,7 +388,7 @@ impl DistributedPairFft {
             self.middle[m] = C::new(self.recv[k], self.recv[k + 1]);
         }
         if !self.middle.is_empty() {
-            self.inverse[1].process_with_scratch(&mut self.middle, &mut self.scratch);
+            self.lanes.run(1, true, &mut self.middle)?;
         }
         self.slab.fill(C::default());
         for (k, &z) in self.planes.iter().enumerate() {
@@ -385,31 +396,38 @@ impl DistributedPairFft {
                 self.slab[y * nz + z] = self.middle[k * ny + y];
             }
         }
-        self.inverse[2].process_with_scratch(&mut self.slab, &mut self.scratch);
+        self.lanes.run(2, true, &mut self.slab)?;
+        Ok(())
     }
 
     /// r->G for owned plane i from `plane()`; results are staged for the transpose.
-    pub fn to_reciprocal_plane(&mut self, i: usize) {
+    pub fn to_reciprocal_plane(&mut self, i: usize) -> Result<(), DistFftError> {
         self.to_reciprocal_plane_in(0, 1, i)
     }
 
     /// r->G of vector t of a batch of `np`, owned plane i (staged for the transpose).
-    pub fn to_reciprocal_plane_in(&mut self, t: usize, np: usize, i: usize) {
+    pub fn to_reciprocal_plane_in(
+        &mut self,
+        t: usize,
+        np: usize,
+        i: usize,
+    ) -> Result<(), DistFftError> {
         let [_, ny, nz] = self.n;
-        self.forward[2].process_with_scratch(&mut self.slab, &mut self.scratch);
+        self.lanes.run(2, false, &mut self.slab)?;
         for (k, &z) in self.planes.iter().enumerate() {
             for y in 0..ny {
                 self.middle[k * ny + y] = self.slab[y * nz + z];
             }
         }
         if !self.middle.is_empty() {
-            self.forward[1].process_with_scratch(&mut self.middle, &mut self.scratch);
+            self.lanes.run(1, false, &mut self.middle)?;
         }
         for &(m, owner, off) in &self.occupied {
             let k = 2 * ((owner * np + t) * self.block + off + i);
             self.send[k] = self.middle[m].re;
             self.send[k + 1] = self.middle[m].im;
         }
+        Ok(())
     }
 
     /// Transpose back, 1D transforms on local sticks, 1/N scaling; writes local coefficients.
@@ -448,7 +466,7 @@ impl DistributedPairFft {
                 }
             }
             if !self.sticks.is_empty() {
-                self.forward[0].process_with_scratch(&mut self.sticks, &mut self.scratch);
+                self.lanes.run(0, false, &mut self.sticks)?;
             }
             for (o, &i) in out[t * ll..(t + 1) * ll].iter_mut().zip(&self.scatter) {
                 *o = self.sticks[i] / self.total as f64;
@@ -470,7 +488,7 @@ impl DistributedPairFft {
             return Err(FftError::IncompatibleArray.into());
         }
         self.begin_to_real(comm, c)?;
-        self.multiply_planes(potential, 1);
+        self.multiply_planes(potential, 1)?;
         self.finish_to_reciprocal(comm, out)
     }
 
@@ -488,15 +506,15 @@ impl DistributedPairFft {
             return Err(FftError::IncompatibleArray.into());
         }
         self.begin_to_real_batch(comm, data, np)?;
-        self.multiply_planes(potential, np);
+        self.multiply_planes(potential, np)?;
         self.finish_to_reciprocal_batch(comm, data, np)
     }
 
-    fn multiply_planes(&mut self, potential: &[f64], np: usize) {
+    fn multiply_planes(&mut self, potential: &[f64], np: usize) -> Result<(), DistFftError> {
         let (ny, nz) = (self.n[1], self.n[2]);
         for t in 0..np {
             for i in 0..self.plane_count() {
-                self.to_real_plane_in(t, np, i);
+                self.to_real_plane_in(t, np, i)?;
                 for y in 0..ny {
                     let start = self.grid_start(i, y);
                     for (a, &v) in self.slab[y * nz..(y + 1) * nz]
@@ -506,9 +524,10 @@ impl DistributedPairFft {
                         *a *= v;
                     }
                 }
-                self.to_reciprocal_plane_in(t, np, i);
+                self.to_reciprocal_plane_in(t, np, i)?;
             }
         }
+        Ok(())
     }
 
     /// Grid points on this rank's planes (`plane_count * rows * shape[2]`): the
@@ -634,7 +653,7 @@ mod tests {
             p.begin_to_real(comm, &local).unwrap();
             let mut lines = Vec::new();
             for i in 0..p.plane_count() {
-                p.to_real_plane(i);
+                p.to_real_plane(i).unwrap();
                 for y in 0..p.rows() {
                     lines.push((
                         p.grid_start(i, y),
@@ -748,6 +767,41 @@ mod tests {
                 assert!(e_pot < 1e-12);
                 if ranks == 1 {
                     assert_eq!(got, want, "one rank is bit-identical to PairFusedPlan");
+                }
+            }
+        }
+    }
+
+    /// `BAANDI_M2_FFT=mkl` lanes: within 1e-14 relative of the rustfft lanes on
+    /// every rank count (MKL builds), bit-identical on pure builds (no vendor lanes).
+    #[test]
+    fn vendor_lanes_match_rust_lanes() {
+        for (shape, idx) in cases() {
+            let n = shape.iter().product::<usize>();
+            let c = random_c(idx.len(), 21);
+            let mut s = 17;
+            let pot: Vec<f64> = (0..n).map(|_| 1.0 + lcg(&mut s)).collect();
+            for ranks in [1usize, 2, 3, 5] {
+                let parts = simulate(ranks, |comm| {
+                    let mut out = Vec::new();
+                    for vendor in [false, true] {
+                        let mut p =
+                            DistributedPairFft::with_lanes(shape, &idx, comm.rank(), ranks, vendor)
+                                .unwrap();
+                        assert_eq!(p.vendor_lanes(), vendor && dft_numerics::MKL_BACKEND);
+                        let mut data: Vec<C> = p.local_positions().iter().map(|&g| c[g]).collect();
+                        let np = 1;
+                        p.apply_local_batch(comm, &mut data, &pot, np).unwrap();
+                        out.push(data);
+                    }
+                    out
+                });
+                for part in &parts {
+                    let e = rel(&part[1], &part[0]);
+                    assert!(e < 1e-14, "{shape:?} P={ranks}: vendor lanes {e:e}");
+                    if !dft_numerics::MKL_BACKEND {
+                        assert_eq!(part[0], part[1], "pure build: identical lanes");
+                    }
                 }
             }
         }

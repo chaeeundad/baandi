@@ -413,7 +413,20 @@ fn bits_of(m: &RealMatrix) -> Vec<u64> {
 }
 
 fn check_rows_case(op: &Operator, diag: &[f64], bands: usize, pol: BandTolerances, tol: f64) {
+    check_rows_case_tuned(op, diag, bands, pol, tol, DistributedTuning::default());
+}
+
+/// Returns the rank-0 distributed solution of every rank count for comparisons.
+fn check_rows_case_tuned(
+    op: &Operator,
+    diag: &[f64],
+    bands: usize,
+    pol: BandTolerances,
+    tol: f64,
+    tuning: DistributedTuning,
+) -> Vec<dft_solvers::RealEigenSolution> {
     let n = op.dimension();
+    let mut out = Vec::new();
     let s = RealDavidson {
         bands,
         tolerance: tol,
@@ -427,8 +440,10 @@ fn check_rows_case(op: &Operator, diag: &[f64], bands: usize, pol: BandTolerance
             simulate(ranks, |comm| {
                 let mut rop = RowsOp::new(&op.a, comm.rank(), ranks);
                 let dl: Vec<f64> = rop.rows.iter().map(|&r| diag[r]).collect();
-                s.solve_distributed_rows(comm, &mut rop, None, &dl, pol, false, true, 6)
-                    .unwrap()
+                s.solve_distributed_rows_tuned(
+                    comm, &mut rop, None, &dl, pol, false, true, 6, tuning,
+                )
+                .unwrap()
             })
         };
         let results = run();
@@ -457,7 +472,9 @@ fn check_rows_case(op: &Operator, diag: &[f64], bands: usize, pol: BandTolerance
             bits_of(&again[0].eigenvectors),
             "not reproducible at P={ranks}"
         );
+        out.push(results.into_iter().next().unwrap());
     }
+    out
 }
 
 #[test]
@@ -475,5 +492,95 @@ fn rows_solver_matches_serial_on_clustered_spectra() {
             buffer_tolerance: 1e-5,
         };
         check_rows_case(&op, &diag, 6, pol, 1e-9);
+    }
+}
+
+// ---- MPI entry cost (docs/performance/mpi-entry-cost-analysis.md) ----
+use dft_solvers::distributed_davidson::DistributedTuning;
+
+fn work_of(r: &dft_solvers::RealEigenSolution) -> (usize, usize) {
+    (r.iterations, r.operator_applications)
+}
+
+/// M2_LEAN is bit-identical; M2_DGEMM is bit-identical on pure builds (the wide
+/// route is the same product there; on MKL builds it is a rounding change and only
+/// the accuracy checks of `check_rows_case_tuned` apply).
+#[test]
+fn lean_and_wide_tuning_keep_the_classic_bits() {
+    let (op, diag) = fixture(260);
+    let base = check_rows_case_tuned(
+        &op,
+        &diag,
+        9,
+        policy(9),
+        1e-11,
+        DistributedTuning::default(),
+    );
+    let lean = DistributedTuning {
+        lean: true,
+        ..Default::default()
+    };
+    let wide = DistributedTuning {
+        wide_gemm: true,
+        ..Default::default()
+    };
+    for (name, tuning, exact) in [
+        ("lean", lean, true),
+        ("wide", wide, !dft_numerics::MKL_BACKEND),
+    ] {
+        let got = check_rows_case_tuned(&op, &diag, 9, policy(9), 1e-11, tuning);
+        for (a, b) in got.iter().zip(&base) {
+            if exact {
+                assert_eq!(bits_of(&a.eigenvectors), bits_of(&b.eigenvectors), "{name}");
+                assert_eq!(work_of(a), work_of(b), "{name}");
+            }
+        }
+    }
+}
+
+/// M2_ORTHO=serial: the serial solver's orthonormalization order (one projection,
+/// DGKS, panel Gram-Schmidt) keeps eigenvalues within 1e-9 of the serial solver,
+/// residuals below 1e-8, all ranks bit-equal and every rank count reproducible
+/// (checked inside `check_rows_case_tuned`), and the Davidson iterations within
+/// 10 percent plus two of the classic order, for the panel rules whole block,
+/// fixed 4 (several panels) and the shape rule, with and without DGKS.
+#[test]
+fn serial_order_orthonormalization_matches_serial_eigenpairs() {
+    let (a, d) = fixture(260);
+    let (b, e) = spectrum_fixture(64, 4);
+    let clustered = BandTolerances {
+        strict_bands: 4,
+        buffer_tolerance: 1e-5,
+    };
+    let cases = [
+        ("scattered", &a, &d, 9, policy(9), 1e-11),
+        ("clustered", &b, &e, 6, clustered, 1e-9),
+    ];
+    for (name, op, diag, bands, pol, tol) in cases {
+        let classic =
+            check_rows_case_tuned(op, diag, bands, pol, tol, DistributedTuning::default());
+        for panel in [None, Some(4), Some(0)] {
+            for dgks in [None, Some(0.1)] {
+                let tuning = DistributedTuning {
+                    serial_ortho: true,
+                    lean: true,
+                    wide_gemm: true,
+                    panel,
+                    dgks,
+                };
+                let got = check_rows_case_tuned(op, diag, bands, pol, tol, tuning);
+                for (g, c) in got.iter().zip(&classic) {
+                    let (gi, ga) = work_of(g);
+                    let (ci, ca) = work_of(c);
+                    println!(
+                        "{name} panel {panel:?} dgks {dgks:?}: iterations {gi} vs {ci}, applications {ga} vs {ca}"
+                    );
+                    assert!(
+                        gi <= ci + ci / 10 + 2,
+                        "{name} {panel:?} {dgks:?}: {gi} vs {ci}"
+                    );
+                }
+            }
+        }
     }
 }

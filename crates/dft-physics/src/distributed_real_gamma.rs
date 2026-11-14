@@ -46,8 +46,10 @@
 //!
 //! Numerics. One rank reproduces `RealHamiltonian::apply_block` to rounding; it is
 //! bit-identical when the serial and distributed FFT paths agree bitwise (tested,
-//! reported by the gate test). Default GEMM path only (`BAANDI_MKL_NONLOCAL` is not
-//! honoured). Inputs are not scanned for NaN/inf: an early error on one rank only
+//! reported by the gate test). Nonlocal GEMMs: the pure-Rust tiled path by default
+//! (`BAANDI_MKL_NONLOCAL` is not honoured); `BAANDI_M2_DGEMM=on` takes both projector
+//! products through `multiply_slices_wide_into` like the serial MKL path (per-panel
+//! dgemm on MKL builds, a rounding change; the same product on pure builds). Inputs are not scanned for NaN/inf: an early error on one rank only
 //! would desynchronise the collectives; non-finite values propagate to the output.
 //! No allocation after construction (conversion helpers `extract_local` and
 //! `scatter_local` allocate and are for the library boundary); no unsafe; no logging.
@@ -56,7 +58,7 @@ use crate::real_gamma::{RealGammaError, pack_projector};
 use dft_basis::{HalfSphere, PlaneWaveBasis};
 use dft_mpi::{Collective, MpiError};
 use dft_numerics::linalg::LinalgError;
-use dft_numerics::{FftError, RealGemmWorkspace, RealMatrix, RealOp, pool::WorkerPool};
+use dft_numerics::{FftError, GemmSite, RealGemmWorkspace, RealMatrix, RealOp, pool::WorkerPool};
 use dft_solvers::distributed_fft::{DistFftError, DistributedPairFft, position_owners};
 use num_complex::Complex64 as C;
 use std::f64::consts::SQRT_2;
@@ -146,6 +148,8 @@ pub struct DistributedRealHamiltonian {
     weights: RealMatrix,
     image: RealMatrix,
     gemm: RealGemmWorkspace,
+    /// `BAANDI_M2_DGEMM=on`: projector products through the per-panel dgemm route.
+    dgemm: bool,
     source_identity: Arc<()>,
     pool: Arc<WorkerPool>,
 }
@@ -317,6 +321,7 @@ impl DistributedRealHamiltonian {
             weights: RealMatrix::zeros(count, capacity)?,
             image: RealMatrix::zeros(n_loc, capacity)?,
             gemm: RealGemmWorkspace::with_pool(n_loc, count.max(capacity), pool.clone())?,
+            dgemm: dft_numerics::switches::on(dft_numerics::switches::Id::M2_DGEMM),
             source_identity: source.operator_identity(),
             pool,
             projectors,
@@ -375,6 +380,10 @@ impl DistributedRealHamiltonian {
     }
     pub fn batched(&self) -> bool {
         self.batched
+    }
+    /// Test hook: force the dgemm route of the projector products (`BAANDI_M2_DGEMM`).
+    pub fn set_dgemm(&mut self, on: bool) {
+        self.dgemm = on;
     }
 
     /// Grid points of this rank's FFT planes (length of a plane-local field).
@@ -539,7 +548,7 @@ impl DistributedRealHamiltonian {
         for t in 0..pairs {
             let (ca, cb) = (2 * t, (2 * t + 1 < m).then_some(2 * t + 1));
             for i in 0..self.fft.plane_count() {
-                self.fft.to_real_plane_in(t, pairs, i);
+                self.fft.to_real_plane_in(t, pairs, i)?;
                 let slab = self.fft.plane();
                 let base = i * line;
                 let wa = weights[ca];
@@ -618,7 +627,21 @@ impl DistributedRealHamiltonian {
         x: &RealMatrix,
     ) -> Result<(), DistributedRealError> {
         let (count, m) = (self.count, x.cols());
-        if !self.rows.is_empty() {
+        let n_loc = self.rows.len();
+        if n_loc > 0 && self.dgemm {
+            self.gemm.multiply_slices_wide_into(
+                GemmSite::Other,
+                self.projectors.as_slice(),
+                n_loc,
+                count,
+                n_loc,
+                RealOp::Transpose,
+                &x.as_slice()[..n_loc * m],
+                m,
+                n_loc,
+                self.projections.as_mut().subcols_mut(0, m),
+            )?;
+        } else if n_loc > 0 {
             self.gemm.multiply_into(
                 self.projectors.as_ref(),
                 RealOp::Transpose,
@@ -820,7 +843,23 @@ impl DistributedRealHamiltonian {
                     }
                 }
             }
-            if n_loc > 0 {
+            if n_loc > 0 && self.dgemm {
+                self.gemm.multiply_slices_wide_into(
+                    GemmSite::Other,
+                    self.projectors.as_slice(),
+                    n_loc,
+                    count,
+                    n_loc,
+                    RealOp::Identity,
+                    &self.weights.as_slice()[..count * m],
+                    m,
+                    count,
+                    self.image.as_mut().subcols_mut(0, m),
+                )?;
+                for (y, v) in y.as_mut_slice().iter_mut().zip(self.image.as_slice()) {
+                    *y += v;
+                }
+            } else if n_loc > 0 {
                 self.gemm.multiply_into(
                     self.projectors.as_ref(),
                     RealOp::Identity,

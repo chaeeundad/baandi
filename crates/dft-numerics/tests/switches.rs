@@ -126,9 +126,19 @@ fn legacy_defaults_are_unchanged() {
         Id::PROJECT_WIDE,
         Id::B1_NARROW,
         Id::SINGLE_PATH,
+        Id::M2_DGEMM,
+        Id::M2_LEAN,
     ] {
         assert!(!on(id), "{id:?} must default off");
     }
+    assert_eq!(
+        switches::resolve(switches::switch(Id::M2_ORTHO), None).0,
+        Value::Choice("classic")
+    );
+    assert_eq!(
+        switches::resolve(switches::switch(Id::M2_FFT), None).0,
+        Value::Choice("rust")
+    );
     let value = |id: Id| switches::resolve(switches::switch(id), None).0;
     assert_eq!(value(Id::NL_ENERGY), Value::Choice("fast"));
     assert_eq!(value(Id::B1_SKETCH), Value::Choice("count"));
@@ -171,5 +181,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::CUTOFF_LADDER), Value::Raw(None));
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
-    assert_eq!(TABLE.len(), 52);
+    assert_eq!(TABLE.len(), 56);
 }

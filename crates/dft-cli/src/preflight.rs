@@ -265,8 +265,9 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             ));
         }
     }
-    let options =
-        crate::run::options(config).map_err(|e| fail("scf", e, "correct the SCF controls"))?;
+    // ADR 0043: check the controls as a classic run would resolve them.
+    let options = crate::run::options_with(config, None)
+        .map_err(|e| fail("scf", e, "correct the SCF controls"))?;
     let mut warnings = Vec::new();
     if let Some(metadata) = crate::run::reference_metadata(&options) {
         warnings.push(metadata.to_string());

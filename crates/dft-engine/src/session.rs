@@ -65,6 +65,8 @@ pub struct ScfSession {
     /// Standard profile only: eigen tolerance of the first step instead of the
     /// cap (cutoff-ladder hand-off; set before the first step, crate-private).
     standard_seed: Option<f64>,
+    /// ADR 0043: attempts of the post-convergence verification.
+    verification: VerificationReport,
 }
 impl ScfSession {
     pub(crate) fn prepare_boundary_policy(
@@ -190,6 +192,7 @@ impl ScfSession {
             events,
             certificate_attempted: false,
             standard_seed: None,
+            verification: VerificationReport::default(),
         })
     }
     pub fn initialize(&mut self) -> Result<(), ScfError> {
@@ -700,6 +703,35 @@ impl ScfSession {
                 )?;
                 passed = report.passed;
             }
+            if passed && self.problem.options.verification == Verification::FixedPoint {
+                // ADR 0043: one more map at the delivered density; the delivered
+                // state stays the converged step's own (V4).
+                self.certificate_attempted = true;
+                let (attempt, record, clipped) = verify_fixed_point(
+                    &mut self.problem,
+                    &step.density,
+                    &step.k_points,
+                    tolerance,
+                    standard_error_ha.expect("standard history metric"),
+                    iteration,
+                )
+                .map_err(|e| match e {
+                    ScfError::NonFinite => ScfError::Diverged {
+                        reason: "nonfinite verification arithmetic".into(),
+                        history: history.clone(),
+                    },
+                    other => other,
+                })?;
+                if let Some(reason) = clipped {
+                    return Err(ScfError::Diverged {
+                        reason,
+                        history: std::mem::take(history),
+                    });
+                }
+                passed = attempt.passed;
+                self.verification.attempts.push(attempt);
+                history.last_mut().unwrap().fixed_point_certificate = Some(record);
+            }
             if passed {
                 self.problem.check_gap(&step.k_points)?;
             }
@@ -892,6 +924,9 @@ impl ScfSession {
                     ),
                     standard,
                     certified: certified && standard.is_none(),
+                    verification: (standard.is_some()
+                        && self.problem.options.verification != Verification::Off)
+                        .then(|| self.verification.clone()),
                     spectral_completeness: self.spectral_report.clone().map(|mut r| {
                         r.passed &= certified;
                         r
@@ -1597,6 +1632,161 @@ impl ScfSession {
         session.import_electronic(&checkpoint.electronic_state)?;
         Ok(session)
     }
+}
+
+/// ADR 0043 verification: one more ordinary map at the converged output density
+/// (V1), pass on the Coulomb fixed-point residual at the standard threshold and,
+/// with the residual guard on, the residual bound of that solve (V2). Strict
+/// certificate quantities are computed as information only (V3). Returns the
+/// attempt, its record for the history entry, and a clipped-charge failure.
+fn verify_fixed_point(
+    problem: &mut ScfProblem,
+    density: &Array3<f64>,
+    points: &[KPointSolution],
+    tolerance: f64,
+    standard_error_ha: f64,
+    iteration: usize,
+) -> Result<(VerificationAttempt, FixedPointCertificate, Option<String>), ScfError> {
+    let clock = Instant::now();
+    let threshold = problem
+        .options
+        .standard
+        .expect("verification requires the standard profile")
+        .threshold_ha;
+    let eigen_tolerance = StandardProfile::ratchet(tolerance, standard_error_ha, problem.electrons);
+    let warm: Vec<_> = points
+        .iter()
+        .map(|k| k.solution.eigenvectors.clone())
+        .collect();
+    let check = problem.step_kpoints_with_certification(
+        density,
+        Some(&warm),
+        eigen_tolerance,
+        // Same flag as an ordinary step (the standard path ignores it).
+        eigen_tolerance <= problem.options.eigen_tolerance,
+    )?;
+    let coulomb_error_ha = problem
+        .coulomb
+        .as_mut()
+        .expect("standard Coulomb metric")
+        .error(density, &check.density)?;
+    let residual_bound_ha = dft_numerics::switches::on(
+        dft_numerics::switches::Id::STANDARD_RESIDUAL_GUARD,
+    )
+    .then(|| {
+        StandardProfile::residual_energy_bound(
+            check
+                .k_points
+                .iter()
+                .map(|k| (k.point.weight, k.solution.residuals.as_slice())),
+            &problem.occupations,
+        )
+    });
+    let density_residual = density_distance(
+        &check.density,
+        density,
+        problem.cell.volume_bohr3(),
+        problem.electrons,
+    );
+    let occupied_eigenvalue_change_ha = check
+        .k_points
+        .iter()
+        .zip(points)
+        .flat_map(|(a, b)| {
+            a.solution
+                .eigenvalues
+                .iter()
+                .zip(&b.solution.eigenvalues)
+                .zip(&problem.occupations)
+        })
+        .filter(|(_, f)| **f > 0.0)
+        .map(|((a, b), _)| (a - b).abs())
+        .fold(0.0, f64::max);
+    if !coulomb_error_ha.is_finite()
+        || !density_residual.is_finite()
+        || !occupied_eigenvalue_change_ha.is_finite()
+    {
+        return Err(ScfError::NonFinite);
+    }
+    #[allow(unused_mut)]
+    let mut passed =
+        coulomb_error_ha < threshold && residual_bound_ha.is_none_or(|b| b < threshold);
+    #[cfg(test)]
+    if problem.force_verification_failures > 0 {
+        problem.force_verification_failures -= 1;
+        passed = false;
+    }
+    let mut clipped = None;
+    if passed && problem.density_floor.is_some() {
+        let charge = problem
+            .negative_charge(density)
+            .max(problem.negative_charge(&check.density));
+        clipped = ScfProblem::validate_clipped_charge(charge, problem.electrons).err();
+    }
+    if passed && clipped.is_none() {
+        problem.check_gap(&check.k_points)?;
+    }
+    let residuals = |buffered: bool| -> Vec<Vec<f64>> {
+        check
+            .k_points
+            .iter()
+            .map(|k| {
+                k.solution
+                    .residuals
+                    .iter()
+                    .zip(&k.solution.buffer)
+                    .filter_map(|(&r, &buffer)| (buffer == buffered).then_some(r))
+                    .collect()
+            })
+            .collect()
+    };
+    let strict_residuals_per_k = residuals(false);
+    let strict_criteria_met = density_residual <= problem.options.density_tolerance
+        && occupied_eigenvalue_change_ha <= CERT_EIGENVALUE_LIMIT_HA
+        && strict_residuals_per_k
+            .iter()
+            .flatten()
+            .all(|r| *r <= 0.1 * problem.options.eigen_tolerance);
+    let davidson_iterations = check.k_points.iter().map(|k| k.solution.iterations).sum();
+    let operator_applications = check
+        .k_points
+        .iter()
+        .map(|k| k.solution.operator_applications)
+        .sum();
+    let record = FixedPointCertificate {
+        strict_residuals_per_k,
+        buffer_residuals_per_k: residuals(true),
+        density_residual,
+        occupied_eigenvalue_change: occupied_eigenvalue_change_ha,
+        davidson_iterations,
+        operator_applications,
+        davidson_iterations_per_k: check
+            .k_points
+            .iter()
+            .map(|k| k.solution.iterations)
+            .collect(),
+        operator_applications_per_k: check
+            .k_points
+            .iter()
+            .map(|k| k.solution.operator_applications)
+            .collect(),
+        timings: check.timings,
+    };
+    let attempt = VerificationAttempt {
+        iteration,
+        passed: passed && clipped.is_none(),
+        coulomb_error_ha,
+        threshold_ha: threshold,
+        eigen_tolerance_ha: eigen_tolerance,
+        residual_bound_ha,
+        density_residual,
+        occupied_eigenvalue_change_ha,
+        strict_criteria_met,
+        davidson_iterations,
+        operator_applications,
+        wall: clock.elapsed(),
+    };
+    Ok((attempt, record, clipped))
 }
 
 /// Largest occupied-eigenvalue change (Ha) the fixed-point certificate accepts.

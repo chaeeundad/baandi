@@ -56,6 +56,13 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
         ));
     }
 
+    // ADR 0043: forces accept a verified standard state; stress stays strict
+    // until its cutoff scans are adapted to a standard caller.
+    if state.options.standard.is_some() {
+        return Err(ScfError::InvalidInput(
+            "observables.stress: strict convergence profile required; rerun with convergence_profile = strict",
+        ));
+    }
     let start = std::time::Instant::now();
     // Shared force path enforces the independent setup identity, active ledger,
     // strict tolerances and fresh certificate before accepting the state.

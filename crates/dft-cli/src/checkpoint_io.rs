@@ -205,6 +205,15 @@ pub fn encode(checkpoint: &Checkpoint) -> Result<Vec<u8>, Error> {
             "checkpoint v1 cannot preserve scf.spectral_guard=final audit history or scf.locking=auto policy",
         ));
     }
+    if checkpoint
+        .continuation
+        .as_ref()
+        .is_some_and(|c| c.options.verification != dft_engine::Verification::Off)
+    {
+        return Err(invalid(
+            "checkpoint v1 cannot preserve the fixed-point verification (ADR 0043); use scf.verify = \"off\" or convergence_profile = strict",
+        ));
+    }
     let mut binary = Vec::new();
     let wire = checkpoint.encode(&mut binary)?;
     let header = serde_json::to_vec(&wire)?;
@@ -694,7 +703,7 @@ wire_struct!(ScfOptions, WScfOptions {
     seed: u64,
     divergence_factor: f64,
     divergence_patience: usize,
-} defaults { locking: dft_engine::Locking::Off, spectral_guard: dft_engine::SpectralGuard::Off, strain_reference: None, });
+} defaults { locking: dft_engine::Locking::Off, spectral_guard: dft_engine::SpectralGuard::Off, strain_reference: None, verification: dft_engine::Verification::Off, });
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 enum WSolverChoice {

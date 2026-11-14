@@ -1200,13 +1200,61 @@ fn stress_table(s: &dft_engine::stress::StressResult) -> String {
 /// cumulative over the process, seconds.
 fn davidson_stages_json() -> serde_json::Value {
     let s = dft_engine::stage_seconds();
+    let mut out = stage_block_json(&s);
+    out["note"] = json!(
+        "BAANDI_DAVIDSON_STAGES=on; serial real Davidson only; width 0 = returning iteration; h_apply includes certificate and restart applications"
+    );
+    // P0.2 work timers (same switch): FFT by kind, h_apply parts, per run stage.
+    let work = dft_numerics::work_timers::snapshot();
+    let pooled = work
+        .iter()
+        .fold(dft_numerics::work_timers::WorkTimes::default(), |a, b| {
+            a.plus(b)
+        });
+    out["fft"] = fft_json(&pooled);
+    out["h_apply_parts"] = h_apply_parts_json(&pooled);
+    let stages = dft_engine::stage_seconds_by_run_stage();
+    out["by_run_stage"] = dft_numerics::work_timers::RUN_STAGE_LABELS
+        .iter()
+        .zip(stages.iter().zip(&work))
+        .map(|(label, (s, w))| {
+            let mut block = stage_block_json(s);
+            block["fft"] = fft_json(w);
+            block["h_apply_parts"] = h_apply_parts_json(w);
+            (label.to_string(), block)
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into();
+    out["work_timers_note"] = json!(
+        "BAANDI_DAVIDSON_STAGES=on. fft and h_apply_parts: seconds summed over worker threads (thread-seconds; at T>1 compare with wall only after dividing by the busy threads), counts independent of the thread count. fft.pair_*: paired orbital transforms of the real Gamma h_apply (one inverse and one forward transform per pair, as QE's fftw count of wave transforms); pair_potential_s is the grid multiply between them, not FFT. fft.density_*: density transforms (one inverse each). fft.other_*: other wave transforms (complex-path local applies, folded odd tail), one inverse and one forward each. h_apply_parts: real Gamma block applications (apply_s whole call, local_s wall of the local part on the calling thread including pack/unpack, nonlocal projection P^T X and back product); remainder_s = apply - local - nonlocal (kinetic, scans). by_run_stage splits every block by run stage (fine, ladder coarse, verification = certificate block); the pooled keys are the sums."
+    );
+    out
+}
+fn stage_block_json(s: &dft_engine::StageSecondsReport) -> serde_json::Value {
     let labels = dft_engine::DAVIDSON_WIDTH_LABELS;
     json!({
         "timed_solves":s.timed_solves,
         "iteration_s_by_correction_width":labels.iter().zip(s.width_seconds).map(|(l,v)|(l.to_string(),json!(v))).collect::<serde_json::Map<_,_>>(),
         "iterations_by_correction_width":labels.iter().zip(s.width_iterations).map(|(l,v)|(l.to_string(),json!(v))).collect::<serde_json::Map<_,_>>(),
         "stage_s":{"reduced":s.reduced,"eigen":s.eigen,"rotate":s.rotate,"residual":s.residual,"orthonormalize":s.orthonormalize,"h_apply":s.h_apply,"sketch":s.sketch,"precondition":s.precondition},
-        "note":"BAANDI_DAVIDSON_STAGES=on; serial real Davidson only; width 0 = returning iteration; h_apply includes certificate and restart applications"
+    })
+}
+fn fft_json(w: &dft_numerics::work_timers::WorkTimes) -> serde_json::Value {
+    let pair_fft = w.pair_inverse + w.pair_forward + w.pair_unsplit;
+    json!({
+        "pair_inverse_s":w.pair_inverse,"pair_forward_s":w.pair_forward,"pair_unsplit_s":w.pair_unsplit,
+        "pair_potential_s":w.pair_potential,"pair_transforms":w.pair_transforms,"pair_columns":w.pair_columns,
+        "density_s":w.density,"density_transforms":w.density_transforms,"density_columns":w.density_columns,
+        "other_s":w.other,"other_transforms":w.other_transforms,"other_columns":w.other_columns,
+        "wave_fft_s":pair_fft + w.density + w.other,
+        "wave_fft_calls":2 * w.pair_transforms + w.density_transforms + 2 * w.other_transforms,
+    })
+}
+fn h_apply_parts_json(w: &dft_numerics::work_timers::WorkTimes) -> serde_json::Value {
+    json!({
+        "apply_s":w.apply,"apply_calls":w.apply_calls,"apply_columns":w.apply_columns,"local_s":w.local,
+        "nonlocal_projection_s":w.nonlocal_projection,"nonlocal_back_s":w.nonlocal_back,
+        "remainder_s":w.apply - w.local - w.nonlocal_projection - w.nonlocal_back,
     })
 }
 

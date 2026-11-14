@@ -120,6 +120,18 @@ impl FusedOperator for MklPairPlan {
             Self::Pruned(p) => p.apply_local(c, potential, out),
         }
     }
+    fn apply_local_laps(
+        &mut self,
+        c: &[C],
+        potential: &[f64],
+        out: &mut [C],
+        laps: &mut crate::work_timers::LocalLaps,
+    ) -> Result<(), FftError> {
+        match self {
+            Self::Grid(p) => p.apply_local_laps(c, potential, out, laps),
+            Self::Pruned(p) => p.apply_local_laps(c, potential, out, laps),
+        }
+    }
     fn accumulate_density(
         &mut self,
         c: &[C],
@@ -280,22 +292,25 @@ impl<L: PairLanes> PairFusedPlan<L> {
         }
         Ok(())
     }
-}
-impl<L: PairLanes> FusedOperator for PairFusedPlan<L> {
-    fn shape(&self) -> [usize; 3] {
-        self.shape
-    }
-    fn coefficient_count(&self) -> usize {
-        self.scatter.len()
-    }
-    fn apply_local(&mut self, c: &[C], potential: &[f64], out: &mut [C]) -> Result<(), FftError> {
+    /// The single body of `apply_local`; `NoLaps` makes the laps vanish. Laps
+    /// are taken per slab (inverse, multiply, forward), not per element.
+    fn apply_local_with<K: crate::work_timers::Laps>(
+        &mut self,
+        c: &[C],
+        potential: &[f64],
+        out: &mut [C],
+        laps: &mut K,
+    ) -> Result<(), FftError> {
+        use crate::work_timers::Phase;
         self.validate(c, potential.len())?;
         if out.len() != c.len() {
             return Err(FftError::IncompatibleArray);
         }
         self.inverse_sticks(c)?;
+        laps.lap(Phase::Inverse);
         for x in 0..self.n[0] {
             self.inverse_slab(x)?;
+            laps.lap(Phase::Inverse);
             for y in 0..self.n[1] {
                 let start = self.grid_start(x, y);
                 for (a, &v) in self.slab[y * self.n[2]..(y + 1) * self.n[2]]
@@ -305,7 +320,9 @@ impl<L: PairLanes> FusedOperator for PairFusedPlan<L> {
                     *a *= v;
                 }
             }
+            laps.lap(Phase::Potential);
             self.forward_slab(x)?;
+            laps.lap(Phase::Forward);
         }
         if !self.sticks.is_empty() {
             self.lanes.run(0, false, &mut self.sticks)?;
@@ -313,7 +330,28 @@ impl<L: PairLanes> FusedOperator for PairFusedPlan<L> {
         for (o, &i) in out.iter_mut().zip(&self.scatter) {
             *o = self.sticks[i] / self.size as f64;
         }
+        laps.lap(Phase::Forward);
         Ok(())
+    }
+}
+impl<L: PairLanes> FusedOperator for PairFusedPlan<L> {
+    fn shape(&self) -> [usize; 3] {
+        self.shape
+    }
+    fn coefficient_count(&self) -> usize {
+        self.scatter.len()
+    }
+    fn apply_local(&mut self, c: &[C], potential: &[f64], out: &mut [C]) -> Result<(), FftError> {
+        self.apply_local_with(c, potential, out, &mut crate::work_timers::NoLaps)
+    }
+    fn apply_local_laps(
+        &mut self,
+        c: &[C],
+        potential: &[f64],
+        out: &mut [C],
+        laps: &mut crate::work_timers::LocalLaps,
+    ) -> Result<(), FftError> {
+        self.apply_local_with(c, potential, out, laps)
     }
     fn accumulate_density(
         &mut self,

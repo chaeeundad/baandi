@@ -4,6 +4,7 @@ use crate::hamiltonian::{Hamiltonian, NonlocalOperator};
 use dft_basis::{HalfSphere, PlaneWaveBasis};
 use dft_numerics::fused_fold::FoldedRealPlan;
 use dft_numerics::fused_pair_plan::RealPairPlan;
+use dft_numerics::work_timers::{self as timers, Slot};
 use dft_numerics::{
     FftPlan3d, PairMap, RealGemmWorkspace, RealMatrix, RealOp, fused_pair::PairLocalWorkspace,
     pool::WorkerPool,
@@ -148,6 +149,7 @@ impl RealNonlocal {
             return Err(RealGammaError::Shape);
         }
         let count = self.projectors.cols();
+        let clock = timers::start();
         if self.dgemm_products {
             self.gemm.multiply_slices_wide_into(
                 dft_numerics::GemmSite::Other,
@@ -169,7 +171,11 @@ impl RealNonlocal {
                 self.projections.as_mut().subcols_mut(0, m),
             )?;
         }
-        self.add_from_projections(y, m)
+        timers::stop(clock, Slot::NonlocalProjectionNs);
+        let clock = timers::start();
+        let result = self.add_from_projections(y, m);
+        timers::stop(clock, Slot::NonlocalBackNs);
+        result
     }
 
     /// Number of projector columns (rows of the projection block P^T X).
@@ -210,8 +216,11 @@ impl RealNonlocal {
         {
             return Err(RealGammaError::NonFinite);
         }
+        let clock = timers::start();
         self.projections.as_mut_slice()[..count * m].copy_from_slice(projections);
-        self.add_from_projections(y, m)
+        let result = self.add_from_projections(y, m);
+        timers::stop(clock, Slot::NonlocalBackNs);
+        result
     }
 
     /// NL-ENERGY-REAL (engine switch `BAANDI_NL_ENERGY_REAL=on`): per column the
@@ -290,6 +299,7 @@ impl RealNonlocal {
             return Err(RealGammaError::Shape);
         }
         let count = self.projectors.cols();
+        let clock = timers::start();
         if self.dgemm_products {
             self.gemm.multiply_slices_wide_into(
                 dft_numerics::GemmSite::Other,
@@ -311,7 +321,11 @@ impl RealNonlocal {
                 self.projections.as_mut().subcols_mut(0, m),
             )?;
         }
-        self.image_from_projections(m)
+        timers::stop(clock, Slot::NonlocalProjectionNs);
+        let clock = timers::start();
+        let result = self.image_from_projections(m);
+        timers::stop(clock, Slot::NonlocalBackNs);
+        result
     }
 
     /// HAPPLY-OVERLAP with caller projections (B6): the arithmetic of
@@ -328,8 +342,11 @@ impl RealNonlocal {
         if projections.iter().any(|x| !x.is_finite()) {
             return Err(RealGammaError::NonFinite);
         }
+        let clock = timers::start();
         self.projections.as_mut_slice()[..count * m].copy_from_slice(projections);
-        self.image_from_projections(m)
+        let result = self.image_from_projections(m);
+        timers::stop(clock, Slot::NonlocalBackNs);
+        result
     }
 
     /// Y += image (first `Y.cols()` columns), then the output scan.
@@ -511,6 +528,16 @@ impl RealHamiltonian {
         x: &RealMatrix,
         y: &mut RealMatrix,
     ) -> Result<(), RealGammaError> {
+        let clock = timers::start();
+        let result = self.apply_block_untimed(x, y);
+        record_apply(clock, x.cols());
+        result
+    }
+    fn apply_block_untimed(
+        &mut self,
+        x: &RealMatrix,
+        y: &mut RealMatrix,
+    ) -> Result<(), RealGammaError> {
         if x.rows() != self.half.full_len()
             || y.rows() != x.rows()
             || y.cols() != x.cols()
@@ -538,14 +565,17 @@ impl RealHamiltonian {
     /// with HAPPLY-FOLD the odd tail through the folded plan; the two run as
     /// the branches of one pool join (disjoint outputs, serial arithmetic each).
     fn apply_local(&mut self, x: &RealMatrix, y: &mut RealMatrix) -> Result<(), RealGammaError> {
-        local_part(
+        let clock = timers::start();
+        let result = local_part(
             &mut self.local,
             self.fold.as_mut(),
             &self.pool,
             x,
             &self.potential,
             y,
-        )
+        );
+        timers::stop(clock, Slot::LocalNs);
+        result
     }
     /// HAPPLY-OVERLAP: local part and nonlocal image in one pool join, then
     /// the kinetic and nonlocal additions in the serial order (bit-identical
@@ -567,7 +597,12 @@ impl RealHamiltonian {
         } = self;
         let (local_result, image_result) = pool.install(|| {
             WorkerPool::join(
-                || local_part(local, fold.as_mut(), pool, x, potential, y),
+                || {
+                    let clock = timers::start();
+                    let result = local_part(local, fold.as_mut(), pool, x, potential, y);
+                    timers::stop(clock, Slot::LocalNs);
+                    result
+                },
                 || match projections {
                     None => nonlocal.image_block(x),
                     Some(p) => nonlocal.image_with_projections(p, m),
@@ -577,7 +612,10 @@ impl RealHamiltonian {
         local_result?;
         image_result?;
         self.add_kinetic(x, y);
-        self.nonlocal.add_image(y)
+        let clock = timers::start();
+        let result = self.nonlocal.add_image(y);
+        timers::stop(clock, Slot::NonlocalBackNs);
+        result
     }
     /// APPLY-LEAN kinetic term: the same `y += t x` per element, column by column
     /// instead of an integer modulo per element (bit-identical).
@@ -620,6 +658,17 @@ impl RealHamiltonian {
         projections: &[f64],
         y: &mut RealMatrix,
     ) -> Result<(), RealGammaError> {
+        let clock = timers::start();
+        let result = self.apply_block_with_projections_untimed(x, projections, y);
+        record_apply(clock, x.cols());
+        result
+    }
+    fn apply_block_with_projections_untimed(
+        &mut self,
+        x: &RealMatrix,
+        projections: &[f64],
+        y: &mut RealMatrix,
+    ) -> Result<(), RealGammaError> {
         if x.rows() != self.half.full_len()
             || y.rows() != x.rows()
             || y.cols() != x.cols()
@@ -643,6 +692,32 @@ impl RealHamiltonian {
         }
         self.nonlocal.add_block_with_projections(projections, y)
     }
+}
+
+/// P0.2 work timers: one whole block application of `apply_block` or
+/// `apply_block_with_projections` (no-op when the timers are off).
+fn record_apply(clock: Option<std::time::Instant>, columns: usize) {
+    if clock.is_some() {
+        timers::stop(clock, Slot::ApplyNs);
+        timers::add(Slot::ApplyCalls, 1);
+        timers::add(Slot::ApplyColumns, columns as u64);
+    }
+}
+/// HAPPLY-FOLD odd tail, charged to the "other" wave transforms.
+fn fold_tail(
+    fold: &mut FoldedRealPlan<FftPlan3d>,
+    xt: &[f64],
+    potential: &[f64],
+    yt: &mut [f64],
+) -> Result<(), dft_numerics::FftError> {
+    let clock = timers::start();
+    let result = fold.apply_local_real(xt, potential, yt);
+    if clock.is_some() {
+        timers::stop(clock, Slot::OtherNs);
+        timers::add(Slot::OtherTransforms, 1);
+        timers::add(Slot::OtherColumns, 1);
+    }
+    result
 }
 
 /// Local potential image of a block (overwrite). Without a fold plan this is
@@ -670,13 +745,13 @@ fn local_part(
     let (xp, xt) = x.as_slice().split_at(split);
     let (yp, yt) = y.as_mut_slice().split_at_mut(split);
     if split == 0 {
-        fold.apply_local_real(xt, potential, yt)?;
+        fold_tail(fold, xt, potential, yt)?;
         return Ok(());
     }
     let (a, b) = pool.install(|| {
         WorkerPool::join(
             || local.apply_block(xp, potential, yp),
-            || fold.apply_local_real(xt, potential, yt),
+            || fold_tail(fold, xt, potential, yt),
         )
     });
     a?;

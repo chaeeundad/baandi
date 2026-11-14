@@ -625,6 +625,11 @@ impl ScfSession {
         // paying for the tight re-solve. It can only reject; passing still needs
         // the full solve below. `trace` prints the bound and runs the solve anyway.
         let certificate_clock = Instant::now();
+        // P0.2: work of the certificate block is reported as the verification
+        // run stage (a coarse-stage certificate stays in the coarse stage).
+        let verification = dft_numerics::work_timers::in_fine_stage().then(|| {
+            dft_numerics::work_timers::enter(dft_numerics::work_timers::RunStage::Verification)
+        });
         let screen_start = Instant::now();
         let screen = if converged && standard.is_none() {
             match cert_screen_mode() {
@@ -834,6 +839,7 @@ impl ScfSession {
         };
         // Fields kept by the screen belong to this certificate only.
         self.problem.clear_reused_fields();
+        drop(verification);
         if self.certificate_attempted {
             crate::phase_clock::add_certificate(certificate_clock);
         }

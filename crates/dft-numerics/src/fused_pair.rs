@@ -192,8 +192,15 @@ impl<P: FusedOperator> PairPlan<P> {
             return Err(FftError::IncompatibleArray);
         }
         self.map.pack(a, b, &mut self.phi)?;
-        self.plan
-            .apply_local(&self.phi, potential, &mut self.image)?;
+        if crate::work_timers::enabled() {
+            let mut laps = crate::work_timers::LocalLaps::start();
+            self.plan
+                .apply_local_laps(&self.phi, potential, &mut self.image, &mut laps)?;
+            laps.record_pair(1 + u64::from(b.is_some()));
+        } else {
+            self.plan
+                .apply_local(&self.phi, potential, &mut self.image)?;
+        }
         self.map.unpack(&self.image, out_a, out_b)
     }
     /// Column-major block, pairs (0,1), (2,3), ...; odd tail uses a zero partner.
@@ -245,8 +252,19 @@ impl<P: PairDensityOperator> PairPlan<P> {
             return Ok(());
         }
         self.map.pack(a, b, &mut self.phi)?;
-        self.plan
-            .accumulate_density_pair(&self.phi, weights, volume, density)
+        let clock = crate::work_timers::start();
+        let result = self
+            .plan
+            .accumulate_density_pair(&self.phi, weights, volume, density);
+        if clock.is_some() {
+            crate::work_timers::stop(clock, crate::work_timers::Slot::DensityNs);
+            crate::work_timers::add(crate::work_timers::Slot::DensityTransforms, 1);
+            crate::work_timers::add(
+                crate::work_timers::Slot::DensityColumns,
+                1 + u64::from(b.is_some()),
+            );
+        }
+        result
     }
 }
 

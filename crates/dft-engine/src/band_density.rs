@@ -205,6 +205,15 @@ fn check(band: usize, c: &[Complex64], grid: &FftGridSpec) -> Result<(), ScfErro
     }
     Ok(())
 }
+/// P0.2 work timers: one density transform carrying `bands` bands.
+fn record_density(clock: Option<std::time::Instant>, bands: u64) {
+    if clock.is_some() {
+        use dft_numerics::work_timers::{Slot, add, stop};
+        stop(clock, Slot::DensityNs);
+        add(Slot::DensityTransforms, 1);
+        add(Slot::DensityColumns, bands);
+    }
+}
 fn transform(
     workers: &mut [Worker],
     coefficients: &[Vec<Complex64>],
@@ -221,12 +230,15 @@ fn transform(
                 let c = &coefficients[band];
                 check(band, c, grid)?;
                 contribution.fill(0.0);
+                let clock = dft_numerics::work_timers::start();
                 worker.fft.accumulate_density(
                     c,
                     occupations[band],
                     volume,
                     contribution.as_slice_mut().unwrap(),
                 )?;
+                // A zero weight skips the transform.
+                record_density(clock.filter(|_| occupations[band] != 0.0), 1);
             }
             return Ok(());
         }
@@ -253,6 +265,7 @@ fn transform(
                 let (da, db) = (&mut left[local], &mut right[0]);
                 da.fill(0.0);
                 db.fill(0.0);
+                let clock = dft_numerics::work_timers::start();
                 worker.fft.accumulate_density_pair_split(
                     &worker.phi,
                     [w, occupations[band + 1]],
@@ -260,6 +273,7 @@ fn transform(
                     da.as_slice_mut().unwrap(),
                     db.as_slice_mut().unwrap(),
                 )?;
+                record_density(clock, 2);
                 worker.live[local] = true;
                 worker.live[local + 1] = true;
                 local += 2;
@@ -276,9 +290,11 @@ fn transform(
                 continue;
             }
             contribution.fill(0.0);
+            let clock = dft_numerics::work_timers::start();
             worker
                 .fft
                 .accumulate_density(c, w, volume, contribution.as_slice_mut().unwrap())?;
+            record_density(clock.filter(|_| w != 0.0), 1);
             worker.live[local] = true;
             local += 1;
         }

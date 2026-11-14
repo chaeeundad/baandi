@@ -211,10 +211,19 @@ const STAGES: usize = 8;
 /// Correction-width buckets: 0 (returning or no correction), 1, 2-8, 9-64, 65+.
 const WIDTHS: usize = 5;
 
-static STAGE_NANOS: [AtomicU64; STAGES] = [const { AtomicU64::new(0) }; STAGES];
-static WIDTH_NANOS: [AtomicU64; WIDTHS] = [const { AtomicU64::new(0) }; WIDTHS];
-static WIDTH_COUNTS: [AtomicU64; WIDTHS] = [const { AtomicU64::new(0) }; WIDTHS];
-static TIMED_SOLVES: AtomicU64 = AtomicU64::new(0);
+// Per run stage (`dft_numerics::work_timers::RunStage`: fine, ladder coarse,
+// verification), selected by the process-wide index the engine sets between solves.
+const RUN_STAGES: usize = dft_numerics::work_timers::RUN_STAGES;
+static STAGE_NANOS: [[AtomicU64; STAGES]; RUN_STAGES] =
+    [const { [const { AtomicU64::new(0) }; STAGES] }; RUN_STAGES];
+static WIDTH_NANOS: [[AtomicU64; WIDTHS]; RUN_STAGES] =
+    [const { [const { AtomicU64::new(0) }; WIDTHS] }; RUN_STAGES];
+static WIDTH_COUNTS: [[AtomicU64; WIDTHS]; RUN_STAGES] =
+    [const { [const { AtomicU64::new(0) }; WIDTHS] }; RUN_STAGES];
+static TIMED_SOLVES: [AtomicU64; RUN_STAGES] = [const { AtomicU64::new(0) }; RUN_STAGES];
+fn run_stage() -> usize {
+    dft_numerics::work_timers::run_stage()
+}
 
 fn width_bucket(width: usize) -> usize {
     match width {
@@ -234,7 +243,7 @@ pub(crate) struct Timers {
 impl Timers {
     pub(crate) fn new(on: bool) -> Self {
         if on {
-            TIMED_SOLVES.fetch_add(1, Relaxed);
+            TIMED_SOLVES[run_stage()].fetch_add(1, Relaxed);
         }
         Self { on }
     }
@@ -245,7 +254,7 @@ impl Timers {
     #[inline]
     pub(crate) fn stop(self, start: Option<Instant>, stage: Stage) {
         if let Some(t) = start {
-            STAGE_NANOS[stage as usize].fetch_add(nanos(t), Relaxed);
+            STAGE_NANOS[run_stage()][stage as usize].fetch_add(nanos(t), Relaxed);
         }
     }
     /// Whole-iteration wall time, bucketed by the correction width it appended.
@@ -253,8 +262,9 @@ impl Timers {
     pub(crate) fn iteration(self, start: Option<Instant>, width: usize) {
         if let Some(t) = start {
             let b = width_bucket(width);
-            WIDTH_NANOS[b].fetch_add(nanos(t), Relaxed);
-            WIDTH_COUNTS[b].fetch_add(1, Relaxed);
+            let r = run_stage();
+            WIDTH_NANOS[r][b].fetch_add(nanos(t), Relaxed);
+            WIDTH_COUNTS[r][b].fetch_add(1, Relaxed);
         }
     }
 }
@@ -285,10 +295,37 @@ pub struct StageSeconds {
 /// Width bucket labels in the order of `StageSeconds::width_seconds`.
 pub const WIDTH_LABELS: [&str; WIDTHS] = ["0", "1", "2-8", "9-64", "65+"];
 
+/// Cumulative stage timers of this process, summed over the run stages.
 pub fn stage_seconds() -> StageSeconds {
-    let s = |i: usize| STAGE_NANOS[i].load(Relaxed) as f64 * 1e-9;
+    let all = stage_seconds_by_run_stage();
+    let mut out = StageSeconds::default();
+    for r in &all {
+        out.timed_solves += r.timed_solves;
+        for b in 0..WIDTHS {
+            out.width_seconds[b] += r.width_seconds[b];
+            out.width_iterations[b] += r.width_iterations[b];
+        }
+        out.reduced += r.reduced;
+        out.eigen += r.eigen;
+        out.rotate += r.rotate;
+        out.residual += r.residual;
+        out.orthonormalize += r.orthonormalize;
+        out.h_apply += r.h_apply;
+        out.sketch += r.sketch;
+        out.precondition += r.precondition;
+    }
+    out
+}
+
+/// Cumulative stage timers per run stage, in the index order of
+/// `dft_numerics::work_timers::RunStage` (fine, ladder coarse, verification).
+pub fn stage_seconds_by_run_stage() -> [StageSeconds; RUN_STAGES] {
+    std::array::from_fn(stage_seconds_of)
+}
+fn stage_seconds_of(r: usize) -> StageSeconds {
+    let s = |i: usize| STAGE_NANOS[r][i].load(Relaxed) as f64 * 1e-9;
     let mut out = StageSeconds {
-        timed_solves: TIMED_SOLVES.load(Relaxed),
+        timed_solves: TIMED_SOLVES[r].load(Relaxed),
         reduced: s(Stage::Reduced as usize),
         eigen: s(Stage::Eigen as usize),
         rotate: s(Stage::Rotate as usize),
@@ -300,8 +337,8 @@ pub fn stage_seconds() -> StageSeconds {
         ..StageSeconds::default()
     };
     for b in 0..WIDTHS {
-        out.width_seconds[b] = WIDTH_NANOS[b].load(Relaxed) as f64 * 1e-9;
-        out.width_iterations[b] = WIDTH_COUNTS[b].load(Relaxed);
+        out.width_seconds[b] = WIDTH_NANOS[r][b].load(Relaxed) as f64 * 1e-9;
+        out.width_iterations[b] = WIDTH_COUNTS[r][b].load(Relaxed);
     }
     out
 }

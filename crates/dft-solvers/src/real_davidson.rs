@@ -6,6 +6,7 @@ use crate::davidson_stages::{
 pub use crate::davidson_stages::{
     AlgebraCounters, B1Counters, B1Mode, B5Counters, ResearchOptions, SketchKind, StageSeconds,
     WIDTH_LABELS, algebra_counters, b1_counters, b5_counters, stage_seconds,
+    stage_seconds_by_run_stage,
 };
 use crate::{BandTolerances, RealLinearOperator, SolverError};
 use dft_numerics::{

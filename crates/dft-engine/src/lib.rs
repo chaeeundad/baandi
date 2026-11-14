@@ -49,8 +49,9 @@ pub mod gamma_real;
 pub mod m2;
 pub mod parallel;
 pub use dft_solvers::real_davidson::{
-    WIDTH_LABELS as DAVIDSON_WIDTH_LABELS, algebra_counters, b1_counters, b5_counters,
-    ortho_counters, second_vector_columns, stage_seconds,
+    StageSeconds as StageSecondsReport, WIDTH_LABELS as DAVIDSON_WIDTH_LABELS, algebra_counters,
+    b1_counters, b5_counters, ortho_counters, second_vector_columns, stage_seconds,
+    stage_seconds_by_run_stage,
 };
 pub use gamma_real::{GammaReal, GammaRealDiagnostics};
 

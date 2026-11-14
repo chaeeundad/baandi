@@ -784,11 +784,19 @@ impl HamiltonianData {
         if !x.iter().all(finite) {
             return Err(HamiltonianError::NonFinite);
         }
+        // P0.2 work timers: complex local applies count as "other" wave transforms.
+        let clock = dft_numerics::work_timers::start();
         scratch.fft.apply_local(
             x,
             self.potential.as_slice().ok_or(HamiltonianError::Shape)?,
             y,
         )?;
+        if clock.is_some() {
+            use dft_numerics::work_timers::{Slot, add, stop};
+            stop(clock, Slot::OtherNs);
+            add(Slot::OtherTransforms, 1);
+            add(Slot::OtherColumns, 1);
+        }
         for (i, value) in y.iter_mut().enumerate() {
             *value += self.kinetic[i] * x[i];
         }

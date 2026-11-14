@@ -27,6 +27,20 @@ pub trait FusedOperator {
     /// Write P V psi in the input sphere order. Potential values are in Ha;
     /// kinetic and nonlocal terms are not included.
     fn apply_local(&mut self, c: &[C], potential: &[f64], out: &mut [C]) -> Result<(), FftError>;
+    /// `apply_local` with the work timers (P0.2): the same operations in the
+    /// same order, with laps charged to inverse, potential and forward. Plans
+    /// without a split charge the whole call to the unsplit slot.
+    fn apply_local_laps(
+        &mut self,
+        c: &[C],
+        potential: &[f64],
+        out: &mut [C],
+        laps: &mut crate::work_timers::LocalLaps,
+    ) -> Result<(), FftError> {
+        let result = self.apply_local(c, potential, out);
+        laps.lap_unsplit();
+        result
+    }
     /// Add `weight * |psi|^2 / volume` in that arithmetic order, in e/Bohr^3.
     /// Weight is separate from volume (Bohr^3) to avoid changing rounding.
     /// Exactly zero weight leaves the accumulator untouched and skips FFTs.
@@ -528,6 +542,33 @@ impl<F: crate::Fft3d> GridFusedPlan<F> {
         self.fft
             .transform_in_place(&mut self.real, &mut self.reciprocal, true)
     }
+    /// The single body of `apply_local`; `NoLaps` makes the laps vanish.
+    fn apply_local_with<K: crate::work_timers::Laps>(
+        &mut self,
+        c: &[C],
+        potential: &[f64],
+        out: &mut [C],
+        laps: &mut K,
+    ) -> Result<(), FftError> {
+        use crate::work_timers::Phase;
+        self.validate(c, potential.len())?;
+        if out.len() != c.len() {
+            return Err(FftError::IncompatibleArray);
+        }
+        self.inverse(c)?;
+        laps.lap(Phase::Inverse);
+        for (z, &v) in self.real.iter_mut().zip(potential) {
+            *z *= v;
+        }
+        laps.lap(Phase::Potential);
+        self.fft
+            .transform_in_place(&mut self.real, &mut self.reciprocal, false)?;
+        for (dst, &index) in out.iter_mut().zip(&self.indices) {
+            *dst = self.real[index];
+        }
+        laps.lap(Phase::Forward);
+        Ok(())
+    }
 }
 impl GridFusedPlan<crate::FftPlan3d> {
     pub fn new(shape: [usize; 3], indices: &[[usize; 3]]) -> Result<Self, FftError> {
@@ -542,20 +583,16 @@ impl<F: crate::Fft3d> FusedOperator for GridFusedPlan<F> {
         self.indices.len()
     }
     fn apply_local(&mut self, c: &[C], potential: &[f64], out: &mut [C]) -> Result<(), FftError> {
-        self.validate(c, potential.len())?;
-        if out.len() != c.len() {
-            return Err(FftError::IncompatibleArray);
-        }
-        self.inverse(c)?;
-        for (z, &v) in self.real.iter_mut().zip(potential) {
-            *z *= v;
-        }
-        self.fft
-            .transform_in_place(&mut self.real, &mut self.reciprocal, false)?;
-        for (dst, &index) in out.iter_mut().zip(&self.indices) {
-            *dst = self.real[index];
-        }
-        Ok(())
+        self.apply_local_with(c, potential, out, &mut crate::work_timers::NoLaps)
+    }
+    fn apply_local_laps(
+        &mut self,
+        c: &[C],
+        potential: &[f64],
+        out: &mut [C],
+        laps: &mut crate::work_timers::LocalLaps,
+    ) -> Result<(), FftError> {
+        self.apply_local_with(c, potential, out, laps)
     }
     fn accumulate_density(
         &mut self,

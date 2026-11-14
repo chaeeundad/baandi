@@ -345,6 +345,8 @@ fn coarse_stage(
     ladder: &CutoffLadderOptions,
     report: &mut CutoffLadderReport,
 ) -> Result<CoarseState, ScfError> {
+    // P0.2: Davidson and operator work of this stage is reported as ladder coarse.
+    let _run_stage = dft_numerics::work_timers::enter(dft_numerics::work_timers::RunStage::Coarse);
     let basis = coarse.states[0].basis.clone();
     let session_start = Instant::now();
     let clock = crate::phase_clock::snapshot();

@@ -15,6 +15,7 @@ pub use real::{
 pub mod mkl_backend;
 pub mod pool;
 pub mod switches;
+pub mod work_timers;
 #[cfg(not(feature = "mkl"))]
 pub use RustFftPlan3d as FftPlan3d;
 #[cfg(feature = "mkl")]

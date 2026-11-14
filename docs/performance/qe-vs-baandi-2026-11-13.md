@@ -1,5 +1,7 @@
 # QE 7.6 against BAANDI after the P48 round (si8 to si64, dev08, equal conditions)
 
+> **Comparison rule (user, 2026-11-14, `comparison-rules.md`):** the eight-core columns below put BAANDI THREADS against QE MPI ranks and are NOT LIKE-FOR-LIKE (informational only). Valid eight-core comparisons are threads against QE OpenMP and BAANDI MPI against QE MPI; only the one-core columns and the si32 strict OpenMP number are valid today. The QE OpenMP measurement for all cells is queued.
+
 Status 2026-11-14. This replaces the first 2026-11-13 table, whose QE input lacked `startingwfc = 'atomic'` (QE then runs a worse start and is too slow; see ledger QE-STARTINGWFC-CORRECTION). Measured by the master session on dev08.
 
 QE 7.6, `K_POINTS gamma`, nosym/noinv, `startingwfc = 'atomic'`, `diagonalization = david`, `diago_full_acc`, same cell, cutoff and FFT grid as BAANDI, `nbnd` = BAANDI's band count (si32 68, si64 132), median of 3 runs, UPF SHA-256 51b1... (full hash in the raw log), 569 rows, raw data /scr/mino/rustdft/qe-remeasure-2026-11-13. BAANDI: main 3fea9e8 (MKL build, adoption-round defaults incl. S1 and the residual guard; P48B/C/D/F not in this build), P48A seeds 601-610. Same displaced coordinates for both codes (b1e-7 = +-1e-7 Bohr per Cartesian component, f1e-3 = +-0.001 fractional). Accuracy: BAANDI standard against QE `conv_thr` 1e-8, BAANDI strict against 1e-10.

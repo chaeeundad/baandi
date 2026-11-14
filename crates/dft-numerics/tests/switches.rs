@@ -110,6 +110,7 @@ fn legacy_defaults_are_unchanged() {
         Id::MKL_EVD,
         Id::CUTOFF_LADDER_STANDARD,
         Id::STANDARD_RESIDUAL_GUARD,
+        Id::PHASE_THREADS,
     ] {
         assert!(on(id), "{id:?} must default on");
     }
@@ -121,7 +122,6 @@ fn legacy_defaults_are_unchanged() {
         Id::DAVIDSON_STAGES,
         Id::HAPPLY_OVERLAP,
         Id::HAPPLY_FOLD,
-        Id::PHASE_THREADS,
         Id::SECOND_VECTOR,
     ] {
         assert!(!on(id), "{id:?} must default off");

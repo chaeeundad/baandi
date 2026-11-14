@@ -1,0 +1,12 @@
+# Speed comparison rules (user rule, 2026-11-14; binding for every later task)
+
+1. **Compare like with like in the parallel model.** Multithreading is compared with multithreading, MPI with MPI. Never put BAANDI threads against QE MPI ranks (or the reverse) in a headline column, a ratio, a ledger conclusion or an adoption argument.
+   - Thread against thread: BAANDI `threads = N` (shared memory, one process) against QE with `OMP_NUM_THREADS = N`, one MPI rank (`mpirun -np 1`), MKL threads as QE's OpenMP build uses them; same physical cores, same socket binding.
+   - MPI against MPI: BAANDI built with `--features mpi` (M2 path, `mpirun -np N`, threads 1) against QE `mpirun -np N`, OpenMP and MKL threads 1; same ranks, same cores.
+   - One core is both models at once (BAANDI T=1, QE np=1, OMP 1) and may always be compared.
+2. **Every table states the model of each column** ("threads vs threads", "MPI vs MPI") in the header. A column that mixes models is not allowed; if it exists for information it is labelled "NOT LIKE-FOR-LIKE" and never used for a conclusion.
+3. **Equal conditions beyond the model:** same cell, cutoff, FFT grid, UPF (record SHA-256), band count, start (QE `startingwfc = 'atomic'`), same displaced coordinates from one generator, accuracy class matched (BAANDI standard against QE `conv_thr` 1e-8, strict against 1e-10), idle node, 3 or more repetitions with the median reported, command and binary hashes recorded.
+4. **Consequence for existing tables:** the "T=8 against np=8" columns of `qe-vs-baandi-2026-11-11.md` and `qe-vs-baandi-2026-11-13.md` mix models and are informational only. The valid 8-core comparisons are (a) BAANDI threads against QE OpenMP (needs the QE OMP measurement for every cell; only si32 strict unperturbed exists: QE OMP 8 = 1.957 s) and (b) BAANDI MPI (M2d, np=8) against QE MPI np=8.
+5. **Where the rule applies:** QE comparison tables, README and report statements about being faster or slower than QE, ledger rows that quote a QE ratio, the performance target in AGENTS.md ("match and then exceed QE at equal core count"), and every dev08 request that involves QE.
+
+Reason: QE's OpenMP scaling (1.78x at 8 threads for si32 strict) is far below its MPI scaling (4.18x), so comparing across models misstates the gap (si32 strict 8.74x threads-against-MPI against 3.84x threads-against-threads).

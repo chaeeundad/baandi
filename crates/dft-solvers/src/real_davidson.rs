@@ -1574,6 +1574,15 @@ struct Projection {
     /// at most `NARROW_WIDTH` columns use the streaming dot and fused update
     /// kernels of the GEMM workspace instead of the panel GEMMs.
     narrow: bool,
+    /// PROJECT-WIDE (`BAANDI_PROJECT_WIDE=on`, default off; rounding class on
+    /// MKL builds, bit-identical on pure builds where both routes forward to the
+    /// same product): the long apply X -= Q S of the basis projection and the
+    /// MGS-B cross-panel apply take `multiply_slices_wide_into`, so they reach
+    /// the per-panel dgemm for any block width (only the fixed 256-row panel
+    /// bound applies) instead of falling back to the pure kernel once
+    /// rows x columns exceeds capacity^2. Shapes only; the fixed panels keep the
+    /// result independent of the thread count.
+    project_wide: bool,
 }
 /// DGKS keep ratio: one pass suffices when every column kept at least this
 /// fraction of its unit input norm (`BAANDI_ORTHO=dgks`, parsed in the switches
@@ -1637,6 +1646,7 @@ impl Projection {
             dgks: dgks_keep(),
             block_ortho: dft_numerics::switches::on(dft_numerics::switches::Id::ORTHO_BLOCK),
             narrow: false,
+            project_wide: dft_numerics::switches::on(dft_numerics::switches::Id::PROJECT_WIDE),
             column: vec![0.; n],
         })
     }
@@ -1726,7 +1736,16 @@ impl Projection {
                     self.overlap.as_mut().submatrix_mut(0, 0, q.cols(), count),
                 )?;
                 let overlap_rows = self.overlap.rows();
-                ws.multiply_slices_into(
+                // PROJECT-WIDE: the apply has the flops of the overlap product
+                // above; the wide route takes it through the per-panel dgemm at
+                // any width (MKL builds), the default keeps the square bound.
+                let apply = if self.project_wide {
+                    RealGemmWorkspace::multiply_slices_wide_into
+                } else {
+                    RealGemmWorkspace::multiply_slices_into
+                };
+                apply(
+                    ws,
                     dft_numerics::GemmSite::ProjectionApply,
                     q.as_slice(),
                     q.rows(),
@@ -1793,8 +1812,8 @@ impl Projection {
                         // per-panel dgemm when n w exceeds the square workspace
                         // bound (MKL builds; same fixed 256-row panels, so the
                         // result does not depend on the thread count). MGS-B keeps
-                        // its original call.
-                        let apply = if self.block_ortho {
+                        // its original call unless PROJECT-WIDE is on.
+                        let apply = if self.block_ortho || self.project_wide {
                             RealGemmWorkspace::multiply_slices_wide_into
                         } else {
                             RealGemmWorkspace::multiply_slices_into
@@ -2347,6 +2366,168 @@ mod tests {
                         .all(|(a, b)| a.to_bits() == b.to_bits()),
                     "{name} T={threads}"
                 );
+            }
+        }
+    }
+    /// PROJECT-WIDE at the GEMM level: the apply Q S (n = 4096 rows, 40 basis
+    /// columns, 30 block columns, workspace capacity 96, so rows x columns is
+    /// far above capacity^2 and only the wide route reaches dgemm on MKL builds)
+    /// agrees with the square-bound route entrywise within
+    /// 2 k eps sum_l |Q_il| |S_lj|, is bit-identical at 1, 2, 4 and 8 workers
+    /// (above the parallel threshold), and equals it bitwise on pure builds,
+    /// where both routes forward to the same product.
+    #[test]
+    fn project_wide_apply_matches_square_route() {
+        let (n, k, c, cap) = (4096, 40, 30, 96);
+        let q = Random(61).block(n, k).unwrap();
+        let s = Random(67).block(k, c).unwrap();
+        let product = |wide: bool, threads: usize| {
+            let mut ws =
+                RealGemmWorkspace::with_pool(n, cap, WorkerPool::new(threads).unwrap()).unwrap();
+            let mut out = RealMatrix::zeros(n, c).unwrap();
+            let call = if wide {
+                RealGemmWorkspace::multiply_slices_wide_into
+            } else {
+                RealGemmWorkspace::multiply_slices_into
+            };
+            call(
+                &mut ws,
+                dft_numerics::GemmSite::ProjectionApply,
+                q.as_slice(),
+                n,
+                k,
+                n,
+                RealOp::Identity,
+                s.as_slice(),
+                c,
+                k,
+                out.as_mut(),
+            )
+            .unwrap();
+            out
+        };
+        let square = product(false, 1);
+        let wide = product(true, 1);
+        let mut worst = 0_f64;
+        for j in 0..c {
+            for i in 0..n {
+                let scale: f64 = (0..k).map(|l| (q[(i, l)] * s[(l, j)]).abs()).sum();
+                let bound = 2. * k as f64 * f64::EPSILON * scale;
+                let d = (wide[(i, j)] - square[(i, j)]).abs();
+                assert!(d <= bound, "({i},{j}): {d:e} > {bound:e}");
+                worst = worst.max(d / bound.max(f64::MIN_POSITIVE));
+            }
+        }
+        eprintln!(
+            "PROJECT-WIDE gemm: max |wide - square| / bound = {worst:.3e} (mkl {})",
+            dft_numerics::MKL_BACKEND
+        );
+        if !dft_numerics::MKL_BACKEND {
+            assert!(
+                wide.as_slice()
+                    .iter()
+                    .zip(square.as_slice())
+                    .all(|(a, b)| a.to_bits() == b.to_bits())
+            );
+        }
+        for threads in [2, 4, 8] {
+            let other = product(true, threads);
+            assert!(
+                other
+                    .as_slice()
+                    .iter()
+                    .zip(wide.as_slice())
+                    .all(|(a, b)| a.to_bits() == b.to_bits()),
+                "T={threads}"
+            );
+        }
+    }
+    /// One projection with MGS-B (`blocked`) or the classic sweep and the
+    /// PROJECT-WIDE flag; returns the output and the defect of [q, output].
+    fn project_wide_variant(
+        x: &RealMatrix,
+        q: &RealMatrix,
+        blocked: bool,
+        wide: bool,
+        threads: usize,
+    ) -> (RealMatrix, f64) {
+        let n = x.rows();
+        let cap = 96;
+        let pool = WorkerPool::new(threads).unwrap();
+        let mut ws = RealGemmWorkspace::with_pool(n, cap, pool.clone()).unwrap();
+        let mut projection = Projection::with_pool(n, cap, pool).unwrap();
+        projection.blocked = blocked;
+        projection.block_ortho = false;
+        projection.dgks = Some(0.1);
+        projection.project_wide = wide;
+        let out = projection.run(x, Some(q), &mut ws).unwrap();
+        let both = append(q, &out).unwrap();
+        let defect = orthogonality_defect(&both);
+        (out, defect)
+    }
+    /// PROJECT-WIDE in `Projection::run_into` (basis apply and MGS-B cross-panel
+    /// apply): default off with the environment unset; same kept-column counts
+    /// as the default route on random, nearly and exactly dependent blocks, defect
+    /// inside the 1e-12 contraction gate, random outputs equal to rounding (and
+    /// bitwise on pure builds), and bit-identical at 1, 2, 4 and 8 workers.
+    #[test]
+    fn project_wide_projection_rounding_class_and_thread_independent() {
+        // n = 2048 keeps 8 panels and m n k = 3e6 multiply-adds, above the
+        // parallel threshold of the panel products.
+        let n = 2048;
+        {
+            use dft_numerics::switches::{Id, Source, manifest};
+            let entry = &manifest()[Id::PROJECT_WIDE as usize];
+            let projection = Projection::new(n, 8).unwrap();
+            if entry.source == Source::Default {
+                assert!(!projection.project_wide, "PROJECT_WIDE must default off");
+            }
+        }
+        let pool = WorkerPool::new(1).unwrap();
+        let mut ws = RealGemmWorkspace::with_pool(n, 96, pool.clone()).unwrap();
+        let q = Projection::with_pool(n, 96, pool)
+            .unwrap()
+            .run(&Random(71).block(n, 30).unwrap(), None, &mut ws)
+            .unwrap();
+        for (name, x) in ortho_inputs(n, 50) {
+            for blocked in [false, true] {
+                let tag = format!("{name} blocked={blocked}");
+                let (off, d0) = project_wide_variant(&x, &q, blocked, false, 1);
+                let (on, d1) = project_wide_variant(&x, &q, blocked, true, 1);
+                assert_eq!(on.cols(), off.cols(), "{tag}");
+                assert!(d1 <= 1e-12, "{tag}: defect {d1:e} (off {d0:e})");
+                if name == "random" {
+                    let diff = on
+                        .as_slice()
+                        .iter()
+                        .zip(off.as_slice())
+                        .fold(0_f64, |a, (x, y)| a.max((x - y).abs()));
+                    assert!(diff <= 1e-12, "{tag}: max |on - off| {diff:e}");
+                }
+                if !dft_numerics::MKL_BACKEND {
+                    assert!(
+                        on.as_slice()
+                            .iter()
+                            .zip(off.as_slice())
+                            .all(|(a, b)| a.to_bits() == b.to_bits()),
+                        "{tag}: pure builds must be bit-identical"
+                    );
+                }
+                if !matches!(name, "random" | "near-1e-12" | "exact") {
+                    continue;
+                }
+                for threads in [2, 4, 8] {
+                    let (other, _) = project_wide_variant(&x, &q, blocked, true, threads);
+                    assert_eq!(other.cols(), on.cols(), "{tag} T={threads}");
+                    assert!(
+                        other
+                            .as_slice()
+                            .iter()
+                            .zip(on.as_slice())
+                            .all(|(a, b)| a.to_bits() == b.to_bits()),
+                        "{tag} T={threads}"
+                    );
+                }
             }
         }
     }

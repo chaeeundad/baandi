@@ -211,6 +211,8 @@ table! {
         "panel Gram-Schmidt of the correction block, L2 shape-rule panel width (P48D; overrides MGS; default on in pure builds where it replaces the serial classic sweep, off on MKL builds where MGS-B already blocks)";
     WIDE_DOT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "wide dot products in the orthogonalization";
+    PROJECT_WIDE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "basis-projection apply X -= Q S and MGS-B cross-panel apply through the per-panel dgemm at any block width (MKL builds; pure builds unchanged)";
     // Physics (dft-physics).
     MKL_NONLOCAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "nonlocal products by dgemm on the real Gamma path";

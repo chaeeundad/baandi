@@ -619,7 +619,7 @@ fn expressions_preserve_energy_and_record_resolutions() {
     let plain = c.json("plain", "results.json");
     // Switch manifest (work order A1): the whole table, effective value and source.
     let switches = plain["scf"]["switches"].as_object().unwrap();
-    assert_eq!(switches.len(), 51);
+    assert_eq!(switches.len(), 52);
     let ladder = &switches["BAANDI_CUTOFF_LADDER"];
     assert_eq!(
         (&ladder["value"], &ladder["source"]),

@@ -53,7 +53,19 @@ pub fn sha256(bytes: &[u8]) -> String {
 }
 
 /// Resolve only user-exposed controls, preserving all other engine defaults.
+/// SCF options of every caller except a classic `run`: plain inputs keep the
+/// strict path there (ADR 0043; bands, checkpoints, inspection, relaxation).
 pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
+    options_with(config, Some("not a classic run"))
+}
+/// `single_path_exclusion`: Some(reason) keeps plain inputs on the strict path.
+pub fn options_with(
+    config: &Config,
+    single_path_exclusion: Option<&'static str>,
+) -> Result<ScfOptions, RunError> {
+    let path = config
+        .scf_path(single_path_exclusion)
+        .map_err(|e| error(1, e.to_string()))?;
     let mut o = ScfOptions {
         compat_mode: if config.compat.reference() {
             dft_engine::CompatMode::Reference
@@ -82,7 +94,7 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
         ..ScfOptions::default()
     };
     if let Some(s) = &config.scf {
-        o.standard = s.standard_profile().map_err(|e| error(1, e.to_string()))?;
+        s.standard_profile().map_err(|e| error(1, e.to_string()))?;
         o.standard_stall_guard = s
             .standard_stall_guard()
             .map_err(|e| error(1, e.to_string()))?;
@@ -124,6 +136,8 @@ pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
         }
         o.mixing = s.mixing_strategy().map_err(|e| error(1, e.to_string()))?;
     }
+    o.standard = path.standard;
+    o.verification = path.verification;
     if o.max_iterations == 0
         || [o.energy_tolerance, o.density_tolerance, o.eigen_tolerance]
             .iter()
@@ -464,7 +478,14 @@ pub fn execute_mode(
         preflight.print();
     }
     let prepared = config.prepare().map_err(|e| error(1, e))?;
-    let opts = options(&config)?;
+    // ADR 0043: the runtime modes keep plain inputs on the strict path
+    // (checkpoint v1 cannot carry the verification).
+    let runtime_exclusion =
+        (mode.observe || mode.agent).then_some("observe/agent runtime mode (checkpoint v1)");
+    let opts = options_with(&config, runtime_exclusion)?;
+    let scf_path = config
+        .scf_path(runtime_exclusion)
+        .map_err(|e| error(1, e.to_string()))?;
     let mut potentials = Vec::new();
     let mut species = Vec::new();
     let mut inputs = vec![fs::canonicalize(input)?];
@@ -770,10 +791,25 @@ pub fn execute_mode(
         result["work"] = json!({"davidson_steps":r.history.iter().map(|h|h.davidson_iterations).sum::<usize>(),
             "h_vectors":r.history.iter().map(|h|h.operator_applications).sum::<usize>() + r.spectral_completeness.as_ref().map_or(0, |s| s.operator_applications),
             "first_iteration_redos":r.history.iter().filter(|h|h.standard_redo).count(),
-            "certificate_solves":0});
+            "certificate_solves":r.verification.as_ref().map_or(0, |v| v.attempts.len())});
         println!(
             "convergence_profile: standard; certified: false; standard_threshold_ha: {}",
             p.threshold_ha
+        );
+    }
+    if scf_path.status != "off" {
+        result["single_path"] = json!({"status":scf_path.status,"reason":scf_path.reason,
+            "verification":opts.verification.name(),"switch":"BAANDI_SINGLE_PATH","adr":"0043"});
+    }
+    if let Some(v) = &r.verification {
+        result["verified"] = json!(v.passed());
+        result["verification"] = verification_json(v);
+        result["timings"]["verification_s"] = json!(v.wall().as_secs_f64());
+        println!(
+            "verification: fixed_point; passed: {}; attempts: {}; verification_s: {:.6}",
+            v.passed(),
+            v.attempts.len(),
+            v.wall().as_secs_f64()
         );
     }
     if dft_engine::work_accounting::ENABLED {
@@ -1038,6 +1074,11 @@ pub fn execute_mode(
     )? {
         console.push_str(&force_table(&force));
         result["forces"] = force_json(&force);
+        if opts.standard.is_some() {
+            // ADR 0043: forces of a standard state rest on the passed verification.
+            result["forces"]["preconditions"] = json!({"convergence_profile":"standard",
+                "converged":true,"fixed_point_verification_passed":true});
+        }
     }
     if let Some(stress) = requested_stress(
         &config,
@@ -1056,6 +1097,20 @@ pub fn execute_mode(
         console,
         converged: outcome.converged,
     })
+}
+
+/// ADR 0043 verification record: every attempt, the pass criterion (Coulomb
+/// fixed-point residual against the threshold) and information-only strict criteria.
+fn verification_json(v: &dft_engine::VerificationReport) -> Value {
+    json!({"mode":"fixed_point","passed":v.passed(),"wall_s":v.wall().as_secs_f64(),
+        "attempts":v.attempts.iter().map(|a| json!({"iteration":a.iteration,"passed":a.passed,
+            "coulomb_error_ha":a.coulomb_error_ha,"threshold_ha":a.threshold_ha,
+            "eigen_tolerance_ha":a.eigen_tolerance_ha,"residual_bound_ha":a.residual_bound_ha,
+            "density_residual":a.density_residual,"occupied_eigenvalue_change_ha":a.occupied_eigenvalue_change_ha,
+            "strict_criteria_met":a.strict_criteria_met,"davidson_iterations":a.davidson_iterations,
+            "h_vectors":a.operator_applications,"wall_s":a.wall.as_secs_f64()})).collect::<Vec<_>>(),
+        "criterion":"E_H[F(rho_out) - rho_out] < threshold_ha (and the residual bound when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
+        "note":"delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate"})
 }
 
 /// Reporting boundary only; untested states never receive a passing flag.

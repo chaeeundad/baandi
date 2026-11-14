@@ -378,7 +378,113 @@ pub enum SpinMode {
     Unpolarized,
     Collinear,
 }
+/// ADR 0043: the SCF path of one run and why.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScfPath {
+    pub standard: Option<dft_engine::StandardProfile>,
+    pub verification: dft_engine::Verification,
+    /// `off` (switch off), `explicit_profile`, `applied` or `not_applicable`.
+    pub status: &'static str,
+    pub reason: Option<&'static str>,
+}
 impl Config {
+    /// Path selection (ADR 0043). `caller_exclusion` names a caller that keeps
+    /// the strict path for plain inputs (runtime modes, bands, checkpoints).
+    pub fn scf_path(&self, caller_exclusion: Option<&'static str>) -> Result<ScfPath, ConfigError> {
+        let invalid = |m: &str| ConfigError::Invalid(m.to_owned());
+        let switch = dft_numerics::switches::on(dft_numerics::switches::Id::SINGLE_PATH);
+        let s = self.scf.as_ref();
+        let verify = s.map(Scf::verify).transpose()?.flatten();
+        if let Some(scf) = s.filter(|s| s.convergence_profile.is_some()) {
+            let standard = scf.standard_profile()?;
+            if standard.is_none() && verify.is_some() {
+                return Err(invalid(
+                    "scf.verify applies to the standard path; the strict profile always runs its fixed-point certificate",
+                ));
+            }
+            return Ok(ScfPath {
+                standard,
+                verification: if standard.is_some() && verify == Some(true) {
+                    dft_engine::Verification::FixedPoint
+                } else {
+                    dft_engine::Verification::Off
+                },
+                status: if switch { "explicit_profile" } else { "off" },
+                reason: None,
+            });
+        }
+        let exclusion = if switch {
+            match caller_exclusion {
+                Some(reason) => Some(reason),
+                None => self.single_path_exclusion()?,
+            }
+        } else {
+            None
+        };
+        if !switch || exclusion.is_some() {
+            if s.is_some_and(|s| s.standard_threshold_ha.is_some()) {
+                return Err(invalid(
+                    "standard_threshold_ha requires convergence_profile=standard",
+                ));
+            }
+            return Ok(ScfPath {
+                standard: None,
+                verification: dft_engine::Verification::Off,
+                status: if switch { "not_applicable" } else { "off" },
+                reason: exclusion,
+            });
+        }
+        let threshold = s
+            .and_then(|s| s.standard_threshold_ha)
+            .unwrap_or(dft_engine::StandardProfile::default().threshold_ha);
+        if !threshold.is_finite() || threshold <= 0.0 {
+            return Err(invalid(
+                "scf.standard_threshold_ha must be finite and positive",
+            ));
+        }
+        let verification = if verify == Some(false) {
+            dft_engine::Verification::Off
+        } else {
+            dft_engine::Verification::FixedPoint
+        };
+        if verification == dft_engine::Verification::Off
+            && self.output.as_ref().is_some_and(|o| o.forces)
+        {
+            return Err(invalid(
+                "output.forces on the single SCF path requires the fixed-point verification; remove scf.verify = \"off\" or set scf.convergence_profile = \"strict\"",
+            ));
+        }
+        Ok(ScfPath {
+            standard: Some(dft_engine::StandardProfile {
+                threshold_ha: threshold,
+            }),
+            verification,
+            status: "applied",
+            reason: None,
+        })
+    }
+    /// Inputs that keep the strict path on the single path (ADR 0043 item 5).
+    fn single_path_exclusion(&self) -> Result<Option<&'static str>, ConfigError> {
+        Ok(if self.relax.is_some() {
+            Some("relaxation")
+        } else if self.output.as_ref().is_some_and(|o| o.stress) {
+            Some("stress")
+        } else if self.collinear() {
+            Some("collinear spin")
+        } else if self.finite_temperature()?.is_some() {
+            Some("Fermi-Dirac occupations")
+        } else if self
+            .scf
+            .as_ref()
+            .map(Scf::locking)
+            .transpose()?
+            .is_some_and(|l| l == dft_engine::Locking::Auto)
+        {
+            Some("scf.locking = auto")
+        } else {
+            None
+        })
+    }
     pub fn collinear(&self) -> bool {
         self.spin
             .as_ref()
@@ -504,6 +610,10 @@ pub struct Scf {
     pub standard_threshold_ha: Option<f64>,
     pub standard_stall_guard: Option<String>,
     pub standard_density_forcing: Option<String>,
+    /// ADR 0043: "fixed_point" or "off". Default on the single path
+    /// (`BAANDI_SINGLE_PATH=on`, no explicit profile): fixed_point; on an explicit
+    /// standard profile: off (unchanged behaviour). Error with explicit strict.
+    pub verify: Option<String>,
     pub mixing_metric: Option<String>,
     pub spectral_guard: Option<String>,
     pub locking: Option<String>,
@@ -612,7 +722,13 @@ impl Scf {
             ));
         }
         match self.convergence_profile.as_deref().unwrap_or("strict") {
-            "strict" if self.standard_threshold_ha.is_none() => Ok(None),
+            // Without an explicit profile the threshold may belong to the single
+            // path (ADR 0043); `Config::scf_path` decides and rejects otherwise.
+            "strict"
+                if self.standard_threshold_ha.is_none() || self.convergence_profile.is_none() =>
+            {
+                Ok(None)
+            }
             "strict" => Err(ConfigError::Invalid(
                 "standard_threshold_ha requires convergence_profile=standard".into(),
             )),
@@ -621,6 +737,17 @@ impl Scf {
             })),
             _ => Err(ConfigError::Invalid(
                 "scf.convergence_profile must be strict or standard".into(),
+            )),
+        }
+    }
+    /// `scf.verify`: Some(true) = fixed_point, Some(false) = off, None = default.
+    pub fn verify(&self) -> Result<Option<bool>, ConfigError> {
+        match self.verify.as_deref() {
+            None => Ok(None),
+            Some("fixed_point") => Ok(Some(true)),
+            Some("off") => Ok(Some(false)),
+            Some(_) => Err(ConfigError::Invalid(
+                "scf.verify must be fixed_point or off".into(),
             )),
         }
     }
@@ -1166,13 +1293,20 @@ impl Config {
             s.davidson_capacity_per_band()?;
             s.preconditioner()?;
             s.standard_profile()?;
+            s.verify()?;
+            // ADR 0043: forces on an explicit standard profile need verify = fixed_point.
+            let verified = s.verify()? == Some(true);
             if s.standard_profile()?.is_some()
-                && self.output.as_ref().is_some_and(|o| o.forces || o.stress)
+                && self
+                    .output
+                    .as_ref()
+                    .is_some_and(|o| o.stress || (o.forces && !verified))
             {
                 return Err(ConfigError::Invalid("output.forces/stress: strict convergence profile required; set scf.convergence_profile='strict'".into()));
             }
             s.hartree_mixing()?;
         }
+        self.scf_path(None)?;
         self.cell()?;
         self.symmetry_map()?;
         if let Some(v) = self.output.as_ref().and_then(|o| o.volumetric.as_ref()) {

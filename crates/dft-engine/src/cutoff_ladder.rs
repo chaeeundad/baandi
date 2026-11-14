@@ -320,6 +320,8 @@ fn coarse_problem(
     options.cutoff_hartree *= ladder.fraction;
     // A fixed grid belongs to the full cutoff; the coarse grid follows E1.
     options.grid_override = None;
+    // ADR 0043: the coarse stage only supplies a start; verification belongs to the fine run.
+    options.verification = crate::Verification::Off;
     let mut coarse = ScfProblem::new(&fine.cell, &fine.atoms, potentials, options)?;
     if let Some(floor) = fine.density_floor {
         coarse.set_density_floor(floor)?;

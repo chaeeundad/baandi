@@ -213,14 +213,23 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
         ));
     }
 
+    // ADR 0043: a standard state with a passed fixed-point verification counts
+    // as certified; an unverified standard state is rejected as before.
+    let verified = match &state.electronic {
+        ElectronicState::Fixed(r) => {
+            r.standard.is_some() && r.verification.as_ref().is_some_and(|v| v.passed())
+        }
+        _ => false,
+    };
     let (certified, standard, densities, blocks, quantity) = match &state.electronic {
         ElectronicState::Fixed(r) => (
-            r.certified
-                && r.history
-                    .last()
-                    .and_then(|h| h.fixed_point_certificate.as_ref())
-                    .is_some(),
-            r.standard.is_some(),
+            verified
+                || (r.certified
+                    && r.history
+                        .last()
+                        .and_then(|h| h.fixed_point_certificate.as_ref())
+                        .is_some()),
+            r.standard.is_some() && !verified,
             vec![&r.density],
             r.k_points
                 .iter()
@@ -280,9 +289,9 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
             )
         }
     };
-    if state.options.standard.is_some() || standard {
+    if (state.options.standard.is_some() && !verified) || standard {
         return Err(ScfError::InvalidInput(
-            "observables.forces: strict convergence profile required; rerun with convergence_profile = strict",
+            "observables.forces: strict convergence profile required, or a passed fixed-point verification on the standard path; rerun with convergence_profile = strict or scf.verify = fixed_point",
         ));
     }
     if state.options.density_tolerance > 1e-7

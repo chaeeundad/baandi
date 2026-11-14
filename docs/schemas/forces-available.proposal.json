@@ -192,26 +192,53 @@
       }
     },
     "preconditions": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "convergence_profile",
-        "converged",
-        "fixed_point_certificate_passed"
-      ],
-      "properties": {
-        "convergence_profile": {
-          "const": "strict"
+      "$comment": "ADR 0043: a strict state with a passed certificate, or a standard state with a passed fixed-point verification",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "convergence_profile",
+            "converged",
+            "fixed_point_certificate_passed"
+          ],
+          "properties": {
+            "convergence_profile": {
+              "const": "strict"
+            },
+            "converged": {
+              "type": "boolean",
+              "const": true
+            },
+            "fixed_point_certificate_passed": {
+              "type": "boolean",
+              "const": true
+            }
+          }
         },
-        "converged": {
-          "type": "boolean",
-          "const": true
-        },
-        "fixed_point_certificate_passed": {
-          "type": "boolean",
-          "const": true
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "convergence_profile",
+            "converged",
+            "fixed_point_verification_passed"
+          ],
+          "properties": {
+            "convergence_profile": {
+              "const": "standard"
+            },
+            "converged": {
+              "type": "boolean",
+              "const": true
+            },
+            "fixed_point_verification_passed": {
+              "type": "boolean",
+              "const": true
+            }
+          }
         }
-      }
+      ]
     }
   }
 }

@@ -107,6 +107,63 @@ impl StandardProfile {
     }
 }
 
+/// Post-convergence fixed-point verification of the standard profile (ADR 0043).
+/// `Off` (default) keeps the standard path exactly as before; the strict
+/// profile ignores it (its certificate always runs).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Verification {
+    #[default]
+    Off,
+    /// One more Kohn-Sham map at the delivered density; pass when the Coulomb
+    /// fixed-point residual E_H[F(rho_out) - rho_out] is below the threshold.
+    FixedPoint,
+}
+impl Verification {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::FixedPoint => "fixed_point",
+        }
+    }
+}
+
+/// One verification attempt (ADR 0043, V1 to V6). Energies in Ha.
+#[derive(Clone, Debug)]
+pub struct VerificationAttempt {
+    /// SCF iteration whose output density was verified.
+    pub iteration: usize,
+    pub passed: bool,
+    /// E_H[F(rho_out) - rho_out], the pass criterion (V2).
+    pub coulomb_error_ha: f64,
+    pub threshold_ha: f64,
+    /// Eigen tolerance of the verification solve (the next ratchet value).
+    pub eigen_tolerance_ha: f64,
+    /// Residual bound of the verification solve when the residual guard is on.
+    pub residual_bound_ha: Option<f64>,
+    /// Information only (V3): density L2 change and occupied eigenvalue change,
+    /// and whether the strict certificate criteria would also have passed.
+    pub density_residual: f64,
+    pub occupied_eigenvalue_change_ha: f64,
+    pub strict_criteria_met: bool,
+    pub davidson_iterations: usize,
+    pub operator_applications: usize,
+    pub wall: std::time::Duration,
+}
+
+/// All verification attempts of one run; passed when the last one passed.
+#[derive(Clone, Debug, Default)]
+pub struct VerificationReport {
+    pub attempts: Vec<VerificationAttempt>,
+}
+impl VerificationReport {
+    pub fn passed(&self) -> bool {
+        self.attempts.last().is_some_and(|a| a.passed)
+    }
+    pub fn wall(&self) -> std::time::Duration {
+        self.attempts.iter().map(|a| a.wall).sum()
+    }
+}
+
 /// K maps a signed density to half its Hartree potential times voxel volume.
 /// Thus r.K.r = E_H[r] in Ha. G=0 and modes outside the density sphere vanish.
 /// All FFT buffers and sphere weights are created once, outside SCF steps.

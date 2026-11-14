@@ -8,7 +8,7 @@ pub use start_density::StartDensity;
 #[path = "convergence.rs"]
 mod convergence;
 use convergence::CoulombMetric;
-pub use convergence::StandardProfile;
+pub use convergence::{StandardProfile, Verification, VerificationAttempt, VerificationReport};
 #[path = "collinear.rs"]
 pub mod collinear;
 /// C1 cutoff ladder (coarse-cutoff start, full-cutoff finish); opt-in.
@@ -171,6 +171,9 @@ pub struct ScfOptions {
     pub standard_stall_guard: bool,
     /// Experimental density-residual forcing cap; default off, standard only.
     pub standard_density_forcing: bool,
+    /// ADR 0043: fixed-point verification after a standard stop (default off;
+    /// requires the standard profile).
+    pub verification: Verification,
     pub hartree_mixing: bool,
     pub spectral_guard: crate::SpectralGuard,
     pub locking: dft_solvers::locking::Locking,
@@ -244,6 +247,7 @@ impl Default for ScfOptions {
             standard: None,
             standard_stall_guard: false,
             standard_density_forcing: false,
+            verification: Verification::Off,
             hartree_mixing: false,
             spectral_guard: crate::SpectralGuard::Off,
             locking: dft_solvers::locking::Locking::Off,
@@ -389,6 +393,8 @@ pub struct ScfResult {
     pub(crate) force_identity: crate::force_identity::ForceIdentity,
     pub standard: Option<StandardProfile>,
     pub certified: bool,
+    /// ADR 0043: verification attempts (Some only when verification was on).
+    pub verification: Option<VerificationReport>,
     pub spectral_completeness: Option<crate::SpectralReport>,
     pub energy: EnergyAudit,
     /// B2 (`BAANDI_ENERGY_IDENTITY=on`): identity against explicit nonlocal
@@ -505,6 +511,9 @@ pub struct ScfProblem {
     force_real_rebuild: bool,
     #[cfg(test)]
     force_energy_identity: bool,
+    /// Test hook: the next this-many verifications fail regardless of the criterion.
+    #[cfg(test)]
+    pub(crate) force_verification_failures: usize,
     force_model: crate::force_identity::ModelDescription,
     atoms: Vec<Atom>,
     symmetry: Option<dft_physics::symmetry::DensitySymmetrizer>,
@@ -788,6 +797,11 @@ impl ScfProblem {
         if options.standard_stall_guard && options.standard.is_none() {
             return Err(ScfError::InvalidInput(
                 "standard_stall_guard requires the standard profile",
+            ));
+        }
+        if options.verification != Verification::Off && options.standard.is_none() {
+            return Err(ScfError::InvalidInput(
+                "verification requires the standard profile; the strict profile always runs its certificate",
             ));
         }
         if options
@@ -1094,6 +1108,8 @@ impl ScfProblem {
             force_real_rebuild: false,
             #[cfg(test)]
             force_energy_identity: false,
+            #[cfg(test)]
+            force_verification_failures: 0,
             gamma_real_exclusion,
             reused_fields: None,
             screen_ffts: Vec::new(),
@@ -2787,6 +2803,9 @@ mod threading_tests {
 
 #[path = "spectral_scf.rs"]
 mod spectral_scf;
+#[cfg(test)]
+#[path = "verification_tests.rs"]
+mod verification_tests;
 
 #[cfg(test)]
 mod bands_fit_tests {

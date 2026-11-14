@@ -319,6 +319,7 @@ pub(crate) fn options_identical(a: &ScfOptions, b: &ScfOptions) -> bool {
         && a.standard == b.standard
         && a.standard_stall_guard == b.standard_stall_guard
         && a.standard_density_forcing == b.standard_density_forcing
+        && a.verification == b.verification
         && a.hartree_mixing == b.hartree_mixing
         && solver
         && eq!(

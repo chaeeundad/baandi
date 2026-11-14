@@ -967,6 +967,40 @@ work is still reported when available. Use `--qe-output /path/pw.out` (repeatabl
 Raw QE parsing was tested on all four existing k222/k222s/si30 outputs.
 The validation-claim scripts reject non-strict or explicitly uncertified results.
 See [measured accuracy, limitations and commands](performance/p17a-standard-profile.md).
+
+### Single SCF path and fixed-point verification (ADR 0043, switch, default off)
+
+`BAANDI_SINGLE_PATH=on` makes a classic `run` of an input **without**
+`scf.convergence_profile` use the standard profile with
+`standard_threshold_ha` from the input (default 5e-9 Ha) and Pulay beta 0.5,
+followed by a **fixed-point verification** after the stop rule fires:
+one more ordinary map at the delivered output density (warm start, eigen
+tolerance = the next ratchet value) passes when the Coulomb fixed-point residual
+`E_H[F(rho_out) - rho_out]` is below the threshold (and, with
+`BAANDI_STANDARD_RESIDUAL_GUARD=on`, the residual bound of that solve). A failed
+verification continues SCF and verifies again at the next stop; the delivered
+state is always the converged step's own (verification never changes a number).
+
+`[scf] verify = "fixed_point" | "off"`: default `fixed_point` on the single path,
+`off` on an explicit `convergence_profile = "standard"` (unchanged behaviour);
+`verify` with an explicit `strict` profile is an input error (strict always
+certifies). On the strict path chosen implicitly (switch off) `verify` has no
+effect. An explicit `strict` profile keeps today's strict behaviour bit for bit.
+
+Results with the switch on carry `single_path` (`status`: `applied`,
+`explicit_profile` or `not_applicable` with `reason`; `verification`). Verified
+runs carry `verified`, `verification` (every attempt: `coulomb_error_ha`,
+`threshold_ha`, `eigen_tolerance_ha`, `residual_bound_ha`, `density_residual`,
+`occupied_eigenvalue_change_ha`, information-only `strict_criteria_met`, work and
+`wall_s`) and `timings.verification_s`; verification work is also in each history
+entry's `fixed_point_certificate` and in `timings.certificate`.
+
+Forces accept a standard state with a passed verification (`forces.preconditions`
+says so); `output.forces` with `verify = "off"` on the single path is an input
+error. Relaxation, stress, collinear spin, Fermi-Dirac occupations,
+`scf.locking = "auto"`, the observe/agent runtime modes and the non-`run`
+commands keep plain inputs on the strict path (`not_applicable`). Checkpoint v1
+cannot encode a continuation with verification on.
 ## Finite-temperature occupations (P17B)
 
 Omitting `[occupations]` preserves fixed insulating occupations and all existing

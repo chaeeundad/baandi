@@ -255,6 +255,8 @@ table! {
         "overrides scf.cutoff_ladder / fraction of the input file";
     RELAX_EXTRAPOLATION: Kind::Override { valid: relax_extrapolation_valid }, "config",
         "none, first_order, second_order", "overrides the relaxation density extrapolation of the input file";
+    SINGLE_PATH: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "ADR 0043: inputs without scf.convergence_profile use the standard profile with the fixed-point verification after convergence (scf.verify)";
     DGEMM_TIMERS: Kind::Presence, "off", "any value (presence)",
         "print per-site dgemm timers at exit (dgemm-timers builds)";
     PSEUDO_DIR: Kind::Path, "platform cache", "absolute path",

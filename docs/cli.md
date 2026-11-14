@@ -729,7 +729,7 @@ fine step uses the tolerance the coarse ratchet would use next, or the cap with
 seeds the full-cutoff Pulay mixer with the last h coarse difference pairs,
 prolonged like the density. The block then also reports `standard`,
 `standard_seed_ha`, `secant_requested`, `secant_seeded` and `secant_fallback`.
-`BAANDI_STANDARD_RESIDUAL_GUARD=on` (default off, any standard run, ladder or
+`BAANDI_STANDARD_RESIDUAL_GUARD=on` (default ON since 2026-11-13, any standard run, ladder or
 not) adds a second condition to the standard-class stop: the second-order
 band-energy bound sum_k w_k sum_occupied f_i |r_i|^2 (Ha, residual norms of the
 latest eigensolve, coefficient 1/Ha; derivation at

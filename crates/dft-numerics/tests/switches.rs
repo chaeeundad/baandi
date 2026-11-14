@@ -126,10 +126,15 @@ fn legacy_defaults_are_unchanged() {
         Id::PROJECT_WIDE,
         Id::B1_NARROW,
         Id::SINGLE_PATH,
+        Id::M2_B5,
     ] {
         assert!(!on(id), "{id:?} must default off");
     }
     assert!(on(Id::M2_DGEMM) && on(Id::M2_LEAN));
+    assert_eq!(
+        switches::resolve(switches::switch(Id::M2_EIGEN), None).0,
+        Value::Choice("replicated")
+    );
     assert_eq!(
         switches::resolve(switches::switch(Id::M2_ORTHO), None).0,
         Value::Choice("serial")
@@ -180,5 +185,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::CUTOFF_LADDER), Value::Raw(None));
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
-    assert_eq!(TABLE.len(), 56);
+    assert_eq!(TABLE.len(), 58);
 }

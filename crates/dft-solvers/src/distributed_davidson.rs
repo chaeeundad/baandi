@@ -7,6 +7,7 @@
 //! construction); this solver is used for two or more ranks.
 use crate::{
     BandTolerances, RealLinearOperator, SolverError,
+    bordered::{Bordered, MAX_STREAK},
     distributed::{column_norms_squared, gram, project_out_with, rotate_local_with},
     real_davidson::{RealEigenSolution, free_electron_initial_guess},
 };
@@ -72,6 +73,83 @@ pub fn stage_seconds() -> Vec<(&'static str, f64)> {
 }
 fn stage_add(i: usize, start: Instant) {
     STAGE_NANOS[i].fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+}
+
+// Reduced eigenproblem accounting (docs/performance/mpi-reduced-eigen-analysis.md):
+// one histogram slot per matrix order (orders above the last slot are counted in
+// it), plus the number of solves by kind. Process-wide, no allocation.
+const ORDER_SLOTS: usize = 4096;
+static SOLVE_ORDERS: [AtomicU64; ORDER_SLOTS] = [const { AtomicU64::new(0) }; ORDER_SLOTS];
+// Sum of m^3 (f64 bits), single-column appends, bordered updates, root broadcasts.
+static SOLVE_COUNTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+
+/// Distribution of the reduced eigenproblems solved by this process: orders,
+/// cubic work and how each was solved. `p90` and `max` are exact orders.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ReducedSolveStats {
+    /// Reduced eigenproblems (one per Davidson iteration).
+    pub solves: u64,
+    pub mean_order: f64,
+    pub p90_order: usize,
+    pub max_order: usize,
+    /// Sum of m^3 over all solves (the dense EVD cost model).
+    pub sum_cubed: f64,
+    /// Iterations whose reduced matrix grew by exactly one column.
+    pub single_column: u64,
+    /// Solves done by the bordered (secular) update (`BAANDI_M2_B5=on`).
+    pub bordered: u64,
+    /// Solves done on rank 0 and broadcast (`BAANDI_M2_EIGEN=root`).
+    pub broadcast: u64,
+}
+
+/// The reduced-solve distribution accumulated so far by this process.
+pub fn reduced_solve_stats() -> ReducedSolveStats {
+    let counts: Vec<u64> = SOLVE_ORDERS
+        .iter()
+        .map(|c| c.load(Ordering::Relaxed))
+        .collect();
+    let solves: u64 = counts.iter().sum();
+    let mut sum = 0.0;
+    let mut max_order = 0;
+    for (m, &c) in counts.iter().enumerate() {
+        sum += m as f64 * c as f64;
+        if c > 0 {
+            max_order = m;
+        }
+    }
+    let target = (solves as f64 * 0.9).ceil() as u64;
+    let mut seen = 0;
+    let mut p90_order = 0;
+    for (m, &c) in counts.iter().enumerate() {
+        seen += c;
+        if c > 0 && seen >= target {
+            p90_order = m;
+            break;
+        }
+    }
+    let load = |i: usize| SOLVE_COUNTS[i].load(Ordering::Relaxed);
+    ReducedSolveStats {
+        solves,
+        mean_order: if solves > 0 { sum / solves as f64 } else { 0.0 },
+        p90_order,
+        max_order,
+        sum_cubed: f64::from_bits(load(0)),
+        single_column: load(1),
+        bordered: load(2),
+        broadcast: load(3),
+    }
+}
+
+fn record_solve(m: usize, fresh: usize) {
+    SOLVE_ORDERS[m.min(ORDER_SLOTS - 1)].fetch_add(1, Ordering::Relaxed);
+    let cubed = (m as f64).powi(3);
+    // f64 accumulation through the bit pattern (compare-and-swap loop).
+    let _ = SOLVE_COUNTS[0].try_update(Ordering::Relaxed, Ordering::Relaxed, |b| {
+        Some((f64::from_bits(b) + cubed).to_bits())
+    });
+    if fresh == 1 {
+        SOLVE_COUNTS[1].fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 /// Row partition: `index[r]` lists the global row of every local row of rank `r`
@@ -211,6 +289,14 @@ pub struct DistributedTuning {
     /// `BAANDI_M2_LEAN=on`: residual and correction blocks by slice loops
     /// (bit-identical).
     pub lean: bool,
+    /// `BAANDI_M2_EIGEN=root`: rank 0 solves the reduced eigenproblem and
+    /// broadcasts the lowest `bands` pairs (bit-identical: the same solve on the
+    /// same replicated matrix; removes the concurrent replicated solves).
+    pub eigen_root: bool,
+    /// `BAANDI_M2_B5=on`: bordered (secular) update of the reduced
+    /// eigenproblem when exactly one column was appended (the serial solver's B5;
+    /// rounding class).
+    pub bordered: bool,
 }
 impl DistributedTuning {
     /// The switches of this process; the serial-order panel and DGKS rules are the
@@ -231,6 +317,8 @@ impl DistributedTuning {
             dgks: crate::real_davidson::dgks_keep(),
             panel,
             lean: on(Id::M2_LEAN),
+            eigen_root: choice(Id::M2_EIGEN) == "root",
+            bordered: on(Id::M2_B5),
         }
     }
     /// The tuning of the calling thread: the test override when set
@@ -519,6 +607,41 @@ fn orthonormalize_tuned<C: Collective>(
     }
 }
 
+/// One reduced eigenproblem: the bordered (secular) update when exactly one
+/// column was appended to an unbroken base (`BAANDI_M2_B5=on`, same rule and
+/// streak bound as the serial solver), otherwise the dense solve. With B5 the
+/// result becomes the next base. All pairs are written.
+fn solve_reduced(
+    eig: &mut RealEighWorkspace,
+    b5: Option<(&mut Bordered, &mut RealGemmWorkspace)>,
+    reduced: &RealMatrix,
+    prefix: usize,
+    values: &mut [f64],
+    coefficients: &mut RealMatrix,
+) -> Result<(), SolverError> {
+    let m = reduced.rows();
+    let Some((b, ws)) = b5 else {
+        eig.solve_into(reduced, values, coefficients)?;
+        return Ok(());
+    };
+    if prefix == 0 {
+        b.invalidate();
+    }
+    let bordered = prefix + 1 == m
+        && b.order == prefix
+        && b.streak < MAX_STREAK
+        && b.update(ws, reduced, values, coefficients, None)?;
+    if bordered {
+        b.streak += 1;
+        SOLVE_COUNTS[2].fetch_add(1, Ordering::Relaxed);
+    } else {
+        eig.solve_into(reduced, values, coefficients)?;
+        b.streak = 0;
+    }
+    b.store(values, coefficients);
+    Ok(())
+}
+
 fn append_columns(a: &mut RealMatrix, b: &RealMatrix) -> Result<(), SolverError> {
     let mut data = a.as_slice().to_vec();
     data.extend_from_slice(b.as_slice());
@@ -741,8 +864,32 @@ impl crate::RealDavidson {
         let capacity = self.max_subspace.max(bands * capacity_per_band).min(n);
         let nl = layout.nl();
         let max_rows = layout.counts.iter().copied().max().unwrap_or(1);
+        let b5_pool = pool.clone();
         let mut ws = RealGemmWorkspace::with_pool(max_rows.max(1), capacity.max(1), pool)?;
-        let mut eig = RealEighWorkspace::new(capacity)?;
+        // Reduced eigenproblem: replicated on every rank, or on rank 0 with a
+        // broadcast of the lowest `bands` pairs (status, values, coefficients).
+        let root_mode = tuning.eigen_root && comm.size() > 1;
+        let solves_here = !root_mode || comm.rank() == 0;
+        let mut eig = if solves_here {
+            Some(RealEighWorkspace::new(capacity)?)
+        } else {
+            None
+        };
+        // B5 state and its own GEMM workspace (the coefficient product is
+        // capacity x capacity, independent of the local row count).
+        let mut b5 = if tuning.bordered && solves_here {
+            Some((
+                Bordered::new(capacity),
+                RealGemmWorkspace::with_pool(capacity.max(1), capacity.max(1), b5_pool)?,
+            ))
+        } else {
+            None
+        };
+        let mut eigen_buffer = if root_mode {
+            vec![0.0; 1 + bands + capacity * bands]
+        } else {
+            Vec::new()
+        };
         let mut rng = Rng(self.seed);
         let panel = tuning.panel_width(max_rows.max(1));
         let wide = tuning.wide_gemm;
@@ -836,6 +983,7 @@ impl crate::RealDavidson {
                 }
             }
             let fresh = m - reduced_width;
+            let prefix = reduced_width;
             let mut fresh_products = RealMatrix::zeros(nl, fresh)?;
             fresh_products
                 .as_mut_slice()
@@ -855,7 +1003,40 @@ impl crate::RealDavidson {
             let mut values = vec![0.0; m];
             let mut coefficients = RealMatrix::zeros(m, m)?;
             let t0 = Instant::now();
-            eig.solve_into(&reduced, &mut values, &mut coefficients)?;
+            record_solve(m, fresh);
+            let mut status: Result<(), SolverError> = Ok(());
+            if let Some(eig) = eig.as_mut() {
+                status = solve_reduced(
+                    eig,
+                    b5.as_mut().map(|(b, g)| (b, g)),
+                    &reduced,
+                    prefix,
+                    &mut values,
+                    &mut coefficients,
+                );
+            }
+            if root_mode {
+                let buffer = &mut eigen_buffer[..1 + bands + m * bands];
+                if comm.rank() == 0 {
+                    buffer[0] = if status.is_ok() { 0.0 } else { 1.0 };
+                    buffer[1..1 + bands].copy_from_slice(&values[..bands]);
+                    buffer[1 + bands..].copy_from_slice(&coefficients.as_slice()[..m * bands]);
+                }
+                comm.bcast_f64(buffer, 0).map_err(comm_error)?;
+                if comm.rank() != 0 {
+                    if buffer[0] != 0.0 {
+                        status = Err(SolverError::Application(
+                            "reduced eigenproblem failed on rank 0".into(),
+                        ));
+                    } else {
+                        values[..bands].copy_from_slice(&buffer[1..1 + bands]);
+                        coefficients.as_mut_slice()[..m * bands]
+                            .copy_from_slice(&buffer[1 + bands..]);
+                    }
+                }
+                SOLVE_COUNTS[3].fetch_add(1, Ordering::Relaxed);
+            }
+            status?;
             stage_add(1, t0);
             let t0 = Instant::now();
             let lowest = RealMatrix::new(m, bands, coefficients.as_slice()[..m * bands].to_vec())?;

@@ -9,7 +9,12 @@
 //!
 //! DFT_SI_UPF=/path/Si.pz-vbc.UPF BAANDI_DAVIDSON_STAGES=on \
 //!   cargo test --release -p dft-engine --test m2_entry_cost -- --ignored --nocapture
-//! Optional: M2_PROFILE_CASE=si8, si16 or si32 (default si8), M2_PROFILE_RANKS=2 (comma list).
+//! Optional: M2_PROFILE_CASE=si8, si16, si32 or si64 (default si8), M2_PROFILE_RANKS=2 (comma list),
+//! M2_PROFILE_CAPACITY=<2..12> (Davidson capacity per band, default 6),
+//! M2_PROFILE_SERIAL=off (skip the threads-only reference run).
+//! The reduced-eigenproblem distribution (orders, sum of m^3, single-column
+//! appends, bordered and broadcast solves) is printed per rank
+//! (docs/performance/mpi-reduced-eigen-analysis.md).
 #[allow(dead_code)]
 mod common;
 use dft_engine::{GammaReal, ScfOptions, ScfProblem, ScfResult, SpeciesPotential, parallel};
@@ -31,15 +36,16 @@ const BASE: [[f64; 3]; 8] = [
 ];
 
 fn structure(case: &str) -> (Cell, Vec<Atom>) {
-    let (rx, ry) = match case {
-        "si16" => (2, 1),
-        "si32" => (2, 2),
-        _ => (1, 1),
+    let (rx, ry, rz) = match case {
+        "si16" => (2, 1, 1),
+        "si32" => (2, 2, 1),
+        "si64" => (2, 2, 2),
+        _ => (1, 1, 1),
     };
     let cell = Cell::from_user_rows_bohr([
         [A * rx as f64, 0., 0.],
         [0., A * ry as f64, 0.],
-        [0., 0., A],
+        [0., 0., A * rz as f64],
     ])
     .unwrap();
     // Fixed fractional displacements of amplitude 1e-3 (deterministic LCG, seed 601).
@@ -51,15 +57,17 @@ fn structure(case: &str) -> (Cell, Vec<Atom>) {
         ((s >> 11) as f64 / (1u64 << 53) as f64) * 2. - 1.
     };
     let mut atoms = Vec::new();
-    for i in 0..rx {
-        for j in 0..ry {
-            for p in BASE {
-                let q = [
-                    (p[0] + i as f64) / rx as f64 + 1e-3 * next(),
-                    (p[1] + j as f64) / ry as f64 + 1e-3 * next(),
-                    p[2] + 1e-3 * next(),
-                ];
-                atoms.push(Atom::new("Si", q));
+    for k in 0..rz {
+        for i in 0..rx {
+            for j in 0..ry {
+                for p in BASE {
+                    let q = [
+                        (p[0] + i as f64) / rx as f64 + 1e-3 * next(),
+                        (p[1] + j as f64) / ry as f64 + 1e-3 * next(),
+                        (p[2] + k as f64) / rz as f64 + 1e-3 * next(),
+                    ];
+                    atoms.push(Atom::new("Si", q));
+                }
             }
         }
     }
@@ -86,6 +94,10 @@ fn run(case: &str, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult
             gamma_real: GammaReal::Auto,
             cutoff_hartree: 15.,
             threads: 1,
+            davidson_capacity_per_band: std::env::var("M2_PROFILE_CAPACITY")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(6),
             ..Default::default()
         },
     )
@@ -127,6 +139,12 @@ fn m2_entry_cost_profile() {
         .split(',')
         .map(|s| s.trim().parse().unwrap())
         .collect();
+    if std::env::var("M2_PROFILE_SERIAL").as_deref() == Ok("off") {
+        for &p in &ranks {
+            distributed_rows(&case, p, None);
+        }
+        return;
+    }
     let t = Instant::now();
     let serial = run(&case, None);
     let serial_wall = t.elapsed().as_secs_f64();
@@ -153,16 +171,37 @@ fn m2_entry_cost_profile() {
         wt.apply, wt.local, wt.nonlocal_projection, wt.nonlocal_back, wt.apply_columns
     );
     for &p in &ranks {
+        distributed_rows(&case, p, Some(&serial));
+    }
+}
+
+fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
+    {
+        let solves_before = dft_solvers::distributed_davidson::reduced_solve_stats();
         let before = snapshot();
         let t = Instant::now();
-        let results = simulate(p, |comm: &SimRank| run(&case, Some(Arc::new(comm.clone()))));
+        let results = simulate(p, |comm: &SimRank| run(case, Some(Arc::new(comm.clone()))));
         let wall = t.elapsed().as_secs_f64();
         let after = snapshot();
         let r = &results[0];
         println!(
-            "{case} M2 np={p}: wall {wall:.3} s, dE {:.3e} Ha, (SCF, Davidson, H) {:?}",
-            (r.total_hartree() - serial.total_hartree()).abs(),
+            "{case} M2 np={p}: wall {wall:.3} s, E {:.12} Ha, dE vs serial {:.3e} Ha, (SCF, Davidson, H) {:?}",
+            r.total_hartree(),
+            serial.map_or(f64::NAN, |s| (r.total_hartree() - s.total_hartree()).abs()),
             work(r)
+        );
+        let s = dft_solvers::distributed_davidson::reduced_solve_stats();
+        let pp = p as u64;
+        let solves = (s.solves - solves_before.solves) / pp;
+        println!(
+            "  reduced solves per rank: {solves}, orders mean {:.1} (cumulative over the process) p90 {} max {}, sum m^3 {:.3e}, single-column {} bordered (summed over ranks) {} broadcast {}",
+            s.mean_order,
+            s.p90_order,
+            s.max_order,
+            (s.sum_cubed - solves_before.sum_cubed) / p as f64,
+            (s.single_column - solves_before.single_column) / pp,
+            (s.bordered - solves_before.bordered),
+            (s.broadcast - solves_before.broadcast) / pp
         );
         let per = |a: f64, b: f64| (a - b) / p as f64;
         let line: Vec<String> = after

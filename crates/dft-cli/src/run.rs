@@ -830,6 +830,12 @@ pub fn execute_mode(
     if crate::parallel::size() > 1 {
         let m2_on = dft_engine::parallel::m2_enabled();
         let (m2_counts, m2_stages) = dft_engine::parallel::m2_stats();
+        let s = dft_engine::parallel::reduced_solve_stats();
+        let reduced_solves = json!({
+            "solves": s.solves, "mean_order": s.mean_order, "p90_order": s.p90_order,
+            "max_order": s.max_order, "sum_order_cubed": s.sum_cubed,
+            "single_column": s.single_column, "bordered": s.bordered, "broadcast": s.broadcast,
+        });
         result["parallel"] = json!({
             "model": if m2_on { "mpi_stick_rows" } else { "mpi_row_block" },
             "m2": {
@@ -848,6 +854,7 @@ pub fn execute_mode(
                 .into_iter()
                 .map(|(name, seconds)| json!({"stage": name, "seconds": seconds}))
                 .collect::<Vec<_>>(),
+            "reduced_solves": reduced_solves,
             "collectives": dft_engine::parallel::collective_stats()
                 .into_iter()
                 .map(|(op, calls, seconds)| json!({"op": op, "calls": calls, "seconds": seconds}))

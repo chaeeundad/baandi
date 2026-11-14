@@ -128,9 +128,14 @@ fn legacy_defaults_are_unchanged() {
         Id::SINGLE_PATH,
         Id::M2_DGEMM,
         Id::M2_LEAN,
+        Id::M2_B5,
     ] {
         assert!(!on(id), "{id:?} must default off");
     }
+    assert_eq!(
+        switches::resolve(switches::switch(Id::M2_EIGEN), None).0,
+        Value::Choice("replicated")
+    );
     assert_eq!(
         switches::resolve(switches::switch(Id::M2_ORTHO), None).0,
         Value::Choice("classic")
@@ -181,5 +186,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::CUTOFF_LADDER), Value::Raw(None));
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
-    assert_eq!(TABLE.len(), 56);
+    assert_eq!(TABLE.len(), 58);
 }

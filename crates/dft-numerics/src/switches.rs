@@ -194,6 +194,12 @@ table! {
         "1D kernels of the M2 distributed FFT (mkl: MKL DFTI batch lanes on MKL builds, rounding class; pure builds stay rustfft)";
     M2_LEAN: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "distributed Davidson residuals and corrections by slice loops without per-element index checks; bit-identical";
+    // MPI reduced eigenproblem (docs/performance/mpi-reduced-eigen-analysis.md); default off.
+    M2_EIGEN: Kind::Choice { allowed: &["replicated", "root"], default: "replicated" }, "replicated",
+        "replicated, root",
+        "distributed Davidson reduced eigenproblem: replicated (every rank solves) or root (rank 0 solves and broadcasts the lowest pairs; bit-identical)";
+    M2_B5: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "distributed Davidson bordered (secular) reduced eigen update when one column was appended (the serial B5; rounding class)";
     // Solvers (dft-solvers).
     B1: Kind::Choice { allowed: &["on", "off", "standard", "strict"], default: "on" }, "on",
         "on, off, standard, strict", "B1 selected-root Davidson iterations";
@@ -520,6 +526,20 @@ mod tests {
         assert_eq!(
             eval(Id::M2_ORTHO, Some("serial")).0,
             Value::Choice("serial")
+        );
+        assert_eq!(eval(Id::M2_B5, None), (Value::Choice("off"), Default));
+        assert_eq!(eval(Id::M2_B5, Some("on")), (Value::Choice("on"), Env));
+        assert_eq!(
+            eval(Id::M2_EIGEN, None),
+            (Value::Choice("replicated"), Default)
+        );
+        assert_eq!(
+            eval(Id::M2_EIGEN, Some("root")),
+            (Value::Choice("root"), Env)
+        );
+        assert_eq!(
+            eval(Id::M2_EIGEN, Some("on")),
+            (Value::Choice("replicated"), InvalidToDefault)
         );
         assert_eq!(eval(Id::M2_FFT, None).0, Value::Choice("rust"));
         assert_eq!(eval(Id::M2_FFT, Some("mkl")).0, Value::Choice("mkl"));

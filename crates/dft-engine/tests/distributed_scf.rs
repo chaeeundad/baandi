@@ -325,3 +325,77 @@ fn m2_tuned_solver_matches_threads_only() {
         }
     }
 }
+
+/// MPI reduced eigenproblem (docs/performance/mpi-reduced-eigen-analysis.md):
+/// on top of the entry-cost stack, `M2_EIGEN=root` (rank 0 solves, broadcast)
+/// gives bit-identical energies and densities to the replicated solve, and
+/// `M2_B5=on` (bordered update) stays within the accuracy classes of the
+/// threads-only run (strict 1e-10 Ha, standard 5e-9 Ha); ranks agree bit for
+/// bit and a fixed rank count is bit-reproducible. Cubic and skewed cells, 2 and
+/// 3 ranks, strict and standard.
+#[test]
+fn m2_reduced_eigen_switches_keep_classes() {
+    use dft_solvers::distributed_davidson::{DistributedTuning, set_tuning_override};
+    let stack = DistributedTuning {
+        serial_ortho: true,
+        wide_gemm: true,
+        lean: true,
+        ..DistributedTuning::from_env()
+    };
+    let arm = |tuning: DistributedTuning, kind: usize, ranks: usize, standard: bool| {
+        simulate(ranks, |comm: &SimRank| {
+            set_tuning_override(Some(tuning));
+            let r = run_m2_profile(kind, Some(Arc::new(comm.clone())), standard);
+            set_tuning_override(None);
+            r
+        })
+    };
+    let density_bits = |r: &ScfResult| r.density.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    for (standard, limit) in [(false, 1e-10), (true, 5e-9)] {
+        for kind in 0..2 {
+            let serial = run_m2_profile(kind, None, standard);
+            for ranks in [2usize, 3] {
+                let replicated = arm(stack, kind, ranks, standard);
+                let root = DistributedTuning {
+                    eigen_root: true,
+                    ..stack
+                };
+                let rooted = arm(root, kind, ranks, standard);
+                for (a, b) in rooted.iter().zip(&replicated) {
+                    assert_eq!(
+                        a.total_hartree().to_bits(),
+                        b.total_hartree().to_bits(),
+                        "root broadcast changed the energy"
+                    );
+                    assert_eq!(density_bits(a), density_bits(b));
+                }
+                let b5 = DistributedTuning {
+                    bordered: true,
+                    eigen_root: true,
+                    ..stack
+                };
+                let bordered = arm(b5, kind, ranks, standard);
+                let again = arm(b5, kind, ranks, standard);
+                for (r, res) in bordered.iter().enumerate() {
+                    let de = (res.total_hartree() - serial.total_hartree()).abs();
+                    println!(
+                        "B5+root standard={standard} kind {kind} P={ranks} rank {r}: dE {de:e} Ha, Davidson {} vs {}",
+                        total_davidson(res),
+                        total_davidson(&serial)
+                    );
+                    assert!(de < limit, "kind {kind} P={ranks}: dE {de:e}");
+                    assert_eq!(
+                        res.total_hartree().to_bits(),
+                        bordered[0].total_hartree().to_bits(),
+                        "ranks disagree"
+                    );
+                    assert_eq!(
+                        res.total_hartree().to_bits(),
+                        again[r].total_hartree().to_bits(),
+                        "not bit-reproducible at fixed rank count"
+                    );
+                }
+            }
+        }
+    }
+}

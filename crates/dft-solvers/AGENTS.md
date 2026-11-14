@@ -62,3 +62,15 @@ on pure builds), `BAANDI_M2_LEAN=on` (bit-identical slice loops). `BAANDI_M2_FFT
 selects MKL lanes in `DistributedPairFft` (`with_lanes`). All default off; they apply
 to the M1 and M2 distributed solvers. Analysis and dev08 request:
 docs/performance/mpi-entry-cost-analysis.md.
+
+## MPI reduced eigenproblem switches (2026-11-15)
+
+Same `DistributedTuning` mechanism: `BAANDI_M2_EIGEN=root` (`eigen_root`: rank 0
+solves the reduced eigenproblem, one broadcast of status, the lowest `bands` values
+and coefficient columns; bit-identical to the replicated solve; a failure on rank 0
+is broadcast so no rank waits forever) and `BAANDI_M2_B5=on` (`bordered`: the serial
+B5 secular update from `bordered.rs` when exactly one column was appended, own
+capacity x capacity GEMM workspace; rounding class). Both default off.
+`reduced_solve_stats()` gives the order distribution (mean, p90, max, sum of m^3,
+single-column appends, bordered and broadcast solves), written to results.json
+`parallel.reduced_solves`. Analysis: docs/performance/mpi-reduced-eigen-analysis.md.

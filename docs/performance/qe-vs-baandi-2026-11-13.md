@@ -1,6 +1,6 @@
 # QE 7.6 against BAANDI after the P48 round (si8 to si64, dev08, equal conditions)
 
-> **Comparison rule (user, 2026-11-14, `comparison-rules.md`):** the eight-core columns below put BAANDI THREADS against QE MPI ranks and are NOT LIKE-FOR-LIKE (informational only). Valid eight-core comparisons are threads against QE OpenMP and BAANDI MPI against QE MPI; only the one-core columns and the si32 strict OpenMP number are valid today. The QE OpenMP measurement for all cells is queued.
+> **Comparison rule (user, 2026-11-14, `comparison-rules.md`):** only like-for-like models are compared (one core, threads against threads, MPI against MPI). Mixed threads-against-MPI columns of the first version of this document were removed.
 
 Status 2026-11-14. This replaces the first 2026-11-13 table, whose QE input lacked `startingwfc = 'atomic'` (QE then runs a worse start and is too slow; see ledger QE-STARTINGWFC-CORRECTION). Measured by the master session on dev08.
 
@@ -17,23 +17,6 @@ QE 7.6, `K_POINTS gamma`, nosym/noinv, `startingwfc = 'atomic'`, `diagonalizatio
 | si32 | 1e-10 | 3.484 | 3.512 | 7.413 | 0.833 | 0.860 | 2.138 |
 | si64 | 1e-8 | 16.076 | 15.966 | 26.548 | 3.122 | 3.169 | 6.449 |
 | si64 | 1e-10 | 21.510 | 21.896 | 30.467 | 4.115 | 4.564 | 7.497 |
-
-## BAANDI divided by QE, geometry b1e-7 (BAANDI P48A medians, MKL; above 1 means BAANDI is slower)
-| cell | class | T=1 / np=1 (valid: one core) | T=8 / np=8 (BAANDI threads vs QE MPI: NOT LIKE-FOR-LIKE, informational) |
-|---|---|---|---|
-| si8 | standard | 0.459 / 0.331 = 1.39 | 0.449 / 0.225 = 2.00 |
-| si8 | strict | 0.939 / 0.414 = 2.27 | 0.816 / 0.244 = 3.34 |
-| si16 | standard | 1.964 / 0.984 = 2.00 | 1.471 / 0.403 = 3.65 |
-| si16 | strict | 3.302 / 1.415 = 2.33 | 2.136 / 0.525 = 4.07 |
-| si32 | standard | 8.168 / 2.988 = 2.73 | 4.768 / 0.750 = 6.36 |
-| si32 | strict | 15.140 / 3.512 = 4.31 | 7.519 / 0.860 = 8.74 |
-| si64 | standard | 38.935 / 15.966 = 2.44 | 20.283 / 3.169 = 6.40 |
-| si64 | strict | 96.969 / 21.896 = 4.43 | 43.309 / 4.564 = 9.49 |
-
-Unperturbed BAANDI (3fea9e8, same build) against the QE unperturbed medians, one core: si32 standard 6.32 / 2.969 = 2.13, strict 12.60 / 3.484 = 3.62; si64 standard 30.06 / 16.076 = 1.87, strict 96.78 / 21.510 = 4.50. Eight cores (threads against MPI): si32 standard 4.36 / 0.741 = 5.88, strict 7.00 / 0.833 = 8.40; si64 standard 17.86 / 3.122 = 5.72, strict 39.27 / 4.115 = 9.54.
-
-## Threads against threads (the T=8 column above is threads against MPI)
-QE si32 strict unperturbed: np=1 3.484 s, np=1 with OMP 8 threads 1.957 s (1.78x), np=8 MPI 0.833 s (4.18x). QE's OpenMP scaling is 43 percent of its MPI scaling, so BAANDI T=8 against QE np=8 compares BAANDI threads with QE's best mode. Thread against thread (si32 strict): 7.519 / 1.957 = 3.84 instead of 8.74.
 
 ## Displacement sensitivity, M2 (si32 Gamma, BAANDI T=1 / QE np=1, same geometries, seeds 601-605, wall seconds and increase over unperturbed)
 | class | amplitude | BAANDI | increase | SCF / H | QE | increase | it / h_psi | sensitivity ratio (BAANDI / QE) |
@@ -56,23 +39,24 @@ No nonconvergence; BAANDI standard error against the strict reference of the sam
 
 Ladder effect (si32 standard T=1, ladder on against off, each arm against its own unperturbed): the ladder lowers the unperturbed baseline strongly (6.29 against 7.30 s, SCF 5 against 10), so its percentage increase is larger at every amplitude (b1e-7 +30.1 against +13.6 %, f1e-3 +65.6 against +56.2 %), yet the absolute wall is lower with the ladder at every amplitude except b1e-5 (8.933 against 8.707 s). Quote absolute times, not only increases. The growth of BAANDI's wall with amplitude is work growth (si32 standard SCF 5 to 9, Davidson iterations 24 to 59, H columns 1119 to 1954 at b1e-5), mostly narrower correction blocks (columns per Davidson iteration 46.6 to 33.1); the cost per H column does not rise (-6 % standard, +9.5 % strict).
 
-Eight cores (M2c, si32, BAANDI threads against QE MPI np=8: NOT LIKE-FOR-LIKE, the sensitivity ratios compare each code's increase over its own unperturbed baseline but the baselines are different parallel models): strict unperturbed 6.334 / 0.845 s; b1e-7 +19.1 % / +1.7 % (sensitivity ratio 11.2); f1e-3 +51.4 % / +152.6 % (ratio 0.34). Standard unperturbed 3.968 / 0.740 s; b1e-7 +20.0 % / +1.1 % (ratio 18.1); f1e-3 +44.3 % / +141.9 % (ratio 0.31). QE's MPI absorbs the extra work of displaced geometries worse (np=1 to np=8 speed-up 3.44 at f1e-3 against 4.08 unperturbed) while BAANDI's thread speed-up barely changes (2.08 against 1.95). Ladder at f1e-2 (si32 standard T=1): on 11.894 s (SCF 11, H 2449) against off 15.233 s (SCF 22, H 4393): the ladder gains most on the hardest geometry (-21.9 %). Threads against MPI (NOT LIKE-FOR-LIKE), f1e-3, strict: 9.589 / 2.134 = 4.49x; standard 5.726 / 1.792 = 3.20x.
+Ladder effect (si32 standard T=1, ladder on against off, each arm against its own unperturbed): the ladder lowers the unperturbed baseline strongly (6.29 against 7.30 s, SCF 5 against 10), so its percentage increase is larger at every amplitude (b1e-7 +30.1 against +13.6 %, f1e-3 +65.6 against +56.2 %), yet the absolute wall is lower with the ladder at every amplitude except b1e-5 (8.933 against 8.707 s). Quote absolute times, not only increases. The growth of BAANDI's wall with amplitude is work growth (si32 standard SCF 5 to 9, Davidson iterations 24 to 59, H columns 1119 to 1954 at b1e-5), mostly narrower correction blocks (columns per Davidson iteration 46.6 to 33.1); the cost per H column does not rise (-6 % standard, +9.5 % strict).
 
-## Headline (decision of 2026-11-11: realistic amplitude f1e-3 = +-0.001 fractional per component), all cells
+## Headline (decision of 2026-11-11: realistic amplitude f1e-3 = +-0.001 fractional per component), one core
 BAANDI main 38048b9 (MKL, `cli-f3-mkl`), same displaced coordinates as the QE re-measurement (seeds 601-610; si64 601-603), density SHA T=1 equals T=8 in every cell, no nonconvergence, standard error against the strict reference at most 3.747e-9 Ha.
-| cell | class | BAANDI T=1 | QE np=1 | ratio | BAANDI T=8 | QE np=8 | ratio (BAANDI threads vs QE MPI: NOT LIKE-FOR-LIKE, informational) |
-|---|---|---|---|---|---|---|---|
-| si8 | standard | 0.607 | 0.441 | 1.38x | 0.569 | 0.272 | 2.09x |
-| si8 | strict | 0.917 | 0.531 | 1.73x | 0.788 | 0.306 | 2.58x |
-| si16 | standard | 2.580 | 1.300 | 1.98x | 1.841 | 0.504 | 3.65x |
-| si16 | strict | 4.305 | 1.669 | 2.58x | 2.672 | 0.631 | 4.23x |
-| si32 | standard | 10.372 | 5.948 | 1.74x | 5.749 | 1.737 | 3.31x |
-| si32 | strict | 19.955 | 7.413 | 2.69x | 9.586 | 2.138 | 4.48x |
-| si64 | standard | 46.272 | 26.548 | 1.74x | 24.042 | 6.449 | 3.73x |
-| si64 | strict | 110.388 | 30.467 | 3.62x | 49.086 | 7.497 | 6.55x |
-At the realistic amplitude the one-core gap is 1.4x to 3.6x (b1e-7 column: 1.4x to 4.4x); the standard class is at 1.4x to 2.0x for every size. Thread against thread (QE OpenMP scales 1.78x against 4.18x for MPI at si32 strict unperturbed) the T=8 ratios shrink by about 2.3x. Work counts f1e-3 (SCF / Davidson / H): si32 standard 10 / 53 / 2266, strict 11 / 128.5 / 4716; si64 standard 10 / 59 / 4385, strict 11 / 176 / 10068.
+| cell | class | BAANDI 1 core | QE 1 core (np=1) | ratio |
+|---|---|---|---|---|
+| si8 | standard | 0.607 | 0.441 | 1.38x |
+| si8 | strict | 0.917 | 0.531 | 1.73x |
+| si16 | standard | 2.580 | 1.300 | 1.98x |
+| si16 | strict | 4.305 | 1.669 | 2.58x |
+| si32 | standard | 10.372 | 5.948 | 1.74x |
+| si32 | strict | 19.955 | 7.413 | 2.69x |
+| si64 | standard | 46.272 | 26.548 | 1.74x |
+| si64 | strict | 110.388 | 30.467 | 3.62x |
+Stress column (b1e-7, one core, BAANDI P48A medians / QE): si8 standard 0.459 / 0.331 = 1.39x, strict 0.939 / 0.414 = 2.27x; si16 1.964 / 0.984 = 2.00x, 3.302 / 1.415 = 2.33x; si32 8.168 / 2.988 = 2.73x, 15.140 / 3.512 = 4.31x; si64 38.935 / 15.966 = 2.44x, 96.969 / 21.896 = 4.43x. Work counts f1e-3 (SCF / Davidson / H): si32 standard 10 / 53 / 2266, strict 11 / 128.5 / 4716; si64 standard 10 / 59 / 4385, strict 11 / 176 / 10068.
 
-Where the displacement cost comes from (si32, stage timers, seeds 601-603): not narrow blocks. Width-1 steps take under 4 percent of the increase (strict even falls from 13 to 12); the growth is in wide correction blocks (9-64 and 65+ columns) and therefore in dense eigen (+140 percent strict), rotate (+104) and orthonormalize (+98) which scale with the number of Davidson iterations, faster than h_apply (+57). It is simply more iterations to converge, not a degenerate cluster or per-column cost.
+## Threads against threads and MPI against MPI: not yet measured
+Per the comparison rule (user, 2026-11-14; AGENTS.md) only like-for-like models are compared. The measurements that exist are single-model: QE alone (si32 strict unperturbed, 1e-10: np=1 3.484 s, np=1 with OMP 8 threads 1.957 s, np=8 MPI 0.833 s) and BAANDI alone (threads). The paired tables are queued: BAANDI threads against QE OpenMP at 1, 2, 4, 8 threads for every cell, and BAANDI MPI against QE MPI at 1, 2, 4, 8 ranks (work order beat-qe-2026-11-14, phases E1 and E2). Earlier tables that put BAANDI threads against QE MPI have been removed from the comparison documents.
 
 ## Band-count effect on QE (si32, atomic start): QE default nbnd is 3.9 to 7.3 percent faster than nbnd = 68 for unperturbed and b1e-7 geometries. For displaced geometries it can reverse: si8 1e-10 f1e-3 with nbnd 20 needs 13.0 h_psi calls against 26.5 with the default nbnd 16 (wall 0.531 against 0.559 s), because QE without buffer bands runs Davidson twice as long. The fair comparison uses BAANDI's band count.
 
@@ -81,5 +65,5 @@ BAANDI minus QE is +1.27e-6 Ha per atom at every size (si32 +4.07e-5 Ha, si64 +8
 
 ## Reading
 1. One core, b1e-7: BAANDI is 1.4x (si8 standard) to 4.4x (si64 strict) slower. Strict is the larger gap and grows with size (2.3x at si8/si16, 4.3x at si32, 4.4x at si64).
-2. Threads against MPI the gap is 2.0x to 9.5x; threads against threads (one cell measured) it is 3.84x for si32 strict.
+2. Threads against threads and MPI against MPI: pending (see above).
 3. Since this build the following were merged and are not yet in the table: P48B (pure GEMM, opt-in), P48C (auto), P48D (pure builds default on), P48F (phase threading, opt-in). Their dev08 A/B is queued.

@@ -9,6 +9,10 @@
 //!   iterations (proposal B1, ledger row B1-SELECTED-ROOTS). `standard` acts on
 //!   Ritz-change solves only, `strict` on residual solves only, `on` on both.
 //!   `BAANDI_B1_SKETCH=count` replaces the dense strict sketch by a CountSketch.
+//!   Gap-analysis rank 2 (default off / unchanged): `BAANDI_B1_NARROW=on` takes
+//!   the narrow path for any proper subset of the bands, `BAANDI_B1_MARGIN`
+//!   (default 0.5) sets the strict sketch margin and `BAANDI_B1_ROWS` the sketch
+//!   rows (default: the 8-sigma rule of `ResearchOptions::b1_sketch_rows`).
 //! * B5 (`BAANDI_B5=on`, default off): when exactly one column was appended,
 //!   the reduced eigenproblem is updated from the previous decomposition by the
 //!   secular equation (module `bordered`), with a full solve on any doubt and
@@ -74,11 +78,34 @@ pub enum SketchKind {
     Count,
 }
 
+/// Default B1 strict sketch margin (`BAANDI_B1_MARGIN`).
+pub const B1_DEFAULT_MARGIN: f64 = 0.5;
+/// Miss bound of the automatic B1 sketch row rule, in standard deviations of
+/// the relative sketch error. A sketched norm has relative standard error about
+/// 1/sqrt(2 s) for s rows; a root whose true residual exceeds its threshold is
+/// skipped only when its estimate falls below `margin` times the threshold, a
+/// relative error of at least (1 - margin), i.e. (1 - margin) sqrt(2 s) standard
+/// deviations. The default (margin 0.5, s = 128) gives 8; the rule keeps 8 at
+/// any margin. A statistical rule, independent of the material.
+const B1_SKETCH_SIGMAS: f64 = 8.0;
+
 /// Options of the research entry point `RealDavidson::solve_research`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResearchOptions {
     pub b1: B1Mode,
     pub sketch: SketchKind,
+    /// B1-NARROW (`BAANDI_B1_NARROW=on`): narrow iteration whenever the explicit
+    /// root set is smaller than the band count; off keeps the original gate
+    /// (fewer than half the bands). Restart, return and the iteration limit keep
+    /// the all-band path either way.
+    pub b1_narrow: bool,
+    /// B1 strict sketch margin (`BAANDI_B1_MARGIN`, default 0.5): a root whose
+    /// estimate is below `b1_margin` times its threshold is flagged converged
+    /// for one iteration without an explicit residual. In (0, 1).
+    pub b1_margin: f64,
+    /// B1 strict sketch rows (`BAANDI_B1_ROWS`); `None` = the rule of
+    /// [`ResearchOptions::b1_sketch_rows`] (128 at the default margin).
+    pub b1_rows: Option<usize>,
     /// B5 bordered update of the reduced eigenproblem (`BAANDI_B5=on`).
     pub b5: bool,
     pub stage_timers: bool,
@@ -100,11 +127,47 @@ pub struct ResearchOptions {
     /// kernel (rounding class).
     pub narrow_reduced: bool,
 }
+impl Default for ResearchOptions {
+    /// Every research switch off (B1 off, margin 0.5, automatic rows).
+    fn default() -> Self {
+        Self {
+            b1: B1Mode::default(),
+            sketch: SketchKind::default(),
+            b1_narrow: false,
+            b1_margin: B1_DEFAULT_MARGIN,
+            b1_rows: None,
+            b5: false,
+            stage_timers: false,
+            b6: false,
+            b5_parallel: false,
+            ritz_fused: false,
+            narrow_proj: false,
+            narrow_reduced: false,
+        }
+    }
+}
 impl ResearchOptions {
+    /// Rows of the B1 strict sketch before the caps of the space (the dense
+    /// form is also capped by the subspace capacity, either form by the
+    /// dimension): `b1_rows`, or ceil((8 / (1 - margin))^2 / 2), which is 128
+    /// at margin 0.5, 356 at 0.7 and 512 at 0.75.
+    pub fn b1_sketch_rows(&self) -> usize {
+        match self.b1_rows {
+            Some(rows) => rows.max(1),
+            None => {
+                let z = B1_SKETCH_SIGMAS / (1. - self.b1_margin);
+                (0.5 * z * z).ceil() as usize
+            }
+        }
+    }
     /// `BAANDI_B1` and `BAANDI_DAVIDSON_STAGES=on`, read once per solve.
     pub fn from_env() -> Self {
+        use dft_numerics::switches::{Id, number, on};
         Self {
             b1: B1Mode::from_env(),
+            b1_narrow: on(Id::B1_NARROW),
+            b1_margin: number(Id::B1_MARGIN).unwrap_or(B1_DEFAULT_MARGIN),
+            b1_rows: number(Id::B1_ROWS).map(|r| r as usize),
             sketch: match dft_numerics::switches::choice(dft_numerics::switches::Id::B1_SKETCH) {
                 "dense" => SketchKind::Dense,
                 _ => SketchKind::Count,

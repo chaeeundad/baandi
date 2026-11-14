@@ -123,6 +123,7 @@ fn legacy_defaults_are_unchanged() {
         Id::HAPPLY_OVERLAP,
         Id::HAPPLY_FOLD,
         Id::SECOND_VECTOR,
+        Id::B1_NARROW,
     ] {
         assert!(!on(id), "{id:?} must default off");
     }
@@ -163,8 +164,10 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::BUFFER_TOL), Value::Number(Some(1e-3)));
     assert_eq!(value(Id::EIGEN_FACTOR), Value::Number(Some(0.1)));
     assert_eq!(value(Id::MIX_GROWTH_RESET), Value::Number(None));
+    assert_eq!(value(Id::B1_MARGIN), Value::Number(Some(0.5)));
+    assert_eq!(value(Id::B1_ROWS), Value::Number(None));
     assert_eq!(value(Id::CUTOFF_LADDER), Value::Raw(None));
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
-    assert_eq!(TABLE.len(), 47);
+    assert_eq!(TABLE.len(), 50);
 }

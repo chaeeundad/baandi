@@ -379,18 +379,21 @@ impl RealDavidson {
         let second_vector = SecondVector::from_env();
         let b1_active = options.b1.acts_on(ritz) && second_vector == SecondVector::Off;
         let sketching = b1_active && !ritz;
+        // B1 strict margin and sketch rows (0.5 and 128 by default).
+        let margin = options.b1_margin;
+        let sketch_rows = options.b1_sketch_rows();
         if b1_active {
             b1_add(B1Count::Solves, 1);
             if b1_scratch
                 .as_ref()
-                .is_none_or(|s| !s.matches(self.seed, sketching, options.sketch))
+                .is_none_or(|s| !s.matches(self.seed, sketching, options.sketch, sketch_rows))
             {
                 *b1_scratch = Some(B1Scratch::new(
                     n,
                     self.bands,
                     capacity,
                     self.seed,
-                    sketching.then_some(options.sketch),
+                    sketching.then_some((options.sketch, sketch_rows)),
                 )?);
             }
         }
@@ -553,11 +556,17 @@ impl RealDavidson {
                     } else {
                         let est = &b1.est;
                         b1.set
-                            .extend((0..self.bands).filter(|&j| est[j] >= 0.5 * threshold(j)));
+                            .extend((0..self.bands).filter(|&j| est[j] >= margin * threshold(j)));
                     }
-                    narrow = !b1.set.is_empty()
-                        && 2 * b1.set.len() < self.bands
-                        && basis.cols() + b1.set.len() <= capacity;
+                    // Default gate: fewer than half the bands; B1-NARROW: any
+                    // proper subset. Corrections are a subset of the set, so a
+                    // narrow iteration never restarts.
+                    let small = if options.b1_narrow {
+                        b1.set.len() < self.bands
+                    } else {
+                        2 * b1.set.len() < self.bands
+                    };
+                    narrow = !b1.set.is_empty() && small && basis.cols() + b1.set.len() <= capacity;
                 }
                 if narrow {
                     let k = b1.set.len();
@@ -634,7 +643,9 @@ impl RealDavidson {
                 )?;
                 if sketching && let Some(b1) = b1.as_ref() {
                     let missed = (0..self.bands)
-                        .filter(|&j| b1.est[j] < 0.5 * threshold(j) && residuals[j] > threshold(j))
+                        .filter(|&j| {
+                            b1.est[j] < margin * threshold(j) && residuals[j] > threshold(j)
+                        })
                         .count();
                     b1_add(B1Count::Disagreements, missed);
                 }
@@ -688,8 +699,9 @@ impl RealDavidson {
                     iteration > 1 && (values[j] - previous[j]).abs() < threshold(j)
                 } else if narrow {
                     // Not in the explicit set: the sketch estimate is below
-                    // half the threshold.
-                    b1.as_ref().is_some_and(|b| b.est[j] < 0.5 * threshold(j))
+                    // the margin (default half) times the threshold.
+                    b1.as_ref()
+                        .is_some_and(|b| b.est[j] < margin * threshold(j))
                         || residuals[j] <= threshold(j)
                 } else {
                     residuals[j] <= threshold(j)
@@ -1899,10 +1911,10 @@ impl Projection {
         Ok(())
     }
 }
-/// Rows of the B1 strict sketch (capped by the subspace capacity, because the
-/// shared GEMM workspace bounds the short dimension). Relative estimate error is
-/// about 1/sqrt(2 s): 6 percent at s = 128.
-const SKETCH_ROWS: usize = 128;
+// Rows of the B1 strict sketch: `ResearchOptions::b1_sketch_rows` (128 at the
+// default margin; the dense form is capped by the subspace capacity, because
+// the shared GEMM workspace bounds the short dimension). Relative estimate
+// error is about 1/sqrt(2 s): 6 percent at s = 128.
 /// Stream offset of the sketch generator, so the solver's own random fallback
 /// sequence is unchanged by B1.
 const SKETCH_STREAM: u64 = 0x5b1c_e7c4_2f6a_9d01;
@@ -1927,12 +1939,12 @@ impl B1Scratch {
         bands: usize,
         capacity: usize,
         seed: u64,
-        sketch: Option<SketchKind>,
+        sketch: Option<(SketchKind, usize)>,
     ) -> Result<Self, SolverError> {
         Ok(Self {
             seed,
             sketch: match sketch {
-                Some(kind) => Some(Sketch::new(n, bands, capacity, seed, kind)?),
+                Some((kind, rows)) => Some(Sketch::new(n, bands, capacity, seed, kind, rows)?),
                 None => None,
             },
             est: vec![0.; bands],
@@ -1942,10 +1954,10 @@ impl B1Scratch {
             set_norms: vec![0.; bands],
         })
     }
-    fn matches(&self, seed: u64, sketching: bool, kind: SketchKind) -> bool {
+    fn matches(&self, seed: u64, sketching: bool, kind: SketchKind, rows: usize) -> bool {
         self.seed == seed
             && match &self.sketch {
-                Some(s) => sketching && s.kind() == kind,
+                Some(s) => sketching && s.kind() == kind && s.requested == rows,
                 None => !sketching,
             }
     }
@@ -1960,6 +1972,8 @@ impl B1Scratch {
 /// the shared GEMM workspace, so estimates do not depend on the thread budget.
 struct Sketch {
     rows: usize,
+    /// Rows requested before the caps (scratch reuse key).
+    requested: usize,
     /// Requested form (the identity is used for small spaces of either kind).
     kind: SketchKind,
     form: SketchForm,
@@ -1977,13 +1991,14 @@ impl Sketch {
         capacity: usize,
         seed: u64,
         kind: SketchKind,
+        requested: usize,
     ) -> Result<Self, SolverError> {
         // The dense form is bounded by the GEMM workspace's short dimension;
         // the count form is not. When the space is no larger than the sketch,
         // S is the identity (exact residual norms; no sketch error at all).
         let rows = match kind {
-            SketchKind::Dense => SKETCH_ROWS.min(capacity),
-            SketchKind::Count => SKETCH_ROWS.min(n),
+            SketchKind::Dense => requested.min(capacity),
+            SketchKind::Count => requested.min(n),
         };
         let mut rng = Random(seed ^ SKETCH_STREAM);
         let form = match kind {
@@ -2013,6 +2028,7 @@ impl Sketch {
         };
         Ok(Self {
             rows,
+            requested,
             kind,
             form,
             a: RealMatrix::zeros(rows, capacity)?,

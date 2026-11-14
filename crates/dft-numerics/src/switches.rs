@@ -107,6 +107,12 @@ fn buffer_tol_valid(v: f64) -> bool {
 fn growth_reset_valid(v: f64) -> bool {
     v.is_finite() && v > 1.0
 }
+fn b1_margin_valid(v: f64) -> bool {
+    v.is_finite() && v > 0.0 && v < 1.0
+}
+fn b1_rows_valid(v: f64) -> bool {
+    v.fract() == 0.0 && (8.0..=65536.0).contains(&v)
+}
 fn cutoff_ladder_valid(v: &str) -> bool {
     matches!(v, "off" | "on")
         || v.parse::<f64>()
@@ -183,6 +189,12 @@ table! {
         "on, off, standard, strict", "B1 selected-root Davidson iterations";
     B1_SKETCH: Kind::Choice { allowed: &["count", "dense"], default: "count" }, "count", "count, dense",
         "B1 residual sketch";
+    B1_NARROW: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "B1 narrow iteration whenever the explicit root set is smaller than the band count (off: fewer than half the bands)";
+    B1_MARGIN: Kind::Number { default: Some(0.5), valid: b1_margin_valid }, "0.5", "number in (0, 1)",
+        "B1 strict: a root whose sketch estimate is below margin x its threshold skips its explicit residual for one iteration";
+    B1_ROWS: Kind::Number { default: None, valid: b1_rows_valid }, "auto", "integer in [8, 65536]",
+        "B1 strict sketch rows (auto: ceil(32 / (1 - margin)^2), 128 at margin 0.5, same 8-sigma miss bound at any margin)";
     B5: Kind::Choice { allowed: &["on", "off", "par"], default: "on" }, "on", "on, off, par",
         "bordered reduced eigenproblem update (par: threaded)";
     B6: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",

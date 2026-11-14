@@ -19,7 +19,7 @@ QE 7.6, `K_POINTS gamma`, nosym/noinv, `startingwfc = 'atomic'`, `diagonalizatio
 | si64 | 1e-10 | 21.510 | 21.896 | 30.467 | 4.115 | 4.564 | 7.497 |
 
 ## BAANDI divided by QE, geometry b1e-7 (BAANDI P48A medians, MKL; above 1 means BAANDI is slower)
-| cell | class | T=1 / np=1 | T=8 / np=8 (threads against MPI) |
+| cell | class | T=1 / np=1 (valid: one core) | T=8 / np=8 (BAANDI threads vs QE MPI: NOT LIKE-FOR-LIKE, informational) |
 |---|---|---|---|
 | si8 | standard | 0.459 / 0.331 = 1.39 | 0.449 / 0.225 = 2.00 |
 | si8 | strict | 0.939 / 0.414 = 2.27 | 0.816 / 0.244 = 3.34 |
@@ -56,11 +56,11 @@ No nonconvergence; BAANDI standard error against the strict reference of the sam
 
 Ladder effect (si32 standard T=1, ladder on against off, each arm against its own unperturbed): the ladder lowers the unperturbed baseline strongly (6.29 against 7.30 s, SCF 5 against 10), so its percentage increase is larger at every amplitude (b1e-7 +30.1 against +13.6 %, f1e-3 +65.6 against +56.2 %), yet the absolute wall is lower with the ladder at every amplitude except b1e-5 (8.933 against 8.707 s). Quote absolute times, not only increases. The growth of BAANDI's wall with amplitude is work growth (si32 standard SCF 5 to 9, Davidson iterations 24 to 59, H columns 1119 to 1954 at b1e-5), mostly narrower correction blocks (columns per Davidson iteration 46.6 to 33.1); the cost per H column does not rise (-6 % standard, +9.5 % strict).
 
-Eight cores (M2c, si32, BAANDI T=8 against QE np=8): strict unperturbed 6.334 / 0.845 s; b1e-7 +19.1 % / +1.7 % (sensitivity ratio 11.2); f1e-3 +51.4 % / +152.6 % (ratio 0.34). Standard unperturbed 3.968 / 0.740 s; b1e-7 +20.0 % / +1.1 % (ratio 18.1); f1e-3 +44.3 % / +141.9 % (ratio 0.31). QE's MPI absorbs the extra work of displaced geometries worse (np=1 to np=8 speed-up 3.44 at f1e-3 against 4.08 unperturbed) while BAANDI's thread speed-up barely changes (2.08 against 1.95). Ladder at f1e-2 (si32 standard T=1): on 11.894 s (SCF 11, H 2449) against off 15.233 s (SCF 22, H 4393): the ladder gains most on the hardest geometry (-21.9 %). Threads against MPI, f1e-3, strict: 9.589 / 2.134 = 4.49x; standard 5.726 / 1.792 = 3.20x.
+Eight cores (M2c, si32, BAANDI threads against QE MPI np=8: NOT LIKE-FOR-LIKE, the sensitivity ratios compare each code's increase over its own unperturbed baseline but the baselines are different parallel models): strict unperturbed 6.334 / 0.845 s; b1e-7 +19.1 % / +1.7 % (sensitivity ratio 11.2); f1e-3 +51.4 % / +152.6 % (ratio 0.34). Standard unperturbed 3.968 / 0.740 s; b1e-7 +20.0 % / +1.1 % (ratio 18.1); f1e-3 +44.3 % / +141.9 % (ratio 0.31). QE's MPI absorbs the extra work of displaced geometries worse (np=1 to np=8 speed-up 3.44 at f1e-3 against 4.08 unperturbed) while BAANDI's thread speed-up barely changes (2.08 against 1.95). Ladder at f1e-2 (si32 standard T=1): on 11.894 s (SCF 11, H 2449) against off 15.233 s (SCF 22, H 4393): the ladder gains most on the hardest geometry (-21.9 %). Threads against MPI (NOT LIKE-FOR-LIKE), f1e-3, strict: 9.589 / 2.134 = 4.49x; standard 5.726 / 1.792 = 3.20x.
 
 ## Headline (decision of 2026-11-11: realistic amplitude f1e-3 = +-0.001 fractional per component), all cells
 BAANDI main 38048b9 (MKL, `cli-f3-mkl`), same displaced coordinates as the QE re-measurement (seeds 601-610; si64 601-603), density SHA T=1 equals T=8 in every cell, no nonconvergence, standard error against the strict reference at most 3.747e-9 Ha.
-| cell | class | BAANDI T=1 | QE np=1 | ratio | BAANDI T=8 | QE np=8 | ratio (threads against MPI) |
+| cell | class | BAANDI T=1 | QE np=1 | ratio | BAANDI T=8 | QE np=8 | ratio (BAANDI threads vs QE MPI: NOT LIKE-FOR-LIKE, informational) |
 |---|---|---|---|---|---|---|---|
 | si8 | standard | 0.607 | 0.441 | 1.38x | 0.569 | 0.272 | 2.09x |
 | si8 | strict | 0.917 | 0.531 | 1.73x | 0.788 | 0.306 | 2.58x |

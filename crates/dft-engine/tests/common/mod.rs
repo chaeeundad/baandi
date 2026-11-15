@@ -31,6 +31,27 @@ pub fn potential_with_functional(
     points: usize,
     functional: &str,
 ) -> Pseudopotential {
+    build(z, rc, nonlocal, points, functional, false)
+}
+/// As `potential`, with a Gaussian atomic charge in PP_RHOATOM (4 pi r^2 rho(r),
+/// width rc, integrating to z) so that an atomic start density exists.
+#[allow(dead_code)]
+pub fn potential_with_atomic_charge(
+    z: f64,
+    rc: f64,
+    nonlocal: bool,
+    points: usize,
+) -> Pseudopotential {
+    build(z, rc, nonlocal, points, "SLA PZ", true)
+}
+fn build(
+    z: f64,
+    rc: f64,
+    nonlocal: bool,
+    points: usize,
+    functional: &str,
+    atomic_charge: bool,
+) -> Pseudopotential {
     let end = 12.0;
     let r0 = 0.02;
     let dx = (1.0_f64 + end / r0).ln() / (points - 1) as f64;
@@ -66,7 +87,14 @@ pub fn potential_with_functional(
         array(&r),
         array(&rab),
         array(&local),
-        array(&vec![0.0; points])
+        array(&if atomic_charge {
+            let alpha = 1.0 / (rc * rc);
+            r.iter()
+                .map(|r| z * 4.0 * PI * r * r * (alpha / PI).powf(1.5) * (-alpha * r * r).exp())
+                .collect()
+        } else {
+            vec![0.0; points]
+        })
     );
     let xml = if nonlocal {
         xml

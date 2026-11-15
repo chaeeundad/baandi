@@ -426,6 +426,480 @@ fn standard_and_secant_ladder_is_independent_of_thread_count() {
 }
 
 // ---------------------------------------------------------------------------
+// D1 hand-off knobs (coarse stop level and rule, first fine tolerance).
+
+use cutoff_ladder::{CoarseStopRule, FirstTolerance};
+
+/// Cubic synthetic fixture (simple cubic cell, one nonlocal atom; the Gamma
+/// fixture of the stepwise-equivalence matrix).
+fn synthetic_cubic() -> Model {
+    Model {
+        cell: Cell::from_user_rows_bohr([[4., 0., 0.], [0., 4., 0.], [0., 0., 4.]]).unwrap(),
+        atoms: vec![Atom::new("Xx", [0.13, 0.21, 0.32])],
+        species: vec![("Xx".into(), common::potential(2.0, 1.0, true, 401))],
+        options: ScfOptions {
+            cutoff_hartree: 4.0,
+            bands: Some(3),
+            energy_tolerance: 1e-10,
+            ..Default::default()
+        },
+    }
+}
+
+fn run_with(
+    model: &Model,
+    options: ScfOptions,
+    ladder: &CutoffLadderOptions,
+) -> cutoff_ladder::LadderOutcome {
+    cutoff_ladder::run_ladder(model.problem(options), &model.refs(), ladder, true).unwrap()
+}
+
+fn same_bits(a: &cutoff_ladder::LadderOutcome, b: &cutoff_ladder::LadderOutcome) {
+    assert_eq!(
+        a.outcome.result.total_hartree().to_bits(),
+        b.outcome.result.total_hartree().to_bits()
+    );
+    assert_eq!(a.outcome.result.density, b.outcome.result.density);
+    assert_eq!(
+        a.outcome.result.history.len(),
+        b.outcome.result.history.len()
+    );
+    assert_eq!(a.report.coarse_iterations, b.report.coarse_iterations);
+    assert_eq!(a.report.coarse_h_vectors, b.report.coarse_h_vectors);
+}
+
+#[test]
+fn d1_defaults_are_the_adopted_ladder() {
+    // The test process leaves the D1 variables unset: Default keeps the
+    // pre-registered stop level, the fixed rule and the adopted first step.
+    let d = CutoffLadderOptions::default();
+    let b = CutoffLadderOptions::baseline();
+    assert_eq!(d.fraction, 0.5);
+    assert_eq!(d.coarse_density_residual.to_bits(), 1e-4f64.to_bits());
+    assert_eq!(b.coarse_density_residual.to_bits(), 1e-4f64.to_bits());
+    assert_eq!(d.coarse_rule, CoarseStopRule::Fixed);
+    assert_eq!(d.first_tolerance, FirstTolerance::Auto);
+    assert_eq!(b.first_tolerance, FirstTolerance::Auto);
+    // Auto equals the explicit equivalents bit for bit: strict Auto = Cap
+    // (cold schedule), standard Auto with the coarse seed = Next.
+    let model = synthetic_skew();
+    let auto = run_with(
+        &model,
+        model.options.clone(),
+        &CutoffLadderOptions::baseline(),
+    );
+    let cap = run_with(
+        &model,
+        model.options.clone(),
+        &CutoffLadderOptions {
+            first_tolerance: FirstTolerance::Cap,
+            ..CutoffLadderOptions::baseline()
+        },
+    );
+    assert!(auto.report.used && auto.report.strict_seed_ha.is_none());
+    same_bits(&auto, &cap);
+    let std_ladder = |first_tolerance| CutoffLadderOptions {
+        standard: true,
+        first_tolerance,
+        ..CutoffLadderOptions::baseline()
+    };
+    let auto = run_with(
+        &model,
+        standard(&model.options),
+        &std_ladder(FirstTolerance::Auto),
+    );
+    let next = run_with(
+        &model,
+        standard(&model.options),
+        &std_ladder(FirstTolerance::Next),
+    );
+    assert!(auto.report.standard_seed_ha.is_some());
+    assert_eq!(auto.report.standard_seed_ha, next.report.standard_seed_ha);
+    same_bits(&auto, &next);
+    // The reported fine work matches the fine history.
+    let r = &auto.report;
+    assert_eq!(r.fine_iterations, auto.outcome.result.history.len());
+    assert!(r.fine_h_vectors > 0 && r.coarse_fine_step_equivalents().unwrap() > 0.0);
+    assert!(r.handoff_to_final_density_distance.unwrap() > 0.0);
+}
+
+/// Each D1 knob changes only its documented quantity, and the full-cutoff
+/// session still converges to the strict fixed point (1e-10 Ha) on the cubic,
+/// skewed and slab fixtures.
+#[test]
+fn d1_knobs_change_only_their_quantity_and_the_fine_stage_converges() {
+    for model in [synthetic_cubic(), synthetic_skew(), synthetic_slab()] {
+        let plain = model.problem(model.options.clone()).run_outcome().unwrap();
+        assert!(plain.converged);
+        let reference = plain.result.total_hartree();
+        let base = run_with(
+            &model,
+            model.options.clone(),
+            &CutoffLadderOptions::baseline(),
+        );
+        assert!(
+            base.report.used,
+            "fallback: {:?}",
+            base.report.fallback_reason
+        );
+        // Coarse stop level: only the coarse stage changes.
+        for level in [1e-2, 1e-3, 3e-3] {
+            let out = run_with(
+                &model,
+                model.options.clone(),
+                &CutoffLadderOptions {
+                    coarse_density_residual: level,
+                    ..CutoffLadderOptions::baseline()
+                },
+            );
+            let r = &out.report;
+            assert!(r.used && out.outcome.converged);
+            assert_eq!(r.coarse_stop_level, level);
+            assert!(r.coarse_iterations <= base.report.coarse_iterations);
+            assert!(
+                r.coarse_final_density_residual <= level
+                    || r.coarse_iterations == CutoffLadderOptions::baseline().coarse_max_iterations
+            );
+            assert!(r.strict_seed_ha.is_none());
+            let de = (out.outcome.result.total_hartree() - reference).abs();
+            println!(
+                "stop {level:e}: coarse {} SCF ({:.0} H eq, {:.2} fine-step eq), fine {} SCF, dE {de:e} Ha",
+                r.coarse_iterations,
+                r.coarse_h_equivalents(),
+                r.coarse_fine_step_equivalents().unwrap_or(f64::NAN),
+                r.fine_iterations
+            );
+            assert!(de < 1e-10, "stop {level:e}: energy difference {de:e} Ha");
+        }
+        // First fine tolerance: the coarse stage is untouched, the first fine
+        // step requests the seed (inside the schedule's bounds).
+        for first_tolerance in [FirstTolerance::Coarse, FirstTolerance::Next] {
+            let out = run_with(
+                &model,
+                model.options.clone(),
+                &CutoffLadderOptions {
+                    first_tolerance,
+                    ..CutoffLadderOptions::baseline()
+                },
+            );
+            let r = &out.report;
+            assert!(r.used && out.outcome.converged);
+            assert_eq!(r.coarse_iterations, base.report.coarse_iterations);
+            assert_eq!(r.coarse_h_vectors, base.report.coarse_h_vectors);
+            let seed = r.strict_seed_ha.expect("strict seed");
+            assert!(seed < 1e-2);
+            let first = out.outcome.result.history[0].requested_eigen_tolerance;
+            assert_eq!(
+                first.to_bits(),
+                seed.min(1e-2)
+                    .max(0.1 * model.options.eigen_tolerance)
+                    .to_bits()
+            );
+            let de = (out.outcome.result.total_hartree() - reference).abs();
+            println!(
+                "first {first_tolerance:?}: seed {seed:e} Ha, fine {} SCF ({} H) vs {} SCF ({} H), dE {de:e} Ha",
+                r.fine_iterations,
+                r.fine_h_vectors,
+                base.report.fine_iterations,
+                base.report.fine_h_vectors
+            );
+            assert!(
+                de < 1e-10,
+                "{first_tolerance:?}: energy difference {de:e} Ha"
+            );
+        }
+    }
+}
+
+#[test]
+fn atomic_coarse_rule_only_raises_the_stop_level() {
+    let mut model = synthetic_skew();
+    model.species = vec![
+        (
+            "Xx".into(),
+            common::potential_with_atomic_charge(2.0, 1.0, true, 401),
+        ),
+        (
+            "Yy".into(),
+            common::potential_with_atomic_charge(2.0, 1.3, false, 401),
+        ),
+    ];
+    // Uniform start: no atomic distance, the fixed level applies.
+    let uniform = run_with(
+        &model,
+        model.options.clone(),
+        &CutoffLadderOptions {
+            coarse_rule: CoarseStopRule::Atomic,
+            ..CutoffLadderOptions::baseline()
+        },
+    );
+    assert!(uniform.report.atomic_truncation_distance.is_none());
+    same_bits(
+        &uniform,
+        &run_with(
+            &model,
+            model.options.clone(),
+            &CutoffLadderOptions::baseline(),
+        ),
+    );
+    let atomic = ScfOptions {
+        start_density: dft_engine::StartDensity::Atomic,
+        ..model.options.clone()
+    };
+    let fixed = run_with(&model, atomic.clone(), &CutoffLadderOptions::baseline());
+    let rule = run_with(
+        &model,
+        atomic.clone(),
+        &CutoffLadderOptions {
+            coarse_rule: CoarseStopRule::Atomic,
+            ..CutoffLadderOptions::baseline()
+        },
+    );
+    let d = rule
+        .report
+        .atomic_truncation_distance
+        .expect("atomic distance");
+    assert!(d > 0.0 && d.is_finite());
+    assert_eq!(fixed.report.atomic_truncation_distance, Some(d));
+    assert_eq!(fixed.report.coarse_stop_level, 1e-4);
+    assert_eq!(rule.report.coarse_stop_level, d.max(1e-4));
+    assert!(rule.report.coarse_iterations <= fixed.report.coarse_iterations);
+    assert!(rule.outcome.converged);
+    let plain = model.problem(atomic).run_outcome().unwrap();
+    let de = (plain.result.total_hartree() - rule.outcome.result.total_hartree()).abs();
+    println!(
+        "atomic rule: d {d:e}, coarse {} vs {} SCF, measured coarse-to-fine {:e}, dE {de:e} Ha",
+        rule.report.coarse_iterations,
+        fixed.report.coarse_iterations,
+        rule.report
+            .handoff_to_final_density_distance
+            .unwrap_or(f64::NAN)
+    );
+    assert!(de < 1e-10, "energy difference {de:e} Ha");
+}
+
+#[test]
+fn d1_knobs_on_a_k_point_problem_fall_back_bit_identically() {
+    // Four k points in a cubic cell (the stepwise-equivalence k fixture).
+    let model = Model {
+        cell: Cell::from_user_rows_bohr([[4., 0., 0.], [0., 4., 0.], [0., 0., 4.]]).unwrap(),
+        atoms: vec![Atom::new("Xx", [0.13, 0.21, 0.32])],
+        species: vec![("Xx".into(), common::potential(2.0, 1.0, true, 401))],
+        options: ScfOptions {
+            cutoff_hartree: 2.5,
+            bands: Some(3),
+            ..Default::default()
+        },
+    };
+    let points: Vec<_> = (0..4)
+        .map(|i| dft_geometry::kpoints::KPoint {
+            fractional: [0.025 * i as f64, 0.015 * i as f64, 0.],
+            weight: 0.25,
+        })
+        .collect();
+    let problem = || {
+        ScfProblem::with_kpoints(
+            &model.cell,
+            &model.atoms,
+            &model.refs(),
+            model.options.clone(),
+            &points,
+            dft_engine::OccupationPolicy::Insulator {
+                minimum_gap_hartree: 1e-7,
+            },
+        )
+        .unwrap()
+    };
+    let plain = problem().run_outcome().unwrap();
+    let out = cutoff_ladder::run_ladder(
+        problem(),
+        &model.refs(),
+        &CutoffLadderOptions {
+            coarse_density_residual: 1e-2,
+            coarse_rule: CoarseStopRule::Atomic,
+            first_tolerance: FirstTolerance::Coarse,
+            ..CutoffLadderOptions::baseline()
+        },
+        true,
+    )
+    .unwrap();
+    assert!(!out.report.used);
+    assert_eq!(
+        out.report.fallback_reason.as_deref(),
+        Some("multiple k points")
+    );
+    assert!(out.report.strict_seed_ha.is_none() && out.report.fine_iterations == 0);
+    assert_eq!(
+        plain.result.total_hartree().to_bits(),
+        out.outcome.result.total_hartree().to_bits()
+    );
+    assert_eq!(plain.result.density, out.outcome.result.density);
+}
+
+#[test]
+fn d1_knobs_are_independent_of_thread_count() {
+    let model = synthetic_slab();
+    let ladder = CutoffLadderOptions {
+        coarse_density_residual: 3e-3,
+        first_tolerance: FirstTolerance::Coarse,
+        ..CutoffLadderOptions::baseline()
+    };
+    let run = |threads| {
+        run_with(
+            &model,
+            ScfOptions {
+                threads,
+                ..model.options.clone()
+            },
+            &ladder,
+        )
+    };
+    let one = run(1);
+    let four = run(4);
+    assert!(one.report.used && one.report.strict_seed_ha.is_some());
+    assert_eq!(
+        one.report.strict_seed_ha.map(f64::to_bits),
+        four.report.strict_seed_ha.map(f64::to_bits)
+    );
+    same_bits(&one, &four);
+}
+
+// ---------------------------------------------------------------------------
+// D1 Mac count scan (release only):
+// `cargo test --release -p dft-engine --test cutoff_ladder ladder_d1_scan -- --ignored --nocapture --test-threads=1`
+// Env: D1_CASES (default si16,si32), D1_AMP (default f1e-3), D1_SEED (default 601),
+// D1_PROFILES (default standard), D1_STOPS (default 1e-4,3e-3,1e-3,1e-2),
+// D1_FRACTIONS (default 0.5,0.7), D1_FIRST (default auto,coarse), D1_ATOMIC=on adds the
+// atomic rule arm (needs D1_START=atomic; default uniform start density as the CLI),
+// LADDER_THREADS (default 4).
+#[test]
+#[ignore = "release-only D1 scan (minutes on a Mac)"]
+fn ladder_d1_scan() {
+    let cases = env_list("D1_CASES", "si16,si32");
+    let amp = std::env::var("D1_AMP").unwrap_or_else(|_| "f1e-3".into());
+    let seed: u64 = std::env::var("D1_SEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(601);
+    let profiles = env_list("D1_PROFILES", "standard");
+    let stops: Vec<f64> = env_list("D1_STOPS", "1e-4,3e-3,1e-3,1e-2")
+        .iter()
+        .map(|s| s.parse().unwrap())
+        .collect();
+    let fractions: Vec<f64> = env_list("D1_FRACTIONS", "0.5,0.7")
+        .iter()
+        .map(|s| s.parse().unwrap())
+        .collect();
+    let firsts = env_list("D1_FIRST", "auto,coarse");
+    let atomic = std::env::var("D1_ATOMIC").as_deref() == Ok("on");
+    let threads: usize = std::env::var("LADDER_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(4);
+    let (fractional, amplitude) = match amp.split_at(1) {
+        ("b", v) => (false, v.parse::<f64>().unwrap()),
+        ("f", v) => (true, v.parse::<f64>().unwrap()),
+        _ => panic!("D1_AMP starts with b or f"),
+    };
+    println!(
+        "case | profile | arm | conv | fine_scf | fine_H | fine_cert_H | coarse_scf | coarse_H_eq | coarse_step_eq | total_step_eq | total_H_eq | stop_level | atomic_d | handoff_d | seed_tol_Ha | dE_vs_strict_plain_Ha | wall_s"
+    );
+    for case in &cases {
+        let Some(mut model) = bench_model(case) else {
+            println!("{case} | skipped (fixture missing)");
+            continue;
+        };
+        if seed != 0 {
+            model.perturb(seed, amplitude, fractional);
+        }
+        let base = ScfOptions {
+            threads,
+            start_density: if std::env::var("D1_START").as_deref() == Ok("atomic") {
+                dft_engine::StartDensity::Atomic
+            } else {
+                dft_engine::StartDensity::Uniform
+            },
+            ..model.options.clone()
+        };
+        let strict_plain = model.problem(base.clone()).run_outcome().unwrap();
+        let e_ref = strict_plain.result.total_hartree();
+        for profile in &profiles {
+            let options = ScfOptions {
+                standard: (profile == "standard").then(dft_engine::StandardProfile::default),
+                ..base.clone()
+            };
+            let started = std::time::Instant::now();
+            let plain = model.problem(options.clone()).run_outcome().unwrap();
+            let wall = started.elapsed().as_secs_f64();
+            let (scf, h) = fine_work(&plain);
+            println!(
+                "{case} | {profile} | off | {} | {scf} | {h} | - | 0 | 0 | 0 | {scf} | {h} | - | - | - | - | {:.2e} | {wall:.2}",
+                plain.converged,
+                (plain.result.total_hartree() - e_ref).abs()
+            );
+            let mut arms = Vec::new();
+            for &fraction in &fractions {
+                for &stop in &stops {
+                    for first in &firsts {
+                        arms.push((fraction, stop, first.clone(), CoarseStopRule::Fixed));
+                    }
+                }
+                if atomic {
+                    arms.push((fraction, 1e-4, "auto".into(), CoarseStopRule::Atomic));
+                }
+            }
+            for (fraction, stop, first, rule) in arms {
+                let ladder = CutoffLadderOptions {
+                    fraction,
+                    coarse_density_residual: stop,
+                    coarse_rule: rule,
+                    standard: true,
+                    first_tolerance: match first.as_str() {
+                        "cap" => FirstTolerance::Cap,
+                        "coarse" => FirstTolerance::Coarse,
+                        "next" => FirstTolerance::Next,
+                        _ => FirstTolerance::Auto,
+                    },
+                    ..CutoffLadderOptions::baseline()
+                };
+                let started = std::time::Instant::now();
+                let out = cutoff_ladder::run_ladder(
+                    model.problem(options.clone()),
+                    &model.refs(),
+                    &ladder,
+                    true,
+                )
+                .unwrap();
+                let wall = started.elapsed().as_secs_f64();
+                let r = &out.report;
+                let step_eq = r.coarse_fine_step_equivalents().unwrap_or(f64::NAN);
+                println!(
+                    "{case} | {profile} | E1={fraction} stop={stop:e} first={first} rule={rule:?} | {} | {} | {} | {} | {} | {:.0} | {step_eq:.2} | {:.2} | {:.0} | {:.1e} | {} | {} | {} | {:.2e} | {wall:.2}",
+                    out.outcome.converged,
+                    r.fine_iterations,
+                    r.fine_h_vectors,
+                    r.fine_certificate_h_vectors,
+                    r.coarse_iterations,
+                    r.coarse_h_equivalents(),
+                    r.fine_iterations as f64 + step_eq,
+                    r.coarse_h_equivalents()
+                        + (r.fine_h_vectors + r.fine_certificate_h_vectors) as f64,
+                    r.coarse_stop_level,
+                    r.atomic_truncation_distance
+                        .map_or("-".into(), |d| format!("{d:.1e}")),
+                    r.handoff_to_final_density_distance
+                        .map_or("-".into(), |d| format!("{d:.1e}")),
+                    r.standard_seed_ha
+                        .or(r.strict_seed_ha)
+                        .map_or("-".into(), |t| format!("{t:.1e}")),
+                    (out.outcome.result.total_hartree() - e_ref).abs(),
+                );
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Mac count bench for S1/S2 (release only, minutes):
 // `cargo test --release -p dft-engine --test cutoff_ladder -- --ignored --nocapture --test-threads=1`
 // Env: LADDER_CASES (comma list), LADDER_SEEDS (default 601,602,603; 0 = unperturbed),

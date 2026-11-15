@@ -145,11 +145,11 @@ fn legacy_defaults_are_unchanged() {
     );
     assert_eq!(
         switches::resolve(switches::switch(Id::M2_SCREEN), None).0,
-        Value::Choice("replicated")
+        Value::Choice("dist")
     );
     assert_eq!(
         switches::resolve(switches::switch(Id::M2_ATOMIC), None).0,
-        Value::Choice("replicated")
+        Value::Choice("split")
     );
     let value = |id: Id| switches::resolve(switches::switch(id), None).0;
     assert_eq!(value(Id::NL_ENERGY), Value::Choice("fast"));

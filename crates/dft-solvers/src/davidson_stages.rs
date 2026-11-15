@@ -611,6 +611,14 @@ pub struct LeanCounters {
     pub pivot_below_1e_2: u64,
     /// Smallest pivot ratio seen in any append (1 when none).
     pub pivot_min: f64,
+    /// REUSE-PSI: lean solves that started from the kept X and H X (no
+    /// initial H application), armed starts declined because `initial` was
+    /// not the kept X, returns that kept X and H X, and the H columns the
+    /// kept starts did not apply.
+    pub kept_starts: u64,
+    pub kept_declined: u64,
+    pub kept_stored: u64,
+    pub kept_columns: u64,
 }
 impl LeanCounters {
     /// Stage-2 fallbacks (basis orthonormalizations) per append (the
@@ -647,8 +655,12 @@ pub(crate) enum LeanCount {
     PivotBelow1 = 11,
     PivotBelow2 = 12,
     Reprojections = 13,
+    KeptStarts = 14,
+    KeptDeclined = 15,
+    KeptStored = 16,
+    KeptColumns = 17,
 }
-static LEAN_COUNTS: [AtomicU64; 14] = [const { AtomicU64::new(0) }; 14];
+static LEAN_COUNTS: [AtomicU64; 18] = [const { AtomicU64::new(0) }; 18];
 /// Smallest pivot ratio, as f64 bits (positive floats order like their bits).
 static LEAN_PIVOT_MIN: AtomicU64 = AtomicU64::new(0x3ff0_0000_0000_0000);
 #[inline]
@@ -687,5 +699,9 @@ pub fn lean_counters() -> LeanCounters {
         pivot_below_1e_1: g(LeanCount::PivotBelow1),
         pivot_below_1e_2: g(LeanCount::PivotBelow2),
         pivot_min: f64::from_bits(LEAN_PIVOT_MIN.load(Relaxed)),
+        kept_starts: g(LeanCount::KeptStarts),
+        kept_declined: g(LeanCount::KeptDeclined),
+        kept_stored: g(LeanCount::KeptStored),
+        kept_columns: g(LeanCount::KeptColumns),
     }
 }

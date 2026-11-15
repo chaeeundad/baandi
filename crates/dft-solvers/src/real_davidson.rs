@@ -89,6 +89,83 @@ pub struct RealDavidsonWorkspace {
     /// Lean Davidson scratch (overlap, inverse factor, reduced matrices),
     /// allocated at the first lean solve.
     lean: Option<lean::LeanScratch>,
+    /// REUSE-PSI (work order C2): X and H X of the latest lean return, kept
+    /// when the caller asked for them; allocated at the first such return.
+    kept: Option<KeptStart>,
+}
+/// REUSE-PSI: the returned Ritz vectors X (all bands) and their H images,
+/// formed by the return rotation of the lean solve. `armed` makes the next
+/// lean solve start from them (after the caller added the change of the
+/// operator to `products`) when its `initial` equals `vectors` to 1e-14.
+pub struct KeptStart {
+    /// Store X and H X at the next lean returns.
+    pub(crate) store: bool,
+    /// `vectors`/`products` hold the latest lean return of this workspace.
+    pub(crate) valid: bool,
+    /// The next lean solve may start from them.
+    pub(crate) armed: bool,
+    pub(crate) vectors: RealMatrix,
+    pub(crate) products: RealMatrix,
+}
+/// Largest absolute difference between a caller's `initial` block and the kept
+/// X for which the kept start is taken (the ORC packing tolerance; a round trip
+/// through the complex Hermitian completion changes entries by about 1 ulp).
+pub const KEPT_START_TOLERANCE: f64 = 1e-14;
+impl RealDavidsonWorkspace {
+    /// REUSE-PSI: ask lean returns of this workspace to keep X and H X (`true`)
+    /// or drop them (`false`). Allocates n x bands twice on the first request.
+    pub fn keep_returned_products(&mut self, on: bool) -> Result<(), SolverError> {
+        if on && self.kept.is_none() {
+            self.kept = Some(KeptStart {
+                store: true,
+                valid: false,
+                armed: false,
+                vectors: RealMatrix::zeros(self.n, self.bands)?,
+                products: RealMatrix::zeros(self.n, self.bands)?,
+            });
+        }
+        if let Some(k) = self.kept.as_mut() {
+            k.store = on;
+            if !on {
+                k.valid = false;
+                k.armed = false;
+            }
+        }
+        Ok(())
+    }
+    /// X and H X of the latest lean return, if kept and not consumed.
+    pub fn kept_start(&self) -> Option<(&RealMatrix, &RealMatrix)> {
+        self.kept
+            .as_ref()
+            .filter(|k| k.valid)
+            .map(|k| (&k.vectors, &k.products))
+    }
+    /// X (read) and H X (write) of the kept start, for the caller's update of
+    /// H X to the next operator.
+    pub fn kept_start_mut(&mut self) -> Option<(&RealMatrix, &mut RealMatrix)> {
+        self.kept
+            .as_mut()
+            .filter(|k| k.valid)
+            .map(|k| (&k.vectors, &mut k.products))
+    }
+    /// Let the next lean solve start from the kept X and H X (the caller has
+    /// brought H X to the next operator). False when nothing is kept.
+    pub fn arm_kept_start(&mut self) -> bool {
+        match self.kept.as_mut().filter(|k| k.valid) {
+            Some(k) => {
+                k.armed = true;
+                true
+            }
+            None => false,
+        }
+    }
+    /// Forget the kept start (the operator or the orbitals changed).
+    pub fn invalidate_kept_start(&mut self) {
+        if let Some(k) = self.kept.as_mut() {
+            k.valid = false;
+            k.armed = false;
+        }
+    }
 }
 impl RealDavidsonWorkspace {
     fn new(
@@ -123,6 +200,7 @@ impl RealDavidsonWorkspace {
             b5: None,
             b6: None,
             lean: None,
+            kept: None,
             n,
             bands,
             capacity,
@@ -250,6 +328,54 @@ impl RealDavidson {
         )
     }
 
+    /// Replace `workspace` unless it matches the dimension, band count,
+    /// capacity and pool of a solve (the rule of every reusing entry point).
+    fn ensure_workspace(
+        &self,
+        n: usize,
+        capacity: usize,
+        pool: &std::sync::Arc<WorkerPool>,
+        workspace: &mut Option<RealDavidsonWorkspace>,
+    ) -> Result<(), SolverError> {
+        if workspace.as_ref().is_none_or(|w| {
+            w.n != n
+                || w.bands != self.bands
+                || w.capacity != capacity
+                || !std::sync::Arc::ptr_eq(&w.pool, pool)
+        }) {
+            *workspace = Some(RealDavidsonWorkspace::new(
+                n,
+                self.bands,
+                capacity,
+                pool.clone(),
+            )?);
+        }
+        Ok(())
+    }
+
+    /// REUSE-PSI: the workspace a reusing solve of `op` with this capacity per
+    /// band will use (created or replaced exactly as the solve would), so a
+    /// caller can ask it to keep X and H X before the first solve.
+    pub fn prepare_workspace<'w>(
+        &self,
+        op: &dyn RealLinearOperator,
+        capacity_per_band: usize,
+        workspace: &'w mut Option<RealDavidsonWorkspace>,
+    ) -> Result<&'w mut RealDavidsonWorkspace, SolverError> {
+        let n = op.dimension();
+        let capacity = self
+            .max_subspace
+            .max(self.bands.saturating_mul(capacity_per_band))
+            .min(n);
+        let pool = match op.worker_pool() {
+            Some(pool) => pool,
+            None => WorkerPool::new(op.inner_threads())
+                .map_err(|e| SolverError::Application(e.to_string()))?,
+        };
+        self.ensure_workspace(n, capacity, &pool, workspace)?;
+        Ok(workspace.as_mut().unwrap())
+    }
+
     /// Research damping selection; the old entry point is bit-preserving.
     #[allow(clippy::too_many_arguments)]
     pub fn solve_reusing_with_preconditioner(
@@ -340,19 +466,7 @@ impl RealDavidson {
             None => WorkerPool::new(op.inner_threads())
                 .map_err(|e| SolverError::Application(e.to_string()))?,
         };
-        if workspace.as_ref().is_none_or(|w| {
-            w.n != n
-                || w.bands != self.bands
-                || w.capacity != capacity
-                || !std::sync::Arc::ptr_eq(&w.pool, &pool)
-        }) {
-            *workspace = Some(RealDavidsonWorkspace::new(
-                n,
-                self.bands,
-                capacity,
-                pool.clone(),
-            )?);
-        }
+        self.ensure_workspace(n, capacity, &pool, workspace)?;
         // Lean Davidson (work order phase B): Ritz-value solves only, never with
         // the experimental second vector (as B1).
         if options.lean && ritz && SecondVector::from_env() == SecondVector::Off {
@@ -368,6 +482,9 @@ impl RealDavidson {
                 options,
             );
         }
+        // REUSE-PSI: only lean returns keep X and H X; any other solve makes
+        // the kept start stale.
+        workspace.as_mut().unwrap().invalidate_kept_start();
         let RealDavidsonWorkspace {
             gemm,
             projection,

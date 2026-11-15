@@ -160,7 +160,10 @@ fn assert_certified(name: &str, s: &RealEigenSolution, op: &Operator) {
 fn defaults_reproduce_the_previous_path() {
     let _g = SERIAL.lock().unwrap();
     // Environment unset in tests: the new switches are off / 0.5 / automatic.
-    let env = ResearchOptions::from_env();
+    // Lean Davidson is the default since 2026-11-15; this test is about the B1
+    // knobs of the classic path, so pin it.
+    let mut env = ResearchOptions::from_env();
+    env.lean = false;
     assert!(!env.b1_narrow);
     assert_eq!(env.b1_margin, 0.5);
     assert_eq!(env.b1_rows, None);

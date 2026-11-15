@@ -187,7 +187,8 @@ fn work_timers_report_by_kind_and_run_stage() {
         assert!(stages.get(key).is_some(), "{key}");
     }
     let fft = &stages["fft"];
-    assert_eq!(fft.as_object().unwrap().len(), 14);
+    // 14 P0.2 keys plus the three REUSE-PSI kept_* keys.
+    assert_eq!(fft.as_object().unwrap().len(), 17);
     let parts = &stages["h_apply_parts"];
     assert_eq!(parts.as_object().unwrap().len(), 7);
     let n = |v: &serde_json::Value| v.as_u64().unwrap();

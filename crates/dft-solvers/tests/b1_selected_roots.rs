@@ -346,6 +346,7 @@ fn default_options_are_the_default_path() {
             b1: B1Mode::On,
             sketch: SketchKind::Count,
             b5: true,
+            lean: true, // default since 2026-11-15 (BAANDI_DAVIDSON=lean)
             ..ResearchOptions::default()
         }
     );

@@ -53,7 +53,9 @@ pub use dft_solvers::real_davidson::{
     b1_counters, b5_counters, flop_counters, lean_counters, ortho_counters, second_vector_columns,
     stage_seconds, stage_seconds_by_run_stage,
 };
-pub use gamma_real::{GammaReal, GammaRealDiagnostics};
+pub use gamma_real::{
+    GammaReal, GammaRealDiagnostics, PSI_KEEP_MAX_BYTES, ReusePsiCounters, reuse_psi_counters,
+};
 
 /// Research radial conventions; default variants retain the legacy path.
 pub use dft_upf::radial::{LocalMesh, RadialEvenRule};

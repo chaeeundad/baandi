@@ -367,3 +367,21 @@ Every branch condition must stay replicated so all ranks enter the same
 collectives. Tests: `tests/m2_coarse_certificate.rs`, the lib test
 `split_two_pass_gram_schmidt_is_bit_identical_to_the_serial_routine`. See
 `docs/performance/mpi-coarse-certificate-analysis.md`.
+
+## REUSE-PSI (work order beat-QE C2, 2026-11-16)
+
+`BAANDI_REUSE_PSI=on|off` (default off until dev08; rounding class). `gamma_real.rs`
+`prepare_kept_start` asks the Davidson workspace to keep X and H X at each lean
+return, and before the next threads-only standard solve of the same k state
+brings H X to the new potential, H_new X = H_old X + (V_new - V_old) X, then arms
+the start (the solver takes it only when its `initial` is that X to 1e-14).
+`band_density.rs` `compute_keep` stores psi(r) (unscaled inverse pair
+transform) of the leading occupied pairs in `RealSolveState::psi_keep` slots, so
+the potential change costs one forward transform per kept pair; other pairs run
+the full pair transform. Memory gate `PSI_KEEP_MAX_BYTES` (2 GiB per k state):
+above it the kept H X is still used and every pair is transformed both ways.
+Any rebuild of the state (new operator identity, grid, ladder stage, MPI path)
+drops everything. Counters `reuse_psi_counters()` -> results.json
+`convergence.work.reuse_psi`. Tests: lib `reuse_psi_tests`, physics
+`reuse_psi_potential_change_matches_plain_apply`, solvers
+`kept_start_skips_initial_application`, CLI `reuse_psi_switch_keeps_energy_and_reuses_starts`.

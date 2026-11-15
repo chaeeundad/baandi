@@ -411,6 +411,58 @@ impl<L: PairLanes> FusedOperator for PairFusedPlan<L> {
         Ok(())
     }
 }
+impl<L: PairLanes> crate::fused_pair::ForwardProduct for PairFusedPlan<L> {
+    /// The forward half of `apply_local_with` on a kept C-order grid: slab by
+    /// slab, `grid * potential`, then the same forward lanes, gather and 1/N.
+    fn forward_product(
+        &mut self,
+        grid: &[C],
+        potential: &[f64],
+        out: &mut [C],
+    ) -> Result<(), FftError> {
+        if out.len() != self.scatter.len()
+            || grid.len() != self.size
+            || potential.len() != self.size
+        {
+            return Err(FftError::IncompatibleArray);
+        }
+        let nz = self.n[2];
+        for x in 0..self.n[0] {
+            for y in 0..self.n[1] {
+                let start = self.grid_start(x, y);
+                for ((a, &g), &v) in self.slab[y * nz..(y + 1) * nz]
+                    .iter_mut()
+                    .zip(&grid[start..start + nz])
+                    .zip(&potential[start..start + nz])
+                {
+                    *a = g * v;
+                }
+            }
+            self.forward_slab(x)?;
+        }
+        if !self.sticks.is_empty() {
+            self.lanes.run(0, false, &mut self.sticks)?;
+        }
+        for (o, &i) in out.iter_mut().zip(&self.scatter) {
+            *o = self.sticks[i] / self.size as f64;
+        }
+        Ok(())
+    }
+}
+#[cfg(feature = "mkl")]
+impl crate::fused_pair::ForwardProduct for MklPairPlan {
+    fn forward_product(
+        &mut self,
+        grid: &[C],
+        potential: &[f64],
+        out: &mut [C],
+    ) -> Result<(), FftError> {
+        match self {
+            Self::Grid(p) => p.forward_product(grid, potential, out),
+            Self::Pruned(p) => p.forward_product(grid, potential, out),
+        }
+    }
+}
 impl<L: PairLanes> PairDensityOperator for PairFusedPlan<L> {
     fn accumulate_density_pair(
         &mut self,
@@ -460,6 +512,99 @@ mod tests {
             p.accumulate_density_pair(&out, [0.3, 0.7], 10., &mut rho)
                 .unwrap();
             assert_eq!(before, state(&p));
+        }
+    }
+
+    /// REUSE-PSI: the kept inverse transform of the density plans (ordered and
+    /// grid adapters) followed by `forward_product` equals `apply_local` of the
+    /// pair plan and of the grid adapter (relative 1e-14), and keeping the
+    /// grid leaves the split pair density bit-identical.
+    #[test]
+    fn kept_grid_forward_matches_apply_local() {
+        use crate::fused::{GridFusedPlan, OrderedFusedPlan};
+        use crate::fused_pair::{ForwardProduct, SplitPairDensity};
+        for shape in [[15, 20, 24], [9, 12, 10]] {
+            let h = |n: usize| (n as i64 - 1) / 4;
+            let wrap = |v: i64, n: usize| v.rem_euclid(n as i64) as usize;
+            let mut indices = Vec::new();
+            for x in -h(shape[0])..=h(shape[0]) {
+                for y in -h(shape[1])..=h(shape[1]) {
+                    for z in -h(shape[2])..=h(shape[2]) {
+                        if x * x + y * y + z * z <= h(shape[0]).pow(2) + 1 {
+                            indices.push([wrap(x, shape[0]), wrap(y, shape[1]), wrap(z, shape[2])]);
+                        }
+                    }
+                }
+            }
+            let size: usize = shape.iter().product();
+            let v: Vec<f64> = (0..size)
+                .map(|i| 0.3 * ((i * 7 + 1) as f64).sin())
+                .collect();
+            let c: Vec<C> = (0..indices.len())
+                .map(|i| C::new(((i * 3 + 1) as f64).cos(), ((i * 5 + 2) as f64).sin()))
+                .collect();
+            let relative = |a: &[C], b: &[C]| {
+                let d = a
+                    .iter()
+                    .zip(b)
+                    .map(|(x, y)| (x - y).norm_sqr())
+                    .sum::<f64>();
+                (d / b.iter().map(|y| y.norm_sqr()).sum::<f64>()).sqrt()
+            };
+            let mut pair = PairFusedPlan::new(shape, &indices).unwrap();
+            let mut grid = GridFusedPlan::new(shape, &indices).unwrap();
+            let mut expected = vec![C::default(); c.len()];
+            pair.apply_local(&c, &v, &mut expected).unwrap();
+            let mut ordered = OrderedFusedPlan::new(shape, &indices).unwrap();
+            let mut keeps = Vec::new();
+            for which in 0..2 {
+                let (mut a, mut b) = (vec![0.; size], vec![0.; size]);
+                let (mut a0, mut b0) = (vec![0.; size], vec![0.; size]);
+                let mut keep = vec![C::default(); size];
+                if which == 0 {
+                    ordered
+                        .accumulate_density_pair_split_keep(
+                            &c,
+                            [0.3, 0.7],
+                            10.,
+                            &mut a,
+                            &mut b,
+                            &mut keep,
+                        )
+                        .unwrap();
+                    ordered
+                        .accumulate_density_pair_split(&c, [0.3, 0.7], 10., &mut a0, &mut b0)
+                        .unwrap();
+                } else {
+                    grid.accumulate_density_pair_split_keep(
+                        &c,
+                        [0.3, 0.7],
+                        10.,
+                        &mut a,
+                        &mut b,
+                        &mut keep,
+                    )
+                    .unwrap();
+                    grid.accumulate_density_pair_split(&c, [0.3, 0.7], 10., &mut a0, &mut b0)
+                        .unwrap();
+                }
+                assert_eq!((a, b), (a0, b0), "{shape:?} plan {which}: density changed");
+                keeps.push(keep);
+            }
+            for keep in &keeps {
+                let mut out = vec![C::default(); c.len()];
+                pair.forward_product(keep, &v, &mut out).unwrap();
+                let e = relative(&out, &expected);
+                assert!(e <= 1e-14, "{shape:?} pair forward {e:e}");
+                grid.forward_product(keep, &v, &mut out).unwrap();
+                let e = relative(&out, &expected);
+                assert!(e <= 1e-14, "{shape:?} grid forward {e:e}");
+            }
+            // The kept grid is untouched by the forward product.
+            let copy = keeps[0].clone();
+            let mut out = vec![C::default(); c.len()];
+            pair.forward_product(&keeps[0], &v, &mut out).unwrap();
+            assert_eq!(copy, keeps[0]);
         }
     }
 

@@ -677,6 +677,40 @@ impl crate::fused_pair::SplitPairDensity for OrderedFusedPlan {
         }
         Ok(())
     }
+    fn accumulate_density_pair_split_keep(
+        &mut self,
+        phi: &[C],
+        weights: [f64; 2],
+        volume: f64,
+        a: &mut [f64],
+        b: &mut [f64],
+        keep: &mut [C],
+    ) -> Result<(), FftError> {
+        self.validate(phi, a.len())?;
+        crate::fused_pair::validate_density(weights, volume)?;
+        if b.len() != a.len() || keep.len() != a.len() {
+            return Err(FftError::IncompatibleArray);
+        }
+        self.inverse_xy(phi);
+        let [nx, ny, nz] = self.shape;
+        let add = weights != [0.; 2];
+        for xy in 0..nx * ny {
+            self.inverse_z(xy);
+            let range = xy * nz..(xy + 1) * nz;
+            keep[range.clone()].copy_from_slice(&self.kernels.lane[..nz]);
+            if add {
+                for ((value, a), b) in self.kernels.lane[..nz]
+                    .iter()
+                    .zip(&mut a[range.clone()])
+                    .zip(&mut b[range])
+                {
+                    *a += weights[0] * (value.re * value.re) / volume;
+                    *b += weights[1] * (value.im * value.im) / volume;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 impl<F: crate::Fft3d> crate::fused_pair::SplitPairDensity for GridFusedPlan<F> {
     fn accumulate_density_pair_split(
@@ -699,6 +733,55 @@ impl<F: crate::Fft3d> crate::fused_pair::SplitPairDensity for GridFusedPlan<F> {
         for ((value, a), b) in self.real.iter().zip(a.iter_mut()).zip(b.iter_mut()) {
             *a += weights[0] * (value.re * value.re) / volume;
             *b += weights[1] * (value.im * value.im) / volume;
+        }
+        Ok(())
+    }
+    fn accumulate_density_pair_split_keep(
+        &mut self,
+        phi: &[C],
+        weights: [f64; 2],
+        volume: f64,
+        a: &mut [f64],
+        b: &mut [f64],
+        keep: &mut [C],
+    ) -> Result<(), FftError> {
+        self.validate(phi, a.len())?;
+        crate::fused_pair::validate_density(weights, volume)?;
+        if b.len() != a.len() || keep.len() != a.len() {
+            return Err(FftError::IncompatibleArray);
+        }
+        self.inverse(phi)?;
+        let real = self.real.as_slice().ok_or(FftError::IncompatibleArray)?;
+        keep.copy_from_slice(real);
+        if weights != [0.; 2] {
+            for ((value, a), b) in real.iter().zip(a.iter_mut()).zip(b.iter_mut()) {
+                *a += weights[0] * (value.re * value.re) / volume;
+                *b += weights[1] * (value.im * value.im) / volume;
+            }
+        }
+        Ok(())
+    }
+}
+impl<F: crate::Fft3d> crate::fused_pair::ForwardProduct for GridFusedPlan<F> {
+    fn forward_product(
+        &mut self,
+        grid: &[C],
+        potential: &[f64],
+        out: &mut [C],
+    ) -> Result<(), FftError> {
+        if out.len() != self.indices.len()
+            || grid.len() != self.real.len()
+            || potential.len() != self.real.len()
+        {
+            return Err(FftError::IncompatibleArray);
+        }
+        for ((z, &g), &v) in self.real.iter_mut().zip(grid).zip(potential) {
+            *z = g * v;
+        }
+        self.fft
+            .transform_in_place(&mut self.real, &mut self.reciprocal, false)?;
+        for (dst, &index) in out.iter_mut().zip(&self.indices) {
+            *dst = self.real[index];
         }
         Ok(())
     }

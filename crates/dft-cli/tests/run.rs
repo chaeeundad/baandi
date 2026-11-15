@@ -70,6 +70,62 @@ impl Drop for Case {
         fs::remove_dir_all(&self.dir).unwrap();
     }
 }
+/// REUSE-PSI (`BAANDI_REUSE_PSI`, work order C2): on a real Gamma standard
+/// (Ritz-value) run the switch reuses H X of every solve after the first
+/// (armed and taken starts, kept psi(r) pairs, columns not applied), keeps
+/// convergence and the SCF count, and moves the energy only within the
+/// standard accuracy class, as an existing rounding-class switch does on the
+/// same toy; off leaves the counters at zero. Davidson iteration counts of
+/// this slowly converging toy shuffle under any rounding change (ledger C.11)
+/// and are not compared.
+#[test]
+fn reuse_psi_switch_keeps_energy_and_reuses_starts() {
+    let c = Case::new(true);
+    let input = format!("{}\n[scf]\nconvergence_profile='standard'\n", c.text);
+    fs::write(c.dir.join("input.toml"), input).unwrap();
+    let run = |mode: &str, extra: (&str, &str)| {
+        let out = format!("reuse-{mode}-{}", extra.1);
+        let o = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+            .env("BAANDI_CUTOFF_LADDER", "off")
+            .env("BAANDI_DAVIDSON", "lean")
+            .env("BAANDI_REUSE_PSI", mode)
+            .env(extra.0, extra.1)
+            .current_dir(&c.dir)
+            .args(["run", "input.toml", "--output-dir", &out])
+            .output()
+            .unwrap();
+        status(&o, 0);
+        c.json(&out, "results.json")
+    };
+    let none = ("BAANDI_DAVIDSON_STAGES", "off");
+    let (off, on) = (run("off", none), run("on", none));
+    let control = run("off", ("BAANDI_DENSITY_PAIR", "off"));
+    let reuse = &on["convergence"]["work"]["reuse_psi"];
+    assert_eq!(reuse["mode"], "on");
+    let iterations = on["convergence"]["iterations"].as_u64().unwrap();
+    assert!(iterations >= 3, "{iterations}");
+    assert_eq!(reuse["armed_starts"], reuse["kept_starts"]);
+    assert_eq!(reuse["declined_starts"], 0);
+    assert!(reuse["kept_starts"].as_u64().unwrap() + 1 >= iterations);
+    assert!(reuse["kept_pairs"].as_u64().unwrap() > 0);
+    assert!(reuse["h_columns_not_applied"].as_u64().unwrap() > 0);
+    let offr = &off["convergence"]["work"]["reuse_psi"];
+    assert_eq!(offr["mode"], "off");
+    assert_eq!(offr["armed_starts"], 0);
+    for key in ["converged", "iterations"] {
+        assert_eq!(on["convergence"][key], off["convergence"][key], "{key}");
+    }
+    // Standard accuracy class (5e-9 Ha). This toy stops at a threshold whose
+    // delivered energy moves by a few 1e-9 Ha under any rounding change: the
+    // existing rounding-class switch DENSITY_PAIR=off moves it by 2.2e-9 Ha,
+    // REUSE-PSI by 1.6e-9 Ha (Mac, 2026-11-16); both stay in the class.
+    let e = |v: &Value| v["total_energy"]["ha"].as_f64().unwrap();
+    for (label, run) in [("reuse", &on), ("density_pair=off control", &control)] {
+        assert_eq!(run["convergence"]["converged"], true, "{label}");
+        let d = (e(run) - e(&off)).abs();
+        assert!(d <= 5e-9, "{label}: {} vs {}", e(run), e(&off));
+    }
+}
 fn status(o: &Output, code: i32) {
     assert_eq!(
         o.status.code(),
@@ -619,7 +675,7 @@ fn expressions_preserve_energy_and_record_resolutions() {
     let plain = c.json("plain", "results.json");
     // Switch manifest (work order A1): the whole table, effective value and source.
     let switches = plain["scf"]["switches"].as_object().unwrap();
-    assert_eq!(switches.len(), 61);
+    assert_eq!(switches.len(), 62);
     let ladder = &switches["BAANDI_CUTOFF_LADDER"];
     assert_eq!(
         (&ladder["value"], &ladder["source"]),

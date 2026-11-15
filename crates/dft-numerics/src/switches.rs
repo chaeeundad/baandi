@@ -194,6 +194,8 @@ table! {
         "batched FFT transposes of the M2 path";
     PHASE_THREADS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P48F: thread the atomic start (span build, two-pass Gram-Schmidt right-looking) on the SCF pool; bit-identical";
+    REUSE_PSI: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "C2: a lean real Gamma Davidson solve that starts from the previous solve's orbitals X takes H X from that solve's rotated H images plus (V_new - V_old) X, formed from the psi(r) the density build kept (one forward transform per pair; no inverse transform, nonlocal product or kinetic pass); falls back to the plain apply when X, the operator or the grid changed or the cache exceeds its memory gate; rounding class";
     // MPI entry cost (docs/performance/mpi-entry-cost-analysis.md). Adopted 2026-11-15 on dev08 A/B: M2_DGEMM, M2_ORTHO=serial and M2_LEAN default on; M2_FFT stays rust (neutral).
     M2_DGEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "distributed Davidson rotations and projections and the M2 nonlocal products through the per-panel dgemm at any width (MKL builds: rounding class; pure builds bit-identical)";
@@ -283,7 +285,10 @@ table! {
         "rotation panels by MKL dgemm (MKL builds)";
     MKL_EVD: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "reduced symmetric eigensolve by MKL (MKL builds)";
-    PAIR_FFT: Kind::Choice { allowed: &["grid", "pruned"], default: "grid" }, "grid", "grid, pruned",
+    PAIR_FFT: Kind::Choice {
+        allowed: &["grid", "pruned"],
+        default: if crate::MKL_BACKEND { "pruned" } else { "grid" },
+    }, if crate::MKL_BACKEND { "pruned" } else { "grid" }, "grid, pruned",
         "pair FFT plan of MKL builds (pruned: stick lanes)";
     // CLI (dft-cli).
     CUTOFF_LADDER: Kind::Override { valid: cutoff_ladder_valid }, "config", "off, on, fraction in (0, 1)",

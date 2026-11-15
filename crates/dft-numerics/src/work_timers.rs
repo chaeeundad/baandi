@@ -131,9 +131,16 @@ pub enum Slot {
     NonlocalProjectionNs = 16,
     /// Nonlocal back product (coupling D, P W, Y += image, output scan).
     NonlocalBackNs = 17,
+    /// REUSE-PSI: forward transforms of kept psi(r) grids times the potential
+    /// change (one forward transform, gather and unpack per pair).
+    KeptForwardNs = 18,
+    /// REUSE-PSI: those forward transforms.
+    KeptTransforms = 19,
+    /// REUSE-PSI: orbital columns carried by them.
+    KeptColumns = 20,
 }
 /// Number of slots.
-pub const SLOTS: usize = 18;
+pub const SLOTS: usize = 21;
 
 static COUNTS: [[AtomicU64; SLOTS]; RUN_STAGES] =
     [const { [const { AtomicU64::new(0) }; SLOTS] }; RUN_STAGES];
@@ -241,6 +248,9 @@ pub struct WorkTimes {
     pub local: f64,
     pub nonlocal_projection: f64,
     pub nonlocal_back: f64,
+    pub kept_forward: f64,
+    pub kept_transforms: u64,
+    pub kept_columns: u64,
 }
 impl WorkTimes {
     /// Element-wise sum.
@@ -264,6 +274,9 @@ impl WorkTimes {
             local: self.local + o.local,
             nonlocal_projection: self.nonlocal_projection + o.nonlocal_projection,
             nonlocal_back: self.nonlocal_back + o.nonlocal_back,
+            kept_forward: self.kept_forward + o.kept_forward,
+            kept_transforms: self.kept_transforms + o.kept_transforms,
+            kept_columns: self.kept_columns + o.kept_columns,
         }
     }
 }
@@ -293,6 +306,9 @@ pub fn snapshot() -> [WorkTimes; RUN_STAGES] {
             local: s(Slot::LocalNs),
             nonlocal_projection: s(Slot::NonlocalProjectionNs),
             nonlocal_back: s(Slot::NonlocalBackNs),
+            kept_forward: s(Slot::KeptForwardNs),
+            kept_transforms: g(Slot::KeptTransforms),
+            kept_columns: g(Slot::KeptColumns),
         }
     })
 }

@@ -34,6 +34,33 @@ pub trait SplitPairDensity: FusedOperator {
         a: &mut [f64],
         b: &mut [f64],
     ) -> Result<(), FftError>;
+    /// REUSE-PSI (`BAANDI_REUSE_PSI=on`): `accumulate_density_pair_split` that
+    /// also stores the unscaled inverse transform `psi = F^-1 phi` in `keep`
+    /// (grid C order, the field `FusedOperator::apply_local` multiplies by the
+    /// potential). The density arithmetic is unchanged; `keep` is written even
+    /// when both weights are zero.
+    fn accumulate_density_pair_split_keep(
+        &mut self,
+        phi: &[C],
+        weights: [f64; 2],
+        volume: f64,
+        a: &mut [f64],
+        b: &mut [f64],
+        keep: &mut [C],
+    ) -> Result<(), FftError>;
+}
+
+/// REUSE-PSI: the second half of `FusedOperator::apply_local` on a kept grid.
+/// `out = P F (grid * potential)` with the plan's forward normalization (1/N)
+/// and the input sphere order, so `forward_product(F^-1 c, v)` equals
+/// `apply_local(c, v)` to rounding. `grid` is not modified.
+pub trait ForwardProduct: FusedOperator {
+    fn forward_product(
+        &mut self,
+        grid: &[C],
+        potential: &[f64],
+        out: &mut [C],
+    ) -> Result<(), FftError>;
 }
 
 /// Validated full-sphere mirror table, independent of the basis crate.
@@ -229,6 +256,33 @@ impl<P: FusedOperator> PairPlan<P> {
             )?;
         }
         Ok(())
+    }
+}
+impl<P: ForwardProduct> PairPlan<P> {
+    /// REUSE-PSI: the local image of a pair whose unscaled inverse transform
+    /// `grid` (psi_a + i psi_b on the grid) is already known: one forward
+    /// transform of `grid * potential`, then the parity separation of
+    /// `apply_local_pair`.
+    pub fn apply_kept_pair(
+        &mut self,
+        grid: &[C],
+        potential: &[f64],
+        out_a: &mut [f64],
+        out_b: Option<&mut [f64]>,
+    ) -> Result<(), FftError> {
+        if !self.map.valid_bands(out_a, out_b.as_deref()) {
+            return Err(FftError::IncompatibleArray);
+        }
+        let clock = crate::work_timers::start();
+        self.plan
+            .forward_product(grid, potential, &mut self.image)?;
+        if clock.is_some() {
+            use crate::work_timers::{Slot, add, stop};
+            stop(clock, Slot::KeptForwardNs);
+            add(Slot::KeptTransforms, 1);
+            add(Slot::KeptColumns, 1 + u64::from(out_b.is_some()));
+        }
+        self.map.unpack(&self.image, out_a, out_b)
     }
 }
 impl<P: PairDensityOperator> PairPlan<P> {
@@ -446,6 +500,75 @@ impl<P: FusedOperator + Send> PairLocalWorkspace<P> {
         let pieces = &mut self.pieces[..count];
         self.pool
             .install(|| local_pieces(pieces, bands, potential, out, self.n))
+    }
+}
+impl<P: ForwardProduct + Send> PairLocalWorkspace<P> {
+    /// REUSE-PSI: overwrite `out` with the local image `potential * X` of the
+    /// column-major block `bands` (pairs (0,1), (2,3), ..., odd tail with a zero
+    /// partner, as `apply_block`). Pair `p` with `kept[p]` true takes the kept
+    /// grid `grids[p]` (its unscaled inverse transform) and needs one forward
+    /// transform; every other pair runs the full `apply_local_pair`. Pairs are
+    /// fixed and outputs disjoint, so the result does not depend on the pool.
+    pub fn apply_block_kept(
+        &mut self,
+        bands: &[f64],
+        grids: &[Vec<C>],
+        kept: &[bool],
+        potential: &[f64],
+        out: &mut [f64],
+    ) -> Result<(), FftError> {
+        if !bands.len().is_multiple_of(self.n)
+            || bands.len() / self.n > self.capacity
+            || out.len() != bands.len()
+            || potential.len() != self.grid_len
+            || kept.len() > grids.len()
+            || grids
+                .iter()
+                .zip(kept)
+                .any(|(g, &k)| k && g.len() != self.grid_len)
+        {
+            return Err(FftError::IncompatibleArray);
+        }
+        let count = (bands.len() / self.n).div_ceil(2);
+        let pieces = &mut self.pieces[..count];
+        let n = self.n;
+        self.pool
+            .install(|| kept_pieces(pieces, bands, grids, kept, potential, out, n))
+    }
+}
+fn kept_pieces<P: ForwardProduct + Send>(
+    pieces: &mut [PairPlan<P>],
+    bands: &[f64],
+    grids: &[Vec<C>],
+    kept: &[bool],
+    potential: &[f64],
+    out: &mut [f64],
+    n: usize,
+) -> Result<(), FftError> {
+    if pieces.len() > 1 {
+        let mid = pieces.len() / 2;
+        let (left, right) = pieces.split_at_mut(mid);
+        let (lb, rb) = bands.split_at(mid * 2 * n);
+        let (lo, ro) = out.split_at_mut(mid * 2 * n);
+        let (lg, rg) = grids.split_at(mid.min(grids.len()));
+        let (lk, rk) = kept.split_at(mid.min(kept.len()));
+        let (a, b) = WorkerPool::join(
+            || kept_pieces(left, lb, lg, lk, potential, lo, n),
+            || kept_pieces(right, rb, rg, rk, potential, ro, n),
+        );
+        a?;
+        b
+    } else if let Some(piece) = pieces.first_mut() {
+        let (a, b) = bands.split_at(n.min(bands.len()));
+        let (oa, ob) = out.split_at_mut(n.min(out.len()));
+        let b = (!b.is_empty()).then_some(b);
+        let ob = (!ob.is_empty()).then_some(ob);
+        match (kept.first(), grids.first()) {
+            (Some(true), Some(grid)) => piece.apply_kept_pair(grid, potential, oa, ob),
+            _ => piece.apply_local_pair(a, b, potential, oa, ob),
+        }
+    } else {
+        Ok(())
     }
 }
 fn local_pieces<P: FusedOperator + Send>(

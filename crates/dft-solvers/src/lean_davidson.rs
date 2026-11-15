@@ -595,6 +595,7 @@ pub(super) fn solve(
         column_of,
         b5: b5_scratch,
         lean,
+        kept,
         pool,
         ..
     } = workspace;
@@ -616,9 +617,50 @@ pub(super) fn solve(
     }
     previous.fill(f64::NAN);
     selected.clear();
-    // Start: identical to the classic path (orthonormal start basis).
+    // REUSE-PSI (work order C2): an armed kept start is taken when `initial`
+    // is the kept X (to the ORC packing tolerance); either way it is consumed.
+    let from_kept = match kept.as_mut() {
+        Some(k) if k.armed => {
+            let take = k.valid
+                && initial.is_some_and(|x| {
+                    x.rows() == n
+                        && x.cols() == bands
+                        && x.as_slice()
+                            .iter()
+                            .zip(k.vectors.as_slice())
+                            .all(|(a, b)| (a - b).abs() <= KEPT_START_TOLERANCE)
+                });
+            lean_add(
+                if take {
+                    LeanCount::KeptStarts
+                } else {
+                    LeanCount::KeptDeclined
+                },
+                1,
+            );
+            k.armed = false;
+            k.valid = false;
+            take
+        }
+        Some(k) => {
+            k.valid = false;
+            false
+        }
+        None => false,
+    };
+    // Start: identical to the classic path (orthonormal start basis), or the
+    // kept X itself (S = X^T X is factored like any fresh basis).
     let mut rng = Random(solver.seed);
-    if let Some(x) = initial {
+    if from_kept {
+        let k = kept.as_ref().unwrap();
+        basis.reshape_within_storage(n, bands)?;
+        basis.as_mut_slice().copy_from_slice(k.vectors.as_slice());
+        products.reshape_within_storage(n, bands)?;
+        products
+            .as_mut_slice()
+            .copy_from_slice(k.products.as_slice());
+        lean_add(LeanCount::KeptColumns, bands);
+    } else if let Some(x) = initial {
         if x.rows() != n || x.cols() > capacity {
             return Err(LinalgError::Dimension.into());
         }
@@ -663,7 +705,9 @@ pub(super) fn solve(
     let mut result_residuals = vec![0.; bands];
     let mut result_converged = vec![false; bands];
     residuals.fill(0.);
-    apply_into(op, basis, &mut applications, &mut work, products, timers)?;
+    if !from_kept {
+        apply_into(op, basis, &mut applications, &mut work, products, timers)?;
+    }
     // Columns whose H_r / A border is formed, and columns of S and T.
     let mut prefix = 0;
     let mut factored = 0;
@@ -751,7 +795,7 @@ pub(super) fn solve(
             vectors.reshape_within_storage(n, bands)?;
             rotated_products.reshape_within_storage(n, bands)?;
             residual_block.reshape_within_storage(n, bands)?;
-            ritz_and_residuals(
+            let hx_formed = ritz_and_residuals(
                 FlopSite::Return,
                 options.ritz_fused,
                 gemm,
@@ -779,6 +823,15 @@ pub(super) fn solve(
                 });
             }
             lean_add(LeanCount::Returns, 1);
+            // REUSE-PSI: keep X and H X (the return rotation) for the next solve.
+            if let Some(k) = kept.as_mut().filter(|k| k.store && hx_formed) {
+                k.vectors.as_mut_slice().copy_from_slice(vectors.as_slice());
+                k.products
+                    .as_mut_slice()
+                    .copy_from_slice(rotated_products.as_slice());
+                k.valid = true;
+                lean_add(LeanCount::KeptStored, 1);
+            }
             work.returned();
             result_values.copy_from_slice(&values[..bands]);
             result_vectors

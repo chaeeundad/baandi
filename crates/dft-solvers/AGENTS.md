@@ -95,3 +95,15 @@ pivot statistics) and `flop_counters()` (GEMM flops by site for both paths), wri
 results.json `convergence.work.davidson_lean`. Tests `tests/lean_davidson.rs`.
 Do not make it the default without the dev08 A/B (docs/performance/attempts-ledger.md
 row B-LEAN-DAVIDSON).
+
+## Kept start (REUSE-PSI, 2026-11-16)
+
+`RealDavidsonWorkspace::{keep_returned_products, kept_start, kept_start_mut,
+arm_kept_start, invalidate_kept_start}` and `RealDavidson::prepare_workspace`:
+a lean return copies X and its H images (the return rotation) into the
+workspace; an armed kept start makes the next lean solve start from that X and
+the caller-updated H X without the initial application, only when `initial`
+equals the kept X to `KEPT_START_TOLERANCE` (1e-14); every other solve consumes
+or drops it (classic and residual solves invalidate it). Counters in
+`lean_counters()` (`kept_starts`, `kept_declined`, `kept_stored`, `kept_columns`).
+Test `tests/lean_davidson.rs::kept_start_skips_initial_application`.

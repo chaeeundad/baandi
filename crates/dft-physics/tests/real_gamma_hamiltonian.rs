@@ -679,3 +679,111 @@ fn persistent_hamiltonian_refreshes_potential_and_rejects_replacement() {
         assert!(!cached.update_from_complex(&replacement, &b));
     }
 }
+
+/// REUSE-PSI (work order C2, unit gate): H_new X = H_old X + (V_new - V_old) X,
+/// with the potential change applied to psi(r) kept by the density build's
+/// pair transform (one forward transform per pair), equals a plain application
+/// of H_new to relative 1e-13 (Frobenius, Hamiltonian-scale rounding of the
+/// two-part sum and of the different inverse plans). Pairs without a kept grid
+/// and an odd tail take the full pair transform. Cubic, skewed and elongated
+/// two-species cells with s, p, d, f projectors; the potential-change image is
+/// bit-identical at 1, 2 and 4 pool threads.
+#[test]
+fn reuse_psi_potential_change_matches_plain_apply() {
+    use dft_physics::density::{FusedPlan, SplitPairDensity};
+    let mut worst = 0.0_f64;
+    for (case, rows) in [
+        [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],
+        [[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]],
+        [[4., 0., 0.], [0., 5., 0.], [0., 0., 14.]],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (basis, _) = fixture(rows, 2 + case, 1.2);
+        let n = basis.vectors().len();
+        let volume = Cell::from_user_rows_bohr(rows).unwrap().volume_bohr3();
+        for m in [4, 5] {
+            let x = states(n, m, 11 + case);
+            let mut reference_bits: Option<Vec<u64>> = None;
+            for threads in [1, 2, 4] {
+                let pool = WorkerPool::new(threads).unwrap();
+                let (_, mut h_old) = fixture(rows, 2 + case, 1.2);
+                let mut real = RealHamiltonian::from_complex(&h_old, &basis, m + 1, pool).unwrap();
+                let mut hx = RealMatrix::zeros(n, m).unwrap();
+                real.apply_block(&x, &mut hx).unwrap();
+                let v_old = real.potential().to_vec();
+                // psi(r) of the full pairs by the density plan (the second pair
+                // is left unkept to exercise the full pair transform).
+                let grid = h_old.fft_grid();
+                let len: usize = grid.dims().iter().product();
+                let cx = complete(real.half_sphere(), &x);
+                let mut plan = FusedPlan::new(grid.dims(), grid.g_to_fft()).unwrap();
+                let pairs = m / 2;
+                let mut grids = vec![vec![Complex64::default(); len]; pairs];
+                let kept: Vec<bool> = (0..pairs).map(|p| p != 1).collect();
+                let (mut a, mut b) = (vec![0.; len], vec![0.; len]);
+                for (p, g) in grids.iter_mut().enumerate() {
+                    let ca = &cx.as_slice()[2 * p * n..(2 * p + 1) * n];
+                    let cb = &cx.as_slice()[(2 * p + 1) * n..(2 * p + 2) * n];
+                    let phi: Vec<Complex64> = ca
+                        .iter()
+                        .zip(cb)
+                        .map(|(a, b)| Complex64::new(a.re - b.im, a.im + b.re))
+                        .collect();
+                    plan.accumulate_density_pair_split_keep(
+                        &phi,
+                        [2., 2.],
+                        volume,
+                        &mut a,
+                        &mut b,
+                        g,
+                    )
+                    .unwrap();
+                }
+                // New potential, same operator identity.
+                let v = Array3::from_shape_fn(grid.dims(), |(i, j, k)| {
+                    0.1 + 0.25 * ((i * 5 + j * 3 + k * 11) as f64).cos()
+                });
+                h_old.set_local_potential(v).unwrap();
+                assert!(real.update_from_complex(&h_old, &basis));
+                let delta: Vec<f64> = real
+                    .potential()
+                    .iter()
+                    .zip(&v_old)
+                    .map(|(new, old)| new - old)
+                    .collect();
+                let mut image = RealMatrix::zeros(n, m).unwrap();
+                real.apply_local_kept(&x, &grids, &kept, &delta, &mut image)
+                    .unwrap();
+                let bits: Vec<u64> = image.as_slice().iter().map(|v| v.to_bits()).collect();
+                match &reference_bits {
+                    Some(r) => assert_eq!(&bits, r, "case {case} m {m} threads {threads}"),
+                    None => reference_bits = Some(bits),
+                }
+                for (y, d) in hx.as_mut_slice().iter_mut().zip(image.as_slice()) {
+                    *y += d;
+                }
+                let mut expected = RealMatrix::zeros(n, m).unwrap();
+                real.apply_block(&x, &mut expected).unwrap();
+                let diff = hx
+                    .as_slice()
+                    .iter()
+                    .zip(expected.as_slice())
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum::<f64>()
+                    .sqrt();
+                let scale = expected
+                    .as_slice()
+                    .iter()
+                    .map(|b| b * b)
+                    .sum::<f64>()
+                    .sqrt();
+                let error = diff / scale;
+                worst = worst.max(error);
+                assert!(error < 1e-13, "case {case} m {m}: relative {error:e}");
+            }
+        }
+    }
+    println!("REUSE-PSI H_new X relative error (worst) {worst:e}");
+}

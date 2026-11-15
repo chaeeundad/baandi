@@ -108,16 +108,50 @@ impl BandDensity {
         volume: f64,
         hermitian: bool,
     ) -> Result<&Array3<f64>, ScfError> {
+        self.compute_keep(coefficients, occupations, grid, volume, hermitian, None)
+    }
+    /// Whether pair transforms (and so REUSE-PSI kept grids) are active for
+    /// Hermitian-completed vectors.
+    pub(crate) fn pairs(&self) -> bool {
+        self.pair
+    }
+    /// `compute_with`; with `keep = Some((grids, kept))` every pair transform of
+    /// bands (2p, 2p + 1) with p < grids.len() also stores its unscaled inverse
+    /// transform in `grids[p]` and sets `kept[p]` (REUSE-PSI). The density
+    /// arithmetic is unchanged; only pair transforms keep (DENSITY-PAIR on and
+    /// both bands occupied), every other flag is left false.
+    pub(crate) fn compute_keep(
+        &mut self,
+        coefficients: &[Vec<Complex64>],
+        occupations: &[f64],
+        grid: &FftGridSpec,
+        volume: f64,
+        hermitian: bool,
+        keep: Option<(&mut [Vec<Complex64>], &mut [bool])>,
+    ) -> Result<&Array3<f64>, ScfError> {
         let mode = Mode {
             pair: self.pair && hermitian,
             reduce: self.reduce,
         };
+        let (grids, kept): (&mut [Vec<Complex64>], &mut [bool]) = match keep {
+            Some((g, k)) if mode.pair && g.len() == k.len() => {
+                k.fill(false);
+                (g, k)
+            }
+            Some((_, k)) => {
+                k.fill(false);
+                (&mut [], &mut [])
+            }
+            None => (&mut [], &mut []),
+        };
+        let keep = Keep { grids, kept };
         let workers = &mut self.workers;
         if workers.len() == 1 {
-            transform(workers, coefficients, occupations, grid, volume, mode)?;
+            transform(workers, coefficients, occupations, grid, volume, mode, keep)?;
         } else {
-            self.pool
-                .install(|| transform(workers, coefficients, occupations, grid, volume, mode))?;
+            self.pool.install(|| {
+                transform(workers, coefficients, occupations, grid, volume, mode, keep)
+            })?;
         }
         let density = &mut self.density;
         if self.reduce {
@@ -196,6 +230,31 @@ struct Mode {
     pair: bool,
     reduce: bool,
 }
+/// REUSE-PSI kept grids of the pairs of one worker range: slot `p` belongs to
+/// bands (first + 2p, first + 2p + 1) of the range (`first` is even in pair
+/// mode), the slices may be shorter than the range (empty: nothing kept).
+struct Keep<'a> {
+    grids: &'a mut [Vec<Complex64>],
+    kept: &'a mut [bool],
+}
+impl<'a> Keep<'a> {
+    /// Split at the pair slot `at` (clamped to the length).
+    fn split(self, at: usize) -> (Keep<'a>, Keep<'a>) {
+        let at = at.min(self.grids.len());
+        let (gl, gr) = self.grids.split_at_mut(at);
+        let (kl, kr) = self.kept.split_at_mut(at);
+        (
+            Keep {
+                grids: gl,
+                kept: kl,
+            },
+            Keep {
+                grids: gr,
+                kept: kr,
+            },
+        )
+    }
+}
 fn check(band: usize, c: &[Complex64], grid: &FftGridSpec) -> Result<(), ScfError> {
     if c.len() != grid.g_to_fft().len() || c.iter().any(|z| !z.re.is_finite() || !z.im.is_finite())
     {
@@ -221,6 +280,7 @@ fn transform(
     grid: &FftGridSpec,
     volume: f64,
     mode: Mode,
+    keep: Keep<'_>,
 ) -> Result<(), ScfError> {
     if workers.len() == 1 {
         let worker = &mut workers[0];
@@ -266,13 +326,26 @@ fn transform(
                 da.fill(0.0);
                 db.fill(0.0);
                 let clock = dft_numerics::work_timers::start();
-                worker.fft.accumulate_density_pair_split(
-                    &worker.phi,
-                    [w, occupations[band + 1]],
-                    volume,
-                    da.as_slice_mut().unwrap(),
-                    db.as_slice_mut().unwrap(),
-                )?;
+                let slot = local / 2;
+                if slot < keep.grids.len() {
+                    worker.fft.accumulate_density_pair_split_keep(
+                        &worker.phi,
+                        [w, occupations[band + 1]],
+                        volume,
+                        da.as_slice_mut().unwrap(),
+                        db.as_slice_mut().unwrap(),
+                        &mut keep.grids[slot],
+                    )?;
+                    keep.kept[slot] = true;
+                } else {
+                    worker.fft.accumulate_density_pair_split(
+                        &worker.phi,
+                        [w, occupations[band + 1]],
+                        volume,
+                        da.as_slice_mut().unwrap(),
+                        db.as_slice_mut().unwrap(),
+                    )?;
+                }
                 record_density(clock, 2);
                 worker.live[local] = true;
                 worker.live[local + 1] = true;
@@ -304,15 +377,33 @@ fn transform(
     let (left, right) = workers.split_at_mut(middle);
     let first_left = left[0].first;
     let first_right = right[0].first;
+    // Pair mode aligns worker ranges to whole pairs; without pairs nothing is kept.
+    let (keep_left, keep_right) = keep.split((first_right - first_left) / 2);
     let (left, right) = WorkerPool::join(
         || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                transform(left, coefficients, occupations, grid, volume, mode)
+                transform(
+                    left,
+                    coefficients,
+                    occupations,
+                    grid,
+                    volume,
+                    mode,
+                    keep_left,
+                )
             }))
         },
         || {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                transform(right, coefficients, occupations, grid, volume, mode)
+                transform(
+                    right,
+                    coefficients,
+                    occupations,
+                    grid,
+                    volume,
+                    mode,
+                    keep_right,
+                )
             }))
         },
     );

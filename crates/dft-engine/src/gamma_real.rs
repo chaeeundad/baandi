@@ -5,7 +5,7 @@ use dft_basis::PlaneWaveBasis;
 use dft_mpi::Collective;
 use dft_numerics::{RealMatrix, linalg::ComplexMatrix, pool::WorkerPool};
 use dft_physics::{
-    distributed_real_gamma::DistributedRealHamiltonian, hamiltonian::Hamiltonian,
+    data::Complex64, distributed_real_gamma::DistributedRealHamiltonian, hamiltonian::Hamiltonian,
     real_gamma::RealHamiltonian,
 };
 use dft_solvers::{
@@ -74,11 +74,156 @@ pub(crate) struct RealSolveState {
     /// NL-ENERGY-REAL: per-band <x|V_nl|x> (Ha) of the latest real solve.
     nl_values: Vec<f64>,
     nl_valid: bool,
+    /// REUSE-PSI state (work order C2), created at the first eligible solve.
+    reuse: Option<PsiReuse>,
 }
 impl RealSolveState {
     /// NL-ENERGY-REAL values of the latest solve of this state, if computed.
     pub(crate) fn nonlocal_partials(&self) -> Option<&[f64]> {
         self.nl_valid.then_some(self.nl_values.as_slice())
+    }
+    /// REUSE-PSI: slots for the psi(r) grids of the leading `pairs` band pairs
+    /// of the latest solve's orbitals, for the density build to fill. `None`
+    /// when the latest solve kept no X and H X, or when the grids would exceed
+    /// `PSI_KEEP_MAX_BYTES` (then the next start transforms every pair). The
+    /// grids are allocated here once per state (outside numerical loops).
+    pub(crate) fn psi_keep(
+        &mut self,
+        pairs: usize,
+        dims: [usize; 3],
+    ) -> Option<(&mut [Vec<Complex64>], &mut [bool])> {
+        let reuse = self.reuse.as_mut().filter(|r| r.collect)?;
+        let grid_len = dims.iter().product::<usize>();
+        if dims != reuse.dims || grid_len != reuse.v_old.len() {
+            return None;
+        }
+        if reuse.grids.len() != pairs {
+            let bytes = pairs
+                .saturating_mul(grid_len)
+                .saturating_mul(std::mem::size_of::<Complex64>());
+            if bytes > PSI_KEEP_MAX_BYTES {
+                if !reuse.gated {
+                    reuse.gated = true;
+                    reuse_add(ReuseCount::Gated, 1);
+                }
+                reuse.grids = Vec::new();
+                reuse.kept = Vec::new();
+                return None;
+            }
+            reuse.grids = (0..pairs)
+                .map(|_| vec![Complex64::default(); grid_len])
+                .collect();
+            reuse.kept = vec![false; pairs];
+            reuse_max(ReuseCount::BytesKept, bytes);
+        }
+        Some((&mut reuse.grids, &mut reuse.kept))
+    }
+}
+
+/// REUSE-PSI (`BAANDI_REUSE_PSI=on`, default off; work order beat-QE C2;
+/// rounding class). Every SCF map transforms the returned orbitals X to real
+/// space for the density, and the next lean Davidson solve starts by applying
+/// H to the same X. With the switch on, the lean return keeps X and H X (its
+/// return rotation of the stored H images), the density build keeps psi(r) of
+/// each occupied band pair, and the next solve starts from
+/// H_new X = H_old X + (V_new - V_old) X: the potential change multiplies the
+/// kept psi(r), one forward transform per pair; kinetic and nonlocal parts are
+/// unchanged and not applied. Pairs without a kept grid (empty bands, odd
+/// tails) take the full pair transform with the potential change. Fallback to
+/// the plain start whenever the solver's `initial` is not the kept X, the
+/// operator was rebuilt (new atoms or projectors, a different basis or grid,
+/// the other ladder grid), the solve is not a threads-only lean Ritz-value
+/// solve, or the grids exceed the memory gate.
+pub(crate) fn reuse_psi() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::REUSE_PSI))
+}
+/// REUSE-PSI memory gate for the kept psi(r) grids of one k state (pair
+/// complex grids, 16 bytes per point and pair). A resource bound, not a
+/// physical parameter: above it the kept H X is still used and every pair is
+/// transformed in both directions.
+pub const PSI_KEEP_MAX_BYTES: usize = 2 << 30;
+
+pub(crate) struct PsiReuse {
+    /// Whether the latest solve kept X and H X (the density build may fill
+    /// the grids for them).
+    collect: bool,
+    /// Grid of the local potential (the density grid must match).
+    dims: [usize; 3],
+    /// Potential (Ha, grid C order) the kept H X belongs to.
+    v_old: Vec<f64>,
+    /// Potential change scratch.
+    delta: Vec<f64>,
+    /// (V_new - V_old) X, n x bands.
+    image: RealMatrix,
+    /// psi(r) of band pairs (0,1), (2,3), ... of the kept X (unscaled inverse
+    /// transforms), valid where `kept` is set.
+    grids: Vec<Vec<Complex64>>,
+    kept: Vec<bool>,
+    /// The memory gate declined the grids for this state.
+    gated: bool,
+}
+
+#[derive(Clone, Copy)]
+enum ReuseCount {
+    /// Solves started from the kept X and H X (armed; the solver may still
+    /// decline when `initial` is not the kept X).
+    Armed = 0,
+    /// Armed starts whose potential did not change (no transform at all).
+    Unchanged = 1,
+    /// Pairs whose potential change came from a kept grid (one forward
+    /// transform; the inverse transform is saved).
+    KeptPairs = 2,
+    /// Pairs transformed in both directions for the potential change.
+    FullPairs = 3,
+    /// Columns whose nonlocal products (P^T X and the back product) and kinetic
+    /// pass were not formed.
+    ColumnsSaved = 4,
+    /// Eligible solves with no kept start (first solve, rebuilt operator,
+    /// changed grid, failed previous solve).
+    NotKept = 5,
+    /// States whose grids exceeded the memory gate.
+    Gated = 6,
+    /// Largest kept grid storage of a state, bytes.
+    BytesKept = 7,
+}
+static REUSE_COUNTS: [std::sync::atomic::AtomicU64; 8] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 8];
+fn reuse_add(c: ReuseCount, v: usize) {
+    REUSE_COUNTS[c as usize].fetch_add(v as u64, std::sync::atomic::Ordering::Relaxed);
+}
+fn reuse_max(c: ReuseCount, v: usize) {
+    REUSE_COUNTS[c as usize].fetch_max(v as u64, std::sync::atomic::Ordering::Relaxed);
+}
+/// REUSE-PSI counters of this process (all zero with the switch off).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReusePsiCounters {
+    pub armed: u64,
+    pub unchanged_potential: u64,
+    pub kept_pairs: u64,
+    pub full_pairs: u64,
+    pub columns_saved: u64,
+    pub not_kept: u64,
+    pub gated: u64,
+    pub bytes_kept: u64,
+}
+impl ReusePsiCounters {
+    /// Inverse transforms saved against the plain start (one per kept pair).
+    pub fn transforms_saved(&self) -> u64 {
+        self.kept_pairs
+    }
+}
+pub fn reuse_psi_counters() -> ReusePsiCounters {
+    let g = |c: ReuseCount| REUSE_COUNTS[c as usize].load(std::sync::atomic::Ordering::Relaxed);
+    ReusePsiCounters {
+        armed: g(ReuseCount::Armed),
+        unchanged_potential: g(ReuseCount::Unchanged),
+        kept_pairs: g(ReuseCount::KeptPairs),
+        full_pairs: g(ReuseCount::FullPairs),
+        columns_saved: g(ReuseCount::ColumnsSaved),
+        not_kept: g(ReuseCount::NotKept),
+        gated: g(ReuseCount::Gated),
+        bytes_kept: g(ReuseCount::BytesKept),
     }
 }
 /// NL-ENERGY-REAL (opt-in `BAANDI_NL_ENERGY_REAL=on`, default off; rounding
@@ -204,6 +349,7 @@ fn ensure_state(
             m2_density: None,
             nl_values: Vec::new(),
             nl_valid: false,
+            reuse: None,
         });
     }
     Ok(())
@@ -398,6 +544,15 @@ pub(crate) fn solve_real_gamma(
         seed: options.seed,
     };
     drop(real);
+    // REUSE-PSI: threads-only Ritz-value (standard) solves of this state.
+    let reuse = comm.is_none() && options.standard.is_some() && reuse_psi();
+    if reuse {
+        prepare_kept_start(state, &solver, options, packed.is_some())?;
+    } else if state.reuse.take().is_some()
+        && let Some(ws) = state.workspace.as_mut()
+    {
+        ws.keep_returned_products(false)?;
+    }
     let op = &state.op;
     let dist = state.dist.as_mut();
     // The SCF driver supplies the same ratcheted tolerance and band policy to
@@ -447,6 +602,12 @@ pub(crate) fn solve_real_gamma(
             options.preconditioner,
         )?
     };
+    if reuse && let (Some(r), Some(ws)) = (state.reuse.as_mut(), state.workspace.as_ref()) {
+        // The density build of this map may keep psi(r) for the kept X.
+        r.collect = ws.kept_start().is_some();
+        r.kept.fill(false);
+        r.v_old.copy_from_slice(state.op.h.borrow().potential());
+    }
     // NL-ENERGY-REAL: nonlocal expectation values of the returned real vectors
     // for the energy audit of this map (threads-only path).
     if comm.is_none() && nl_energy_real() {
@@ -486,6 +647,83 @@ pub(crate) fn solve_real_gamma(
         history: result.history,
         operator_applications: result.operator_applications,
     }))
+}
+
+/// REUSE-PSI: ask the workspace to keep X and H X at the coming return, and,
+/// when the previous solve of this state kept them, bring H X to the current
+/// potential, H_new X = H_old X + (V_new - V_old) X (kinetic and nonlocal parts
+/// are unchanged because the state was not rebuilt), and arm the kept start.
+/// The solver takes it only if its `initial` is that X.
+fn prepare_kept_start(
+    state: &mut RealSolveState,
+    solver: &RealDavidson,
+    options: &ScfOptions,
+    has_initial: bool,
+) -> Result<(), ScfError> {
+    let RealSolveState {
+        op,
+        workspace,
+        reuse,
+        ..
+    } = state;
+    let ws = solver.prepare_workspace(op, options.davidson_capacity_per_band, workspace)?;
+    ws.keep_returned_products(true)?;
+    let mut h = op.h.borrow_mut();
+    let dims = h.grid_dims();
+    let grid_len = h.potential().len();
+    let (n, bands) = (op.n, solver.bands);
+    if reuse.as_ref().is_none_or(|r| {
+        r.dims != dims
+            || r.v_old.len() != grid_len
+            || r.image.rows() != n
+            || r.image.cols() != bands
+    }) {
+        *reuse = Some(PsiReuse {
+            collect: false,
+            dims,
+            v_old: vec![0.; grid_len],
+            delta: vec![0.; grid_len],
+            image: RealMatrix::zeros(n, bands).map_err(SolverError::from)?,
+            grids: Vec::new(),
+            kept: Vec::new(),
+            gated: false,
+        });
+    }
+    let r = reuse.as_mut().unwrap();
+    let collected = std::mem::replace(&mut r.collect, false);
+    let armed = match ws.kept_start_mut() {
+        Some((x, hx)) if collected && has_initial => {
+            let mut changed = false;
+            for ((d, &new), &old) in r.delta.iter_mut().zip(h.potential()).zip(&r.v_old) {
+                *d = new - old;
+                changed |= *d != 0.;
+            }
+            if changed {
+                h.apply_local_kept(x, &r.grids, &r.kept, &r.delta, &mut r.image)
+                    .map_err(|e| ScfError::Numerical(e.to_string()))?;
+                for (y, &d) in hx.as_mut_slice().iter_mut().zip(r.image.as_slice()) {
+                    *y += d;
+                }
+                let pairs = bands.div_ceil(2);
+                let kept = r.kept.iter().take(pairs).filter(|&&k| k).count();
+                reuse_add(ReuseCount::KeptPairs, kept);
+                reuse_add(ReuseCount::FullPairs, pairs - kept);
+            } else {
+                reuse_add(ReuseCount::Unchanged, 1);
+            }
+            true
+        }
+        _ => false,
+    };
+    if armed {
+        ws.arm_kept_start();
+        reuse_add(ReuseCount::Armed, 1);
+        reuse_add(ReuseCount::ColumnsSaved, bands);
+    } else {
+        ws.invalidate_kept_start();
+        reuse_add(ReuseCount::NotKept, 1);
+    }
+    Ok(())
 }
 
 // Boundary conversions use the same fixed pair partition as local application.
@@ -598,6 +836,68 @@ mod atomic_real_tests {
                 .unwrap()
                 .is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod reuse_psi_tests {
+    use super::*;
+    use dft_geometry::Cell;
+    use dft_physics::data::Array3;
+    use dft_physics::hamiltonian::NonlocalOperator;
+
+    /// REUSE-PSI memory gate and validity: grids are offered only after a
+    /// solve kept X and H X, only for the local-potential grid, and never
+    /// above `PSI_KEEP_MAX_BYTES` (then nothing is allocated and the state is
+    /// counted once as gated).
+    #[test]
+    fn psi_keep_gate_and_validity() {
+        let cell =
+            Cell::from_user_rows_bohr([[4.2, 0.3, 0.], [0., 3.9, 0.2], [0.1, 0., 4.4]]).unwrap();
+        let options = ScfOptions {
+            gamma_real: GammaReal::Auto,
+            cutoff_hartree: 2.5,
+            ..Default::default()
+        };
+        let basis = options.basis(&cell, [0.; 3], 1.).unwrap();
+        let grid = dft_basis::FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None)
+            .unwrap();
+        let h = Hamiltonian::new(
+            &cell,
+            &basis,
+            Array3::zeros(grid.dims()),
+            NonlocalOperator::new(&basis, cell.volume_bohr3(), &[]).unwrap(),
+        )
+        .unwrap();
+        let pool = WorkerPool::new(1).unwrap();
+        let mut state = None;
+        let capacity = real_capacity(&options, 4, h.kinetic_diagonal().len());
+        ensure_state(&h, &basis, 4, capacity, &options, &pool, &mut state).unwrap();
+        let state = state.as_mut().unwrap();
+        let dims = grid.dims();
+        let len: usize = dims.iter().product();
+        assert!(state.psi_keep(1, dims).is_none(), "no reuse state yet");
+        state.reuse = Some(PsiReuse {
+            collect: false,
+            dims,
+            v_old: vec![0.; len],
+            delta: vec![0.; len],
+            image: RealMatrix::zeros(state.op.n, 4).unwrap(),
+            grids: Vec::new(),
+            kept: Vec::new(),
+            gated: false,
+        });
+        assert!(state.psi_keep(1, dims).is_none(), "nothing kept at return");
+        state.reuse.as_mut().unwrap().collect = true;
+        assert!(state.psi_keep(1, [dims[0] + 1, dims[1], dims[2]]).is_none());
+        let (grids, kept) = state.psi_keep(2, dims).expect("two pairs fit");
+        assert_eq!((grids.len(), kept.len(), grids[1].len()), (2, 2, len));
+        let gated_before = reuse_psi_counters().gated;
+        let too_many = PSI_KEEP_MAX_BYTES / (len * std::mem::size_of::<Complex64>()) + 1;
+        assert!(state.psi_keep(too_many, dims).is_none());
+        let reuse = state.reuse.as_ref().unwrap();
+        assert!(reuse.gated && reuse.grids.is_empty());
+        assert!(reuse_psi_counters().gated > gated_before);
     }
 }
 

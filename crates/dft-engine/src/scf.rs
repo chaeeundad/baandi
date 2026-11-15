@@ -2066,12 +2066,33 @@ impl ScfProblem {
                 // this step's real Gamma solve; the M2 path builds its density
                 // from the distributed eigenvectors.
                 if !m2 {
-                    state.band_density.compute_with(
+                    let weights = finite.map_or(occupations.as_slice(), |w| w.block(0, i));
+                    // REUSE-PSI: pair transforms of the leading occupied pairs
+                    // keep psi(r) for the next solve's start.
+                    let real = state.gamma_real.gamma_real_used;
+                    let keep =
+                        if real && crate::gamma_real::reuse_psi() && state.band_density.pairs() {
+                            let pairs = weights
+                                .as_chunks::<2>()
+                                .0
+                                .iter()
+                                .take_while(|w| w[0] != 0.0 && w[1] != 0.0)
+                                .count();
+                            state
+                                .real_solve
+                                .as_mut()
+                                .filter(|_| pairs > 0)
+                                .and_then(|r| r.psi_keep(pairs, state.grid.dims()))
+                        } else {
+                            None
+                        };
+                    state.band_density.compute_keep(
                         &orbitals,
-                        finite.map_or(occupations.as_slice(), |w| w.block(0, i)),
+                        weights,
                         &state.grid,
                         volume,
-                        state.gamma_real.gamma_real_used,
+                        real,
+                        keep,
                     )?;
                 }
                 Ok(orbitals)

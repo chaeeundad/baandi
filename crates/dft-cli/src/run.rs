@@ -743,6 +743,7 @@ pub fn execute_mode(
                 "ortho":{"mode":dft_numerics::switches::text(dft_numerics::switches::Id::ORTHO).unwrap_or("dgks:0.1 (default)"),"second_pass_skipped":dft_engine::ortho_counters().0,"second_pass_repeated":dft_engine::ortho_counters().1},
                 "algebra_stream":algebra_stream_json(),
                 "davidson_lean":davidson_lean_json(),
+                "reuse_psi":reuse_psi_json(),
                 "h_vectors_recorded":r.history.iter().map(|h|h.operator_applications).sum::<usize>(),
                 "certificate_h_vectors":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.operator_applications).sum::<usize>(),
                 "note":"recorded = per-iteration solves in history; certificate = fixed-point certificate re-solves, reported only inside each history entry's fixed_point_certificate; total work is the sum"}},"energies":energies,
@@ -1305,7 +1306,7 @@ fn davidson_stages_json() -> serde_json::Value {
         .collect::<serde_json::Map<_, _>>()
         .into();
     out["work_timers_note"] = json!(
-        "BAANDI_DAVIDSON_STAGES=on. fft and h_apply_parts: seconds summed over worker threads (thread-seconds; at T>1 compare with wall only after dividing by the busy threads), counts independent of the thread count. fft.pair_*: paired orbital transforms of the real Gamma h_apply (one inverse and one forward transform per pair, as QE's fftw count of wave transforms); pair_potential_s is the grid multiply between them, not FFT. fft.density_*: density transforms (one inverse each). fft.other_*: other wave transforms (complex-path local applies, folded odd tail), one inverse and one forward each. h_apply_parts: real Gamma block applications (apply_s whole call, local_s wall of the local part on the calling thread including pack/unpack, nonlocal projection P^T X and back product); remainder_s = apply - local - nonlocal (kinetic, scans). by_run_stage splits every block by run stage (fine, ladder coarse, verification = certificate block); the pooled keys are the sums."
+        "BAANDI_DAVIDSON_STAGES=on. fft and h_apply_parts: seconds summed over worker threads (thread-seconds; at T>1 compare with wall only after dividing by the busy threads), counts independent of the thread count. fft.pair_*: paired orbital transforms of the real Gamma h_apply (one inverse and one forward transform per pair, as QE's fftw count of wave transforms); pair_potential_s is the grid multiply between them, not FFT. fft.density_*: density transforms (one inverse each). fft.other_*: other wave transforms (complex-path local applies, folded odd tail), one inverse and one forward each. fft.kept_*: REUSE-PSI forward transforms of kept psi(r) times the potential change (one forward each, no inverse). h_apply_parts: real Gamma block applications (apply_s whole call, local_s wall of the local part on the calling thread including pack/unpack, nonlocal projection P^T X and back product); remainder_s = apply - local - nonlocal (kinetic, scans). by_run_stage splits every block by run stage (fine, ladder coarse, verification = certificate block); the pooled keys are the sums."
     );
     out
 }
@@ -1325,8 +1326,9 @@ fn fft_json(w: &dft_numerics::work_timers::WorkTimes) -> serde_json::Value {
         "pair_potential_s":w.pair_potential,"pair_transforms":w.pair_transforms,"pair_columns":w.pair_columns,
         "density_s":w.density,"density_transforms":w.density_transforms,"density_columns":w.density_columns,
         "other_s":w.other,"other_transforms":w.other_transforms,"other_columns":w.other_columns,
-        "wave_fft_s":pair_fft + w.density + w.other,
-        "wave_fft_calls":2 * w.pair_transforms + w.density_transforms + 2 * w.other_transforms,
+        "kept_forward_s":w.kept_forward,"kept_transforms":w.kept_transforms,"kept_columns":w.kept_columns,
+        "wave_fft_s":pair_fft + w.density + w.other + w.kept_forward,
+        "wave_fft_calls":2 * w.pair_transforms + w.density_transforms + 2 * w.other_transforms + w.kept_transforms,
     })
 }
 fn h_apply_parts_json(w: &dft_numerics::work_timers::WorkTimes) -> serde_json::Value {
@@ -1370,6 +1372,24 @@ fn davidson_lean_json() -> serde_json::Value {
             "small":f.small as f64*1e-9,"total":f.total() as f64*1e-9},
         "eigen_full_solves":f.eigen_full,"eigen_full_m3":f.eigen_full_m3,
         "note":"process totals of the serial real Davidson (all solves, both paths; MPI distributed solver not counted)"
+    })
+}
+
+/// REUSE-PSI (`BAANDI_REUSE_PSI`, work order C2) counters of this process.
+fn reuse_psi_json() -> serde_json::Value {
+    let c = dft_engine::reuse_psi_counters();
+    let l = dft_engine::lean_counters();
+    json!({
+        "mode":dft_numerics::switches::choice(dft_numerics::switches::Id::REUSE_PSI),
+        "armed_starts":c.armed,"kept_starts":l.kept_starts,"declined_starts":l.kept_declined,
+        "kept_returns":l.kept_stored,"not_kept":c.not_kept,
+        "unchanged_potential":c.unchanged_potential,
+        "kept_pairs":c.kept_pairs,"full_pairs":c.full_pairs,
+        "inverse_transforms_saved":c.transforms_saved(),
+        "h_columns_not_applied":l.kept_columns,
+        "nonlocal_columns_saved":c.columns_saved,
+        "bytes_kept_max":c.bytes_kept,"memory_gate_bytes":dft_engine::PSI_KEEP_MAX_BYTES,"gated_states":c.gated,
+        "note":"armed = solves whose kept H X was brought to the new potential; kept_starts = armed starts the lean solver took (its initial equals the kept X), declined = armed but initial differed; kept_pairs: one forward transform of kept psi(r) (inverse saved), full_pairs: pair transformed both ways; nonlocal_columns_saved: columns whose P^T X, back product and kinetic pass were skipped (counted when armed); h_columns_not_applied: columns of the initial H application the solver skipped"
     })
 }
 

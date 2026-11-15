@@ -627,6 +627,45 @@ impl RealHamiltonian {
             }
         }
     }
+    /// Local potential samples of the current snapshot (grid C order, Ha).
+    pub fn potential(&self) -> &[f64] {
+        &self.potential
+    }
+    /// FFT grid dimensions of the local part.
+    pub fn grid_dims(&self) -> [usize; 3] {
+        self.grid_shape
+    }
+    /// REUSE-PSI: overwrite Y with the local image `potential * X` of an ORC
+    /// block for a caller-supplied potential (the potential change between two
+    /// SCF maps), without kinetic or nonlocal parts. Pairs (0,1), (2,3), ...
+    /// whose `kept` flag is set use `grids[p]`, the unscaled inverse transform
+    /// psi_a + i psi_b of exactly those two columns (kept from the density
+    /// build), and need one forward transform; the others run the full pair
+    /// transform. Equal to the local part of `apply_block` with `potential` to
+    /// rounding. The snapshot potential is not used or changed.
+    pub fn apply_local_kept(
+        &mut self,
+        x: &RealMatrix,
+        grids: &[Vec<Complex64>],
+        kept: &[bool],
+        potential: &[f64],
+        y: &mut RealMatrix,
+    ) -> Result<(), RealGammaError> {
+        if x.rows() != self.half.full_len()
+            || y.rows() != x.rows()
+            || y.cols() != x.cols()
+            || x.cols() > self.capacity
+            || potential.len() != self.potential.len()
+        {
+            return Err(RealGammaError::Shape);
+        }
+        if potential.iter().any(|v| !v.is_finite()) {
+            return Err(RealGammaError::NonFinite);
+        }
+        self.local
+            .apply_block_kept(x.as_slice(), grids, kept, potential, y.as_mut_slice())?;
+        Ok(())
+    }
     /// Number of nonlocal projector columns.
     pub fn projector_count(&self) -> usize {
         self.nonlocal.projector_count()

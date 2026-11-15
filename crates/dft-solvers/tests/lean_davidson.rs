@@ -474,3 +474,108 @@ fn lean_counters_move() {
     assert!(after.fallback_rate() <= 1.0);
     assert!(lean.max_basis_dimension <= 60);
 }
+
+/// REUSE-PSI (work order C2), solver half: a lean return keeps X and H X (the
+/// return rotation equals A X to rounding); after the caller brings H X to a
+/// changed operator (here A + D, H_new X = H_old X + D X) and arms the start,
+/// the next lean solve from `initial = X` skips the initial application of
+/// all bands, agrees with a plain warm start on eigenvalues (1e-9 Ha) and on
+/// the iteration count, and returns exact residuals. An armed start whose
+/// `initial` differs is declined (bit-identical to the plain solve), and a
+/// residual (classic) solve drops the kept start.
+#[test]
+fn kept_start_skips_initial_application() {
+    use dft_solvers::real_davidson::KEPT_START_TOLERANCE;
+    let (op, diag) = skew(260, 2);
+    let bands = 10;
+    let s = solver(bands, 1e-11);
+    let policy = BandTolerances {
+        strict_bands: 8,
+        buffer_tolerance: 1e-9,
+    };
+    let solve = |op: &Operator, initial: Option<&RealMatrix>, ws: &mut Option<_>, ritz: bool| {
+        s.solve_research(
+            op,
+            initial,
+            &diag,
+            policy,
+            ritz,
+            !ritz,
+            6,
+            ws,
+            DavidsonPreconditioner::Default,
+            options(true),
+        )
+        .unwrap()
+    };
+    let mut ws = None;
+    s.prepare_workspace(&op, 6, &mut ws)
+        .unwrap()
+        .keep_returned_products(true)
+        .unwrap();
+    let first = solve(&op, None, &mut ws, true);
+    let (x, hx) = ws.as_ref().unwrap().kept_start().expect("kept at return");
+    assert_eq!(x.as_slice(), first.eigenvectors.as_slice());
+    let n = op.a.rows();
+    let mut ax = vec![0.; n];
+    let mut worst = 0_f64;
+    for j in 0..bands {
+        op.apply(&x.as_slice()[j * n..(j + 1) * n], &mut ax)
+            .unwrap();
+        for (a, b) in ax.iter().zip(&hx.as_slice()[j * n..(j + 1) * n]) {
+            worst = worst.max((a - b).abs());
+        }
+    }
+    assert!(worst <= 1e-12, "kept H X against A X: {worst:e}");
+    // A changed operator on the same pool (a local-potential-like change).
+    let d: Vec<f64> = (0..n).map(|i| 0.01 * ((i * 7 + 3) as f64).sin()).collect();
+    let mut a2 = op.a.clone();
+    for (i, &v) in d.iter().enumerate() {
+        a2[(i, i)] += v;
+    }
+    let op2 = Operator {
+        a: a2,
+        pool: op.pool.clone(),
+    };
+    let x0 = first.eigenvectors.clone();
+    {
+        let (x, hx) = ws.as_mut().unwrap().kept_start_mut().unwrap();
+        for j in 0..bands {
+            for i in 0..n {
+                hx[(i, j)] += d[i] * x[(i, j)];
+            }
+        }
+    }
+    assert!(ws.as_mut().unwrap().arm_kept_start());
+    let before = lean_counters();
+    let reused = solve(&op2, Some(&x0), &mut ws, true);
+    let after = lean_counters();
+    assert!(after.kept_starts > before.kept_starts);
+    let plain = solve(&op2, Some(&x0), &mut None, true);
+    assert_eq!(
+        reused.operator_applications + bands,
+        plain.operator_applications
+    );
+    assert_eq!(reused.iterations, plain.iterations);
+    for (a, b) in reused.eigenvalues.iter().zip(&plain.eigenvalues) {
+        assert!((a - b).abs() <= 1e-9, "{a} vs {b}");
+    }
+    let (res, defect) = check(&op2, &reused);
+    assert!(defect <= 1e-11, "defect {defect:e}");
+    for (r, reported) in res.iter().zip(&reused.residuals) {
+        assert!((r - reported).abs() <= 1e-11, "{r:e} vs {reported:e}");
+    }
+    // Declined: initial is not the kept X (one entry moved beyond the tolerance).
+    let mut moved = reused.eigenvectors.clone();
+    moved[(3, 1)] += 10. * KEPT_START_TOLERANCE;
+    assert!(ws.as_mut().unwrap().arm_kept_start());
+    let before = lean_counters();
+    let declined = solve(&op2, Some(&moved), &mut ws, true);
+    assert!(lean_counters().kept_declined > before.kept_declined);
+    let fresh = solve(&op2, Some(&moved), &mut None, true);
+    assert_eq!(declined, fresh);
+    // A residual solve leaves no kept start behind.
+    assert!(ws.as_ref().unwrap().kept_start().is_some());
+    let _ = solve(&op2, Some(&moved), &mut ws, false);
+    assert!(ws.as_ref().unwrap().kept_start().is_none());
+}

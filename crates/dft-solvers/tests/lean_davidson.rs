@@ -276,15 +276,15 @@ const FIXTURES: [(&str, Fixture, usize); 4] = [
     ("multi-projector", projectors, 260),
 ];
 
-/// The switch defaults to classic; lean never acts on residual solves.
+/// The switch defaults to lean (adopted 2026-11-15); lean never acts on residual solves.
 #[test]
-fn default_classic_and_strict_untouched() {
+fn default_lean_and_strict_untouched() {
     use dft_numerics::switches::{Id, Source, manifest};
     let entry = &manifest()[Id::DAVIDSON as usize];
     if entry.source == Source::Default {
         assert!(
-            !ResearchOptions::from_env().lean,
-            "DAVIDSON must default classic"
+            ResearchOptions::from_env().lean,
+            "DAVIDSON must default lean"
         );
         let (op, diag) = cubic(160, 1);
         let s = solver(12, 1e-9);
@@ -293,7 +293,7 @@ fn default_classic_and_strict_untouched() {
             buffer_tolerance: 1e-6,
         };
         let a = s.solve_ritz_changes(&op, None, &diag, policy).unwrap();
-        assert_eq!(a, run(&s, &op, &diag, policy, true, 6, false));
+        assert_eq!(a, run(&s, &op, &diag, policy, true, 6, true));
     }
     let (op, diag) = skew(160, 1);
     let s = solver(12, 1e-8);

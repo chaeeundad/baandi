@@ -175,7 +175,7 @@ fn legacy_defaults_are_unchanged() {
         })
     );
     assert_eq!(value(Id::PAIR_FFT), Value::Choice("grid"));
-    assert_eq!(value(Id::DAVIDSON), Value::Choice("classic"));
+    assert_eq!(value(Id::DAVIDSON), Value::Choice("lean"));
     assert_eq!(value(Id::NONLOCAL_BLOCK), Value::Choice("auto"));
     assert_eq!(
         value(Id::MGS),

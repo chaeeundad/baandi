@@ -511,12 +511,14 @@ fn initial_block(
             &problem.options,
             problem.occupations.len(),
             None,
+            None,
         )?;
         let (guess, report) = atomic_start::ritz(
             &span,
             &state.hamiltonian,
             problem.occupations.len(),
             true,
+            None,
             None,
         )?;
         let mut ok = true;

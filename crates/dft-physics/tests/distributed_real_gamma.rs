@@ -717,3 +717,103 @@ fn distributed_band_densities_and_nonlocal_energies_match_serial() {
         }
     }
 }
+
+/// `band_values` (distributed certificate screen): plane-local psi_b(r) equal to
+/// the real part of the complex full-grid transform of the Hermitian-completed
+/// column within 1e-13 relative, weight * psi^2 / volume equal to
+/// `band_densities` bit for bit, and the values independent of the rank count
+/// (the plane split is a permutation). Three cell shapes, ranks 1 to 5.
+#[test]
+fn distributed_band_values_match_serial_and_band_densities() {
+    use dft_basis::HalfSphere;
+    use dft_numerics::{Fft3d, FftPlan3d};
+    use num_complex::Complex64 as C;
+    let cases = [
+        ([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]], 2),
+        ([[6.4, 0.4, 0.2], [1., 7.3, 0.3], [0.5, 0.7, 8.4]], 4),
+        ([[4.2, 0., 0.], [0., 5.2, 0.], [0., 0., 14.2]], 3),
+    ];
+    for (case, (rows, atoms)) in cases.into_iter().enumerate() {
+        let (basis, h) = fixture(rows, atoms, 1.2);
+        let grid = h.fft_grid().clone();
+        let half = HalfSphere::new(&basis, &grid).unwrap();
+        let n = half.full_len();
+        let volume = Cell::from_user_rows_bohr(rows).unwrap().volume_bohr3();
+        let m = 5;
+        let x = block(n, m, 91);
+        let weights = [2., 2., 1.5, 0.5, 2.];
+        let points_all: usize = grid.dims().iter().product();
+        let mut fft = FftPlan3d::new(grid.dims()).unwrap();
+        let mut want = vec![0.; m * points_all];
+        for b in 0..m {
+            let mut c = vec![C::default(); n];
+            half.unpack(&x.as_slice()[b * n..(b + 1) * n], &mut c)
+                .unwrap();
+            let mut field = Array3::<C>::zeros(grid.dims());
+            fft.to_real(&grid.scatter(&c).unwrap(), &mut field).unwrap();
+            for (w, v) in want[b * points_all..].iter_mut().zip(field.iter()) {
+                *w = v.re;
+            }
+        }
+        let scale = want.iter().fold(0f64, |a, v| a.max(v.abs()));
+        let mut previous: Option<Vec<f64>> = None;
+        for ranks in 1..=5 {
+            let parts = simulate(ranks, |comm| {
+                let (basis, h) = fixture(rows, atoms, 1.2);
+                let mut d = DistributedRealHamiltonian::new(
+                    &h,
+                    &basis,
+                    8,
+                    comm.rank(),
+                    ranks,
+                    WorkerPool::new(1).unwrap(),
+                )
+                .unwrap();
+                let xl = d.extract_local(&x).unwrap();
+                let points = d.plane_points();
+                let mut values = vec![0.; m * points];
+                d.band_values(comm, &xl, &mut values).unwrap();
+                let mut density = vec![0.; m * points];
+                d.band_densities(comm, &xl, &weights, volume, &mut density)
+                    .unwrap();
+                for b in 0..m {
+                    for p in 0..points {
+                        let v = values[b * points + p];
+                        assert_eq!(
+                            (weights[b] * v * v / volume).to_bits(),
+                            density[b * points + p].to_bits()
+                        );
+                    }
+                }
+                // Scatter this rank's planes into the full grid (zeros elsewhere).
+                let offsets = d.plane_grid_offsets();
+                let mut full = vec![0.; m * points_all];
+                for b in 0..m {
+                    for (p, &o) in offsets.iter().enumerate() {
+                        full[b * points_all + o] = values[b * points + p];
+                    }
+                }
+                full
+            });
+            let mut full = vec![0.; m * points_all];
+            for part in &parts {
+                for (f, v) in full.iter_mut().zip(part) {
+                    if *v != 0. {
+                        *f = *v;
+                    }
+                }
+            }
+            let err = full
+                .iter()
+                .zip(&want)
+                .fold(0f64, |a, (g, w)| a.max((g - w).abs()))
+                / scale;
+            println!("case {case} P={ranks}: band values rel {err:e}");
+            assert!(err < 1e-13, "case {case} P={ranks}: {err:e}");
+            if let Some(p) = &previous {
+                assert_eq!(p, &full, "values independent of the rank count");
+            }
+            previous = Some(full);
+        }
+    }
+}

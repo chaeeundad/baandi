@@ -1552,6 +1552,12 @@ impl ScfProblem {
         let mut integrals = vec![0.0; bands];
         let mut psi: Vec<Array3<Complex64>> = Vec::new();
         let mut entries: Vec<(usize, usize, Complex64)> = Vec::new();
+        let m2_comm = crate::m2::active();
+        let m2_on = m2_comm.is_some();
+        let screen_comm = m2_comm.filter(|_| crate::m2::tuning().screen_dist);
+        // Plane-local delta, band values and entry sums of the distributed screen.
+        let (mut delta_local, mut values, mut partial, mut reduced) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         for (state, k) in self.states.iter_mut().zip(k_points) {
             let current = state.hamiltonian.local_potential_values();
             let eigenvalues = &k.solution.eigenvalues;
@@ -1561,6 +1567,7 @@ impl ScfProblem {
             for ((d, t), c) in delta.iter_mut().zip(target).zip(current) {
                 *d = t - c;
             }
+            delta_local.clear();
             match (
                 crate::m2::active(),
                 state
@@ -1591,44 +1598,100 @@ impl ScfProblem {
                     continue;
                 }
                 // Cluster: build diag(eps) + M with M_ij = mean_r conj(psi_i) dV psi_j.
-                psi.resize_with(size, || Array3::zeros(state.grid.dims()));
-                // One band transform per pool worker (own FFT plan each) and the
-                // cluster entries split over the pool; every transform and every
-                // entry keeps its serial arithmetic, so the estimate is bit-identical
-                // for any thread count.
-                if self.screen_ffts.is_empty() {
-                    self.screen_ffts = (0..self.options.threads.max(1))
-                        .map(|_| FftPlan3d::new(self.grid.dims()))
-                        .collect::<Result<Vec<_>, _>>()?;
-                }
-                let vectors = &k.solution.eigenvectors;
-                let grid = &state.grid;
-                let mut jobs: Vec<_> = psi.iter_mut().zip(start..end).collect();
-                ordered_chunks(
-                    &mut jobs,
-                    &mut self.screen_ffts,
-                    &self.pool,
-                    |_, (slot, b), fft| {
-                        fft.to_real(&grid.scatter(vectors.column(*b))?, slot)?;
-                        Ok(())
-                    },
-                    |()| {},
-                )?;
-                drop(jobs);
                 entries.clear();
                 for j in 0..size {
                     for i in 0..=j {
                         entries.push((i, j, Complex64::default()));
                     }
                 }
-                let slices: Vec<&[Complex64]> = psi
-                    .iter()
-                    .map(|p| p.as_slice().expect("standard layout"))
-                    .collect();
-                let (slices, delta) = (slices.as_slice(), delta.as_slice());
-                let entries_slice = entries.as_mut_slice();
-                self.pool
-                    .install(move || cluster_entries(slices, delta, entries_slice));
+                // BAANDI_M2_SCREEN=dist: the band values on this rank's FFT planes
+                // (distributed transform), plane-local sums and one tree_sum per
+                // cluster instead of full-grid transforms on every rank. All
+                // conditions are replicated, so every rank takes the same branch.
+                let cluster_clock = Instant::now();
+                if let Some(comm) = screen_comm.as_ref()
+                    && let Some(rs) = state.real_solve.as_mut()
+                    && let (Some(dist), Some(x), Some(md)) = (
+                        rs.dist.as_mut(),
+                        rs.m2_local.as_ref(),
+                        rs.m2_density.as_ref().filter(|d| d.valid),
+                    )
+                    && x.cols() == bands
+                    && md.points == dist.plane_points()
+                    && md.offsets.len() == md.points
+                {
+                    let pts = md.points;
+                    if delta_local.len() != pts {
+                        delta_local.clear();
+                        delta_local.extend(md.offsets.iter().map(|&o| delta[o]));
+                    }
+                    let n_loc = x.rows();
+                    let mut xm = dft_numerics::RealMatrix::zeros(n_loc, size)
+                        .map_err(dft_solvers::SolverError::from)?;
+                    xm.as_mut_slice()
+                        .copy_from_slice(&x.as_slice()[start * n_loc..end * n_loc]);
+                    values.clear();
+                    values.resize(size * pts, 0.);
+                    dist.band_values(comm, &xm, &mut values)
+                        .map_err(|e| ScfError::Numerical(format!("M2 screen: {e}")))?;
+                    partial.clear();
+                    for &(i, j, _) in &entries {
+                        let (a, b) = (
+                            &values[i * pts..(i + 1) * pts],
+                            &values[j * pts..(j + 1) * pts],
+                        );
+                        let mut sum = 0.0;
+                        for ((a, b), d) in a.iter().zip(b).zip(&delta_local) {
+                            sum += a * b * d;
+                        }
+                        partial.push(sum);
+                    }
+                    reduced.clear();
+                    reduced.resize(partial.len(), 0.);
+                    dft_mpi::Collective::tree_sum_f64(comm, &partial, &mut reduced)
+                        .map_err(|e| ScfError::Numerical(e.to_string()))?;
+                    for (e, v) in entries.iter_mut().zip(&reduced) {
+                        e.2 = Complex64::new(*v, 0.0);
+                    }
+                    crate::m2::count(crate::m2::Count::ScreenDistClusters);
+                } else {
+                    psi.resize_with(size, || Array3::zeros(state.grid.dims()));
+                    // One band transform per pool worker (own FFT plan each) and the
+                    // cluster entries split over the pool; every transform and every
+                    // entry keeps its serial arithmetic, so the estimate is
+                    // bit-identical for any thread count.
+                    if self.screen_ffts.is_empty() {
+                        self.screen_ffts = (0..self.options.threads.max(1))
+                            .map(|_| FftPlan3d::new(self.grid.dims()))
+                            .collect::<Result<Vec<_>, _>>()?;
+                    }
+                    let vectors = &k.solution.eigenvectors;
+                    let grid = &state.grid;
+                    let mut jobs: Vec<_> = psi.iter_mut().zip(start..end).collect();
+                    ordered_chunks(
+                        &mut jobs,
+                        &mut self.screen_ffts,
+                        &self.pool,
+                        |_, (slot, b), fft| {
+                            fft.to_real(&grid.scatter(vectors.column(*b))?, slot)?;
+                            Ok(())
+                        },
+                        |()| {},
+                    )?;
+                    drop(jobs);
+                    let slices: Vec<&[Complex64]> = psi
+                        .iter()
+                        .map(|p| p.as_slice().expect("standard layout"))
+                        .collect();
+                    let (slices, delta) = (slices.as_slice(), delta.as_slice());
+                    let entries_slice = entries.as_mut_slice();
+                    self.pool
+                        .install(move || cluster_entries(slices, delta, entries_slice));
+                }
+                if m2_on {
+                    crate::m2::add(crate::m2::Stage::ScreenClusters, cluster_clock);
+                    crate::m2::count_n(crate::m2::Count::ScreenClusterBands, size);
+                }
                 let mut matrix = ComplexMatrix::zeros(size, size)
                     .map_err(|e| ScfError::Numerical(e.to_string()))?;
                 for &(i, j, sum) in &entries {
@@ -1647,6 +1710,7 @@ impl ScfProblem {
                 start = end;
             }
         }
+        crate::m2::record_screen_bound(bound);
         if bound.is_finite() {
             Ok(Some(bound))
         } else {
@@ -1731,6 +1795,8 @@ impl ScfProblem {
                 None
             } else if let Some(species) = &self.atomic_species {
                 let atomic_clock = Instant::now();
+                // BAANDI_M2_ATOMIC=split: span, Gram-Schmidt and H Q split over ranks.
+                let split = crate::m2::active().filter(|_| crate::m2::tuning().atomic_split);
                 let mut guesses = Vec::with_capacity(self.states.len());
                 for state in &mut self.states {
                     let span = atomic_start::span(
@@ -1742,6 +1808,7 @@ impl ScfProblem {
                         self.occupations.len(),
                         dft_numerics::switches::on(dft_numerics::switches::Id::PHASE_THREADS)
                             .then_some(&*self.pool),
+                        split.as_ref(),
                     )?;
                     // ATOMIC-REAL: H Q on the real Gamma path when eligible.
                     let hq = if crate::gamma_real::atomic_real() {
@@ -1764,6 +1831,7 @@ impl ScfProblem {
                         self.occupations.len(),
                         state.point.fractional == [0.; 3],
                         hq,
+                        split.as_ref(),
                     )?;
                     self.atomic_start.atomic_orbitals += report.atomic_orbitals;
                     self.atomic_start.initial_h_applications += report.initial_h_applications;
@@ -1772,6 +1840,12 @@ impl ScfProblem {
                     self.atomic_start.radial_samples += report.radial_samples;
                     self.atomic_start.evd_orders.extend(report.evd_orders);
                     guesses.push(guess);
+                }
+                if split.is_some() {
+                    crate::m2::count(crate::m2::Count::AtomicSplitStarts);
+                }
+                if crate::m2::active().is_some() {
+                    crate::m2::add(crate::m2::Stage::AtomicStart, atomic_clock);
                 }
                 crate::phase_clock::add_atomic_start(atomic_clock);
                 Some(guesses)

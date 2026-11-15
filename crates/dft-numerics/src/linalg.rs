@@ -512,7 +512,10 @@ pub fn orthonormalize_pooled(
     })
 }
 
-fn subtract_projection(v: &mut [Complex64], q: &[Complex64]) {
+/// v -= (q^H v) q with the fixed summation order of [`orthonormalize`]
+/// (public so that a distributed schedule of the same two-pass Gram-Schmidt can
+/// reproduce its bits).
+pub fn subtract_projection(v: &mut [Complex64], q: &[Complex64]) {
     let mut sums = [Complex64::new(0.0, 0.0); 4];
     let (qc, qr) = q.as_chunks::<4>();
     let (vc, vr) = v.as_chunks::<4>();

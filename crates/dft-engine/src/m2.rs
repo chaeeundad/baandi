@@ -36,6 +36,61 @@ pub(crate) fn active() -> Option<SharedComm> {
     SharedComm::active().filter(|_| crate::parallel::m2_enabled())
 }
 
+/// Engine-side M2 switches of the coarse stage and the certificate
+/// (docs/performance/mpi-coarse-certificate-analysis.md; both default off).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EngineTuning {
+    /// `BAANDI_M2_SCREEN=dist`: certificate-screen clusters from the distributed
+    /// band values (plane-local sums, one tree_sum per cluster).
+    pub screen_dist: bool,
+    /// `BAANDI_M2_ATOMIC=split`: atomic-start span, Gram-Schmidt first passes,
+    /// H Q and Gram columns split over ranks.
+    pub atomic_split: bool,
+}
+impl EngineTuning {
+    pub fn from_env() -> Self {
+        use dft_numerics::switches::{Id, choice};
+        Self {
+            screen_dist: choice(Id::M2_SCREEN) == "dist",
+            atomic_split: choice(Id::M2_ATOMIC) == "split",
+        }
+    }
+}
+thread_local! {
+    static TUNING_OVERRIDE: std::cell::Cell<Option<EngineTuning>> = const { std::cell::Cell::new(None) };
+}
+/// Override the engine M2 switches for the calling thread (simulated ranks in
+/// tests); `None` restores the environment.
+pub fn set_tuning_override(t: Option<EngineTuning>) {
+    TUNING_OVERRIDE.with(|o| o.set(t));
+}
+/// The engine M2 switches in force on this thread.
+pub fn tuning() -> EngineTuning {
+    TUNING_OVERRIDE.with(|o| o.get()).unwrap_or_else(|| {
+        static ENV: std::sync::OnceLock<EngineTuning> = std::sync::OnceLock::new();
+        *ENV.get_or_init(EngineTuning::from_env)
+    })
+}
+
+thread_local! {
+    // Diagnostic: the last screen estimates of this thread (tests compare the
+    // replicated and distributed screens); bounded, no numerical use.
+    static SCREEN_BOUNDS: std::cell::RefCell<Vec<f64>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+pub(crate) fn record_screen_bound(bound: f64) {
+    SCREEN_BOUNDS.with(|b| {
+        let mut b = b.borrow_mut();
+        if b.len() < 64 {
+            b.push(bound);
+        }
+    });
+}
+/// Certificate-screen estimates (Ha) recorded on this thread since the last
+/// call, oldest first (at most 64; diagnostics and tests).
+pub fn take_screen_bounds() -> Vec<f64> {
+    SCREEN_BOUNDS.with(|b| std::mem::take(&mut *b.borrow_mut()))
+}
+
 /// `BAANDI_M2_BATCH=off` restores the per-pair FFT transposes of M2b/M2c (A/B).
 pub(crate) fn batched_transposes() -> bool {
     dft_numerics::switches::on(dft_numerics::switches::Id::M2_BATCH)
@@ -196,9 +251,18 @@ pub(crate) enum Stage {
     Xc,
     NonlocalEnergy,
     ScreenIntegrals,
+    ScreenClusters,
+    AtomicStart,
 }
-const STAGE_NAMES: [&str; 4] = ["density", "xc", "nonlocal_energy", "screen_integrals"];
-static STAGE_NANOS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+const STAGE_NAMES: [&str; 6] = [
+    "density",
+    "xc",
+    "nonlocal_energy",
+    "screen_integrals",
+    "screen_clusters",
+    "atomic_start",
+];
+static STAGE_NANOS: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
 pub(crate) fn add(stage: Stage, start: Instant) {
     STAGE_NANOS[stage as usize].fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 }
@@ -208,14 +272,23 @@ pub(crate) enum Count {
     Xc,
     NonlocalEnergy,
     ScreenIntegrals,
+    ScreenClusterBands,
+    ScreenDistClusters,
+    AtomicSplitStarts,
 }
-const COUNT_NAMES: [&str; 4] = [
+const COUNT_NAMES: [&str; 7] = [
     "density_builds",
     "xc_evaluations",
     "nonlocal_energy_audits",
     "screen_integrals",
+    "screen_cluster_bands",
+    "screen_dist_clusters",
+    "atomic_split_starts",
 ];
-static COUNTS: [AtomicUsize; 4] = [const { AtomicUsize::new(0) }; 4];
+static COUNTS: [AtomicUsize; 7] = [const { AtomicUsize::new(0) }; 7];
+pub(crate) fn count_n(c: Count, n: usize) {
+    COUNTS[c as usize].fetch_add(n, Ordering::Relaxed);
+}
 pub(crate) fn count(c: Count) {
     COUNTS[c as usize].fetch_add(1, Ordering::Relaxed);
 }

@@ -200,6 +200,13 @@ table! {
         "distributed Davidson reduced eigenproblem: replicated (every rank solves) or root (rank 0 solves and broadcasts the lowest pairs; bit-identical)";
     M2_B5: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "distributed Davidson bordered (secular) reduced eigen update when one column was appended (the serial B5; rounding class)";
+    // MPI coarse stage and certificate (docs/performance/mpi-coarse-certificate-analysis.md); default off.
+    M2_SCREEN: Kind::Choice { allowed: &["replicated", "dist"], default: "replicated" }, "replicated",
+        "replicated, dist",
+        "certificate screen clusters on the M2 path: replicated (every rank transforms the cluster bands on the full grid) or dist (band values on each rank's FFT planes, local sums plus one tree_sum per cluster; rounding class of the screen estimate only)";
+    M2_ATOMIC: Kind::Choice { allowed: &["replicated", "split"], default: "replicated" }, "replicated",
+        "replicated, split",
+        "atomic start on the M2 path: replicated, or split (span columns, two-pass Gram-Schmidt first passes, H Q and the Gram columns split over ranks with one broadcast per column and one allgatherv; Gram-Schmidt bit-identical, Gram block GEMM rounding class)";
     // Solvers (dft-solvers).
     B1: Kind::Choice { allowed: &["on", "off", "standard", "strict"], default: "on" }, "on",
         "on, off, standard, strict", "B1 selected-root Davidson iterations";
@@ -536,6 +543,30 @@ mod tests {
         );
         assert_eq!(
             eval(Id::M2_EIGEN, Some("on")),
+            (Value::Choice("replicated"), InvalidToDefault)
+        );
+        assert_eq!(
+            eval(Id::M2_SCREEN, None),
+            (Value::Choice("replicated"), Default)
+        );
+        assert_eq!(
+            eval(Id::M2_SCREEN, Some("dist")),
+            (Value::Choice("dist"), Env)
+        );
+        assert_eq!(
+            eval(Id::M2_SCREEN, Some("on")),
+            (Value::Choice("replicated"), InvalidToDefault)
+        );
+        assert_eq!(
+            eval(Id::M2_ATOMIC, None),
+            (Value::Choice("replicated"), Default)
+        );
+        assert_eq!(
+            eval(Id::M2_ATOMIC, Some("split")),
+            (Value::Choice("split"), Env)
+        );
+        assert_eq!(
+            eval(Id::M2_ATOMIC, Some("dist")),
             (Value::Choice("replicated"), InvalidToDefault)
         );
         assert_eq!(eval(Id::M2_FFT, None).0, Value::Choice("rust"));

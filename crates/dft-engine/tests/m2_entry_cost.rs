@@ -15,6 +15,9 @@
 //! The reduced-eigenproblem distribution (orders, sum of m^3, single-column
 //! appends, bordered and broadcast solves) is printed per rank
 //! (docs/performance/mpi-reduced-eigen-analysis.md).
+//! M2_PROFILE_LADDER=on runs the C1 cutoff ladder (coarse stage report, certificate,
+//! screen and atomic-start clocks; docs/performance/mpi-coarse-certificate-analysis.md);
+//! the energy bits and a density FNV-1a hash are printed for A/B identity checks.
 #[allow(dead_code)]
 mod common;
 use dft_engine::{GammaReal, ScfOptions, ScfProblem, ScfResult, SpeciesPotential, parallel};
@@ -83,13 +86,14 @@ fn run(case: &str, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult
         parallel::set_m2_override(Some(true));
     }
     parallel::set_communicator(comm);
-    let result = ScfProblem::new(
+    let potentials = [SpeciesPotential {
+        label: "Si",
+        potential: &pp,
+    }];
+    let problem = ScfProblem::new(
         &cell,
         &atoms,
-        &[SpeciesPotential {
-            label: "Si",
-            potential: &pp,
-        }],
+        &potentials,
         ScfOptions {
             gamma_real: GammaReal::Auto,
             cutoff_hartree: 15.,
@@ -101,9 +105,37 @@ fn run(case: &str, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult
             ..Default::default()
         },
     )
-    .unwrap()
-    .run()
     .unwrap();
+    let result = if std::env::var("M2_PROFILE_LADDER").as_deref() == Ok("on") {
+        let out = dft_engine::cutoff_ladder::run_ladder(
+            problem,
+            &potentials,
+            &dft_engine::cutoff_ladder::CutoffLadderOptions::default(),
+            false,
+        )
+        .unwrap();
+        let r = &out.report;
+        println!(
+            "  ladder: used {} coarse grid {:?} pw {} iterations {} Davidson {} setup {:.3} s session {:.3} s prolong {:.3} s, coarse phases potential {:.3} diag {:.3} density {:.3} energy {:.3} mixing {:.3}, atomic start {:.3} s",
+            r.used,
+            r.coarse_grid,
+            r.coarse_plane_waves,
+            r.coarse_iterations,
+            r.coarse_davidson_iterations,
+            r.coarse_setup.as_secs_f64(),
+            r.coarse_session.as_secs_f64(),
+            r.coarse_prolong.as_secs_f64(),
+            r.coarse_phases.potential.as_secs_f64(),
+            r.coarse_phases.diagonalization.as_secs_f64(),
+            r.coarse_phases.density.as_secs_f64(),
+            r.coarse_phases.energy.as_secs_f64(),
+            r.coarse_phases.mixing.as_secs_f64(),
+            r.coarse_clock.atomic_start.as_secs_f64()
+        );
+        out.outcome.result
+    } else {
+        problem.run().unwrap()
+    };
     parallel::set_communicator(None);
     parallel::set_m2_override(None);
     result
@@ -121,12 +153,14 @@ type Snap = (
     Vec<(&'static str, f64)>,
     Vec<(String, f64)>,
     Vec<(&'static str, usize, f64)>,
+    dft_engine::phase_clock::PhaseClock,
 );
 fn snapshot() -> Snap {
     (
         parallel::stage_seconds(),
         parallel::m2_stats().1,
         parallel::collective_stats(),
+        dft_engine::phase_clock::snapshot(),
     )
 }
 
@@ -225,5 +259,21 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
             .map(|((n, c, a), (_, d, b))| format!("{n} {} calls {:.3} s", (c - d) / p, per(*a, *b)))
             .collect();
         println!("  collectives per rank: {}", line.join(", "));
+        let clock = dft_engine::phase_clock::snapshot().since(&before.3);
+        // The ladder clock printed above is process-wide (summed over simulated ranks).
+        println!(
+            "  clocks per rank: certificate {:.3} s in {} blocks, screen {:.3} s, atomic start {:.3} s",
+            clock.certificate.as_secs_f64() / p as f64,
+            clock.certificate_blocks / p as u64,
+            clock.screen.as_secs_f64() / p as f64,
+            clock.atomic_start.as_secs_f64() / p as f64
+        );
+        let density: u64 = r.density.iter().fold(0xcbf2_9ce4_8422_2325, |h: u64, x| {
+            (h ^ x.to_bits()).wrapping_mul(0x0100_0000_01b3)
+        });
+        println!(
+            "  energy bits {:#018x}, density FNV-1a {density:#018x}",
+            r.total_hartree().to_bits()
+        );
     }
 }

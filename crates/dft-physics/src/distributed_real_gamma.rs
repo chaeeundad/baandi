@@ -510,6 +510,43 @@ impl DistributedRealHamiltonian {
         out: &mut [f64],
     ) -> Result<(), DistributedRealError> {
         let start = Instant::now();
+        if weights.len() != x.cols() || !(volume.is_finite() && volume > 0.) {
+            return Err(DistributedRealError::Shape);
+        }
+        self.band_planes(comm, x, out, |c, v| weights[c] * v * v / volume)?;
+        stage_add(Stage::Density, start);
+        COUNTS[Count::Densities as usize].fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Real-space values psi_b(r) of the first m = x.cols() ORC columns on this
+    /// rank's FFT planes, `out[b * plane_points() + p]`, in the normalization of
+    /// `band_densities` (density = weight * psi^2 / volume) and of the complex
+    /// `to_real` transform of the Hermitian-completed column. Same collectives as
+    /// `band_densities` (one mirror alltoall when split, one batched transpose).
+    /// Used by the distributed certificate screen (`BAANDI_M2_SCREEN=dist`).
+    pub fn band_values<K: Collective>(
+        &mut self,
+        comm: &K,
+        x: &RealMatrix,
+        out: &mut [f64],
+    ) -> Result<(), DistributedRealError> {
+        let start = Instant::now();
+        self.band_planes(comm, x, out, |_, v| v)?;
+        stage_add(Stage::Values, start);
+        COUNTS[Count::Values as usize].fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Shared body of `band_densities` and `band_values`: transform the ORC
+    /// columns of x to this rank's planes and write `f(column, psi(r))`.
+    fn band_planes<K: Collective>(
+        &mut self,
+        comm: &K,
+        x: &RealMatrix,
+        out: &mut [f64],
+        f: impl Fn(usize, f64) -> f64,
+    ) -> Result<(), DistributedRealError> {
         let n_loc = self.rows.len();
         let m = x.cols();
         let points = self.fft.plane_points();
@@ -517,9 +554,7 @@ impl DistributedRealHamiltonian {
             || comm.rank() != self.rank
             || x.rows() != n_loc
             || m > self.capacity
-            || weights.len() != m
             || out.len() != m * points
-            || !(volume.is_finite() && volume > 0.)
         {
             return Err(DistributedRealError::Shape);
         }
@@ -551,26 +586,22 @@ impl DistributedRealHamiltonian {
                 self.fft.to_real_plane_in(t, pairs, i)?;
                 let slab = self.fft.plane();
                 let base = i * line;
-                let wa = weights[ca];
                 for (o, v) in out[ca * points + base..ca * points + base + line]
                     .iter_mut()
                     .zip(slab)
                 {
-                    *o = wa * v.re * v.re / volume;
+                    *o = f(ca, v.re);
                 }
                 if let Some(cb) = cb {
-                    let wb = weights[cb];
                     for (o, v) in out[cb * points + base..cb * points + base + line]
                         .iter_mut()
                         .zip(slab)
                     {
-                        *o = wb * v.im * v.im / volume;
+                        *o = f(cb, v.im);
                     }
                 }
             }
         }
-        stage_add(Stage::Density, start);
-        COUNTS[Count::Densities as usize].fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
@@ -894,8 +925,9 @@ enum Stage {
     Density,
     NonlocalEnergy,
     Gather,
+    Values,
 }
-const STAGE_NAMES: [&str; 7] = [
+const STAGE_NAMES: [&str; 8] = [
     "apply_mirror_exchange",
     "apply_pack_unpack_kinetic",
     "apply_fft_transposes",
@@ -903,8 +935,9 @@ const STAGE_NAMES: [&str; 7] = [
     "band_densities",
     "nonlocal_energy",
     "gather_planes",
+    "band_values",
 ];
-static STAGE_NANOS: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
+static STAGE_NANOS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
 fn stage_add(stage: Stage, start: Instant) {
     STAGE_NANOS[stage as usize].fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
 }
@@ -915,15 +948,17 @@ enum Count {
     Columns,
     Densities,
     NonlocalEnergies,
+    Values,
 }
-const COUNT_NAMES: [&str; 5] = [
+const COUNT_NAMES: [&str; 6] = [
     "batched_applies",
     "unbatched_applies",
     "applied_columns",
     "band_density_builds",
     "nonlocal_energy_evaluations",
+    "band_value_builds",
 ];
-static COUNTS: [AtomicUsize; 5] = [const { AtomicUsize::new(0) }; 5];
+static COUNTS: [AtomicUsize; 6] = [const { AtomicUsize::new(0) }; 6];
 
 /// (counter name, value) list and (stage name, wall seconds) list.
 pub type M2Counters = (Vec<(&'static str, usize)>, Vec<(&'static str, f64)>);

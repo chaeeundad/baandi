@@ -355,3 +355,15 @@ checkpoint reject before the first step. Count bench (ignored, release):
 `cargo test --release -p dft-engine --test cutoff_ladder ladder_standard_secant_bench -- --ignored --nocapture --test-threads=1`.
 `ScfProblem::atomic_superposition_density` (C3 relax predictor) exposes the
 atomic start density built with `start_density = Atomic`; no arithmetic changed.
+
+## M2 coarse stage and certificate switches
+
+`m2::EngineTuning` (`BAANDI_M2_SCREEN=dist`, `BAANDI_M2_ATOMIC=split`, both
+default off; per-thread override `m2::set_tuning_override` for simulated ranks)
+distributes the certificate-screen clusters (`band_values` of the distributed
+operator, one tree_sum per cluster) and the atomic start (cyclic span columns,
+`orthonormalize_split` with the serial arithmetic, H Q and Gram column blocks).
+Every branch condition must stay replicated so all ranks enter the same
+collectives. Tests: `tests/m2_coarse_certificate.rs`, the lib test
+`split_two_pass_gram_schmidt_is_bit_identical_to_the_serial_routine`. See
+`docs/performance/mpi-coarse-certificate-analysis.md`.

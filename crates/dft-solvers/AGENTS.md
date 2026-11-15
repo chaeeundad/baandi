@@ -74,3 +74,24 @@ capacity x capacity GEMM workspace; rounding class). Both default off.
 `reduced_solve_stats()` gives the order distribution (mean, p90, max, sum of m^3,
 single-column appends, bordered and broadcast solves), written to results.json
 `parallel.reduced_solves`. Analysis: docs/performance/mpi-reduced-eigen-analysis.md.
+
+## Lean Davidson (work order beat-QE phase B, 2026-11-15)
+
+`BAANDI_DAVIDSON=lean|classic` (default `classic`; `ResearchOptions::lean`), module
+`src/lean_davidson.rs` (child of `real_davidson`). Acts only on Ritz-value
+(standard-profile) solves of the serial real Gamma path; residual (strict) solves, the
+certificate, the complex and the MPI distributed solvers are unchanged. Per iteration:
+residual vectors of the unconverged roots only; all-band Ritz vectors and H images at
+return (the standard residual guard reads their norms) and contraction; unit-norm
+corrections appended without projection; overlap S = V^T V kept beside H_r with the
+explicit inverse Cholesky factor T (bordered, panels of 64 columns, GEMM workspace);
+reduced problem A = T H_r T^T by dsyevd/faer or B5; coefficients T^T Y. Pivot rule:
+every new column's squared pivot over its overlap diagonal must be at least
+`PIVOT_RATIO_MIN = eps / 1e-12`. Failing appends: stage 1 re-projects the block alone
+through T (rank floor `DEPENDENCE_TOLERANCE` on the unit input, then the classic in-block
+Gram-Schmidt) and tests again; stage 2 rotates the basis to its Ritz basis once and
+projects classically. Counters: `lean_counters()` (fallback and reprojection rates,
+pivot statistics) and `flop_counters()` (GEMM flops by site for both paths), written to
+results.json `convergence.work.davidson_lean`. Tests `tests/lean_davidson.rs`.
+Do not make it the default without the dev08 A/B (docs/performance/attempts-ledger.md
+row B-LEAN-DAVIDSON).

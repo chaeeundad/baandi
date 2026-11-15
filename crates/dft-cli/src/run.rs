@@ -742,6 +742,7 @@ pub fn execute_mode(
                 "b5":{"mode":dft_numerics::switches::choice(dft_numerics::switches::Id::B5),"bordered":dft_engine::b5_counters().bordered,"declined":dft_engine::b5_counters().declined,"full":dft_engine::b5_counters().full},
                 "ortho":{"mode":dft_numerics::switches::text(dft_numerics::switches::Id::ORTHO).unwrap_or("dgks:0.1 (default)"),"second_pass_skipped":dft_engine::ortho_counters().0,"second_pass_repeated":dft_engine::ortho_counters().1},
                 "algebra_stream":algebra_stream_json(),
+                "davidson_lean":davidson_lean_json(),
                 "h_vectors_recorded":r.history.iter().map(|h|h.operator_applications).sum::<usize>(),
                 "certificate_h_vectors":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.operator_applications).sum::<usize>(),
                 "note":"recorded = per-iteration solves in history; certificate = fixed-point certificate re-solves, reported only inside each history entry's fixed_point_certificate; total work is the sum"}},"energies":energies,
@@ -1329,6 +1330,30 @@ fn b1_json() -> serde_json::Value {
         "solves":c.solves,"narrow_iterations":c.narrow_iterations,"full_iterations":c.full_iterations,
         "narrow_columns":c.narrow_columns,"avoided_columns":c.avoided_columns,"fallbacks":c.fallbacks,
         "sketch_estimates":c.sketch_estimates,"sketch_disagreements":c.sketch_disagreements
+    })
+}
+
+/// Lean Davidson (`BAANDI_DAVIDSON=lean`, work order phase B) counters and the
+/// serial real Davidson GEMM flops by site (both paths; 2 m n k per product).
+fn davidson_lean_json() -> serde_json::Value {
+    let c = dft_engine::lean_counters();
+    let f = dft_engine::flop_counters();
+    json!({
+        "mode":dft_numerics::switches::choice(dft_numerics::switches::Id::DAVIDSON),
+        "solves":c.solves,"iterations":c.iterations,"residual_columns":c.residual_columns,
+        "appends":c.appends,"appended_columns":c.appended_columns,
+        "reprojections":c.reprojections,"reprojection_rate":c.reprojection_rate(),
+        "fallbacks":c.fallbacks,"fallback_rate":c.fallback_rate(),"fallback_dropped_columns":c.fallback_dropped_columns,
+        "rebuilds":c.rebuilds,"rebuild_columns":c.rebuild_columns,"contractions":c.contractions,
+        "returns":c.returns,"pivot_min":c.pivot_min,"pivot_below_1e-1":c.pivot_below_1e_1,
+        "pivot_below_1e-2":c.pivot_below_1e_2,
+        "gemm_gflop":{"reduced":f.reduced as f64*1e-9,"overlap":f.overlap as f64*1e-9,
+            "ritz_loop":f.ritz_loop as f64*1e-9,"return":f.ret as f64*1e-9,
+            "contraction":f.contraction as f64*1e-9,"projection":f.projection as f64*1e-9,
+            "gram_schmidt":f.gram_schmidt as f64*1e-9,"fallback":f.fallback as f64*1e-9,
+            "small":f.small as f64*1e-9,"total":f.total() as f64*1e-9},
+        "eigen_full_solves":f.eigen_full,"eigen_full_m3":f.eigen_full_m3,
+        "note":"process totals of the serial real Davidson (all solves, both paths; MPI distributed solver not counted)"
     })
 }
 

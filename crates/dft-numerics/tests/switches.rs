@@ -175,6 +175,7 @@ fn legacy_defaults_are_unchanged() {
         })
     );
     assert_eq!(value(Id::PAIR_FFT), Value::Choice("grid"));
+    assert_eq!(value(Id::DAVIDSON), Value::Choice("classic"));
     assert_eq!(value(Id::NONLOCAL_BLOCK), Value::Choice("auto"));
     assert_eq!(
         value(Id::MGS),
@@ -193,5 +194,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::CUTOFF_LADDER), Value::Raw(None));
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
-    assert_eq!(TABLE.len(), 60);
+    assert_eq!(TABLE.len(), 61);
 }

@@ -22,6 +22,11 @@
 //!   `BAANDI_NARROW_REDUCED`, `BAANDI_B5=par`; default off): counters in
 //!   [`algebra_counters`] show how often each one acted.
 //!
+//! * Lean Davidson (`BAANDI_DAVIDSON=lean`, default classic): Ritz-value
+//!   solves through `real_davidson::lean` (work order beat-QE phase B);
+//!   counters in [`lean_counters`], GEMM flops by site for both paths in
+//!   [`flop_counters`].
+//!
 //! The counters are cumulative for the process (all solves, all threads) and are
 //! read once at the reporting boundary through [`stage_seconds`] and
 //! [`b1_counters`].
@@ -126,6 +131,13 @@ pub struct ResearchOptions {
     /// matrix for at most `NARROW_WIDTH` new columns by the same streaming dot
     /// kernel (rounding class).
     pub narrow_reduced: bool,
+    /// Lean Davidson (`BAANDI_DAVIDSON=lean`, work order phase B; default
+    /// classic): Ritz-value (standard) solves form residuals of the unconverged
+    /// roots only, all-band Ritz vectors only at return and contraction, append
+    /// unit-norm corrections without projection and solve the generalized
+    /// reduced problem by Cholesky reduction (module `real_davidson::lean`).
+    /// Residual (strict) solves always take the classic path.
+    pub lean: bool,
 }
 impl Default for ResearchOptions {
     /// Every research switch off (B1 off, margin 0.5, automatic rows).
@@ -143,6 +155,7 @@ impl Default for ResearchOptions {
             ritz_fused: false,
             narrow_proj: false,
             narrow_reduced: false,
+            lean: false,
         }
     }
 }
@@ -183,6 +196,7 @@ impl ResearchOptions {
             narrow_reduced: dft_numerics::switches::on(dft_numerics::switches::Id::NARROW_REDUCED),
             stage_timers: dft_numerics::switches::on(dft_numerics::switches::Id::DAVIDSON_STAGES),
             b6: dft_numerics::switches::on(dft_numerics::switches::Id::B6),
+            lean: dft_numerics::switches::choice(dft_numerics::switches::Id::DAVIDSON) == "lean",
         }
     }
 }
@@ -466,5 +480,212 @@ pub fn algebra_counters() -> AlgebraCounters {
         narrow_projections: g(AlgebraCount::NarrowProjection),
         narrow_reduced: g(AlgebraCount::NarrowReduced),
         b5_parallel: g(AlgebraCount::B5Parallel),
+    }
+}
+
+/// GEMM sites of the serial real Davidson for the work counters (flops are
+/// 2 m n k per product, counted from the shapes at the call; no effect on the
+/// arithmetic). The in-block Gram-Schmidt loops are counted as 4 n flops per
+/// projected (column, earlier column) pair and repetition.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum FlopSite {
+    /// Border of the reduced matrix V^T (H V).
+    Reduced = 0,
+    /// Lean: border of the basis overlap V^T V.
+    Overlap = 1,
+    /// Ritz vectors, H images and residuals inside the loop (classic: every
+    /// iteration incl. the returning one; lean: the unconverged roots only).
+    RitzLoop = 2,
+    /// Lean: all-band Ritz vectors and residuals at the return.
+    Return = 3,
+    /// Contraction restarts (lean: X and H X of all bands; classic: the late
+    /// H X of fused iterations).
+    Contraction = 4,
+    /// Projection of a block against the basis (Q^T X and Q S, every pass).
+    Projection = 5,
+    /// In-block Gram-Schmidt (panel GEMMs and the scalar sweep).
+    GramSchmidt = 6,
+    /// Lean fallback: rotation of the whole basis to its Ritz basis.
+    Fallback = 7,
+    /// Lean small dense products of order m (Cholesky border, inverse factor,
+    /// reduced border of T H T^T, coefficients T^T Y).
+    Small = 8,
+}
+const FLOP_SITES: usize = 9;
+static FLOPS: [AtomicU64; FLOP_SITES] = [const { AtomicU64::new(0) }; FLOP_SITES];
+/// Full dense reduced eigensolves: count and sum of m^3.
+static EIGEN_FULL: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+#[inline]
+pub(crate) fn flops_add(site: FlopSite, rows: usize, inner: usize, cols: usize) {
+    let f = 2_u64
+        .saturating_mul(rows as u64)
+        .saturating_mul(inner as u64)
+        .saturating_mul(cols as u64);
+    FLOPS[site as usize].fetch_add(f, Relaxed);
+}
+#[inline]
+pub(crate) fn flops_add_raw(site: FlopSite, flops: u64) {
+    FLOPS[site as usize].fetch_add(flops, Relaxed);
+}
+#[inline]
+pub(crate) fn eigen_full_add(order: usize) {
+    EIGEN_FULL[0].fetch_add(1, Relaxed);
+    EIGEN_FULL[1].fetch_add((order as u64).saturating_pow(3), Relaxed);
+}
+/// Cumulative GEMM flops of the serial real Davidson by site (both paths).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FlopCounters {
+    pub reduced: u64,
+    pub overlap: u64,
+    pub ritz_loop: u64,
+    pub ret: u64,
+    pub contraction: u64,
+    pub projection: u64,
+    pub gram_schmidt: u64,
+    pub fallback: u64,
+    pub small: u64,
+    /// Full dense reduced eigensolves (B5 bordered updates excluded).
+    pub eigen_full: u64,
+    /// Sum of m^3 over those solves.
+    pub eigen_full_m3: u64,
+}
+impl FlopCounters {
+    /// Sum of the GEMM sites (the eigensolves are not GEMM work).
+    pub fn total(&self) -> u64 {
+        self.reduced
+            + self.overlap
+            + self.ritz_loop
+            + self.ret
+            + self.contraction
+            + self.projection
+            + self.gram_schmidt
+            + self.fallback
+            + self.small
+    }
+}
+pub fn flop_counters() -> FlopCounters {
+    let g = |s: FlopSite| FLOPS[s as usize].load(Relaxed);
+    FlopCounters {
+        reduced: g(FlopSite::Reduced),
+        overlap: g(FlopSite::Overlap),
+        ritz_loop: g(FlopSite::RitzLoop),
+        ret: g(FlopSite::Return),
+        contraction: g(FlopSite::Contraction),
+        projection: g(FlopSite::Projection),
+        gram_schmidt: g(FlopSite::GramSchmidt),
+        fallback: g(FlopSite::Fallback),
+        small: g(FlopSite::Small),
+        eigen_full: EIGEN_FULL[0].load(Relaxed),
+        eigen_full_m3: EIGEN_FULL[1].load(Relaxed),
+    }
+}
+
+/// Cumulative counters of the lean Davidson (all zero when it never ran).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct LeanCounters {
+    pub solves: u64,
+    pub iterations: u64,
+    /// Ritz and residual columns formed inside the loop (unconverged roots).
+    pub residual_columns: u64,
+    /// Correction blocks appended (each one is a pivot test).
+    pub appends: u64,
+    pub appended_columns: u64,
+    /// Appends whose overlap pivot ratio fell below the bound (fallback stage
+    /// 1: the block alone was projected against the basis through the factor,
+    /// passed through the in-block Gram-Schmidt and tested again).
+    pub reprojections: u64,
+    /// Appends that failed stage 1 too (stage 2: the basis was rotated to its
+    /// Ritz basis once and the block projected classically).
+    pub fallbacks: u64,
+    /// Correction columns dropped by the classic rank decisions of either stage.
+    pub fallback_dropped_columns: u64,
+    /// Bases rebuilt by projection and H application (factor failure right
+    /// after a start or a contraction; expected zero).
+    pub rebuilds: u64,
+    pub rebuild_columns: u64,
+    pub contractions: u64,
+    pub returns: u64,
+    /// Appends whose smallest pivot ratio was below 1e-1 and 1e-2 (headroom
+    /// above the bound).
+    pub pivot_below_1e_1: u64,
+    pub pivot_below_1e_2: u64,
+    /// Smallest pivot ratio seen in any append (1 when none).
+    pub pivot_min: f64,
+}
+impl LeanCounters {
+    /// Stage-2 fallbacks (basis orthonormalizations) per append (the
+    /// work-order kill rule: below 0.05).
+    pub fn fallback_rate(&self) -> f64 {
+        if self.appends == 0 {
+            0.
+        } else {
+            self.fallbacks as f64 / self.appends as f64
+        }
+    }
+    /// Appends that needed any fallback stage (pivot test failed once).
+    pub fn reprojection_rate(&self) -> f64 {
+        if self.appends == 0 {
+            0.
+        } else {
+            self.reprojections as f64 / self.appends as f64
+        }
+    }
+}
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum LeanCount {
+    Solves = 0,
+    Iterations = 1,
+    ResidualColumns = 2,
+    Appends = 3,
+    AppendedColumns = 4,
+    Fallbacks = 5,
+    FallbackDropped = 6,
+    Rebuilds = 7,
+    RebuildColumns = 8,
+    Contractions = 9,
+    Returns = 10,
+    PivotBelow1 = 11,
+    PivotBelow2 = 12,
+    Reprojections = 13,
+}
+static LEAN_COUNTS: [AtomicU64; 14] = [const { AtomicU64::new(0) }; 14];
+/// Smallest pivot ratio, as f64 bits (positive floats order like their bits).
+static LEAN_PIVOT_MIN: AtomicU64 = AtomicU64::new(0x3ff0_0000_0000_0000);
+#[inline]
+pub(crate) fn lean_add(counter: LeanCount, value: usize) {
+    LEAN_COUNTS[counter as usize].fetch_add(value as u64, Relaxed);
+}
+pub(crate) fn lean_pivot(ratio: f64) {
+    if ratio < 1e-1 {
+        lean_add(LeanCount::PivotBelow1, 1);
+    }
+    if ratio < 1e-2 {
+        lean_add(LeanCount::PivotBelow2, 1);
+    }
+    let bits = if ratio.is_finite() && ratio > 0. {
+        ratio.to_bits()
+    } else {
+        0
+    };
+    LEAN_PIVOT_MIN.fetch_min(bits, Relaxed);
+}
+pub fn lean_counters() -> LeanCounters {
+    let g = |c: LeanCount| LEAN_COUNTS[c as usize].load(Relaxed);
+    LeanCounters {
+        solves: g(LeanCount::Solves),
+        iterations: g(LeanCount::Iterations),
+        residual_columns: g(LeanCount::ResidualColumns),
+        appends: g(LeanCount::Appends),
+        appended_columns: g(LeanCount::AppendedColumns),
+        reprojections: g(LeanCount::Reprojections),
+        fallbacks: g(LeanCount::Fallbacks),
+        fallback_dropped_columns: g(LeanCount::FallbackDropped),
+        rebuilds: g(LeanCount::Rebuilds),
+        rebuild_columns: g(LeanCount::RebuildColumns),
+        contractions: g(LeanCount::Contractions),
+        returns: g(LeanCount::Returns),
+        pivot_below_1e_1: g(LeanCount::PivotBelow1),
+        pivot_below_1e_2: g(LeanCount::PivotBelow2),
+        pivot_min: f64::from_bits(LEAN_PIVOT_MIN.load(Relaxed)),
     }
 }

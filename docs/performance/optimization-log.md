@@ -1,5 +1,26 @@
 # Optimization log (newest first)
 
+## B-LEAN-DAVIDSON — lean Davidson of the real Gamma path (2026-11-15, opt-in)
+
+Work order `docs/performance/requests/work-order-beat-qe-2026-11-14.md` phase B
+(B1 at every width, B3a generalized reduced problem; B2 and B4 documented).
+Base `2acbce5` (= main); branch uncommitted. Derived from notes
+`docs/research/qe-study/qe-solvers-and-subspace.md` (sections 1, 2.6, 4) and
+`davidson-and-scf-thresholds.md` section 1 (unit-norm corrections, overlap
+rectangle instead of orthonormalization, update/last split); the pivot rule,
+the explicit inverse factor, the two-stage fallback and every threshold are our
+own and justified by the rule in `lean_davidson.rs`, not by QE.
+
+Switch `BAANDI_DAVIDSON=lean|classic` (default classic). Not adopted: dev08
+A/B pending (request in the ledger row B-LEAN-DAVIDSON and the task report).
+Mac counts (O, pure, f1e-3 seed 601): identical SCF, Davidson and H counts on
+si16/si32/si64 standard; GEMM flops -16 % (si16 5.84 -> 4.93, si32 57.08 ->
+47.86, si64 386.8 -> 322.9 GFLOP); no fallbacks; strict profiles untouched;
+classic default bit-identical to main at T=1 and T=8. Limits: no dev08 time,
+Mac walls are single observations; the return still forms H X of all bands
+because the standard residual guard reads all residual norms (work order C2
+is the follow-up that reuses it).
+
 ## P48F — closed time budget and threaded atomic start (2026-11-13, opt-in)
 
 Ticket `tickets/P48F-THREAD-PHASES.md`, work order P48 sections 1-2. Base

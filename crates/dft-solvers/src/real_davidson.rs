@@ -1,19 +1,23 @@
 //! Isolated ORC Davidson; no complex-path dispatch or arithmetic is changed.
 use crate::bordered::MAX_STREAK;
 use crate::davidson_stages::{
-    AlgebraCount, B1Count, B5Count, Stage, Timers, algebra_add, b1_add, b5_add,
+    AlgebraCount, B1Count, B5Count, FlopSite, Stage, Timers, algebra_add, b1_add, b5_add,
+    eigen_full_add, flops_add, flops_add_raw,
 };
 pub use crate::davidson_stages::{
-    AlgebraCounters, B1Counters, B1Mode, B5Counters, ResearchOptions, SketchKind, StageSeconds,
-    WIDTH_LABELS, algebra_counters, b1_counters, b5_counters, stage_seconds,
-    stage_seconds_by_run_stage,
+    AlgebraCounters, B1Counters, B1Mode, B5Counters, FlopCounters, LeanCounters, ResearchOptions,
+    SketchKind, StageSeconds, WIDTH_LABELS, algebra_counters, b1_counters, b5_counters,
+    flop_counters, lean_counters, stage_seconds, stage_seconds_by_run_stage,
 };
+#[path = "lean_davidson.rs"]
+mod lean;
 use crate::{BandTolerances, RealLinearOperator, SolverError};
 use dft_numerics::{
     linalg::{DEPENDENCE_TOLERANCE, LinalgError},
     pool::WorkerPool,
     real::{RealEighWorkspace, RealGemmWorkspace, RealMatrix, RealOp},
 };
+pub use lean::PIVOT_RATIO_MIN;
 
 /// Same accuracy flags and work units as the complex EigenSolution.
 #[derive(Debug, Clone, PartialEq)]
@@ -82,6 +86,9 @@ pub struct RealDavidsonWorkspace {
     b5: Option<crate::bordered::Bordered>,
     /// B6 projector-product cache, allocated at the first B6-active solve.
     b6: Option<B6Cache>,
+    /// Lean Davidson scratch (overlap, inverse factor, reduced matrices),
+    /// allocated at the first lean solve.
+    lean: Option<lean::LeanScratch>,
 }
 impl RealDavidsonWorkspace {
     fn new(
@@ -115,6 +122,7 @@ impl RealDavidsonWorkspace {
             b1: None,
             b5: None,
             b6: None,
+            lean: None,
             n,
             bands,
             capacity,
@@ -345,6 +353,21 @@ impl RealDavidson {
                 pool.clone(),
             )?);
         }
+        // Lean Davidson (work order phase B): Ritz-value solves only, never with
+        // the experimental second vector (as B1).
+        if options.lean && ritz && SecondVector::from_env() == SecondVector::Off {
+            return lean::solve(
+                self,
+                op,
+                initial,
+                diagonal,
+                policy,
+                capacity,
+                workspace.as_mut().unwrap(),
+                preconditioner,
+                options,
+            );
+        }
         let RealDavidsonWorkspace {
             gemm,
             projection,
@@ -520,6 +543,7 @@ impl RealDavidson {
             };
             if !bordered {
                 eigensolver.solve_into(reduced, &mut values[..m], coefficients)?;
+                eigen_full_add(m);
             }
             if let Some(b) = b5.as_mut() {
                 if bordered {
@@ -582,6 +606,7 @@ impl RealDavidson {
                     residual_block.reshape_within_storage(n, k)?;
                     // Narrow iterations never restart, so H X is never needed.
                     ritz_and_residuals(
+                        FlopSite::RitzLoop,
                         options.ritz_fused,
                         gemm,
                         basis,
@@ -629,6 +654,7 @@ impl RealDavidson {
                 rotated_products.reshape_within_storage(n, self.bands)?;
                 residual_block.reshape_within_storage(n, self.bands)?;
                 hx_formed = ritz_and_residuals(
+                    FlopSite::RitzLoop,
                     options.ritz_fused,
                     gemm,
                     basis,
@@ -763,51 +789,17 @@ impl RealDavidson {
             );
             corrections.reshape_within_storage(n, selected.len())?;
             let t = timers.start();
-            let column_slots: &[usize] = &column_of[..];
-            pool.install(|| {
-                column_work(corrections.as_mut_slice(), n, 0, &|k, dst| {
-                    let j = selected[k];
-                    // Column of root j in the Ritz and residual blocks (j on the
-                    // all-band path, its slot in a B1 narrow iteration).
-                    let c = column_slots[j];
-                    // The default damping keeps the original tight loop; research
-                    // variants take their own loops (no per-element dispatch).
-                    match preconditioner {
-                        crate::DavidsonPreconditioner::Default => {
-                            for ((dst, &r), &d) in
-                                dst.iter_mut().zip(column(residual_block, c)).zip(diagonal)
-                            {
-                                *dst = precondition(r, d, values[j])?;
-                            }
-                        }
-                        crate::DavidsonPreconditioner::Tpa => {
-                            let scale = crate::kinetic_scale(
-                                column(vectors, c)
-                                    .iter()
-                                    .zip(diagonal)
-                                    .map(|(&c, &t)| (c * c, t)),
-                            )?;
-                            for ((dst, &r), &d) in
-                                dst.iter_mut().zip(column(residual_block, c)).zip(diagonal)
-                            {
-                                *dst = -r * crate::tpa_weight(d, scale);
-                                finite(&[*dst])?;
-                            }
-                        }
-                        crate::DavidsonPreconditioner::RitzShift => {
-                            for ((dst, &r), &d) in
-                                dst.iter_mut().zip(column(residual_block, c)).zip(diagonal)
-                            {
-                                let delta = d - values[j];
-                                finite(&[delta])?;
-                                *dst = -r / delta.max(0.1);
-                                finite(&[*dst])?;
-                            }
-                        }
-                    }
-                    Ok(())
-                })
-            })?;
+            precondition_block(
+                &pool,
+                preconditioner,
+                corrections,
+                selected,
+                &column_of[..],
+                residual_block,
+                vectors,
+                diagonal,
+                &values[..self.bands],
+            )?;
             timers.stop(t, Stage::Precondition);
             if second_vector != SecondVector::Off {
                 add_second_vector(
@@ -849,6 +841,7 @@ impl RealDavidson {
                             rotated_products.as_mut_slice(),
                         )?;
                         timers.stop(t, Stage::Rotate);
+                        flops_add(FlopSite::Contraction, n, m, self.bands);
                         algebra_add(AlgebraCount::DeferredHx);
                     }
                     std::mem::swap(basis, vectors);
@@ -917,6 +910,68 @@ impl RealDavidson {
         }
         unreachable!("validated positive iteration limit")
     }
+}
+
+/// Preconditioned corrections of the `selected` roots into `corrections`
+/// (n x selected); `column_slots[j]` is the column of root j in the Ritz and
+/// residual blocks. Fixed four-column pieces on the pool.
+#[allow(clippy::too_many_arguments)]
+fn precondition_block(
+    pool: &WorkerPool,
+    preconditioner: crate::DavidsonPreconditioner,
+    corrections: &mut RealMatrix,
+    selected: &[usize],
+    column_slots: &[usize],
+    residual_block: &RealMatrix,
+    vectors: &RealMatrix,
+    diagonal: &[f64],
+    values: &[f64],
+) -> Result<(), LinalgError> {
+    let n = corrections.rows();
+    pool.install(|| {
+        column_work(corrections.as_mut_slice(), n, 0, &|k, dst| {
+            let j = selected[k];
+            // Column of root j in the Ritz and residual blocks (j on the
+            // all-band path, its slot in a B1 narrow iteration).
+            let c = column_slots[j];
+            // The default damping keeps the original tight loop; research
+            // variants take their own loops (no per-element dispatch).
+            match preconditioner {
+                crate::DavidsonPreconditioner::Default => {
+                    for ((dst, &r), &d) in
+                        dst.iter_mut().zip(column(residual_block, c)).zip(diagonal)
+                    {
+                        *dst = precondition(r, d, values[j])?;
+                    }
+                }
+                crate::DavidsonPreconditioner::Tpa => {
+                    let scale = crate::kinetic_scale(
+                        column(vectors, c)
+                            .iter()
+                            .zip(diagonal)
+                            .map(|(&c, &t)| (c * c, t)),
+                    )?;
+                    for ((dst, &r), &d) in
+                        dst.iter_mut().zip(column(residual_block, c)).zip(diagonal)
+                    {
+                        *dst = -r * crate::tpa_weight(d, scale);
+                        finite(&[*dst])?;
+                    }
+                }
+                crate::DavidsonPreconditioner::RitzShift => {
+                    for ((dst, &r), &d) in
+                        dst.iter_mut().zip(column(residual_block, c)).zip(diagonal)
+                    {
+                        let delta = d - values[j];
+                        finite(&[delta])?;
+                        *dst = -r / delta.max(0.1);
+                        finite(&[*dst])?;
+                    }
+                }
+            }
+            Ok(())
+        })
+    })
 }
 
 /// Lowest kinetic coordinate units; ties retain ORC half-list order (0, cos, sin).
@@ -1316,6 +1371,7 @@ fn reduced_matrix_into(
     // One old/new rectangle and the new square, in one GEMM. Preserve the
     // old prefix exactly; the newly computed upper triangle defines symmetry.
     let rows = v.rows();
+    flops_add(FlopSite::Reduced, m, rows, m - prefix);
     if narrow && prefix > 0 && m - prefix <= NARROW_WIDTH {
         // NARROW-REDUCED: one streaming dot per entry of the border.
         algebra_add(AlgebraCount::NarrowReduced);
@@ -1447,6 +1503,7 @@ fn residual_into(
 /// `vectors` and `rotated_products`, then the residual (returns true).
 #[allow(clippy::too_many_arguments)]
 fn ritz_and_residuals(
+    site: FlopSite,
     fused: bool,
     gemm: &mut RealGemmWorkspace,
     basis: &RealMatrix,
@@ -1462,6 +1519,8 @@ fn ritz_and_residuals(
 ) -> Result<bool, SolverError> {
     let m = basis.cols();
     let k = values.len();
+    // V C and (H V) C.
+    flops_add(site, basis.rows(), m, 2 * k);
     let t = timers.start();
     if fused
         && gemm.rotate_residual_slices(
@@ -1700,6 +1759,8 @@ impl Projection {
         })?;
         let against = against.filter(|q| q.cols() > 0);
         let mut skip_second = false;
+        // Work counter: in-block Gram-Schmidt pair operations (4 n flops each).
+        let mut gs_pairs: u64 = 0;
         for pass in 0..if against.is_some() { 2 } else { 1 } {
             if pass > 0 && skip_second {
                 // ORTHO-DGKS: the first pass kept every column with at least
@@ -1712,6 +1773,10 @@ impl Projection {
                 // Both buffers have the same capacity; the previous MGS result
                 // becomes input, and the old input storage becomes output.
                 std::mem::swap(&mut self.normalized, &mut self.output);
+            }
+            if let Some(q) = against {
+                // Q^T X and X -= Q S.
+                flops_add(FlopSite::Projection, q.cols(), n, 2 * count);
             }
             if let Some(q) = against
                 && self.narrow
@@ -1808,6 +1873,7 @@ impl Projection {
                         if kept == 0 {
                             break;
                         }
+                        flops_add(FlopSite::GramSchmidt, kept, n, 2 * w);
                         ws.multiply_slices_into(
                             dft_numerics::GemmSite::Other,
                             self.output.as_slice(),
@@ -1861,6 +1927,7 @@ impl Projection {
                     }
                     let panel_start = kept;
                     for jj in start..start + w {
+                        gs_pairs += 2 * (kept - panel_start) as u64;
                         self.column.copy_from_slice(column(&self.normalized, jj));
                         for _ in 0..2 {
                             for k in panel_start..kept {
@@ -1889,6 +1956,7 @@ impl Projection {
                 }
             } else {
                 for j in 0..count {
+                    gs_pairs += 2 * kept as u64;
                     self.column.copy_from_slice(column(&self.normalized, j));
                     for _ in 0..2 {
                         for k in 0..kept {
@@ -1924,6 +1992,7 @@ impl Projection {
             }
             count = kept;
         }
+        flops_add_raw(FlopSite::GramSchmidt, gs_pairs * 4 * n as u64);
         let cap = self.output.cols();
         std::mem::swap(&mut self.output, out);
         out.reshape_within_storage(n, count)?;

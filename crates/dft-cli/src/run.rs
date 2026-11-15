@@ -107,6 +107,18 @@ pub fn options_with(
         o.davidson_capacity_per_band = s
             .davidson_capacity_per_band()
             .map_err(|e| error(1, e.to_string()))?;
+        // MPI capacity rule (dev08 capacity sweep 2026-11-15): with four or more
+        // ranks the replicated dense reduced eigenproblem is a scaling ceiling,
+        // and a basis of 3 columns per band (instead of 6) shrinks it at a
+        // small cost in Davidson iterations (si64 strict np=4/8 -6.8/-13.9 %,
+        // standard np=8 -19.8 %, MgO 132 bands np=8 -5.2 %). An explicit
+        // scf.davidson_capacity_per_band always wins.
+        if s.davidson_capacity_per_band.is_none()
+            && crate::parallel::size() >= 4
+            && dft_numerics::switches::choice(dft_numerics::switches::Id::M2_CAPACITY) == "auto"
+        {
+            o.davidson_capacity_per_band = 3;
+        }
         o.start_wavefunctions = s
             .start_wavefunctions()
             .map_err(|e| error(1, e.to_string()))?;

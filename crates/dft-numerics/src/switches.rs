@@ -206,6 +206,8 @@ table! {
         "1D kernels of the M2 distributed FFT (mkl: MKL DFTI batch lanes on MKL builds, rounding class; pure builds stay rustfft)";
     M2_LEAN: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "distributed Davidson residuals and corrections by slice loops without per-element index checks; bit-identical";
+    M2_CAPACITY: Kind::Choice { allowed: &["auto", "off"], default: "auto" }, "auto", "auto, off",
+        "MPI runs with four or more ranks use 3 Davidson basis columns per band when scf.davidson_capacity_per_band is not set (auto), else the default 6 (off)";
     // MPI reduced eigenproblem (docs/performance/mpi-reduced-eigen-analysis.md); default off.
     M2_EIGEN: Kind::Choice { allowed: &["replicated", "root"], default: "replicated" }, "replicated",
         "replicated, root",

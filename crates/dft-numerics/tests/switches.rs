@@ -133,6 +133,10 @@ fn legacy_defaults_are_unchanged() {
     }
     assert!(on(Id::M2_DGEMM) && on(Id::M2_LEAN));
     assert_eq!(
+        switches::resolve(switches::switch(Id::M2_CAPACITY), None).0,
+        Value::Choice("auto")
+    );
+    assert_eq!(
         switches::resolve(switches::switch(Id::M2_EIGEN), None).0,
         Value::Choice("replicated")
     );
@@ -205,5 +209,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::CUTOFF_LADDER), Value::Raw(None));
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
-    assert_eq!(TABLE.len(), 65);
+    assert_eq!(TABLE.len(), 66);
 }

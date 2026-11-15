@@ -65,6 +65,10 @@ pub struct ScfSession {
     /// Standard profile only: eigen tolerance of the first step instead of the
     /// cap (cutoff-ladder hand-off; set before the first step, crate-private).
     standard_seed: Option<f64>,
+    /// Strict residual schedule only: eigen tolerance of the first step instead
+    /// of the schedule's 1e-2 start (cutoff-ladder hand-off, D1
+    /// `BAANDI_LADDER_FIRST_TOL`; set before the first step, crate-private).
+    strict_seed: Option<f64>,
     /// ADR 0043: attempts of the post-convergence verification.
     verification: VerificationReport,
 }
@@ -192,6 +196,7 @@ impl ScfSession {
             events,
             certificate_attempted: false,
             standard_seed: None,
+            strict_seed: None,
             verification: VerificationReport::default(),
         })
     }
@@ -400,13 +405,11 @@ impl ScfSession {
                 ordinary
             }
         } else if self.problem.options.residual_eigen_schedule {
-            // Residual is the normalized density L2 norm in atomic units.
-            // 0.1 is an empirical scheduling coefficient in atomic units.
-            history
-                .last()
-                .map_or(1e-2, |r| schedule_factor() * r.density_residual)
-                .min(1e-2)
-                .max(0.1 * self.problem.options.eigen_tolerance)
+            residual_schedule(
+                &self.problem.options,
+                history.last().map(|r| r.density_residual),
+                self.strict_seed.unwrap_or(1e-2),
+            )
         } else {
             (self.problem.options.initial_eigen_tolerance
                 * self
@@ -1225,6 +1228,29 @@ impl ScfSession {
             Some(tolerance.clamp(StandardProfile::FLOOR_HA, StandardProfile::CAP_HA));
         Ok(())
     }
+    /// Cutoff-ladder hand-off (D1): first-step eigen tolerance of the strict
+    /// residual schedule, clamped by the schedule's own bounds. Ignored by the
+    /// standard profile and by the legacy decay schedule.
+    pub(crate) fn seed_strict_tolerance(&mut self, tolerance: f64) -> Result<(), ScfError> {
+        if self.iteration != 0 || !tolerance.is_finite() || tolerance <= 0.0 {
+            return Err(ScfError::InvalidInput(
+                "seed_strict_tolerance: positive value before the first step",
+            ));
+        }
+        self.strict_seed = Some(tolerance);
+        Ok(())
+    }
+    /// Strict residual schedule: the eigen tolerance the next step would use
+    /// (None for the standard profile, the legacy schedule or an empty history).
+    pub(crate) fn next_strict_tolerance(&self) -> Option<f64> {
+        let o = &self.problem.options;
+        if o.standard.is_some() || !o.residual_eigen_schedule {
+            return None;
+        }
+        self.history()
+            .last()
+            .map(|r| residual_schedule(o, Some(r.density_residual), 1e-2))
+    }
     pub fn events(&mut self) -> Option<&mut EventQueue> {
         self.events.as_mut()
     }
@@ -1348,7 +1374,8 @@ impl ScfSession {
             }
             let c = self.continuation.as_ref().ok_or(Rejection::Boundary)?;
             // A pending first-step standard seed is not part of checkpoint v1.
-            if self.standard_seed.is_some() && c.history.is_empty() {
+            if (self.standard_seed.is_some() || self.strict_seed.is_some()) && c.history.is_empty()
+            {
                 return Err(Rejection::Boundary);
             }
             Some(ContinuationState {
@@ -1842,6 +1869,15 @@ fn growth_reset_limit() -> Option<f64> {
 /// Coefficient of the residual-driven eigen tolerance schedule (tolerance =
 /// factor x density residual). Default 0.1 (the established empirical value);
 /// `BAANDI_EIGEN_FACTOR=<x>` (0.001 to 1) is an experiment switch for dev08 A/B.
+/// Strict residual eigen schedule: factor x last density residual (the
+/// normalized density L2 norm in atomic units; 0.1 is an empirical scheduling
+/// coefficient), `first` without history, clamped to [0.1 eigen_tolerance, 1e-2].
+fn residual_schedule(options: &ScfOptions, last_residual: Option<f64>, first: f64) -> f64 {
+    last_residual
+        .map_or(first, |r| schedule_factor() * r)
+        .min(1e-2)
+        .max(0.1 * options.eigen_tolerance)
+}
 fn schedule_factor() -> f64 {
     static FACTOR: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
     *FACTOR.get_or_init(|| {

@@ -729,6 +729,24 @@ fine step uses the tolerance the coarse ratchet would use next, or the cap with
 seeds the full-cutoff Pulay mixer with the last h coarse difference pairs,
 prolonged like the density. The block then also reports `standard`,
 `standard_seed_ha`, `secant_requested`, `secant_seeded` and `secant_fallback`.
+D1 hand-off scan switches (work order 2026-11-14 phase D; defaults reproduce the
+adopted ladder bit for bit): `BAANDI_LADDER_COARSE_STOP=<x>` (coarse stop level of
+the density residual, Bohr^-3/2, in (0, 1), default 1e-4);
+`BAANDI_LADDER_COARSE_RULE=fixed|atomic` (atomic: stop at the larger of that level
+and the distance between the full-cutoff and the prolonged coarse atomic start
+densities, available only with `scf.start_density = "atomic"`, otherwise the
+fixed level applies); `BAANDI_LADDER_FIRST_TOL=auto|cap|coarse|next` (first fine
+eigen tolerance: auto = standard per `BAANDI_LADDER_STANDARD_SEED`, strict cold
+1e-2; cap = both cold; coarse = the last coarse step's requested tolerance; next =
+the coarse schedule's next tolerance); the coarse fraction is
+`BAANDI_CUTOFF_LADDER=<fraction>`. The block reports `coarse_stop_rule`,
+`coarse_stop_level`, `atomic_truncation_distance`,
+`handoff_to_final_density_distance` (converged fine density against the handed-off
+density, the measured coarse-to-fine difference), `first_tolerance`,
+`strict_seed_ha`, `fine_scf_steps`, `fine_h_vectors`, `fine_certificate_h_vectors`,
+`coarse_fine_step_equivalents` (coarse full-grid H equivalents over the mean
+recorded fine H per step), `coarse_wall_fine_step_equivalents`,
+`total_step_equivalents` and `total_h_full_grid_equivalents`.
 `BAANDI_STANDARD_RESIDUAL_GUARD=on` (default ON since 2026-11-13, any standard run, ladder or
 not) adds a second condition to the standard-class stop: the second-order
 band-energy bound sum_k w_k sum_occupied f_i |r_i|^2 (Ha, residual norms of the

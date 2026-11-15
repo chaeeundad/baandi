@@ -42,6 +42,15 @@
 //! the coarse stage stops when its density residual falls to a fixed level
 //! (default 1e-4 Bohr^-3/2, pre-registered in the design note) or after a fixed
 //! iteration budget. Neither value is tuned on any system.
+//!
+//! D1 hand-off knobs (work order 2026-11-14, all default to the adopted ladder):
+//! `BAANDI_LADDER_COARSE_STOP` (the fixed level), `BAANDI_LADDER_COARSE_RULE`
+//! (`fixed`, or `atomic`: stop at the larger of the fixed level and the
+//! truncation distance of the atomic start density, `CoarseStopRule`) and
+//! `BAANDI_LADDER_FIRST_TOL` (first fine eigen tolerance, `FirstTolerance`).
+//! The fraction is `BAANDI_CUTOFF_LADDER=<fraction>` (CLI). Every knob changes
+//! only the start state or the first-step tolerance of the full-cutoff session;
+//! its stopping rule, certificate and verification are untouched.
 use super::*;
 use crate::checkpoint::{ElectronicState, Orbitals};
 use std::collections::HashMap;
@@ -57,6 +66,37 @@ pub enum StandardSeed {
     /// ratchet(last coarse tolerance, last coarse Coulomb error, N_e). The fine
     /// session's own ratchet takes over from its first record.
     Coarse,
+}
+
+/// Coarse stop level rule (D1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CoarseStopRule {
+    /// Stop at `coarse_density_residual` (the adopted rule).
+    Fixed,
+    /// Stop at max(`coarse_density_residual`, d) with d the distance (same norm
+    /// as the density residual) between the atomic start density of the full
+    /// cutoff and the prolonged atomic start density of the coarse cutoff: the
+    /// part of a density the coarse grid cannot hold, so a coarse residual
+    /// below d is below the coarse-to-fine model difference. No constant; it can
+    /// only stop the coarse stage earlier. Without an atomic start (uniform
+    /// start density) d is unavailable and the fixed level applies (recorded).
+    Atomic,
+}
+
+/// First-step eigen tolerance of the full-cutoff session after a hand-off (D1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FirstTolerance {
+    /// Adopted behaviour: standard follows `standard_seed`, strict starts its
+    /// residual schedule at its cold value (1e-2).
+    Auto,
+    /// Both profiles start cold (standard cap, strict 1e-2).
+    Cap,
+    /// Both start from the eigen tolerance the last coarse step requested (the
+    /// coarse orbitals are converged to it).
+    Coarse,
+    /// Both start from the tolerance the coarse schedule would use next
+    /// (standard ratchet; strict factor x last coarse density residual).
+    Next,
 }
 
 /// Ladder controls. Off unless a caller runs `run_ladder`.
@@ -77,6 +117,12 @@ pub struct CutoffLadderOptions {
     /// S2: number h of coarse Pulay difference pairs prolonged into the fine
     /// mixer; 0 is off (`BAANDI_LADDER_SECANT=off|on|<h>`, on means 4; default off).
     pub secant_pairs: usize,
+    /// D1: coarse stop level rule (`BAANDI_LADDER_COARSE_RULE=fixed|atomic`;
+    /// default fixed).
+    pub coarse_rule: CoarseStopRule,
+    /// D1: first fine eigen tolerance (`BAANDI_LADDER_FIRST_TOL=auto|cap|coarse|next`;
+    /// default auto).
+    pub first_tolerance: FirstTolerance,
 }
 impl Default for CutoffLadderOptions {
     /// Pre-registered values (fraction 0.5, residual 1e-4, budget 30) and the
@@ -100,6 +146,24 @@ impl Default for CutoffLadderOptions {
                 "on" => 4,
                 v => v.parse().unwrap_or(0),
             },
+            coarse_density_residual: dft_numerics::switches::number(
+                dft_numerics::switches::Id::LADDER_COARSE_STOP,
+            )
+            .unwrap_or(1e-4),
+            coarse_rule: match dft_numerics::switches::choice(
+                dft_numerics::switches::Id::LADDER_COARSE_RULE,
+            ) {
+                "atomic" => CoarseStopRule::Atomic,
+                _ => CoarseStopRule::Fixed,
+            },
+            first_tolerance: match dft_numerics::switches::choice(
+                dft_numerics::switches::Id::LADDER_FIRST_TOL,
+            ) {
+                "cap" => FirstTolerance::Cap,
+                "coarse" => FirstTolerance::Coarse,
+                "next" => FirstTolerance::Next,
+                _ => FirstTolerance::Auto,
+            },
             ..Self::baseline()
         }
     }
@@ -115,6 +179,8 @@ impl CutoffLadderOptions {
             standard: false,
             standard_seed: StandardSeed::Coarse,
             secant_pairs: 0,
+            coarse_rule: CoarseStopRule::Fixed,
+            first_tolerance: FirstTolerance::Auto,
         }
     }
     pub fn validate(&self) -> Result<(), ScfError> {
@@ -174,8 +240,36 @@ pub struct CutoffLadderReport {
     pub secant_requested: usize,
     pub secant_seeded: usize,
     pub secant_fallback: Option<String>,
+    /// D1: rule and level (Bohr^-3/2) that stopped the coarse stage.
+    pub coarse_rule: Option<CoarseStopRule>,
+    pub coarse_stop_level: f64,
+    /// D1: distance between the full-cutoff atomic start density and the
+    /// prolonged coarse one (density-residual norm, Bohr^-3/2); None without an
+    /// atomic start.
+    pub atomic_truncation_distance: Option<f64>,
+    /// D1: distance between the converged full-cutoff density and the handed-off
+    /// (prolonged coarse) density, same norm: the measured coarse-to-fine
+    /// density difference of this run.
+    pub handoff_to_final_density_distance: Option<f64>,
+    /// D1: first-step tolerance rule and the strict seed given (Ha; None means
+    /// the cold schedule start).
+    pub first_tolerance: Option<FirstTolerance>,
+    pub strict_seed_ha: Option<f64>,
+    /// D1: full-cutoff work after the hand-off: SCF steps, ordinary (recorded)
+    /// H columns and certificate H columns.
+    pub fine_iterations: usize,
+    pub fine_h_vectors: usize,
+    pub fine_certificate_h_vectors: usize,
 }
 impl CutoffLadderReport {
+    /// D1: coarse stage cost in fine-step equivalents: full-grid-equivalent
+    /// coarse H columns divided by the mean recorded H columns of one fine SCF
+    /// step (None before a fine step ran).
+    pub fn coarse_fine_step_equivalents(&self) -> Option<f64> {
+        (self.fine_iterations > 0 && self.fine_h_vectors > 0).then(|| {
+            self.coarse_h_equivalents() / (self.fine_h_vectors as f64 / self.fine_iterations as f64)
+        })
+    }
     /// Coarse H columns scaled by the FFT grid ratio (H cost per column is
     /// dominated by the grid transforms): full-grid H-column equivalents.
     pub fn coarse_h_equivalents(&self) -> f64 {
@@ -338,6 +432,10 @@ struct CoarseState {
     mixer: Option<crate::checkpoint::MixerState>,
     /// Standard profile: the tolerance the coarse ratchet would use next.
     standard_next: Option<f64>,
+    /// Strict residual schedule: the tolerance the coarse session would use next.
+    strict_next: Option<f64>,
+    /// Eigen tolerance requested by the last coarse step.
+    last_tolerance: Option<f64>,
 }
 
 /// Coarse stage: drive the ordinary session at E1 and return its next input
@@ -345,6 +443,7 @@ struct CoarseState {
 fn coarse_stage(
     coarse: ScfProblem,
     ladder: &CutoffLadderOptions,
+    stop_level: f64,
     report: &mut CutoffLadderReport,
 ) -> Result<CoarseState, ScfError> {
     // P0.2: Davidson and operator work of this stage is reported as ladder coarse.
@@ -365,7 +464,7 @@ fn coarse_stage(
             .last()
             .map_or(f64::INFINITY, |r| r.density_residual);
         if status != StepStatus::Ready
-            || last <= ladder.coarse_density_residual
+            || last <= stop_level
             || session.history().len() >= ladder.coarse_max_iterations
         {
             break;
@@ -405,6 +504,8 @@ fn coarse_stage(
             )
         })
     });
+    let strict_next = session.next_strict_tolerance();
+    let last_tolerance = history.last().map(|r| r.requested_eigen_tolerance);
     let mixer = if ladder.secant_pairs > 0 {
         session.mixer_state()
     } else {
@@ -429,6 +530,8 @@ fn coarse_stage(
         basis,
         mixer,
         standard_next,
+        strict_next,
+        last_tolerance,
     })
 }
 
@@ -492,6 +595,9 @@ pub fn run_ladder(
         standard: fine.options.standard.is_some(),
         secant_requested: ladder.secant_pairs,
         fraction: ladder.fraction,
+        coarse_rule: Some(ladder.coarse_rule),
+        coarse_stop_level: ladder.coarse_density_residual,
+        first_tolerance: Some(ladder.first_tolerance),
         coarse_cutoff_hartree: fine.options.cutoff_hartree * ladder.fraction,
         fine_grid: fine.grid.dims(),
         fine_plane_waves: fine.states[0].basis.vectors().len(),
@@ -508,7 +614,14 @@ pub fn run_ladder(
             report.coarse_setup = setup.elapsed();
             report.coarse_grid = coarse.grid.dims();
             report.coarse_plane_waves = coarse.states[0].basis.vectors().len();
-            coarse_stage(coarse, ladder, &mut report).and_then(|c| {
+            report.atomic_truncation_distance = atomic_truncation_distance(&fine, &coarse);
+            if ladder.coarse_rule == CoarseStopRule::Atomic
+                && let Some(d) = report.atomic_truncation_distance
+            {
+                report.coarse_stop_level = report.coarse_stop_level.max(d);
+            }
+            let stop_level = report.coarse_stop_level;
+            coarse_stage(coarse, ladder, stop_level, &mut report).and_then(|c| {
                 let prolong = Instant::now();
                 let state = hand_off(&fine, &c.basis, &c.density, &c.orbitals);
                 report.coarse_prolong = prolong.elapsed();
@@ -520,8 +633,20 @@ pub fn run_ladder(
     let (electronic, seeds) = match start {
         Ok((state, coarse)) => {
             report.used = true;
-            if fine.options.standard.is_some() && ladder.standard_seed == StandardSeed::Coarse {
-                report.standard_seed_ha = coarse.standard_next;
+            let standard = fine.options.standard.is_some();
+            let seed = match ladder.first_tolerance {
+                FirstTolerance::Auto => (standard && ladder.standard_seed == StandardSeed::Coarse)
+                    .then_some(coarse.standard_next)
+                    .flatten(),
+                FirstTolerance::Cap => None,
+                FirstTolerance::Coarse => coarse.last_tolerance,
+                FirstTolerance::Next if standard => coarse.standard_next,
+                FirstTolerance::Next => coarse.strict_next,
+            };
+            if standard {
+                report.standard_seed_ha = seed;
+            } else if fine.options.residual_eigen_schedule {
+                report.strict_seed_ha = seed;
             }
             let seeds = if ladder.secant_pairs > 0 {
                 match prolonged_secant_pairs(
@@ -551,8 +676,44 @@ pub fn run_ladder(
         let outcome = direct_min::finish(fine, None, retain_last)?;
         return Ok(LadderOutcome { outcome, report });
     };
+    let handoff = Array3::from_shape_vec(electronic.grid, electronic.density.clone())
+        .map_err(|e| ScfError::Numerical(format!("cutoff_ladder: {e}")))?;
+    let (volume, electrons) = (fine.cell.volume_bohr3(), fine.electrons);
     let outcome = finish_from(fine, &electronic, seeds, retain_last, &mut report)?;
+    let h = &outcome.result.history;
+    report.fine_iterations = h.len();
+    report.fine_h_vectors = h.iter().map(|r| r.operator_applications).sum();
+    report.fine_certificate_h_vectors = h
+        .iter()
+        .filter_map(|r| r.fixed_point_certificate.as_ref())
+        .map(|c| c.operator_applications)
+        .sum();
+    report.handoff_to_final_density_distance = Some(density_distance(
+        &outcome.result.density,
+        &handoff,
+        volume,
+        electrons,
+    ))
+    .filter(|d| d.is_finite());
     Ok(LadderOutcome { outcome, report })
+}
+
+/// D1: distance (density-residual norm) between the full-cutoff atomic start
+/// density and the coarse one prolonged to the full grid; None without an
+/// atomic start on both levels.
+fn atomic_truncation_distance(fine: &ScfProblem, coarse: &ScfProblem) -> Option<f64> {
+    let (f, c) = (
+        fine.atomic_superposition_density()?,
+        coarse.atomic_superposition_density()?,
+    );
+    let prolonged = prolong_density(c, fine.grid.dims()).ok()?;
+    Some(density_distance(
+        f,
+        &prolonged,
+        fine.cell.volume_bohr3(),
+        fine.electrons,
+    ))
+    .filter(|d| d.is_finite())
 }
 
 /// `direct_min::finish` from the prolonged state, plus the optional S1
@@ -566,7 +727,7 @@ fn finish_from(
     retain_last: bool,
     report: &mut CutoffLadderReport,
 ) -> Result<ScfOutcome, ScfError> {
-    if report.standard_seed_ha.is_none() && seeds.is_none() {
+    if report.standard_seed_ha.is_none() && report.strict_seed_ha.is_none() && seeds.is_none() {
         return direct_min::finish(fine, Some(start), retain_last);
     }
     let completion = if retain_last {
@@ -578,6 +739,9 @@ fn finish_from(
     session.initialize_electronic(start)?;
     if let Some(t) = report.standard_seed_ha {
         session.seed_standard_tolerance(t)?;
+    }
+    if let Some(t) = report.strict_seed_ha {
+        session.seed_strict_tolerance(t)?;
     }
     if let Some((dx, dr)) = seeds {
         match session.seed_mixer_differences(&dx, &dr) {

@@ -767,7 +767,23 @@ pub fn execute_mode(
             "standard":l.standard,"standard_seed_ha":l.standard_seed_ha,
             "secant_requested":l.secant_requested,"secant_seeded":l.secant_seeded,
             "secant_fallback":l.secant_fallback,
-            "note":"coarse stage supplies the start only; convergence, energy audit and certificate are at the full cutoff (history and work above are full-cutoff only)"});
+            "coarse_stop_rule":l.coarse_rule.map(|r| format!("{r:?}").to_lowercase()),
+            "coarse_stop_level":l.coarse_stop_level,
+            "atomic_truncation_distance":l.atomic_truncation_distance,
+            "handoff_to_final_density_distance":l.handoff_to_final_density_distance,
+            "first_tolerance":l.first_tolerance.map(|r| format!("{r:?}").to_lowercase()),
+            "strict_seed_ha":l.strict_seed_ha,
+            "fine_scf_steps":l.fine_iterations,"fine_h_vectors":l.fine_h_vectors,
+            "fine_certificate_h_vectors":l.fine_certificate_h_vectors,
+            "coarse_fine_step_equivalents":l.coarse_fine_step_equivalents(),
+            "coarse_wall_fine_step_equivalents":(l.used && l.fine_iterations > 0).then(|| {
+                let steps = timings["steps_s"].as_f64().unwrap_or(f64::NAN)
+                    - timings["certificate"]["wall_s"].as_f64().unwrap_or(0.0);
+                l.coarse_time.as_secs_f64() / (steps / l.fine_iterations as f64)
+            }).filter(|x| x.is_finite()),
+            "total_step_equivalents":l.coarse_fine_step_equivalents().map(|c| c + l.fine_iterations as f64),
+            "total_h_full_grid_equivalents":l.coarse_h_equivalents() + (l.fine_h_vectors + l.fine_certificate_h_vectors) as f64,
+            "note":"coarse stage supplies the start only; convergence, energy audit and certificate are at the full cutoff (history and work above are full-cutoff only). D1: coarse_fine_step_equivalents = coarse_h_full_grid_equivalents / (fine_h_vectors / fine_scf_steps) (recorded H per fine step, certificate excluded); coarse_wall_fine_step_equivalents = coarse_stage_s / ((timings.steps_s - timings.certificate.wall_s) / fine_scf_steps); total_step_equivalents = fine_scf_steps + coarse_fine_step_equivalents; total_h_full_grid_equivalents = coarse equivalents + fine recorded + fine certificate H; distances in the density-residual norm (Bohr^-3/2)"});
     }
     if let Some(c) = &r.energy_identity {
         // B2 (BAANDI_ENERGY_IDENTITY=on): history energies of non-final iterations

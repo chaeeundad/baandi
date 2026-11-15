@@ -353,6 +353,13 @@ S1/S2 switches (default off, `CutoffLadderOptions::baseline()` reads no environm
 by `PulayState.seed_dx/seed_dr`). A pending standard seed makes an exact
 checkpoint reject before the first step. Count bench (ignored, release):
 `cargo test --release -p dft-engine --test cutoff_ladder ladder_standard_secant_bench -- --ignored --nocapture --test-threads=1`.
+D1 knobs (defaults = adopted ladder, bit-identical): `coarse_density_residual`
+(`BAANDI_LADDER_COARSE_STOP`), `coarse_rule` (`BAANDI_LADDER_COARSE_RULE`, atomic
+start-density truncation distance, never lowers the level) and `first_tolerance`
+(`BAANDI_LADDER_FIRST_TOL`; strict seeds go through `seed_strict_tolerance`, used
+only by the residual schedule; a pending strict seed also rejects an exact
+checkpoint). Scan bench: `cargo test --release -p dft-engine --test cutoff_ladder
+ladder_d1_scan -- --ignored --nocapture --test-threads=1` (env in the test file).
 `ScfProblem::atomic_superposition_density` (C3 relax predictor) exposes the
 atomic start density built with `start_density = Atomic`; no arithmetic changed.
 

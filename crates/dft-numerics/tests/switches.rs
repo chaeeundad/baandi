@@ -129,12 +129,11 @@ fn legacy_defaults_are_unchanged() {
         Id::B1_NARROW,
         Id::REFERENCE_STRICT,
         Id::M2_B5,
-        Id::M2_SELECTED_ROOTS,
         Id::LEAN_PROJ_CACHE,
     ] {
         assert!(!on(id), "{id:?} must default off");
     }
-    assert!(on(Id::M2_DGEMM) && on(Id::M2_LEAN) && on(Id::REUSE_PSI));
+    assert!(on(Id::M2_DGEMM) && on(Id::M2_LEAN) && on(Id::REUSE_PSI) && on(Id::M2_SELECTED_ROOTS));
     assert_eq!(
         switches::resolve(switches::switch(Id::M2_CAPACITY), None).0,
         Value::Choice("auto")

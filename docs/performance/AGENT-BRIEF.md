@@ -13,7 +13,8 @@ Applies to Codex implementers and Claude agents. Rules from AGENTS.md (Performan
 5. **Three-point comparison.** Build and measure (a) the baseline commit, (b) current main, (c) your branch, each in its own target directory, binary sha256 recorded. The effect is (c) against (b); (b) against (a) shows what else moved.
 6. **Mac is an observation.** Alternating pairs: at least 30 per condition for a 1-3% claim (7 pairs only to settle one outlier); load recorded; no builds overlapping. Mac scaling is not evidence for dev08 (see ledger C.1). Never claim acceptance from the Mac.
 7. **dev08 acceptance goes through the orchestrator**, who asks the remote measurement session. You do not log into dev08. Give them the request in the ticket report (below).
-8. **Update ledger and backlog** with new rows (numbers, mechanism, lesson, source), including negative results.
+8. **Fast loop (user request 2026-11-16).** Screen an idea on one representative case first (counters, then three alternating pairs), widen to five or six cases only for survivors, and run the full generality set once per surviving candidate (stage 3). Details: [fast-loop-protocol.md](fast-loop-protocol.md). Screening is never adoption evidence.
+9. **Update ledger and backlog** with new rows (numbers, mechanism, lesson, source), including negative results.
 
 ## Gates (every change)
 - `scripts/check.sh` exit 0 (build, test, fmt, clippy -D warnings); tests longer than 10 s in debug are `#[ignore]` with the release command documented.

@@ -307,7 +307,7 @@ table! {
     // Per-core kernels (ticket PERCORE-KERNELS, docs/performance/percore-kernels-2026-11-17.md); default off.
     LEAN_BORDER: Kind::Choice { allowed: &["separate", "fused"], default: "separate" }, "separate",
         "separate, fused",
-        "PERCORE-KERNELS: borders of the lean real Gamma Davidson: separate (overlap border V^T E before the H apply, reduced border V^T (H E) in the next iteration, two transposed products) or fused (H applied to the unit corrections first, then one transposed product V^T [E | H E] of twice the width forms both borders, so the basis is streamed once; the pivot test follows it and a failing append discards the images and takes the separate fallback; fresh bases (start, contraction) form V^T [V | H V] at once; bit-identical on the aarch64 pure kernel, rounding class on MKL and x86)";
+        "PERCORE-KERNELS: borders of the lean real Gamma Davidson: separate (overlap border V^T E before the H apply, reduced border V^T (H E) in the next iteration, two transposed products) or fused (H applied to the unit corrections first, then one transposed product V^T [E | H E] of twice the width forms both borders, so the basis is streamed once; the pivot test follows it and a failing append discards the images, takes the separate fallback and ends fusing for the rest of that solve; only blocks with 4 k <= m (basis width m) fuse, wider blocks such as the first append of every solve keep the separate products; bit-identical on the aarch64 pure kernel, rounding class on MKL and x86)";
     // Physics (dft-physics).
     MKL_NONLOCAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "nonlocal products by dgemm on the real Gamma path";

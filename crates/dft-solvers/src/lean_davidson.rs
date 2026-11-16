@@ -965,6 +965,10 @@ pub(super) fn solve(
     let mut prefix = 0;
     let mut factored = 0;
     let mut max_basis_dimension = 0;
+    // LEAN_BORDER=fused until the first failed pivot test of this solve; the
+    // remaining appends take the separate path (bounds the discarded H
+    // columns to one block per solve on systems where the test fails often).
+    let mut fuse_allowed = options.lean_border_fused && !options.narrow_reduced;
     for iteration in 1..=solver.max_iterations {
         lean_add(LeanCount::Iterations, 1);
         let iteration_clock = timers.start();
@@ -1269,7 +1273,18 @@ pub(super) fn solve(
             timers.stop(t, Stage::Orthonormalize);
         }
         // LEAN_BORDER=fused: H on E first, then both borders from one product.
-        let fused = options.lean_border_fused && !options.narrow_reduced;
+        // A zero correction (exactly dependent) fails the pivot test anyway and
+        // must not reach the operator: such a block takes the separate path.
+        // Shape rule (traffic, not tuning): the fused product saves one stream
+        // of the basis (n m) and costs copies of E and H E (about 4 n k), so it
+        // is taken for blocks with 4 k <= m; wider blocks (the first append of
+        // every solve) keep the separate products.
+        let fused = fuse_allowed
+            && 4 * k <= m
+            && extra
+                .as_slice()
+                .chunks_exact(n)
+                .all(|c| c.iter().any(|&x| x != 0.));
         if fused {
             apply_into(
                 op,
@@ -1308,6 +1323,7 @@ pub(super) fn solve(
             // own columns below (counted, expected zero).
             lean.pending = None;
             lean_add(LeanCount::FusedWasted, k);
+            fuse_allowed = false;
         }
         let mut appended = ok;
         if !ok {

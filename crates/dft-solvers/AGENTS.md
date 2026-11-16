@@ -239,8 +239,9 @@ formulas and orders: bit-identical (test `mixing::incremental_tests`). Counters
 the lean solver applies H to the unit corrections E before the pivot test and forms the
 overlap border V^T E and the reduced border V^T (H E) as one product V^T [E | H E]
 (`lean_davidson::fused_border`, the reduced step then copies its border in
-`reduced_from_fused`). A failing pivot test discards the images (`fused_wasted_columns`)
-and takes the separate fallback. Inactive with `BAANDI_NARROW_REDUCED=on`. Bit-identical
+`reduced_from_fused`). A failing pivot test discards the images (`fused_wasted_columns`),
+takes the separate fallback and ends fusing for that solve; only blocks with 4 k <= m fuse
+(traffic rule: the copies of E and H E against the saved stream of V). Inactive with `BAANDI_NARROW_REDUCED=on`. Bit-identical
 on the aarch64 pure kernel, rounding class on MKL / x86 faer. `BAANDI_RITZ_FUSED=loop`
 (`ritz_fused_loop`): the fused Ritz/residual kernel only at the selected-root residuals of
 the lean loop (bit-identical). Counters `lean_counters().fused_borders`,

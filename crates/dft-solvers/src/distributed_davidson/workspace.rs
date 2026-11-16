@@ -492,6 +492,32 @@ fn append_in_place(a: &mut RealMatrix, extra: &RealMatrix) -> Result<(), SolverE
     Ok(())
 }
 
+/// MPI-KEPT-START return: the local rows of the returned X into the caller's
+/// `x`, and, for a Ritz-change return with `keep`, its H images (the return
+/// rotation of the H products) as the stored kept start.
+fn keep_return(
+    kept: Option<&mut (&mut RealMatrix, &mut DistributedKeptStart)>,
+    vectors: &RealMatrix,
+    rotated: &RealMatrix,
+    images: bool,
+    nl: usize,
+    bands: usize,
+) -> Result<(), SolverError> {
+    let Some((x, k)) = kept else {
+        return Ok(());
+    };
+    fit(x, nl, bands)?;
+    x.as_mut_slice()
+        .copy_from_slice(&vectors.as_slice()[..nl * bands]);
+    if images && k.keep {
+        fit(&mut k.hx, nl, bands)?;
+        k.hx.as_mut_slice()
+            .copy_from_slice(&rotated.as_slice()[..nl * bands]);
+        k.stored = true;
+    }
+    Ok(())
+}
+
 /// Workspace form of `solve_core` (see the module documentation). `apply`
 /// writes H x into a caller-shaped output (local rows x columns of x).
 #[allow(clippy::too_many_arguments)]
@@ -510,6 +536,7 @@ pub(super) fn solve_core_ws<C: Collective>(
     certify: bool,
     capacity_per_band: usize,
     tuning: DistributedTuning,
+    kept: Option<(&mut RealMatrix, &mut DistributedKeptStart)>,
 ) -> Result<RealEigenSolution, SolverError> {
     let mut ws = WORKSPACE
         .with(|w| w.borrow_mut().take())
@@ -531,6 +558,7 @@ pub(super) fn solve_core_ws<C: Collective>(
         certify,
         capacity_per_band,
         tuning,
+        kept,
     );
     WS_COUNTS[0].fetch_add(1, Ordering::Relaxed);
     if SOLVE_GROWTHS.with(|g| g.get()) == 0 {
@@ -557,6 +585,7 @@ fn solve_on<C: Collective>(
     certify: bool,
     capacity_per_band: usize,
     tuning: DistributedTuning,
+    mut kept: Option<(&mut RealMatrix, &mut DistributedKeptStart)>,
 ) -> Result<RealEigenSolution, SolverError> {
     let n = layout.n;
     if !(2..=12).contains(&capacity_per_band) {
@@ -707,16 +736,67 @@ fn solve_on<C: Collective>(
             &cold
         }
     };
-    ortho_into(
-        comm,
-        gemm,
-        None,
-        &local_rows(layout, start)?,
-        &tuning,
-        panel,
-        ortho,
-        basis,
-    )?;
+    let start_local = local_rows(layout, start)?;
+    // MPI-KEPT-START: the stored return is consumed by this solve (stored again
+    // only by a keeping return below); the decision to take it is replicated.
+    let mut kept_taken = false;
+    if let Some((x, k)) = kept.as_mut() {
+        let armed = std::mem::replace(&mut k.armed, false) && k.stored && ritz && initial.is_some();
+        k.stored = false;
+        if armed {
+            // Local mismatch (shape or values) of initial against the kept X,
+            // summed over ranks: zero on every rank or the start is declined.
+            let shape_ok = x.rows() == nl
+                && x.cols() == bands
+                && k.hx.rows() == nl
+                && k.hx.cols() == bands
+                && start_local.cols() == bands;
+            let differs = !shape_ok
+                || x.as_slice()
+                    .iter()
+                    .zip(start_local.as_slice())
+                    .any(|(a, b)| (a - b).abs() > KEPT_START_TOLERANCE);
+            let mut flag = [0.0];
+            site(Site::Setup);
+            comm.tree_sum_f64(&[f64::from(u8::from(differs))], &mut flag)
+                .map_err(comm_error)?;
+            if flag[0] == 0.0 {
+                // Contraction rule of a restart: Gram defect of X at most 1e-12.
+                fit(defect, bands, bands)?;
+                fit(partial, bands, bands)?;
+                site(Site::RestartDefect);
+                gram_slices(
+                    comm,
+                    gemm,
+                    x.as_slice(),
+                    bands,
+                    x.as_slice(),
+                    bands,
+                    nl,
+                    partial,
+                    defect,
+                )?;
+                let mut worst = 0.0_f64;
+                for j in 0..bands {
+                    for i in 0..bands {
+                        worst = worst.max((defect[(i, j)] - if i == j { 1.0 } else { 0.0 }).abs());
+                    }
+                }
+                kept_taken = worst <= 1e-12;
+            }
+            if kept_taken {
+                fit(basis, nl, bands)?;
+                basis.as_mut_slice().copy_from_slice(x.as_slice());
+                fit(products, nl, bands)?;
+                products.as_mut_slice().copy_from_slice(k.hx.as_slice());
+            }
+            k.taken = kept_taken;
+            k.declined = !kept_taken;
+        }
+    }
+    if !kept_taken {
+        ortho_into(comm, gemm, None, &start_local, &tuning, panel, ortho, basis)?;
+    }
     while basis.cols() < bands {
         let w = bands - basis.cols();
         let random = RealMatrix::new(n, w, (0..n * w).map(|_| rng.next()).collect())?;
@@ -738,9 +818,11 @@ fn solve_on<C: Collective>(
         append_in_place(basis, extra)?;
     }
     let mut applications = 0usize;
-    fit(products, nl, basis.cols())?;
-    apply(basis, products)?;
-    applications += basis.cols();
+    if !kept_taken {
+        fit(products, nl, basis.cols())?;
+        apply(basis, products)?;
+        applications += basis.cols();
+    }
 
     let threshold = |j: usize| {
         if j < policy.strict_bands - usize::from(ritz) {
@@ -902,6 +984,7 @@ fn solve_on<C: Collective>(
                         residuals: norms.clone(),
                     });
                 }
+                keep_return(kept.as_mut(), vectors, rotated, ritz, nl, bands)?;
                 let full = gather_full(comm, layout, vectors)?;
                 return Ok(RealEigenSolution {
                     eigenvalues: values[..bands].to_vec(),
@@ -1058,6 +1141,14 @@ fn solve_on<C: Collective>(
                 || (iteration == solver.max_iterations
                     && converged[..policy.strict_bands].iter().all(|&b| b));
             if finished {
+                keep_return(
+                    kept.as_mut(),
+                    vectors,
+                    rotated,
+                    ritz && !certified,
+                    nl,
+                    bands,
+                )?;
                 let full = gather_full(comm, layout, vectors)?;
                 return Ok(RealEigenSolution {
                     eigenvalues: values[..bands].to_vec(),

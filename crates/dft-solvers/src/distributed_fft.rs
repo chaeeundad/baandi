@@ -511,23 +511,82 @@ impl DistributedPairFft {
     }
 
     fn multiply_planes(&mut self, potential: &[f64], np: usize) -> Result<(), DistFftError> {
-        let (ny, nz) = (self.n[1], self.n[2]);
         for t in 0..np {
             for i in 0..self.plane_count() {
                 self.to_real_plane_in(t, np, i)?;
-                for y in 0..ny {
-                    let start = self.grid_start(i, y);
-                    for (a, &v) in self.slab[y * nz..(y + 1) * nz]
-                        .iter_mut()
-                        .zip(&potential[start..start + nz])
-                    {
-                        *a *= v;
-                    }
-                }
+                self.multiply_slab(potential, i);
                 self.to_reciprocal_plane_in(t, np, i)?;
             }
         }
         Ok(())
+    }
+
+    /// Multiply the current slab (owned plane i) by `potential` (full row-major grid).
+    fn multiply_slab(&mut self, potential: &[f64], i: usize) {
+        let (ny, nz) = (self.n[1], self.n[2]);
+        for y in 0..ny {
+            let start = self.grid_start(i, y);
+            for (a, &v) in self.slab[y * nz..(y + 1) * nz]
+                .iter_mut()
+                .zip(&potential[start..start + nz])
+            {
+                *a *= v;
+            }
+        }
+    }
+
+    /// MPI-KEPT-START: `apply_local_batch` for `np` vectors of which the first
+    /// `kept` have their real-space planes supplied in `planes` (vector t, owned
+    /// plane i at `planes[t * plane_points() + i * rows() * shape[2]..]`, the
+    /// slab `plane()` that `to_real_plane_in` leaves for that vector), so that
+    /// only the r -> G transform runs for them; the remaining `np - kept` vectors
+    /// are read from `data[kept * local_len()..]` and transformed both ways. All
+    /// np results are written to `data` with ONE transpose back. A kept plane
+    /// equal to the slab the inverse transform would produce gives the bits of
+    /// `apply_local_batch` (the transforms of one vector do not depend on the
+    /// batch). Collectives: one transpose to r when `kept < np`, one back; every
+    /// rank must call with the same np and kept.
+    pub fn apply_local_batch_kept<K: Collective>(
+        &mut self,
+        comm: &K,
+        data: &mut [C],
+        potential: &[f64],
+        np: usize,
+        kept: usize,
+        planes: &[C],
+    ) -> Result<(), DistFftError> {
+        let ll = self.scatter.len();
+        let pp = self.plane_points();
+        if potential.len() != self.total
+            || data.len() != ll * np
+            || kept > np
+            || planes.len() < kept * pp
+        {
+            return Err(FftError::IncompatibleArray.into());
+        }
+        let fresh = np - kept;
+        if fresh > 0 {
+            self.begin_to_real_batch(comm, &data[kept * ll..], fresh)?;
+        }
+        // Keeps the received fresh data (resize preserves the contents).
+        self.reserve_batch(np);
+        let line = self.n[1] * self.n[2];
+        for t in 0..kept {
+            for i in 0..self.plane_count() {
+                self.slab
+                    .copy_from_slice(&planes[t * pp + i * line..t * pp + (i + 1) * line]);
+                self.multiply_slab(potential, i);
+                self.to_reciprocal_plane_in(t, np, i)?;
+            }
+        }
+        for t in 0..fresh {
+            for i in 0..self.plane_count() {
+                self.to_real_plane_in(t, fresh, i)?;
+                self.multiply_slab(potential, i);
+                self.to_reciprocal_plane_in(kept + t, np, i)?;
+            }
+        }
+        self.finish_to_reciprocal_batch(comm, data, np)
     }
 
     /// Grid points on this rank's planes (`plane_count * rows * shape[2]`): the
@@ -856,6 +915,56 @@ mod tests {
                     res.iter().all(|r| r.1),
                     "{shape:?} P={ranks}: gather differs"
                 );
+            }
+        }
+    }
+
+    /// MPI-KEPT-START: with the planes of the first `kept` vectors taken from
+    /// their own inverse transforms, `apply_local_batch_kept` gives the bits of
+    /// `apply_local_batch` for every kept count, 1 to 5 ranks.
+    #[test]
+    fn kept_planes_batch_equals_plain_batch_bitwise() {
+        for (shape, idx) in cases() {
+            let n = shape.iter().product::<usize>();
+            let mut s = 11;
+            let pot: Vec<f64> = (0..n).map(|_| lcg(&mut s) - 0.5).collect();
+            let np = 3;
+            let vecs: Vec<Vec<C>> = (0..np)
+                .map(|t| random_c(idx.len(), 70 + t as u64))
+                .collect();
+            for ranks in 1..=5 {
+                let res = simulate(ranks, |comm| {
+                    let mut p = DistributedPairFft::new(shape, &idx, comm.rank(), ranks).unwrap();
+                    let vecs = &vecs;
+                    let input: Vec<C> = (0..np)
+                        .flat_map(|t| p.local_positions().iter().map(move |&g| vecs[t][g]))
+                        .collect();
+                    let mut plain = input.clone();
+                    p.apply_local_batch(comm, &mut plain, &pot, np).unwrap();
+                    // Planes of every vector from the inverse transform alone.
+                    let pp = p.plane_points();
+                    let mut planes = vec![C::default(); np * pp];
+                    p.begin_to_real_batch(comm, &input, np).unwrap();
+                    let line = p.rows() * shape[2];
+                    for t in 0..np {
+                        for i in 0..p.plane_count() {
+                            p.to_real_plane_in(t, np, i).unwrap();
+                            planes[t * pp + i * line..t * pp + (i + 1) * line]
+                                .copy_from_slice(p.plane());
+                        }
+                    }
+                    (0..=np)
+                        .map(|kept| {
+                            let mut out = input.clone();
+                            p.apply_local_batch_kept(comm, &mut out, &pot, np, kept, &planes)
+                                .unwrap();
+                            out == plain
+                        })
+                        .collect::<Vec<_>>()
+                });
+                for r in &res {
+                    assert!(r.iter().all(|&b| b), "{shape:?} P={ranks}: {r:?}");
+                }
             }
         }
     }

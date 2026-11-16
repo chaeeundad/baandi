@@ -445,6 +445,75 @@ fn apply_distributed<C: Collective>(
     out
 }
 
+/// Largest absolute difference between the solver's `initial` and the kept X
+/// (local rows) for which a kept start is taken (as the serial
+/// `real_davidson::KEPT_START_TOLERANCE`: the pack/unpack round trip of the
+/// complex warm start changes X by rounding only).
+pub const KEPT_START_TOLERANCE: f64 = 1e-14;
+
+/// Kept start of the stick-row solver (MPI-KEPT-START, `BAANDI_M2_REUSE`): the
+/// H images of the latest Ritz-change return on this rank's rows, owned by the
+/// caller across solves (the X itself is the caller's `x_local`). All flags
+/// are replicated: every rank sets and reads them under the same conditions.
+#[derive(Debug)]
+pub struct DistributedKeptStart {
+    hx: RealMatrix,
+    keep: bool,
+    stored: bool,
+    armed: bool,
+    taken: bool,
+    declined: bool,
+}
+
+impl Default for DistributedKeptStart {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DistributedKeptStart {
+    pub fn new() -> Self {
+        Self {
+            hx: RealMatrix::new(0, 0, Vec::new()).expect("empty matrix"),
+            keep: false,
+            stored: false,
+            armed: false,
+            taken: false,
+            declined: false,
+        }
+    }
+    /// Keep H X at the next Ritz-change return (`stored` afterwards).
+    pub fn set_keep(&mut self, keep: bool) {
+        self.keep = keep;
+    }
+    /// H X of the latest keeping return (local rows x bands), if stored.
+    pub fn stored_mut(&mut self) -> Option<&mut RealMatrix> {
+        self.stored.then_some(&mut self.hx)
+    }
+    pub fn is_stored(&self) -> bool {
+        self.stored
+    }
+    /// Let the next solve try the kept start (the caller has brought H X to the
+    /// current operator). Without a stored return this does nothing.
+    pub fn arm(&mut self) {
+        self.armed = self.stored;
+    }
+    /// Forget the stored return (rebuilt operator, failed solve, checkpoint).
+    pub fn invalidate(&mut self) {
+        self.stored = false;
+        self.armed = false;
+    }
+    /// Whether the latest solve started from the kept X and H X.
+    pub fn taken(&self) -> bool {
+        self.taken
+    }
+    /// Whether the latest solve was armed but declined the kept start
+    /// (initial differs from X, or the Gram defect of X exceeds 1e-12).
+    pub fn declined(&self) -> bool {
+        self.declined
+    }
+}
+
 /// Run-time choices of the distributed solver (MPI entry cost,
 /// docs/performance/mpi-entry-cost-analysis.md). `from_env` reads the switches;
 /// `Default` is the classic M1/M2 code (all off). Every choice is a function of
@@ -1022,6 +1091,7 @@ impl crate::RealDavidson {
                 certify,
                 capacity_per_band,
                 tuning,
+                None,
             );
         }
         let pool = match op.worker_pool() {
@@ -1096,6 +1166,81 @@ impl crate::RealDavidson {
         capacity_per_band: usize,
         tuning: DistributedTuning,
     ) -> Result<RealEigenSolution, SolverError> {
+        self.solve_rows_impl(
+            comm,
+            op,
+            initial,
+            diagonal_local,
+            policy,
+            ritz,
+            certify,
+            capacity_per_band,
+            tuning,
+            None,
+        )
+    }
+
+    /// MPI-KEPT-START (`BAANDI_M2_REUSE=on`): `solve_distributed_rows_tuned` with
+    /// a kept start. `x_local` receives the local rows of the returned
+    /// eigenvectors (this rank's rows of `eigenvectors`, in local row order; no
+    /// extraction from the gathered block needed). When `kept` is armed and holds
+    /// a return, `x_local` must hold that return's X and `kept` its H X at the
+    /// CURRENT operator (the caller adds (V_new - V_old) X); the solve then starts
+    /// from basis X and products H X without orthonormalization or an initial
+    /// apply, if (replicated decision) `initial` equals X on every rank to
+    /// `KEPT_START_TOLERANCE` and the Gram defect of X is at most 1e-12 (the
+    /// contraction rule of a restart). Otherwise it takes the plain start. A
+    /// Ritz-change return with `kept.keep` stores H X (the return rotation of the
+    /// H images). Needs the workspace path (`tuning.workspace` or
+    /// `selected_roots`); otherwise the kept data is dropped and the plain solver
+    /// runs.
+    #[allow(clippy::too_many_arguments)]
+    pub fn solve_distributed_rows_kept<C: Collective, O: DistributedRealOperator>(
+        &self,
+        comm: &C,
+        op: &mut O,
+        initial: Option<&RealMatrix>,
+        diagonal_local: &[f64],
+        policy: BandTolerances,
+        ritz: bool,
+        certify: bool,
+        capacity_per_band: usize,
+        tuning: DistributedTuning,
+        x_local: &mut RealMatrix,
+        kept: &mut DistributedKeptStart,
+    ) -> Result<RealEigenSolution, SolverError> {
+        self.solve_rows_impl(
+            comm,
+            op,
+            initial,
+            diagonal_local,
+            policy,
+            ritz,
+            certify,
+            capacity_per_band,
+            tuning,
+            Some((x_local, kept)),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn solve_rows_impl<C: Collective, O: DistributedRealOperator>(
+        &self,
+        comm: &C,
+        op: &mut O,
+        initial: Option<&RealMatrix>,
+        diagonal_local: &[f64],
+        policy: BandTolerances,
+        ritz: bool,
+        certify: bool,
+        capacity_per_band: usize,
+        tuning: DistributedTuning,
+        mut kept: Option<(&mut RealMatrix, &mut DistributedKeptStart)>,
+    ) -> Result<RealEigenSolution, SolverError> {
+        if let Some((_, k)) = kept.as_mut() {
+            k.taken = false;
+            k.declined = false;
+        }
         let counted = Counted { inner: comm };
         let comm = &counted;
         REDUCTION_SOLVES.fetch_add(1, Ordering::Relaxed);
@@ -1168,7 +1313,13 @@ impl crate::RealDavidson {
                 certify,
                 capacity_per_band,
                 tuning,
+                kept,
             );
+        }
+        // The allocating path has no kept start: drop it, then give the local
+        // rows of the result below.
+        if let Some((_, k)) = kept.as_mut() {
+            k.invalidate();
         }
         let pool = match op.worker_pool() {
             Some(p) => p,
@@ -1189,7 +1340,7 @@ impl crate::RealDavidson {
             }
             Ok(y)
         };
-        self.solve_core(
+        let result = self.solve_core(
             comm,
             &layout,
             pool,
@@ -1202,7 +1353,11 @@ impl crate::RealDavidson {
             certify,
             capacity_per_band,
             tuning,
-        )
+        )?;
+        if let Some((x, _)) = kept {
+            *x = local_rows(&layout, &result.eigenvectors)?;
+        }
+        Ok(result)
     }
 
     #[allow(clippy::too_many_arguments)]

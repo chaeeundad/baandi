@@ -432,6 +432,20 @@ bare `Instant::now()` to a new MPI stage; a clock shared with the phase clock
 goes through `stage_clock::keep`. Test `tests/stage_timers.rs` (forces the mode
 with `stage_clock::force`).
 
+## MPI kept start (MPI-KEPT-START, 2026-11-16)
+
+`BAANDI_M2_REUSE=on|off` (default off until dev08; rounding class; design
+`docs/design/mpi-kept-start.md`). `gamma_real.rs` `M2Reuse` /
+`prepare_m2_kept_start`: standard M2 solves keep local X (`m2_local`, filled by
+the solver, no `extract_local`) and H X; `scf.rs` `m2_density` keeps the plane
+slabs of the leading fully occupied pairs (`M2Reuse::plane_slots`, replicated
+memory gate); the next solve adds (V_new - V_old) X via
+`DistributedRealHamiltonian::apply_local_change` and arms the solver's kept
+start. Dropped on any operator rebuild, strict solve, `forget_reuse`. Every
+condition must stay replicated. Per-thread override `set_m2_reuse_override`.
+Counters `reuse_*` in `m2::stats`. Test
+`tests/m2_kept_start.rs::m2_kept_start_keeps_the_standard_class_and_saves_columns`.
+
 ## VERIFY-REUSE (2026-11-16, default off)
 
 `BAANDI_VERIFY_REUSE=off|warm|feed` (`session.rs` `verify_reuse`; test hook

@@ -833,3 +833,118 @@ fn distributed_band_values_match_serial_and_band_densities() {
         }
     }
 }
+
+/// MPI-KEPT-START: H_new X = H_old X + (V_new - V_old) X. The potential change
+/// from kept slabs (`band_densities_keeping` of the leading pairs) has the bits
+/// of the change formed by transforming every pair, the kept sum equals a plain
+/// apply with the new potential to rounding (gate 1e-13 relative), and the
+/// density bits do not depend on keeping. 1 to 4 ranks; even and odd column
+/// counts; two cells.
+#[test]
+fn potential_change_from_kept_planes_matches_plain_apply() {
+    let cases = [
+        ([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]], 2),
+        ([[6.4, 0.4, 0.2], [1., 7.3, 0.3], [0.5, 0.7, 8.4]], 4),
+    ];
+    for (rows, atoms) in cases {
+        let (basis, h) = fixture(rows, atoms, 1.2);
+        let half = dft_basis::HalfSphere::new(&basis, h.fft_grid()).unwrap();
+        let n = half.full_len();
+        let volume = Cell::from_user_rows_bohr(rows).unwrap().volume_bohr3();
+        for m in [5usize, 6] {
+            let x = block(n, m, 400 + m);
+            let occupied = 4;
+            let weights = vec![2.; occupied];
+            for ranks in 1..=4 {
+                let parts = simulate(ranks, |comm| {
+                    let (basis, mut h) = fixture(rows, atoms, 1.2);
+                    let mut d = DistributedRealHamiltonian::new(
+                        &h,
+                        &basis,
+                        8,
+                        comm.rank(),
+                        ranks,
+                        WorkerPool::new(1).unwrap(),
+                    )
+                    .unwrap();
+                    let xl = d.extract_local(&x).unwrap();
+                    let nl = xl.rows();
+                    let mut old = RealMatrix::zeros(nl, m).unwrap();
+                    d.apply_block(comm, &xl, &mut old).unwrap();
+                    // Density of the occupied prefix, keeping both full pairs.
+                    let mut xm = RealMatrix::zeros(nl, occupied).unwrap();
+                    xm.as_mut_slice()
+                        .copy_from_slice(&xl.as_slice()[..nl * occupied]);
+                    let pp = d.plane_points();
+                    let mut plain_density = vec![0.; occupied * pp];
+                    d.band_densities(comm, &xm, &weights, volume, &mut plain_density)
+                        .unwrap();
+                    let mut kept_density = vec![0.; occupied * pp];
+                    let mut planes = vec![num_complex::Complex64::default(); 2 * pp];
+                    d.band_densities_keeping(
+                        comm,
+                        &xm,
+                        &weights,
+                        volume,
+                        &mut kept_density,
+                        &mut planes,
+                    )
+                    .unwrap();
+                    assert_eq!(plain_density, kept_density, "keeping changed the density");
+                    // New potential of the same operator.
+                    let v_old = d.potential().to_vec();
+                    let dims = h.fft_grid().dims();
+                    let v_new = Array3::from_shape_fn(dims, |(i, j, k)| {
+                        0.3 * ((i * 13 + j * 7 + k * 3) as f64).sin()
+                            + 0.05 * ((i + 2 * j + 5 * k) as f64).cos()
+                    });
+                    h.set_local_potential(v_new).unwrap();
+                    assert!(d.update_from_complex(&h, &basis));
+                    let delta: Vec<f64> = d
+                        .potential()
+                        .iter()
+                        .zip(&v_old)
+                        .map(|(a, b)| a - b)
+                        .collect();
+                    let mut change = Vec::new();
+                    for kept in 0..=2 {
+                        let mut y = RealMatrix::zeros(nl, m).unwrap();
+                        d.apply_local_change(comm, &xl, &planes, kept, &delta, &mut y)
+                            .unwrap();
+                        change.push(y);
+                    }
+                    let mut fresh = RealMatrix::zeros(nl, m).unwrap();
+                    d.apply_block(comm, &xl, &mut fresh).unwrap();
+                    let mut sum = old.clone();
+                    for (s, c) in sum.as_mut_slice().iter_mut().zip(change[2].as_slice()) {
+                        *s += c;
+                    }
+                    let identical = change.iter().all(|c| c.as_slice() == change[0].as_slice());
+                    let mut g_sum = RealMatrix::zeros(n, m).unwrap();
+                    let mut g_fresh = RealMatrix::zeros(n, m).unwrap();
+                    d.scatter_local(&sum, &mut g_sum).unwrap();
+                    d.scatter_local(&fresh, &mut g_fresh).unwrap();
+                    (d.local_rows().to_vec(), g_sum, g_fresh, identical)
+                });
+                let (mut sum, mut fresh) = (vec![0.; n * m], vec![0.; n * m]);
+                for (rows_l, gs, gf, identical) in &parts {
+                    assert!(identical, "kept planes changed the bits (P={ranks})");
+                    for c in 0..m {
+                        for &r in rows_l {
+                            sum[c * n + r] = gs.as_slice()[c * n + r];
+                            fresh[c * n + r] = gf.as_slice()[c * n + r];
+                        }
+                    }
+                }
+                let scale = fresh.iter().fold(0f64, |a, v| a.max(v.abs()));
+                let err = sum
+                    .iter()
+                    .zip(&fresh)
+                    .fold(0f64, |a, (s, f)| a.max((s - f).abs()))
+                    / scale;
+                println!("atoms {atoms} m {m} P={ranks}: H_old X + dV X vs H_new X rel {err:e}");
+                assert!(err < 1e-13, "atoms {atoms} m {m} P={ranks}: {err:e}");
+            }
+        }
+    }
+}

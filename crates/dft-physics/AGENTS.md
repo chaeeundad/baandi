@@ -152,3 +152,12 @@ ascending band order through the sink form of `band_planes` (bit-identical to
 summing `band_densities`); the engine takes it on the standard path with
 `BAANDI_M2_DENSITY=fused` (default bands). Test
 `distributed_band_values_match_serial_and_band_densities`.
+
+## M2 kept start (MPI-KEPT-START, 2026-11-16)
+
+`band_densities_keeping` / `band_density_sum_keeping` copy the pair slabs of the
+leading pairs (density bits unchanged); `apply_local_change` applies a potential
+change only (no kinetic, no nonlocal), kept pairs forward-transformed from their
+slabs, the rest both ways; `potential()` accessor. Counters
+`inverse_pair_transforms`, `forward_pair_transforms`, `kept_plane_pairs`,
+`potential_change_columns`. Test `potential_change_from_kept_planes_matches_plain_apply`.

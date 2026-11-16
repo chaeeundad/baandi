@@ -180,3 +180,16 @@ Profile and request: docs/performance/profile-2026-11-16-mpi.md,
 docs/performance/requests/mpi-fast-screen-2026-11-16.md. `dft-mpi` also has
 `BAANDI_MPI_TREE=rd` (recursive-doubling tree sum, bit-identical for power-of-two
 rank counts; set by the CLI with `dft_mpi::set_tree_sum`).
+
+## MPI kept start (MPI-KEPT-START, 2026-11-16)
+
+`RealDavidson::solve_distributed_rows_kept` with `DistributedKeptStart` (workspace
+path only): returns the local rows of X in the caller's `x_local`; a Ritz-change
+return with `set_keep(true)` stores H X; an armed solve starts from X and the
+caller-updated H X (no orthonormalization, no initial apply) when one tree sum
+finds `initial` equal to X to `KEPT_START_TOLERANCE` on every rank and the Gram
+defect of X is at most 1e-12 (the restart contraction rule). Flags must be set
+under replicated conditions. `DistributedPairFft::apply_local_batch_kept` takes
+kept real-space slabs for the leading vectors (bit-identical to
+`apply_local_batch` for the same slabs). Tests `tests/distributed_kept_start.rs`,
+lib `kept_planes_batch_equals_plain_batch_bitwise`.

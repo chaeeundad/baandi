@@ -509,6 +509,23 @@ impl DistributedRealHamiltonian {
         volume: f64,
         out: &mut [f64],
     ) -> Result<(), DistributedRealError> {
+        self.band_densities_keeping(comm, x, weights, volume, out, &mut [])
+    }
+
+    /// `band_densities` that also copies the real-space slab of each of the
+    /// leading `keep.len() / plane_points()` column pairs into `keep` (pair t at
+    /// `keep[t * plane_points()..]`, [plane][row][z], re = column 2t, im = column
+    /// 2t+1, the unscaled inverse transform) for `apply_local_change`
+    /// (MPI-KEPT-START). The density bits do not depend on `keep`.
+    pub fn band_densities_keeping<K: Collective>(
+        &mut self,
+        comm: &K,
+        x: &RealMatrix,
+        weights: &[f64],
+        volume: f64,
+        out: &mut [f64],
+        keep: &mut [C],
+    ) -> Result<(), DistributedRealError> {
         let start = dft_numerics::stage_clock::start();
         if weights.len() != x.cols() || !(volume.is_finite() && volume > 0.) {
             return Err(DistributedRealError::Shape);
@@ -517,7 +534,7 @@ impl DistributedRealHamiltonian {
         if out.len() != x.cols() * points {
             return Err(DistributedRealError::Shape);
         }
-        self.band_planes(comm, x, |c, p, v| {
+        self.band_planes(comm, x, Some(keep), |c, p, v| {
             out[c * points + p] = weights[c] * v * v / volume
         })?;
         stage_add(Stage::Density, start);
@@ -539,6 +556,20 @@ impl DistributedRealHamiltonian {
         volume: f64,
         out: &mut [f64],
     ) -> Result<(), DistributedRealError> {
+        self.band_density_sum_keeping(comm, x, weights, volume, out, &mut [])
+    }
+
+    /// `band_density_sum` that also keeps the leading pair slabs in `keep`, as
+    /// `band_densities_keeping` (MPI-KEPT-START).
+    pub fn band_density_sum_keeping<K: Collective>(
+        &mut self,
+        comm: &K,
+        x: &RealMatrix,
+        weights: &[f64],
+        volume: f64,
+        out: &mut [f64],
+        keep: &mut [C],
+    ) -> Result<(), DistributedRealError> {
         let start = dft_numerics::stage_clock::start();
         if weights.len() != x.cols()
             || !(volume.is_finite() && volume > 0.)
@@ -547,7 +578,9 @@ impl DistributedRealHamiltonian {
             return Err(DistributedRealError::Shape);
         }
         out.fill(0.);
-        self.band_planes(comm, x, |c, p, v| out[p] += weights[c] * v * v / volume)?;
+        self.band_planes(comm, x, Some(keep), |c, p, v| {
+            out[p] += weights[c] * v * v / volume
+        })?;
         stage_add(Stage::Density, start);
         COUNTS[Count::Densities as usize].fetch_add(1, Ordering::Relaxed);
         Ok(())
@@ -570,7 +603,7 @@ impl DistributedRealHamiltonian {
         if out.len() != x.cols() * points {
             return Err(DistributedRealError::Shape);
         }
-        self.band_planes(comm, x, |c, p, v| out[c * points + p] = v)?;
+        self.band_planes(comm, x, None, |c, p, v| out[c * points + p] = v)?;
         stage_add(Stage::Values, start);
         COUNTS[Count::Values as usize].fetch_add(1, Ordering::Relaxed);
         Ok(())
@@ -585,6 +618,7 @@ impl DistributedRealHamiltonian {
         &mut self,
         comm: &K,
         x: &RealMatrix,
+        mut keep: Option<&mut [C]>,
         mut sink: impl FnMut(usize, usize, f64),
     ) -> Result<(), DistributedRealError> {
         let n_loc = self.rows.len();
@@ -616,14 +650,22 @@ impl DistributedRealHamiltonian {
         }
         self.fft
             .begin_to_real_batch(comm, &self.hbuf[..pairs * ll], pairs)?;
+        COUNTS[Count::InversePairs as usize].fetch_add(pairs, Ordering::Relaxed);
         let (rows, nz) = (self.fft.rows(), self.fft.shape()[2]);
         let line = rows * nz;
+        let pp = self.fft.plane_points();
         for t in 0..pairs {
             let (ca, cb) = (2 * t, (2 * t + 1 < m).then_some(2 * t + 1));
             for i in 0..self.fft.plane_count() {
                 self.fft.to_real_plane_in(t, pairs, i)?;
                 let slab = self.fft.plane();
                 let base = i * line;
+                // MPI-KEPT-START: the pair's slab for the next solve's potential change.
+                if let Some(k) = keep.as_deref_mut()
+                    && (t + 1) * pp <= k.len()
+                {
+                    k[t * pp + base..t * pp + base + line].copy_from_slice(&slab[..line]);
+                }
                 for (j, v) in slab.iter().take(line).enumerate() {
                     sink(ca, base + j, v.re);
                 }
@@ -787,8 +829,6 @@ impl DistributedRealHamiltonian {
         let pairs = m.div_ceil(2);
         let local_len = self.fft.local_len();
         let xs = x.as_slice();
-        let mi = self.max_items;
-        let ranks = self.ranks;
 
         // (1) mirror rows to the ranks that own the minus positions.
         let t0 = dft_numerics::stage_clock::start();
@@ -829,65 +869,10 @@ impl DistributedRealHamiltonian {
             }
         }
         stage_add(Stage::Fft, t0);
-        let t0 = dft_numerics::stage_clock::start();
-        for t in 0..pairs {
-            let out = &self.hbuf[t * local_len..(t + 1) * local_len];
-            for &(k, id) in &self.in_items {
-                let off = (id * pairs + t) * 2;
-                self.hsend[off] = out[k].re;
-                self.hsend[off + 1] = out[k].im;
-            }
-        }
-        stage_add(Stage::PackUnpack, t0);
-
-        // (3) mirror h back to the representative owners.
-        if mi > 0 {
-            let t0 = dft_numerics::stage_clock::start();
-            let blk = mi * 2 * pairs;
-            comm.alltoall_f64(
-                &self.hsend[..ranks * blk],
-                blk,
-                &mut self.hrecv[..ranks * blk],
-            )?;
-            stage_add(Stage::Mirror, t0);
-        }
-
-        // Unpack, kinetic term.
-        let t0 = dft_numerics::stage_clock::start();
-        let ys = y.as_mut_slice();
-        for t in 0..pairs {
-            let (ca, cb) = (2 * t, (2 * t + 1 < m).then_some(2 * t + 1));
-            let h = &self.hbuf[t * local_len..(t + 1) * local_len];
-            for rep in &self.reps {
-                let hp = h[rep.plus_pos];
-                let hm = match rep.minus {
-                    MinusAt::None => {
-                        ys[ca * n_loc + rep.slot] = hp.re;
-                        if let Some(cb) = cb {
-                            ys[cb * n_loc + rep.slot] = hp.im;
-                        }
-                        continue;
-                    }
-                    MinusAt::Local(k) => h[k],
-                    MinusAt::Remote(id) => {
-                        let off = (id * pairs + t) * 2;
-                        C::new(self.hrecv[off], self.hrecv[off + 1])
-                    }
-                };
-                let even = (hp + hm.conj()) * 0.5;
-                let odd = (hp - hm.conj()) * 0.5;
-                ys[ca * n_loc + rep.slot] = even.re * SQRT_2;
-                ys[ca * n_loc + rep.slot + 1] = even.im * SQRT_2;
-                if let Some(cb) = cb {
-                    ys[cb * n_loc + rep.slot] = odd.im * SQRT_2;
-                    ys[cb * n_loc + rep.slot + 1] = -odd.re * SQRT_2;
-                }
-            }
-        }
-        for (j, (x, y)) in xs.iter().zip(ys.iter_mut()).enumerate() {
-            *y += self.kinetic[j % n_loc] * x;
-        }
-        stage_add(Stage::PackUnpack, t0);
+        COUNTS[Count::InversePairs as usize].fetch_add(pairs, Ordering::Relaxed);
+        COUNTS[Count::ForwardPairs as usize].fetch_add(pairs, Ordering::Relaxed);
+        // (3) mirror h back, unpack; kinetic term.
+        self.mirror_back_and_unpack(comm, m, y, Some(xs))?;
 
         // Nonlocal: P^T X local + tree_sum, replicated coupling, P W local.
         let t0 = dft_numerics::stage_clock::start();
@@ -943,6 +928,161 @@ impl DistributedRealHamiltonian {
             .fetch_add(1, Ordering::Relaxed);
         COUNTS[Count::Columns as usize].fetch_add(m, Ordering::Relaxed);
         Ok(())
+    }
+
+    /// Stage the mirror h values of the `ceil(m/2)` pairs in `hbuf`, send them
+    /// back to the representative owners (one alltoall when split) and unpack
+    /// into `y` (overwritten); with `kinetic_x` the kinetic term of that block is
+    /// added (the tail of `apply_block`, same arithmetic and order).
+    fn mirror_back_and_unpack<K: Collective>(
+        &mut self,
+        comm: &K,
+        m: usize,
+        y: &mut RealMatrix,
+        kinetic_x: Option<&[f64]>,
+    ) -> Result<(), DistributedRealError> {
+        let n_loc = self.rows.len();
+        let pairs = m.div_ceil(2);
+        let local_len = self.fft.local_len();
+        let (mi, ranks) = (self.max_items, self.ranks);
+        let t0 = dft_numerics::stage_clock::start();
+        for t in 0..pairs {
+            let out = &self.hbuf[t * local_len..(t + 1) * local_len];
+            for &(k, id) in &self.in_items {
+                let off = (id * pairs + t) * 2;
+                self.hsend[off] = out[k].re;
+                self.hsend[off + 1] = out[k].im;
+            }
+        }
+        stage_add(Stage::PackUnpack, t0);
+        if mi > 0 {
+            let t0 = dft_numerics::stage_clock::start();
+            let blk = mi * 2 * pairs;
+            comm.alltoall_f64(
+                &self.hsend[..ranks * blk],
+                blk,
+                &mut self.hrecv[..ranks * blk],
+            )?;
+            stage_add(Stage::Mirror, t0);
+        }
+        let t0 = dft_numerics::stage_clock::start();
+        let ys = y.as_mut_slice();
+        for t in 0..pairs {
+            let (ca, cb) = (2 * t, (2 * t + 1 < m).then_some(2 * t + 1));
+            let h = &self.hbuf[t * local_len..(t + 1) * local_len];
+            for rep in &self.reps {
+                let hp = h[rep.plus_pos];
+                let hm = match rep.minus {
+                    MinusAt::None => {
+                        ys[ca * n_loc + rep.slot] = hp.re;
+                        if let Some(cb) = cb {
+                            ys[cb * n_loc + rep.slot] = hp.im;
+                        }
+                        continue;
+                    }
+                    MinusAt::Local(k) => h[k],
+                    MinusAt::Remote(id) => {
+                        let off = (id * pairs + t) * 2;
+                        C::new(self.hrecv[off], self.hrecv[off + 1])
+                    }
+                };
+                let even = (hp + hm.conj()) * 0.5;
+                let odd = (hp - hm.conj()) * 0.5;
+                ys[ca * n_loc + rep.slot] = even.re * SQRT_2;
+                ys[ca * n_loc + rep.slot + 1] = even.im * SQRT_2;
+                if let Some(cb) = cb {
+                    ys[cb * n_loc + rep.slot] = odd.im * SQRT_2;
+                    ys[cb * n_loc + rep.slot + 1] = -odd.re * SQRT_2;
+                }
+            }
+        }
+        if let Some(xs) = kinetic_x {
+            for (j, (x, y)) in xs.iter().zip(ys.iter_mut()).enumerate() {
+                *y += self.kinetic[j % n_loc] * x;
+            }
+        }
+        stage_add(Stage::PackUnpack, t0);
+        Ok(())
+    }
+
+    /// Local potential of the operator (Ha, full row-major grid).
+    pub fn potential(&self) -> &[f64] {
+        &self.potential
+    }
+
+    /// MPI-KEPT-START: `y` = (local potential `delta`) applied to the columns of
+    /// x on this rank's rows (both `local_len` x m, m <= capacity): the local part
+    /// of `apply_block` with `delta` in place of the operator's potential, no
+    /// kinetic and no nonlocal term. Pairs t < `kept_pairs` take their
+    /// real-space slabs from `planes` (`band_densities_keeping` of the same x;
+    /// only the r -> G transform runs); the other pairs are packed and
+    /// transformed both ways. With planes from the same x the result has the bits
+    /// of the plain transform of every pair. Collectives (every rank calls with
+    /// the same m and `kept_pairs`): the mirror-row alltoall and one transpose to
+    /// r only when some pair is not kept, one transpose back, the mirror-h
+    /// alltoall (when split).
+    pub fn apply_local_change<K: Collective>(
+        &mut self,
+        comm: &K,
+        x: &RealMatrix,
+        planes: &[C],
+        kept_pairs: usize,
+        delta: &[f64],
+        y: &mut RealMatrix,
+    ) -> Result<(), DistributedRealError> {
+        let n_loc = self.rows.len();
+        let m = x.cols();
+        let pairs = m.div_ceil(2);
+        if comm.size() != self.ranks
+            || comm.rank() != self.rank
+            || x.rows() != n_loc
+            || y.rows() != n_loc
+            || y.cols() != m
+            || m > self.capacity
+            || kept_pairs > m / 2
+            || planes.len() < kept_pairs * self.fft.plane_points()
+            || delta.len() != self.potential.len()
+        {
+            return Err(DistributedRealError::Shape);
+        }
+        if m == 0 {
+            return Ok(());
+        }
+        let local_len = self.fft.local_len();
+        let xs = x.as_slice();
+        let t0 = dft_numerics::stage_clock::start();
+        if kept_pairs < pairs {
+            self.exchange_mirror_rows(comm, xs, m)?;
+        }
+        stage_add(Stage::Mirror, t0);
+        let t0 = dft_numerics::stage_clock::start();
+        for t in kept_pairs..pairs {
+            Self::pack_pair(
+                &self.src,
+                &self.xrecv,
+                xs,
+                n_loc,
+                m,
+                t,
+                &mut self.hbuf[t * local_len..(t + 1) * local_len],
+            );
+        }
+        stage_add(Stage::PackUnpack, t0);
+        let t0 = dft_numerics::stage_clock::start();
+        self.fft.apply_local_batch_kept(
+            comm,
+            &mut self.hbuf[..pairs * local_len],
+            delta,
+            pairs,
+            kept_pairs,
+            planes,
+        )?;
+        stage_add(Stage::Fft, t0);
+        COUNTS[Count::InversePairs as usize].fetch_add(pairs - kept_pairs, Ordering::Relaxed);
+        COUNTS[Count::ForwardPairs as usize].fetch_add(pairs, Ordering::Relaxed);
+        COUNTS[Count::KeptPlanePairs as usize].fetch_add(kept_pairs, Ordering::Relaxed);
+        COUNTS[Count::ChangeColumns as usize].fetch_add(m, Ordering::Relaxed);
+        self.mirror_back_and_unpack(comm, m, y, None)
     }
 }
 
@@ -1000,16 +1140,27 @@ enum Count {
     Densities,
     NonlocalEnergies,
     Values,
+    InversePairs,
+    ForwardPairs,
+    KeptPlanePairs,
+    ChangeColumns,
 }
-const COUNT_NAMES: [&str; 6] = [
+const COUNT_NAMES: [&str; 10] = [
     "batched_applies",
     "unbatched_applies",
     "applied_columns",
     "band_density_builds",
     "nonlocal_energy_evaluations",
     "band_value_builds",
+    // Pair transforms G -> r and r -> G (apply, density/values, potential change).
+    "inverse_pair_transforms",
+    "forward_pair_transforms",
+    // MPI-KEPT-START: pairs of a potential change taken from kept slabs, and
+    // columns given (V_new - V_old) X instead of a full apply.
+    "kept_plane_pairs",
+    "potential_change_columns",
 ];
-static COUNTS: [AtomicUsize; 6] = [const { AtomicUsize::new(0) }; 6];
+static COUNTS: [AtomicUsize; 10] = [const { AtomicUsize::new(0) }; 10];
 
 /// (counter name, value) list and (stage name, wall seconds) list.
 pub type M2Counters = (Vec<(&'static str, usize)>, Vec<(&'static str, f64)>);

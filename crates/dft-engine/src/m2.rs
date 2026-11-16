@@ -292,8 +292,28 @@ pub(crate) enum Count {
     ScreenClusterBands,
     ScreenDistClusters,
     AtomicSplitStarts,
+    /// MPI-KEPT-START (`BAANDI_M2_REUSE=on`): solves armed with the kept X and
+    /// H X (the solver may still decline).
+    ReuseArmed,
+    /// Armed solves the solver started from the kept X and H X.
+    ReuseTaken,
+    /// Armed solves the solver declined (initial differs, Gram defect).
+    ReuseDeclined,
+    /// Armed solves whose potential did not change (no transform at all).
+    ReuseUnchanged,
+    /// Eligible solves without a kept return (first solve, rebuilt operator,
+    /// failed or non-keeping previous solve).
+    ReuseNotKept,
+    /// H columns not applied thanks to a taken kept start.
+    ReuseColumnsSaved,
+    /// Density builds that kept plane slabs for the next start.
+    ReusePlaneKeeps,
+    /// States whose plane slabs exceeded the memory gate.
+    ReuseGated,
+    /// Largest kept plane-slab storage of a rank, bytes (maximum, not a sum).
+    ReusePlaneBytes,
 }
-const COUNT_NAMES: [&str; 7] = [
+const COUNT_NAMES: [&str; 16] = [
     "density_builds",
     "xc_evaluations",
     "nonlocal_energy_audits",
@@ -301,8 +321,20 @@ const COUNT_NAMES: [&str; 7] = [
     "screen_cluster_bands",
     "screen_dist_clusters",
     "atomic_split_starts",
+    "reuse_armed",
+    "reuse_taken",
+    "reuse_declined",
+    "reuse_unchanged_potential",
+    "reuse_not_kept",
+    "reuse_columns_saved",
+    "reuse_plane_keeps",
+    "reuse_gated",
+    "reuse_plane_bytes_max",
 ];
-static COUNTS: [AtomicUsize; 7] = [const { AtomicUsize::new(0) }; 7];
+static COUNTS: [AtomicUsize; 16] = [const { AtomicUsize::new(0) }; 16];
+pub(crate) fn count_max(c: Count, n: usize) {
+    COUNTS[c as usize].fetch_max(n, Ordering::Relaxed);
+}
 pub(crate) fn count_n(c: Count, n: usize) {
     COUNTS[c as usize].fetch_add(n, Ordering::Relaxed);
 }

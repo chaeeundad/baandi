@@ -179,20 +179,23 @@ fn failed_verification_reuse_keeps_the_fixed_point() {
         p.force_verify_reuse = mode;
         p.run_outcome().unwrap()
     };
+    // The default is `half` since 2026-11-17 (dev08: median -16 percent on si64);
+    // `off` is the previous default path and stays the reference here.
     let default = run(None, 2);
-    let off = run(Some(VerifyReuse::Off), 2);
+    let half = run(Some(VerifyReuse::Half), 2);
     assert_eq!(
         default.result.energy.total_hartree().to_bits(),
-        off.result.energy.total_hartree().to_bits()
+        half.result.energy.total_hartree().to_bits()
     );
     assert!(
         default
             .result
             .density
             .iter()
-            .zip(&off.result.density)
+            .zip(&half.result.density)
             .all(|(a, b)| a.to_bits() == b.to_bits())
     );
+    let default = run(Some(VerifyReuse::Off), 2);
     let reference = default.result.energy.total_hartree();
     for mode in [
         VerifyReuse::Warm,

@@ -696,9 +696,10 @@ pub fn execute_mode(
                 .z_valence()
         })
         .sum();
-    // Collinear spin and Fermi-Dirac drivers: strict path, complex solver,
-    // never distributed (the real-Gamma path excludes both), so MPI ranks
-    // replicate them (review F02).
+    // Collinear spin and Fermi-Dirac drivers: the standard path with the
+    // verification since ONEPATH-3 (strict only behind BAANDI_REFERENCE_STRICT),
+    // complex solver, never distributed (the real-Gamma path excludes both), so
+    // MPI ranks replicate them (review F02).
     let driver_record = |reason: &'static str| -> Value {
         let (model, replicated) = parallel_model(
             crate::parallel::size(),
@@ -1364,6 +1365,48 @@ pub fn execute_mode(
     })
 }
 
+/// ONEPATH-3: standard-path records of the collinear and Fermi-Dirac drivers
+/// (profile, threshold, verification attempts and wall) and the standard
+/// preconditions of forces and stress, as on the closed-shell path.
+pub(crate) fn driver_standard_json(
+    result: &mut Value,
+    standard: Option<dft_engine::StandardProfile>,
+    verification: Option<&dft_engine::VerificationReport>,
+    standard_errors: &[Option<f64>],
+    converged: bool,
+) {
+    let Some(p) = standard else { return };
+    result["convergence_profile"] = json!("standard");
+    result["certified"] = json!(false);
+    result["standard_threshold_ha"] = json!(p.threshold_ha);
+    result["convergence"]["standard_error_ha"] = json!(standard_errors);
+    result["convergence"]["estimator"] = json!(
+        "E_H[d_n] + E_H[d_m] + E_0[d_m] (collinear; d_m = 0 without spin), Ha; docs/design/onepath3-spin-metals.md"
+    );
+    if let Some(v) = verification {
+        result["verified"] = json!(v.passed());
+        result["verification"] = verification_json(v);
+        result["timings"]["verification_s"] = json!(v.wall().as_secs_f64());
+    }
+    let last = verification.and_then(|v| v.attempts.last());
+    for key in ["forces", "stress"] {
+        if result[key]["status"] == "available" {
+            let pre = json!({"convergence_profile":"standard",
+                "converged":converged,
+                "fixed_point_verification_passed":verification.is_some_and(|v| v.passed()),
+                "standard_threshold_ha":p.threshold_ha,
+                "verification_attempts":verification.map_or(0, |v| v.attempts.len()),
+                "verification_coulomb_error_ha":last.map(|a| a.coulomb_error_ha),
+                "verification_residual_bound_ha":last.and_then(|a| a.residual_bound_ha),
+                "state":"converged step's own state (ADR 0043 V4); same formulas as the strict path"});
+            result[key]["preconditions"] = pre.clone();
+            if result["state_contracts"][key]["status"] == "available" {
+                result["state_contracts"][key]["preconditions"] = pre;
+            }
+        }
+    }
+}
+
 /// ADR 0043 verification record: every attempt, the pass criterion (Coulomb
 /// fixed-point residual against the threshold) and information-only strict criteria.
 fn verification_json(v: &dft_engine::VerificationReport) -> Value {
@@ -1373,7 +1416,21 @@ fn verification_json(v: &dft_engine::VerificationReport) -> Value {
             "eigen_tolerance_ha":a.eigen_tolerance_ha,"residual_bound_ha":a.residual_bound_ha,
             "density_residual":a.density_residual,"occupied_eigenvalue_change_ha":a.occupied_eigenvalue_change_ha,
             "strict_criteria_met":a.strict_criteria_met,"davidson_iterations":a.davidson_iterations,
-            "h_vectors":a.operator_applications,"wall_s":a.wall.as_secs_f64()})).collect::<Vec<_>>(),
+            "h_vectors":a.operator_applications,"wall_s":a.wall.as_secs_f64()})).zip(&v.attempts)
+            .map(|(mut record, a)| {
+                // ONEPATH-3 information keys (spin / Fermi-Dirac runs only).
+                for (key, value) in [
+                    ("spin_density_residual", a.spin_density_residual),
+                    ("occupation_change_electrons", a.occupation_change_electrons),
+                    ("chemical_potential_change_ha", a.chemical_potential_change_ha),
+                    ("moment_change_mu_b", a.moment_change),
+                ] {
+                    if let Some(x) = value {
+                        record[key] = json!(x);
+                    }
+                }
+                record
+            }).collect::<Vec<_>>(),
         "criterion":"E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
         "note":"delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate"})
 }

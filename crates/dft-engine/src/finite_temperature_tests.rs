@@ -263,3 +263,114 @@ fn insufficient_empty_band_cap_fails_closed() {
         matches!(result,Err(ScfError::InvalidInput(message)) if message.contains("insufficient empty-state coverage"))
     );
 }
+
+/// ONEPATH-3 V5 on both drivers: a failed verification continues the SCF and
+/// the next stop verifies again; the delivered state is the stop step's own.
+#[test]
+fn standard_failed_verification_continues_spin_and_finite_scf() {
+    use super::super::collinear::{CollinearProblem, SpinSector};
+    let cell =
+        Cell::from_user_rows_bohr([[5.0, 0.0, 0.0], [0.4, 5.2, 0.0], [0.0, 0.3, 5.1]]).unwrap();
+    let pw = common::potential_with_functional(1.0, 1.0, true, 401, "SLA PW");
+    let pz = common::potential(1.0, 1.0, false, 401);
+    let point = [KPoint {
+        fractional: [0.0; 3],
+        weight: 1.0,
+    }];
+    let options = |functional| ScfOptions {
+        functional,
+        cutoff_hartree: 2.5,
+        max_iterations: 200,
+        standard: Some(StandardProfile::default()),
+        verification: Verification::FixedPoint,
+        ..Default::default()
+    };
+    let sector = SpinSector {
+        n_up: 1,
+        n_down: 0,
+        axis_cartesian: [0.0, 0.0, 1.0],
+        initial_moment_seed: None,
+    };
+    let species = |p| {
+        [SpeciesPotential {
+            label: "Xx",
+            potential: p,
+        }]
+    };
+    let atoms = [Atom::new("Xx", [0.0; 3])];
+    for finite in [false, true] {
+        let make = || {
+            let mut o = options(Functional::LdaPw);
+            if finite {
+                CollinearProblem::new_fermi_dirac(
+                    &cell,
+                    &atoms,
+                    &species(&pw),
+                    o,
+                    &point,
+                    sector.clone(),
+                    0.01,
+                    Constraint::Total,
+                    12,
+                )
+            } else {
+                o.bands = Some(4);
+                CollinearProblem::new(&cell, &atoms, &species(&pw), o, &point, sector.clone())
+            }
+            .unwrap()
+        };
+        let plain = make().run().unwrap();
+        let mut forced = make();
+        forced.force_verification_failures(1);
+        let r = forced.run().unwrap();
+        for result in [&plain, &r] {
+            assert!(result.converged && result.certificate.is_none());
+            assert!(result.finite_certificate.is_none());
+        }
+        let v = r.verification.as_ref().unwrap();
+        assert_eq!(v.attempts.len(), 2, "{:?}", v.attempts);
+        assert!(!v.attempts[0].passed && v.attempts[1].passed);
+        assert!(v.attempts[1].iteration > v.attempts[0].iteration);
+        assert!(r.history.len() > plain.history.len());
+        assert!(v.attempts[1].spin_density_residual.is_some());
+        assert_eq!(v.attempts[1].occupation_change_electrons.is_some(), finite);
+        let de = (r.energy.total_hartree() - plain.energy.total_hartree()).abs();
+        println!(
+            "collinear finite={finite}: attempts={} iterations {}/{} dE={de:e} Ha",
+            v.attempts.len(),
+            r.history.len(),
+            plain.history.len()
+        );
+        assert!(de <= 5e-9);
+    }
+    let make = || {
+        FiniteTProblem::new(
+            &cell,
+            &atoms,
+            &species(&pz),
+            options(Functional::LdaPz),
+            &point,
+            0.01,
+            12,
+        )
+        .unwrap()
+    };
+    let plain = make().run().unwrap();
+    let mut forced = make();
+    forced.problem.force_verification_failures = 1;
+    let r = forced.run().unwrap();
+    assert!(r.converged && r.certificate.is_none());
+    let v = r.verification.as_ref().unwrap();
+    assert_eq!(v.attempts.len(), 2);
+    assert!(!v.attempts[0].passed && v.attempts[1].passed);
+    assert!(r.iterations > plain.iterations);
+    assert!(v.attempts[1].chemical_potential_change_ha.is_some());
+    assert!((r.thermodynamics.free_energy_ha - plain.thermodynamics.free_energy_ha).abs() <= 5e-9);
+    // Budget exhaustion with every attempt failing: not converged.
+    let mut never = make();
+    never.problem.force_verification_failures = usize::MAX;
+    never.problem.options.max_iterations = plain.iterations + 2;
+    let r = never.run().unwrap();
+    assert!(!r.converged);
+    assert!(!r.verification.unwrap().passed());
+}

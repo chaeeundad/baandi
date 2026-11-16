@@ -75,6 +75,23 @@ Occupation change is <=1e-8*max(1,N), number/moment <=1e-10*max(1,N).
 The reported state remains the ordinary candidate, as in the existing driver.
 The CLI adds a canonical policy digest to the certificate.
 
+**Default path since ONEPATH-3 (user decision 2026-11-16).** The certificate
+above is the strict reference (`BAANDI_REFERENCE_STRICT=on`). A plain
+`dft-cli run` with Fermi-Dirac occupations (scalar or collinear) uses the
+single standard path: the eigen tolerance follows the standard ratchet instead
+of 0.1 x eigen tolerance in every step (every retained band stays mandatory),
+the stop rule is the Coulomb estimate (collinear: charge plus magnetization
+plus uniform-moment term) and the residual guard with the fractional
+occupations below `scf.standard_threshold_ha`, and the fixed-point verification
+repeats the complete map including the number solve and requires the same
+estimate plus the number, moment and edge tests above. Occupation change,
+delta F, mu change and moment change are information only. Measured on three
+synthetic fixtures against the strict reference (Mac, release): |dF| 2.0e-12
+and 5.5e-11 Ha, |dmu| 8.9e-7 and 6.6e-6 Ha, sum w|df| 3.8e-6 and 6.7e-6
+electrons (bounds 5e-9 Ha, 1e-4 Ha, 1e-4 electrons; ledger ONEPATH-3,
+`crates/dft-cli/tests/onepath_spin_metals.rs`). Design and limits:
+[onepath3-spin-metals](../design/onepath3-spin-metals.md).
+
 Unconstrained collinear FD uses one mu and allows channel populations to change.
 Fixed M uses two roots at (N+M)/2 and (N-M)/2, including fractional targets.
 An optional initial moment seed selects the initial density in the unconstrained

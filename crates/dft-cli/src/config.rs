@@ -534,21 +534,23 @@ impl Config {
         // ONEPATH-1 and ONEPATH-2 (user decision 2026-11-16): forces, stress and
         // every relaxation mode (ions, cell, ions_cell) run the standard path
         // with the verification; stress cutoff scans verify each scan SCF.
-        Ok(if self.collinear() {
-            Some("collinear spin")
-        } else if self.finite_temperature()?.is_some() {
-            Some("Fermi-Dirac occupations")
-        } else if self
-            .scf
-            .as_ref()
-            .map(Scf::locking)
-            .transpose()?
-            .is_some_and(|l| l == dft_engine::Locking::Auto)
-        {
-            Some("scf.locking = auto")
-        } else {
-            None
-        })
+        // ONEPATH-3 (user decision 2026-11-16): collinear spin and Fermi-Dirac
+        // occupations run the standard path with the verification as well
+        // (docs/design/onepath3-spin-metals.md); their syntax is still checked here.
+        self.finite_temperature()?;
+        Ok(
+            if self
+                .scf
+                .as_ref()
+                .map(Scf::locking)
+                .transpose()?
+                .is_some_and(|l| l == dft_engine::Locking::Auto)
+            {
+                Some("scf.locking = auto")
+            } else {
+                None
+            },
+        )
     }
     pub fn collinear(&self) -> bool {
         self.spin
@@ -1635,6 +1637,28 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("output.stress"), "{err}");
+        // ONEPATH-3: collinear spin and Fermi-Dirac occupations take the
+        // standard path with the verification; standard-only keys are accepted.
+        for tail in [
+            "[spin]\nmode = 'collinear'\ntotal_moment = 0.0",
+            "[occupations]\nmode = 'fermi_dirac'\nsmearing_ha = 0.01",
+            "[spin]\nmode = 'collinear'\n[occupations]\nmode = 'fermi_dirac'\nsmearing_ha = 0.01",
+        ] {
+            let p = parse(tail).unwrap().scf_path(None).unwrap();
+            assert_eq!((p.status, p.reason), ("applied", None), "{tail}");
+            assert_eq!(p.verification, dft_engine::Verification::FixedPoint);
+            assert_eq!(p.standard.unwrap().threshold_ha, 5e-9);
+            let tight = parse(&format!("[scf]\nstandard_threshold_ha = 5e-11\n{tail}"))
+                .unwrap()
+                .scf_path(None)
+                .unwrap();
+            assert_eq!(tight.standard.unwrap().threshold_ha, 5e-11);
+            let off = parse(&format!("[scf]\nverify = 'off'\n{tail}"))
+                .unwrap()
+                .scf_path(None)
+                .unwrap();
+            assert_eq!(off.verification, dft_engine::Verification::Off);
+        }
         // The reference switch is unaffected (strict for every input) and is
         // covered by the CLI tests, which set the environment per process.
     }

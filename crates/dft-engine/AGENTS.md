@@ -230,7 +230,11 @@ existing mixer proposals. Only raw charge and spin residuals certify convergence
 per-channel gaps apply only to nonempty channels. Output energy/eigenpairs/density
 are one state, with fresh certificate metrics separate. No spin runtime or exact
 checkpoint support is implied. See `docs/user/collinear-spin.md` for bounds,
-measured evidence and limitations.
+measured evidence and limitations. ONEPATH-3: with `options.standard` the
+collinear and finite-T drivers run the standard stop rule (collinear Coulomb
+estimate `CoulombMetric::spin_error`, block residual guard, ratchet, redo) and
+the fixed-point verification of the whole map (`standard_attempt`); the strict
+branches keep their arithmetic. Design: `docs/design/onepath3-spin-metals.md`.
 
 The geometry/mesh test exceeds the debug budget and is ignored by default:
 `cargo test --release -p dft-engine --test collinear -- --include-ignored --nocapture`.

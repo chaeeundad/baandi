@@ -219,7 +219,17 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
         ElectronicState::Fixed(r) => {
             r.standard.is_some() && r.verification.as_ref().is_some_and(|v| v.passed())
         }
-        _ => false,
+        // ONEPATH-3: spin and Fermi-Dirac states on the standard path.
+        ElectronicState::FiniteTemperature(r) => {
+            r.converged
+                && r.standard.is_some()
+                && r.verification.as_ref().is_some_and(|v| v.passed())
+        }
+        ElectronicState::Collinear(r) => {
+            r.converged
+                && r.standard.is_some()
+                && r.verification.as_ref().is_some_and(|v| v.passed())
+        }
     };
     let (certified, standard, densities, blocks, quantity) = match &state.electronic {
         ElectronicState::Fixed(r) => (
@@ -238,8 +248,8 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
             "E",
         ),
         ElectronicState::FiniteTemperature(r) => (
-            r.converged && r.certificate.as_ref().is_some_and(|c| c.passed),
-            false,
+            verified || (r.converged && r.certificate.as_ref().is_some_and(|c| c.passed)),
+            r.standard.is_some() && !verified,
             vec![&r.state.density],
             r.state
                 .k_points
@@ -255,12 +265,13 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
                     "forces.spin: collinear density required",
                 ));
             };
-            let certified = r.converged
-                && if r.finite_occupations.is_some() {
-                    r.finite_certificate.as_ref().is_some_and(|c| c.passed)
-                } else {
-                    r.certificate.as_ref().is_some_and(|c| c.passed)
-                };
+            let certified = verified
+                || (r.converged
+                    && if r.finite_occupations.is_some() {
+                        r.finite_certificate.as_ref().is_some_and(|c| c.passed)
+                    } else {
+                        r.certificate.as_ref().is_some_and(|c| c.passed)
+                    });
             let blocks = r
                 .k_points
                 .iter()
@@ -278,7 +289,7 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
                 .collect();
             (
                 certified,
-                false,
+                r.standard.is_some() && !verified,
                 vec![&channels[0], &channels[1]],
                 blocks,
                 if r.finite_occupations.is_some() {

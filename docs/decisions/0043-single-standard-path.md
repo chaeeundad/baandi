@@ -1,6 +1,6 @@
 # ADR 0043: One SCF path (standard profile) with a fixed-point verification after convergence
 
-- Status (amended 2026-11-16): **Default flipped by user decision 2026-11-16; the input key `scf.convergence_profile` is removed.** The single standard path with the fixed-point verification is the only SCF path of a classic run; `BAANDI_SINGLE_PATH` is removed and the strict path is a reference tool behind `BAANDI_REFERENCE_STRICT=on`. See the amendment at the end; a second amendment (ONEPATH-1, same day) moves forces and fixed-cell relaxation onto the single path, a third (ONEPATH-2) stress and variable-cell relaxation. The original status line follows for the record.
+- Status (amended 2026-11-16): **Default flipped by user decision 2026-11-16; the input key `scf.convergence_profile` is removed.** The single standard path with the fixed-point verification is the only SCF path of a classic run; `BAANDI_SINGLE_PATH` is removed and the strict path is a reference tool behind `BAANDI_REFERENCE_STRICT=on`. See the amendment at the end; a second amendment (ONEPATH-1, same day) moves forces and fixed-cell relaxation onto the single path, a third (ONEPATH-2) stress and variable-cell relaxation, a fourth (ONEPATH-3) collinear spin and Fermi-Dirac occupations. The original status line follows for the record.
 - Status: **Accepted in direction by the user (decisions 1 and 5 of 2026-11-14, `docs/performance/requests/work-order-beat-qe-2026-11-14.md` section 1)**; this ADR fixes the definition the work order left open (P0.1 item c). The implementation is behind `BAANDI_SINGLE_PATH` (default `off`) until the dev08 check list `docs/performance/requests/p01-single-path.md` shows convergence and delivered error in class on the generality set. Switching the default is a separate, one-line change recorded as an amendment here.
 - Supersedes, when the default flips: the "strict is the default" clause of ADR 0035. ADR 0035's labelling rules stay (a standard result says so); the "never certified" rule is replaced by the verification below, which is reported under its own name and is not the strict certificate.
 
@@ -249,3 +249,59 @@ item 4 of the ONEPATH-1 amendment and the stress bullet of item 5.
    variable-cell relaxations run the strict path with the same options and scan
    routing as before; the stress block gains only the additive
    `pulay_assessment.scan_*` keys.
+
+## Amendment: collinear spin and Fermi-Dirac occupations on the single path (ONEPATH-3, user decision 2026-11-16)
+
+Decision (user, 2026-11-16): stage 3 of removing the strict path from
+production use (ticket `tickets/ONEPATH-3-SPIN-METALS.md`, design
+`docs/design/onepath3-spin-metals.md`). This amendment replaces the spin and
+Fermi-Dirac parts of item 5 ("Paths the standard profile does not support"),
+of item 3 of the first amendment and of item 3 of the ONEPATH-2 amendment.
+
+1. **Routing.** Collinear spin (fixed sector and Fermi-Dirac) and scalar
+   Fermi-Dirac inputs run the standard path with the verification
+   (`single_path.status = "applied"`); the reasons `collinear spin` and
+   `Fermi-Dirac occupations` are removed; standard-only keys are accepted.
+   `scf.locking = "auto"` keeps the strict fallback. The engine no longer
+   rejects a standard profile for spin channels; it rejects the Hartree mixing
+   metric (unchanged) and the experimental stall guard / density forcing
+   (closed-shell experiments) for them.
+2. **Estimator.** Collinear: E_spin = E_H[d_n] + E_H[d_m] + E_0[d_m], the
+   charge and magnetization residuals in the same Coulomb metric plus the
+   uniform magnetization (total-moment change, possible only under an
+   unconstrained FD moment) weighted like the longest wavelength of the
+   density sphere. It reduces to the closed-shell estimator when both channels
+   are equal. Like the residual guard it is an estimator, not an energy bound
+   (the magnetization's energy cost is set by the spin stiffness, not by
+   4 pi / G^2). Residual guard: sum over spin channels and k of
+   w f |r|^2 with the actual occupations (capacity 1 per channel, 2 closed
+   shell; fractional under FD). Ratchet, first-iteration redo, Ritz-change
+   Davidson and band policy (all retained FD bands mandatory) as on the
+   closed-shell standard path; complex solver (real Gamma excludes spin and FD).
+3. **Verification.** V1 repeats the whole map at the delivered densities,
+   including the Fermi-level solve; V2 passes on the same estimator and the
+   guard of the verification solve below the threshold plus the number, moment
+   and band-edge checks of the strict certificate, and (fixed sector) the
+   channel gaps; V3 records charge and spin density changes, occupation change,
+   free-energy change, chemical-potential change and moment change as
+   information (`strict_criteria_met`); V4 delivers the stop step's own state
+   (energies, F, mu, moment, occupations); V5 and V6 unchanged.
+4. **Downstream.** Forces and stress accept a spin or FD standard state with a
+   passed verification (same rule as ONEPATH-1/2). Stress cutoff scans of a
+   standard caller run standard with verification; for a strict caller with a
+   spin or FD state the scans go straight to strict (before this amendment the
+   standard first attempt always failed for these problems), so the reference
+   stays bit-identical. Relaxation with spin or FD and the observe/agent modes
+   with spin or FD stay input errors.
+5. **Measured (Mac, synthetic, ledger ONEPATH-3; bounds fixed before
+   measuring).** (a) zero-moment collinear against closed shell on the standard
+   path: |dE| 1e-15 Ha, same SCF count (bound 1e-10 Ha, +-1 iteration). (b)
+   standard 5e-9 Ha against the strict reference: ferromagnetic fixed sector
+   |dE| 2.3e-10 Ha, |dM| 2e-16 mu_B; scalar FD metal (2x2x2 mesh) |dF| 2.0e-12
+   Ha, |dmu| 8.9e-7 Ha, sum w|df| 3.8e-6 e; collinear FD with free moment |dF|
+   5.5e-11 Ha, |dM| 6.7e-6 mu_B, |dmu| 6.6e-6 Ha, sum w|df| 6.7e-6 e (bounds
+   5e-9 Ha, 1e-4 mu_B, 1e-4 Ha, 1e-4 e). SCF counts 15/5/12 against strict
+   45/9/39. dev08 request: `docs/performance/requests/onepath3-spin-metals.md`.
+6. **Reference identity.** With `BAANDI_REFERENCE_STRICT=on` spin and FD runs
+   take the strict drivers with the same options as before; results gain only
+   the `single_path`/`execution` keys they already had.

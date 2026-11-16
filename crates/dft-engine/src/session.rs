@@ -1820,6 +1820,10 @@ fn verify_fixed_point(
         davidson_iterations,
         operator_applications,
         wall: clock.elapsed(),
+        spin_density_residual: None,
+        occupation_change_electrons: None,
+        chemical_potential_change_ha: None,
+        moment_change: None,
     };
     Ok((attempt, record, clipped))
 }

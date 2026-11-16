@@ -1080,9 +1080,36 @@ what applied (also in the relaxation `scf` block). The rule awaits
 confirmation by the dev08 request `performance/requests/onepath2-stress.md`;
 measurements: ledger rows ONEPATH-2 and ONEPATH-2-STRESS-DEFAULT.
 
-Collinear spin, Fermi-Dirac occupations and `scf.locking = "auto"` keep
-the strict path (`not_applicable` with the reason); in those inputs the
-standard-only keys are input errors instead of being dropped. The observe/agent
+Collinear spin (fixed sector and Fermi-Dirac) and Fermi-Dirac occupations run
+on the standard path with the verification since ONEPATH-3 (user decision
+2026-11-16; the reasons `collinear spin` and `Fermi-Dirac occupations` are gone;
+design `design/onepath3-spin-metals.md`). The stop estimate of a collinear run is
+`E_H[d_n] + E_H[d_m] + E_0[d_m]` (charge residual, magnetization residual in the
+same Coulomb metric, and a uniform-moment term weighted like the longest
+wavelength of the cell; an estimator, not a bound); the residual guard sums
+`f |r|^2` over both spin channels with the actual (fractional under
+Fermi-Dirac) occupations. The verification repeats the whole map including the
+Fermi-level solve and passes on the same estimate below the threshold plus the
+number, moment and band-edge checks of the strict certificate; Fermi level,
+moment and occupation changes are recorded as information
+(`verification.attempts[].chemical_potential_change_ha`, `moment_change_mu_b`,
+`occupation_change_electrons`, `spin_density_residual`). The delivered state
+(energies, F, mu, moment, occupations) is the stop step's own. Spin and FD
+results carry `convergence_profile`, `standard_threshold_ha`,
+`convergence.standard_error_ha` (per step), `verified`, `verification`,
+`timings.verification_s`, and in each spin history entry `standard_error_ha` and
+`requested_eigen_tolerance_ha`; the strict `convergence.certificate` is null on
+the standard path. These runs use the complex Davidson
+(`execution.effective_solver = "complex_davidson"`; real Gamma excludes spin and
+FD as before). Forces and stress of a verified spin or FD state are available
+with the standard preconditions. Still unsupported (input errors, unchanged):
+relaxation with spin or FD, the observe/agent modes with spin or FD, the
+Hartree mixing metric with spin or FD, and (new, previously unreachable)
+`standard_stall_guard` / `standard_density_forcing` with spin or FD. The opt-in
+`BAANDI_STANDARD_STOP=confirm` rule applies to closed-shell runs only.
+
+`scf.locking = "auto"` keeps the strict path (`not_applicable` with the reason);
+in such inputs the standard-only keys are input errors instead of being dropped. The observe/agent
 runtime modes and the non-`run` commands (bands, checkpoint, restart,
 inspection) keep a plain input on the strict path (`not_applicable`); an input
 that writes a standard-only key runs the standard path there too. Checkpoint v1

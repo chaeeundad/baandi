@@ -824,9 +824,17 @@ impl ScfProblem {
                 "positive finite standard_threshold_ha required",
             ));
         }
-        if channel.is_some() && (options.standard.is_some() || options.hartree_mixing) {
+        // ONEPATH-3: the standard profile (with its verification) runs collinear
+        // spin and Fermi-Dirac drivers; the Hartree mixing metric and the
+        // experimental stall guard / density forcing stay closed-shell only.
+        if channel.is_some() && options.hartree_mixing {
             return Err(ScfError::InvalidInput(
-                "standard profile and Hartree metric currently require closed-shell fixed occupations (not collinear spin or Fermi-Dirac smearing runs); use the strict profile with smearing",
+                "Hartree mixing metric currently requires closed-shell fixed occupations (not collinear spin or Fermi-Dirac smearing runs); use the default l2 mixing metric",
+            ));
+        }
+        if channel.is_some() && (options.standard_stall_guard || options.standard_density_forcing) {
+            return Err(ScfError::InvalidInput(
+                "standard_stall_guard and standard_density_forcing apply to closed-shell fixed occupations only (not collinear spin or Fermi-Dirac smearing runs); remove them",
             ));
         }
         if options.standard.is_some()

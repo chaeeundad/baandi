@@ -91,11 +91,27 @@ impl StandardProfile {
         points: impl IntoIterator<Item = (f64, &'a [f64])>,
         occupations: &[f64],
     ) -> f64 {
+        Self::residual_energy_estimate_blocks(
+            points
+                .into_iter()
+                .map(|(weight, residuals)| (weight, residuals, occupations)),
+        )
+    }
+
+    /// The same estimator over (spin, k) blocks with their own occupations
+    /// (ONEPATH-3): sum over blocks of w_k sum_i f_i ||r_i||^2, f in electrons
+    /// including the channel capacity (1 per spin channel, 2 closed shell;
+    /// fractional under Fermi-Dirac), k weights excluded from f. Exact zeros do
+    /// not contribute. Two spin channels with f = 1 reproduce the closed-shell
+    /// 2 ||r||^2.
+    pub fn residual_energy_estimate_blocks<'a>(
+        blocks: impl IntoIterator<Item = (f64, &'a [f64], &'a [f64])>,
+    ) -> f64 {
         const C_PER_HA: f64 = 1.0;
         C_PER_HA
-            * points
+            * blocks
                 .into_iter()
-                .map(|(weight, residuals)| {
+                .map(|(weight, residuals, occupations)| {
                     weight
                         * residuals
                             .iter()
@@ -157,6 +173,15 @@ pub struct VerificationAttempt {
     pub davidson_iterations: usize,
     pub operator_applications: usize,
     pub wall: std::time::Duration,
+    /// ONEPATH-3, information only (None on the closed-shell path): spin
+    /// density L2 change of a collinear run (`density_residual` is then the
+    /// charge density change), weighted occupation change sum w |Delta f|
+    /// (electrons), largest change of a chemical potential (Ha) and total
+    /// moment change (mu_B) of the verification map against the stop step.
+    pub spin_density_residual: Option<f64>,
+    pub occupation_change_electrons: Option<f64>,
+    pub chemical_potential_change_ha: Option<f64>,
+    pub moment_change: Option<f64>,
 }
 
 /// All verification attempts of one run; passed when the last one passed.
@@ -252,6 +277,50 @@ impl CoulombMetric {
             return Err(ScfError::NonFinite);
         }
         Ok(energy.max(0.0))
+    }
+    /// ONEPATH-3 collinear estimator (docs/design/onepath3-spin-metals.md):
+    /// E_H[d_n] + E_H[d_m] + E_0[d_m], d_s = output_s - input_s, d_n the charge
+    /// and d_m the magnetization residual. E_0 weights the uniform part of d_m
+    /// (a change of the total moment, possible under an unconstrained
+    /// Fermi-Dirac moment) like the longest wavelength of the density sphere:
+    /// E_0 = N_grid * max weight * <d_m>^2 = (Omega/2) (4 pi / G_min^2) <d_m>^2.
+    /// An estimator, not an energy bound. Unpolarized limit (d_up = d_down):
+    /// exactly `error` of the total densities.
+    pub(crate) fn spin_error(
+        &mut self,
+        input: &[Array3<f64>; 2],
+        output: &[Array3<f64>; 2],
+    ) -> Result<f64, ScfError> {
+        let mut energy = 0.0;
+        let mut mean = 0.0;
+        for sign in [1.0, -1.0] {
+            for (((r, a0), a1), (b0, b1)) in self
+                .residual
+                .iter_mut()
+                .zip(&input[0])
+                .zip(&input[1])
+                .zip(output[0].iter().zip(&output[1]))
+            {
+                *r = (b0 - a0) + sign * (b1 - a1);
+            }
+            if sign < 0.0 {
+                mean = self.residual.iter().sum::<f64>() / self.residual.len() as f64;
+            }
+            self.transform()?;
+            energy += self
+                .residual
+                .iter()
+                .zip(&self.mapped)
+                .map(|(a, b)| a * b)
+                .sum::<f64>()
+                .max(0.0);
+        }
+        let largest = self.weights.iter().copied().fold(0.0, f64::max);
+        energy += self.weights.len() as f64 * largest * mean * mean;
+        if !energy.is_finite() {
+            return Err(ScfError::NonFinite);
+        }
+        Ok(energy)
     }
 }
 impl ResidualMetric for CoulombMetric {
@@ -391,6 +460,53 @@ mod tests {
             StandardProfile::FLOOR_HA
         );
         assert_eq!(StandardProfile::ratchet(0.005, 0.032, 32.0), 0.0001);
+    }
+
+    /// ONEPATH-3 collinear estimator: equal channel residuals reduce to the
+    /// closed-shell E_H of the total; a pure magnetization wave counts with the
+    /// same Coulomb weight; a uniform moment change counts like the longest
+    /// wavelength of the sphere (analytic values, Ha).
+    #[test]
+    fn spin_coulomb_estimator_limits() {
+        let side: f64 = 8.0;
+        let cell =
+            Cell::from_user_rows_bohr([[side, 0., 0.], [0., side, 0.], [0., 0., side]]).unwrap();
+        let mut metric = CoulombMetric::new(&cell, 0.2, [12, 12, 12]).unwrap();
+        let pi = std::f64::consts::PI;
+        let a = 0.03;
+        let wave = |amp: f64, mean: f64| {
+            Array3::from_shape_fn([12, 12, 12], |(i, _, _)| {
+                mean + amp * (2.0 * pi * i as f64 / 12.0).cos()
+            })
+        };
+        let zero = [Array3::zeros([12, 12, 12]), Array3::zeros([12, 12, 12])];
+        let g2 = (2.0 * pi / side).powi(2);
+        // Unpolarized limit: d_up = d_down = d/2 gives E_H[d].
+        let half = [wave(0.5 * a, 0.1), wave(0.5 * a, 0.1)];
+        let total = wave(a, 0.2);
+        let closed = metric.error(&Array3::zeros([12, 12, 12]), &total).unwrap();
+        let spin = metric.spin_error(&zero, &half).unwrap();
+        assert!((spin - closed).abs() <= 1e-14, "{spin:e} vs {closed:e}");
+        // Magnetization wave only (d_n = 0): E_H[d_m] = pi Omega a^2 / G^2.
+        let split = [wave(0.5 * a, 0.1), wave(-0.5 * a, 0.1)];
+        let expected = pi * side.powi(3) * a * a / g2;
+        let e = metric.spin_error(&zero, &split).unwrap();
+        assert!(
+            (e - expected).abs() <= 1e-12 * expected,
+            "{e:e} vs {expected:e}"
+        );
+        // Uniform moment change dM: (Omega/2)(4 pi/G_min^2)(dM/Omega)^2.
+        let dm: f64 = 0.01;
+        let uniform = [
+            wave(0.0, 0.5 * dm / side.powi(3)),
+            wave(0.0, -0.5 * dm / side.powi(3)),
+        ];
+        let expected = 2.0 * pi * dm * dm / (side.powi(3) * g2);
+        let e = metric.spin_error(&zero, &uniform).unwrap();
+        assert!(
+            (e - expected).abs() <= 1e-12 * expected,
+            "{e:e} vs {expected:e}"
+        );
     }
 
     #[test]

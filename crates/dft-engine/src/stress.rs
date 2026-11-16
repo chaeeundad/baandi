@@ -433,6 +433,12 @@ pub fn stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
             // Strict caller (the reference path): standard profile first; a
             // scan that fails to converge there (stall, exhausted budget) is
             // repeated with the caller's strict settings. Unchanged.
+            // ONEPATH-3: spin and Fermi-Dirac problems used to reject the
+            // standard profile, so their strict-caller scans always fell back
+            // to strict; they go there directly to keep the reference bit for bit.
+            None if !matches!(state.electronic, ElectronicState::Fixed(_)) => {
+                energy_at(state, state.cell, options).map(|e| (e, None))
+            }
             None => match energy_at(state, state.cell, fast) {
                 Ok(e) => Ok((e, Some(scan_threshold))),
                 Err(_) => energy_at(state, state.cell, options).map(|e| (e, None)),

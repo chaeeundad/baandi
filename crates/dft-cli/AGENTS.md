@@ -93,8 +93,9 @@ nominal-cutoff equilibrium, and the default rebuild cadence remains zero.
 ## Single SCF path (ADR 0043, default since 2026-11-16)
 
 `scf.convergence_profile` is removed (input error with the replacement). `Config::scf_path`
-selects: `BAANDI_REFERENCE_STRICT=on` -> strict reference; input exclusions (spin, FD,
-locking auto; forces and relaxation run standard since ONEPATH-1, stress and variable-cell
+selects: `BAANDI_REFERENCE_STRICT=on` -> strict reference; input exclusions (locking
+auto; spin and FD run standard with verification since ONEPATH-3, `tests/onepath_spin_metals.rs`,
+`spin_run`/`finite_run` write the standard records through `run::driver_standard_json`; forces and relaxation run standard since ONEPATH-1, stress and variable-cell
 relaxation since ONEPATH-2, with verified cutoff scans, `tests/onepath_stress.rs`) -> strict `not_applicable` and standard-only keys reject; caller
 exclusions (runtime modes, non-run commands) -> strict for plain inputs; otherwise the
 standard path with verification. Every result records `single_path` and `execution`

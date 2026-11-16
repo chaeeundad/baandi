@@ -63,7 +63,23 @@ uses `2*e_sigma_uu*grad(n_up) + e_sigma_ud*grad(n_down)` (one cross factor).
 Direct and band-sum energy audits subtract the potential integrated against
 valence output density, and include Hartree, XC and Ewald once.
 
-Convergence requires raw total-density and magnetization residuals, energy,
+**Default path (ONEPATH-3, user decision 2026-11-16).** A `dft-cli run` of a
+collinear input (fixed sector or Fermi-Dirac) uses the single standard path
+with the fixed-point verification, like an unpolarized run: it stops when the
+collinear Coulomb estimate `E_H[d_n] + E_H[d_m] + E_0[d_m]` (charge and
+magnetization residuals in the same Coulomb metric, plus a uniform-moment term)
+and the residual guard over both channels fall below
+`scf.standard_threshold_ha` (default 5e-9 Ha), then repeats the whole map once
+at the delivered densities and requires the same estimate, the channel/moment
+sums and (fixed sector) the channel gaps to pass. The delivered state is the
+stop step's own; the strict certificate described below is the reference path
+(`BAANDI_REFERENCE_STRICT=on`). Design, estimator and limits:
+[onepath3-spin-metals](../design/onepath3-spin-metals.md); measured agreement
+with the strict reference: ledger row ONEPATH-3. With `n_up = n_down` the
+standard collinear run reproduces the unpolarized standard run (same SCF count,
+energy difference about 1e-15 Ha on the synthetic fixtures).
+
+Strict reference: convergence requires raw total-density and magnetization residuals, energy,
 number/moment conservation and strict eigen residuals in both channels. A fresh
 map at `0.1*eigen_tolerance` must also pass both raw residuals, energy change,
 occupied eigenvalue change (`1e-7 Ha`, the legacy certificate cap), strict

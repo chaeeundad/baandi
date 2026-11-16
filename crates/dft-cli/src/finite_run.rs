@@ -29,6 +29,12 @@ pub(super) fn execute(
         .unwrap_or(32);
     let sector = config.spin_sector(target).map_err(|e| error(1, e))?;
     let gamma_real_fallback_reason;
+    // ONEPATH-3: standard profile, verification and per-step estimates.
+    let standard_record: (
+        Option<dft_engine::StandardProfile>,
+        Option<dft_engine::VerificationReport>,
+        Vec<Option<f64>>,
+    );
     let force_result;
     let stress_result;
     let (
@@ -62,6 +68,11 @@ pub(super) fn execute(
         }
         let r = problem.run().map_err(engine_error)?;
         gamma_real_fallback_reason = r.gamma_real_fallback_reason.clone();
+        standard_record = (
+            r.standard,
+            r.verification.clone(),
+            r.history.iter().map(|h| h.standard_error_ha).collect(),
+        );
         force_result = requested_forces(
             config,
             &prepared.cell,
@@ -132,6 +143,11 @@ pub(super) fn execute(
         }
         let r = problem.run().map_err(engine_error)?;
         gamma_real_fallback_reason = r.gamma_real_fallback_reason.clone();
+        standard_record = (
+            r.standard,
+            r.verification.clone(),
+            r.standard_errors_ha.iter().map(|e| Some(*e)).collect(),
+        );
         force_result = requested_forces(
             config,
             &prepared.cell,
@@ -301,6 +317,13 @@ pub(super) fn execute(
         result["state_contracts"]["stress"] = stress_json(&stress);
         fs::write(out.join("stress.txt"), stress_table(&stress)).map_err(|e| error(1, e))?;
     }
+    super::driver_standard_json(
+        &mut result,
+        standard_record.0,
+        standard_record.1.as_ref(),
+        &standard_record.2,
+        converged,
+    );
     if let (Some(r), Value::Object(extra)) = (result.as_object_mut(), path_record) {
         r.extend(extra);
     }
@@ -357,7 +380,12 @@ band_cap=12
     let result: Value =
         serde_json::from_slice(&fs::read(dir.join("out/results.json")).unwrap()).unwrap();
     assert_eq!(result["occupations"]["policy"], "fermi_dirac");
-    assert_eq!(result["convergence"]["certificate"]["passed"], true);
+    // ONEPATH-3: FD runs take the standard path with the fixed-point
+    // verification (the strict certificate is the BAANDI_REFERENCE_STRICT
+    // reference, exercised by tests/onepath_spin_metals.rs).
+    assert_eq!(result["single_path"]["status"], "applied");
+    assert_eq!(result["verified"], true);
+    assert_eq!(result["verification"]["passed"], true);
     assert_eq!(result["forces"]["status"], "unavailable");
     let extension = &result["state_contracts"];
     let schema: Value = serde_json::from_str(include_str!(
@@ -453,7 +481,12 @@ band_cap=12
                 .len(),
             roots
         );
-        assert!(spin["convergence"]["certificate"]["spin_density_residual"].is_number());
+        assert_eq!(spin["verified"], true);
+        assert!(
+            spin["verification"]["attempts"][0]["spin_density_residual"].is_number(),
+            "{}",
+            spin["verification"]
+        );
         assert!(
             std::process::Command::new("python3")
                 .arg("-I")

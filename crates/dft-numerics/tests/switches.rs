@@ -220,7 +220,8 @@ fn legacy_defaults_are_unchanged() {
     // MPI-SCALING-GAP switches stay opt-in until dev08.
     assert_eq!(value(Id::M2_STICKS), Value::Choice("greedy"));
     assert_eq!(value(Id::M2_START), Value::Choice("ortho"));
-    // MPI-LAZY-ORBITALS stays opt-in until dev08.
-    assert_eq!(value(Id::M2_LAZY), Value::Choice("off"));
+    // Adopted 2026-11-17 on dev08 evidence (ledger M2-LAZY-DEV08-STAGE0/-STAGE1, MPI-FS-PANEL-GS).
+    assert_eq!(value(Id::M2_LAZY), Value::Choice("on"));
+    assert_eq!(value(Id::M2_PANEL_GS), Value::Choice("fused"));
     assert_eq!(TABLE.len(), 78);
 }

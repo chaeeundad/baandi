@@ -225,7 +225,7 @@ table! {
     M2_SELECTED_ROOTS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "distributed Davidson Ritz-change (standard) solves: unconverged roots decided from the Ritz-value change first, Ritz vectors, H images and residuals of those roots only, all bands rotated only at return and restarts (the serial lean rule); strict solves unchanged; implies the workspace path; rounding class";
     // MPI in-panel Gram-Schmidt reductions (docs/performance/profile-2026-11-16-mpi.md); default classic until dev08.
-    M2_PANEL_GS: Kind::Choice { allowed: &["classic", "pythag", "fused"], default: "classic" }, "classic",
+    M2_PANEL_GS: Kind::Choice { allowed: &["classic", "pythag", "fused"], default: "fused" }, "fused",
         "classic, pythag, fused",
         "distributed panel Gram-Schmidt reductions per column: classic (two dot reductions and one norm), pythag (norm rides with the second dots, Pythagorean update, 2 reductions), fused (input norm rides with the first dots, second pass only when the per-column DGKS rule of BAANDI_ORTHO fails, about 1 reduction); rounding class";
     M2_DENSITY: Kind::Choice { allowed: &["bands", "fused"], default: "bands" }, "bands",
@@ -242,7 +242,7 @@ table! {
         "ortho, gram",
         "start of a distributed Davidson solve (workspace path): ortho (panel Gram-Schmidt of the start block) or gram (one Gram matrix and one reduction; a start block with Gram defect at most 1e-12, the restart contraction rule, is taken as the basis without Gram-Schmidt, otherwise ortho; rounding class)";
     // MPI lazy orbitals (ticket MPI-LAZY-ORBITALS, docs/design/mpi-lazy-orbitals.md); default off.
-    M2_LAZY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    M2_LAZY: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "MPI-LAZY-ORBITALS: a standard (Ritz-change) M2 solve inside the SCF session returns only this rank's stick rows of the eigenvectors (no N x B allgatherv, no complex unpack); the next solve starts from those rows, the density, nonlocal and kinetic energy are formed from them (kinetic: one reduction of B values), and the full complex block is gathered once, on first demand (result, checkpoint, ladder hand-off, spectral audit, explicit nonlocal audit), and cached; gathered blocks are bit-identical, the energy is rounding class (distributed kinetic sum)";
     MPI_TREE: Kind::Choice { allowed: &["binomial", "rd"], default: "rd" }, "rd",
         "binomial, rd",

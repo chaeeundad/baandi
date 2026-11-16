@@ -179,7 +179,7 @@ table! {
     STANDARD_STOP: Kind::Choice { allowed: &["plain", "confirm"], default: "plain" }, "plain",
         "plain, confirm", "standard-class stop rule: plain threshold, or confirm (also stop when the estimator is within 2x the threshold, the previous step within 20x, and it contracted by 0.3 or better)";
     STANDARD_RESIDUAL_GUARD: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "standard-class stop also requires sum_k w_k sum_occupied f_i |r_i|^2 (Ha, second-order band-energy bound) below the threshold";
+        "standard-class stop also requires sum_k w_k sum_occupied f_i |r_i|^2 x 1 Ha^-1 (empirical second-order band-energy estimator, not a bound; review F03) below the threshold";
     DENSITY_PAIR: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "two bands per inverse transform in the density build";
     DENSITY_REDUCE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -297,8 +297,8 @@ table! {
         "overrides scf.cutoff_ladder / fraction of the input file";
     RELAX_EXTRAPOLATION: Kind::Override { valid: relax_extrapolation_valid }, "config",
         "none, first_order, second_order", "overrides the relaxation density extrapolation of the input file";
-    SINGLE_PATH: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "ADR 0043: inputs without scf.convergence_profile use the standard profile with the fixed-point verification after convergence (scf.verify)";
+    REFERENCE_STRICT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "ADR 0043 (2026-11-16): force the strict reference SCF path with its fixed-point certificate (accuracy gates and tests); off = the single standard path with verification";
     DGEMM_TIMERS: Kind::Presence, "off", "any value (presence)",
         "print per-site dgemm timers at exit (dgemm-timers builds)";
     PSEUDO_DIR: Kind::Path, "platform cache", "absolute path",

@@ -946,11 +946,17 @@ See [bulk smoke evidence and limitations](validation/materials-smoke.md).
 
 ### Standard convergence profile (ADR 0035)
 
-`[scf] convergence_profile = "strict" | "standard"` defaults to `strict`.
-Strict arithmetic, certificate, output schema version and omitted-extension
-fields are unchanged. `standard_threshold_ha` is valid only with `standard`;
-it must be positive and finite and defaults to **5e-9 Ha** (frozen P17A E1).
-The standard profile is unpolarized Davidson only; collinear use rejects.
+The input key `scf.convergence_profile` was **removed** on 2026-11-16 (user
+decision, ADR 0043): an input that still contains it (any value) is an input
+error that names the replacement. Every classic `run` uses the standard profile
+with the fixed-point verification (next section). `standard_threshold_ha`
+(positive, finite, default **5e-9 Ha**, frozen P17A E1) sets its accuracy;
+`verify = "off"` gives the former explicit standard profile (no verification).
+The strict path is a reference/test tool only: `BAANDI_REFERENCE_STRICT=on`
+(environment) runs the same input on the strict path with its certificate;
+strict arithmetic, certificate, output schema version and omitted-extension
+fields are unchanged there. The standard profile is unpolarized Davidson only;
+collinear inputs keep the strict path.
 
 Standard stops on the **total Coulomb energy of output-minus-input density**,
 without electron-count division. Its Ritz-change threshold starts at 5e-3 Ha,
@@ -986,39 +992,62 @@ Raw QE parsing was tested on all four existing k222/k222s/si30 outputs.
 The validation-claim scripts reject non-strict or explicitly uncertified results.
 See [measured accuracy, limitations and commands](performance/p17a-standard-profile.md).
 
-### Single SCF path and fixed-point verification (ADR 0043, switch, default off)
+### Single SCF path and fixed-point verification (ADR 0043, default since 2026-11-16)
 
-`BAANDI_SINGLE_PATH=on` makes a classic `run` of an input **without**
-`scf.convergence_profile` use the standard profile with
-`standard_threshold_ha` from the input (default 5e-9 Ha) and Pulay beta 0.5,
-followed by a **fixed-point verification** after the stop rule fires:
-one more ordinary map at the delivered output density (warm start, eigen
-tolerance = the next ratchet value) passes when the Coulomb fixed-point residual
-`E_H[F(rho_out) - rho_out]` is below the threshold (and, with
-`BAANDI_STANDARD_RESIDUAL_GUARD=on`, the residual bound of that solve). A failed
-verification continues SCF and verifies again at the next stop; the delivered
-state is always the converged step's own (verification never changes a number).
+A classic `run` uses the standard profile with `standard_threshold_ha` from the
+input (default 5e-9 Ha) and Pulay beta 0.5, followed by a **fixed-point
+verification** after the stop rule fires: one more ordinary map at the
+delivered output density (warm start, eigen tolerance = the next ratchet value)
+passes when the Coulomb fixed-point residual `E_H[F(rho_out) - rho_out]` is
+below the threshold (and, with `BAANDI_STANDARD_RESIDUAL_GUARD=on`, the default,
+the residual estimate of that solve; this guard is an empirical estimator, not
+an error bound, see ADR 0043). A failed verification continues SCF and verifies
+again at the next stop; the delivered state is always the converged step's own
+(verification never changes a number).
 
-`[scf] verify = "fixed_point" | "off"`: default `fixed_point` on the single path,
-`off` on an explicit `convergence_profile = "standard"` (unchanged behaviour);
-`verify` with an explicit `strict` profile is an input error (strict always
-certifies). On the strict path chosen implicitly (switch off) `verify` has no
-effect. An explicit `strict` profile keeps today's strict behaviour bit for bit.
+`[scf] verify = "fixed_point" | "off"`: default `fixed_point`; `off` skips the
+verification (its result is the former explicit standard profile, bit for bit).
 
-Results with the switch on carry `single_path` (`status`: `applied`,
-`explicit_profile` or `not_applicable` with `reason`; `verification`). Verified
-runs carry `verified`, `verification` (every attempt: `coulomb_error_ha`,
-`threshold_ha`, `eigen_tolerance_ha`, `residual_bound_ha`, `density_residual`,
+`BAANDI_REFERENCE_STRICT=on|off` (default `off`) forces the strict reference path
+with its fixed-point certificate for accuracy gates and tests; the standard-only
+keys of the input (`standard_threshold_ha`, `verify`, `standard_stall_guard`,
+`standard_density_forcing`) are then ignored, which the result records
+(`single_path.status = "reference_strict"`).
+
+Every result carries `single_path` (`status`: `applied`, `reference_strict` or
+`not_applicable` with `reason`; `effective_profile`; `verification`:
+`fixed_point`, `off` or `strict_certificate`) and `execution` (review F01:
+`requested` controls, `effective_profile`, `standard_threshold_ha`,
+`verification`, `effective_solver` (`real_gamma_lean_davidson`,
+`real_gamma_classic_davidson`, `complex_davidson` or an MPI distributed solver),
+`real_gamma` and its fallback reason, `davidson_mode`, `lean_solves`, `backend`
+(`linear_algebra` mkl or pure, `mpi_feature`, `ranks`, `threads`),
+`parallel_model` and `non_default_switches`; the complete switch table stays in
+`scf.switches`). Verified runs carry `verified`, `verification` (every attempt:
+`coulomb_error_ha`, `threshold_ha`, `eigen_tolerance_ha`, `residual_bound_ha`
+(the residual estimate; name kept for compatibility), `density_residual`,
 `occupied_eigenvalue_change_ha`, information-only `strict_criteria_met`, work and
 `wall_s`) and `timings.verification_s`; verification work is also in each history
 entry's `fixed_point_certificate` and in `timings.certificate`.
 
 Forces accept a standard state with a passed verification (`forces.preconditions`
-says so); `output.forces` with `verify = "off"` on the single path is an input
-error. Relaxation, stress, collinear spin, Fermi-Dirac occupations,
-`scf.locking = "auto"`, the observe/agent runtime modes and the non-`run`
-commands keep plain inputs on the strict path (`not_applicable`). Checkpoint v1
-cannot encode a continuation with verification on.
+says so); `output.forces` with `verify = "off"` is an input error. Relaxation,
+stress, collinear spin, Fermi-Dirac occupations and `scf.locking = "auto"` keep
+the strict path (`not_applicable` with the reason); in those inputs the
+standard-only keys are input errors instead of being dropped. The observe/agent
+runtime modes and the non-`run` commands (bands, checkpoint, restart,
+inspection) keep a plain input on the strict path (`not_applicable`); an input
+that writes a standard-only key runs the standard path there too. Checkpoint v1
+cannot encode a continuation with verification on (use `verify = "off"`).
+
+MPI (review F02): with more than one k point, collinear spin or Fermi-Dirac
+occupations there are no k-point pools and no distributed eigensolve; every
+rank runs the whole calculation. Such runs report
+`parallel.model = "mpi_replicated"` with `parallel.replicated_reason`,
+`parallel.distributed_solves = 0`, and a warning on rank 0; they are not MPI
+measurements and are excluded from MPI against MPI comparisons. Replicated
+execution is deterministic (every rank follows the same branches and agrees bit
+for bit; engine test `multiple_k_points_run_replicated_on_every_rank`).
 ## Finite-temperature occupations (P17B)
 
 Omitting `[occupations]` preserves fixed insulating occupations and all existing

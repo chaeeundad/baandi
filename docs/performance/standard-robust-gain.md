@@ -1,5 +1,7 @@
 # P29B robust gain of the standard convergence profile
 
+> Note (2026-11-16, ADR 0043 amendment): the input key `scf.convergence_profile` named below was removed. Reproduce a former `convergence_profile = "standard"` run with a plain input and `scf.verify = "off"`, and a former strict run with `BAANDI_REFERENCE_STRICT=on`. The commands and numbers below are the historical record and are not rewritten.
+
 2026-11-07. **The Si8 standard-profile median work gain is 1.785x, not the
 historical single-run 2.65x.** Its seed-paired 95% bootstrap interval is
 1.650–2.004x; worst observed paired gain is 1.404x. This includes the mandatory

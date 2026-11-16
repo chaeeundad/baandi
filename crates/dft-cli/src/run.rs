@@ -53,12 +53,13 @@ pub fn sha256(bytes: &[u8]) -> String {
 }
 
 /// Resolve only user-exposed controls, preserving all other engine defaults.
-/// SCF options of every caller except a classic `run`: plain inputs keep the
-/// strict path there (ADR 0043; bands, checkpoints, inspection, relaxation).
+/// SCF options of every caller except a classic `run`: these callers keep a
+/// plain input on the strict path (ADR 0043 item 5; bands, checkpoints,
+/// inspection, relaxation); an input with standard-only keys runs standard.
 pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
     options_with(config, Some("not a classic run"))
 }
-/// `single_path_exclusion`: Some(reason) keeps plain inputs on the strict path.
+/// `single_path_exclusion`: Some(reason) keeps the run on the strict path.
 pub fn options_with(
     config: &Config,
     single_path_exclusion: Option<&'static str>,
@@ -94,13 +95,14 @@ pub fn options_with(
         ..ScfOptions::default()
     };
     if let Some(s) = &config.scf {
-        s.standard_profile().map_err(|e| error(1, e.to_string()))?;
-        o.standard_stall_guard = s
-            .standard_stall_guard()
-            .map_err(|e| error(1, e.to_string()))?;
-        o.standard_density_forcing = s
-            .standard_density_forcing()
-            .map_err(|e| error(1, e.to_string()))?;
+        // Standard-only controls act on the standard path only (strict
+        // fallbacks of callers and the reference switch ignore them).
+        o.standard_stall_guard = path.standard.is_some()
+            && s.standard_stall_guard()
+                .map_err(|e| error(1, e.to_string()))?;
+        o.standard_density_forcing = path.standard.is_some()
+            && s.standard_density_forcing()
+                .map_err(|e| error(1, e.to_string()))?;
         o.hartree_mixing = s.hartree_mixing().map_err(|e| error(1, e.to_string()))?;
         o.spectral_guard = s.spectral_guard().map_err(|e| error(1, e.to_string()))?;
         o.preconditioner = s.preconditioner().map_err(|e| error(1, e.to_string()))?;
@@ -257,6 +259,118 @@ fn options_json(o: &ScfOptions) -> Value {
     // value and source, so a result shows which combination produced it.
     result["switches"] = switches_json();
     result
+}
+/// `single_path` block of every result (ADR 0043): which SCF path ran and why.
+pub(crate) fn single_path_json(path: &crate::config::ScfPath, o: &ScfOptions) -> Value {
+    json!({"status":path.status,"reason":path.reason,
+        "effective_profile":if o.standard.is_some() { "standard" } else { "strict" },
+        "verification":if o.standard.is_some() { o.verification.name() } else { "strict_certificate" },
+        "switch":"BAANDI_REFERENCE_STRICT","adr":"0043"})
+}
+/// Reason recorded for MPI runs with more than one k point (review F02).
+pub(crate) const REPLICATED_MULTI_K: &str =
+    "more than one k point: no k-point pools, every rank solves every k point";
+/// Review F02: the parallel model that actually ran. `ranks > 1` without a
+/// single distributed eigensolve means every rank repeated the whole
+/// calculation (`mpi_replicated`, with the reason); such a run is not an MPI
+/// measurement. One rank is `threads`.
+pub(crate) fn parallel_model(
+    ranks: usize,
+    distributed_solves: usize,
+    m2: bool,
+    replicated_reason: Option<String>,
+) -> (&'static str, Option<String>) {
+    if ranks <= 1 {
+        ("threads", None)
+    } else if distributed_solves == 0 {
+        (
+            "mpi_replicated",
+            Some(replicated_reason.unwrap_or_else(|| "no distributed eigensolve".into())),
+        )
+    } else if m2 {
+        ("mpi_stick_rows", None)
+    } else {
+        ("mpi_row_block", None)
+    }
+}
+/// What the solver actually did (filled from the SCF result).
+pub(crate) struct Solver<'a> {
+    pub gamma_real_used: bool,
+    pub gamma_real_fallback_reason: Option<&'a str>,
+    pub parallel_model: &'static str,
+}
+/// Review F01: requested and effective path, solver, verification, backend and
+/// the switches whose value is not the default, so that a stored result (a
+/// baseline) identifies the combination that produced it. The complete switch
+/// table stays under `scf.switches`.
+pub(crate) fn execution_json(
+    config: &Config,
+    path: &crate::config::ScfPath,
+    o: &ScfOptions,
+    s: Solver<'_>,
+) -> Value {
+    use dft_numerics::switches::{self, Id, Source, Value as V};
+    let scf = config.scf.as_ref();
+    let lean = dft_engine::lean_counters();
+    let effective_solver = if dft_engine::parallel::distributed_solves() > 0 {
+        if dft_engine::parallel::distributed_rows_solves() > 0 {
+            "mpi_distributed_real_davidson_stick_rows"
+        } else {
+            "mpi_distributed_real_davidson_row_block"
+        }
+    } else if s.gamma_real_used {
+        if lean.solves > 0 {
+            "real_gamma_lean_davidson"
+        } else {
+            "real_gamma_classic_davidson"
+        }
+    } else {
+        "complex_davidson"
+    };
+    let non_default: serde_json::Map<_, _> = switches::manifest()
+        .into_iter()
+        .filter(|e| e.source != Source::Default)
+        .map(|e| {
+            let value = match e.value {
+                V::Choice(c) => json!(c),
+                V::Number(x) => json!(x),
+                V::Raw(r) => json!(r),
+                V::Present(b) => json!(b),
+            };
+            (
+                e.switch.name.to_owned(),
+                json!({"value":value,"source":e.source.as_str()}),
+            )
+        })
+        .collect();
+    json!({
+        "requested":{
+            "standard_threshold_ha":scf.and_then(|s| s.standard_threshold_ha),
+            "verify":scf.and_then(|s| s.verify.as_deref()),
+            "gamma_real":scf.and_then(|s| s.gamma_real.as_deref()).unwrap_or("auto"),
+            "threads":scf.and_then(|s| s.threads),
+            "reference_strict":switches::on(Id::REFERENCE_STRICT),
+        },
+        "effective_profile":if o.standard.is_some() { "standard" } else { "strict" },
+        "path_status":path.status,
+        "path_reason":path.reason,
+        "standard_threshold_ha":o.standard.map(|p| p.threshold_ha),
+        "verification":if o.standard.is_some() { o.verification.name() } else { "strict_certificate" },
+        "effective_solver":effective_solver,
+        "real_gamma":s.gamma_real_used,
+        "real_gamma_fallback_reason":s.gamma_real_fallback_reason,
+        "davidson_mode":switches::choice(Id::DAVIDSON),
+        "lean_solves":lean.solves,
+        "solver_note":"lean applies to Ritz-value (standard-path) real-Gamma solves; residual-criterion solves (strict path, certificate) use the classic real Davidson; process totals including the cutoff-ladder coarse stage",
+        "backend":{
+            "linear_algebra":if dft_numerics::MKL_BACKEND { "mkl" } else { "pure" },
+            "mpi_feature":cfg!(feature = "mpi"),
+            "ranks":crate::parallel::size(),
+            "threads":o.threads.max(1),
+        },
+        "parallel_model":s.parallel_model,
+        "non_default_switches":non_default,
+    })
 }
 /// `scf.switches`: name -> {value, source, default, allowed, meaning}. Values are
 /// strings, numbers, booleans or null (null: unset override / two-pass ORTHO /
@@ -580,7 +694,37 @@ pub fn execute_mode(
                 .z_valence()
         })
         .sum();
+    // Collinear spin and Fermi-Dirac drivers: strict path, complex solver,
+    // never distributed (the real-Gamma path excludes both), so MPI ranks
+    // replicate them (review F02).
+    let driver_record = |reason: &'static str| -> Value {
+        let (model, replicated) = parallel_model(
+            crate::parallel::size(),
+            0,
+            false,
+            Some(format!("{reason}: every rank runs the whole calculation")),
+        );
+        let mut v = json!({
+            "single_path": single_path_json(&scf_path, &opts),
+            "execution": execution_json(&config, &scf_path, &opts, Solver {
+                gamma_real_used: false,
+                gamma_real_fallback_reason: Some(reason),
+                parallel_model: model,
+            }),
+        });
+        if crate::parallel::size() > 1 {
+            if crate::parallel::rank() == 0 {
+                eprintln!(
+                    "warning: MPI ranks replicate the whole calculation ({reason}); this run is not a distributed (MPI vs MPI) measurement"
+                );
+            }
+            v["parallel"] = json!({"model":model,"replicated_reason":replicated,
+                "ranks":crate::parallel::size(),"rank":crate::parallel::rank(),"distributed_solves":0});
+        }
+        v
+    };
     if let Some(theta) = config.finite_temperature().map_err(|e| error(1, e))? {
+        let record = driver_record("Fermi-Dirac occupations");
         return finite_run::execute(
             &config,
             &prepared,
@@ -594,15 +738,17 @@ pub fn execute_mode(
             preflight,
             species,
             &bytes,
+            record,
         );
     }
     if let Some(sector) = config
         .spin_sector(electron_target)
         .map_err(|e| error(1, e))?
     {
+        let record = driver_record("collinear spin");
         return spin_run::execute(
             &config, &prepared, opts, &atoms, &refs, &points, sector, &out, preflight, species,
-            &bytes,
+            &bytes, record,
         );
     }
     let mut problem = if config.basis.legacy_gamma() {
@@ -827,10 +973,7 @@ pub fn execute_mode(
             p.threshold_ha
         );
     }
-    if scf_path.status != "off" {
-        result["single_path"] = json!({"status":scf_path.status,"reason":scf_path.reason,
-            "verification":opts.verification.name(),"switch":"BAANDI_SINGLE_PATH","adr":"0043"});
-    }
+    result["single_path"] = single_path_json(&scf_path, &opts);
     if let Some(v) = &r.verification {
         result["verified"] = json!(v.passed());
         result["verification"] = verification_json(v);
@@ -857,6 +1000,35 @@ pub fn execute_mode(
         });
     }
     result["gamma_real_used"] = json!(r.gamma_real_used);
+    let replicated_reason = if points.len() > 1 {
+        Some(REPLICATED_MULTI_K.to_owned())
+    } else {
+        r.gamma_real_fallback_reason.as_ref().map(|reason| {
+            format!("real-Gamma path not taken ({reason}): every rank runs the complex solver")
+        })
+    };
+    let (model, replicated) = parallel_model(
+        crate::parallel::size(),
+        dft_engine::parallel::distributed_solves(),
+        dft_engine::parallel::m2_enabled(),
+        replicated_reason,
+    );
+    if model == "mpi_replicated" && crate::parallel::rank() == 0 {
+        eprintln!(
+            "warning: MPI ranks replicate the whole calculation ({}); this run is not a distributed (MPI vs MPI) measurement",
+            replicated.as_deref().unwrap_or("no distributed solve")
+        );
+    }
+    result["execution"] = execution_json(
+        &config,
+        &scf_path,
+        &opts,
+        Solver {
+            gamma_real_used: r.gamma_real_used,
+            gamma_real_fallback_reason: r.gamma_real_fallback_reason.as_deref(),
+            parallel_model: model,
+        },
+    );
     if crate::parallel::size() > 1 {
         let m2_on = dft_engine::parallel::m2_enabled();
         let (m2_counts, m2_stages) = dft_engine::parallel::m2_stats();
@@ -867,7 +1039,8 @@ pub fn execute_mode(
             "single_column": s.single_column, "bordered": s.bordered, "broadcast": s.broadcast,
         });
         result["parallel"] = json!({
-            "model": if m2_on { "mpi_stick_rows" } else { "mpi_row_block" },
+            "model": model,
+            "replicated_reason": replicated,
             "m2": {
                 "enabled": m2_on,
                 "batched_transposes": dft_numerics::switches::on(dft_numerics::switches::Id::M2_BATCH),
@@ -1146,7 +1319,7 @@ fn verification_json(v: &dft_engine::VerificationReport) -> Value {
             "density_residual":a.density_residual,"occupied_eigenvalue_change_ha":a.occupied_eigenvalue_change_ha,
             "strict_criteria_met":a.strict_criteria_met,"davidson_iterations":a.davidson_iterations,
             "h_vectors":a.operator_applications,"wall_s":a.wall.as_secs_f64()})).collect::<Vec<_>>(),
-        "criterion":"E_H[F(rho_out) - rho_out] < threshold_ha (and the residual bound when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
+        "criterion":"E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
         "note":"delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate"})
 }
 
@@ -1450,5 +1623,27 @@ mod tests {
         }
         let c = Config::parse(example).unwrap();
         assert_eq!(options(&c).unwrap().seed, 2026);
+    }
+    /// Review F02: the reported parallel model follows the solves that ran,
+    /// not the rank count or the M2 switch. MPI ranks without a distributed
+    /// eigensolve (more than one k point, spin, Fermi-Dirac, or a real-Gamma
+    /// fallback) are `mpi_replicated` with the reason.
+    #[test]
+    fn parallel_model_reports_replicated_mpi_runs() {
+        assert_eq!(parallel_model(1, 0, true, None), ("threads", None));
+        assert_eq!(
+            parallel_model(1, 0, true, Some("x".into())),
+            ("threads", None)
+        );
+        assert_eq!(
+            parallel_model(4, 0, true, Some(REPLICATED_MULTI_K.into())),
+            ("mpi_replicated", Some(REPLICATED_MULTI_K.into()))
+        );
+        assert_eq!(
+            parallel_model(2, 0, false, None),
+            ("mpi_replicated", Some("no distributed eigensolve".into()))
+        );
+        assert_eq!(parallel_model(8, 12, true, None), ("mpi_stick_rows", None));
+        assert_eq!(parallel_model(8, 12, false, None), ("mpi_row_block", None));
     }
 }

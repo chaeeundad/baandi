@@ -1,5 +1,7 @@
 # Where the non-diagonalization time goes: si8 real Gamma + standard profile (Mac observation)
 
+> Note (2026-11-16, ADR 0043 amendment): the input key `scf.convergence_profile` named below was removed. Reproduce a former `convergence_profile = "standard"` run with a plain input and `scf.verify = "off"`, and a former strict run with `BAANDI_REFERENCE_STRICT=on`. The commands and numbers below are the historical record and are not rewritten.
+
 Written 2026-11-07 by the performance owner. Measurement only; no source was changed. Everything here is a Mac observation (shared machine, load average about 1.4 during the runs), not an acceptance number. Binary: `target/release/dft-cli` (sha256 prefix 558bd73dd6c3345d), HEAD b59d10b, UPF `Si.pz-vbc.UPF`.
 
 ## Method

@@ -29,6 +29,7 @@ Status words: ADOPTED (default), OPT-IN (in main, off by default), REJECTED, OPE
 | Nonlocal operator as GEMM (MKL path) | OPEN | 6 to 12x QE's calbec/add_vuspsi; earlier traversal rewrites lost | stage-decomposition-results |
 | Batching single-column projection products | OPEN | 25 percent of dgemm calls have n = 1 | DGEMM-CENSUS |
 | Start from the density of a similar system | PARKED by the user | no design | wiki state-of-play |
+| Single standard SCF path with fixed-point verification; `scf.convergence_profile` removed; strict only via `BAANDI_REFERENCE_STRICT=on` | ADOPTED default (user decision 2026-11-16) | user decision; dev08 measurements of the new default owed (p01-single-path) | ADR 0043 amendment, SINGLE-PATH-DEFAULT-FLIP |
 
 - 2026-11-10 BAANDI_MKL_NONLOCAL (MKL dgemm for nonlocal projector products): -6.4 percent strict and -4.2 percent standard wall at T=1, only -2.0 and -1.5 percent at T=8; NOT adopted as default (pre-registered 3 percent in both thread budgets); opt-in. Ledger NONLOCAL-DGEMM-AB.
 - 2026-11-10 BAANDI_CERT_SCREEN=on (skip fixed-point certificate re-solves that a first-order eigenvalue-shift estimate shows cannot pass; trajectory-neutral): every si32 seed 601-610 fails its first two certificates on the eigenvalue criterion (26 percent of H vectors); Mac -17 to -21 percent wall, density SHA identical; OPT-IN until the pre-registered dev08 A/B (docs/performance/requests/single-node-speed.md). Ledger CERT-SCREEN.

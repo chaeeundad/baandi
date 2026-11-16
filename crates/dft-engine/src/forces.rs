@@ -291,7 +291,7 @@ pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
     };
     if (state.options.standard.is_some() && !verified) || standard {
         return Err(ScfError::InvalidInput(
-            "observables.forces: strict convergence profile required, or a passed fixed-point verification on the standard path; rerun with convergence_profile = strict or scf.verify = fixed_point",
+            "observables.forces: strict convergence profile required, or a passed fixed-point verification on the standard path; rerun with scf.verify = fixed_point (default) or on the strict reference path (BAANDI_REFERENCE_STRICT=on)",
         ));
     }
     if state.options.density_tolerance > 1e-7

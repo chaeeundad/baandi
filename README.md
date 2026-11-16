@@ -190,7 +190,7 @@ A synthetic skew cell exposes a false success after 6 iterations: occupied-state
 
 ### Standard convergence profile: work versus strict
 
-Opt-in standard threshold: 5e-09 Ha; strict remains the default. **Standard results are not certified.** The table compares BAANDI with its own strict run, not QE. Energy differences are per cell; unavailable means no successful pair. Failed runs retain their work counts. [`tests/reference/perf/p17a/final-report.json`](tests/reference/perf/p17a/final-report.json).
+Standard threshold: 5e-09 Ha. Since 2026-11-16 the standard path with a fixed-point verification after convergence is the default (ADR 0043); the rows below are the P17A measurement of the unverified standard profile. **Standard results are not certified.** The table compares BAANDI with its own strict run, not QE. Energy differences are per cell; unavailable means no successful pair. Failed runs retain their work counts. [`tests/reference/perf/p17a/final-report.json`](tests/reference/perf/p17a/final-report.json).
 
 | Case | Status strict / standard | SCF iterations strict / standard | Davidson steps strict / standard | E standard - E strict (Ha) |
 |---|---|---:|---:|---:|

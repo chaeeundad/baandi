@@ -1,4 +1,8 @@
-"""Release CLI/profile/checkpoint contracts; generated UPF remains temporary."""
+"""Release CLI/profile/checkpoint contracts; generated UPF remains temporary.
+
+Since ADR 0043 (2026-11-16) the standard rows use the default single path with
+scf.verify = "off" (the former explicit standard profile); the plain input of
+the checkpoint commands runs the strict path."""
 import json
 from pathlib import Path
 import struct
@@ -34,7 +38,7 @@ with tempfile.TemporaryDirectory(prefix='p17a-cli-') as d:
     text,_=ea.case_input('syn4-elongated',d,Path('/unused'),1)
     for metric in ['l2','hartree']:
         inp=d/(metric+'.toml')
-        inp.write_text(ea.scf_settings(text,dict(convergence_profile='standard',mixing_metric=metric)))
+        inp.write_text(ea.scf_settings(text,dict(verify='off',mixing_metric=metric)))
         output=d/(metric+'-run')
         p=run('run',inp,'--output-dir',output)
         assert 'convergence_profile: standard; certified: false' in p.stdout
@@ -63,8 +67,9 @@ with tempfile.TemporaryDirectory(prefix='p17a-cli-') as d:
         assert wh['result']['history'][0]['standard_redo'], 'near-fixed-point warm start must trigger the first redo'
         strict=d/'strict.toml';strict.write_text(text)
         run('restart',strict,exact,d/'mismatch.cp',ok=False)
-    for settings in [dict(convergence_profile='typo'),dict(convergence_profile='standard',standard_threshold_ha=0.),
-                     dict(mixing_metric='typo'),dict(standard_threshold_ha=5e-9)]:
+    # convergence_profile was removed (ADR 0043, 2026-11-16): any value is an input error.
+    for settings in [dict(convergence_profile='typo'),dict(convergence_profile='standard'),dict(verify='off',standard_threshold_ha=0.),
+                     dict(mixing_metric='typo'),dict(verify='typo')]:
         inp=d/'bad.toml';inp.write_text(ea.scf_settings(text,settings))
         run('run',inp,'--output-dir',d/'bad',ok=False)
 print('PASS standard labels, redo, ratchet, roots, counters, both metrics, exact checkpoint bits, incompatible options and invalid inputs')

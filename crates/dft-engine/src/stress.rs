@@ -60,7 +60,7 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
     // until its cutoff scans are adapted to a standard caller.
     if state.options.standard.is_some() {
         return Err(ScfError::InvalidInput(
-            "observables.stress: strict convergence profile required; rerun with convergence_profile = strict",
+            "observables.stress: strict convergence profile required; stress requests keep the strict path (ADR 0043 item 5)",
         ));
     }
     let start = std::time::Instant::now();

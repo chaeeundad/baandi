@@ -105,6 +105,72 @@ fn distributed_with_threads_takes_the_distributed_path_and_keeps_iterations() {
     }
 }
 
+/// Review F02 (2026-11-16): with an active communicator and more than one k
+/// point there is no k-point pool and no distributed solve: every rank solves
+/// every k point on the complex path (replicated execution, reported by the CLI
+/// as `parallel.model = "mpi_replicated"`). The replicated run is safe: the
+/// real-Gamma (distributed) path is not taken, every rank agrees bit for bit and
+/// the energy equals the threads-only run within the strict class (1e-10 Ha).
+#[test]
+fn multiple_k_points_run_replicated_on_every_rank() {
+    use dft_engine::OccupationPolicy;
+    use dft_geometry::kpoints::KPoint;
+    let run_k = |comm: Option<Arc<dyn Collective + Send + Sync>>| {
+        parallel::set_communicator(comm);
+        let cell = Cell::from_user_rows_bohr([[4., 0., 0.], [0., 4., 0.], [0., 0., 4.]]).unwrap();
+        let pp = common::potential(2., 1., true, 401);
+        let r = ScfProblem::with_kpoints(
+            &cell,
+            &[Atom::new("Xx", [0.13, 0.21, 0.32])],
+            &[SpeciesPotential {
+                label: "Xx",
+                potential: &pp,
+            }],
+            ScfOptions {
+                gamma_real: GammaReal::Auto,
+                cutoff_hartree: 2.5,
+                bands: Some(5),
+                threads: 1,
+                eigen_tolerance: 1e-10,
+                ..Default::default()
+            },
+            &[
+                KPoint {
+                    fractional: [0., 0., 0.],
+                    weight: 0.5,
+                },
+                KPoint {
+                    fractional: [0.25, 0., 0.],
+                    weight: 0.5,
+                },
+            ],
+            OccupationPolicy::Insulator {
+                minimum_gap_hartree: 1e-6,
+            },
+        )
+        .unwrap()
+        .run()
+        .unwrap();
+        parallel::set_communicator(None);
+        r
+    };
+    let serial = run_k(None);
+    let results = simulate(2, |comm: &SimRank| run_k(Some(Arc::new(comm.clone()))));
+    for r in &results {
+        assert!(
+            !r.gamma_real_used,
+            "multi-k must not take the real-Gamma path"
+        );
+        assert_eq!(
+            r.total_hartree().to_bits(),
+            results[0].total_hartree().to_bits(),
+            "ranks disagree"
+        );
+        let de = (r.total_hartree() - serial.total_hartree()).abs();
+        assert!(de < 1e-10, "replicated dE {de:e} Ha");
+    }
+}
+
 fn total_davidson(r: &ScfResult) -> usize {
     r.history.iter().map(|h| h.davidson_iterations).sum()
 }

@@ -1,5 +1,6 @@
 # ADR 0043: One SCF path (standard profile) with a fixed-point verification after convergence
 
+- Status (amended 2026-11-16): **Default flipped by user decision 2026-11-16; the input key `scf.convergence_profile` is removed.** The single standard path with the fixed-point verification is the only SCF path of a classic run; `BAANDI_SINGLE_PATH` is removed and the strict path is a reference tool behind `BAANDI_REFERENCE_STRICT=on`. See the amendment at the end. The original status line follows for the record.
 - Status: **Accepted in direction by the user (decisions 1 and 5 of 2026-11-14, `docs/performance/requests/work-order-beat-qe-2026-11-14.md` section 1)**; this ADR fixes the definition the work order left open (P0.1 item c). The implementation is behind `BAANDI_SINGLE_PATH` (default `off`) until the dev08 check list `docs/performance/requests/p01-single-path.md` shows convergence and delivered error in class on the generality set. Switching the default is a separate, one-line change recorded as an amendment here.
 - Supersedes, when the default flips: the "strict is the default" clause of ADR 0035. ADR 0035's labelling rules stay (a standard result says so); the "never certified" rule is replaced by the verification below, which is reported under its own name and is not the strict certificate.
 
@@ -40,3 +41,90 @@ The user decided on 2026-11-14 that the standard path becomes the only SCF path,
 - With the switch on, plain runs change path (standard instead of strict): SCF counts, energies (within the standard class, 5e-9 Ha), mixing beta (0.5) and density hashes change. With the switch off nothing changes (tested bit for bit).
 - The verification cost is inside every timed BAANDI run and reported separately (work order decision 5).
 - Open, measured on dev08 before the default flips (request `p01-single-path.md`): convergence and delivered error at thresholds 1e-8 and 1e-10 on si16/si32/si64 f1e-3 and the generality set; verification pass rate and cost; force differences standard against strict.
+
+## Amendment: default flipped, profile key removed (user decision 2026-11-16)
+
+Decision (user, 2026-11-16, in response to the code and performance review of
+2026-11-16, items F01 to F04): remove `scf.convergence_profile`; the single
+standard path with verification is the only path. This amendment replaces items
+1, 2 and 6 above; items 3 to 5 stand with the changes noted.
+
+1. **Input.** `scf.convergence_profile` (any value, including `"strict"` and
+   `"standard"`) is an input error whose message names the replacement:
+   accuracy by `scf.standard_threshold_ha` (default 5e-9 Ha, unchanged),
+   verification by `scf.verify` (`fixed_point` default, `off`), strict only as a
+   reference tool. Every classic `run` uses the standard path with the
+   verification (status `applied`). `scf.verify = "off"` reproduces the former
+   explicit `convergence_profile = "standard"` bit for bit (same options).
+2. **Reference strict.** `BAANDI_REFERENCE_STRICT=on|off` (default `off`)
+   replaces `BAANDI_SINGLE_PATH` in the switch table (count unchanged, 66).
+   With `on` the same input runs the strict path with its certificate (status
+   `reference_strict`); standard-only keys are ignored there and the result says
+   so. Accuracy gates, QE validations (`scripts/verify_qe.py` rejects non-strict
+   results) and strict baselines use it; `scripts/equal_accuracy.py` sets it per
+   row, `scripts/bench_scf.py` refuses to compare a run against a baseline of
+   the other profile and names the switch. The engine API is unchanged:
+   `ScfOptions::default()` is still strict (`standard = None`), so engine tests
+   and the strict reference keep their arithmetic.
+3. **Strict fallbacks (item 5, unchanged in substance).** Inputs with
+   relaxation, stress, collinear spin, Fermi-Dirac occupations or
+   `scf.locking = "auto"` keep the strict path and record
+   `single_path.status = "not_applicable"` with the reason; in these inputs the
+   standard-only keys (`standard_threshold_ha`, `verify`, `standard_stall_guard`,
+   `standard_density_forcing`) are input errors instead of being silently
+   dropped. The observe/agent runtime modes and the non-`run` commands (bands,
+   checkpoint, restart, inspection) keep a plain input on the strict path
+   (checkpoint v1 cannot carry the verification); an input that writes a
+   standard-only key asks for the standard path explicitly and gets it there
+   (with `verify = "off"`, the former explicit standard profile that checkpoints
+   carry). Forces use the passed verification (item 5); `output.forces` with
+   `verify = "off"` is an input error.
+4. **Recording (review F01).** Every result carries `single_path` (status,
+   reason, effective profile, verification mode) and `execution`: requested
+   controls, effective profile, threshold, verification, effective solver
+   (`real_gamma_lean_davidson`, `real_gamma_classic_davidson`,
+   `complex_davidson`, or the MPI distributed solver), real-Gamma use and its
+   fallback reason, Davidson mode and lean solve count, backend (MKL or pure,
+   MPI feature, ranks, threads), parallel model and every switch whose value is
+   not the default. A stored baseline therefore identifies its combination.
+5. **MPI replication (review F02).** With more than one k point, spin or
+   Fermi-Dirac there are no k-point pools: every rank solves every k point.
+   Results report `parallel.model = "mpi_replicated"`, the reason and
+   `distributed_solves = 0` (the model follows the solves that ran, not the
+   rank count or the M2 switch), and rank 0 warns. Replicated execution is
+   deterministic: every rank follows the same branches and enters the same
+   collectives; the engine test `multiple_k_points_run_replicated_on_every_rank`
+   (two k points, two simulated ranks) checks bit-equal ranks and agreement with
+   the threads-only run within 1e-10 Ha. Such runs are excluded from MPI
+   against MPI comparisons. k-point pools are not built in this change.
+
+Consequences for default runs: a plain Si input now runs the standard path with
+the verification instead of the strict path. Its SCF count, energy (within the
+standard class, 5e-9 Ha), mixing beta (0.5 instead of 0.3 for single-k strict
+runs), density hash and work counts change **only because the default path
+changed**; no kernel, tolerance or threshold changed. The strict path, reached
+by `BAANDI_REFERENCE_STRICT=on`, is bit-identical to the former default. The
+dev08 check list `docs/performance/requests/p01-single-path.md` was not run
+before this user decision; its measurements (delivered error, verification
+pass rate and cost, force differences) remain owed and are now measurements of
+the default rather than gates of the flip.
+
+### Residual guard is an estimator (review F03)
+
+The residual guard (`BAANDI_STANDARD_RESIDUAL_GUARD`, default on, used by the
+standard stop rule and by V2) computes B = 1 Ha^-1 * sum_k w_k sum_i f_i
+||r_ik||^2. It is an **empirical estimator**, not an error bound: the
+Kato-Temple form ||r||^2 / gap needs a spectral separation, and choosing the
+unit gap 1 Ha does not guarantee that the actual separation is at least 1 Ha;
+an SCF fixed-point residual is not the total-energy error either.
+Counter-example (2 x 2, arithmetic, Python): H = diag(0, 0.01 Ha),
+x = (sqrt(1 - 1e-6), 1e-3): the Rayleigh-quotient error is 1e-8 Ha while
+||r||^2 * 1 Ha^-1 = 9.99999e-11 Ha, below the 5e-9 Ha threshold. This refutes
+the guard as a general guarantee; it is not a run of the BAANDI SCF failing on
+that input. The code now names it so (`StandardProfile::residual_energy_estimate`,
+comments, switch meaning); the result key `residual_bound_ha` keeps its name for
+compatibility. No number, threshold or tolerance changed. The adequacy of the
+default rests on measured delivered error against strict references (dev08
+list above); a true bound would need an occupied/unoccupied spectral
+separation estimate that handles degeneracy and finite occupations, which is
+not designed here.

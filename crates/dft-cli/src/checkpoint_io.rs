@@ -211,7 +211,7 @@ pub fn encode(checkpoint: &Checkpoint) -> Result<Vec<u8>, Error> {
         .is_some_and(|c| c.options.verification != dft_engine::Verification::Off)
     {
         return Err(invalid(
-            "checkpoint v1 cannot preserve the fixed-point verification (ADR 0043); use scf.verify = \"off\" or convergence_profile = strict",
+            "checkpoint v1 cannot preserve the fixed-point verification (ADR 0043); use scf.verify = \"off\" or the strict reference path (BAANDI_REFERENCE_STRICT=on)",
         ));
     }
     let mut binary = Vec::new();

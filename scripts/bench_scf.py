@@ -126,6 +126,9 @@ def run_case(binary, upf, key, repeats, threads=None, extra_toml=()):
                 "phase_medians_s": {key: statistics.median(p[key] for p in phases) for key in ph},
                 "iterations": len(r["convergence"]["history"]), "total_energy_ha": r["total_energy"]["ha"],
                 "density_sha256": sha256(os.path.join(last, "density.bin")),
+                # ADR 0043: the SCF path that ran (results without the record are strict).
+                "effective_profile": r.get("single_path", {}).get("effective_profile", "strict"),
+                "execution": r.get("execution"),
                 "switches_not_default": {n: e["value"] for n, e in switches.items() if e["source"] != "default"}}
 
 
@@ -166,6 +169,11 @@ def main(argv):
         if not a.skip_legacy_si8_anchor and k == "si8" and abs(r["total_energy_ha"] - (-31.3218036010316)) > 1e-9:
             status = 5
         b = base.get(k)
+        if b and b.get("effective_profile", "strict") != r["effective_profile"]:
+            print(f"{k}: run used the {r['effective_profile']} SCF path but the baseline is "
+                  f"{b.get('effective_profile', 'strict')}; set BAANDI_REFERENCE_STRICT=on to compare "
+                  "against a strict baseline (ADR 0043, default flipped 2026-11-16)")
+            return 3
         de = abs(r["total_energy_ha"] - b["total_energy_ha"]) if b else None
         ident = (r["density_sha256"] == b["density_sha256"]) if b else None
         sp = b["wall_median_s"] / r["wall_median_s"] if b else None

@@ -433,7 +433,7 @@ fn rejects_standard_profile_and_invalid_constraints_without_scf() {
     )
     .unwrap();
     for (i, text) in [
-        input().replace("[scf]", "[scf]\nconvergence_profile='standard'") + "\n[relax]\n",
+        input().replace("[scf]", "[scf]\nstandard_threshold_ha=5e-11") + "\n[relax]\n",
         input() + "\n[relax]\nfixed=[{atom=2}]\n",
         input() + "\n[relax]\nforce_tol_ha_bohr=nan\n",
         input().replace("[0.27,0.23,0.19]", "[0.25,0.0,0.0]")

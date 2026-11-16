@@ -383,64 +383,83 @@ pub enum SpinMode {
 pub struct ScfPath {
     pub standard: Option<dft_engine::StandardProfile>,
     pub verification: dft_engine::Verification,
-    /// `off` (switch off), `explicit_profile`, `applied` or `not_applicable`.
+    /// `applied` (the single standard path), `reference_strict`
+    /// (`BAANDI_REFERENCE_STRICT=on`) or `not_applicable` (strict fallback, see
+    /// `reason`).
     pub status: &'static str,
     pub reason: Option<&'static str>,
 }
+/// Reason recorded when the reference switch forces the strict path.
+pub const REFERENCE_STRICT_REASON: &str = "BAANDI_REFERENCE_STRICT=on (strict reference path)";
+/// Error for the removed `scf.convergence_profile` key (user decision 2026-11-16).
+pub const CONVERGENCE_PROFILE_REMOVED: &str = "scf.convergence_profile was removed (user decision 2026-11-16, ADR 0043): every run uses the single standard SCF path with the fixed-point verification after convergence; set the accuracy with scf.standard_threshold_ha (default 5e-9 Ha) and the verification with scf.verify = \"fixed_point\" (default) or \"off\"; the strict path is a reference tool only (environment BAANDI_REFERENCE_STRICT=on); delete the key";
 impl Config {
-    /// Path selection (ADR 0043). `caller_exclusion` names a caller that keeps
-    /// the strict path for plain inputs (runtime modes, bands, checkpoints).
+    /// Path selection (ADR 0043, default flipped 2026-11-16). Every classic run
+    /// uses the standard path with the fixed-point verification. The strict
+    /// path remains for (a) the reference switch `BAANDI_REFERENCE_STRICT=on`,
+    /// (b) callers named by `caller_exclusion` (runtime modes, bands,
+    /// checkpoints, relaxation driver) and (c) inputs the standard path does not
+    /// support yet (`single_path_exclusion`); the last two are recorded as
+    /// `not_applicable` with the reason.
     pub fn scf_path(&self, caller_exclusion: Option<&'static str>) -> Result<ScfPath, ConfigError> {
-        let invalid = |m: &str| ConfigError::Invalid(m.to_owned());
-        let switch = dft_numerics::switches::on(dft_numerics::switches::Id::SINGLE_PATH);
+        let invalid = |m: String| ConfigError::Invalid(m);
         let s = self.scf.as_ref();
+        if let Some(s) = s {
+            s.reject_removed_keys()?;
+        }
         let verify = s.map(Scf::verify).transpose()?.flatten();
-        if let Some(scf) = s.filter(|s| s.convergence_profile.is_some()) {
-            let standard = scf.standard_profile()?;
-            if standard.is_none() && verify.is_some() {
-                return Err(invalid(
-                    "scf.verify applies to the standard path; the strict profile always runs its fixed-point certificate",
-                ));
-            }
+        let threshold = s.and_then(|s| s.standard_threshold_ha);
+        if threshold.is_some_and(|t| !t.is_finite() || t <= 0.0) {
+            return Err(invalid(
+                "scf.standard_threshold_ha must be finite and positive".into(),
+            ));
+        }
+        if dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_STRICT) {
+            // Reference tool: the same input runs on the strict path; the
+            // standard-only keys are recorded as ignored by the status.
             return Ok(ScfPath {
-                standard,
-                verification: if standard.is_some() && verify == Some(true) {
-                    dft_engine::Verification::FixedPoint
-                } else {
-                    dft_engine::Verification::Off
-                },
-                status: if switch { "explicit_profile" } else { "off" },
-                reason: None,
+                standard: None,
+                verification: dft_engine::Verification::Off,
+                status: "reference_strict",
+                reason: Some(REFERENCE_STRICT_REASON),
             });
         }
-        let exclusion = if switch {
-            match caller_exclusion {
-                Some(reason) => Some(reason),
-                None => self.single_path_exclusion()?,
-            }
-        } else {
-            None
-        };
-        if !switch || exclusion.is_some() {
-            if s.is_some_and(|s| s.standard_threshold_ha.is_some()) {
-                return Err(invalid(
-                    "standard_threshold_ha requires convergence_profile=standard",
-                ));
+        // Standard-only controls written in the input.
+        let standard_keys = s.is_some_and(|s| {
+            s.standard_threshold_ha.is_some()
+                || s.verify.is_some()
+                || s.standard_stall_guard.as_deref() == Some("on")
+                || s.standard_density_forcing.as_deref() == Some("on")
+        });
+        if let Some(reason) = self.single_path_exclusion()? {
+            // The input itself keeps the strict path: standard-only controls
+            // would be silently dropped, so they are input errors.
+            if standard_keys {
+                return Err(invalid(format!(
+                    "scf.standard_threshold_ha, scf.verify, standard_stall_guard and standard_density_forcing apply to the standard SCF path; this input runs on the strict path ({reason}, ADR 0043 item 5); remove them"
+                )));
             }
             return Ok(ScfPath {
                 standard: None,
                 verification: dft_engine::Verification::Off,
-                status: if switch { "not_applicable" } else { "off" },
-                reason: exclusion,
+                status: "not_applicable",
+                reason: Some(reason),
             });
         }
-        let threshold = s
-            .and_then(|s| s.standard_threshold_ha)
-            .unwrap_or(dft_engine::StandardProfile::default().threshold_ha);
-        if !threshold.is_finite() || threshold <= 0.0 {
-            return Err(invalid(
-                "scf.standard_threshold_ha must be finite and positive",
-            ));
+        // Callers that keep the strict path for plain inputs (checkpoint v1
+        // cannot carry the verification; bands, inspection). An input that
+        // writes a standard-only control asks for the standard path explicitly
+        // and gets it (with `scf.verify = "off"` the former explicit standard
+        // profile, which checkpoints and the runtime modes can carry).
+        if let Some(reason) = caller_exclusion
+            && !standard_keys
+        {
+            return Ok(ScfPath {
+                standard: None,
+                verification: dft_engine::Verification::Off,
+                status: "not_applicable",
+                reason: Some(reason),
+            });
         }
         let verification = if verify == Some(false) {
             dft_engine::Verification::Off
@@ -451,12 +470,13 @@ impl Config {
             && self.output.as_ref().is_some_and(|o| o.forces)
         {
             return Err(invalid(
-                "output.forces on the single SCF path requires the fixed-point verification; remove scf.verify = \"off\" or set scf.convergence_profile = \"strict\"",
+                "output.forces requires the fixed-point verification (ADR 0043 item 5); remove scf.verify = \"off\"".into(),
             ));
         }
         Ok(ScfPath {
             standard: Some(dft_engine::StandardProfile {
-                threshold_ha: threshold,
+                threshold_ha: threshold
+                    .unwrap_or(dft_engine::StandardProfile::default().threshold_ha),
             }),
             verification,
             status: "applied",
@@ -606,13 +626,16 @@ pub struct Scf {
     pub davidson_capacity_per_band: Option<usize>,
     pub preconditioner: Option<String>,
     pub gamma_real: Option<String>,
-    pub convergence_profile: Option<String>,
+    /// Removed key (user decision 2026-11-16): kept only so that an input that
+    /// still names it fails with `CONVERGENCE_PROFILE_REMOVED` instead of a
+    /// generic unknown-field error.
+    #[serde(rename = "convergence_profile")]
+    pub removed_convergence_profile: Option<toml::Value>,
+    /// Threshold of the standard stop rule in Ha (default 5e-9 Ha, ADR 0035).
     pub standard_threshold_ha: Option<f64>,
     pub standard_stall_guard: Option<String>,
     pub standard_density_forcing: Option<String>,
-    /// ADR 0043: "fixed_point" or "off". Default on the single path
-    /// (`BAANDI_SINGLE_PATH=on`, no explicit profile): fixed_point; on an explicit
-    /// standard profile: off (unchanged behaviour). Error with explicit strict.
+    /// ADR 0043: "fixed_point" (default) or "off".
     pub verify: Option<String>,
     pub mixing_metric: Option<String>,
     pub spectral_guard: Option<String>,
@@ -710,35 +733,15 @@ impl Scf {
         }
     }
 
-    pub fn standard_profile(&self) -> Result<Option<dft_engine::StandardProfile>, ConfigError> {
+    /// Reject removed keys and check the standard-path controls' syntax. The
+    /// path itself is chosen by `Config::scf_path`.
+    pub fn reject_removed_keys(&self) -> Result<(), ConfigError> {
+        if self.removed_convergence_profile.is_some() {
+            return Err(ConfigError::Invalid(CONVERGENCE_PROFILE_REMOVED.into()));
+        }
         self.standard_stall_guard()?;
         self.standard_density_forcing()?;
-        let threshold = self
-            .standard_threshold_ha
-            .unwrap_or(dft_engine::StandardProfile::default().threshold_ha);
-        if !threshold.is_finite() || threshold <= 0.0 {
-            return Err(ConfigError::Invalid(
-                "scf.standard_threshold_ha must be finite and positive".into(),
-            ));
-        }
-        match self.convergence_profile.as_deref().unwrap_or("strict") {
-            // Without an explicit profile the threshold may belong to the single
-            // path (ADR 0043); `Config::scf_path` decides and rejects otherwise.
-            "strict"
-                if self.standard_threshold_ha.is_none() || self.convergence_profile.is_none() =>
-            {
-                Ok(None)
-            }
-            "strict" => Err(ConfigError::Invalid(
-                "standard_threshold_ha requires convergence_profile=standard".into(),
-            )),
-            "standard" => Ok(Some(dft_engine::StandardProfile {
-                threshold_ha: threshold,
-            })),
-            _ => Err(ConfigError::Invalid(
-                "scf.convergence_profile must be strict or standard".into(),
-            )),
-        }
+        Ok(())
     }
     /// `scf.verify`: Some(true) = fixed_point, Some(false) = off, None = default.
     pub fn verify(&self) -> Result<Option<bool>, ConfigError> {
@@ -751,13 +754,12 @@ impl Scf {
             )),
         }
     }
+    /// Applies on the standard path only (`Config::scf_path` rejects it on an
+    /// input that falls back to strict).
     pub fn standard_stall_guard(&self) -> Result<bool, ConfigError> {
         match self.standard_stall_guard.as_deref().unwrap_or("off") {
             "off" => Ok(false),
-            "on" if self.convergence_profile.as_deref() == Some("standard") => Ok(true),
-            "on" => Err(ConfigError::Invalid(
-                "standard_stall_guard=on requires convergence_profile=standard".into(),
-            )),
+            "on" => Ok(true),
             _ => Err(ConfigError::Invalid(
                 "scf.standard_stall_guard must be off or on".into(),
             )),
@@ -766,13 +768,9 @@ impl Scf {
     pub fn standard_density_forcing(&self) -> Result<bool, ConfigError> {
         match self.standard_density_forcing.as_deref().unwrap_or("off") {
             "off" => Ok(false),
-            "on" if self.convergence_profile.as_deref() == Some("standard")
-                && !self.standard_stall_guard()? =>
-            {
-                Ok(true)
-            }
+            "on" if !self.standard_stall_guard()? => Ok(true),
             "on" => Err(ConfigError::Invalid(
-                "standard_density_forcing=on requires standard profile and stall guard off".into(),
+                "standard_density_forcing=on requires standard_stall_guard off".into(),
             )),
             _ => Err(ConfigError::Invalid(
                 "scf.standard_density_forcing must be off or on".into(),
@@ -1255,18 +1253,8 @@ impl Config {
             relax
                 .validate(self.system.atoms.len())
                 .map_err(|e| ConfigError::Invalid(e.to_string()))?;
-            if self
-                .scf
-                .as_ref()
-                .map(|s| s.standard_profile())
-                .transpose()?
-                .flatten()
-                .is_some()
-            {
-                return Err(ConfigError::Invalid(
-                    "relax: strict convergence profile required".into(),
-                ));
-            }
+            // Relaxation keeps the strict path (ADR 0043 item 5); standard-only
+            // controls are rejected by `scf_path`.
         }
         let invalid = |message: &str| ConfigError::Invalid(message.to_owned());
         if !self.basis.ecutwfc_ry.is_finite() || self.basis.ecutwfc_ry <= 0. {
@@ -1292,18 +1280,8 @@ impl Config {
             s.start_density()?;
             s.davidson_capacity_per_band()?;
             s.preconditioner()?;
-            s.standard_profile()?;
+            s.reject_removed_keys()?;
             s.verify()?;
-            // ADR 0043: forces on an explicit standard profile need verify = fixed_point.
-            let verified = s.verify()? == Some(true);
-            if s.standard_profile()?.is_some()
-                && self
-                    .output
-                    .as_ref()
-                    .is_some_and(|o| o.stress || (o.forces && !verified))
-            {
-                return Err(ConfigError::Invalid("output.forces/stress: strict convergence profile required; set scf.convergence_profile='strict'".into()));
-            }
             s.hartree_mixing()?;
         }
         self.scf_path(None)?;
@@ -1425,48 +1403,93 @@ mod tests {
     }
 
     #[test]
-    fn standard_stall_guard_requires_explicit_standard_profile() {
+    fn standard_stall_guard_values() {
         for (settings, expected) in [
             ("", Some(false)),
             ("standard_stall_guard = \"off\"", Some(false)),
-            ("standard_stall_guard = \"on\"", None),
-            (
-                "convergence_profile = \"standard\"\nstandard_stall_guard = \"on\"",
-                Some(true),
-            ),
-            (
-                "convergence_profile = \"standard\"\nstandard_stall_guard = \"typo\"",
-                None,
-            ),
+            ("standard_stall_guard = \"on\"", Some(true)),
+            ("standard_stall_guard = \"typo\"", None),
         ] {
             let scf: Scf = toml::from_str(settings).unwrap();
             assert_eq!(scf.standard_stall_guard().ok(), expected);
-            assert_eq!(scf.standard_profile().is_ok(), expected.is_some());
+            assert_eq!(scf.reject_removed_keys().is_ok(), expected.is_some());
         }
     }
     #[test]
-    fn standard_density_forcing_requires_explicit_standard_profile() {
+    fn standard_density_forcing_requires_stall_guard_off() {
         for (settings, expected) in [
             (
-                "convergence_profile = \"standard\"\nstandard_density_forcing = \"on\"\nstandard_stall_guard = \"on\"",
+                "standard_density_forcing = \"on\"\nstandard_stall_guard = \"on\"",
                 None,
             ),
             ("", Some(false)),
             ("standard_density_forcing = \"off\"", Some(false)),
-            ("standard_density_forcing = \"on\"", None),
-            (
-                "convergence_profile = \"standard\"\nstandard_density_forcing = \"on\"",
-                Some(true),
-            ),
-            (
-                "convergence_profile = \"standard\"\nstandard_density_forcing = \"typo\"",
-                None,
-            ),
+            ("standard_density_forcing = \"on\"", Some(true)),
+            ("standard_density_forcing = \"typo\"", None),
         ] {
             let scf: Scf = toml::from_str(settings).unwrap();
             assert_eq!(scf.standard_density_forcing().ok(), expected);
-            assert_eq!(scf.standard_profile().is_ok(), expected.is_some());
+            assert_eq!(scf.reject_removed_keys().is_ok(), expected.is_some());
         }
+    }
+    /// User decision 2026-11-16: the profile key is removed; every value of it
+    /// (including the old "strict" and "standard") fails with a message that
+    /// names the replacement controls.
+    #[test]
+    fn removed_convergence_profile_key_is_a_clear_error() {
+        for value in ["'strict'", "'standard'", "'typo'", "1"] {
+            let err = Config::parse(&format!(
+                "{EXAMPLE}\n[scf]\nconvergence_profile = {value}\n"
+            ))
+            .unwrap_err()
+            .to_string();
+            for needle in [
+                "convergence_profile was removed",
+                "scf.standard_threshold_ha",
+                "scf.verify",
+                "BAANDI_REFERENCE_STRICT",
+            ] {
+                assert!(err.contains(needle), "{value}: {err}");
+            }
+        }
+    }
+    /// Plain inputs take the single standard path with verification; inputs
+    /// the standard path does not support fall back to strict with a reason
+    /// and reject standard-only keys.
+    #[test]
+    fn single_path_selection() {
+        let parse = |tail: &str| Config::parse(&format!("{EXAMPLE}\n{tail}\n"));
+        let plain = parse("").unwrap().scf_path(None).unwrap();
+        assert_eq!(plain.status, "applied");
+        assert_eq!(plain.standard.unwrap().threshold_ha, 5e-9);
+        assert_eq!(plain.verification, dft_engine::Verification::FixedPoint);
+        let off = parse("[scf]\nverify = 'off'")
+            .unwrap()
+            .scf_path(None)
+            .unwrap();
+        assert_eq!(off.verification, dft_engine::Verification::Off);
+        let tight = parse("[scf]\nstandard_threshold_ha = 5e-11")
+            .unwrap()
+            .scf_path(None)
+            .unwrap();
+        assert_eq!(tight.standard.unwrap().threshold_ha, 5e-11);
+        assert!(parse("[scf]\nstandard_threshold_ha = 0.0").is_err());
+        assert!(parse("[scf]\nverify = 'off'\n[output]\nforces = true").is_err());
+        let caller = parse("").unwrap().scf_path(Some("bands")).unwrap();
+        assert_eq!(
+            (caller.status, caller.reason, caller.standard),
+            ("not_applicable", Some("bands"), None)
+        );
+        let locking = parse("[scf]\nlocking = 'auto'")
+            .unwrap()
+            .scf_path(None)
+            .unwrap();
+        assert_eq!(locking.reason, Some("scf.locking = auto"));
+        assert!(locking.standard.is_none());
+        let err = parse("[scf]\nlocking = 'auto'\nstandard_threshold_ha = 5e-11")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("scf.locking = auto"), "{err}");
     }
     #[test]
     fn example_and_units_and_rows() {

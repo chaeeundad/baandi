@@ -11,14 +11,18 @@ fn stress_output_identity_schema_and_standard_rejection() {
     )
     .unwrap();
     let base = "[system]\nname='synthetic stress'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\n[output]\ndirectory='out'\nstress=true\n";
-    let run = |text: &str| {
+    // Stress keeps the strict path (ADR 0043 item 5); the stress-off identity
+    // run compares against the same strict path through the reference switch.
+    let run_with = |text: &str, reference: &str| {
         fs::write(dir.join("input.toml"), text).unwrap();
         Command::new(env!("CARGO_BIN_EXE_dft-cli"))
             .current_dir(&dir)
+            .env("BAANDI_REFERENCE_STRICT", reference)
             .args(["run", "input.toml"])
             .output()
             .unwrap()
     };
+    let run = |text: &str| run_with(text, "off");
     let output = run(base);
     assert!(
         output.status.success(),
@@ -41,13 +45,15 @@ fn stress_output_identity_schema_and_standard_rejection() {
             .unwrap()
             .success()
     );
-    let off = run(&base.replace("stress=true", "stress=false"));
+    let off = run_with(&base.replace("stress=true", "stress=false"), "on");
     assert!(off.status.success());
     let no_stress: serde_json::Value =
         serde_json::from_slice(&fs::read(dir.join("out/results.json")).unwrap()).unwrap();
     assert_eq!(result["total_energy"], no_stress["total_energy"]);
     assert_eq!(density, fs::read(dir.join("out/density.bin")).unwrap());
-    let standard = run(&base.replace("[scf]", "[scf]\nconvergence_profile='standard'"));
+    // ADR 0043 item 5: stress keeps the strict path; a standard-only control
+    // is an input error instead of being dropped.
+    let standard = run(&base.replace("[scf]", "[scf]\nstandard_threshold_ha=5e-11"));
     assert_eq!(standard.status.code(), Some(1));
     assert!(String::from_utf8_lossy(&standard.stderr).contains("strict"));
     fs::remove_dir_all(dir).unwrap();

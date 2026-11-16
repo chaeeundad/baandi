@@ -1,5 +1,7 @@
 # P26E real Gamma SCF integration (Mac observations)
 
+> Note (2026-11-16, ADR 0043 amendment): the input key `scf.convergence_profile` named below was removed. Reproduce a former `convergence_profile = "standard"` run with a plain input and `scf.verify = "off"`, and a former strict run with `BAANDI_REFERENCE_STRICT=on`. The commands and numbers below are the historical record and are not rewritten.
+
 ## Frozen calibration (before any real-path SCF comparison)
 
 On 2026-11-06, the complex path was run on the four synthetic fixtures in

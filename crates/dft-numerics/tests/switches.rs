@@ -125,7 +125,7 @@ fn legacy_defaults_are_unchanged() {
         Id::SECOND_VECTOR,
         Id::PROJECT_WIDE,
         Id::B1_NARROW,
-        Id::SINGLE_PATH,
+        Id::REFERENCE_STRICT,
         Id::M2_B5,
         Id::REUSE_PSI,
     ] {

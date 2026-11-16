@@ -172,6 +172,9 @@ def density_accuracy(a, b):
 
 
 def run_one(binary, text, directory, label, expected_profile, timeout):
+    """Strict rows run the strict reference path (BAANDI_REFERENCE_STRICT=on);
+    standard rows the default single path (ADR 0043, profile key removed
+    2026-11-16) with scf.verify set by the variant."""
     directory.mkdir()
     inp = directory / 'input.toml'
     inp.write_text(text)
@@ -182,7 +185,9 @@ def run_one(binary, text, directory, label, expected_profile, timeout):
                binary_sha256=sha(binary) if binary.exists() else None)
     start = time.monotonic()
     try:
-        proc = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+        env = dict(os.environ, BAANDI_REFERENCE_STRICT='on' if expected_profile == 'strict' else 'off')
+        row.update(environment=dict(BAANDI_REFERENCE_STRICT=env['BAANDI_REFERENCE_STRICT']))
+        proc = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=env)
         row.update(exit_code=proc.returncode, wall_s=time.monotonic()-start,
                    wall_scope='process, including startup',
                    stderr=(proc.stderr if len(proc.stderr) <= 4000 else
@@ -211,17 +216,19 @@ def run_one(binary, text, directory, label, expected_profile, timeout):
 def baandi_case(args, name, directory):
     with tempfile.TemporaryDirectory(prefix='p17a-pseudo-') as temp:
         text, hashes = case_input(name, Path(temp), args.upf.resolve(), args.threads)
-        variants = [('tight', dict(energy_tolerance_ha=1e-12, density_residual_tolerance=1e-9, eigen_tolerance=1e-10)),
-                    ('tighter', dict(energy_tolerance_ha=1e-13, density_residual_tolerance=1e-10, eigen_tolerance=1e-11)),
-                    ('strict', {})]
+        # (label, scf settings, profile). Standard rows keep the P17A meaning
+        # (uncertified standard stop, no verification solve): verify = off.
+        variants = [('tight', dict(energy_tolerance_ha=1e-12, density_residual_tolerance=1e-9, eigen_tolerance=1e-10), 'strict'),
+                    ('tighter', dict(energy_tolerance_ha=1e-13, density_residual_tolerance=1e-10, eigen_tolerance=1e-11), 'strict'),
+                    ('strict', {}, 'strict')]
         if not args.strict_only:
-            variants += [(f'standard-{t:g}', dict(convergence_profile='standard', standard_threshold_ha=t))
+            variants += [(f'standard-{t:g}', dict(verify='off', standard_threshold_ha=t), 'standard')
                          for t in args.thresholds]
-            variants += [('strict-hartree', dict(mixing_metric='hartree'))]
+            variants += [('strict-hartree', dict(mixing_metric='hartree'), 'strict')]
         rows, densities = [], []
-        for label, settings in variants:
+        for label, settings, expected in variants:
             row, density = run_one(args.binary.resolve(), scf_settings(text, settings),
-                                   directory / label, label, settings.get('convergence_profile', 'strict'), args.timeout)
+                                   directory / label, label, expected, args.timeout)
             row.update(case=name, upf_sha256=hashes)
             rows.append(row)
             densities.append(density)

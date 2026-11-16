@@ -555,6 +555,9 @@ pub struct ScfProblem {
     /// Test hook: the next this-many verifications fail regardless of the criterion.
     #[cfg(test)]
     pub(crate) force_verification_failures: usize,
+    /// Test hook: the VERIFY-REUSE mode regardless of the environment.
+    #[cfg(test)]
+    pub(crate) force_verify_reuse: Option<session::VerifyReuse>,
     force_model: crate::force_identity::ModelDescription,
     atoms: Vec<Atom>,
     symmetry: Option<dft_physics::symmetry::DensitySymmetrizer>,
@@ -1172,6 +1175,8 @@ impl ScfProblem {
             force_energy_identity: false,
             #[cfg(test)]
             force_verification_failures: 0,
+            #[cfg(test)]
+            force_verify_reuse: None,
             gamma_real_exclusion,
             reused_fields: None,
             screen_ffts: Vec::new(),

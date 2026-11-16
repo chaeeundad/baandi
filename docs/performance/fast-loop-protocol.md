@@ -24,3 +24,17 @@ Only candidates that survived stage 2 run the full generality set and the accura
 - Implementers measure stage 1 locally where possible (Mac observation, label O) before asking dev08 for stage 2; dev08 requests list the stage explicitly.
 - A stage-1 negative result is recorded in the ledger as a short row (idea, counter, wall, spread) so that it is not repeated.
 - Screening results are never adoption evidence. Never skip stage 3 for a default change.
+
+## Harness: `scripts/fast_screen.py` (stage 1, added 2026-11-16)
+Standard library only (`python3 -I`), no network. One case, two arms, N alternating pairs (AB, BA, AB, ...; default 3).
+```
+python3 -I scripts/fast_screen.py --binary target/release/dft-cli --upf /path/Si.pz-vbc.UPF \
+    --env-b BAANDI_X=on                              # environment A/B, same binary
+python3 -I scripts/fast_screen.py --binary old/dft-cli --binary-b new/dft-cli --upf ...   # two binaries
+python3 -I scripts/fast_screen.py ... --scf-b "davidson_capacity_per_band = 3"            # input A/B
+```
+- Defaults: `benchmarks/cases/si32-gamma.toml`, seed 601, fractional amplitude 1e-3 (every atom, every component, `random.Random(seed).uniform(-amp, amp)` in atom order, the documented MPI-M1-GATE3 stream; byte equality with dev08's p48lib geometry is not verified, so Mac screen walls are not comparable with dev08 tables), T=1, single-path defaults (no `[scf]` keys beyond seed, threads, max_iterations; `--scf`, `--scf-a`, `--scf-b` add lines).
+- Per run: external wall (process), exit code, 1-min load, `converged`, `verified`, total energy, density.bin SHA-256, `timings`, and the deterministic counters: H vectors (recorded + certificate, and each part), coarse-stage H vectors, Davidson iterations (fine + verification, and coarse), SCF steps (fine, coarse), verification attempts, `gemm_dispatch.rows` calls and GFLOP.
+- Output: per-arm median, min, max, range/median; paired ratios B/A with median and spread (half range, at least 1 %); energy difference; density SHA identical or not; counters with B/A (the mandatory self-check: a counter zero in both arms prints `unusable (all zero)` and takes no part in the verdict); whether counters are identical within each arm.
+- Verdict: REJECT (a failed run, not converged, failed verification, |dE| above `--energy-gate` 5e-9 Ha, or median ratio above 1 + spread); CANDIDATE (median ratio below 1 - spread, or H vectors / Davidson iterations / GEMM GFLOP down by at least 5 % with the wall inside the spread); NEUTRAL otherwise. `--json` keeps every record.
+- One si32 T=1 run takes 5 to 6 s on the Mac (2026-11-16, pure build), so a three-pair screen is under a minute. Pick a seed whose verification fails when the idea concerns the verification (si32 f1e-3 seed 603: 4 attempts, 13 fine steps; seed 601: 1 attempt).

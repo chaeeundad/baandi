@@ -164,6 +164,59 @@ fn failed_verification_continues_scf_and_verifies_again() {
     assert!(!outcome.result.verification.as_ref().unwrap().passed());
 }
 
+/// VERIFY-REUSE (`BAANDI_VERIFY_REUSE=warm|feed`): a failed verification's solve
+/// is reused (orbitals as the next warm start; with feed also its density pair in
+/// the mixer). The run still ends only on a passed verification, at the same
+/// fixed point as the default (standard class, gate 5e-9 Ha), and off is the
+/// default path bit for bit.
+#[test]
+fn failed_verification_reuse_keeps_the_fixed_point() {
+    use super::session::VerifyReuse;
+    let pp = super::pool_fixture::potential(2.0, 1.0, true, 401);
+    let run = |mode: Option<VerifyReuse>, failures: usize| {
+        let mut p = problem(&pp, Some(5e-9), Verification::FixedPoint).unwrap();
+        p.force_verification_failures = failures;
+        p.force_verify_reuse = mode;
+        p.run_outcome().unwrap()
+    };
+    let default = run(None, 2);
+    let off = run(Some(VerifyReuse::Off), 2);
+    assert_eq!(
+        default.result.energy.total_hartree().to_bits(),
+        off.result.energy.total_hartree().to_bits()
+    );
+    assert!(
+        default
+            .result
+            .density
+            .iter()
+            .zip(&off.result.density)
+            .all(|(a, b)| a.to_bits() == b.to_bits())
+    );
+    let reference = default.result.energy.total_hartree();
+    for mode in [VerifyReuse::Warm, VerifyReuse::Feed] {
+        let o = run(Some(mode), 2);
+        assert!(o.converged, "{mode:?}");
+        let report = o.result.verification.as_ref().unwrap();
+        assert!(report.passed(), "{mode:?}");
+        assert_eq!(report.attempts.len(), 3, "{mode:?} {:?}", report.attempts);
+        let de = (o.result.energy.total_hartree() - reference).abs();
+        println!(
+            "{mode:?}: |dE| {de:e} Ha, history {} vs {}",
+            o.result.history.len(),
+            default.result.history.len()
+        );
+        assert!(de < 5e-9, "{mode:?} |dE| {de:e} Ha");
+    }
+    // No failure: the reuse never triggers, bit-identical to the default.
+    let plain = run(None, 0);
+    let feed = run(Some(VerifyReuse::Feed), 0);
+    assert_eq!(
+        plain.result.energy.total_hartree().to_bits(),
+        feed.result.energy.total_hartree().to_bits()
+    );
+}
+
 /// ONEPATH-4 (user decision 2026-11-16): the engine default is the standard
 /// path with the verification; every other field equals the strict reference,
 /// which keeps the former default bit for bit.

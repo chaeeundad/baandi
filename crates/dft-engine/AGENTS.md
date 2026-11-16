@@ -431,3 +431,13 @@ count payload bytes (`parallel::collective_bytes`). Stage call counts:
 bare `Instant::now()` to a new MPI stage; a clock shared with the phase clock
 goes through `stage_clock::keep`. Test `tests/stage_timers.rs` (forces the mode
 with `stage_clock::force`).
+
+## VERIFY-REUSE (2026-11-16, default off)
+
+`BAANDI_VERIFY_REUSE=off|warm|feed` (`session.rs` `verify_reuse`; test hook
+`ScfProblem::force_verify_reuse`). Acts only after a failed ADR 0043 verification:
+`warm` starts the next step from the verification solve's orbitals (its REUSE-PSI
+kept start is then taken); `feed` also mixes the pair (rho_out, F(rho_out)) after
+the step's own pair. Off is the default path bit for bit; acceptance still needs a
+passed verification. Test `verification_tests::failed_verification_reuse_keeps_the_fixed_point`.
+Ledger VERIFY-REUSE-*, dev08 request `docs/performance/requests/verify-reuse.md`.

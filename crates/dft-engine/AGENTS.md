@@ -12,6 +12,18 @@ restart guarantee or engine disk I/O is implied. See `docs/checkpoint-format.md`
 
 **Purpose:** Orchestrates SCF, occupations, total energy and its audit (ion-ion/Ewald, double counting).
 
+**Default path (ADR 0043 ONEPATH-4, 2026-11-16):** `ScfOptions::default()` is the
+single standard path with the fixed-point verification (5e-9 Ha, Pulay beta
+0.5). The strict path is reached only through `ScfOptions::strict_reference()`
+(the former default, bit for bit) or `ScfOptions::from_reference_switch()` under
+`BAANDI_REFERENCE_STRICT=on`. Tests, oracles and accuracy gates that need the
+strict arithmetic or certificate must ask for `strict_reference()` explicitly;
+`default()` reads no environment. Checkpoint v1 carries `verification` and the
+failed `verification_attempts` of an exact continuation (`restore_exact_inner`
+validates them against the history's verification records). `nscf` clears the
+SCF profile fields (it is one residual solve). Runtime policy rejects a hybrid
+eigensolver on a standard session (`StandardRequiresDavidson`).
+
 **Invariants to preserve and test:** Every energy term has a unit test and appears in results; no hidden constants.
 
 **Before editing:** read ../../AGENTS.md, ../../ownership.toml (allowed dependencies) and the ADRs in ../../docs/decisions/.

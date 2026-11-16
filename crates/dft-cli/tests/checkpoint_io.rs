@@ -391,8 +391,13 @@ fn command_line_cross_process() {
     let text = "[system]\nname='checkpoint fixture'\nlattice_unit='bohr'\nlattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]\n[[system.atoms]]\nspecies='Si'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nSi='synthetic.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n";
     fs::write(dir.join("input.toml"), text).unwrap();
     let invoke = |args: &[&str]| {
+        // ONEPATH-4: the CLI checkpoint commands run the standard path with the
+        // verification. An exact checkpoint makes the live session forget its
+        // kept REUSE_PSI state, so the comparison with an uninterrupted run is
+        // bit for bit with REUSE_PSI off (tests/onepath_last_fallbacks.rs covers on).
         let o = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
             .current_dir(&dir)
+            .env("BAANDI_REUSE_PSI", "off")
             .args(args)
             .output()
             .unwrap();
@@ -416,13 +421,26 @@ fn command_line_cross_process() {
     let mut a = io::read(&dir.join("baseline.cp")).unwrap();
     let mut b = io::read(&dir.join("restarted.cp")).unwrap();
     for cp in [&mut a, &mut b] {
-        for h in &mut cp.result.as_mut().unwrap().history {
+        let r = cp.result.as_mut().unwrap();
+        for h in &mut r.history {
             h.timings = PhaseTimings::default();
             if let Some(c) = &mut h.fixed_point_certificate {
                 c.timings = PhaseTimings::default();
             }
         }
+        for v in &mut r.verification_attempts {
+            v.wall = std::time::Duration::ZERO;
+        }
     }
+    assert_eq!(a.verification, dft_engine::Verification::FixedPoint);
+    assert!(
+        a.result
+            .as_ref()
+            .unwrap()
+            .verification_attempts
+            .last()
+            .is_some_and(|v| v.passed)
+    );
     assert_eq!(
         format!("{:?}", a.electronic_state),
         format!("{:?}", b.electronic_state)

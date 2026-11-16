@@ -1,5 +1,6 @@
 # ADR 0043: One SCF path (standard profile) with a fixed-point verification after convergence
 
+- Status (amended 2026-11-16, ONEPATH-4): **Single path complete.** Every command, execution mode and the engine and Python defaults use the standard path with the fixed-point verification; the strict path is reachable only through the reference option (`BAANDI_REFERENCE_STRICT=on`, `ScfOptions::strict_reference()`, Python `Options.reference_strict`). See the fifth amendment (ONEPATH-4) at the end.
 - Status (amended 2026-11-16): **Default flipped by user decision 2026-11-16; the input key `scf.convergence_profile` is removed.** The single standard path with the fixed-point verification is the only SCF path of a classic run; `BAANDI_SINGLE_PATH` is removed and the strict path is a reference tool behind `BAANDI_REFERENCE_STRICT=on`. See the amendment at the end; a second amendment (ONEPATH-1, same day) moves forces and fixed-cell relaxation onto the single path, a third (ONEPATH-2) stress and variable-cell relaxation, a fourth (ONEPATH-3) collinear spin and Fermi-Dirac occupations. The original status line follows for the record.
 - Status: **Accepted in direction by the user (decisions 1 and 5 of 2026-11-14, `docs/performance/requests/work-order-beat-qe-2026-11-14.md` section 1)**; this ADR fixes the definition the work order left open (P0.1 item c). The implementation is behind `BAANDI_SINGLE_PATH` (default `off`) until the dev08 check list `docs/performance/requests/p01-single-path.md` shows convergence and delivered error in class on the generality set. Switching the default is a separate, one-line change recorded as an amendment here.
 - Supersedes, when the default flips: the "strict is the default" clause of ADR 0035. ADR 0035's labelling rules stay (a standard result says so); the "never certified" rule is replaced by the verification below, which is reported under its own name and is not the strict certificate.
@@ -305,3 +306,96 @@ of item 3 of the first amendment and of item 3 of the ONEPATH-2 amendment.
 6. **Reference identity.** With `BAANDI_REFERENCE_STRICT=on` spin and FD runs
    take the strict drivers with the same options as before; results gain only
    the `single_path`/`execution` keys they already had.
+
+## Amendment: last fallbacks and engine default; single path complete (ONEPATH-4, user decision 2026-11-16)
+
+Decision (user, 2026-11-16): stage 4, the last one, of removing the strict path
+from production use (ticket `tickets/ONEPATH-4-LAST-FALLBACKS.md`). This
+amendment replaces item 2 ("The engine API is unchanged: `ScfOptions::default()`
+is still strict") and item 3 of the first amendment, the "Still strict" parts of
+the ONEPATH-1/2/3 amendments, and the checkpoint bullet of item 5.
+
+1. **No strict fallback remains.** `Config::scf_path` has no caller exclusion and
+   no input exclusion: `run` in every execution mode (classic, `--observe`,
+   `--agent`), `relax`, `bands`, `dos`, `checkpoint`, `restart` and `explain`
+   resolve the same options (`run::options`): the standard path with the
+   verification, or the strict reference under `BAANDI_REFERENCE_STRICT=on`.
+   `single_path.status` is `applied` or `reference_strict`; `not_applicable` is
+   no longer produced.
+2. **`scf.locking = "auto"` is an input error** on the default path, with a
+   message that names the reference switch. Why it cannot move: locking is
+   hard prefix deflation of the strict residual Davidson whose correctness rests
+   on a fresh true-residual certificate of every locked root; the standard path
+   solves with the Ritz-value-change Davidson, which by design retests every
+   rotated root and has no locking. Combining them would be a new eigensolver
+   (a kernel change outside this ticket). Under `BAANDI_REFERENCE_STRICT=on`
+   the input runs as before (checked by `tests/single_path.rs`); the historical
+   P24A locking harnesses set the switch.
+3. **Runtime modes.** The observe/agent modes run the standard path with the
+   verification; a passed or failed verification is published as the existing
+   `certificate_evaluated` event. Runtime tolerance interventions keep acting
+   on the strict-only options (their ceilings are the unchanged strict
+   certificate thresholds, now read from `ScfOptions::strict_reference()`), so
+   they do not move the standard stop rule (recorded as a limitation, no
+   semantic change). A hybrid eigensolver request on a standard session, which
+   the Ritz-change solver would silently ignore, is rejected
+   (`PolicyError::StandardRequiresDavidson`, additive wire variant). Spin and
+   Fermi-Dirac inputs stay input errors in these modes.
+4. **Checkpoint v1 carries the verification** (schema version unchanged, additive
+   optional keys omitted at their defaults, so files without verification are
+   byte-identical to earlier ones and decode unchanged): top-level
+   `verification`, `options.verification`, `continuation.verification_attempts`
+   and `result.verification_attempts` (`docs/checkpoint-format.md`). Exact
+   restore re-installs the failed attempts made before the boundary; it rejects
+   attempt records that do not match the history's verification records
+   (`History`; one per record, iteration order, not passed, same threshold,
+   finite) and a different verification option (`Options`). The encode-time
+   rejection of a continuation with verification on is removed. The existing
+   behaviour that an exact checkpoint makes the live session forget its kept
+   REUSE_PSI state is unchanged: a restart reproduces the checkpointed session
+   continued after its checkpoint bit for bit; against a run that never
+   checkpointed it is bit-identical with `BAANDI_REUSE_PSI=off` and in the
+   REUSE_PSI rounding class otherwise.
+5. **bands/dos.** Their SCF runs the standard path with the verification and is
+   recorded (`scf_path` in `bands.json`/`dos.json`, console line). The NSCF solve
+   (`dft_engine::nscf`) clears the SCF profile fields and stays the all-bands
+   residual solve at the requested tolerance, whatever profile delivered the
+   density (an NSCF has no SCF stop rule).
+6. **Engine default flip.** `ScfOptions::default()` is the standard path with the
+   verification (`StandardProfile::default()`, 5e-9 Ha, `Verification::FixedPoint`,
+   Pulay beta 0.5 = the CLI's standard-class mixing default); every other field
+   is unchanged. `ScfOptions::strict_reference()` is the former default bit for
+   bit (strict, beta 0.3). `ScfOptions::from_reference_switch()` mirrors the CLI
+   switch for hosts without an input file. Every engine test, CLI test helper,
+   MCP test and checkpoint fixture that relied on the strict default now asks
+   for `strict_reference()` explicitly (no tolerance changed); the new default is
+   covered by `verification_tests::engine_default_is_the_verified_standard_path`.
+7. **Python session.** `Options()` defaults to the standard path with the
+   verification (`standard_threshold_ha = 5e-9`, `verify = True`,
+   `mixing_beta = 0.5`); `reference_strict` (default mirrors
+   `BAANDI_REFERENCE_STRICT`) selects the strict reference. `Session.stress()`
+   refuses a session whose threshold is looser than
+   `StandardProfile::STRESS_THRESHOLD_HA` (5e-11 Ha, the CLI stress default of the
+   ONEPATH-2 amendment, now an engine constant) instead of returning a tensor
+   outside the stress class; forces accept the verified state (5e-9 Ha, as in
+   the CLI). The native/CLI bit-equality tests disable the CLI cutoff ladder (a
+   run-driver coarse stage the session does not have) and are bit-identical.
+8. **What remains strict.** Only the reference option: `BAANDI_REFERENCE_STRICT=on`
+   (CLI, scripts, Python default mirror), `ScfOptions::strict_reference()`
+   (engine tests, accuracy gates) and `Options.reference_strict = True` (Python).
+   The strict certificate code, its arithmetic and every accuracy gate that uses
+   it are unchanged.
+9. **Measured (Mac, synthetic, ledger ONEPATH-4).** Observe mode against a classic
+   run (ladder off): identical energy bits, density hash and attempt count; the
+   agent mode (ignored socket test) runs verified;
+   standard against the strict reference in observe mode |dE| 8.0e-12 Ha
+   (bound 5e-9 Ha). Exact checkpoint after a forced failed verification
+   (engine): bit-identical continuation, 2 attempts, tampered records reject.
+   CLI checkpoint/restart with verification: bit-identical to the uninterrupted
+   run with `BAANDI_REUSE_PSI=off`; with REUSE_PSI on |dE| 1.1e-16 Ha (bound
+   1e-10 Ha, pre-registered). Python: 9 of 9 binding tests pass on the installed
+   wheel, including CLI/native/ASE bit equality on the default path, the
+   default/reference test and the ASE stress oracle at 5e-11 Ha (max FD error
+   8.8e-8 eV/Angstrom^3, bound 1e-5). dev08 request:
+   `docs/performance/requests/onepath4-last-fallbacks.md`.
+

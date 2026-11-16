@@ -20,7 +20,7 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
-    /// Relax atomic positions at fixed cell with strict certified forces.
+    /// Relax atomic positions (and optionally the cell) with forces from verified SCF states.
     Relax {
         input: PathBuf,
         #[arg(long)]

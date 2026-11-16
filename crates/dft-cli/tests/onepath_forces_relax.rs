@@ -167,8 +167,8 @@ fn standard_forces_agree_with_strict_reference() {
     fs::remove_dir_all(dir).unwrap();
 }
 
-/// (d) verify = off with forces or with a relaxation is an input error; (c) a
-/// variable-cell relaxation keeps the strict path and rejects standard-only keys.
+/// (d) verify = off with forces or with a relaxation (fixed-cell or, since
+/// ONEPATH-2, variable-cell) is an input error.
 #[test]
 fn verification_off_and_variable_cell_inputs_are_rejected() {
     let dir = setup("reject");
@@ -192,17 +192,18 @@ fn verification_off_and_variable_cell_inputs_are_rejected() {
     assert_eq!(relax.code, Some(1), "{}", relax.text);
     assert!(relax.text.contains("verification"), "{}", relax.text);
     assert!(relax.result.is_none());
+    // ONEPATH-2: variable-cell relaxation runs the standard path too, so
+    // verify = off is an input error there as well.
     let cell = cli(
         &dir,
         "relax",
-        "cell-standard",
-        &format!(
-            "{CUBIC}[scf]\nnbands=4\nstandard_threshold_ha=5e-11\n[relax]\nmode='cell'\nmax_steps=1\n"
-        ),
+        "cell-off",
+        &format!("{CUBIC}{scf}[relax]\nmode='cell'\nmax_steps=1\n"),
         false,
     );
     assert_eq!(cell.code, Some(1), "{}", cell.text);
-    assert!(cell.text.contains("variable-cell"), "{}", cell.text);
+    assert!(cell.text.contains("verification"), "{}", cell.text);
+    assert!(cell.result.is_none());
     fs::remove_dir_all(dir).unwrap();
 }
 

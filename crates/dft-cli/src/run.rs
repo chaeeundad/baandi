@@ -1339,6 +1339,21 @@ pub fn execute_mode(
     )? {
         console.push_str(&stress_table(&stress));
         result["stress"] = stress_json(&stress);
+        if let Some(p) = opts.standard {
+            // ONEPATH-2 (ADR 0043): stress of a standard state rests on its
+            // passed verification (the engine refuses it otherwise); the cutoff
+            // scans are verified standard runs (pulay_assessment.scan_*).
+            let v = r.verification.as_ref();
+            let last = v.and_then(|v| v.attempts.last());
+            result["stress"]["preconditions"] = json!({"convergence_profile":"standard",
+                "converged":outcome.converged,
+                "fixed_point_verification_passed":v.is_some_and(|v| v.passed()),
+                "standard_threshold_ha":p.threshold_ha,
+                "verification_attempts":v.map_or(0, |v| v.attempts.len()),
+                "verification_coulomb_error_ha":last.map(|a| a.coulomb_error_ha),
+                "verification_residual_bound_ha":last.and_then(|a| a.residual_bound_ha),
+                "state":"converged step's own state (ADR 0043 V4); stress uses the same formulas as the strict path"});
+        }
     }
     write_json(&out.join("results.json"), &result)?;
     Ok(RunReport {
@@ -1482,7 +1497,7 @@ fn requested_stress(
 }
 
 fn stress_json(s: &dft_engine::stress::StressResult) -> Value {
-    let pulay=s.pulay.as_ref().map(|p|json!({"method":p.method,"isotropic_correction_ha_bohr3":p.correction,"uncertainty_ha_bohr3":p.uncertainty,"cutoff_steps_ha":p.cutoff_steps_ha,"warning_threshold_ha_bohr3":p.warning_threshold,"warning":p.warning,"shells_resolved":p.shells_resolved,"uncertainty_kind":"two_step_spread_not_bound","anisotropic_convergence":"not_established","elapsed_seconds":p.elapsed.as_secs_f64()}));
+    let pulay=s.pulay.as_ref().map(|p|json!({"method":p.method,"isotropic_correction_ha_bohr3":p.correction,"uncertainty_ha_bohr3":p.uncertainty,"cutoff_steps_ha":p.cutoff_steps_ha,"warning_threshold_ha_bohr3":p.warning_threshold,"warning":p.warning,"shells_resolved":p.shells_resolved,"uncertainty_kind":"two_step_spread_not_bound","anisotropic_convergence":"not_established","elapsed_seconds":p.elapsed.as_secs_f64(),"scan_profile":p.scan_profile,"scan_thresholds_ha":p.scan_thresholds_ha,"scan_energy_resolution_ha":p.scan_energy_resolution_ha}));
     json!({"status":"available","units":s.units,"frame":"cartesian_tensor","sign_convention":"tensile_positive","quantity":s.quantity,"values":s.values,"pressure_ha_bohr3":s.pressure,"symmetric":s.symmetric,"antisymmetric":s.antisymmetric,"antisymmetric_norm_ha_bohr3":s.antisymmetric_norm,"basis_protocol":s.basis_protocol,"cutoff_ha":s.cutoff_ha,"strain_steps":s.strain_steps,"cutoff_converged":false,"pulay_assessment":pulay,"per_term":s.terms.iter().map(|(name,t)|((*name).to_string(),json!(t))).collect::<serde_json::Map<_,_>>(),"derivative_ledger":s.ledger.iter().map(|e|json!({"term_id":e.term_id,"owner":e.owner,"energy_ha":e.energy_ha,"included_in":e.included_in,"dependencies":e.dependencies,"active":e.active,"stress_capability":if e.active {"available"}else{"not_applicable"},"reason":e.reason})).collect::<Vec<_>>(),"unavailable_terms":[],"preconditions":{"convergence_profile":"strict","converged":true,"fixed_point_certificate_passed":true},"elapsed_seconds":s.elapsed.as_secs_f64(),"band_passes":s.band_passes,"precondition_force_band_passes":s.precondition_force_band_passes,"cutoff_scf_runs":3})
 }
 fn stress_table(s: &dft_engine::stress::StressResult) -> String {

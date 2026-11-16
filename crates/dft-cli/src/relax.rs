@@ -207,11 +207,6 @@ fn error(code: u8, e: impl std::fmt::Display) -> RunError {
     }
 }
 impl Settings {
-    /// Cell or ions+cell mode: every step needs stress, which keeps the strict
-    /// SCF path for now (ADR 0043 item 5).
-    pub(crate) fn variable_cell(&self) -> bool {
-        self.mode != cell::Mode::Ions
-    }
     pub(crate) fn validate(&self, n: usize) -> Result<(), RunError> {
         if [
             self.force_tol_ha_bohr,
@@ -659,9 +654,9 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
     let mut settings = config.relax.clone().unwrap_or_default();
     settings.start_extrapolation = settings.start_extrapolation.effective()?;
     settings.validate(config.system.atoms.len())?;
-    // ONEPATH-1 (ADR 0043 item 5): fixed-cell relaxation runs every ionic
-    // step on the standard path with the fixed-point verification; the
-    // variable-cell modes keep the strict path (stress) and record why.
+    // ONEPATH-1/ONEPATH-2 (ADR 0043 item 5): every relaxation mode runs each
+    // ionic or cell step on the standard path with the fixed-point
+    // verification; forces and stress come from the verified step.
     let scf_path = config.scf_path(None).map_err(|e| error(1, e))?;
     let opts = options_with(&config, None)?;
     if opts.energy_tolerance > 1e-8 || opts.eigen_tolerance > 1e-8 || opts.density_tolerance > 1e-7
@@ -1108,7 +1103,7 @@ fn outputs(
         "scf":{"effective_profile":if ctx.opts.standard.is_some() { "standard" } else { "strict" },
             "standard_threshold_ha":ctx.opts.standard.map(|p| p.threshold_ha),
             "verification":if ctx.opts.standard.is_some() { ctx.opts.verification.name() } else { "strict_certificate" },
-            "note":"every ionic step runs this SCF; forces of a standard step rest on its passed fixed-point verification (frames[].verification); tighten scf.standard_threshold_ha for force-sensitive runs"},
+            "note":"every ionic or cell step runs this SCF; forces and stress of a standard step rest on its passed fixed-point verification (frames[].verification); tighten scf.standard_threshold_ha for force- or stress-sensitive runs"},
         "relaxation":{"status":state.status,"steps":state.frames.len()-1,"final_max_force_ha_bohr":last.max_force_ha_bohr,
         "energy_history_ha":state.frames.iter().map(|f|f.energy_ha).collect::<Vec<_>>(),"constraints":settings.fixed,"frames":state.frames,"failures":state.failures,
         "restart_semantics":"same_build_ionic_continuation; each transferred SCF is warm_transfer, not exact SCF replay","settings":settings}});

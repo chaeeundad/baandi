@@ -20,12 +20,27 @@ for a in range(3):
         assert s['values'][a][b] == s['values'][b][a]
 assert abs(s['pressure_ha_bohr3'] + sum(s['values'][a][a] for a in range(3))/3) < 1e-12
 assert s['antisymmetric_norm_ha_bohr3'] < 1e-10
+# ONEPATH-2 (ADR 0043): a strict state needs its certificate, a standard state
+# its passed fixed-point verification; neither may claim the other's evidence.
+if s['preconditions']['convergence_profile'] == 'standard':
+    profile_probes = [
+        ('strict claim', lambda x: x['preconditions'].update(convergence_profile='strict')),
+        ('verification', lambda x: x['preconditions'].update(fixed_point_verification_passed=False)),
+        ('no threshold', lambda x: x['preconditions'].pop('standard_threshold_ha')),
+        ('unconverged', lambda x: x['preconditions'].update(converged=False)),
+    ]
+    assert s['pulay_assessment']['scan_profile'] == 'standard_verified'
+    assert all(t is not None for t in s['pulay_assessment']['scan_thresholds_ha'])
+else:
+    profile_probes = [
+        ('standard', lambda x: x['preconditions'].update(convergence_profile='standard')),
+        ('certificate', lambda x: x['preconditions'].update(fixed_point_certificate_passed=False)),
+    ]
 for label, mutate in [
     ('units', lambda x: x.update(units='GPa')),
     ('unavailable numeric', lambda x: x.update(status='unavailable', reason='missing')),
     ('incomplete terms', lambda x: x['per_term'].pop('core')),
-    ('standard', lambda x: x['preconditions'].update(convergence_profile='standard')),
-    ('certificate', lambda x: x['preconditions'].update(fixed_point_certificate_passed=False)),
+    *profile_probes,
     ('tensor shape', lambda x: x.update(values=[[0, 0]])),
     ('cutoff claim', lambda x: x.update(cutoff_converged=True)),
 ]:

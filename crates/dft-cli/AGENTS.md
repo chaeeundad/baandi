@@ -58,9 +58,9 @@ unchanged. `tests/validate_force_schema.py` checks fixtures and actual CLI outpu
 `relax` is the ticket-authorized driver-layer optimizer exception to the general
 I/O-only rule. BFGS/FIRE and optimizer restart/output ownership stay here, never
 in the electronic numerical core. Keep physical forces separate from constraint
-projection. Since ONEPATH-1 the ions mode runs the standard path with the
-fixed-point verification on every step (`verify = "off"` rejects); variable-cell
-modes keep strict (stress); spin/FD modes reject. Retry a failed
+projection. Since ONEPATH-1 (ions) and ONEPATH-2 (cell, ions_cell) every mode
+runs the standard path with the fixed-point verification on every step
+(`verify = "off"` rejects); spin/FD modes reject. Retry a failed
 candidate exactly once fresh at half displacement, then retain the last good
 structure; never query uncertified forces. The restart uses float bits and a
 checksum, includes the next warm density and optimizer memory, and is not an
@@ -93,8 +93,9 @@ nominal-cutoff equilibrium, and the default rebuild cadence remains zero.
 ## Single SCF path (ADR 0043, default since 2026-11-16)
 
 `scf.convergence_profile` is removed (input error with the replacement). `Config::scf_path`
-selects: `BAANDI_REFERENCE_STRICT=on` -> strict reference; input exclusions (stress,
-variable-cell relax, spin, FD, locking auto; fixed-cell relax runs standard since ONEPATH-1) -> strict `not_applicable` and standard-only keys reject; caller
+selects: `BAANDI_REFERENCE_STRICT=on` -> strict reference; input exclusions (spin, FD,
+locking auto; forces and relaxation run standard since ONEPATH-1, stress and variable-cell
+relaxation since ONEPATH-2, with verified cutoff scans, `tests/onepath_stress.rs`) -> strict `not_applicable` and standard-only keys reject; caller
 exclusions (runtime modes, non-run commands) -> strict for plain inputs; otherwise the
 standard path with verification. Every result records `single_path` and `execution`
 (review F01); MPI runs without a distributed solve report `mpi_replicated` (F02). Tests

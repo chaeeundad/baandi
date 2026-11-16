@@ -391,9 +391,6 @@ pub struct ScfPath {
 }
 /// Reason recorded when the reference switch forces the strict path.
 pub const REFERENCE_STRICT_REASON: &str = "BAANDI_REFERENCE_STRICT=on (strict reference path)";
-/// Reason recorded when a variable-cell relaxation keeps the strict path
-/// (stress is not yet on the standard path, ADR 0043 item 5).
-pub const VARIABLE_CELL_REASON: &str = "stress (variable-cell relaxation)";
 /// Error for the removed `scf.convergence_profile` key (user decision 2026-11-16).
 pub const CONVERGENCE_PROFILE_REMOVED: &str = "scf.convergence_profile was removed (user decision 2026-11-16, ADR 0043): every run uses the single standard SCF path with the fixed-point verification after convergence; set the accuracy with scf.standard_threshold_ha (default 5e-9 Ha) and the verification with scf.verify = \"fixed_point\" (default) or \"off\"; the strict path is a reference tool only (environment BAANDI_REFERENCE_STRICT=on); delete the key";
 impl Config {
@@ -476,6 +473,13 @@ impl Config {
                 "output.forces requires the fixed-point verification (ADR 0043 item 5); remove scf.verify = \"off\"".into(),
             ));
         }
+        if verification == dft_engine::Verification::Off
+            && self.output.as_ref().is_some_and(|o| o.stress)
+        {
+            return Err(invalid(
+                "output.stress requires the fixed-point verification (ADR 0043 item 5, ONEPATH-2); remove scf.verify = \"off\"".into(),
+            ));
+        }
         if verification == dft_engine::Verification::Off && self.relax.is_some() {
             return Err(invalid(
                 "relax needs forces from a passed fixed-point verification on every ionic step (ADR 0043 item 5, ONEPATH-1); remove scf.verify = \"off\"".into(),
@@ -493,14 +497,10 @@ impl Config {
     }
     /// Inputs that keep the strict path on the single path (ADR 0043 item 5).
     fn single_path_exclusion(&self) -> Result<Option<&'static str>, ConfigError> {
-        // ONEPATH-1 (user decision 2026-11-16): fixed-cell relaxation runs the
-        // standard path with the verification on every ionic step; only the
-        // variable-cell modes, which need stress, keep the strict path.
-        Ok(if self.output.as_ref().is_some_and(|o| o.stress) {
-            Some("stress")
-        } else if self.relax.as_ref().is_some_and(|r| r.variable_cell()) {
-            Some(VARIABLE_CELL_REASON)
-        } else if self.collinear() {
+        // ONEPATH-1 and ONEPATH-2 (user decision 2026-11-16): forces, stress and
+        // every relaxation mode (ions, cell, ions_cell) run the standard path
+        // with the verification; stress cutoff scans verify each scan SCF.
+        Ok(if self.collinear() {
             Some("collinear spin")
         } else if self.finite_temperature()?.is_some() {
             Some("Fermi-Dirac occupations")
@@ -1520,27 +1520,43 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("verification"), "{err}");
+        // ONEPATH-2: variable-cell relaxation and stress take the standard path
+        // with the verification (also with a tighter threshold); verify = off
+        // is an input error there.
         for mode in ["cell", "ions_cell"] {
             let cell = parse(&format!("[relax]\nmode = '{mode}'"))
                 .unwrap()
                 .scf_path(None)
                 .unwrap();
-            assert_eq!(
-                (cell.status, cell.reason, cell.standard),
-                ("not_applicable", Some(VARIABLE_CELL_REASON), None)
-            );
-            assert!(
-                parse(&format!(
-                    "[scf]\nstandard_threshold_ha = 5e-11\n[relax]\nmode = '{mode}'"
-                ))
-                .is_err()
-            );
-        }
-        let stress = parse("[output]\nstress = true\n[relax]")
+            assert_eq!((cell.status, cell.reason), ("applied", None));
+            assert_eq!(cell.verification, dft_engine::Verification::FixedPoint);
+            assert_eq!(cell.standard.unwrap().threshold_ha, 5e-9);
+            let tight = parse(&format!(
+                "[scf]\nstandard_threshold_ha = 5e-11\n[relax]\nmode = '{mode}'"
+            ))
             .unwrap()
             .scf_path(None)
             .unwrap();
-        assert_eq!(stress.reason, Some("stress"));
+            assert_eq!(tight.standard.unwrap().threshold_ha, 5e-11);
+            let err = parse(&format!("[scf]\nverify = 'off'\n[relax]\nmode = '{mode}'"))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("verification"), "{err}");
+        }
+        for tail in [
+            "[output]\nstress = true",
+            "[output]\nstress = true\n[relax]",
+        ] {
+            let stress = parse(tail).unwrap().scf_path(None).unwrap();
+            assert_eq!((stress.status, stress.reason), ("applied", None));
+            assert_eq!(stress.verification, dft_engine::Verification::FixedPoint);
+        }
+        let err = parse("[scf]\nverify = 'off'\n[output]\nstress = true")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("output.stress"), "{err}");
+        // The reference switch is unaffected (strict for every input) and is
+        // covered by the CLI tests, which set the environment per process.
     }
     #[test]
     fn example_and_units_and_rows() {

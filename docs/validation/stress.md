@@ -90,7 +90,17 @@ estimate uses the standard isotropic approximation
 
     sigma_fixed_cutoff - sigma_frozen ~= (2 Ecut / (3 Omega)) dQ/dEcut * I.
 
-Three independent strict SCFs at Ecut, 1.05 Ecut, 1.10 Ecut rebuild their bases.
+Three independent SCFs at Ecut, 1.05 Ecut, 1.10 Ecut rebuild their bases.
+How they converge depends on the caller (ONEPATH-2, ADR 0043): for a standard
+caller (the default path) every scan runs the standard profile with the
+fixed-point verification at `min(1e-9 Ha, scf.standard_threshold_ha)`, repeated
+once at the caller's threshold when that is looser and the first try fails; there
+is no strict fallback, and the uncertainty's SCF term uses the larger of
+`energy_tolerance` and the loosest scan threshold used. For a strict caller
+(`BAANDI_REFERENCE_STRICT=on`) the scans are unchanged: standard profile at
+1e-9 Ha without verification, a failed scan repeated with the caller's strict
+settings. `pulay_assessment.scan_profile`, `scan_thresholds_ha` and
+`scan_energy_resolution_ha` record which applied.
 They share an FFT grid at least as large as both the original grid and the
 largest-cutoff requirement; the center is recomputed on that grid too. The
 reported correction uses the 5% slope. Its uncertainty diagnostic is the
@@ -109,9 +119,14 @@ timing. A scan failure propagates an error rather than fabricating an estimate.
 ## Preconditions, symmetry and interfaces
 
 The independent setup-model identity (cell, atom order/positions, potential
-contents, functional/floor, reciprocal model, occupations and symmetry), strict
-profile/tolerance caps, and fresh passed stationary certificate are the same
-as forces. Standard profile, unconverged or mismatched states reject. Validation
+contents, functional/floor, reciprocal model, occupations and symmetry),
+tolerance caps, and fresh passed stationary certificate (strict) or passed
+fixed-point verification (standard, since ONEPATH-2) are the same as forces.
+Unverified standard, unconverged or mismatched states reject. `preconditions`
+has a strict branch and a standard branch (threshold, verification attempts,
+last Coulomb residual) in the results proposal schema. Standard against strict
+stress differences on synthetic fixtures: ledger row ONEPATH-2 and
+`crates/dft-cli/tests/onepath_stress.rs`. Validation
 currently reuses the force pass; its work is included in analytic elapsed time
 and reported separately as `precondition_force_band_passes`. This conservative
 implementation has overhead; no performance optimization is claimed.

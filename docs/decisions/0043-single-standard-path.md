@@ -1,6 +1,6 @@
 # ADR 0043: One SCF path (standard profile) with a fixed-point verification after convergence
 
-- Status (amended 2026-11-16): **Default flipped by user decision 2026-11-16; the input key `scf.convergence_profile` is removed.** The single standard path with the fixed-point verification is the only SCF path of a classic run; `BAANDI_SINGLE_PATH` is removed and the strict path is a reference tool behind `BAANDI_REFERENCE_STRICT=on`. See the amendment at the end; a second amendment (ONEPATH-1, same day) moves forces and fixed-cell relaxation onto the single path. The original status line follows for the record.
+- Status (amended 2026-11-16): **Default flipped by user decision 2026-11-16; the input key `scf.convergence_profile` is removed.** The single standard path with the fixed-point verification is the only SCF path of a classic run; `BAANDI_SINGLE_PATH` is removed and the strict path is a reference tool behind `BAANDI_REFERENCE_STRICT=on`. See the amendment at the end; a second amendment (ONEPATH-1, same day) moves forces and fixed-cell relaxation onto the single path, a third (ONEPATH-2) stress and variable-cell relaxation. The original status line follows for the record.
 - Status: **Accepted in direction by the user (decisions 1 and 5 of 2026-11-14, `docs/performance/requests/work-order-beat-qe-2026-11-14.md` section 1)**; this ADR fixes the definition the work order left open (P0.1 item c). The implementation is behind `BAANDI_SINGLE_PATH` (default `off`) until the dev08 check list `docs/performance/requests/p01-single-path.md` shows convergence and delivered error in class on the generality set. Switching the default is a separate, one-line change recorded as an amendment here.
 - Supersedes, when the default flips: the "strict is the default" clause of ADR 0035. ADR 0035's labelling rules stay (a standard result says so); the "never certified" rule is replaced by the verification below, which is reported under its own name and is not the strict certificate.
 
@@ -174,3 +174,66 @@ and the word "Relaxation" in item 3 of the first amendment.
    the strict path with the same options as before this amendment (frames carry
    no verification record); only the added top-level `single_path` and `scf`
    keys of `results.json` differ from the former output.
+
+## Amendment: stress and variable-cell relaxation on the single path (ONEPATH-2, user decision 2026-11-16)
+
+Decision (user, 2026-11-16): stage 2 of removing the strict path from
+production use (ticket `tickets/ONEPATH-2-STRESS.md`). This amendment replaces
+item 4 of the ONEPATH-1 amendment and the stress bullet of item 5.
+
+1. **Stress** (`output.stress`) runs the standard path with the verification
+   (`single_path.status = "applied"`). The engine accepts a standard state for
+   stress exactly when it accepts it for forces (a passed verification; the
+   stress-specific rejection of any standard state is removed). The tensor is
+   computed with the same formulas from the converged step's own state (V4).
+   `stress.preconditions` carries the forces' standard keys (threshold,
+   verification passed, attempts, last Coulomb residual and residual estimate);
+   the results proposal schema gives `stress.preconditions` a strict branch
+   (unchanged) and a verified-standard branch. `verify = "off"` with
+   `output.stress` is an input error.
+2. **Cutoff scans.** The isotropic Pulay estimate re-runs three SCFs (Ecut,
+   1.05 Ecut, 1.10 Ecut). For a standard caller every scan runs the standard
+   path with the verification at `min(1e-9 Ha, scf.standard_threshold_ha)`:
+   never looser than the former scan threshold and following a caller who
+   tightens. A scan that fails there is repeated once at the caller's own
+   threshold when that is looser; there is no strict fallback. The SCF term of
+   the uncertainty uses max(`energy_tolerance`, loosest scan threshold used).
+   For a strict caller (`BAANDI_REFERENCE_STRICT=on`) the scans are unchanged
+   bit for bit (standard at 1e-9 Ha unverified, strict fallback).
+   `pulay_assessment` records `scan_profile`, `scan_thresholds_ha` and
+   `scan_energy_resolution_ha`.
+3. **Variable-cell relaxation** (`relax.mode = "cell"`, `"ions_cell"`) runs every
+   step, including basis rebuilds and the final nominal-cutoff point, on the
+   standard path with the verification; frames carry the ONEPATH-1
+   `verification` record; the frozen Miller chart, rebuilds and Pulay handling
+   are unchanged. The reasons `stress` and `stress (variable-cell relaxation)`
+   are removed. Still strict: collinear spin, Fermi-Dirac, `locking = "auto"`
+   (also when they request stress), the observe/agent modes and the non-`run`
+   commands; the Python session's `stress()` uses the engine API (strict
+   default) and is unchanged.
+4. **Stress sensitivity to SCF convergence (measured, Mac, synthetic).** Stress,
+   like forces, is first order in the density error while the energy is second
+   order, so the stress error falls roughly as the square root of the delivered
+   energy error. Pre-registered bound (ticket criterion a, the synthetic stress
+   oracle cap 1e-7 Ha/Bohr^3 of `docs/validation/stress.md`): at 5e-11 Ha both
+   fixtures pass (cubic 6.5e-10, skewed nonlocal 6.1e-8 Ha/Bohr^3); at the
+   default 5e-9 Ha the cubic fixture passes (2.1e-9) and **the skewed nonlocal
+   fixture fails (1.305e-7 Ha/Bohr^3, relative 2.7e-5)**. Against a tightened
+   strict reference the default strict path is within 8.6e-11, so the
+   exceedance is the standard path's own error, not the reference's
+   (decomposition: 5e-10 -> 5.9e-8, 5e-13 -> 5.0e-9 Ha/Bohr^3 on the skewed
+   fixture). The bound is not widened; the failing test is kept and marked.
+5. **Threshold recommendation (not applied).** Stress-sensitive runs (stress
+   reported to the stress class, tight `stress_tol_ha_bohr3`, equation-of-state
+   fits, variable-cell relaxations aiming at 1e-7 Ha/Bohr^3) should set
+   `scf.standard_threshold_ha = 5e-11`. The default stays 5e-9 Ha: two
+   synthetic fixtures on one machine are not the generality set, and whether
+   stress inputs should get a tighter default is a user decision, informed by
+   the dev08 list `docs/performance/requests/onepath2-stress.md`. Variable-cell
+   relaxations at the default reached the strict reference's cell within
+   1.6e-8 Bohr (BCC, isotropic) and 5.4e-6 Bohr (compact skewed, full cell and
+   ions), well inside the pre-registered 1e-3 Bohr.
+6. **Reference identity.** With `BAANDI_REFERENCE_STRICT=on` stress runs and
+   variable-cell relaxations run the strict path with the same options and scan
+   routing as before; the stress block gains only the additive
+   `pulay_assessment.scan_*` keys.

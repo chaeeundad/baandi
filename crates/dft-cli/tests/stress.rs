@@ -2,7 +2,7 @@
 mod common;
 use std::{fs, process::Command};
 #[test]
-fn stress_output_identity_schema_and_standard_rejection() {
+fn stress_output_identity_schema_and_paths() {
     let dir = std::env::temp_dir().join(format!("p22-stress-cli-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     fs::write(
@@ -11,8 +11,9 @@ fn stress_output_identity_schema_and_standard_rejection() {
     )
     .unwrap();
     let base = "[system]\nname='synthetic stress'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,8.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.27,0.23,0.19]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\n[output]\ndirectory='out'\nstress=true\n";
-    // Stress keeps the strict path (ADR 0043 item 5); the stress-off identity
-    // run compares against the same strict path through the reference switch.
+    // ONEPATH-2 (ADR 0043 item 5): stress runs the standard path with the
+    // fixed-point verification; the stress-off identity run takes the same
+    // path. The strict reference (BAANDI_REFERENCE_STRICT=on) is checked too.
     let run_with = |text: &str, reference: &str| {
         fs::write(dir.join("input.toml"), text).unwrap();
         Command::new(env!("CARGO_BIN_EXE_dft-cli"))
@@ -33,29 +34,71 @@ fn stress_output_identity_schema_and_standard_rejection() {
     let result: serde_json::Value =
         serde_json::from_slice(&fs::read(dir.join("out/results.json")).unwrap()).unwrap();
     let density = fs::read(dir.join("out/density.bin")).unwrap();
-    assert!(
+    let schema_ok = || {
         Command::new("python3")
             .arg("-I")
             .arg(
                 std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests/validate_stress_schema.py")
+                    .join("tests/validate_stress_schema.py"),
             )
             .arg(dir.join("out/results.json"))
             .status()
             .unwrap()
             .success()
+    };
+    assert!(schema_ok());
+    assert_eq!(result["single_path"]["status"], "applied");
+    assert_eq!(result["verified"], true);
+    let p = &result["stress"]["preconditions"];
+    assert_eq!(p["convergence_profile"], "standard");
+    assert_eq!(p["fixed_point_verification_passed"], true);
+    assert_eq!(p["standard_threshold_ha"], 5e-9);
+    let pulay = &result["stress"]["pulay_assessment"];
+    assert_eq!(pulay["scan_profile"], "standard_verified");
+    // Scan threshold min(1e-9, caller threshold) for a converged first try.
+    assert_eq!(
+        pulay["scan_thresholds_ha"],
+        serde_json::json!([1e-9, 1e-9, 1e-9])
     );
-    let off = run_with(&base.replace("stress=true", "stress=false"), "on");
+    let off = run(&base.replace("stress=true", "stress=false"));
     assert!(off.status.success());
     let no_stress: serde_json::Value =
         serde_json::from_slice(&fs::read(dir.join("out/results.json")).unwrap()).unwrap();
     assert_eq!(result["total_energy"], no_stress["total_energy"]);
     assert_eq!(density, fs::read(dir.join("out/density.bin")).unwrap());
-    // ADR 0043 item 5: stress keeps the strict path; a standard-only control
-    // is an input error instead of being dropped.
-    let standard = run(&base.replace("[scf]", "[scf]\nstandard_threshold_ha=5e-11"));
-    assert_eq!(standard.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&standard.stderr).contains("strict"));
+    // A tighter standard threshold is accepted and tightens the scans.
+    let tight = run(&base.replace("[scf]", "[scf]\nstandard_threshold_ha=5e-11"));
+    assert!(
+        tight.status.success(),
+        "{}",
+        String::from_utf8_lossy(&tight.stderr)
+    );
+    assert!(schema_ok());
+    let tight: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.join("out/results.json")).unwrap()).unwrap();
+    assert_eq!(
+        tight["stress"]["pulay_assessment"]["scan_thresholds_ha"],
+        serde_json::json!([5e-11, 5e-11, 5e-11])
+    );
+    // The strict reference keeps its certificate preconditions.
+    let strict = run_with(base, "on");
+    assert!(strict.status.success());
+    assert!(schema_ok());
+    let strict: serde_json::Value =
+        serde_json::from_slice(&fs::read(dir.join("out/results.json")).unwrap()).unwrap();
+    assert_eq!(strict["single_path"]["status"], "reference_strict");
+    assert_eq!(
+        strict["stress"]["preconditions"]["convergence_profile"],
+        "strict"
+    );
+    assert_eq!(
+        strict["stress"]["pulay_assessment"]["scan_profile"],
+        "standard_then_strict"
+    );
+    // verify = off cannot deliver stress: an input error before any SCF.
+    let unverified = run(&base.replace("[scf]", "[scf]\nverify='off'"));
+    assert_eq!(unverified.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&unverified.stderr).contains("verification"));
     fs::remove_dir_all(dir).unwrap();
 }
 

@@ -295,7 +295,11 @@ and the release ignored three-structure warm/fresh energy oracle.
 
 ## NC stress (P22A)
 
-`stress(&StressState)` requires the same model and strict certificate as forces.
+`stress(&StressState)` requires the same model and strict certificate as forces,
+or (ONEPATH-2) a standard state with a passed fixed-point verification. Its
+cutoff scans follow the caller: standard callers run every scan standard with
+verification at min(1e-9 Ha, caller threshold) and never fall back to strict;
+strict callers keep the old scan routing bit for bit.
 It reports frozen-Miller tensor/pressure and an independent isotropic cutoff
 estimate. `frozen_stress` omits that estimate explicitly. Neither claims cutoff
 convergence. The opt-in boxed `ScfOptions.strain_reference` requires a fixed FFT

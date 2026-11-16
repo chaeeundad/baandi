@@ -37,8 +37,10 @@ relaxation runs the single standard SCF path with the fixed-point verification
 a failed verification continues that step's SCF. The SCF accuracy is
 `scf.standard_threshold_ha` (default 5e-9 Ha); `scf.verify = "off"` is an input
 error. The strict path with its certificate remains as a reference tool
-(`BAANDI_REFERENCE_STRICT=on`). Variable-cell modes still use the strict path
-because stress has not moved yet. Tighten `standard_threshold_ha` to resolve a
+(`BAANDI_REFERENCE_STRICT=on`). Since ONEPATH-2 the variable-cell modes (`cell`,
+`ions_cell`) run the same standard path: forces and stress of every step come
+from its verified state, and the stress cutoff scans are verified standard runs
+(see [cell relaxation](cell-relaxation.md)). Tighten `standard_threshold_ha` to resolve a
 small ionic energy threshold or tight force tolerance (for example 5e-11 Ha, or
 5e-13 Ha for `energy_tol_ha = 1e-12`); nothing is loosened automatically.
 The spectral guard remains available. No tolerances are automatically loosened.

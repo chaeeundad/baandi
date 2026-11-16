@@ -438,10 +438,9 @@ fn rejects_unsupported_standard_controls_and_invalid_constraints_without_scf() {
     )
     .unwrap();
     for (i, text) in [
-        // ONEPATH-1: fixed-cell relaxation runs the standard path; variable-cell
-        // relaxation keeps the strict path (stress) and rejects standard-only
-        // controls, and every relaxation needs the verification.
-        input().replace("[scf]", "[scf]\nstandard_threshold_ha=5e-11") + "\n[relax]\nmode='cell'\n",
+        // ONEPATH-1/ONEPATH-2: every relaxation mode runs the standard path
+        // and needs the verification on every step.
+        input().replace("[scf]", "[scf]\nverify='off'") + "\n[relax]\nmode='cell'\n",
         input().replace("[scf]", "[scf]\nverify='off'") + "\n[relax]\n",
         input() + "\n[relax]\nfixed=[{atom=2}]\n",
         input() + "\n[relax]\nforce_tol_ha_bohr=nan\n",

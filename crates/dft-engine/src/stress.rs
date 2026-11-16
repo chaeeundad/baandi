@@ -10,7 +10,11 @@ pub type Tensor = terms::Tensor;
 /// scan differences enter the estimate scaled by 2c/(3 V dc), about 1e-2 per Ha
 /// for a 30 Ry silicon cell, so a 1e-9 Ha scan energy error moves the estimate
 /// by about 1e-11 Ha/Bohr^3, orders below its reported uncertainty.
-const SCAN_THRESHOLD_HA: f64 = 1e-9;
+///
+/// ONEPATH-2 (ADR 0043): for a standard caller the scan threshold is
+/// `min(SCAN_THRESHOLD_HA, caller threshold)`, so a scan is never looser than
+/// before and follows a caller who tightens `scf.standard_threshold_ha`.
+pub const SCAN_THRESHOLD_HA: f64 = 1e-9;
 type Blocks<'a> = Vec<(&'a crate::KPointSolution, &'a [f64])>;
 pub type StressState<'a> = ForceState<'a>;
 #[derive(Debug)]
@@ -24,6 +28,20 @@ pub struct PulayAssessment {
     pub warning: bool,
     pub shells_resolved: bool,
     pub elapsed: std::time::Duration,
+    /// How the three scan SCF runs were converged (ONEPATH-2):
+    /// `standard_then_strict` for a strict caller (standard profile at
+    /// `SCAN_THRESHOLD_HA` without verification, a failed scan repeated with the
+    /// caller's strict settings; unchanged reference behaviour) or
+    /// `standard_verified` for a standard caller (every scan on the standard
+    /// path with the fixed-point verification; no strict fallback).
+    pub scan_profile: &'static str,
+    /// Threshold each scan (centre, +5 %, +10 %) actually converged to, Ha;
+    /// None for a scan that fell back to the caller's strict settings.
+    pub scan_thresholds_ha: [Option<f64>; 3],
+    /// SCF energy resolution entering `uncertainty`, Ha: the caller's
+    /// `energy_tolerance`, and for a standard caller at least the loosest scan
+    /// threshold actually used.
+    pub scan_energy_resolution_ha: f64,
 }
 #[derive(Debug)]
 pub struct StressResult {
@@ -56,16 +74,13 @@ pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> 
         ));
     }
 
-    // ADR 0043: forces accept a verified standard state; stress stays strict
-    // until its cutoff scans are adapted to a standard caller.
-    if state.options.standard.is_some() {
-        return Err(ScfError::InvalidInput(
-            "observables.stress: strict convergence profile required; stress requests keep the strict path (ADR 0043 item 5)",
-        ));
-    }
+    // ADR 0043 (ONEPATH-2): a standard state is accepted exactly when forces
+    // accept it, i.e. with a passed fixed-point verification; the shared force
+    // path below rejects an unverified standard state.
     let start = std::time::Instant::now();
     // Shared force path enforces the independent setup identity, active ledger,
-    // strict tolerances and fresh certificate before accepting the state.
+    // strict tolerances and fresh certificate (or passed verification) before
+    // accepting the state.
     let validated = crate::forces::forces(state)?;
     let (densities, blocks): (Vec<&Array3<f64>>, Blocks<'_>) = match &state.electronic {
         ElectronicState::Fixed(r) => (
@@ -399,25 +414,52 @@ pub fn stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
     // (rounded up); the energies are unchanged bit for bit.
     let budget = state.options.threads.max(1);
     let per_scan = budget.div_ceil(3).max(1);
-    let run_scan = |delta: f64| -> Result<f64, ScfError> {
+    let caller = state.options.standard;
+    let scan_threshold =
+        caller.map_or(SCAN_THRESHOLD_HA, |p| p.threshold_ha.min(SCAN_THRESHOLD_HA));
+    // Each scan returns its energy and the standard threshold it converged to
+    // (None: the strict fallback of a strict caller).
+    let run_scan = |delta: f64| -> Result<(f64, Option<f64>), ScfError> {
         let mut options = state.options.clone();
         options.strain_reference = None;
         options.grid_override = Some(scan_dims);
         options.cutoff_hartree = c + delta;
         options.threads = per_scan;
-        // Standard profile first; a scan that fails to converge there (stall,
-        // exhausted budget) is repeated with the caller's strict settings.
         let mut fast = options.clone();
         fast.standard = Some(crate::StandardProfile {
-            threshold_ha: SCAN_THRESHOLD_HA,
+            threshold_ha: scan_threshold,
         });
-        match energy_at(state, state.cell, fast) {
-            Ok(e) => Ok(e),
-            Err(_) => energy_at(state, state.cell, options),
+        match caller {
+            // Strict caller (the reference path): standard profile first; a
+            // scan that fails to converge there (stall, exhausted budget) is
+            // repeated with the caller's strict settings. Unchanged.
+            None => match energy_at(state, state.cell, fast) {
+                Ok(e) => Ok((e, Some(scan_threshold))),
+                Err(_) => energy_at(state, state.cell, options).map(|e| (e, None)),
+            },
+            // Standard caller (ONEPATH-2): every scan runs the standard path
+            // with the fixed-point verification (a scan energy is returned only
+            // from a converged run whose verification passed). A scan that
+            // fails at the scan threshold is repeated once at the caller's own
+            // threshold when that is looser; there is no strict fallback.
+            Some(p) => {
+                fast.verification = crate::Verification::FixedPoint;
+                match energy_at(state, state.cell, fast) {
+                    Ok(e) => Ok((e, Some(scan_threshold))),
+                    Err(first) if p.threshold_ha > scan_threshold => {
+                        options.verification = crate::Verification::FixedPoint;
+                        energy_at(state, state.cell, options)
+                            .map(|e| (e, Some(p.threshold_ha)))
+                            .map_err(|_| first)
+                    }
+                    Err(first) => Err(first),
+                }
+            }
         }
     };
+    let mut used = [None; 3];
     if budget >= 3 {
-        let results: Vec<Result<f64, ScfError>> = std::thread::scope(|scope| {
+        let results: Vec<Result<(f64, Option<f64>), ScfError>> = std::thread::scope(|scope| {
             let handles: Vec<_> = [0., steps[0], steps[1]]
                 .into_iter()
                 .map(|delta| {
@@ -431,18 +473,27 @@ pub fn stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
                 .collect()
         });
         for (i, r) in results.into_iter().enumerate() {
-            energies[i] = r?;
+            (energies[i], used[i]) = r?;
         }
     } else {
         for (i, delta) in [0., steps[0], steps[1]].into_iter().enumerate() {
-            energies[i] = run_scan(delta)?;
+            (energies[i], used[i]) = run_scan(delta)?;
         }
     }
     let estimates = [0, 1].map(|i| {
         2. * c / (3. * state.cell.volume_bohr3()) * (energies[i + 1] - energies[0]) / steps[i]
     });
+    // Strict caller: the configured energy tolerance (unchanged). Standard
+    // caller: never below the loosest threshold a scan actually converged to.
+    let resolution = if caller.is_some() {
+        used.iter()
+            .flatten()
+            .fold(state.options.energy_tolerance, |a, t| a.max(*t))
+    } else {
+        state.options.energy_tolerance
+    };
     let uncertainty = (estimates[0] - estimates[1]).abs()
-        + 4. * state.options.energy_tolerance / (3. * state.cell.volume_bohr3() * 0.05);
+        + 4. * resolution / (3. * state.cell.volume_bohr3() * 0.05);
     let threshold = 1e-5;
     result.pulay = Some(PulayAssessment {
         method: "isotropic_cutoff_derivative_5_10_percent",
@@ -453,6 +504,13 @@ pub fn stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
         warning: !shells_resolved || estimates[0].abs() + uncertainty > threshold,
         shells_resolved,
         elapsed: start.elapsed(),
+        scan_profile: if caller.is_some() {
+            "standard_verified"
+        } else {
+            "standard_then_strict"
+        },
+        scan_thresholds_ha: used,
+        scan_energy_resolution_ha: resolution,
     });
     Ok(result)
 }

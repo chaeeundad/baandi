@@ -31,11 +31,23 @@ any fixed axis rejects. Cartesian atom constraints (`relax.fixed`) currently
 reject in the variable-cell modes; use the fixed-cell driver for those constraints.
 
 The supported electronic models are those of the fixed-cell driver: unpolarized
-fixed occupations with complete strict force/stress certificates. No standard
-profile, spin/FD driver, ESLE continuation or uncertified derivative is admitted.
-Cell runs use the requested strict eigen tolerance from the initial solve,
-disabling residual-based eigen scheduling in this path. Ordinary SCF and ionic
-relaxation retain their existing schedules.
+fixed occupations. Since ONEPATH-2 (user decision 2026-11-16, ADR 0043) every
+step runs the single standard SCF path with the fixed-point verification:
+forces and stress are computed only from a step whose verification passed (a
+failed verification continues that step's SCF), each frame records its
+`verification`, and `scf.verify = "off"` is an input error. The accuracy is
+`scf.standard_threshold_ha` (default 5e-9 Ha). **For stress-sensitive runs
+(tight `stress_tol_ha_bohr3`, small `energy_tol_ha`, equation-of-state fits)
+tighten the threshold**: the SCF energy is resolved to about the threshold, and
+the measured stress differences against the strict reference are in ledger row
+ONEPATH-2. The strict path with its certificate is a reference tool only
+(`BAANDI_REFERENCE_STRICT=on`). No spin/FD driver, ESLE continuation or
+uncertified derivative is admitted. The frozen Miller chart, basis rebuilds and
+the Pulay assessment are unchanged.
+Cell runs set the initial eigen tolerance to the requested eigen tolerance and
+disable residual-based eigen scheduling; these two options act on the strict
+reference path only (the standard path ratchets its own eigen tolerance).
+Ordinary SCF and ionic relaxation retain their existing schedules.
 
 ## Coordinates, gradients and symmetry
 

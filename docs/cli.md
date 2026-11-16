@@ -1054,9 +1054,27 @@ SCF energy is resolved to about the threshold, so an ionic energy test at
 against the strict reference shrink with the threshold (ledger ONEPATH-1;
 dev08 request `performance/requests/onepath1-forces-relax.md`).
 
-Stress (`output.stress`, and the variable-cell relaxation modes `cell` and
-`ions_cell`, reason `stress (variable-cell relaxation)`), collinear spin,
-Fermi-Dirac occupations and `scf.locking = "auto"` keep
+Stress (`output.stress`) and the variable-cell relaxation modes `cell` and
+`ions_cell` run on the standard path with the verification since ONEPATH-2
+(user decision 2026-11-16; the reasons `stress` and `stress (variable-cell
+relaxation)` are gone). The stress needs a passed verification exactly like the
+forces; `stress.preconditions` carries the same standard keys as
+`forces.preconditions`; the three cutoff-scan SCFs of the isotropic Pulay
+estimate run the standard path with the verification at
+`min(1e-9 Ha, scf.standard_threshold_ha)` (repeated once at the caller's
+threshold when that is looser; no strict fallback), recorded in
+`stress.pulay_assessment.scan_profile` (`standard_verified`),
+`scan_thresholds_ha` and `scan_energy_resolution_ha`. Every variable-cell step
+(including basis rebuilds and the final nominal-cutoff point) verifies and
+records `frames[].verification`; the frozen Miller chart and the Pulay handling
+are unchanged. `verify = "off"` with `output.stress` or with any `[relax]` is an
+input error. **For stress-sensitive runs (tight `stress_tol_ha_bohr3`, small
+`energy_tol_ha`, equation-of-state fits) tighten `scf.standard_threshold_ha`**;
+measured stress differences against the strict reference: ledger row ONEPATH-2,
+dev08 request `performance/requests/onepath2-stress.md`. The default threshold
+is unchanged.
+
+Collinear spin, Fermi-Dirac occupations and `scf.locking = "auto"` keep
 the strict path (`not_applicable` with the reason); in those inputs the
 standard-only keys are input errors instead of being dropped. The observe/agent
 runtime modes and the non-`run` commands (bands, checkpoint, restart,
@@ -1186,8 +1204,12 @@ losses](user/relaxation.md) and [validation scope](validation/relaxation.md).
 
 ## Stress and pressure (P22A)
 
-Set `[output] stress = true` after a strict certified NC SCF. Standard profile
-rejects this request. The Cartesian tensile-positive 3x3 tensor is in Ha/Bohr^3;
+Set `[output] stress = true` on a converged NC SCF: since ONEPATH-2 the default
+standard path with a passed fixed-point verification (see the single SCF path
+section above), or the strict certified reference path
+(`BAANDI_REFERENCE_STRICT=on`); `scf.verify = "off"` rejects this request.
+Spin and Fermi-Dirac stress runs stay on the strict path for now. The
+Cartesian tensile-positive 3x3 tensor is in Ha/Bohr^3;
 pressure is `-trace(stress)/3`. The JSON `stress` block contains per-term values,
 symmetric/antisymmetric parts, raw antisymmetric norm, derivative ledger and
 preconditions. LDA-PZ, LDA-PW, PBE, collinear spin, NLCC and FD free-energy

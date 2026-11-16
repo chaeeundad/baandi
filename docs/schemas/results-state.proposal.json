@@ -341,23 +341,69 @@
               "maxItems": 0
             },
             "preconditions": {
-              "type": "object",
-              "required": [
-                "convergence_profile",
-                "converged",
-                "fixed_point_certificate_passed"
-              ],
-              "properties": {
-                "convergence_profile": {
-                  "const": "strict"
+              "$comment": "ADR 0043 (ONEPATH-2): a strict state with a passed certificate, or a standard state with a passed fixed-point verification",
+              "oneOf": [
+                {
+                  "type": "object",
+                  "required": [
+                    "convergence_profile",
+                    "converged",
+                    "fixed_point_certificate_passed"
+                  ],
+                  "properties": {
+                    "convergence_profile": {
+                      "const": "strict"
+                    },
+                    "converged": {
+                      "const": true
+                    },
+                    "fixed_point_certificate_passed": {
+                      "const": true
+                    }
+                  }
                 },
-                "converged": {
-                  "const": true
-                },
-                "fixed_point_certificate_passed": {
-                  "const": true
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "convergence_profile",
+                    "converged",
+                    "fixed_point_verification_passed",
+                    "standard_threshold_ha",
+                    "verification_attempts"
+                  ],
+                  "properties": {
+                    "convergence_profile": {
+                      "const": "standard"
+                    },
+                    "converged": {
+                      "const": true
+                    },
+                    "fixed_point_verification_passed": {
+                      "const": true
+                    },
+                    "standard_threshold_ha": {
+                      "type": "number",
+                      "exclusiveMinimum": 0
+                    },
+                    "verification_attempts": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "verification_coulomb_error_ha": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "verification_residual_bound_ha": {
+                      "type": ["number", "null"],
+                      "minimum": 0
+                    },
+                    "state": {
+                      "type": "string"
+                    }
+                  }
                 }
-              }
+              ]
             },
             "elapsed_seconds": {
               "type": "number",

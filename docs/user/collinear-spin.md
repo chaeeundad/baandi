@@ -90,6 +90,16 @@ orbitals, density and energy all refer to the same state; fresh-map metrics are
 reported separately. Budget exhaustion returns a retained unconverged state and
 CLI exit 3. It never fabricates a passed certificate.
 
+Start wavefunctions (ONEPATH-3B, ADR 0042 amendment): with the default
+`scf.start_wavefunctions = "atomic"` and species that carry `PP_PSWFC`, a fixed
+sector starts each channel from the atomic subspace (Rayleigh-Ritz in that
+channel's Hamiltonian), as the unpolarized run does; `results.json` records
+`atomic_start`. Fermi-Dirac runs keep the free-electron start
+(`fallback_reason = "Fermi-Dirac occupations"`). A zero-moment run then needs the
+same number of SCF steps as the unpolarized complex-path run; its wall is about
+twice that run (two channel solves per step). Real Gamma and the cutoff ladder
+remain closed-shell only.
+
 The architect approved xcx result-vector allocations at density-field evaluation
 boundaries, outside orbital, k and Hamiltonian inner loops. Output-state energy
 assembly and fresh certification each need their own XC evaluation as in the

@@ -214,6 +214,19 @@ pub(super) fn execute(
     if let Some(symmetry) = config.symmetry_json().map_err(|e| error(1, e))? {
         result["symmetry"] = symmetry;
     }
+    // ONEPATH-3B: the fixed sector starts from the atomic subspace (ADR 0042).
+    if opts.start_wavefunctions == dft_engine::StartWavefunctions::Atomic {
+        let a = &r.atomic_start;
+        result["atomic_start"] = json!({
+            "requested": opts.start_wavefunctions.name(), "fallback_reason": a.fallback_reason,
+            "atomic_orbitals_used": a.atomic_orbitals,
+            "initial_h_applications": a.initial_h_applications,
+            "gram_rotation_complex_macs": a.gram_rotation_macs,
+            "mgs_projection_complex_macs": a.mgs_projection_macs,
+            "radial_samples": a.radial_samples, "evd_orders": a.evd_orders,
+            "span_shared_by_spin_channels": true
+        });
+    }
     result["gamma_real_used"] = json!(r.gamma_real_used);
     result["gamma_real_fallback_reason"] = json!(r.gamma_real_fallback_reason);
     if let Some(report) = &r.spectral_completeness {

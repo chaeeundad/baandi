@@ -44,6 +44,40 @@ pub fn potential_with_atomic_charge(
 ) -> Pseudopotential {
     build(z, rc, nonlocal, points, "SLA PZ", true)
 }
+/// As `potential_with_functional`, with synthetic s and p atomic
+/// orbitals in PP_PSWFC (r^(l+1) exp(-a r^2), not normalized; the atomic start
+/// orthonormalizes its span) so that the atomic start applies (ONEPATH-3B).
+#[allow(dead_code)]
+pub fn potential_with_orbitals(
+    z: f64,
+    rc: f64,
+    nonlocal: bool,
+    points: usize,
+    functional: &str,
+) -> Pseudopotential {
+    let text = build_text(z, rc, nonlocal, points, functional, false);
+    let pp = parse_upf(&text).unwrap();
+    let chi = |l: i32, a: f64| {
+        array(
+            &pp.mesh()
+                .r()
+                .iter()
+                .map(|r| r.powi(l + 1) * (-a * r * r).exp())
+                .collect::<Vec<_>>(),
+        )
+    };
+    let text = text
+        .replace("number_of_wfc=\"0\"", "number_of_wfc=\"2\"")
+        .replace(
+            "</UPF>",
+            &format!(
+                "<PP_PSWFC><PP_CHI.1 l=\"0\" label=\"s\" occupation=\"2\">{}</PP_CHI.1><PP_CHI.2 l=\"1\" label=\"p\" occupation=\"2\">{}</PP_CHI.2></PP_PSWFC></UPF>",
+                chi(0, 0.6),
+                chi(1, 0.5)
+            ),
+        );
+    parse_upf(&text).unwrap()
+}
 fn build(
     z: f64,
     rc: f64,
@@ -52,6 +86,24 @@ fn build(
     functional: &str,
     atomic_charge: bool,
 ) -> Pseudopotential {
+    parse_upf(&build_text(
+        z,
+        rc,
+        nonlocal,
+        points,
+        functional,
+        atomic_charge,
+    ))
+    .unwrap()
+}
+fn build_text(
+    z: f64,
+    rc: f64,
+    nonlocal: bool,
+    points: usize,
+    functional: &str,
+    atomic_charge: bool,
+) -> String {
     let end = 12.0;
     let r0 = 0.02;
     let dx = (1.0_f64 + end / r0).ln() / (points - 1) as f64;
@@ -96,10 +148,9 @@ fn build(
             vec![0.0; points]
         })
     );
-    let xml = if nonlocal {
+    if nonlocal {
         xml
     } else {
         xml.replace("<PP_DIJ></PP_DIJ>", "")
-    };
-    parse_upf(&xml).unwrap()
+    }
 }

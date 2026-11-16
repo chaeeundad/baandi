@@ -79,6 +79,9 @@ pub struct SpinIteration {
     pub standard_redo: bool,
 }
 pub struct CollinearResult {
+    /// ONEPATH-3B: atomic start of both channels (ADR 0042). Span work is
+    /// counted once per k point, Rayleigh-Ritz work once per channel and k.
+    pub atomic_start: AtomicStartReport,
     /// ONEPATH-3: the standard profile of the run (None: strict reference).
     pub standard: Option<StandardProfile>,
     /// ADR 0043 verification attempts (Some only on the standard path with
@@ -293,6 +296,8 @@ impl CollinearProblem {
         let finite = OccupationWorkspace::new(band_cap, points, true, theta_ha, constraint)?;
         for p in &mut problem.channels {
             p.occupations.fill(1.0);
+            // Same rule as the scalar Fermi-Dirac driver (ADR 0042).
+            p.clear_atomic_start("Fermi-Dirac occupations");
         }
         problem.finite = Some(finite);
         Ok(problem)
@@ -332,6 +337,13 @@ impl CollinearProblem {
         let mut nonlocal = 0.0;
         let mut band_sum = 0.0;
         let mut eig_bound = 0.0;
+        // ONEPATH-3B (ADR 0042 amendment): a cold solve of a fixed sector
+        // starts from the atomic subspace exactly as the closed-shell path,
+        // Rayleigh-Ritz in each channel's own Hamiltonian. The span depends
+        // only on the basis, so it is built once per k and shared by both
+        // channels. Fermi-Dirac problems have no prepared species.
+        let mut spans: Vec<Option<atomic_start::AtomicSpan>> =
+            (0..self.blocks[0].len()).map(|_| None).collect();
         for (s, channel_output) in output.iter_mut().enumerate() {
             let p = &mut self.channels[s];
             let bands = p.occupations.len();
@@ -362,12 +374,57 @@ impl CollinearProblem {
                 *v = ion + h + x;
             }
             channel_output.fill(0.0);
-            for (state, work) in p.states.iter_mut().zip(&mut self.blocks[s]) {
+            for (k, (state, work)) in p.states.iter_mut().zip(&mut self.blocks[s]).enumerate() {
                 state.hamiltonian.copy_local_potential(&self.effective)?;
+                let mut atomic = false;
+                if work.solution.is_none()
+                    && work.saved.is_none()
+                    && self.finite.is_none()
+                    && let Some(species) = &p.atomic_species
+                {
+                    let clock = Instant::now();
+                    let shared = spans[k].is_some();
+                    if !shared {
+                        spans[k] = Some(atomic_start::span(
+                            &p.cell,
+                            &state.basis,
+                            &state.grid,
+                            species,
+                            &p.options,
+                            bands,
+                            dft_numerics::switches::on(dft_numerics::switches::Id::PHASE_THREADS)
+                                .then_some(&*p.pool),
+                            None,
+                        )?);
+                    }
+                    let (guess, report) = atomic_start::ritz(
+                        spans[k].as_ref().unwrap(),
+                        &state.hamiltonian,
+                        bands,
+                        state.point.fractional == [0.; 3],
+                        None,
+                        None,
+                    )?;
+                    work.initial
+                        .as_mut_slice()
+                        .copy_from_slice(guess.as_slice());
+                    let a = &mut p.atomic_start;
+                    if !shared {
+                        // Span work (radial transforms, Gram-Schmidt) is done once per k.
+                        a.atomic_orbitals += report.atomic_orbitals;
+                        a.mgs_projection_macs += report.mgs_projection_macs;
+                        a.radial_samples += report.radial_samples;
+                    }
+                    a.initial_h_applications += report.initial_h_applications;
+                    a.gram_rotation_macs += report.gram_rotation_macs;
+                    a.evd_orders.extend(report.evd_orders);
+                    crate::phase_clock::add_atomic_start(clock);
+                    atomic = true;
+                }
                 // Reuse the established solver. Its owned result/workspace lifecycle
                 // is unchanged; all new band/grid/audit buffers live in BlockWork.
                 let guess = work.solution.as_ref().map(|v| &v.eigenvectors).or_else(|| {
-                    (work.saved.is_some() || p.options.free_electron_initial_guess)
+                    (atomic || work.saved.is_some() || p.options.free_electron_initial_guess)
                         .then_some(&work.initial)
                 });
                 // ONEPATH-3: the standard profile uses the Ritz-change stopping
@@ -991,7 +1048,23 @@ impl CollinearProblem {
                         })
                         .collect()
                 });
+                let atomic_start = {
+                    let [a, b] = [
+                        &self.channels[0].atomic_start,
+                        &self.channels[1].atomic_start,
+                    ];
+                    AtomicStartReport {
+                        atomic_orbitals: a.atomic_orbitals + b.atomic_orbitals,
+                        initial_h_applications: a.initial_h_applications + b.initial_h_applications,
+                        gram_rotation_macs: a.gram_rotation_macs + b.gram_rotation_macs,
+                        mgs_projection_macs: a.mgs_projection_macs + b.mgs_projection_macs,
+                        radial_samples: a.radial_samples + b.radial_samples,
+                        evd_orders: a.evd_orders.iter().chain(&b.evd_orders).copied().collect(),
+                        fallback_reason: a.fallback_reason.clone(),
+                    }
+                };
                 return Ok(CollinearResult {
+                    atomic_start,
                     standard,
                     verification: (standard.is_some() && o.verification != Verification::Off)
                         .then(|| verification.clone()),

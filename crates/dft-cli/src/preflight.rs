@@ -661,9 +661,8 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         },
         atomic_start: (options.start_wavefunctions == dft_engine::StartWavefunctions::Atomic).then(
             || {
-                let reason = if sector.is_some() {
-                    Some("spin-polarized occupations")
-                } else if finite {
+                // ONEPATH-3B: a collinear fixed sector uses the atomic start.
+                let reason = if finite {
                     Some("Fermi-Dirac occupations")
                 } else {
                     atomic_fallback

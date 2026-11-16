@@ -178,6 +178,7 @@ impl FiniteTProblem {
         let mut problem =
             ScfProblem::construct(cell, atoms, potentials, options, points, None, Some(0))?;
         problem.gamma_real_exclusion = Some("Fermi-Dirac occupations");
+        problem.clear_atomic_start("Fermi-Dirac occupations");
         for state in &mut problem.states {
             state.gamma_real = gamma_real.clone();
         }

@@ -1111,9 +1111,10 @@ impl ScfProblem {
         )?;
         let mut atomic_start = AtomicStartReport::default();
         let atomic_species = if options.start_wavefunctions == StartWavefunctions::Atomic {
-            let reason = if channel.is_some() {
-                Some("spin-polarized occupations")
-            } else if species.iter().any(|s| {
+            // ONEPATH-3B: spin channels (collinear fixed sector) prepare the
+            // atomic start too; the Fermi-Dirac constructors (scalar and
+            // collinear) clear it with their own reason.
+            let reason = if species.iter().any(|s| {
                 s.potential
                     .atomic_wavefunctions()
                     .is_none_or(|w| w.is_empty())
@@ -1203,6 +1204,14 @@ impl ScfProblem {
     }
     pub fn atomic_start_report(&self) -> &AtomicStartReport {
         &self.atomic_start
+    }
+    /// Drivers whose start does not use the atomic subspace (Fermi-Dirac
+    /// occupations) drop the prepared species and record the reason
+    /// (ADR 0042; ONEPATH-3B moved this out of the spin-channel construction).
+    pub(crate) fn clear_atomic_start(&mut self, reason: &str) {
+        if self.atomic_species.take().is_some() {
+            self.atomic_start.fallback_reason = Some(reason.to_owned());
+        }
     }
     /// Enable only a geometry-verified reduction of the supplied full mesh.
     /// No fields, local constraints or Hubbard terms exist in this SCF model.

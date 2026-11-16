@@ -247,6 +247,12 @@ collinear and finite-T drivers run the standard stop rule (collinear Coulomb
 estimate `CoulombMetric::spin_error`, block residual guard, ratchet, redo) and
 the fixed-point verification of the whole map (`standard_attempt`); the strict
 branches keep their arithmetic. Design: `docs/design/onepath3-spin-metals.md`.
+ONEPATH-3B (ADR 0042 amendment): cold fixed-sector solves start from the atomic
+subspace (span once per k shared by both channels, `atomic_start::ritz` per
+channel); FD problems call `ScfProblem::clear_atomic_start` ("Fermi-Dirac
+occupations"). `CollinearResult.atomic_start` reports it. Test
+`tests/spin_atomic_start.rs` (its header records why the 1e-10 bound holds for
+the free-electron start only: the atomic start amplifies rounding).
 
 The geometry/mesh test exceeds the debug budget and is ignored by default:
 `cargo test --release -p dft-engine --test collinear -- --include-ignored --nocapture`.

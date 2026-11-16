@@ -488,6 +488,7 @@ dependencies = [
  "dft-mpi",
  "dft-numerics",
  "dft-physics",
+ "dft-solvers",
  "dft-units",
  "dft-upf",
  "serde",

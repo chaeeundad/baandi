@@ -223,16 +223,28 @@ item 4 of the ONEPATH-1 amendment and the stress bullet of item 5.
    exceedance is the standard path's own error, not the reference's
    (decomposition: 5e-10 -> 5.9e-8, 5e-13 -> 5.0e-9 Ha/Bohr^3 on the skewed
    fixture). The bound is not widened; the failing test is kept and marked.
-5. **Threshold recommendation (not applied).** Stress-sensitive runs (stress
-   reported to the stress class, tight `stress_tol_ha_bohr3`, equation-of-state
-   fits, variable-cell relaxations aiming at 1e-7 Ha/Bohr^3) should set
-   `scf.standard_threshold_ha = 5e-11`. The default stays 5e-9 Ha: two
-   synthetic fixtures on one machine are not the generality set, and whether
-   stress inputs should get a tighter default is a user decision, informed by
-   the dev08 list `docs/performance/requests/onepath2-stress.md`. Variable-cell
-   relaxations at the default reached the strict reference's cell within
-   1.6e-8 Bohr (BCC, isotropic) and 5.4e-6 Bohr (compact skewed, full cell and
-   ions), well inside the pre-registered 1e-3 Bohr.
+5. **Stress default threshold (orchestrator decision 2026-11-16, PROVISIONAL).**
+   Under the adoption rule "the default must meet the accuracy class", an input
+   that asks for stress (`output.stress`, or `relax.mode = "cell"` or
+   `"ions_cell"`) and does not set `scf.standard_threshold_ha` runs at
+   `STRESS_DEFAULT_THRESHOLD_HA` = 5e-11 Ha. This is a rule by observable, not by
+   material. Forces, `relax.mode = "ions"` and plain runs keep 5e-9 Ha; an
+   explicit user value always wins, tighter or looser. `results.json` records
+   the effective threshold and its origin in `single_path.standard_threshold_ha`
+   and `single_path.threshold_source` (`user`, `stress_default` or `default`;
+   null off the standard path); the relaxation `scf` block carries the same two
+   keys. Evidence: two synthetic fixtures on the Mac (item 4), with a margin of
+   only 1.6x on the skewed nonlocal fixture (6.1e-8 against 1e-7 Ha/Bohr^3). The
+   rule is provisional until the dev08 list
+   `docs/performance/requests/onepath2-stress.md` (si8, si16, si-skew, si-slab,
+   strained si8 at 5e-9, 5e-10 and 5e-11 Ha against a tightened strict
+   reference) confirms it; if dev08 shows 5e-11 missing the class anywhere, the
+   default is revisited, not the bound. Cost: on the skewed fixture 44 SCF
+   iterations at 5e-11 against 21 at 5e-9 (strict 17). Variable-cell
+   relaxations at 5e-9 reached the strict reference's cell within 1.6e-8 Bohr
+   (BCC, isotropic) and 5.4e-6 Bohr (compact skewed, full cell and ions), well
+   inside the pre-registered 1e-3 Bohr; the numbers at the new default are in
+   ledger row ONEPATH-2-STRESS-DEFAULT.
 6. **Reference identity.** With `BAANDI_REFERENCE_STRICT=on` stress runs and
    variable-cell relaxations run the strict path with the same options and scan
    routing as before; the stress block gains only the additive

@@ -36,11 +36,13 @@ step runs the single standard SCF path with the fixed-point verification:
 forces and stress are computed only from a step whose verification passed (a
 failed verification continues that step's SCF), each frame records its
 `verification`, and `scf.verify = "off"` is an input error. The accuracy is
-`scf.standard_threshold_ha` (default 5e-9 Ha). **For stress-sensitive runs
-(tight `stress_tol_ha_bohr3`, small `energy_tol_ha`, equation-of-state fits)
-tighten the threshold**: the SCF energy is resolved to about the threshold, and
-the measured stress differences against the strict reference are in ledger row
-ONEPATH-2. The strict path with its certificate is a reference tool only
+`scf.standard_threshold_ha`; when it is not set, variable-cell modes use the
+stress default 5e-11 Ha (provisional, pending dev08), not the 5e-9 Ha of plain
+runs and fixed-cell relaxation: stress is first order in the density error, and
+5e-9 Ha missed the 1e-7 Ha/Bohr^3 stress class on a synthetic nonlocal fixture.
+An explicit value always wins; `scf.threshold_source` in `results.json` says
+which applied. Measured stress differences against the strict reference are
+in ledger rows ONEPATH-2 and ONEPATH-2-STRESS-DEFAULT. The strict path with its certificate is a reference tool only
 (`BAANDI_REFERENCE_STRICT=on`). No spin/FD driver, ESLE continuation or
 uncertified derivative is admitted. The frozen Miller chart, basis rebuilds and
 the Pulay assessment are unchanged.

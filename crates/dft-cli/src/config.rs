@@ -388,7 +388,21 @@ pub struct ScfPath {
     /// `reason`).
     pub status: &'static str,
     pub reason: Option<&'static str>,
+    /// Where the standard threshold came from (None off the standard path):
+    /// `user` (`scf.standard_threshold_ha`), `stress_default`
+    /// (`STRESS_DEFAULT_THRESHOLD_HA`, stress or variable-cell input) or
+    /// `default` (`StandardProfile::default()`).
+    pub threshold_source: Option<&'static str>,
 }
+/// Default standard threshold, Ha, of inputs that ask for stress
+/// (`output.stress`, `relax.mode = "cell"` or `"ions_cell"`) without
+/// `scf.standard_threshold_ha` (ONEPATH-2, orchestrator decision 2026-11-16
+/// under the adoption rule "the default must meet the accuracy class"): the
+/// default 5e-9 Ha missed the 1e-7 Ha/Bohr^3 stress class on a synthetic
+/// nonlocal fixture (1.3e-7), 5e-11 Ha met it on both fixtures (margin 1.6x).
+/// A rule by observable, not by material; provisional until the dev08 list
+/// `docs/performance/requests/onepath2-stress.md` confirms it.
+pub const STRESS_DEFAULT_THRESHOLD_HA: f64 = 5e-11;
 /// Reason recorded when the reference switch forces the strict path.
 pub const REFERENCE_STRICT_REASON: &str = "BAANDI_REFERENCE_STRICT=on (strict reference path)";
 /// Error for the removed `scf.convergence_profile` key (user decision 2026-11-16).
@@ -422,6 +436,7 @@ impl Config {
                 verification: dft_engine::Verification::Off,
                 status: "reference_strict",
                 reason: Some(REFERENCE_STRICT_REASON),
+                threshold_source: None,
             });
         }
         // Standard-only controls written in the input.
@@ -444,6 +459,7 @@ impl Config {
                 verification: dft_engine::Verification::Off,
                 status: "not_applicable",
                 reason: Some(reason),
+                threshold_source: None,
             });
         }
         // Callers that keep the strict path for plain inputs (checkpoint v1
@@ -459,6 +475,7 @@ impl Config {
                 verification: dft_engine::Verification::Off,
                 status: "not_applicable",
                 reason: Some(reason),
+                threshold_source: None,
             });
         }
         let verification = if verify == Some(false) {
@@ -485,15 +502,32 @@ impl Config {
                 "relax needs forces from a passed fixed-point verification on every ionic step (ADR 0043 item 5, ONEPATH-1); remove scf.verify = \"off\"".into(),
             ));
         }
+        // An explicit threshold always wins; otherwise inputs that ask for
+        // stress get the stress default, everything else the class default.
+        let (threshold_ha, source) = match threshold {
+            Some(t) => (t, "user"),
+            None if self.wants_stress() => (STRESS_DEFAULT_THRESHOLD_HA, "stress_default"),
+            None => (
+                dft_engine::StandardProfile::default().threshold_ha,
+                "default",
+            ),
+        };
         Ok(ScfPath {
-            standard: Some(dft_engine::StandardProfile {
-                threshold_ha: threshold
-                    .unwrap_or(dft_engine::StandardProfile::default().threshold_ha),
-            }),
+            standard: Some(dft_engine::StandardProfile { threshold_ha }),
             verification,
             status: "applied",
             reason: None,
+            threshold_source: Some(source),
         })
+    }
+    /// The input asks for stress: `output.stress` or a variable-cell
+    /// relaxation (`relax.mode = "cell"` or `"ions_cell"`).
+    pub fn wants_stress(&self) -> bool {
+        self.output.as_ref().is_some_and(|o| o.stress)
+            || self
+                .relax
+                .as_ref()
+                .is_some_and(|r| r.mode != crate::relax::cell::Mode::Ions)
     }
     /// Inputs that keep the strict path on the single path (ADR 0043 item 5).
     fn single_path_exclusion(&self) -> Result<Option<&'static str>, ConfigError> {
@@ -1530,14 +1564,22 @@ mod tests {
                 .unwrap();
             assert_eq!((cell.status, cell.reason), ("applied", None));
             assert_eq!(cell.verification, dft_engine::Verification::FixedPoint);
-            assert_eq!(cell.standard.unwrap().threshold_ha, 5e-9);
-            let tight = parse(&format!(
-                "[scf]\nstandard_threshold_ha = 5e-11\n[relax]\nmode = '{mode}'"
-            ))
-            .unwrap()
-            .scf_path(None)
-            .unwrap();
-            assert_eq!(tight.standard.unwrap().threshold_ha, 5e-11);
+            assert_eq!(
+                cell.standard.unwrap().threshold_ha,
+                STRESS_DEFAULT_THRESHOLD_HA
+            );
+            assert_eq!(cell.threshold_source, Some("stress_default"));
+            // An explicit value always wins, tighter or looser.
+            for user in [5e-13, 5e-9] {
+                let set = parse(&format!(
+                    "[scf]\nstandard_threshold_ha = {user:e}\n[relax]\nmode = '{mode}'"
+                ))
+                .unwrap()
+                .scf_path(None)
+                .unwrap();
+                assert_eq!(set.standard.unwrap().threshold_ha, user);
+                assert_eq!(set.threshold_source, Some("user"));
+            }
             let err = parse(&format!("[scf]\nverify = 'off'\n[relax]\nmode = '{mode}'"))
                 .unwrap_err()
                 .to_string();
@@ -1550,7 +1592,45 @@ mod tests {
             let stress = parse(tail).unwrap().scf_path(None).unwrap();
             assert_eq!((stress.status, stress.reason), ("applied", None));
             assert_eq!(stress.verification, dft_engine::Verification::FixedPoint);
+            assert_eq!(
+                (
+                    stress.standard.unwrap().threshold_ha,
+                    stress.threshold_source
+                ),
+                (STRESS_DEFAULT_THRESHOLD_HA, Some("stress_default"))
+            );
         }
+        // Forces, ions relaxation and plain runs keep the class default.
+        for tail in [
+            "",
+            "[output]\nforces = true",
+            "[relax]",
+            "[relax]\nmode = 'ions'",
+        ] {
+            let p = parse(tail).unwrap().scf_path(None).unwrap();
+            assert_eq!(
+                (p.standard.unwrap().threshold_ha, p.threshold_source),
+                (5e-9, Some("default")),
+                "{tail}"
+            );
+        }
+        let user = parse("[scf]\nstandard_threshold_ha = 1e-8\n[output]\nstress = true")
+            .unwrap()
+            .scf_path(None)
+            .unwrap();
+        assert_eq!(
+            (user.standard.unwrap().threshold_ha, user.threshold_source),
+            (1e-8, Some("user"))
+        );
+        // Off the standard path there is no threshold source.
+        let spin_like = parse("[scf]\nlocking = 'auto'\n[output]\nstress = true")
+            .unwrap()
+            .scf_path(None)
+            .unwrap();
+        assert_eq!(
+            (spin_like.standard, spin_like.threshold_source),
+            (None, None)
+        );
         let err = parse("[scf]\nverify = 'off'\n[output]\nstress = true")
             .unwrap_err()
             .to_string();

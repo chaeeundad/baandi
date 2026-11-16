@@ -40,7 +40,9 @@ error. The strict path with its certificate remains as a reference tool
 (`BAANDI_REFERENCE_STRICT=on`). Since ONEPATH-2 the variable-cell modes (`cell`,
 `ions_cell`) run the same standard path: forces and stress of every step come
 from its verified state, and the stress cutoff scans are verified standard runs
-(see [cell relaxation](cell-relaxation.md)). Tighten `standard_threshold_ha` to resolve a
+(see [cell relaxation](cell-relaxation.md)); without an explicit
+`scf.standard_threshold_ha` they default to 5e-11 Ha (stress default,
+provisional), while the ions mode keeps 5e-9 Ha. Tighten `standard_threshold_ha` to resolve a
 small ionic energy threshold or tight force tolerance (for example 5e-11 Ha, or
 5e-13 Ha for `energy_tol_ha = 1e-12`); nothing is loosened automatically.
 The spectral guard remains available. No tolerances are automatically loosened.

@@ -9,7 +9,10 @@
 //! - stress class: the synthetic stress oracle cap of `docs/validation/stress.md`
 //!   (1e-7 Ha/Bohr^3 per component), applied to the frozen-Miller tensor
 //!   difference standard against strict, to the pressure difference and to the
-//!   isotropic Pulay correction difference, at 5e-9 Ha and at 5e-11 Ha;
+//!   isotropic Pulay correction difference, at 5e-9 Ha and at 5e-11 Ha
+//!   (5e-9 failed on the skewed fixture; stress inputs now default to
+//!   5e-11 Ha, so the default-threshold test runs at 5e-11 with the same bound;
+//!   the 5e-9 numbers stay in `stress_error_decomposition_information`);
 //! - energy: |E_standard - E_strict| <= the standard threshold;
 //! - variable-cell relaxation: final lattice columns and Cartesian positions
 //!   within 1e-3 Bohr per component of the strict reference (the ONEPATH-1
@@ -125,29 +128,31 @@ fn schema_ok(path: &Path) -> bool {
 #[test]
 #[ignore = "stress runs with three cutoff-scan SCFs each; run cargo test --release -p dft-cli --test onepath_stress -- --ignored --nocapture"]
 fn standard_stress_at_5e_11_agrees_with_strict_reference() {
-    compare_stress("t5e-11", 5e-11);
+    compare_stress("t5e-11", Some(5e-11));
 }
 
-/// Stress at the default threshold 5e-9 Ha against the strict reference.
-/// KNOWN FAILURE of the pre-registered bound (ticket ONEPATH-2, criterion a),
-/// measured 2026-11-16 on the Mac: on the skewed nonlocal fixture the largest
-/// tensor component differs by 1.305e-7 Ha/Bohr^3 (relative 2.7e-5), above the
-/// 1e-7 stress class; the cubic fixture passes (2.1e-9). The bound is NOT
-/// widened: stress-sensitive runs must tighten `scf.standard_threshold_ha`
-/// (docs/cli.md, ADR 0043 amendment ONEPATH-2); whether stress inputs get a
-/// tighter default is an open user decision. This test therefore fails until
-/// that decision; it is kept so the finding stays reproducible.
+/// Stress at the default threshold of a stress input against the strict
+/// reference, bound unchanged (criterion a). History: with the class default
+/// 5e-9 Ha this test FAILED on the skewed nonlocal fixture (1.305e-7 >
+/// 1e-7 Ha/Bohr^3, relative 2.7e-5; cubic 2.1e-9, ledger ONEPATH-2). Since the
+/// orchestrator decision of 2026-11-16 (adoption rule: the default must meet the
+/// accuracy class) a stress input without `scf.standard_threshold_ha` runs at
+/// `STRESS_DEFAULT_THRESHOLD_HA` = 5e-11 Ha (`threshold_source =
+/// "stress_default"`); this test checks that rule and the bound (provisional
+/// until the dev08 list confirms; margin 1.6x on the skewed fixture).
 #[test]
-#[ignore = "KNOWN FAILURE at the default threshold (ONEPATH-2 criterion a, skew 1.3e-7 > 1e-7 Ha/Bohr^3); run cargo test --release -p dft-cli --test onepath_stress -- --ignored --nocapture"]
+#[ignore = "stress runs with three cutoff-scan SCFs each; run cargo test --release -p dft-cli --test onepath_stress -- --ignored --nocapture"]
 fn standard_stress_at_default_threshold_agrees_with_strict_reference() {
-    compare_stress("t5e-9", 5e-9);
+    compare_stress("tdefault", None);
 }
 
-/// Stress of the standard path with verification at `threshold` against the
-/// strict reference on two fixtures (cubic local-only; skewed two-species with
-/// s, s, p projectors). Every row is measured and printed before the bounds
-/// are asserted.
-fn compare_stress(tag: &str, threshold: f64) {
+/// Stress of the standard path with verification against the strict
+/// reference on two fixtures (cubic local-only; skewed two-species with
+/// s, s, p projectors), at the user threshold `user` or, when None, at the
+/// stress default (5e-11 Ha). Every row is measured and printed before the
+/// bounds are asserted.
+fn compare_stress(tag: &str, user: Option<f64>) {
+    let threshold = user.unwrap_or(5e-11);
     let dir = setup(tag);
     let mut violations = Vec::new();
     for (fixture, base) in [("cubic", CUBIC), ("skew", SKEW)] {
@@ -175,15 +180,20 @@ fn compare_stress(tag: &str, threshold: f64) {
             strict.wall
         );
         {
-            let name = format!("{fixture}-{threshold:e}");
-            let scf = if threshold == 5e-9 {
-                String::new()
-            } else {
-                format!("standard_threshold_ha={threshold:e}\n")
-            };
+            let name = format!("{fixture}-{tag}");
+            let scf = user.map_or(String::new(), |t| format!("standard_threshold_ha={t:e}\n"));
             let standard = cli(&dir, "run", &name, &input(&name, &scf), false);
             let v = ok(&standard);
             assert_eq!(v["single_path"]["status"], "applied");
+            assert_eq!(
+                v["single_path"]["threshold_source"],
+                if user.is_some() {
+                    "user"
+                } else {
+                    "stress_default"
+                }
+            );
+            assert_eq!(v["single_path"]["standard_threshold_ha"], threshold);
             assert_eq!(v["single_path"]["verification"], "fixed_point");
             assert_eq!(v["verified"], true);
             let p = &v["stress"]["preconditions"];
@@ -253,7 +263,11 @@ fn stress_error_decomposition_information() {
         let e = t["total_energy"]["ha"].as_f64().unwrap();
         for (label, scf, strict) in [
             ("strict default", String::new(), true),
-            ("standard 5e-9", String::new(), false),
+            (
+                "standard 5e-9",
+                "standard_threshold_ha=5e-9\n".into(),
+                false,
+            ),
             (
                 "standard 5e-10",
                 "standard_threshold_ha=5e-10\n".into(),
@@ -325,11 +339,13 @@ fn standard_variable_cell_relaxation_matches_strict_reference() {
             } else {
                 assert_eq!(v["single_path"]["status"], "applied");
                 assert_eq!(v["single_path"]["verification"], "fixed_point");
-                assert_eq!(v["scf"]["standard_threshold_ha"], 5e-9);
+                // Variable-cell input: the stress default applies.
+                assert_eq!(v["scf"]["standard_threshold_ha"], 5e-11);
+                assert_eq!(v["scf"]["threshold_source"], "stress_default");
                 for f in frames {
                     let ver = &f["verification"];
                     assert_eq!(ver["passed"], true, "{f}");
-                    assert!(ver["coulomb_error_ha"].as_f64().unwrap() < 5e-9);
+                    assert!(ver["coulomb_error_ha"].as_f64().unwrap() < 5e-11);
                 }
             }
             let last = frames.last().unwrap();

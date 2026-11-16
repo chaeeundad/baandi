@@ -268,8 +268,10 @@ observed failures and validation limits. No QE symmetry-on oracle is available.
 
 ## Atomic forces (P20A)
 
-`forces(&ForceState)` is post-convergence only. It rejects standard/uncertified
-states and reports the complete NC derivative sum. The borrowed cell, atoms,
+`forces(&ForceState)` is post-convergence only. It accepts a strict state with a
+passed certificate or (ADR 0043, ONEPATH-1) a standard state with a passed
+fixed-point verification, rejects unverified standard and uncertified states,
+and reports the complete NC derivative sum. The borrowed cell, atoms,
 UPFs, options, density floor and symmetry operations must be the exact original
 model. A private setup-time descriptor independently compares these fields and
 exact parsed pseudopotential content before force work. File SHA-256 provenance

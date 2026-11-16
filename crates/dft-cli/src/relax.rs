@@ -1,5 +1,5 @@
 //! Fixed-cell ionic driver. SCF kernels and derivative ownership stay in engine.
-mod cell;
+pub(crate) mod cell;
 pub mod optimizer;
 use crate::{
     config::Config,
@@ -1102,6 +1102,7 @@ fn outputs(
         "single_path":crate::run::single_path_json(&ctx.scf_path, &ctx.opts),
         "scf":{"effective_profile":if ctx.opts.standard.is_some() { "standard" } else { "strict" },
             "standard_threshold_ha":ctx.opts.standard.map(|p| p.threshold_ha),
+            "threshold_source":ctx.scf_path.threshold_source,
             "verification":if ctx.opts.standard.is_some() { ctx.opts.verification.name() } else { "strict_certificate" },
             "note":"every ionic or cell step runs this SCF; forces and stress of a standard step rest on its passed fixed-point verification (frames[].verification); tighten scf.standard_threshold_ha for force- or stress-sensitive runs"},
         "relaxation":{"status":state.status,"steps":state.frames.len()-1,"final_max_force_ha_bohr":last.max_force_ha_bohr,

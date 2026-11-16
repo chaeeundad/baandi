@@ -12,8 +12,10 @@ moved from the strict path to the standard path with the fixed-point verificatio
 three cutoff-scan SCFs of the Pulay estimate run standard with verification at
 `min(1e-9 Ha, scf.standard_threshold_ha)`. On the Mac the default 5e-9 Ha failed the
 pre-registered stress class on one synthetic nonlocal fixture (1.305e-7 Ha/Bohr^3) and
-5e-11 Ha met it on both. The user decides from these numbers whether stress inputs get a
-tighter default threshold (recommendation: 5e-11 Ha); nothing changes before that.
+5e-11 Ha met it on both (margin 1.6x). Orchestrator decision 2026-11-16: stress inputs
+without an explicit threshold now default to 5e-11 Ha, PROVISIONAL until this list
+confirms that 5e-11 meets the stress class on every geometry (if not, the default is
+revisited, never the bound).
 
 ## Build
 Branch HEAD of ONEPATH-2 after merge with main. MKL build (`--features mkl`,
@@ -24,9 +26,12 @@ and exit code recorded. Same binary for every arm.
 - REF: `BAANDI_REFERENCE_STRICT=on`, plain input (strict path with its certificate).
 - TIGHT: REF with `[scf] energy_tolerance_ha = 1e-12`, `density_residual_tolerance = 1e-10`,
   `eigen_tolerance = 1e-11`, `max_iterations = 300` (stress truth for the error columns).
-- S9: plain input (default standard path, 5e-9 Ha, verification on).
-- S10: plain input with `[scf] standard_threshold_ha = 5e-10`.
-- S11: plain input with `[scf] standard_threshold_ha = 5e-11`.
+- S9: `[scf] standard_threshold_ha = 5e-9` written explicitly (stress inputs no
+  longer default to 5e-9; `threshold_source = "user"`).
+- S10: `[scf] standard_threshold_ha = 5e-10`.
+- S11: plain input (the provisional stress default 5e-11 Ha,
+  `threshold_source = "stress_default"`); this arm is the one that confirms or
+  refutes the default.
 Defaults otherwise. T=1 (taskset core 0) for every run; T=8 (cores 0-7) for the si16
 arms S9 and S11 only (thread independence). Node idle (load below 0.30), uptime before and
 after, arms interleaved per geometry.

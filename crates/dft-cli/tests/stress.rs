@@ -52,33 +52,46 @@ fn stress_output_identity_schema_and_paths() {
     let p = &result["stress"]["preconditions"];
     assert_eq!(p["convergence_profile"], "standard");
     assert_eq!(p["fixed_point_verification_passed"], true);
-    assert_eq!(p["standard_threshold_ha"], 5e-9);
+    // ONEPATH-2 stress default: 5e-11 Ha when no threshold is written.
+    assert_eq!(p["standard_threshold_ha"], 5e-11);
+    assert_eq!(result["single_path"]["standard_threshold_ha"], 5e-11);
+    assert_eq!(result["single_path"]["threshold_source"], "stress_default");
     let pulay = &result["stress"]["pulay_assessment"];
     assert_eq!(pulay["scan_profile"], "standard_verified");
     // Scan threshold min(1e-9, caller threshold) for a converged first try.
     assert_eq!(
         pulay["scan_thresholds_ha"],
-        serde_json::json!([1e-9, 1e-9, 1e-9])
+        serde_json::json!([5e-11, 5e-11, 5e-11])
     );
-    let off = run(&base.replace("stress=true", "stress=false"));
+    // Stress-off identity at the same effective threshold (written by the
+    // user there, since a plain run defaults to 5e-9 Ha).
+    let off = run(&base
+        .replace("stress=true", "stress=false")
+        .replace("[scf]", "[scf]\nstandard_threshold_ha=5e-11"));
     assert!(off.status.success());
     let no_stress: serde_json::Value =
         serde_json::from_slice(&fs::read(dir.join("out/results.json")).unwrap()).unwrap();
+    assert_eq!(no_stress["single_path"]["threshold_source"], "user");
     assert_eq!(result["total_energy"], no_stress["total_energy"]);
     assert_eq!(density, fs::read(dir.join("out/density.bin")).unwrap());
-    // A tighter standard threshold is accepted and tightens the scans.
-    let tight = run(&base.replace("[scf]", "[scf]\nstandard_threshold_ha=5e-11"));
+    // An explicit (here looser) threshold wins; the scans stay at 1e-9 Ha.
+    let user = run(&base.replace("[scf]", "[scf]\nstandard_threshold_ha=5e-9"));
     assert!(
-        tight.status.success(),
+        user.status.success(),
         "{}",
-        String::from_utf8_lossy(&tight.stderr)
+        String::from_utf8_lossy(&user.stderr)
     );
     assert!(schema_ok());
-    let tight: serde_json::Value =
+    let user: serde_json::Value =
         serde_json::from_slice(&fs::read(dir.join("out/results.json")).unwrap()).unwrap();
+    assert_eq!(user["single_path"]["threshold_source"], "user");
     assert_eq!(
-        tight["stress"]["pulay_assessment"]["scan_thresholds_ha"],
-        serde_json::json!([5e-11, 5e-11, 5e-11])
+        user["stress"]["preconditions"]["standard_threshold_ha"],
+        5e-9
+    );
+    assert_eq!(
+        user["stress"]["pulay_assessment"]["scan_thresholds_ha"],
+        serde_json::json!([1e-9, 1e-9, 1e-9])
     );
     // The strict reference keeps its certificate preconditions.
     let strict = run_with(base, "on");

@@ -264,6 +264,8 @@ fn options_json(o: &ScfOptions) -> Value {
 pub(crate) fn single_path_json(path: &crate::config::ScfPath, o: &ScfOptions) -> Value {
     json!({"status":path.status,"reason":path.reason,
         "effective_profile":if o.standard.is_some() { "standard" } else { "strict" },
+        "standard_threshold_ha":o.standard.map(|p| p.threshold_ha),
+        "threshold_source":path.threshold_source,
         "verification":if o.standard.is_some() { o.verification.name() } else { "strict_certificate" },
         "switch":"BAANDI_REFERENCE_STRICT","adr":"0043"})
 }

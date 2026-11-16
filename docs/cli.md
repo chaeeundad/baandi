@@ -1068,11 +1068,17 @@ threshold when that is looser; no strict fallback), recorded in
 (including basis rebuilds and the final nominal-cutoff point) verifies and
 records `frames[].verification`; the frozen Miller chart and the Pulay handling
 are unchanged. `verify = "off"` with `output.stress` or with any `[relax]` is an
-input error. **For stress-sensitive runs (tight `stress_tol_ha_bohr3`, small
-`energy_tol_ha`, equation-of-state fits) tighten `scf.standard_threshold_ha`**;
-measured stress differences against the strict reference: ledger row ONEPATH-2,
-dev08 request `performance/requests/onepath2-stress.md`. The default threshold
-is unchanged.
+input error. **Stress default threshold (provisional):** an input with
+`output.stress = true` or `relax.mode = "cell"`/`"ions_cell"` and no
+`scf.standard_threshold_ha` runs at 5e-11 Ha instead of 5e-9 Ha, because 5e-9
+missed the 1e-7 Ha/Bohr^3 stress class on a synthetic nonlocal fixture
+(1.3e-7) while 5e-11 met it on both fixtures (margin 1.6x). Forces,
+`relax.mode = "ions"` and plain runs keep 5e-9 Ha; an explicit
+`scf.standard_threshold_ha` always wins. `single_path.standard_threshold_ha` and
+`single_path.threshold_source` (`user`, `stress_default`, `default`) record
+what applied (also in the relaxation `scf` block). The rule awaits
+confirmation by the dev08 request `performance/requests/onepath2-stress.md`;
+measurements: ledger rows ONEPATH-2 and ONEPATH-2-STRESS-DEFAULT.
 
 Collinear spin, Fermi-Dirac occupations and `scf.locking = "auto"` keep
 the strict path (`not_applicable` with the reason); in those inputs the

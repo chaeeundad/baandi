@@ -196,6 +196,8 @@ table! {
         "P48F: thread the atomic start (span build, two-pass Gram-Schmidt right-looking) on the SCF pool; bit-identical";
     REUSE_PSI: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "C2: a lean real Gamma Davidson solve that starts from the previous solve's orbitals X takes H X from that solve's rotated H images plus (V_new - V_old) X, formed from the psi(r) the density build kept (one forward transform per pair; no inverse transform, nonlocal product or kinetic pass); falls back to the plain apply when X, the operator or the grid changed or the cache exceeds its memory gate; rounding class";
+    VERIFY_REUSE: Kind::Choice { allowed: &["off", "warm", "feed"], default: "off" }, "off", "off, warm, feed",
+        "reuse of a failed fixed-point verification solve (F at the delivered density rho_out): warm = the next SCF step starts from its orbitals (so the REUSE_PSI kept start is taken); feed = warm and the pair (rho_out, F(rho_out)) also enters the mixer after the step's own pair, so the next input density is mixed from it (the verification map counts as an SCF map); off = discarded; rounding class (trajectory changes, acceptance still needs a passed verification)";
     // MPI entry cost (docs/performance/mpi-entry-cost-analysis.md). Adopted 2026-11-15 on dev08 A/B: M2_DGEMM, M2_ORTHO=serial and M2_LEAN default on; M2_FFT stays rust (neutral).
     M2_DGEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "distributed Davidson rotations and projections and the M2 nonlocal products through the per-panel dgemm at any width (MKL builds: rounding class; pure builds bit-identical)";
@@ -222,6 +224,16 @@ table! {
     // MPI selected-root rotation (review F05; ledger row M2-SELECTED-ROOTS-F05); default off until dev08.
     M2_SELECTED_ROOTS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "distributed Davidson Ritz-change (standard) solves: unconverged roots decided from the Ritz-value change first, Ritz vectors, H images and residuals of those roots only, all bands rotated only at return and restarts (the serial lean rule); strict solves unchanged; implies the workspace path; rounding class";
+    // MPI in-panel Gram-Schmidt reductions (docs/performance/profile-2026-11-16-mpi.md); default classic until dev08.
+    M2_PANEL_GS: Kind::Choice { allowed: &["classic", "pythag", "fused"], default: "classic" }, "classic",
+        "classic, pythag, fused",
+        "distributed panel Gram-Schmidt reductions per column: classic (two dot reductions and one norm), pythag (norm rides with the second dots, Pythagorean update, 2 reductions), fused (input norm rides with the first dots, second pass only when the per-column DGKS rule of BAANDI_ORTHO fails, about 1 reduction); rounding class";
+    M2_DENSITY: Kind::Choice { allowed: &["bands", "fused"], default: "bands" }, "bands",
+        "bands, fused",
+        "M2 distributed density on the standard path: bands (per-band plane contributions kept, then summed) or fused (plane density accumulated in ascending band order, no bands x plane buffer; the per-band data only serves the strict certificate screen); bit-identical";
+    MPI_TREE: Kind::Choice { allowed: &["binomial", "rd"], default: "binomial" }, "binomial",
+        "binomial, rd",
+        "message pattern of the deterministic MPI tree sum: binomial (reduce to rank 0 plus broadcast, 2 log2 P rounds) or rd (recursive doubling with MPI_Sendrecv, log2 P rounds; bit-identical for power-of-two rank counts, other counts stay binomial); read by the CLI at MPI start";
     // MPI coarse stage and certificate (docs/performance/mpi-coarse-certificate-analysis.md); default off.
     M2_SCREEN: Kind::Choice { allowed: &["replicated", "dist"], default: "dist" }, "dist",
         "replicated, dist",

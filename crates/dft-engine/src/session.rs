@@ -626,6 +626,9 @@ impl ScfSession {
         // fixed-point residual. A small-gap response can amplify that residual.
         self.problem.energy_identity = false;
         let mut rescued = None;
+        // VERIFY-REUSE (`BAANDI_VERIFY_REUSE=warm|feed`): orbitals and output
+        // density F(rho_out) of a failed verification solve.
+        let mut verification_reuse: Option<(Vec<ComplexMatrix>, Array3<f64>)> = None;
         let mut unable_to_verify = false;
         // Opt-in pre-screen (BAANDI_CERT_SCREEN=on): predict a certain failure of the
         // occupied-eigenvalue criterion from first-order perturbation theory before
@@ -716,7 +719,7 @@ impl ScfSession {
                 // ADR 0043: one more map at the delivered density; the delivered
                 // state stays the converged step's own (V4).
                 self.certificate_attempted = true;
-                let (attempt, record, clipped) = verify_fixed_point(
+                let (attempt, record, clipped, reuse) = verify_fixed_point(
                     &mut self.problem,
                     &step.density,
                     &step.k_points,
@@ -738,6 +741,9 @@ impl ScfSession {
                     });
                 }
                 passed = attempt.passed;
+                if !passed && verify_reuse(&self.problem) != VerifyReuse::Off {
+                    verification_reuse = Some(reuse);
+                }
                 self.verification.attempts.push(attempt);
                 history.last_mut().unwrap().fixed_point_certificate = Some(record);
             }
@@ -999,6 +1005,26 @@ impl ScfSession {
                 reason: e.to_string(),
                 history: history.clone(),
             })?;
+        // VERIFY-REUSE feed: the failed verification evaluated the map at rho_out;
+        // its pair enters the mixer after the step's own, and the next input is
+        // mixed from it (the step's own proposal above is superseded).
+        let feed = verification_reuse
+            .as_ref()
+            .filter(|_| verify_reuse(&self.problem) == VerifyReuse::Feed)
+            .map(|(_, d)| d);
+        if let Some(fed) = feed {
+            mixed = mixer
+                .mix(
+                    step.density.as_slice().unwrap(),
+                    fed.as_slice().unwrap(),
+                    self.problem.electrons / self.problem.cell.volume_bohr3(),
+                )
+                .map_err(|e| ScfError::Diverged {
+                    reason: e.to_string(),
+                    history: history.clone(),
+                })?;
+        }
+        let base: &Array3<f64> = if feed.is_some() { &step.density } else { n };
         history.last_mut().unwrap().mixing_history_used =
             Some(mixer.history_len().saturating_sub(1));
         history.last_mut().unwrap().mixing_raw_recovery = mixer.used_raw_recovery();
@@ -1009,14 +1035,14 @@ impl ScfSession {
             self.problem.options.mixing,
             Mixing::Pulay { .. } | Mixing::KerkerPulay { .. }
         ) {
-            let fraction = n
+            let fraction = base
                 .iter()
                 .zip(&mixed)
                 .filter(|(_, b)| **b < 0.0)
                 .map(|(a, b)| 0.9 * a / (a - b))
                 .fold(1.0, f64::min);
             if fraction < 1.0 {
-                for (b, a) in mixed.iter_mut().zip(n.iter()) {
+                for (b, a) in mixed.iter_mut().zip(base.iter()) {
                     *b = a + fraction * (*b - a);
                 }
                 mixer.reset();
@@ -1029,7 +1055,8 @@ impl ScfSession {
         }
         n.as_slice_mut().unwrap().copy_from_slice(&mixed);
         history.last_mut().unwrap().timings.mixing = mix_start.elapsed();
-        *previous = rescued.or_else(|| {
+        let verification_orbitals = verification_reuse.map(|(o, _)| o);
+        *previous = rescued.or(verification_orbitals).or_else(|| {
             Some(
                 step.k_points
                     .into_iter()
@@ -1718,6 +1745,15 @@ fn verification_attempts_consistent(c: &crate::checkpoint::ContinuationState) ->
         })
 }
 
+/// Attempt, its history record, a clipped-charge failure, and the solve's
+/// orbitals and output density F(rho_out) (VERIFY-REUSE).
+type VerificationOutcome = (
+    VerificationAttempt,
+    FixedPointCertificate,
+    Option<String>,
+    (Vec<ComplexMatrix>, Array3<f64>),
+);
+
 /// ADR 0043 verification: one more ordinary map at the converged output density
 /// (V1), pass on the Coulomb fixed-point residual at the standard threshold and,
 /// with the residual guard on, the residual estimate of that solve (V2). Strict
@@ -1730,7 +1766,7 @@ fn verify_fixed_point(
     tolerance: f64,
     standard_error_ha: f64,
     iteration: usize,
-) -> Result<(VerificationAttempt, FixedPointCertificate, Option<String>), ScfError> {
+) -> Result<VerificationOutcome, ScfError> {
     let clock = Instant::now();
     let threshold = problem
         .options
@@ -1874,7 +1910,34 @@ fn verify_fixed_point(
         chemical_potential_change_ha: None,
         moment_change: None,
     };
-    Ok((attempt, record, clipped))
+    let orbitals = check
+        .k_points
+        .into_iter()
+        .map(|k| k.solution.eigenvectors)
+        .collect();
+    Ok((attempt, record, clipped, (orbitals, check.density)))
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum VerifyReuse {
+    Off,
+    Warm,
+    Feed,
+}
+/// `BAANDI_VERIFY_REUSE=off|warm|feed` (default off; ledger VERIFY-REUSE).
+fn verify_reuse(#[allow(unused_variables)] problem: &ScfProblem) -> VerifyReuse {
+    #[cfg(test)]
+    if let Some(mode) = problem.force_verify_reuse {
+        return mode;
+    }
+    static MODE: std::sync::OnceLock<VerifyReuse> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| {
+        match dft_numerics::switches::choice(dft_numerics::switches::Id::VERIFY_REUSE) {
+            "warm" => VerifyReuse::Warm,
+            "feed" => VerifyReuse::Feed,
+            _ => VerifyReuse::Off,
+        }
+    })
 }
 
 /// Largest occupied-eigenvalue change (Ha) the fixed-point certificate accepts.

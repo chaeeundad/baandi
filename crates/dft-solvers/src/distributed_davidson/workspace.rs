@@ -307,9 +307,10 @@ fn panel_gs_into<C: Collective>(
     comm: &C,
     gemm: &mut RealGemmWorkspace,
     panel: usize,
-    wide: bool,
+    tuning: &DistributedTuning,
     o: &mut OrthoScratch,
 ) -> Result<f64, SolverError> {
+    let wide = tuning.wide_gemm;
     let OrthoScratch {
         x,
         y,
@@ -359,32 +360,16 @@ fn panel_gs_into<C: Collective>(
         let first = kept;
         for jj in 0..w {
             v.copy_from_slice(column_of(p, jj));
-            for _ in 0..2 {
-                let k = kept - first;
-                if k > 0 {
-                    local.clear();
-                    for c in first..kept {
-                        let q = &y.as_slice()[c * rows..(c + 1) * rows];
-                        local.push(q.iter().zip(v.iter()).map(|(a, b)| a * b).sum::<f64>());
-                    }
-                    sums.clear();
-                    sums.resize(k, 0.0);
-                    site(Site::PanelDot);
-                    comm.tree_sum_f64(local, sums).map_err(comm_error)?;
-                    for (c, s) in (first..kept).zip(sums.iter()) {
-                        let q = &y.as_slice()[c * rows..(c + 1) * rows];
-                        for (vi, qi) in v.iter_mut().zip(q) {
-                            *vi -= s * qi;
-                        }
-                    }
-                }
-            }
-            let local_norm = [v.iter().map(|a| a * a).sum::<f64>()];
-            let mut total = [0.0];
-            site(Site::PanelNorm);
-            comm.tree_sum_f64(&local_norm, &mut total)
-                .map_err(comm_error)?;
-            let len = total[0].sqrt();
+            let len = panel_column(
+                comm,
+                &y.as_slice()[first * rows..kept * rows],
+                rows,
+                v,
+                local,
+                sums,
+                tuning.panel_gs,
+                tuning.dgks,
+            )?;
             if len.is_finite() {
                 min_len = min_len.min(len);
             }
@@ -460,7 +445,7 @@ fn ortho_into<C: Collective>(
                 tuning.wide_gemm,
             )?;
         }
-        let min_len = panel_gs_into(comm, gemm, panel, tuning.wide_gemm, o)?;
+        let min_len = panel_gs_into(comm, gemm, panel, tuning, o)?;
         if pass == 0
             && against.is_some()
             && let Some(keep) = tuning.dgks

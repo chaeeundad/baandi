@@ -56,6 +56,21 @@ unsafe extern "C" {
         comm: Handle,
         status: *mut c_void,
     ) -> c_int;
+    #[allow(clippy::too_many_arguments)]
+    fn MPI_Sendrecv(
+        sendbuf: *const c_void,
+        sendcount: c_int,
+        sendtype: Handle,
+        dest: c_int,
+        sendtag: c_int,
+        recvbuf: *mut c_void,
+        recvcount: c_int,
+        recvtype: Handle,
+        source: c_int,
+        recvtag: c_int,
+        comm: Handle,
+        status: *mut c_void,
+    ) -> c_int;
     fn MPI_Alltoall(
         sendbuf: *const c_void,
         sendcount: c_int,
@@ -255,14 +270,68 @@ impl World {
         let (rank, size) = (self.rank(), self.size());
         let n = count(local.len(), "tree_sum count")?;
         out.copy_from_slice(local);
+        let doubling = size.is_power_of_two()
+            && crate::tree_sum_pattern() == crate::TreeSum::RecursiveDoubling;
         RECV_SCRATCH.with(|scratch| {
             let incoming = &mut *scratch.borrow_mut();
             if incoming.len() < local.len() {
                 incoming.resize(local.len(), 0.0);
             }
-            self.tree_steps(rank, size, n, out, &mut incoming[..local.len()])
+            if doubling {
+                self.doubling_steps(rank, size, n, out, &mut incoming[..local.len()])
+            } else {
+                self.tree_steps(rank, size, n, out, &mut incoming[..local.len()])
+            }
         })?;
-        self.bcast_f64(out, 0)
+        if doubling {
+            Ok(())
+        } else {
+            self.bcast_f64(out, 0)
+        }
+    }
+    /// Recursive-doubling rounds of `tree_sum_f64` (P a power of two): in round s
+    /// rank r exchanges its partial with r XOR s and both form (lower partner's
+    /// partial) + (higher partner's partial), the association of the binomial
+    /// tree (`crate::recursive_doubling_associate`), so the bits equal the
+    /// binomial reduce plus broadcast on every rank.
+    fn doubling_steps(
+        &self,
+        rank: usize,
+        size: usize,
+        n: c_int,
+        out: &mut [f64],
+        incoming: &mut [f64],
+    ) -> Result<(), MpiError> {
+        let mut step = 1;
+        while step < size {
+            let partner = (rank ^ step) as c_int;
+            // SAFETY: `out` and `incoming` hold n doubles each and do not overlap;
+            // both are borrowed for the blocking call; the null status pointer is
+            // MPI_STATUS_IGNORE in the Open MPI ABI.
+            check("MPI_Sendrecv", unsafe {
+                MPI_Sendrecv(
+                    out.as_ptr().cast(),
+                    n,
+                    self.double(),
+                    partner,
+                    7002,
+                    incoming.as_mut_ptr().cast(),
+                    n,
+                    self.double(),
+                    partner,
+                    7002,
+                    self.comm(),
+                    std::ptr::null_mut(),
+                )
+            })?;
+            // IEEE addition is commutative, so own + incoming has the bits of
+            // (lower partial) + (higher partial) on both partners.
+            for (a, b) in out.iter_mut().zip(incoming.iter()) {
+                *a += *b;
+            }
+            step <<= 1;
+        }
+        Ok(())
     }
     /// The send/receive rounds of `tree_sum_f64` with a caller-owned receive buffer.
     fn tree_steps(

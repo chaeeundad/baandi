@@ -7,6 +7,14 @@ use dft_geometry::{Atom, Cell};
 use dft_mpi::{Collective, SimRank, simulate};
 use std::sync::Arc;
 
+/// The distributed solver keeps process-wide reduction counters and a process-wide
+/// tuning override; concurrent tests in this binary would mix them, so every test
+/// takes this lock (the tests are small).
+fn serial() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn run(kind: usize, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult {
     run_with(kind, comm, 1, 5, 2.5)
 }
@@ -52,6 +60,7 @@ fn run_with(
 
 #[test]
 fn distributed_scf_matches_threads_only() {
+    let _serial = serial();
     for kind in 0..2 {
         let serial = run(kind, None);
         for ranks in [2usize, 3] {
@@ -78,6 +87,7 @@ fn distributed_scf_matches_threads_only() {
 
 #[test]
 fn distributed_with_threads_takes_the_distributed_path_and_keeps_iterations() {
+    let _serial = serial();
     // threads >= 2 used to move the solve to a pool thread where the communicator
     // is not visible, silently running the serial solver on every rank.
     let serial = run_with(1, None, 2, 24, 4.0);
@@ -113,6 +123,7 @@ fn distributed_with_threads_takes_the_distributed_path_and_keeps_iterations() {
 /// the energy equals the threads-only run within the strict class (1e-10 Ha).
 #[test]
 fn multiple_k_points_run_replicated_on_every_rank() {
+    let _serial = serial();
     use dft_engine::OccupationPolicy;
     use dft_geometry::kpoints::KPoint;
     let run_k = |comm: Option<Arc<dyn Collective + Send + Sync>>| {
@@ -184,6 +195,7 @@ fn run_m2(kind: usize, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfRe
 
 #[test]
 fn m2c_stick_row_scf_matches_threads_only() {
+    let _serial = serial();
     // Cubic and skewed cells; the M2c path is selected per thread (no env mutation).
     assert!(
         parallel::m2_enabled(),
@@ -267,6 +279,7 @@ fn run_m2_profile(
 
 #[test]
 fn m2d_distributed_scf_stages_match_threads_only() {
+    let _serial = serial();
     // Two cell shapes, strict (1e-10 Ha) and standard (5e-9 Ha) classes, 2..4 ranks.
     for (standard, limit) in [(false, 1e-10), (true, 5e-9)] {
         for kind in 0..2 {
@@ -324,6 +337,7 @@ fn m2d_distributed_scf_stages_match_threads_only() {
 
 #[test]
 fn m2_off_and_one_rank_keep_the_threads_only_bits() {
+    let _serial = serial();
     // M2 requested on one rank (no communicator) must be the threads-only path.
     let serial = run(0, None);
     let one = run_m2_profile(0, None, false);
@@ -347,6 +361,7 @@ fn m2_off_and_one_rank_keep_the_threads_only_bits() {
 /// rank agrees bit for bit and a fixed rank count is bit-reproducible.
 #[test]
 fn m2_tuned_solver_matches_threads_only() {
+    let _serial = serial();
     use dft_solvers::distributed_davidson::{DistributedTuning, set_tuning_override};
     let tuned = DistributedTuning {
         serial_ortho: true,
@@ -400,6 +415,7 @@ fn m2_tuned_solver_matches_threads_only() {
 /// cells, 2 and 3 ranks, strict and standard.
 #[test]
 fn m2_panel_gs_variants_keep_classes() {
+    let _serial = serial();
     use dft_solvers::distributed_davidson::{
         DistributedTuning, PanelGs, reduction_stats, set_tuning_override,
     };
@@ -466,6 +482,7 @@ fn m2_panel_gs_variants_keep_classes() {
 /// 3 ranks, strict and standard.
 #[test]
 fn m2_reduced_eigen_switches_keep_classes() {
+    let _serial = serial();
     use dft_solvers::distributed_davidson::{DistributedTuning, set_tuning_override};
     let stack = DistributedTuning {
         serial_ortho: true,
@@ -537,6 +554,7 @@ fn m2_reduced_eigen_switches_keep_classes() {
 /// strict and standard, 2 and 3 ranks, on the adopted stack from the switches.
 #[test]
 fn m2_workspace_is_bit_identical_in_scf() {
+    let _serial = serial();
     use dft_solvers::distributed_davidson::{
         DistributedTuning, release_workspace, set_tuning_override, workspace_stats,
     };

@@ -24,7 +24,7 @@ FINDING (MPI-REMAINING-MAP): from np 4 to 8 the panel Gram-Schmidt of the correc
 Every replicated quantity is computed from tree-summed data by the same code on every rank (same GEMM workspace shape, thread-count independent), so every rank holds the same bits and takes the same branches (pivot decisions, fallbacks, convergence flags).
 
 ## 3. Reductions per iteration (C)
-Default M2 stack (serial-order orthonormalization, fused panel Gram-Schmidt, selected roots), one Davidson iteration that appends k corrections:
+M2 stack (serial-order orthonormalization, fused panel Gram-Schmidt, selected roots), one Davidson iteration that appends k corrections:
 | step | orthonormal path | lean algebra |
 |---|---|---|
 | H border | 1 (`reduced_gram`) | 1 (`reduced_gram`) |
@@ -62,12 +62,13 @@ First version: S border, H border and residual norms in ONE tree sum after H was
 - `M2_SELECTED_ROOTS`: the lean path always uses the selected-root rule (residuals of unconverged roots only; all bands at return and contraction), independent of that switch.
 - `M2_PANEL_GS`: unused on the lean path except inside the fallback stages (in-block Gram-Schmidt of a rejected block, rebuild), where the switch applies as before.
 - `M2_EIGEN=root`: ignored on the lean path (stage 2 needs all reduced eigenvectors on every rank); the reduced problem is solved replicated. `M2_B5=on` applies to A (its leading block is kept bit for bit by the border update).
-- `M2_START=gram`: on the lean path the start block is accepted when its Gram matrix passes the pivot rule (instead of the 1e-12 defect), and the factor is kept (no second S reduction). `M2_START=ortho`: the start is orthonormalized as before (its panel Gram-Schmidt is most of the remaining reductions of a solve; the stack with `gram` removes it).
-- `M2_REUSE` (kept start): the generalized path needs a factorable S of the kept X, not an orthonormal X: the kept start is taken when initial equals X (unchanged flag reduction) and the Gram of X (unchanged reduction) passes the pivot rule; the factor is kept. Counter `factored_starts`.
+- `M2_START=gram` (default since 0d87d6e): on the lean path the start block is accepted when its Gram matrix passes the pivot rule (instead of the 1e-12 defect), and the factor is kept (no second S reduction). `M2_START=ortho`: the start is orthonormalized as before (its panel Gram-Schmidt is then most of the remaining reductions of a solve).
+- `M2_REUSE` (kept start, default on since 0d87d6e): the generalized path needs a factorable S of the kept X, not an orthonormal X: the kept start is taken when initial equals X (unchanged flag reduction) and the Gram of X (unchanged reduction) passes the pivot rule; the factor is kept. Counter `factored_starts`.
 - `M2_LAZY`: unchanged (the return keeps the local rows; no gather).
 - M1 path (`solve_distributed`): takes the same code when the switch is on (workspace path).
 
 ## 8. Screens (O, Mac pure build, simulated ranks, shared host at load 6 to 12; counters exact C)
+Measured on 2963c86 defaults (greedy sticks, ortho start, no kept start); main 0d87d6e has since adopted mirror sticks, the Gram start and the kept start, i.e. the stack arm S below is the new default.
 ### Stage 0 (`scripts/fast_screen_dav.py --ranks P --b BAANDI_M2_LEAN_ALGEBRA=on`, f1e-3 seed 601, converged base density, 3 alternating pairs x 5 repeats, davidson_bench sha256 9f3833e8c557cea6; capacity rule 6 per band at np=2, 3 at np >= 4)
 | cell | cold solve B/A (spread) | warm solve B/A (spread) | tree sums cold / warm A -> B | H columns, Davidson iterations | warm stage-1 re-projections | GEMM flop warm |
 |---|---|---|---|---|---|---|

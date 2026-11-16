@@ -872,8 +872,8 @@ pub(super) fn run<C: Collective>(
                 site(Site::OrthoNormalize);
                 column_norms_squared_into(comm, corrections, norm_partial, norms)?;
                 let mut kept_cols = 0;
-                for j in 0..kk {
-                    let len = norms[j].sqrt();
+                for (j, &n2) in norms.iter().enumerate().take(kk) {
+                    let len = n2.sqrt();
                     if !len.is_finite() {
                         return Err(SolverError::Application(
                             "distributed lean Davidson: non-finite re-projected correction".into(),

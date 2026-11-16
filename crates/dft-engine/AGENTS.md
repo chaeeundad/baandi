@@ -448,10 +448,12 @@ Counters `reuse_*` in `m2::stats`. Test
 
 ## VERIFY-REUSE (2026-11-16, default off)
 
-`BAANDI_VERIFY_REUSE=off|warm|feed` (`session.rs` `verify_reuse`; test hook
+`BAANDI_VERIFY_REUSE=off|warm|feed|feed2|replace|half` (`session.rs` `verify_reuse`; test hook
 `ScfProblem::force_verify_reuse`). Acts only after a failed ADR 0043 verification:
 `warm` starts the next step from the verification solve's orbitals (its REUSE-PSI
 kept start is then taken); `feed` also mixes the pair (rho_out, F(rho_out)) after
-the step's own pair. Off is the default path bit for bit; acceptance still needs a
+the step's own pair; `half` (the dev08 candidate) takes the midpoint of the
+step's and the fed Pulay proposals; `feed2` feeds only from the second failure;
+`replace` records only the verification pair (rejected). Off is the default path bit for bit; acceptance still needs a
 passed verification. Test `verification_tests::failed_verification_reuse_keeps_the_fixed_point`.
 Ledger VERIFY-REUSE-*, dev08 request `docs/performance/requests/verify-reuse.md`.

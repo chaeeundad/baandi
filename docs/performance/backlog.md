@@ -232,6 +232,6 @@ Evidence: on si32 strict (perturbed seed 601) 66.4 percent of Davidson apply cal
 - C3a (2026-11-16, from C2-REUSE-PSI / C3-NL-ENERGY-FROM-PROJECTIONS): lean solver keeps P^T V beside H V (copy after each apply via `copy_last_projections`, rotate at contraction and return) so the audit's nonlocal energy reads (P^T V) C and the C2 kept start carries P^T X; removes one n x n_proj x bands GEMM per map (si64 E 1.5 to 2.7 %). Own switch, counts first. IMPLEMENTED 2026-11-16 as `BAANDI_LEAN_PROJ_CACHE` (default off; ledger C3a-LEAN-PROJ-CACHE); dev08 A/B pending.
 
 ## Fast-loop follow-ups (2026-11-16, threads/one-core owner; profile-2026-11-16-threads.md)
-- VERIFY-REUSE feed: dev08 stage 2 pending (requests/verify-reuse.md). If small cells keep losing near-threshold attempts, the next idea is to let the feed act only from the second failed attempt on (still a general rule, no material constant).
+- VERIFY-REUSE: feed regressed si16 on dev08 stage 1; variants screened (feed2 and replace rejected); `half` is the stage-2 candidate (requests/verify-reuse.md).
 - Passed-verification cost (8 to 16 %): tau_v is fixed by ADR 0043; a user decision, not a switch.
 - Stop-estimator underestimation (10 to 20x below the verification residual at failing stops, si32 seeds 603/605/610): a better predictor of F(rho_out) - rho_out (for example from the Pulay subspace) would avoid futile verifications; analysis only so far.

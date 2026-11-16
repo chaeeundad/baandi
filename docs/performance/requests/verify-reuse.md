@@ -1,11 +1,13 @@
 # dev08 request: fast-loop stage 2 for VERIFY-REUSE (and C3a), threads / one core
 
-Status: pre-registered 2026-11-16, not yet run. Stage 2 of `docs/performance/fast-loop-protocol.md` (five to six cells, paired env A/B, same binary). Screening numbers (Mac, O) are in the ledger rows VERIFY-REUSE-FEED, VERIFY-REUSE-WARM, C3a-SCREEN and in `docs/performance/profile-2026-11-16-threads.md`. BAANDI-only: no QE column, no QE ratio; every table is one model at one thread count (`comparison-rules.md`). Accuracy classes unchanged (strict 1e-10 Ha, standard 5e-9 Ha); no tolerance, threshold or stop rule changed; acceptance still needs a passed verification.
+Status: pre-registered 2026-11-16; revised 2026-11-16 after the dev08 stage-1 result of `feed` (ledger VERIFY-REUSE-FEED-DEV08-S1: si32 s603 -11.1 %, si16 s601/602/605 +10 to +12 % with one extra attempt). The candidate is now `half` (ledger VERIFY-REUSE-VARIANTS, VERIFY-REUSE-HALF); not yet run. Stage 2 of `docs/performance/fast-loop-protocol.md` (five to six cells, paired env A/B, same binary). Screening numbers (Mac, O) are in the ledger rows VERIFY-REUSE-FEED, VERIFY-REUSE-WARM, C3a-SCREEN and in `docs/performance/profile-2026-11-16-threads.md`. BAANDI-only: no QE column, no QE ratio; every table is one model at one thread count (`comparison-rules.md`). Accuracy classes unchanged (strict 1e-10 Ha, standard 5e-9 Ha); no tolerance, threshold or stop rule changed; acceptance still needs a passed verification.
 
 ## What changes
-`BAANDI_VERIFY_REUSE=off|warm|feed` (default off; `crates/dft-engine/src/session.rs`). Acts only after a FAILED fixed-point verification (ADR 0043 V1/V2); with no failure the run is bit-identical to off.
+`BAANDI_VERIFY_REUSE=off|warm|feed|feed2|replace|half` (default off; `crates/dft-engine/src/session.rs`). Acts only after a FAILED fixed-point verification (ADR 0043 V1/V2); with no failure the run is bit-identical to off.
 - warm: the next SCF step starts from the verification solve's orbitals (eigenpairs at V(rho_out)); the REUSE-PSI kept start is then taken instead of declined.
 - feed: warm, and the pair (rho_out, F(rho_out)) enters the mixer after the step's own pair (rho_in, rho_out); the next input density is the mixer's proposal from that history. The verification map becomes an SCF map instead of being discarded.
+- half (the candidate): as feed, but the next input density is the midpoint of the step's own Pulay proposal and the fed proposal (unweighted mean, no fitted factor). Mac counters over 19 geometries: never an extra attempt or SCF step; si32 seeds 603/605/610 attempts 4/3/5 -> 2/2/2, H -27/-16/-35 %; si16 seeds 601/602/605 unchanged attempts and SCF (H -1.2/0.0/+0.6 %).
+- feed2 (first failure keeps the default, repeated failures feed) and replace (only the verification pair) were screened and are not requested (REJECT, ledger VERIFY-REUSE-VARIANTS).
 Rounding class (the trajectory after the first failed attempt changes). Thread-count independence: no new parallel code; density SHA must stay equal across T within each arm.
 
 ## Build
@@ -13,8 +15,8 @@ Branch HEAD (commit given by the orchestrator) after merge with main; MKL build 
 
 ## Arms (same binary, environment only, interleaved per geometry)
 - A: default (switch unset).
-- F: `BAANDI_VERIFY_REUSE=feed`.
-- W: `BAANDI_VERIFY_REUSE=warm` (si32 only; cost attribution).
+- F: `BAANDI_VERIFY_REUSE=half` (the candidate; called F below).
+- G: `BAANDI_VERIFY_REUSE=feed` (si16 and si32 only; reference for the dev08 stage-1 numbers).
 - P: `BAANDI_LEAN_PROJ_CACHE=on` (C3a, independent code path; stage-2 data for the existing C3a request).
 - FP: F + P (stacking check).
 

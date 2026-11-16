@@ -124,3 +124,24 @@ ordinary energy without adding a free-energy alias.
   if formal external JSON-schema validation is required. Existing SCF schemas
   and their consumers are unchanged.
 - Changes remain uncommitted on `task/P21A-RELAXATION` for review.
+
+## ONEPATH-1: relaxation on the single standard path (2026-11-16)
+
+Fixed-cell relaxation now runs the standard SCF path with the fixed-point
+verification on every ionic step (ADR 0043, amendment ONEPATH-1). Synthetic
+oracles (Mac observations, release build):
+
+- `tests/onepath_forces_relax.rs::standard_relaxation_matches_strict_reference`
+  (two H ions, compact skewed cell, force_tol 1e-4 Ha/Bohr): standard and
+  strict reference end 1.6e-6 Bohr apart (tolerance 1e-3 Bohr), 17 ionic steps
+  each, total SCF iterations 41 (standard, 18 verification attempts) against 122
+  (strict).
+- The existing oracles keep their tolerances: `relax_extrapolation.rs` asks for
+  the strict-class threshold 5e-11 Ha (max |dF| 9.8e-8 Ha/Bohr first order,
+  6.5e-8 second order, bound 1e-6), `relaxation.rs` energy scan asks for 5e-13
+  Ha because its ionic energy test is 1e-12 Ha (final distance error 3.3e-5
+  Bohr, bound 1e-4; directional FD errors below 1.5e-8 Ha/Bohr, bound 1e-6).
+  At the default 5e-9 Ha the extrapolation oracle measured max |dF| 1.07e-6
+  Ha/Bohr (above its 1e-6 strict-class bound) and the energy scan did not meet
+  the 1e-12 Ha energy test within 200 steps: the default threshold does not
+  resolve those tolerances, which is why the user guide says to tighten it.

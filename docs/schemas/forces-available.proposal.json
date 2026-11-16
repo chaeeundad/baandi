@@ -235,6 +235,28 @@
             "fixed_point_verification_passed": {
               "type": "boolean",
               "const": true
+            },
+            "standard_threshold_ha": {
+              "$comment": "ONEPATH-1: accuracy threshold of the standard stop rule and of the verification",
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "verification_attempts": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "verification_coulomb_error_ha": {
+              "$comment": "E_H[F(rho_out) - rho_out] of the passing (last) attempt",
+              "type": "number",
+              "minimum": 0
+            },
+            "verification_residual_bound_ha": {
+              "$comment": "residual energy estimate of the last attempt; null when the residual guard is off",
+              "type": ["number", "null"],
+              "minimum": 0
+            },
+            "state": {
+              "type": "string"
             }
           }
         }

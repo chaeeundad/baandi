@@ -43,9 +43,13 @@ fn potential_with_charge(z: f64) -> String {
     format!("{}{}{}", &text[..start], rho.join(" "), &text[end..])
 }
 
+/// Since ONEPATH-1 the relaxation runs the standard path with verification;
+/// the assertions below are strict-class (1e-10 Ha), so the input asks for the
+/// strict-class threshold 5e-11 Ha (the QE conv_thr 1e-10 Ry equivalent, ADR
+/// 0043). The strict tolerance keys act only on the strict reference path.
 fn input(extra: &str) -> String {
     format!(
-        "[system]\nname='c3'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,9.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.2,0.17,0.15]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\nmax_iterations=300\nenergy_tolerance_ha=1e-12\ndensity_residual_tolerance=1e-10\neigen_tolerance=1e-11\n[relax]\nmax_steps=5\nforce_tol_ha_bohr=1e-9\n{extra}"
+        "[system]\nname='c3'\nlattice_unit='bohr'\nlattice_vectors=[[8.0,0.0,0.0],[0.0,8.0,0.0],[0.0,0.0,9.0]]\n[[system.atoms]]\nspecies='H'\nfractional=[0.0,0.0,0.0]\n[[system.atoms]]\nspecies='H'\nfractional=[0.2,0.17,0.15]\n[pseudopotentials]\nH='syn.xml'\n[basis]\necutwfc_ry=3.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=4\nmax_iterations=300\nenergy_tolerance_ha=1e-12\ndensity_residual_tolerance=1e-10\neigen_tolerance=1e-11\nstandard_threshold_ha=5e-11\n[relax]\nmax_steps=5\nforce_tol_ha_bohr=1e-9\n{extra}"
     )
 }
 

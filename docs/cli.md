@@ -1030,9 +1030,33 @@ Every result carries `single_path` (`status`: `applied`, `reference_strict` or
 `wall_s`) and `timings.verification_s`; verification work is also in each history
 entry's `fixed_point_certificate` and in `timings.certificate`.
 
-Forces accept a standard state with a passed verification (`forces.preconditions`
-says so); `output.forces` with `verify = "off"` is an input error. Relaxation,
-stress, collinear spin, Fermi-Dirac occupations and `scf.locking = "auto"` keep
+Forces accept a standard state with a passed verification; `forces.preconditions`
+records `standard_threshold_ha`, `fixed_point_verification_passed`,
+`verification_attempts` and the last attempt's `verification_coulomb_error_ha`
+and `verification_residual_bound_ha` (ONEPATH-1). The forces are computed with
+the same formulas as on the strict path, from the converged step's own state.
+`output.forces` with `verify = "off"` is an input error.
+
+Fixed-cell relaxation (`dft-cli relax`, `relax.mode = "ions"`, the default) runs
+every ionic step on the standard path with the verification (ONEPATH-1, user
+decision 2026-11-16): a failed verification continues that step's SCF, warm
+starts and `start_extrapolation` are unchanged, and the relaxation
+`results.json` carries `single_path`, `scf.standard_threshold_ha` and a
+`verification` record per frame (`passed`, `threshold_ha`, `attempts`,
+`coulomb_error_ha`, `residual_bound_ha`, `strict_criteria_met`, `h_vectors`;
+no wall time, so a resumed relaxation stays bit-identical). `verify = "off"`
+with `[relax]` is an input error. The threshold is `scf.standard_threshold_ha`
+(default 5e-9 Ha). **For force-sensitive runs (tight `force_tol_ha_bohr`, small
+`energy_tol_ha`, phonon-like finite differences) tighten the threshold**: the
+SCF energy is resolved to about the threshold, so an ionic energy test at
+1e-12 Ha needs a threshold of the same order (the synthetic oracle in
+`tests/relaxation.rs` uses 5e-13 Ha), and the measured force differences
+against the strict reference shrink with the threshold (ledger ONEPATH-1;
+dev08 request `performance/requests/onepath1-forces-relax.md`).
+
+Stress (`output.stress`, and the variable-cell relaxation modes `cell` and
+`ions_cell`, reason `stress (variable-cell relaxation)`), collinear spin,
+Fermi-Dirac occupations and `scf.locking = "auto"` keep
 the strict path (`not_applicable` with the reason); in those inputs the
 standard-only keys are input errors instead of being dropped. The observe/agent
 runtime modes and the non-`run` commands (bands, checkpoint, restart,
@@ -1150,8 +1174,9 @@ results schema version is unchanged. See [validation](validation/forces.md).
 ## Fixed-cell relaxation (P21A)
 
 `dft-cli relax input.toml --output-dir DIR [--resume]` accepts the optional
-`[relax]` table, certified strict forces, capped BFGS/FIRE steps and Cartesian
-constraints. Exit 0 is converged, 3 is ionic step exhaustion, 4 is failure after
+`[relax]` table, forces from a verified standard SCF on every ionic step (the
+strict certificate with `BAANDI_REFERENCE_STRICT=on`; see the single SCF path
+section), capped BFGS/FIRE steps and Cartesian constraints. Exit 0 is converged, 3 is ionic step exhaustion, 4 is failure after
 one fresh half-step retry. Density transfer is labelled `warm_transfer`; the
 optimizer restart is a separate same-build ionic continuation record.
 The `calculation_type="relaxation"` results profile contains the `relaxation`

@@ -31,9 +31,16 @@ strict inequalities. Exit 0 means converged, 3 means ionic step budget exhausted
 4 means SCF/derivative failure after the retry, 1 invalid input, 5 I/O failure.
 An exhausted ionic trajectory still contains certified SCFs and usable forces.
 
-The standard SCF profile is rejected. The P20A force requirements still apply:
-SCF density <=1e-7, energy/eigen tolerances <=1e-8 Ha and a fresh strict certificate.
-Tighter SCF tolerances may be necessary to resolve a small ionic energy threshold.
+Since ONEPATH-1 (user decision 2026-11-16) every ionic step of a fixed-cell
+relaxation runs the single standard SCF path with the fixed-point verification
+(ADR 0043); forces are computed only from a step whose verification passed, and
+a failed verification continues that step's SCF. The SCF accuracy is
+`scf.standard_threshold_ha` (default 5e-9 Ha); `scf.verify = "off"` is an input
+error. The strict path with its certificate remains as a reference tool
+(`BAANDI_REFERENCE_STRICT=on`). Variable-cell modes still use the strict path
+because stress has not moved yet. Tighten `standard_threshold_ha` to resolve a
+small ionic energy threshold or tight force tolerance (for example 5e-11 Ha, or
+5e-13 Ha for `energy_tol_ha = 1e-12`); nothing is loosened automatically.
 The spectral guard remains available. No tolerances are automatically loosened.
 
 ## Optimizers and symmetry

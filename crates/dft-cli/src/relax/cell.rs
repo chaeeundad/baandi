@@ -489,7 +489,7 @@ pub(super) fn execute(
                 let old_options = ctx.opts.clone();
                 let rebuild = (|| {
                     ctx.opts.strain_reference = None;
-                    ctx.opts.grid_override = options(&ctx.config)?.grid_override;
+                    ctx.opts.grid_override = crate::run::options(&ctx.config)?.grid_override;
                     let grid = ctx.problem()?.grid_dimensions();
                     ctx.opts.grid_override = Some(grid);
                     ctx.opts.strain_reference = Some(Box::new(ctx.cell.clone()));
@@ -762,6 +762,7 @@ mod tests {
                 scf_h_vectors: None,
                 start_fallback: None,
                 start_clipped_fraction: None,
+                verification: None,
             }
         };
         for dofs in [Dofs::Full, Dofs::Isotropic, Dofs::XyzDiagonal] {

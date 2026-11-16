@@ -3,7 +3,7 @@ mod cell;
 pub mod optimizer;
 use crate::{
     config::Config,
-    run::{RunError, options, sha256},
+    run::{RunError, options_with, sha256},
 };
 use dft_engine::{
     CompletionMode, ExecutionConfig, ScfOptions, ScfProblem, ScfSession, SpeciesPotential,
@@ -183,6 +183,23 @@ impl Default for Settings {
         }
     }
 }
+/// Per-step verification record (ONEPATH-1): threshold, outcome, attempts and
+/// the last attempt's Coulomb fixed-point residual. None on the strict path.
+/// Deterministic fields only (no wall time): frames are part of restart.json,
+/// and a resumed relaxation must reproduce the uninterrupted files bit for bit.
+fn verification_summary(state: &dft_engine::ScfResult, opts: &ScfOptions) -> Option<Value> {
+    let p = opts.standard?;
+    let v = state.verification.as_ref()?;
+    let last = v.attempts.last();
+    Some(json!({
+        "mode":"fixed_point","passed":v.passed(),"threshold_ha":p.threshold_ha,
+        "attempts":v.attempts.len(),
+        "coulomb_error_ha":last.map(|a| a.coulomb_error_ha),
+        "residual_bound_ha":last.and_then(|a| a.residual_bound_ha),
+        "strict_criteria_met":last.map(|a| a.strict_criteria_met),
+        "h_vectors":v.attempts.iter().map(|a| a.operator_applications).sum::<usize>(),
+    }))
+}
 fn error(code: u8, e: impl std::fmt::Display) -> RunError {
     RunError {
         code,
@@ -190,6 +207,11 @@ fn error(code: u8, e: impl std::fmt::Display) -> RunError {
     }
 }
 impl Settings {
+    /// Cell or ions+cell mode: every step needs stress, which keeps the strict
+    /// SCF path for now (ADR 0043 item 5).
+    pub(crate) fn variable_cell(&self) -> bool {
+        self.mode != cell::Mode::Ions
+    }
     pub(crate) fn validate(&self, n: usize) -> Result<(), RunError> {
         if [
             self.force_tol_ha_bohr,
@@ -249,6 +271,11 @@ struct Frame {
     /// start (then renormalised); absent when nothing was clipped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     start_clipped_fraction: Option<f64>,
+    /// ONEPATH-1: fixed-point verification of this step's SCF on the standard
+    /// path (threshold, attempts, last Coulomb residual); absent on the strict
+    /// path, whose forces rest on the strict certificate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    verification: Option<Value>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -273,6 +300,8 @@ struct Context {
     opts: ScfOptions,
     potentials: Vec<(String, dft_upf::Pseudopotential)>,
     provenance: Value,
+    /// ADR 0043 path of every ionic step's SCF (recorded in results.json).
+    scf_path: crate::config::ScfPath,
 }
 impl Context {
     fn position(&mut self, fractional: &[[f64; 3]]) {
@@ -518,6 +547,7 @@ impl Context {
             ),
             start_fallback,
             start_clipped_fraction,
+            verification: verification_summary(&state, &self.opts),
         };
         Ok((frame, state.density.iter().copied().collect(), n_at))
     }
@@ -629,15 +659,16 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
     let mut settings = config.relax.clone().unwrap_or_default();
     settings.start_extrapolation = settings.start_extrapolation.effective()?;
     settings.validate(config.system.atoms.len())?;
-    let opts = options(&config)?;
-    if opts.standard.is_some()
-        || opts.energy_tolerance > 1e-8
-        || opts.eigen_tolerance > 1e-8
-        || opts.density_tolerance > 1e-7
+    // ONEPATH-1 (ADR 0043 item 5): fixed-cell relaxation runs every ionic
+    // step on the standard path with the fixed-point verification; the
+    // variable-cell modes keep the strict path (stress) and record why.
+    let scf_path = config.scf_path(None).map_err(|e| error(1, e))?;
+    let opts = options_with(&config, None)?;
+    if opts.energy_tolerance > 1e-8 || opts.eigen_tolerance > 1e-8 || opts.density_tolerance > 1e-7
     {
         return Err(error(
             1,
-            "relax requires strict SCF force certificate tolerances; standard profile is unsupported",
+            "relax requires SCF tolerances no looser than the force preconditions (energy 1e-8 Ha, eigen 1e-8 Ha, density 1e-7)",
         ));
     }
     if config
@@ -739,6 +770,7 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
         cell,
         opts,
         potentials,
+        scf_path,
         provenance: json!({"input_sha256":sha256(&bytes),"executable_sha256":build_sha256,"pseudopotentials_sha256":pp_hashes,"platform":std::env::consts::OS,"architecture":std::env::consts::ARCH}),
     };
     if settings.mode != cell::Mode::Ions {
@@ -1071,7 +1103,13 @@ fn outputs(
             }
         }
     }
-    let result = json!({"schema_version":1,"calculation_type":"relaxation","provenance":ctx.provenance,"relaxation":{"status":state.status,"steps":state.frames.len()-1,"final_max_force_ha_bohr":last.max_force_ha_bohr,
+    let result = json!({"schema_version":1,"calculation_type":"relaxation","provenance":ctx.provenance,
+        "single_path":crate::run::single_path_json(&ctx.scf_path, &ctx.opts),
+        "scf":{"effective_profile":if ctx.opts.standard.is_some() { "standard" } else { "strict" },
+            "standard_threshold_ha":ctx.opts.standard.map(|p| p.threshold_ha),
+            "verification":if ctx.opts.standard.is_some() { ctx.opts.verification.name() } else { "strict_certificate" },
+            "note":"every ionic step runs this SCF; forces of a standard step rest on its passed fixed-point verification (frames[].verification); tighten scf.standard_threshold_ha for force-sensitive runs"},
+        "relaxation":{"status":state.status,"steps":state.frames.len()-1,"final_max_force_ha_bohr":last.max_force_ha_bohr,
         "energy_history_ha":state.frames.iter().map(|f|f.energy_ha).collect::<Vec<_>>(),"constraints":settings.fixed,"frames":state.frames,"failures":state.failures,
         "restart_semantics":"same_build_ionic_continuation; each transferred SCF is warm_transfer, not exact SCF replay","settings":settings}});
     for (name, text) in [

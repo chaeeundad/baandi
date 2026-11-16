@@ -76,6 +76,11 @@ pub(crate) struct RealSolveState {
     nl_valid: bool,
     /// REUSE-PSI state (work order C2), created at the first eligible solve.
     reuse: Option<PsiReuse>,
+    /// Set by an exact-continuation checkpoint: the next solve forgets the kept
+    /// X, H X and psi(r) and takes the plain start, exactly as a restored session
+    /// (which has no kept state) does, so a continued and a restored run agree bit
+    /// for bit.
+    pub(crate) forget_reuse: std::sync::atomic::AtomicBool,
 }
 impl RealSolveState {
     /// NL-ENERGY-REAL values of the latest solve of this state, if computed.
@@ -363,6 +368,7 @@ fn ensure_state(
             nl_values: Vec::new(),
             nl_valid: false,
             reuse: None,
+            forget_reuse: std::sync::atomic::AtomicBool::new(false),
         });
     }
     Ok(())
@@ -559,6 +565,15 @@ pub(crate) fn solve_real_gamma(
     drop(real);
     // REUSE-PSI: threads-only Ritz-value (standard) solves of this state.
     let reuse = comm.is_none() && options.standard.is_some() && reuse_psi();
+    if state
+        .forget_reuse
+        .swap(false, std::sync::atomic::Ordering::Relaxed)
+    {
+        state.reuse = None;
+        if let Some(ws) = state.workspace.as_mut() {
+            ws.keep_returned_products(false)?;
+        }
+    }
     if reuse {
         prepare_kept_start(state, &solver, options, packed.is_some())?;
     } else if state.reuse.take().is_some()

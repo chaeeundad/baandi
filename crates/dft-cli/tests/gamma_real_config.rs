@@ -145,6 +145,12 @@ fn work_timers_report_by_kind_and_run_stage() {
         let output = std::process::Command::new(env!("CARGO_BIN_EXE_dft-cli"))
             .current_dir(&dir)
             .env("BAANDI_DAVIDSON_STAGES", stages)
+            // This test checks the timer bookkeeping of the plain apply path, where
+            // every h_apply column sits in a pair transform. With REUSE_PSI (default
+            // on since 2026-11-16) a kept start forms H X from the cached psi(r) and
+            // the pair transforms also carry kept-start forward transforms, so the
+            // two counters legitimately differ (the reuse path has its own kept_* counters).
+            .env("BAANDI_REUSE_PSI", "off")
             .args(["run", "input.toml", "--output-dir", &out])
             .output()
             .unwrap();

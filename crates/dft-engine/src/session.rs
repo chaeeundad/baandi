@@ -1373,6 +1373,7 @@ impl ScfSession {
             if self.status != StepStatus::Ready {
                 return Err(Rejection::Boundary);
             }
+            self.problem.forget_real_reuse();
             let c = self.continuation.as_ref().ok_or(Rejection::Boundary)?;
             // A pending first-step standard seed is not part of checkpoint v1.
             if (self.standard_seed.is_some() || self.strict_seed.is_some()) && c.history.is_empty()

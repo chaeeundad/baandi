@@ -690,6 +690,18 @@ pub struct ScfStep {
     pub nonlocal_from_identity: bool,
 }
 impl ScfProblem {
+    /// Exact-continuation checkpoint hook: the kept REUSE-PSI state is not part of
+    /// checkpoint v1, so the live session forgets it at the checkpoint instant and
+    /// continues exactly like a session restored from that checkpoint.
+    pub(crate) fn forget_real_reuse(&self) {
+        for state in &self.states {
+            if let Some(rs) = state.real_solve.as_ref() {
+                rs.forget_reuse
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+    }
+
     /// Dispatch evidence in input k order for the latest solve.
     pub fn gamma_real_diagnostics(&self) -> impl Iterator<Item = &crate::GammaRealDiagnostics> {
         self.states.iter().map(|s| &s.gamma_real)

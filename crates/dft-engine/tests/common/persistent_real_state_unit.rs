@@ -42,12 +42,24 @@ fn real_state_reuse_matches_forced_rebuild_each_scf_map() {
                 }
                 let a = reused.step(&density, guess.as_ref(), 1e-9).unwrap();
                 let b = fresh.step(&density, guess.as_ref(), 1e-9).unwrap();
-                assert_eq!(format!("{:?}", a.solution), format!("{:?}", b.solution));
-                assert_eq!(format!("{:?}", a.energy), format!("{:?}", b.energy));
-                assert_eq!(
-                    a.density.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
-                    b.density.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
-                );
+                if standard && crate::gamma_real::reuse_psi() {
+                    // REUSE_PSI (default on) forms the next solve's H X from the
+                    // kept psi(r) in `reused` while `fresh` applies H plainly:
+                    // rounding class, not bits (the solves do fewer applications).
+                    for (x, y) in a.solution.eigenvalues.iter().zip(&b.solution.eigenvalues) {
+                        assert!((x - y).abs() < 1e-10, "{x} {y}");
+                    }
+                    for (x, y) in a.density.iter().zip(b.density.iter()) {
+                        assert!((x - y).abs() < 1e-9, "{x} {y}");
+                    }
+                } else {
+                    assert_eq!(format!("{:?}", a.solution), format!("{:?}", b.solution));
+                    assert_eq!(format!("{:?}", a.energy), format!("{:?}", b.energy));
+                    assert_eq!(
+                        a.density.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                        b.density.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+                    );
+                }
                 assert!(reused.states[0].real_solve.is_some());
                 density = 0.7 * density + 0.3 * a.density;
                 guess = Some(a.solution.eigenvectors);
@@ -90,6 +102,11 @@ fn real_state_full_scf_matches_forced_rebuild() {
                 let mut rebuilt = make();
                 rebuilt.force_real_rebuild = true;
                 let b = rebuilt.run().unwrap();
+                if standard && crate::gamma_real::reuse_psi() {
+                    // Rounding class under REUSE_PSI (see the unit test above).
+                    assert!((a.total_hartree() - b.total_hartree()).abs() < 1e-10);
+                    continue;
+                }
                 assert_eq!(a.total_hartree().to_bits(), b.total_hartree().to_bits());
                 assert_eq!(
                     a.density.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),

@@ -165,3 +165,18 @@ start of every solve). The REUSE-PSI kept start carries the kept P^T X. The solv
 is bit-identical with the switch on and off; only the caller's nonlocal energy
 from these projections is rounding class. Counters in `lean_counters()`
 (`proj_cache_*`). Test `tests/lean_proj_cache.rs`; ledger C3a-LEAN-PROJ-CACHE.
+
+## MPI in-panel Gram-Schmidt reductions (2026-11-16)
+
+`BAANDI_M2_PANEL_GS=classic|pythag|fused` (default classic; `DistributedTuning.panel_gs`,
+`PanelGs`): `panel_column` orthogonalises one column against the kept in-panel
+columns for both the workspace and the allocating path. classic = the earlier
+arithmetic bit for bit (two dot reductions, one norm); pythag = the norm rides with
+the second dots (Pythagorean update, explicit norm when it would cancel more than a
+factor 4); fused = the input norm rides with the first dots and the second pass runs
+only when the per-column DGKS rule (`BAANDI_ORTHO` keep) fails. Rounding class.
+Tests: lib `panel_gs_tests`, dft-engine `m2_panel_gs_variants_keep_classes`.
+Profile and request: docs/performance/profile-2026-11-16-mpi.md,
+docs/performance/requests/mpi-fast-screen-2026-11-16.md. `dft-mpi` also has
+`BAANDI_MPI_TREE=rd` (recursive-doubling tree sum, bit-identical for power-of-two
+rank counts; set by the CLI with `dft_mpi::set_tree_sum`).

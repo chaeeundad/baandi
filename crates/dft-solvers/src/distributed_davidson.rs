@@ -487,6 +487,32 @@ pub struct DistributedTuning {
     /// solver's rule). Runs on the workspace path. Strict (residual) solves are
     /// unchanged. Rounding class (column subsets of the same GEMM).
     pub selected_roots: bool,
+    /// `BAANDI_M2_PANEL_GS`: reduction scheme of the in-panel Gram-Schmidt
+    /// (`PanelGs`; default classic, three reductions per column).
+    pub panel_gs: PanelGs,
+}
+
+/// In-panel reduction scheme of the distributed panel Gram-Schmidt
+/// (`BAANDI_M2_PANEL_GS`, docs/performance/profile-2026-11-16-mpi.md). The
+/// in-panel dot and norm reductions are about 88 percent of all reductions of the
+/// distributed solver and carry at most 64 doubles each (latency bound, ledger
+/// M2-REDUCTION-COUNTS-F08).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PanelGs {
+    /// Two dot reductions and one norm reduction per column (the M1/M2 code).
+    #[default]
+    Classic,
+    /// Two passes; the norm of the once-projected column rides with the second
+    /// pass's dot products and the final norm is the Pythagorean update
+    /// `|v1|^2 - |s2|^2` (explicit norm reduction when that update would cancel
+    /// more than a factor 4). Two reductions per column; rounding class.
+    Pythag,
+    /// The input norm rides with the first pass's dot products; the second pass
+    /// is skipped when the DGKS rule holds for the column (`|v1| >= keep |v|`,
+    /// keep = the `BAANDI_ORTHO` ratio the serial solver applies against the
+    /// basis), else `Pythag`'s second pass. About one reduction per column;
+    /// rounding class.
+    Fused,
 }
 impl DistributedTuning {
     /// The switches of this process; the serial-order panel and DGKS rules are the
@@ -511,6 +537,11 @@ impl DistributedTuning {
             bordered: on(Id::M2_B5),
             workspace: on(Id::M2_WORKSPACE),
             selected_roots: on(Id::M2_SELECTED_ROOTS),
+            panel_gs: match choice(Id::M2_PANEL_GS) {
+                "pythag" => PanelGs::Pythag,
+                "fused" => PanelGs::Fused,
+                _ => PanelGs::Classic,
+            },
         }
     }
     /// The tuning of the calling thread: the test override when set
@@ -589,7 +620,7 @@ fn orthonormalize_serial<C: Collective>(
                 tuning.wide_gemm,
             )?;
         }
-        let (y, min_len) = panel_gram_schmidt(comm, ws, &x, panel, tuning.wide_gemm)?;
+        let (y, min_len) = panel_gram_schmidt(comm, ws, &x, panel, tuning)?;
         if pass == 0
             && against.is_some()
             && let Some(keep) = tuning.dgks
@@ -614,8 +645,9 @@ fn panel_gram_schmidt<C: Collective>(
     ws: &mut RealGemmWorkspace,
     x: &RealMatrix,
     panel: usize,
-    wide: bool,
+    tuning: &DistributedTuning,
 ) -> Result<(RealMatrix, f64), SolverError> {
+    let wide = tuning.wide_gemm;
     let (rows, cols) = (x.rows(), x.cols());
     let mut out = RealMatrix::zeros(rows, cols)?;
     let mut kept = 0usize;
@@ -638,37 +670,21 @@ fn panel_gram_schmidt<C: Collective>(
             }
         }
         let first = kept;
-        let mut local = Vec::with_capacity(w);
-        let mut sums = Vec::with_capacity(w);
+        let mut local = Vec::with_capacity(w + 1);
+        let mut sums = Vec::with_capacity(w + 1);
         let mut v = vec![0.0; rows];
         for jj in 0..w {
             v.copy_from_slice(column_of(&p, jj));
-            for _ in 0..2 {
-                let k = kept - first;
-                if k > 0 {
-                    local.clear();
-                    for c in first..kept {
-                        let q = &out.as_slice()[c * rows..(c + 1) * rows];
-                        local.push(q.iter().zip(&v).map(|(a, b)| a * b).sum::<f64>());
-                    }
-                    sums.clear();
-                    sums.resize(k, 0.0);
-                    site(Site::PanelDot);
-                    comm.tree_sum_f64(&local, &mut sums).map_err(comm_error)?;
-                    for (c, s) in (first..kept).zip(&sums) {
-                        let q = &out.as_slice()[c * rows..(c + 1) * rows];
-                        for (vi, qi) in v.iter_mut().zip(q) {
-                            *vi -= s * qi;
-                        }
-                    }
-                }
-            }
-            let local_norm = [v.iter().map(|a| a * a).sum::<f64>()];
-            let mut total = [0.0];
-            site(Site::PanelNorm);
-            comm.tree_sum_f64(&local_norm, &mut total)
-                .map_err(comm_error)?;
-            let len = total[0].sqrt();
+            let len = panel_column(
+                comm,
+                &out.as_slice()[first * rows..kept * rows],
+                rows,
+                &mut v,
+                &mut local,
+                &mut sums,
+                tuning.panel_gs,
+                tuning.dgks,
+            )?;
             if len.is_finite() {
                 min_len = min_len.min(len);
             }
@@ -687,6 +703,104 @@ fn panel_gram_schmidt<C: Collective>(
     }
     out.reshape_within_storage(rows, kept)?;
     Ok((out, min_len))
+}
+
+/// Orthogonalise `v` (local rows) against the `q.len() / rows` orthonormal
+/// in-panel columns `q` (column-major) and return its remaining global norm,
+/// with the reductions of `mode` (`PanelGs`). `Classic` is the arithmetic of the
+/// earlier panel code bit for bit. Every branch depends on reduced values only,
+/// so all ranks take the same branches and enter the same reductions.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn panel_column<C: Collective>(
+    comm: &C,
+    q: &[f64],
+    rows: usize,
+    v: &mut [f64],
+    local: &mut Vec<f64>,
+    sums: &mut Vec<f64>,
+    mode: PanelGs,
+    keep: Option<f64>,
+) -> Result<f64, SolverError> {
+    let k = q.len().checked_div(rows).unwrap_or(0);
+    // Local dot products with the k columns, optionally followed by |v|^2.
+    let dots = |v: &[f64], local: &mut Vec<f64>, norm: bool| {
+        local.clear();
+        for c in 0..k {
+            let qc = &q[c * rows..(c + 1) * rows];
+            local.push(qc.iter().zip(v).map(|(a, b)| a * b).sum::<f64>());
+        }
+        if norm {
+            local.push(v.iter().map(|a| a * a).sum::<f64>());
+        }
+    };
+    let subtract = |v: &mut [f64], sums: &[f64]| {
+        for (c, s) in sums.iter().enumerate().take(k) {
+            let qc = &q[c * rows..(c + 1) * rows];
+            for (vi, qi) in v.iter_mut().zip(qc) {
+                *vi -= s * qi;
+            }
+        }
+    };
+    let explicit_norm = |v: &[f64]| -> Result<f64, SolverError> {
+        let local_norm = [v.iter().map(|a| a * a).sum::<f64>()];
+        let mut total = [0.0];
+        site(Site::PanelNorm);
+        comm.tree_sum_f64(&local_norm, &mut total)
+            .map_err(comm_error)?;
+        Ok(total[0].sqrt())
+    };
+    let reduce = |local: &[f64], sums: &mut Vec<f64>| -> Result<(), SolverError> {
+        sums.clear();
+        sums.resize(local.len(), 0.0);
+        site(Site::PanelDot);
+        comm.tree_sum_f64(local, sums).map_err(comm_error)
+    };
+    if mode == PanelGs::Classic || k == 0 {
+        if k > 0 {
+            for _ in 0..2 {
+                dots(v, local, false);
+                reduce(local, sums)?;
+                subtract(v, sums);
+            }
+        }
+        return explicit_norm(v);
+    }
+    // First pass: the dots, plus the input norm when the column may stop here.
+    let fused = mode == PanelGs::Fused && keep.is_some();
+    dots(v, local, fused);
+    reduce(local, sums)?;
+    subtract(v, sums);
+    if fused {
+        let keep = keep.unwrap_or(0.0);
+        let (n0, removed) = (sums[k], sum_squares(&sums[..k]));
+        if n0 > 0.0 && n0 - removed >= keep * keep * n0 {
+            return match pythagorean(n0, removed) {
+                Some(len) => Ok(len),
+                None => explicit_norm(v),
+            };
+        }
+    }
+    // Second pass with the norm of the once-projected column.
+    dots(v, local, true);
+    reduce(local, sums)?;
+    let (n1, removed) = (sums[k], sum_squares(&sums[..k]));
+    subtract(v, sums);
+    match pythagorean(n1, removed) {
+        Some(len) => Ok(len),
+        None => explicit_norm(v),
+    }
+}
+
+fn sum_squares(s: &[f64]) -> f64 {
+    s.iter().map(|x| x * x).sum()
+}
+
+/// Norm of u - Q s (s = Q^T u, Q orthonormal) from |u|^2 and |s|^2, only when the
+/// update cancels at most a factor 4 (relative rounding below about 4 eps);
+/// `None` asks for an explicit norm reduction.
+fn pythagorean(norm2: f64, removed: f64) -> Option<f64> {
+    let left = norm2 - removed;
+    (left >= 0.25 * norm2).then(|| left.sqrt())
 }
 
 /// Sequential modified Gram-Schmidt inside the panel (two passes per column), the
@@ -1490,5 +1604,151 @@ impl crate::RealDavidson {
             append_columns(&mut basis, &extra)?;
         }
         unreachable!("validated positive iteration limit")
+    }
+}
+
+#[cfg(test)]
+mod panel_gs_tests {
+    use super::*;
+    use dft_mpi::simulate;
+
+    /// Rows of a global vector owned by `rank` (cyclic split).
+    fn local(global: &[f64], rank: usize, ranks: usize) -> Vec<f64> {
+        global.iter().skip(rank).step_by(ranks).copied().collect()
+    }
+
+    /// `panel_column` in every mode: an exactly dependent column is dropped (norm
+    /// at the dependence floor); a nearly dependent one (relative 1e-7) and a
+    /// generic one keep their norm to 1e-9 relative of the classic mode and the
+    /// orthogonalised vectors agree to 1e-12; every rank returns the same bits.
+    /// The fused mode takes one reduction for the generic column and two for the
+    /// (nearly) dependent ones (the per-column DGKS rule sends them to the second
+    /// pass).
+    #[test]
+    fn panel_column_modes_agree_and_drop_dependent_columns() {
+        let n = 97;
+        let k = 3;
+        let mut q = vec![0.0; n * k];
+        for c in 0..k {
+            for i in (c * 30)..(c * 30 + 30) {
+                q[c * n + i] = (1.0 + (i % 7) as f64).sqrt();
+            }
+            let s: f64 = q[c * n..(c + 1) * n]
+                .iter()
+                .map(|x| x * x)
+                .sum::<f64>()
+                .sqrt();
+            q[c * n..(c + 1) * n].iter_mut().for_each(|x| *x /= s);
+        }
+        let generic: Vec<f64> = (0..n).map(|i| ((i * 37 % 11) as f64 - 5.0) * 0.1).collect();
+        let span: Vec<f64> = (0..n)
+            .map(|i| 0.3 * q[i] - 0.7 * q[n + i] + 0.2 * q[2 * n + i])
+            .collect();
+        let near: Vec<f64> = span
+            .iter()
+            .zip(&generic)
+            .map(|(s, g)| s + 1e-7 * g)
+            .collect();
+        for ranks in [1usize, 2, 3] {
+            let out = simulate(ranks, |comm| {
+                let rows = local(&generic, comm.rank(), ranks).len();
+                let mut ql = Vec::new();
+                for c in 0..k {
+                    ql.extend(local(&q[c * n..(c + 1) * n], comm.rank(), ranks));
+                }
+                let mut res = Vec::new();
+                for mode in [PanelGs::Classic, PanelGs::Pythag, PanelGs::Fused] {
+                    for vector in [&generic, &span, &near] {
+                        let mut v = local(vector, comm.rank(), ranks);
+                        let (mut l, mut s) = (Vec::new(), Vec::new());
+                        let calls = std::cell::Cell::new(0u64);
+                        let counting = CountingComm {
+                            inner: comm,
+                            calls: &calls,
+                        };
+                        let len = panel_column(
+                            &counting,
+                            &ql,
+                            rows,
+                            &mut v,
+                            &mut l,
+                            &mut s,
+                            mode,
+                            Some(0.1),
+                        )
+                        .unwrap();
+                        res.push((mode, len, v, calls.get()));
+                    }
+                }
+                res
+            });
+            for rank_res in &out {
+                for (a, b) in rank_res.iter().zip(&out[0]) {
+                    assert_eq!(a.1.to_bits(), b.1.to_bits(), "ranks {ranks}");
+                }
+            }
+            let r = &out[0];
+            for (i, (mode, len, v, calls)) in r.iter().enumerate() {
+                let c = &r[i % 3];
+                if i % 3 == 1 {
+                    assert!(*len <= DEPENDENCE_TOLERANCE, "{mode:?} dependent {len}");
+                } else {
+                    assert!((len - c.1).abs() <= 1e-9 * c.1, "{mode:?} {len} vs {}", c.1);
+                    for (a, b) in v.iter().zip(&c.2) {
+                        assert!((a - b).abs() <= 1e-12 * c.1, "{mode:?}");
+                    }
+                }
+                let expect = match (mode, i % 3) {
+                    (PanelGs::Classic, _) => 3,
+                    (PanelGs::Pythag, _) => 2,
+                    (PanelGs::Fused, 0) => 1,
+                    (PanelGs::Fused, _) => 2,
+                };
+                // A cancelling Pythagorean update adds one explicit norm.
+                assert!(
+                    *calls == expect || (*calls == expect + 1 && i % 3 != 0),
+                    "{mode:?} case {i}: {calls} reductions"
+                );
+            }
+        }
+    }
+
+    struct CountingComm<'a, C> {
+        inner: &'a C,
+        calls: &'a std::cell::Cell<u64>,
+    }
+    impl<C: Collective> Collective for CountingComm<'_, C> {
+        fn rank(&self) -> usize {
+            self.inner.rank()
+        }
+        fn size(&self) -> usize {
+            self.inner.size()
+        }
+        fn barrier(&self) -> Result<(), dft_mpi::MpiError> {
+            self.inner.barrier()
+        }
+        fn allgatherv_f64(
+            &self,
+            local: &[f64],
+            counts: &[usize],
+            out: &mut [f64],
+        ) -> Result<(), dft_mpi::MpiError> {
+            self.inner.allgatherv_f64(local, counts, out)
+        }
+        fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
+            self.calls.set(self.calls.get() + 1);
+            self.inner.tree_sum_f64(local, out)
+        }
+        fn bcast_f64(&self, data: &mut [f64], root: usize) -> Result<(), dft_mpi::MpiError> {
+            self.inner.bcast_f64(data, root)
+        }
+        fn alltoall_f64(
+            &self,
+            send: &[f64],
+            block: usize,
+            recv: &mut [f64],
+        ) -> Result<(), dft_mpi::MpiError> {
+            self.inner.alltoall_f64(send, block, recv)
+        }
     }
 }

@@ -40,6 +40,62 @@ mod single;
 #[cfg(not(feature = "mpi"))]
 pub use single::{Universe, World};
 
+/// Message pattern of `World::tree_sum_f64` (`BAANDI_MPI_TREE`, set once by the
+/// host after reading the switch). Both give the binomial-tree association bit
+/// for bit when the rank count is a power of two (IEEE addition is commutative
+/// and each round adds the lower block's partial before the higher block's);
+/// other rank counts always use `Binomial`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TreeSum {
+    /// Binomial reduce to rank 0, then a broadcast: 2 log2(P) message rounds.
+    Binomial,
+    /// Recursive doubling (pairwise exchange with rank XOR 2^s): log2(P)
+    /// rounds, every rank ends with the sum.
+    RecursiveDoubling,
+}
+static TREE_SUM: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+/// Select the message pattern of `tree_sum_f64` for this process.
+pub fn set_tree_sum(pattern: TreeSum) {
+    TREE_SUM.store(
+        u8::from(pattern == TreeSum::RecursiveDoubling),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+/// The message pattern selected by `set_tree_sum` (default `Binomial`).
+pub fn tree_sum_pattern() -> TreeSum {
+    if TREE_SUM.load(std::sync::atomic::Ordering::Relaxed) == 1 {
+        TreeSum::RecursiveDoubling
+    } else {
+        TreeSum::Binomial
+    }
+}
+/// The arithmetic of the recursive-doubling exchange over contributions in rank
+/// order (what every rank holds at the end), for P a power of two: in round s
+/// rank r and r XOR s both form (lower partner's partial) + (higher partner's
+/// partial). Equals [`tree_associate`] bit for bit (test below).
+pub fn recursive_doubling_associate(contributions: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let size = contributions.len();
+    assert!(size.is_power_of_two(), "recursive doubling needs 2^k ranks");
+    let mut held: Vec<Vec<f64>> = contributions.to_vec();
+    let mut step = 1;
+    while step < size {
+        let before = held.clone();
+        for (r, h) in held.iter_mut().enumerate() {
+            let partner = r ^ step;
+            let (lo, hi) = if r < partner {
+                (&before[r], &before[partner])
+            } else {
+                (&before[partner], &before[r])
+            };
+            for ((o, a), b) in h.iter_mut().zip(lo).zip(hi) {
+                *o = a + b;
+            }
+        }
+        step <<= 1;
+    }
+    held
+}
+
 /// Row counts of a block distribution: `total` items over `ranks`, the first
 /// `total % ranks` ranks get one extra. A fixed function of (total, ranks).
 pub fn block_counts(total: usize, ranks: usize) -> Vec<usize> {
@@ -75,6 +131,36 @@ mod tests {
                 assert_eq!(d[0], 0);
             }
         }
+    }
+    /// Recursive doubling reproduces the binomial association bit for bit on every
+    /// rank for P = 1, 2, 4, 8, 16 (values chosen so that association matters).
+    #[test]
+    fn recursive_doubling_equals_the_binomial_tree() {
+        for size in [1usize, 2, 4, 8, 16] {
+            let contributions: Vec<Vec<f64>> = (0..size)
+                .map(|r| {
+                    (0..5)
+                        .map(|i| {
+                            let x = (r * 7 + i * 3) as f64;
+                            0.1 * x + 1e-17 * x * x - (if r % 3 == 0 { 1e16 } else { 0.0 })
+                                + (if r % 3 == 1 { 1e16 } else { 0.0 })
+                        })
+                        .collect()
+                })
+                .collect();
+            let tree = tree_associate(&mut contributions.clone());
+            for held in recursive_doubling_associate(&contributions) {
+                assert_eq!(
+                    held.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                    tree.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                    "P={size}"
+                );
+            }
+        }
+        set_tree_sum(TreeSum::RecursiveDoubling);
+        assert_eq!(tree_sum_pattern(), TreeSum::RecursiveDoubling);
+        set_tree_sum(TreeSum::Binomial);
+        assert_eq!(tree_sum_pattern(), TreeSum::Binomial);
     }
     #[test]
     fn stand_in_is_a_single_rank() {

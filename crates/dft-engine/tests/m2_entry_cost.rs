@@ -13,6 +13,13 @@
 //! M2_PROFILE_CAPACITY=<2..12> (Davidson capacity per band, default 6),
 //! M2_PROFILE_SERIAL=off (skip the threads-only reference run).
 //! M2_PROFILE_STANDARD=on runs the standard (Ritz-change) profile instead of strict.
+//! M2_PROFILE_MODE=production runs the production default (`ScfOptions::default()`:
+//! standard 5e-9 Ha, fixed-point verification, Pulay 0.5) with the CLI capacity rule
+//! (3 per band at four or more ranks unless `BAANDI_M2_CAPACITY=off` or
+//! M2_PROFILE_CAPACITY is set); combine with M2_PROFILE_LADDER=on for the CLI default;
+//! M2_PROFILE_VERIFY=off drops the verification (to size its cost only).
+//! Every distributed run also prints one machine-readable line `M2SCREEN_JSON {...}`
+//! (per-rank counters and stages) read by `scripts/fast_screen_mpi.py`.
 //! The Ritz rotation work (`rotation_stats`: pairs, columns, flops) is printed per rank.
 //! The reduced-eigenproblem distribution (orders, sum of m^3, single-column
 //! appends, bordered and broadcast solves) is printed per rank
@@ -84,6 +91,39 @@ fn run(case: &str, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult
     let pp = dft_upf::parse_upf(&std::fs::read_to_string(path).unwrap()).unwrap();
     let (cell, atoms) = structure(case);
     let m2 = comm.is_some();
+    let ranks = comm.as_ref().map_or(1, |c| c.size());
+    let production = std::env::var("M2_PROFILE_MODE").as_deref() == Ok("production");
+    let capacity = std::env::var("M2_PROFILE_CAPACITY")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| {
+            // The CLI rule (MPI-CAPACITY-RULE) in production mode, else the default 6.
+            let auto =
+                dft_numerics::switches::choice(dft_numerics::switches::Id::M2_CAPACITY) == "auto";
+            if production && ranks >= 4 && auto {
+                3
+            } else {
+                6
+            }
+        });
+    let base = if production {
+        ScfOptions {
+            // M2_PROFILE_VERIFY=off: production without the fixed-point
+            // verification (sizes the verification cost; never a production arm).
+            verification: if std::env::var("M2_PROFILE_VERIFY").as_deref() == Ok("off") {
+                dft_engine::Verification::Off
+            } else {
+                dft_engine::Verification::FixedPoint
+            },
+            ..ScfOptions::default()
+        }
+    } else {
+        ScfOptions {
+            standard: (std::env::var("M2_PROFILE_STANDARD").as_deref() == Ok("on"))
+                .then(dft_engine::StandardProfile::default),
+            ..ScfOptions::strict_reference()
+        }
+    };
     if m2 {
         parallel::set_m2_override(Some(true));
     }
@@ -100,13 +140,8 @@ fn run(case: &str, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult
             gamma_real: GammaReal::Auto,
             cutoff_hartree: 15.,
             threads: 1,
-            davidson_capacity_per_band: std::env::var("M2_PROFILE_CAPACITY")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(6),
-            standard: (std::env::var("M2_PROFILE_STANDARD").as_deref() == Ok("on"))
-                .then(dft_engine::StandardProfile::default),
-            ..ScfOptions::strict_reference()
+            davidson_capacity_per_band: capacity,
+            ..base
         },
     )
     .unwrap();
@@ -158,6 +193,7 @@ type Snap = (
     Vec<(String, f64)>,
     Vec<(&'static str, usize, f64)>,
     dft_engine::phase_clock::PhaseClock,
+    Vec<(&'static str, u64)>,
 );
 fn snapshot() -> Snap {
     (
@@ -165,6 +201,7 @@ fn snapshot() -> Snap {
         parallel::m2_stats().1,
         parallel::collective_stats(),
         dft_engine::phase_clock::snapshot(),
+        parallel::collective_bytes(),
     )
 }
 
@@ -306,5 +343,68 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
             "  energy bits {:#018x}, density FNV-1a {density:#018x}",
             r.total_hartree().to_bits()
         );
+        // Machine-readable line for scripts/fast_screen_mpi.py (per-rank values).
+        let (scf, dav, h) = work(r);
+        let mut j = format!(
+            "{{\"case\":\"{case}\",\"ranks\":{p},\"wall_s\":{wall:.6},\"energy_ha\":{:.17e},\"energy_bits\":\"{:#018x}\",\"density_fnv\":\"{density:#018x}\",\"scf\":{scf},\"davidson\":{dav},\"h_columns\":{h}",
+            r.total_hartree(),
+            r.total_hartree().to_bits()
+        );
+        j.push_str(&format!(
+            ",\"rotation_flops\":{:.6e},\"reduced_solves\":{solves},\"reduced_sum_m3\":{:.6e}",
+            (rot.flops - rot_before.flops) as f64 / p as f64,
+            (s.sum_cubed - solves_before.sum_cubed) / p as f64
+        ));
+        let sites: Vec<String> = red
+            .1
+            .iter()
+            .zip(&red_before.1)
+            .map(|(now, then)| {
+                format!(
+                    "\"{}\":[{},{}]",
+                    now.site,
+                    (now.calls - then.calls) / p as u64,
+                    (now.payload - then.payload) / p as u64
+                )
+            })
+            .collect();
+        j.push_str(&format!(",\"reductions\":{{{}}}", sites.join(",")));
+        let bytes = parallel::collective_bytes();
+        let coll: Vec<String> = after
+            .2
+            .iter()
+            .zip(&before.2)
+            .zip(bytes.iter().zip(&before.4))
+            .map(|(((n, c, a), (_, d, b)), ((_, x), (_, y)))| {
+                format!(
+                    "\"{n}\":[{},{},{:.6}]",
+                    (c - d) / p,
+                    (x - y) / p as u64,
+                    per(*a, *b)
+                )
+            })
+            .collect();
+        j.push_str(&format!(",\"collectives\":{{{}}}", coll.join(",")));
+        let stages: Vec<String> = after
+            .0
+            .iter()
+            .zip(&before.0)
+            .map(|((n, a), (_, b))| format!("\"{n}\":{:.6}", per(*a, *b)))
+            .chain(
+                after
+                    .1
+                    .iter()
+                    .zip(&before.1)
+                    .map(|((n, a), (_, b))| format!("\"m2.{n}\":{:.6}", per(*a, *b))),
+            )
+            .collect();
+        j.push_str(&format!(",\"stages\":{{{}}}", stages.join(",")));
+        let counters: Vec<String> = parallel::m2_stats()
+            .0
+            .iter()
+            .map(|(n, v)| format!("\"{n}\":{}", v / p))
+            .collect();
+        j.push_str(&format!(",\"m2_counters\":{{{}}}}}", counters.join(",")));
+        println!("M2SCREEN_JSON {j}");
     }
 }

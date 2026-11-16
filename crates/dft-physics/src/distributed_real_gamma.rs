@@ -513,7 +513,41 @@ impl DistributedRealHamiltonian {
         if weights.len() != x.cols() || !(volume.is_finite() && volume > 0.) {
             return Err(DistributedRealError::Shape);
         }
-        self.band_planes(comm, x, out, |c, v| weights[c] * v * v / volume)?;
+        let points = self.fft.plane_points();
+        if out.len() != x.cols() * points {
+            return Err(DistributedRealError::Shape);
+        }
+        self.band_planes(comm, x, |c, p, v| {
+            out[c * points + p] = weights[c] * v * v / volume
+        })?;
+        stage_add(Stage::Density, start);
+        COUNTS[Count::Densities as usize].fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// The plane-local density sum_b weights[b] psi_b(r)^2 / volume of the first
+    /// m = x.cols() ORC columns, accumulated in ascending band order into `out`
+    /// (`plane_points()` values, overwritten): bit-identical to summing the
+    /// per-band output of `band_densities` in ascending band order, without the
+    /// m x plane_points buffer and its second pass (`BAANDI_M2_DENSITY=fused`).
+    /// Same collectives as `band_densities`.
+    pub fn band_density_sum<K: Collective>(
+        &mut self,
+        comm: &K,
+        x: &RealMatrix,
+        weights: &[f64],
+        volume: f64,
+        out: &mut [f64],
+    ) -> Result<(), DistributedRealError> {
+        let start = dft_numerics::stage_clock::start();
+        if weights.len() != x.cols()
+            || !(volume.is_finite() && volume > 0.)
+            || out.len() != self.fft.plane_points()
+        {
+            return Err(DistributedRealError::Shape);
+        }
+        out.fill(0.);
+        self.band_planes(comm, x, |c, p, v| out[p] += weights[c] * v * v / volume)?;
         stage_add(Stage::Density, start);
         COUNTS[Count::Densities as usize].fetch_add(1, Ordering::Relaxed);
         Ok(())
@@ -532,29 +566,33 @@ impl DistributedRealHamiltonian {
         out: &mut [f64],
     ) -> Result<(), DistributedRealError> {
         let start = dft_numerics::stage_clock::start();
-        self.band_planes(comm, x, out, |_, v| v)?;
+        let points = self.fft.plane_points();
+        if out.len() != x.cols() * points {
+            return Err(DistributedRealError::Shape);
+        }
+        self.band_planes(comm, x, |c, p, v| out[c * points + p] = v)?;
         stage_add(Stage::Values, start);
         COUNTS[Count::Values as usize].fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
 
-    /// Shared body of `band_densities` and `band_values`: transform the ORC
-    /// columns of x to this rank's planes and write `f(column, psi(r))`.
+    /// Shared body of `band_densities`, `band_density_sum` and `band_values`:
+    /// transform the ORC columns of x to this rank's planes and call
+    /// `sink(column, plane point, psi(r))`, pair by pair in ascending column order
+    /// (column 2t before 2t+1) for every point, so a sink that accumulates sums
+    /// each point in ascending band order.
     fn band_planes<K: Collective>(
         &mut self,
         comm: &K,
         x: &RealMatrix,
-        out: &mut [f64],
-        f: impl Fn(usize, f64) -> f64,
+        mut sink: impl FnMut(usize, usize, f64),
     ) -> Result<(), DistributedRealError> {
         let n_loc = self.rows.len();
         let m = x.cols();
-        let points = self.fft.plane_points();
         if comm.size() != self.ranks
             || comm.rank() != self.rank
             || x.rows() != n_loc
             || m > self.capacity
-            || out.len() != m * points
         {
             return Err(DistributedRealError::Shape);
         }
@@ -586,18 +624,12 @@ impl DistributedRealHamiltonian {
                 self.fft.to_real_plane_in(t, pairs, i)?;
                 let slab = self.fft.plane();
                 let base = i * line;
-                for (o, v) in out[ca * points + base..ca * points + base + line]
-                    .iter_mut()
-                    .zip(slab)
-                {
-                    *o = f(ca, v.re);
+                for (j, v) in slab.iter().take(line).enumerate() {
+                    sink(ca, base + j, v.re);
                 }
                 if let Some(cb) = cb {
-                    for (o, v) in out[cb * points + base..cb * points + base + line]
-                        .iter_mut()
-                        .zip(slab)
-                    {
-                        *o = f(cb, v.im);
+                    for (j, v) in slab.iter().take(line).enumerate() {
+                        sink(cb, base + j, v.im);
                     }
                 }
             }

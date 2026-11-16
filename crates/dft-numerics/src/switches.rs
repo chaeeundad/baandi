@@ -222,6 +222,16 @@ table! {
     // MPI selected-root rotation (review F05; ledger row M2-SELECTED-ROOTS-F05); default off until dev08.
     M2_SELECTED_ROOTS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "distributed Davidson Ritz-change (standard) solves: unconverged roots decided from the Ritz-value change first, Ritz vectors, H images and residuals of those roots only, all bands rotated only at return and restarts (the serial lean rule); strict solves unchanged; implies the workspace path; rounding class";
+    // MPI in-panel Gram-Schmidt reductions (docs/performance/profile-2026-11-16-mpi.md); default classic until dev08.
+    M2_PANEL_GS: Kind::Choice { allowed: &["classic", "pythag", "fused"], default: "classic" }, "classic",
+        "classic, pythag, fused",
+        "distributed panel Gram-Schmidt reductions per column: classic (two dot reductions and one norm), pythag (norm rides with the second dots, Pythagorean update, 2 reductions), fused (input norm rides with the first dots, second pass only when the per-column DGKS rule of BAANDI_ORTHO fails, about 1 reduction); rounding class";
+    M2_DENSITY: Kind::Choice { allowed: &["bands", "fused"], default: "bands" }, "bands",
+        "bands, fused",
+        "M2 distributed density on the standard path: bands (per-band plane contributions kept, then summed) or fused (plane density accumulated in ascending band order, no bands x plane buffer; the per-band data only serves the strict certificate screen); bit-identical";
+    MPI_TREE: Kind::Choice { allowed: &["binomial", "rd"], default: "binomial" }, "binomial",
+        "binomial, rd",
+        "message pattern of the deterministic MPI tree sum: binomial (reduce to rank 0 plus broadcast, 2 log2 P rounds) or rd (recursive doubling with MPI_Sendrecv, log2 P rounds; bit-identical for power-of-two rank counts, other counts stay binomial); read by the CLI at MPI start";
     // MPI coarse stage and certificate (docs/performance/mpi-coarse-certificate-analysis.md); default off.
     M2_SCREEN: Kind::Choice { allowed: &["replicated", "dist"], default: "dist" }, "dist",
         "replicated, dist",

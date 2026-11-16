@@ -1,5 +1,7 @@
 # P17A: standard convergence and delivered accuracy
 
+> Note (2026-11-16, ADR 0043 amendment): the input key `scf.convergence_profile` named below was removed. Reproduce a former `convergence_profile = "standard"` run with a plain input and `scf.verify = "off"`, and a former strict run with `BAANDI_REFERENCE_STRICT=on`. The commands and numbers below are the historical record and are not rewritten.
+
 Implemented, additive, unpolarized Davidson only. Strict remains the default.
 Baseline: `84f06a478549ce39151ba6095f5980bb652d8d26`; changes uncommitted.
 No QE source was accessed. Derived from prose notes `qe-scf-cycle.md` and

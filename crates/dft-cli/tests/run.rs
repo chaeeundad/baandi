@@ -55,6 +55,11 @@ impl Case {
         // These legacy-output tests pin the pre-ladder path (the C1 cutoff ladder is
         // on by default since 2026-11-10 and has its own tests).
         cmd.env("BAANDI_CUTOFF_LADDER", "off");
+        // They also pin the strict reference path (ADR 0043: the single
+        // standard path is the default since 2026-11-16 and is tested in
+        // tests/single_path.rs); the legacy outputs and the independent engine
+        // comparisons below are strict.
+        cmd.env("BAANDI_REFERENCE_STRICT", "on");
         cmd.current_dir(&self.dir).args(["run", "input.toml"]);
         if let Some(dir) = override_dir {
             cmd.arg("--output-dir").arg(dir);
@@ -81,7 +86,8 @@ impl Drop for Case {
 #[test]
 fn reuse_psi_switch_keeps_energy_and_reuses_starts() {
     let c = Case::new(true);
-    let input = format!("{}\n[scf]\nconvergence_profile='standard'\n", c.text);
+    // Standard path without the verification (the former explicit standard profile).
+    let input = format!("{}\n[scf]\nverify='off'\n", c.text);
     fs::write(c.dir.join("input.toml"), input).unwrap();
     let run = |mode: &str, extra: (&str, &str)| {
         let out = format!("reuse-{mode}-{}", extra.1);
@@ -166,8 +172,9 @@ fn verify(large: bool) {
     // Legacy fields plus the additive preflight report, checked on CLI output.
     // Legacy fields plus additive per-band accuracy, checked on actual output.
     // 24 legacy keys plus gamma_real_used and gamma_real_fallback_reason (default Auto
-    // mode, ADR 0040) and atomic_start (default atomic start, ADR 0042).
-    assert_eq!(first.as_object().unwrap().len(), 27);
+    // mode, ADR 0040), atomic_start (default atomic start, ADR 0042), single_path
+    // (ADR 0043) and execution (review F01).
+    assert_eq!(first.as_object().unwrap().len(), 29);
     assert!(first.get("kpoints").is_none());
     for key in [
         "preflight",
@@ -675,7 +682,7 @@ fn expressions_preserve_energy_and_record_resolutions() {
     let plain = c.json("plain", "results.json");
     // Switch manifest (work order A1): the whole table, effective value and source.
     let switches = plain["scf"]["switches"].as_object().unwrap();
-    assert_eq!(switches.len(), 68);
+    assert_eq!(switches.len(), 70);
     let ladder = &switches["BAANDI_CUTOFF_LADDER"];
     assert_eq!(
         (&ladder["value"], &ladder["source"]),
@@ -718,6 +725,9 @@ fn expressions_preserve_energy_and_record_resolutions() {
         "gamma_real_fallback_reason",
         // Recorded by the default atomic start (ADR 0042).
         "atomic_start",
+        // ADR 0043 path record and review F01 execution record (every run).
+        "single_path",
+        "execution",
     ];
     let keys: std::collections::BTreeSet<_> = plain
         .as_object()
@@ -906,6 +916,16 @@ fn threading_metadata_and_identical_outputs() {
             object.remove("threading");
             object.remove("input_sha256");
             object["scf"].as_object_mut().unwrap().remove("threads");
+            // The execution record states the requested and used threads.
+            assert_eq!(object["execution"]["backend"]["threads"], requested.max(1));
+            object["execution"]["requested"]
+                .as_object_mut()
+                .unwrap()
+                .remove("threads");
+            object["execution"]["backend"]
+                .as_object_mut()
+                .unwrap()
+                .remove("threads");
             let density = fs::read(c.dir.join(&name).join("density.bin")).unwrap();
             if let Some((ref_json, ref_density)) = &reference {
                 assert_eq!(ref_json, &json);
@@ -968,6 +988,9 @@ fn compare_execution_modes(include_agent: bool) {
         }
         let result = baandi()
             .current_dir(&c.dir)
+            // Same (strict reference) path as `Case::run`: the runtime modes keep
+            // the strict path for plain inputs (ADR 0043 item 5).
+            .env("BAANDI_REFERENCE_STRICT", "on")
             .args(["run", "input.toml", "--output-dir", name])
             .args(flags)
             .output()

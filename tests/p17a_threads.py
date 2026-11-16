@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix='p17a-threads-') as td:
             records=[]
             for thread in [1,8]:
                 inp=directory/f'{metric}-{thread}.toml'
-                inp.write_text(ea.scf_settings(base,dict(convergence_profile='standard',mixing_metric=metric,threads=thread)))
+                inp.write_text(ea.scf_settings(base,dict(verify='off',mixing_metric=metric,threads=thread)))
                 out=directory/f'{metric}-{thread}'
                 command=[str(ROOT/'target/release/dft-cli'),'run',str(inp),'--output-dir',str(out)]
                 p=subprocess.run(command,capture_output=True,text=True,timeout=1800)

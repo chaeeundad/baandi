@@ -71,7 +71,7 @@ class EqualAccuracyTests(unittest.TestCase):
 
     def test_scf_settings_does_not_change_other_tables(self):
         text = '[scf]\nthreads = 1\n[other]\nthreads = 4\n'
-        got = ea.scf_settings(text, {'threads': 8, 'convergence_profile': 'standard'})
+        got = ea.scf_settings(text, {'threads': 8, 'verify': 'off'})
         self.assertIn('threads = 8', got)
         self.assertTrue(got.endswith('[other]\nthreads = 4\n'))
         self.assertEqual(got.count('threads ='), 2)

@@ -2,13 +2,9 @@
 fn relax_without_table_rejects_reference_before_scf() {
     let dir = std::env::temp_dir().join(format!("reference-relax-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    for profile in ["strict", "standard"] {
+    for (profile, scf) in [("plain", ""), ("unverified", "verify='off'\n")] {
         let path = dir.join("input.toml");
-        std::fs::write(
-            &path,
-            input(&format!("{MODE}[scf]\nconvergence_profile='{profile}'\n")),
-        )
-        .unwrap();
+        std::fs::write(&path, input(&format!("{MODE}[scf]\n{scf}"))).unwrap();
         let result = std::process::Command::new(env!("CARGO_BIN_EXE_dft-cli"))
             .arg("relax")
             .arg(&path)

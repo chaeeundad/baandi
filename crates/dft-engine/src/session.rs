@@ -575,14 +575,15 @@ impl ScfSession {
                                     && e <= 0.3 * previous
                             }))
             });
-            // Residual guard (default off; StandardProfile::residual_energy_bound):
-            // the Coulomb estimator does not see the second-order band-energy
-            // error of loose eigensolves, so also require that bound below the
-            // class threshold. Only evaluated when the density rule already stops.
+            // Residual guard (default on; StandardProfile::residual_energy_estimate,
+            // an empirical estimator, not a bound: review F03): the Coulomb
+            // estimator does not see the second-order band-energy error of loose
+            // eigensolves, so also require that estimate below the class
+            // threshold. Only evaluated when the density rule already stops.
             if stop
                 && dft_numerics::switches::on(dft_numerics::switches::Id::STANDARD_RESIDUAL_GUARD)
             {
-                let bound = StandardProfile::residual_energy_bound(
+                let bound = StandardProfile::residual_energy_estimate(
                     step.k_points
                         .iter()
                         .map(|k| (k.point.weight, k.solution.residuals.as_slice())),
@@ -1669,7 +1670,7 @@ impl ScfSession {
 
 /// ADR 0043 verification: one more ordinary map at the converged output density
 /// (V1), pass on the Coulomb fixed-point residual at the standard threshold and,
-/// with the residual guard on, the residual bound of that solve (V2). Strict
+/// with the residual guard on, the residual estimate of that solve (V2). Strict
 /// certificate quantities are computed as information only (V3). Returns the
 /// attempt, its record for the history entry, and a clipped-charge failure.
 fn verify_fixed_point(
@@ -1707,7 +1708,7 @@ fn verify_fixed_point(
         dft_numerics::switches::Id::STANDARD_RESIDUAL_GUARD,
     )
     .then(|| {
-        StandardProfile::residual_energy_bound(
+        StandardProfile::residual_energy_estimate(
             check
                 .k_points
                 .iter()

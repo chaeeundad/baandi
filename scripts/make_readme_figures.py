@@ -547,8 +547,10 @@ def extended_results():
               + evidence_link("tests/reference/spectral/final/verification.json") + ".", "",
               "### Standard convergence profile: work versus strict", ""]
     freeze = load(os.path.join(REF, "perf/p17a/default-freeze.json"))
-    lines += [f"Opt-in standard threshold: {freeze['standard_threshold_ha']:.0e} Ha; strict remains the default. "
-              "**Standard results are not certified.** The table compares BAANDI with its own strict run, not QE. "
+    lines += [f"Standard threshold: {freeze['standard_threshold_ha']:.0e} Ha. Since 2026-11-16 the standard path with a "
+              "fixed-point verification after convergence is the default (ADR 0043); the rows below are the P17A "
+              "measurement of the unverified standard profile. **Standard results are not certified.** "
+              "The table compares BAANDI with its own strict run, not QE. "
               "Energy differences are per cell; unavailable means no successful pair. Failed runs retain their work counts. "
               + evidence_link("tests/reference/perf/p17a/final-report.json") + ".", "",
               "| Case | Status strict / standard | SCF iterations strict / standard | Davidson steps strict / standard | E standard - E strict (Ha) |",

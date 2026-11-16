@@ -112,6 +112,7 @@ fn legacy_defaults_are_unchanged() {
         Id::STANDARD_RESIDUAL_GUARD,
         Id::PHASE_THREADS,
         Id::STAGE_TIMERS,
+        Id::M2_WORKSPACE,
     ] {
         assert!(on(id), "{id:?} must default on");
     }
@@ -126,8 +127,9 @@ fn legacy_defaults_are_unchanged() {
         Id::SECOND_VECTOR,
         Id::PROJECT_WIDE,
         Id::B1_NARROW,
-        Id::SINGLE_PATH,
+        Id::REFERENCE_STRICT,
         Id::M2_B5,
+        Id::M2_SELECTED_ROOTS,
         Id::REUSE_PSI,
         Id::LEAN_PROJ_CACHE,
     ] {
@@ -211,5 +213,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::CUTOFF_LADDER), Value::Raw(None));
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
-    assert_eq!(TABLE.len(), 68);
+    assert_eq!(TABLE.len(), 70);
 }

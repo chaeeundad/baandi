@@ -232,7 +232,7 @@ fn functional_files_and_kpoint_gap() {
 
 #[test]
 fn valid_preflight_preserves_engine_energy_and_density() {
-    use dft_cli::{config::Config, run::options};
+    use dft_cli::{config::Config, run::options_with};
     use dft_engine::{ScfProblem, SpeciesPotential, input::Atom};
     let c = Case::new();
     let text = c.text("Si", "'synthetic.xml'", "max_iterations=1");
@@ -245,7 +245,8 @@ fn valid_preflight_preserves_engine_energy_and_density() {
             label: "Si",
             potential: &potential,
         }],
-        options(&config).unwrap(),
+        // The options of a classic run (ADR 0043 single path).
+        options_with(&config, None).unwrap(),
     )
     .unwrap()
     .run_outcome()

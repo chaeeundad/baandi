@@ -179,7 +179,7 @@ table! {
     STANDARD_STOP: Kind::Choice { allowed: &["plain", "confirm"], default: "plain" }, "plain",
         "plain, confirm", "standard-class stop rule: plain threshold, or confirm (also stop when the estimator is within 2x the threshold, the previous step within 20x, and it contracted by 0.3 or better)";
     STANDARD_RESIDUAL_GUARD: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
-        "standard-class stop also requires sum_k w_k sum_occupied f_i |r_i|^2 (Ha, second-order band-energy bound) below the threshold";
+        "standard-class stop also requires sum_k w_k sum_occupied f_i |r_i|^2 x 1 Ha^-1 (empirical second-order band-energy estimator, not a bound; review F03) below the threshold";
     DENSITY_PAIR: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "two bands per inverse transform in the density build";
     DENSITY_REDUCE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -216,6 +216,12 @@ table! {
         "distributed Davidson reduced eigenproblem: replicated (every rank solves) or root (rank 0 solves and broadcasts the lowest pairs; bit-identical)";
     M2_B5: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "distributed Davidson bordered (secular) reduced eigen update when one column was appended (the serial B5; rounding class)";
+    // MPI solver workspace (review F06; ledger row M2-WORKSPACE-F06); bit-identical.
+    M2_WORKSPACE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "distributed Davidson keeps its basis, products, reduced matrix (fixed leading dimension, border update), Ritz, residual and orthonormalization buffers, GEMM and EVD workspaces in a per-rank workspace reused across iterations and solves (no per-iteration large allocation); bit-identical to off";
+    // MPI selected-root rotation (review F05; ledger row M2-SELECTED-ROOTS-F05); default off until dev08.
+    M2_SELECTED_ROOTS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "distributed Davidson Ritz-change (standard) solves: unconverged roots decided from the Ritz-value change first, Ritz vectors, H images and residuals of those roots only, all bands rotated only at return and restarts (the serial lean rule); strict solves unchanged; implies the workspace path; rounding class";
     // MPI coarse stage and certificate (docs/performance/mpi-coarse-certificate-analysis.md); default off.
     M2_SCREEN: Kind::Choice { allowed: &["replicated", "dist"], default: "dist" }, "dist",
         "replicated, dist",
@@ -301,8 +307,8 @@ table! {
         "overrides scf.cutoff_ladder / fraction of the input file";
     RELAX_EXTRAPOLATION: Kind::Override { valid: relax_extrapolation_valid }, "config",
         "none, first_order, second_order", "overrides the relaxation density extrapolation of the input file";
-    SINGLE_PATH: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "ADR 0043: inputs without scf.convergence_profile use the standard profile with the fixed-point verification after convergence (scf.verify)";
+    REFERENCE_STRICT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "ADR 0043 (2026-11-16): force the strict reference SCF path with its fixed-point certificate (accuracy gates and tests); off = the single standard path with verification";
     DGEMM_TIMERS: Kind::Presence, "off", "any value (presence)",
         "print per-site dgemm timers at exit (dgemm-timers builds)";
     PSEUDO_DIR: Kind::Path, "platform cache", "absolute path",
@@ -573,6 +579,19 @@ mod tests {
         assert_eq!(
             eval(Id::M2_ORTHO, Some("serial")).0,
             Value::Choice("serial")
+        );
+        assert_eq!(eval(Id::M2_WORKSPACE, None), (Value::Choice("on"), Default));
+        assert_eq!(
+            eval(Id::M2_WORKSPACE, Some("off")),
+            (Value::Choice("off"), Env)
+        );
+        assert_eq!(
+            eval(Id::M2_SELECTED_ROOTS, None),
+            (Value::Choice("off"), Default)
+        );
+        assert_eq!(
+            eval(Id::M2_SELECTED_ROOTS, Some("on")),
+            (Value::Choice("on"), Env)
         );
         assert_eq!(eval(Id::M2_B5, None), (Value::Choice("off"), Default));
         assert_eq!(eval(Id::M2_B5, Some("on")), (Value::Choice("on"), Env));

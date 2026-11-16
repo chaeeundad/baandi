@@ -1,5 +1,7 @@
 # dev08 request: B1 selected-root products, Davidson stage timers; B4 and B5 decisions (pre-registered 2026-11-10)
 
+> Note (2026-11-16, ADR 0043 amendment): the input key `scf.convergence_profile` named below was removed. Reproduce a former `convergence_profile = "standard"` run with a plain input and `scf.verify = "off"`, and a former strict run with `BAANDI_REFERENCE_STRICT=on`. The commands and numbers below are the historical record and are not rewritten.
+
 Source: proposal "Structural speed proposal" (2026-11-10, sections 1, 4 B1/B4/B5, 6). Ledger rows: B1-SELECTED-ROOTS, DAVIDSON-STAGES, B4-INNER, B5-BORDERED. Threads-only; no MPI file touched. Every rule below was written before any dev08 data and before the Mac harness data of B4 and the Mac timing of B5; rules are never moved after data.
 
 ## Switches (environment, read once per solve; default off; the default path is bit-identical)

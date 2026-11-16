@@ -92,10 +92,10 @@ fn standard_combination_reaches_real_engine_and_labels_output() {
     .unwrap();
     for mode in ["auto", "on"] {
         let text = format!(
-            "[system]\nname='R6 synthetic'\nlattice_unit='bohr'\nlattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=5.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=5\nconvergence_profile='standard'\ngamma_real='{mode}'\n[output]\ndirectory='out-{mode}'\n"
+            "[system]\nname='R6 synthetic'\nlattice_unit='bohr'\nlattice_vectors=[[4.0,0.0,0.0],[0.0,4.0,0.0],[0.0,0.0,4.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=5.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=5\nverify='off'\ngamma_real='{mode}'\n[output]\ndirectory='out-{mode}'\n"
         );
         let config = Config::parse(&text).unwrap();
-        let opts = run::options(&config).unwrap();
+        let opts = run::options_with(&config, None).unwrap();
         assert_eq!(opts.standard, Some(dft_engine::StandardProfile::default()));
         assert_ne!(opts.gamma_real, GammaReal::Off);
         fs::write(dir.join("input.toml"), &text).unwrap();

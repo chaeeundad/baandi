@@ -44,8 +44,11 @@ observed failures and validation limits. No QE symmetry-on oracle is available.
 
 ## Force output (P20A)
 
-`output.forces` defaults false. Standard profile rejects at shared preflight;
-all paths use the engine's post-SCF derivative implementation. Force-on output
+`output.forces` defaults false. Since ADR 0043 (2026-11-16) the default standard
+path supplies forces from a passed fixed-point verification (`verify = "off"`
+with forces rejects at preflight); the strict reference path
+(`BAANDI_REFERENCE_STRICT=on`) keeps the certificate preconditions.
+All paths use the engine's post-SCF derivative implementation. Force-on output
 has a per-term block and text table. The results proposal accepts extension versions 1 (historical unavailable) and 2
 (available forces with strict certificate preconditions); keep outer schema_version
 unchanged. `tests/validate_force_schema.py` checks fixtures and actual CLI output. Run `cargo test -p dft-cli --test forces`.
@@ -84,3 +87,14 @@ Polish is a new optimizer calculation, never a renamed exact restart. Preserve
 all stage inputs, times and failures. `rebuilt_pressure_check` warns independently
 of the Pulay tensor-difference warning; frozen-only convergence must not imply
 nominal-cutoff equilibrium, and the default rebuild cadence remains zero.
+
+## Single SCF path (ADR 0043, default since 2026-11-16)
+
+`scf.convergence_profile` is removed (input error with the replacement). `Config::scf_path`
+selects: `BAANDI_REFERENCE_STRICT=on` -> strict reference; input exclusions (relax, stress,
+spin, FD, locking auto) -> strict `not_applicable` and standard-only keys reject; caller
+exclusions (runtime modes, non-run commands) -> strict for plain inputs; otherwise the
+standard path with verification. Every result records `single_path` and `execution`
+(review F01); MPI runs without a distributed solve report `mpi_replicated` (F02). Tests
+that need strict set `BAANDI_REFERENCE_STRICT=on` (`tests/run.rs` `Case::run`) or use the
+engine API; `tests/single_path.rs` covers the default path.

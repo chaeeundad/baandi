@@ -75,6 +75,51 @@ capacity x capacity GEMM workspace; rounding class). Both default off.
 single-column appends, bordered and broadcast solves), written to results.json
 `parallel.reduced_solves`. Analysis: docs/performance/mpi-reduced-eigen-analysis.md.
 
+## MPI solver workspace (review F06, 2026-11-16)
+
+`BAANDI_M2_WORKSPACE=on|off` (default on; `DistributedTuning.workspace`): the
+distributed solver runs on `distributed_davidson/workspace.rs`, a per-thread (per
+rank) `DistributedDavidsonWorkspace` reused across iterations and solves: basis and
+products with `capacity` columns of storage (appends in place), reduced matrix with
+the fixed leading dimension `capacity` and border update (packed m x m copy for the
+dense solver), fresh products, lowest coefficients and Gram operands as slices,
+persistent Ritz/residual/correction/orthonormalization scratch, GEMM, EVD and B5
+workspaces (rebuilt only when (max rows, capacity, pool) changes). Same arithmetic
+in the same order: bit-identical to off (tests `tests/distributed_workspace.rs`, ranks
+1 to 4, every switch stack; `dft-engine` `m2_workspace_is_bit_identical_in_scf`).
+Growth counters `workspace_stats()`; `release_workspace()` frees the calling
+thread's workspace; `set_iteration_probe` is a test hook. The classic (non-serial)
+orthonormalization and the M1 apply still allocate inside; on pure builds faer's EVD
+allocates its own packing (MKL `dsyevd` does not). `dft-mpi`: `tree_sum_f64` and
+`allgatherv_f64` keep their receive scratch and count/displacement arrays per thread;
+the rank simulator reuses its slots (results unchanged).
+
+## MPI selected-root rotation (review F05, 2026-11-16)
+
+`BAANDI_M2_SELECTED_ROOTS=on|off` (default off until dev08; `DistributedTuning.selected_roots`,
+implies the workspace path): on Ritz-change (standard) distributed solves the
+unconverged roots are decided from the Ritz-value change before any rotation; V C,
+(H V) C and residuals are formed for those columns only (coefficient columns gathered
+into `sel_coeff`); all bands are rotated at return (every band's residual reported)
+and at a restart (when a restart follows, one full rotation serves both the selected
+residuals and the contraction basis). Strict (residual) solves are unchanged.
+`rotation_stats()` counts rotation pairs, columns and flops on both paths. Rounding
+class in principle (column subsets of one GEMM); bit-identical on pure builds in
+`tests/distributed_selected_roots.rs` (ranks 1 to 4, scattered, clustered and
+degenerate spectra, capacities 6 and 3). History records the selected maximum per
+iteration (as the serial lean solver).
+
+## MPI reduction counters (review F08, 2026-11-16; analysis only)
+
+Both distributed entry points wrap the communicator in `Counted` (forwards every call
+unchanged) and count each tree sum by the site last declared on the thread with
+`site(Site::..)`: reduced_gram, residual_norms, ortho_normalize, ortho_projection,
+panel_cross, panel_dot, panel_norm, restart_defect, apply (the operator's own sums),
+setup; payload histogram buckets 1, 2-8, 9-64, 65-512, 513-4096, above
+(`REDUCTION_BUCKETS`). Count only (no timer, no allocation); reduction order and
+results unchanged. `reduction_stats()` (solves, sites), results.json
+`parallel.reductions`, printed by the m2_entry_cost harness.
+
 ## Lean Davidson (work order beat-QE phase B, 2026-11-15)
 
 `BAANDI_DAVIDSON=lean|classic` (default `classic`; `ResearchOptions::lean`), module

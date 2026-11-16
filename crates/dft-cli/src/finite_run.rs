@@ -19,6 +19,8 @@ pub(super) fn execute(
     preflight: crate::config::preflight::Report,
     species: Vec<Value>,
     input_bytes: &[u8],
+    // ADR 0043 / review F01-F02: `single_path`, `execution`, `parallel` keys.
+    path_record: Value,
 ) -> Result<RunReport, RunError> {
     let cap = config
         .occupations
@@ -298,6 +300,9 @@ pub(super) fn execute(
         result["stress"] = stress_json(&stress);
         result["state_contracts"]["stress"] = stress_json(&stress);
         fs::write(out.join("stress.txt"), stress_table(&stress)).map_err(|e| error(1, e))?;
+    }
+    if let (Some(r), Value::Object(extra)) = (result.as_object_mut(), path_record) {
+        r.extend(extra);
     }
     write_json(&out.join("results.json"), &result)?;
     Ok(RunReport {

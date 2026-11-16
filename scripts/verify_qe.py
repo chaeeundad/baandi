@@ -245,7 +245,7 @@ def require_strict_result(result):
     """Legacy unlabelled results are strict; explicit weaker claims fail closed."""
     for section in (result, result.get('scf', {}), result.get('convergence', {})):
         if section.get('convergence_profile', 'strict') != 'strict':
-            raise Error('validation requires strict convergence_profile; use equal_accuracy.py for standard results', 3)
+            raise Error('validation requires strict convergence_profile (run with BAANDI_REFERENCE_STRICT=on, ADR 0043); use equal_accuracy.py for standard results', 3)
         if 'certified' in section and section['certified'] is not True:
             raise Error('validation rejects explicitly uncertified results', 3)
 

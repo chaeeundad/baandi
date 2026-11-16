@@ -87,7 +87,14 @@ pub struct SimRank {
 }
 impl SimRank {
     fn publish(&self, data: &[f64]) {
-        self.shared.slots.lock().unwrap()[self.rank] = data.to_vec();
+        {
+            // Reuse the slot's storage (grow-only), so a steady-state collective of
+            // the simulator allocates nothing.
+            let mut slots = self.shared.slots.lock().unwrap();
+            let slot = &mut slots[self.rank];
+            slot.clear();
+            slot.extend_from_slice(data);
+        }
         self.shared.barrier.wait();
     }
     fn release(&self) {
@@ -138,8 +145,31 @@ impl Collective for SimRank {
         }
         self.publish(local);
         {
-            let mut all = self.shared.slots.lock().unwrap().clone();
-            out.copy_from_slice(&tree_associate(&mut all));
+            // The association of `tree_associate`, element by element on a
+            // stack copy of the P contributions (no clone of the slots).
+            let slots = self.shared.slots.lock().unwrap();
+            let size = slots.len();
+            if size > 64 {
+                let mut all = slots.clone();
+                out.copy_from_slice(&tree_associate(&mut all));
+            } else {
+                let mut acc = [0.0f64; 64];
+                for (i, o) in out.iter_mut().enumerate() {
+                    for (a, slot) in acc.iter_mut().zip(slots.iter()) {
+                        *a = slot[i];
+                    }
+                    let mut step = 1;
+                    while step < size {
+                        for r in (0..size).step_by(2 * step) {
+                            if r + step < size {
+                                acc[r] += acc[r + step];
+                            }
+                        }
+                        step <<= 1;
+                    }
+                    *o = acc[0];
+                }
+            }
         }
         self.release();
         Ok(())

@@ -1,5 +1,7 @@
 # P29A standard-profile stagnation study
 
+> Note (2026-11-16, ADR 0043 amendment): the input key `scf.convergence_profile` named below was removed. Reproduce a former `convergence_profile = "standard"` run with a plain input and `scf.verify = "off"`, and a former strict run with `BAANDI_REFERENCE_STRICT=on`. The commands and numbers below are the historical record and are not rewritten.
+
 2026-11-07. **Stagnation reproduced; guard is an experimental, default-off
 robustness tradeoff, not an accepted speed optimization.** On Si8, the guard
 reduces the worst of ten trajectories from 32 to 27 SCF iterations, but median

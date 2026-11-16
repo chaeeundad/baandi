@@ -124,8 +124,7 @@ fn observe_mode_runs_the_verified_standard_path() {
     let last_certificate = events
         .lines()
         .map(|l| serde_json::from_str::<Value>(l).unwrap())
-        .filter(|e| e["type"] == "certificate_evaluated")
-        .next_back()
+        .rfind(|e| e["type"] == "certificate_evaluated")
         .expect("verification reported as certificate_evaluated");
     assert_eq!(last_certificate["data"]["passed"], true);
     // The reference switch keeps the strict path in the runtime modes too.

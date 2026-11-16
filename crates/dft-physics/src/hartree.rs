@@ -53,6 +53,32 @@ pub fn evaluate(
     cell: &Cell,
     fft: &mut impl Fft3d,
 ) -> Result<HartreeGrid, PhysicsError> {
+    evaluate_inner(n, cell, fft, None)
+}
+
+/// As `evaluate`, and copies the Fourier coefficients of the checked density
+/// (`to_reciprocal` normalization, before the Coulomb kernel) into `keep`,
+/// which must have the grid shape. The potential and energy are bit-identical
+/// to `evaluate` (ticket MPI-REMAINING: the standard stop-rule estimate reuses
+/// these coefficients instead of transforming the residual again).
+pub fn evaluate_keeping_density(
+    n: &Array3<f64>,
+    cell: &Cell,
+    fft: &mut impl Fft3d,
+    keep: &mut Array3<Complex64>,
+) -> Result<HartreeGrid, PhysicsError> {
+    if keep.shape() != n.shape() {
+        return Err(PhysicsError::Shape);
+    }
+    evaluate_inner(n, cell, fft, Some(keep))
+}
+
+fn evaluate_inner(
+    n: &Array3<f64>,
+    cell: &Cell,
+    fft: &mut impl Fft3d,
+    keep: Option<&mut Array3<Complex64>>,
+) -> Result<HartreeGrid, PhysicsError> {
     if n.shape() != fft.shape() {
         return Err(PhysicsError::Shape);
     }
@@ -62,6 +88,9 @@ pub fn evaluate(
     }
     let mut reciprocal = Array3::zeros(n.raw_dim());
     fft.to_reciprocal(&real, &mut reciprocal)?;
+    if let Some(keep) = keep {
+        keep.assign(&reciprocal);
+    }
     let g2 = squared_frequencies(cell, fft.shape())?;
     let mut energy = 0.0;
     for ((index, z), &g2) in reciprocal.indexed_iter_mut().zip(&g2) {

@@ -242,6 +242,12 @@ Evidence: on si32 strict (perturbed seed 601) 66.4 percent of Davidson apply cal
 - Passed-verification cost (8 to 16 %): tau_v is fixed by ADR 0043; a user decision, not a switch.
 - Stop-estimator underestimation (10 to 20x below the verification residual at failing stops, si32 seeds 603/605/610): a better predictor of F(rho_out) - rho_out (for example from the Pulay subspace) would avoid futile verifications; analysis only so far.
 
+## MPI remaining terms (2026-11-17, MPI-REMAINING; docs/performance/mpi-remaining.md)
+- Overlap-matrix (QE-style generalized reduced problem) Davidson on the M2 path: port the serial lean bordering (S = V^T V beside H_r, inverse Cholesky factor, pivot rule, two fallback stages) into `distributed_davidson/workspace.rs` behind `BAANDI_M2_DAVIDSON=lean`; the S and H borders share one tree sum per iteration and replace the panel Gram-Schmidt chain (orthonormalize stage 12 percent of the si32 np=8 wall, flat from np 4 to 8, O). Largest remaining lever; stage-0 counters: tree sums per solve, orthonormalize seconds, H columns.
+- M2 output XC energy without the potential allgatherv: the audit's output-density XC needs the energy only (no core density on the M2 XC path), but `m2::xc` gathers the full potential (N doubles per map); bit-identical, small (one allgatherv of 1.5 MB at si32 per map).
+- Distributed Pulay mixer (history on grid blocks, one tree sum of the m x m Gram and m right-hand sides, one allgatherv of the mixed density): after MIX_INCREMENTAL the remaining replicated mixer work is O(m N); checkpoints need the full history (gather on capture).
+- Ladder coarse stage at np >= 4 (25 percent of the si32 np=8 wall, flat from np 4 to 8; serial coarse stage 1.19 s is slower than distributed 0.72 s on the Mac): per-iteration costs of a 4189-PW problem dominate; the overlap-matrix Davidson acts here too.
+
 ## Per-core kernel follow-ups (2026-11-17, PERCORE-KERNELS; docs/performance/percore-kernels-2026-11-17.md)
 - `BAANDI_LEAN_BORDER=fused` and `BAANDI_PACK_FIXED=on` are stage-0 candidates on the Mac (bit-identical there); dev08 stage 0/1 (MKL and x86 pure) in requests/percore-kernels.md. The MKL per-kernel table of the lean default (Part A0) decides the next kernel item.
 - Fresh-basis borders (start, contraction): V^T V and V^T (H V) could also be one product V^T [V | H V], and their diagonal blocks are symmetric (half the flops of the k x k block, dsyrk on MKL); about 2 % of a warm solve (factor_fresh), more in solves with contractions. Not implemented.

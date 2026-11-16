@@ -232,13 +232,13 @@ table! {
         "bands, fused",
         "M2 distributed density on the standard path: bands (per-band plane contributions kept, then summed) or fused (plane density accumulated in ascending band order, no bands x plane buffer; the per-band data only serves the strict certificate screen); bit-identical";
     // MPI kept start (ticket MPI-KEPT-START, docs/design/mpi-kept-start.md); default off until dev08.
-    M2_REUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    M2_REUSE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "MPI-KEPT-START: a standard (Ritz-change) M2 stick-row solve that starts from the previous solve's orbitals X takes X and H X from that solve's local rows (the return rotation of the H images) plus (V_new - V_old) X, formed from the plane slabs the M2 density build kept (one forward transform per occupied pair, no inverse transform, nonlocal product or kinetic pass), when initial equals X to 1e-14 and the Gram defect of X is at most 1e-12; the local rows of X come from the solver (no extraction from the gathered block); falls back to the plain start otherwise; rounding class";
     // MPI scaling gap (ticket MPI-SCALING-GAP, docs/performance/mpi-scaling-gap.md); default off.
-    M2_STICKS: Kind::Choice { allowed: &["greedy", "mirror"], default: "greedy" }, "greedy",
+    M2_STICKS: Kind::Choice { allowed: &["greedy", "mirror"], default: "mirror" }, "mirror",
         "greedy, mirror",
         "stick partition of the M2 distributed FFT: greedy (sticks one by one to the least loaded rank) or mirror (a stick and its Gamma mirror stick go to the same rank as one unit, so no ORC representative is split and the two mirror alltoalls of every apply vanish; rounding class: rows are summed in a different order)";
-    M2_START: Kind::Choice { allowed: &["ortho", "gram"], default: "ortho" }, "ortho",
+    M2_START: Kind::Choice { allowed: &["ortho", "gram"], default: "gram" }, "gram",
         "ortho, gram",
         "start of a distributed Davidson solve (workspace path): ortho (panel Gram-Schmidt of the start block) or gram (one Gram matrix and one reduction; a start block with Gram defect at most 1e-12, the restart contraction rule, is taken as the basis without Gram-Schmidt, otherwise ortho; rounding class)";
     // MPI lazy orbitals (ticket MPI-LAZY-ORBITALS, docs/design/mpi-lazy-orbitals.md); default off.
@@ -254,7 +254,12 @@ table! {
     M2_ATOMIC: Kind::Choice { allowed: &["replicated", "split"], default: "split" }, "split",
         "replicated, split",
         "atomic start on the M2 path: replicated, or split (span columns, two-pass Gram-Schmidt first passes, H Q and the Gram columns split over ranks with one broadcast per column and one allgatherv; Gram-Schmidt bit-identical, Gram block GEMM rounding class)";
+    // Replicated grid stages outside the solve (ticket MPI-REMAINING, docs/performance/mpi-remaining.md); default off.
+    STOP_METRIC: Kind::Choice { allowed: &["fft", "kept"], default: "fft" }, "fft", "fft, kept",
+        "standard stop-rule Coulomb estimate E_H[rho_out - rho_in]: fft (transform the residual forward and back on the full grid) or kept (Parseval sum over the map's own Fourier coefficients of rho_in, kept from the Hartree potential, and rho_out, kept from the energy audit; no FFT; falls back to fft when a density was clamped or the kept coefficients do not belong to the two densities; rounding class of the estimate only)";
     // Solvers (dft-solvers).
+    MIX_INCREMENTAL: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "Pulay mixer keeps its difference vectors (and their metric images) and the Gram matrix entries across calls and forms only the newest difference and Gram row per step (O(m N) instead of O(m^2 N) grid work, no per-step difference allocation; ticket MPI-REMAINING); bit-identical";
     B1: Kind::Choice { allowed: &["on", "off", "standard", "strict"], default: "on" }, "on",
         "on, off, standard, strict", "B1 selected-root Davidson iterations";
     B1_SKETCH: Kind::Choice { allowed: &["count", "dense"], default: "count" }, "count", "count, dense",
@@ -626,23 +631,23 @@ mod tests {
         );
         assert_eq!(eval(Id::M2_B5, None), (Value::Choice("off"), Default));
         assert_eq!(eval(Id::M2_B5, Some("on")), (Value::Choice("on"), Env));
-        // MPI-SCALING-GAP switches (default off).
+        // MPI-SCALING-GAP switches (defaults mirror and gram since 0d87d6e).
         assert_eq!(
             eval(Id::M2_STICKS, None),
-            (Value::Choice("greedy"), Default)
+            (Value::Choice("mirror"), Default)
         );
         assert_eq!(
-            eval(Id::M2_STICKS, Some("mirror")),
-            (Value::Choice("mirror"), Env)
+            eval(Id::M2_STICKS, Some("greedy")),
+            (Value::Choice("greedy"), Env)
         );
         assert_eq!(
             eval(Id::M2_STICKS, Some("on")),
-            (Value::Choice("greedy"), InvalidToDefault)
+            (Value::Choice("mirror"), InvalidToDefault)
         );
-        assert_eq!(eval(Id::M2_START, None), (Value::Choice("ortho"), Default));
+        assert_eq!(eval(Id::M2_START, None), (Value::Choice("gram"), Default));
         assert_eq!(
-            eval(Id::M2_START, Some("gram")),
-            (Value::Choice("gram"), Env)
+            eval(Id::M2_START, Some("ortho")),
+            (Value::Choice("ortho"), Env)
         );
         assert_eq!(
             eval(Id::M2_EIGEN, None),

@@ -502,3 +502,18 @@ Test `tests/m2_lazy_orbitals.rs` (production standard + verification, cubic and
 skewed, P 2/3, kept start off/on: density, eigenvalues, orbitals and counts
 bit-identical to off, |dE| <= 1e-12 Ha, ranks equal, reproducible; checkpoint
 capture with lazy warm orbitals bit-identical).
+
+## Stop-rule estimate from kept coefficients (MPI-REMAINING, 2026-11-17)
+
+`BAANDI_STOP_METRIC=fft|kept` (default fft; per-thread override
+`set_stop_metric_override`): `ScfProblem::stop_error` (every closed-shell
+standard stop-rule estimate: session step, redo, verification) evaluates
+E_H[rho_out - rho_in] by Parseval from the map's own Fourier coefficients
+(`StopKept`: rho_in from `hartree::evaluate_keeping_density` in `input_fields`,
+rho_out moved out of the audit's `SharedAudit`), only when the two densities are
+bit-equal to the kept ones and unclamped; else the residual is transformed as
+before. Rounding class of the estimate only. Counters `stop_metric_counters()`.
+Collinear and finite-T estimators are unchanged. Tests: lib
+`coulomb_estimate_from_kept_coefficients_matches_the_transform`,
+`tests/m2_remaining.rs` (also the combined MPI stack: mirror sticks, Gram
+start, fused panel Gram-Schmidt, kept start, lazy orbitals).

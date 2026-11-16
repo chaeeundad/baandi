@@ -1166,9 +1166,7 @@ fn pack_strip(
             // doubles); the packed values are the same.
             for (p, dst) in strip.as_chunks_mut::<MR>().0.iter_mut().enumerate() {
                 let col = a.col(pc + p).try_as_col_major().expect("contiguous column");
-                let src: &[f64; MR] = col.as_slice()[i..i + MR]
-                    .try_into()
-                    .expect("eight rows");
+                let src: &[f64; MR] = col.as_slice()[i..i + MR].try_into().expect("eight rows");
                 *dst = *src;
             }
             return;

@@ -43,6 +43,7 @@ fn bits(x: &[f64]) -> Vec<u64> {
 }
 
 /// Two border products (separate) or one on the packed block (fused).
+#[allow(clippy::too_many_arguments)]
 fn border(
     ws: &mut RealGemmWorkspace,
     v: &RealMatrix,
@@ -112,11 +113,27 @@ fn fused_border_matches_two_products() {
             let mut h = RealMatrix::zeros(m, k).unwrap();
             let mut sh = RealMatrix::zeros(m, 2 * k).unwrap();
             border(
-                &mut ws, &v, e.as_slice(), he.as_slice(), k, &mut pair, false, &mut s, &mut h,
+                &mut ws,
+                &v,
+                e.as_slice(),
+                he.as_slice(),
+                k,
+                &mut pair,
+                false,
+                &mut s,
+                &mut h,
                 &mut sh,
             );
             border(
-                &mut ws, &v, e.as_slice(), he.as_slice(), k, &mut pair, true, &mut s, &mut h,
+                &mut ws,
+                &v,
+                e.as_slice(),
+                he.as_slice(),
+                k,
+                &mut pair,
+                true,
+                &mut s,
+                &mut h,
                 &mut sh,
             );
             let (fs, fh) = sh.as_slice().split_at(m * k);
@@ -124,7 +141,11 @@ fn fused_border_matches_two_products() {
                 assert_eq!(bits(fs), bits(s.as_slice()), "S border n={n} m={m} k={k}");
                 assert_eq!(bits(fh), bits(h.as_slice()), "H border n={n} m={m} k={k}");
             } else {
-                for (x, y) in fs.iter().chain(fh).zip(s.as_slice().iter().chain(h.as_slice())) {
+                for (x, y) in fs
+                    .iter()
+                    .chain(fh)
+                    .zip(s.as_slice().iter().chain(h.as_slice()))
+                {
                     assert!((x - y).abs() <= 1e-13 * n as f64, "n={n} m={m} k={k}");
                 }
             }
@@ -160,7 +181,10 @@ fn percore_kernel_microbench() {
         .and_then(|t| t.parse().ok())
         .unwrap_or(1);
     let pool = WorkerPool::new(threads).unwrap();
-    println!("threads {threads}, MKL backend {}", dft_numerics::MKL_BACKEND);
+    println!(
+        "threads {threads}, MKL backend {}",
+        dft_numerics::MKL_BACKEND
+    );
     // (case, n, basis columns m (after the append, borders), block k)
     // from the stage-0 traces: si32 warm m 68 -> 244, si64 warm m 132 -> ...
     let shapes: [(&str, usize, usize, usize); 12] = [
@@ -195,8 +219,16 @@ fn percore_kernel_microbench() {
         let sep = median_us(
             || {
                 border(
-                    &mut ws, &v, e.as_slice(), he.as_slice(), k, &mut pair, false, &mut s,
-                    &mut h, &mut sh,
+                    &mut ws,
+                    &v,
+                    e.as_slice(),
+                    he.as_slice(),
+                    k,
+                    &mut pair,
+                    false,
+                    &mut s,
+                    &mut h,
+                    &mut sh,
                 )
             },
             reps,
@@ -204,8 +236,16 @@ fn percore_kernel_microbench() {
         let fused = median_us(
             || {
                 border(
-                    &mut ws, &v, e.as_slice(), he.as_slice(), k, &mut pair, true, &mut s,
-                    &mut h, &mut sh,
+                    &mut ws,
+                    &v,
+                    e.as_slice(),
+                    he.as_slice(),
+                    k,
+                    &mut pair,
+                    true,
+                    &mut s,
+                    &mut h,
+                    &mut sh,
                 )
             },
             reps,
@@ -279,7 +319,11 @@ fn percore_kernel_microbench() {
                     .unwrap()
                 );
                 for j in 0..k {
-                    norms[j] = r[j * n..(j + 1) * n].iter().map(|x| x * x).sum::<f64>().sqrt();
+                    norms[j] = r[j * n..(j + 1) * n]
+                        .iter()
+                        .map(|x| x * x)
+                        .sum::<f64>()
+                        .sqrt();
                 }
             },
             reps,

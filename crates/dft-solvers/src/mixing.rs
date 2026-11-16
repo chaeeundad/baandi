@@ -73,6 +73,57 @@ pub struct PulayMixer {
     /// window differences and age out first (seeds + window <= capacity).
     seeds: Vec<(Vec<f64>, Vec<f64>)>,
     mean: Option<f64>,
+    /// `BAANDI_MIX_INCREMENTAL=on` (ticket MPI-REMAINING): keep the differences
+    /// and Gram entries across calls (bit-identical; see `Incremental`).
+    incremental: Option<Incremental>,
+}
+/// Cross-call memory of the incremental Pulay update. Every pair and seed gets
+/// a serial number when it enters the history; a difference is identified by
+/// the serial numbers it is formed from, so a cached difference (and its metric
+/// image) is reused only for exactly the same operands, and a Gram entry only
+/// for exactly the same two differences. Formulas and summation orders are the
+/// ones of the plain path, so results are bit-identical.
+#[derive(Debug, Clone, Default)]
+struct Incremental {
+    next_serial: u64,
+    pair_serials: Vec<u64>,
+    seed_serials: Vec<u64>,
+    /// Cached differences in the order of the current history (seeds first).
+    diffs: Vec<CachedDiff>,
+    /// Gram entries keyed by the two difference keys.
+    gram: Vec<((DiffKey, DiffKey), f64)>,
+    /// Buffers of dropped differences, reused for new ones.
+    spare: Vec<CachedDiff>,
+}
+/// (first operand serial, second operand serial); a seed is (serial, u64::MAX).
+type DiffKey = (u64, u64);
+#[derive(Debug, Clone, Default)]
+struct CachedDiff {
+    key: DiffKey,
+    dx: Vec<f64>,
+    dr: Vec<f64>,
+    weighted: Vec<f64>,
+}
+/// Process-wide counters of the Pulay mixer (ticket MPI-REMAINING; relaxed
+/// atomics, no allocation): mix calls with history, differences formed (two
+/// grid vectors each), Gram dot products, metric applications.
+static MIX_CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static MIX_DIFFS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static MIX_DOTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static MIX_METRIC: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// (mix calls with history, differences formed, Gram and right-hand-side dot
+/// products, metric applications) since process start.
+pub fn mixer_counters() -> [u64; 4] {
+    use std::sync::atomic::Ordering::Relaxed;
+    [
+        MIX_CALLS.load(Relaxed),
+        MIX_DIFFS.load(Relaxed),
+        MIX_DOTS.load(Relaxed),
+        MIX_METRIC.load(Relaxed),
+    ]
+}
+fn bump(c: &std::sync::atomic::AtomicU64, n: usize) {
+    c.fetch_add(n as u64, std::sync::atomic::Ordering::Relaxed);
 }
 /// A positive semidefinite density metric. Applies its symmetric kernel to
 /// a residual; unlike preconditioning, it changes only the least-squares fit.
@@ -92,6 +143,7 @@ impl Clone for PulayMixer {
             metric: self.metric.as_ref().map(|m| m.duplicate()),
             metric_vectors: self.metric_vectors.clone(),
             metric_r: self.metric_r.clone(),
+            incremental: self.incremental.clone(),
         }
     }
 }
@@ -111,7 +163,14 @@ impl PulayMixer {
             pairs: Vec::new(),
             seeds: Vec::new(),
             mean: None,
+            incremental: incremental_switch().then(Incremental::default),
         })
+    }
+    /// Force the incremental update on or off (tests; the constructor reads
+    /// `BAANDI_MIX_INCREMENTAL`). Clears the history.
+    pub fn set_incremental(&mut self, on: bool) {
+        self.reset();
+        self.incremental = on.then(Incremental::default);
     }
     pub fn set_metric(&mut self, metric: Box<dyn ResidualMetric>) {
         self.reset();
@@ -159,6 +218,169 @@ impl PulayMixer {
             .zip(dr[skip..].iter().cloned())
             .collect();
         self.mean = Some(mean);
+        if let Some(inc) = &mut self.incremental {
+            inc.forget(self.pairs.len(), self.seeds.len());
+        }
+        Ok(())
+    }
+}
+thread_local! {
+    static INCREMENTAL_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+/// Override `BAANDI_MIX_INCREMENTAL` for mixers constructed on the calling
+/// thread (simulated ranks in tests); `None` restores the environment.
+pub fn set_incremental_override(on: Option<bool>) {
+    INCREMENTAL_OVERRIDE.with(|o| o.set(on));
+}
+fn incremental_switch() -> bool {
+    INCREMENTAL_OVERRIDE
+        .with(|o| o.get())
+        .unwrap_or_else(|| dft_numerics::switches::on(dft_numerics::switches::Id::MIX_INCREMENTAL))
+}
+fn dot(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b).map(|(a, b)| a * b).sum::<f64>()
+}
+impl Incremental {
+    fn serial(&mut self) -> u64 {
+        self.next_serial += 1;
+        self.next_serial
+    }
+    /// Fresh serial numbers for `pairs` pairs and `seeds` seeds; every cached
+    /// difference and Gram entry is dropped (buffers kept for reuse).
+    fn forget(&mut self, pairs: usize, seeds: usize) {
+        self.pair_serials.clear();
+        self.seed_serials.clear();
+        for _ in 0..pairs {
+            let s = self.serial();
+            self.pair_serials.push(s);
+        }
+        for _ in 0..seeds {
+            let s = self.serial();
+            self.seed_serials.push(s);
+        }
+        self.spare.append(&mut self.diffs);
+        self.gram.clear();
+    }
+    /// Renumber when the history changed outside `mix` (seeding, restore).
+    fn sync(&mut self, pairs: usize, seeds: usize) {
+        if self.pair_serials.len() != pairs || self.seed_serials.len() != seeds {
+            self.forget(pairs, seeds);
+        }
+    }
+}
+impl PulayMixer {
+    /// The plain path's Pulay update with cached differences, metric images and
+    /// Gram entries (bit-identical: same operands, formulas and orders).
+    fn incremental_update(
+        &mut self,
+        r: &[f64],
+        next: &mut [f64],
+        m: usize,
+    ) -> Result<(), SolverError> {
+        let Self {
+            beta,
+            metric,
+            metric_r,
+            pairs,
+            seeds,
+            incremental,
+            ..
+        } = self;
+        let inc = incremental.as_mut().expect("incremental state");
+        inc.sync(pairs.len(), seeds.len());
+        let mut old = std::mem::take(&mut inc.diffs);
+        let keys = inc
+            .seed_serials
+            .iter()
+            .map(|&s| (s, u64::MAX))
+            .chain(inc.pair_serials.windows(2).map(|w| (w[0], w[1])));
+        for (j, key) in keys.enumerate() {
+            if let Some(at) = old.iter().position(|d| d.key == key) {
+                inc.diffs.push(old.swap_remove(at));
+                continue;
+            }
+            let mut d = inc.spare.pop().unwrap_or_default();
+            d.key = key;
+            d.dx.clear();
+            d.dr.clear();
+            if j < seeds.len() {
+                d.dx.extend_from_slice(&seeds[j].0);
+                d.dr.extend_from_slice(&seeds[j].1);
+            } else {
+                let w = j - seeds.len();
+                let (p0, p1) = (&pairs[w], &pairs[w + 1]);
+                d.dx.extend(p1.0.iter().zip(&p0.0).map(|(a, b)| a - b));
+                d.dr.extend(p1.1.iter().zip(&p0.1).map(|(a, b)| a - b));
+            }
+            bump(&MIX_DIFFS, 1);
+            if let Some(metric) = metric.as_mut() {
+                d.weighted.resize(d.dr.len(), 0.0);
+                metric.apply(&d.dr, &mut d.weighted)?;
+                bump(&MIX_METRIC, 1);
+            }
+            inc.diffs.push(d);
+        }
+        inc.spare.append(&mut old);
+        debug_assert_eq!(inc.diffs.len(), m);
+        if let Some(metric) = metric.as_mut() {
+            metric.apply(r, metric_r)?;
+            bump(&MIX_METRIC, 1);
+        }
+        let weighted_metric = metric.is_some();
+        let mut gram = ComplexMatrix::zeros(m, m)?;
+        let mut kept = Vec::with_capacity(m * m);
+        for i in 0..m {
+            for j in 0..m {
+                let key = (inc.diffs[i].key, inc.diffs[j].key);
+                let value = match inc.gram.iter().find(|(k, _)| *k == key) {
+                    Some(&(_, v)) => v,
+                    None => {
+                        let (a, b) = (&inc.diffs[i], &inc.diffs[j]);
+                        bump(&MIX_DOTS, if weighted_metric { 2 } else { 1 });
+                        if weighted_metric {
+                            0.5 * (dot(&a.dr, &b.weighted) + dot(&b.dr, &a.weighted))
+                        } else {
+                            dot(&a.dr, &b.dr)
+                        }
+                    }
+                };
+                gram[(i, j)] = value.into();
+                kept.push((key, value));
+            }
+        }
+        inc.gram = kept;
+        let (values, vectors) = hermitian_eigh(&gram)?;
+        let largest = values.iter().copied().fold(0.0, f64::max);
+        let rhs: Vec<_> = inc
+            .diffs
+            .iter()
+            .map(|d| {
+                dot(
+                    &d.dr,
+                    if weighted_metric {
+                        metric_r.as_slice()
+                    } else {
+                        r
+                    },
+                )
+            })
+            .collect();
+        bump(&MIX_DOTS, m);
+        let mut gamma = vec![0.0; m];
+        for (k, &value) in values.iter().enumerate() {
+            if value > 1e-12 * largest {
+                let projection: f64 =
+                    (0..m).map(|i| vectors[(i, k)].re * rhs[i]).sum::<f64>() / value;
+                for i in 0..m {
+                    gamma[i] += vectors[(i, k)].re * projection;
+                }
+            }
+        }
+        for (d, g) in inc.diffs.iter().zip(&gamma) {
+            for (i, n) in next.iter_mut().enumerate() {
+                *n -= g * (d.dx[i] + *beta * d.dr[i]);
+            }
+        }
         Ok(())
     }
 }
@@ -172,6 +394,9 @@ impl DensityMixer for PulayMixer {
         self.pairs.clear();
         self.seeds.clear();
         self.mean = None;
+        if let Some(inc) = &mut self.incremental {
+            inc.forget(0, 0);
+        }
     }
     fn mix(&mut self, input: &[f64], output: &[f64], mean: f64) -> Result<Vec<f64>, SolverError> {
         validate(input, output, mean, self.beta)?;
@@ -190,11 +415,22 @@ impl DensityMixer for PulayMixer {
         }
         let r: Vec<_> = output.iter().zip(input).map(|(b, a)| b - a).collect();
         self.pairs.push((input.to_vec(), r.clone()));
+        if let Some(inc) = &mut self.incremental {
+            inc.sync(self.pairs.len() - 1, self.seeds.len());
+            let serial = inc.serial();
+            inc.pair_serials.push(serial);
+        }
         if self.pairs.len() > self.capacity + 1 {
             self.pairs.remove(0);
+            if let Some(inc) = &mut self.incremental {
+                inc.pair_serials.remove(0);
+            }
         }
         while !self.seeds.is_empty() && self.seeds.len() + self.pairs.len() - 1 > self.capacity {
             self.seeds.remove(0);
+            if let Some(inc) = &mut self.incremental {
+                inc.seed_serials.remove(0);
+            }
         }
         let mut next: Vec<_> = input
             .iter()
@@ -203,6 +439,16 @@ impl DensityMixer for PulayMixer {
             .collect();
         let m = self.seeds.len() + self.pairs.len() - 1;
         if m > 0 {
+            bump(&MIX_CALLS, 1);
+        }
+        if m > 0 && self.incremental.is_some() {
+            self.incremental_update(&r, &mut next, m)?;
+        } else if m > 0 {
+            bump(&MIX_DIFFS, m);
+            bump(&MIX_DOTS, m * m + m);
+            if self.metric.is_some() {
+                bump(&MIX_METRIC, m + 1);
+            }
             // Seeded differences first (older), then the window differences of the
             // absolute pairs; never a difference between the two blocks.
             let dx: Vec<Vec<f64>> = self
@@ -410,6 +656,9 @@ impl PulayMixer {
             .zip(state.seed_dr.iter().cloned())
             .collect();
         self.mean = state.mean;
+        if let Some(inc) = &mut self.incremental {
+            inc.forget(self.pairs.len(), self.seeds.len());
+        }
         Ok(())
     }
 }
@@ -587,5 +836,124 @@ mod seed_tests {
         let many = vec![dx[0].clone(); 5];
         r.seed_differences(&many, &many, 1.0).unwrap();
         assert_eq!(r.seeded_len(), 3);
+    }
+}
+
+#[cfg(test)]
+mod incremental_tests {
+    use super::*;
+    /// Nonlinear charge-keeping map on a small grid (deterministic).
+    fn map(x: &[f64]) -> Vec<f64> {
+        let n = x.len();
+        let mut y: Vec<_> = (0..n)
+            .map(|i| 1.0 + 0.7 * (x[(i + 1) % n] - 1.0) + 0.05 * (x[i] - 1.0).powi(2))
+            .collect();
+        let defect = (y.iter().sum::<f64>() - x.iter().sum::<f64>()) / n as f64;
+        for v in &mut y {
+            *v -= defect;
+        }
+        y
+    }
+    #[derive(Debug, Clone)]
+    struct Weights(Vec<f64>);
+    impl ResidualMetric for Weights {
+        fn duplicate(&self) -> Box<dyn ResidualMetric> {
+            Box::new(self.clone())
+        }
+        fn apply(&mut self, r: &[f64], out: &mut [f64]) -> Result<(), SolverError> {
+            for ((v, r), w) in out.iter_mut().zip(r).zip(&self.0) {
+                *v = r * w;
+            }
+            Ok(())
+        }
+    }
+    fn run(incremental: bool, metric: bool, history: usize, script: &[u8]) -> Vec<Vec<u64>> {
+        let n = 17;
+        let mut p = PulayMixer::new(0.4, history).unwrap();
+        if metric {
+            p.set_metric(Box::new(Weights(
+                (0..n).map(|i| 1.0 + i as f64 * 0.1).collect(),
+            )));
+        }
+        p.set_incremental(incremental);
+        let mut x: Vec<f64> = (0..n)
+            .map(|i| 1.0 + 0.3 * ((i * 7 % 5) as f64 - 2.0) / 2.0)
+            .collect();
+        let mean = x.iter().sum::<f64>() / n as f64;
+        let mut out = Vec::new();
+        let mut saved = None;
+        for &op in script {
+            match op {
+                b'm' => {
+                    x = p.mix(&x, &map(&x), mean).unwrap();
+                    out.push(x.iter().map(|v| v.to_bits()).collect());
+                }
+                b'c' => saved = Some(p.checkpoint()),
+                b'r' => p.restore(saved.as_ref().unwrap(), n).unwrap(),
+                b'z' => p.reset(),
+                b's' => {
+                    p.reset();
+                    let dx: Vec<Vec<f64>> = (0..3)
+                        .map(|k| {
+                            (0..n)
+                                .map(|i| 1e-3 * ((i + k) % 4) as f64 - 1.5e-3)
+                                .collect()
+                        })
+                        .collect();
+                    let dr: Vec<Vec<f64>> = (0..3)
+                        .map(|k| {
+                            (0..n)
+                                .map(|i| 2e-3 * ((i * k + 1) % 3) as f64 - 2e-3)
+                                .collect()
+                        })
+                        .collect();
+                    p.seed_differences(&dx, &dr, mean).unwrap();
+                }
+                _ => unreachable!(),
+            }
+        }
+        out
+    }
+    #[test]
+    fn incremental_update_is_bit_identical_to_the_plain_update() {
+        // Window filling and sliding, checkpoint/restore with the same pair
+        // count, reset, seeds that age out; l2 and a metric; capacities 2 and 6.
+        let scripts: [&[u8]; 4] = [
+            b"mmmmmmmmmmmmmm",
+            b"mmmmcmmmrmmmm",
+            b"mmmzmmmmmmm",
+            b"smmmmmmmmsmmm",
+        ];
+        for script in scripts {
+            for metric in [false, true] {
+                for history in [2, 6] {
+                    let plain = run(false, metric, history, script);
+                    let fast = run(true, metric, history, script);
+                    assert_eq!(
+                        plain,
+                        fast,
+                        "script {:?} metric {metric} history {history}",
+                        std::str::from_utf8(script).unwrap()
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn incremental_update_keeps_one_difference_per_history_entry() {
+        let mut p = PulayMixer::new(0.4, 6).unwrap();
+        p.set_incremental(true);
+        let n = 9;
+        let mut x: Vec<f64> = (0..n).map(|i| 1.0 + 0.1 * (i as f64 - 4.0) / 4.0).collect();
+        let mean = x.iter().sum::<f64>() / n as f64;
+        for _ in 0..9 {
+            x = p.mix(&x, &map(&x), mean).unwrap();
+        }
+        // Process-wide counters are shared with concurrent tests; the cache
+        // sizes are exact: six differences, a 6 x 6 Gram, at most one spare.
+        let inc = p.incremental.as_ref().unwrap();
+        assert_eq!(inc.diffs.len(), 6);
+        assert_eq!(inc.gram.len(), 36);
+        assert!(inc.spare.len() <= 1);
     }
 }

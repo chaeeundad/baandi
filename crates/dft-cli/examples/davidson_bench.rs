@@ -162,6 +162,7 @@ struct Snap {
     reduced: dft_solvers::distributed_davidson::ReducedSolveStats,
     rotation_flops: u64,
     start_gram: (u64, u64),
+    lean_algebra: dft_solvers::distributed_davidson::LeanAlgebraStats,
 }
 
 fn snap() -> Snap {
@@ -193,6 +194,7 @@ fn snap() -> Snap {
         reduced: parallel::reduced_solve_stats(),
         rotation_flops: dft_solvers::distributed_davidson::rotation_stats().flops,
         start_gram: dft_solvers::distributed_davidson::start_gram_stats(),
+        lean_algebra: dft_solvers::distributed_davidson::lean_algebra_stats(),
     }
 }
 
@@ -298,6 +300,28 @@ fn delta(a: &Snap, b: &Snap, p: u64) -> (BTreeMap<String, Value>, BTreeMap<Strin
     put("dist.rotation_flop", b.rotation_flops - a.rotation_flops);
     put("dist.start_gram_taken", b.start_gram.0 - a.start_gram.0);
     put("dist.start_gram_declined", b.start_gram.1 - a.start_gram.1);
+    // MPI-OVERLAP-DAVIDSON (`BAANDI_M2_LEAN_ALGEBRA=on`).
+    let (la, lb) = (&a.lean_algebra, &b.lean_algebra);
+    put("dist.lean_solves", lb.solves - la.solves);
+    put(
+        "dist.lean_border_reductions",
+        lb.border_reductions - la.border_reductions,
+    );
+    put("dist.lean_appends", lb.appends - la.appends);
+    put(
+        "dist.lean_reprojections",
+        lb.reprojections - la.reprojections,
+    );
+    put("dist.lean_fallbacks", lb.fallbacks - la.fallbacks);
+    put("dist.lean_rebuilds", lb.rebuilds - la.rebuilds);
+    put(
+        "dist.lean_wasted_columns",
+        lb.wasted_columns - la.wasted_columns,
+    );
+    put(
+        "dist.lean_factored_starts",
+        lb.factored_starts - la.factored_starts,
+    );
     let (t0, t1) = (&a.stages, &b.stages);
     for (k, v) in [
         ("stage.reduced", t1.reduced - t0.reduced),

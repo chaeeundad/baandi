@@ -517,3 +517,12 @@ Collinear and finite-T estimators are unchanged. Tests: lib
 `coulomb_estimate_from_kept_coefficients_matches_the_transform`,
 `tests/m2_remaining.rs` (also the combined MPI stack: mirror sticks, Gram
 start, fused panel Gram-Schmidt, kept start, lazy orbitals).
+
+## MPI overlap-matrix Davidson (MPI-OVERLAP-DAVIDSON, 2026-11-17)
+
+`BAANDI_M2_LEAN_ALGEBRA=on` (dft-solvers, default off) counts as a workspace-path
+switch for the lazy and kept-start conditions in `gamma_real.rs`.
+`tests/m2_entry_cost.rs` prints its counters in `m2_counters` (`lean_*`). Test
+`tests/m2_lean_algebra.rs`: production standard SCF on the M2 path, defaults and
+the pending stack, cubic and skewed cells, P 2/3: standard class against
+threads-only, verified, ranks bit-equal, reproducible.

@@ -23,6 +23,9 @@ use crate::distributed::{
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
+mod lean;
+pub use lean::{LeanAlgebraStats, lean_algebra_stats};
+
 /// Growth and reuse counters of the persistent workspace (process-wide).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WorkspaceStats {
@@ -196,6 +199,8 @@ pub struct DistributedDavidsonWorkspace {
     sel_norms: Vec<f64>,
     band_residuals: Vec<f64>,
     ortho: OrthoScratch,
+    /// MPI-OVERLAP-DAVIDSON lean algebra state (`BAANDI_M2_LEAN_ALGEBRA=on`).
+    lean: Option<Box<lean::LeanState>>,
 }
 
 impl DistributedDavidsonWorkspace {
@@ -231,6 +236,7 @@ impl DistributedDavidsonWorkspace {
             sel_norms: Vec::new(),
             band_residuals: Vec::new(),
             ortho: OrthoScratch::new(),
+            lean: None,
         }
     }
 }
@@ -641,7 +647,11 @@ fn solve_on<C: Collective>(
             RealGemmWorkspace::with_pool(max_rows.max(1), capacity.max(1), pool.clone())?,
         ));
     }
-    let root_mode = tuning.eigen_root && comm.size() > 1;
+    // MPI-OVERLAP-DAVIDSON: Ritz-change solves run the lean algebra; its
+    // stage-2 fallback needs all reduced eigenvectors, so the reduced problem
+    // is solved replicated on that path (`BAANDI_M2_EIGEN=root` is ignored).
+    let lean_mode = tuning.lean_algebra && ritz;
+    let root_mode = tuning.eigen_root && comm.size() > 1 && !lean_mode;
     let solves_here = !root_mode || comm.rank() == 0;
     if solves_here && ws.eig.as_ref().map(|(c, _)| *c) != Some(capacity) {
         grown(3 * capacity * capacity * 8);
@@ -688,6 +698,9 @@ fn solve_on<C: Collective>(
     ] {
         reserve(m, nl * bands)?;
     }
+    if lean_mode {
+        lean::prepare(&mut ws.lean, capacity, bands, &pool)?;
+    }
     let mut rng = Rng(solver.seed);
     let panel = tuning.panel_width(max_rows.max(1));
     let wide = tuning.wide_gemm;
@@ -722,6 +735,7 @@ fn solve_on<C: Collective>(
         sel_norms,
         band_residuals,
         ortho,
+        lean: lean_state,
         ..
     } = ws;
     let gemm = &mut gemm.as_mut().expect("GEMM workspace").1;
@@ -769,6 +783,8 @@ fn solve_on<C: Collective>(
     // MPI-KEPT-START: the stored return is consumed by this solve (stored again
     // only by a keeping return below); the decision to take it is replicated.
     let mut kept_taken = false;
+    // Lean algebra: columns of the start whose overlap is already factored.
+    let mut lean_factored = 0usize;
     if let Some((x, k)) = kept.as_mut() {
         let armed = std::mem::replace(&mut k.armed, false) && k.stored && ritz && initial.is_some();
         k.stored = false;
@@ -805,13 +821,23 @@ fn solve_on<C: Collective>(
                     partial,
                     defect,
                 )?;
-                let mut worst = 0.0_f64;
-                for j in 0..bands {
-                    for i in 0..bands {
-                        worst = worst.max((defect[(i, j)] - if i == j { 1.0 } else { 0.0 }).abs());
+                if let Some(state) = lean_state.as_mut().filter(|_| lean_mode) {
+                    // MPI-OVERLAP-DAVIDSON: the generalized path needs a
+                    // factorable overlap (pivot rule), not an orthonormal X.
+                    kept_taken = lean::factor_start(state, defect, bands)?;
+                    if kept_taken {
+                        lean_factored = bands;
                     }
+                } else {
+                    let mut worst = 0.0_f64;
+                    for j in 0..bands {
+                        for i in 0..bands {
+                            worst =
+                                worst.max((defect[(i, j)] - if i == j { 1.0 } else { 0.0 }).abs());
+                        }
+                    }
+                    kept_taken = worst <= 1e-12;
                 }
-                kept_taken = worst <= 1e-12;
             }
             if kept_taken {
                 fit(basis, nl, bands)?;
@@ -843,13 +869,23 @@ fn solve_on<C: Collective>(
             partial,
             defect,
         )?;
-        let mut worst = 0.0_f64;
-        for j in 0..w {
-            for i in 0..w {
-                worst = worst.max((defect[(i, j)] - if i == j { 1.0 } else { 0.0 }).abs());
+        let accept = if let Some(state) = lean_state.as_mut().filter(|_| lean_mode) {
+            // Lean algebra: the pivot rule decides; the factor is kept.
+            let ok = lean::factor_start(state, defect, w)?;
+            if ok {
+                lean_factored = w;
             }
-        }
-        if worst <= 1e-12 {
+            ok
+        } else {
+            let mut worst = 0.0_f64;
+            for j in 0..w {
+                for i in 0..w {
+                    worst = worst.max((defect[(i, j)] - if i == j { 1.0 } else { 0.0 }).abs());
+                }
+            }
+            worst <= 1e-12
+        };
+        if accept {
             fit(basis, nl, w)?;
             basis.as_mut_slice().copy_from_slice(start_local.as_slice());
             gram_taken = true;
@@ -887,6 +923,59 @@ fn solve_on<C: Collective>(
         fit(products, nl, basis.cols())?;
         apply(basis, products)?;
         applications += basis.cols();
+    }
+    if lean_mode {
+        // The random completion above extends a factored start: refactor.
+        if basis.cols() != lean_factored {
+            lean_factored = 0;
+        }
+        let state = lean_state.as_mut().expect("lean state prepared");
+        return lean::run(
+            lean::Ctx {
+                solver,
+                comm,
+                layout,
+                apply,
+                diag_local,
+                policy,
+                capacity,
+                tuning,
+                kept,
+                gather,
+                rng,
+                panel,
+                ld: capacity,
+                applications,
+                factored: lean_factored,
+                use_b5,
+            },
+            lean::Bufs {
+                gemm,
+                eig,
+                b5,
+                basis,
+                products,
+                held,
+                reduced,
+                coefficients,
+                values,
+                vectors,
+                rotated,
+                residual,
+                corrections,
+                extra,
+                extra_products,
+                norms,
+                norm_partial,
+                converged,
+                selected,
+                sel_values,
+                sel_norms,
+                band_residuals,
+                ortho,
+                lean: state,
+            },
+        );
     }
 
     let threshold = |j: usize| {

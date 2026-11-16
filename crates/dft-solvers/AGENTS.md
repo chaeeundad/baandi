@@ -232,3 +232,21 @@ from, and forms only the newest difference and Gram row per step. Reset,
 `seed_differences` and `restore` renumber and drop the cache. Same operands,
 formulas and orders: bit-identical (test `mixing::incremental_tests`). Counters
 `mixing::mixer_counters()`. Analysis docs/performance/mpi-remaining.md.
+
+## MPI overlap-matrix Davidson (MPI-OVERLAP-DAVIDSON, 2026-11-17)
+
+`BAANDI_M2_LEAN_ALGEBRA=on|off` (default off; `DistributedTuning.lean_algebra`, implies
+the workspace path): Ritz-change (standard) distributed solves run the serial lean
+algebra (`distributed_davidson/workspace/lean.rs`, reusing `lean_davidson.rs`'s
+`LeanScratch`, `extend_factor`, `reduced_border`, `ritz_coefficients`): raw
+corrections appended without Gram-Schmidt, ONE tree sum for the S border (with the
+selected residual norms), unit scaling from the S diagonal, pivot test
+(`PIVOT_RATIO_MIN`) before H is applied, the serial stage-1/stage-2 fallbacks and
+rebuild; H border at the next iteration (`reduced_gram`). Two tree sums per
+iteration instead of about 4 + k. Replicated S, T, A, C in the per-rank workspace
+(own capacity x capacity GEMM workspace). `M2_EIGEN=root` is ignored on this path;
+kept and Gram starts are accepted by the pivot rule (factor kept). Strict solves
+unchanged. Counters `lean_algebra_stats()`, reduction site `lean_border`. Tests
+`tests/distributed_lean_algebra.rs` (ranks 1 to 4: class against the orthonormal
+path, rank decisions equal to the serial lean solver, fallbacks, bits),
+dft-engine `tests/m2_lean_algebra.rs`. Design docs/design/mpi-overlap-davidson.md.

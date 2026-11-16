@@ -255,6 +255,7 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
         let solves_before = dft_solvers::distributed_davidson::reduced_solve_stats();
         let rot_before = dft_solvers::distributed_davidson::rotation_stats();
         let red_before = dft_solvers::distributed_davidson::reduction_stats();
+        let lean_before = dft_solvers::distributed_davidson::lean_algebra_stats();
         let grid_before = (
             dft_solvers::mixing::mixer_counters(),
             dft_engine::stop_metric_counters(),
@@ -438,11 +439,31 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
             .map(|(n, s)| format!("\"{n}\":{s:.6}"))
             .collect();
         j.push_str(&format!(",\"phases\":{{{}}}", ph.join(",")));
-        let counters: Vec<String> = parallel::m2_stats()
+        let mut counters: Vec<String> = parallel::m2_stats()
             .0
             .iter()
             .map(|(n, v)| format!("\"{n}\":{}", v / p))
             .collect();
+        // MPI-OVERLAP-DAVIDSON lean algebra counters (per rank).
+        let la = dft_solvers::distributed_davidson::lean_algebra_stats();
+        let lb = &lean_before;
+        for (n, v) in [
+            ("lean_solves", la.solves - lb.solves),
+            (
+                "lean_border_reductions",
+                la.border_reductions - lb.border_reductions,
+            ),
+            ("lean_reprojections", la.reprojections - lb.reprojections),
+            ("lean_fallbacks", la.fallbacks - lb.fallbacks),
+            ("lean_rebuilds", la.rebuilds - lb.rebuilds),
+            ("lean_wasted_columns", la.wasted_columns - lb.wasted_columns),
+            (
+                "lean_factored_starts",
+                la.factored_starts - lb.factored_starts,
+            ),
+        ] {
+            counters.push(format!("\"{n}\":{}", v / p as u64));
+        }
         j.push_str(&format!(",\"m2_counters\":{{{}}}", counters.join(",")));
         // MPI-REMAINING: replicated grid-stage counters (process-wide over the
         // simulated ranks, divided by the rank count like every other entry).

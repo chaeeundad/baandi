@@ -71,20 +71,20 @@ pub const PIVOT_RATIO_MIN: f64 = f64::EPSILON / ORTHOGONALITY_GATE;
 const FACTOR_PANEL: usize = 64;
 
 pub(crate) struct LeanScratch {
-    cap: usize,
+    pub(crate) cap: usize,
     /// Basis overlap S, cap x cap, leading dimension cap.
-    s: RealMatrix,
+    pub(crate) s: RealMatrix,
     /// Inverse Cholesky factor T = L^{-1}, lower triangular, cap x cap.
-    t: RealMatrix,
+    pub(crate) t: RealMatrix,
     /// Reduced matrix T H_r T^T, compact m x m.
-    a: RealMatrix,
+    pub(crate) a: RealMatrix,
     /// Ritz coefficients in basis coordinates, compact m x k.
-    c: RealMatrix,
+    pub(crate) c: RealMatrix,
     /// Gathered eigenvector columns, compact m x k.
     y: RealMatrix,
     /// Reduced-border scratch: Z = T[new rows, :]^T and H_r Z, m x c.
-    z: RealMatrix,
-    p: RealMatrix,
+    pub(crate) z: RealMatrix,
+    pub(crate) p: RealMatrix,
     /// Factor scratch: W = T S_12 (p0 x w), U = W^T T (w x p0), W^T W and
     /// the panel inverse (w x w).
     w: RealMatrix,
@@ -97,7 +97,7 @@ pub(crate) struct LeanScratch {
     sel_norms: Vec<f64>,
 }
 impl LeanScratch {
-    fn new(cap: usize, bands: usize) -> Result<Self, SolverError> {
+    pub(crate) fn new(cap: usize, bands: usize) -> Result<Self, SolverError> {
         let panel = FACTOR_PANEL.min(cap.max(1));
         Ok(Self {
             cap,
@@ -285,7 +285,7 @@ fn overlap_border(
 /// Extend T = L^{-1} from the leading `from` columns to `to` (bordered
 /// Cholesky in panels). Returns (accepted, smallest pivot ratio of the new
 /// columns); on rejection T is valid for the leading `from` columns only.
-fn extend_factor(
+pub(crate) fn extend_factor(
     gemm: &mut RealGemmWorkspace,
     lean: &mut LeanScratch,
     from: usize,
@@ -432,7 +432,7 @@ fn extend_factor(
 
 /// Border of A = T H_r T^T for the columns prefix..m (H_r compact m x m); the
 /// leading prefix block is kept bit for bit (B5 relies on it).
-fn reduced_border(
+pub(crate) fn reduced_border(
     gemm: &mut RealGemmWorkspace,
     h: &RealMatrix,
     lean: &mut LeanScratch,
@@ -496,7 +496,7 @@ fn reduced_border(
 
 /// lean.c (m x k) = T^T Y[:, cols] for the eigenvector columns `cols` of the
 /// compact m x m `y` (`None`: the leading k columns).
-fn ritz_coefficients(
+pub(crate) fn ritz_coefficients(
     gemm: &mut RealGemmWorkspace,
     lean: &mut LeanScratch,
     y: &RealMatrix,

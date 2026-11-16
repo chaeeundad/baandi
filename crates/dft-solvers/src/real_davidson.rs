@@ -10,7 +10,7 @@ pub use crate::davidson_stages::{
     flop_counters, lean_counters, stage_seconds, stage_seconds_by_run_stage,
 };
 #[path = "lean_davidson.rs"]
-mod lean;
+pub(crate) mod lean;
 use crate::{BandTolerances, RealLinearOperator, SolverError};
 use dft_numerics::{
     linalg::{DEPENDENCE_TOLERANCE, LinalgError},

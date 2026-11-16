@@ -856,7 +856,7 @@ pub(crate) fn solve_real_gamma(
         && comm.is_some()
         && state.dist.is_some()
         && options.standard.is_some()
-        && (tuning.workspace || tuning.selected_roots);
+        && (tuning.workspace || tuning.selected_roots || tuning.lean_algebra);
     if lazy_path && state.lazy_half.is_none() {
         state.lazy_half = Some(Arc::new(half.clone()));
     }
@@ -947,7 +947,7 @@ pub(crate) fn solve_real_gamma(
         && dist.is_some()
         && options.standard.is_some()
         && m2_reuse()
-        && (tuning.workspace || tuning.selected_roots);
+        && (tuning.workspace || tuning.selected_roots || tuning.lean_algebra);
     if !m2_kept {
         state.m2_reuse = None;
     }

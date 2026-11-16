@@ -42,8 +42,8 @@ pub trait DistributedRealOperator {
 
 mod workspace;
 pub use workspace::{
-    DistributedDavidsonWorkspace, WorkspaceStats, release_workspace, set_iteration_probe,
-    start_gram_stats, workspace_stats,
+    DistributedDavidsonWorkspace, LeanAlgebraStats, WorkspaceStats, lean_algebra_stats,
+    release_workspace, set_iteration_probe, start_gram_stats, workspace_stats,
 };
 
 fn comm_error(e: dft_mpi::MpiError) -> SolverError {
@@ -214,7 +214,7 @@ fn rotation_add(nl: usize, m: usize, cols: usize) {
 // Every tree sum issued inside a distributed solve passes through `Counted`,
 // which adds one call and the payload length to the histogram of the site the
 // solver last declared on this thread (`site`). No timing, no allocation.
-const REDUCTION_SITES: [&str; 10] = [
+const REDUCTION_SITES: [&str; 11] = [
     "reduced_gram",
     "residual_norms",
     "ortho_normalize",
@@ -225,11 +225,12 @@ const REDUCTION_SITES: [&str; 10] = [
     "restart_defect",
     "apply",
     "setup",
+    "lean_border",
 ];
 /// Payload buckets (doubles per call): 1, 2-8, 9-64, 65-512, 513-4096, above.
 pub const REDUCTION_BUCKETS: [&str; 6] = ["1", "2-8", "9-64", "65-512", "513-4096", ">4096"];
-static REDUCTION_CALLS: [[AtomicU64; 6]; 10] = [const { [const { AtomicU64::new(0) }; 6] }; 10];
-static REDUCTION_PAYLOAD: [AtomicU64; 10] = [const { AtomicU64::new(0) }; 10];
+static REDUCTION_CALLS: [[AtomicU64; 6]; 11] = [const { [const { AtomicU64::new(0) }; 6] }; 11];
+static REDUCTION_PAYLOAD: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
 static REDUCTION_SOLVES: AtomicU64 = AtomicU64::new(0);
 thread_local! {
     static SITE: std::cell::Cell<usize> = const { std::cell::Cell::new(9) };
@@ -252,6 +253,9 @@ pub(crate) enum Site {
     RestartDefect = 7,
     Apply = 8,
     Setup = 9,
+    /// MPI-OVERLAP-DAVIDSON: the one tree sum per iteration of the lean
+    /// algebra (S border, H border and the selected residual norms).
+    LeanBorder = 10,
 }
 
 fn bucket(len: usize) -> usize {
@@ -574,6 +578,16 @@ pub struct DistributedTuning {
     /// `BAANDI_M2_PANEL_GS`: reduction scheme of the in-panel Gram-Schmidt
     /// (`PanelGs`; default classic, three reductions per column).
     pub panel_gs: PanelGs,
+    /// `BAANDI_M2_LEAN_ALGEBRA=on` (MPI-OVERLAP-DAVIDSON): Ritz-change
+    /// (standard) solves run the serial lean solver's algebra on the stick
+    /// rows: unit-norm corrections appended without Gram-Schmidt, overlap S and
+    /// its inverse Cholesky factor kept beside H_r, generalized reduced problem;
+    /// one tree sum per iteration carries the S border, the H border and the
+    /// selected residual norms (`workspace/lean.rs`,
+    /// docs/design/mpi-overlap-davidson.md). Implies the workspace path and
+    /// selected-root rotation on those solves; strict solves are unchanged.
+    /// Rounding class.
+    pub lean_algebra: bool,
 }
 
 /// In-panel reduction scheme of the distributed panel Gram-Schmidt
@@ -626,6 +640,7 @@ impl DistributedTuning {
                 "fused" => PanelGs::Fused,
                 _ => PanelGs::Classic,
             },
+            lean_algebra: on(Id::M2_LEAN_ALGEBRA),
         }
     }
     /// The tuning of the calling thread: the test override when set
@@ -1101,7 +1116,7 @@ impl crate::RealDavidson {
         let offset = layout.index[comm.rank()].first().copied().unwrap_or(0);
         let diag_local = &diagonal[offset..offset + nl];
         let tuning = DistributedTuning::current();
-        if tuning.workspace || tuning.selected_roots {
+        if tuning.workspace || tuning.selected_roots || tuning.lean_algebra {
             let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), SolverError> {
                 site(Site::Apply);
                 let r = apply_distributed(comm, &layout, op, x)?;
@@ -1358,7 +1373,7 @@ impl crate::RealDavidson {
             index,
         };
         let nl = layout.nl();
-        if tuning.workspace || tuning.selected_roots {
+        if tuning.workspace || tuning.selected_roots || tuning.lean_algebra {
             let supplied = op.worker_pool();
             let threads = op.inner_threads();
             let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), SolverError> {

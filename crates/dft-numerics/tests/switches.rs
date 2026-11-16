@@ -228,7 +228,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::M2_LAZY), Value::Choice("on"));
     assert_eq!(value(Id::M2_PANEL_GS), Value::Choice("fused"));
     // MPI-REMAINING grid switches stay opt-in until dev08.
-    assert_eq!(value(Id::MIX_INCREMENTAL), Value::Choice("off"));
-    assert_eq!(value(Id::STOP_METRIC), Value::Choice("fft"));
+    assert_eq!(value(Id::MIX_INCREMENTAL), Value::Choice("on"));
+    assert_eq!(value(Id::STOP_METRIC), Value::Choice("kept"));
     assert_eq!(TABLE.len(), 83);
 }

@@ -258,10 +258,10 @@ table! {
         "replicated, split",
         "atomic start on the M2 path: replicated, or split (span columns, two-pass Gram-Schmidt first passes, H Q and the Gram columns split over ranks with one broadcast per column and one allgatherv; Gram-Schmidt bit-identical, Gram block GEMM rounding class)";
     // Replicated grid stages outside the solve (ticket MPI-REMAINING, docs/performance/mpi-remaining.md); default off.
-    STOP_METRIC: Kind::Choice { allowed: &["fft", "kept"], default: "fft" }, "fft", "fft, kept",
+    STOP_METRIC: Kind::Choice { allowed: &["fft", "kept"], default: "kept" }, "kept", "fft, kept",
         "standard stop-rule Coulomb estimate E_H[rho_out - rho_in]: fft (transform the residual forward and back on the full grid) or kept (Parseval sum over the map's own Fourier coefficients of rho_in, kept from the Hartree potential, and rho_out, kept from the energy audit; no FFT; falls back to fft when a density was clamped or the kept coefficients do not belong to the two densities; rounding class of the estimate only)";
     // Solvers (dft-solvers).
-    MIX_INCREMENTAL: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    MIX_INCREMENTAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "Pulay mixer keeps its difference vectors (and their metric images) and the Gram matrix entries across calls and forms only the newest difference and Gram row per step (O(m N) instead of O(m^2 N) grid work, no per-step difference allocation; ticket MPI-REMAINING); bit-identical";
     B1: Kind::Choice { allowed: &["on", "off", "standard", "strict"], default: "on" }, "on",
         "on, off, standard, strict", "B1 selected-root Davidson iterations";

@@ -248,6 +248,11 @@ fn delta(a: &Snap, b: &Snap, p: u64) -> (BTreeMap<String, Value>, BTreeMap<Strin
         "lean.proj_cache_columns",
         l1.proj_cache_columns - l0.proj_cache_columns,
     );
+    put("lean.fused_borders", l1.fused_borders - l0.fused_borders);
+    put(
+        "lean.fused_wasted_columns",
+        l1.fused_wasted_columns - l0.fused_wasted_columns,
+    );
     let (w0, w1) = (&a.work, &b.work);
     put(
         "fft.pair_transforms",

@@ -130,9 +130,11 @@ fn legacy_defaults_are_unchanged() {
         Id::REFERENCE_STRICT,
         Id::M2_B5,
         Id::LEAN_PROJ_CACHE,
+        Id::PACK_FIXED,
     ] {
         assert!(!on(id), "{id:?} must default off");
     }
+    assert_eq!(switches::choice(Id::LEAN_BORDER), "separate");
     assert!(on(Id::M2_DGEMM) && on(Id::M2_LEAN) && on(Id::REUSE_PSI) && on(Id::M2_SELECTED_ROOTS));
     assert_eq!(
         switches::resolve(switches::switch(Id::VERIFY_REUSE), None).0,
@@ -223,5 +225,5 @@ fn legacy_defaults_are_unchanged() {
     // Adopted 2026-11-17 on dev08 evidence (ledger M2-LAZY-DEV08-STAGE0/-STAGE1, MPI-FS-PANEL-GS).
     assert_eq!(value(Id::M2_LAZY), Value::Choice("on"));
     assert_eq!(value(Id::M2_PANEL_GS), Value::Choice("fused"));
-    assert_eq!(TABLE.len(), 78);
+    assert_eq!(TABLE.len(), 80);
 }

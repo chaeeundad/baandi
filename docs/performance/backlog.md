@@ -241,3 +241,9 @@ Evidence: on si32 strict (perturbed seed 601) 66.4 percent of Davidson apply cal
 - VERIFY-REUSE: feed regressed si16 on dev08 stage 1; variants screened (feed2 and replace rejected); `half` is the stage-2 candidate (requests/verify-reuse.md).
 - Passed-verification cost (8 to 16 %): tau_v is fixed by ADR 0043; a user decision, not a switch.
 - Stop-estimator underestimation (10 to 20x below the verification residual at failing stops, si32 seeds 603/605/610): a better predictor of F(rho_out) - rho_out (for example from the Pulay subspace) would avoid futile verifications; analysis only so far.
+
+## Per-core kernel follow-ups (2026-11-17, PERCORE-KERNELS; docs/performance/percore-kernels-2026-11-17.md)
+- `BAANDI_LEAN_BORDER=fused` and `BAANDI_PACK_FIXED=on` are stage-0 candidates on the Mac (bit-identical there); dev08 stage 0/1 (MKL and x86 pure) in requests/percore-kernels.md. The MKL per-kernel table of the lean default (Part A0) decides the next kernel item.
+- Fresh-basis borders (start, contraction): V^T V and V^T (H V) could also be one product V^T [V | H V], and their diagonal blocks are symmetric (half the flops of the k x k block, dsyrk on MKL); about 2 % of a warm solve (factor_fresh), more in solves with contractions. Not implemented.
+- Narrow NN rotations stay far below the GEMM rate even after PACK_FIXED (k <= 4: GEMV shaped); a streaming kernel for X_s = V C_s with k <= 4 (one pass over V, like NARROW_PROJ for the TN side) is the remaining pure-build lever; on MKL check the per-call rate first (Part A0).
+- Algebra work per H column is about twice QE's (22 against about 10 to 12 MFLOP at si32, basis size): any capacity change must pass the SCF-level screens (A13 / SERIAL-CAPACITY-SCREEN premises), not stage 0 alone.

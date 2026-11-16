@@ -221,3 +221,17 @@ block (callers check `eigenvectors.rows()`). `solve_distributed_rows_kept` is th
 entry with `Global` and `gather = true` (unchanged). Test
 `tests/distributed_lazy_rows.rs` (1 to 4 ranks, workspace full/selected and the
 allocating path, bits). Engine design: docs/design/mpi-lazy-orbitals.md.
+
+## Per-core kernels (PERCORE-KERNELS, 2026-11-17)
+
+`BAANDI_LEAN_BORDER=separate|fused` (default separate; `ResearchOptions::lean_border_fused`):
+the lean solver applies H to the unit corrections E before the pivot test and forms the
+overlap border V^T E and the reduced border V^T (H E) as one product V^T [E | H E]
+(`lean_davidson::fused_border`, the reduced step then copies its border in
+`reduced_from_fused`). A failing pivot test discards the images (`fused_wasted_columns`)
+and takes the separate fallback. Inactive with `BAANDI_NARROW_REDUCED=on`. Bit-identical
+on the aarch64 pure kernel, rounding class on MKL / x86 faer. `BAANDI_RITZ_FUSED=loop`
+(`ritz_fused_loop`): the fused Ritz/residual kernel only at the selected-root residuals of
+the lean loop (bit-identical). Counters `lean_counters().fused_borders`,
+`fused_wasted_columns`. Tests `tests/lean_davidson.rs::percore_*`. Analysis
+docs/performance/percore-kernels-2026-11-17.md.

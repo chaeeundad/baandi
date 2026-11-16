@@ -107,3 +107,12 @@ Pure builds also count the route an MKL build would take (`rows_as_if_mkl`).
 Do not change a dispatch condition without updating the route functions and
 that test. Exported in results.json `convergence.work.gemm_dispatch`; analysis
 docs/performance/gemm-dispatch-analysis-2026-11-16.md; test `tests/gemm_dispatch.rs`.
+
+## PACK-FIXED (PERCORE-KERNELS, 2026-11-17)
+
+`BAANDI_PACK_FIXED=on` (default off): the aarch64 register-tile kernel (`PureGemm::Simd`)
+packs full eight-row strips and stores full tile columns with constant-length copies
+(no `memmove` call per eight doubles), and packs transposed strips in gather order.
+Pure data movement, bit-identical; no effect on x86 (faer packed) or MKL builds.
+Microbenchmark of the lean Davidson shapes and the fused-border identity test:
+`tests/percore_kernels.rs`.

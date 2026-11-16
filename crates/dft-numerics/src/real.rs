@@ -1066,6 +1066,13 @@ fn bounded_matmul(
 const KC: usize = 256;
 const NR: usize = 4;
 const MR: usize = 8;
+/// PACK-FIXED (`BAANDI_PACK_FIXED=on`, default off; ticket PERCORE-KERNELS):
+/// full eight-row strips are packed and full tile columns stored by
+/// constant-length copies instead of one variable-length `copy_from_slice`
+/// (a `memmove` call per eight doubles). Pure data movement: bit-identical.
+fn pack_fixed() -> bool {
+    crate::switches::on(crate::switches::Id::PACK_FIXED)
+}
 static ZERO_COLUMN: [f64; KC] = [0.; KC];
 
 /// Panel product through the register-tile kernel. Returns false (nothing
@@ -1086,12 +1093,13 @@ fn simd_gemm(mut out: RealMatrixMut<'_>, a: RealMatrixRef<'_>, b: RealMatrixRef<
         return true;
     }
     let mut strip = [0_f64; MR * KC];
+    let fixed = pack_fixed();
     for pc in (0..k).step_by(KC) {
         let kc = KC.min(k - pc);
         let strip = &mut strip[..MR * kc];
         for i in (0..m).step_by(MR) {
             let rows = MR.min(m - i);
-            pack_strip(strip, a, i, rows, pc, kc);
+            pack_strip(strip, a, i, rows, pc, kc, fixed);
             for j in (0..n).step_by(NR) {
                 let cols = NR.min(n - j);
                 let column = |c: usize| -> &[f64] {
@@ -1116,6 +1124,13 @@ fn simd_gemm(mut out: RealMatrixMut<'_>, a: RealMatrixRef<'_>, b: RealMatrixRef<
                 let tile = register_tile(strip, columns, tile);
                 for (c, col) in tile.iter().enumerate().take(cols) {
                     match out.as_mut().col_mut(j + c).try_as_col_major_mut() {
+                        // PACK-FIXED: constant-length store of a full tile column.
+                        Some(dst) if rows == MR && fixed => {
+                            let dst: &mut [f64; MR] = (&mut dst.as_slice_mut()[i..i + MR])
+                                .try_into()
+                                .expect("eight rows");
+                            *dst = *col;
+                        }
                         Some(dst) => dst.as_slice_mut()[i..i + rows].copy_from_slice(&col[..rows]),
                         None => {
                             for (r, &value) in col.iter().enumerate().take(rows) {
@@ -1138,12 +1153,26 @@ fn pack_strip(
     rows: usize,
     pc: usize,
     kc: usize,
+    fixed: bool,
 ) {
     // Branch on the strides themselves (the exact test faer's
     // `try_as_col_major` / `try_as_row_major` apply), not on the shape: a
     // one-row transposed view has row stride != 1 and must not take the
     // column branch (P48B robustness-suite panic, syn-s1 and friends).
     if a.row_stride() == 1 {
+        if rows == MR && fixed {
+            // PACK-FIXED: a full strip row is a constant-length copy (inlined
+            // vector loads and stores instead of one memmove call per eight
+            // doubles); the packed values are the same.
+            for (p, dst) in strip.as_chunks_mut::<MR>().0.iter_mut().enumerate() {
+                let col = a.col(pc + p).try_as_col_major().expect("contiguous column");
+                let src: &[f64; MR] = col.as_slice()[i..i + MR]
+                    .try_into()
+                    .expect("eight rows");
+                *dst = *src;
+            }
+            return;
+        }
         for (p, dst) in strip.as_chunks_mut::<MR>().0.iter_mut().enumerate() {
             let col = a.col(pc + p).try_as_col_major().expect("contiguous column");
             dst[..rows].copy_from_slice(&col.as_slice()[i..i + rows]);
@@ -1151,6 +1180,27 @@ fn pack_strip(
         }
     } else if a.col_stride() == 1 {
         // Transposed view (A^T of a column-major A): rows are contiguous.
+        if rows == MR && fixed {
+            // PACK-FIXED: gather order, term by term from the eight row streams
+            // into one contiguous chunk (instead of eight strided passes over
+            // the strip); the packed values are the same.
+            let row = |r: usize| -> &[f64] {
+                &a.row(i + r)
+                    .try_as_row_major()
+                    .expect("contiguous row")
+                    .as_slice()[pc..pc + kc]
+            };
+            let (r0, r1, r2, r3) = (row(0), row(1), row(2), row(3));
+            let (r4, r5, r6, r7) = (row(4), row(5), row(6), row(7));
+            let chunks = strip.as_chunks_mut::<MR>().0;
+            let len = chunks.len().min(kc);
+            let (r0, r1, r2, r3) = (&r0[..len], &r1[..len], &r2[..len], &r3[..len]);
+            let (r4, r5, r6, r7) = (&r4[..len], &r5[..len], &r6[..len], &r7[..len]);
+            for (p, dst) in chunks[..len].iter_mut().enumerate() {
+                *dst = [r0[p], r1[p], r2[p], r3[p], r4[p], r5[p], r6[p], r7[p]];
+            }
+            return;
+        }
         for r in 0..MR {
             if r < rows {
                 let row = a.row(i + r).try_as_row_major().expect("contiguous row");

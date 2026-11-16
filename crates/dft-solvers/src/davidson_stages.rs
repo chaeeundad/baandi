@@ -123,6 +123,11 @@ pub struct ResearchOptions {
     /// in one pass over V and HV; H X is formed only for a contraction restart.
     /// Bit-identical to the default path.
     pub ritz_fused: bool,
+    /// PERCORE-KERNELS (`BAANDI_RITZ_FUSED=loop`): the fused one-pass Ritz and
+    /// residual kernel only at the lean solver's selected-root residuals (the
+    /// loop site, whose H X_s is never used again); the return keeps the pair
+    /// rotation, so REUSE-PSI keeps X and H X. Bit-identical.
+    pub ritz_fused_loop: bool,
     /// NARROW-PROJ (`BAANDI_NARROW_PROJ=on`): blocks of at most
     /// `real_davidson::NARROW_WIDTH` columns are projected against the basis by
     /// streaming dot products and one fused update pass (rounding class).
@@ -145,6 +150,12 @@ pub struct ResearchOptions {
     /// unchanged bit for bit; only the caller's use of the projections is a
     /// rounding-class change.
     pub lean_proj_cache: bool,
+    /// PERCORE-KERNELS (`BAANDI_LEAN_BORDER=fused`, default separate): the lean
+    /// solver applies H to the unit corrections E before the pivot test and
+    /// forms the overlap border V^T E and the reduced border V^T (H E) as one
+    /// product V^T [E | H E] (one stream of the basis instead of two). Bit-
+    /// identical on the aarch64 pure kernel, rounding class elsewhere.
+    pub lean_border_fused: bool,
 }
 impl Default for ResearchOptions {
     /// Every research switch off (B1 off, margin 0.5, automatic rows).
@@ -160,10 +171,12 @@ impl Default for ResearchOptions {
             b6: false,
             b5_parallel: false,
             ritz_fused: false,
+            ritz_fused_loop: false,
             narrow_proj: false,
             narrow_reduced: false,
             lean: false,
             lean_proj_cache: false,
+            lean_border_fused: false,
         }
     }
 }
@@ -200,6 +213,8 @@ impl ResearchOptions {
             b5: dft_numerics::switches::choice(dft_numerics::switches::Id::B5) != "off",
             b5_parallel: dft_numerics::switches::choice(dft_numerics::switches::Id::B5) == "par",
             ritz_fused: dft_numerics::switches::on(dft_numerics::switches::Id::RITZ_FUSED),
+            ritz_fused_loop: dft_numerics::switches::choice(dft_numerics::switches::Id::RITZ_FUSED)
+                == "loop",
             narrow_proj: dft_numerics::switches::on(dft_numerics::switches::Id::NARROW_PROJ),
             narrow_reduced: dft_numerics::switches::on(dft_numerics::switches::Id::NARROW_REDUCED),
             stage_timers: dft_numerics::switches::on(dft_numerics::switches::Id::DAVIDSON_STAGES),
@@ -208,6 +223,9 @@ impl ResearchOptions {
             lean_proj_cache: dft_numerics::switches::on(
                 dft_numerics::switches::Id::LEAN_PROJ_CACHE,
             ),
+            lean_border_fused: dft_numerics::switches::choice(
+                dft_numerics::switches::Id::LEAN_BORDER,
+            ) == "fused",
         }
     }
 }
@@ -638,6 +656,12 @@ pub struct LeanCounters {
     pub proj_cache_misses: u64,
     pub proj_cache_kept_loads: u64,
     pub proj_cache_columns: u64,
+    /// PERCORE-KERNELS (`BAANDI_LEAN_BORDER=fused`): appends whose overlap and
+    /// reduced borders came from one product V^T [E | H E], and H columns
+    /// applied before a failed pivot test and discarded (the fallback applies
+    /// H again to its own columns; expected zero, like the fallback rate).
+    pub fused_borders: u64,
+    pub fused_wasted_columns: u64,
 }
 impl LeanCounters {
     /// Stage-2 fallbacks (basis orthonormalizations) per append (the
@@ -682,8 +706,10 @@ pub(crate) enum LeanCount {
     ProjCacheMisses = 19,
     ProjCacheKeptLoads = 20,
     ProjCacheColumns = 21,
+    FusedBorders = 22,
+    FusedWasted = 23,
 }
-static LEAN_COUNTS: [AtomicU64; 22] = [const { AtomicU64::new(0) }; 22];
+static LEAN_COUNTS: [AtomicU64; 24] = [const { AtomicU64::new(0) }; 24];
 /// Smallest pivot ratio, as f64 bits (positive floats order like their bits).
 static LEAN_PIVOT_MIN: AtomicU64 = AtomicU64::new(0x3ff0_0000_0000_0000);
 #[inline]
@@ -730,5 +756,7 @@ pub fn lean_counters() -> LeanCounters {
         proj_cache_misses: g(LeanCount::ProjCacheMisses),
         proj_cache_kept_loads: g(LeanCount::ProjCacheKeptLoads),
         proj_cache_columns: g(LeanCount::ProjCacheColumns),
+        fused_borders: g(LeanCount::FusedBorders),
+        fused_wasted_columns: g(LeanCount::FusedWasted),
     }
 }

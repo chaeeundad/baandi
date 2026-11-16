@@ -18,7 +18,7 @@ fn run(theta: f64, bands: usize, electrons: f64) -> FiniteTResult {
             energy_tolerance: 1e-11,
             eigen_tolerance: 1e-10,
             max_iterations: 200,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
         &[KPoint {
             fractional: [0.0; 3],
@@ -118,7 +118,7 @@ fn spin_finite_roots_and_scf() {
                 eigen_tolerance: 1e-10,
                 density_tolerance: 1e-9,
                 max_iterations: 200,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             },
             &[KPoint {
                 fractional: [0.0; 3],
@@ -175,7 +175,7 @@ fn real_al_finite() {
             functional: Functional::Pbe,
             cutoff_hartree: 20.0,
             max_iterations: 200,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
         &points,
         0.01,
@@ -212,7 +212,7 @@ fn gapped_zero_temperature_limit() {
             eigen_tolerance: 1e-10,
             energy_tolerance: 1e-11,
             max_iterations: 200,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap()
@@ -248,7 +248,7 @@ fn insufficient_empty_band_cap_fails_closed() {
         ScfOptions {
             cutoff_hartree: 2.5,
             bands: Some(1),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
         &[KPoint {
             fractional: [0.0; 3],
@@ -283,7 +283,7 @@ fn standard_failed_verification_continues_spin_and_finite_scf() {
         max_iterations: 200,
         standard: Some(StandardProfile::default()),
         verification: Verification::FixedPoint,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let sector = SpinSector {
         n_up: 1,

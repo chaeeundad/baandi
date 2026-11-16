@@ -188,7 +188,7 @@ fn sweep() {
                 cutoff_hartree: numbers(&text, if material { "ecutwfc_ry" } else { "cutoff_ry" })
                     .unwrap()[0]
                     * 0.5,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             };
             if material {
                 opts.functional = Functional::Pbe;

@@ -8,6 +8,8 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+# ADR 0043 ONEPATH-4: locking="auto" exists only on the strict reference path.
+os.environ.setdefault('BAANDI_REFERENCE_STRICT','on')
 ROOT=Path(__file__).resolve().parents[1]
 OUT=ROOT/'tests/reference/perf/p24a/spin'
 OUT.mkdir(parents=True,exist_ok=True)

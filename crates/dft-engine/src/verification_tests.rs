@@ -20,7 +20,7 @@ fn problem(
             verification,
             cutoff_hartree: 2.5,
             bands: Some(3),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
         &[KPoint {
             fractional: [0.; 3],
@@ -62,7 +62,10 @@ fn verification_requires_standard_profile() {
         problem(&pp, None, Verification::FixedPoint),
         Err(ScfError::InvalidInput(_))
     ));
-    assert_eq!(ScfOptions::default().verification, Verification::Off);
+    assert_eq!(
+        ScfOptions::strict_reference().verification,
+        Verification::Off
+    );
 }
 
 /// V4: verification is an observation. A passing first attempt delivers the
@@ -159,4 +162,199 @@ fn failed_verification_continues_scf_and_verifies_again() {
     let outcome = never.run_outcome().unwrap();
     assert!(!outcome.converged);
     assert!(!outcome.result.verification.as_ref().unwrap().passed());
+}
+
+/// ONEPATH-4 (user decision 2026-11-16): the engine default is the standard
+/// path with the verification; every other field equals the strict reference,
+/// which keeps the former default bit for bit.
+#[test]
+fn engine_default_is_the_verified_standard_path() {
+    let d = ScfOptions::default();
+    let s = ScfOptions::strict_reference();
+    assert_eq!(d.standard, Some(StandardProfile { threshold_ha: 5e-9 }));
+    assert_eq!(d.verification, Verification::FixedPoint);
+    assert!(matches!(
+        d.mixing,
+        Mixing::Pulay {
+            beta: 0.5,
+            history: 6
+        }
+    ));
+    assert!(!d.is_strict_reference() && s.is_strict_reference());
+    assert_eq!((s.standard, s.verification), (None, Verification::Off));
+    assert!(matches!(
+        s.mixing,
+        Mixing::Pulay {
+            beta: 0.3,
+            history: 6
+        }
+    ));
+    let aligned = ScfOptions {
+        standard: None,
+        verification: Verification::Off,
+        mixing: s.mixing.clone(),
+        ..d.clone()
+    };
+    assert!(crate::checkpoint::options_identical(&aligned, &s));
+    // A default problem converges with a passed verification, uncertified.
+    let pp = super::pool_fixture::potential(2.0, 1.0, true, 401);
+    let cell = Cell::from_user_rows_bohr([[4., 0., 0.], [0.3, 4.2, 0.], [0., 0.2, 4.4]]).unwrap();
+    let r = ScfProblem::new(
+        &cell,
+        &[Atom::new("Xx", [0.13, 0.21, 0.32])],
+        &[SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }],
+        ScfOptions {
+            cutoff_hartree: 2.5,
+            bands: Some(3),
+            ..ScfOptions::default()
+        },
+    )
+    .unwrap()
+    .run()
+    .unwrap();
+    assert!(r.verification.as_ref().is_some_and(|v| v.passed()));
+    assert!(!r.certified && r.standard.is_some());
+}
+
+fn identity(
+    problem: &ScfProblem,
+) -> (
+    crate::checkpoint::ModelIdentity,
+    crate::checkpoint::ExecutionIdentity,
+) {
+    (
+        crate::checkpoint::ModelIdentity {
+            cell_bohr: problem.cell.lattice_columns_bohr(),
+            atoms_fractional: vec![[0.13, 0.21, 0.32]],
+            species: vec!["Xx".into()],
+            pseudopotential_sha256: vec!["0".repeat(64)],
+            cutoff_hartree: problem.options.cutoff_hartree,
+            kpoints: vec![[0., 0., 0., 1.]],
+            electrons: problem.electrons,
+            xc: problem.options.functional.name().into(),
+            spin: "unpolarized".into(),
+            environment: "none".into(),
+        },
+        crate::checkpoint::ExecutionIdentity {
+            build_sha256: "1".repeat(64),
+            platform: "synthetic-same-test-build".into(),
+            threads: problem.options.threads,
+        },
+    )
+}
+
+fn finish(mut s: ScfSession) -> ScfOutcome {
+    while s.snapshot().status == StepStatus::Ready {
+        s.step().unwrap();
+    }
+    s.into_result().unwrap()
+}
+
+/// ONEPATH-4: checkpoint v1 carries the verification option and the failed
+/// attempts. An exact continuation taken after a failed verification resumes
+/// bit for bit (energy, density, history, attempts without wall time) against
+/// the live session continued after its checkpoint; tampered attempt records
+/// and a different verification option reject.
+#[test]
+fn exact_checkpoint_after_failed_verification_resumes_bit_for_bit() {
+    use crate::checkpoint::{CheckpointKind, Rejection};
+    let pp = super::pool_fixture::potential(2.0, 1.0, true, 401);
+    let fresh = || problem(&pp, Some(5e-9), Verification::FixedPoint).unwrap();
+    let mut forced = fresh();
+    forced.force_verification_failures = 1;
+    let (model, execution) = identity(&forced);
+    let mut live = ScfSession::new(
+        forced,
+        CompletionMode::RetainLast,
+        crate::events::ExecutionConfig::default(),
+    )
+    .unwrap();
+    live.initialize().unwrap();
+    while live
+        .history()
+        .last()
+        .is_none_or(|h| h.fixed_point_certificate.is_none())
+    {
+        assert_eq!(live.step().unwrap().status, StepStatus::Ready);
+    }
+    let cp = live
+        .checkpoint(
+            CheckpointKind::ExactContinuation,
+            model.clone(),
+            execution.clone(),
+        )
+        .unwrap();
+    assert_eq!(cp.verification, Verification::FixedPoint);
+    let saved = &cp.continuation.as_ref().unwrap().verification_attempts;
+    assert_eq!(saved.len(), 1);
+    assert!(!saved[0].passed);
+    let restored = ScfSession::restore_exact(fresh(), &cp, &model, &execution).unwrap();
+    let a = finish(live);
+    let b = finish(restored);
+    assert!(a.converged && b.converged);
+    assert_eq!(
+        a.result.total_hartree().to_bits(),
+        b.result.total_hartree().to_bits()
+    );
+    assert!(
+        a.result
+            .density
+            .iter()
+            .zip(&b.result.density)
+            .all(|(x, y)| x.to_bits() == y.to_bits())
+    );
+    assert_eq!(a.result.history.len(), b.result.history.len());
+    let strip = |o: &ScfOutcome| {
+        o.result
+            .verification
+            .as_ref()
+            .unwrap()
+            .attempts
+            .iter()
+            .map(|a| {
+                format!(
+                    "{:?}",
+                    VerificationAttempt {
+                        wall: std::time::Duration::ZERO,
+                        ..a.clone()
+                    }
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(strip(&a), strip(&b));
+    assert_eq!(strip(&a).len(), 2);
+    // Tampering: attempts dropped, attempt marked passed, mode mismatch.
+    let mut dropped = cp.clone();
+    dropped
+        .continuation
+        .as_mut()
+        .unwrap()
+        .verification_attempts
+        .clear();
+    assert_eq!(
+        ScfSession::restore_exact(fresh(), &dropped, &model, &execution).err(),
+        Some(Rejection::History)
+    );
+    let mut passed = cp.clone();
+    passed.continuation.as_mut().unwrap().verification_attempts[0].passed = true;
+    assert_eq!(
+        ScfSession::restore_exact(fresh(), &passed, &model, &execution).err(),
+        Some(Rejection::History)
+    );
+    let mut mode = cp.clone();
+    mode.verification = Verification::Off;
+    assert_eq!(
+        ScfSession::restore_exact(fresh(), &mode, &model, &execution).err(),
+        Some(Rejection::Options)
+    );
+    // A target problem with the verification off: options mismatch.
+    let off = problem(&pp, Some(5e-9), Verification::Off).unwrap();
+    assert_eq!(
+        ScfSession::restore_exact(off, &cp, &model, &execution).err(),
+        Some(Rejection::Options)
+    );
 }

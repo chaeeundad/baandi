@@ -32,7 +32,7 @@ fn isolated_atoms_pbe_smoke() {
             cutoff_hartree: cutoff,
             bands: Some(electrons.div_ceil(2) + 3),
             max_iterations: 60,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         // Explicit fixed sector permits odd-electron Al; no fractional occupation
         // or hidden exception to the legacy even-electron constructor.

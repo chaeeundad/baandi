@@ -77,7 +77,7 @@ fn scf_thread_counts_are_bit_identical() {
                         threads,
                         cutoff_hartree: 2.5,
                         bands: Some(3),
-                        ..Default::default()
+                        ..ScfOptions::strict_reference()
                     },
                     &points,
                     OccupationPolicy::Insulator {

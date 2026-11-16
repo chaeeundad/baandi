@@ -109,6 +109,17 @@ pub(crate) fn evidence(path: &Path) -> Result<Value, checkpoint_io::Error> {
         evidence["convergence_profile"] = json!("standard");
         evidence["certified"] = json!(false);
         evidence["standard_threshold_ha"] = json!(p.threshold_ha);
+        // ADR 0043 ONEPATH-4: the verification option and its saved attempts.
+        evidence["verification"] = json!(cp.verification.name());
+        let attempts = cp
+            .continuation
+            .as_ref()
+            .map(|c| &c.verification_attempts)
+            .or(cp.result.as_ref().map(|r| &r.verification_attempts));
+        if let Some(a) = attempts.filter(|a| !a.is_empty()) {
+            evidence["verification_attempts"] = json!(a.len());
+            evidence["verified"] = json!(a.last().is_some_and(|a| a.passed));
+        }
     }
     if cp.hartree_mixing {
         evidence["mixing_metric"] = json!("hartree");

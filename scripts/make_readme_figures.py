@@ -312,8 +312,9 @@ def structural_results():
                      f"{obs[name + '_uncertainty_sum_ha_per_bohr']:.2e} |")
     lines += ["", "Uncertainty covers SCF, cutoff and FFT-grid checks; it is not the derivative error. "
               f"Both sums are below one third of the {force['real_cap']:.0e} Ha/Bohr real-force cap. "
-              "These results do not establish pseudopotential transferability. Forces require strict converged "
-              "states and complete NC derivatives; DFT+U forces are unsupported. Spin and finite-temperature "
+              "These results do not establish pseudopotential transferability. The stored runs used strict certified "
+              "states; since ADR 0043 forces also come from a standard state with a passed fixed-point verification "
+              "(the default path), always with complete NC derivatives; DFT+U forces are unsupported. Spin and finite-temperature "
               "forces exist in engine/CLI; the ASE adapter remains Gamma/unpolarized. "
               "[Force scope](docs/validation/forces.md); comparison with QE pending.", "",
               "Mac cost observations (one sample per case, no performance acceptance): "
@@ -352,7 +353,8 @@ def structural_results():
     lines += ["MgO caveat: the Gamma-only model relaxes away from ideal rocksalt. A fresh-SCF scalar "
               f"energy scan finds negative curvature {curv[-1]['directional_curvature_ha_bohr2']:.5f} Ha/Bohr^2 "
               "at the ideal position; this is not bulk structural qualification. " + evidence_link(curvature_path) + ". "
-              "CLI spin-polarized or finite-temperature relaxation is unsupported; strict unpolarized fixed occupations only. "
+              "CLI spin-polarized or finite-temperature relaxation is unsupported; unpolarized fixed occupations only "
+              "(stored runs strict; default runs verify every step on the standard path, ADR 0043). "
               "[Relaxation scope](docs/validation/relaxation.md); comparison with QE pending.", "",
               "![Si relaxation force history](docs/img/relaxation-forces.svg)", "", "### Stress: checked against cell strains", ""]
     stp = "tests/reference/stress/validation.json"
@@ -380,7 +382,8 @@ def structural_results():
         lines.append(f"| {name} | {r['maximum_final_error_ha_bohr3']:.2e} | {r['uncertainty_ha_bohr3']:.2e} | {r['status']} |")
     lines += ["", "The separate isotropic Pulay estimate measures cutoff sensitivity; its two-step spread is not an error bound, "
               "does not establish anisotropic convergence and is not silently added to the analytic tensor. "
-              "Stress with the standard profile is unsupported; a fresh strict stationary certificate is required. "
+              "The stored runs used strict certified states; since ADR 0043 stress also comes from a standard state with "
+              "a passed fixed-point verification (the default path; stress inputs default to 5e-11 Ha, provisional). "
               "[Stress scope](docs/validation/stress.md); comparison with QE pending.", "",
               "Mac cost observations, one on/off pair per case. Analytic time includes force-based precondition checking; "
               "Pulay scans are extra. " + evidence_link("tests/reference/stress/cost.json") + ".", "",

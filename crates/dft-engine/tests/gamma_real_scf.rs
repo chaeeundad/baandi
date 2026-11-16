@@ -31,7 +31,7 @@ fn options(mode: GammaReal, threads: usize, seed: u64) -> ScfOptions {
         seed,
         cutoff_hartree: 2.5,
         bands: Some(5),
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     }
 }
 fn problem(kind: usize, opts: ScfOptions) -> ScfProblem {
@@ -94,7 +94,7 @@ fn calibrate_complex_noise() {
 }
 #[test]
 fn off_is_default() {
-    assert_eq!(ScfOptions::default().gamma_real, GammaReal::Auto);
+    assert_eq!(ScfOptions::strict_reference().gamma_real, GammaReal::Auto);
 }
 
 #[test]

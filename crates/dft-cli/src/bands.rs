@@ -161,6 +161,21 @@ impl Context {
             result.total_hartree(),
             result.history.len()
         );
+        // ADR 0043 ONEPATH-4: the SCF of bands/dos runs the single standard
+        // path with the verification (strict only behind the reference switch).
+        match (&self.options.standard, &result.verification) {
+            (Some(p), Some(v)) => println!(
+                "SCF path: standard; threshold {} Ha; verification: fixed_point; passed: {}; attempts: {}",
+                p.threshold_ha,
+                v.passed(),
+                v.attempts.len()
+            ),
+            (Some(p), None) => println!(
+                "SCF path: standard; threshold {} Ha; verification: off",
+                p.threshold_ha
+            ),
+            (None, _) => println!("SCF path: strict reference (certificate)"),
+        }
         Ok(result)
     }
     pub fn spectrum(
@@ -198,7 +213,7 @@ impl Context {
     }
     pub fn metadata(&self, result: &NscfResult, edges: &Edges, scf: &ScfResult) -> Value {
         let density_bytes: Vec<_> = scf.density.iter().flat_map(|v| v.to_le_bytes()).collect();
-        json!({"schema_version":1,"scf_density_sha256":sha256(&density_bytes),"scf_energy_hartree":scf.total_hartree(),"scf_iterations":scf.history.len(),"eigen_tolerance_hartree":result.tolerance_hartree,"title":self.config.system.name,"code":"rust-dft","code_version":env!("CARGO_PKG_VERSION"),"input_sha256":self.input_hash,"pseudopotentials":self.pp_metadata,
+        json!({"schema_version":1,"scf_density_sha256":sha256(&density_bytes),"scf_energy_hartree":scf.total_hartree(),"scf_iterations":scf.history.len(),"scf_path":scf_path_json(&self.options, scf),"eigen_tolerance_hartree":result.tolerance_hartree,"title":self.config.system.name,"code":"rust-dft","code_version":env!("CARGO_PKG_VERSION"),"input_sha256":self.input_hash,"pseudopotentials":self.pp_metadata,
         "energy_reference":"maximum occupied eigenvalue over this computed sampling (VBM); not a Fermi level","hartree_to_ev":ev(1.0),"energy_reference_hartree":edges.vbm,"vbm":{"hartree":edges.vbm,"k_index":edges.vi,"fractional":result.points[edges.vi].fractional},"cbm":{"hartree":edges.cbm,"k_index":edges.ci,"fractional":result.points[edges.ci].fractional},"gap_ev":ev(edges.cbm-edges.vbm),"gap_hartree":edges.cbm-edges.vbm,"electrons":result.electrons,"nbands":result.solutions[0].solution.eigenvalues.len(),"cutoff_hartree":self.options.cutoff_hartree,"threads":self.options.threads,"converged":result.converged,"functional":self.options.functional.name(),"lattice_columns_bohr":self.cell.lattice_columns_bohr(),"kpoints":result.points.iter().map(|p| json!({"fractional":p.fractional,"weight":p.weight})).collect::<Vec<_>>(),"residuals_hartree":result.solutions.iter().map(|k| &k.solution.residuals).collect::<Vec<_>>()})
     }
     pub fn write(&self, name: &str, text: &str) -> Result<(), RunError> {
@@ -226,6 +241,20 @@ impl Context {
             lengths[0], lengths[1], lengths[2]
         )
     }
+}
+/// SCF path of the density the spectrum was computed at (ADR 0043): profile,
+/// threshold and verification outcome. The NSCF solve itself is always the
+/// all-bands residual solve (`eigen_tolerance_hartree`).
+fn scf_path_json(options: &ScfOptions, scf: &ScfResult) -> Value {
+    json!({
+        "effective_profile": if options.standard.is_some() { "standard" } else { "strict" },
+        "standard_threshold_ha": options.standard.map(|p| p.threshold_ha),
+        "verification": if options.standard.is_some() { options.verification.name() } else { "strict_certificate" },
+        "verified": scf.verification.as_ref().map(|v| v.passed()),
+        "verification_attempts": scf.verification.as_ref().map(|v| v.attempts.len()),
+        "certified": scf.certified,
+        "switch": "BAANDI_REFERENCE_STRICT", "adr": "0043"
+    })
 }
 pub(crate) struct Edges {
     pub vbm: f64,

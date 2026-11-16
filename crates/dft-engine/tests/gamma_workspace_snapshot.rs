@@ -31,7 +31,7 @@ fn options(mode: GammaReal, threads: usize, seed: u64) -> ScfOptions {
         seed,
         cutoff_hartree: 2.5,
         bands: Some(5),
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     }
 }
 fn problem(kind: usize, opts: ScfOptions) -> ScfProblem {
@@ -141,7 +141,7 @@ fn snapshots() {
                             beta: 0.5,
                             history: 6,
                         },
-                        ..Default::default()
+                        ..ScfOptions::strict_reference()
                     },
                 )
                 .unwrap()

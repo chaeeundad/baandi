@@ -166,7 +166,7 @@ fn gamma_pre_p7_regression() {
     let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
     let options = ScfOptions {
         cutoff_hartree: 1.5,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let legacy = ScfProblem::new(&cell(), &atoms, &species, options.clone())
         .unwrap()
@@ -226,7 +226,7 @@ fn scf_translation_and_time_reversal() {
         eigen_tolerance: 1e-12,
         initial_eigen_tolerance: 1e-12,
         max_iterations: 300,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let run = |p: &[KPoint]| {
         ScfProblem::with_kpoints(&cell(), &atoms, &species, options.clone(), p, policy())
@@ -316,7 +316,7 @@ fn occupation_policy_and_weight_errors() {
     let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
     let options = ScfOptions {
         cutoff_hartree: 1.5,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     assert!(
         ScfProblem::with_kpoints(
@@ -383,7 +383,7 @@ fn gamma_nonlocal_pre_p7_regression() {
         &common::cell(),
         &common::atoms(),
         &species,
-        ScfOptions::default(),
+        ScfOptions::strict_reference(),
         &points([0.0; 3]),
         policy(),
     )

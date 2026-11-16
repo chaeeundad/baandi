@@ -816,7 +816,7 @@ mod atomic_real_tests {
         let options = ScfOptions {
             gamma_real: GammaReal::Auto,
             cutoff_hartree: 2.5,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         let basis = options.basis(&cell, [0.; 3], 1.).unwrap();
         let grid = dft_basis::FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None)
@@ -902,7 +902,7 @@ mod reuse_psi_tests {
         let options = ScfOptions {
             gamma_real: GammaReal::Auto,
             cutoff_hartree: 2.5,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         let basis = options.basis(&cell, [0.; 3], 1.).unwrap();
         let grid = dft_basis::FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None)

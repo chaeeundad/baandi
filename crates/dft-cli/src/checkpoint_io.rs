@@ -205,15 +205,10 @@ pub fn encode(checkpoint: &Checkpoint) -> Result<Vec<u8>, Error> {
             "checkpoint v1 cannot preserve scf.spectral_guard=final audit history or scf.locking=auto policy",
         ));
     }
-    if checkpoint
-        .continuation
-        .as_ref()
-        .is_some_and(|c| c.options.verification != dft_engine::Verification::Off)
-    {
-        return Err(invalid(
-            "checkpoint v1 cannot preserve the fixed-point verification (ADR 0043); use scf.verify = \"off\" or the strict reference path (BAANDI_REFERENCE_STRICT=on)",
-        ));
-    }
+    // ADR 0043 ONEPATH-4: the fixed-point verification option and its attempts
+    // are carried (additive optional keys `verification`,
+    // `options.verification`, `verification_attempts`); files without them
+    // decode as before (verification off, no attempts).
     let mut binary = Vec::new();
     let wire = checkpoint.encode(&mut binary)?;
     let header = serde_json::to_vec(&wire)?;
@@ -361,6 +356,8 @@ wire_vec!([f64; 3]);
 wire_vec!([f64; 4]);
 wire_vec!(usize);
 wire_struct!(Checkpoint, WCheckpoint {
+    #[serde(default = "verification_off", skip_serializing_if = "is_verification_off")]
+    verification: dft_engine::Verification,
     #[serde(default, skip_serializing_if = "is_false")]
     standard_stall_guard: bool,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -447,6 +444,8 @@ wire_struct!(AtomicStartReport, WAtomicStartReport {
     fallback_reason: Option<String>,
 });
 wire_struct!(ContinuationState, WContinuationState {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    verification_attempts: Vec<VerificationAttempt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     atomic_start: Option<dft_engine::AtomicStartReport>,
     options: ScfOptions,
@@ -542,6 +541,49 @@ impl Wire for dft_engine::GammaReal {
         }
     }
 }
+impl Wire for dft_engine::Verification {
+    type Repr = String;
+    fn encode(&self, _bytes: &mut Vec<u8>) -> Result<String, Error> {
+        Ok(self.name().into())
+    }
+    fn decode(w: String, _bytes: &[u8], _cursor: &mut usize) -> Result<Self, Error> {
+        match w.as_str() {
+            "off" => Ok(Self::Off),
+            "fixed_point" => Ok(Self::FixedPoint),
+            _ => Err(invalid("invalid verification option")),
+        }
+    }
+}
+fn verification_off() -> String {
+    "off".into()
+}
+fn is_verification_off(s: &str) -> bool {
+    s == "off"
+}
+use dft_engine::VerificationAttempt;
+wire_vec!(VerificationAttempt);
+wire_struct!(VerificationAttempt, WVerificationAttempt {
+    iteration: usize,
+    passed: bool,
+    coulomb_error_ha: f64,
+    threshold_ha: f64,
+    eigen_tolerance_ha: f64,
+    residual_bound_ha: Option<f64>,
+    density_residual: f64,
+    occupied_eigenvalue_change_ha: f64,
+    strict_criteria_met: bool,
+    davidson_iterations: usize,
+    operator_applications: usize,
+    wall: Duration,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    spin_density_residual: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    occupation_change_electrons: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    chemical_potential_change_ha: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    moment_change: Option<f64>,
+});
 fn gamma_real_off() -> String {
     "off".into()
 }
@@ -677,6 +719,8 @@ wire_struct!(ScfOptions, WScfOptions {
     pw92_prefactor: dft_engine::Pw92Prefactor,
     #[serde(default = "gamma_real_off", skip_serializing_if = "is_gamma_real_off")]
     gamma_real: dft_engine::GammaReal,
+    #[serde(default = "verification_off", skip_serializing_if = "is_verification_off")]
+    verification: dft_engine::Verification,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     standard: Option<StandardProfile>,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -703,7 +747,7 @@ wire_struct!(ScfOptions, WScfOptions {
     seed: u64,
     divergence_factor: f64,
     divergence_patience: usize,
-} defaults { locking: dft_engine::Locking::Off, spectral_guard: dft_engine::SpectralGuard::Off, strain_reference: None, verification: dft_engine::Verification::Off, });
+} defaults { locking: dft_engine::Locking::Off, spectral_guard: dft_engine::SpectralGuard::Off, strain_reference: None, });
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 enum WSolverChoice {
@@ -1683,6 +1727,7 @@ enum WPolicyError {
     RestrictedSchedule,
     RestrictedDivergence,
     LockingRequiresDavidson,
+    StandardRequiresDavidson,
 }
 impl Wire for PolicyError {
     type Repr = WPolicyError;
@@ -1706,6 +1751,7 @@ impl Wire for PolicyError {
             Self::RestrictedSchedule => WPolicyError::RestrictedSchedule,
             Self::RestrictedDivergence => WPolicyError::RestrictedDivergence,
             Self::LockingRequiresDavidson => WPolicyError::LockingRequiresDavidson,
+            Self::StandardRequiresDavidson => WPolicyError::StandardRequiresDavidson,
         })
     }
     fn decode(w: Self::Repr, _bytes: &[u8], _cursor: &mut usize) -> Result<Self, Error> {
@@ -1728,6 +1774,7 @@ impl Wire for PolicyError {
             WPolicyError::RestrictedSchedule => Self::RestrictedSchedule,
             WPolicyError::RestrictedDivergence => Self::RestrictedDivergence,
             WPolicyError::LockingRequiresDavidson => Self::LockingRequiresDavidson,
+            WPolicyError::StandardRequiresDavidson => Self::StandardRequiresDavidson,
         })
     }
 }
@@ -1784,6 +1831,8 @@ impl Wire for Trigger {
     }
 }
 wire_struct!(ExportResult, WExportResult {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    verification_attempts: Vec<VerificationAttempt>,
     converged: bool,
     energy: EnergyAudit,
     charge: f64,
@@ -1902,6 +1951,30 @@ fn context(
     };
     Ok((problem, model, execution))
 }
+/// SCF path of a written checkpoint (ADR 0043): profile, threshold and, on the
+/// verified standard path, the verification attempts it carries.
+fn print_profile(cp: &Checkpoint) {
+    match cp.standard {
+        Some(p) => println!(
+            "convergence_profile: standard; certified: false; standard_threshold_ha: {}; verification: {}",
+            p.threshold_ha,
+            cp.verification.name()
+        ),
+        None => println!("convergence_profile: strict (reference path)"),
+    }
+    let attempts = cp
+        .continuation
+        .as_ref()
+        .map(|c| &c.verification_attempts)
+        .or(cp.result.as_ref().map(|r| &r.verification_attempts));
+    if let Some(a) = attempts.filter(|a| !a.is_empty()) {
+        println!(
+            "verification attempts: {}; last passed: {}",
+            a.len(),
+            a.last().is_some_and(|a| a.passed)
+        );
+    }
+}
 fn finish(session: &mut dft_engine::ScfSession) -> Result<(), Error> {
     while session.snapshot().status == dft_engine::StepStatus::Ready {
         session.step()?;
@@ -1933,12 +2006,7 @@ pub fn create(input: &Path, output: &Path, iteration: usize, kind: Kind) -> Resu
     }
     let cp = session.checkpoint(kind, model, execution)?;
     write(output, &cp)?;
-    if let Some(p) = cp.standard {
-        println!(
-            "convergence_profile: standard; certified: false; standard_threshold_ha: {}",
-            p.threshold_ha
-        );
-    }
+    print_profile(&cp);
     println!(
         "Wrote {:?}, iteration {}: {}",
         kind,
@@ -1973,12 +2041,7 @@ pub fn restart(input: &Path, source: &Path, output: &Path, warm: bool) -> Result
     finish(&mut session)?;
     let result = session.checkpoint(CheckpointKind::ResultExport, model, execution)?;
     write(output, &result)?;
-    if let Some(p) = result.standard {
-        println!(
-            "convergence_profile: standard; certified: false; standard_threshold_ha: {}",
-            p.threshold_ha
-        );
-    }
+    print_profile(&result);
     let r = result.result.as_ref().unwrap();
     println!(
         "Energy {:.17} Ha, converged={}, iterations={}",
@@ -2002,7 +2065,7 @@ mod pw92_wire_tests {
         for crystal in [false, true] {
             let options = ScfOptions {
                 crystal_density_group: crystal,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             };
             let mut bytes = Vec::new();
             let json = serde_json::to_value(options.encode(&mut bytes).unwrap()).unwrap();
@@ -2017,7 +2080,7 @@ mod pw92_wire_tests {
         for multiplier in [2, 3, 4, 6, 12] {
             let options = ScfOptions {
                 davidson_capacity_per_band: multiplier,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             };
             let mut bytes = Vec::new();
             let json = serde_json::to_value(options.encode(&mut bytes).unwrap()).unwrap();
@@ -2036,7 +2099,7 @@ mod pw92_wire_tests {
             let options = ScfOptions {
                 standard: Some(StandardProfile::default()),
                 standard_stall_guard: enabled,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             };
             let mut bytes = Vec::new();
             let wire = options.encode(&mut bytes).unwrap();
@@ -2053,7 +2116,7 @@ mod pw92_wire_tests {
             let options = ScfOptions {
                 standard: Some(StandardProfile::default()),
                 standard_density_forcing: enabled,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             };
             let mut bytes = Vec::new();
             let wire = options.encode(&mut bytes).unwrap();
@@ -2072,7 +2135,7 @@ mod pw92_wire_tests {
         ] {
             let options = ScfOptions {
                 compat_mode,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             };
             let mut bytes = Vec::new();
             let wire = options.encode(&mut bytes).unwrap();
@@ -2103,7 +2166,7 @@ mod pw92_wire_tests {
         ] {
             let options = ScfOptions {
                 pw92_prefactor: prefactor,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             };
             let mut bytes = Vec::new();
             let wire = options.encode(&mut bytes).unwrap();
@@ -2141,7 +2204,7 @@ mod pseudo_wire_tests {
                 let options = ScfOptions {
                     local_mesh,
                     radial_even_rule,
-                    ..Default::default()
+                    ..ScfOptions::strict_reference()
                 };
                 let mut bytes = Vec::new();
                 let mut json = serde_json::to_value(options.encode(&mut bytes).unwrap()).unwrap();

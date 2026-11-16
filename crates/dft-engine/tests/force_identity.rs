@@ -18,7 +18,7 @@ fn retained_model_rejects_independent_input_mutations() {
     }];
     let opts = ScfOptions {
         cutoff_hartree: 1.,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let mut r = ScfProblem::new(&cell, &atoms, &refs, opts.clone())
         .unwrap()
@@ -128,7 +128,7 @@ fn finite_temperature_policy_is_bound_to_certificate() {
         functional: Functional::LdaPw,
         grid_override: Some([48; 3]),
         davidson_subspace: 96,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let points = [KPoint {
         fractional: [0.; 3],

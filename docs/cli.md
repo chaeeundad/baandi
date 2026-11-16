@@ -948,15 +948,17 @@ See [bulk smoke evidence and limitations](validation/materials-smoke.md).
 
 The input key `scf.convergence_profile` was **removed** on 2026-11-16 (user
 decision, ADR 0043): an input that still contains it (any value) is an input
-error that names the replacement. Every classic `run` uses the standard profile
-with the fixed-point verification (next section). `standard_threshold_ha`
+error that names the replacement. Every command (`run` in every execution mode,
+`relax`, `bands`, `dos`, `checkpoint`, `restart`, `explain`) uses the standard
+profile with the fixed-point verification (next section; single path complete
+since ONEPATH-4). `standard_threshold_ha`
 (positive, finite, default **5e-9 Ha**, frozen P17A E1) sets its accuracy;
 `verify = "off"` gives the former explicit standard profile (no verification).
 The strict path is a reference/test tool only: `BAANDI_REFERENCE_STRICT=on`
 (environment) runs the same input on the strict path with its certificate;
 strict arithmetic, certificate, output schema version and omitted-extension
-fields are unchanged there. The standard profile is unpolarized Davidson only;
-collinear inputs keep the strict path.
+fields are unchanged there. Collinear spin and Fermi-Dirac inputs run the
+standard profile too since ONEPATH-3 (see below).
 
 Standard stops on the **total Coulomb energy of output-minus-input density**,
 without electron-count division. Its Ritz-change threshold starts at 5e-3 Ha,
@@ -967,8 +969,9 @@ solves. Empty roots use `max(5*threshold,5e-6 Ha)`; all occupied roots and the
 first empty must converge, including at the iteration limit. Higher buffer
 roots may remain unconverged only at that limit. This is not residual certification.
 
-No fixed-point certificate solve runs for standard. Results and checkpoint
-provenance explicitly label it `standard` and `certified: false`; results include
+No strict fixed-point certificate solve runs for standard (the fixed-point
+verification of the next section is a different, standard-class check). Results
+and checkpoint provenance explicitly label it `standard` and `certified: false`; results include
 thresholds, Hartree residuals, redo flags and total work (including discarded
 redo solves). `spectral_guard="final"` remains an independent opt-in audit and
 cannot turn a standard result into a certified result. Standard does not
@@ -994,7 +997,7 @@ See [measured accuracy, limitations and commands](performance/p17a-standard-prof
 
 ### Single SCF path and fixed-point verification (ADR 0043, default since 2026-11-16)
 
-A classic `run` uses the standard profile with `standard_threshold_ha` from the
+Every command uses the standard profile with `standard_threshold_ha` from the
 input (default 5e-9 Ha) and Pulay beta 0.5, followed by a **fixed-point
 verification** after the stop rule fires: one more ordinary map at the
 delivered output density (warm start, eigen tolerance = the next ratchet value)
@@ -1014,8 +1017,9 @@ keys of the input (`standard_threshold_ha`, `verify`, `standard_stall_guard`,
 `standard_density_forcing`) are then ignored, which the result records
 (`single_path.status = "reference_strict"`).
 
-Every result carries `single_path` (`status`: `applied`, `reference_strict` or
-`not_applicable` with `reason`; `effective_profile`; `verification`:
+Every result carries `single_path` (`status`: `applied` or `reference_strict`
+with `reason`; `not_applicable` is no longer produced since ONEPATH-4;
+`effective_profile`; `verification`:
 `fixed_point`, `off` or `strict_certificate`) and `execution` (review F01:
 `requested` controls, `effective_profile`, `standard_threshold_ha`,
 `verification`, `effective_solver` (`real_gamma_lean_davidson`,
@@ -1108,12 +1112,43 @@ Hartree mixing metric with spin or FD, and (new, previously unreachable)
 `standard_stall_guard` / `standard_density_forcing` with spin or FD. The opt-in
 `BAANDI_STANDARD_STOP=confirm` rule applies to closed-shell runs only.
 
-`scf.locking = "auto"` keeps the strict path (`not_applicable` with the reason);
-in such inputs the standard-only keys are input errors instead of being dropped. The observe/agent
-runtime modes and the non-`run` commands (bands, checkpoint, restart,
-inspection) keep a plain input on the strict path (`not_applicable`); an input
-that writes a standard-only key runs the standard path there too. Checkpoint v1
-cannot encode a continuation with verification on (use `verify = "off"`).
+**No strict fallback remains (ONEPATH-4, user decision 2026-11-16).** The strict
+path is reached only through `BAANDI_REFERENCE_STRICT=on` (engine:
+`ScfOptions::strict_reference()`; Python: `Options.reference_strict = True`).
+
+- `scf.locking = "auto"` is an input error on the default path: locking is an
+  experimental option of the strict residual Davidson (hard locking with a
+  residual certificate), and the standard path's Ritz-change Davidson retests
+  every root and has no locking. The message names the reference switch, under
+  which the input runs as before.
+- The observe/agent runtime modes (`run --observe`, `run --agent`) run the
+  standard path with the verification exactly like a classic run, with the same
+  `results.json` records (`single_path.status = "applied"`, `verified`,
+  `verification`). Runtime tolerance interventions act on the strict-only
+  options (`density_residual_tolerance`, `energy_tolerance_ha`,
+  `eigen_tolerance`) and therefore do not move the standard stop rule; a hybrid
+  eigensolver request is rejected on the standard path
+  (`PolicyError::StandardRequiresDavidson`) instead of being ignored. Spin and
+  Fermi-Dirac inputs stay input errors in these modes (runtime control is not
+  spin-aware).
+- `bands` and `dos` run their SCF on the standard path with the verification
+  (printed, and recorded in the metadata JSON as `scf_path`); the NSCF solve is
+  the unchanged all-bands residual solve at `--tolerance` whatever profile
+  delivered the density.
+- `checkpoint`, `restart` and `explain` resolve the same options as `run`.
+  Checkpoint v1 carries the verification option (`verification` and
+  `options.verification`, omitted when off) and the verification attempts
+  (`continuation.verification_attempts`, `result.verification_attempts`,
+  omitted when empty); files written before ONEPATH-4 decode unchanged (no
+  verification, no attempts). An exact continuation restores the failed
+  attempts made before the boundary and continues bit for bit; a passed attempt
+  ends the run, so it never appears in a continuation. Exact restore rejects
+  attempt records that do not match the history's verification records
+  (`History`) and a different verification option (`Options`). As before, an
+  exact checkpoint makes the live session forget its kept REUSE_PSI state, so a
+  restart reproduces the checkpointed session continued after its checkpoint;
+  against an uninterrupted run that never checkpointed it is bit-identical only
+  with `BAANDI_REUSE_PSI=off` (otherwise the same rounding class).
 
 MPI (review F02): with more than one k point, collinear spin or Fermi-Dirac
 occupations there are no k-point pools and no distributed eigensolve; every
@@ -1209,7 +1244,9 @@ are unchanged. See [validation and limits](validation/symmetry.md).
 ## Atomic forces (P20A)
 
 Set `[output] forces = true` to request Cartesian forces in input atom order,
-Ha/Bohr. A strict, certified state is required; `standard` rejects at preflight.
+Ha/Bohr. A passed fixed-point verification (the default single path, ADR 0043)
+or the strict certificate (`BAANDI_REFERENCE_STRICT=on`) is required;
+`scf.verify = "off"` rejects at preflight.
 `results.json.forces` contains `status`, `quantity` (E or F), `units`, `frame`,
 `values`, `per_term` (ewald/local/nonlocal/core), `net_force`,
 `maximum_absolute_component`, `elapsed_seconds`, `band_passes` and
@@ -1241,7 +1278,8 @@ Set `[output] stress = true` on a converged NC SCF: since ONEPATH-2 the default
 standard path with a passed fixed-point verification (see the single SCF path
 section above), or the strict certified reference path
 (`BAANDI_REFERENCE_STRICT=on`); `scf.verify = "off"` rejects this request.
-Spin and Fermi-Dirac stress runs stay on the strict path for now. The
+Spin and Fermi-Dirac stress runs use the standard path with the verification
+since ONEPATH-3. The
 Cartesian tensile-positive 3x3 tensor is in Ha/Bohr^3;
 pressure is `-trace(stress)/3`. The JSON `stress` block contains per-term values,
 symmetric/antisymmetric parts, raw antisymmetric norm, derivative ledger and

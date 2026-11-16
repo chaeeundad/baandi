@@ -65,7 +65,7 @@ fn spin_and_fermi_dirac_budget_identity() {
                 density_tolerance: 1e-10,
                 energy_tolerance: 1e-11,
                 max_iterations: 200,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             };
             let (mut bits, work) = if spin {
                 let r = CollinearProblem::new(

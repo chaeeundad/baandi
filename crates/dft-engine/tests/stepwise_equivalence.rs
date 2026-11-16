@@ -85,7 +85,7 @@ fn fixture(kind: usize, mixing: Mixing, threads: usize, max_iterations: usize) -
             max_iterations,
             cutoff_hartree: 2.5,
             bands: Some(if kind == 2 { 4 } else { 3 }),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
         &points,
         OccupationPolicy::Insulator {

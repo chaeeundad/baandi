@@ -171,8 +171,9 @@ pub struct ScfOptions {
     pub standard_stall_guard: bool,
     /// Experimental density-residual forcing cap; default off, standard only.
     pub standard_density_forcing: bool,
-    /// ADR 0043: fixed-point verification after a standard stop (default off;
-    /// requires the standard profile).
+    /// ADR 0043: fixed-point verification after a standard stop (default
+    /// `FixedPoint` since ONEPATH-4, `Off` in `strict_reference()`; requires
+    /// the standard profile).
     pub verification: Verification,
     pub hartree_mixing: bool,
     pub spectral_guard: crate::SpectralGuard,
@@ -236,8 +237,32 @@ impl ScfOptions {
         }
     }
 }
+/// ADR 0043 amendment ONEPATH-4 (user decision 2026-11-16): the engine default
+/// is the single standard SCF path with the fixed-point verification after
+/// convergence (`StandardProfile::default()`, 5e-9 Ha; Pulay beta 0.5, the
+/// standard-class mixing default of the CLI). The strict path is a reference
+/// tool reached only through `ScfOptions::strict_reference()` (mirrored by the
+/// CLI and Python switch `BAANDI_REFERENCE_STRICT=on`, see
+/// `ScfOptions::from_reference_switch`). Every other field is shared.
 impl Default for ScfOptions {
     fn default() -> Self {
+        Self {
+            standard: Some(StandardProfile::default()),
+            verification: Verification::FixedPoint,
+            mixing: Mixing::Pulay {
+                beta: 0.5,
+                history: 6,
+            },
+            ..Self::strict_reference()
+        }
+    }
+}
+impl ScfOptions {
+    /// The strict reference path (the engine default before ONEPATH-4, bit for
+    /// bit): residual stop rule and the strict fixed-point certificate, Pulay
+    /// beta 0.3. For accuracy gates, references and tests that need the strict
+    /// arithmetic; production callers use `ScfOptions::default()`.
+    pub fn strict_reference() -> Self {
         Self {
             start_wavefunctions: StartWavefunctions::default(),
             start_density: StartDensity::Uniform,
@@ -280,6 +305,22 @@ impl Default for ScfOptions {
             divergence_factor: 20.0,
             divergence_patience: 3,
         }
+    }
+    /// Host default that mirrors the reference switch of the CLI:
+    /// `BAANDI_REFERENCE_STRICT=on` gives `strict_reference()`, otherwise
+    /// `default()` (the standard path with verification). Hosts without an
+    /// input file (Python session) use this; engine tests and the numerical
+    /// core never read the environment through `default()`.
+    pub fn from_reference_switch() -> Self {
+        if dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_STRICT) {
+            Self::strict_reference()
+        } else {
+            Self::default()
+        }
+    }
+    /// True when these options select the strict reference path.
+    pub fn is_strict_reference(&self) -> bool {
+        self.standard.is_none()
     }
 }
 /// Whether `bands` fit a basis of `plane_waves` functions. The solvers raise the
@@ -2449,7 +2490,7 @@ mod tests {
                         cutoff_hartree: 10.0,
                         bands: Some(24),
                         max_iterations: 6,
-                        ..Default::default()
+                        ..ScfOptions::strict_reference()
                     },
                 )
                 .unwrap()
@@ -2496,7 +2537,7 @@ mod tests {
                 threads: 1,
                 cutoff_hartree: 3.0,
                 bands: Some(6),
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             },
         )
         .unwrap();
@@ -2566,7 +2607,7 @@ mod tests {
                     threads,
                     cutoff_hartree: 3.0,
                     bands: Some(6),
-                    ..Default::default()
+                    ..ScfOptions::strict_reference()
                 },
             )
             .unwrap();
@@ -2641,7 +2682,7 @@ mod tests {
                     threads: 1,
                     cutoff_hartree: 3.0,
                     bands: Some(6),
-                    ..Default::default()
+                    ..ScfOptions::strict_reference()
                 },
             )
             .unwrap()
@@ -2729,7 +2770,7 @@ mod tests {
                     threads,
                     cutoff_hartree: 2.5,
                     bands: Some(3),
-                    ..Default::default()
+                    ..ScfOptions::strict_reference()
                 },
             )
             .unwrap();
@@ -2763,7 +2804,7 @@ mod tests {
 
     #[test]
     fn convergence_requires_every_certificate_on_same_iteration() {
-        let o = ScfOptions::default();
+        let o = ScfOptions::strict_reference();
         let energy = EnergyAudit {
             xc_floor: None,
             kinetic: 0.0,

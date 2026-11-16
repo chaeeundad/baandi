@@ -20,7 +20,7 @@ fn problem(variant: dft_solvers::DavidsonPreconditioner) -> Result<ScfProblem, S
             preconditioner: variant,
             cutoff_hartree: 2.5,
             bands: Some(3),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
         &[KPoint {
             fractional: [0.; 3],

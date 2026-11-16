@@ -5,7 +5,7 @@ fn preconditioner_wire_and_config_contract() {
     for kind in [Kind::Default, Kind::Tpa, Kind::RitzShift] {
         let o = ScfOptions {
             preconditioner: kind,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         let mut bytes = Vec::new();
         let json = serde_json::to_value(o.encode(&mut bytes).unwrap()).unwrap();

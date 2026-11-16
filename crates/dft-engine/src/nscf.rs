@@ -66,6 +66,15 @@ pub fn nscf(
             "density must be finite and nonnegative",
         ));
     }
+    // ONEPATH-4: an NSCF is one residual-certified eigensolve at a fixed
+    // density, not an SCF; the SCF stop rule (standard profile, its
+    // verification and experiments) does not apply, so the solve below is the
+    // all-bands residual solve whatever profile delivered the density (the
+    // same arithmetic as with the former strict default).
+    options.standard = None;
+    options.verification = crate::Verification::Off;
+    options.standard_stall_guard = false;
+    options.standard_density_forcing = false;
     options.extra_bands = options.extra_bands.max(4);
     options.grid_override = Some([density.shape()[0], density.shape()[1], density.shape()[2]]);
     let tolerance = options.eigen_tolerance;

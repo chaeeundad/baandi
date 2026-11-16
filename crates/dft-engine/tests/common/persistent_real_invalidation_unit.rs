@@ -9,7 +9,7 @@ fn operator_options_bands_and_executor_invalidate_cached_state() {
     let mut options = ScfOptions {
         gamma_real: GammaReal::On,
         cutoff_hartree: 2.5,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let basis = options.basis(&cell, [0.; 3], 1.).unwrap();
     let grid =

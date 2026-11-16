@@ -11,7 +11,7 @@ fn floors() -> Option<ToleranceFloors> {
 
 #[test]
 fn rejected_batch_does_not_modify_input() {
-    let original = ScfOptions::default();
+    let original = ScfOptions::strict_reference();
     let before = format!("{original:?}").into_bytes();
     let cases = [
         (PolicyChange::MixingBeta(f64::NAN), PolicyError::InvalidBeta),
@@ -71,7 +71,7 @@ fn rejected_batch_does_not_modify_input() {
 
 #[test]
 fn reset_semantics_and_merged_mixers() {
-    let original = ScfOptions::default();
+    let original = ScfOptions::strict_reference();
     for mixing in [
         Mixing::Linear { beta: 0.2 },
         Mixing::Pulay {
@@ -120,7 +120,7 @@ fn reset_semantics_and_merged_mixers() {
 
 #[test]
 fn quotas_noops_and_ambiguous_batches_reject() {
-    let original = ScfOptions::default();
+    let original = ScfOptions::strict_reference();
     assert_eq!(
         prepare_policy(&original, 0, floors(), &[]).unwrap_err(),
         PolicyError::Empty
@@ -181,7 +181,7 @@ fn quotas_noops_and_ambiguous_batches_reject() {
 
 #[test]
 fn tolerance_metadata_and_certificate_ceiling_are_required() {
-    let original = ScfOptions::default();
+    let original = ScfOptions::strict_reference();
     assert_eq!(
         prepare_policy(&original, 0, None, &[PolicyChange::DensityTolerance(1e-8)]).unwrap_err(),
         PolicyError::MissingToleranceFloors
@@ -270,7 +270,7 @@ fn problem(kind: usize, budget: usize) -> ScfProblem {
             cutoff_hartree: 2.5,
             bands: Some(if kind == 2 { 4 } else { 3 }),
             max_iterations: budget,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
         &points,
         OccupationPolicy::Insulator {

@@ -126,6 +126,40 @@ and completed history. It is an inspection payload, not a reconstructible live
 `ScfResult`: setup/total wall time, Ewald component breakdown and solver-internal
 result bookkeeping are not exported. Unconverged results remain unconverged.
 
+### Fixed-point verification (ADR 0043 amendment ONEPATH-4)
+
+Version 1 carries the single standard path's fixed-point verification through
+additive optional keys; the schema version stays 1. A key is omitted when it has
+its default, so a file without verification is byte-identical to one written
+before ONEPATH-4, and such files decode unchanged.
+
+- `verification` (top level) and `continuation.options.verification`: `"off"`
+  (default, omitted) or `"fixed_point"`. Exact restore requires both to match
+  each other and the importing problem (`Options` rejection).
+- `continuation.verification_attempts`: the attempts made before the boundary,
+  oldest first (default empty, omitted). They are always failed attempts: a
+  passed attempt ends the run, so an exact boundary never follows one. Each
+  record has `iteration`, `passed`, `coulomb_error_ha`, `threshold_ha`,
+  `eigen_tolerance_ha`, `residual_bound_ha` (the residual estimate, or null),
+  `density_residual`, `occupied_eigenvalue_change_ha`, `strict_criteria_met`,
+  `davidson_iterations`, `operator_applications`, `wall` (a duration, excluded
+  from bitwise claims) and the optional spin/occupation fields of the engine's
+  `VerificationAttempt`. Exact restore requires one attempt per history entry
+  that holds a verification record (the standard history's
+  `fixed_point_certificate`), in iteration order, not passed, with the session's
+  threshold and finite nonnegative numbers (`History` rejection otherwise).
+- `result.verification_attempts`: every attempt of an exported run (default
+  empty, omitted); the last one passed when the export is converged on the
+  verified standard path.
+
+The restored session continues with the saved attempts, so its final
+verification report equals the live session's continued after the checkpoint
+(wall times excluded). As before, taking an exact checkpoint makes the live
+session forget its kept REUSE_PSI state, so the restart reproduces the
+checkpointed session; against a run that never checkpointed it is bit-identical
+with `BAANDI_REUSE_PSI=off` and in the REUSE_PSI rounding class otherwise
+(`crates/dft-cli/tests/onepath_last_fallbacks.rs`, bound 1e-10 Ha).
+
 ## Identity and runtime boundary
 
 Compatibility has named rejections for schema, kind, cell, atom positions,

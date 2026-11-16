@@ -22,7 +22,7 @@ fn primitive_start_and_history_diagnosis() {
             beta: 0.5,
             history: 6,
         },
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let make = |mode| {
         ScfProblem::new(

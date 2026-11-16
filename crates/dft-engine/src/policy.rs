@@ -94,6 +94,9 @@ pub enum PolicyError {
     RestrictedSchedule,
     RestrictedDivergence,
     LockingRequiresDavidson,
+    /// ADR 0043 ONEPATH-4: the standard path solves with the Ritz-change
+    /// Davidson only; a hybrid eigensolver request would be silently ignored.
+    StandardRequiresDavidson,
 }
 
 /// Prepared options are deliberately read-only. A session integration must
@@ -197,7 +200,8 @@ pub fn prepare_policy(
     let mut next = current.clone();
     let mut fields = 0u16;
     let mut reset = false;
-    let defaults = ScfOptions::default();
+    // Ceilings are the strict certificate thresholds (unchanged by ONEPATH-4).
+    let defaults = ScfOptions::strict_reference();
     for change in changes {
         let field = match change {
             PolicyChange::Mixing(_)
@@ -286,6 +290,9 @@ pub fn prepare_policy(
     if next.locking == crate::Locking::Auto && !matches!(next.eigensolver, SolverChoice::Davidson) {
         return Err(PolicyError::LockingRequiresDavidson);
     }
+    if next.standard.is_some() && !matches!(next.eigensolver, SolverChoice::Davidson) {
+        return Err(PolicyError::StandardRequiresDavidson);
+    }
     validate_mixing(&next.mixing)?;
     let mixing_changed = mixing_key(&next.mixing) != mixing_key(&current.mixing);
     if !reset
@@ -302,4 +309,21 @@ pub fn prepare_policy(
         options: next,
         reset_history: reset || mixing_changed,
     })
+}
+
+#[cfg(test)]
+mod standard_policy_tests {
+    use super::*;
+    /// ONEPATH-4: the runtime modes run the standard path by default; a hybrid
+    /// eigensolver request would be ignored by the Ritz-change solver there, so
+    /// it rejects. The strict reference keeps accepting it.
+    #[test]
+    fn hybrid_request_rejects_on_the_standard_path_only() {
+        let change = [PolicyChange::Eigensolver(RuntimeEigensolver::Hybrid)];
+        assert_eq!(
+            prepare_policy(&ScfOptions::default(), 1, None, &change).err(),
+            Some(PolicyError::StandardRequiresDavidson)
+        );
+        assert!(prepare_policy(&ScfOptions::strict_reference(), 1, None, &change).is_ok());
+    }
 }

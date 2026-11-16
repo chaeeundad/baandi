@@ -90,15 +90,18 @@ all stage inputs, times and failures. `rebuilt_pressure_check` warns independent
 of the Pulay tensor-difference warning; frozen-only convergence must not imply
 nominal-cutoff equilibrium, and the default rebuild cadence remains zero.
 
-## Single SCF path (ADR 0043, default since 2026-11-16)
+## Single SCF path (ADR 0043, default since 2026-11-16; complete since ONEPATH-4)
 
 `scf.convergence_profile` is removed (input error with the replacement). `Config::scf_path`
-selects: `BAANDI_REFERENCE_STRICT=on` -> strict reference; input exclusions (locking
-auto; spin and FD run standard with verification since ONEPATH-3, `tests/onepath_spin_metals.rs`,
-`spin_run`/`finite_run` write the standard records through `run::driver_standard_json`; forces and relaxation run standard since ONEPATH-1, stress and variable-cell
-relaxation since ONEPATH-2, with verified cutoff scans, `tests/onepath_stress.rs`) -> strict `not_applicable` and standard-only keys reject; caller
-exclusions (runtime modes, non-run commands) -> strict for plain inputs; otherwise the
-standard path with verification. Every result records `single_path` and `execution`
+(`scf_path_with(reference)` for in-process comparisons with a child that sets the switch)
+selects: `BAANDI_REFERENCE_STRICT=on` -> strict reference; otherwise the standard path with
+verification for every command and mode (`run` classic/observe/agent, `relax`, `bands`, `dos`,
+`checkpoint`, `restart`, `explain`; all resolve `run::options`). There is no strict fallback:
+`scf.locking = "auto"` is an input error naming the switch (ONEPATH-4); spin/FD run standard
+since ONEPATH-3, forces/relaxation since ONEPATH-1, stress/variable-cell since ONEPATH-2.
+Checkpoint v1 carries the verification option and attempts (`docs/checkpoint-format.md`);
+`bands`/`dos` record `scf_path`. Every result records `single_path` and `execution`
 (review F01); MPI runs without a distributed solve report `mpi_replicated` (F02). Tests
-that need strict set `BAANDI_REFERENCE_STRICT=on` (`tests/run.rs` `Case::run`) or use the
-engine API; `tests/single_path.rs` covers the default path.
+that need strict set `BAANDI_REFERENCE_STRICT=on` (`tests/run.rs` `Case::run`), use
+`run::options_with_reference(config, true)` or the engine's `ScfOptions::strict_reference()`;
+`tests/single_path.rs` and `tests/onepath_last_fallbacks.rs` cover the default path.

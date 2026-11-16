@@ -18,3 +18,11 @@ ASE stress is tensile-positive in eV/Angstrom^3, Voigt xx,yy,zz,yz,xz,xy.
 The native method returns Ha/Bohr^3 and warns on the separate Pulay assessment.
 `test_ase_stress_sign_voigt_and_energy_derivative` uses ASE's own numerical
 stress oracle. Do not claim installed-wheel acceptance from skipped tests.
+
+ADR 0043 ONEPATH-4 (2026-11-16): `Options()` defaults to the standard path with
+the fixed-point verification (`standard_threshold_ha` 5e-9, `verify` True,
+`mixing_beta` 0.5); `reference_strict` (default mirrors `BAANDI_REFERENCE_STRICT`)
+selects the strict reference. Forces need a passed verification or the strict
+certificate; `stress()` refuses a threshold looser than
+`StandardProfile::STRESS_THRESHOLD_HA` (5e-11 Ha). The native/CLI bit-equality
+tests set `cutoff_ladder = "off"` on the CLI side (the session has no ladder).

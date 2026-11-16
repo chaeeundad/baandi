@@ -38,7 +38,7 @@ fn problem() -> ScfProblem {
             cutoff_hartree: 2.5,
             bands: Some(2),
             max_iterations: 2,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap()

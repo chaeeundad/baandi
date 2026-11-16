@@ -89,7 +89,7 @@ fn run(
             bands: Some(6),
             threads: 1,
             eigen_tolerance: 1e-10,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap()

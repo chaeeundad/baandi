@@ -15,6 +15,11 @@ impl Default for StandardProfile {
 impl StandardProfile {
     pub const CAP_HA: f64 = 5e-3;
     pub const FLOOR_HA: f64 = 5e-14;
+    /// Threshold, Ha, that stress needs to meet the 1e-7 Ha/Bohr^3 stress class
+    /// (ADR 0043 amendment ONEPATH-2 item 5, provisional until dev08): the CLI
+    /// default for inputs that ask for stress, and the loosest threshold the
+    /// Python session's `stress()` accepts. A rule by observable, not material.
+    pub const STRESS_THRESHOLD_HA: f64 = 5e-11;
     pub fn ratchet(previous: f64, error_ha: f64, electrons: f64) -> f64 {
         previous
             .min(0.1 * error_ha / electrons.max(1.0))

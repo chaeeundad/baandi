@@ -99,7 +99,7 @@ fn converged_local_and_nonlocal() {
                 energy_tolerance: 1e-12,
                 eigen_tolerance: 1e-11,
                 max_iterations: 300,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             };
             let run = |atoms: &[Atom]| {
                 ScfProblem::new(&cell, atoms, &species, opts.clone())
@@ -374,7 +374,7 @@ fn spin_core_and_finite() {
             eigen_tolerance: 1e-11,
             davidson_subspace: if mode == "fd" { 96 } else { 48 },
             max_iterations: 400,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         let points = [KPoint {
             fractional: [0.; 3],
@@ -646,7 +646,7 @@ fn real_files() {
             energy_tolerance: 1e-11,
             eigen_tolerance: 1e-10,
             max_iterations: 200,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         let run = |atoms: &[Atom], opts: &ScfOptions| {
             let mut p = ScfProblem::new(&cell, atoms, &species, opts.clone()).unwrap();

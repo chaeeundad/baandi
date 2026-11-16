@@ -32,7 +32,7 @@ fn run_with(
         bands: Some(bands),
         threads,
         eigen_tolerance: 1e-10,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let result = ScfProblem::new(
         &cell,
@@ -132,7 +132,7 @@ fn multiple_k_points_run_replicated_on_every_rank() {
                 bands: Some(5),
                 threads: 1,
                 eigen_tolerance: 1e-10,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             },
             &[
                 KPoint {
@@ -246,7 +246,7 @@ fn run_m2_profile(
         threads: 1,
         eigen_tolerance: 1e-10,
         standard: standard.then(dft_engine::StandardProfile::default),
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let result = ScfProblem::new(
         &cell,

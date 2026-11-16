@@ -101,7 +101,7 @@ fn frozen_spectra_for_ambiguous_rows() {
                 history: 6,
             },
             standard: standard.then(StandardProfile::default),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         if material {
             options.functional = Functional::Pbe;

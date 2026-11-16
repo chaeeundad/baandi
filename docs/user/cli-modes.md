@@ -27,6 +27,18 @@ path, final outputs, console text and exit codes are retained. The original
 `dft-cli run` spelling continues to work. Execution mode does not select physics,
 change tolerances, or provide a new convergence criterion.
 
+Every mode (classic, observed, agent) and every other command (`bands`, `dos`,
+`checkpoint`, `restart`, `explain`) runs the same SCF path: the single standard
+path with the fixed-point verification after convergence (ADR 0043; since
+ONEPATH-4, 2026-11-16, there is no strict fallback for any mode or command). The
+strict path with its certificate is a reference tool reached only with
+`BAANDI_REFERENCE_STRICT=on`. In the observed and agent modes the verification
+is reported as the `certificate_evaluated` event and in `results.json`
+(`verified`, `verification`). Agent tolerance interventions act on the strict
+reference options and do not move the standard stop rule; a hybrid eigensolver
+request is rejected on the standard path. Spin and Fermi-Dirac inputs remain
+classic-only.
+
 ## Observed
 
 ```

@@ -25,6 +25,7 @@ class Baandi(Calculator):
         source = options or Options()
         self._options = Options()
         for name in (
+            "reference_strict", "standard_threshold_ha", "verify",
             "cutoff_hartree", "bands", "extra_bands", "max_iterations",
             "density_tolerance", "energy_tolerance", "eigen_tolerance", "seed",
             "mixing_beta", "mixing_history",

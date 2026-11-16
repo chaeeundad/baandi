@@ -466,3 +466,13 @@ local potential of `n` as a map does and returns the atomic-start vectors throug
 `step_with_occupations` unchanged; CLI si8/si32 density.bin SHA-256 identical before
 and after). `dft-cli/examples/davidson_bench.rs` passes them to its cold maps; the
 SCF never calls the hook. Protocol: docs/performance/fast-loop-protocol.md (stage 0).
+
+## MPI scaling gap instrumentation (MPI-SCALING-GAP, 2026-11-17)
+
+`m2::Stage::SolvePrepare` / `SolveUnpack` (stage names `solve_prepare`,
+`solve_unpack`) time the replicated solve interface of the M2 path in
+`gamma_real.rs` (operator update, diagonal, ORC packing of the N x B start;
+unpacking of the N x B result); count and clock only. `tests/m2_entry_cost.rs`
+prints the SCF phases (max over ranks) and the time outside them. Test
+`distributed_scf::m2_scaling_gap_switches_keep_classes` covers
+`BAANDI_M2_STICKS=mirror` and `BAANDI_M2_START=gram` (dft-solvers).

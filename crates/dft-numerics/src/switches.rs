@@ -234,6 +234,13 @@ table! {
     // MPI kept start (ticket MPI-KEPT-START, docs/design/mpi-kept-start.md); default off until dev08.
     M2_REUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "MPI-KEPT-START: a standard (Ritz-change) M2 stick-row solve that starts from the previous solve's orbitals X takes X and H X from that solve's local rows (the return rotation of the H images) plus (V_new - V_old) X, formed from the plane slabs the M2 density build kept (one forward transform per occupied pair, no inverse transform, nonlocal product or kinetic pass), when initial equals X to 1e-14 and the Gram defect of X is at most 1e-12; the local rows of X come from the solver (no extraction from the gathered block); falls back to the plain start otherwise; rounding class";
+    // MPI scaling gap (ticket MPI-SCALING-GAP, docs/performance/mpi-scaling-gap.md); default off.
+    M2_STICKS: Kind::Choice { allowed: &["greedy", "mirror"], default: "greedy" }, "greedy",
+        "greedy, mirror",
+        "stick partition of the M2 distributed FFT: greedy (sticks one by one to the least loaded rank) or mirror (a stick and its Gamma mirror stick go to the same rank as one unit, so no ORC representative is split and the two mirror alltoalls of every apply vanish; rounding class: rows are summed in a different order)";
+    M2_START: Kind::Choice { allowed: &["ortho", "gram"], default: "ortho" }, "ortho",
+        "ortho, gram",
+        "start of a distributed Davidson solve (workspace path): ortho (panel Gram-Schmidt of the start block) or gram (one Gram matrix and one reduction; a start block with Gram defect at most 1e-12, the restart contraction rule, is taken as the basis without Gram-Schmidt, otherwise ortho; rounding class)";
     MPI_TREE: Kind::Choice { allowed: &["binomial", "rd"], default: "rd" }, "rd",
         "binomial, rd",
         "message pattern of the deterministic MPI tree sum: binomial (reduce to rank 0 plus broadcast, 2 log2 P rounds) or rd (recursive doubling with MPI_Sendrecv, log2 P rounds; bit-identical for power-of-two rank counts, other counts stay binomial); read by the CLI at MPI start";
@@ -610,6 +617,24 @@ mod tests {
         );
         assert_eq!(eval(Id::M2_B5, None), (Value::Choice("off"), Default));
         assert_eq!(eval(Id::M2_B5, Some("on")), (Value::Choice("on"), Env));
+        // MPI-SCALING-GAP switches (default off).
+        assert_eq!(
+            eval(Id::M2_STICKS, None),
+            (Value::Choice("greedy"), Default)
+        );
+        assert_eq!(
+            eval(Id::M2_STICKS, Some("mirror")),
+            (Value::Choice("mirror"), Env)
+        );
+        assert_eq!(
+            eval(Id::M2_STICKS, Some("on")),
+            (Value::Choice("greedy"), InvalidToDefault)
+        );
+        assert_eq!(eval(Id::M2_START, None), (Value::Choice("ortho"), Default));
+        assert_eq!(
+            eval(Id::M2_START, Some("gram")),
+            (Value::Choice("gram"), Env)
+        );
         assert_eq!(
             eval(Id::M2_EIGEN, None),
             (Value::Choice("replicated"), Default)

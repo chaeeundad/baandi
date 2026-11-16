@@ -214,5 +214,8 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
     // MPI-KEPT-START stays opt-in until dev08.
     assert_eq!(value(Id::M2_REUSE), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 75);
+    // MPI-SCALING-GAP switches stay opt-in until dev08.
+    assert_eq!(value(Id::M2_STICKS), Value::Choice("greedy"));
+    assert_eq!(value(Id::M2_START), Value::Choice("ortho"));
+    assert_eq!(TABLE.len(), 77);
 }

@@ -253,25 +253,34 @@ pub(crate) enum Stage {
     ScreenIntegrals,
     ScreenClusters,
     AtomicStart,
+    /// Replicated solve interface before the distributed solver (operator
+    /// update, kinetic diagonal, ORC packing of the N x B start; MPI-SCALING-GAP).
+    SolvePrepare,
+    /// Replicated solve interface after it (ORC unpacking of the N x B result).
+    SolveUnpack,
 }
-const STAGE_NAMES: [&str; 6] = [
+const STAGE_NAMES: [&str; 8] = [
     "density",
     "xc",
     "nonlocal_energy",
     "screen_integrals",
     "screen_clusters",
     "atomic_start",
+    "solve_prepare",
+    "solve_unpack",
 ];
-const STAGE_CALL_NAMES: [&str; 6] = [
+const STAGE_CALL_NAMES: [&str; 8] = [
     "calls.density",
     "calls.xc",
     "calls.nonlocal_energy",
     "calls.screen_integrals",
     "calls.screen_clusters",
     "calls.atomic_start",
+    "calls.solve_prepare",
+    "calls.solve_unpack",
 ];
-static STAGE_NANOS: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
-static STAGE_CALLS: [AtomicUsize; 6] = [const { AtomicUsize::new(0) }; 6];
+static STAGE_NANOS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+static STAGE_CALLS: [AtomicUsize; 8] = [const { AtomicUsize::new(0) }; 8];
 /// F21: `start` from `dft_numerics::stage_clock::start` (or `keep`); `None`
 /// with `BAANDI_STAGE_TIMERS=off` counts the entry without reading a clock.
 pub(crate) fn add(stage: Stage, start: Option<Instant>) {

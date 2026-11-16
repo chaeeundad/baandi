@@ -193,3 +193,18 @@ under replicated conditions. `DistributedPairFft::apply_local_batch_kept` takes
 kept real-space slabs for the leading vectors (bit-identical to
 `apply_local_batch` for the same slabs). Tests `tests/distributed_kept_start.rs`,
 lib `kept_planes_batch_equals_plain_batch_bitwise`.
+
+## MPI scaling gap (MPI-SCALING-GAP, 2026-11-17)
+
+`BAANDI_M2_STICKS=greedy|mirror` (default greedy; per-thread override
+`distributed_fft::set_mirror_sticks_override`): `partition` assigns a stick and
+its Gamma mirror stick to one rank as a unit, so no pair representative of the
+real Gamma operator is split and its two mirror alltoalls per apply vanish
+(rounding class). `BAANDI_M2_START=ortho|gram` (default ortho; override
+`distributed_davidson::set_start_gram_override`, counters `start_gram_stats`):
+the workspace solver takes an orthonormal start (Gram defect <= 1e-12 from one
+reduction, the restart contraction rule) as its basis without the panel
+Gram-Schmidt (rounding class). Solver stages `solve_start` and `solve_return`
+time the entry and the N x B gather. Tests: lib
+`mirror_partition_keeps_gamma_pairs_on_one_rank`, `tests/distributed_start_gram.rs`.
+Analysis docs/performance/mpi-scaling-gap.md.

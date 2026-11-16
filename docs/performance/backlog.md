@@ -231,6 +231,12 @@ Evidence: on si32 strict (perturbed seed 601) 66.4 percent of Davidson apply cal
 
 - C3a (2026-11-16, from C2-REUSE-PSI / C3-NL-ENERGY-FROM-PROJECTIONS): lean solver keeps P^T V beside H V (copy after each apply via `copy_last_projections`, rotate at contraction and return) so the audit's nonlocal energy reads (P^T V) C and the C2 kept start carries P^T X; removes one n x n_proj x bands GEMM per map (si64 E 1.5 to 2.7 %). Own switch, counts first. IMPLEMENTED 2026-11-16 as `BAANDI_LEAN_PROJ_CACHE` (default off; ledger C3a-LEAN-PROJ-CACHE); dev08 A/B pending.
 
+## MPI scaling gap follow-ups (2026-11-17, MPI-SCALING-GAP; docs/performance/mpi-scaling-gap.md)
+- Distributed full-grid FFT for the replicated Hartree potential, audit Hartree energy and Coulomb metric of the M2 path (`DistributedPairFft` over the full box: fill planes from the replicated density, `to_reciprocal_plane`, `finish_to_reciprocal`, local 4 pi / G^2, one tree sum for the energy, inverse and `gather_planes`); replicated potential/audit/mixing are about 10 percent of the Mac np=4 wall and grow with np on dev08 (MPI-SCALING-BEYOND-8). Rounding class.
+- Lazy orbitals on the M2 path (no N x B allgatherv and complex unpack per solve; audit kinetic energy from local rows): engine-wide type change, docs/design/mpi-kept-start.md section 7. The gather's node volume grows as P x N x B.
+- Distributed back-transform of the reduced eigenproblem: tridiagonalize replicated (about 4/3 m^3), each rank computes bands/P eigenvectors of the tridiagonal problem and back-transforms them, one allgather of the m x bands coefficients; needs dsytrd/dstemr/dormtr on MKL and a pure-build route.
+- Stick balance rule on stick count when `M2_STICKS=mirror` (si32 np=8 imbalance 1.058) if dev08 shows it.
+
 ## Fast-loop follow-ups (2026-11-16, threads/one-core owner; profile-2026-11-16-threads.md)
 - VERIFY-REUSE: feed regressed si16 on dev08 stage 1; variants screened (feed2 and replace rejected); `half` is the stage-2 candidate (requests/verify-reuse.md).
 - Passed-verification cost (8 to 16 %): tau_v is fixed by ADR 0043; a user decision, not a switch.

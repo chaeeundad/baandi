@@ -11,7 +11,10 @@
 //!
 //! Partition rule (deterministic in shape, indices, ranks): sticks sorted by
 //! length descending (ties: lower (z, other) slot) are assigned one by one to the
-//! rank with the smallest accumulated length (ties: lower rank). Each rank owns
+//! rank with the smallest accumulated length (ties: lower rank); with
+//! `BAANDI_M2_STICKS=mirror` (MPI-SCALING-GAP) a stick and its Gamma mirror stick
+//! are assigned together as one unit (no pair representative is split, so the
+//! mirror exchanges of the real Gamma operator vanish). Each rank owns
 //! the sticks assigned to it; its local coefficients are the entries of the global
 //! coefficient vector that fall on those sticks, in ascending global position
 //! (`local_positions`). Real-space planes are contiguous ranges of the first axis
@@ -59,6 +62,21 @@ struct Partition {
     counts: Vec<usize>,
 }
 
+thread_local! {
+    static MIRROR_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+/// Force the stick rule of the calling thread (tests with simulated ranks; every
+/// rank thread must set the same value); `None` restores `BAANDI_M2_STICKS`.
+pub fn set_mirror_sticks_override(mirror: Option<bool>) {
+    MIRROR_OVERRIDE.with(|o| o.set(mirror));
+}
+/// True when the mirror-paired stick partition is in force on this thread.
+pub fn mirror_sticks() -> bool {
+    MIRROR_OVERRIDE.with(|o| o.get()).unwrap_or_else(|| {
+        dft_numerics::switches::choice(dft_numerics::switches::Id::M2_STICKS) == "mirror"
+    })
+}
+
 /// Stick partition shared by `new` and `position_owners` (inputs already validated).
 fn partition(shape: [usize; 3], indices: &[[usize; 3]], ranks: usize) -> Partition {
     let supports: [_; 2] = std::array::from_fn(|a| {
@@ -89,11 +107,32 @@ fn partition(shape: [usize; 3], indices: &[[usize; 3]], ranks: usize) -> Partiti
     let mut order: Vec<usize> = (0..sticks.len()).collect();
     order.sort_by(|&a, &b| len[b].cmp(&len[a]).then(a.cmp(&b)));
     let mut load = vec![0usize; ranks];
-    let mut owner = vec![0usize; sticks.len()];
+    let mut owner = vec![usize::MAX; sticks.len()];
+    // `BAANDI_M2_STICKS=mirror` (MPI-SCALING-GAP): a stick (z, o) and its mirror
+    // ((-z) mod n2, (-o) mod n1) are assigned to one rank as a unit, so the two
+    // positions +G and -G of every Gamma pair representative live on one rank.
+    // A stick without a mirror in the set (non-symmetric index sets) or its own
+    // mirror is assigned alone, exactly as in the greedy rule.
+    let mirror = mirror_sticks();
+    let n_other = n[1];
+    let n_z = n[2];
     for &s in &order {
+        if owner[s] != usize::MAX {
+            continue;
+        }
         let r = (0..ranks).min_by_key(|&r| (load[r], r)).unwrap();
         owner[s] = r;
         load[r] += len[s];
+        if mirror {
+            let (z, o) = sticks[s];
+            let key = ((n_z - z) % n_z, (n_other - o) % n_other);
+            if let Ok(m) = sticks.binary_search(&key)
+                && owner[m] == usize::MAX
+            {
+                owner[m] = r;
+                load[r] += len[m];
+            }
+        }
     }
     let mut local_index = vec![0usize; sticks.len()];
     let mut counts = vec![0usize; ranks];
@@ -751,6 +790,55 @@ mod tests {
                 let max = *lens.iter().max().unwrap();
                 let min = *lens.iter().min().unwrap();
                 assert!(max - min <= shape[0].max(shape[1]), "{lens:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn mirror_partition_keeps_gamma_pairs_on_one_rank() {
+        // BAANDI_M2_STICKS=mirror: exact partition for every case; on the
+        // Gamma-symmetric spheres +G and -G always share an owner, while the greedy
+        // rule splits some pairs for two or more ranks.
+        for (case, (shape, idx)) in cases().into_iter().enumerate() {
+            let mirror_of = |p: &[usize; 3]| {
+                [
+                    (shape[0] - p[0]) % shape[0],
+                    (shape[1] - p[1]) % shape[1],
+                    (shape[2] - p[2]) % shape[2],
+                ]
+            };
+            let symmetric = idx.iter().all(|p| idx.contains(&mirror_of(p)));
+            for ranks in 1..=8 {
+                for mirror in [false, true] {
+                    set_mirror_sticks_override(Some(mirror));
+                    let owners = position_owners(shape, &idx, ranks).unwrap();
+                    let mut seen = vec![0; idx.len()];
+                    for r in 0..ranks {
+                        let p = DistributedPairFft::new(shape, &idx, r, ranks).unwrap();
+                        for &g in p.local_positions() {
+                            seen[g] += 1;
+                            assert_eq!(owners[g], r);
+                        }
+                    }
+                    set_mirror_sticks_override(None);
+                    assert!(seen.iter().all(|&s| s == 1), "case {case} ranks {ranks}");
+                    if !symmetric {
+                        continue;
+                    }
+                    let split = idx
+                        .iter()
+                        .enumerate()
+                        .filter(|(g, p)| {
+                            let m = idx.iter().position(|q| *q == mirror_of(p)).unwrap();
+                            owners[*g] != owners[m]
+                        })
+                        .count();
+                    if mirror {
+                        assert_eq!(split, 0, "case {case} ranks {ranks}");
+                    } else if ranks >= 2 {
+                        assert!(split > 0, "case {case} ranks {ranks}");
+                    }
+                }
             }
         }
     }

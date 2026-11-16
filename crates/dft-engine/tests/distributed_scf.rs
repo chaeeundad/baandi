@@ -398,8 +398,13 @@ fn m2_tuned_solver_matches_threads_only() {
 /// agree bit for bit, a fixed rank count is bit-reproducible, and the in-panel
 /// reductions fall (fused: fewer tree sums than classic). Cubic and skewed
 /// cells, 2 and 3 ranks, strict and standard.
+/// Serializes the tests that read process-wide reduction counters against the
+/// longer M2 SCF tests of this binary (tests run on parallel threads).
+static COUNTER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn m2_panel_gs_variants_keep_classes() {
+    let _serial = COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     use dft_solvers::distributed_davidson::{
         DistributedTuning, PanelGs, reduction_stats, set_tuning_override,
     };
@@ -452,6 +457,57 @@ fn m2_panel_gs_variants_keep_classes() {
                     calls[2] < calls[0],
                     "fused must reduce the tree sums: {calls:?}"
                 );
+            }
+        }
+    }
+}
+
+/// MPI-SCALING-GAP (docs/performance/mpi-scaling-gap.md): `M2_STICKS=mirror`
+/// (mirror-paired stick partition, no mirror exchanges) and `M2_START=gram`
+/// (orthonormal starts taken after one Gram reduction), alone and together, stay
+/// within the accuracy classes of the threads-only run (strict 1e-10 Ha,
+/// standard 5e-9 Ha); ranks agree bit for bit and a fixed rank count is
+/// bit-reproducible. Cubic and skewed cells, 2 and 3 ranks, strict and standard.
+#[test]
+fn m2_scaling_gap_switches_keep_classes() {
+    let _serial = COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    use dft_solvers::distributed_davidson::set_start_gram_override;
+    use dft_solvers::distributed_fft::set_mirror_sticks_override;
+    for (standard, limit) in [(false, 1e-10), (true, 5e-9)] {
+        for kind in 0..2 {
+            let serial = run_m2_profile(kind, None, standard);
+            for ranks in [2usize, 3] {
+                for (mirror, gram) in [(true, false), (false, true), (true, true)] {
+                    let go = || {
+                        simulate(ranks, |comm: &SimRank| {
+                            set_mirror_sticks_override(Some(mirror));
+                            set_start_gram_override(Some(gram));
+                            let r = run_m2_profile(kind, Some(Arc::new(comm.clone())), standard);
+                            set_mirror_sticks_override(None);
+                            set_start_gram_override(None);
+                            r
+                        })
+                    };
+                    let results = go();
+                    let again = go();
+                    for (r, res) in results.iter().enumerate() {
+                        let de = (res.total_hartree() - serial.total_hartree()).abs();
+                        println!(
+                            "sticks mirror={mirror} start gram={gram} standard={standard} kind {kind} P={ranks} rank {r}: dE {de:e} Ha"
+                        );
+                        assert!(de < limit, "kind {kind} P={ranks}: dE {de:e}");
+                        assert_eq!(
+                            res.total_hartree().to_bits(),
+                            results[0].total_hartree().to_bits(),
+                            "ranks disagree"
+                        );
+                        assert_eq!(
+                            res.total_hartree().to_bits(),
+                            again[r].total_hartree().to_bits(),
+                            "not bit-reproducible at fixed rank count"
+                        );
+                    }
+                }
             }
         }
     }

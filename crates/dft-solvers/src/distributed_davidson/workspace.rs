@@ -40,6 +40,19 @@ pub struct WorkspaceStats {
 // solves, warm solves, growths, growth bytes
 static WS_COUNTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 
+// `BAANDI_M2_START=gram` (summed over ranks): starts taken as the basis after
+// the Gram check, starts that failed it (panel Gram-Schmidt instead).
+static START_COUNTS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+
+/// (taken, declined) Gram-checked starts of `BAANDI_M2_START=gram`, summed over
+/// the ranks of this process.
+pub fn start_gram_stats() -> (u64, u64) {
+    (
+        START_COUNTS[0].load(Ordering::Relaxed),
+        START_COUNTS[1].load(Ordering::Relaxed),
+    )
+}
+
 /// The workspace counters accumulated so far by this process.
 pub fn workspace_stats() -> WorkspaceStats {
     let load = |i: usize| WS_COUNTS[i].load(Ordering::Relaxed);
@@ -711,6 +724,7 @@ fn solve_on<C: Collective>(
     let gemm = &mut gemm.as_mut().expect("GEMM workspace").1;
 
     // Initial basis.
+    let t_start = dft_numerics::stage_clock::start();
     let cold;
     let start = match initial {
         Some(x) => x,
@@ -794,7 +808,42 @@ fn solve_on<C: Collective>(
             k.declined = !kept_taken;
         }
     }
-    if !kept_taken {
+    // `BAANDI_M2_START=gram`: an orthonormal start (Gram defect <= 1e-12, the
+    // restart contraction rule; replicated decision from one reduction) is the
+    // basis as it stands; otherwise the panel Gram-Schmidt below.
+    let mut gram_taken = false;
+    if !kept_taken && start_gram() && start_local.cols() > 0 && start_local.cols() <= bands {
+        let w = start_local.cols();
+        fit(defect, w, w)?;
+        fit(partial, w, w)?;
+        site(Site::Setup);
+        gram_slices(
+            comm,
+            gemm,
+            start_local.as_slice(),
+            w,
+            start_local.as_slice(),
+            w,
+            nl,
+            partial,
+            defect,
+        )?;
+        let mut worst = 0.0_f64;
+        for j in 0..w {
+            for i in 0..w {
+                worst = worst.max((defect[(i, j)] - if i == j { 1.0 } else { 0.0 }).abs());
+            }
+        }
+        if worst <= 1e-12 {
+            fit(basis, nl, w)?;
+            basis.as_mut_slice().copy_from_slice(start_local.as_slice());
+            gram_taken = true;
+            START_COUNTS[0].fetch_add(1, Ordering::Relaxed);
+        } else {
+            START_COUNTS[1].fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    if !kept_taken && !gram_taken {
         ortho_into(comm, gemm, None, &start_local, &tuning, panel, ortho, basis)?;
     }
     while basis.cols() < bands {
@@ -817,6 +866,7 @@ fn solve_on<C: Collective>(
         }
         append_in_place(basis, extra)?;
     }
+    stage_add(8, t_start);
     let mut applications = 0usize;
     if !kept_taken {
         fit(products, nl, basis.cols())?;
@@ -984,8 +1034,10 @@ fn solve_on<C: Collective>(
                         residuals: norms.clone(),
                     });
                 }
+                let t0 = dft_numerics::stage_clock::start();
                 keep_return(kept.as_mut(), vectors, rotated, ritz, nl, bands)?;
                 let full = gather_full(comm, layout, vectors)?;
+                stage_add(9, t0);
                 return Ok(RealEigenSolution {
                     eigenvalues: values[..bands].to_vec(),
                     eigenvectors: full,
@@ -1141,6 +1193,7 @@ fn solve_on<C: Collective>(
                 || (iteration == solver.max_iterations
                     && converged[..policy.strict_bands].iter().all(|&b| b));
             if finished {
+                let t0 = dft_numerics::stage_clock::start();
                 keep_return(
                     kept.as_mut(),
                     vectors,
@@ -1150,6 +1203,7 @@ fn solve_on<C: Collective>(
                     bands,
                 )?;
                 let full = gather_full(comm, layout, vectors)?;
+                stage_add(9, t0);
                 return Ok(RealEigenSolution {
                     eigenvalues: values[..bands].to_vec(),
                     eigenvectors: full,

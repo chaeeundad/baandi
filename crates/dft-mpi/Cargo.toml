@@ -25,3 +25,6 @@ name = "mpi_smoke"
 
 [[example]]
 name = "mpi_tree_bench"
+
+[[example]]
+name = "mpi_transpose_bench"

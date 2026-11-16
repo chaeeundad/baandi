@@ -336,6 +336,36 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
             clock.screen.as_secs_f64() / p as f64,
             clock.atomic_start.as_secs_f64() / p as f64
         );
+        // SCF phase seconds summed over the recorded iterations (MPI-SCALING-GAP):
+        // maximum over the ranks of each phase; the remainder of the wall is work
+        // outside the recorded maps (setup, verification maps, ladder coarse stage).
+        let phase = |f: fn(&dft_engine::PhaseTimings) -> std::time::Duration| -> f64 {
+            results
+                .iter()
+                .map(|r| {
+                    r.history
+                        .iter()
+                        .map(|h| f(&h.timings).as_secs_f64())
+                        .sum::<f64>()
+                })
+                .fold(0.0, f64::max)
+        };
+        let phases = [
+            ("potential", phase(|t| t.potential)),
+            ("diagonalization", phase(|t| t.diagonalization)),
+            ("density", phase(|t| t.density)),
+            ("energy", phase(|t| t.energy)),
+            ("mixing", phase(|t| t.mixing)),
+        ];
+        println!(
+            "  phases (recorded iterations, max over ranks): {}; outside {:.3} s",
+            phases
+                .iter()
+                .map(|(n, s)| format!("{n} {s:.3}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            wall - phases.iter().map(|(_, s)| s).sum::<f64>()
+        );
         let density: u64 = r.density.iter().fold(0xcbf2_9ce4_8422_2325, |h: u64, x| {
             (h ^ x.to_bits()).wrapping_mul(0x0100_0000_01b3)
         });
@@ -399,6 +429,11 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
             )
             .collect();
         j.push_str(&format!(",\"stages\":{{{}}}", stages.join(",")));
+        let ph: Vec<String> = phases
+            .iter()
+            .map(|(n, s)| format!("\"{n}\":{s:.6}"))
+            .collect();
+        j.push_str(&format!(",\"phases\":{{{}}}", ph.join(",")));
         let counters: Vec<String> = parallel::m2_stats()
             .0
             .iter()

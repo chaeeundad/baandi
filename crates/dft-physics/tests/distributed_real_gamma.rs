@@ -140,7 +140,20 @@ fn distributed(
     x: &RealMatrix,
     ranks: usize,
 ) -> (RealMatrix, Counts, Counts) {
+    distributed_sticks(rows, atoms, x, ranks, None)
+}
+
+/// `distributed` with the stick rule forced on every rank (`Some(true)` =
+/// `BAANDI_M2_STICKS=mirror`); `None` keeps the switch.
+fn distributed_sticks(
+    rows: [[f64; 3]; 3],
+    atoms: usize,
+    x: &RealMatrix,
+    ranks: usize,
+    mirror: Option<bool>,
+) -> (RealMatrix, Counts, Counts) {
     let parts = simulate(ranks, |comm| {
+        dft_solvers::distributed_fft::set_mirror_sticks_override(mirror);
         // Hamiltonian is not Sync: every simulated rank builds its own snapshot.
         let (basis, h) = fixture(rows, atoms, 1.2);
         let pool = WorkerPool::new(1).unwrap();
@@ -232,6 +245,50 @@ fn distributed_h_matches_serial_on_1_to_8_ranks() {
     }
     println!("max relative error by rank count 1..8: {worst_by_ranks:?}");
     println!("one rank bit-identical to serial: {bit_one_rank}");
+}
+
+#[test]
+fn mirror_sticks_match_serial_without_mirror_exchanges() {
+    // BAANDI_M2_STICKS=mirror (MPI-SCALING-GAP): with +G and -G of every pair
+    // representative on one rank the two mirror alltoalls vanish (2 alltoalls and
+    // one tree_sum per apply at every rank count); H X agrees with the serial
+    // operator to rounding and is bit-reproducible at a fixed rank count.
+    let cases = [
+        ([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]], 2),
+        ([[6.4, 0.4, 0.2], [1., 7.3, 0.3], [0.5, 0.7, 8.4]], 4),
+        ([[4.2, 0., 0.], [0., 5.2, 0.], [0., 0., 14.2]], 3),
+    ];
+    for (case, (rows, atoms)) in cases.into_iter().enumerate() {
+        let (basis, h) = fixture(rows, atoms, 1.2);
+        let n = basis.vectors().len();
+        let mut serial =
+            RealHamiltonian::from_complex(&h, &basis, 16, WorkerPool::new(1).unwrap()).unwrap();
+        for m in [1, 3, 16] {
+            let x = block(n, m, 11 + m);
+            let mut want = RealMatrix::zeros(n, m).unwrap();
+            serial.apply_block(&x, &mut want).unwrap();
+            let norm = want.as_slice().iter().map(|v| v * v).sum::<f64>().sqrt();
+            for ranks in 1..=6 {
+                let (got, measured, predicted) =
+                    distributed_sticks(rows, atoms, &x, ranks, Some(true));
+                let err = got
+                    .as_slice()
+                    .iter()
+                    .zip(want.as_slice())
+                    .map(|(a, b)| (a - b) * (a - b))
+                    .sum::<f64>()
+                    .sqrt()
+                    / norm;
+                assert!(err < 1e-12, "case {case} m {m} ranks {ranks}: {err:e}");
+                for (meas, pred) in measured.iter().zip(&predicted) {
+                    assert_eq!(*pred, (2, 1), "case {case} m {m} ranks {ranks}");
+                    assert_eq!(*meas, (2, 1), "case {case} m {m} ranks {ranks}");
+                }
+                let (again, _, _) = distributed_sticks(rows, atoms, &x, ranks, Some(true));
+                assert_eq!(again.as_slice(), got.as_slice(), "bit reproducibility");
+            }
+        }
+    }
 }
 
 #[test]

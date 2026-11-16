@@ -591,6 +591,7 @@ pub(crate) fn solve_real_gamma(
     // MPI-KEPT-START: the previous solve's local rows are the kept X (and the
     // storage of this solve's local rows).
     let previous_local = state.m2_local.take();
+    let t_prepare = dft_numerics::stage_clock::start();
     // M2c: the distributed Hamiltonian follows the SCF potential like the serial one.
     match comm.as_ref().filter(|_| crate::parallel::m2_enabled()) {
         Some(c) => {
@@ -648,6 +649,9 @@ pub(crate) fn solve_real_gamma(
     } else {
         None
     };
+    if state.dist.is_some() {
+        crate::m2::add(crate::m2::Stage::SolvePrepare, t_prepare);
+    }
     let solver = RealDavidson {
         bands,
         tolerance,
@@ -810,6 +814,7 @@ pub(crate) fn solve_real_gamma(
             }
         };
     }
+    let t_unpack = dft_numerics::stage_clock::start();
     let mut eigenvectors = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
     {
         let h = op.h.borrow();
@@ -824,6 +829,9 @@ pub(crate) fn solve_real_gamma(
                 )
             })
             .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    }
+    if state.dist.is_some() {
+        crate::m2::add(crate::m2::Stage::SolveUnpack, t_unpack);
     }
     diagnostics.gamma_real_used = true;
     diagnostics.fallback_reason = None;

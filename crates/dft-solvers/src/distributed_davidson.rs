@@ -43,7 +43,7 @@ pub trait DistributedRealOperator {
 mod workspace;
 pub use workspace::{
     DistributedDavidsonWorkspace, WorkspaceStats, release_workspace, set_iteration_probe,
-    workspace_stats,
+    start_gram_stats, workspace_stats,
 };
 
 fn comm_error(e: dft_mpi::MpiError) -> SolverError {
@@ -53,7 +53,11 @@ fn comm_error(e: dft_mpi::MpiError) -> SolverError {
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-pub const STAGES: [&str; 8] = [
+/// `solve_start`: workspace path, from entry to the first iteration (row
+/// extraction of the start, kept-start check, initial orthonormalization; the
+/// initial apply is in `apply_total`). `solve_return`: the kept return and the
+/// N x B gather of the eigenvectors at a converged return (MPI-SCALING-GAP).
+pub const STAGES: [&str; 10] = [
     "reduced_gram",
     "reduced_eigen",
     "rotate",
@@ -62,15 +66,17 @@ pub const STAGES: [&str; 8] = [
     "apply_total",
     "apply_operator",
     "other_solve",
+    "solve_start",
+    "solve_return",
 ];
-static STAGE_NANOS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
-static STAGE_CALLS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+static STAGE_NANOS: [AtomicU64; 10] = [const { AtomicU64::new(0) }; 10];
+static STAGE_CALLS: [AtomicU64; 10] = [const { AtomicU64::new(0) }; 10];
 
 /// Wall seconds of this process in each stage of the distributed solver (cheap
 /// per-stage accumulation, no I/O in the loop; read once for the run report).
 /// All 0 with `BAANDI_STAGE_TIMERS=off` (count-only; `stage_calls` still counts).
 pub fn stage_seconds() -> Vec<(&'static str, f64)> {
-    (0..8)
+    (0..STAGES.len())
         .map(|i| {
             (
                 STAGES[i],
@@ -81,7 +87,7 @@ pub fn stage_seconds() -> Vec<(&'static str, f64)> {
 }
 /// Entries into each stage (both time modes), in `STAGES` order.
 pub fn stage_calls() -> Vec<(&'static str, u64)> {
-    (0..8)
+    (0..STAGES.len())
         .map(|i| (STAGES[i], STAGE_CALLS[i].load(Ordering::Relaxed)))
         .collect()
 }
@@ -641,6 +647,23 @@ thread_local! {
 /// `None` restores the environment.
 pub fn set_tuning_override(tuning: Option<DistributedTuning>) {
     TUNING_OVERRIDE.with(|t| t.set(tuning));
+}
+
+thread_local! {
+    static START_GRAM_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+/// Force `BAANDI_M2_START` for the calling thread (tests with simulated ranks;
+/// every rank thread sets the same value); `None` restores the switch.
+pub fn set_start_gram_override(gram: Option<bool>) {
+    START_GRAM_OVERRIDE.with(|o| o.set(gram));
+}
+/// `BAANDI_M2_START=gram` (MPI-SCALING-GAP): the workspace solver takes an
+/// orthonormal start block (Gram defect at most 1e-12, the restart contraction
+/// rule) as its basis after one Gram reduction instead of the panel Gram-Schmidt.
+pub fn start_gram() -> bool {
+    START_GRAM_OVERRIDE.with(|o| o.get()).unwrap_or_else(|| {
+        dft_numerics::switches::choice(dft_numerics::switches::Id::M2_START) == "gram"
+    })
 }
 
 /// Serial-order orthonormalization (`BAANDI_M2_ORTHO=serial`), the distributed

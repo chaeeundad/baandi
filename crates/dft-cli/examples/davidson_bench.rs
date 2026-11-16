@@ -154,9 +154,13 @@ struct Snap {
     coll_bytes: Vec<(&'static str, u64)>,
     m2_stage_calls: Vec<(&'static str, u64)>,
     m2_stage_seconds: Vec<(&'static str, f64)>,
+    /// Engine and operator M2 stages (`parallel::m2_stats`: density, XC, solve
+    /// interface, FFT transposes, nonlocal, ...).
+    m2_engine_seconds: Vec<(String, f64)>,
     reductions: (u64, u64),
     reduced: dft_solvers::distributed_davidson::ReducedSolveStats,
     rotation_flops: u64,
+    start_gram: (u64, u64),
 }
 
 fn snap() -> Snap {
@@ -179,12 +183,14 @@ fn snap() -> Snap {
         coll_bytes: parallel::collective_bytes(),
         m2_stage_calls: parallel::stage_calls(),
         m2_stage_seconds: parallel::stage_seconds(),
+        m2_engine_seconds: parallel::m2_stats().1,
         reductions: (
             red.1.iter().map(|s| s.calls).sum(),
             red.1.iter().map(|s| s.payload).sum(),
         ),
         reduced: parallel::reduced_solve_stats(),
         rotation_flops: dft_solvers::distributed_davidson::rotation_stats().flops,
+        start_gram: dft_solvers::distributed_davidson::start_gram_stats(),
     }
 }
 
@@ -271,6 +277,9 @@ fn delta(a: &Snap, b: &Snap, p: u64) -> (BTreeMap<String, Value>, BTreeMap<Strin
     for ((n, s1), (_, s0)) in b.m2_stage_seconds.iter().zip(&a.m2_stage_seconds) {
         s.insert(format!("dist.{n}"), (s1 - s0) / p as f64);
     }
+    for ((n, s1), (_, s0)) in b.m2_engine_seconds.iter().zip(&a.m2_engine_seconds) {
+        s.insert(format!("m2.{n}"), (s1 - s0) / p as f64);
+    }
     put("dist.reductions.calls", b.reductions.0 - a.reductions.0);
     put("dist.reductions.doubles", b.reductions.1 - a.reductions.1);
     put("dist.reduced_solves", b.reduced.solves - a.reduced.solves);
@@ -279,6 +288,8 @@ fn delta(a: &Snap, b: &Snap, p: u64) -> (BTreeMap<String, Value>, BTreeMap<Strin
         (b.reduced.sum_cubed - a.reduced.sum_cubed).max(0.0) as u64,
     );
     put("dist.rotation_flop", b.rotation_flops - a.rotation_flops);
+    put("dist.start_gram_taken", b.start_gram.0 - a.start_gram.0);
+    put("dist.start_gram_declined", b.start_gram.1 - a.start_gram.1);
     let (t0, t1) = (&a.stages, &b.stages);
     for (k, v) in [
         ("stage.reduced", t1.reduced - t0.reduced),

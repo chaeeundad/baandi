@@ -158,6 +158,37 @@ fn record_solve(m: usize, fresh: usize) {
     }
 }
 
+// Ritz rotations V C and (H V) C: rotation calls (pairs), output columns,
+// flops (2 n m c per product, both products counted). Process-wide.
+static ROTATION_COUNTS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+
+/// Ritz rotation work of the distributed solver (review F05 accounting).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RotationStats {
+    /// Rotation pairs (V C and (H V) C together).
+    pub rotations: u64,
+    /// Output columns of those pairs (per product).
+    pub columns: u64,
+    /// GEMM flops of both products, 2 n_local m c each.
+    pub flops: u64,
+}
+
+/// The rotation work accumulated so far by this process.
+pub fn rotation_stats() -> RotationStats {
+    let load = |i: usize| ROTATION_COUNTS[i].load(Ordering::Relaxed);
+    RotationStats {
+        rotations: load(0),
+        columns: load(1),
+        flops: load(2),
+    }
+}
+
+fn rotation_add(nl: usize, m: usize, cols: usize) {
+    ROTATION_COUNTS[0].fetch_add(1, Ordering::Relaxed);
+    ROTATION_COUNTS[1].fetch_add(cols as u64, Ordering::Relaxed);
+    ROTATION_COUNTS[2].fetch_add(4 * (nl * m * cols) as u64, Ordering::Relaxed);
+}
+
 /// Row partition: `index[r]` lists the global row of every local row of rank `r`
 /// (contiguous blocks for M1, the stick partition for M2c). Algebra helpers only
 /// use the local row count; the partition matters at the replicated interface.
@@ -306,6 +337,13 @@ pub struct DistributedTuning {
     /// `BAANDI_M2_WORKSPACE=on`: run on the persistent per-rank workspace
     /// (`workspace.rs`; storage only, bit-identical).
     pub workspace: bool,
+    /// `BAANDI_M2_SELECTED_ROOTS=on`: on Ritz-change (standard) solves, decide
+    /// the unconverged roots from the Ritz-value change before any rotation and
+    /// form Ritz vectors, H images and residuals for those roots only; all bands
+    /// are rotated only at return and at restarts (review F05, the serial lean
+    /// solver's rule). Runs on the workspace path. Strict (residual) solves are
+    /// unchanged. Rounding class (column subsets of the same GEMM).
+    pub selected_roots: bool,
 }
 impl DistributedTuning {
     /// The switches of this process; the serial-order panel and DGKS rules are the
@@ -329,6 +367,7 @@ impl DistributedTuning {
             eigen_root: choice(Id::M2_EIGEN) == "root",
             bordered: on(Id::M2_B5),
             workspace: on(Id::M2_WORKSPACE),
+            selected_roots: on(Id::M2_SELECTED_ROOTS),
         }
     }
     /// The tuning of the calling thread: the test override when set
@@ -695,7 +734,7 @@ impl crate::RealDavidson {
         let offset = layout.index[comm.rank()].first().copied().unwrap_or(0);
         let diag_local = &diagonal[offset..offset + nl];
         let tuning = DistributedTuning::current();
-        if tuning.workspace {
+        if tuning.workspace || tuning.selected_roots {
             let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), SolverError> {
                 let r = apply_distributed(comm, &layout, op, x)?;
                 y.as_mut_slice().copy_from_slice(r.as_slice());
@@ -823,7 +862,7 @@ impl crate::RealDavidson {
             index,
         };
         let nl = layout.nl();
-        if tuning.workspace {
+        if tuning.workspace || tuning.selected_roots {
             let supplied = op.worker_pool();
             let threads = op.inner_threads();
             let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), SolverError> {
@@ -1112,6 +1151,7 @@ impl crate::RealDavidson {
             let mut rotated = RealMatrix::zeros(nl, bands)?;
             rotate_local_with(&mut ws, &basis, &lowest, &mut vectors, wide)?;
             rotate_local_with(&mut ws, &products, &lowest, &mut rotated, wide)?;
+            rotation_add(nl, m, bands);
             stage_add(2, t0);
             let residual_of = |hv: &RealMatrix,
                                v: &RealMatrix,

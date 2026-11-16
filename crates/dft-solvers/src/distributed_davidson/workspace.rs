@@ -178,6 +178,10 @@ pub struct DistributedDavidsonWorkspace {
     norm_partial: Vec<f64>,
     converged: Vec<bool>,
     selected: Vec<usize>,
+    sel_coeff: RealMatrix,
+    sel_values: Vec<f64>,
+    sel_norms: Vec<f64>,
+    band_residuals: Vec<f64>,
     ortho: OrthoScratch,
 }
 
@@ -209,6 +213,10 @@ impl DistributedDavidsonWorkspace {
             norm_partial: Vec::new(),
             converged: Vec::new(),
             selected: Vec::new(),
+            sel_coeff: empty(),
+            sel_values: Vec::new(),
+            sel_norms: Vec::new(),
+            band_residuals: Vec::new(),
             ortho: OrthoScratch::new(),
         }
     }
@@ -246,11 +254,29 @@ fn residual_into<C: Collective>(
     norms: &mut Vec<f64>,
     partial: &mut Vec<f64>,
 ) -> Result<(), SolverError> {
+    residual_cols(comm, hv, v, None, lambdas, lean, out, norms, partial)
+}
+
+/// `residual_into` with output column `slot` taken from input column
+/// `map[slot]` (identity without a map).
+#[allow(clippy::too_many_arguments)]
+fn residual_cols<C: Collective>(
+    comm: &C,
+    hv: &RealMatrix,
+    v: &RealMatrix,
+    map: Option<&[usize]>,
+    lambdas: &[f64],
+    lean: bool,
+    out: &mut RealMatrix,
+    norms: &mut Vec<f64>,
+    partial: &mut Vec<f64>,
+) -> Result<(), SolverError> {
     let (nl, cols) = (v.rows(), lambdas.len());
     fit(out, nl, cols)?;
+    let src = |slot: usize| map.map_or(slot, |m| m[slot]);
     if lean {
         for (j, &lambda) in lambdas.iter().enumerate() {
-            let (h, x) = (column_of(hv, j), column_of(v, j));
+            let (h, x) = (column_of(hv, src(j)), column_of(v, src(j)));
             for ((r, &h), &x) in out.as_mut_slice()[j * nl..(j + 1) * nl]
                 .iter_mut()
                 .zip(h)
@@ -261,8 +287,9 @@ fn residual_into<C: Collective>(
         }
     } else {
         for (j, &lambda) in lambdas.iter().enumerate() {
+            let c = src(j);
             for i in 0..nl {
-                out[(i, j)] = hv[(i, j)] - lambda * v[(i, j)];
+                out[(i, j)] = hv[(i, c)] - lambda * v[(i, c)];
             }
         }
     }
@@ -441,6 +468,28 @@ fn ortho_into<C: Collective>(
     Ok(())
 }
 
+/// Ritz vectors V C and H images (H V) C of `cols` coefficient columns
+/// (`coeff`: m x cols, m = basis columns), counted in `rotation_stats`.
+#[allow(clippy::too_many_arguments)]
+fn rotate_ritz(
+    gemm: &mut RealGemmWorkspace,
+    basis: &RealMatrix,
+    products: &RealMatrix,
+    coeff: &[f64],
+    cols: usize,
+    vectors: &mut RealMatrix,
+    rotated: &mut RealMatrix,
+    wide: bool,
+) -> Result<(), SolverError> {
+    let (nl, m) = (basis.rows(), basis.cols());
+    fit(vectors, nl, cols)?;
+    fit(rotated, nl, cols)?;
+    rotate_slices_with(gemm, basis.as_slice(), nl, m, coeff, cols, vectors, wide)?;
+    rotate_slices_with(gemm, products.as_slice(), nl, m, coeff, cols, rotated, wide)?;
+    rotation_add(nl, m, cols);
+    Ok(())
+}
+
 /// Append the columns of `extra` to `a` in place (storage permitting).
 fn append_in_place(a: &mut RealMatrix, extra: &RealMatrix) -> Result<(), SolverError> {
     let (rows, m) = (a.rows(), a.cols());
@@ -587,7 +636,7 @@ fn solve_on<C: Collective>(
     for m in [&mut ws.basis, &mut ws.products] {
         reserve(m, nl * capacity)?;
     }
-    for m in [&mut ws.reduced, &mut ws.coefficients] {
+    for m in [&mut ws.reduced, &mut ws.coefficients, &mut ws.sel_coeff] {
         reserve(m, capacity * capacity)?;
     }
     for m in [&mut ws.block, &mut ws.partial] {
@@ -632,6 +681,10 @@ fn solve_on<C: Collective>(
         norm_partial,
         converged,
         selected,
+        sel_coeff,
+        sel_values,
+        sel_norms,
+        band_residuals,
         ortho,
         ..
     } = ws;
@@ -717,6 +770,19 @@ fn solve_on<C: Collective>(
     let mut reduced_width = 0usize;
     let mut max_basis = 0usize;
     let buffer: Vec<bool> = (0..bands).map(|j| j >= policy.strict_bands).collect();
+    // F05 (`BAANDI_M2_SELECTED_ROOTS=on`): Ritz-change (standard) solves only.
+    let selected_mode = tuning.selected_roots && ritz;
+    band_residuals.clear();
+    band_residuals.resize(bands, 0.0);
+    let precondition = |d: f64, lambda: f64, r: f64| {
+        let delta = d - lambda;
+        let denominator = if delta < 0.0 {
+            -delta.abs().max(0.1)
+        } else {
+            delta.max(0.1)
+        };
+        -r / denominator
+    };
 
     for iteration in 1..=solver.max_iterations {
         call_probe(iteration);
@@ -795,47 +861,165 @@ fn solve_on<C: Collective>(
         }
         status?;
         stage_add(1, t0);
-        let t0 = Instant::now();
-        fit(vectors, nl, bands)?;
-        fit(rotated, nl, bands)?;
-        let lowest = &coefficients.as_slice()[..m * bands];
-        rotate_slices_with(gemm, basis.as_slice(), nl, m, lowest, bands, vectors, wide)?;
-        rotate_slices_with(
-            gemm,
-            products.as_slice(),
-            nl,
-            m,
-            lowest,
-            bands,
-            rotated,
-            wide,
-        )?;
-        stage_add(2, t0);
-        let t0 = Instant::now();
-        residual_into(
-            comm,
-            rotated,
-            vectors,
-            &values[..bands],
-            tuning.lean,
-            residual,
-            norms,
-            norm_partial,
-        )?;
-        stage_add(3, t0);
-        let mut certified = false;
         let mut trusted = true;
-        if !ritz
-            && (certify || iteration == solver.max_iterations)
-            && (meets_policy(norms) || (iteration == solver.max_iterations && meets_strict(norms)))
-        {
-            certificates += 1;
-            fit(actual, nl, bands)?;
-            apply(vectors, actual)?;
-            applications += bands;
+        let mut full_rotated = false;
+        let maximum;
+        if selected_mode {
+            // F05: convergence from the Ritz-value change first; Ritz vectors,
+            // H images and residuals of the unconverged roots only. All bands
+            // are rotated only at return and at a restart (below).
+            converged.clear();
+            converged.extend(
+                (0..bands).map(|j| iteration > 1 && (values[j] - previous[j]).abs() < threshold(j)),
+            );
+            previous.copy_from_slice(&values[..bands]);
+            let finished = converged.iter().all(|&b| b)
+                || (iteration == solver.max_iterations
+                    && converged[..policy.strict_bands].iter().all(|&b| b));
+            if finished || iteration == solver.max_iterations {
+                let t0 = Instant::now();
+                rotate_ritz(
+                    gemm,
+                    basis,
+                    products,
+                    &coefficients.as_slice()[..m * bands],
+                    bands,
+                    vectors,
+                    rotated,
+                    wide,
+                )?;
+                stage_add(2, t0);
+                let t0 = Instant::now();
+                residual_into(
+                    comm,
+                    rotated,
+                    vectors,
+                    &values[..bands],
+                    tuning.lean,
+                    residual,
+                    norms,
+                    norm_partial,
+                )?;
+                stage_add(3, t0);
+                let maximum = norms.iter().copied().fold(0.0, f64::max);
+                history.push(maximum);
+                if !finished {
+                    return Err(SolverError::NotConverged {
+                        iterations: iteration,
+                        max_residual: maximum,
+                        residuals: norms.clone(),
+                    });
+                }
+                let full = gather_full(comm, layout, vectors)?;
+                return Ok(RealEigenSolution {
+                    eigenvalues: values[..bands].to_vec(),
+                    eigenvectors: full,
+                    residuals: norms.clone(),
+                    converged: converged.clone(),
+                    buffer,
+                    residuals_certified: false,
+                    iterations: iteration,
+                    history,
+                    operator_applications: applications,
+                    restarts,
+                    contracted_restarts: contractions,
+                    certification_attempts: certificates,
+                    max_basis_dimension: max_basis,
+                });
+            }
+            if iteration == 1 && basis.cols() == n {
+                history.push(0.0);
+                continue;
+            }
+            selected.clear();
+            selected.extend(
+                (0..bands)
+                    .filter(|&j| !converged[j])
+                    .take(bands.min(capacity - bands)),
+            );
+            let k = selected.len();
+            fit(sel_coeff, m, k)?;
+            sel_values.clear();
+            for (slot, &j) in selected.iter().enumerate() {
+                sel_coeff.as_mut_slice()[slot * m..(slot + 1) * m]
+                    .copy_from_slice(&coefficients.as_slice()[j * m..(j + 1) * m]);
+                sel_values.push(values[j]);
+            }
+            // A restart follows in this iteration: rotate all bands once (the
+            // contraction basis) and take the selected residuals from it.
+            full_rotated = basis.cols() + k > capacity;
+            let t0 = Instant::now();
+            if full_rotated {
+                rotate_ritz(
+                    gemm,
+                    basis,
+                    products,
+                    &coefficients.as_slice()[..m * bands],
+                    bands,
+                    vectors,
+                    rotated,
+                    wide,
+                )?;
+            } else {
+                rotate_ritz(
+                    gemm,
+                    basis,
+                    products,
+                    sel_coeff.as_slice(),
+                    k,
+                    vectors,
+                    rotated,
+                    wide,
+                )?;
+            }
+            stage_add(2, t0);
+            let t0 = Instant::now();
+            residual_cols(
+                comm,
+                rotated,
+                vectors,
+                full_rotated.then_some(&selected[..]),
+                sel_values,
+                tuning.lean,
+                residual,
+                sel_norms,
+                norm_partial,
+            )?;
+            stage_add(3, t0);
+            for (slot, &j) in selected.iter().enumerate() {
+                band_residuals[j] = sel_norms[slot];
+            }
+            maximum = sel_norms.iter().copied().fold(0.0, f64::max);
+            history.push(maximum);
+            // Corrections: residual column `slot` belongs to root selected[slot].
+            fit(corrections, nl, k)?;
+            for (slot, &j) in selected.iter().enumerate() {
+                let r = column_of(residual, slot);
+                for ((c, &d), &r) in corrections.as_mut_slice()[slot * nl..(slot + 1) * nl]
+                    .iter_mut()
+                    .zip(diag_local)
+                    .zip(r)
+                {
+                    *c = precondition(d, values[j], r);
+                }
+            }
+        } else {
+            let t0 = Instant::now();
+            rotate_ritz(
+                gemm,
+                basis,
+                products,
+                &coefficients.as_slice()[..m * bands],
+                bands,
+                vectors,
+                rotated,
+                wide,
+            )?;
+            stage_add(2, t0);
+            let t0 = Instant::now();
             residual_into(
                 comm,
-                actual,
+                rotated,
                 vectors,
                 &values[..bands],
                 tuning.lean,
@@ -843,87 +1027,116 @@ fn solve_on<C: Collective>(
                 norms,
                 norm_partial,
             )?;
-            certified = true;
-            trusted = meets_policy(norms);
-        }
-        let maximum = norms.iter().copied().fold(0.0, f64::max);
-        history.push(maximum);
-        converged.clear();
-        converged.extend((0..bands).map(|j| {
-            if ritz {
-                iteration > 1 && (values[j] - previous[j]).abs() < threshold(j)
-            } else {
-                norms[j] <= threshold(j)
+            stage_add(3, t0);
+            let mut certified = false;
+            if !ritz
+                && (certify || iteration == solver.max_iterations)
+                && (meets_policy(norms)
+                    || (iteration == solver.max_iterations && meets_strict(norms)))
+            {
+                certificates += 1;
+                fit(actual, nl, bands)?;
+                apply(vectors, actual)?;
+                applications += bands;
+                residual_into(
+                    comm,
+                    actual,
+                    vectors,
+                    &values[..bands],
+                    tuning.lean,
+                    residual,
+                    norms,
+                    norm_partial,
+                )?;
+                certified = true;
+                trusted = meets_policy(norms);
             }
-        }));
-        previous.copy_from_slice(&values[..bands]);
-        let finished = converged.iter().all(|&b| b)
-            || (iteration == solver.max_iterations
-                && converged[..policy.strict_bands].iter().all(|&b| b));
-        if finished {
-            let full = gather_full(comm, layout, vectors)?;
-            return Ok(RealEigenSolution {
-                eigenvalues: values[..bands].to_vec(),
-                eigenvectors: full,
-                residuals: norms.clone(),
-                converged: converged.clone(),
-                buffer,
-                residuals_certified: certified,
-                iterations: iteration,
-                history,
-                operator_applications: applications,
-                restarts,
-                contracted_restarts: contractions,
-                certification_attempts: certificates,
-                max_basis_dimension: max_basis,
-            });
-        }
-        if iteration == solver.max_iterations {
-            return Err(SolverError::NotConverged {
-                iterations: iteration,
-                max_residual: maximum,
-                residuals: norms.clone(),
-            });
-        }
-        if ritz && iteration == 1 && basis.cols() == n {
-            continue;
-        }
-        // Corrections for the unconverged roots (row-local preconditioning).
-        selected.clear();
-        selected.extend(
-            (0..bands)
-                .filter(|&j| !converged[j])
-                .take(bands.min(capacity - bands)),
-        );
-        fit(corrections, nl, selected.len())?;
-        let precondition = |d: f64, lambda: f64, r: f64| {
-            let delta = d - lambda;
-            let denominator = if delta < 0.0 {
-                -delta.abs().max(0.1)
-            } else {
-                delta.max(0.1)
-            };
-            -r / denominator
-        };
-        for (k, &j) in selected.iter().enumerate() {
-            if tuning.lean {
-                let r = column_of(residual, j);
-                for ((c, &d), &r) in corrections.as_mut_slice()[k * nl..(k + 1) * nl]
-                    .iter_mut()
-                    .zip(diag_local)
-                    .zip(r)
-                {
-                    *c = precondition(d, values[j], r);
+            maximum = norms.iter().copied().fold(0.0, f64::max);
+            history.push(maximum);
+            converged.clear();
+            converged.extend((0..bands).map(|j| {
+                if ritz {
+                    iteration > 1 && (values[j] - previous[j]).abs() < threshold(j)
+                } else {
+                    norms[j] <= threshold(j)
                 }
-            } else {
-                for i in 0..nl {
-                    corrections[(i, k)] = precondition(diag_local[i], values[j], residual[(i, j)]);
+            }));
+            previous.copy_from_slice(&values[..bands]);
+            let finished = converged.iter().all(|&b| b)
+                || (iteration == solver.max_iterations
+                    && converged[..policy.strict_bands].iter().all(|&b| b));
+            if finished {
+                let full = gather_full(comm, layout, vectors)?;
+                return Ok(RealEigenSolution {
+                    eigenvalues: values[..bands].to_vec(),
+                    eigenvectors: full,
+                    residuals: norms.clone(),
+                    converged: converged.clone(),
+                    buffer,
+                    residuals_certified: certified,
+                    iterations: iteration,
+                    history,
+                    operator_applications: applications,
+                    restarts,
+                    contracted_restarts: contractions,
+                    certification_attempts: certificates,
+                    max_basis_dimension: max_basis,
+                });
+            }
+            if iteration == solver.max_iterations {
+                return Err(SolverError::NotConverged {
+                    iterations: iteration,
+                    max_residual: maximum,
+                    residuals: norms.clone(),
+                });
+            }
+            if ritz && iteration == 1 && basis.cols() == n {
+                continue;
+            }
+            // Corrections for the unconverged roots (row-local preconditioning).
+            selected.clear();
+            selected.extend(
+                (0..bands)
+                    .filter(|&j| !converged[j])
+                    .take(bands.min(capacity - bands)),
+            );
+            fit(corrections, nl, selected.len())?;
+            for (k, &j) in selected.iter().enumerate() {
+                if tuning.lean {
+                    let r = column_of(residual, j);
+                    for ((c, &d), &r) in corrections.as_mut_slice()[k * nl..(k + 1) * nl]
+                        .iter_mut()
+                        .zip(diag_local)
+                        .zip(r)
+                    {
+                        *c = precondition(d, values[j], r);
+                    }
+                } else {
+                    for i in 0..nl {
+                        corrections[(i, k)] =
+                            precondition(diag_local[i], values[j], residual[(i, j)]);
+                    }
                 }
             }
         }
         if !trusted || basis.cols() + corrections.cols() > capacity {
             restarts += 1;
             reduced_width = 0;
+            if selected_mode && !full_rotated {
+                // Restart: X and H X of all bands (the contraction basis).
+                let t0 = Instant::now();
+                rotate_ritz(
+                    gemm,
+                    basis,
+                    products,
+                    &coefficients.as_slice()[..m * bands],
+                    bands,
+                    vectors,
+                    rotated,
+                    wide,
+                )?;
+                stage_add(2, t0);
+            }
             fit(defect, bands, bands)?;
             fit(partial, bands, bands)?;
             gram_slices(
@@ -986,7 +1199,11 @@ fn solve_on<C: Collective>(
             return Err(SolverError::NotConverged {
                 iterations: iteration,
                 max_residual: maximum,
-                residuals: norms.clone(),
+                residuals: if selected_mode {
+                    band_residuals.clone()
+                } else {
+                    norms.clone()
+                },
             });
         }
         fit(extra_products, nl, extra.cols())?;

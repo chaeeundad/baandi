@@ -12,6 +12,8 @@
 //! Optional: M2_PROFILE_CASE=si8, si16, si32 or si64 (default si8), M2_PROFILE_RANKS=2 (comma list),
 //! M2_PROFILE_CAPACITY=<2..12> (Davidson capacity per band, default 6),
 //! M2_PROFILE_SERIAL=off (skip the threads-only reference run).
+//! M2_PROFILE_STANDARD=on runs the standard (Ritz-change) profile instead of strict.
+//! The Ritz rotation work (`rotation_stats`: pairs, columns, flops) is printed per rank.
 //! The reduced-eigenproblem distribution (orders, sum of m^3, single-column
 //! appends, bordered and broadcast solves) is printed per rank
 //! (docs/performance/mpi-reduced-eigen-analysis.md).
@@ -102,6 +104,8 @@ fn run(case: &str, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(6),
+            standard: (std::env::var("M2_PROFILE_STANDARD").as_deref() == Ok("on"))
+                .then(dft_engine::StandardProfile::default),
             ..Default::default()
         },
     )
@@ -212,6 +216,7 @@ fn m2_entry_cost_profile() {
 fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
     {
         let solves_before = dft_solvers::distributed_davidson::reduced_solve_stats();
+        let rot_before = dft_solvers::distributed_davidson::rotation_stats();
         let before = snapshot();
         let t = Instant::now();
         let results = simulate(p, |comm: &SimRank| run(case, Some(Arc::new(comm.clone()))));
@@ -223,6 +228,13 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
             r.total_hartree(),
             serial.map_or(f64::NAN, |s| (r.total_hartree() - s.total_hartree()).abs()),
             work(r)
+        );
+        let rot = dft_solvers::distributed_davidson::rotation_stats();
+        println!(
+            "  ritz rotations per rank: pairs {} columns {} flops {:.4e}",
+            (rot.rotations - rot_before.rotations) / p as u64,
+            (rot.columns - rot_before.columns) / p as u64,
+            (rot.flops - rot_before.flops) as f64 / p as f64
         );
         let s = dft_solvers::distributed_davidson::reduced_solve_stats();
         let pp = p as u64;

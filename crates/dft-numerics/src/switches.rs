@@ -217,6 +217,9 @@ table! {
     // MPI solver workspace (review F06; ledger row M2-WORKSPACE-F06); bit-identical.
     M2_WORKSPACE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "distributed Davidson keeps its basis, products, reduced matrix (fixed leading dimension, border update), Ritz, residual and orthonormalization buffers, GEMM and EVD workspaces in a per-rank workspace reused across iterations and solves (no per-iteration large allocation); bit-identical to off";
+    // MPI selected-root rotation (review F05; ledger row M2-SELECTED-ROOTS-F05); default off until dev08.
+    M2_SELECTED_ROOTS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "distributed Davidson Ritz-change (standard) solves: unconverged roots decided from the Ritz-value change first, Ritz vectors, H images and residuals of those roots only, all bands rotated only at return and restarts (the serial lean rule); strict solves unchanged; implies the workspace path; rounding class";
     // MPI coarse stage and certificate (docs/performance/mpi-coarse-certificate-analysis.md); default off.
     M2_SCREEN: Kind::Choice { allowed: &["replicated", "dist"], default: "dist" }, "dist",
         "replicated, dist",
@@ -577,6 +580,14 @@ mod tests {
         assert_eq!(
             eval(Id::M2_WORKSPACE, Some("off")),
             (Value::Choice("off"), Env)
+        );
+        assert_eq!(
+            eval(Id::M2_SELECTED_ROOTS, None),
+            (Value::Choice("off"), Default)
+        );
+        assert_eq!(
+            eval(Id::M2_SELECTED_ROOTS, Some("on")),
+            (Value::Choice("on"), Env)
         );
         assert_eq!(eval(Id::M2_B5, None), (Value::Choice("off"), Default));
         assert_eq!(eval(Id::M2_B5, Some("on")), (Value::Choice("on"), Env));

@@ -94,6 +94,21 @@ allocates its own packing (MKL `dsyevd` does not). `dft-mpi`: `tree_sum_f64` and
 `allgatherv_f64` keep their receive scratch and count/displacement arrays per thread;
 the rank simulator reuses its slots (results unchanged).
 
+## MPI selected-root rotation (review F05, 2026-11-16)
+
+`BAANDI_M2_SELECTED_ROOTS=on|off` (default off until dev08; `DistributedTuning.selected_roots`,
+implies the workspace path): on Ritz-change (standard) distributed solves the
+unconverged roots are decided from the Ritz-value change before any rotation; V C,
+(H V) C and residuals are formed for those columns only (coefficient columns gathered
+into `sel_coeff`); all bands are rotated at return (every band's residual reported)
+and at a restart (when a restart follows, one full rotation serves both the selected
+residuals and the contraction basis). Strict (residual) solves are unchanged.
+`rotation_stats()` counts rotation pairs, columns and flops on both paths. Rounding
+class in principle (column subsets of one GEMM); bit-identical on pure builds in
+`tests/distributed_selected_roots.rs` (ranks 1 to 4, scattered, clustered and
+degenerate spectra, capacities 6 and 3). History records the selected maximum per
+iteration (as the serial lean solver).
+
 ## Lean Davidson (work order beat-QE phase B, 2026-11-15)
 
 `BAANDI_DAVIDSON=lean|classic` (default `classic`; `ResearchOptions::lean`), module

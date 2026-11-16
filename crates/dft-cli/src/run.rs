@@ -866,6 +866,15 @@ pub fn execute_mode(
             "max_order": s.max_order, "sum_order_cubed": s.sum_cubed,
             "single_column": s.single_column, "bordered": s.bordered, "broadcast": s.broadcast,
         });
+        let (reduction_solves, reduction_sites) = dft_engine::parallel::reduction_stats();
+        let reductions = json!({
+            "solves": reduction_solves,
+            "buckets": dft_engine::parallel::REDUCTION_BUCKETS,
+            "sites": reduction_sites
+                .into_iter()
+                .map(|r| json!({"site": r.site, "calls": r.calls, "payload": r.payload, "histogram": r.histogram}))
+                .collect::<Vec<_>>(),
+        });
         result["parallel"] = json!({
             "model": if m2_on { "mpi_stick_rows" } else { "mpi_row_block" },
             "m2": {
@@ -885,6 +894,7 @@ pub fn execute_mode(
                 .map(|(name, seconds)| json!({"stage": name, "seconds": seconds}))
                 .collect::<Vec<_>>(),
             "reduced_solves": reduced_solves,
+            "reductions": reductions,
             "collectives": dft_engine::parallel::collective_stats()
                 .into_iter()
                 .map(|(op, calls, seconds)| json!({"op": op, "calls": calls, "seconds": seconds}))

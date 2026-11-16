@@ -451,3 +451,55 @@ fn strict_solves_are_unchanged() {
         }
     }
 }
+
+/// F08: the per-site reduction counters see exactly the tree sums the
+/// communicator saw (count-only; order and results unchanged).
+#[test]
+fn reduction_counters_match_the_communicator() {
+    use dft_solvers::distributed_davidson::reduction_stats;
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let p = &problems()[1];
+    for ranks in [2usize, 3] {
+        let (s0, before) = reduction_stats();
+        let runs = run(
+            &p.a,
+            &p.diag,
+            p.bands,
+            p.policy,
+            p.tol,
+            true,
+            6,
+            ranks,
+            entry_stack(),
+        );
+        let (s1, after) = reduction_stats();
+        assert_eq!(s1 - s0, ranks as u64);
+        let calls: u64 = after
+            .iter()
+            .zip(&before)
+            .map(|(a, b)| a.calls - b.calls)
+            .sum();
+        let payload: u64 = after
+            .iter()
+            .zip(&before)
+            .map(|(a, b)| a.payload - b.payload)
+            .sum();
+        let seen: u64 = runs.iter().map(|r| r.tree_sums).sum();
+        let seen_payload: u64 = runs.iter().map(|r| r.payload).sum();
+        assert_eq!(calls, seen);
+        assert_eq!(payload, seen_payload);
+        for (a, b) in after.iter().zip(&before) {
+            println!(
+                "P={ranks} {}: calls {} payload {}",
+                a.site,
+                (a.calls - b.calls) / ranks as u64,
+                (a.payload - b.payload) / ranks as u64
+            );
+        }
+        let site = |n: &str| {
+            let i = after.iter().position(|s| s.site == n).unwrap();
+            after[i].calls - before[i].calls
+        };
+        assert!(site("panel_dot") > 0 && site("panel_norm") > 0 && site("reduced_gram") > 0);
+    }
+}

@@ -217,6 +217,7 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
     {
         let solves_before = dft_solvers::distributed_davidson::reduced_solve_stats();
         let rot_before = dft_solvers::distributed_davidson::rotation_stats();
+        let red_before = dft_solvers::distributed_davidson::reduction_stats();
         let before = snapshot();
         let t = Instant::now();
         let results = simulate(p, |comm: &SimRank| run(case, Some(Arc::new(comm.clone()))));
@@ -229,6 +230,24 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
             serial.map_or(f64::NAN, |s| (r.total_hartree() - s.total_hartree()).abs()),
             work(r)
         );
+        let red = dft_solvers::distributed_davidson::reduction_stats();
+        let solves_d = (red.0 - red_before.0).max(1) as f64;
+        for (now, then) in red.1.iter().zip(&red_before.1) {
+            let calls = (now.calls - then.calls) as f64 / p as f64;
+            if calls > 0.0 {
+                let h: Vec<u64> = (0..6)
+                    .map(|b| (now.histogram[b] - then.histogram[b]) / p as u64)
+                    .collect();
+                println!(
+                    "  reductions per rank {}: calls {calls:.0} ({:.1} per solve), payload {:.0} doubles, histogram {:?} (buckets {:?})",
+                    now.site,
+                    calls / (solves_d / p as f64),
+                    (now.payload - then.payload) as f64 / p as f64,
+                    h,
+                    dft_solvers::distributed_davidson::REDUCTION_BUCKETS
+                );
+            }
+        }
         let rot = dft_solvers::distributed_davidson::rotation_stats();
         println!(
             "  ritz rotations per rank: pairs {} columns {} flops {:.4e}",

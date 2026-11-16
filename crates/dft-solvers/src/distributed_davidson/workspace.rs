@@ -293,6 +293,7 @@ fn residual_cols<C: Collective>(
             }
         }
     }
+    site(Site::ResidualNorms);
     column_norms_squared_into(comm, out, partial, norms)?;
     for x in norms.iter_mut() {
         *x = x.sqrt();
@@ -340,6 +341,7 @@ fn panel_gs_into<C: Collective>(
             fit(overlap, kept, w)?;
             fit(scratch, rows, w)?;
             fit(partial, kept, w)?;
+            site(Site::PanelCross);
             for _ in 0..2 {
                 project_out_slices(
                     comm,
@@ -367,6 +369,7 @@ fn panel_gs_into<C: Collective>(
                     }
                     sums.clear();
                     sums.resize(k, 0.0);
+                    site(Site::PanelDot);
                     comm.tree_sum_f64(local, sums).map_err(comm_error)?;
                     for (c, s) in (first..kept).zip(sums.iter()) {
                         let q = &y.as_slice()[c * rows..(c + 1) * rows];
@@ -378,6 +381,7 @@ fn panel_gs_into<C: Collective>(
             }
             let local_norm = [v.iter().map(|a| a * a).sum::<f64>()];
             let mut total = [0.0];
+            site(Site::PanelNorm);
             comm.tree_sum_f64(&local_norm, &mut total)
                 .map_err(comm_error)?;
             let len = total[0].sqrt();
@@ -424,6 +428,7 @@ fn ortho_into<C: Collective>(
     let rows = block.rows();
     fit(&mut o.x, rows, block.cols())?;
     o.x.as_mut_slice().copy_from_slice(block.as_slice());
+    site(Site::OrthoNormalize);
     column_norms_squared_into(comm, &o.x, &mut o.norm_partial, &mut o.norms)?;
     for (j, nn) in o.norms.iter().enumerate() {
         let len = nn.sqrt();
@@ -442,6 +447,7 @@ fn ortho_into<C: Collective>(
             fit(&mut o.overlap, q.cols(), count)?;
             fit(&mut o.scratch, rows, count)?;
             fit(&mut o.partial, q.cols(), count)?;
+            site(Site::OrthoProjection);
             project_out_slices(
                 comm,
                 gemm,
@@ -796,6 +802,7 @@ fn solve_on<C: Collective>(
         let prefix = reduced_width;
         fit(block, m, fresh)?;
         fit(partial, m, fresh)?;
+        site(Site::ReducedGram);
         gram_slices(
             comm,
             gemm,
@@ -1139,6 +1146,7 @@ fn solve_on<C: Collective>(
             }
             fit(defect, bands, bands)?;
             fit(partial, bands, bands)?;
+            site(Site::RestartDefect);
             gram_slices(
                 comm,
                 gemm,

@@ -109,6 +109,17 @@ class in principle (column subsets of one GEMM); bit-identical on pure builds in
 degenerate spectra, capacities 6 and 3). History records the selected maximum per
 iteration (as the serial lean solver).
 
+## MPI reduction counters (review F08, 2026-11-16; analysis only)
+
+Both distributed entry points wrap the communicator in `Counted` (forwards every call
+unchanged) and count each tree sum by the site last declared on the thread with
+`site(Site::..)`: reduced_gram, residual_norms, ortho_normalize, ortho_projection,
+panel_cross, panel_dot, panel_norm, restart_defect, apply (the operator's own sums),
+setup; payload histogram buckets 1, 2-8, 9-64, 65-512, 513-4096, above
+(`REDUCTION_BUCKETS`). Count only (no timer, no allocation); reduction order and
+results unchanged. `reduction_stats()` (solves, sites), results.json
+`parallel.reductions`, printed by the m2_entry_cost harness.
+
 ## Lean Davidson (work order beat-QE phase B, 2026-11-15)
 
 `BAANDI_DAVIDSON=lean|classic` (default `classic`; `ResearchOptions::lean`), module

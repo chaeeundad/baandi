@@ -75,6 +75,25 @@ capacity x capacity GEMM workspace; rounding class). Both default off.
 single-column appends, bordered and broadcast solves), written to results.json
 `parallel.reduced_solves`. Analysis: docs/performance/mpi-reduced-eigen-analysis.md.
 
+## MPI solver workspace (review F06, 2026-11-16)
+
+`BAANDI_M2_WORKSPACE=on|off` (default on; `DistributedTuning.workspace`): the
+distributed solver runs on `distributed_davidson/workspace.rs`, a per-thread (per
+rank) `DistributedDavidsonWorkspace` reused across iterations and solves: basis and
+products with `capacity` columns of storage (appends in place), reduced matrix with
+the fixed leading dimension `capacity` and border update (packed m x m copy for the
+dense solver), fresh products, lowest coefficients and Gram operands as slices,
+persistent Ritz/residual/correction/orthonormalization scratch, GEMM, EVD and B5
+workspaces (rebuilt only when (max rows, capacity, pool) changes). Same arithmetic
+in the same order: bit-identical to off (tests `tests/distributed_workspace.rs`, ranks
+1 to 4, every switch stack; `dft-engine` `m2_workspace_is_bit_identical_in_scf`).
+Growth counters `workspace_stats()`; `release_workspace()` frees the calling
+thread's workspace; `set_iteration_probe` is a test hook. The classic (non-serial)
+orthonormalization and the M1 apply still allocate inside; on pure builds faer's EVD
+allocates its own packing (MKL `dsyevd` does not). `dft-mpi`: `tree_sum_f64` and
+`allgatherv_f64` keep their receive scratch and count/displacement arrays per thread;
+the rank simulator reuses its slots (results unchanged).
+
 ## Lean Davidson (work order beat-QE phase B, 2026-11-15)
 
 `BAANDI_DAVIDSON=lean|classic` (default `classic`; `ResearchOptions::lean`), module

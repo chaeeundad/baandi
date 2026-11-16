@@ -78,6 +78,17 @@ fn count(n: usize, what: &'static str) -> Result<c_int, MpiError> {
     c_int::try_from(n).map_err(|_| MpiError::Shape(what))
 }
 
+thread_local! {
+    // Persistent receive scratch of `tree_sum_f64` and the count/displacement
+    // arrays of `allgatherv_f64` (F06): grow-only, reused by every call of the
+    // calling thread (MPI is driven from the thread that initialised it), so a
+    // steady-state collective allocates nothing. Contents are fully overwritten
+    // before use; results are unchanged.
+    static RECV_SCRATCH: std::cell::RefCell<Vec<f64>> = const { std::cell::RefCell::new(Vec::new()) };
+    static COUNT_SCRATCH: std::cell::RefCell<(Vec<c_int>, Vec<c_int>)> =
+        const { std::cell::RefCell::new((Vec::new(), Vec::new())) };
+}
+
 /// Initialises MPI (single-threaded semantics: the library is called from the
 /// thread that created the Universe) and finalises it on drop.
 pub struct Universe {
@@ -184,33 +195,31 @@ impl World {
         {
             return Err(MpiError::Shape("allgatherv counts"));
         }
-        let rc: Vec<c_int> = counts
-            .iter()
-            .map(|&c| count(c, "allgatherv count"))
-            .collect::<Result<_, _>>()?;
-        let mut at = 0;
-        let displs: Vec<c_int> = counts
-            .iter()
-            .map(|&c| {
-                let d = at;
+        COUNT_SCRATCH.with(|scratch| {
+            let (rc, displs) = &mut *scratch.borrow_mut();
+            rc.clear();
+            displs.clear();
+            let mut at = 0;
+            for &c in counts {
+                rc.push(count(c, "allgatherv count")?);
+                displs.push(count(at, "allgatherv displacement")?);
                 at += c;
-                count(d, "allgatherv displacement")
+            }
+            // SAFETY: counts/displacements describe disjoint slices of `out`, whose
+            // length equals their sum; `local` holds counts[rank] doubles; all
+            // buffers are borrowed for the call.
+            check("MPI_Allgatherv", unsafe {
+                MPI_Allgatherv(
+                    local.as_ptr().cast(),
+                    count(local.len(), "allgatherv send count")?,
+                    self.double(),
+                    out.as_mut_ptr().cast(),
+                    rc.as_ptr(),
+                    displs.as_ptr(),
+                    self.double(),
+                    self.comm(),
+                )
             })
-            .collect::<Result<_, _>>()?;
-        // SAFETY: counts/displacements describe disjoint slices of `out`, whose
-        // length equals their sum; `local` holds counts[rank] doubles; all
-        // buffers are borrowed for the call.
-        check("MPI_Allgatherv", unsafe {
-            MPI_Allgatherv(
-                local.as_ptr().cast(),
-                count(local.len(), "allgatherv send count")?,
-                self.double(),
-                out.as_mut_ptr().cast(),
-                rc.as_ptr(),
-                displs.as_ptr(),
-                self.double(),
-                self.comm(),
-            )
         })
     }
     /// Elementwise sum over ranks added in rank order after an allgather
@@ -246,7 +255,24 @@ impl World {
         let (rank, size) = (self.rank(), self.size());
         let n = count(local.len(), "tree_sum count")?;
         out.copy_from_slice(local);
-        let mut incoming = vec![0.0; local.len()];
+        RECV_SCRATCH.with(|scratch| {
+            let incoming = &mut *scratch.borrow_mut();
+            if incoming.len() < local.len() {
+                incoming.resize(local.len(), 0.0);
+            }
+            self.tree_steps(rank, size, n, out, &mut incoming[..local.len()])
+        })?;
+        self.bcast_f64(out, 0)
+    }
+    /// The send/receive rounds of `tree_sum_f64` with a caller-owned receive buffer.
+    fn tree_steps(
+        &self,
+        rank: usize,
+        size: usize,
+        n: c_int,
+        out: &mut [f64],
+        incoming: &mut [f64],
+    ) -> Result<(), MpiError> {
         let mut step = 1;
         while step < size {
             if rank & step != 0 {
@@ -276,13 +302,13 @@ impl World {
                         std::ptr::null_mut(),
                     )
                 })?;
-                for (a, b) in out.iter_mut().zip(&incoming) {
+                for (a, b) in out.iter_mut().zip(incoming.iter()) {
                     *a += *b;
                 }
             }
             step <<= 1;
         }
-        self.bcast_f64(out, 0)
+        Ok(())
     }
     pub fn alltoall_f64(
         &self,

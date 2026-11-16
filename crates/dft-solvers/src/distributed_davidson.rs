@@ -40,6 +40,12 @@ pub trait DistributedRealOperator {
     ) -> Result<(), SolverError>;
 }
 
+mod workspace;
+pub use workspace::{
+    DistributedDavidsonWorkspace, WorkspaceStats, release_workspace, set_iteration_probe,
+    workspace_stats,
+};
+
 fn comm_error(e: dft_mpi::MpiError) -> SolverError {
     SolverError::Application(e.to_string())
 }
@@ -297,6 +303,9 @@ pub struct DistributedTuning {
     /// eigenproblem when exactly one column was appended (the serial solver's B5;
     /// rounding class).
     pub bordered: bool,
+    /// `BAANDI_M2_WORKSPACE=on`: run on the persistent per-rank workspace
+    /// (`workspace.rs`; storage only, bit-identical).
+    pub workspace: bool,
 }
 impl DistributedTuning {
     /// The switches of this process; the serial-order panel and DGKS rules are the
@@ -319,6 +328,7 @@ impl DistributedTuning {
             lean: on(Id::M2_LEAN),
             eigen_root: choice(Id::M2_EIGEN) == "root",
             bordered: on(Id::M2_B5),
+            workspace: on(Id::M2_WORKSPACE),
         }
     }
     /// The tuning of the calling thread: the test override when set
@@ -684,6 +694,30 @@ impl crate::RealDavidson {
         let nl = layout.nl();
         let offset = layout.index[comm.rank()].first().copied().unwrap_or(0);
         let diag_local = &diagonal[offset..offset + nl];
+        let tuning = DistributedTuning::current();
+        if tuning.workspace {
+            let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), SolverError> {
+                let r = apply_distributed(comm, &layout, op, x)?;
+                y.as_mut_slice().copy_from_slice(r.as_slice());
+                Ok(())
+            };
+            return workspace::solve_core_ws(
+                self,
+                comm,
+                &layout,
+                op.worker_pool(),
+                op.inner_threads(),
+                &mut apply,
+                initial,
+                diag_local,
+                Some(diagonal),
+                policy,
+                ritz,
+                certify,
+                capacity_per_band,
+                tuning,
+            );
+        }
         let pool = match op.worker_pool() {
             Some(p) => p,
             None => WorkerPool::new(op.inner_threads())
@@ -702,7 +736,7 @@ impl crate::RealDavidson {
             ritz,
             certify,
             capacity_per_band,
-            DistributedTuning::current(),
+            tuning,
         )
     }
 
@@ -788,12 +822,45 @@ impl crate::RealDavidson {
             counts,
             index,
         };
+        let nl = layout.nl();
+        if tuning.workspace {
+            let supplied = op.worker_pool();
+            let threads = op.inner_threads();
+            let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), SolverError> {
+                let start = Instant::now();
+                y.as_mut_slice().fill(0.0);
+                op.apply_block(comm, x, y)?;
+                stage_add(5, start);
+                stage_add(6, start);
+                if y.as_slice().iter().any(|v| !v.is_finite()) {
+                    return Err(SolverError::Application(
+                        "operator returned an invalid block".into(),
+                    ));
+                }
+                Ok(())
+            };
+            return workspace::solve_core_ws(
+                self,
+                comm,
+                &layout,
+                supplied,
+                threads,
+                &mut apply,
+                initial,
+                diagonal_local,
+                None,
+                policy,
+                ritz,
+                certify,
+                capacity_per_band,
+                tuning,
+            );
+        }
         let pool = match op.worker_pool() {
             Some(p) => p,
             None => WorkerPool::new(op.inner_threads())
                 .map_err(|e| SolverError::Application(e.to_string()))?,
         };
-        let nl = layout.nl();
         let mut apply = |x: &RealMatrix| -> Result<RealMatrix, SolverError> {
             let start = Instant::now();
             let mut y = RealMatrix::zeros(nl, x.cols())?;
@@ -970,6 +1037,7 @@ impl crate::RealDavidson {
         let buffer: Vec<bool> = (0..bands).map(|j| j >= policy.strict_bands).collect();
 
         for iteration in 1..=self.max_iterations {
+            workspace::call_probe(iteration);
             let m = basis.cols();
             max_basis = max_basis.max(m);
             // Reduced matrix V^T HV (replicated), symmetrised from the upper triangle.

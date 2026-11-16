@@ -111,6 +111,7 @@ fn legacy_defaults_are_unchanged() {
         Id::CUTOFF_LADDER_STANDARD,
         Id::STANDARD_RESIDUAL_GUARD,
         Id::PHASE_THREADS,
+        Id::M2_WORKSPACE,
     ] {
         assert!(on(id), "{id:?} must default on");
     }
@@ -209,5 +210,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::CUTOFF_LADDER), Value::Raw(None));
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
-    assert_eq!(TABLE.len(), 66);
+    assert_eq!(TABLE.len(), 67);
 }

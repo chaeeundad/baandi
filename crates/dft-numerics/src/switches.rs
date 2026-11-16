@@ -264,6 +264,8 @@ table! {
         "basis-projection apply X -= Q S and MGS-B cross-panel apply through the per-panel dgemm at any block width (MKL builds; pure builds unchanged)";
     DAVIDSON: Kind::Choice { allowed: &["classic", "lean"], default: "lean" }, "lean", "classic, lean",
         "serial real Gamma Davidson of Ritz-value (standard) solves: classic (orthonormal basis, Ritz vectors of all bands in wide iterations) or lean (work order phase B: residuals of unconverged roots only, all-band Ritz vectors at return and contraction, unit-norm corrections without projection and a generalized reduced problem by Cholesky reduction; one orthonormalization when a pivot ratio of the basis overlap falls below eps/1e-12; rounding class)";
+    LEAN_PROJ_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "C3a: the lean real Gamma Davidson keeps P^T V (projector products) beside its basis (copied after each H apply, rotated at contraction and return) and the audit's nonlocal energy reads P^T X = (P^T V) C instead of a fresh n x n_proj x bands product; falls back to the direct product whenever the cache is incomplete; rounding class";
     // Physics (dft-physics).
     MKL_NONLOCAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "nonlocal products by dgemm on the real Gamma path";

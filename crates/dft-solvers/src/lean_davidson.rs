@@ -120,6 +120,133 @@ impl LeanScratch {
     }
 }
 
+/// C3a (`BAANDI_LEAN_PROJ_CACHE=on`; ledger C3a, review F10): projector
+/// products P^T V of the basis columns, kept beside V and H V. The operator
+/// leaves P^T Y of its latest block application available
+/// (`RealLinearOperator::copy_last_projections`); every apply of basis columns
+/// copies them in (start, appended corrections, a rebuild), a contraction
+/// rotates them with the same coefficients as V (P^T (V C) = (P^T V) C) and the
+/// return forms P^T X = (P^T V) C for the caller's nonlocal energy, a product
+/// of order n_proj x m x bands instead of n x n_proj x bands. Any basis change
+/// the cache does not follow (the stage-2 fallback rotation) invalidates it,
+/// and an invalid cache is only made valid again by a fresh apply of the whole
+/// basis; the return then reports no projections. Products go through the
+/// fixed-panel GEMM workspace, so they do not depend on the thread count.
+/// The solve's arithmetic is untouched (the cache is only read at the return).
+pub(crate) struct ProjCache {
+    count: usize,
+    /// P^T V, count x capacity (column j belongs to basis column j).
+    pv: RealMatrix,
+    /// P^T X of the latest return (and contraction scratch), count x bands.
+    pub(crate) pc: RealMatrix,
+    cols: usize,
+    valid: bool,
+}
+impl ProjCache {
+    /// The cache of this solve (allocated on the first use or a shape change),
+    /// emptied; `None` when the operator exposes no projector products.
+    fn activate<'a>(
+        slot: &'a mut Option<ProjCache>,
+        op: &dyn RealLinearOperator,
+        capacity: usize,
+        bands: usize,
+    ) -> Result<Option<&'a mut ProjCache>, SolverError> {
+        let count = op.projector_count();
+        if count == 0 {
+            return Ok(None);
+        }
+        if slot
+            .as_ref()
+            .is_none_or(|c| c.count != count || c.pv.cols() != capacity || c.pc.cols() != bands)
+        {
+            *slot = Some(ProjCache {
+                count,
+                pv: RealMatrix::zeros(count, capacity)?,
+                pc: RealMatrix::zeros(count, bands)?,
+                cols: 0,
+                valid: false,
+            });
+        }
+        let cache = slot.as_mut().unwrap();
+        cache.cols = 0;
+        cache.valid = false;
+        Ok(Some(cache))
+    }
+    /// Basis columns `first..first + k` were just applied by `op` (a block of
+    /// exactly those columns). `first == 0` restarts the cache.
+    fn load(&mut self, op: &dyn RealLinearOperator, first: usize, k: usize) {
+        if first == 0 {
+            self.cols = 0;
+            self.valid = true;
+        }
+        let range = first * self.count..(first + k) * self.count;
+        self.valid = self.valid
+            && first == self.cols
+            && range.end <= self.pv.as_slice().len()
+            && op.copy_last_projections(k, &mut self.pv.as_mut_slice()[range]);
+        self.cols = first + k;
+        if self.valid {
+            lean_add(LeanCount::ProjCacheColumns, k);
+        }
+    }
+    fn covers(&self, m: usize) -> bool {
+        self.valid && self.cols == m
+    }
+    /// pc = (P^T V)[:, :m] C with C m x bands (column-major, leading dimension m).
+    fn rotate(
+        &mut self,
+        gemm: &mut RealGemmWorkspace,
+        c: &[f64],
+        m: usize,
+        bands: usize,
+    ) -> Result<(), SolverError> {
+        let count = self.count;
+        flops_add(FlopSite::Small, count, m, bands);
+        gemm.multiply_slices_into(
+            GemmSite::Other,
+            &self.pv.as_slice()[..count * m],
+            count,
+            m,
+            count,
+            RealOp::Identity,
+            c,
+            bands,
+            m,
+            self.pc.as_mut().subcols_mut(0, bands),
+        )?;
+        Ok(())
+    }
+    /// The basis became V C (contraction to `bands` columns).
+    fn contract(
+        &mut self,
+        gemm: &mut RealGemmWorkspace,
+        c: &[f64],
+        m: usize,
+        bands: usize,
+    ) -> Result<(), SolverError> {
+        if !self.covers(m) {
+            self.valid = false;
+            return Ok(());
+        }
+        self.rotate(gemm, c, m, bands)?;
+        let len = self.count * bands;
+        self.pv.as_mut_slice()[..len].copy_from_slice(&self.pc.as_slice()[..len]);
+        self.cols = bands;
+        Ok(())
+    }
+}
+/// `ProjCache::load` on an optional cache.
+fn proj_load(
+    cache: &mut Option<&mut ProjCache>,
+    op: &dyn RealLinearOperator,
+    first: usize,
+    k: usize,
+) {
+    if let Some(c) = cache.as_mut() {
+        c.load(op, first, k);
+    }
+}
+
 /// S[:, from..to] = V^T V[:, from..to] (one border GEMM) and its mirror.
 fn overlap_border(
     gemm: &mut RealGemmWorkspace,
@@ -522,6 +649,7 @@ fn factor_fresh(
     applications: &mut usize,
     work: &mut crate::work_accounting::Trace,
     timers: Timers,
+    proj: &mut Option<&mut ProjCache>,
 ) -> Result<(), SolverError> {
     let m = basis.cols();
     let t = timers.start();
@@ -540,6 +668,7 @@ fn factor_fresh(
     projection.run_into(scratch, None, gemm, basis)?;
     timers.stop(t, Stage::Orthonormalize);
     apply_into(op, basis, applications, work, products, timers)?;
+    proj_load(proj, op, 0, basis.cols());
     lean_add(LeanCount::RebuildColumns, basis.cols());
     let m = basis.cols();
     overlap_border(gemm, basis, 0, m, &mut lean.s)?;
@@ -597,9 +726,18 @@ pub(super) fn solve(
         lean,
         kept,
         pool,
+        lean_proj,
+        returned_projections,
         ..
     } = workspace;
     let lean = lean.as_mut().unwrap();
+    // C3a: projector products of the basis columns (switch and operator support).
+    let mut proj = if options.lean_proj_cache {
+        ProjCache::activate(lean_proj, op, capacity, bands)?
+    } else {
+        None
+    };
+    *returned_projections = false;
     let pool = pool.clone();
     projection.narrow = options.narrow_proj;
     let timers = Timers::new(options.stage_timers);
@@ -660,6 +798,16 @@ pub(super) fn solve(
             .as_mut_slice()
             .copy_from_slice(k.products.as_slice());
         lean_add(LeanCount::KeptColumns, bands);
+        // C3a: the kept P^T X belongs to the kept X (same operator).
+        if let Some(c) = proj.as_mut() {
+            let len = c.count * bands;
+            c.cols = bands;
+            c.valid = k.projection_count == c.count && k.projections.len() == len;
+            if c.valid {
+                c.pv.as_mut_slice()[..len].copy_from_slice(&k.projections);
+                lean_add(LeanCount::ProjCacheKeptLoads, 1);
+            }
+        }
     } else if let Some(x) = initial {
         if x.rows() != n || x.cols() > capacity {
             return Err(LinalgError::Dimension.into());
@@ -707,6 +855,7 @@ pub(super) fn solve(
     residuals.fill(0.);
     if !from_kept {
         apply_into(op, basis, &mut applications, &mut work, products, timers)?;
+        proj_load(&mut proj, op, 0, basis.cols());
     }
     // Columns whose H_r / A border is formed, and columns of S and T.
     let mut prefix = 0;
@@ -727,6 +876,7 @@ pub(super) fn solve(
                 &mut applications,
                 &mut work,
                 timers,
+                &mut proj,
             )?;
             factored = basis.cols();
             prefix = 0;
@@ -823,6 +973,22 @@ pub(super) fn solve(
                 });
             }
             lean_add(LeanCount::Returns, 1);
+            // C3a: P^T X = (P^T V) C for the caller's nonlocal energy.
+            let proj_ready = match proj.as_mut() {
+                Some(c) if c.covers(m) => {
+                    let t = timers.start();
+                    c.rotate(gemm, &lean.c.as_slice()[..m * bands], m, bands)?;
+                    timers.stop(t, Stage::Rotate);
+                    lean_add(LeanCount::ProjCacheReturns, 1);
+                    true
+                }
+                Some(_) => {
+                    lean_add(LeanCount::ProjCacheMisses, 1);
+                    false
+                }
+                None => false,
+            };
+            *returned_projections = proj_ready;
             // REUSE-PSI: keep X and H X (the return rotation) for the next solve.
             if let Some(k) = kept.as_mut().filter(|k| k.store && hx_formed) {
                 k.vectors.as_mut_slice().copy_from_slice(vectors.as_slice());
@@ -830,6 +996,14 @@ pub(super) fn solve(
                     .as_mut_slice()
                     .copy_from_slice(rotated_products.as_slice());
                 k.valid = true;
+                // C3a: and P^T X with them (allocated once per shape).
+                k.projection_count = 0;
+                if let Some(c) = proj.as_ref().filter(|_| proj_ready) {
+                    let len = c.count * bands;
+                    k.projections.resize(len, 0.);
+                    k.projections.copy_from_slice(&c.pc.as_slice()[..len]);
+                    k.projection_count = c.count;
+                }
                 lean_add(LeanCount::KeptStored, 1);
             }
             work.returned();
@@ -944,6 +1118,9 @@ pub(super) fn solve(
                 vectors.as_mut_slice(),
                 rotated_products.as_mut_slice(),
             )?;
+            if let Some(c) = proj.as_mut() {
+                c.contract(gemm, &lean.c.as_slice()[..m * bands], m, bands)?;
+            }
             timers.stop(t, Stage::Rotate);
             std::mem::swap(basis, vectors);
             std::mem::swap(products, rotated_products);
@@ -958,6 +1135,7 @@ pub(super) fn solve(
                 &mut applications,
                 &mut work,
                 timers,
+                &mut proj,
             )?;
             prefix = 0;
         }
@@ -1036,6 +1214,11 @@ pub(super) fn solve(
                 timers.stop(t, Stage::Orthonormalize);
                 std::mem::swap(basis, vectors);
                 std::mem::swap(products, rotated_products);
+                // C3a: this m-column rotation is not followed (rare; measured
+                // fallback rate 0): the cache stays invalid until a full apply.
+                if let Some(c) = proj.as_mut() {
+                    c.valid = false;
+                }
                 factor_fresh(
                     op,
                     gemm,
@@ -1047,6 +1230,7 @@ pub(super) fn solve(
                     &mut applications,
                     &mut work,
                     timers,
+                    &mut proj,
                 )?;
             }
             prefix = 0;
@@ -1093,6 +1277,7 @@ pub(super) fn solve(
             extra_products,
             timers,
         )?;
+        proj_load(&mut proj, op, first, k);
         append_into(products, extra_products)?;
         factored = basis.cols();
         lean_add(LeanCount::AppendedColumns, k);

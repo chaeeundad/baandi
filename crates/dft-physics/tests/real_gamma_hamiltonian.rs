@@ -300,6 +300,37 @@ fn real_nonlocal_expectation_matches_complex() {
         }
     }
 }
+/// C3a: the expectation values from caller-held projections run the same
+/// coupling sum; fed the projections of the latest apply of the same block
+/// (several projectors per atom, off-diagonal D, odd band count) they equal
+/// `nonlocal_expectation_values` bit for bit, at every thread budget.
+#[test]
+fn nonlocal_expectation_from_projections_is_bit_identical() {
+    let (basis, h) = fixture([[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]], 5, 1.2);
+    let n = basis.vectors().len();
+    let m = 7;
+    let x = states(n, m, 33);
+    for threads in [1, 3] {
+        let mut real =
+            RealHamiltonian::from_complex(&h, &basis, m, WorkerPool::new(threads).unwrap())
+                .unwrap();
+        assert!(real.projector_count() > 5, "several projectors per atom");
+        let mut y = RealMatrix::zeros(n, m).unwrap();
+        real.apply_block(&x, &mut y).unwrap();
+        let p = real.last_projections(m).unwrap().to_vec();
+        let mut from_p = vec![0.; m];
+        real.nonlocal_expectation_values_from_projections(&p, &mut from_p)
+            .unwrap();
+        let mut direct = vec![0.; m];
+        real.nonlocal_expectation_values(&x, &mut direct).unwrap();
+        assert_eq!(from_p, direct);
+        assert!(direct.iter().any(|v| v.abs() > 1e-6));
+        assert!(
+            real.nonlocal_expectation_values_from_projections(&p[1..], &mut from_p)
+                .is_err()
+        );
+    }
+}
 /// APPLY-LEAN (`BAANDI_APPLY_LEAN=on`) is bit-identical to the default apply,
 /// for plain and cached-projection applications, and rejects non-finite input
 /// with the same error.

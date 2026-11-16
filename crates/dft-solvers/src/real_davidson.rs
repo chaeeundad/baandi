@@ -92,6 +92,12 @@ pub struct RealDavidsonWorkspace {
     /// REUSE-PSI (work order C2): X and H X of the latest lean return, kept
     /// when the caller asked for them; allocated at the first such return.
     kept: Option<KeptStart>,
+    /// C3a (`ResearchOptions::lean_proj_cache`): P^T V of the lean basis
+    /// columns, allocated at the first lean solve with the switch on.
+    lean_proj: Option<lean::ProjCache>,
+    /// C3a: `lean_proj.pc` holds P^T X of the vectors the latest solve of this
+    /// workspace returned. Cleared at the start of every solve.
+    returned_projections: bool,
 }
 /// REUSE-PSI: the returned Ritz vectors X (all bands) and their H images,
 /// formed by the return rotation of the lean solve. `armed` makes the next
@@ -106,6 +112,12 @@ pub struct KeptStart {
     pub(crate) armed: bool,
     pub(crate) vectors: RealMatrix,
     pub(crate) products: RealMatrix,
+    /// C3a: P^T X of `vectors` (projector rows `projection_count`, column-major;
+    /// `projection_count == 0`: not kept). The operator is the same for a
+    /// kept start (the engine rebuilds the workspace with the operator), so
+    /// the projectors and hence P^T X stay valid with X.
+    pub(crate) projections: Vec<f64>,
+    pub(crate) projection_count: usize,
 }
 /// Largest absolute difference between a caller's `initial` block and the kept
 /// X for which the kept start is taken (the ORC packing tolerance; a round trip
@@ -122,6 +134,8 @@ impl RealDavidsonWorkspace {
                 armed: false,
                 vectors: RealMatrix::zeros(self.n, self.bands)?,
                 products: RealMatrix::zeros(self.n, self.bands)?,
+                projections: Vec::new(),
+                projection_count: 0,
             });
         }
         if let Some(k) = self.kept.as_mut() {
@@ -129,9 +143,23 @@ impl RealDavidsonWorkspace {
             if !on {
                 k.valid = false;
                 k.armed = false;
+                k.projection_count = 0;
             }
         }
         Ok(())
+    }
+    /// C3a (`BAANDI_LEAN_PROJ_CACHE=on`): P^T X of the vectors the latest solve
+    /// of this workspace returned (column-major, `projector_count()` rows of the
+    /// operator, one column per band), formed as (P^T V) C from the projector
+    /// products of the basis columns. `None` when that solve was not a lean
+    /// solve with the switch on, the operator exposes no projections, or the
+    /// cache was incomplete (a rotation it could not follow); the caller then
+    /// forms P^T X directly.
+    pub fn returned_projections(&self) -> Option<&[f64]> {
+        if !self.returned_projections {
+            return None;
+        }
+        self.lean_proj.as_ref().map(|c| c.pc.as_slice())
     }
     /// X and H X of the latest lean return, if kept and not consumed.
     pub fn kept_start(&self) -> Option<(&RealMatrix, &RealMatrix)> {
@@ -164,6 +192,7 @@ impl RealDavidsonWorkspace {
         if let Some(k) = self.kept.as_mut() {
             k.valid = false;
             k.armed = false;
+            k.projection_count = 0;
         }
     }
 }
@@ -201,6 +230,8 @@ impl RealDavidsonWorkspace {
             b6: None,
             lean: None,
             kept: None,
+            lean_proj: None,
+            returned_projections: false,
             n,
             bands,
             capacity,
@@ -467,6 +498,8 @@ impl RealDavidson {
                 .map_err(|e| SolverError::Application(e.to_string()))?,
         };
         self.ensure_workspace(n, capacity, &pool, workspace)?;
+        // C3a: returned projections belong to exactly one solve.
+        workspace.as_mut().unwrap().returned_projections = false;
         // Lean Davidson (work order phase B): Ritz-value solves only, never with
         // the experimental second vector (as B1).
         if options.lean && ritz && SecondVector::from_env() == SecondVector::Off {

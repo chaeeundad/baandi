@@ -54,7 +54,8 @@ pub use dft_solvers::real_davidson::{
     stage_seconds, stage_seconds_by_run_stage,
 };
 pub use gamma_real::{
-    GammaReal, GammaRealDiagnostics, PSI_KEEP_MAX_BYTES, ReusePsiCounters, reuse_psi_counters,
+    GammaReal, GammaRealDiagnostics, PSI_KEEP_MAX_BYTES, ReusePsiCounters, nl_audit_counters,
+    reuse_psi_counters,
 };
 
 /// Research radial conventions; default variants retain the legacy path.

@@ -234,6 +234,19 @@ pub(crate) fn nl_energy_real() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::NL_ENERGY_REAL))
 }
+/// C3a: audits of the real nonlocal energy that read the solver's kept
+/// projections (index 0) or formed P^T X directly (index 1).
+static NL_AUDITS: [std::sync::atomic::AtomicU64; 2] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 2];
+fn count_nl_audit(cached: bool) {
+    NL_AUDITS[usize::from(!cached)].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+/// C3a (`BAANDI_LEAN_PROJ_CACHE`): (audits from the kept projections, audits
+/// with a direct P^T X product) of the threads-only real Gamma path.
+pub fn nl_audit_counters() -> (u64, u64) {
+    let g = |i: usize| NL_AUDITS[i].load(std::sync::atomic::Ordering::Relaxed);
+    (g(0), g(1))
+}
 
 #[derive(PartialEq, Eq)]
 struct RealSolveKey {
@@ -610,12 +623,29 @@ pub(crate) fn solve_real_gamma(
     }
     // NL-ENERGY-REAL: nonlocal expectation values of the returned real vectors
     // for the energy audit of this map (threads-only path).
+    // C3a (`BAANDI_LEAN_PROJ_CACHE=on`): a lean return leaves P^T X = (P^T V) C
+    // of exactly these vectors in the workspace (same operator, this solve);
+    // otherwise the projector product is formed here.
     if comm.is_none() && nl_energy_real() {
         state.nl_values.resize(bands, 0.0);
-        state.nl_valid =
-            op.h.borrow_mut()
-                .nonlocal_expectation_values(&result.eigenvectors, &mut state.nl_values)
-                .is_ok();
+        let cached = state
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.returned_projections());
+        state.nl_valid = match cached {
+            Some(p) => {
+                count_nl_audit(true);
+                op.h.borrow()
+                    .nonlocal_expectation_values_from_projections(p, &mut state.nl_values)
+                    .is_ok()
+            }
+            None => {
+                count_nl_audit(false);
+                op.h.borrow_mut()
+                    .nonlocal_expectation_values(&result.eigenvectors, &mut state.nl_values)
+                    .is_ok()
+            }
+        };
     }
     let mut eigenvectors = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
     {

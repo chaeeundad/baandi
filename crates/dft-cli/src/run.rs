@@ -1383,6 +1383,11 @@ fn davidson_lean_json() -> serde_json::Value {
             "gram_schmidt":f.gram_schmidt as f64*1e-9,"fallback":f.fallback as f64*1e-9,
             "small":f.small as f64*1e-9,"total":f.total() as f64*1e-9},
         "eigen_full_solves":f.eigen_full,"eigen_full_m3":f.eigen_full_m3,
+        "proj_cache":{"mode":dft_numerics::switches::choice(dft_numerics::switches::Id::LEAN_PROJ_CACHE),
+            "returns":c.proj_cache_returns,"misses":c.proj_cache_misses,
+            "kept_loads":c.proj_cache_kept_loads,"columns_copied":c.proj_cache_columns,
+            "audits_from_cache":dft_engine::nl_audit_counters().0,
+            "audits_direct":dft_engine::nl_audit_counters().1},
         "note":"process totals of the serial real Davidson (all solves, both paths; MPI distributed solver not counted)"
     })
 }

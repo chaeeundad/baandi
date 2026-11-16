@@ -68,6 +68,37 @@ struct Coupling {
     values: Vec<f64>,
 }
 
+/// Per column of `projections` (count rows) the energy sum over atoms, then i,
+/// then j of d_ij p_i p_j (Ha), serial and in a fixed order.
+fn coupled_energies(
+    coupling: &[Coupling],
+    projections: &[f64],
+    count: usize,
+    out: &mut [f64],
+) -> Result<(), RealGammaError> {
+    for (band, value) in out.iter_mut().enumerate() {
+        let p = &projections[band * count..(band + 1) * count];
+        let mut energy = 0.0;
+        for atom in coupling {
+            let nc = atom.count;
+            for i in 0..nc {
+                for j in 0..nc {
+                    let d = atom.values[i * nc + j];
+                    if d == 0.0 {
+                        continue;
+                    }
+                    energy += d * (p[atom.start + i] * p[atom.start + j]);
+                }
+            }
+        }
+        *value = energy;
+    }
+    if out.iter().any(|v| !v.is_finite()) {
+        return Err(RealGammaError::NonFinite);
+    }
+    Ok(())
+}
+
 /// P D P^T on ORC blocks, with construction-sized scratch and deterministic GEMM.
 /// The source must describe the same Gamma basis as `half`; use
 /// `RealHamiltonian::from_complex` to validate the complete basis identity.
@@ -261,27 +292,30 @@ impl RealNonlocal {
                 self.projections.as_mut().subcols_mut(0, m),
             )?;
         }
-        for (band, value) in out.iter_mut().enumerate() {
-            let p = &self.projections.as_slice()[band * count..(band + 1) * count];
-            let mut energy = 0.0;
-            for atom in &self.coupling {
-                let nc = atom.count;
-                for i in 0..nc {
-                    for j in 0..nc {
-                        let d = atom.values[i * nc + j];
-                        if d == 0.0 {
-                            continue;
-                        }
-                        energy += d * (p[atom.start + i] * p[atom.start + j]);
-                    }
-                }
-            }
-            *value = energy;
+        coupled_energies(
+            &self.coupling,
+            &self.projections.as_slice()[..count * m],
+            count,
+            out,
+        )
+    }
+
+    /// C3a (`BAANDI_LEAN_PROJ_CACHE=on` callers): the per-column nonlocal
+    /// expectation values of `expectation_values` from projections P^T X the
+    /// caller already holds (column-major, `projector_count()` rows, one column
+    /// per entry of `out`), e.g. (P^T V) C kept by the eigensolver. The coupling
+    /// sum is the same code; with the same projections the result is bit for
+    /// bit that of `expectation_values`, with (P^T V) C equal to rounding.
+    pub fn expectation_values_from_projections(
+        &self,
+        projections: &[f64],
+        out: &mut [f64],
+    ) -> Result<(), RealGammaError> {
+        let count = self.projectors.cols();
+        if projections.len() != count * out.len() {
+            return Err(RealGammaError::Shape);
         }
-        if out.iter().any(|v| !v.is_finite()) {
-            return Err(RealGammaError::NonFinite);
-        }
-        Ok(())
+        coupled_energies(&self.coupling, projections, count, out)
     }
 
     /// Coupling and back product from `self.projections` (first `m` columns).
@@ -681,6 +715,16 @@ impl RealHamiltonian {
             return Err(RealGammaError::Shape);
         }
         self.nonlocal.expectation_values(x, out)
+    }
+    /// C3a: per-column nonlocal expectation values (Ha) from projections P^T X
+    /// the caller holds; see `RealNonlocal::expectation_values_from_projections`.
+    pub fn nonlocal_expectation_values_from_projections(
+        &self,
+        projections: &[f64],
+        out: &mut [f64],
+    ) -> Result<(), RealGammaError> {
+        self.nonlocal
+            .expectation_values_from_projections(projections, out)
     }
     /// Projections P^T X of the most recent `apply_block` (first `m` columns,
     /// column-major); see `RealNonlocal::last_projections`.

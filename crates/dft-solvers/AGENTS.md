@@ -107,3 +107,16 @@ equals the kept X to `KEPT_START_TOLERANCE` (1e-14); every other solve consumes
 or drops it (classic and residual solves invalidate it). Counters in
 `lean_counters()` (`kept_starts`, `kept_declined`, `kept_stored`, `kept_columns`).
 Test `tests/lean_davidson.rs::kept_start_skips_initial_application`.
+
+## Lean projection cache (C3a, 2026-11-16)
+
+`BAANDI_LEAN_PROJ_CACHE=on|off` (default off; `ResearchOptions::lean_proj_cache`):
+the lean solver keeps P^T V of its basis columns (`lean_davidson::ProjCache`;
+loaded through `copy_last_projections` after every apply of basis columns,
+rotated by the contraction coefficients, invalidated by the stage-2 fallback
+rotation) and, at a return with a complete cache, leaves P^T X = (P^T V) C in
+the workspace (`RealDavidsonWorkspace::returned_projections`, cleared at the
+start of every solve). The REUSE-PSI kept start carries the kept P^T X. The solve
+is bit-identical with the switch on and off; only the caller's nonlocal energy
+from these projections is rounding class. Counters in `lean_counters()`
+(`proj_cache_*`). Test `tests/lean_proj_cache.rs`; ledger C3a-LEAN-PROJ-CACHE.

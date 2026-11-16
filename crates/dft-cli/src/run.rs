@@ -902,6 +902,7 @@ pub fn execute_mode(
                 "algebra_stream":algebra_stream_json(),
                 "davidson_lean":davidson_lean_json(),
                 "reuse_psi":reuse_psi_json(),
+                "gemm_dispatch":gemm_dispatch_json(),
                 "h_vectors_recorded":r.history.iter().map(|h|h.operator_applications).sum::<usize>(),
                 "certificate_h_vectors":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.operator_applications).sum::<usize>(),
                 "note":"recorded = per-iteration solves in history; certificate = fixed-point certificate re-solves, reported only inside each history entry's fixed_point_certificate; total work is the sum"}},"energies":energies,
@@ -988,6 +989,19 @@ pub fn execute_mode(
     if dft_engine::work_accounting::ENABLED {
         result["davidson_work"] = json!(davidson_work);
     }
+    // F11: source-only GEMM accounting build (P14B_GEMM_ACCOUNTING=1): every
+    // GEMM shape with its route (`real.<site>.<route>` for the real wrappers).
+    if dft_numerics::linalg::accounting::ENABLED {
+        result["gemm_accounting"] = json!(
+            dft_numerics::linalg::accounting::take()
+                .iter()
+                .map(
+                    |r| json!({"site":r.site,"m":r.m,"n":r.n,"k":r.k,"calls":r.calls,
+                "gflop":r.flops as f64*1e-9,"seconds":r.nanoseconds as f64*1e-9})
+                )
+                .collect::<Vec<_>>()
+        );
+    }
     if opts.start_wavefunctions == dft_engine::StartWavefunctions::Atomic {
         let a = &r.atomic_start;
         result["atomic_start"] = json!({
@@ -1038,6 +1052,15 @@ pub fn execute_mode(
             "max_order": s.max_order, "sum_order_cubed": s.sum_cubed,
             "single_column": s.single_column, "bordered": s.bordered, "broadcast": s.broadcast,
         });
+        let (reduction_solves, reduction_sites) = dft_engine::parallel::reduction_stats();
+        let reductions = json!({
+            "solves": reduction_solves,
+            "buckets": dft_engine::parallel::REDUCTION_BUCKETS,
+            "sites": reduction_sites
+                .into_iter()
+                .map(|r| json!({"site": r.site, "calls": r.calls, "payload": r.payload, "histogram": r.histogram}))
+                .collect::<Vec<_>>(),
+        });
         result["parallel"] = json!({
             "model": model,
             "replicated_reason": replicated,
@@ -1053,14 +1076,19 @@ pub fn execute_mode(
             "ranks": crate::parallel::size(),
             "rank": crate::parallel::rank(),
             "distributed_solves": dft_engine::parallel::distributed_solves(),
+            // F21: `off` = count-only (calls and payload bytes, no clock; seconds 0).
+            "stage_timers": if dft_numerics::stage_clock::on() { "on" } else { "off" },
             "stages": dft_engine::parallel::stage_seconds()
                 .into_iter()
-                .map(|(name, seconds)| json!({"stage": name, "seconds": seconds}))
+                .zip(dft_engine::parallel::stage_calls())
+                .map(|((name, seconds), (_, calls))| json!({"stage": name, "seconds": seconds, "calls": calls}))
                 .collect::<Vec<_>>(),
             "reduced_solves": reduced_solves,
+            "reductions": reductions,
             "collectives": dft_engine::parallel::collective_stats()
                 .into_iter()
-                .map(|(op, calls, seconds)| json!({"op": op, "calls": calls, "seconds": seconds}))
+                .zip(dft_engine::parallel::collective_bytes())
+                .map(|((op, calls, seconds), (_, bytes))| json!({"op": op, "calls": calls, "seconds": seconds, "payload_bytes": bytes}))
                 .collect::<Vec<_>>(),
         });
     }
@@ -1566,7 +1594,36 @@ fn davidson_lean_json() -> serde_json::Value {
             "gram_schmidt":f.gram_schmidt as f64*1e-9,"fallback":f.fallback as f64*1e-9,
             "small":f.small as f64*1e-9,"total":f.total() as f64*1e-9},
         "eigen_full_solves":f.eigen_full,"eigen_full_m3":f.eigen_full_m3,
+        "proj_cache":{"mode":dft_numerics::switches::choice(dft_numerics::switches::Id::LEAN_PROJ_CACHE),
+            "returns":c.proj_cache_returns,"misses":c.proj_cache_misses,
+            "kept_loads":c.proj_cache_kept_loads,"columns_copied":c.proj_cache_columns,
+            "audits_from_cache":dft_engine::nl_audit_counters().0,
+            "audits_direct":dft_engine::nl_audit_counters().1},
         "note":"process totals of the serial real Davidson (all solves, both paths; MPI distributed solver not counted)"
+    })
+}
+
+/// F11: effective route, shape and fallback reason of every real GEMM wrapper
+/// call of this process (count-only; `dft_numerics::gemm_dispatch`).
+fn gemm_dispatch_json() -> serde_json::Value {
+    let rows = dft_numerics::gemm_dispatch::rows();
+    let (mut mkl, mut total) = (0_u64, 0_u64);
+    for r in &rows {
+        total += r.flops;
+        if r.is_mkl() {
+            mkl += r.flops;
+        }
+    }
+    json!({
+        "backend":if dft_numerics::MKL_BACKEND {"mkl"} else {"pure"},
+        "rows":rows.iter().map(|r|json!({"site":r.site,"route":r.route,"calls":r.calls,
+            "gflop":r.flops as f64*1e-9,"max_m":r.max_m,"max_n":r.max_n,"max_k":r.max_k})).collect::<Vec<_>>(),
+        "rows_as_if_mkl":dft_numerics::gemm_dispatch::rows_as_if_mkl().iter().map(|r|json!({"site":r.site,"route":r.route,"calls":r.calls,
+            "gflop":r.flops as f64*1e-9,"max_m":r.max_m,"max_n":r.max_n,"max_k":r.max_k})).collect::<Vec<_>>(),
+        "wide_requests":dft_numerics::gemm_dispatch::wide_requests().into_iter()
+            .map(|(s,c)|json!({"site":s,"calls":c})).collect::<Vec<_>>(),
+        "mkl_flop_fraction":if total > 0 {mkl as f64/total as f64} else {0.0},
+        "note":"process totals of the real GEMM wrappers (serial and MPI real paths); output m x n, reduction k, gflop = 2 m n k; route mkl_wide = dgemm only because of the wide entry; pure_output_bound / pure_panel_bound / pure_long / pure_short / pure_layout = fallback reason on an MKL build; pure_direct = direct pure-kernel entry; narrow = streaming kernels; rows_as_if_mkl (pure builds only) = the same calls under the route an MKL build with dgemm on would take (same rule and workspace); complex GEMMs (atomic start, k points) are not included"
     })
 }
 

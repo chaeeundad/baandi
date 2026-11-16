@@ -1350,7 +1350,7 @@ impl ScfProblem {
         if !integer_occupations || self.states.len() != 1 || k_points.len() != 1 {
             return Ok(None);
         }
-        let start = Instant::now();
+        let start = dft_numerics::stage_clock::start();
         let dims = self.grid.dims();
         let volume = self.cell.volume_bohr3();
         let occupations = &self.occupations;
@@ -1434,7 +1434,7 @@ impl ScfProblem {
         if self.states.len() != 1 {
             return Ok(None);
         }
-        let start = Instant::now();
+        let start = dft_numerics::stage_clock::start();
         let occupations = &self.occupations;
         let Some(rs) = self.states[0].real_solve.as_mut() else {
             return Ok(None);
@@ -1608,7 +1608,7 @@ impl ScfProblem {
                 // (distributed transform), plane-local sums and one tree_sum per
                 // cluster instead of full-grid transforms on every rank. All
                 // conditions are replicated, so every rank takes the same branch.
-                let cluster_clock = Instant::now();
+                let cluster_clock = dft_numerics::stage_clock::start();
                 if let Some(comm) = screen_comm.as_ref()
                     && let Some(rs) = state.real_solve.as_mut()
                     && let (Some(dist), Some(x), Some(md)) = (
@@ -1845,7 +1845,10 @@ impl ScfProblem {
                     crate::m2::count(crate::m2::Count::AtomicSplitStarts);
                 }
                 if crate::m2::active().is_some() {
-                    crate::m2::add(crate::m2::Stage::AtomicStart, atomic_clock);
+                    crate::m2::add(
+                        crate::m2::Stage::AtomicStart,
+                        dft_numerics::stage_clock::keep(atomic_clock),
+                    );
                 }
                 crate::phase_clock::add_atomic_start(atomic_clock);
                 Some(guesses)

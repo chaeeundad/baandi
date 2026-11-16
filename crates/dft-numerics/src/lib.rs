@@ -3,6 +3,7 @@ pub mod fused;
 pub mod fused_fold;
 pub mod fused_pair;
 pub mod fused_pair_plan;
+pub mod gemm_dispatch;
 pub use fused_pair::{PairDensityOperator, PairDensityWorkspace, PairMap, PairPlan};
 pub use fused_pair_plan::PairFusedPlan;
 pub mod linalg;
@@ -14,6 +15,7 @@ pub use real::{
 #[cfg(feature = "mkl")]
 pub mod mkl_backend;
 pub mod pool;
+pub mod stage_clock;
 pub mod switches;
 pub mod work_timers;
 #[cfg(not(feature = "mkl"))]

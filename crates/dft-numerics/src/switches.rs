@@ -208,12 +208,20 @@ table! {
         "distributed Davidson residuals and corrections by slice loops without per-element index checks; bit-identical";
     M2_CAPACITY: Kind::Choice { allowed: &["auto", "off"], default: "auto" }, "auto", "auto, off",
         "MPI runs with four or more ranks use 3 Davidson basis columns per band when scf.davidson_capacity_per_band is not set (auto), else the default 6 (off)";
+    STAGE_TIMERS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "F21: MPI stage and collective counters measure wall time (on, the earlier behaviour) or run count-only (off: calls and collective payload bytes counted, no clock read, stage seconds 0)";
     // MPI reduced eigenproblem (docs/performance/mpi-reduced-eigen-analysis.md); default off.
     M2_EIGEN: Kind::Choice { allowed: &["replicated", "root"], default: "replicated" }, "replicated",
         "replicated, root",
         "distributed Davidson reduced eigenproblem: replicated (every rank solves) or root (rank 0 solves and broadcasts the lowest pairs; bit-identical)";
     M2_B5: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "distributed Davidson bordered (secular) reduced eigen update when one column was appended (the serial B5; rounding class)";
+    // MPI solver workspace (review F06; ledger row M2-WORKSPACE-F06); bit-identical.
+    M2_WORKSPACE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "distributed Davidson keeps its basis, products, reduced matrix (fixed leading dimension, border update), Ritz, residual and orthonormalization buffers, GEMM and EVD workspaces in a per-rank workspace reused across iterations and solves (no per-iteration large allocation); bit-identical to off";
+    // MPI selected-root rotation (review F05; ledger row M2-SELECTED-ROOTS-F05); default off until dev08.
+    M2_SELECTED_ROOTS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "distributed Davidson Ritz-change (standard) solves: unconverged roots decided from the Ritz-value change first, Ritz vectors, H images and residuals of those roots only, all bands rotated only at return and restarts (the serial lean rule); strict solves unchanged; implies the workspace path; rounding class";
     // MPI coarse stage and certificate (docs/performance/mpi-coarse-certificate-analysis.md); default off.
     M2_SCREEN: Kind::Choice { allowed: &["replicated", "dist"], default: "dist" }, "dist",
         "replicated, dist",
@@ -264,6 +272,8 @@ table! {
         "basis-projection apply X -= Q S and MGS-B cross-panel apply through the per-panel dgemm at any block width (MKL builds; pure builds unchanged)";
     DAVIDSON: Kind::Choice { allowed: &["classic", "lean"], default: "lean" }, "lean", "classic, lean",
         "serial real Gamma Davidson of Ritz-value (standard) solves: classic (orthonormal basis, Ritz vectors of all bands in wide iterations) or lean (work order phase B: residuals of unconverged roots only, all-band Ritz vectors at return and contraction, unit-norm corrections without projection and a generalized reduced problem by Cholesky reduction; one orthonormalization when a pivot ratio of the basis overlap falls below eps/1e-12; rounding class)";
+    LEAN_PROJ_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "C3a: the lean real Gamma Davidson keeps P^T V (projector products) beside its basis (copied after each H apply, rotated at contraction and return) and the audit's nonlocal energy reads P^T X = (P^T V) C instead of a fresh n x n_proj x bands product; falls back to the direct product whenever the cache is incomplete; rounding class";
     // Physics (dft-physics).
     MKL_NONLOCAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "nonlocal products by dgemm on the real Gamma path";
@@ -569,6 +579,19 @@ mod tests {
         assert_eq!(
             eval(Id::M2_ORTHO, Some("serial")).0,
             Value::Choice("serial")
+        );
+        assert_eq!(eval(Id::M2_WORKSPACE, None), (Value::Choice("on"), Default));
+        assert_eq!(
+            eval(Id::M2_WORKSPACE, Some("off")),
+            (Value::Choice("off"), Env)
+        );
+        assert_eq!(
+            eval(Id::M2_SELECTED_ROOTS, None),
+            (Value::Choice("off"), Default)
+        );
+        assert_eq!(
+            eval(Id::M2_SELECTED_ROOTS, Some("on")),
+            (Value::Choice("on"), Env)
         );
         assert_eq!(eval(Id::M2_B5, None), (Value::Choice("off"), Default));
         assert_eq!(eval(Id::M2_B5, Some("on")), (Value::Choice("on"), Env));

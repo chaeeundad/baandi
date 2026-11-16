@@ -156,6 +156,13 @@ pub enum GemmSite {
     Reduced,
     Other,
 }
+impl GemmSite {
+    /// Row of the F11 dispatch counters (`gemm_dispatch::SITES`).
+    fn index(self) -> usize {
+        self as usize
+    }
+}
+use crate::gemm_dispatch::{self as dispatch, Route};
 #[cfg(feature = "mkl")]
 impl From<GemmSite> for dft_mkl::DgemmSite {
     fn from(site: GemmSite) -> Self {
@@ -291,15 +298,24 @@ impl RealGemmWorkspace {
         if hv.len() != m * k || out_v.len() != m * n || out_hv.len() != m * n {
             return Err(LinalgError::Dimension);
         }
+        // F11: the dgemm condition below as a route (two products, V C and HV C).
+        let mkl_route = if m > self.long {
+            Route::PureLong
+        } else if k > self.short || n > self.short {
+            Route::PureShort
+        } else if m == 0 {
+            Route::PureLayout
+        } else if PANEL.min(m) * n > self.short * self.short {
+            Route::PurePanel
+        } else {
+            Route::Mkl
+        };
+        let site = GemmSite::Rotate.index();
+        let route = self.count_route(site, mkl_route, [m, n, k], 2);
+        let _span = dispatch::span(site, route, m, 2 * n, k);
         #[cfg(feature = "mkl")]
         {
-            if self.dgemm_rotation
-                && m <= self.long
-                && k <= self.short
-                && n <= self.short
-                && m > 0
-                && PANEL.min(m) * n <= self.short * self.short
-            {
+            if route == Route::Mkl {
                 // Non-finite inputs are caught by the output scan below: a NaN or
                 // infinity in A, B propagates to every dependent entry of C.
                 let count = m.div_ceil(PANEL);
@@ -351,7 +367,7 @@ impl RealGemmWorkspace {
                 };
             }
         }
-        self.rotate_pair(
+        self.rotate_pair_impl(
             MatRef::from_column_major_slice(v, m, k),
             MatRef::from_column_major_slice(hv, m, k),
             MatRef::from_column_major_slice(c, k, n),
@@ -415,12 +431,21 @@ impl RealGemmWorkspace {
         ldb: usize,
         #[cfg_attr(not(feature = "mkl"), allow(unused_mut))] mut out: RealMatrixMut<'_>,
     ) -> Result<(), LinalgError> {
-        #[cfg(not(feature = "mkl"))]
-        let _ = wide;
-        #[cfg(not(feature = "mkl"))]
-        let _ = site;
+        // F11 counters: output m x n, reduction k.
+        let (m, k) = if op == RealOp::Transpose {
+            (a_cols, a_rows)
+        } else {
+            (a_rows, a_cols)
+        };
+        let n = b_cols;
+        if wide {
+            dispatch::record_wide_request(site.index());
+        }
+        let mkl_route = self.slices_route(wide, op, [m, n, k], a_rows, a_cols, lda, ldb, &out);
+        let route = self.count_route(site.index(), mkl_route, [m, n, k], 1);
+        let _span = dispatch::span(site.index(), route, m, n, k);
         let fallback = |ws: &mut Self, out: RealMatrixMut<'_>| {
-            ws.multiply_into(
+            ws.multiply_into_impl(
                 MatRef::from_column_major_slice_with_stride(a, a_rows, a_cols, lda),
                 op,
                 MatRef::from_column_major_slice_with_stride(
@@ -438,27 +463,8 @@ impl RealGemmWorkspace {
         };
         #[cfg(feature = "mkl")]
         {
-            let (m, k) = if op == RealOp::Transpose {
-                (a_cols, a_rows)
-            } else {
-                (a_rows, a_cols)
-            };
-            let n = b_cols;
             let count = if op == RealOp::Transpose { k } else { m }.div_ceil(PANEL);
-            if self.dgemm_rotation
-                && m > 0
-                && n > 0
-                && k > 0
-                && a_rows <= self.long
-                && a_cols <= self.short
-                && n <= self.short
-                && ((wide && op == RealOp::Identity) || m * n <= self.short * self.short)
-                && PANEL.min(m) * n <= self.short * self.short
-                && lda >= a_rows
-                && ldb >= k
-                && out.nrows() == m
-                && out.ncols() == n
-            {
+            if matches!(route, Route::Mkl | Route::MklWide) {
                 // Inputs are not scanned: a non-finite input makes the output
                 // non-finite (NaN and infinity propagate through every product and
                 // sum), and the output scan below rejects it.
@@ -491,6 +497,70 @@ impl RealGemmWorkspace {
             }
         }
         fallback(self, out)
+    }
+    /// F11: the route of one call given the route an MKL build with dgemm on
+    /// takes (`mkl_route`): pure builds report `PureBuild` (and count
+    /// `mkl_route` in the as-if-MKL table, so a pure run shows where an MKL
+    /// build would fall back), MKL builds with `BAANDI_MKL_DGEMM=off` report
+    /// `PureSwitch`. Counts `products` calls of shape [m, n, k].
+    fn count_route(
+        &self,
+        site: usize,
+        mkl_route: Route,
+        shape: [usize; 3],
+        products: usize,
+    ) -> Route {
+        #[cfg(feature = "mkl")]
+        let route = if self.dgemm_rotation {
+            mkl_route
+        } else {
+            Route::PureSwitch
+        };
+        #[cfg(not(feature = "mkl"))]
+        let route = Route::PureBuild;
+        let [m, n, k] = shape;
+        for _ in 0..products {
+            dispatch::record(site, route, m, n, k);
+            if !crate::MKL_BACKEND {
+                dispatch::record_as_if_mkl(site, mkl_route, m, n, k);
+            }
+        }
+        route
+    }
+    /// The dgemm condition of `multiply_slices_impl` (with dgemm enabled) as a
+    /// route: `Mkl` or `MklWide` exactly when every clause of the original
+    /// condition holds, otherwise the first failing clause (F11; the decision
+    /// is unchanged).
+    #[allow(clippy::too_many_arguments)]
+    fn slices_route(
+        &self,
+        wide: bool,
+        op: RealOp,
+        [m, n, k]: [usize; 3],
+        a_rows: usize,
+        a_cols: usize,
+        lda: usize,
+        ldb: usize,
+        out: &RealMatrixMut<'_>,
+    ) -> Route {
+        let square = self.short * self.short;
+        if m == 0 || n == 0 || k == 0 {
+            Route::PureLayout
+        } else if a_rows > self.long {
+            Route::PureLong
+        } else if a_cols > self.short || n > self.short {
+            Route::PureShort
+        } else if !(wide && op == RealOp::Identity) && m * n > square {
+            Route::PureOutput
+        } else if PANEL.min(m) * n > square {
+            Route::PurePanel
+        } else if lda < a_rows || ldb < k || out.nrows() != m || out.ncols() != n {
+            Route::PureLayout
+        } else if m * n > square {
+            Route::MklWide
+        } else {
+            Route::Mkl
+        }
     }
     pub fn set_rotate_kernel(&mut self, kernel: RotateKernel) {
         self.kernel = kernel;
@@ -557,6 +627,10 @@ impl RealGemmWorkspace {
         if !mkl && self.kernel == RotateKernel::Blocked {
             return Ok(false);
         }
+        // F11: two products per panel (V C and HV C), fused with the residual.
+        let site = GemmSite::Rotate.index();
+        let route = self.count_route(site, Route::Mkl, [m, n, k], 2);
+        let _span = dispatch::span(site, route, m, 2 * n, k);
         let tiles = &mut self.tiles[..count];
         let job = FusedPanels {
             v,
@@ -605,9 +679,17 @@ impl RealGemmWorkspace {
         }
         let count = m.div_ceil(PANEL);
         let parallel = count >= 4 && m.saturating_mul(n).saturating_mul(k) >= PARALLEL_WORK;
+        // F11: the dgemm condition below as a route.
+        let mkl_route = if PANEL.min(m) * n > self.short * self.short {
+            Route::PurePanel
+        } else {
+            Route::Mkl
+        };
+        let route = self.count_route(GemmSite::Rotate.index(), mkl_route, [m, n, k], 1);
+        let _span = dispatch::span(GemmSite::Rotate.index(), route, m, n, k);
         #[cfg(feature = "mkl")]
         {
-            if self.dgemm_rotation && PANEL.min(m) * n <= self.short * self.short {
+            if route == Route::Mkl {
                 let tiles = &mut self.tiles[..count];
                 let mut o = MatMut::from_column_major_slice_mut(out, m, n);
                 let mut work =
@@ -662,6 +744,7 @@ impl RealGemmWorkspace {
         if mq == 0 || k == 0 {
             return Ok(());
         }
+        dispatch::record(dispatch::UNLABELLED, Route::Narrow, mq, k, n);
         let parallel = mq > NARROW_PIECE && n.saturating_mul(mq).saturating_mul(k) >= PARALLEL_WORK;
         if parallel {
             self.pool
@@ -690,6 +773,7 @@ impl RealGemmWorkspace {
         if n == 0 || mq == 0 || s.ncols() == 0 {
             return Ok(());
         }
+        dispatch::record(dispatch::UNLABELLED, Route::Narrow, n, s.ncols(), mq);
         let parallel =
             n > NARROW_ROWS && n.saturating_mul(mq).saturating_mul(s.ncols()) >= PARALLEL_WORK;
         if parallel {
@@ -737,6 +821,9 @@ impl RealGemmWorkspace {
         let mkl = self.dgemm_rotation;
         #[cfg(not(feature = "mkl"))]
         let mkl = false;
+        // F11: B5 column groups (labelled `other`).
+        let route = self.count_route(GemmSite::Other.index(), Route::Mkl, [rows, n, k], 1);
+        let _span = dispatch::span(GemmSite::Other.index(), route, rows, n, k);
         let job = GroupJob {
             a,
             rows,
@@ -760,6 +847,20 @@ impl RealGemmWorkspace {
     /// Each side retains the original 256-row pieces and bounded kernel calls
     /// (24 independent pieces for a 2969-row pair). The guard is unchanged.
     pub fn rotate_pair(
+        &mut self,
+        v: RealMatrixRef<'_>,
+        hv: RealMatrixRef<'_>,
+        c: RealMatrixRef<'_>,
+        out_v: RealMatrixMut<'_>,
+        out_hv: RealMatrixMut<'_>,
+    ) -> Result<(), LinalgError> {
+        let (m, k, n) = (v.nrows(), v.ncols(), c.ncols());
+        dispatch::record(dispatch::UNLABELLED, Route::PureDirect, m, n, k);
+        dispatch::record(dispatch::UNLABELLED, Route::PureDirect, m, n, k);
+        let _span = dispatch::span(dispatch::UNLABELLED, Route::PureDirect, m, 2 * n, k);
+        self.rotate_pair_impl(v, hv, c, out_v, out_hv)
+    }
+    fn rotate_pair_impl(
         &mut self,
         v: RealMatrixRef<'_>,
         hv: RealMatrixRef<'_>,
@@ -824,6 +925,22 @@ impl RealGemmWorkspace {
     /// Overwrite output with A B or A^T B. Dimensions, capacity, and finiteness
     /// are checked. Zero reduction length produces zeros. Inputs may be views.
     pub fn multiply_into(
+        &mut self,
+        a: RealMatrixRef<'_>,
+        op: RealOp,
+        b: RealMatrixRef<'_>,
+        out: RealMatrixMut<'_>,
+    ) -> Result<(), LinalgError> {
+        let (m, k) = if op == RealOp::Transpose {
+            (a.ncols(), a.nrows())
+        } else {
+            (a.nrows(), a.ncols())
+        };
+        dispatch::record(dispatch::UNLABELLED, Route::PureDirect, m, b.ncols(), k);
+        let _span = dispatch::span(dispatch::UNLABELLED, Route::PureDirect, m, b.ncols(), k);
+        self.multiply_into_impl(a, op, b, out)
+    }
+    fn multiply_into_impl(
         &mut self,
         a: RealMatrixRef<'_>,
         op: RealOp,
@@ -1870,6 +1987,72 @@ mod tests {
     use super::*;
     use crate::linalg::{ComplexMatrix, GemmWorkspace, MatrixOp};
     use num_complex::Complex64;
+    /// F11: `slices_route` selects dgemm exactly when the dgemm condition of
+    /// `multiply_slices_impl` before the counters held (copied verbatim here).
+    #[cfg(feature = "mkl")]
+    #[test]
+    fn slices_route_matches_original_condition() {
+        let pool = WorkerPool::new(1).unwrap();
+        for (long, short) in [(600, 12), (600, 64), (1000, 40)] {
+            let mut ws = RealGemmWorkspace::with_pool(long, short, pool.clone()).unwrap();
+            for dgemm in [true, false] {
+                ws.dgemm_rotation = dgemm;
+                for &a_rows in &[0_usize, 1, 30, 300, 600, 1001] {
+                    for &a_cols in &[0, 5, 12, 40, 65] {
+                        for &b_cols in &[0, 3, 11, 40, 70] {
+                            for op in [RealOp::Identity, RealOp::Transpose] {
+                                for wide in [false, true] {
+                                    for (dl, db) in [(0, 0), (1, 0)] {
+                                        let (m, k) = if op == RealOp::Transpose {
+                                            (a_cols, a_rows)
+                                        } else {
+                                            (a_rows, a_cols)
+                                        };
+                                        let n = b_cols;
+                                        let lda = a_rows.saturating_sub(dl);
+                                        let ldb = k + db;
+                                        let mut buf = vec![0.; m * n];
+                                        let out =
+                                            MatMut::from_column_major_slice_mut(&mut buf, m, n);
+                                        let original = dgemm
+                                            && m > 0
+                                            && n > 0
+                                            && k > 0
+                                            && a_rows <= ws.long
+                                            && a_cols <= ws.short
+                                            && n <= ws.short
+                                            && ((wide && op == RealOp::Identity)
+                                                || m * n <= ws.short * ws.short)
+                                            && PANEL.min(m) * n <= ws.short * ws.short
+                                            && lda >= a_rows
+                                            && ldb >= k
+                                            && out.nrows() == m
+                                            && out.ncols() == n;
+                                        let mkl_route = ws.slices_route(
+                                            wide,
+                                            op,
+                                            [m, n, k],
+                                            a_rows,
+                                            a_cols,
+                                            lda,
+                                            ldb,
+                                            &out,
+                                        );
+                                        let route = ws.count_route(5, mkl_route, [m, n, k], 1);
+                                        assert_eq!(
+                                            original,
+                                            matches!(route, Route::Mkl | Route::MklWide),
+                                            "{long} {short} {a_rows} {a_cols} {b_cols} {op:?} {wide} {route:?}"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     fn fixture(r: usize, c: usize) -> RealMatrix {
         RealMatrix::new(
             r,

@@ -40,6 +40,12 @@ pub trait DistributedRealOperator {
     ) -> Result<(), SolverError>;
 }
 
+mod workspace;
+pub use workspace::{
+    DistributedDavidsonWorkspace, WorkspaceStats, release_workspace, set_iteration_probe,
+    workspace_stats,
+};
+
 fn comm_error(e: dft_mpi::MpiError) -> SolverError {
     SolverError::Application(e.to_string())
 }
@@ -47,7 +53,7 @@ fn comm_error(e: dft_mpi::MpiError) -> SolverError {
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-const STAGES: [&str; 8] = [
+pub const STAGES: [&str; 8] = [
     "reduced_gram",
     "reduced_eigen",
     "rotate",
@@ -58,9 +64,11 @@ const STAGES: [&str; 8] = [
     "other_solve",
 ];
 static STAGE_NANOS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+static STAGE_CALLS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
 
 /// Wall seconds of this process in each stage of the distributed solver (cheap
 /// per-stage accumulation, no I/O in the loop; read once for the run report).
+/// All 0 with `BAANDI_STAGE_TIMERS=off` (count-only; `stage_calls` still counts).
 pub fn stage_seconds() -> Vec<(&'static str, f64)> {
     (0..8)
         .map(|i| {
@@ -71,8 +79,21 @@ pub fn stage_seconds() -> Vec<(&'static str, f64)> {
         })
         .collect()
 }
-fn stage_add(i: usize, start: Instant) {
-    STAGE_NANOS[i].fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+/// Entries into each stage (both time modes), in `STAGES` order.
+pub fn stage_calls() -> Vec<(&'static str, u64)> {
+    (0..8)
+        .map(|i| (STAGES[i], STAGE_CALLS[i].load(Ordering::Relaxed)))
+        .collect()
+}
+/// F21: `start` from `dft_numerics::stage_clock::start` (`None` count-only).
+fn stage_add(i: usize, start: Option<Instant>) {
+    STAGE_CALLS[i].fetch_add(1, Ordering::Relaxed);
+    if start.is_some() {
+        STAGE_NANOS[i].fetch_add(
+            dft_numerics::stage_clock::elapsed_ns(start),
+            Ordering::Relaxed,
+        );
+    }
 }
 
 // Reduced eigenproblem accounting (docs/performance/mpi-reduced-eigen-analysis.md):
@@ -152,6 +173,165 @@ fn record_solve(m: usize, fresh: usize) {
     }
 }
 
+// Ritz rotations V C and (H V) C: rotation calls (pairs), output columns,
+// flops (2 n m c per product, both products counted). Process-wide.
+static ROTATION_COUNTS: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
+
+/// Ritz rotation work of the distributed solver (review F05 accounting).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RotationStats {
+    /// Rotation pairs (V C and (H V) C together).
+    pub rotations: u64,
+    /// Output columns of those pairs (per product).
+    pub columns: u64,
+    /// GEMM flops of both products, 2 n_local m c each.
+    pub flops: u64,
+}
+
+/// The rotation work accumulated so far by this process.
+pub fn rotation_stats() -> RotationStats {
+    let load = |i: usize| ROTATION_COUNTS[i].load(Ordering::Relaxed);
+    RotationStats {
+        rotations: load(0),
+        columns: load(1),
+        flops: load(2),
+    }
+}
+
+fn rotation_add(nl: usize, m: usize, cols: usize) {
+    ROTATION_COUNTS[0].fetch_add(1, Ordering::Relaxed);
+    ROTATION_COUNTS[1].fetch_add(cols as u64, Ordering::Relaxed);
+    ROTATION_COUNTS[2].fetch_add(4 * (nl * m * cols) as u64, Ordering::Relaxed);
+}
+
+// ---- F08: reduction counters (count only; order and semantics unchanged) ----
+// Every tree sum issued inside a distributed solve passes through `Counted`,
+// which adds one call and the payload length to the histogram of the site the
+// solver last declared on this thread (`site`). No timing, no allocation.
+const REDUCTION_SITES: [&str; 10] = [
+    "reduced_gram",
+    "residual_norms",
+    "ortho_normalize",
+    "ortho_projection",
+    "panel_cross",
+    "panel_dot",
+    "panel_norm",
+    "restart_defect",
+    "apply",
+    "setup",
+];
+/// Payload buckets (doubles per call): 1, 2-8, 9-64, 65-512, 513-4096, above.
+pub const REDUCTION_BUCKETS: [&str; 6] = ["1", "2-8", "9-64", "65-512", "513-4096", ">4096"];
+static REDUCTION_CALLS: [[AtomicU64; 6]; 10] = [const { [const { AtomicU64::new(0) }; 6] }; 10];
+static REDUCTION_PAYLOAD: [AtomicU64; 10] = [const { AtomicU64::new(0) }; 10];
+static REDUCTION_SOLVES: AtomicU64 = AtomicU64::new(0);
+thread_local! {
+    static SITE: std::cell::Cell<usize> = const { std::cell::Cell::new(9) };
+}
+
+/// Declare the reduction site of the following tree sums on this thread.
+pub(crate) fn site(s: Site) {
+    SITE.with(|c| c.set(s as usize));
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Site {
+    ReducedGram = 0,
+    ResidualNorms = 1,
+    OrthoNormalize = 2,
+    OrthoProjection = 3,
+    PanelCross = 4,
+    PanelDot = 5,
+    PanelNorm = 6,
+    RestartDefect = 7,
+    Apply = 8,
+    Setup = 9,
+}
+
+fn bucket(len: usize) -> usize {
+    match len {
+        0 | 1 => 0,
+        2..=8 => 1,
+        9..=64 => 2,
+        65..=512 => 3,
+        513..=4096 => 4,
+        _ => 5,
+    }
+}
+
+/// Tree-sum calls and payload of one site of the distributed solver.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReductionSite {
+    pub site: &'static str,
+    /// Calls per payload bucket (`REDUCTION_BUCKETS`).
+    pub histogram: [u64; 6],
+    pub calls: u64,
+    /// Doubles reduced in total.
+    pub payload: u64,
+}
+
+/// Reduction counts of this process (summed over the simulated ranks of a test
+/// process) by site, and the number of distributed solves they cover.
+pub fn reduction_stats() -> (u64, Vec<ReductionSite>) {
+    let sites = REDUCTION_SITES
+        .iter()
+        .enumerate()
+        .map(|(i, &name)| {
+            let histogram: [u64; 6] =
+                std::array::from_fn(|b| REDUCTION_CALLS[i][b].load(Ordering::Relaxed));
+            ReductionSite {
+                site: name,
+                histogram,
+                calls: histogram.iter().sum(),
+                payload: REDUCTION_PAYLOAD[i].load(Ordering::Relaxed),
+            }
+        })
+        .collect();
+    (REDUCTION_SOLVES.load(Ordering::Relaxed), sites)
+}
+
+/// The solver's view of the communicator: forwards every call unchanged and
+/// counts the tree sums by site.
+struct Counted<'a, C: Collective> {
+    inner: &'a C,
+}
+impl<C: Collective> Collective for Counted<'_, C> {
+    fn rank(&self) -> usize {
+        self.inner.rank()
+    }
+    fn size(&self) -> usize {
+        self.inner.size()
+    }
+    fn barrier(&self) -> Result<(), dft_mpi::MpiError> {
+        self.inner.barrier()
+    }
+    fn allgatherv_f64(
+        &self,
+        local: &[f64],
+        counts: &[usize],
+        out: &mut [f64],
+    ) -> Result<(), dft_mpi::MpiError> {
+        self.inner.allgatherv_f64(local, counts, out)
+    }
+    fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
+        let s = SITE.with(|c| c.get());
+        REDUCTION_CALLS[s][bucket(local.len())].fetch_add(1, Ordering::Relaxed);
+        REDUCTION_PAYLOAD[s].fetch_add(local.len() as u64, Ordering::Relaxed);
+        self.inner.tree_sum_f64(local, out)
+    }
+    fn bcast_f64(&self, data: &mut [f64], root: usize) -> Result<(), dft_mpi::MpiError> {
+        self.inner.bcast_f64(data, root)
+    }
+    fn alltoall_f64(
+        &self,
+        send: &[f64],
+        block: usize,
+        recv: &mut [f64],
+    ) -> Result<(), dft_mpi::MpiError> {
+        self.inner.alltoall_f64(send, block, recv)
+    }
+}
+
 /// Row partition: `index[r]` lists the global row of every local row of rank `r`
 /// (contiguous blocks for M1, the stick partition for M2c). Algebra helpers only
 /// use the local row count; the partition matters at the replicated interface.
@@ -225,7 +405,7 @@ fn apply_distributed<C: Collective>(
     op: &dyn RealLinearOperator,
     x_local: &RealMatrix,
 ) -> Result<RealMatrix, SolverError> {
-    let apply_start = Instant::now();
+    let apply_start = dft_numerics::stage_clock::start();
     let w = x_local.cols();
     let n = layout.n;
     let full = gather_full(comm, layout, x_local)?;
@@ -238,7 +418,7 @@ fn apply_distributed<C: Collective>(
     let mut mine = RealMatrix::zeros(n, owned)?;
     if owned > 0 {
         let x = RealMatrix::new(n, owned, full.as_slice()[first * n..last * n].to_vec())?;
-        let op_start = Instant::now();
+        let op_start = dft_numerics::stage_clock::start();
         op.apply_block(&x, &mut mine)?;
         stage_add(6, op_start);
         if mine.rows() != n
@@ -297,6 +477,16 @@ pub struct DistributedTuning {
     /// eigenproblem when exactly one column was appended (the serial solver's B5;
     /// rounding class).
     pub bordered: bool,
+    /// `BAANDI_M2_WORKSPACE=on`: run on the persistent per-rank workspace
+    /// (`workspace.rs`; storage only, bit-identical).
+    pub workspace: bool,
+    /// `BAANDI_M2_SELECTED_ROOTS=on`: on Ritz-change (standard) solves, decide
+    /// the unconverged roots from the Ritz-value change before any rotation and
+    /// form Ritz vectors, H images and residuals for those roots only; all bands
+    /// are rotated only at return and at restarts (review F05, the serial lean
+    /// solver's rule). Runs on the workspace path. Strict (residual) solves are
+    /// unchanged. Rounding class (column subsets of the same GEMM).
+    pub selected_roots: bool,
 }
 impl DistributedTuning {
     /// The switches of this process; the serial-order panel and DGKS rules are the
@@ -319,6 +509,8 @@ impl DistributedTuning {
             lean: on(Id::M2_LEAN),
             eigen_root: choice(Id::M2_EIGEN) == "root",
             bordered: on(Id::M2_B5),
+            workspace: on(Id::M2_WORKSPACE),
+            selected_roots: on(Id::M2_SELECTED_ROOTS),
         }
     }
     /// The tuning of the calling thread: the test override when set
@@ -368,6 +560,7 @@ fn orthonormalize_serial<C: Collective>(
 ) -> Result<RealMatrix, SolverError> {
     let rows = block.rows();
     let mut x = block.clone();
+    site(Site::OrthoNormalize);
     let norms = column_norms_squared(comm, &x)?;
     for (j, nn) in norms.iter().enumerate() {
         let len = nn.sqrt();
@@ -385,6 +578,7 @@ fn orthonormalize_serial<C: Collective>(
         if let Some(q) = against {
             let mut overlap = RealMatrix::zeros(q.cols(), count)?;
             let mut scratch = RealMatrix::zeros(rows, count)?;
+            site(Site::OrthoProjection);
             project_out_with(
                 comm,
                 ws,
@@ -438,6 +632,7 @@ fn panel_gram_schmidt<C: Collective>(
             let q = RealMatrix::new(rows, kept, out.as_slice()[..kept * rows].to_vec())?;
             let mut overlap = RealMatrix::zeros(kept, w)?;
             let mut scratch = RealMatrix::zeros(rows, w)?;
+            site(Site::PanelCross);
             for _ in 0..2 {
                 project_out_with(comm, ws, &q, &mut p, &mut overlap, &mut scratch, wide)?;
             }
@@ -458,6 +653,7 @@ fn panel_gram_schmidt<C: Collective>(
                     }
                     sums.clear();
                     sums.resize(k, 0.0);
+                    site(Site::PanelDot);
                     comm.tree_sum_f64(&local, &mut sums).map_err(comm_error)?;
                     for (c, s) in (first..kept).zip(&sums) {
                         let q = &out.as_slice()[c * rows..(c + 1) * rows];
@@ -469,6 +665,7 @@ fn panel_gram_schmidt<C: Collective>(
             }
             let local_norm = [v.iter().map(|a| a * a).sum::<f64>()];
             let mut total = [0.0];
+            site(Site::PanelNorm);
             comm.tree_sum_f64(&local_norm, &mut total)
                 .map_err(comm_error)?;
             let len = total[0].sqrt();
@@ -676,6 +873,10 @@ impl crate::RealDavidson {
         certify: bool,
         capacity_per_band: usize,
     ) -> Result<RealEigenSolution, SolverError> {
+        let counted = Counted { inner: comm };
+        let comm = &counted;
+        REDUCTION_SOLVES.fetch_add(1, Ordering::Relaxed);
+        site(Site::Setup);
         let n = op.dimension();
         if diagonal.len() != n {
             return Err(SolverError::InvalidParameter("bands or diagonal length"));
@@ -684,12 +885,40 @@ impl crate::RealDavidson {
         let nl = layout.nl();
         let offset = layout.index[comm.rank()].first().copied().unwrap_or(0);
         let diag_local = &diagonal[offset..offset + nl];
+        let tuning = DistributedTuning::current();
+        if tuning.workspace || tuning.selected_roots {
+            let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), SolverError> {
+                site(Site::Apply);
+                let r = apply_distributed(comm, &layout, op, x)?;
+                y.as_mut_slice().copy_from_slice(r.as_slice());
+                Ok(())
+            };
+            return workspace::solve_core_ws(
+                self,
+                comm,
+                &layout,
+                op.worker_pool(),
+                op.inner_threads(),
+                &mut apply,
+                initial,
+                diag_local,
+                Some(diagonal),
+                policy,
+                ritz,
+                certify,
+                capacity_per_band,
+                tuning,
+            );
+        }
         let pool = match op.worker_pool() {
             Some(p) => p,
             None => WorkerPool::new(op.inner_threads())
                 .map_err(|e| SolverError::Application(e.to_string()))?,
         };
-        let mut apply = |x: &RealMatrix| apply_distributed(comm, &layout, op, x);
+        let mut apply = |x: &RealMatrix| {
+            site(Site::Apply);
+            apply_distributed(comm, &layout, op, x)
+        };
         self.solve_core(
             comm,
             &layout,
@@ -702,7 +931,7 @@ impl crate::RealDavidson {
             ritz,
             certify,
             capacity_per_band,
-            DistributedTuning::current(),
+            tuning,
         )
     }
 
@@ -753,6 +982,10 @@ impl crate::RealDavidson {
         capacity_per_band: usize,
         tuning: DistributedTuning,
     ) -> Result<RealEigenSolution, SolverError> {
+        let counted = Counted { inner: comm };
+        let comm = &counted;
+        REDUCTION_SOLVES.fetch_add(1, Ordering::Relaxed);
+        site(Site::Setup);
         let n = op.global_len();
         let mine: Vec<usize> = op.local_rows().to_vec();
         if diagonal_local.len() != mine.len() || mine.iter().any(|&r| r >= n) {
@@ -788,14 +1021,49 @@ impl crate::RealDavidson {
             counts,
             index,
         };
+        let nl = layout.nl();
+        if tuning.workspace || tuning.selected_roots {
+            let supplied = op.worker_pool();
+            let threads = op.inner_threads();
+            let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), SolverError> {
+                site(Site::Apply);
+                let start = dft_numerics::stage_clock::start();
+                y.as_mut_slice().fill(0.0);
+                op.apply_block(comm, x, y)?;
+                stage_add(5, start);
+                stage_add(6, start);
+                if y.as_slice().iter().any(|v| !v.is_finite()) {
+                    return Err(SolverError::Application(
+                        "operator returned an invalid block".into(),
+                    ));
+                }
+                Ok(())
+            };
+            return workspace::solve_core_ws(
+                self,
+                comm,
+                &layout,
+                supplied,
+                threads,
+                &mut apply,
+                initial,
+                diagonal_local,
+                None,
+                policy,
+                ritz,
+                certify,
+                capacity_per_band,
+                tuning,
+            );
+        }
         let pool = match op.worker_pool() {
             Some(p) => p,
             None => WorkerPool::new(op.inner_threads())
                 .map_err(|e| SolverError::Application(e.to_string()))?,
         };
-        let nl = layout.nl();
         let mut apply = |x: &RealMatrix| -> Result<RealMatrix, SolverError> {
-            let start = Instant::now();
+            site(Site::Apply);
+            let start = dft_numerics::stage_clock::start();
             let mut y = RealMatrix::zeros(nl, x.cols())?;
             op.apply_block(comm, x, &mut y)?;
             stage_add(5, start);
@@ -970,12 +1238,13 @@ impl crate::RealDavidson {
         let buffer: Vec<bool> = (0..bands).map(|j| j >= policy.strict_bands).collect();
 
         for iteration in 1..=self.max_iterations {
+            workspace::call_probe(iteration);
             let m = basis.cols();
             max_basis = max_basis.max(m);
             // Reduced matrix V^T HV (replicated), symmetrised from the upper triangle.
             // Incremental, as in the serial solver: only the columns added since the last
             // iteration are formed (m x new products); the rest is reused.
-            let t0 = Instant::now();
+            let t0 = dft_numerics::stage_clock::start();
             let mut reduced = RealMatrix::zeros(m, m)?;
             for c in 0..reduced_width {
                 for r in 0..reduced_width {
@@ -989,6 +1258,7 @@ impl crate::RealDavidson {
                 .as_mut_slice()
                 .copy_from_slice(&products.as_slice()[reduced_width * nl..m * nl]);
             let mut block = RealMatrix::zeros(m, fresh)?;
+            site(Site::ReducedGram);
             gram(comm, &mut ws, &basis, &fresh_products, &mut block)?;
             for c in reduced_width..m {
                 for r in 0..=c {
@@ -1002,7 +1272,7 @@ impl crate::RealDavidson {
             reduced_prev = reduced.clone();
             let mut values = vec![0.0; m];
             let mut coefficients = RealMatrix::zeros(m, m)?;
-            let t0 = Instant::now();
+            let t0 = dft_numerics::stage_clock::start();
             record_solve(m, fresh);
             let mut status: Result<(), SolverError> = Ok(());
             if let Some(eig) = eig.as_mut() {
@@ -1038,12 +1308,13 @@ impl crate::RealDavidson {
             }
             status?;
             stage_add(1, t0);
-            let t0 = Instant::now();
+            let t0 = dft_numerics::stage_clock::start();
             let lowest = RealMatrix::new(m, bands, coefficients.as_slice()[..m * bands].to_vec())?;
             let mut vectors = RealMatrix::zeros(nl, bands)?;
             let mut rotated = RealMatrix::zeros(nl, bands)?;
             rotate_local_with(&mut ws, &basis, &lowest, &mut vectors, wide)?;
             rotate_local_with(&mut ws, &products, &lowest, &mut rotated, wide)?;
+            rotation_add(nl, m, bands);
             stage_add(2, t0);
             let residual_of = |hv: &RealMatrix,
                                v: &RealMatrix,
@@ -1069,13 +1340,14 @@ impl crate::RealDavidson {
                         }
                     }
                 }
+                site(Site::ResidualNorms);
                 let norms = column_norms_squared(comm, &r)?
                     .into_iter()
                     .map(f64::sqrt)
                     .collect();
                 Ok((r, norms))
             };
-            let t0 = Instant::now();
+            let t0 = dft_numerics::stage_clock::start();
             let (mut residual_block, mut residuals) = residual_of(&rotated, &vectors, comm)?;
             stage_add(3, t0);
             let mut certified = false;
@@ -1171,6 +1443,7 @@ impl crate::RealDavidson {
                 restarts += 1;
                 reduced_width = 0;
                 let mut defect = RealMatrix::zeros(bands, bands)?;
+                site(Site::RestartDefect);
                 gram(comm, &mut ws, &vectors, &vectors, &mut defect)?;
                 let mut worst = 0.0_f64;
                 for j in 0..bands {
@@ -1188,7 +1461,7 @@ impl crate::RealDavidson {
                     applications += basis.cols();
                 }
             }
-            let t0 = Instant::now();
+            let t0 = dft_numerics::stage_clock::start();
             let mut extra =
                 orthonormalize_tuned(comm, &mut ws, Some(&basis), &corrections, &tuning, panel)?;
             stage_add(4, t0);

@@ -414,7 +414,7 @@ impl DistributedRealHamiltonian {
         local: &[f64],
         full: &mut [f64],
     ) -> Result<(), DistributedRealError> {
-        let start = Instant::now();
+        let start = dft_numerics::stage_clock::start();
         self.fft
             .gather_planes(comm, local, &mut self.gather_scratch, full)?;
         stage_add(Stage::Gather, start);
@@ -509,7 +509,7 @@ impl DistributedRealHamiltonian {
         volume: f64,
         out: &mut [f64],
     ) -> Result<(), DistributedRealError> {
-        let start = Instant::now();
+        let start = dft_numerics::stage_clock::start();
         if weights.len() != x.cols() || !(volume.is_finite() && volume > 0.) {
             return Err(DistributedRealError::Shape);
         }
@@ -531,7 +531,7 @@ impl DistributedRealHamiltonian {
         x: &RealMatrix,
         out: &mut [f64],
     ) -> Result<(), DistributedRealError> {
-        let start = Instant::now();
+        let start = dft_numerics::stage_clock::start();
         self.band_planes(comm, x, out, |_, v| v)?;
         stage_add(Stage::Values, start);
         COUNTS[Count::Values as usize].fetch_add(1, Ordering::Relaxed);
@@ -615,7 +615,7 @@ impl DistributedRealHamiltonian {
         x: &RealMatrix,
         out: &mut [f64],
     ) -> Result<(), DistributedRealError> {
-        let start = Instant::now();
+        let start = dft_numerics::stage_clock::start();
         let n_loc = self.rows.len();
         let m = x.cols();
         if comm.size() != self.ranks
@@ -759,13 +759,13 @@ impl DistributedRealHamiltonian {
         let ranks = self.ranks;
 
         // (1) mirror rows to the ranks that own the minus positions.
-        let t0 = Instant::now();
+        let t0 = dft_numerics::stage_clock::start();
         self.exchange_mirror_rows(comm, xs, m)?;
         stage_add(Stage::Mirror, t0);
 
         // (2) pack every pair, distributed local-potential apply (one transpose per
         // direction for the whole block when batched), stage mirror h.
-        let t0 = Instant::now();
+        let t0 = dft_numerics::stage_clock::start();
         for t in 0..pairs {
             Self::pack_pair(
                 &self.src,
@@ -778,7 +778,7 @@ impl DistributedRealHamiltonian {
             );
         }
         stage_add(Stage::PackUnpack, t0);
-        let t0 = Instant::now();
+        let t0 = dft_numerics::stage_clock::start();
         if self.batched {
             self.fft.apply_local_batch(
                 comm,
@@ -797,7 +797,7 @@ impl DistributedRealHamiltonian {
             }
         }
         stage_add(Stage::Fft, t0);
-        let t0 = Instant::now();
+        let t0 = dft_numerics::stage_clock::start();
         for t in 0..pairs {
             let out = &self.hbuf[t * local_len..(t + 1) * local_len];
             for &(k, id) in &self.in_items {
@@ -810,7 +810,7 @@ impl DistributedRealHamiltonian {
 
         // (3) mirror h back to the representative owners.
         if mi > 0 {
-            let t0 = Instant::now();
+            let t0 = dft_numerics::stage_clock::start();
             let blk = mi * 2 * pairs;
             comm.alltoall_f64(
                 &self.hsend[..ranks * blk],
@@ -821,7 +821,7 @@ impl DistributedRealHamiltonian {
         }
 
         // Unpack, kinetic term.
-        let t0 = Instant::now();
+        let t0 = dft_numerics::stage_clock::start();
         let ys = y.as_mut_slice();
         for t in 0..pairs {
             let (ca, cb) = (2 * t, (2 * t + 1 < m).then_some(2 * t + 1));
@@ -858,7 +858,7 @@ impl DistributedRealHamiltonian {
         stage_add(Stage::PackUnpack, t0);
 
         // Nonlocal: P^T X local + tree_sum, replicated coupling, P W local.
-        let t0 = Instant::now();
+        let t0 = dft_numerics::stage_clock::start();
         let count = self.count;
         if count > 0 {
             self.projections_reduced(comm, x)?;
@@ -937,9 +937,28 @@ const STAGE_NAMES: [&str; 8] = [
     "gather_planes",
     "band_values",
 ];
+const STAGE_CALL_NAMES: [&str; 8] = [
+    "calls.apply_mirror_exchange",
+    "calls.apply_pack_unpack_kinetic",
+    "calls.apply_fft_transposes",
+    "calls.apply_nonlocal",
+    "calls.band_densities",
+    "calls.nonlocal_energy",
+    "calls.gather_planes",
+    "calls.band_values",
+];
 static STAGE_NANOS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
-fn stage_add(stage: Stage, start: Instant) {
-    STAGE_NANOS[stage as usize].fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+static STAGE_CALLS: [AtomicUsize; 8] = [const { AtomicUsize::new(0) }; 8];
+/// F21: `start` from `dft_numerics::stage_clock::start` (`None` with
+/// `BAANDI_STAGE_TIMERS=off`: the entry is counted, no clock is read).
+fn stage_add(stage: Stage, start: Option<Instant>) {
+    STAGE_CALLS[stage as usize].fetch_add(1, Ordering::Relaxed);
+    if start.is_some() {
+        STAGE_NANOS[stage as usize].fetch_add(
+            dft_numerics::stage_clock::elapsed_ns(start),
+            Ordering::Relaxed,
+        );
+    }
 }
 #[derive(Clone, Copy)]
 enum Count {
@@ -964,13 +983,21 @@ static COUNTS: [AtomicUsize; 6] = [const { AtomicUsize::new(0) }; 6];
 pub type M2Counters = (Vec<(&'static str, usize)>, Vec<(&'static str, f64)>);
 
 /// (counter name, value) and (stage name, wall seconds) of every M2 distributed
-/// operator in this process since start.
+/// operator in this process since start. The counters end with one
+/// `calls.<stage>` entry per stage (entries, both time modes); the seconds are 0
+/// with `BAANDI_STAGE_TIMERS=off`.
 pub fn m2_counters() -> M2Counters {
     (
         COUNT_NAMES
             .iter()
             .zip(&COUNTS)
             .map(|(n, c)| (*n, c.load(Ordering::Relaxed)))
+            .chain(
+                STAGE_CALL_NAMES
+                    .iter()
+                    .zip(&STAGE_CALLS)
+                    .map(|(n, c)| (*n, c.load(Ordering::Relaxed))),
+            )
             .collect(),
         STAGE_NAMES
             .iter()

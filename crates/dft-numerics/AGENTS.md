@@ -95,3 +95,15 @@ Validation, reproduction commands, numerical results and Mac-only timings:
 `cargo test --release -p dft-numerics --test real_gamma_pair pair_microbenchmark
 -- --ignored --nocapture`. No engine caller or performance default is changed;
 dev08 remains the performance acceptance authority.
+
+## GEMM dispatch counters (F11, 2026-11-16)
+
+`gemm_dispatch.rs` counts every real GEMM wrapper call of `RealGemmWorkspace`
+by (site, effective route) with calls, 2 m n k flops and max m/n/k (relaxed
+atomics; no allocation, no clock). The dgemm condition of
+`multiply_slices_impl` is `slices_route` plus `count_route` (a clause-by-clause
+decomposition; MKL-only test `real::tests::slices_route_matches_original_condition`).
+Pure builds also count the route an MKL build would take (`rows_as_if_mkl`).
+Do not change a dispatch condition without updating the route functions and
+that test. Exported in results.json `convergence.work.gemm_dispatch`; analysis
+docs/performance/gemm-dispatch-analysis-2026-11-16.md; test `tests/gemm_dispatch.rs`.

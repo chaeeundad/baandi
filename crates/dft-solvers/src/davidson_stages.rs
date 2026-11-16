@@ -138,6 +138,13 @@ pub struct ResearchOptions {
     /// reduced problem by Cholesky reduction (module `real_davidson::lean`).
     /// Residual (strict) solves always take the classic path.
     pub lean: bool,
+    /// C3a (`BAANDI_LEAN_PROJ_CACHE=on`, default off): the lean solver keeps
+    /// P^T V of its basis columns (operators that expose projector products)
+    /// and leaves P^T X of the returned vectors in the workspace
+    /// (`RealDavidsonWorkspace::returned_projections`). The solve itself is
+    /// unchanged bit for bit; only the caller's use of the projections is a
+    /// rounding-class change.
+    pub lean_proj_cache: bool,
 }
 impl Default for ResearchOptions {
     /// Every research switch off (B1 off, margin 0.5, automatic rows).
@@ -156,6 +163,7 @@ impl Default for ResearchOptions {
             narrow_proj: false,
             narrow_reduced: false,
             lean: false,
+            lean_proj_cache: false,
         }
     }
 }
@@ -197,6 +205,9 @@ impl ResearchOptions {
             stage_timers: dft_numerics::switches::on(dft_numerics::switches::Id::DAVIDSON_STAGES),
             b6: dft_numerics::switches::on(dft_numerics::switches::Id::B6),
             lean: dft_numerics::switches::choice(dft_numerics::switches::Id::DAVIDSON) == "lean",
+            lean_proj_cache: dft_numerics::switches::on(
+                dft_numerics::switches::Id::LEAN_PROJ_CACHE,
+            ),
         }
     }
 }
@@ -619,6 +630,14 @@ pub struct LeanCounters {
     pub kept_declined: u64,
     pub kept_stored: u64,
     pub kept_columns: u64,
+    /// C3a (`BAANDI_LEAN_PROJ_CACHE=on`): returns that left P^T X in the
+    /// workspace, returns whose projection cache was incomplete (the caller
+    /// computes P^T X directly), kept starts that also took the kept P^T X,
+    /// and projector-product columns copied from the operator after applies.
+    pub proj_cache_returns: u64,
+    pub proj_cache_misses: u64,
+    pub proj_cache_kept_loads: u64,
+    pub proj_cache_columns: u64,
 }
 impl LeanCounters {
     /// Stage-2 fallbacks (basis orthonormalizations) per append (the
@@ -659,8 +678,12 @@ pub(crate) enum LeanCount {
     KeptDeclined = 15,
     KeptStored = 16,
     KeptColumns = 17,
+    ProjCacheReturns = 18,
+    ProjCacheMisses = 19,
+    ProjCacheKeptLoads = 20,
+    ProjCacheColumns = 21,
 }
-static LEAN_COUNTS: [AtomicU64; 18] = [const { AtomicU64::new(0) }; 18];
+static LEAN_COUNTS: [AtomicU64; 22] = [const { AtomicU64::new(0) }; 22];
 /// Smallest pivot ratio, as f64 bits (positive floats order like their bits).
 static LEAN_PIVOT_MIN: AtomicU64 = AtomicU64::new(0x3ff0_0000_0000_0000);
 #[inline]
@@ -703,5 +726,9 @@ pub fn lean_counters() -> LeanCounters {
         kept_declined: g(LeanCount::KeptDeclined),
         kept_stored: g(LeanCount::KeptStored),
         kept_columns: g(LeanCount::KeptColumns),
+        proj_cache_returns: g(LeanCount::ProjCacheReturns),
+        proj_cache_misses: g(LeanCount::ProjCacheMisses),
+        proj_cache_kept_loads: g(LeanCount::ProjCacheKeptLoads),
+        proj_cache_columns: g(LeanCount::ProjCacheColumns),
     }
 }

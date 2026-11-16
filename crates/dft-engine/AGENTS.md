@@ -392,3 +392,14 @@ drops everything. Counters `reuse_psi_counters()` -> results.json
 `convergence.work.reuse_psi`. Tests: lib `reuse_psi_tests`, physics
 `reuse_psi_potential_change_matches_plain_apply`, solvers
 `kept_start_skips_initial_application`, CLI `reuse_psi_switch_keeps_energy_and_reuses_starts`.
+
+## MPI stage timers (F21, 2026-11-16)
+
+`BAANDI_STAGE_TIMERS=on|off` (default on; `dft_numerics::stage_clock`). Every
+MPI stage and collective counter takes its clock from `stage_clock::start()`
+(`None` in count-only mode) and counts entries in both modes; collectives also
+count payload bytes (`parallel::collective_bytes`). Stage call counts:
+`parallel::stage_calls`, `calls.<stage>` entries of `m2_stats().0`. Do not add a
+bare `Instant::now()` to a new MPI stage; a clock shared with the phase clock
+goes through `stage_clock::keep`. Test `tests/stage_timers.rs` (forces the mode
+with `stage_clock::force`).

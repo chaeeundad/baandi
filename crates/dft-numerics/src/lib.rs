@@ -15,6 +15,7 @@ pub use real::{
 #[cfg(feature = "mkl")]
 pub mod mkl_backend;
 pub mod pool;
+pub mod stage_clock;
 pub mod switches;
 pub mod work_timers;
 #[cfg(not(feature = "mkl"))]

@@ -208,6 +208,8 @@ table! {
         "distributed Davidson residuals and corrections by slice loops without per-element index checks; bit-identical";
     M2_CAPACITY: Kind::Choice { allowed: &["auto", "off"], default: "auto" }, "auto", "auto, off",
         "MPI runs with four or more ranks use 3 Davidson basis columns per band when scf.davidson_capacity_per_band is not set (auto), else the default 6 (off)";
+    STAGE_TIMERS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "F21: MPI stage and collective counters measure wall time (on, the earlier behaviour) or run count-only (off: calls and collective payload bytes counted, no clock read, stage seconds 0)";
     // MPI reduced eigenproblem (docs/performance/mpi-reduced-eigen-analysis.md); default off.
     M2_EIGEN: Kind::Choice { allowed: &["replicated", "root"], default: "replicated" }, "replicated",
         "replicated, root",

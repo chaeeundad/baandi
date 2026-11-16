@@ -3,7 +3,7 @@
 //! threading one through every option struct. Unset or one rank means the
 //! threads-only path, which is bit-identical to a build without MPI.
 use dft_mpi::{Collective, MpiError};
-pub use dft_solvers::distributed_davidson::{reduced_solve_stats, stage_seconds};
+pub use dft_solvers::distributed_davidson::{reduced_solve_stats, stage_calls, stage_seconds};
 use std::{
     cell::RefCell,
     sync::{
@@ -24,13 +24,17 @@ thread_local! {
 }
 static DISTRIBUTED_ROWS_SOLVES: AtomicUsize = AtomicUsize::new(0);
 static DISTRIBUTED_SOLVES: AtomicUsize = AtomicUsize::new(0);
-// Per-operation call counts and wall nanoseconds spent inside collectives
-// (allgatherv, tree_sum, bcast, alltoall, barrier), process-wide.
+// Per-operation call counts, payload bytes and wall nanoseconds spent inside
+// collectives (allgatherv, tree_sum, bcast, alltoall, barrier), process-wide.
+// Wall time only in the time mode of `BAANDI_STAGE_TIMERS` (default on; F21);
+// calls and bytes always.
 static CALLS: [AtomicUsize; 5] = [const { AtomicUsize::new(0) }; 5];
 static NANOS: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
+static BYTES: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
 const OPS: [&str; 5] = ["allgatherv", "tree_sum", "bcast", "alltoall", "barrier"];
 
-/// (operation, calls, seconds) for every collective used so far.
+/// (operation, calls, seconds) for every collective used so far (seconds 0
+/// with `BAANDI_STAGE_TIMERS=off`).
 pub fn collective_stats() -> Vec<(&'static str, usize, f64)> {
     (0..5)
         .map(|i| {
@@ -43,11 +47,28 @@ pub fn collective_stats() -> Vec<(&'static str, usize, f64)> {
         .collect()
 }
 
-fn timed<R>(op: usize, f: impl FnOnce() -> R) -> R {
-    let start = std::time::Instant::now();
+/// (operation, payload bytes of this rank) for every collective so far: the
+/// f64 buffer each call delivers on this rank (allgatherv: the gathered output;
+/// tree_sum: the summed vector; bcast: the broadcast buffer; alltoall: the send
+/// buffer; barrier: 0), 8 bytes per value. A volume measure for the
+/// communication model, not wire traffic (which depends on the algorithm).
+pub fn collective_bytes() -> Vec<(&'static str, u64)> {
+    (0..5)
+        .map(|i| (OPS[i], BYTES[i].load(Ordering::Relaxed)))
+        .collect()
+}
+
+fn timed<R>(op: usize, values: usize, f: impl FnOnce() -> R) -> R {
+    let start = dft_numerics::stage_clock::start();
     let r = f();
     CALLS[op].fetch_add(1, Ordering::Relaxed);
-    NANOS[op].fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    BYTES[op].fetch_add(8 * values as u64, Ordering::Relaxed);
+    if start.is_some() {
+        NANOS[op].fetch_add(
+            dft_numerics::stage_clock::elapsed_ns(start),
+            Ordering::Relaxed,
+        );
+    }
     r
 }
 
@@ -140,7 +161,7 @@ impl Collective for SharedComm {
         self.0.size()
     }
     fn barrier(&self) -> Result<(), MpiError> {
-        timed(4, || self.0.barrier())
+        timed(4, 0, || self.0.barrier())
     }
     fn allgatherv_f64(
         &self,
@@ -148,15 +169,17 @@ impl Collective for SharedComm {
         counts: &[usize],
         out: &mut [f64],
     ) -> Result<(), MpiError> {
-        timed(0, || self.0.allgatherv_f64(local, counts, out))
+        let values = out.len();
+        timed(0, values, || self.0.allgatherv_f64(local, counts, out))
     }
     fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), MpiError> {
-        timed(1, || self.0.tree_sum_f64(local, out))
+        timed(1, local.len(), || self.0.tree_sum_f64(local, out))
     }
     fn bcast_f64(&self, data: &mut [f64], root: usize) -> Result<(), MpiError> {
-        timed(2, || self.0.bcast_f64(data, root))
+        let values = data.len();
+        timed(2, values, || self.0.bcast_f64(data, root))
     }
     fn alltoall_f64(&self, send: &[f64], block: usize, recv: &mut [f64]) -> Result<(), MpiError> {
-        timed(3, || self.0.alltoall_f64(send, block, recv))
+        timed(3, send.len(), || self.0.alltoall_f64(send, block, recv))
     }
 }

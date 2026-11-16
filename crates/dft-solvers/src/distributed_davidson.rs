@@ -47,7 +47,7 @@ fn comm_error(e: dft_mpi::MpiError) -> SolverError {
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-const STAGES: [&str; 8] = [
+pub const STAGES: [&str; 8] = [
     "reduced_gram",
     "reduced_eigen",
     "rotate",
@@ -58,9 +58,11 @@ const STAGES: [&str; 8] = [
     "other_solve",
 ];
 static STAGE_NANOS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+static STAGE_CALLS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
 
 /// Wall seconds of this process in each stage of the distributed solver (cheap
 /// per-stage accumulation, no I/O in the loop; read once for the run report).
+/// All 0 with `BAANDI_STAGE_TIMERS=off` (count-only; `stage_calls` still counts).
 pub fn stage_seconds() -> Vec<(&'static str, f64)> {
     (0..8)
         .map(|i| {
@@ -71,8 +73,21 @@ pub fn stage_seconds() -> Vec<(&'static str, f64)> {
         })
         .collect()
 }
-fn stage_add(i: usize, start: Instant) {
-    STAGE_NANOS[i].fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+/// Entries into each stage (both time modes), in `STAGES` order.
+pub fn stage_calls() -> Vec<(&'static str, u64)> {
+    (0..8)
+        .map(|i| (STAGES[i], STAGE_CALLS[i].load(Ordering::Relaxed)))
+        .collect()
+}
+/// F21: `start` from `dft_numerics::stage_clock::start` (`None` count-only).
+fn stage_add(i: usize, start: Option<Instant>) {
+    STAGE_CALLS[i].fetch_add(1, Ordering::Relaxed);
+    if start.is_some() {
+        STAGE_NANOS[i].fetch_add(
+            dft_numerics::stage_clock::elapsed_ns(start),
+            Ordering::Relaxed,
+        );
+    }
 }
 
 // Reduced eigenproblem accounting (docs/performance/mpi-reduced-eigen-analysis.md):
@@ -225,7 +240,7 @@ fn apply_distributed<C: Collective>(
     op: &dyn RealLinearOperator,
     x_local: &RealMatrix,
 ) -> Result<RealMatrix, SolverError> {
-    let apply_start = Instant::now();
+    let apply_start = dft_numerics::stage_clock::start();
     let w = x_local.cols();
     let n = layout.n;
     let full = gather_full(comm, layout, x_local)?;
@@ -238,7 +253,7 @@ fn apply_distributed<C: Collective>(
     let mut mine = RealMatrix::zeros(n, owned)?;
     if owned > 0 {
         let x = RealMatrix::new(n, owned, full.as_slice()[first * n..last * n].to_vec())?;
-        let op_start = Instant::now();
+        let op_start = dft_numerics::stage_clock::start();
         op.apply_block(&x, &mut mine)?;
         stage_add(6, op_start);
         if mine.rows() != n
@@ -795,7 +810,7 @@ impl crate::RealDavidson {
         };
         let nl = layout.nl();
         let mut apply = |x: &RealMatrix| -> Result<RealMatrix, SolverError> {
-            let start = Instant::now();
+            let start = dft_numerics::stage_clock::start();
             let mut y = RealMatrix::zeros(nl, x.cols())?;
             op.apply_block(comm, x, &mut y)?;
             stage_add(5, start);
@@ -975,7 +990,7 @@ impl crate::RealDavidson {
             // Reduced matrix V^T HV (replicated), symmetrised from the upper triangle.
             // Incremental, as in the serial solver: only the columns added since the last
             // iteration are formed (m x new products); the rest is reused.
-            let t0 = Instant::now();
+            let t0 = dft_numerics::stage_clock::start();
             let mut reduced = RealMatrix::zeros(m, m)?;
             for c in 0..reduced_width {
                 for r in 0..reduced_width {
@@ -1002,7 +1017,7 @@ impl crate::RealDavidson {
             reduced_prev = reduced.clone();
             let mut values = vec![0.0; m];
             let mut coefficients = RealMatrix::zeros(m, m)?;
-            let t0 = Instant::now();
+            let t0 = dft_numerics::stage_clock::start();
             record_solve(m, fresh);
             let mut status: Result<(), SolverError> = Ok(());
             if let Some(eig) = eig.as_mut() {
@@ -1038,7 +1053,7 @@ impl crate::RealDavidson {
             }
             status?;
             stage_add(1, t0);
-            let t0 = Instant::now();
+            let t0 = dft_numerics::stage_clock::start();
             let lowest = RealMatrix::new(m, bands, coefficients.as_slice()[..m * bands].to_vec())?;
             let mut vectors = RealMatrix::zeros(nl, bands)?;
             let mut rotated = RealMatrix::zeros(nl, bands)?;
@@ -1075,7 +1090,7 @@ impl crate::RealDavidson {
                     .collect();
                 Ok((r, norms))
             };
-            let t0 = Instant::now();
+            let t0 = dft_numerics::stage_clock::start();
             let (mut residual_block, mut residuals) = residual_of(&rotated, &vectors, comm)?;
             stage_add(3, t0);
             let mut certified = false;
@@ -1188,7 +1203,7 @@ impl crate::RealDavidson {
                     applications += basis.cols();
                 }
             }
-            let t0 = Instant::now();
+            let t0 = dft_numerics::stage_clock::start();
             let mut extra =
                 orthonormalize_tuned(comm, &mut ws, Some(&basis), &corrections, &tuning, panel)?;
             stage_add(4, t0);

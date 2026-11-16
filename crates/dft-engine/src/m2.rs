@@ -131,7 +131,7 @@ impl M2Density {
         field: &[f64],
         out: &mut [f64],
     ) -> Result<(), ScfError> {
-        let start = Instant::now();
+        let start = dft_numerics::stage_clock::start();
         self.partial.clear();
         self.partial.resize(out.len(), 0.);
         for (b, p) in self.partial.iter_mut().enumerate().take(self.bands) {
@@ -178,7 +178,7 @@ fn xc_lda<K: Collective>(
     n: &Array3<f64>,
     volume: f64,
 ) -> Result<xc::XcGrid, PhysicsError> {
-    let start = Instant::now();
+    let start = dft_numerics::stage_clock::start();
     if !(volume.is_finite() && volume > 0.) || n.is_empty() {
         return Err(PhysicsError::Shape);
     }
@@ -262,9 +262,26 @@ const STAGE_NAMES: [&str; 6] = [
     "screen_clusters",
     "atomic_start",
 ];
+const STAGE_CALL_NAMES: [&str; 6] = [
+    "calls.density",
+    "calls.xc",
+    "calls.nonlocal_energy",
+    "calls.screen_integrals",
+    "calls.screen_clusters",
+    "calls.atomic_start",
+];
 static STAGE_NANOS: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
-pub(crate) fn add(stage: Stage, start: Instant) {
-    STAGE_NANOS[stage as usize].fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+static STAGE_CALLS: [AtomicUsize; 6] = [const { AtomicUsize::new(0) }; 6];
+/// F21: `start` from `dft_numerics::stage_clock::start` (or `keep`); `None`
+/// with `BAANDI_STAGE_TIMERS=off` counts the entry without reading a clock.
+pub(crate) fn add(stage: Stage, start: Option<Instant>) {
+    STAGE_CALLS[stage as usize].fetch_add(1, Ordering::Relaxed);
+    if start.is_some() {
+        STAGE_NANOS[stage as usize].fetch_add(
+            dft_numerics::stage_clock::elapsed_ns(start),
+            Ordering::Relaxed,
+        );
+    }
 }
 #[derive(Clone, Copy)]
 pub(crate) enum Count {
@@ -293,13 +310,21 @@ pub(crate) fn count(c: Count) {
     COUNTS[c as usize].fetch_add(1, Ordering::Relaxed);
 }
 
-/// Engine-level M2d counters and stage seconds of this process.
+/// Engine-level M2d counters and stage seconds of this process (counters end
+/// with one `calls.<stage>` entry per stage; seconds 0 with
+/// `BAANDI_STAGE_TIMERS=off`).
 pub fn stats() -> dft_physics::distributed_real_gamma::M2Counters {
     (
         COUNT_NAMES
             .iter()
             .zip(&COUNTS)
             .map(|(n, c)| (*n, c.load(Ordering::Relaxed)))
+            .chain(
+                STAGE_CALL_NAMES
+                    .iter()
+                    .zip(&STAGE_CALLS)
+                    .map(|(n, c)| (*n, c.load(Ordering::Relaxed))),
+            )
             .collect(),
         STAGE_NAMES
             .iter()

@@ -894,14 +894,18 @@ pub fn execute_mode(
             "ranks": crate::parallel::size(),
             "rank": crate::parallel::rank(),
             "distributed_solves": dft_engine::parallel::distributed_solves(),
+            // F21: `off` = count-only (calls and payload bytes, no clock; seconds 0).
+            "stage_timers": if dft_numerics::stage_clock::on() { "on" } else { "off" },
             "stages": dft_engine::parallel::stage_seconds()
                 .into_iter()
-                .map(|(name, seconds)| json!({"stage": name, "seconds": seconds}))
+                .zip(dft_engine::parallel::stage_calls())
+                .map(|((name, seconds), (_, calls))| json!({"stage": name, "seconds": seconds, "calls": calls}))
                 .collect::<Vec<_>>(),
             "reduced_solves": reduced_solves,
             "collectives": dft_engine::parallel::collective_stats()
                 .into_iter()
-                .map(|(op, calls, seconds)| json!({"op": op, "calls": calls, "seconds": seconds}))
+                .zip(dft_engine::parallel::collective_bytes())
+                .map(|((op, calls, seconds), (_, bytes))| json!({"op": op, "calls": calls, "seconds": seconds, "payload_bytes": bytes}))
                 .collect::<Vec<_>>(),
         });
     }

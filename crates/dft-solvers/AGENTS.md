@@ -208,3 +208,16 @@ Gram-Schmidt (rounding class). Solver stages `solve_start` and `solve_return`
 time the entry and the N x B gather. Tests: lib
 `mirror_partition_keeps_gamma_pairs_on_one_rank`, `tests/distributed_start_gram.rs`.
 Analysis docs/performance/mpi-scaling-gap.md.
+
+## MPI lazy orbitals (MPI-LAZY-ORBITALS, 2026-11-17)
+
+`RealDavidson::solve_distributed_rows_local` with `DistributedStart::{Global, Local}`
+and `gather: bool`: a `Local` start is this rank's rows in the operator's
+`local_rows` order (no replicated block; bit-identical to the same start passed
+`Global`); with `gather = false` the workspace path skips the final N x B
+allgatherv and returns a 0 x bands eigenvector placeholder, the rows living only in
+`x_local`. The non-workspace path gathers a local start and always returns the full
+block (callers check `eigenvectors.rows()`). `solve_distributed_rows_kept` is this
+entry with `Global` and `gather = true` (unchanged). Test
+`tests/distributed_lazy_rows.rs` (1 to 4 ranks, workspace full/selected and the
+allocating path, bits). Engine design: docs/design/mpi-lazy-orbitals.md.

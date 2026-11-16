@@ -78,6 +78,13 @@ pub(crate) struct RealSolveState {
     reuse: Option<PsiReuse>,
     /// MPI-KEPT-START state (`BAANDI_M2_REUSE=on`) of the M2 stick-row path.
     pub(crate) m2_reuse: Option<M2Reuse>,
+    /// MPI-LAZY-ORBITALS: half sphere shared by this state's lazy blocks, the
+    /// operator's local rows and their ORC kinetic diagonal (Ha) of the latest
+    /// lazy solve, and the block that solve returned (taken by the caller).
+    lazy_half: Option<Arc<dft_basis::HalfSphere>>,
+    lazy_rows: Arc<[usize]>,
+    lazy_diag: Vec<f64>,
+    pub(crate) lazy_latest: Option<LazyOrbitals>,
     /// Set by an exact-continuation checkpoint: the next solve forgets the kept
     /// X, H X and psi(r) and takes the plain start, exactly as a restored session
     /// (which has no kept state) does, so a continued and a restored run agree bit
@@ -258,6 +265,209 @@ thread_local! {
 /// tests); `None` restores the environment.
 pub fn set_m2_reuse_override(value: Option<bool>) {
     M2_REUSE_OVERRIDE.with(|o| o.set(value));
+}
+
+/// MPI-LAZY-ORBITALS (`BAANDI_M2_LAZY=on`, default off;
+/// docs/design/mpi-lazy-orbitals.md): standard M2 solves of the SCF session
+/// return only this rank's stick rows; the full complex block is gathered on
+/// demand (`LazyOrbitals::materialize`). Per-thread override for simulated
+/// ranks: `set_m2_lazy_override`.
+pub(crate) fn m2_lazy() -> bool {
+    M2_LAZY_OVERRIDE.with(|o| o.get()).unwrap_or_else(|| {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::M2_LAZY))
+    })
+}
+thread_local! {
+    static M2_LAZY_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+/// Override `BAANDI_M2_LAZY` for the calling thread (simulated ranks in tests);
+/// `None` restores the environment.
+pub fn set_m2_lazy_override(value: Option<bool>) {
+    M2_LAZY_OVERRIDE.with(|o| o.set(value));
+}
+
+/// MPI-LAZY-ORBITALS: the eigenvectors of one standard M2 solve held as this
+/// rank's stick rows (ORC real coordinates, the operator's `local_rows` order),
+/// the authoritative SCF state of the M2 path. The complex N x B block is
+/// formed only by `materialize` (three allgathervs and the Hermitian completion
+/// of the gathered path, so its bits equal the gathered block's) and cached
+/// with the handle. Cloning shares the data. Every rank must call
+/// `materialize` at the same point of the (replicated) control flow.
+#[derive(Clone)]
+pub struct LazyOrbitals(Arc<LazyInner>);
+struct LazyInner {
+    /// n_loc x bands, this rank's rows.
+    x: RealMatrix,
+    /// Global ORC row index of each local row.
+    rows: Arc<[usize]>,
+    /// Global ORC length N.
+    n: usize,
+    half: Arc<dft_basis::HalfSphere>,
+    comm: crate::parallel::SharedComm,
+    full: std::sync::OnceLock<ComplexMatrix>,
+}
+impl std::fmt::Debug for LazyOrbitals {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LazyOrbitals")
+            .field("n", &self.0.n)
+            .field("local_rows", &self.0.x.rows())
+            .field("bands", &self.0.x.cols())
+            .field("materialized", &self.0.full.get().is_some())
+            .finish()
+    }
+}
+impl LazyOrbitals {
+    pub fn bands(&self) -> usize {
+        self.0.x.cols()
+    }
+    /// Global plane-wave count (rows of the materialized block).
+    pub fn global_len(&self) -> usize {
+        self.0.n
+    }
+    /// Whether this handle holds the rows of `rows` (the operator's local
+    /// rows) of an N-row block.
+    fn matches(&self, rows: &[usize], n: usize) -> bool {
+        self.0.n == n && *self.0.rows == *rows
+    }
+    /// The local rows after the elementwise ORC round trip sqrt2 * (x / sqrt2)
+    /// that pack(unpack(x)) applies to every coordinate but the G = 0 row:
+    /// bit-identical to the local rows of the packed gathered warm start.
+    fn round_trip_start(&self) -> Result<RealMatrix, ScfError> {
+        let x = &self.0.x;
+        let nl = x.rows();
+        let mut out = RealMatrix::zeros(nl, x.cols()).map_err(SolverError::from)?;
+        let s = std::f64::consts::SQRT_2;
+        for (dst, src) in out
+            .as_mut_slice()
+            .chunks_mut(nl.max(1))
+            .zip(x.as_slice().chunks(nl.max(1)))
+        {
+            for ((d, &v), &g) in dst.iter_mut().zip(src).zip(self.0.rows.iter()) {
+                *d = if g == 0 { v } else { s * (v / s) };
+            }
+        }
+        Ok(out)
+    }
+    /// The full complex N x B block (gathered once, then cached). Collective:
+    /// every rank must call it at the same point.
+    pub fn materialize(&self) -> Result<&ComplexMatrix, ScfError> {
+        if let Some(m) = self.0.full.get() {
+            return Ok(m);
+        }
+        let start = dft_numerics::stage_clock::start();
+        let inner = &*self.0;
+        let comm = &inner.comm;
+        let size = comm.size();
+        let (n, nl, bands) = (inner.n, inner.x.rows(), inner.x.cols());
+        let err = |e: dft_mpi::MpiError| ScfError::Numerical(format!("lazy orbitals: {e}"));
+        let mut counts_f = vec![0.0; size];
+        comm.allgatherv_f64(&[nl as f64], &vec![1; size], &mut counts_f)
+            .map_err(err)?;
+        let counts: Vec<usize> = counts_f.iter().map(|&c| c as usize).collect();
+        if counts.iter().sum::<usize>() != n {
+            return Err(ScfError::Numerical(
+                "lazy orbitals: row partition does not cover the basis".into(),
+            ));
+        }
+        let mine: Vec<f64> = inner.rows.iter().map(|&r| r as f64).collect();
+        let mut index = vec![0.0; n];
+        comm.allgatherv_f64(&mine, &counts, &mut index)
+            .map_err(err)?;
+        let block: Vec<usize> = counts.iter().map(|c| c * bands).collect();
+        let mut flat = vec![0.0; n * bands];
+        comm.allgatherv_f64(inner.x.as_slice(), &block, &mut flat)
+            .map_err(err)?;
+        // Scatter to global ORC order, column by column (exact data movement).
+        let mut real = vec![0.0; n * bands];
+        let (mut at, mut offset) = (0, 0);
+        for &c in &counts {
+            let rows = &index[offset..offset + c];
+            for j in 0..bands {
+                let src = &flat[at + j * c..at + (j + 1) * c];
+                for (&g, &v) in rows.iter().zip(src) {
+                    real[j * n + g as usize] = v;
+                }
+            }
+            at += c * bands;
+            offset += c;
+        }
+        let mut full = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
+        for j in 0..bands {
+            inner
+                .half
+                .unpack(&real[j * n..(j + 1) * n], full.column_mut(j))
+                .map_err(|e| ScfError::Numerical(format!("lazy orbitals: {e}")))?;
+        }
+        let _ = inner.full.set(full);
+        crate::m2::count(crate::m2::Count::LazyMaterializations);
+        crate::m2::add(crate::m2::Stage::LazyMaterialize, start);
+        Ok(inner.full.get().expect("set above"))
+    }
+    /// The full block, owned (gathered if not yet; moved out of the cache when
+    /// this is the last handle, cloned otherwise). Collective like `materialize`.
+    pub fn into_full(self) -> Result<ComplexMatrix, ScfError> {
+        self.materialize()?;
+        match Arc::try_unwrap(self.0) {
+            Ok(inner) => Ok(inner.full.into_inner().expect("materialized")),
+            Err(shared) => Ok(shared.full.get().expect("materialized").clone()),
+        }
+    }
+    /// Occupation-weighted kinetic energy sum_b f_b sum_G |G|^2/2 |c_b(G)|^2 from
+    /// the local rows: sum_r d_r x_rb^2 with the ORC kinetic diagonal d (the
+    /// representative's |G|^2/2 on both of its coordinates, |G|^2/2 at G = 0),
+    /// band values reduced with one tree sum, then summed in band order.
+    /// Rounding class against the complex sum (another summation order).
+    fn kinetic_energy(&self, diagonal: &[f64], occupations: &[f64]) -> Result<f64, ScfError> {
+        let x = &self.0.x;
+        let nl = x.rows();
+        let m = occupations
+            .iter()
+            .rposition(|&f| f != 0.0)
+            .map_or(0, |i| i + 1);
+        if diagonal.len() != nl || occupations.len() != x.cols() {
+            return Err(ScfError::InvalidInput("lazy kinetic energy dimensions"));
+        }
+        let mut partial = vec![0.0; m];
+        for (p, column) in partial.iter_mut().zip(x.as_slice().chunks(nl.max(1))) {
+            *p = column
+                .iter()
+                .zip(diagonal)
+                .map(|(&v, &d)| d * v * v)
+                .sum::<f64>();
+        }
+        let mut values = vec![0.0; m];
+        self.0
+            .comm
+            .tree_sum_f64(&partial, &mut values)
+            .map_err(|e| ScfError::Numerical(format!("lazy kinetic energy: {e}")))?;
+        let mut sum = 0.0;
+        for (v, f) in values.iter().zip(occupations) {
+            if *f != 0.0 {
+                sum += f * v;
+            }
+        }
+        Ok(sum)
+    }
+}
+
+/// MPI-LAZY-ORBITALS: the audit's kinetic energy of a lazy block, with the ORC
+/// kinetic diagonal of the operator rows of `state` (kept by the solve that
+/// produced the block). One tree sum; collective.
+pub(crate) fn lazy_kinetic_energy(
+    state: &RealSolveState,
+    lazy: &LazyOrbitals,
+    occupations: &[f64],
+) -> Result<f64, ScfError> {
+    let start = dft_numerics::stage_clock::start();
+    if !lazy.matches(&state.lazy_rows, lazy.0.n) {
+        return Err(ScfError::Numerical(
+            "lazy kinetic energy: rows differ from the operator".into(),
+        ));
+    }
+    let value = lazy.kinetic_energy(&state.lazy_diag, occupations)?;
+    crate::m2::add(crate::m2::Stage::LazyKinetic, start);
+    Ok(value)
 }
 
 /// MPI-KEPT-START state of one k state on one rank. Every flag is replicated
@@ -456,6 +666,10 @@ fn ensure_state(
             nl_valid: false,
             reuse: None,
             m2_reuse: None,
+            lazy_half: None,
+            lazy_rows: Arc::from(Vec::new()),
+            lazy_diag: Vec::new(),
+            lazy_latest: None,
             forget_reuse: std::sync::atomic::AtomicBool::new(false),
         });
     }
@@ -541,6 +755,8 @@ pub(crate) fn solve_real_gamma(
     hamiltonian: &Hamiltonian,
     basis: &PlaneWaveBasis,
     initial: Option<&ComplexMatrix>,
+    initial_lazy: Option<&LazyOrbitals>,
+    lazy: bool,
     kinetic: &[f64],
     bands: usize,
     tolerance: f64,
@@ -588,6 +804,7 @@ pub(crate) fn solve_real_gamma(
     }
     let state = state.as_mut().unwrap();
     state.nl_valid = false;
+    state.lazy_latest = None;
     // MPI-KEPT-START: the previous solve's local rows are the kept X (and the
     // storage of this solve's local rows).
     let previous_local = state.m2_local.take();
@@ -632,6 +849,49 @@ pub(crate) fn solve_real_gamma(
         diagonal[2 * i - 1] = kinetic[p as usize];
         diagonal[2 * i] = kinetic[p as usize];
     }
+    // MPI-LAZY-ORBITALS: standard M2 solves on the workspace path return only
+    // the local rows when the caller asks for it (replicated conditions).
+    let tuning = dft_solvers::distributed_davidson::DistributedTuning::current();
+    let lazy_path = lazy
+        && comm.is_some()
+        && state.dist.is_some()
+        && options.standard.is_some()
+        && (tuning.workspace || tuning.selected_roots);
+    if lazy_path && state.lazy_half.is_none() {
+        state.lazy_half = Some(Arc::new(half.clone()));
+    }
+    // A lazy warm start (0 x B placeholder plus the rows): this rank's rows
+    // enter the solver directly when every rank's rows match its operator
+    // (one 1-double tree sum); otherwise the block is gathered and packed.
+    let mut lazy_start: Option<RealMatrix> = None;
+    let initial = match (initial, initial_lazy) {
+        (Some(m), Some(h)) if m.rows() == 0 => {
+            let mut local = false;
+            if lazy_path && let (Some(c), Some(d)) = (comm.as_ref(), state.dist.as_ref()) {
+                let mismatch = !h.matches(d.local_rows(), n);
+                let mut flag = [0.0];
+                c.tree_sum_f64(&[f64::from(u8::from(mismatch))], &mut flag)
+                    .map_err(|e| ScfError::Numerical(format!("lazy start: {e}")))?;
+                local = flag[0] == 0.0;
+                if !local {
+                    crate::m2::count(crate::m2::Count::LazyStartMismatches);
+                }
+            }
+            if local {
+                lazy_start = Some(h.round_trip_start()?);
+                crate::m2::count(crate::m2::Count::LazyStarts);
+                None
+            } else {
+                Some(h.materialize()?)
+            }
+        }
+        (Some(m), None) if m.rows() == 0 => {
+            return Err(ScfError::InvalidInput(
+                "lazy warm start without its distributed rows",
+            ));
+        }
+        (m, _) => m,
+    };
     let packed = if let Some(initial) = initial {
         let mut packed = RealMatrix::zeros(n, initial.cols()).map_err(SolverError::from)?;
         if let Err(e) = pool.install(|| {
@@ -683,7 +943,6 @@ pub(crate) fn solve_real_gamma(
     let dist = state.dist.as_mut();
     // The SCF driver supplies the same ratcheted tolerance and band policy to
     // both representations. Standard returns remain explicitly uncertified.
-    let tuning = dft_solvers::distributed_davidson::DistributedTuning::current();
     let m2_kept = comm.is_some()
         && dist.is_some()
         && options.standard.is_some()
@@ -696,45 +955,93 @@ pub(crate) fn solve_real_gamma(
         crate::parallel::count_distributed_solve();
         crate::parallel::count_distributed_rows_solve();
         let local_diagonal: Vec<f64> = dist.local_rows().iter().map(|&r| diagonal[r]).collect();
-        if m2_kept {
+        if m2_kept || lazy_path {
+            use dft_solvers::distributed_davidson::{DistributedKeptStart, DistributedStart};
             let mut x_local = previous_local
                 .unwrap_or_else(|| RealMatrix::new(0, 0, Vec::new()).expect("empty matrix"));
-            let r = state.m2_reuse.get_or_insert_with(|| M2Reuse {
-                kept: dft_solvers::distributed_davidson::DistributedKeptStart::new(),
-                v_old: Vec::new(),
-                delta: Vec::new(),
-                image: RealMatrix::new(0, 0, Vec::new()).expect("empty matrix"),
-                planes: Vec::new(),
-                kept_pairs: 0,
-                collect: false,
-                gated: false,
-            });
-            prepare_m2_kept_start(comm, dist, r, &x_local, packed.is_some(), bands)?;
-            let solved = solver.solve_distributed_rows_kept(
-                comm,
-                dist,
-                packed.as_ref(),
-                &local_diagonal,
-                policy,
-                true,
-                false,
-                options.davidson_capacity_per_band,
-                tuning,
-                &mut x_local,
-                &mut r.kept,
-            );
-            if r.kept.taken() {
-                crate::m2::count(crate::m2::Count::ReuseTaken);
-                crate::m2::count_n(crate::m2::Count::ReuseColumnsSaved, bands);
-            } else if r.kept.declined() {
-                crate::m2::count(crate::m2::Count::ReuseDeclined);
+            let start = match (&lazy_start, &packed) {
+                (Some(l), _) => Some(DistributedStart::Local(l)),
+                (None, Some(p)) => Some(DistributedStart::Global(p)),
+                (None, None) => None,
+            };
+            let gather = !lazy_path;
+            let result = if m2_kept {
+                let r = state.m2_reuse.get_or_insert_with(|| M2Reuse {
+                    kept: DistributedKeptStart::new(),
+                    v_old: Vec::new(),
+                    delta: Vec::new(),
+                    image: RealMatrix::new(0, 0, Vec::new()).expect("empty matrix"),
+                    planes: Vec::new(),
+                    kept_pairs: 0,
+                    collect: false,
+                    gated: false,
+                });
+                prepare_m2_kept_start(comm, dist, r, &x_local, start.is_some(), bands)?;
+                let solved = solver.solve_distributed_rows_local(
+                    comm,
+                    dist,
+                    start,
+                    &local_diagonal,
+                    policy,
+                    true,
+                    false,
+                    options.davidson_capacity_per_band,
+                    tuning,
+                    &mut x_local,
+                    &mut r.kept,
+                    gather,
+                );
+                if r.kept.taken() {
+                    crate::m2::count(crate::m2::Count::ReuseTaken);
+                    crate::m2::count_n(crate::m2::Count::ReuseColumnsSaved, bands);
+                } else if r.kept.declined() {
+                    crate::m2::count(crate::m2::Count::ReuseDeclined);
+                }
+                let result = solved?;
+                // The density build of this map may keep slabs for the stored X.
+                r.collect = r.kept.is_stored();
+                r.kept_pairs = 0;
+                r.v_old.clear();
+                r.v_old.extend_from_slice(dist.potential());
+                result
+            } else {
+                // MPI-LAZY-ORBITALS without the kept start: a kept-start object
+                // that never keeps (only the local rows are returned in x_local).
+                let mut plain = DistributedKeptStart::new();
+                solver.solve_distributed_rows_local(
+                    comm,
+                    dist,
+                    start,
+                    &local_diagonal,
+                    policy,
+                    true,
+                    false,
+                    options.davidson_capacity_per_band,
+                    tuning,
+                    &mut x_local,
+                    &mut plain,
+                    gather,
+                )?
+            };
+            if lazy_path && result.eigenvectors.rows() == 0 {
+                // The block stays on the ranks: this rank's rows are its state.
+                if *state.lazy_rows != *dist.local_rows() {
+                    state.lazy_rows = Arc::from(dist.local_rows());
+                }
+                state.lazy_diag = local_diagonal;
+                let x =
+                    RealMatrix::new(x_local.rows(), x_local.cols(), x_local.as_slice().to_vec())
+                        .map_err(SolverError::from)?;
+                state.lazy_latest = Some(LazyOrbitals(Arc::new(LazyInner {
+                    x,
+                    rows: state.lazy_rows.clone(),
+                    n,
+                    half: state.lazy_half.clone().expect("set on the lazy path"),
+                    comm: comm.clone(),
+                    full: std::sync::OnceLock::new(),
+                })));
+                crate::m2::count(crate::m2::Count::LazyReturns);
             }
-            let result = solved?;
-            // The density build of this map may keep slabs for the stored X.
-            r.collect = r.kept.is_stored();
-            r.kept_pairs = 0;
-            r.v_old.clear();
-            r.v_old.extend_from_slice(dist.potential());
             // M2d: this rank's rows for the distributed density and energy,
             // straight from the solver (F07: no extraction from the gathered block).
             state.m2_local = Some(x_local);
@@ -813,6 +1120,25 @@ pub(crate) fn solve_real_gamma(
                     .is_ok()
             }
         };
+    }
+    // MPI-LAZY-ORBITALS: a lazy return has no block to unpack; the caller takes
+    // `lazy_latest` and keeps the 0 x B placeholder.
+    if result.eigenvectors.rows() == 0 && state.lazy_latest.is_some() {
+        diagnostics.gamma_real_used = true;
+        diagnostics.fallback_reason = None;
+        return Ok(Some(EigenSolution {
+            locking: None,
+            spectral_completeness: None,
+            eigenvalues: result.eigenvalues,
+            eigenvectors: ComplexMatrix::zeros(0, bands).map_err(SolverError::from)?,
+            residuals: result.residuals,
+            converged: result.converged,
+            buffer: result.buffer,
+            residuals_certified: result.residuals_certified,
+            iterations: result.iterations,
+            history: result.history,
+            operator_applications: result.operator_applications,
+        }));
     }
     let t_unpack = dft_numerics::stage_clock::start();
     let mut eigenvectors = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;

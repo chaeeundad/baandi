@@ -476,3 +476,29 @@ unpacking of the N x B result); count and clock only. `tests/m2_entry_cost.rs`
 prints the SCF phases (max over ranks) and the time outside them. Test
 `distributed_scf::m2_scaling_gap_switches_keep_classes` covers
 `BAANDI_M2_STICKS=mirror` and `BAANDI_M2_START=gram` (dft-solvers).
+
+## MPI lazy orbitals (MPI-LAZY-ORBITALS, 2026-11-17)
+
+`BAANDI_M2_LAZY=on|off` (default off until dev08; per-thread override
+`gamma_real::set_m2_lazy_override`; design and consumer inventory
+`docs/design/mpi-lazy-orbitals.md`). Session maps (`ScfProblem::step_session`)
+of the M2 standard path return `KPointSolution.lazy` (`gamma_real::LazyOrbitals`:
+this rank's stick rows, the half sphere, the communicator, a cached gathered
+block) with a 0 x B placeholder in `solution.eigenvectors`; the next solve
+starts from the rows (ORC round trip applied, so the start bits equal the
+gathered path's); the audit takes the kinetic energy from the rows
+(`lazy_kinetic_energy`, one tree sum, rounding class) and the nonlocal energy
+from the existing M2 projections. Every boundary that needs the full block
+materializes it (collective; all ranks reach it together): the delivered result,
+the spectral audit, `warm_state` (ladder hand-off), `checkpoint`, a declined M2
+density or nonlocal energy, a complex-solver fallback, and every non-lazy map
+given a lazy warm start. Public `step_kpoints*` never return lazy blocks; the
+stage-0 bench uses the hidden `step_kpoints_lazy` / `split_warm` /
+`materialize_orbitals`. Counters `lazy_returns`, `lazy_starts`,
+`lazy_materializations`, `lazy_start_mismatches`, stages `lazy_materialize`,
+`lazy_kinetic` (`m2::stats`). Do not add a consumer of
+`solution.eigenvectors` inside the session loop without checking `lazy` first.
+Test `tests/m2_lazy_orbitals.rs` (production standard + verification, cubic and
+skewed, P 2/3, kept start off/on: density, eigenvalues, orbitals and counts
+bit-identical to off, |dE| <= 1e-12 Ha, ranks equal, reproducible; checkpoint
+capture with lazy warm orbitals bit-identical).

@@ -541,7 +541,7 @@ pub(super) fn solve_core_ws<C: Collective>(
     supplied_pool: Option<Arc<WorkerPool>>,
     inner_threads: usize,
     apply: &mut dyn FnMut(&RealMatrix, &mut RealMatrix) -> Result<(), SolverError>,
-    initial: Option<&RealMatrix>,
+    initial: Option<DistributedStart<'_>>,
     diag_local: &[f64],
     full_diagonal: Option<&[f64]>,
     policy: BandTolerances,
@@ -550,6 +550,7 @@ pub(super) fn solve_core_ws<C: Collective>(
     capacity_per_band: usize,
     tuning: DistributedTuning,
     kept: Option<(&mut RealMatrix, &mut DistributedKeptStart)>,
+    gather: bool,
 ) -> Result<RealEigenSolution, SolverError> {
     let mut ws = WORKSPACE
         .with(|w| w.borrow_mut().take())
@@ -572,6 +573,7 @@ pub(super) fn solve_core_ws<C: Collective>(
         capacity_per_band,
         tuning,
         kept,
+        gather,
     );
     WS_COUNTS[0].fetch_add(1, Ordering::Relaxed);
     if SOLVE_GROWTHS.with(|g| g.get()) == 0 {
@@ -590,7 +592,7 @@ fn solve_on<C: Collective>(
     supplied_pool: Option<Arc<WorkerPool>>,
     inner_threads: usize,
     apply: &mut dyn FnMut(&RealMatrix, &mut RealMatrix) -> Result<(), SolverError>,
-    initial: Option<&RealMatrix>,
+    initial: Option<DistributedStart<'_>>,
     diag_local: &[f64],
     full_diagonal: Option<&[f64]>,
     policy: BandTolerances,
@@ -599,6 +601,7 @@ fn solve_on<C: Collective>(
     capacity_per_band: usize,
     tuning: DistributedTuning,
     mut kept: Option<(&mut RealMatrix, &mut DistributedKeptStart)>,
+    gather: bool,
 ) -> Result<RealEigenSolution, SolverError> {
     let n = layout.n;
     if !(2..=12).contains(&capacity_per_band) {
@@ -727,7 +730,9 @@ fn solve_on<C: Collective>(
     let t_start = dft_numerics::stage_clock::start();
     let cold;
     let start = match initial {
-        Some(x) => x,
+        Some(DistributedStart::Global(x)) => x,
+        // MPI-LAZY-ORBITALS: the rows are this rank's (checked below).
+        Some(DistributedStart::Local(x)) => x,
         None => {
             let full: Vec<f64> = match full_diagonal {
                 Some(d) => d.to_vec(),
@@ -750,7 +755,17 @@ fn solve_on<C: Collective>(
             &cold
         }
     };
-    let start_local = local_rows(layout, start)?;
+    let start_local = match initial {
+        Some(DistributedStart::Local(x)) => {
+            if x.rows() != nl {
+                return Err(SolverError::InvalidParameter(
+                    "local start rows differ from the operator's rows",
+                ));
+            }
+            RealMatrix::new(nl, x.cols(), x.as_slice().to_vec())?
+        }
+        _ => local_rows(layout, start)?,
+    };
     // MPI-KEPT-START: the stored return is consumed by this solve (stored again
     // only by a keeping return below); the decision to take it is replicated.
     let mut kept_taken = false;
@@ -1036,7 +1051,13 @@ fn solve_on<C: Collective>(
                 }
                 let t0 = dft_numerics::stage_clock::start();
                 keep_return(kept.as_mut(), vectors, rotated, ritz, nl, bands)?;
-                let full = gather_full(comm, layout, vectors)?;
+                // MPI-LAZY-ORBITALS: without `gather` the rows stay on their
+                // ranks (`x_local`); the solution carries a 0 x bands placeholder.
+                let full = if gather {
+                    gather_full(comm, layout, vectors)?
+                } else {
+                    RealMatrix::new(0, bands, Vec::new())?
+                };
                 stage_add(9, t0);
                 return Ok(RealEigenSolution {
                     eigenvalues: values[..bands].to_vec(),
@@ -1202,7 +1223,13 @@ fn solve_on<C: Collective>(
                     nl,
                     bands,
                 )?;
-                let full = gather_full(comm, layout, vectors)?;
+                // MPI-LAZY-ORBITALS: without `gather` the rows stay on their
+                // ranks (`x_local`); the solution carries a 0 x bands placeholder.
+                let full = if gather {
+                    gather_full(comm, layout, vectors)?
+                } else {
+                    RealMatrix::new(0, bands, Vec::new())?
+                };
                 stage_add(9, t0);
                 return Ok(RealEigenSolution {
                     eigenvalues: values[..bands].to_vec(),

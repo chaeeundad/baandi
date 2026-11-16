@@ -217,5 +217,7 @@ fn legacy_defaults_are_unchanged() {
     // MPI-SCALING-GAP switches stay opt-in until dev08.
     assert_eq!(value(Id::M2_STICKS), Value::Choice("greedy"));
     assert_eq!(value(Id::M2_START), Value::Choice("ortho"));
-    assert_eq!(TABLE.len(), 77);
+    // MPI-LAZY-ORBITALS stays opt-in until dev08.
+    assert_eq!(value(Id::M2_LAZY), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 78);
 }

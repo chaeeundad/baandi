@@ -258,8 +258,12 @@ pub(crate) enum Stage {
     SolvePrepare,
     /// Replicated solve interface after it (ORC unpacking of the N x B result).
     SolveUnpack,
+    /// MPI-LAZY-ORBITALS: on-demand gather and unpacking of a lazy block.
+    LazyMaterialize,
+    /// MPI-LAZY-ORBITALS: kinetic energy of the audit from the local rows.
+    LazyKinetic,
 }
-const STAGE_NAMES: [&str; 8] = [
+const STAGE_NAMES: [&str; 10] = [
     "density",
     "xc",
     "nonlocal_energy",
@@ -268,8 +272,10 @@ const STAGE_NAMES: [&str; 8] = [
     "atomic_start",
     "solve_prepare",
     "solve_unpack",
+    "lazy_materialize",
+    "lazy_kinetic",
 ];
-const STAGE_CALL_NAMES: [&str; 8] = [
+const STAGE_CALL_NAMES: [&str; 10] = [
     "calls.density",
     "calls.xc",
     "calls.nonlocal_energy",
@@ -278,9 +284,11 @@ const STAGE_CALL_NAMES: [&str; 8] = [
     "calls.atomic_start",
     "calls.solve_prepare",
     "calls.solve_unpack",
+    "calls.lazy_materialize",
+    "calls.lazy_kinetic",
 ];
-static STAGE_NANOS: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
-static STAGE_CALLS: [AtomicUsize; 8] = [const { AtomicUsize::new(0) }; 8];
+static STAGE_NANOS: [AtomicU64; 10] = [const { AtomicU64::new(0) }; 10];
+static STAGE_CALLS: [AtomicUsize; 10] = [const { AtomicUsize::new(0) }; 10];
 /// F21: `start` from `dft_numerics::stage_clock::start` (or `keep`); `None`
 /// with `BAANDI_STAGE_TIMERS=off` counts the entry without reading a clock.
 pub(crate) fn add(stage: Stage, start: Option<Instant>) {
@@ -321,8 +329,19 @@ pub(crate) enum Count {
     ReuseGated,
     /// Largest kept plane-slab storage of a rank, bytes (maximum, not a sum).
     ReusePlaneBytes,
+    /// MPI-LAZY-ORBITALS (`BAANDI_M2_LAZY=on`): solves that returned only the
+    /// local rows (no N x B allgatherv, no complex unpack).
+    LazyReturns,
+    /// Solves started from a lazy block's local rows (no ORC pack, no row
+    /// extraction).
+    LazyStarts,
+    /// Lazy blocks gathered on demand (result, checkpoint, ladder, audits).
+    LazyMaterializations,
+    /// Lazy starts whose rows did not match the operator on some rank (then
+    /// gathered and packed; expected 0).
+    LazyStartMismatches,
 }
-const COUNT_NAMES: [&str; 16] = [
+const COUNT_NAMES: [&str; 20] = [
     "density_builds",
     "xc_evaluations",
     "nonlocal_energy_audits",
@@ -339,8 +358,12 @@ const COUNT_NAMES: [&str; 16] = [
     "reuse_plane_keeps",
     "reuse_gated",
     "reuse_plane_bytes_max",
+    "lazy_returns",
+    "lazy_starts",
+    "lazy_materializations",
+    "lazy_start_mismatches",
 ];
-static COUNTS: [AtomicUsize; 16] = [const { AtomicUsize::new(0) }; 16];
+static COUNTS: [AtomicUsize; 20] = [const { AtomicUsize::new(0) }; 20];
 pub(crate) fn count_max(c: Count, n: usize) {
     COUNTS[c as usize].fetch_max(n, Ordering::Relaxed);
 }

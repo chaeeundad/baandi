@@ -415,6 +415,39 @@ pub struct KPointSolution {
     pub point: KPoint,
     /// Eigenvalues/residuals in Ha and normalized coefficients in this k basis.
     pub solution: EigenSolution,
+    /// MPI-LAZY-ORBITALS (`BAANDI_M2_LAZY=on`, session maps only): the block
+    /// held as distributed stick rows; `solution.eigenvectors` is then a
+    /// 0 x bands placeholder until `ScfProblem::materialize_orbitals`. Never set
+    /// on results, public `step_kpoints*` maps or with the switch off.
+    pub(crate) lazy: Option<crate::gamma_real::LazyOrbitals>,
+}
+
+/// Warm-start matrices and lazy rows of earlier k points (MPI-LAZY-ORBITALS).
+#[doc(hidden)]
+pub fn split_warm(
+    points: Option<&[KPointSolution]>,
+) -> (
+    Option<Vec<ComplexMatrix>>,
+    Vec<Option<crate::gamma_real::LazyOrbitals>>,
+) {
+    match points {
+        None => (None, Vec::new()),
+        Some(p) => (
+            Some(p.iter().map(|k| k.solution.eigenvectors.clone()).collect()),
+            p.iter().map(|k| k.lazy.clone()).collect(),
+        ),
+    }
+}
+
+/// Replace every lazy block of `k_points` by its gathered complex form
+/// (collective on the M2 path) and drop the handles.
+pub(crate) fn materialize_kpoints(k_points: &mut [KPointSolution]) -> Result<(), ScfError> {
+    for k in k_points {
+        if let Some(lazy) = k.lazy.take() {
+            k.solution.eigenvectors = lazy.into_full()?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -1940,6 +1973,63 @@ impl ScfProblem {
         initial: Option<&[ComplexMatrix]>,
         tolerance: f64,
         certify: bool,
+        finite: Option<&mut finite_temperature::OccupationWorkspace>,
+    ) -> Result<ScfStep, ScfError> {
+        self.step_map(n, initial, &[], false, tolerance, certify, finite)
+    }
+
+    /// MPI-LAZY-ORBITALS session entry: one map whose warm start may hold lazy
+    /// blocks (0 x B placeholders in `initial` with their rows in
+    /// `initial_lazy`, quadrature order; empty = none) and whose standard M2
+    /// solves return lazy blocks when `BAANDI_M2_LAZY` is on. The returned k
+    /// points then carry `lazy` handles and 0 x B placeholders; callers
+    /// materialize them (`materialize_orbitals`) where the full block is needed.
+    pub(crate) fn step_session(
+        &mut self,
+        n: &Array3<f64>,
+        initial: Option<&[ComplexMatrix]>,
+        initial_lazy: &[Option<crate::gamma_real::LazyOrbitals>],
+        tolerance: f64,
+        certify: bool,
+    ) -> Result<ScfStep, ScfError> {
+        let lazy = crate::gamma_real::m2_lazy();
+        self.step_map(n, initial, initial_lazy, lazy, tolerance, certify, None)
+    }
+
+    /// Stage-0 measurement access (`dft-cli/examples/davidson_bench.rs`): the
+    /// session's map. `initial` may hold 0 x B placeholders whose rows are in
+    /// `initial_lazy` (`split_warm` of earlier k points); lazy blocks are left
+    /// in the result when `BAANDI_M2_LAZY` is on. With the switch off it is
+    /// `step_kpoints_with_certification`.
+    #[doc(hidden)]
+    pub fn step_kpoints_lazy(
+        &mut self,
+        n: &Array3<f64>,
+        initial: Option<&[ComplexMatrix]>,
+        initial_lazy: &[Option<crate::gamma_real::LazyOrbitals>],
+        tolerance: f64,
+        certify: bool,
+    ) -> Result<ScfStep, ScfError> {
+        self.step_session(n, initial, initial_lazy, tolerance, certify)
+    }
+
+    /// Gather every lazy block of `k_points` into its full complex form
+    /// (collective on the M2 path: every rank calls it at the same point) and
+    /// drop the handles. No-op for full blocks.
+    #[doc(hidden)]
+    pub fn materialize_orbitals(&self, k_points: &mut [KPointSolution]) -> Result<(), ScfError> {
+        materialize_kpoints(k_points)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn step_map(
+        &mut self,
+        n: &Array3<f64>,
+        initial: Option<&[ComplexMatrix]>,
+        initial_lazy: &[Option<crate::gamma_real::LazyOrbitals>],
+        lazy: bool,
+        tolerance: f64,
+        certify: bool,
         mut finite: Option<&mut finite_temperature::OccupationWorkspace>,
     ) -> Result<ScfStep, ScfError> {
         #[cfg(test)]
@@ -1963,6 +2053,30 @@ impl ScfProblem {
         if initial.is_some_and(|v| v.len() != self.states.len()) {
             return Err(ScfError::InvalidInput("one warm start required per k"));
         }
+        // MPI-LAZY-ORBITALS: lazy returns only for one k point with integer
+        // occupations on the M2 standard path (replicated conditions); a lazy
+        // warm start of any other map is gathered first.
+        let lazy = lazy
+            && crate::m2::active().is_some()
+            && self.states.len() == 1
+            && finite.is_none()
+            && self.options.standard.is_some();
+        let gathered_initial: Option<Vec<ComplexMatrix>>;
+        let lazy_of = |i: usize| initial_lazy.get(i).and_then(Option::as_ref);
+        let initial = match initial {
+            Some(v) if !lazy && v.iter().any(|m| m.rows() == 0) => {
+                let mut full = Vec::with_capacity(v.len());
+                for (i, m) in v.iter().enumerate() {
+                    full.push(match lazy_of(i) {
+                        Some(h) if m.rows() == 0 => h.materialize()?.clone(),
+                        _ => m.clone(),
+                    });
+                }
+                gathered_initial = Some(full);
+                gathered_initial.as_deref()
+            }
+            other => other,
+        };
         if n.shape() != self.grid.dims() {
             return Err(ScfError::InvalidInput("input density grid"));
         }
@@ -2072,6 +2186,8 @@ impl ScfProblem {
                         &state.hamiltonian,
                         &state.basis,
                         initial.map(|v| &v[i]),
+                        lazy_of(i),
+                        lazy,
                         state.hamiltonian.kinetic_diagonal(),
                         self.occupations.len(),
                         tolerance,
@@ -2087,18 +2203,28 @@ impl ScfProblem {
                     let solution = if let Some(solution) = real_solution {
                         solution
                     } else {
+                        // A lazy warm start of a solve that left the real path
+                        // (replicated options) is gathered first.
+                        let gathered;
+                        let warm = match (initial.map(|v| &v[i]), lazy_of(i)) {
+                            (Some(m), Some(h)) if m.rows() == 0 => {
+                                gathered = h.materialize()?.clone();
+                                Some(&gathered)
+                            }
+                            (w, _) => w,
+                        };
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             if self.options.standard.is_some() {
                                 solver.solve_ritz_changes(
                                     &state.hamiltonian,
-                                    initial.map(|v| &v[i]).or(guess.as_ref()),
+                                    warm.or(guess.as_ref()),
                                     Some(&preconditioner),
                                     policy,
                                 )
                             } else if self.options.locking == dft_solvers::locking::Locking::Auto {
                                 solver.solve_locked(
                                     &state.hamiltonian,
-                                    initial.map(|v| &v[i]).or(guess.as_ref()),
+                                    warm.or(guess.as_ref()),
                                     Some(&preconditioner),
                                     policy,
                                 )
@@ -2108,7 +2234,7 @@ impl ScfProblem {
                                     .solve_with_band_tolerances_and_certification(
                                         &solver,
                                         &state.hamiltonian,
-                                        initial.map(|v| &v[i]).or(guess.as_ref()),
+                                        warm.or(guess.as_ref()),
                                         Some(&preconditioner),
                                         policy,
                                         certify,
@@ -2118,9 +2244,11 @@ impl ScfProblem {
                         .map_err(|_| ScfError::Numerical(format!("k index {i}: solve panicked")))?
                         .map_err(|e| ScfError::Numerical(format!("k index {i}: {e}")))?
                     };
+                    let lazy = state.real_solve.as_mut().and_then(|r| r.lazy_latest.take());
                     k_points.push(KPointSolution {
                         point: state.point,
                         solution,
+                        lazy,
                     });
                 }
                 k_points
@@ -2149,6 +2277,8 @@ impl ScfProblem {
                             &state.hamiltonian,
                             &state.basis,
                             initial.map(|v| &v[i]),
+                            None,
+                            false,
                             state.hamiltonian.kinetic_diagonal(),
                             bands,
                             tolerance,
@@ -2194,6 +2324,7 @@ impl ScfProblem {
                         Ok(KPointSolution {
                             point: state.point,
                             solution,
+                            lazy: None,
                         })
                     },
                 )?
@@ -2210,10 +2341,15 @@ impl ScfProblem {
         // M2d: distributed density on the M2 path (None: replicated band density).
         let m2_output = self.m2_density(&k_points, finite.is_none())?;
         let m2 = m2_output.is_some();
+        let mut k_points = k_points;
+        if !m2 && k_points.iter().any(|k| k.lazy.is_some()) {
+            // MPI-LAZY-ORBITALS: the replicated band density needs the block.
+            materialize_kpoints(&mut k_points)?;
+        }
         let occupations = &self.occupations;
         let finite = finite.as_deref();
         let volume = self.cell.volume_bohr3();
-        let orbitals = ordered_solves(
+        let mut orbitals = ordered_solves(
             &mut self.states,
             self.options.threads,
             &self.pool,
@@ -2333,6 +2469,28 @@ impl ScfProblem {
         } else {
             None
         };
+        // MPI-LAZY-ORBITALS: the kinetic energy of a lazy block from its local
+        // rows (one tree sum); the nonlocal energy then comes from the
+        // distributed projections or the identity. Otherwise gather it first.
+        let mut lazy_kinetic = None;
+        if let Some(lazy) = k_points.first().and_then(|k| k.lazy.as_ref()) {
+            match self.states[0].real_solve.as_ref() {
+                Some(rs) if m2 && (identity || m2_nonlocal.is_some()) => {
+                    lazy_kinetic = Some(crate::gamma_real::lazy_kinetic_energy(
+                        rs,
+                        lazy,
+                        &self.occupations,
+                    )?);
+                }
+                _ => {
+                    materialize_kpoints(&mut k_points)?;
+                    for (o, k) in orbitals.iter_mut().zip(&k_points) {
+                        let v = &k.solution.eigenvectors;
+                        *o = (0..v.cols()).map(|b| v.column(b).to_vec()).collect();
+                    }
+                }
+            }
+        }
         let mut audits = Vec::new();
         ordered_chunks(
             &mut self.states,
@@ -2346,7 +2504,7 @@ impl ScfProblem {
                     .as_ref()
                     .filter(|_| state.gamma_real.gamma_real_used)
                     .and_then(|r| r.nonlocal_partials());
-                let audit = energy::evaluate_shared_with_partials(
+                let audit = energy::evaluate_shared_with_kinetic(
                     AuditInput {
                         cell: &self.cell,
                         basis: &state.basis,
@@ -2366,6 +2524,7 @@ impl ScfProblem {
                     &shared_audit,
                     !identity && m2_nonlocal.is_none(),
                     partials,
+                    if i == 0 { lazy_kinetic } else { None },
                 )?;
                 Ok((state.point.weight, audit))
             },

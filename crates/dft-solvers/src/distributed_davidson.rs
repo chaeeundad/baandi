@@ -457,6 +457,15 @@ fn apply_distributed<C: Collective>(
 /// complex warm start changes X by rounding only).
 pub const KEPT_START_TOLERANCE: f64 = 1e-14;
 
+/// Start block of a stick-row solve (MPI-LAZY-ORBITALS): replicated global
+/// rows (N x w, the same on every rank) or this rank's rows only (n_loc x w, in
+/// the operator's `local_rows` order).
+#[derive(Clone, Copy, Debug)]
+pub enum DistributedStart<'a> {
+    Global(&'a RealMatrix),
+    Local(&'a RealMatrix),
+}
+
 /// Kept start of the stick-row solver (MPI-KEPT-START, `BAANDI_M2_REUSE`): the
 /// H images of the latest Ritz-change return on this rank's rows, owned by the
 /// caller across solves (the X itself is the caller's `x_local`). All flags
@@ -1106,7 +1115,7 @@ impl crate::RealDavidson {
                 op.worker_pool(),
                 op.inner_threads(),
                 &mut apply,
-                initial,
+                initial.map(DistributedStart::Global),
                 diag_local,
                 Some(diagonal),
                 policy,
@@ -1115,6 +1124,7 @@ impl crate::RealDavidson {
                 capacity_per_band,
                 tuning,
                 None,
+                true,
             );
         }
         let pool = match op.worker_pool() {
@@ -1192,7 +1202,7 @@ impl crate::RealDavidson {
         self.solve_rows_impl(
             comm,
             op,
-            initial,
+            initial.map(DistributedStart::Global),
             diagonal_local,
             policy,
             ritz,
@@ -1200,6 +1210,7 @@ impl crate::RealDavidson {
             capacity_per_band,
             tuning,
             None,
+            true,
         )
     }
 
@@ -1235,6 +1246,47 @@ impl crate::RealDavidson {
         self.solve_rows_impl(
             comm,
             op,
+            initial.map(DistributedStart::Global),
+            diagonal_local,
+            policy,
+            ritz,
+            certify,
+            capacity_per_band,
+            tuning,
+            Some((x_local, kept)),
+            true,
+        )
+    }
+
+    /// MPI-LAZY-ORBITALS (`BAANDI_M2_LAZY=on`): `solve_distributed_rows_kept`
+    /// with the start given either replicated (`DistributedStart::Global`) or as
+    /// this rank's rows in the operator's local row order
+    /// (`DistributedStart::Local`, no replicated block needed), and with the
+    /// final N x B allgatherv optional. With `gather = false` on the workspace
+    /// path the returned `eigenvectors` is a 0 x bands placeholder and the
+    /// eigenvectors exist only as the local rows in `x_local` (every rank holds
+    /// its own rows). On the non-workspace path a local start is gathered first
+    /// and the full block is always returned; callers check
+    /// `eigenvectors.rows()`. All ranks must pass the same variant and `gather`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn solve_distributed_rows_local<C: Collective, O: DistributedRealOperator>(
+        &self,
+        comm: &C,
+        op: &mut O,
+        initial: Option<DistributedStart<'_>>,
+        diagonal_local: &[f64],
+        policy: BandTolerances,
+        ritz: bool,
+        certify: bool,
+        capacity_per_band: usize,
+        tuning: DistributedTuning,
+        x_local: &mut RealMatrix,
+        kept: &mut DistributedKeptStart,
+        gather: bool,
+    ) -> Result<RealEigenSolution, SolverError> {
+        self.solve_rows_impl(
+            comm,
+            op,
             initial,
             diagonal_local,
             policy,
@@ -1243,6 +1295,7 @@ impl crate::RealDavidson {
             capacity_per_band,
             tuning,
             Some((x_local, kept)),
+            gather,
         )
     }
 
@@ -1251,7 +1304,7 @@ impl crate::RealDavidson {
         &self,
         comm: &C,
         op: &mut O,
-        initial: Option<&RealMatrix>,
+        initial: Option<DistributedStart<'_>>,
         diagonal_local: &[f64],
         policy: BandTolerances,
         ritz: bool,
@@ -1259,6 +1312,7 @@ impl crate::RealDavidson {
         capacity_per_band: usize,
         tuning: DistributedTuning,
         mut kept: Option<(&mut RealMatrix, &mut DistributedKeptStart)>,
+        gather: bool,
     ) -> Result<RealEigenSolution, SolverError> {
         if let Some((_, k)) = kept.as_mut() {
             k.taken = false;
@@ -1337,6 +1391,7 @@ impl crate::RealDavidson {
                 capacity_per_band,
                 tuning,
                 kept,
+                gather,
             );
         }
         // The allocating path has no kept start: drop it, then give the local
@@ -1344,6 +1399,22 @@ impl crate::RealDavidson {
         if let Some((_, k)) = kept.as_mut() {
             k.invalidate();
         }
+        // It also needs a replicated start: gather a local one (MPI-LAZY-ORBITALS
+        // with the workspace off), and it always returns the gathered block.
+        let gathered;
+        let initial = match initial {
+            Some(DistributedStart::Global(x)) => Some(x),
+            Some(DistributedStart::Local(x)) => {
+                if x.rows() != nl {
+                    return Err(SolverError::InvalidParameter(
+                        "local start rows differ from the operator's rows",
+                    ));
+                }
+                gathered = gather_full(comm, &layout, x)?;
+                Some(&gathered)
+            }
+            None => None,
+        };
         let pool = match op.worker_pool() {
             Some(p) => p,
             None => WorkerPool::new(op.inner_threads())

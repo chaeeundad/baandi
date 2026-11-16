@@ -55,6 +55,8 @@ fn operator_options_bands_and_executor_invalidate_cached_state() {
                 &h,
                 &basis,
                 None,
+                None,
+                false,
                 h.kinetic_diagonal(),
                 bands,
                 1e-9,

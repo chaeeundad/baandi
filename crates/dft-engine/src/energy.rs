@@ -511,6 +511,20 @@ pub(crate) fn evaluate_shared_with_partials(
     explicit_nonlocal: bool,
     partials: Option<&[f64]>,
 ) -> Result<EnergyAudit, ScfError> {
+    evaluate_shared_with_kinetic(a, shared, explicit_nonlocal, partials, None)
+}
+
+/// As `evaluate_shared_with_partials`; `kinetic` (MPI-LAZY-ORBITALS) is the
+/// kinetic energy (Ha) of these orbitals computed from distributed rows, used
+/// in place of the plane-wave sum over `a.orbitals` (which then need only the
+/// right count; their coefficients are not read).
+pub(crate) fn evaluate_shared_with_kinetic(
+    a: AuditInput<'_>,
+    shared: &SharedAudit,
+    explicit_nonlocal: bool,
+    partials: Option<&[f64]>,
+    kinetic: Option<f64>,
+) -> Result<EnergyAudit, ScfError> {
     let n = a.output_density;
     if a.orbitals.len() != a.occupations.len()
         || a.eigenvalues.len() != a.occupations.len()
@@ -531,7 +545,11 @@ pub(crate) fn evaluate_shared_with_partials(
     {
         return Err(ScfError::InvalidInput("invalid energy/eigenpair data"));
     }
-    let kinetic = kinetic::energy(a.basis, a.orbitals, a.occupations)?.0;
+    let kinetic = match kinetic {
+        Some(value) if value.is_finite() => value,
+        Some(_) => return Err(ScfError::NonFinite),
+        None => kinetic::energy(a.basis, a.orbitals, a.occupations)?.0,
+    };
     // Per-band <c|V_nl|c> in parallel (each band's own arithmetic unchanged),
     // accumulated in ascending band order: bit-identical to the serial loop.
     let mut nonlocal = 0.0;

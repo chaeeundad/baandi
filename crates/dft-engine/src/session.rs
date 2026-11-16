@@ -41,6 +41,9 @@ struct Continuation {
     n: Array3<f64>,
     mixer: Box<dyn MixerHistory>,
     previous: Option<Vec<ComplexMatrix>>,
+    /// MPI-LAZY-ORBITALS: distributed rows of the blocks of `previous` that are
+    /// 0 x B placeholders (same order; empty when none is lazy).
+    previous_lazy: Vec<Option<crate::gamma_real::LazyOrbitals>>,
     history: Vec<IterationRecord>,
     weight: f64,
     best: f64,
@@ -355,6 +358,7 @@ impl ScfSession {
             n,
             mixer,
             previous: None,
+            previous_lazy: Vec::new(),
             history: Vec::new(),
             weight,
             best: f64::INFINITY,
@@ -371,6 +375,7 @@ impl ScfSession {
             n,
             mixer,
             previous,
+            previous_lazy,
             history,
             weight,
             best,
@@ -427,9 +432,10 @@ impl ScfSession {
         self.problem.energy_identity = identity;
         let mut step = self
             .problem
-            .step_kpoints_with_certification(
+            .step_session(
                 n,
                 previous.as_deref(),
+                previous_lazy,
                 tolerance,
                 tolerance <= self.problem.options.eigen_tolerance,
             )
@@ -454,14 +460,10 @@ impl ScfSession {
                 standard_error_ha.unwrap(),
                 self.problem.electrons,
             );
-            let warm: Vec<_> = step
-                .k_points
-                .iter()
-                .map(|k| k.solution.eigenvectors.clone())
-                .collect();
+            let (warm, warm_lazy) = split_warm(Some(&step.k_points));
             let mut redo =
                 self.problem
-                    .step_kpoints_with_certification(n, Some(&warm), tolerance, false)?;
+                    .step_session(n, warm.as_deref(), &warm_lazy, tolerance, false)?;
             // Charge every discarded first solve, including its potential,
             // density and audit work. No mixer history exists before the redo.
             for (new, old) in redo.k_points.iter_mut().zip(&step.k_points) {
@@ -707,6 +709,8 @@ impl ScfSession {
             // requested spectral audit remains a separate, charged operation.
             let mut passed = true;
             if let Some(report) = &mut self.spectral_report {
+                // MPI-LAZY-ORBITALS: the spectral audit reads the full blocks.
+                materialize_kpoints(&mut step.k_points)?;
                 (rescued, unable_to_verify) = self.problem.audit_reported_spectrum(
                     n,
                     &mut step.k_points,
@@ -901,6 +905,14 @@ impl ScfSession {
             || unable_to_verify
             || (retain_last && iteration == self.problem.options.max_iterations)
         {
+            // MPI-LAZY-ORBITALS: the delivered state carries full blocks (one
+            // gather per lazy k block; every rank reaches this point together).
+            if step.k_points.iter().any(|k| k.lazy.is_some()) {
+                materialize_kpoints(&mut step.k_points)?;
+                if let Some(first) = step.k_points.first() {
+                    step.solution.eigenvectors = first.solution.eigenvectors.clone();
+                }
+            }
             // B2: the final state always carries the explicit nonlocal audit.
             let energy_identity = if step.nonlocal_from_identity {
                 let audit = self.problem.explicit_nonlocal_energy(&step.k_points)?;
@@ -1076,15 +1088,15 @@ impl ScfSession {
         }
         n.as_slice_mut().unwrap().copy_from_slice(&mixed);
         history.last_mut().unwrap().timings.mixing = mix_start.elapsed();
+        // MPI-LAZY-ORBITALS: lazy blocks travel with their distributed rows.
         let verification_orbitals = verification_reuse.map(|(_, (o, _))| o);
-        *previous = rescued.or(verification_orbitals).or_else(|| {
-            Some(
-                step.k_points
-                    .into_iter()
-                    .map(|k| k.solution.eigenvectors)
-                    .collect(),
-            )
-        });
+        let (warm, lazy) = match (rescued, verification_orbitals) {
+            (Some(r), _) => (r, Vec::new()),
+            (None, Some(points)) => split_points(points),
+            (None, None) => split_points(step.k_points),
+        };
+        *previous = Some(warm);
+        *previous_lazy = lazy;
         if iteration == self.problem.options.max_iterations {
             Ok(StepStatus::NotConverged)
         } else {
@@ -1229,10 +1241,12 @@ impl ScfSession {
             .or_else(|| self.continuation.as_ref().map(|c| &c.n))
     }
     /// C1 ladder hand-off: next input density and warm orbitals at an active boundary.
-    pub(crate) fn warm_state(&self) -> Option<(&Array3<f64>, Option<&[ComplexMatrix]>)> {
-        self.continuation
-            .as_ref()
-            .map(|c| (&c.n, c.previous.as_deref()))
+    /// Lazy blocks (MPI-LAZY-ORBITALS) are gathered here (collective).
+    pub(crate) fn warm_state(&self) -> Result<Option<WarmState<'_>>, ScfError> {
+        let Some(c) = self.continuation.as_ref() else {
+            return Ok(None);
+        };
+        Ok(Some((&c.n, full_previous(c)?)))
     }
     pub(crate) fn problem_ref(&self) -> &ScfProblem {
         &self.problem
@@ -1402,11 +1416,20 @@ impl ScfSession {
                 .map(|k| orbitals(&k.solution.eigenvectors))
                 .collect()
         } else {
-            self.continuation
-                .as_ref()
-                .and_then(|c| c.previous.as_ref())
-                .map(|v| v.iter().map(orbitals).collect())
-                .unwrap_or_default()
+            // MPI-LAZY-ORBITALS: lazy blocks are gathered (every rank runs the
+            // same capture, so the collective is entered by all of them).
+            match self.continuation.as_ref() {
+                Some(c) if c.previous_lazy.iter().any(Option::is_some) => full_previous(c)
+                    .map_err(|_| Rejection::Orbitals)?
+                    .map(|v| v.iter().map(orbitals).collect())
+                    .unwrap_or_default(),
+                Some(c) => c
+                    .previous
+                    .as_ref()
+                    .map(|v| v.iter().map(orbitals).collect())
+                    .unwrap_or_default(),
+                None => Vec::new(),
+            }
         };
         let sequence = if kind == CheckpointKind::ExactContinuation {
             self.events
@@ -1587,6 +1610,7 @@ impl ScfSession {
         let c = self.continuation.as_mut().ok_or(R::Boundary)?;
         c.n = n;
         c.previous = previous;
+        c.previous_lazy = Vec::new();
         Ok(())
     }
     pub fn restore_exact(
@@ -1768,8 +1792,48 @@ fn verification_attempts_consistent(c: &crate::checkpoint::ContinuationState) ->
 
 /// Attempt, its history record, a clipped-charge failure, and the solve's
 /// orbitals and output density F(rho_out) (VERIFY-REUSE).
-/// Orbitals and output density F(rho_out) of a verification solve.
-type VerificationMap = (Vec<ComplexMatrix>, Array3<f64>);
+/// Next input density and warm orbitals at an active boundary (ladder hand-off).
+pub(crate) type WarmState<'a> = (&'a Array3<f64>, Option<Vec<ComplexMatrix>>);
+
+/// The continuation's warm-start blocks with every lazy one gathered
+/// (MPI-LAZY-ORBITALS; collective when any is lazy).
+fn full_previous(c: &Continuation) -> Result<Option<Vec<ComplexMatrix>>, ScfError> {
+    let Some(previous) = c.previous.as_ref() else {
+        return Ok(None);
+    };
+    let mut out = Vec::with_capacity(previous.len());
+    for (i, m) in previous.iter().enumerate() {
+        out.push(match c.previous_lazy.get(i).and_then(Option::as_ref) {
+            Some(lazy) if m.rows() == 0 => lazy.materialize()?.clone(),
+            _ => m.clone(),
+        });
+    }
+    Ok(Some(out))
+}
+
+/// Orbitals (k points, possibly lazy) and output density F(rho_out) of a
+/// verification solve.
+type VerificationMap = (Vec<KPointSolution>, Array3<f64>);
+
+/// Owned warm-start blocks and their lazy rows (MPI-LAZY-ORBITALS), moved out
+/// of k points; the lazy list is empty when no block is lazy.
+fn split_points(
+    points: Vec<KPointSolution>,
+) -> (
+    Vec<ComplexMatrix>,
+    Vec<Option<crate::gamma_real::LazyOrbitals>>,
+) {
+    let any_lazy = points.iter().any(|k| k.lazy.is_some());
+    let mut warm = Vec::with_capacity(points.len());
+    let mut lazy = Vec::new();
+    for k in points {
+        warm.push(k.solution.eigenvectors);
+        if any_lazy {
+            lazy.push(k.lazy);
+        }
+    }
+    (warm, lazy)
+}
 
 type VerificationOutcome = (
     VerificationAttempt,
@@ -1798,13 +1862,11 @@ fn verify_fixed_point(
         .expect("verification requires the standard profile")
         .threshold_ha;
     let eigen_tolerance = StandardProfile::ratchet(tolerance, standard_error_ha, problem.electrons);
-    let warm: Vec<_> = points
-        .iter()
-        .map(|k| k.solution.eigenvectors.clone())
-        .collect();
-    let check = problem.step_kpoints_with_certification(
+    let (warm, warm_lazy) = split_warm(Some(points));
+    let check = problem.step_session(
         density,
-        Some(&warm),
+        warm.as_deref(),
+        &warm_lazy,
         eigen_tolerance,
         // Same flag as an ordinary step (the standard path ignores it).
         eigen_tolerance <= problem.options.eigen_tolerance,
@@ -1934,12 +1996,7 @@ fn verify_fixed_point(
         chemical_potential_change_ha: None,
         moment_change: None,
     };
-    let orbitals = check
-        .k_points
-        .into_iter()
-        .map(|k| k.solution.eigenvectors)
-        .collect();
-    Ok((attempt, record, clipped, (orbitals, check.density)))
+    Ok((attempt, record, clipped, (check.k_points, check.density)))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

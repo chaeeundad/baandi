@@ -1045,6 +1045,7 @@ impl CollinearProblem {
                         .map(|(w, k)| KPointSolution {
                             point: k.point,
                             solution: w.solution.take().unwrap(),
+                            lazy: None,
                         })
                         .collect()
                 });

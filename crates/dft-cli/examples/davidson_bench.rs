@@ -54,7 +54,6 @@ use dft_cli::config::Config;
 use dft_engine::{ScfProblem, ScfStep, SpeciesPotential, StandardProfile, parallel};
 use dft_geometry::Atom;
 use dft_mpi::Collective;
-use dft_numerics::linalg::ComplexMatrix;
 use dft_physics::data::Array3;
 use serde_json::{Value, json};
 use std::{
@@ -157,6 +156,8 @@ struct Snap {
     /// Engine and operator M2 stages (`parallel::m2_stats`: density, XC, solve
     /// interface, FFT transposes, nonlocal, ...).
     m2_engine_seconds: Vec<(String, f64)>,
+    /// Engine and operator M2 counters (the `lazy_*` ones are reported).
+    m2_counts: Vec<(String, usize)>,
     reductions: (u64, u64),
     reduced: dft_solvers::distributed_davidson::ReducedSolveStats,
     rotation_flops: u64,
@@ -184,6 +185,7 @@ fn snap() -> Snap {
         m2_stage_calls: parallel::stage_calls(),
         m2_stage_seconds: parallel::stage_seconds(),
         m2_engine_seconds: parallel::m2_stats().1,
+        m2_counts: parallel::m2_stats().0,
         reductions: (
             red.1.iter().map(|s| s.calls).sum(),
             red.1.iter().map(|s| s.payload).sum(),
@@ -279,6 +281,12 @@ fn delta(a: &Snap, b: &Snap, p: u64) -> (BTreeMap<String, Value>, BTreeMap<Strin
     }
     for ((n, s1), (_, s0)) in b.m2_engine_seconds.iter().zip(&a.m2_engine_seconds) {
         s.insert(format!("m2.{n}"), (s1 - s0) / p as f64);
+    }
+    // MPI-LAZY-ORBITALS counters (`m2.lazy_*`).
+    for ((n, c1), (_, c0)) in b.m2_counts.iter().zip(&a.m2_counts) {
+        if n.starts_with("lazy_") {
+            put(&format!("m2.{n}"), (c1 - c0) as u64);
+        }
     }
     put("dist.reductions.calls", b.reductions.0 - a.reductions.0);
     put("dist.reductions.doubles", b.reductions.1 - a.reductions.1);
@@ -454,7 +462,13 @@ fn bench(args: &Args, comm: Option<&dyn Collective>, p: u64) -> RankOut {
             },
         ),
     };
-    let one = |m: &ComplexMatrix| vec![m.clone()];
+    // Warm starts of the session maps: blocks plus their lazy rows
+    // (MPI-LAZY-ORBITALS; with `BAANDI_M2_LAZY` off the blocks are full and the
+    // maps are `step_kpoints_with_certification`).
+    let warm_of = |step: &ScfStep| {
+        let (warm, lazy) = dft_engine::split_warm(Some(&step.k_points));
+        (warm.expect("one block"), lazy)
+    };
     let construct_s = t0.elapsed().as_secs_f64();
     // Atomic-start vectors of a cold map at rho0, computed once (the SCF's own
     // routine, `ScfProblem::atomic_start_vectors`); None without atomic orbitals
@@ -464,11 +478,14 @@ fn bench(args: &Args, comm: Option<&dyn Collective>, p: u64) -> RankOut {
     let atomic_s = t_atomic.elapsed().as_secs_f64();
     // Setup map: X_prev and rho_out at rho0, from the atomic start.
     let setup = problem
-        .step_kpoints_with_certification(&rho0, atomic.as_deref(), args.prev_tol, false)
+        .step_kpoints_lazy(&rho0, atomic.as_deref(), &[], args.prev_tol, false)
         .expect("setup map");
     let gamma_real = problem.gamma_real_diagnostics().all(|d| d.gamma_real_used);
-    let x_prev = one(&setup.k_points[0].solution.eigenvectors);
-    let plane_waves = x_prev[0].rows();
+    let (x_prev, x_prev_lazy) = warm_of(&setup);
+    let plane_waves = x_prev_lazy
+        .first()
+        .and_then(|l| l.as_ref())
+        .map_or(x_prev[0].rows(), |l| l.global_len());
     let bands = setup.k_points[0].solution.eigenvalues.len();
     let e_h_change = hartree_difference(&setup.density, &rho0, &prepared.cell);
     let warm_tol = args
@@ -497,7 +514,7 @@ fn bench(args: &Args, comm: Option<&dyn Collective>, p: u64) -> RankOut {
         for r in 0..=args.repeats {
             let initial = if kind == "warm" {
                 let rearm = problem
-                    .step_kpoints_with_certification(&rho0, Some(&x_prev), args.cold_tol, false)
+                    .step_kpoints_lazy(&rho0, Some(&x_prev), &x_prev_lazy, args.cold_tol, false)
                     .expect("re-arm map");
                 if r == 0 && rank0 {
                     let s = &rearm.k_points[0].solution;
@@ -512,18 +529,22 @@ fn bench(args: &Args, comm: Option<&dyn Collective>, p: u64) -> RankOut {
                         s.operator_applications
                     );
                 }
-                Some(one(&rearm.k_points[0].solution.eigenvectors))
+                Some(warm_of(&rearm))
             } else if args.cold_internal {
                 None
             } else {
-                atomic.clone()
+                atomic.clone().map(|a| (a, Vec::new()))
             };
             let density = if kind == "warm" { &rho_w } else { &rho0 };
+            let (initial, initial_lazy) = match &initial {
+                Some((w, l)) => (Some(w.as_slice()), l.as_slice()),
+                None => (None, &[][..]),
+            };
             barrier();
             let before = snap();
             let t = Instant::now();
             let step: ScfStep = problem
-                .step_kpoints_with_certification(density, initial.as_deref(), tolerance, false)
+                .step_kpoints_lazy(density, initial, initial_lazy, tolerance, false)
                 .expect("timed map");
             let map_s = t.elapsed().as_secs_f64();
             barrier();

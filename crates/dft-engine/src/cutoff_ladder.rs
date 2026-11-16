@@ -511,8 +511,11 @@ fn coarse_stage(
     } else {
         None
     };
-    let (density, orbitals) = match session.warm_state() {
-        Some((n, Some(orbitals))) if orbitals.len() == 1 => (n.clone(), orbitals[0].clone()),
+    // MPI-LAZY-ORBITALS: `warm_state` gathers a lazy coarse block (once).
+    let (density, orbitals) = match session.warm_state()? {
+        Some((n, Some(mut orbitals))) if orbitals.len() == 1 => {
+            (n.clone(), orbitals.pop().expect("one block"))
+        }
         _ => {
             // Terminal coarse session (converged or exhausted): use its result.
             let outcome = session.result().ok_or(ScfError::InvalidInput(

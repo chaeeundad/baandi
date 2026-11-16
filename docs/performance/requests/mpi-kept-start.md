@@ -19,7 +19,7 @@ MPI against MPI only (BAANDI `--features mkl,mpi` at np ranks; no threads and no
 - |dE| within the standard class 5e-9 Ha in every row, converged, verification passed, SCF and Davidson counts within the run-to-run variation of A.
 - Every rank's energy equal to rank 0; arm B density SHA of two repeats at np=4 identical (bit-reproducible at a fixed rank count).
 - `reuse_taken` > 0 in every row and `reuse_gated` = 0 (otherwise report the grid and kept pairs).
-- Also run `cargo test --release --features mkl -p dft-solvers --test distributed_kept_start`, `cargo test --release --features mkl -p dft-physics --test distributed_real_gamma potential_change`, `cargo test --release --features mkl -p dft-engine --test distributed_scf m2_kept_start` (MKL rounding of the kept start).
+- Also run `cargo test --release --features mkl -p dft-solvers --test distributed_kept_start`, `cargo test --release --features mkl -p dft-physics --test distributed_real_gamma potential_change`, `cargo test --release --features mkl -p dft-engine --test m2_kept_start` (MKL rounding of the kept start).
 - One strict cell (si64 `BAANDI_REFERENCE_STRICT=on` np=8 seed 601, arms A and B): energy and density SHA bit-identical (strict solves never take the kept start; the switch must be inert there).
 
 ## Decision (AGENTS.md adoption rule)

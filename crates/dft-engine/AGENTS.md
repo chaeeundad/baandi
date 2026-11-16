@@ -444,4 +444,14 @@ memory gate); the next solve adds (V_new - V_old) X via
 start. Dropped on any operator rebuild, strict solve, `forget_reuse`. Every
 condition must stay replicated. Per-thread override `set_m2_reuse_override`.
 Counters `reuse_*` in `m2::stats`. Test
-`tests/distributed_scf.rs::m2_kept_start_keeps_the_standard_class_and_saves_columns`.
+`tests/m2_kept_start.rs::m2_kept_start_keeps_the_standard_class_and_saves_columns`.
+
+## VERIFY-REUSE (2026-11-16, default off)
+
+`BAANDI_VERIFY_REUSE=off|warm|feed` (`session.rs` `verify_reuse`; test hook
+`ScfProblem::force_verify_reuse`). Acts only after a failed ADR 0043 verification:
+`warm` starts the next step from the verification solve's orbitals (its REUSE-PSI
+kept start is then taken); `feed` also mixes the pair (rho_out, F(rho_out)) after
+the step's own pair. Off is the default path bit for bit; acceptance still needs a
+passed verification. Test `verification_tests::failed_verification_reuse_keeps_the_fixed_point`.
+Ledger VERIFY-REUSE-*, dev08 request `docs/performance/requests/verify-reuse.md`.

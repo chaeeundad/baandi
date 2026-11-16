@@ -130,6 +130,7 @@ fn legacy_defaults_are_unchanged() {
         Id::REFERENCE_STRICT,
         Id::M2_B5,
         Id::LEAN_PROJ_CACHE,
+        Id::VERIFY_REUSE,
     ] {
         assert!(!on(id), "{id:?} must default off");
     }
@@ -213,5 +214,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
     // MPI-KEPT-START stays opt-in until dev08.
     assert_eq!(value(Id::M2_REUSE), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 74);
+    assert_eq!(TABLE.len(), 75);
 }

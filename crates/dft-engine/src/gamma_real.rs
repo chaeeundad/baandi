@@ -76,6 +76,8 @@ pub(crate) struct RealSolveState {
     nl_valid: bool,
     /// REUSE-PSI state (work order C2), created at the first eligible solve.
     reuse: Option<PsiReuse>,
+    /// MPI-KEPT-START state (`BAANDI_M2_REUSE=on`) of the M2 stick-row path.
+    pub(crate) m2_reuse: Option<M2Reuse>,
     /// Set by an exact-continuation checkpoint: the next solve forgets the kept
     /// X, H X and psi(r) and takes the plain start, exactly as a restored session
     /// (which has no kept state) does, so a continued and a restored run agree bit
@@ -231,6 +233,91 @@ pub fn reuse_psi_counters() -> ReusePsiCounters {
         bytes_kept: g(ReuseCount::BytesKept),
     }
 }
+/// MPI-KEPT-START (`BAANDI_M2_REUSE=on`, default off; rounding class;
+/// docs/design/mpi-kept-start.md): the REUSE-PSI kept start on the M2
+/// stick-row path. A standard (Ritz-change) M2 solve keeps the local rows of X
+/// and of H X (the return rotation of the H images); the M2 density build keeps
+/// the real-space plane slabs of the leading fully occupied pairs; the next
+/// standard solve of the same operator starts from X and
+/// H_new X = H_old X + (V_new - V_old) X (one forward transform per kept pair,
+/// both transforms for the other pairs; no kinetic or nonlocal work, no
+/// orthonormalization, no initial apply) when the solver finds `initial` equal
+/// to X to 1e-14 and the Gram defect of X at most 1e-12. The local rows of X
+/// come from the solver, not from the gathered block. Per-thread override for
+/// simulated ranks: `set_m2_reuse_override`.
+pub(crate) fn m2_reuse() -> bool {
+    M2_REUSE_OVERRIDE.with(|o| o.get()).unwrap_or_else(|| {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::M2_REUSE))
+    })
+}
+thread_local! {
+    static M2_REUSE_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+/// Override `BAANDI_M2_REUSE` for the calling thread (simulated ranks in
+/// tests); `None` restores the environment.
+pub fn set_m2_reuse_override(value: Option<bool>) {
+    M2_REUSE_OVERRIDE.with(|o| o.set(value));
+}
+
+/// MPI-KEPT-START state of one k state on one rank. Every flag is replicated
+/// (set under conditions every rank evaluates alike); the matrices hold this
+/// rank's rows and the slabs this rank's FFT planes.
+pub(crate) struct M2Reuse {
+    /// H X of the latest keeping return and the solver flags.
+    pub(crate) kept: dft_solvers::distributed_davidson::DistributedKeptStart,
+    /// Potential (Ha, full grid) the stored H X belongs to.
+    v_old: Vec<f64>,
+    delta: Vec<f64>,
+    /// (V_new - V_old) X on the local rows.
+    image: RealMatrix,
+    /// Plane slabs of the leading pairs of the kept X (pair t at
+    /// `planes[t * plane_points..]`), valid for the first `kept_pairs` pairs.
+    pub(crate) planes: Vec<Complex64>,
+    pub(crate) kept_pairs: usize,
+    /// The latest solve stored a return: the density build may keep slabs.
+    pub(crate) collect: bool,
+    pub(crate) gated: bool,
+}
+
+impl M2Reuse {
+    /// Slab storage for `pairs` pairs of `plane_points` points, or None when
+    /// nothing was stored or the replicated estimate `pairs * ceil(grid /
+    /// ranks)` points exceeds `PSI_KEEP_MAX_BYTES` (the decision must not
+    /// depend on the rank's own plane count, so that every rank takes the same
+    /// branch). Grows once (setup of the state), never in a numerical loop.
+    pub(crate) fn plane_slots(
+        &mut self,
+        pairs: usize,
+        plane_points: usize,
+        grid_points: usize,
+        ranks: usize,
+    ) -> Option<&mut [Complex64]> {
+        let estimate = pairs
+            .saturating_mul(grid_points.div_ceil(ranks.max(1)))
+            .saturating_mul(std::mem::size_of::<Complex64>());
+        if !self.collect || pairs == 0 {
+            return None;
+        }
+        if estimate > PSI_KEEP_MAX_BYTES {
+            if !self.gated {
+                self.gated = true;
+                crate::m2::count(crate::m2::Count::ReuseGated);
+            }
+            return None;
+        }
+        let len = pairs * plane_points;
+        if self.planes.len() < len {
+            self.planes.resize(len, Complex64::default());
+            crate::m2::count_max(
+                crate::m2::Count::ReusePlaneBytes,
+                len * std::mem::size_of::<Complex64>(),
+            );
+        }
+        Some(&mut self.planes[..len])
+    }
+}
+
 /// NL-ENERGY-REAL (opt-in `BAANDI_NL_ENERGY_REAL=on`, default off; rounding
 /// class): on the real Gamma path the audit's per-band nonlocal energies come
 /// from one real projector product of the returned ORC vectors (P^T X by the
@@ -368,6 +455,7 @@ fn ensure_state(
             nl_values: Vec::new(),
             nl_valid: false,
             reuse: None,
+            m2_reuse: None,
             forget_reuse: std::sync::atomic::AtomicBool::new(false),
         });
     }
@@ -500,7 +588,9 @@ pub(crate) fn solve_real_gamma(
     }
     let state = state.as_mut().unwrap();
     state.nl_valid = false;
-    state.m2_local = None;
+    // MPI-KEPT-START: the previous solve's local rows are the kept X (and the
+    // storage of this solve's local rows).
+    let previous_local = state.m2_local.take();
     // M2c: the distributed Hamiltonian follows the SCF potential like the serial one.
     match comm.as_ref().filter(|_| crate::parallel::m2_enabled()) {
         Some(c) => {
@@ -519,6 +609,8 @@ pub(crate) fn solve_real_gamma(
                 )
                 .ok();
                 state.m2_density = None;
+                // A rebuilt operator (atoms, projectors, basis, grid): nothing kept.
+                state.m2_reuse = None;
             }
             if let Some(d) = state.dist.as_mut() {
                 d.set_batched(crate::m2::batched_transposes());
@@ -527,6 +619,7 @@ pub(crate) fn solve_real_gamma(
         None => {
             state.dist = None;
             state.m2_density = None;
+            state.m2_reuse = None;
         }
     }
     let real = state.op.h.borrow();
@@ -570,6 +663,7 @@ pub(crate) fn solve_real_gamma(
         .swap(false, std::sync::atomic::Ordering::Relaxed)
     {
         state.reuse = None;
+        state.m2_reuse = None;
         if let Some(ws) = state.workspace.as_mut() {
             ws.keep_returned_products(false)?;
         }
@@ -585,26 +679,80 @@ pub(crate) fn solve_real_gamma(
     let dist = state.dist.as_mut();
     // The SCF driver supplies the same ratcheted tolerance and band policy to
     // both representations. Standard returns remain explicitly uncertified.
+    let tuning = dft_solvers::distributed_davidson::DistributedTuning::current();
+    let m2_kept = comm.is_some()
+        && dist.is_some()
+        && options.standard.is_some()
+        && m2_reuse()
+        && (tuning.workspace || tuning.selected_roots);
+    if !m2_kept {
+        state.m2_reuse = None;
+    }
     let result = if let (Some(comm), Some(dist)) = (&comm, dist) {
         crate::parallel::count_distributed_solve();
         crate::parallel::count_distributed_rows_solve();
         let local_diagonal: Vec<f64> = dist.local_rows().iter().map(|&r| diagonal[r]).collect();
-        let result = solver.solve_distributed_rows(
-            comm,
-            dist,
-            packed.as_ref(),
-            &local_diagonal,
-            policy,
-            options.standard.is_some(),
-            certify && options.standard.is_none(),
-            options.davidson_capacity_per_band,
-        )?;
-        // M2d: keep this rank's rows for the distributed density and energy.
-        state.m2_local = Some(
-            dist.extract_local(&result.eigenvectors)
-                .map_err(|e| ScfError::Numerical(e.to_string()))?,
-        );
-        result
+        if m2_kept {
+            let mut x_local = previous_local
+                .unwrap_or_else(|| RealMatrix::new(0, 0, Vec::new()).expect("empty matrix"));
+            let r = state.m2_reuse.get_or_insert_with(|| M2Reuse {
+                kept: dft_solvers::distributed_davidson::DistributedKeptStart::new(),
+                v_old: Vec::new(),
+                delta: Vec::new(),
+                image: RealMatrix::new(0, 0, Vec::new()).expect("empty matrix"),
+                planes: Vec::new(),
+                kept_pairs: 0,
+                collect: false,
+                gated: false,
+            });
+            prepare_m2_kept_start(comm, dist, r, &x_local, packed.is_some(), bands)?;
+            let solved = solver.solve_distributed_rows_kept(
+                comm,
+                dist,
+                packed.as_ref(),
+                &local_diagonal,
+                policy,
+                true,
+                false,
+                options.davidson_capacity_per_band,
+                tuning,
+                &mut x_local,
+                &mut r.kept,
+            );
+            if r.kept.taken() {
+                crate::m2::count(crate::m2::Count::ReuseTaken);
+                crate::m2::count_n(crate::m2::Count::ReuseColumnsSaved, bands);
+            } else if r.kept.declined() {
+                crate::m2::count(crate::m2::Count::ReuseDeclined);
+            }
+            let result = solved?;
+            // The density build of this map may keep slabs for the stored X.
+            r.collect = r.kept.is_stored();
+            r.kept_pairs = 0;
+            r.v_old.clear();
+            r.v_old.extend_from_slice(dist.potential());
+            // M2d: this rank's rows for the distributed density and energy,
+            // straight from the solver (F07: no extraction from the gathered block).
+            state.m2_local = Some(x_local);
+            result
+        } else {
+            let result = solver.solve_distributed_rows(
+                comm,
+                dist,
+                packed.as_ref(),
+                &local_diagonal,
+                policy,
+                options.standard.is_some(),
+                certify && options.standard.is_none(),
+                options.davidson_capacity_per_band,
+            )?;
+            // M2d: keep this rank's rows for the distributed density and energy.
+            state.m2_local = Some(
+                dist.extract_local(&result.eigenvectors)
+                    .map_err(|e| ScfError::Numerical(e.to_string()))?,
+            );
+            result
+        }
     } else if let Some(comm) = &comm {
         crate::parallel::count_distributed_solve();
         solver.solve_distributed(
@@ -768,6 +916,54 @@ fn prepare_kept_start(
         ws.invalidate_kept_start();
         reuse_add(ReuseCount::NotKept, 1);
     }
+    Ok(())
+}
+
+/// MPI-KEPT-START: keep H X at the coming return, and, when the previous solve
+/// of this operator stored X (`x`, local rows) and H X, bring H X to the current
+/// potential, H_new X = H_old X + (V_new - V_old) X, and arm the kept start
+/// (the solver takes it only if `initial` is that X). Every condition is
+/// replicated, so all ranks enter the same collectives.
+fn prepare_m2_kept_start(
+    comm: &crate::parallel::SharedComm,
+    dist: &mut DistributedRealHamiltonian,
+    r: &mut M2Reuse,
+    x: &RealMatrix,
+    has_initial: bool,
+    bands: usize,
+) -> Result<(), ScfError> {
+    r.kept.set_keep(true);
+    let collected = std::mem::replace(&mut r.collect, false);
+    let grid = dist.potential().len();
+    let stored = r.kept.is_stored();
+    if !(collected && stored && has_initial && r.v_old.len() == grid && x.cols() == bands) {
+        r.kept.invalidate();
+        crate::m2::count(crate::m2::Count::ReuseNotKept);
+        return Ok(());
+    }
+    r.delta.clear();
+    let mut changed = false;
+    for (&new, &old) in dist.potential().iter().zip(&r.v_old) {
+        let d = new - old;
+        changed |= d != 0.;
+        r.delta.push(d);
+    }
+    if changed {
+        if r.image.rows() != x.rows() || r.image.cols() != bands {
+            r.image = RealMatrix::zeros(x.rows(), bands).map_err(SolverError::from)?;
+        }
+        let kept_pairs = r.kept_pairs.min(bands / 2);
+        dist.apply_local_change(comm, x, &r.planes, kept_pairs, &r.delta, &mut r.image)
+            .map_err(|e| ScfError::Numerical(format!("M2 kept start: {e}")))?;
+        let hx = r.kept.stored_mut().expect("stored");
+        for (y, &d) in hx.as_mut_slice().iter_mut().zip(r.image.as_slice()) {
+            *y += d;
+        }
+    } else {
+        crate::m2::count(crate::m2::Count::ReuseUnchanged);
+    }
+    r.kept.arm();
+    crate::m2::count(crate::m2::Count::ReuseArmed);
     Ok(())
 }
 

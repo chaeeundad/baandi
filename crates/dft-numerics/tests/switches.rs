@@ -211,5 +211,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::CUTOFF_LADDER), Value::Raw(None));
     assert_eq!(value(Id::RELAX_EXTRAPOLATION), Value::Raw(None));
     assert_eq!(value(Id::DGEMM_TIMERS), Value::Present(false));
-    assert_eq!(TABLE.len(), 73);
+    // MPI-KEPT-START stays opt-in until dev08.
+    assert_eq!(value(Id::M2_REUSE), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 74);
 }

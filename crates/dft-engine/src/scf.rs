@@ -1465,19 +1465,45 @@ impl ScfProblem {
         // path accumulates the plane density directly (bit-identical sum order).
         let fused = self.options.standard.is_some()
             && dft_numerics::switches::choice(dft_numerics::switches::Id::M2_DENSITY) == "fused";
+        // MPI-KEPT-START: keep the plane slabs of the leading fully occupied
+        // pairs of the stored X for the next start's potential change. The
+        // pair count and the memory gate are replicated decisions.
+        let mut no_keep: [Complex64; 0] = [];
+        let mut kept_pairs = 0;
+        let keep: &mut [Complex64] = match rs.m2_reuse.as_mut() {
+            Some(r) => {
+                let pairs = occupations[..m]
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .take_while(|w| w[0] != 0.0 && w[1] != 0.0)
+                    .count();
+                r.kept_pairs = 0;
+                let ranks = dft_mpi::Collective::size(&comm);
+                match r.plane_slots(pairs, points, dims.iter().product(), ranks) {
+                    Some(slots) => {
+                        kept_pairs = pairs;
+                        slots
+                    }
+                    None => &mut no_keep,
+                }
+            }
+            None => &mut no_keep,
+        };
         if fused {
             md.contributions.clear();
-            dist.band_density_sum(&comm, &xm, &occupations[..m], volume, &mut local)
+            dist.band_density_sum_keeping(&comm, &xm, &occupations[..m], volume, &mut local, keep)
                 .map_err(err)?;
         } else {
             md.contributions.clear();
             md.contributions.resize(bands * points, 0.);
-            dist.band_densities(
+            dist.band_densities_keeping(
                 &comm,
                 &xm,
                 &occupations[..m],
                 volume,
                 &mut md.contributions[..m * points],
+                keep,
             )
             .map_err(err)?;
             // Ascending band order on the planes, as the replicated fold.
@@ -1502,6 +1528,12 @@ impl ScfProblem {
         }
         // Without per-band contributions the screen data is not held.
         md.valid = !fused;
+        if kept_pairs > 0
+            && let Some(r) = rs.m2_reuse.as_mut()
+        {
+            r.kept_pairs = kept_pairs;
+            crate::m2::count(crate::m2::Count::ReusePlaneKeeps);
+        }
         crate::m2::add(crate::m2::Stage::Density, start);
         crate::m2::count(crate::m2::Count::Density);
         Ok(Some(output))

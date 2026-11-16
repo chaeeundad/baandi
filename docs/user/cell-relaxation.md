@@ -45,7 +45,11 @@ which applied. Measured stress differences against the strict reference are
 in ledger rows ONEPATH-2 and ONEPATH-2-STRESS-DEFAULT. The strict path with its certificate is a reference tool only
 (`BAANDI_REFERENCE_STRICT=on`). No spin/FD driver, ESLE continuation or
 uncertified derivative is admitted. The frozen Miller chart, basis rebuilds and
-the Pulay assessment are unchanged.
+the Pulay assessment are unchanged. Every density-space object of a step,
+including the Hartree-metric estimator of the standard stop rule, uses the
+frozen reference Miller set on the frozen FFT grid (ONEPATH-2B: the estimator
+used the current cell's own sphere and failed with "Miller index ... outside the
+canonical frequencies" once the cell had expanded).
 Cell runs set the initial eigen tolerance to the requested eigen tolerance and
 disable residual-based eigen scheduling; these two options act on the strict
 reference path only (the standard path ratchets its own eigen tolerance).

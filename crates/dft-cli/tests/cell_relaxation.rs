@@ -256,6 +256,17 @@ fn combined_scf_enthalpy_derivative() {
     let a = cfg.cell().unwrap();
     let atoms = [Atom::new("H", [0.; 3]), Atom::new("H", [0.27, 0.23, 0.19])];
     let mut opts = dft_cli::run::options(&cfg).unwrap();
+    // Accuracy oracle of the analytic derivative (1e-7 relative against FD):
+    // it runs on the strict reference path, as accuracy gates do (ADR 0043),
+    // with the options BAANDI_REFERENCE_STRICT=on gives this input (no
+    // standard profile, no verification, single-k strict Pulay beta 0.3).
+    // Measured on the standard path (ONEPATH-2B): relative 2.5e-5 at the
+    // default 5e-9 Ha and 2.4e-7 at 5e-13 Ha; strict: 5.0e-10.
+    opts.standard = None;
+    opts.verification = dft_engine::Verification::Off;
+    if let dft_engine::Mixing::Pulay { history, .. } = opts.mixing {
+        opts.mixing = dft_engine::Mixing::Pulay { beta: 0.3, history };
+    }
     opts.grid_override = Some(
         ScfProblem::new(&a, &atoms, &refs, opts.clone())
             .unwrap()

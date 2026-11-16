@@ -130,9 +130,11 @@ fn legacy_defaults_are_unchanged() {
         Id::REFERENCE_STRICT,
         Id::M2_B5,
         Id::LEAN_PROJ_CACHE,
+        Id::PACK_FIXED,
     ] {
         assert!(!on(id), "{id:?} must default off");
     }
+    assert_eq!(switches::choice(Id::LEAN_BORDER), "separate");
     assert!(on(Id::M2_DGEMM) && on(Id::M2_LEAN) && on(Id::REUSE_PSI) && on(Id::M2_SELECTED_ROOTS));
     assert_eq!(
         switches::resolve(switches::switch(Id::VERIFY_REUSE), None).0,
@@ -228,5 +230,5 @@ fn legacy_defaults_are_unchanged() {
     // MPI-REMAINING grid switches stay opt-in until dev08.
     assert_eq!(value(Id::MIX_INCREMENTAL), Value::Choice("off"));
     assert_eq!(value(Id::STOP_METRIC), Value::Choice("fft"));
-    assert_eq!(TABLE.len(), 81);
+    assert_eq!(TABLE.len(), 83);
 }

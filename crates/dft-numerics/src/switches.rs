@@ -277,8 +277,8 @@ table! {
         "bordered reduced eigenproblem update (par: threaded)";
     B6: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "B6 projector-product reuse";
-    RITZ_FUSED: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
-        "fused Ritz rotation";
+    RITZ_FUSED: Kind::Choice { allowed: &["on", "off", "loop"], default: "off" }, "off", "on, off, loop",
+        "fused Ritz rotation (loop: only the selected-root residuals inside the lean Davidson iteration, where H X is not kept; the return keeps the pair rotation that REUSE-PSI needs; PERCORE-KERNELS)";
     NARROW_PROJ: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "narrow-iteration projection kernel";
     NARROW_REDUCED: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
@@ -307,6 +307,10 @@ table! {
         "serial real Gamma Davidson of Ritz-value (standard) solves: classic (orthonormal basis, Ritz vectors of all bands in wide iterations) or lean (work order phase B: residuals of unconverged roots only, all-band Ritz vectors at return and contraction, unit-norm corrections without projection and a generalized reduced problem by Cholesky reduction; one orthonormalization when a pivot ratio of the basis overlap falls below eps/1e-12; rounding class)";
     LEAN_PROJ_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "C3a: the lean real Gamma Davidson keeps P^T V (projector products) beside its basis (copied after each H apply, rotated at contraction and return) and the audit's nonlocal energy reads P^T X = (P^T V) C instead of a fresh n x n_proj x bands product; falls back to the direct product whenever the cache is incomplete; rounding class";
+    // Per-core kernels (ticket PERCORE-KERNELS, docs/performance/percore-kernels-2026-11-17.md); default off.
+    LEAN_BORDER: Kind::Choice { allowed: &["separate", "fused"], default: "separate" }, "separate",
+        "separate, fused",
+        "PERCORE-KERNELS: borders of the lean real Gamma Davidson: separate (overlap border V^T E before the H apply, reduced border V^T (H E) in the next iteration, two transposed products) or fused (H applied to the unit corrections first, then one transposed product V^T [E | H E] of twice the width forms both borders, so the basis is streamed once; the pivot test follows it and a failing append discards the images, takes the separate fallback and ends fusing for the rest of that solve; only blocks with 4 k <= m (basis width m) fuse, wider blocks such as the first append of every solve keep the separate products; bit-identical on the aarch64 pure kernel, rounding class on MKL and x86)";
     // Physics (dft-physics).
     MKL_NONLOCAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "nonlocal products by dgemm on the real Gamma path";
@@ -326,6 +330,8 @@ table! {
         default: if crate::MKL_BACKEND { "nano" } else { "packed" },
     }, if crate::MKL_BACKEND { "nano" } else { "packed" }, "nano, packed",
         "pure-Rust real GEMM panels: nano tiles or one packed product per panel (P48B; default packed in pure builds, nano on MKL builds where dgemm replaces these sites)";
+    PACK_FIXED: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "PERCORE-KERNELS: the aarch64 pure GEMM kernel packs full eight-row strips and stores full tile columns by constant-length copies instead of one memmove call per eight doubles (bit-identical; acts on pure builds on aarch64 only)";
     MKL_DGEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "rotation panels by MKL dgemm (MKL builds)";
     MKL_EVD: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -628,23 +634,23 @@ mod tests {
         );
         assert_eq!(eval(Id::M2_B5, None), (Value::Choice("off"), Default));
         assert_eq!(eval(Id::M2_B5, Some("on")), (Value::Choice("on"), Env));
-        // MPI-SCALING-GAP switches (default off).
+        // MPI-SCALING-GAP switches (defaults mirror and gram since 0d87d6e).
         assert_eq!(
             eval(Id::M2_STICKS, None),
-            (Value::Choice("greedy"), Default)
+            (Value::Choice("mirror"), Default)
         );
         assert_eq!(
-            eval(Id::M2_STICKS, Some("mirror")),
-            (Value::Choice("mirror"), Env)
+            eval(Id::M2_STICKS, Some("greedy")),
+            (Value::Choice("greedy"), Env)
         );
         assert_eq!(
             eval(Id::M2_STICKS, Some("on")),
-            (Value::Choice("greedy"), InvalidToDefault)
+            (Value::Choice("mirror"), InvalidToDefault)
         );
-        assert_eq!(eval(Id::M2_START, None), (Value::Choice("ortho"), Default));
+        assert_eq!(eval(Id::M2_START, None), (Value::Choice("gram"), Default));
         assert_eq!(
-            eval(Id::M2_START, Some("gram")),
-            (Value::Choice("gram"), Env)
+            eval(Id::M2_START, Some("ortho")),
+            (Value::Choice("ortho"), Env)
         );
         assert_eq!(
             eval(Id::M2_EIGEN, None),

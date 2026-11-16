@@ -233,6 +233,21 @@ from, and forms only the newest difference and Gram row per step. Reset,
 formulas and orders: bit-identical (test `mixing::incremental_tests`). Counters
 `mixing::mixer_counters()`. Analysis docs/performance/mpi-remaining.md.
 
+## Per-core kernels (PERCORE-KERNELS, 2026-11-17)
+
+`BAANDI_LEAN_BORDER=separate|fused` (default separate; `ResearchOptions::lean_border_fused`):
+the lean solver applies H to the unit corrections E before the pivot test and forms the
+overlap border V^T E and the reduced border V^T (H E) as one product V^T [E | H E]
+(`lean_davidson::fused_border`, the reduced step then copies its border in
+`reduced_from_fused`). A failing pivot test discards the images (`fused_wasted_columns`),
+takes the separate fallback and ends fusing for that solve; only blocks with 4 k <= m fuse
+(traffic rule: the copies of E and H E against the saved stream of V). Inactive with `BAANDI_NARROW_REDUCED=on`. Bit-identical
+on the aarch64 pure kernel, rounding class on MKL / x86 faer. `BAANDI_RITZ_FUSED=loop`
+(`ritz_fused_loop`): the fused Ritz/residual kernel only at the selected-root residuals of
+the lean loop (bit-identical). Counters `lean_counters().fused_borders`,
+`fused_wasted_columns`. Tests `tests/lean_davidson.rs::percore_*`. Analysis
+docs/performance/percore-kernels-2026-11-17.md.
+
 ## MPI overlap-matrix Davidson (MPI-OVERLAP-DAVIDSON, 2026-11-17)
 
 `BAANDI_M2_LEAN_ALGEBRA=on|off` (default off; `DistributedTuning.lean_algebra`, implies

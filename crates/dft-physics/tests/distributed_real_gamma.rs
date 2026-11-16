@@ -140,7 +140,10 @@ fn distributed(
     x: &RealMatrix,
     ranks: usize,
 ) -> (RealMatrix, Counts, Counts) {
-    distributed_sticks(rows, atoms, x, ranks, None)
+    // The collective counts asserted by the callers are those of the greedy
+    // stick partition (two mirror exchanges per apply on more than one rank);
+    // the mirror partition, default since 0d87d6e, has its own test below.
+    distributed_sticks(rows, atoms, x, ranks, Some(false))
 }
 
 /// `distributed` with the stick rule forced on every rank (`Some(true)` =
@@ -557,6 +560,8 @@ fn apply_mode_with(
     dgemm: bool,
 ) -> (Vec<f64>, Vec<usize>) {
     let parts = simulate(ranks, |comm| {
+        // Greedy stick partition: the callers count its mirror exchanges.
+        dft_solvers::distributed_fft::set_mirror_sticks_override(Some(false));
         let (basis, h) = fixture(rows, atoms, 1.2);
         let mut d = DistributedRealHamiltonian::new(
             &h,

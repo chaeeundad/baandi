@@ -30,7 +30,7 @@ fn small_problem(mode: CompatMode) -> ScfProblem {
             local_mesh: L::QeLike,
             radial_even_rule: R::SimpsonQuadraticEnd,
             cutoff_hartree: 1.5,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap()

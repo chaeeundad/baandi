@@ -1381,6 +1381,7 @@ impl ScfSession {
                 return Err(Rejection::Boundary);
             }
             Some(ContinuationState {
+                verification_attempts: self.verification.attempts.clone(),
                 atomic_start: (self.problem.options.start_wavefunctions
                     == StartWavefunctions::Atomic)
                     .then(|| self.problem.atomic_start.clone()),
@@ -1404,6 +1405,11 @@ impl ScfSession {
             let o = self.outcome.as_ref().ok_or(Rejection::Boundary)?;
             let r = &o.result;
             Some(ExportResult {
+                verification_attempts: r
+                    .verification
+                    .as_ref()
+                    .map(|v| v.attempts.clone())
+                    .unwrap_or_default(),
                 converged: o.converged,
                 energy: r.energy.clone(),
                 charge: r.charge,
@@ -1424,6 +1430,7 @@ impl ScfSession {
             None
         };
         Ok(Checkpoint {
+            verification: self.problem.options.verification,
             standard_stall_guard: self.problem.options.standard_stall_guard,
             standard_density_forcing: self.problem.options.standard_density_forcing,
             standard: self.problem.options.standard,
@@ -1559,6 +1566,7 @@ impl ScfSession {
             return Err(Rejection::Kind);
         }
         if checkpoint.standard != c.options.standard
+            || checkpoint.verification != c.options.verification
             || checkpoint.standard_stall_guard != c.options.standard_stall_guard
             || checkpoint.standard_density_forcing != c.options.standard_density_forcing
             || checkpoint.hartree_mixing != c.options.hartree_mixing
@@ -1593,8 +1601,15 @@ impl ScfSession {
                         && (!r.requested_eigen_tolerance.is_finite()
                             || !(StandardProfile::FLOOR_HA..=StandardProfile::CAP_HA)
                                 .contains(&r.requested_eigen_tolerance)
-                            || r.fixed_point_certificate.is_some()))
+                            // A standard history holds a certificate record
+                            // only for a verification attempt (ONEPATH-4).
+                            || (r.fixed_point_certificate.is_some()
+                                && !c
+                                    .verification_attempts
+                                    .iter()
+                                    .any(|a| a.iteration == r.iteration))))
             })
+            || !verification_attempts_consistent(c)
             || (c.iteration > 0 && checkpoint.electronic_state.orbitals.is_empty())
             || c.best.is_some_and(|v| !v.is_finite() || v < 0.0)
             || (c.iteration > 0 && c.best.is_none())
@@ -1622,6 +1637,7 @@ impl ScfSession {
         session.initialize().map_err(|_| Rejection::Mixer)?;
         session.import_electronic(&checkpoint.electronic_state)?;
         session.problem.atomic_start = c.atomic_start.clone().unwrap_or_default();
+        session.verification.attempts = c.verification_attempts.clone();
         let state = session.continuation.as_mut().unwrap();
         state
             .mixer
@@ -1667,6 +1683,39 @@ impl ScfSession {
         session.import_electronic(&checkpoint.electronic_state)?;
         Ok(session)
     }
+}
+
+/// ONEPATH-4: the saved verification attempts of an exact continuation are
+/// the failed attempts of its history, one per history entry that carries a
+/// verification record, in iteration order, each with finite numbers and the
+/// session's threshold. Without the verification there are none.
+fn verification_attempts_consistent(c: &crate::checkpoint::ContinuationState) -> bool {
+    let attempts = &c.verification_attempts;
+    if c.options.verification != Verification::FixedPoint || c.options.standard.is_none() {
+        return attempts.is_empty();
+    }
+    let threshold = c.options.standard.map(|p| p.threshold_ha);
+    let recorded: Vec<usize> = c
+        .history
+        .iter()
+        .filter(|r| r.fixed_point_certificate.is_some())
+        .map(|r| r.iteration)
+        .collect();
+    recorded.len() == attempts.len()
+        && attempts.iter().zip(&recorded).all(|(a, &iteration)| {
+            a.iteration == iteration
+                && !a.passed
+                && Some(a.threshold_ha.to_bits()) == threshold.map(f64::to_bits)
+                && [
+                    a.coulomb_error_ha,
+                    a.eigen_tolerance_ha,
+                    a.density_residual,
+                    a.occupied_eigenvalue_change_ha,
+                ]
+                .iter()
+                .chain(a.residual_bound_ha.iter())
+                .all(|v| v.is_finite() && *v >= 0.0)
+        })
 }
 
 /// ADR 0043 verification: one more ordinary map at the converged output density

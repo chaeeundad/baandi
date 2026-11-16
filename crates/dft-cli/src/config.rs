@@ -383,9 +383,9 @@ pub enum SpinMode {
 pub struct ScfPath {
     pub standard: Option<dft_engine::StandardProfile>,
     pub verification: dft_engine::Verification,
-    /// `applied` (the single standard path), `reference_strict`
-    /// (`BAANDI_REFERENCE_STRICT=on`) or `not_applicable` (strict fallback, see
-    /// `reason`).
+    /// `applied` (the single standard path) or `reference_strict`
+    /// (`BAANDI_REFERENCE_STRICT=on`). Since ONEPATH-4 there is no strict
+    /// fallback (`not_applicable` is no longer produced).
     pub status: &'static str,
     pub reason: Option<&'static str>,
     /// Where the standard threshold came from (None off the standard path):
@@ -402,20 +402,28 @@ pub struct ScfPath {
 /// nonlocal fixture (1.3e-7), 5e-11 Ha met it on both fixtures (margin 1.6x).
 /// A rule by observable, not by material; provisional until the dev08 list
 /// `docs/performance/requests/onepath2-stress.md` confirms it.
-pub const STRESS_DEFAULT_THRESHOLD_HA: f64 = 5e-11;
+pub const STRESS_DEFAULT_THRESHOLD_HA: f64 = dft_engine::StandardProfile::STRESS_THRESHOLD_HA;
 /// Reason recorded when the reference switch forces the strict path.
 pub const REFERENCE_STRICT_REASON: &str = "BAANDI_REFERENCE_STRICT=on (strict reference path)";
 /// Error for the removed `scf.convergence_profile` key (user decision 2026-11-16).
 pub const CONVERGENCE_PROFILE_REMOVED: &str = "scf.convergence_profile was removed (user decision 2026-11-16, ADR 0043): every run uses the single standard SCF path with the fixed-point verification after convergence; set the accuracy with scf.standard_threshold_ha (default 5e-9 Ha) and the verification with scf.verify = \"fixed_point\" (default) or \"off\"; the strict path is a reference tool only (environment BAANDI_REFERENCE_STRICT=on); delete the key";
+/// Error for `scf.locking = "auto"` on the standard path (ONEPATH-4).
+pub const LOCKING_REFERENCE_ONLY: &str = "scf.locking = \"auto\" is an experimental option of the strict reference eigensolver (residual Davidson with hard locking); the standard SCF path solves with the Ritz-change Davidson, which retests every root and has no locking (ADR 0043 amendment ONEPATH-4); remove scf.locking, or run the strict reference path with BAANDI_REFERENCE_STRICT=on";
 impl Config {
-    /// Path selection (ADR 0043, default flipped 2026-11-16). Every classic run
-    /// uses the standard path with the fixed-point verification. The strict
-    /// path remains for (a) the reference switch `BAANDI_REFERENCE_STRICT=on`,
-    /// (b) callers named by `caller_exclusion` (runtime modes, bands,
-    /// checkpoints, inspection) and (c) inputs the standard path does not
-    /// support yet (`single_path_exclusion`); the last two are recorded as
-    /// `not_applicable` with the reason.
-    pub fn scf_path(&self, caller_exclusion: Option<&'static str>) -> Result<ScfPath, ConfigError> {
+    /// Path selection (ADR 0043, default flipped 2026-11-16; single path
+    /// complete since ONEPATH-4). Every command (`run` in every execution mode,
+    /// `relax`, `bands`, `dos`, `checkpoint`, `restart`, `explain`) uses the
+    /// standard path with the fixed-point verification. The strict path is
+    /// reached only through the reference switch `BAANDI_REFERENCE_STRICT=on`.
+    pub fn scf_path(&self) -> Result<ScfPath, ConfigError> {
+        self.scf_path_with(dft_numerics::switches::on(
+            dft_numerics::switches::Id::REFERENCE_STRICT,
+        ))
+    }
+    /// `scf_path` with the reference switch given explicitly (`true` = the
+    /// strict reference path, as under `BAANDI_REFERENCE_STRICT=on`), for
+    /// in-process callers that must match a child process with the switch set.
+    pub fn scf_path_with(&self, reference_strict: bool) -> Result<ScfPath, ConfigError> {
         let invalid = |m: String| ConfigError::Invalid(m);
         let s = self.scf.as_ref();
         if let Some(s) = s {
@@ -428,7 +436,7 @@ impl Config {
                 "scf.standard_threshold_ha must be finite and positive".into(),
             ));
         }
-        if dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_STRICT) {
+        if reference_strict {
             // Reference tool: the same input runs on the strict path; the
             // standard-only keys are recorded as ignored by the status.
             return Ok(ScfPath {
@@ -439,45 +447,9 @@ impl Config {
                 threshold_source: None,
             });
         }
-        // Standard-only controls written in the input.
-        let standard_keys = s.is_some_and(|s| {
-            s.standard_threshold_ha.is_some()
-                || s.verify.is_some()
-                || s.standard_stall_guard.as_deref() == Some("on")
-                || s.standard_density_forcing.as_deref() == Some("on")
-        });
-        if let Some(reason) = self.single_path_exclusion()? {
-            // The input itself keeps the strict path: standard-only controls
-            // would be silently dropped, so they are input errors.
-            if standard_keys {
-                return Err(invalid(format!(
-                    "scf.standard_threshold_ha, scf.verify, standard_stall_guard and standard_density_forcing apply to the standard SCF path; this input runs on the strict path ({reason}, ADR 0043 item 5); remove them"
-                )));
-            }
-            return Ok(ScfPath {
-                standard: None,
-                verification: dft_engine::Verification::Off,
-                status: "not_applicable",
-                reason: Some(reason),
-                threshold_source: None,
-            });
-        }
-        // Callers that keep the strict path for plain inputs (checkpoint v1
-        // cannot carry the verification; bands, inspection). An input that
-        // writes a standard-only control asks for the standard path explicitly
-        // and gets it (with `scf.verify = "off"` the former explicit standard
-        // profile, which checkpoints and the runtime modes can carry).
-        if let Some(reason) = caller_exclusion
-            && !standard_keys
-        {
-            return Ok(ScfPath {
-                standard: None,
-                verification: dft_engine::Verification::Off,
-                status: "not_applicable",
-                reason: Some(reason),
-                threshold_source: None,
-            });
-        }
+        // The last strict fallback (`scf.locking = "auto"`) is an input error
+        // since ONEPATH-4; the reference switch above still accepts it.
+        self.check_single_path_input()?;
         let verification = if verify == Some(false) {
             dft_engine::Verification::Off
         } else {
@@ -529,28 +501,24 @@ impl Config {
                 .as_ref()
                 .is_some_and(|r| r.mode != crate::relax::cell::Mode::Ions)
     }
-    /// Inputs that keep the strict path on the single path (ADR 0043 item 5).
-    fn single_path_exclusion(&self) -> Result<Option<&'static str>, ConfigError> {
-        // ONEPATH-1 and ONEPATH-2 (user decision 2026-11-16): forces, stress and
-        // every relaxation mode (ions, cell, ions_cell) run the standard path
-        // with the verification; stress cutoff scans verify each scan SCF.
-        // ONEPATH-3 (user decision 2026-11-16): collinear spin and Fermi-Dirac
-        // occupations run the standard path with the verification as well
-        // (docs/design/onepath3-spin-metals.md); their syntax is still checked here.
+    /// Inputs the single standard path cannot run (ADR 0043 item 5). Stages
+    /// ONEPATH-1 to 3 (user decisions 2026-11-16) moved forces, every
+    /// relaxation mode, stress, collinear spin and Fermi-Dirac occupations onto
+    /// the standard path with the verification; ONEPATH-4 turned the last
+    /// input fallback, `scf.locking = "auto"`, into an input error (the
+    /// locking eigensolver exists only for the strict residual Davidson).
+    fn check_single_path_input(&self) -> Result<(), ConfigError> {
         self.finite_temperature()?;
-        Ok(
-            if self
-                .scf
-                .as_ref()
-                .map(Scf::locking)
-                .transpose()?
-                .is_some_and(|l| l == dft_engine::Locking::Auto)
-            {
-                Some("scf.locking = auto")
-            } else {
-                None
-            },
-        )
+        if self
+            .scf
+            .as_ref()
+            .map(Scf::locking)
+            .transpose()?
+            .is_some_and(|l| l == dft_engine::Locking::Auto)
+        {
+            return Err(ConfigError::Invalid(LOCKING_REFERENCE_ONLY.into()));
+        }
+        Ok(())
     }
     pub fn collinear(&self) -> bool {
         self.spin
@@ -1332,7 +1300,7 @@ impl Config {
             s.verify()?;
             s.hartree_mixing()?;
         }
-        self.scf_path(None)?;
+        self.scf_path()?;
         self.cell()?;
         self.symmetry_map()?;
         if let Some(v) = self.output.as_ref().and_then(|o| o.volumetric.as_ref()) {
@@ -1501,55 +1469,51 @@ mod tests {
             }
         }
     }
-    /// Plain inputs take the single standard path with verification; inputs
-    /// the standard path does not support fall back to strict with a reason
-    /// and reject standard-only keys.
+    /// Plain inputs take the single standard path with verification; since
+    /// ONEPATH-4 there is no strict fallback: `scf.locking = "auto"` (the last
+    /// one) is an input error that names the reference switch.
     #[test]
     fn single_path_selection() {
         let parse = |tail: &str| Config::parse(&format!("{EXAMPLE}\n{tail}\n"));
-        let plain = parse("").unwrap().scf_path(None).unwrap();
+        let plain = parse("").unwrap().scf_path().unwrap();
         assert_eq!(plain.status, "applied");
         assert_eq!(plain.standard.unwrap().threshold_ha, 5e-9);
         assert_eq!(plain.verification, dft_engine::Verification::FixedPoint);
-        let off = parse("[scf]\nverify = 'off'")
-            .unwrap()
-            .scf_path(None)
-            .unwrap();
+        let off = parse("[scf]\nverify = 'off'").unwrap().scf_path().unwrap();
         assert_eq!(off.verification, dft_engine::Verification::Off);
         let tight = parse("[scf]\nstandard_threshold_ha = 5e-11")
             .unwrap()
-            .scf_path(None)
+            .scf_path()
             .unwrap();
         assert_eq!(tight.standard.unwrap().threshold_ha, 5e-11);
         assert!(parse("[scf]\nstandard_threshold_ha = 0.0").is_err());
         assert!(parse("[scf]\nverify = 'off'\n[output]\nforces = true").is_err());
-        let caller = parse("").unwrap().scf_path(Some("bands")).unwrap();
-        assert_eq!(
-            (caller.status, caller.reason, caller.standard),
-            ("not_applicable", Some("bands"), None)
-        );
-        let locking = parse("[scf]\nlocking = 'auto'")
-            .unwrap()
-            .scf_path(None)
-            .unwrap();
-        assert_eq!(locking.reason, Some("scf.locking = auto"));
-        assert!(locking.standard.is_none());
-        let err = parse("[scf]\nlocking = 'auto'\nstandard_threshold_ha = 5e-11")
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("scf.locking = auto"), "{err}");
+        for tail in [
+            "[scf]\nlocking = 'auto'",
+            "[scf]\nlocking = 'auto'\nstandard_threshold_ha = 5e-11",
+            "[scf]\nlocking = 'auto'\n[output]\nstress = true",
+        ] {
+            let err = parse(tail).unwrap_err().to_string();
+            for needle in [
+                "scf.locking",
+                "strict reference",
+                "BAANDI_REFERENCE_STRICT=on",
+            ] {
+                assert!(err.contains(needle), "{tail}: {err}");
+            }
+        }
         // ONEPATH-1: fixed-cell relaxation takes the standard path with the
         // verification (also with a tighter threshold); verify = off is an input
         // error there; variable-cell relaxation and stress keep strict.
         for tail in ["[relax]", "[relax]\nmode = 'ions'"] {
-            let relax = parse(tail).unwrap().scf_path(None).unwrap();
+            let relax = parse(tail).unwrap().scf_path().unwrap();
             assert_eq!(relax.status, "applied");
             assert_eq!(relax.verification, dft_engine::Verification::FixedPoint);
             assert_eq!(relax.standard.unwrap().threshold_ha, 5e-9);
         }
         let tight = parse("[scf]\nstandard_threshold_ha = 5e-11\n[relax]")
             .unwrap()
-            .scf_path(None)
+            .scf_path()
             .unwrap();
         assert_eq!(tight.standard.unwrap().threshold_ha, 5e-11);
         let err = parse("[scf]\nverify = 'off'\n[relax]")
@@ -1562,7 +1526,7 @@ mod tests {
         for mode in ["cell", "ions_cell"] {
             let cell = parse(&format!("[relax]\nmode = '{mode}'"))
                 .unwrap()
-                .scf_path(None)
+                .scf_path()
                 .unwrap();
             assert_eq!((cell.status, cell.reason), ("applied", None));
             assert_eq!(cell.verification, dft_engine::Verification::FixedPoint);
@@ -1577,7 +1541,7 @@ mod tests {
                     "[scf]\nstandard_threshold_ha = {user:e}\n[relax]\nmode = '{mode}'"
                 ))
                 .unwrap()
-                .scf_path(None)
+                .scf_path()
                 .unwrap();
                 assert_eq!(set.standard.unwrap().threshold_ha, user);
                 assert_eq!(set.threshold_source, Some("user"));
@@ -1591,7 +1555,7 @@ mod tests {
             "[output]\nstress = true",
             "[output]\nstress = true\n[relax]",
         ] {
-            let stress = parse(tail).unwrap().scf_path(None).unwrap();
+            let stress = parse(tail).unwrap().scf_path().unwrap();
             assert_eq!((stress.status, stress.reason), ("applied", None));
             assert_eq!(stress.verification, dft_engine::Verification::FixedPoint);
             assert_eq!(
@@ -1609,7 +1573,7 @@ mod tests {
             "[relax]",
             "[relax]\nmode = 'ions'",
         ] {
-            let p = parse(tail).unwrap().scf_path(None).unwrap();
+            let p = parse(tail).unwrap().scf_path().unwrap();
             assert_eq!(
                 (p.standard.unwrap().threshold_ha, p.threshold_source),
                 (5e-9, Some("default")),
@@ -1618,20 +1582,11 @@ mod tests {
         }
         let user = parse("[scf]\nstandard_threshold_ha = 1e-8\n[output]\nstress = true")
             .unwrap()
-            .scf_path(None)
+            .scf_path()
             .unwrap();
         assert_eq!(
             (user.standard.unwrap().threshold_ha, user.threshold_source),
             (1e-8, Some("user"))
-        );
-        // Off the standard path there is no threshold source.
-        let spin_like = parse("[scf]\nlocking = 'auto'\n[output]\nstress = true")
-            .unwrap()
-            .scf_path(None)
-            .unwrap();
-        assert_eq!(
-            (spin_like.standard, spin_like.threshold_source),
-            (None, None)
         );
         let err = parse("[scf]\nverify = 'off'\n[output]\nstress = true")
             .unwrap_err()
@@ -1644,18 +1599,18 @@ mod tests {
             "[occupations]\nmode = 'fermi_dirac'\nsmearing_ha = 0.01",
             "[spin]\nmode = 'collinear'\n[occupations]\nmode = 'fermi_dirac'\nsmearing_ha = 0.01",
         ] {
-            let p = parse(tail).unwrap().scf_path(None).unwrap();
+            let p = parse(tail).unwrap().scf_path().unwrap();
             assert_eq!((p.status, p.reason), ("applied", None), "{tail}");
             assert_eq!(p.verification, dft_engine::Verification::FixedPoint);
             assert_eq!(p.standard.unwrap().threshold_ha, 5e-9);
             let tight = parse(&format!("[scf]\nstandard_threshold_ha = 5e-11\n{tail}"))
                 .unwrap()
-                .scf_path(None)
+                .scf_path()
                 .unwrap();
             assert_eq!(tight.standard.unwrap().threshold_ha, 5e-11);
             let off = parse(&format!("[scf]\nverify = 'off'\n{tail}"))
                 .unwrap()
-                .scf_path(None)
+                .scf_path()
                 .unwrap();
             assert_eq!(off.verification, dft_engine::Verification::Off);
         }

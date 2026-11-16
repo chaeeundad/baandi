@@ -19,7 +19,7 @@ fn functional_labels() {
                 functional: Functional::Pbe,
                 allow_functional_override: allow,
                 cutoff_hartree: 1.5,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             };
             assert_eq!(
                 ScfProblem::new(&cell(), &atoms, &species, options).is_ok(),
@@ -57,7 +57,7 @@ fn synthetic_scf() {
             functional: Functional::Pbe,
             cutoff_hartree: 2.5,
             bands: Some(3),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         let r = ScfProblem::with_kpoints(
             &cell(),

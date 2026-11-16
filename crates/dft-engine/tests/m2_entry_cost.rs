@@ -106,7 +106,7 @@ fn run(case: &str, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult
                 .unwrap_or(6),
             standard: (std::env::var("M2_PROFILE_STANDARD").as_deref() == Ok("on"))
                 .then(dft_engine::StandardProfile::default),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap();

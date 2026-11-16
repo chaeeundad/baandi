@@ -51,7 +51,7 @@ fn problem(
             threads,
             cutoff_hartree: 2.,
             bands: Some(5),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
         &[KPoint {
             fractional: k,

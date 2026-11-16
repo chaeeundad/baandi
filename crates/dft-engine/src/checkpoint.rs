@@ -56,6 +56,10 @@ pub struct ElectronicState {
 }
 #[derive(Clone, Debug)]
 pub struct ContinuationState {
+    /// ADR 0043 ONEPATH-4: verification attempts made before this boundary
+    /// (all failed: a passed attempt ends the run). Empty unless
+    /// `options.verification` is `FixedPoint`.
+    pub verification_attempts: Vec<crate::VerificationAttempt>,
     pub atomic_start: Option<crate::AtomicStartReport>,
     pub options: ScfOptions,
     pub completion: CompletionMode,
@@ -84,6 +88,9 @@ pub struct RuntimeCheckpoint {
 }
 #[derive(Clone, Debug)]
 pub struct ExportResult {
+    /// ADR 0043 ONEPATH-4: every verification attempt of the run (the last
+    /// one passed when `converged` on the verified standard path).
+    pub verification_attempts: Vec<crate::VerificationAttempt>,
     pub converged: bool,
     pub energy: EnergyAudit,
     pub charge: f64,
@@ -94,6 +101,9 @@ pub struct ExportResult {
 }
 #[derive(Clone, Debug)]
 pub struct Checkpoint {
+    /// ADR 0043 ONEPATH-4: verification mode of the session (mirrors
+    /// `continuation.options.verification`, also for warm/result kinds).
+    pub verification: crate::Verification,
     pub standard_stall_guard: bool,
     pub standard_density_forcing: bool,
     pub standard: Option<crate::StandardProfile>,
@@ -364,7 +374,7 @@ mod density_group_tests {
     use super::*;
     #[test]
     fn exact_restart_compares_density_group() {
-        let mesh = ScfOptions::default();
+        let mesh = ScfOptions::strict_reference();
         let crystal = ScfOptions {
             crystal_density_group: true,
             ..mesh.clone()

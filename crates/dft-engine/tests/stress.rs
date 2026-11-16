@@ -75,7 +75,7 @@ fn synthetic_local_nonlocal() {
             eigen_tolerance: 1e-12,
             max_iterations: 500,
             grid_override: Some([24; 3]),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         let r = ScfProblem::new(&cell, &atoms, &species, options.clone())
             .unwrap()
@@ -192,7 +192,7 @@ fn synthetic_models_and_shapes() {
             } else {
                 [24; 3]
             }),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         let points = [KPoint {
             fractional: [0.; 3],
@@ -321,7 +321,7 @@ fn real_files() {
             energy_tolerance: 1e-11,
             eigen_tolerance: 1e-10,
             max_iterations: 300,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         let run = |options: ScfOptions| {
             let mut p = ScfProblem::new(&cell, &atoms, &species, options).unwrap();
@@ -498,7 +498,7 @@ fn symmetry_preconditions_and_pulay() {
         density_tolerance: 1e-10,
         energy_tolerance: 1e-12,
         eigen_tolerance: 1e-11,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let points = [dft_geometry::kpoints::KPoint {
         fractional: [0.; 3],
@@ -621,7 +621,7 @@ fn spin_fd_free_energy() {
         eigen_tolerance: 1e-12,
         davidson_subspace: 96,
         max_iterations: 500,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let points = [dft_geometry::kpoints::KPoint {
         fractional: [0.; 3],
@@ -691,7 +691,7 @@ fn spin_pbe_swap() {
         energy_tolerance: 1e-13,
         eigen_tolerance: 1e-12,
         max_iterations: 500,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let points = [dft_geometry::kpoints::KPoint {
         fractional: [0.; 3],

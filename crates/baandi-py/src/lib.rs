@@ -23,9 +23,17 @@ fn runtime_error(e: impl std::fmt::Display) -> PyErr {
 }
 
 /// Gamma-only LDA settings; omitted fields preserve engine defaults.
+/// ADR 0043 ONEPATH-4: the default is the single standard SCF path with the
+/// fixed-point verification (`standard_threshold_ha` 5e-9 Ha, `verify` True,
+/// mixing beta 0.5). `reference_strict = True` selects the strict reference
+/// path (beta 0.3 when that is the construction-time choice); its default
+/// mirrors the CLI switch `BAANDI_REFERENCE_STRICT=on`.
 #[pyclass(name = "Options", get_all, set_all)]
 #[derive(Clone)]
 struct Options {
+    reference_strict: bool,
+    standard_threshold_ha: f64,
+    verify: bool,
     cutoff_hartree: f64,
     bands: Option<usize>,
     extra_bands: usize,
@@ -41,8 +49,11 @@ struct Options {
 impl Options {
     #[new]
     fn new() -> Self {
-        let o = ScfOptions::default();
+        let o = ScfOptions::from_reference_switch();
         Self {
+            reference_strict: o.is_strict_reference(),
+            standard_threshold_ha: dft_engine::StandardProfile::default().threshold_ha,
+            verify: true,
             cutoff_hartree: o.cutoff_hartree,
             bands: o.bands,
             extra_bands: o.extra_bands,
@@ -51,7 +62,10 @@ impl Options {
             energy_tolerance: o.energy_tolerance,
             eigen_tolerance: o.eigen_tolerance,
             seed: o.seed,
-            mixing_beta: 0.3,
+            mixing_beta: match o.mixing {
+                Mixing::Pulay { beta, .. } => beta,
+                _ => 0.5,
+            },
             mixing_history: 6,
         }
     }
@@ -64,14 +78,30 @@ impl Options {
                 self.density_tolerance,
                 self.energy_tolerance,
                 self.eigen_tolerance,
+                self.standard_threshold_ha,
             ]
             .iter()
             .any(|x| !x.is_finite() || *x <= 0.)
         {
             return Err(value_error(
-                "cutoff, tolerances and max_iterations must be positive and finite",
+                "cutoff, tolerances, standard_threshold_ha and max_iterations must be positive and finite",
             ));
         }
+        let base = if self.reference_strict {
+            ScfOptions::strict_reference()
+        } else {
+            ScfOptions {
+                standard: Some(dft_engine::StandardProfile {
+                    threshold_ha: self.standard_threshold_ha,
+                }),
+                verification: if self.verify {
+                    dft_engine::Verification::FixedPoint
+                } else {
+                    dft_engine::Verification::Off
+                },
+                ..ScfOptions::default()
+            }
+        };
         Ok(ScfOptions {
             cutoff_hartree: self.cutoff_hartree,
             bands: self.bands,
@@ -85,7 +115,7 @@ impl Options {
                 beta: self.mixing_beta,
                 history: self.mixing_history,
             },
-            ..ScfOptions::default()
+            ..base
         })
     }
 }
@@ -267,7 +297,8 @@ impl Session {
             })
         })
     }
-    /// Cartesian forces in input atom order, Ha/Bohr. Requires certification.
+    /// Cartesian forces in input atom order, Ha/Bohr. Requires a strict
+    /// certificate or a passed fixed-point verification (`verify` True).
     fn forces(&self, py: Python<'_>) -> PyResult<Vec<[f64; 3]>> {
         let rows = self.cell_rows_bohr;
         let species = self.species.clone();
@@ -308,8 +339,20 @@ impl Session {
             .map_err(runtime_error)
         })
     }
-    /// Tensile-positive Cartesian stress, Ha/Bohr^3; frozen Miller set. Requires certification.
+    /// Tensile-positive Cartesian stress, Ha/Bohr^3; frozen Miller set. Requires
+    /// a strict certificate or a passed verification at a threshold of at most
+    /// `StandardProfile::STRESS_THRESHOLD_HA` (5e-11 Ha, the stress class; the
+    /// CLI default for stress inputs, ADR 0043 ONEPATH-2/4).
     fn stress(&self, py: Python<'_>) -> PyResult<[[f64; 3]; 3]> {
+        if let Some(p) = self.force_options.standard
+            && p.threshold_ha > dft_engine::StandardProfile::STRESS_THRESHOLD_HA
+        {
+            return Err(value_error(format!(
+                "stress needs Options.standard_threshold_ha <= {:e} Ha (the stress class, ADR 0043 ONEPATH-2); this session ran at {:e} Ha; set it before creating the session",
+                dft_engine::StandardProfile::STRESS_THRESHOLD_HA,
+                p.threshold_ha
+            )));
+        }
         let rows = self.cell_rows_bohr;
         let species = self.species.clone();
         let positions = self.positions_fractional.clone();

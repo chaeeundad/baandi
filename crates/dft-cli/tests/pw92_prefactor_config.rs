@@ -71,7 +71,7 @@ fn small_problem(a: A) -> ScfProblem {
             functional: Functional::Pbe,
             pw92_prefactor: a,
             cutoff_hartree: 1.5,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap()
@@ -151,7 +151,7 @@ fn original_force_stress() {
         energy_tolerance: 1e-13,
         eigen_tolerance: 1e-12,
         max_iterations: 500,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let run = |atoms: &[Atom]| {
         ScfProblem::new(&cell, atoms, &species, options.clone())

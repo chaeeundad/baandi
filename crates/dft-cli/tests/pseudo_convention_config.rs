@@ -69,7 +69,7 @@ fn small_problem(a: (L, R)) -> ScfProblem {
             local_mesh: a.0,
             radial_even_rule: a.1,
             cutoff_hartree: 1.5,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap()

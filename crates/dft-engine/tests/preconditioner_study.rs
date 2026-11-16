@@ -160,7 +160,7 @@ fn sweep() {
                 .unwrap()[0]
                 * 0.5,
             threads: 1,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         if let Some(v) = numbers(&text, "fft_grid") {
             opts.grid_override = Some(std::array::from_fn(|i| v[i] as usize));

@@ -6,7 +6,7 @@ use dft_engine::*;
 use dft_geometry::{Atom, Cell, kpoints::KPoint};
 
 fn thresholds() -> Thresholds {
-    Thresholds::from(&ScfOptions::default())
+    Thresholds::from(&ScfOptions::strict_reference())
 }
 fn samples(residuals: &[f64]) -> Vec<Sample> {
     residuals
@@ -303,7 +303,7 @@ fn fixture(kind: usize, mixing: Mixing) -> (ScfProblem, ScfOptions) {
         cutoff_hartree: 2.5,
         bands: Some(if kind == 1 { 4 } else { 3 }),
         mixing,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let problem = ScfProblem::with_kpoints(
         &cell,
@@ -420,7 +420,7 @@ fn p7pc_current_si8_run() {
             beta: 0.5,
             history: 6,
         },
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let result = ScfProblem::new(
         &cell,

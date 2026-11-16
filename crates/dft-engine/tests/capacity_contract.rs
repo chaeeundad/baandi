@@ -20,7 +20,7 @@ fn problem(multiplier: usize) -> Result<ScfProblem, ScfError> {
             davidson_capacity_per_band: multiplier,
             cutoff_hartree: 2.5,
             bands: Some(3),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
         &[KPoint {
             fractional: [0.; 3],
@@ -34,7 +34,7 @@ fn problem(multiplier: usize) -> Result<ScfProblem, ScfError> {
 
 #[test]
 fn capacity_range_and_default() {
-    assert_eq!(ScfOptions::default().davidson_capacity_per_band, 6);
+    assert_eq!(ScfOptions::strict_reference().davidson_capacity_per_band, 6);
     for value in [0, 1, 13, usize::MAX] {
         let error = problem(value)
             .err()

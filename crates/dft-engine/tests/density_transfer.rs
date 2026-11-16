@@ -21,7 +21,7 @@ fn rejects_invalid_density_and_changed_model_before_initialization() {
     let opts = ScfOptions {
         cutoff_hartree: 1.5,
         bands: Some(4),
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let source = ScfProblem::new(&cell, &atoms, &refs, opts.clone()).unwrap();
     let mut session = ScfSession::new(
@@ -174,7 +174,7 @@ fn three_displaced_structures_match_fresh() {
         energy_tolerance: 1e-12,
         eigen_tolerance: 1e-11,
         max_iterations: 300,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let atoms = [
         Atom::new("X", [0., 0., 0.]),
@@ -226,7 +226,7 @@ fn affine_cell_transfer_preserves_charge_and_rejects_changed_support() {
     let mut opts = ScfOptions {
         cutoff_hartree: 1.5,
         bands: Some(4),
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let original = ScfProblem::new(&a, &atoms, &refs, opts.clone()).unwrap();
     opts.grid_override = Some(original.grid_dimensions());

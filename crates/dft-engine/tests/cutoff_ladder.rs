@@ -47,7 +47,7 @@ fn synthetic_skew() -> Model {
             cutoff_hartree: 4.0,
             bands: Some(4),
             energy_tolerance: 1e-10,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     }
 }
@@ -68,7 +68,7 @@ fn synthetic_slab() -> Model {
             cutoff_hartree: 4.0,
             bands: Some(4),
             energy_tolerance: 1e-10,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     }
 }
@@ -441,7 +441,7 @@ fn synthetic_cubic() -> Model {
             cutoff_hartree: 4.0,
             bands: Some(3),
             energy_tolerance: 1e-10,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     }
 }
@@ -688,7 +688,7 @@ fn d1_knobs_on_a_k_point_problem_fall_back_bit_identically() {
         options: ScfOptions {
             cutoff_hartree: 2.5,
             bands: Some(3),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     };
     let points: Vec<_> = (0..4)
@@ -990,7 +990,7 @@ fn si_bench(rows: [[f64; 3]; 3], atoms: Vec<[f64; 3]>, ry: f64) -> Option<BenchM
         options: ScfOptions {
             cutoff_hartree: ry / 2.,
             max_iterations: 100,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     })
 }
@@ -1054,7 +1054,7 @@ fn bench_model(id: &str) -> Option<BenchModel> {
                     cutoff_hartree: 35.,
                     functional: dft_engine::Functional::Pbe,
                     max_iterations: 100,
-                    ..Default::default()
+                    ..ScfOptions::strict_reference()
                 },
             })
         }
@@ -1067,7 +1067,7 @@ fn bench_model(id: &str) -> Option<BenchModel> {
             options: ScfOptions {
                 cutoff_hartree: 6.,
                 max_iterations: 100,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             },
         }),
         "syn-lowsym6" => {
@@ -1093,7 +1093,7 @@ fn bench_model(id: &str) -> Option<BenchModel> {
                 options: ScfOptions {
                     cutoff_hartree: 4.,
                     max_iterations: 100,
-                    ..Default::default()
+                    ..ScfOptions::strict_reference()
                 },
             })
         }

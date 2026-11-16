@@ -53,11 +53,11 @@ fn material_matrix(standard: bool) {
                     standard: (standard && reference.is_none())
                         .then(dft_engine::StandardProfile::default),
                     energy_tolerance: reference
-                        .map_or(ScfOptions::default().energy_tolerance, |v| v.0),
+                        .map_or(ScfOptions::strict_reference().energy_tolerance, |v| v.0),
                     density_tolerance: reference
-                        .map_or(ScfOptions::default().density_tolerance, |v| v.1),
+                        .map_or(ScfOptions::strict_reference().density_tolerance, |v| v.1),
                     eigen_tolerance: reference
-                        .map_or(ScfOptions::default().eigen_tolerance, |v| v.2),
+                        .map_or(ScfOptions::strict_reference().eigen_tolerance, |v| v.2),
                     threads,
                     cutoff_hartree: 15.,
                     max_iterations: 100,
@@ -65,7 +65,7 @@ fn material_matrix(standard: bool) {
                         beta: 0.5,
                         history: 6,
                     },
-                    ..Default::default()
+                    ..ScfOptions::strict_reference()
                 },
             )
             .unwrap()

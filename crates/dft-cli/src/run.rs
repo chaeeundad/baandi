@@ -53,19 +53,26 @@ pub fn sha256(bytes: &[u8]) -> String {
 }
 
 /// Resolve only user-exposed controls, preserving all other engine defaults.
-/// SCF options of every caller except a classic `run`: these callers keep a
-/// plain input on the strict path (ADR 0043 item 5; bands, checkpoints,
-/// inspection, relaxation); an input with standard-only keys runs standard.
+/// The SCF options of every command (`run` in every execution mode, `relax`,
+/// `bands`, `dos`, `checkpoint`, `restart`, `explain`): the single standard
+/// path with the verification, or the strict reference path under
+/// `BAANDI_REFERENCE_STRICT=on` (ADR 0043, single path complete since
+/// ONEPATH-4). The path fields are set explicitly from `Config::scf_path`.
 pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
-    options_with(config, Some("not a classic run"))
+    options_with_reference(
+        config,
+        dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_STRICT),
+    )
 }
-/// `single_path_exclusion`: Some(reason) keeps the run on the strict path.
-pub fn options_with(
+/// `options` with the reference switch given explicitly (`true` = the strict
+/// reference path of `BAANDI_REFERENCE_STRICT=on`): the options a child
+/// process with that environment resolves, for in-process comparisons.
+pub fn options_with_reference(
     config: &Config,
-    single_path_exclusion: Option<&'static str>,
+    reference_strict: bool,
 ) -> Result<ScfOptions, RunError> {
     let path = config
-        .scf_path(single_path_exclusion)
+        .scf_path_with(reference_strict)
         .map_err(|e| error(1, e.to_string()))?;
     let mut o = ScfOptions {
         compat_mode: if config.compat.reference() {
@@ -95,8 +102,8 @@ pub fn options_with(
         ..ScfOptions::default()
     };
     if let Some(s) = &config.scf {
-        // Standard-only controls act on the standard path only (strict
-        // fallbacks of callers and the reference switch ignore them).
+        // Standard-only controls act on the standard path only (the reference
+        // switch ignores them and records so).
         o.standard_stall_guard = path.standard.is_some()
             && s.standard_stall_guard()
                 .map_err(|e| error(1, e.to_string()))?;
@@ -606,14 +613,11 @@ pub fn execute_mode(
         preflight.print();
     }
     let prepared = config.prepare().map_err(|e| error(1, e))?;
-    // ADR 0043: the runtime modes keep plain inputs on the strict path
-    // (checkpoint v1 cannot carry the verification).
-    let runtime_exclusion =
-        (mode.observe || mode.agent).then_some("observe/agent runtime mode (checkpoint v1)");
-    let opts = options_with(&config, runtime_exclusion)?;
-    let scf_path = config
-        .scf_path(runtime_exclusion)
-        .map_err(|e| error(1, e.to_string()))?;
+    // ADR 0043 ONEPATH-4: the observe/agent runtime modes run the same single
+    // standard path with the verification as a classic run (checkpoint v1
+    // carries the verification option and its attempts).
+    let opts = options(&config)?;
+    let scf_path = config.scf_path().map_err(|e| error(1, e.to_string()))?;
     let mut potentials = Vec::new();
     let mut species = Vec::new();
     let mut inputs = vec![fs::canonicalize(input)?];

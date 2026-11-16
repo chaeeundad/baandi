@@ -125,7 +125,7 @@ fn frozen_wide_spectrum() {
                 cutoff_hartree: numbers(&text, if material { "ecutwfc_ry" } else { "cutoff_ry" })
                     .unwrap()[0]
                     * 0.5,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             };
             opts.threads = 1;
             if let Some(v) = numbers(&text, "fft_grid") {

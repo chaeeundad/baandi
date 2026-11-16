@@ -71,7 +71,7 @@ fn synthetic_skew() -> Model {
         options: ScfOptions {
             cutoff_hartree: 2.5,
             bands: Some(4),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     }
 }
@@ -291,7 +291,7 @@ fn si_model(id: &str) -> Option<Model> {
         options: ScfOptions {
             cutoff_hartree: ry / 2.,
             max_iterations: 100,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     })
 }
@@ -306,7 +306,7 @@ fn other_model(id: &str) -> Option<Model> {
             species: vec![("Xx".into(), common::potential(4.0, 1.0, true, 401))],
             options: ScfOptions {
                 cutoff_hartree: 6.,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             },
         }),
         "syn-lowsym6" => {
@@ -332,7 +332,7 @@ fn other_model(id: &str) -> Option<Model> {
                 options: ScfOptions {
                     cutoff_hartree: 4.,
                     max_iterations: 100,
-                    ..Default::default()
+                    ..ScfOptions::strict_reference()
                 },
             })
         }
@@ -354,7 +354,7 @@ fn other_model(id: &str) -> Option<Model> {
                     cutoff_hartree: 35.,
                     functional: Functional::Pbe,
                     max_iterations: 100,
-                    ..Default::default()
+                    ..ScfOptions::strict_reference()
                 },
             })
         }

@@ -30,7 +30,7 @@ fn crystal_requires_enabled_symmetry_and_commensurate_grid() {
                 cutoff_hartree: 3.,
                 grid_override: Some(dims),
                 crystal_density_group: true,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             },
             &map.points,
             OccupationPolicy::Insulator {
@@ -109,7 +109,7 @@ fn silicon_full_group_oracles() {
                     energy_tolerance: 1e-12,
                     eigen_tolerance: 1e-11,
                     max_iterations: 100,
-                    ..Default::default()
+                    ..ScfOptions::strict_reference()
                 },
                 &map.points,
                 OccupationPolicy::Insulator {

@@ -140,7 +140,7 @@ fn independent_energy_scan_two_starts_and_directional_derivative() {
         energy_tolerance: 1e-12,
         eigen_tolerance: 1e-11,
         max_iterations: 300,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let energy = |position: [f64; 3]| {
         ScfProblem::new(

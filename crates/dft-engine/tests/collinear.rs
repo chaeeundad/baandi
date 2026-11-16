@@ -50,7 +50,7 @@ fn options(functional: Functional) -> ScfOptions {
         max_iterations: 200,
         // Spin runs use the complex path; the unpolarized reference must too.
         gamma_real: dft_engine::GammaReal::Off,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     }
 }
 fn gamma() -> Vec<KPoint> {
@@ -261,7 +261,7 @@ fn sector_validation() {
         &cell,
         &atoms,
         &species,
-        ScfOptions::default(),
+        ScfOptions::strict_reference(),
         &gamma(),
         sector.clone(),
     )

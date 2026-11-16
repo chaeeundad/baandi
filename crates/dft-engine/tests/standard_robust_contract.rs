@@ -23,7 +23,7 @@ fn problem(standard: bool, density_forcing: bool) -> Result<ScfProblem, ScfError
             standard_density_forcing: density_forcing,
             cutoff_hartree: 2.5,
             bands: Some(3),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
         &[KPoint {
             fractional: [0.; 3],
@@ -37,7 +37,7 @@ fn problem(standard: bool, density_forcing: bool) -> Result<ScfProblem, ScfError
 
 #[test]
 fn density_forcing_is_default_off_and_cannot_change_strict_profile() {
-    assert!(!ScfOptions::default().standard_density_forcing);
+    assert!(!ScfOptions::strict_reference().standard_density_forcing);
     assert!(matches!(
         problem(false, true),
         Err(ScfError::InvalidInput(_))

@@ -1,5 +1,5 @@
 mod common;
-use dft_cli::{config::Config, run::options};
+use dft_cli::{config::Config, run::options_with_reference};
 use dft_engine::{
     ScfProblem, SpeciesPotential,
     input::{Atom, parse_upf},
@@ -282,7 +282,10 @@ fn verify(large: bool) {
             label: "Si",
             potential: &pp,
         }],
-        options(&config).unwrap(),
+        // `Case::run` sets BAANDI_REFERENCE_STRICT=on for the CLI process; the
+        // independent engine invocation resolves the same strict reference
+        // options explicitly (ONEPATH-4: no caller falls back to strict).
+        options_with_reference(&config, true).unwrap(),
     )
     .unwrap()
     .run()
@@ -988,8 +991,9 @@ fn compare_execution_modes(include_agent: bool) {
         }
         let result = baandi()
             .current_dir(&c.dir)
-            // Same (strict reference) path as `Case::run`: the runtime modes keep
-            // the strict path for plain inputs (ADR 0043 item 5).
+            // Same (strict reference) path as `Case::run`. Since ONEPATH-4 the
+            // runtime modes run the standard path by default
+            // (tests/onepath_last_fallbacks.rs); this legacy comparison pins strict.
             .env("BAANDI_REFERENCE_STRICT", "on")
             .args(["run", "input.toml", "--output-dir", name])
             .args(flags)

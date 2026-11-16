@@ -20,7 +20,7 @@ fn problem(budget: usize) -> ScfProblem {
             max_iterations: budget,
             threads: 1,
             seed: 2026,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap()

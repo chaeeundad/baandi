@@ -13,7 +13,7 @@ fn real_state_reuse_matches_forced_rebuild_each_scf_map() {
                 standard: standard.then(StandardProfile::default),
                 cutoff_hartree: 2.5,
                 bands: Some(3),
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             };
             let make = || {
                 ScfProblem::new(
@@ -93,7 +93,7 @@ fn real_state_full_scf_matches_forced_rebuild() {
                             standard: standard.then(StandardProfile::default),
                             cutoff_hartree: 2.5,
                             bands: Some(5),
-                            ..Default::default()
+                            ..ScfOptions::strict_reference()
                         },
                     )
                     .unwrap()

@@ -90,13 +90,13 @@ fn invalid_electrons_bands_and_options() {
             &cell(),
             &[Atom::new("Xx", [0.0; 3])],
             &species,
-            ScfOptions::default()
+            ScfOptions::strict_reference()
         ),
         Err(ScfError::OddElectronCount(3.0))
     ));
     let options = ScfOptions {
         bands: Some(2),
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     assert!(matches!(
         ScfProblem::new(&cell(), &atoms(), &species, options),
@@ -112,7 +112,7 @@ fn invalid_electrons_bands_and_options() {
             &species,
             ScfOptions {
                 density_tolerance: f64::NAN,
-                ..Default::default()
+                ..ScfOptions::strict_reference()
             }
         )
         .is_err()
@@ -127,7 +127,7 @@ fn synthetic_scf_audit() {
         // Preserve the seeded trajectory that exercises the positivity safeguard.
         residual_eigen_schedule: false,
         free_electron_initial_guess: false,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let linear_options = ScfOptions {
         mixing: Mixing::Linear { beta: 0.05 },
@@ -217,11 +217,11 @@ fn invariances_and_cutoff_trend() {
     let pp = potential(4.0, 1.0, true, 1201);
     let options = ScfOptions {
         grid_override: Some([32; 3]),
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let base = problem(&pp, options.clone()).run().unwrap();
     check(&base, &options);
-    let coarse_problem = problem(&pp, ScfOptions::default());
+    let coarse_problem = problem(&pp, ScfOptions::strict_reference());
     let coarse_dims = coarse_problem.grid_dimensions();
     let coarse = coarse_problem.run().unwrap();
     println!(
@@ -288,7 +288,7 @@ fn divergence_and_iteration_budget() {
         &pp,
         ScfOptions {
             mixing: Mixing::Linear { beta: 100.0 },
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .run()
@@ -304,7 +304,7 @@ fn divergence_and_iteration_budget() {
         &pp,
         ScfOptions {
             max_iterations: 1,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .run()
@@ -323,7 +323,7 @@ fn small_synthetic_fixed_point() {
     .unwrap();
     let options = ScfOptions {
         cutoff_hartree: 1.5,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let result = ScfProblem::new(
         &c,
@@ -375,7 +375,7 @@ fn functional_labels_preserve_energy_and_reject_other_functionals() {
     let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
     let options = ScfOptions {
         cutoff_hartree: 1.5,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let mut energies = Vec::new();
     for label in ["SLA PZ", " SLA  PZ   NOGX NOGC "] {
@@ -432,7 +432,7 @@ fn residual_schedule_matches_legacy_energy_and_finishes_tightly() {
         let options = ScfOptions {
             cutoff_hartree: 1.5,
             residual_eigen_schedule,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         let result = ScfProblem::new(
             &c,
@@ -482,11 +482,11 @@ fn full_schedule_equivalence() {
     let legacy_options = ScfOptions {
         residual_eigen_schedule: false,
         free_electron_initial_guess: false,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let legacy = problem(&pp, legacy_options.clone()).run().unwrap();
     check(&legacy, &legacy_options);
-    let options = ScfOptions::default();
+    let options = ScfOptions::strict_reference();
     let result = problem(&pp, options.clone()).run().unwrap();
     check(&result, &options);
     let difference = (result.total_hartree() - legacy.total_hartree()).abs();

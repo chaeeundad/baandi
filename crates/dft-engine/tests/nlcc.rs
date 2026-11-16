@@ -167,7 +167,7 @@ fn gaussian_core_translation_and_engine_ledger() {
         let opts = ScfOptions {
             cutoff_hartree: 4.0,
             bands: Some(2),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         let mut energies = Vec::new();
         for pos in [
@@ -228,7 +228,7 @@ fn gaussian_core_translation_and_engine_ledger() {
         ScfOptions {
             cutoff_hartree: 2.,
             bands: Some(2),
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         },
     )
     .unwrap();
@@ -410,7 +410,7 @@ fn synthetic_core_scf() {
             density_tolerance: 1e-10,
             energy_tolerance: 1e-11,
             max_iterations: 120,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         let u = ScfProblem::new(&cell, &atoms, &species, options.clone())
             .unwrap()
@@ -498,7 +498,7 @@ fn rigid_translation_total_scf() {
             density_tolerance: 1e-10,
             energy_tolerance: 1e-11,
             max_iterations: 150,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         let base_atoms = [
             Atom::new("Xx", [0.1, 0.2, 0.3]),

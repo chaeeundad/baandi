@@ -75,6 +75,32 @@ class BindingTests(unittest.TestCase):
                 del a, b
                 self.assertTrue(ra.eigenvalues_hartree)
 
+    def test_default_is_verified_standard_path_and_reference_switch(self):
+        # ADR 0043 ONEPATH-4: default options run the standard path with the
+        # fixed-point verification; reference_strict selects the strict path.
+        o = Options()
+        if os.environ.get("BAANDI_REFERENCE_STRICT", "off") != "on":
+            self.assertFalse(o.reference_strict)
+            self.assertEqual(o.mixing_beta, 0.5)
+        self.assertEqual(o.standard_threshold_ha, 5e-9)
+        self.assertTrue(o.verify)
+        name, symbol, z, channels, cell, positions = CASES[1]
+        pp = {symbol: potential(symbol, z, channels)}
+        standard = Session(cell, [symbol] * len(positions), positions, pp, settings())
+        standard.run()
+        strict_options = settings()
+        strict_options.reference_strict = True
+        strict_options.mixing_beta = 0.3
+        strict = Session(cell, [symbol] * len(positions), positions, pp, strict_options)
+        strict.run()
+        a, b = standard.result(), strict.result()
+        self.assertTrue(a.converged and b.converged)
+        self.assertLess(abs(a.energy_hartree - b.energy_hartree), 5e-9)
+        bad = settings()
+        bad.standard_threshold_ha = 0.0
+        with self.assertRaises(ValueError):
+            Session(cell, [symbol] * len(positions), positions, pp, bad)
+
     def test_invalid_inputs_and_exhaustion(self):
         _, symbol, z, channels, cell, positions = CASES[0]
         pp = {symbol: potential(symbol, z, channels)}
@@ -119,9 +145,14 @@ class BindingTests(unittest.TestCase):
         atoms = Atoms("H2", cell=[[4., 0., 0.], [.2, 3.8, 0.], [.1, .3, 4.2]],
                       scaled_positions=[[0., 0., 0.], [.27, .23, .19]], pbc=True)
         options = settings()
-        options.density_tolerance = 1e-10
-        options.energy_tolerance = 1e-12
-        options.eigen_tolerance = 1e-11
+        # ADR 0043 ONEPATH-4: the default standard path with the verification;
+        # stress needs the stress-class threshold (5e-11 Ha), and the session
+        # refuses a looser one instead of returning a weaker tensor.
+        loose = Baandi(pseudopotentials={"H": potential("H", 1, (0,))}, options=settings())
+        atoms.calc = loose
+        with self.assertRaises(ValueError):
+            atoms.get_stress()
+        options.standard_threshold_ha = 5e-11
         atoms.calc = Baandi(pseudopotentials={"H": potential("H", 1, (0,))}, options=options)
         actual = atoms.get_stress()
         native = np.asarray(atoms.calc.session.stress())
@@ -159,6 +190,9 @@ class BindingTests(unittest.TestCase):
                 for pos in positions:
                     text += f'[[system.atoms]]\nspecies="{symbol}"\nfractional={json.dumps(pos)}\n'
                 text += '[pseudopotentials]\n' + symbol + '= "synthetic.upf"\n[basis]\necutwfc_ry=8.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional="lda-pz"\n[scf]\nnbands=4\n'
+                # Same arithmetic through both front ends: the session has no
+                # cutoff-ladder coarse stage (a CLI run-driver feature, default on).
+                text += 'cutoff_ladder="off"\n'
                 (folder / "input.toml").write_text(text)
                 completed = subprocess.run([os.environ["BAANDI_CLI"], "run", str(folder / "input.toml"), "--output-dir", str(folder / "out")], capture_output=True, text=True)
                 self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
@@ -196,6 +230,9 @@ class BindingTests(unittest.TestCase):
                 for pos in fractions:
                     text += f'[[system.atoms]]\nspecies="{symbol}"\nfractional={json.dumps(pos)}\n'
                 text += '[pseudopotentials]\n' + symbol + '="synthetic.upf"\n[basis]\necutwfc_ry=8.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional="lda-pz"\n[scf]\nnbands=4\n'
+                # Same arithmetic through both front ends: the session has no
+                # cutoff-ladder coarse stage (a CLI run-driver feature, default on).
+                text += 'cutoff_ladder="off"\n'
                 (folder / "input.toml").write_text(text)
                 completed = subprocess.run([os.environ["BAANDI_CLI"], "run", str(folder / "input.toml"), "--output-dir", str(folder / "out")], capture_output=True, text=True)
                 self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)

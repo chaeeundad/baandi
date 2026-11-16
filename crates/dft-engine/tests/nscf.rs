@@ -17,7 +17,7 @@ fn fixed_density_and_threads() {
         eigen_tolerance: 1e-10,
         density_tolerance: 1e-11,
         energy_tolerance: 1e-12,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let points = vec![
         KPoint {
@@ -162,7 +162,7 @@ fn real_si() {
         energy_tolerance: 1e-12,
         davidson_max_iterations: 1200,
         davidson_subspace: 64,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     };
     let scf = ScfProblem::new(&cell, &atoms, &species, options.clone())
         .unwrap()

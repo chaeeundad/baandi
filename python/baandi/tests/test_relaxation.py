@@ -34,6 +34,9 @@ class RelaxationTests(unittest.TestCase):
         opts.density_tolerance = 1e-10
         opts.energy_tolerance = 1e-12
         opts.eigen_tolerance = 1e-11
+        # ADR 0043 ONEPATH-1/4: both sides run the standard path with the
+        # verification; the force-sensitive comparison asks for a tight threshold.
+        opts.standard_threshold_ha = 5e-13
         atoms = Atoms("H2", cell=np.eye(3)*8*ang,
                       scaled_positions=[[0, 0, 0], [.4, .4, .4]], pbc=True)
         atoms.set_constraint(FixAtoms(indices=[0]))
@@ -66,6 +69,7 @@ max_iterations=300
 density_residual_tolerance=1e-10
 energy_tolerance_ha=1e-12
 eigen_tolerance=1e-11
+standard_threshold_ha=5e-13
 [relax]
 max_steps=200
 force_tol_ha_bohr=1e-8

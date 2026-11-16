@@ -197,27 +197,32 @@ fn single_path_default_contract() {
             assert!(bad.stderr.contains(needle), "{}", bad.stderr);
         }
     }
-    // Inputs the standard path cannot run keep the strict path, with a reason.
-    let locking = run(&dir, "locking", None, "locking='auto'\n", "");
-    let l = ok(&locking);
-    assert_eq!(l["single_path"]["status"], "not_applicable");
-    assert_eq!(l["single_path"]["reason"], "scf.locking = auto");
-    assert_eq!(l["execution"]["effective_profile"], "strict");
-    assert!(l.get("convergence_profile").is_none());
-    // ... and reject standard-only controls rather than dropping them.
-    let dropped = run(
+    // ONEPATH-4: no strict fallback remains. `scf.locking = "auto"` (the last
+    // one) is an input error on the default path that names the reference
+    // switch; the strict reference path still runs it.
+    for (name, scf) in [
+        ("locking", "locking='auto'\n"),
+        ("dropped", "locking='auto'\nstandard_threshold_ha=5e-11\n"),
+    ] {
+        let refused = run(&dir, name, None, scf, "");
+        assert_eq!(refused.code, Some(1), "{}", refused.stderr);
+        assert!(refused.result.is_none());
+        for needle in ["scf.locking", "BAANDI_REFERENCE_STRICT=on"] {
+            assert!(refused.stderr.contains(needle), "{}", refused.stderr);
+        }
+    }
+    let locking = run(
         &dir,
-        "dropped",
-        None,
-        "locking='auto'\nstandard_threshold_ha=5e-11\n",
+        "locking-reference",
+        Some("on"),
+        "locking='auto'\n",
         "",
     );
-    assert_eq!(dropped.code, Some(1), "{}", dropped.stderr);
-    assert!(
-        dropped.stderr.contains("scf.locking = auto"),
-        "{}",
-        dropped.stderr
-    );
+    let l = ok(&locking);
+    assert_eq!(l["single_path"]["status"], "reference_strict");
+    assert_eq!(l["execution"]["effective_profile"], "strict");
+    assert_eq!(l["scf"]["locking"], "auto");
+    assert!(l.get("convergence_profile").is_none());
     // A tighter threshold on the default path.
     let tight = run(&dir, "tight", None, "standard_threshold_ha=5e-11\n", "");
     let t = ok(&tight);

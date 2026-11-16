@@ -15,7 +15,7 @@ fn options() -> ScfOptions {
         energy_tolerance: 1e-12,
         eigen_tolerance: 1e-11,
         max_iterations: 250,
-        ..Default::default()
+        ..ScfOptions::strict_reference()
     }
 }
 fn compare(

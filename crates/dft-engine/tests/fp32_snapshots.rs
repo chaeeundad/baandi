@@ -191,7 +191,7 @@ fn histories_and_snapshots() {
             standard: Some(StandardProfile::default()),
             threads: 1,
             cutoff_hartree: 15.,
-            ..Default::default()
+            ..ScfOptions::strict_reference()
         };
         let make = || ScfProblem::new(&cell, &atoms, &species, options.clone()).unwrap();
         for seed in 0..3 {

@@ -3,7 +3,7 @@ pub(crate) mod cell;
 pub mod optimizer;
 use crate::{
     config::Config,
-    run::{RunError, options_with, sha256},
+    run::{RunError, options, sha256},
 };
 use dft_engine::{
     CompletionMode, ExecutionConfig, ScfOptions, ScfProblem, ScfSession, SpeciesPotential,
@@ -657,8 +657,8 @@ pub fn execute(input: &Path, out: &Path, resume: bool) -> Result<(), RunError> {
     // ONEPATH-1/ONEPATH-2 (ADR 0043 item 5): every relaxation mode runs each
     // ionic or cell step on the standard path with the fixed-point
     // verification; forces and stress come from the verified step.
-    let scf_path = config.scf_path(None).map_err(|e| error(1, e))?;
-    let opts = options_with(&config, None)?;
+    let scf_path = config.scf_path().map_err(|e| error(1, e))?;
+    let opts = options(&config)?;
     if opts.energy_tolerance > 1e-8 || opts.eigen_tolerance > 1e-8 || opts.density_tolerance > 1e-7
     {
         return Err(error(

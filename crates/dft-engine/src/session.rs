@@ -446,12 +446,7 @@ impl ScfSession {
                 },
                 other => other,
             })?;
-        let mut standard_error_ha = self
-            .problem
-            .coulomb
-            .as_mut()
-            .map(|m| m.error(n, &step.density))
-            .transpose()?;
+        let mut standard_error_ha = self.problem.stop_error(n, &step.density)?;
         let standard_redo = iteration == 1
             && standard_error_ha.is_some_and(|e| e < tolerance * self.problem.electrons.max(1.0));
         if standard_redo {
@@ -475,13 +470,7 @@ impl ScfSession {
             redo.timings.density += step.timings.density;
             redo.timings.energy += step.timings.energy;
             step = redo;
-            standard_error_ha = Some(
-                self.problem
-                    .coulomb
-                    .as_mut()
-                    .unwrap()
-                    .error(n, &step.density)?,
-            );
+            standard_error_ha = self.problem.stop_error(n, &step.density)?;
         }
         if dft_solvers::replay::ENABLED {
             // Measurement only: signed density residual, normalized FFT, density
@@ -1872,10 +1861,8 @@ fn verify_fixed_point(
         eigen_tolerance <= problem.options.eigen_tolerance,
     )?;
     let coulomb_error_ha = problem
-        .coulomb
-        .as_mut()
-        .expect("standard Coulomb metric")
-        .error(density, &check.density)?;
+        .stop_error(density, &check.density)?
+        .expect("standard Coulomb metric");
     let residual_bound_ha = dft_numerics::switches::on(
         dft_numerics::switches::Id::STANDARD_RESIDUAL_GUARD,
     )

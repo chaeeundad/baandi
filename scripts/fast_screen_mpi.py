@@ -50,6 +50,10 @@ def flatten(record: dict) -> tuple[dict[str, float], dict[str, float]]:
         timings[f"collectives.{op}.s"] = float(values[2])
     for name, value in record.get("m2_counters", {}).items():
         counters[f"m2.{name}"] = float(value)
+    for name, value in record.get("grid_counters", {}).items():
+        counters[f"grid.{name}"] = float(value)
+    for name, value in record.get("phases", {}).items():
+        timings[f"phase.{name}"] = float(value)
     for name, value in record.get("stages", {}).items():
         timings[f"stage.{name}"] = float(value)
     return counters, timings

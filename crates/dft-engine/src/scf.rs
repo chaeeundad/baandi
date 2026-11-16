@@ -595,6 +595,10 @@ pub struct ScfProblem {
     atoms: Vec<Atom>,
     symmetry: Option<dft_physics::symmetry::DensitySymmetrizer>,
     coulomb: Option<CoulombMetric>,
+    /// `BAANDI_STOP_METRIC=kept` (ticket MPI-REMAINING): Fourier coefficients
+    /// of the latest map's input and output densities for the stop-rule
+    /// estimate; None when the switch is off or there is no Coulomb metric.
+    stop_kept: Option<StopKept>,
     cell: Cell,
     states: Vec<KState>,
     grid: FftGridSpec,
@@ -693,6 +697,85 @@ fn ordered_solves_at<T: Send, R: Send>(
     let mut results = left?;
     results.extend(right?);
     Ok(results)
+}
+
+/// Kept Fourier coefficients of one map's densities for the standard
+/// stop-rule estimate (`BAANDI_STOP_METRIC=kept`, ticket MPI-REMAINING). Each
+/// side stores the density it was computed from; `matches` compares those bits
+/// with the densities handed to the estimate, so a stale or foreign entry is
+/// never used (the estimate then transforms the residual as before). A side is
+/// usable only when its density needed no clamping (the coefficients of the
+/// checked density then equal those of the raw density).
+pub(crate) struct StopKept {
+    input: Vec<f64>,
+    input_hat: Array3<Complex64>,
+    input_ok: bool,
+    output: Vec<f64>,
+    output_hat: Array3<Complex64>,
+    output_ok: bool,
+}
+static STOP_KEPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static STOP_FFT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// (stop-rule estimates from kept coefficients, estimates that transformed
+/// the residual: one forward and one inverse full-grid FFT each) since process
+/// start; ticket MPI-REMAINING.
+pub fn stop_metric_counters() -> [u64; 2] {
+    use std::sync::atomic::Ordering::Relaxed;
+    [STOP_KEPT.load(Relaxed), STOP_FFT.load(Relaxed)]
+}
+thread_local! {
+    static STOP_METRIC_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+/// Override `BAANDI_STOP_METRIC` (true = kept) for problems constructed on the
+/// calling thread (simulated ranks in tests); `None` restores the environment.
+pub fn set_stop_metric_override(kept: Option<bool>) {
+    STOP_METRIC_OVERRIDE.with(|o| o.set(kept));
+}
+fn stop_metric_kept() -> bool {
+    STOP_METRIC_OVERRIDE.with(|o| o.get()).unwrap_or_else(|| {
+        dft_numerics::switches::choice(dft_numerics::switches::Id::STOP_METRIC) == "kept"
+    })
+}
+fn unclamped(n: &Array3<f64>) -> bool {
+    n.iter().all(|v| v.to_bits() == v.max(0.0).to_bits())
+}
+fn same_bits(kept: &[f64], n: &Array3<f64>) -> bool {
+    kept.len() == n.len()
+        && kept
+            .iter()
+            .zip(n.iter())
+            .all(|(a, b)| a.to_bits() == b.to_bits())
+}
+impl StopKept {
+    fn new(dims: [usize; 3]) -> Self {
+        Self {
+            input: Vec::new(),
+            input_hat: Array3::zeros(dims),
+            input_ok: false,
+            output: Vec::new(),
+            output_hat: Array3::zeros(dims),
+            output_ok: false,
+        }
+    }
+    fn set_input(&mut self, n: &Array3<f64>) {
+        self.input.clear();
+        self.input.extend(n.iter());
+        self.input_ok = unclamped(n);
+    }
+    fn set_output(&mut self, n: &Array3<f64>, hat: Array3<Complex64>) {
+        self.output.clear();
+        self.output.extend(n.iter());
+        self.output_ok = hat.shape() == self.output_hat.shape() && unclamped(n);
+        if self.output_ok {
+            self.output_hat = hat;
+        }
+    }
+    fn matches(&self, input: &Array3<f64>, output: &Array3<f64>) -> bool {
+        self.input_ok
+            && self.output_ok
+            && same_bits(&self.input, input)
+            && same_bits(&self.output, output)
+    }
 }
 
 /// Cluster matrix sums sum_r conj(psi_i) dV psi_j of the certificate pre-screen,
@@ -1218,6 +1301,8 @@ impl ScfProblem {
             atomic_species,
             atomic_start,
             force_model,
+            stop_kept: (coulomb.is_some() && stop_metric_kept())
+                .then(|| StopKept::new(grid.dims())),
             coulomb,
             cell: cell.clone(),
             states,
@@ -1397,13 +1482,48 @@ impl ScfProblem {
         self.step_with_occupations(n, initial, tolerance, certify, None)
     }
 
+    /// The standard stop-rule Coulomb estimate E_H[output - input] (Ha), None
+    /// without the standard profile. With `BAANDI_STOP_METRIC=kept` and kept
+    /// coefficients of exactly these two densities, a Parseval sum without a
+    /// transform; otherwise the residual is transformed (forward and back).
+    pub(crate) fn stop_error(
+        &mut self,
+        input: &Array3<f64>,
+        output: &Array3<f64>,
+    ) -> Result<Option<f64>, ScfError> {
+        let Some(metric) = self.coulomb.as_mut() else {
+            return Ok(None);
+        };
+        if let Some(kept) = self.stop_kept.as_ref().filter(|k| k.matches(input, output)) {
+            STOP_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return metric
+                .error_reciprocal(&kept.input_hat, &kept.output_hat)
+                .map(Some);
+        }
+        STOP_FFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        metric.error(input, output).map(Some)
+    }
+
     /// Hartree and XC fields of an input density and the effective local
     /// potential built from them (ionic + Hartree + XC), in Ha.
     fn input_fields(
         &mut self,
         n: &Array3<f64>,
     ) -> Result<(hartree::HartreeGrid, xc::XcGrid, Array3<f64>), ScfError> {
-        let h = hartree::evaluate(n, &self.cell, &mut self.fft)?;
+        let h = match self.stop_kept.as_mut() {
+            Some(kept) => {
+                kept.input_ok = false;
+                let h = hartree::evaluate_keeping_density(
+                    n,
+                    &self.cell,
+                    &mut self.fft,
+                    &mut kept.input_hat,
+                )?;
+                kept.set_input(n);
+                h
+            }
+            None => hartree::evaluate(n, &self.cell, &mut self.fft)?,
+        };
         // M2d: pointwise LDA XC split over ranks (bit-identical potential).
         let m2_xc = crate::m2::active().and_then(|comm| {
             crate::m2::xc(
@@ -2439,7 +2559,7 @@ impl ScfProblem {
         } else {
             None
         };
-        let shared_audit = energy::prepare_shared(
+        let mut shared_audit = energy::prepare_shared(
             &AuditInput {
                 cell: &self.cell,
                 basis: &self.states[0].basis,
@@ -2461,6 +2581,9 @@ impl ScfProblem {
             output_xc.as_ref(),
             self.core_density.as_ref(),
         )?;
+        if let Some(kept) = self.stop_kept.as_mut() {
+            kept.set_output(&output, shared_audit.take_density_reciprocal());
+        }
         // B2: Fermi-Dirac occupations fall back to the explicit audit.
         let identity = self.energy_identity && finite.is_none();
         // M2d: nonlocal energy from the distributed projections (one tree_sum).

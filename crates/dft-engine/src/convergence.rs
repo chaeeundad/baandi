@@ -295,6 +295,36 @@ impl CoulombMetric {
         }
         Ok(energy.max(0.0))
     }
+    /// `error` from the Fourier coefficients of the two densities (ticket
+    /// MPI-REMAINING, `BAANDI_STOP_METRIC=kept`): with the forward transform
+    /// scaled by 1/N and the unscaled inverse, sum_r d(r) (W d)(r) =
+    /// N sum_G w(G) |d(G)|^2 for the real residual d and the symmetric weights
+    /// w, so no transform is needed. Rounding class against `error` (the
+    /// residual is transformed as two densities; Parseval order of summation).
+    pub(crate) fn error_reciprocal(
+        &self,
+        input: &Array3<Complex64>,
+        output: &Array3<Complex64>,
+    ) -> Result<f64, ScfError> {
+        let (Some(a), Some(b)) = (input.as_slice(), output.as_slice()) else {
+            return Err(ScfError::InvalidInput("Coulomb metric layout"));
+        };
+        if a.len() != self.weights.len() || b.len() != self.weights.len() {
+            return Err(ScfError::InvalidInput("Coulomb metric grid mismatch"));
+        }
+        let sum: f64 = self
+            .weights
+            .iter()
+            .zip(a.iter().zip(b))
+            .filter(|(w, _)| **w != 0.0)
+            .map(|(w, (a, b))| w * (b - a).norm_sqr())
+            .sum();
+        let energy = sum * self.weights.len() as f64;
+        if !energy.is_finite() {
+            return Err(ScfError::NonFinite);
+        }
+        Ok(energy.max(0.0))
+    }
     /// ONEPATH-3 collinear estimator (docs/design/onepath3-spin-metals.md):
     /// E_H[d_n] + E_H[d_m] + E_0[d_m], d_s = output_s - input_s, d_n the charge
     /// and d_m the magnetization residual. E_0 weights the uniform part of d_m
@@ -485,6 +515,48 @@ mod tests {
             StandardProfile::FLOOR_HA
         );
         assert_eq!(StandardProfile::ratchet(0.005, 0.032, 32.0), 0.0001);
+    }
+
+    /// MPI-REMAINING `BAANDI_STOP_METRIC=kept`: the Parseval form from the
+    /// forward coefficients of the two densities equals the transform form
+    /// to rounding (relative 1e-12) on a skewed cell with a generic density
+    /// pair, and to the analytic value on the plane wave above.
+    #[test]
+    fn coulomb_estimate_from_kept_coefficients_matches_the_transform() {
+        use dft_numerics::Fft3d;
+        let cell =
+            Cell::from_user_rows_bohr([[7.0, 0., 0.], [0.9, 6.4, 0.], [0.4, 0.7, 8.1]]).unwrap();
+        let dims = [12, 10, 14];
+        let mut metric = CoulombMetric::new(
+            &cell,
+            &ScfOptions {
+                cutoff_hartree: 0.6,
+                ..ScfOptions::default()
+            },
+            dims,
+        )
+        .unwrap();
+        let field = |s: f64| {
+            Array3::from_shape_fn(dims, |(i, j, k)| {
+                let x = (i * 31 + j * 17 + k * 7) as f64;
+                0.05 + 0.01 * ((x * s).sin() + 0.5 * (x * 0.37 * s + 1.0).cos())
+            })
+        };
+        let (input, output) = (field(0.11), field(0.13));
+        let mut fft = FftPlan3d::new(dims).unwrap();
+        let hat = |n: &Array3<f64>, fft: &mut FftPlan3d| {
+            let mut out = Array3::zeros(dims);
+            fft.to_reciprocal(&n.mapv(|v| Complex64::new(v, 0.0)), &mut out)
+                .unwrap();
+            out
+        };
+        let (a, b) = (hat(&input, &mut fft), hat(&output, &mut fft));
+        let transform = metric.error(&input, &output).unwrap();
+        let kept = metric.error_reciprocal(&a, &b).unwrap();
+        println!("Coulomb estimate transform {transform:e} kept {kept:e} Ha");
+        assert!(transform > 0.0);
+        assert!((kept - transform).abs() <= 1e-12 * transform);
+        assert_eq!(metric.error_reciprocal(&b, &b).unwrap(), 0.0);
     }
 
     /// ONEPATH-3 collinear estimator: equal channel residuals reduce to the

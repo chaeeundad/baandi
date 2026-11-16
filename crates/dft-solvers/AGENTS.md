@@ -221,3 +221,14 @@ block (callers check `eigenvectors.rows()`). `solve_distributed_rows_kept` is th
 entry with `Global` and `gather = true` (unchanged). Test
 `tests/distributed_lazy_rows.rs` (1 to 4 ranks, workspace full/selected and the
 allocating path, bits). Engine design: docs/design/mpi-lazy-orbitals.md.
+
+## Incremental Pulay update (MPI-REMAINING, 2026-11-17)
+
+`BAANDI_MIX_INCREMENTAL=on|off` (default off; per-thread override
+`mixing::set_incremental_override`, test hook `PulayMixer::set_incremental`):
+`PulayMixer` keeps its difference vectors (and metric images) and Gram entries
+across calls, keyed by the serial numbers of the pairs and seeds they are formed
+from, and forms only the newest difference and Gram row per step. Reset,
+`seed_differences` and `restore` renumber and drop the cache. Same operands,
+formulas and orders: bit-identical (test `mixing::incremental_tests`). Counters
+`mixing::mixer_counters()`. Analysis docs/performance/mpi-remaining.md.

@@ -255,6 +255,10 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
         let solves_before = dft_solvers::distributed_davidson::reduced_solve_stats();
         let rot_before = dft_solvers::distributed_davidson::rotation_stats();
         let red_before = dft_solvers::distributed_davidson::reduction_stats();
+        let grid_before = (
+            dft_solvers::mixing::mixer_counters(),
+            dft_engine::stop_metric_counters(),
+        );
         let before = snapshot();
         let t = Instant::now();
         let results = simulate(p, |comm: &SimRank| run(case, Some(Arc::new(comm.clone()))));
@@ -439,7 +443,20 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
             .iter()
             .map(|(n, v)| format!("\"{n}\":{}", v / p))
             .collect();
-        j.push_str(&format!(",\"m2_counters\":{{{}}}}}", counters.join(",")));
+        j.push_str(&format!(",\"m2_counters\":{{{}}}", counters.join(",")));
+        // MPI-REMAINING: replicated grid-stage counters (process-wide over the
+        // simulated ranks, divided by the rank count like every other entry).
+        let mix = dft_solvers::mixing::mixer_counters();
+        let stop = dft_engine::stop_metric_counters();
+        j.push_str(&format!(
+            ",\"grid_counters\":{{\"mix_calls\":{},\"mix_diffs\":{},\"mix_dots\":{},\"mix_metric\":{},\"stop_kept\":{},\"stop_fft\":{}}}}}",
+            (mix[0] - grid_before.0[0]) / p as u64,
+            (mix[1] - grid_before.0[1]) / p as u64,
+            (mix[2] - grid_before.0[2]) / p as u64,
+            (mix[3] - grid_before.0[3]) / p as u64,
+            (stop[0] - grid_before.1[0]) / p as u64,
+            (stop[1] - grid_before.1[1]) / p as u64,
+        ));
         println!("M2SCREEN_JSON {j}");
     }
 }

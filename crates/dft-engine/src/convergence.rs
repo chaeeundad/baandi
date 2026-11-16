@@ -223,10 +223,22 @@ impl std::fmt::Debug for CoulombMetric {
     }
 }
 impl CoulombMetric {
-    pub(crate) fn new(cell: &Cell, cutoff: f64, dims: [usize; 3]) -> Result<Self, ScfError> {
+    /// The density sphere is the problem's own density list: with a frozen
+    /// strain reference (`options.strain_reference`, variable-cell relaxation)
+    /// the reference cell's Miller set expressed in `cell`, otherwise the
+    /// `cell` sphere at 4 x cutoff (unchanged). ONEPATH-2B: building it from
+    /// `cell` alone ignored the frozen reference, so after a cell expansion
+    /// the sphere left the frozen FFT grid ("Miller index outside the
+    /// canonical frequencies") on the standard path, whose stop rule always
+    /// builds this metric.
+    pub(crate) fn new(
+        cell: &Cell,
+        options: &ScfOptions,
+        dims: [usize; 3],
+    ) -> Result<Self, ScfError> {
         let fft = FftPlan3d::new(dims)?;
         let mut weights = vec![0.0; dims.iter().product()];
-        let sphere = PlaneWaveBasis::new(cell, Hartree(cutoff))?.density_basis(cell)?;
+        let sphere = options.basis(cell, [0.0; 3], 1.0)?.density_basis(cell)?;
         let scale = cell.volume_bohr3() / (2.0 * weights.len() as f64);
         for g in sphere.vectors() {
             if g.norm_squared > 0.0 {
@@ -447,7 +459,15 @@ mod tests {
         let side: f64 = 8.0;
         let cell =
             Cell::from_user_rows_bohr([[side, 0., 0.], [0., side, 0.], [0., 0., side]]).unwrap();
-        let mut metric = CoulombMetric::new(&cell, 0.2, [12, 12, 12]).unwrap();
+        let mut metric = CoulombMetric::new(
+            &cell,
+            &ScfOptions {
+                cutoff_hartree: 0.2,
+                ..ScfOptions::default()
+            },
+            [12, 12, 12],
+        )
+        .unwrap();
         let a = 0.03;
         let pi = std::f64::consts::PI;
         let input = Array3::zeros([12, 12, 12]);
@@ -476,7 +496,15 @@ mod tests {
         let side: f64 = 8.0;
         let cell =
             Cell::from_user_rows_bohr([[side, 0., 0.], [0., side, 0.], [0., 0., side]]).unwrap();
-        let mut metric = CoulombMetric::new(&cell, 0.2, [12, 12, 12]).unwrap();
+        let mut metric = CoulombMetric::new(
+            &cell,
+            &ScfOptions {
+                cutoff_hartree: 0.2,
+                ..ScfOptions::default()
+            },
+            [12, 12, 12],
+        )
+        .unwrap();
         let pi = std::f64::consts::PI;
         let a = 0.03;
         let wave = |amp: f64, mean: f64| {

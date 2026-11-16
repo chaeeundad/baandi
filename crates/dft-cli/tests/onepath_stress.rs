@@ -385,3 +385,137 @@ fn standard_variable_cell_relaxation_matches_strict_reference() {
     }
     fs::remove_dir_all(dir).unwrap();
 }
+
+/// ONEPATH-2B release check on a real pseudopotential (never committed):
+/// `DFT_NC_DIR/Si.upf` (PseudoDojo Si, PBE), conventional Si8 at Gamma, 30 Ry
+/// (the dev08 si8-gamma case, FFT 36^3). The standard arms failed at step 3
+/// with "Miller index [0, 0, 18] is outside the canonical frequencies for
+/// [36, 36, 36]" before the Coulomb metric used the frozen density list.
+/// Checks: no Miller-index failure in any arm; the standard arm ends with the
+/// strict reference's status; the mode-cell case (the dev08 case) converges;
+/// where both converge, final cell and positions within 1e-3 Bohr (the
+/// synthetic test's bound).
+#[test]
+#[ignore = "real PseudoDojo Si PBE; release only, set DFT_NC_DIR: cargo test --release -p dft-cli --test onepath_stress real_si8 -- --ignored --nocapture"]
+fn real_si8_variable_cell_matches_strict_reference() {
+    let nc = std::path::PathBuf::from(std::env::var_os("DFT_NC_DIR").expect("set DFT_NC_DIR"));
+    let upf = nc.join("Si.upf");
+    assert!(upf.is_file(), "missing {}", upf.display());
+    let dir = setup("real-si8");
+    let a = 10.261212856717933;
+    let atoms = [
+        [0., 0., 0.],
+        [0., 0.5, 0.5],
+        [0.5, 0., 0.5],
+        [0.5, 0.5, 0.],
+        [0.25, 0.25, 0.25],
+        [0.25, 0.75, 0.75],
+        [0.75, 0.25, 0.75],
+        [0.75, 0.75, 0.25],
+    ];
+    let input = |scale: f64, shift: f64, relax: &str| {
+        let mut s = format!(
+            "[system]\nname='si8 cell'\nlattice_unit='bohr'\nlattice_vectors=[[{x},0.0,0.0],[0.0,{x},0.0],[0.0,0.0,{x}]]\n",
+            x = a * scale
+        );
+        for (i, f) in atoms.iter().enumerate() {
+            let d = if i == 4 { shift } else { 0. };
+            s += &format!(
+                "[[system.atoms]]\nspecies='Si'\nfractional=[{},{},{}]\n",
+                f[0] + d,
+                f[1] - d,
+                f[2] + 0.5 * d
+            );
+        }
+        s + &format!(
+            "[pseudopotentials]\nSi='{}'\n[basis]\necutwfc_ry=30.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='pbe'\n{relax}",
+            upf.display()
+        )
+    };
+    for (case, text) in [
+        (
+            "cell",
+            input(
+                0.98,
+                0.,
+                "[relax]\nmode='cell'\ncell_dofs='isotropic'\nforce_tol_ha_bohr=1e-3\nmax_steps=30\n",
+            ),
+        ),
+        (
+            "ions-cell",
+            // ions_cell, isotropic cell, one atom displaced. On this input the
+            // STRICT reference itself does not converge (the trajectory reaches
+            // structures where the SCF diverges near step 23; also with the full
+            // cell, lattice x 1.01 and displacement 0.01: step 20 "SCF
+            // unconverged"), and the standard arm follows the same trajectory
+            // to the same failure (ledger ONEPATH-2B). That is a separate,
+            // path-independent finding; here the check is that the standard arm
+            // never fails with the Miller-index error and ends like the
+            // reference.
+            input(
+                1.01,
+                0.005,
+                "[relax]\nmode='ions_cell'\ncell_dofs='isotropic'\nforce_tol_ha_bohr=1e-3\nmax_steps=60\n",
+            ),
+        ),
+    ] {
+        let mut finals = Vec::new();
+        let mut statuses = Vec::new();
+        for strict in [true, false] {
+            let name = format!("{case}-{}", if strict { "strict" } else { "standard" });
+            let out = cli(&dir, "relax", &name, &text, strict);
+            let v = out
+                .result
+                .as_ref()
+                .unwrap_or_else(|| panic!("{}", out.text));
+            let r = &v["relaxation"];
+            for f in r["failures"].as_array().into_iter().flatten() {
+                assert!(
+                    !f["reason"].as_str().unwrap_or("").contains("Miller index"),
+                    "{name}: {f}"
+                );
+            }
+            statuses.push(r["status"].clone());
+            let frames = r["frames"].as_array().unwrap();
+            let last = frames.last().unwrap();
+            println!(
+                "ONEPATH-2B real Si8 {name}: status {}, steps {}, SCF iterations {}, final a00 {} Bohr, max force {:.3e}, wall {:.1} s",
+                r["status"],
+                frames.len() - 1,
+                frames
+                    .iter()
+                    .map(|f| f["scf_iterations"].as_u64().unwrap())
+                    .sum::<u64>(),
+                last["cell_columns_bohr"][0][0],
+                last["max_force_ha_bohr"].as_f64().unwrap(),
+                out.wall
+            );
+            finals.push((
+                flat(&last["cell_columns_bohr"]),
+                last["positions"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| v.as_f64().unwrap())
+                    .collect::<Vec<_>>(),
+            ));
+        }
+        // The standard arm ends like the reference; the mode-cell case is the
+        // failing dev08 case and must converge.
+        assert_eq!(statuses[1], statuses[0], "{case}");
+        if case == "cell" {
+            assert_eq!(statuses[0], "converged");
+        }
+        let dcell = max_abs_diff(&finals[0].0, &finals[1].0);
+        let dx = max_abs_diff(&finals[0].1, &finals[1].1);
+        println!(
+            "ONEPATH-2B real Si8 {case}: status {}, max |a_std - a_strict| {dcell:.3e} Bohr, max |x_std - x_strict| {dx:.3e} Bohr",
+            statuses[0]
+        );
+        if statuses[0] == "converged" {
+            assert!(dcell < 1e-3, "{case}: cell {dcell:e} Bohr");
+            assert!(dx < 1e-3, "{case}: positions {dx:e} Bohr");
+        }
+    }
+    fs::remove_dir_all(dir).unwrap();
+}

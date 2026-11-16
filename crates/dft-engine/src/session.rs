@@ -294,7 +294,7 @@ impl ScfSession {
                 if self.problem.options.hartree_mixing {
                     p.set_metric(Box::new(CoulombMetric::new(
                         &self.problem.cell,
-                        self.problem.options.cutoff_hartree,
+                        &self.problem.options,
                         self.problem.grid.dims(),
                     )?));
                 }
@@ -330,7 +330,7 @@ impl ScfSession {
                 if self.problem.options.hartree_mixing {
                     p.set_metric(Box::new(CoulombMetric::new(
                         &self.problem.cell,
-                        self.problem.options.cutoff_hartree,
+                        &self.problem.options,
                         dims,
                     )?));
                 }

@@ -1155,7 +1155,7 @@ impl ScfProblem {
             .collect();
         let coulomb = options
             .standard
-            .map(|_| CoulombMetric::new(cell, options.cutoff_hartree, grid.dims()))
+            .map(|_| CoulombMetric::new(cell, &options, grid.dims()))
             .transpose()?;
         let force_model = crate::force_identity::ModelDescription::new(
             cell,

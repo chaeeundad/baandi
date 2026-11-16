@@ -34,3 +34,7 @@ dft-engine = { path = "../dft-engine" }
 dft-mpi = { path = "../dft-mpi" }
 
 dft-physics = { path = "../dft-physics" }
+
+[dev-dependencies]
+# examples/davidson_bench.rs (stage-0 benchmark) reads the solver counters.
+dft-solvers = { path = "../dft-solvers" }

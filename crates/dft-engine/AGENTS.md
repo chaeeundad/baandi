@@ -457,3 +457,12 @@ step's and the fed Pulay proposals; `feed2` feeds only from the second failure;
 `replace` records only the verification pair (rejected). Off is the default path bit for bit; acceptance still needs a
 passed verification. Test `verification_tests::failed_verification_reuse_keeps_the_fixed_point`.
 Ledger VERIFY-REUSE-*, dev08 request `docs/performance/requests/verify-reuse.md`.
+
+## Stage-0 benchmark hook (FASTBENCH-DAVIDSON, 2026-11-16)
+
+`ScfProblem::atomic_start_vectors(n)` (`#[doc(hidden)]`, measurement only) sets the
+local potential of `n` as a map does and returns the atomic-start vectors through
+`atomic_guesses`, the single routine every cold map calls (moved out of
+`step_with_occupations` unchanged; CLI si8/si32 density.bin SHA-256 identical before
+and after). `dft-cli/examples/davidson_bench.rs` passes them to its cold maps; the
+SCF never calls the hook. Protocol: docs/performance/fast-loop-protocol.md (stage 0).

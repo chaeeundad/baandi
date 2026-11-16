@@ -1837,6 +1837,103 @@ impl ScfProblem {
         }
     }
 
+    /// Atomic-start vectors of a cold map (one per k state) for the local
+    /// potential currently set on the states; None without atomic species.
+    /// The single implementation used by every cold map.
+    fn atomic_guesses(&mut self) -> Result<Option<Vec<ComplexMatrix>>, ScfError> {
+        let Some(species) = &self.atomic_species else {
+            return Ok(None);
+        };
+        let atomic_clock = Instant::now();
+        // BAANDI_M2_ATOMIC=split: span, Gram-Schmidt and H Q split over ranks.
+        let split = crate::m2::active().filter(|_| crate::m2::tuning().atomic_split);
+        let mut guesses = Vec::with_capacity(self.states.len());
+        for state in &mut self.states {
+            let span = atomic_start::span(
+                &self.cell,
+                &state.basis,
+                &state.grid,
+                species,
+                &self.options,
+                self.occupations.len(),
+                dft_numerics::switches::on(dft_numerics::switches::Id::PHASE_THREADS)
+                    .then_some(&*self.pool),
+                split.as_ref(),
+            )?;
+            // ATOMIC-REAL: H Q on the real Gamma path when eligible.
+            let hq = if crate::gamma_real::atomic_real() {
+                crate::gamma_real::atomic_apply_real(
+                    &state.hamiltonian,
+                    &state.basis,
+                    span.vectors(),
+                    self.occupations.len(),
+                    &self.options,
+                    &self.pool,
+                    self.gamma_real_exclusion,
+                    &mut state.real_solve,
+                )?
+            } else {
+                None
+            };
+            let (guess, report) = atomic_start::ritz(
+                &span,
+                &state.hamiltonian,
+                self.occupations.len(),
+                state.point.fractional == [0.; 3],
+                hq,
+                split.as_ref(),
+            )?;
+            self.atomic_start.atomic_orbitals += report.atomic_orbitals;
+            self.atomic_start.initial_h_applications += report.initial_h_applications;
+            self.atomic_start.gram_rotation_macs += report.gram_rotation_macs;
+            self.atomic_start.mgs_projection_macs += report.mgs_projection_macs;
+            self.atomic_start.radial_samples += report.radial_samples;
+            self.atomic_start.evd_orders.extend(report.evd_orders);
+            guesses.push(guess);
+        }
+        if split.is_some() {
+            crate::m2::count(crate::m2::Count::AtomicSplitStarts);
+        }
+        if crate::m2::active().is_some() {
+            crate::m2::add(
+                crate::m2::Stage::AtomicStart,
+                dft_numerics::stage_clock::keep(atomic_clock),
+            );
+        }
+        crate::phase_clock::add_atomic_start(atomic_clock);
+        Ok(Some(guesses))
+    }
+
+    /// Measurement access (stage-0 benchmark `examples/davidson_bench.rs` of
+    /// dft-cli): sets the local potential of density `n` exactly as a map does
+    /// and returns the atomic-start vectors a cold map at `n` would pass to the
+    /// eigensolver (None when the problem has no atomic start). A map at `n`
+    /// given these vectors as `initial` runs the identical solve without
+    /// recomputing the start. Not used by the SCF.
+    #[doc(hidden)]
+    pub fn atomic_start_vectors(
+        &mut self,
+        n: &Array3<f64>,
+    ) -> Result<Option<Vec<ComplexMatrix>>, ScfError> {
+        if n.shape() != self.grid.dims() {
+            return Err(ScfError::InvalidInput("input density grid"));
+        }
+        if self.options.start_wavefunctions != StartWavefunctions::Atomic {
+            return Ok(None);
+        }
+        let (_, _, effective) = self.input_fields(n)?;
+        ordered_solves(
+            &mut self.states,
+            self.options.threads,
+            &self.pool,
+            |_, state| {
+                state.hamiltonian.set_local_potential(effective.clone())?;
+                Ok(())
+            },
+        )?;
+        self.atomic_guesses()
+    }
+
     fn step_with_occupations(
         &mut self,
         n: &Array3<f64>,
@@ -1912,67 +2009,8 @@ impl ScfProblem {
             } else if finite.is_some() {
                 self.atomic_start.fallback_reason = Some("Fermi-Dirac occupations".into());
                 None
-            } else if let Some(species) = &self.atomic_species {
-                let atomic_clock = Instant::now();
-                // BAANDI_M2_ATOMIC=split: span, Gram-Schmidt and H Q split over ranks.
-                let split = crate::m2::active().filter(|_| crate::m2::tuning().atomic_split);
-                let mut guesses = Vec::with_capacity(self.states.len());
-                for state in &mut self.states {
-                    let span = atomic_start::span(
-                        &self.cell,
-                        &state.basis,
-                        &state.grid,
-                        species,
-                        &self.options,
-                        self.occupations.len(),
-                        dft_numerics::switches::on(dft_numerics::switches::Id::PHASE_THREADS)
-                            .then_some(&*self.pool),
-                        split.as_ref(),
-                    )?;
-                    // ATOMIC-REAL: H Q on the real Gamma path when eligible.
-                    let hq = if crate::gamma_real::atomic_real() {
-                        crate::gamma_real::atomic_apply_real(
-                            &state.hamiltonian,
-                            &state.basis,
-                            span.vectors(),
-                            self.occupations.len(),
-                            &self.options,
-                            &self.pool,
-                            self.gamma_real_exclusion,
-                            &mut state.real_solve,
-                        )?
-                    } else {
-                        None
-                    };
-                    let (guess, report) = atomic_start::ritz(
-                        &span,
-                        &state.hamiltonian,
-                        self.occupations.len(),
-                        state.point.fractional == [0.; 3],
-                        hq,
-                        split.as_ref(),
-                    )?;
-                    self.atomic_start.atomic_orbitals += report.atomic_orbitals;
-                    self.atomic_start.initial_h_applications += report.initial_h_applications;
-                    self.atomic_start.gram_rotation_macs += report.gram_rotation_macs;
-                    self.atomic_start.mgs_projection_macs += report.mgs_projection_macs;
-                    self.atomic_start.radial_samples += report.radial_samples;
-                    self.atomic_start.evd_orders.extend(report.evd_orders);
-                    guesses.push(guess);
-                }
-                if split.is_some() {
-                    crate::m2::count(crate::m2::Count::AtomicSplitStarts);
-                }
-                if crate::m2::active().is_some() {
-                    crate::m2::add(
-                        crate::m2::Stage::AtomicStart,
-                        dft_numerics::stage_clock::keep(atomic_clock),
-                    );
-                }
-                crate::phase_clock::add_atomic_start(atomic_clock);
-                Some(guesses)
             } else {
-                None
+                self.atomic_guesses()?
             }
         } else {
             None

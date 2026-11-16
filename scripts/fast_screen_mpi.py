@@ -263,9 +263,30 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=1800.0)
     ap.add_argument("--json-out", help="write the full result as JSON")
     ap.add_argument("--all-counters", action="store_true")
+    ap.add_argument("--level", default="scf", choices=["scf", "solve"],
+                    help="scf: whole SCF (stage 1, this harness); solve: one Davidson solve at a fixed "
+                         "Hamiltonian on the same simulated ranks (stage 0, scripts/fast_screen_dav.py)")
     args = ap.parse_args()
     if not args.upf or not Path(args.upf).is_file():
         sys.exit("--upf (or $DFT_SI_UPF) must name the Si UPF file")
+    if args.level == "solve":
+        # Stage 0: delegate to the solve-level harness (counter names there: coll.<op>.calls,
+        # dist.<stage>.calls; the SCF-level prefix "collectives." is mapped to "coll.").
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import fast_screen_dav
+        argv = ["--upf", args.upf, "--case", args.case, "--ranks", str(args.ranks),
+                "--pairs", str(args.pairs)]
+        for e in args.a:
+            argv += ["--a", e]
+        for e in args.b:
+            argv += ["--b", e]
+        for e in args.expect:
+            argv += ["--expect", e.replace("collectives.", "coll.", 1)]
+        if args.json_out:
+            argv += ["--json-out", args.json_out]
+        if args.all_counters:
+            argv.append("--all-counters")
+        return fast_screen_dav.main(argv)
     expect = []
     for e in args.expect:
         key, _, direction = e.rpartition(":")

@@ -1464,24 +1464,35 @@ impl ScfProblem {
             .get_or_insert_with(|| crate::m2::M2Density::new(dist.plane_grid_offsets()));
         let points = md.points;
         md.bands = bands;
-        md.contributions.clear();
-        md.contributions.resize(bands * points, 0.);
-        dist.band_densities(
-            &comm,
-            &xm,
-            &occupations[..m],
-            volume,
-            &mut md.contributions[..m * points],
-        )
-        .map_err(err)?;
-        // Ascending band order on the planes, as the replicated fold.
         let mut local = vec![0.0; points];
-        for b in 0..m {
-            for (l, c) in local
-                .iter_mut()
-                .zip(&md.contributions[b * points..(b + 1) * points])
-            {
-                *l += c;
+        // BAANDI_M2_DENSITY=fused: the per-band contributions only serve the
+        // certificate screen, which runs on the strict path only; the standard
+        // path accumulates the plane density directly (bit-identical sum order).
+        let fused = self.options.standard.is_some()
+            && dft_numerics::switches::choice(dft_numerics::switches::Id::M2_DENSITY) == "fused";
+        if fused {
+            md.contributions.clear();
+            dist.band_density_sum(&comm, &xm, &occupations[..m], volume, &mut local)
+                .map_err(err)?;
+        } else {
+            md.contributions.clear();
+            md.contributions.resize(bands * points, 0.);
+            dist.band_densities(
+                &comm,
+                &xm,
+                &occupations[..m],
+                volume,
+                &mut md.contributions[..m * points],
+            )
+            .map_err(err)?;
+            // Ascending band order on the planes, as the replicated fold.
+            for b in 0..m {
+                for (l, c) in local
+                    .iter_mut()
+                    .zip(&md.contributions[b * points..(b + 1) * points])
+                {
+                    *l += c;
+                }
             }
         }
         let mut full = Array3::zeros(dims);
@@ -1494,7 +1505,8 @@ impl ScfProblem {
         for (out, n) in output.iter_mut().zip(&full) {
             *out += weight * n;
         }
-        md.valid = true;
+        // Without per-band contributions the screen data is not held.
+        md.valid = !fused;
         crate::m2::add(crate::m2::Stage::Density, start);
         crate::m2::count(crate::m2::Count::Density);
         Ok(Some(output))

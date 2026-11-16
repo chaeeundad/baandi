@@ -785,6 +785,22 @@ fn distributed_band_values_match_serial_and_band_densities() {
                         );
                     }
                 }
+                // BAANDI_M2_DENSITY=fused: the accumulated plane density equals
+                // the ascending-band sum of the per-band densities bit for bit.
+                let mut sum = vec![0.; points];
+                for b in 0..m {
+                    for (s, c) in sum.iter_mut().zip(&density[b * points..(b + 1) * points]) {
+                        *s += c;
+                    }
+                }
+                let mut fused = vec![f64::NAN; points];
+                d.band_density_sum(comm, &xl, &weights, volume, &mut fused)
+                    .unwrap();
+                assert_eq!(
+                    fused.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                    sum.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                    "fused plane density"
+                );
                 // Scatter this rank's planes into the full grid (zeros elsewhere).
                 let offsets = d.plane_grid_offsets();
                 let mut full = vec![0.; m * points_all];

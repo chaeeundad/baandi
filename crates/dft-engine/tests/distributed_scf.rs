@@ -392,6 +392,71 @@ fn m2_tuned_solver_matches_threads_only() {
     }
 }
 
+/// `BAANDI_M2_PANEL_GS=pythag|fused` (docs/performance/profile-2026-11-16-mpi.md):
+/// on the default distributed stack the SCF energy stays within the accuracy
+/// classes of the threads-only run (strict 1e-10 Ha, standard 5e-9 Ha), ranks
+/// agree bit for bit, a fixed rank count is bit-reproducible, and the in-panel
+/// reductions fall (fused: fewer tree sums than classic). Cubic and skewed
+/// cells, 2 and 3 ranks, strict and standard.
+#[test]
+fn m2_panel_gs_variants_keep_classes() {
+    use dft_solvers::distributed_davidson::{
+        DistributedTuning, PanelGs, reduction_stats, set_tuning_override,
+    };
+    let base = DistributedTuning::from_env();
+    let tree_sums = || -> u64 { reduction_stats().1.iter().map(|s| s.calls).sum() };
+    for (standard, limit) in [(false, 1e-10), (true, 5e-9)] {
+        for kind in 0..2 {
+            let serial = run_m2_profile(kind, None, standard);
+            for ranks in [2usize, 3] {
+                let mut calls = Vec::new();
+                for mode in [PanelGs::Classic, PanelGs::Pythag, PanelGs::Fused] {
+                    let tuning = DistributedTuning {
+                        panel_gs: mode,
+                        ..base
+                    };
+                    let go = || {
+                        simulate(ranks, |comm: &SimRank| {
+                            set_tuning_override(Some(tuning));
+                            let r = run_m2_profile(kind, Some(Arc::new(comm.clone())), standard);
+                            set_tuning_override(None);
+                            r
+                        })
+                    };
+                    let before = tree_sums();
+                    let results = go();
+                    calls.push(tree_sums() - before);
+                    let again = go();
+                    for (r, res) in results.iter().enumerate() {
+                        let de = (res.total_hartree() - serial.total_hartree()).abs();
+                        println!(
+                            "panel_gs {mode:?} standard={standard} kind {kind} P={ranks} rank {r}: dE {de:e} Ha, Davidson {} vs {}",
+                            total_davidson(res),
+                            total_davidson(&serial)
+                        );
+                        assert!(de < limit, "{mode:?} kind {kind} P={ranks}: dE {de:e}");
+                        assert_eq!(
+                            res.total_hartree().to_bits(),
+                            results[0].total_hartree().to_bits(),
+                            "ranks disagree"
+                        );
+                        assert_eq!(
+                            res.total_hartree().to_bits(),
+                            again[r].total_hartree().to_bits(),
+                            "not bit-reproducible at fixed rank count"
+                        );
+                    }
+                }
+                println!("tree sums classic/pythag/fused: {calls:?}");
+                assert!(
+                    calls[2] < calls[0],
+                    "fused must reduce the tree sums: {calls:?}"
+                );
+            }
+        }
+    }
+}
+
 /// MPI reduced eigenproblem (docs/performance/mpi-reduced-eigen-analysis.md):
 /// on top of the entry-cost stack, `M2_EIGEN=root` (rank 0 solves, broadcast)
 /// gives bit-identical energies and densities to the replicated solve, and

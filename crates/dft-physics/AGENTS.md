@@ -144,3 +144,11 @@ bit-identical) and `BAANDI_HAPPLY_FOLD=on` (odd tail column through the
 half-length folded transform of `dft_numerics::fused_fold`, rounding class);
 tests `apply_overlap_is_bit_identical`, `apply_fold_matches_pairs`, ignored
 microbenchmark `happly_widths`.
+
+## M2 fused band density (2026-11-16)
+
+`DistributedRealHamiltonian::band_density_sum` accumulates the plane density in
+ascending band order through the sink form of `band_planes` (bit-identical to
+summing `band_densities`); the engine takes it on the standard path with
+`BAANDI_M2_DENSITY=fused` (default bands). Test
+`distributed_band_values_match_serial_and_band_densities`.

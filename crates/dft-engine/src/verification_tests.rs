@@ -194,7 +194,13 @@ fn failed_verification_reuse_keeps_the_fixed_point() {
             .all(|(a, b)| a.to_bits() == b.to_bits())
     );
     let reference = default.result.energy.total_hartree();
-    for mode in [VerifyReuse::Warm, VerifyReuse::Feed] {
+    for mode in [
+        VerifyReuse::Warm,
+        VerifyReuse::Feed,
+        VerifyReuse::Feed2,
+        VerifyReuse::Replace,
+        VerifyReuse::Half,
+    ] {
         let o = run(Some(mode), 2);
         assert!(o.converged, "{mode:?}");
         let report = o.result.verification.as_ref().unwrap();

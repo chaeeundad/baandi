@@ -628,7 +628,7 @@ impl ScfSession {
         let mut rescued = None;
         // VERIFY-REUSE (`BAANDI_VERIFY_REUSE=warm|feed`): orbitals and output
         // density F(rho_out) of a failed verification solve.
-        let mut verification_reuse: Option<(Vec<ComplexMatrix>, Array3<f64>)> = None;
+        let mut verification_reuse: Option<(VerifyReuse, VerificationMap)> = None;
         let mut unable_to_verify = false;
         // Opt-in pre-screen (BAANDI_CERT_SCREEN=on): predict a certain failure of the
         // occupied-eigenvalue criterion from first-order perturbation theory before
@@ -741,8 +741,20 @@ impl ScfSession {
                     });
                 }
                 passed = attempt.passed;
-                if !passed && verify_reuse(&self.problem) != VerifyReuse::Off {
-                    verification_reuse = Some(reuse);
+                if !passed {
+                    // feed2: the first failed attempt keeps the default
+                    // continuation; repeated failures feed.
+                    let earlier_failures = self
+                        .verification
+                        .attempts
+                        .iter()
+                        .filter(|a| !a.passed)
+                        .count();
+                    verification_reuse = match verify_reuse(&self.problem) {
+                        VerifyReuse::Off => None,
+                        VerifyReuse::Feed2 if earlier_failures == 0 => None,
+                        mode => Some((mode, reuse)),
+                    };
                 }
                 self.verification.attempts.push(attempt);
                 history.last_mut().unwrap().fixed_point_certificate = Some(record);
@@ -995,34 +1007,43 @@ impl ScfSession {
                 record.mixing_resets = *mixing_resets;
             }
         }
-        let mut mixed = mixer
-            .mix(
-                n.as_slice().unwrap(),
-                step.density.as_slice().unwrap(),
-                self.problem.electrons / self.problem.cell.volume_bohr3(),
-            )
-            .map_err(|e| ScfError::Diverged {
-                reason: e.to_string(),
-                history: history.clone(),
-            })?;
-        // VERIFY-REUSE feed: the failed verification evaluated the map at rho_out;
-        // its pair enters the mixer after the step's own, and the next input is
-        // mixed from it (the step's own proposal above is superseded).
+        // VERIFY-REUSE: the failed verification evaluated the map at rho_out.
+        // feed/feed2/half: its pair enters the mixer after the step's own and the
+        // next input is mixed from it (half: midpoint with the step's proposal);
+        // replace: only its pair enters (the step's pair is not recorded).
         let feed = verification_reuse
             .as_ref()
-            .filter(|_| verify_reuse(&self.problem) == VerifyReuse::Feed)
-            .map(|(_, d)| d);
-        if let Some(fed) = feed {
+            .filter(|(mode, _)| *mode != VerifyReuse::Warm)
+            .map(|(mode, (_, d))| (*mode, d));
+        let mean = self.problem.electrons / self.problem.cell.volume_bohr3();
+        let diverged = |e: dft_solvers::SolverError| ScfError::Diverged {
+            reason: e.to_string(),
+            history: history.clone(),
+        };
+        let mut mixed = match feed {
+            Some((VerifyReuse::Replace, _)) => Vec::new(),
+            _ => mixer
+                .mix(
+                    n.as_slice().unwrap(),
+                    step.density.as_slice().unwrap(),
+                    mean,
+                )
+                .map_err(diverged)?,
+        };
+        if let Some((mode, fed)) = feed {
+            let step_proposal = std::mem::take(&mut mixed);
             mixed = mixer
                 .mix(
                     step.density.as_slice().unwrap(),
                     fed.as_slice().unwrap(),
-                    self.problem.electrons / self.problem.cell.volume_bohr3(),
+                    mean,
                 )
-                .map_err(|e| ScfError::Diverged {
-                    reason: e.to_string(),
-                    history: history.clone(),
-                })?;
+                .map_err(diverged)?;
+            if mode == VerifyReuse::Half {
+                for (m, s) in mixed.iter_mut().zip(&step_proposal) {
+                    *m = 0.5 * (*m + s);
+                }
+            }
         }
         let base: &Array3<f64> = if feed.is_some() { &step.density } else { n };
         history.last_mut().unwrap().mixing_history_used =
@@ -1055,7 +1076,7 @@ impl ScfSession {
         }
         n.as_slice_mut().unwrap().copy_from_slice(&mixed);
         history.last_mut().unwrap().timings.mixing = mix_start.elapsed();
-        let verification_orbitals = verification_reuse.map(|(o, _)| o);
+        let verification_orbitals = verification_reuse.map(|(_, (o, _))| o);
         *previous = rescued.or(verification_orbitals).or_else(|| {
             Some(
                 step.k_points
@@ -1747,11 +1768,14 @@ fn verification_attempts_consistent(c: &crate::checkpoint::ContinuationState) ->
 
 /// Attempt, its history record, a clipped-charge failure, and the solve's
 /// orbitals and output density F(rho_out) (VERIFY-REUSE).
+/// Orbitals and output density F(rho_out) of a verification solve.
+type VerificationMap = (Vec<ComplexMatrix>, Array3<f64>);
+
 type VerificationOutcome = (
     VerificationAttempt,
     FixedPointCertificate,
     Option<String>,
-    (Vec<ComplexMatrix>, Array3<f64>),
+    VerificationMap,
 );
 
 /// ADR 0043 verification: one more ordinary map at the converged output density
@@ -1923,6 +1947,9 @@ pub(crate) enum VerifyReuse {
     Off,
     Warm,
     Feed,
+    Feed2,
+    Replace,
+    Half,
 }
 /// `BAANDI_VERIFY_REUSE=off|warm|feed` (default off; ledger VERIFY-REUSE).
 fn verify_reuse(#[allow(unused_variables)] problem: &ScfProblem) -> VerifyReuse {
@@ -1935,6 +1962,9 @@ fn verify_reuse(#[allow(unused_variables)] problem: &ScfProblem) -> VerifyReuse 
         match dft_numerics::switches::choice(dft_numerics::switches::Id::VERIFY_REUSE) {
             "warm" => VerifyReuse::Warm,
             "feed" => VerifyReuse::Feed,
+            "feed2" => VerifyReuse::Feed2,
+            "replace" => VerifyReuse::Replace,
+            "half" => VerifyReuse::Half,
             _ => VerifyReuse::Off,
         }
     })

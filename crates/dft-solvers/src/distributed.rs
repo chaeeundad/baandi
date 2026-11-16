@@ -89,16 +89,54 @@ pub fn gram<C: Collective>(
         return Err(SolverError::InvalidParameter("gram dimensions"));
     }
     let mut partial = RealMatrix::zeros(out.rows(), out.cols())?;
-    if rows > 0 && a.cols() > 0 && b.cols() > 0 {
+    gram_slices(
+        comm,
+        ws,
+        a.as_slice(),
+        a.cols(),
+        b.as_slice(),
+        b.cols(),
+        rows,
+        &mut partial,
+        out,
+    )
+}
+
+/// `gram` on column-major slices with `rows` local rows (`a`: rows x a_cols,
+/// `b`: rows x b_cols) and a caller-owned partial scratch (any storage of at
+/// least a_cols x b_cols entries; reshaped and zeroed here, so the product and
+/// the reduction are exactly those of `gram`). `out` must be a_cols x b_cols.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn gram_slices<C: Collective>(
+    comm: &C,
+    ws: &mut RealGemmWorkspace,
+    a: &[f64],
+    a_cols: usize,
+    b: &[f64],
+    b_cols: usize,
+    rows: usize,
+    partial: &mut RealMatrix,
+    out: &mut RealMatrix,
+) -> Result<(), SolverError> {
+    if a.len() != rows * a_cols
+        || b.len() != rows * b_cols
+        || out.rows() != a_cols
+        || out.cols() != b_cols
+    {
+        return Err(SolverError::InvalidParameter("gram dimensions"));
+    }
+    partial.reshape_within_storage(a_cols, b_cols)?;
+    partial.as_mut_slice().fill(0.0);
+    if rows > 0 && a_cols > 0 && b_cols > 0 {
         ws.multiply_slices_into(
             GemmSite::Other,
-            a.as_slice(),
+            a,
             rows,
-            a.cols(),
+            a_cols,
             rows,
             RealOp::Transpose,
-            b.as_slice(),
-            b.cols(),
+            b,
+            b_cols,
             rows,
             partial.as_mut(),
         )?;
@@ -131,10 +169,43 @@ pub fn rotate_local_with(
     out: &mut RealMatrix,
     wide: bool,
 ) -> Result<(), SolverError> {
-    if c.rows() != a.cols() || out.rows() != a.rows() || out.cols() != c.cols() {
+    if c.rows() != a.cols() {
         return Err(SolverError::InvalidParameter("rotate dimensions"));
     }
-    if a.rows() == 0 || a.cols() == 0 || c.cols() == 0 {
+    rotate_slices_with(
+        ws,
+        a.as_slice(),
+        a.rows(),
+        a.cols(),
+        c.as_slice(),
+        c.cols(),
+        out,
+        wide,
+    )
+}
+
+/// `rotate_local_with` on slices: `a` is rows x a_cols, `c` is a_cols x c_cols
+/// (both contiguous column-major), `out` rows x c_cols. The same product call as
+/// `rotate_local_with` (views instead of copies of `a` and `c`).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn rotate_slices_with(
+    ws: &mut RealGemmWorkspace,
+    a: &[f64],
+    rows: usize,
+    a_cols: usize,
+    c: &[f64],
+    c_cols: usize,
+    out: &mut RealMatrix,
+    wide: bool,
+) -> Result<(), SolverError> {
+    if a.len() != rows * a_cols
+        || c.len() != a_cols * c_cols
+        || out.rows() != rows
+        || out.cols() != c_cols
+    {
+        return Err(SolverError::InvalidParameter("rotate dimensions"));
+    }
+    if rows == 0 || a_cols == 0 || c_cols == 0 {
         out.as_mut_slice().fill(0.0);
         return Ok(());
     }
@@ -146,17 +217,79 @@ pub fn rotate_local_with(
     product(
         ws,
         GemmSite::Other,
-        a.as_slice(),
-        a.rows(),
-        a.cols(),
-        a.rows(),
+        a,
+        rows,
+        a_cols,
+        rows,
         RealOp::Identity,
-        c.as_slice(),
-        c.cols(),
-        c.rows(),
+        c,
+        c_cols,
+        a_cols,
         out.as_mut(),
     )?;
     Ok(())
+}
+
+/// `project_out_with` with `q` given as a rows x q_cols slice and a caller-owned
+/// partial scratch for the Gram reduction (same arithmetic).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn project_out_slices<C: Collective>(
+    comm: &C,
+    ws: &mut RealGemmWorkspace,
+    q: &[f64],
+    q_cols: usize,
+    x: &mut RealMatrix,
+    overlap: &mut RealMatrix,
+    scratch: &mut RealMatrix,
+    partial: &mut RealMatrix,
+    wide: bool,
+) -> Result<(), SolverError> {
+    let rows = x.rows();
+    gram_slices(
+        comm,
+        ws,
+        q,
+        q_cols,
+        x.as_slice(),
+        x.cols(),
+        rows,
+        partial,
+        overlap,
+    )?;
+    rotate_slices_with(
+        ws,
+        q,
+        rows,
+        q_cols,
+        overlap.as_slice(),
+        overlap.cols(),
+        scratch,
+        wide,
+    )?;
+    for (dst, &src) in x.as_mut_slice().iter_mut().zip(scratch.as_slice()) {
+        *dst -= src;
+    }
+    Ok(())
+}
+
+/// `column_norms_squared` into caller-owned vectors (same sums, one reduction).
+pub(crate) fn column_norms_squared_into<C: Collective>(
+    comm: &C,
+    x: &RealMatrix,
+    partial: &mut Vec<f64>,
+    out: &mut Vec<f64>,
+) -> Result<(), SolverError> {
+    let rows = x.rows();
+    partial.clear();
+    partial.extend((0..x.cols()).map(|j| {
+        x.as_slice()[j * rows..(j + 1) * rows]
+            .iter()
+            .map(|v| v * v)
+            .sum::<f64>()
+    }));
+    out.clear();
+    out.resize(x.cols(), 0.0);
+    comm.tree_sum_f64(partial, out).map_err(comm_error)
 }
 
 /// x_local -= Q_local (Q^T X): the block projection against the columns of Q.

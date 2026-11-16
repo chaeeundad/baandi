@@ -465,3 +465,46 @@ fn m2_reduced_eigen_switches_keep_classes() {
         }
     }
 }
+
+/// F06 (`BAANDI_M2_WORKSPACE=on`): the distributed solver on its persistent
+/// per-rank workspace (reused across the solves of the whole SCF) gives energies
+/// and densities bit-identical to the allocating path; cubic and skewed cells,
+/// strict and standard, 2 and 3 ranks, on the adopted stack from the switches.
+#[test]
+fn m2_workspace_is_bit_identical_in_scf() {
+    use dft_solvers::distributed_davidson::{
+        DistributedTuning, release_workspace, set_tuning_override, workspace_stats,
+    };
+    let stack = DistributedTuning::from_env();
+    let arm = |workspace: bool, kind: usize, ranks: usize, standard: bool| {
+        simulate(ranks, |comm: &SimRank| {
+            set_tuning_override(Some(DistributedTuning { workspace, ..stack }));
+            let r = run_m2_profile(kind, Some(Arc::new(comm.clone())), standard);
+            set_tuning_override(None);
+            release_workspace();
+            r
+        })
+    };
+    let density_bits = |r: &ScfResult| r.density.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    let before = workspace_stats();
+    for standard in [false, true] {
+        for kind in 0..2 {
+            for ranks in [2usize, 3] {
+                let off = arm(false, kind, ranks, standard);
+                let on = arm(true, kind, ranks, standard);
+                for (a, b) in on.iter().zip(&off) {
+                    assert_eq!(
+                        a.total_hartree().to_bits(),
+                        b.total_hartree().to_bits(),
+                        "workspace changed the energy (standard={standard} kind {kind} P={ranks})"
+                    );
+                    assert_eq!(density_bits(a), density_bits(b));
+                    assert_eq!(total_davidson(a), total_davidson(b));
+                }
+            }
+        }
+    }
+    let after = workspace_stats();
+    println!("workspace stats before {before:?} after {after:?}");
+    assert!(after.warm_solves > before.warm_solves);
+}

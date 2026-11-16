@@ -166,7 +166,12 @@ fn independent_energy_scan_two_starts_and_directional_derivative() {
         "scan energies Ha: {e0:.17e} {e1:.17e} {e2:.17e}; fitted distance={scan_distance:.17e} Bohr"
     );
     for (name, t) in [("compressed", 0.4), ("stretched", 0.6)] {
-        let text = input().replace("[0.27,0.23,0.19]", &format!("[{t},{t},{t}]"))
+        // ONEPATH-1: the relaxation runs the standard path; the stopping rule
+        // below asks for 1e-12 Ha energy changes, so the SCF threshold is set
+        // to the same order (5e-13 Ha) instead of the 5e-9 Ha default.
+        let text = input()
+            .replace("[0.27,0.23,0.19]", &format!("[{t},{t},{t}]"))
+            .replace("[scf]", "[scf]\nstandard_threshold_ha=5e-13")
             + "\n[relax]\nmax_steps=200\nforce_tol_ha_bohr=1e-8\nenergy_tol_ha=1e-12\nfixed=[{atom=0}]\n";
         fs::write(dir.join(format!("{name}.toml")), text).unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
@@ -424,7 +429,7 @@ fn fire_converges_from_displaced_structure() {
 }
 
 #[test]
-fn rejects_standard_profile_and_invalid_constraints_without_scf() {
+fn rejects_unsupported_standard_controls_and_invalid_constraints_without_scf() {
     let dir = std::env::temp_dir().join(format!("p21-invalid-{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
     fs::write(
@@ -433,7 +438,11 @@ fn rejects_standard_profile_and_invalid_constraints_without_scf() {
     )
     .unwrap();
     for (i, text) in [
-        input().replace("[scf]", "[scf]\nstandard_threshold_ha=5e-11") + "\n[relax]\n",
+        // ONEPATH-1: fixed-cell relaxation runs the standard path; variable-cell
+        // relaxation keeps the strict path (stress) and rejects standard-only
+        // controls, and every relaxation needs the verification.
+        input().replace("[scf]", "[scf]\nstandard_threshold_ha=5e-11") + "\n[relax]\nmode='cell'\n",
+        input().replace("[scf]", "[scf]\nverify='off'") + "\n[relax]\n",
         input() + "\n[relax]\nfixed=[{atom=2}]\n",
         input() + "\n[relax]\nforce_tol_ha_bohr=nan\n",
         input().replace("[0.27,0.23,0.19]", "[0.25,0.0,0.0]")

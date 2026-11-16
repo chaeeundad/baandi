@@ -128,3 +128,49 @@ default rests on measured delivered error against strict references (dev08
 list above); a true bound would need an occupied/unoccupied spectral
 separation estimate that handles degeneracy and finite occupations, which is
 not designed here.
+
+## Amendment: forces and fixed-cell relaxation on the single path (ONEPATH-1, user decision 2026-11-16)
+
+Decision (user, 2026-11-16): the strict path disappears from production use in
+stages: (1) forces and relaxation (this amendment, ticket
+`tickets/ONEPATH-1-FORCES-RELAX.md`), then stress, then spin and metals, then
+the engine default; strict stays only behind `BAANDI_REFERENCE_STRICT=on` as an
+accuracy reference tool. This amendment replaces the relaxation bullet of item 5
+and the word "Relaxation" in item 3 of the first amendment.
+
+1. **Forces.** Unchanged in substance (item 5): a passed verification makes the
+   standard state eligible, and the engine computes the forces with the same
+   formulas from the converged step's own state (V4). `forces.preconditions`
+   now also records `standard_threshold_ha`, `verification_attempts` and the
+   last attempt's `verification_coulomb_error_ha` and
+   `verification_residual_bound_ha` (additive optional keys in
+   `docs/schemas/forces-available.proposal.json`).
+2. **Fixed-cell relaxation** (`relax.mode = "ions"`, the default) runs every
+   ionic step on the standard path with the verification. A failed
+   verification continues that step's SCF (V5); density transfer, warm starts
+   and `start_extrapolation` are unchanged; the half-step retry and every
+   optimizer rule are unchanged. The `relaxation => strict not_applicable`
+   fallback is removed: `single_path.status = "applied"`. `scf.verify = "off"`
+   with `[relax]` is an input error (every step needs forces).
+3. **Threshold.** The relaxation threshold is `scf.standard_threshold_ha`
+   (default 5e-9 Ha, unchanged). Users tighten it for force-sensitive runs
+   (tight `force_tol_ha_bohr`, small `energy_tol_ha`): the SCF energy is
+   resolved to about the threshold, so an ionic energy-change test far below
+   it cannot pass reliably. Measured force differences against the strict
+   reference are in ledger row ONEPATH-1 (Mac, synthetic fixtures) and are
+   requested on dev08 (`docs/performance/requests/onepath1-forces-relax.md`).
+4. **Still strict.** `output.stress` (reason `stress`) and the variable-cell
+   relaxation modes `cell` and `ions_cell` (reason `stress (variable-cell
+   relaxation)`) keep the strict path, and standard-only keys in those inputs
+   stay input errors. Spin, Fermi-Dirac, `locking = "auto"`, the observe/agent
+   modes and the non-`run` commands are unchanged.
+5. **Recording.** The relaxation `results.json` carries `single_path`, an `scf`
+   block (effective profile, threshold, verification mode) and per frame a
+   `verification` record (passed, threshold, attempts, last Coulomb residual,
+   residual estimate, `strict_criteria_met`, H vectors). It holds no wall time,
+   because frames are stored in `restart.json` and a resumed relaxation must
+   reproduce the uninterrupted files bit for bit.
+6. **Reference identity.** With `BAANDI_REFERENCE_STRICT=on` a relaxation runs
+   the strict path with the same options as before this amendment (frames carry
+   no verification record); only the added top-level `single_path` and `scf`
+   keys of `results.json` differ from the former output.

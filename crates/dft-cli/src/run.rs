@@ -1284,10 +1284,20 @@ pub fn execute_mode(
     )? {
         console.push_str(&force_table(&force));
         result["forces"] = force_json(&force);
-        if opts.standard.is_some() {
-            // ADR 0043: forces of a standard state rest on the passed verification.
+        if let Some(p) = opts.standard {
+            // ADR 0043: forces of a standard state rest on the passed verification
+            // (the engine refuses forces otherwise). ONEPATH-1: the threshold and
+            // the verification outcome are recorded next to the forces.
+            let v = r.verification.as_ref();
+            let last = v.and_then(|v| v.attempts.last());
             result["forces"]["preconditions"] = json!({"convergence_profile":"standard",
-                "converged":true,"fixed_point_verification_passed":true});
+                "converged":outcome.converged,
+                "fixed_point_verification_passed":v.is_some_and(|v| v.passed()),
+                "standard_threshold_ha":p.threshold_ha,
+                "verification_attempts":v.map_or(0, |v| v.attempts.len()),
+                "verification_coulomb_error_ha":last.map(|a| a.coulomb_error_ha),
+                "verification_residual_bound_ha":last.and_then(|a| a.residual_bound_ha),
+                "state":"converged step's own state (ADR 0043 V4); forces use the same formulas as the strict path"});
         }
     }
     if let Some(stress) = requested_stress(

@@ -15,7 +15,7 @@ Decision (pre-registered): implement `BAANDI_M2_EIGEN=slices` only if `sliced-mr
 ```
 cargo build --release -p dft-mpi --features mpi --example mpi_tree_bench
 sha256sum target/release/examples/mpi_tree_bench
-for P in 2 4 8; do mpirun -np $P --bind-to core --cpu-set 0-7 target/release/examples/mpi_tree_bench; done
+for P in 2 4 8; do mpirun -np $P --map-by core --bind-to core target/release/examples/mpi_tree_bench; done
 ```
 The program aborts if binomial, rd, rhd and rhd with threshold 0 ever differ in one bit on a power-of-two rank count. Report the per-payload lines (columns binomial / rd / rhd / rhd-forced, worst rank, us per call). The crossover payload where `rhd-forced` beats `rd` calibrates `dft_mpi::HALVING_MIN_DOUBLES` (now 2048).
 
@@ -26,7 +26,7 @@ Same binary (`cargo build --release -p dft-cli --features mpi,mkl`), si32 and si
 ```
 for P in 4 8; do for ARM in A B A B A B; do
   env BAANDI_PHASE_PROFILE=on $( [ $ARM = B ] && echo BAANDI_MPI_TREE=rhd ) \
-    mpirun -np $P --bind-to core --cpu-set 0-7 target/release/dft-cli run <si32-10step.toml> --output-dir ~/fastbench/rel-si32-np$P-$ARM-$RANDOM
+    mpirun -np $P --map-by core --bind-to core target/release/dft-cli run <si32-10step.toml> --output-dir ~/fastbench/rel-si32-np$P-$ARM-$RANDOM
 done; done          # then the same for si64
 ```
 Rows to report per cell: fine `solve.reduced_eigen`, `coll.tree_sum` (seconds and calls), `solve.finish`, `solve.real_state`, wall, energy bits, density SHA-256.

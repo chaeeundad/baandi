@@ -274,7 +274,8 @@ fn reciprocal_term(p: &Prepared, ions: &[Ion], m: [i32; 3]) -> Option<f64> {
     let mv = Vector3::from(m.map(f64::from));
     let g2 = (p.b * mv).norm_squared();
     // The serial predicate exactly (a NaN g2 is skipped, as before).
-    if !(g2 <= p.g_cut * p.g_cut) {
+    let inside = g2 <= p.g_cut * p.g_cut;
+    if !inside {
         return None;
     }
     let structure: Complex64 = ions

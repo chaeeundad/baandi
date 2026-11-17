@@ -64,7 +64,18 @@ impl GammaRealDiagnostics {
 /// the key guards scratch sizing and solver options. Per-iteration tolerances
 /// and certification policy are deliberately supplied afresh, not cached.
 pub(crate) struct RealSolveState {
-    op: Operator,
+    /// Serial real Gamma operator. ISSUE-20 (`BAANDI_M2_LAZY_SERIAL=on`): None
+    /// on the M2 path until a fallback applies it (`ensure_serial_op`);
+    /// always Some otherwise.
+    op: Option<Operator>,
+    /// ISSUE-20: reciprocal-layout descriptor (ORC half sphere) of the state,
+    /// equal to the serial operator's when that exists.
+    half: Arc<dft_basis::HalfSphere>,
+    /// Pool, operator identity and grid the state was built for (reuse check
+    /// of a state without a serial operator).
+    pool: Arc<WorkerPool>,
+    source_identity: Arc<()>,
+    grid_dims: [usize; 3],
     key: RealSolveKey,
     workspace: Option<dft_solvers::real_davidson::RealDavidsonWorkspace>,
     /// Stick-distributed Hamiltonian of this rank (MPI stage M2c), built only when
@@ -310,6 +321,38 @@ thread_local! {
 /// in tests); `None` restores the environment.
 pub fn set_m2_light_state_override(value: Option<bool>) {
     M2_LIGHT_OVERRIDE.with(|o| o.set(value));
+}
+
+/// ISSUE-20 `BAANDI_M2_LAZY_SERIAL=on|off` (default off; per-thread override
+/// `set_m2_lazy_serial_override`): an M2 solve state owns only the ORC
+/// half-sphere descriptor and the distributed operator; the serial real
+/// Hamiltonian is built only if a fallback applies it. Bit-identical.
+pub(crate) fn m2_lazy_serial() -> bool {
+    M2_LAZY_SERIAL_OVERRIDE
+        .with(|o| o.get())
+        .unwrap_or_else(|| {
+            static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            *ON.get_or_init(|| {
+                dft_numerics::switches::on(dft_numerics::switches::Id::M2_LAZY_SERIAL)
+            })
+        })
+}
+thread_local! {
+    static M2_LAZY_SERIAL_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    static M2_DIST_DISABLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+/// Override `BAANDI_M2_LAZY_SERIAL` for the calling thread (simulated ranks in
+/// tests); `None` restores the environment.
+pub fn set_m2_lazy_serial_override(value: Option<bool>) {
+    M2_LAZY_SERIAL_OVERRIDE.with(|o| o.set(value));
+}
+/// ISSUE-20 test hook: treat the distributed operator of the calling thread
+/// as unavailable (its construction "fails"), so that the M1 fallback, and
+/// with it the lazy serial construction, is exercised. Never set in
+/// production code.
+#[doc(hidden)]
+pub fn set_m2_dist_disabled_for_tests(value: bool) {
+    M2_DIST_DISABLED.with(|o| o.set(value));
 }
 
 /// MPI-LAZY-ORBITALS: the eigenvectors of one standard M2 solve held as this
@@ -658,6 +701,72 @@ fn ensure_state(
     pool: &Arc<WorkerPool>,
     state: &mut Option<RealSolveState>,
 ) -> Result<(), dft_physics::RealGammaError> {
+    ensure_state_with(
+        hamiltonian,
+        basis,
+        bands,
+        capacity,
+        options,
+        pool,
+        state,
+        true,
+    )
+}
+
+/// ISSUE-20: serial real Hamiltonian constructions of this process (test and
+/// diagnostic counter; `RealHamiltonian::from_complex` calls of solve states).
+static SERIAL_BUILDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// ISSUE-20: number of serial real Gamma operator constructions of solve
+/// states so far in this process (counts only; never read by the numerics).
+#[doc(hidden)]
+pub fn serial_operator_builds() -> u64 {
+    SERIAL_BUILDS.load(std::sync::atomic::Ordering::Relaxed)
+}
+fn build_operator(
+    hamiltonian: &Hamiltonian,
+    basis: &PlaneWaveBasis,
+    capacity: usize,
+    pool: &Arc<WorkerPool>,
+) -> Result<Operator, dft_physics::RealGammaError> {
+    SERIAL_BUILDS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let real = RealHamiltonian::from_complex(hamiltonian, basis, capacity, pool.clone())?;
+    Ok(Operator {
+        n: real.half_sphere().full_len(),
+        h: RefCell::new(real),
+        pool: pool.clone(),
+    })
+}
+
+/// ISSUE-20: build the serial operator of a state that has none (lazy M2
+/// state reached by a fallback), at `capacity`; a no-op when it exists. The
+/// rest of the state (distributed operator, kept data) is untouched.
+fn ensure_serial_op(
+    hamiltonian: &Hamiltonian,
+    basis: &PlaneWaveBasis,
+    capacity: usize,
+    state: &mut RealSolveState,
+) -> Result<(), dft_physics::RealGammaError> {
+    if state.op.is_none() {
+        state.op = Some(build_operator(hamiltonian, basis, capacity, &state.pool)?);
+    }
+    Ok(())
+}
+
+/// `ensure_state` with the serial operator optional: `build_op = false`
+/// (ISSUE-20 lazy M2 state) builds or reuses a state holding only the
+/// half-sphere descriptor; a reused state keeps a serial operator it already
+/// has (its potential is refreshed).
+#[allow(clippy::too_many_arguments)]
+fn ensure_state_with(
+    hamiltonian: &Hamiltonian,
+    basis: &PlaneWaveBasis,
+    bands: usize,
+    capacity: usize,
+    options: &ScfOptions,
+    pool: &Arc<WorkerPool>,
+    state: &mut Option<RealSolveState>,
+    build_op: bool,
+) -> Result<(), dft_physics::RealGammaError> {
     let key = RealSolveKey {
         bands,
         capacity,
@@ -671,33 +780,60 @@ fn ensure_state(
     };
     let reusable = state.as_mut().is_some_and(|state| {
         state.key == key
-            && Arc::ptr_eq(&state.op.pool, pool)
-            && state.op.h.get_mut().update_from_complex(hamiltonian, basis)
+            && Arc::ptr_eq(&state.pool, pool)
+            && match state.op.as_mut() {
+                Some(op) => op.h.get_mut().update_from_complex(hamiltonian, basis),
+                // The checks of `RealHamiltonian::update_from_complex` without
+                // the potential copy (a descriptor-only state has none).
+                None => {
+                    Arc::ptr_eq(&state.source_identity, &hamiltonian.operator_identity())
+                        && hamiltonian.basis_momenta() == basis.momenta()
+                        && basis.k_fractional() == [0.; 3]
+                        && state.grid_dims == hamiltonian.fft_grid().dims()
+                }
+            }
     });
-    if !reusable {
-        let real = RealHamiltonian::from_complex(hamiltonian, basis, capacity, pool.clone())?;
-        *state = Some(RealSolveState {
-            op: Operator {
-                n: real.half_sphere().full_len(),
-                h: RefCell::new(real),
-                pool: pool.clone(),
-            },
-            key,
-            workspace: None,
-            dist: None,
-            m2_local: None,
-            m2_density: None,
-            nl_values: Vec::new(),
-            nl_valid: false,
-            reuse: None,
-            m2_reuse: None,
-            lazy_half: None,
-            lazy_rows: Arc::from(Vec::new()),
-            lazy_diag: Vec::new(),
-            lazy_latest: None,
-            forget_reuse: std::sync::atomic::AtomicBool::new(false),
-        });
+    if reusable {
+        if build_op {
+            let state = state.as_mut().expect("reusable state");
+            ensure_serial_op(hamiltonian, basis, capacity, state)?;
+        }
+        return Ok(());
     }
+    let (op, half) = if build_op {
+        let op = build_operator(hamiltonian, basis, capacity, pool)?;
+        let half = Arc::new(op.h.borrow().half_sphere().clone());
+        (Some(op), half)
+    } else {
+        // The construction checks of `RealHamiltonian::from_complex` that
+        // precede its plans (shape, half sphere).
+        if hamiltonian.basis_momenta() != basis.momenta() {
+            return Err(dft_physics::RealGammaError::Shape);
+        }
+        let half = dft_basis::HalfSphere::new(basis, hamiltonian.fft_grid())?;
+        (None, Arc::new(half))
+    };
+    *state = Some(RealSolveState {
+        op,
+        half,
+        pool: pool.clone(),
+        source_identity: hamiltonian.operator_identity(),
+        grid_dims: hamiltonian.fft_grid().dims(),
+        key,
+        workspace: None,
+        dist: None,
+        m2_local: None,
+        m2_density: None,
+        nl_values: Vec::new(),
+        nl_valid: false,
+        reuse: None,
+        m2_reuse: None,
+        lazy_half: None,
+        lazy_rows: Arc::from(Vec::new()),
+        lazy_diag: Vec::new(),
+        lazy_latest: None,
+        forget_reuse: std::sync::atomic::AtomicBool::new(false),
+    });
     Ok(())
 }
 
@@ -742,7 +878,10 @@ pub(crate) fn atomic_apply_real(
         return Ok(None);
     }
     let state = state.as_mut().unwrap();
-    let mut h = state.op.h.borrow_mut();
+    let Some(op) = state.op.as_ref() else {
+        return Ok(None);
+    };
+    let mut h = op.h.borrow_mut();
     if h.half_sphere().full_len() != n {
         return Ok(None);
     }
@@ -831,13 +970,17 @@ pub(crate) fn solve_real_gamma(
     // plan instead of capacity / 2 full-grid pair plans and scratch per rank).
     // Replicated condition; the full operator is rebuilt below if the
     // distributed operator cannot be built (the M1 fallback applies it).
-    let light = comm.is_some() && crate::parallel::m2_enabled() && m2_light_state();
+    // ISSUE-20 (`BAANDI_M2_LAZY_SERIAL=on`): on the M2 path the state holds
+    // only the half-sphere descriptor; the serial operator is built below
+    // only when the distributed operator is unavailable. Replicated condition.
+    let lazy_serial = comm.is_some() && crate::parallel::m2_enabled() && m2_lazy_serial();
+    let light = !lazy_serial && comm.is_some() && crate::parallel::m2_enabled() && m2_light_state();
     let state_capacity = if light {
         LIGHT_CAPACITY.min(capacity)
     } else {
         capacity
     };
-    let ensured = ensure_state(
+    let ensured = ensure_state_with(
         hamiltonian,
         basis,
         bands,
@@ -845,6 +988,7 @@ pub(crate) fn solve_real_gamma(
         options,
         &pool,
         state,
+        !lazy_serial,
     );
     crate::m2::add(crate::m2::Stage::RealState, t_state);
     if let Err(e) = ensured {
@@ -878,15 +1022,19 @@ pub(crate) fn solve_real_gamma(
                 .as_mut()
                 .is_some_and(|d| d.update_from_complex(hamiltonian, basis));
             if !fresh {
-                state.dist = DistributedRealHamiltonian::new(
-                    hamiltonian,
-                    basis,
-                    capacity,
-                    c.rank(),
-                    c.size(),
-                    pool.clone(),
-                )
-                .ok();
+                state.dist = if M2_DIST_DISABLED.with(|o| o.get()) {
+                    None
+                } else {
+                    DistributedRealHamiltonian::new(
+                        hamiltonian,
+                        basis,
+                        capacity,
+                        c.rank(),
+                        c.size(),
+                        pool.clone(),
+                    )
+                    .ok()
+                };
                 state.m2_density = None;
                 // A rebuilt operator (atoms, projectors, basis, grid): nothing kept.
                 state.m2_reuse = None;
@@ -918,10 +1066,19 @@ pub(crate) fn solve_real_gamma(
         }
         let full = full.expect("built above");
         state.op = full.op;
+        state.half = full.half;
         state.key = full.key;
     }
-    let real = state.op.h.borrow();
-    let half = real.half_sphere();
+    if state.dist.is_none()
+        && let Err(e) = ensure_serial_op(hamiltonian, basis, capacity, state)
+    {
+        // ISSUE-20: a lazy M2 state reached the M1 fallback; the serial
+        // operator is built now (same construction, same failure policy).
+        diagnostics.fallback(option, format!("real Hamiltonian construction: {e}"))?;
+        return Ok(None);
+    }
+    let real = state.op.as_ref().map(|op| op.h.borrow());
+    let half: &dft_basis::HalfSphere = &state.half;
     let n = half.full_len();
     let mut diagonal = vec![0.; n];
     diagonal[0] = kinetic[0];
@@ -938,7 +1095,7 @@ pub(crate) fn solve_real_gamma(
         && options.standard.is_some()
         && (tuning.workspace || tuning.selected_roots || tuning.lean_algebra);
     if lazy_path && state.lazy_half.is_none() {
-        state.lazy_half = Some(Arc::new(half.clone()));
+        state.lazy_half = Some(state.half.clone());
     }
     // A lazy warm start (0 x B placeholder plus the rows): this rank's rows
     // enter the solver directly when every rank's rows match its operator
@@ -976,7 +1133,14 @@ pub(crate) fn solve_real_gamma(
                         x_rows: inj.x.rows(),
                         x_cols: inj.x.cols(),
                         has_hx: inj.hx.is_some(),
-                        potential: d.map_or_else(|| real.potential(), |d| d.potential()),
+                        potential: d.map_or_else(
+                            || {
+                                real.as_ref()
+                                    .expect("serial operator off the M2 path")
+                                    .potential()
+                            },
+                            |d| d.potential(),
+                        ),
                         tolerance,
                         strict_bands: policy.strict_bands,
                         buffer_tolerance: policy.buffer_tolerance,
@@ -1165,7 +1329,10 @@ pub(crate) fn solve_real_gamma(
         if crate::first_block::enabled()
             && let Some(x) = x_block
         {
-            let op_ref = &state.op;
+            let op_ref = state
+                .op
+                .as_ref()
+                .expect("serial operator on the threads path");
             let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), String> {
                 op_ref.apply_block(x, y).map_err(|e| e.to_string())
             };
@@ -1205,8 +1372,20 @@ pub(crate) fn solve_real_gamma(
             strict_bands: policy.strict_bands,
             buffer_tolerance: policy.buffer_tolerance,
             ritz: options.standard.is_some(),
-            potential: state.op.h.borrow().potential(),
-            grid: state.op.h.borrow().grid_dims(),
+            potential: state
+                .op
+                .as_ref()
+                .expect("serial operator on the threads path")
+                .h
+                .borrow()
+                .potential(),
+            grid: state
+                .op
+                .as_ref()
+                .expect("serial operator on the threads path")
+                .h
+                .borrow()
+                .grid_dims(),
             cutoff_hartree: options.cutoff_hartree,
             electrons,
             capacity_per_band,
@@ -1214,7 +1393,9 @@ pub(crate) fn solve_real_gamma(
     } else {
         None
     };
-    let op = &state.op;
+    // None only on the M2 path of a lazy state (ISSUE-20); every branch that
+    // applies the serial operator runs with `dist` None, where it was built.
+    let op_opt = state.op.as_ref();
     let dist = state.dist.as_mut();
     // The SCF driver supplies the same ratcheted tolerance and band policy to
     // both representations. Standard returns remain explicitly uncertified.
@@ -1533,6 +1714,7 @@ pub(crate) fn solve_real_gamma(
             result
         }
     } else if let Some(comm) = &comm {
+        let op = op_opt.ok_or(ScfError::InvalidInput("serial real operator missing"))?;
         crate::parallel::count_distributed_solve();
         solver.solve_distributed(
             comm,
@@ -1553,6 +1735,7 @@ pub(crate) fn solve_real_gamma(
         // configuration that cannot advance (classic Davidson, second
         // vector) or a solver error declines with its reason and the ordinary
         // converging solve runs instead.
+        let op = op_opt.ok_or(ScfError::InvalidInput("serial real operator missing"))?;
         match solver.advance_reusing(
             op,
             packed.as_ref(),
@@ -1590,6 +1773,7 @@ pub(crate) fn solve_real_gamma(
         if let Some(slot) = diagnostics.advance.as_mut() {
             slot.declined = Some("strict solve");
         }
+        let op = op_opt.ok_or(ScfError::InvalidInput("serial real operator missing"))?;
         let armed_before = state
             .workspace
             .as_ref()
@@ -1623,14 +1807,25 @@ pub(crate) fn solve_real_gamma(
         // The density build of this map may keep psi(r) for the kept X.
         r.collect = ws.kept_start().is_some();
         r.kept.fill(false);
-        r.v_old.copy_from_slice(state.op.h.borrow().potential());
+        r.v_old.copy_from_slice(
+            state
+                .op
+                .as_ref()
+                .expect("serial operator on the threads path")
+                .h
+                .borrow()
+                .potential(),
+        );
     }
     // NL-ENERGY-REAL: nonlocal expectation values of the returned real vectors
     // for the energy audit of this map (threads-only path).
     // C3a (`BAANDI_LEAN_PROJ_CACHE=on`): a lean return leaves P^T X = (P^T V) C
     // of exactly these vectors in the workspace (same operator, this solve);
     // otherwise the projector product is formed here.
-    if comm.is_none() && nl_energy_real() {
+    if comm.is_none()
+        && nl_energy_real()
+        && let Some(op) = op_opt
+    {
         state.nl_values.resize(bands, 0.0);
         let cached = state
             .workspace
@@ -1673,18 +1868,16 @@ pub(crate) fn solve_real_gamma(
     let t_unpack = dft_numerics::stage_clock::start();
     let mut eigenvectors = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
     {
-        let h = op.h.borrow();
-        let half = h.half_sphere();
-        op.pool
-            .install(|| {
-                pair_columns(
-                    result.eigenvectors.as_slice(),
-                    eigenvectors.as_mut_slice(),
-                    n,
-                    &|src, dst| half.unpack(src, dst),
-                )
-            })
-            .map_err(|e| ScfError::Numerical(e.to_string()))?;
+        let half: &dft_basis::HalfSphere = &state.half;
+        pool.install(|| {
+            pair_columns(
+                result.eigenvectors.as_slice(),
+                eigenvectors.as_mut_slice(),
+                n,
+                &|src, dst| half.unpack(src, dst),
+            )
+        })
+        .map_err(|e| ScfError::Numerical(e.to_string()))?;
     }
     if state.dist.is_some() {
         crate::m2::add(crate::m2::Stage::SolveUnpack, t_unpack);
@@ -1723,6 +1916,9 @@ fn prepare_kept_start(
         reuse,
         ..
     } = state;
+    let op = op
+        .as_ref()
+        .ok_or(ScfError::InvalidInput("serial real operator missing"))?;
     let ws = solver.prepare_workspace(op, options.davidson_capacity_per_band, workspace)?;
     ws.keep_returned_products(true)?;
     let mut h = op.h.borrow_mut();
@@ -1920,10 +2116,17 @@ mod atomic_real_tests {
         assert!(worst <= 1e-13 * scale, "{worst:e} of {scale:e}");
         assert!(state.is_some());
         // The solve's own construction check reuses the state built here.
-        let before = state.as_ref().map(|s| s.op.h.as_ptr() as usize);
+        let before = state
+            .as_ref()
+            .map(|s| s.op.as_ref().unwrap().h.as_ptr() as usize);
         let capacity = real_capacity(&options, 4, h.kinetic_diagonal().len());
         ensure_state(&h, &basis, 4, capacity, &options, &pool, &mut state).unwrap();
-        assert_eq!(before, state.as_ref().map(|s| s.op.h.as_ptr() as usize));
+        assert_eq!(
+            before,
+            state
+                .as_ref()
+                .map(|s| s.op.as_ref().unwrap().h.as_ptr() as usize)
+        );
         // Non-Hermitian input and the off option fall back to the complex apply.
         let mut bad = q.clone();
         bad.column_mut(0)[1] += Complex64::new(0., 1e-6);
@@ -1987,7 +2190,7 @@ mod reuse_psi_tests {
             dims,
             v_old: vec![0.; len],
             delta: vec![0.; len],
-            image: RealMatrix::zeros(state.op.n, 4).unwrap(),
+            image: RealMatrix::zeros(state.op.as_ref().unwrap().n, 4).unwrap(),
             grids: Vec::new(),
             kept: Vec::new(),
             gated: false,
@@ -2009,4 +2212,119 @@ mod reuse_psi_tests {
 #[cfg(test)]
 mod persistence_tests {
     include!("../tests/common/persistent_real_invalidation_unit.rs");
+}
+
+#[cfg(test)]
+mod lazy_serial_tests {
+    use super::*;
+    use dft_geometry::Cell;
+    use dft_physics::data::Array3;
+    use dft_physics::hamiltonian::NonlocalOperator;
+
+    /// ISSUE-20: a descriptor-only state (no serial operator) is reused across
+    /// a potential update of the same operator, rebuilt when the operator,
+    /// bands, options, capacity or pool change, and gets its serial operator
+    /// lazily (in place, descriptor kept) when a caller needs it; the lazily
+    /// built operator equals an eagerly built one.
+    #[test]
+    fn descriptor_state_reuse_invalidation_and_lazy_operator() {
+        let cell =
+            Cell::from_user_rows_bohr([[4.2, 0.3, 0.], [0., 3.9, 0.2], [0.1, 0., 4.4]]).unwrap();
+        let mut options = ScfOptions {
+            gamma_real: GammaReal::Auto,
+            cutoff_hartree: 2.5,
+            ..ScfOptions::strict_reference()
+        };
+        let basis = options.basis(&cell, [0.; 3], 1.).unwrap();
+        let grid = dft_basis::FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None)
+            .unwrap();
+        let make = || {
+            Hamiltonian::new(
+                &cell,
+                &basis,
+                Array3::zeros(grid.dims()),
+                NonlocalOperator::new(&basis, cell.volume_bohr3(), &[]).unwrap(),
+            )
+            .unwrap()
+        };
+        let mut h = make();
+        let mut pool = WorkerPool::new(1).unwrap();
+        let mut state = None;
+        let half_ptr = |s: &Option<RealSolveState>| s.as_ref().unwrap().half.plus().as_ptr();
+        let has_op = |s: &Option<RealSolveState>| s.as_ref().unwrap().op.is_some();
+        let n_pw = h.kinetic_diagonal().len();
+        let cap = |o: &ScfOptions, bands| real_capacity(o, bands, n_pw);
+        // (The process-wide build counter is checked by tests/m2_lazy_serial.rs;
+        // other unit tests of this binary build operators concurrently.)
+        let c = cap(&options, 3);
+        ensure_state_with(&h, &basis, 3, c, &options, &pool, &mut state, false).unwrap();
+        assert!(!has_op(&state), "descriptor only");
+        let reference = dft_basis::HalfSphere::new(&basis, h.fft_grid()).unwrap();
+        assert_eq!(state.as_ref().unwrap().half.plus(), reference.plus());
+        assert_eq!(state.as_ref().unwrap().half.minus(), reference.minus());
+        let mut previous = half_ptr(&state);
+        // Potential update of the same operator: reused.
+        h.set_local_potential(Array3::from_elem(grid.dims(), 0.25))
+            .unwrap();
+        ensure_state_with(&h, &basis, 3, c, &options, &pool, &mut state, false).unwrap();
+        assert_eq!(half_ptr(&state), previous, "potential update reuses");
+        // Lazy serial operator: built in place, descriptor kept, potential current.
+        ensure_serial_op(&h, &basis, c, state.as_mut().unwrap()).unwrap();
+        assert!(has_op(&state));
+        assert_eq!(half_ptr(&state), previous, "descriptor kept");
+        {
+            let s = state.as_ref().unwrap();
+            let lazy = s.op.as_ref().unwrap().h.borrow();
+            assert_eq!(lazy.potential(), h.local_potential_values());
+            assert_eq!(lazy.half_sphere().plus(), s.half.plus());
+            // Same operator as an eager construction: identical images.
+            let mut eager = None;
+            ensure_state(&h, &basis, 3, c, &options, &pool, &mut eager).unwrap();
+            let eager = eager.unwrap();
+            let n = s.half.full_len();
+            let x = RealMatrix::new(
+                n,
+                2,
+                (0..2 * n).map(|i| ((i * 7 + 3) as f64).sin()).collect(),
+            )
+            .unwrap();
+            let mut y_lazy = RealMatrix::zeros(n, 2).unwrap();
+            let mut y_eager = RealMatrix::zeros(n, 2).unwrap();
+            drop(lazy);
+            s.op.as_ref().unwrap().apply_block(&x, &mut y_lazy).unwrap();
+            eager
+                .op
+                .as_ref()
+                .unwrap()
+                .apply_block(&x, &mut y_eager)
+                .unwrap();
+            let bits =
+                |m: &RealMatrix| m.as_slice().iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+            assert_eq!(bits(&y_lazy), bits(&y_eager));
+        }
+        // A state with a serial operator stays reusable for descriptor-only calls.
+        ensure_state_with(&h, &basis, 3, c, &options, &pool, &mut state, false).unwrap();
+        assert!(has_op(&state));
+        assert_eq!(half_ptr(&state), previous);
+        // Invalidation: each change rebuilds a descriptor-only state.
+        for step in 0..4 {
+            let bands = if step == 0 { 4 } else { 3 };
+            match step {
+                1 => options.seed += 1,
+                2 => pool = WorkerPool::new(2).unwrap(),
+                3 => h = make(),
+                _ => {}
+            }
+            let c = cap(&options, bands);
+            ensure_state_with(&h, &basis, bands, c, &options, &pool, &mut state, false).unwrap();
+            assert_ne!(half_ptr(&state), previous, "step {step} rebuilds");
+            assert!(!has_op(&state), "step {step}: descriptor only");
+            previous = half_ptr(&state);
+        }
+        // Capacity change (key) rebuilds as well.
+        let c2 = c - 1;
+        ensure_state_with(&h, &basis, 3, c2, &options, &pool, &mut state, false).unwrap();
+        assert_ne!(half_ptr(&state), previous);
+        assert!(!has_op(&state));
+    }
 }

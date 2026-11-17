@@ -610,3 +610,12 @@ built before the M1 fallback), `BAANDI_EWALD_CACHE` (`scf::ewald_energy`,
 per-thread last-construction cache keyed by lattice, charges and fractional
 position bits; counters `ewald_cache_counters`). Do not apply the serial
 operator on the M2 path without checking the light state.
+ISSUE-20 `BAANDI_M2_LAZY_SERIAL` (default off until dev08; per-thread
+override `gamma_real::set_m2_lazy_serial_override`; test
+`tests/m2_lazy_serial.rs`): `RealSolveState::op` is `Option`; on the M2 path
+the state holds only `half` (the ORC half-sphere descriptor, always present)
+and the distributed operator, and `ensure_serial_op` builds the serial
+operator in place only when a branch applies it (distributed operator
+unavailable, threads path). Every serial-apply branch binds `op` through
+`op_opt`; use `state.half` (not the serial operator) for packing and the
+diagonal. Counter `gamma_real::serial_operator_builds`.

@@ -169,6 +169,11 @@ pub struct Report {
     pub fft_grid: [usize; 3],
     pub estimated_array_bytes: u128,
     pub memory_note: &'static str,
+    /// INIT-CLI: the `Config::prepare` result the check built, handed to the
+    /// run so the bases, density sphere and grid are not built a second time
+    /// (same function, same configuration). Not serialized.
+    #[serde(skip)]
+    pub prepared: Option<crate::config::PreparedInput>,
 }
 impl Report {
     pub fn print(&self) {
@@ -686,6 +691,7 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
         fft_grid,
         estimated_array_bytes,
         memory_note: "orbital plus one real and one complex grid payload only; excludes scratch, projectors, allocator overhead; not peak RSS",
+        prepared: Some(prepared),
     })
 }
 

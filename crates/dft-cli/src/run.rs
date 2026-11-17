@@ -624,7 +624,7 @@ pub fn execute_mode(
             "symmetry.execution: checkpoint identity does not carry symmetry yet; use Classic execution",
         ));
     }
-    let preflight = crate::config::preflight::check(&config, input).map_err(|e| error(1, e))?;
+    let mut preflight = crate::config::preflight::check(&config, input).map_err(|e| error(1, e))?;
     if mode.events.as_deref() == Some("-") {
         eprintln!("{}", preflight.summary);
         for warning in &preflight.warnings {
@@ -636,7 +636,12 @@ pub fn execute_mode(
     } else {
         preflight.print();
     }
-    let prepared = config.prepare().map_err(|e| error(1, e))?;
+    // INIT-CLI: reuse the preflight's `Config::prepare` result (built from the
+    // same configuration) instead of building the bases and the grid again.
+    let prepared = match preflight.prepared.take() {
+        Some(prepared) => prepared,
+        None => config.prepare().map_err(|e| error(1, e))?,
+    };
     // ADR 0043 ONEPATH-4: the observe/agent runtime modes run the same single
     // standard path with the verification as a classic run (checkpoint v1
     // carries the verification option and its attempts).

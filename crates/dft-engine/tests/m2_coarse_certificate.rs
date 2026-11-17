@@ -229,3 +229,48 @@ fn split_atomic_start_matches_the_replicated_start() {
     }
     assert!(m2_count("atomic_split_starts") > before);
 }
+
+/// INIT-SCALE `BAANDI_M2_ATOMIC_BLOCK=on` (default off): row-distributed CholQR2
+/// span and row-split Ritz rotation. Rounding class of the split start: every
+/// rank agrees bit for bit, a fixed rank count reproduces its bits, the energy
+/// stays in the strict class of the threads-only run and of the split arm, the
+/// block path is taken (no fallback on these well-conditioned spans).
+#[test]
+fn block_atomic_start_stays_in_the_class_of_the_split_start() {
+    let split = EngineTuning {
+        atomic_split: true,
+        ..EngineTuning::default()
+    };
+    let block = EngineTuning {
+        atomic_block: true,
+        ..split
+    };
+    let (starts, fallbacks) = (
+        m2_count("atomic_block_starts"),
+        m2_count("atomic_block_fallbacks"),
+    );
+    for kind in 0..2 {
+        let (serial, _) = run(kind, true, None, split);
+        for ranks in [2usize, 3, 5, 7] {
+            let base = arm(kind, true, ranks, split);
+            let on = arm(kind, true, ranks, block);
+            let again = arm(kind, true, ranks, block);
+            assert_ranks_and_reproducible(&on, &again);
+            for ((r, _), (b, _)) in on.iter().zip(&base) {
+                let de = (r.total_hartree() - serial.total_hartree()).abs();
+                let db = (r.total_hartree() - b.total_hartree()).abs();
+                println!(
+                    "block atomic kind {kind} P={ranks}: dE vs threads-only {de:e} Ha, vs split {db:e} Ha"
+                );
+                assert!(de < 1e-10, "kind {kind} P={ranks}: dE {de:e}");
+                assert!(db < 1e-10, "kind {kind} P={ranks}: dE {db:e}");
+                assert_eq!(
+                    r.atomic_start.initial_h_applications,
+                    b.atomic_start.initial_h_applications
+                );
+            }
+        }
+    }
+    assert!(m2_count("atomic_block_starts") > starts);
+    assert_eq!(m2_count("atomic_block_fallbacks"), fallbacks);
+}

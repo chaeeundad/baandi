@@ -67,6 +67,10 @@ the stages that issue the collectives (simulated ranks on a loaded Mac: the wait
 number). The wait split is the question Job 1 of the
 request answers on real MPI.
 
+After merging main b1c95a6 (`M2_LEAN_ALGEBRA=on` by default; the lean path got the same
+`precondition`/`append` labels) the picture is the same (O, si32 np=8): fine `other` 0.0006 s,
+`real_state` 0.118 s, `kept_update` 0.075 s, `prepare` 0.025 s, `setup` 0.016 s.
+
 ## Init and remainder (O, same run)
 `init` 0.362 s = fine + coarse construction (basis 0.028, ionic_local 0.044, densities 0.004, states 0.113,
 ewald 0.067, rest 0.013; max over ranks, noisy at 8 simulated ranks: `states` reads 0.03 to 0.15 s between
@@ -100,6 +104,7 @@ identical in every run):
 | si32 np=8 | light state | 5 | 3.154 | 2.895 | 0.918 | 0.866 1.073 0.915 0.961 0.918 |
 | si32 np=8 | Ewald cache | 5 | 3.055 | 3.064 | 0.985 | 1.018 0.971 0.985 1.020 0.908 |
 | si32 np=8 | layout cache | 5 | 3.098 | 3.063 | 1.000 | 1.015 1.000 0.980 1.015 0.925 |
+| si32 np=8, main b1c95a6 defaults (M2_LEAN_ALGEBRA on) | stack | 3 | 2.993 | 2.846 | 0.951 | 0.951 0.939 1.017 |
 | si16 np=4 | stack | 3 | 0.842 | 0.807 | 0.959 | 0.964 0.959 0.942 |
 | si8 np=2 | stack | 3 | 0.298 | 0.275 | 0.930 | 0.930 0.922 0.957 |
 

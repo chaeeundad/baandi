@@ -427,8 +427,12 @@ fn m2_panel_gs_variants_keep_classes() {
             for ranks in [2usize, 3] {
                 let mut calls = Vec::new();
                 for mode in [PanelGs::Classic, PanelGs::Pythag, PanelGs::Fused] {
+                    // The panel Gram-Schmidt is bypassed by the lean algebra
+                    // (default on since b1c95a6) on Ritz-change solves: test
+                    // the orthonormal path the switch acts on.
                     let tuning = DistributedTuning {
                         panel_gs: mode,
+                        lean_algebra: false,
                         ..base
                     };
                     let go = || {

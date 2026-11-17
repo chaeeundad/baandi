@@ -429,6 +429,61 @@ impl<C: Collective> Collective for Counted<'_, C> {
     }
 }
 
+/// Solver-only agreement: the operator uses the underlying communicator, then
+/// records a local failure. The next existing solver sum carries one status
+/// double. Scratch is reserved at entry, never allocated by an iteration.
+struct ApplyAgreement<'a, C: Collective> {
+    inner: &'a C,
+    failed: std::cell::Cell<bool>,
+    scratch: std::cell::RefCell<(Vec<f64>, Vec<f64>)>,
+}
+impl<C: Collective> Collective for ApplyAgreement<'_, C> {
+    fn rank(&self) -> usize {
+        self.inner.rank()
+    }
+    fn size(&self) -> usize {
+        self.inner.size()
+    }
+    fn barrier(&self) -> Result<(), dft_mpi::MpiError> {
+        self.inner.barrier()
+    }
+    fn allgatherv_f64(
+        &self,
+        local: &[f64],
+        counts: &[usize],
+        out: &mut [f64],
+    ) -> Result<(), dft_mpi::MpiError> {
+        self.inner.allgatherv_f64(local, counts, out)
+    }
+    fn bcast_f64(&self, data: &mut [f64], root: usize) -> Result<(), dft_mpi::MpiError> {
+        self.inner.bcast_f64(data, root)
+    }
+    fn alltoall_f64(
+        &self,
+        send: &[f64],
+        block: usize,
+        recv: &mut [f64],
+    ) -> Result<(), dft_mpi::MpiError> {
+        self.inner.alltoall_f64(send, block, recv)
+    }
+    fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
+        let len = local.len();
+        let mut scratch = self.scratch.borrow_mut();
+        let (input, output) = &mut *scratch;
+        input[..len].copy_from_slice(local);
+        input[len] = f64::from(u8::from(self.failed.get()));
+        self.inner
+            .tree_sum_f64(&input[..len + 1], &mut output[..len + 1])?;
+        if output[len] != 0.0 {
+            return Err(dft_mpi::MpiError::State(
+                "distributed operator failed on at least one rank",
+            ));
+        }
+        out.copy_from_slice(&output[..len]);
+        Ok(())
+    }
+}
+
 /// Row partition: `index[r]` lists the global row of every local row of rank `r`
 /// (contiguous blocks for M1, the stick partition for M2c). Algebra helpers only
 /// use the local row count; the partition matters at the replicated interface.
@@ -907,6 +962,7 @@ fn panel_gram_schmidt<C: Collective>(
                 comm,
                 &out.as_slice()[first * rows..kept * rows],
                 rows,
+                kept - first,
                 &mut v,
                 &mut local,
                 &mut sums,
@@ -943,13 +999,15 @@ pub(crate) fn panel_column<C: Collective>(
     comm: &C,
     q: &[f64],
     rows: usize,
+    k: usize,
     v: &mut [f64],
     local: &mut Vec<f64>,
     sums: &mut Vec<f64>,
     mode: PanelGs,
     keep: Option<f64>,
 ) -> Result<f64, SolverError> {
-    let k = q.len().checked_div(rows).unwrap_or(0);
+    // The column count is replicated even when this rank owns zero rows.
+    debug_assert_eq!(q.len(), rows * k);
     // Local dot products with the k columns, optionally followed by |v|^2.
     let dots = |v: &[f64], local: &mut Vec<f64>, norm: bool| {
         local.clear();
@@ -1453,9 +1511,9 @@ impl crate::RealDavidson {
         site(Site::Setup);
         let n = op.global_len();
         let mine: &[usize] = op.local_rows();
-        if diagonal_local.len() != mine.len() || mine.iter().any(|&r| r >= n) {
-            return Err(SolverError::InvalidParameter("bands or diagonal length"));
-        }
+        let invalid = diagonal_local.len() != mine.len()
+            || mine.iter().any(|&r| r >= n)
+            || matches!(initial, Some(DistributedStart::Local(x)) if x.rows() != mine.len());
         let ranks = comm.size();
         // BREAKTHROUGH-4 (`BAANDI_M2_LAYOUT_CACHE=on`): the row lists of all
         // ranks are reused from this thread's previous solve when every rank
@@ -1471,9 +1529,17 @@ impl crate::RealDavidson {
                         && rows.as_slice() == mine
                 })
             });
-            let mut flag = [0.0];
-            comm.tree_sum_f64(&[f64::from(u8::from(!hit))], &mut flag)
-                .map_err(comm_error)?;
+            let mut flag = [0.0; 2];
+            comm.tree_sum_f64(
+                &[f64::from(u8::from(!hit)), f64::from(u8::from(invalid))],
+                &mut flag,
+            )
+            .map_err(comm_error)?;
+            if flag[1] != 0.0 {
+                return Err(SolverError::InvalidParameter(
+                    "invalid local rows, diagonal or start",
+                ));
+            }
             flag[0] == 0.0
         } else {
             false
@@ -1483,10 +1549,24 @@ impl crate::RealDavidson {
             LAYOUT_CACHE.with(|l| l.borrow().as_ref().expect("checked above").1.clone())
         } else {
             // Setup (once per solve): every rank learns the row lists of all ranks.
-            let mut counts_f = vec![0.0; ranks];
-            comm.allgatherv_f64(&[mine.len() as f64], &vec![1; ranks], &mut counts_f)
-                .map_err(comm_error)?;
-            let counts: Vec<usize> = counts_f.iter().map(|&c| c as usize).collect();
+            let mut counts_f = vec![0.0; 2 * ranks];
+            comm.allgatherv_f64(
+                &[mine.len() as f64, f64::from(u8::from(invalid))],
+                &vec![2; ranks],
+                &mut counts_f,
+            )
+            .map_err(comm_error)?;
+            if counts_f.as_chunks::<2>().0.iter().any(|v| v[1] != 0.0) {
+                return Err(SolverError::InvalidParameter(
+                    "invalid local rows, diagonal or start",
+                ));
+            }
+            let counts: Vec<usize> = counts_f
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|v| v[0] as usize)
+                .collect();
             if counts.iter().sum::<usize>() != n {
                 return Err(SolverError::InvalidParameter(
                     "row partition does not cover the basis",
@@ -1518,6 +1598,16 @@ impl crate::RealDavidson {
             layout
         };
         let nl = layout.nl();
+        let cap = self
+            .max_subspace
+            .max(self.bands.saturating_mul(capacity_per_band))
+            .min(n);
+        let payload = 2 * cap * cap + 2 * cap + 1;
+        let agreement = ApplyAgreement {
+            inner: comm,
+            failed: std::cell::Cell::new(false),
+            scratch: std::cell::RefCell::new((vec![0.0; payload], vec![0.0; payload])),
+        };
         stage_add(STAGE_SETUP, t_setup);
         if tuning.workspace || tuning.selected_roots || tuning.lean_algebra {
             let supplied = op.worker_pool();
@@ -1526,22 +1616,21 @@ impl crate::RealDavidson {
                 site(Site::Apply);
                 let start = dft_numerics::stage_clock::start();
                 y.as_mut_slice().fill(0.0);
-                op.apply_block(comm, x, y)?;
+                let failed = op.apply_block(comm, x, y).is_err();
                 stage_add(5, start);
                 stage_add(6, start);
                 let scan = dft_numerics::stage_clock::start();
                 let invalid = y.as_slice().iter().any(|v| !v.is_finite());
                 stage_add(STAGE_APPEND, scan);
-                if invalid {
-                    return Err(SolverError::Application(
-                        "operator returned an invalid block".into(),
-                    ));
+                if failed || invalid {
+                    agreement.failed.set(true);
+                    y.as_mut_slice().fill(0.0);
                 }
                 Ok(())
             };
             let result = workspace::solve_core_ws(
                 self,
-                comm,
+                &agreement,
                 &layout,
                 supplied,
                 threads,
@@ -1590,18 +1679,17 @@ impl crate::RealDavidson {
             site(Site::Apply);
             let start = dft_numerics::stage_clock::start();
             let mut y = RealMatrix::zeros(nl, x.cols())?;
-            op.apply_block(comm, x, &mut y)?;
+            let failed = op.apply_block(comm, x, &mut y).is_err();
             stage_add(5, start);
             stage_add(6, start);
-            if y.as_slice().iter().any(|v| !v.is_finite()) {
-                return Err(SolverError::Application(
-                    "operator returned an invalid block".into(),
-                ));
+            if failed || y.as_slice().iter().any(|v| !v.is_finite()) {
+                agreement.failed.set(true);
+                y.as_mut_slice().fill(0.0);
             }
             Ok(y)
         };
         let result = self.solve_core(
-            comm,
+            &agreement,
             &layout,
             pool,
             &mut apply,
@@ -2086,6 +2174,7 @@ mod panel_gs_tests {
                             &counting,
                             &ql,
                             rows,
+                            k,
                             &mut v,
                             &mut l,
                             &mut s,

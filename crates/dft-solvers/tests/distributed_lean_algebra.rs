@@ -289,6 +289,8 @@ fn lean_algebra_agrees_with_orthonormal_path() {
     ];
     for (name, f, n, bands) in fixtures {
         let (a, b) = (f(n, 0.0), f(n, 1e-3));
+        let oracle_a = dft_numerics::real::symmetric_eigh(&a).unwrap().0;
+        let oracle_b = dft_numerics::real::symmetric_eigh(&b).unwrap().0;
         for per_band in [3, 6] {
             for ranks in 1..=4 {
                 let sums0 = tree_sums();
@@ -299,6 +301,26 @@ fn lean_algebra_agrees_with_orthonormal_path() {
                 let stats1 = lean_algebra_stats();
                 let sums2 = tree_sums();
                 let tag = format!("{name} cap {per_band} ranks {ranks}");
+                let hash = |s: &RealEigenSolution| {
+                    bits(s).into_iter().fold(0xcbf29ce484222325u64, |h, b| {
+                        (h ^ b).wrapping_mul(0x100000001b3)
+                    })
+                };
+                eprintln!(
+                    "BASELINE {tag}: {:016x} {:016x} {:?} sums {}",
+                    hash(&lean[0].cold),
+                    hash(&lean[0].warm),
+                    (
+                        lean[0].cold.iterations,
+                        lean[0].warm.iterations,
+                        lean[0].cold.operator_applications,
+                        lean[0].warm.operator_applications,
+                        stats1.appends - stats0.appends,
+                        stats1.reprojections - stats0.reprojections,
+                        stats1.fallbacks - stats0.fallbacks
+                    ),
+                    sums2 - sums1
+                );
                 for (p, l) in [
                     (&plain[0].cold, &lean[0].cold),
                     (&plain[0].warm, &lean[0].warm),
@@ -311,7 +333,29 @@ fn lean_algebra_agrees_with_orthonormal_path() {
                     } else {
                         &b
                     };
+                    let oracle = if std::ptr::eq(matrix, &a) {
+                        &oracle_a
+                    } else {
+                        &oracle_b
+                    };
+                    for (j, &value) in l.eigenvalues.iter().enumerate() {
+                        assert!(
+                            (value - oracle[j]).abs() <= if l.buffer[j] { 1e-9 } else { 1e-10 },
+                            "{tag}: dense oracle band {j}: value {value:e}, exact {:e}, delta {:e}",
+                            oracle[j],
+                            value - oracle[j]
+                        );
+                    }
                     let (res, defect) = check(matrix, l);
+                    // Ritz-change stopping is not residual certification. This
+                    // independent 1e-4 Ha bound covers ALL requested roots;
+                    // the original 1e-9 Ha buffer Ritz-change policy is kept.
+                    // Tighter 1e-6 Ha all-band bounds live in lean_harden and
+                    // the forced contraction regression.
+                    assert!(
+                        res.iter().all(|&r| r <= 1e-4),
+                        "{tag}: true residuals {res:?}"
+                    );
                     assert!(defect <= 1e-11, "{tag}: defect {defect:e}");
                     for (r, reported) in res.iter().zip(&l.residuals) {
                         assert!(
@@ -360,6 +404,21 @@ fn lean_algebra_agrees_with_orthonormal_path() {
             // Cold solve: the rank decisions and counts of the serial lean
             // solver at every rank count.
             let serial = serial_lean(&a, bands, per_band);
+            let hash = bits(&serial.0)
+                .into_iter()
+                .fold(0xcbf29ce484222325u64, |h, b| {
+                    (h ^ b).wrapping_mul(0x100000001b3)
+                });
+            eprintln!(
+                "SERIAL-BASELINE {name} cap {per_band}: {hash:016x} {:?}",
+                (
+                    serial.0.iterations,
+                    serial.0.operator_applications,
+                    serial.1,
+                    serial.2,
+                    serial.3
+                )
+            );
             for ranks in 1..=4 {
                 let s0 = lean_algebra_stats();
                 let out = cold_lean(ranks, &a, bands, per_band);
@@ -565,7 +624,20 @@ fn rank_decisions_match_the_serial_lean_solver() {
             for (x, y) in out[0].eigenvalues.iter().zip(&reference.eigenvalues) {
                 assert!((x - y).abs() <= 1e-9, "{tag}: {x} vs {y}");
             }
+            let oracle = dft_numerics::real::symmetric_eigh(&a).unwrap().0;
+            for (j, &value) in out[0].eigenvalues.iter().enumerate() {
+                assert!(
+                    (value - oracle[j]).abs() <= 1e-10,
+                    "{tag}: dense oracle band {j}: value {value:e}, exact {:e}, delta {:e}",
+                    oracle[j],
+                    value - oracle[j]
+                );
+            }
             let (res, defect) = check(&a, &out[0]);
+            assert!(
+                res.iter().all(|&r| r <= 1e-4),
+                "{tag}: true residuals {res:?}"
+            );
             assert!(defect <= 1e-11, "{tag}: defect {defect:e}");
             for (t, reported) in res.iter().zip(&out[0].residuals) {
                 assert!((t - reported).abs() <= 1e-11, "{tag}");

@@ -42,17 +42,17 @@ Payload: the S border carries m x (k + 1) doubles per call (bucket 65-512 to 513
 
 ## 4. Dependence and rank decisions (unchanged meaning)
 Same constants and order as the serial lean solver:
-- Pivot rule: every appended column's squared Cholesky pivot over its overlap diagonal must be at least `PIVOT_RATIO_MIN = eps / 1e-12` (the serial `extend_factor`, called unchanged). The pivot test runs on the reduced S before H is applied.
+- Pivot rule: every appended column's squared Cholesky pivot over its overlap diagonal must be at least `PIVOT_RATIO_MIN = eps / 1e-12`. This is a local dependence test, **not** a bound on the conditioning of the whole overlap. The shared serial `extend_factor` also bounds weighted inverse-factor growth (section 9). Both tests run on the reduced S before H is applied.
 - Stage 1 (pivot test failed): E' = E - V T^T T (V^T E) by a local GEMM (V^T E is the S border already reduced; no new Gram), one norm reduction, columns with |E'_j| <= `DEPENDENCE_TOLERANCE` dropped (the classic rank floor on a unit input), the rest through the serial-order in-block Gram-Schmidt (its rank floor), then a new S border and pivot test.
 - Stage 2 (stage 1 failed again, or nothing survived): V and HV are rotated once to the full Ritz basis V C (span unchanged, no H application) unless the basis is the fresh contraction basis; the surviving columns are projected with the classic projection against the basis (random block if nothing survives, as the orthonormal path); a failure of that block is an error.
 - A fresh basis (start, contraction X, stage-2 rotation) that fails the pivot test is rebuilt by Gram-Schmidt and H application (counted `rebuilds`; expected zero, zero in every test and screen).
-- Contraction restart: X = V C with C^T S C = I, taken without the 1e-12 orthogonality-defect check of the orthonormal path (the generalized path needs a factorable S, not an orthonormal X); its S comes with the next S border.
+- Contraction restart: X = V C with C^T S C = I in exact arithmetic. The actual Gram defect of X is checked against 1e-12 using the leading block of the next S border. A failed check rebuilds X before any classical projection. No new collective is needed.
 
 Tests (C): on 1 to 4 ranks the distributed solver takes exactly the serial lean solver's decisions (appends, stage-1 re-projections, stage-2 fallbacks), iterations and H columns, on the cubic, degenerate and skewed fixtures and on the serial lean test's ill-conditioned fixture (coupling 2e-6: stage 1 on both appends; coupling 0: stage 1 and stage 2 down to the random block).
 
 ## 5. Reproducibility and accuracy
 - Fixed rank count: bit-reproducible (fixed-order tree sums; replicated small GEMMs on fixed panels). Ranks agree bit for bit. Different rank counts differ by rounding (the tree sums group the rows differently), as on the orthonormal path.
-- Accuracy class unchanged: standard solves stop on the Ritz-value change as before; returned residual norms are formed explicitly from the returned X and H X (all bands); the returned X is S-orthonormal to about eps / pivot ratio (<= 1e-12 by the pivot rule; observed <= 1e-11 defect in every test). Strict solves (residual criterion, certificate) never take this path. No tolerance changed.
+- Accuracy class unchanged: standard solves stop on the Ritz-value change as before; returned residual norms are formed explicitly from the returned X and H X (all bands); the actual returned X must pass a maximum-entry Gram-defect check of 1e-12. The pivot ratio alone does not imply this bound. The Gram entries ride with the existing all-band residual reduction; failure rebuilds and reconfirms Ritz changes, or returns an error at the iteration limit. Strict solves (residual criterion, certificate) never take this path. No tolerance changed.
 
 ## 6. Rejected variant: one tree sum per iteration (C, O)
 First version: S border, H border and residual norms in ONE tree sum after H was applied to the raw corrections (the pivot test then runs after the application; H E scaled with E). On the warm si32 solve (capacity 3) 15 of 22 appends fail the pivot test (stage 1), so 42 H columns per solve were applied to rejected blocks: H columns 272 -> 314 (+15 percent), alltoall calls +64 percent. The H application is the stage that scales; trading it for one reduction is a loss on dev08. Rejected before measurement on dev08; the two-reduction form applies H only to accepted blocks (H columns equal to the orthonormal path in every screen).
@@ -62,7 +62,7 @@ First version: S border, H border and residual norms in ONE tree sum after H was
 - `M2_SELECTED_ROOTS`: the lean path always uses the selected-root rule (residuals of unconverged roots only; all bands at return and contraction), independent of that switch.
 - `M2_PANEL_GS`: unused on the lean path except inside the fallback stages (in-block Gram-Schmidt of a rejected block, rebuild), where the switch applies as before.
 - `M2_EIGEN=root`: ignored on the lean path (stage 2 needs all reduced eigenvectors on every rank); the reduced problem is solved replicated. `M2_B5=on` applies to A (its leading block is kept bit for bit by the border update).
-- `M2_START=gram` (default since 0d87d6e): on the lean path the start block is accepted when its Gram matrix passes the pivot rule (instead of the 1e-12 defect), and the factor is kept (no second S reduction). `M2_START=ortho`: the start is orthonormalized as before (its panel Gram-Schmidt is then most of the remaining reductions of a solve).
+- `M2_START=gram` (default since 0d87d6e): on the lean path a complete start block is accepted when its Gram matrix passes the pivot and inverse-growth rules, and the factor is kept (no second S reduction). A partial start is accepted unchanged only when its Gram defect is at most 1e-12; otherwise it is orthonormalized before random completion. `M2_START=ortho`: the start is orthonormalized as before (its panel Gram-Schmidt is then most of the remaining reductions of a solve).
 - `M2_REUSE` (kept start, default on since 0d87d6e): the generalized path needs a factorable S of the kept X, not an orthonormal X: the kept start is taken when initial equals X (unchanged flag reduction) and the Gram of X (unchanged reduction) passes the pivot rule; the factor is kept. Counter `factored_starts`.
 - `M2_LAZY`: unchanged (the return keeps the local rows; no gather).
 - M1 path (`solve_distributed`): takes the same code when the switch is on (workspace path).
@@ -87,3 +87,100 @@ Occupied eigenvalues moved by at most 3.3e-14 Ha; eigenvalues reproducible withi
 | si64 np=4 | defaults -> L | 13.98 -> 13.12 s (-6.1 %, 0.58 s) | 9118 -> 3014 (-66.9 %) | panel_dot 6543 -> 2027, panel_cross 1302 -> 400 | 0 (energy bits equal) |
 | si32 np=8 | S -> S + L (S = mirror sticks, Gram start, kept start) | 3.162 -> 2.835 s (-10.3 %, 0.23 s) | 4494 -> 511 (-88.6 %) | every panel and ortho site -> 0, lean_border 105, restart_defect 31 -> 20 | 0 (energy bits equal) |
 SCF, Davidson and H counts unchanged in every cell; density reproducible within each arm; 22 lean solves per rank per si32 run carry every standard iteration (127 iterations: 127 S borders + 105 H borders), no fallback, no rebuild in any SCF screen. With `M2_START=ortho` (default) the start orthonormalization is the remaining chain (panel_dot 1426 per rank); with the stack's Gram start (factored by the pivot rule, `factored_starts` 22) it disappears: 511 tree sums per rank for the whole si32 run.
+
+## 9. LEAN-ALGEBRA-HARDEN (2026-11-17)
+
+The review's bidiagonal chain (`v0 = e0`, `vj = sqrt(0.99) e[j-1] +
+0.1 e[j]`) passes every original pivot test but amplifies overlap rounding.
+For each newly computed row of T, the shared factor extension computes
+`g_i = sum_j |T_ij| sqrt(S_jj)`. A componentwise Gram perturbation bounded by
+`eps sqrt(S_ii S_jj)` is amplified by at most `eps g_i g_j`. The guard rejects
+`eps g_i^2 > sqrt(eps)`, i.e. loss of half the working digits
+(`g_i > eps^(-1/4) = 8192` for binary64). This is a conservative early warning,
+not a forward-error theorem for dot products of arbitrary length. The actual
+1e-12 return/contraction checks enforce the orthogonality contract. No existing
+pivot, dependence, Ritz-change or residual tolerance is relaxed. Rejected
+extensions use the existing stage-1/stage-2 rules; rejected fresh bases rebuild.
+A rebuild with fewer columns than required bands returns a replicated error
+before the reduced solve can index missing columns.
+
+On the row-operator interface, operator errors and nonfinite outputs are recorded
+locally, with the failed output replaced by zeros. A solver-only communicator
+packs one status double with each existing solver tree sum, using buffers
+reserved at solve entry. The operator retains the underlying communicator, so
+its own collectives are unaffected. The next solver sum makes every rank return
+the same error before using its numerical payload. This covers both workspace
+and allocating row solvers. It requires the operator to complete its own
+collectives before returning, as in the operator contract; it cannot recover a
+rank that exits inside an unfinished operator collective. Initial local row and
+diagonal errors ride with the existing row-count exchange (or the layout-cache
+sum). There is no new collective on the ordinary path. Payload sizes increase;
+reduction histogram buckets can therefore change even though call counts do not.
+
+Empty row partitions retain the replicated panel column count explicitly;
+deriving it from `local_elements / local_rows` loses that information on an
+empty rank and previously produced mismatched reduction lengths during repair.
+
+Validation sources: `tests/lean_harden.rs`, the factor-chain unit test, the
+forced-stage-2-after-contraction unit test, and
+`tests/distributed_lean_algebra.rs`. The independent oracle diagonalizes the
+original dense operator, never the solver's reduced overlap problem. The
+original loose buffer policy is retained: dense eigenvalue errors are bounded
+by 1e-10 Ha on required bands and 1e-9 Ha on buffer bands; independently computed
+true residuals of **all** bands are bounded by 1e-4 Ha. This is deliberately
+separate from a strict residual certificate: the unchanged skew fixture has
+true residuals up to 1.67e-5 Ha under its 1e-9 Ha buffer Ritz-change policy.
+The exact-spectrum diagonal and forced-contraction tridiagonal regressions
+bound every required true residual by 1e-6 Ha and eigenvalue error by 1e-10 Ha.
+No convergence flag is used as a substitute for either check.
+
+Baseline for bit comparisons: `0fb09c0edf189f6ced15ae2d4fca4091f5a364aa`,
+Apple Silicon pure Rust, offline debug. The test prints FNV-1a-style hashes of
+all eigenvalue, vector and reported-residual bits, plus iteration, H-column,
+append/fallback and tree-sum counts. Hashes are evidence for this backend only,
+not portable golden values across BLAS/EVD implementations. Before/after records
+are below; no SCF energy or dev08 timing claim is made by this correctness task.
+
+```text
+BASELINE cubic cap 3 ranks 1: 0aaf10ee411555c8 801b4171736bfe14 (5, 3, 27, 18, 6, 1, 0) sums 31
+BASELINE cubic cap 3 ranks 2: 0f4eb50c65f441b9 1a0c1819d4f78ac2 (5, 3, 27, 18, 12, 2, 0) sums 62
+BASELINE cubic cap 3 ranks 3: d88d10327b6f429b db336239dddd6c7a (5, 3, 27, 18, 18, 3, 0) sums 93
+BASELINE cubic cap 3 ranks 4: da5c184ac2dd0e89 4c53dc228c465e08 (5, 3, 27, 18, 24, 4, 0) sums 124
+SERIAL-BASELINE cubic cap 3: 31fec50e8f18d4f1 (5, 27, 4, 1, 0)
+BASELINE cubic cap 6 ranks 1: 8e2966f46bb91b9e 3cdf69b7c7bafea7 (5, 3, 27, 18, 6, 1, 0) sums 31
+BASELINE cubic cap 6 ranks 2: ff33298b31d74997 a09f0903c9a1d5f7 (5, 3, 27, 18, 12, 2, 0) sums 62
+BASELINE cubic cap 6 ranks 3: 949432f178454588 5a179a192d3425cc (5, 3, 27, 18, 18, 3, 0) sums 93
+BASELINE cubic cap 6 ranks 4: 38af73844d42e4c3 1a38378436d16202 (5, 3, 27, 18, 24, 4, 0) sums 124
+SERIAL-BASELINE cubic cap 6: 07f170aa53ffa99b (5, 27, 4, 1, 0)
+BASELINE degenerate cap 3 ranks 1: 975eeb5ba2cbce5a 2791c32b75f1c48b (4, 4, 24, 18, 6, 0, 0) sums 18
+BASELINE degenerate cap 3 ranks 2: 3d13b470b3461a91 f52b2b67e737cc2c (4, 4, 24, 18, 12, 0, 0) sums 36
+BASELINE degenerate cap 3 ranks 3: 30e26e96cca0ea2c a5d945be1ab291de (4, 4, 24, 18, 18, 0, 0) sums 54
+BASELINE degenerate cap 3 ranks 4: 82cc6e775155625b 066106ab6f356615 (4, 4, 24, 18, 24, 0, 0) sums 72
+SERIAL-BASELINE degenerate cap 3: a3424a575f933baf (4, 24, 3, 0, 0)
+BASELINE degenerate cap 6 ranks 1: 87c35157bcdf0474 dfbba373d65f2e5e (4, 4, 24, 18, 6, 0, 0) sums 18
+BASELINE degenerate cap 6 ranks 2: fc829e758052d8f3 11d03e7855ae3ee6 (4, 4, 24, 18, 12, 0, 0) sums 36
+BASELINE degenerate cap 6 ranks 3: cab70bfcdd48b751 6ce20f7c326df057 (4, 4, 24, 18, 18, 0, 0) sums 54
+BASELINE degenerate cap 6 ranks 4: 63b2831caa63b833 51537d86d7514d4b (4, 4, 24, 18, 24, 0, 0) sums 72
+SERIAL-BASELINE degenerate cap 6: 6c11734df57325ce (4, 24, 3, 0, 0)
+BASELINE skew cap 3 ranks 1: 8a4b1624217198af caa45072667de0b0 (22, 8, 103, 47, 28, 0, 0) sums 62
+BASELINE skew cap 3 ranks 2: 85185de0cbe8e53b d3bbb00510fd6dd9 (22, 8, 103, 47, 56, 0, 0) sums 124
+BASELINE skew cap 3 ranks 3: c0d38a23c1266943 fef7df4cbad8076a (22, 8, 103, 47, 84, 0, 0) sums 186
+BASELINE skew cap 3 ranks 4: 843a390731e7185d 6a2860cc9f742b00 (22, 8, 103, 47, 112, 0, 0) sums 248
+SERIAL-BASELINE skew cap 3: b48272857239eb90 (22, 103, 21, 0, 0)
+BASELINE skew cap 6 ranks 1: 3aa7148e65b12529 2efe667fe63281a4 (9, 6, 64, 44, 13, 0, 0) sums 32
+BASELINE skew cap 6 ranks 2: 6528e7b4838a7f8e 6941d1b2325b083f (9, 6, 64, 44, 26, 0, 0) sums 64
+BASELINE skew cap 6 ranks 3: c8d03164a56b4485 16e0f14fe577ac7d (9, 6, 64, 44, 39, 0, 0) sums 96
+BASELINE skew cap 6 ranks 4: c1a78814a5e71296 b6d3a78df2488573 (9, 6, 64, 44, 52, 0, 0) sums 128
+SERIAL-BASELINE skew cap 6: 838277921965fd57 (9, 64, 8, 0, 0)
+```
+
+Verification on the patched tree: `cargo test -p dft-solvers --offline` exited
+0 (133 passed, 25 ignored across 27 test binaries/doc-test groups).
+`cargo clippy -p dft-solvers --offline --all-targets -- -D warnings` exited 0.
+The original-source adversarial run exited 101 (8 failed in 3.01 s); the
+patched integration run passed 9/9 in 0.01 s. The factor-growth, forced
+contraction fallback, and nonempty rank-loss rebuild unit regressions pass.
+The dense-oracle fixture test completes within the approximately 10 s debug
+budget (whole integration binary 6.43 s in the recorded run).
+
+`scripts/check.sh dft-solvers` exited 0: build, test, fmt and clippy all PASS.

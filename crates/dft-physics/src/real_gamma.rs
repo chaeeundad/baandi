@@ -62,6 +62,57 @@ pub(crate) fn pack_projector(
     Ok(())
 }
 
+/// ISSUE-20: the rows `rows` (ORC row indices) of `pack_projector(half, beta)`
+/// written directly to `out` (one value per row, same coefficient mapping and
+/// arithmetic: row 0 = Re beta(G=0), rows 2i-1 and 2i = sqrt(2) Re and Im of
+/// beta at `plus[i]`), without the full-length vector. The validation is that
+/// of `pack_projector` over ALL representatives, so the verdict (and the
+/// error) does not depend on which rows a rank owns. The final finiteness
+/// check is equivalent: sqrt(2) * x rounds monotonically in |x|, so some
+/// scaled component overflows exactly when the largest one does.
+pub(crate) fn pack_projector_rows(
+    half: &HalfSphere,
+    beta: &[Complex64],
+    rows: &[usize],
+    out: &mut [f64],
+) -> Result<(), RealGammaError> {
+    if beta.len() != half.full_len() || out.len() != rows.len() {
+        return Err(RealGammaError::Shape);
+    }
+    let plus = half.plus();
+    let mut scale = 0.0_f64;
+    let mut largest = 0.0_f64;
+    for (i, &p) in plus.iter().enumerate() {
+        let z = beta[p as usize];
+        if !z.re.is_finite() || !z.im.is_finite() || !z.norm().is_finite() {
+            return Err(RealGammaError::NonFinite);
+        }
+        scale = scale.max(z.norm());
+        if i > 0 {
+            largest = largest.max(z.re.abs()).max(z.im.abs());
+        }
+    }
+    if beta[0].im.abs() > 1e-14 * scale {
+        return Err(RealGammaError::ComplexZero);
+    }
+    if !(std::f64::consts::SQRT_2 * largest).is_finite() {
+        return Err(RealGammaError::NonFinite);
+    }
+    for (o, &r) in out.iter_mut().zip(rows) {
+        *o = if r == 0 {
+            beta[0].re
+        } else {
+            let z = beta[*plus.get(r.div_ceil(2)).ok_or(RealGammaError::Shape)? as usize];
+            if r % 2 == 1 {
+                std::f64::consts::SQRT_2 * z.re
+            } else {
+                std::f64::consts::SQRT_2 * z.im
+            }
+        };
+    }
+    Ok(())
+}
+
 struct Coupling {
     start: usize,
     count: usize,
@@ -866,5 +917,62 @@ mod tests {
         pack_projector(&h, &beta, &mut out).unwrap();
         beta[0].re = f64::NAN;
         assert!(pack_projector(&h, &beta, &mut out).is_err());
+    }
+
+    /// ISSUE-20: owned-row packing equals the rows of the full packing bit
+    /// for bit, and gives the same verdict for every row subset (rank
+    /// independent), including invalid columns.
+    #[test]
+    fn projector_rows_match_full_packing() {
+        let cell = dft_geometry::Cell::from_user_rows_bohr([
+            [6.2, 0., 0.],
+            [1.1, 5.7, 0.],
+            [0.4, 0.7, 6.6],
+        ])
+        .unwrap();
+        let b = PlaneWaveBasis::new(&cell, dft_units::Hartree(1.5)).unwrap();
+        let g = dft_basis::FftGridSpec::new(&b, &b, None).unwrap();
+        let h = HalfSphere::new(&b, &g).unwrap();
+        let n = h.full_len();
+        let mut beta: Vec<Complex64> = (0..n)
+            .map(|k| Complex64::new(((k * 7 + 1) as f64).sin(), ((k * 3 + 2) as f64).cos()))
+            .collect();
+        beta[0].im = 0.;
+        let subsets: Vec<Vec<usize>> = vec![
+            (0..n).collect(),
+            (0..n).filter(|r| r % 3 == 1).collect(),
+            (1..n).step_by(5).collect(),
+            vec![0],
+            Vec::new(),
+        ];
+        let check = |beta: &[Complex64]| {
+            let mut full = vec![0.; n];
+            let whole = pack_projector(&h, beta, &mut full).map_err(|e| e.to_string());
+            for rows in &subsets {
+                let mut out = vec![0.; rows.len()];
+                let part = pack_projector_rows(&h, beta, rows, &mut out).map_err(|e| e.to_string());
+                assert_eq!(whole.is_ok(), part.is_ok());
+                assert_eq!(whole, part);
+                if whole.is_ok() {
+                    for (o, &r) in out.iter().zip(rows) {
+                        assert_eq!(o.to_bits(), full[r].to_bits(), "row {r}");
+                    }
+                }
+            }
+        };
+        check(&beta);
+        // Invalid columns: imaginary origin, NaN, overflow of the sqrt(2) scaling.
+        let mut bad = beta.clone();
+        bad[0].im = 1e-3;
+        check(&bad);
+        let mut bad = beta.clone();
+        bad[h.plus()[2] as usize].im = f64::NAN;
+        check(&bad);
+        let mut bad = beta.clone();
+        bad[h.plus()[3] as usize] = Complex64::new(f64::MAX * 0.9, 0.);
+        check(&bad);
+        let mut bad = beta.clone();
+        bad[h.plus()[3] as usize] = Complex64::new(f64::MAX * 0.6, f64::MAX * 0.6);
+        check(&bad);
     }
 }

@@ -54,7 +54,7 @@
 //! No allocation after construction (conversion helpers `extract_local` and
 //! `scatter_local` allocate and are for the library boundary); no unsafe; no logging.
 use crate::hamiltonian::Hamiltonian;
-use crate::real_gamma::{RealGammaError, pack_projector};
+use crate::real_gamma::{RealGammaError, pack_projector_rows};
 use dft_basis::{HalfSphere, PlaneWaveBasis};
 use dft_mpi::{Collective, MpiError};
 use dft_numerics::linalg::LinalgError;
@@ -259,16 +259,22 @@ impl DistributedRealHamiltonian {
             }
         }
 
-        // Kinetic diagonal in ORC order (as RealHamiltonian), restricted to local rows.
-        let mut kinetic_full = vec![0.; n];
-        kinetic_full[0] = source.kinetic_diagonal()[0];
-        for (i, &p) in plus.iter().enumerate().skip(1) {
-            kinetic_full[2 * i - 1] = source.kinetic_diagonal()[p as usize];
-            kinetic_full[2 * i] = kinetic_full[2 * i - 1];
-        }
-        let kinetic = rows.iter().map(|&r| kinetic_full[r]).collect();
+        // Kinetic diagonal in ORC order (as RealHamiltonian) of the local rows
+        // only (ISSUE-20: the same copied values, no full-length vector).
+        let kd = source.kinetic_diagonal();
+        let kinetic = rows
+            .iter()
+            .map(|&r| {
+                if r == 0 {
+                    kd[0]
+                } else {
+                    kd[plus[r.div_ceil(2)] as usize]
+                }
+            })
+            .collect();
 
-        // Projector rows restricted to local rows.
+        // Projector rows of the local rows only (ISSUE-20: packed directly,
+        // validated over all representatives as `pack_projector`).
         let count: usize = source
             .nonlocal()
             .atoms()
@@ -277,16 +283,12 @@ impl DistributedRealHamiltonian {
             .sum();
         let mut projectors = RealMatrix::zeros(n_loc, count)?;
         let mut coupling = Vec::new();
-        let mut full = vec![0.; n];
         let mut start = 0;
         for atom in source.nonlocal().atoms() {
             for (j, beta) in atom.columns().iter().enumerate() {
-                pack_projector(&half, beta, &mut full)?;
                 let col =
                     &mut projectors.as_mut_slice()[(start + j) * n_loc..(start + j + 1) * n_loc];
-                for (c, &r) in col.iter_mut().zip(&rows) {
-                    *c = full[r];
-                }
+                pack_projector_rows(&half, beta, &rows, col)?;
             }
             coupling.push(Coupling {
                 start,

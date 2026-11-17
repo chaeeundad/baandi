@@ -10,15 +10,10 @@
 //!   (the overlap defect max |X^T X - I| is recorded; X is orthonormal to the
 //!   restart rule in every kept start), the occupied / empty boundary from the
 //!   occupation count, and the boundary gap theta[n_o] - theta[n_o - 1];
-//! * the true residuals of the Ritz pairs, r_j = H x_j - theta_j x_j, for all B
-//!   roots, and how many exceed the solver's per-root threshold (occupied
-//!   roots: the solve tolerance; the last mandatory and the buffer roots: the
-//!   buffer tolerance), against the number the Ritz-change rule corrects in its
-//!   first iteration (all B roots, capped by the capacity rule);
-//! * the singular values of the occupied residual block R_o = H X_o - X_o A_o
-//!   (from the eigenvalues of its Gram matrix, one reduction), its effective
-//!   rank at 1e-1, 1e-2, 1e-3 and 1e-4 of the largest singular value, and the
-//!   number of singular values above the solve tolerance.
+//! * true residual norms of all B Ritz pairs, separately from Ritz changes;
+//!   entry has no previous iteration at this Hamiltonian, so changes are absent;
+//! * singular values of exactly the density-carrying occupied residual block.
+//!   Relative ranks describe its spectrum, not standard-path convergence.
 //!
 //! When the kept H X of the start is armed (M2 kept start, REUSE-PSI) it is
 //! used as is; otherwise H is applied to X once (B columns, visible in the
@@ -58,6 +53,28 @@ pub fn enabled() -> bool {
     *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::FIRST_BLOCK))
 }
 
+/// Quantity tested by the eigensolver (both are in Hartree, but not interchangeable).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Criterion {
+    ResidualNorm,
+    RitzChange,
+}
+impl Criterion {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::ResidualNorm => "residual_norm",
+            Self::RitzChange => "ritz_change",
+        }
+    }
+    pub fn root_threshold(self, root: usize, mandatory: usize, tolerance: f64, buffer: f64) -> f64 {
+        if root < mandatory.saturating_sub(usize::from(self == Self::RitzChange)) {
+            tolerance
+        } else {
+            buffer
+        }
+    }
+}
+
 /// One solve's diagnostic.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Record {
@@ -66,6 +83,20 @@ pub struct Record {
     pub iteration: usize,
     pub bands: usize,
     pub occupied: usize,
+    pub electrons: f64,
+    pub occupations: Vec<f64>,
+    pub mandatory_roots: usize,
+    pub empty_buffer_roots: usize,
+    pub criterion: Criterion,
+    /// Thresholds apply to `criterion`, not necessarily to the residual norms.
+    pub root_thresholds: Vec<f64>,
+    /// Unavailable at solver entry: no previous same-H RR iteration exists.
+    pub ritz_changes: Option<Vec<f64>>,
+    pub residual_unconverged_all: Option<usize>,
+    pub residual_unconverged_occupied: Option<usize>,
+    pub ritz_first_correction_capacity: Option<usize>,
+    /// Extra H columns evaluated by the diagnostic, excluded from solver work.
+    pub diagnostic_operator_applications: usize,
     pub tolerance: f64,
     pub buffer_tolerance: f64,
     /// Whether the kept H X was used (else H was applied to X here).
@@ -76,18 +107,14 @@ pub struct Record {
     pub ritz_values: Vec<f64>,
     /// True residual norms of the B Ritz pairs.
     pub residual_norms: Vec<f64>,
-    pub true_unconverged_all: usize,
-    pub true_unconverged_occupied: usize,
-    /// Roots the Ritz-change rule corrects in the solver's first iteration.
-    pub ritz_rule_unconverged: usize,
     /// Singular values of R_o (descending).
     pub singular_values: Vec<f64>,
     pub rank_1e1: usize,
     pub rank_1e2: usize,
     pub rank_1e3: usize,
     pub rank_1e4: usize,
-    /// Singular values above the solve tolerance.
-    pub rank_above_tolerance: usize,
+    /// Only a residual criterion supplies a meaningful residual threshold.
+    pub rank_above_residual_tolerance: Option<usize>,
 }
 
 static RECORDS: Mutex<Vec<Record>> = Mutex::new(Vec::new());
@@ -98,11 +125,13 @@ pub fn take_records() -> Vec<Record> {
 }
 
 /// Inputs of one evaluation.
-pub(crate) struct Input<'a> {
+pub struct Input<'a> {
     pub x: &'a RealMatrix,
     pub hx: Option<&'a RealMatrix>,
     pub bands: usize,
-    pub occupied: usize,
+    pub occupations: &'a [f64],
+    pub electrons: f64,
+    pub criterion: Criterion,
     pub tolerance: f64,
     pub strict_bands: usize,
     pub buffer_tolerance: f64,
@@ -122,7 +151,7 @@ fn reduce<C: Collective>(comm: Option<&C>, local: &[f64], out: &mut [f64]) -> Re
 
 /// Evaluate and record (rank 0 keeps the record). `apply` forms H X on the
 /// rows of `x` when no kept H X is given. Collective when `comm` is given.
-pub(crate) fn evaluate<C: Collective>(
+pub fn evaluate<C: Collective>(
     comm: Option<&C>,
     input: Input<'_>,
     apply: &mut dyn FnMut(&RealMatrix, &mut RealMatrix) -> Result<(), String>,
@@ -131,13 +160,21 @@ pub(crate) fn evaluate<C: Collective>(
         x,
         hx,
         bands,
-        occupied,
+        occupations,
+        electrons,
+        criterion,
         tolerance,
         strict_bands,
         buffer_tolerance,
         capacity,
         pool,
     } = input;
+    // This evaluator is defined only for a closed-shell integer prefix.
+    // Fractional/spin paths must not receive manufactured integer metadata.
+    let occupied = occupations.iter().take_while(|&&f| f == 2.0).count();
+    if occupations.len() != bands || occupations[occupied..].iter().any(|&f| f != 0.0) {
+        return Err("first-block diagnostic requires fixed closed-shell occupations".into());
+    }
     let (nl, b) = (x.rows(), x.cols());
     if b != bands || bands == 0 || occupied == 0 || occupied > bands {
         return Ok(());
@@ -145,7 +182,7 @@ pub(crate) fn evaluate<C: Collective>(
     let e = |err: dft_numerics::linalg::LinalgError| err.to_string();
     let mut gemm = RealGemmWorkspace::with_pool(nl.max(1), b, pool).map_err(e)?;
     let owned;
-    let kept_hx = hx.is_some();
+    let kept_hx = hx.is_some_and(|h| h.rows() == nl && h.cols() == b);
     let hx = match hx {
         Some(h) if h.rows() == nl && h.cols() == b => h,
         _ => {
@@ -236,15 +273,10 @@ pub(crate) fn evaluate<C: Collective>(
             .filter(|&&s| s > t * sigma_max)
             .count()
     };
-    let threshold = |j: usize| {
-        if j + 1 < strict_bands {
-            tolerance
-        } else {
-            buffer_tolerance
-        }
-    };
-    let true_unconverged_all = (0..b).filter(|&j| residual_norms[j] > threshold(j)).count();
-    let true_unconverged_occupied = (0..no)
+    let threshold =
+        |j: usize| criterion.root_threshold(j, strict_bands, tolerance, buffer_tolerance);
+    let residual_count_all = (0..b).filter(|&j| residual_norms[j] > threshold(j)).count();
+    let residual_count_occupied = (0..no)
         .filter(|&j| residual_norms[j] > threshold(j))
         .count();
     let record = Record {
@@ -253,6 +285,20 @@ pub(crate) fn evaluate<C: Collective>(
         iteration: profile::context().iteration,
         bands: b,
         occupied: no,
+        electrons,
+        occupations: occupations.to_vec(),
+        mandatory_roots: strict_bands,
+        empty_buffer_roots: b.saturating_sub(strict_bands.max(no)),
+        criterion,
+        root_thresholds: (0..b).map(threshold).collect(),
+        ritz_changes: None,
+        residual_unconverged_all: (criterion == Criterion::ResidualNorm)
+            .then_some(residual_count_all),
+        residual_unconverged_occupied: (criterion == Criterion::ResidualNorm)
+            .then_some(residual_count_occupied),
+        ritz_first_correction_capacity: (criterion == Criterion::RitzChange)
+            .then_some(b.min(capacity.saturating_sub(b))),
+        diagnostic_operator_applications: if kept_hx { 0 } else { b },
         tolerance,
         buffer_tolerance,
         kept_hx,
@@ -264,14 +310,12 @@ pub(crate) fn evaluate<C: Collective>(
         },
         ritz_values: theta,
         residual_norms,
-        true_unconverged_all,
-        true_unconverged_occupied,
-        ritz_rule_unconverged: b.min(capacity.saturating_sub(b)),
         rank_1e1: rank_at(1e-1),
         rank_1e2: rank_at(1e-2),
         rank_1e3: rank_at(1e-3),
         rank_1e4: rank_at(1e-4),
-        rank_above_tolerance: singular_values.iter().filter(|&&s| s > tolerance).count(),
+        rank_above_residual_tolerance: (criterion == Criterion::ResidualNorm)
+            .then(|| singular_values.iter().filter(|&&s| s > tolerance).count()),
         singular_values,
     };
     if comm.is_none_or(|c| c.rank() == 0) {
@@ -280,76 +324,37 @@ pub(crate) fn evaluate<C: Collective>(
     Ok(())
 }
 
-/// Compact table of the records.
+/// Compact table; absent Ritz changes and residual verdicts are explicit.
 pub fn table(records: &[Record]) -> String {
     use std::fmt::Write;
-    let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "first-block residual diagnostic ({} solves; B bands, n_o occupied; sigma = singular values of R_o = H X_o - X_o A_o; rank@t = count sigma > t sigma_max; unconverged = roots whose true residual exceeds their threshold, rule = roots the Ritz-change rule corrects first)",
-        records.len()
-    );
-    let _ = writeln!(
-        out,
-        "  {:<4} {:<12} {:<9} {:>3} {:>4} {:>4} {:>9} {:>4} {:>9} {:>9} {:>9} {:>9} {:>5} {:>5} {:>5} {:>5} {:>6} {:>7} {:>7} {:>5} {:>9} {:>9}",
-        "seq",
-        "stage",
-        "kind",
-        "it",
-        "B",
-        "n_o",
-        "tol",
-        "kept",
-        "gap",
-        "sig_max",
-        "sig_min",
-        "r_max_occ",
-        "r1e-1",
-        "r1e-2",
-        "r1e-3",
-        "r1e-4",
-        "r>tol",
-        "unc_all",
-        "unc_occ",
-        "rule",
-        "defect",
-        "r_max_emp"
+    let mut out = String::from(
+        "first-block diagnostic: residuals and Ritz changes in Ha; relative ranks are not convergence verdicts\n",
     );
     for (i, r) in records.iter().enumerate() {
-        let sig_min = r.singular_values.last().copied().unwrap_or(0.0);
-        let r_occ = r.residual_norms[..r.occupied]
-            .iter()
-            .copied()
-            .fold(0.0, f64::max);
-        let r_emp = r.residual_norms[r.occupied..]
-            .iter()
-            .copied()
-            .fold(0.0, f64::max);
         let _ = writeln!(
             out,
-            "  {:<4} {:<12} {:<9} {:>3} {:>4} {:>4} {:>9.2e} {:>4} {:>9.2e} {:>9.2e} {:>9.2e} {:>9.2e} {:>5} {:>5} {:>5} {:>5} {:>6} {:>7} {:>7} {:>5} {:>9.1e} {:>9.2e}",
-            i,
+            "{i} {} {} it={} B={} occupied={} electrons={} occupations={:?} mandatory={} empty_buffers={} criterion={} thresholds={:?} gap_ha={:.9e} residual_norms_ha={:?} ritz_changes_ha={:?} residual_unconverged={:?} residual_unconverged_occ={:?} sigma_ha={:?} relative_ranks={:?} first_correction_capacity={:?} diagnostic_H_columns={} overlap_defect={:.2e}",
             r.stage,
             r.kind,
             r.iteration,
             r.bands,
             r.occupied,
-            r.tolerance,
-            if r.kept_hx { "yes" } else { "no" },
+            r.electrons,
+            r.occupations,
+            r.mandatory_roots,
+            r.empty_buffer_roots,
+            r.criterion.name(),
+            r.root_thresholds,
             r.boundary_gap,
-            r.singular_values.first().copied().unwrap_or(0.0),
-            sig_min,
-            r_occ,
-            r.rank_1e1,
-            r.rank_1e2,
-            r.rank_1e3,
-            r.rank_1e4,
-            r.rank_above_tolerance,
-            r.true_unconverged_all,
-            r.true_unconverged_occupied,
-            r.ritz_rule_unconverged,
-            r.overlap_defect,
-            r_emp
+            r.residual_norms,
+            r.ritz_changes,
+            r.residual_unconverged_all,
+            r.residual_unconverged_occupied,
+            r.singular_values,
+            [r.rank_1e1, r.rank_1e2, r.rank_1e3, r.rank_1e4],
+            r.ritz_first_correction_capacity,
+            r.diagnostic_operator_applications,
+            r.overlap_defect
         );
     }
     out

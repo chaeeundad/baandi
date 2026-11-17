@@ -50,6 +50,7 @@ fn operator_options_bands_and_executor_invalidate_cached_state() {
             strict_bands: bands,
             buffer_tolerance: 1e-9,
         };
+        let occupations: Vec<f64> = (0..bands).map(|j| if j == 0 { 2. } else { 0. }).collect();
         let run = |state: &mut Option<RealSolveState>, diagnostics: &mut GammaRealDiagnostics| {
             solve_real_gamma(
                 &h,
@@ -61,6 +62,8 @@ fn operator_options_bands_and_executor_invalidate_cached_state() {
                 bands,
                 1e-9,
                 policy,
+                &occupations,
+                2.,
                 true,
                 &options,
                 pool.clone(),

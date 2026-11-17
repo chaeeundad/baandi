@@ -249,7 +249,12 @@ fn instrumentation_is_bit_identical_and_snapshots_replay() {
             assert_eq!(r.bands, 6);
             assert!(r.rank_1e1 >= 1 && r.rank_1e1 <= r.occupied);
             assert!(r.rank_1e4 >= r.rank_1e1);
-            assert!(r.true_unconverged_all <= r.bands);
+            assert_eq!(r.occupied, 4);
+            assert_eq!(r.electrons, 8.);
+            assert_eq!(r.mandatory_roots, 5);
+            assert_eq!(r.empty_buffer_roots, 1);
+            assert_eq!(r.criterion, dft_engine::first_block::Criterion::RitzChange);
+            assert_eq!(r.residual_unconverged_all, None);
             assert!(
                 r.overlap_defect < 1e-8,
                 "kept vectors orthonormal: {}",

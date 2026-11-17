@@ -619,3 +619,41 @@ operator in place only when a branch applies it (distributed operator
 unavailable, threads path). Every serial-apply branch binds `op` through
 `op_opt`; use `state.half` (not the serial operator) for packing and the
 diagonal. Counter `gamma_real::serial_operator_builds`.
+
+## Construction split over the ranks (INIT-SCALE, 2026-11-18)
+
+
+
+With a registered communicator (two or more ranks; every rank constructs the
+
+problem) `ScfProblem::construct` splits two replicated pieces, always on and
+
+bit-identical for every rank count: `ionic_local_coefficients` (contiguous G
+
+blocks, `ionic_local_with_conventions_rows`, one allgatherv; counter
+
+`ionic_local_splits`) and `ewald_evaluate` (`ewald::EwaldPlan` candidate blocks,
+
+running sums passed down the ranks by P broadcasts so the serial association is
+
+kept; counter `ewald_splits`). Any failure on a rank makes every rank repeat the
+
+serial call (same error). Do not construct a problem on a subset of the ranks
+
+while a communicator is registered. `BAANDI_M2_ATOMIC_BLOCK=on` (default off,
+
+rounding class; `EngineTuning::atomic_block`): row-distributed CholQR2 atomic
+
+span (`orthonormalize_block`, fallback to the split Gram-Schmidt below pivot
+
+1e-6, counters `atomic_block_starts` / `atomic_block_fallbacks`) and row-split
+
+Ritz rotation (`rotate_rows`). Tests `tests/init_scale.rs`,
+
+`m2_coarse_certificate::block_atomic_start_stays_in_the_class_of_the_split_start`,
+
+lib `block_cholesky_qr_matches_gram_schmidt_and_falls_back_together`; physics
+
+`setup_memo_identity::ionic_local_row_blocks_are_bit_identical_for_every_rank_count`,
+
+lib `ewald::tests`. Ledger INIT-*.

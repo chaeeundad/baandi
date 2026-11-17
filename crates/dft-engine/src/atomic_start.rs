@@ -135,10 +135,13 @@ pub(super) fn span(
         }
     }
     atomic_part(AtomicPart::Radial, part);
-    let fill = |j: usize, column: &mut [Complex64]| -> Result<(), ScfError> {
+    // Rows first..first + column.len() of span column j (the same elementwise
+    // arithmetic for any row range).
+    let fill_rows = |j: usize, first: usize, column: &mut [Complex64]| -> Result<(), ScfError> {
         let (r, l, m, pos, il) = columns[j];
         let radial = &radials[r];
-        for (i, g) in basis.momenta().iter().enumerate() {
+        let momenta = &basis.momenta()[first..first + column.len()];
+        for ((out, g), &rad) in column.iter_mut().zip(momenta).zip(&radial[first..]) {
             let y = if g.norm_squared == 0.0 {
                 if l == 0 {
                     1.0 / (4.0 * std::f64::consts::PI).sqrt()
@@ -149,11 +152,25 @@ pub(super) fn span(
                 real_spherical_harmonic(l, m, g.cartesian).map_err(numerical)?
             };
             let phase = hamiltonian::structure_factor(g.cartesian, &[pos])?;
-            column[i] = il * phase * (radial[i] * y);
+            *out = il * phase * (rad * y);
         }
         Ok(())
     };
+    let fill = |j: usize, column: &mut [Complex64]| fill_rows(j, 0, column);
     let part = clock();
+    // BAANDI_M2_ATOMIC_BLOCK=on: row-distributed CholQR2 (rounding class);
+    // None (any rank could not use it) continues with the split routine below.
+    if let Some(comm) = split.filter(|_| npw > 0 && crate::m2::tuning().atomic_block) {
+        let gamma = basis.k_fractional() == [0.; 3];
+        if let Some(ortho) = orthonormalize_block(comm, &fill_rows, npw, count, gamma)? {
+            atomic_part(AtomicPart::Orthonormalize, part);
+            let part = clock();
+            let span = finish_span(basis, grid, bands, ortho, npw, report);
+            atomic_part(AtomicPart::Finish, part);
+            return span;
+        }
+        crate::m2::count_atomic_block_fallback();
+    }
     if let Some(comm) = split.filter(|_| npw > 0) {
         let (rank, ranks) = (comm.rank(), comm.size());
         let mine: Vec<usize> = (rank..count).step_by(ranks).collect();
@@ -383,6 +400,301 @@ fn orthonormalize_split(
     })
 }
 
+/// Smallest Cholesky pivot (relative remaining norm of a unit column) the
+/// block path accepts. CholQR squares the condition number, so it is reliable
+/// only well above sqrt(machine epsilon) ~ 1.5e-8; below this guard the exact
+/// two-pass Gram-Schmidt (which also owns the dependence rule) runs instead.
+/// A numerical-method validity bound, independent of the system.
+const BLOCK_PIVOT_GUARD: f64 = 1e-6;
+
+/// Upper Cholesky factor R (G = R^H R, column-major n x n) of a Hermitian
+/// matrix from its upper triangle; None for a pivot that is nonfinite or
+/// below `guard`. Replicated: every rank factors the same bits.
+fn cholesky_upper(g: &[Complex64], n: usize, guard: f64) -> Option<Vec<Complex64>> {
+    let mut r = vec![Complex64::default(); n * n];
+    for j in 0..n {
+        let mut d = g[j * n + j].re;
+        for k in 0..j {
+            d -= r[j * n + k].norm_sqr();
+        }
+        if !d.is_finite() || d <= guard * guard {
+            return None;
+        }
+        let rjj = d.sqrt();
+        r[j * n + j] = Complex64::new(rjj, 0.0);
+        for i in j + 1..n {
+            // G_ji = sum_k conj(R_kj) R_ki
+            let mut v = g[i * n + j];
+            for k in 0..j {
+                v -= r[j * n + k].conj() * r[i * n + k];
+            }
+            r[i * n + j] = v / rjj;
+        }
+    }
+    Some(r)
+}
+
+/// Inverse of an upper triangular column-major matrix (back substitution).
+fn upper_inverse(r: &[Complex64], n: usize) -> Vec<Complex64> {
+    let mut x = vec![Complex64::default(); n * n];
+    for j in 0..n {
+        x[j * n + j] = Complex64::new(1.0, 0.0) / r[j * n + j];
+        for i in (0..j).rev() {
+            let mut s = Complex64::default();
+            for k in i + 1..=j {
+                s += r[k * n + i] * x[j * n + k];
+            }
+            x[j * n + i] = -s / r[i * n + i];
+        }
+    }
+    x
+}
+
+/// Local products of the block orthonormalization. At Gamma the span columns
+/// are Hermitian-symmetric, so their overlaps and the triangular factors are
+/// real: the complex rows x n block is used as the real 2 rows x n block of
+/// its interleaved parts (Re A^H A = A_r^T A_r, A T = A_r T for real T), half
+/// the work of the complex products.
+enum BlockAlgebra {
+    Complex,
+    Real(dft_numerics::real::RealGemmWorkspace),
+}
+impl BlockAlgebra {
+    fn new(gamma: bool, rows: usize, n: usize) -> Result<Self, ScfError> {
+        if !gamma {
+            return Ok(Self::Complex);
+        }
+        let pool = dft_numerics::pool::WorkerPool::new(1).map_err(numerical)?;
+        dft_numerics::real::RealGemmWorkspace::with_pool(2 * rows, n, pool)
+            .map(Self::Real)
+            .map_err(numerical)
+    }
+    /// Values per Gram matrix in the reduction (real: n^2, complex: 2 n^2).
+    fn gram_len(&self, n: usize) -> usize {
+        match self {
+            Self::Complex => 2 * n * n,
+            Self::Real(_) => n * n,
+        }
+    }
+    /// This rank's Gram contribution into `out` (`gram_len` values).
+    fn gram(&mut self, a: &ComplexMatrix, out: &mut [f64]) -> Result<(), ScfError> {
+        let (rows, n) = (a.rows(), a.cols());
+        match self {
+            Self::Complex => {
+                let g = gemm(a, MatrixOp::Adjoint, a, MatrixOp::Identity).map_err(numerical)?;
+                for (b, z) in out.as_chunks_mut::<2>().0.iter_mut().zip(g.as_slice()) {
+                    b[0] = z.re;
+                    b[1] = z.im;
+                }
+            }
+            Self::Real(ws) => {
+                let flat = interleaved(a.as_slice());
+                let mut g = dft_numerics::real::RealMatrix::zeros(n, n).map_err(numerical)?;
+                ws.multiply_slices_into(
+                    dft_numerics::real::GemmSite::Other,
+                    &flat,
+                    2 * rows,
+                    n,
+                    2 * rows,
+                    dft_numerics::real::RealOp::Transpose,
+                    &flat,
+                    n,
+                    2 * rows,
+                    g.as_mut(),
+                )
+                .map_err(numerical)?;
+                out.copy_from_slice(g.as_slice());
+            }
+        }
+        Ok(())
+    }
+    /// Reduced Gram values back to a complex n x n matrix.
+    fn unpack(&self, values: &[f64]) -> Vec<Complex64> {
+        match self {
+            Self::Complex => values
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| Complex64::new(b[0], b[1]))
+                .collect(),
+            Self::Real(_) => values.iter().map(|&v| Complex64::new(v, 0.0)).collect(),
+        }
+    }
+    /// A T for this rank's rows (T n x n; its real part only at Gamma).
+    fn update(&mut self, a: &ComplexMatrix, t: &[Complex64]) -> Result<ComplexMatrix, ScfError> {
+        let (rows, n) = (a.rows(), a.cols());
+        match self {
+            Self::Complex => {
+                let t = ComplexMatrix::new(n, n, t.to_vec()).map_err(numerical)?;
+                gemm(a, MatrixOp::Identity, &t, MatrixOp::Identity).map_err(numerical)
+            }
+            Self::Real(ws) => {
+                let t: Vec<f64> = t.iter().map(|z| z.re).collect();
+                let mut q =
+                    dft_numerics::real::RealMatrix::zeros(2 * rows, n).map_err(numerical)?;
+                ws.multiply_slices_into(
+                    dft_numerics::real::GemmSite::Other,
+                    &interleaved(a.as_slice()),
+                    2 * rows,
+                    n,
+                    2 * rows,
+                    dft_numerics::real::RealOp::Identity,
+                    &t,
+                    n,
+                    n,
+                    q.as_mut(),
+                )
+                .map_err(numerical)?;
+                ComplexMatrix::new(
+                    rows,
+                    n,
+                    q.as_slice()
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|b| Complex64::new(b[0], b[1]))
+                        .collect(),
+                )
+                .map_err(numerical)
+            }
+        }
+    }
+}
+
+/// The interleaved (re, im) parts of a complex slice (copy; no unsafe view).
+fn interleaved(z: &[Complex64]) -> Vec<f64> {
+    z.iter().flat_map(|z| [z.re, z.im]).collect()
+}
+
+/// Global Gram matrix A^H A of row-distributed columns (`local`: this rank's
+/// rows; None for a rank without rows) by one tree_sum; the last summed value
+/// counts the ranks that flagged a failure (`failed`, or a local product
+/// error). None when any rank failed (the same on every rank).
+fn block_gram(
+    comm: &crate::parallel::SharedComm,
+    algebra: &mut BlockAlgebra,
+    local: Option<&ComplexMatrix>,
+    failed: bool,
+    n: usize,
+) -> Result<Option<Vec<Complex64>>, ScfError> {
+    let len = algebra.gram_len(n);
+    let mut send = vec![0.0; len + 1];
+    if failed {
+        send[len] = 1.0;
+    } else if let Some(a) = local
+        && algebra.gram(a, &mut send[..len]).is_err()
+    {
+        send[..len].fill(0.0);
+        send[len] = 1.0;
+    }
+    let mut out = vec![0.0; send.len()];
+    comm.tree_sum_f64(&send, &mut out)
+        .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    if out[len] != 0.0 || out.iter().any(|v| !v.is_finite()) {
+        return Ok(None);
+    }
+    Ok(Some(algebra.unpack(&out[..len])))
+}
+
+/// Fills rows `first..first + column.len()` of span column `j`.
+type FillRows<'a> = dyn Fn(usize, usize, &mut [Complex64]) -> Result<(), ScfError> + 'a;
+
+/// `BAANDI_M2_ATOMIC_BLOCK=on`: orthonormal span by a row-distributed CholQR2.
+/// Every rank fills its contiguous block of rows of all `n` columns (the
+/// elementwise arithmetic of the replicated fill), then twice: local Gram
+/// GEMM, one tree_sum, replicated Cholesky and triangular inverse, local
+/// update Q = A R^-1 (the first pass on the column-normalized Gram, as the
+/// Gram-Schmidt routine normalizes each column first). One allgatherv returns
+/// the full rows. Same span sequence as Gram-Schmidt (column j of Q spans the
+/// first j + 1 inputs, positive R diagonal); rounding class. `Ok(None)` (every
+/// rank alike) asks for the split Gram-Schmidt: a rank failed to fill, data
+/// were nonfinite, or a pivot fell below `BLOCK_PIVOT_GUARD`. Collective.
+fn orthonormalize_block(
+    comm: &crate::parallel::SharedComm,
+    fill_rows: &FillRows<'_>,
+    m: usize,
+    n: usize,
+    gamma: bool,
+) -> Result<Option<dft_numerics::linalg::Orthonormalized>, ScfError> {
+    let counts = dft_mpi::block_counts(m, comm.size());
+    let first: usize = counts[..comm.rank()].iter().sum();
+    let rows = counts[comm.rank()];
+    let mut a = vec![Complex64::default(); rows * n];
+    let mut filled = true;
+    if rows > 0 {
+        for (j, column) in a.chunks_exact_mut(rows).enumerate() {
+            if fill_rows(j, first, column).is_err() {
+                filled = false;
+                break;
+            }
+        }
+    }
+    let a = ComplexMatrix::new(rows, n, a).map_err(numerical)?;
+    let all_finite = |x: &ComplexMatrix| x.as_slice().iter().all(finite);
+    let failed = !filled || !all_finite(&a);
+    let mut algebra = BlockAlgebra::new(gamma, rows, n)?;
+    let Some(g) = block_gram(comm, &mut algebra, (rows > 0).then_some(&a), failed, n)? else {
+        return Ok(None);
+    };
+    // First pass on the column-normalized Gram: Q1 = A D^-1 R1^-1.
+    let scale: Vec<f64> = (0..n).map(|j| g[j * n + j].re.sqrt()).collect();
+    if scale.iter().any(|s| !s.is_finite() || *s == 0.0) {
+        return Ok(None);
+    }
+    let mut gs = g;
+    for j in 0..n {
+        for i in 0..n {
+            gs[j * n + i] /= scale[i] * scale[j];
+        }
+    }
+    let Some(r1) = cholesky_upper(&gs, n, BLOCK_PIVOT_GUARD) else {
+        return Ok(None);
+    };
+    let mut t1 = upper_inverse(&r1, n);
+    for j in 0..n {
+        for i in 0..n {
+            t1[j * n + i] /= scale[i];
+        }
+    }
+    let (q1, failed) = if rows > 0 {
+        match algebra.update(&a, &t1) {
+            Ok(q) => {
+                let bad = !all_finite(&q);
+                (q, bad)
+            }
+            Err(_) => (a, true),
+        }
+    } else {
+        (a, false)
+    };
+    let Some(g2) = block_gram(comm, &mut algebra, (rows > 0).then_some(&q1), failed, n)? else {
+        return Ok(None);
+    };
+    // Second pass: R2 is the identity to rounding for an accepted first pass.
+    let Some(r2) = cholesky_upper(&g2, n, 0.5) else {
+        return Ok(None);
+    };
+    let t2 = upper_inverse(&r2, n);
+    // Q1 is finite on every rank (checked by the reduction) and R2^-1 is
+    // finite (pivots >= 0.5), so this GEMM cannot reject its inputs.
+    let q = if rows > 0 {
+        algebra.update(&q1, &t2)?
+    } else {
+        q1
+    };
+    let local: Vec<f64> = q.as_slice().iter().flat_map(|z| [z.re, z.im]).collect();
+    let vectors = gather_rows(comm, &counts, &local, n)?;
+    crate::m2::count(crate::m2::Count::AtomicBlockStarts);
+    Ok(Some(dft_numerics::linalg::Orthonormalized {
+        vectors,
+        dropped: Vec::new(),
+    }))
+}
+
+fn finite(z: &Complex64) -> bool {
+    z.re.is_finite() && z.im.is_finite()
+}
+
 /// `BAANDI_M2_ATOMIC=split`: Q^H H Q with the H applications and the Gram
 /// columns split over ranks in contiguous column blocks (one allgatherv of the
 /// small matrix). Each rank's block product is a GEMM of a column subset, so
@@ -425,6 +737,64 @@ fn split_gram(
             .collect(),
     )
     .map_err(numerical)
+}
+
+/// `BAANDI_M2_ATOMIC_BLOCK=on`: Q C with every rank multiplying its contiguous
+/// block of rows (a GEMM of a row subset: rounding class of the replicated
+/// product) and one allgatherv of the rows. Collective.
+fn rotate_rows(
+    comm: &crate::parallel::SharedComm,
+    q: &ComplexMatrix,
+    c: &ComplexMatrix,
+) -> Result<ComplexMatrix, ScfError> {
+    let (m, k, n) = (q.rows(), q.cols(), c.cols());
+    let counts = dft_mpi::block_counts(m, comm.size());
+    let first: usize = counts[..comm.rank()].iter().sum();
+    let rows = counts[comm.rank()];
+    let mut local = Vec::with_capacity(2 * rows * n);
+    if rows > 0 {
+        let mut block = Vec::with_capacity(rows * k);
+        for j in 0..k {
+            block.extend_from_slice(&q.column(j)[first..first + rows]);
+        }
+        let block = ComplexMatrix::new(rows, k, block).map_err(numerical)?;
+        // Q and C are finite (validated by the Gram and the eigensolver), so
+        // every rank either succeeds here or fails identically on its inputs.
+        let part = gemm(&block, MatrixOp::Identity, c, MatrixOp::Identity).map_err(numerical)?;
+        local.extend(part.as_slice().iter().flat_map(|z| [z.re, z.im]));
+    }
+    gather_rows(comm, &counts, &local, n)
+}
+
+/// Full column-major m x n block from every rank's contiguous row block
+/// (`local`: this rank's rows x n block as interleaved re, im; `counts`: rows
+/// per rank, `dft_mpi::block_counts`). One allgatherv. Collective.
+fn gather_rows(
+    comm: &crate::parallel::SharedComm,
+    counts: &[usize],
+    local: &[f64],
+    n: usize,
+) -> Result<ComplexMatrix, ScfError> {
+    let m: usize = counts.iter().sum();
+    let gathered: Vec<usize> = counts.iter().map(|r| 2 * r * n).collect();
+    let mut all = vec![0.0; 2 * m * n];
+    comm.allgatherv_f64(local, &gathered, &mut all)
+        .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    let mut data = vec![Complex64::default(); m * n];
+    let (mut at, mut d) = (0, 0);
+    for &r in counts {
+        for j in 0..n {
+            for (out, b) in data[j * m + d..j * m + d + r]
+                .iter_mut()
+                .zip(all[at..at + 2 * r].as_chunks::<2>().0)
+            {
+                *out = Complex64::new(b[0], b[1]);
+            }
+            at += 2 * r;
+        }
+        d += r;
+    }
+    ComplexMatrix::new(m, n, data).map_err(numerical)
 }
 
 impl AtomicSpan {
@@ -489,7 +859,11 @@ pub(super) fn ritz(
     for j in 0..bands {
         selected.column_mut(j).copy_from_slice(rot.column(j));
     }
-    let guess = gemm(q, MatrixOp::Identity, &selected, MatrixOp::Identity).map_err(numerical)?;
+    // BAANDI_M2_ATOMIC_BLOCK=on: the rotation by row blocks (one allgatherv).
+    let guess = match split.filter(|_| crate::m2::tuning().atomic_block) {
+        Some(comm) => rotate_rows(comm, q, &selected)?,
+        None => gemm(q, MatrixOp::Identity, &selected, MatrixOp::Identity).map_err(numerical)?,
+    };
     atomic_part(AtomicPart::Rotate, part);
     let mut report = span.report.clone();
     report.initial_h_applications = q.cols();
@@ -553,6 +927,116 @@ mod tests {
                 assert_eq!(r.dropped, want.dropped, "P={ranks}");
                 assert_eq!(bits(&r.vectors), bits(&want.vectors), "P={ranks}");
             }
+        }
+    }
+
+    /// `orthonormalize_block` (BAANDI_M2_ATOMIC_BLOCK): for 2 to 7 ranks
+    /// (including ranks without rows) every rank returns the same bits, the
+    /// columns are orthonormal and agree with the serial two-pass Gram-Schmidt
+    /// to rounding (same span sequence and phase convention); a dependent or
+    /// zero column and a failing fill make every rank fall back (None).
+    #[test]
+    fn block_cholesky_qr_matches_gram_schmidt_and_falls_back_together() {
+        let (m, n) = (41, 11);
+        let mut s: u64 = 29;
+        let mut next = || {
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((s >> 11) as f64 / (1u64 << 53) as f64) - 0.5
+        };
+        let mut block = ComplexMatrix::zeros(m, n).unwrap();
+        for j in 0..n {
+            for z in block.column_mut(j) {
+                *z = Complex64::new(next(), next());
+            }
+        }
+        // Columns of very different length (the block path normalizes first).
+        for z in block.column_mut(3) {
+            *z *= 1e3;
+        }
+        // A Gamma-like block: row 0 real, rows 21..41 the conjugates of rows
+        // 1..21 (Hermitian-symmetric columns: real overlaps, real branch).
+        let mut mirrored = block.clone();
+        for j in 0..n {
+            let c = mirrored.column_mut(j);
+            c[0].im = 0.0;
+            for i in 1..=20 {
+                c[20 + i] = c[i].conj();
+            }
+        }
+        let bits = |v: &ComplexMatrix| {
+            v.as_slice()
+                .iter()
+                .flat_map(|z| [z.re.to_bits(), z.im.to_bits()])
+                .collect::<Vec<_>>()
+        };
+        let run = |block: &ComplexMatrix, ranks: usize, fail_rank: Option<usize>, gamma: bool| {
+            simulate(ranks, |comm: &SimRank| {
+                crate::parallel::set_communicator(Some(Arc::new(comm.clone())));
+                let shared = crate::parallel::SharedComm::active().unwrap();
+                let rank = comm.rank();
+                let fill = |j: usize, first: usize, column: &mut [Complex64]| {
+                    if fail_rank == Some(rank) {
+                        return Err(ScfError::Numerical("fill".into()));
+                    }
+                    column.copy_from_slice(&block.column(j)[first..first + column.len()]);
+                    Ok(())
+                };
+                let r = orthonormalize_block(&shared, &fill, m, n, gamma).unwrap();
+                crate::parallel::set_communicator(None);
+                r
+            })
+        };
+        for (block, gamma) in [(&block, false), (&mirrored, true)] {
+            let want = orthonormalize(block, None).unwrap();
+            assert!(want.dropped.is_empty());
+            for ranks in 2..=7 {
+                let got = run(block, ranks, None, gamma);
+                let first = got[0].as_ref().expect("block path accepted");
+                for r in &got {
+                    let r = r.as_ref().unwrap();
+                    assert!(r.dropped.is_empty());
+                    assert_eq!(bits(&r.vectors), bits(&first.vectors), "P={ranks}");
+                }
+                let q = &first.vectors;
+                let mut worst_gs = 0.0f64;
+                for (x, y) in q.as_slice().iter().zip(want.vectors.as_slice()) {
+                    worst_gs = worst_gs.max((x - y).norm());
+                }
+                assert!(
+                    worst_gs < 1e-12,
+                    "P={ranks}: |Q_block - Q_gs| = {worst_gs:e}"
+                );
+                let g = gemm(q, MatrixOp::Adjoint, q, MatrixOp::Identity).unwrap();
+                for j in 0..n {
+                    for i in 0..n {
+                        let e = if i == j { 1.0 } else { 0.0 };
+                        assert!((g[(i, j)] - e).norm() < 1e-14, "P={ranks} ({i},{j})");
+                    }
+                }
+            }
+        }
+        // Exactly dependent column, zero column, failing fill on one rank.
+        let mut dependent = block.clone();
+        let (a, b) = (block.column(1).to_vec(), block.column(2).to_vec());
+        for ((z, x), y) in dependent.column_mut(9).iter_mut().zip(&a).zip(&b) {
+            *z = x * 0.5 - y * 2.0;
+        }
+        let mut zero = block.clone();
+        zero.column_mut(4).fill(Complex64::default());
+        for ranks in [2, 3, 5] {
+            assert!(
+                run(&dependent, ranks, None, false)
+                    .iter()
+                    .all(Option::is_none)
+            );
+            assert!(run(&zero, ranks, None, false).iter().all(Option::is_none));
+            assert!(
+                run(&block, ranks, Some(1), false)
+                    .iter()
+                    .all(Option::is_none)
+            );
         }
     }
 }

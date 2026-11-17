@@ -770,6 +770,126 @@ pub fn ewald_cache_counters() -> [u64; 2] {
 pub fn set_ewald_cache_override(on: Option<bool>) {
     EWALD_CACHE_OVERRIDE.with(|o| o.set(on));
 }
+/// Ionic local coefficients over the density sphere (INIT-SCALE-2, always on).
+/// With a registered communicator of two or more ranks every rank evaluates
+/// its contiguous block of G vectors with the per-G arithmetic of the full call
+/// (`ionic_local_with_conventions_rows`) and one allgatherv assembles them:
+/// bit-identical to the replicated evaluation for any rank count. When any
+/// rank failed, every rank repeats the replicated call, which returns the
+/// replicated error. Collective with a communicator.
+fn ionic_local_coefficients(
+    density: &PlaneWaveBasis,
+    volume_bohr3: f64,
+    species: &[Species<'_>],
+    local_mesh: dft_upf::radial::LocalMesh,
+    rule: dft_upf::radial::RadialEvenRule,
+) -> Result<Vec<Complex64>, ScfError> {
+    use dft_mpi::Collective;
+    let full = || {
+        hamiltonian::ionic_local_with_conventions(density, volume_bohr3, species, local_mesh, rule)
+    };
+    let Some(comm) = crate::parallel::SharedComm::active() else {
+        return Ok(full()?);
+    };
+    let n = density.vectors().len();
+    let counts = dft_mpi::block_counts(n, comm.size());
+    let first: usize = counts[..comm.rank()].iter().sum();
+    let local = hamiltonian::ionic_local_with_conventions_rows(
+        density,
+        volume_bohr3,
+        species,
+        local_mesh,
+        rule,
+        first..first + counts[comm.rank()],
+    );
+    // Per rank: 2 values per coefficient, then a failure flag.
+    let mut send = vec![0.0; 2 * counts[comm.rank()] + 1];
+    match &local {
+        Ok(values) => {
+            for (b, z) in send.as_chunks_mut::<2>().0.iter_mut().zip(values) {
+                b[0] = z.re;
+                b[1] = z.im;
+            }
+        }
+        Err(_) => *send.last_mut().unwrap() = 1.0,
+    }
+    let gathered: Vec<usize> = counts.iter().map(|c| 2 * c + 1).collect();
+    let mut all = vec![0.0; gathered.iter().sum()];
+    comm.allgatherv_f64(&send, &gathered, &mut all)
+        .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    let mut result = Vec::with_capacity(n);
+    let mut at = 0;
+    for &c in &counts {
+        if all[at + 2 * c] != 0.0 {
+            return Ok(full()?);
+        }
+        result.extend(
+            all[at..at + 2 * c]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| Complex64::new(b[0], b[1])),
+        );
+        at += 2 * c + 1;
+    }
+    crate::m2::count(crate::m2::Count::IonicLocalSplits);
+    Ok(result)
+}
+
+/// Ewald energy (INIT-SCALE-3, always on). With a registered communicator of
+/// two or more ranks every rank evaluates the terms of its contiguous block of
+/// the real-space and the reciprocal candidates (`ewald::EwaldPlan`, the
+/// expensive erfc and structure-factor work), then the two running sums pass
+/// down the ranks: rank r adds its terms in order to the sums received from
+/// rank r - 1 and broadcasts them (P broadcasts of three values). This is the
+/// serial loop's association exactly, so the result is bit-identical to
+/// `ewald::energy` for any rank count. A failure on any rank (coincident ions)
+/// is carried in the third value and makes every rank repeat the serial call,
+/// which returns the serial error. Collective with a communicator.
+fn ewald_evaluate(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfError> {
+    use dft_mpi::Collective;
+    let serial = || Ok(ewald::energy(cell, ions, EwaldOptions::default())?);
+    let Some(comm) = crate::parallel::SharedComm::active() else {
+        return serial();
+    };
+    // The plan depends only on replicated inputs: every rank succeeds or fails alike.
+    let Ok(plan) = ewald::EwaldPlan::new(cell, ions, EwaldOptions::default()) else {
+        return serial();
+    };
+    let (rank, ranks) = (comm.rank(), comm.size());
+    let block = |n: usize| {
+        let counts = dft_mpi::block_counts(n, ranks);
+        let first: usize = counts[..rank].iter().sum();
+        first..first + counts[rank]
+    };
+    let (mut real, mut reciprocal) = (Vec::new(), Vec::new());
+    let failed = plan
+        .real_terms(block(plan.real_candidates()), &mut real)
+        .is_err();
+    if !failed {
+        plan.reciprocal_terms(block(plan.reciprocal_candidates()), &mut reciprocal);
+    }
+    // [real sum, reciprocal sum, failure flag], passed from rank 0 to P - 1.
+    let mut state = [0.0; 3];
+    for root in 0..ranks {
+        if root == rank {
+            if failed {
+                state[2] = 1.0;
+            } else if state[2] == 0.0 {
+                state[0] = ewald::accumulate(state[0], &real);
+                state[1] = ewald::accumulate(state[1], &reciprocal);
+            }
+        }
+        comm.bcast_f64(&mut state, root)
+            .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    }
+    if state[2] != 0.0 {
+        return serial();
+    }
+    crate::m2::count(crate::m2::Count::EwaldSplits);
+    Ok(plan.finish_sums(state[0], state[1])?)
+}
+
 fn ewald_energy(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfError> {
     use std::sync::atomic::Ordering::Relaxed;
     let on = EWALD_CACHE_OVERRIDE
@@ -777,7 +897,7 @@ fn ewald_energy(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfErro
         .unwrap_or_else(|| dft_numerics::switches::on(dft_numerics::switches::Id::EWALD_CACHE));
     if !on {
         EWALD_CACHE_COUNTS[1].fetch_add(1, Relaxed);
-        return Ok(ewald::energy(cell, ions, EwaldOptions::default())?);
+        return ewald_evaluate(cell, ions);
     }
     let mut key = Vec::with_capacity(9 + 4 * ions.len());
     key.extend(
@@ -801,7 +921,7 @@ fn ewald_energy(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfErro
         return Ok(e);
     }
     EWALD_CACHE_COUNTS[1].fetch_add(1, Relaxed);
-    let e = ewald::energy(cell, ions, EwaldOptions::default())?;
+    let e = ewald_evaluate(cell, ions)?;
     EWALD_LAST.with(|l| *l.borrow_mut() = Some((key, e.clone())));
     Ok(e)
 }
@@ -1209,7 +1329,7 @@ impl ScfProblem {
                 positions_bohr: r,
             })
             .collect();
-        let ionic_g = dg.scatter(&hamiltonian::ionic_local_with_conventions(
+        let ionic_g = dg.scatter(&ionic_local_coefficients(
             &density_basis,
             cell.volume_bohr3(),
             &species,
@@ -1520,6 +1640,18 @@ impl ScfProblem {
     }
     pub fn uniform_density(&self) -> Array3<f64> {
         Array3::from_elem(self.grid.dims(), self.electrons / self.cell.volume_bohr3())
+    }
+    /// The real-space ionic local potential built at construction (Hartree,
+    /// FFT grid). Read-only; identity tests of the distributed construction.
+    #[doc(hidden)]
+    pub fn ionic_potential(&self) -> &Array3<f64> {
+        &self.ionic_real
+    }
+    /// The Ewald energy terms computed at construction. Read-only; identity
+    /// tests of the distributed construction.
+    #[doc(hidden)]
+    pub fn ewald_terms(&self) -> &ewald::EwaldEnergy {
+        &self.ewald
     }
     /// First SCF input density: the atomic superposition when requested and
     /// available, otherwise the uniform density.

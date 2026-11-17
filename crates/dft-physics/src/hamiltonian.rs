@@ -71,8 +71,21 @@ pub fn ionic_local(
     volume_bohr3: f64,
     species: &[Species<'_>],
 ) -> Result<Vec<Complex64>, HamiltonianError> {
+    ionic_local_rows(density, volume_bohr3, species, 0..density.vectors().len())
+}
+/// Entries `rows` of [`ionic_local`] (density-sphere order). Every entry is
+/// computed by the same per-G arithmetic as the full call (the form factor is a
+/// pure function of |G|^2, the structure factor of G), so concatenating the
+/// row ranges of any partition reproduces the full result bit for bit.
+pub fn ionic_local_rows(
+    density: &PlaneWaveBasis,
+    volume_bohr3: f64,
+    species: &[Species<'_>],
+    rows: std::ops::Range<usize>,
+) -> Result<Vec<Complex64>, HamiltonianError> {
     volume(volume_bohr3)?;
-    let mut result = vec![Complex64::default(); density.vectors().len()];
+    let vectors = density.vectors().get(rows).ok_or(HamiltonianError::Shape)?;
+    let mut result = vec![Complex64::default(); vectors.len()];
     for s in species {
         let local = s.potential.local_transform(volume_bohr3, None)?;
         // Keep LocalTransform's endpoint and quadrature, but hoist only the
@@ -95,8 +108,8 @@ pub fn ionic_local(
             .collect();
         let mut integrand = vec![0.0; n];
         // At most one entry per G; reserve up front so misses never allocate.
-        let mut cache = std::collections::HashMap::with_capacity(density.vectors().len());
-        for (out, g) in result.iter_mut().zip(density.vectors()) {
+        let mut cache = std::collections::HashMap::with_capacity(vectors.len());
+        for (out, g) in result.iter_mut().zip(vectors) {
             let v = if g.miller == [0; 3] {
                 local.alpha_z()?
             } else {
@@ -1495,14 +1508,35 @@ pub fn ionic_local_with_conventions(
     local_mesh: dft_upf::radial::LocalMesh,
     rule: dft_upf::radial::RadialEvenRule,
 ) -> Result<Vec<Complex64>, HamiltonianError> {
+    ionic_local_with_conventions_rows(
+        density,
+        volume_bohr3,
+        species,
+        local_mesh,
+        rule,
+        0..density.vectors().len(),
+    )
+}
+
+/// Entries `rows` of [`ionic_local_with_conventions`], bit-identical to the
+/// same entries of the full call (see [`ionic_local_rows`]).
+pub fn ionic_local_with_conventions_rows(
+    density: &PlaneWaveBasis,
+    volume_bohr3: f64,
+    species: &[Species<'_>],
+    local_mesh: dft_upf::radial::LocalMesh,
+    rule: dft_upf::radial::RadialEvenRule,
+    rows: std::ops::Range<usize>,
+) -> Result<Vec<Complex64>, HamiltonianError> {
     if local_mesh == dft_upf::radial::LocalMesh::Baandi
         && rule == dft_upf::radial::RadialEvenRule::Simpson3_8
     {
-        return ionic_local(density, volume_bohr3, species);
+        return ionic_local_rows(density, volume_bohr3, species, rows);
     }
 
     volume(volume_bohr3)?;
-    let mut result = vec![Complex64::default(); density.vectors().len()];
+    let vectors = density.vectors().get(rows).ok_or(HamiltonianError::Shape)?;
+    let mut result = vec![Complex64::default(); vectors.len()];
     for s in species {
         let local = s
             .potential
@@ -1527,8 +1561,8 @@ pub fn ionic_local_with_conventions(
             .collect();
         let mut integrand = vec![0.0; n];
         // At most one entry per G; reserve up front so misses never allocate.
-        let mut cache = std::collections::HashMap::with_capacity(density.vectors().len());
-        for (out, g) in result.iter_mut().zip(density.vectors()) {
+        let mut cache = std::collections::HashMap::with_capacity(vectors.len());
+        for (out, g) in result.iter_mut().zip(vectors) {
             let v = if g.miller == [0; 3] {
                 local.alpha_z()?
             } else {

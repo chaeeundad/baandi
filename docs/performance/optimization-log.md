@@ -4922,3 +4922,20 @@ Raw retained energy-phase samples in seconds (30 each; warmups excluded):
   }
 }
 ```
+
+## REL-CHECKS — one-pass validation and sign convention of the reduced EVD (2026-11-18)
+
+Profile (Mac, pure build, si32 simulated np=4 warm Davidson solve, temporary
+timers, ledger REL-FINDING): the replicated `solve.reduced_eigen` stage of the
+lean MPI path is 83 % dense EVD, 7 % Cholesky extension, 9 % reduced border;
+inside `RealEighWorkspace::solve_into` 1.51 of 22.27 ms was validation and the
+sign convention around the backend call (finiteness sweep, max |a| sweep,
+asymmetry sweep with a full-stride mirror walk, output finiteness sweep, pivot
+sweep). Change: one tiled input pass (32 x 32 tile pairs) and one output read
+sweep that records the flips, applied only when the whole block is finite.
+Maxima of finite values do not depend on the visiting order and the pivot rule
+(first largest magnitude) is kept, so errors, reported numbers and output bits
+are those of the former code (unit test with the former code kept verbatim).
+After: 0.60 ms (warm), 0.25 -> 0.09 ms (cold). Bit-identical, always on.
+Rejected in the same study (ledger REL-FINDING): distributed Householder
+tridiagonalization (latency), chasing the np4 -> np8 growth as contention.

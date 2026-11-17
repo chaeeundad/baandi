@@ -1906,6 +1906,50 @@ fn rotate(
     }
 }
 
+/// Input validation of `RealEighWorkspace::solve_into` in one tiled pass
+/// (REDUCED-EIGEN-CHECKS): every entry finite, else `NonFinite`; then the
+/// largest entrywise asymmetry max_{i<j} |a_ij - a_ji| against
+/// `HERMITIAN_TOLERANCE * max(1, max |a_ij|)`. Every entry is read once and the
+/// mirrored entry of a pair is read from the same 32 x 32 tile pair, instead of
+/// three sweeps with a full-stride mirror walk. Maxima of finite values do not
+/// depend on the visiting order, so the decision and the reported numbers are
+/// those of the former sweeps exactly. `a` must be square.
+fn symmetric_input_check(a: &RealMatrix) -> Result<(), LinalgError> {
+    const TILE: usize = 32;
+    let n = a.rows;
+    let s = a.as_slice();
+    let mut all_finite = true;
+    let mut scale: f64 = 1.;
+    let mut defect: f64 = 0.;
+    for jb in (0..n).step_by(TILE) {
+        let je = (jb + TILE).min(n);
+        for ib in (0..=jb).step_by(TILE) {
+            let ie = (ib + TILE).min(n);
+            for j in jb..je {
+                for i in ib..ie.min(j) {
+                    let (u, l) = (s[i + j * n], s[j + i * n]);
+                    all_finite &= u.is_finite() & l.is_finite();
+                    scale = scale.max(u.abs()).max(l.abs());
+                    defect = defect.max((u - l).abs());
+                }
+                if ib == jb {
+                    let d = s[j + j * n];
+                    all_finite &= d.is_finite();
+                    scale = scale.max(d.abs());
+                }
+            }
+        }
+    }
+    if !all_finite {
+        return Err(LinalgError::NonFinite);
+    }
+    let allowed = crate::linalg::HERMITIAN_TOLERANCE * scale;
+    if defect > allowed {
+        return Err(LinalgError::NotHermitian { defect, allowed });
+    }
+    Ok(())
+}
+
 /// Real symmetric eigensolve, ascending eigenvalues, sequential faer backend.
 /// Largest-magnitude component of each eigenvector is positive (first index
 /// wins ties). Degenerate eigenspaces are not assigned a unique basis.
@@ -1927,6 +1971,8 @@ pub struct RealEighWorkspace {
     #[cfg(feature = "mkl")]
     mkl: Option<dft_mkl::SymmetricEigen>,
     diagonal: Vec<f64>,
+    /// Columns whose sign convention flips them (output pass, REDUCED-EIGEN-CHECKS).
+    flip: Vec<bool>,
     buffer: faer::dyn_stack::MemBuffer,
 }
 impl RealEighWorkspace {
@@ -1950,6 +1996,7 @@ impl RealEighWorkspace {
                 .then(|| dft_mkl::SymmetricEigen::new(capacity).ok())
                 .flatten(),
             diagonal: vec![0.; capacity],
+            flip: vec![false; capacity],
             buffer: faer::dyn_stack::MemBuffer::new(faer::dyn_stack::StackReq::any_of(
                 &requirements,
             )),
@@ -1967,18 +2014,7 @@ impl RealEighWorkspace {
         if a.rows != a.cols {
             return Err(LinalgError::NotSquare);
         }
-        finite(a.as_ref())?;
-        let allowed = crate::linalg::HERMITIAN_TOLERANCE
-            * a.as_slice().iter().map(|v| v.abs()).fold(1., f64::max);
-        let mut defect: f64 = 0.;
-        for j in 0..a.cols {
-            for i in 0..j {
-                defect = defect.max((a[(i, j)] - a[(j, i)]).abs());
-            }
-        }
-        if defect > allowed {
-            return Err(LinalgError::NotHermitian { defect, allowed });
-        }
+        symmetric_input_check(a)?;
         let n = a.rows;
         if n > self.capacity || values.len() != n || vectors.rows() != n || vectors.cols() != n {
             return Err(LinalgError::Dimension);
@@ -2012,6 +2048,70 @@ impl RealEighWorkspace {
         if values.iter().any(|v| !v.is_finite()) {
             return Err(LinalgError::NonFinite);
         }
+        sign_convention(vectors, &mut self.flip[..n])
+    }
+}
+
+/// Output pass of `RealEighWorkspace::solve_into` (REDUCED-EIGEN-CHECKS): one
+/// read sweep finds non-finite entries and each column's sign pivot (first
+/// largest magnitude); only when the whole block is finite are the columns
+/// whose pivot is negative negated, so the error path leaves the backend output
+/// untouched as the former separate finiteness sweep did. Bit-identical to the
+/// former two sweeps. `vectors` is n x n with n >= 1 and `flip.len() == n`.
+fn sign_convention(vectors: &mut RealMatrix, flip: &mut [bool]) -> Result<(), LinalgError> {
+    let n = vectors.rows;
+    let mut all_finite = true;
+    for (col, f) in vectors.as_slice().chunks_exact(n).zip(flip.iter_mut()) {
+        let mut pivot = 0;
+        let mut best = col[0].abs();
+        all_finite &= col[0].is_finite();
+        for (i, &x) in col.iter().enumerate().skip(1) {
+            all_finite &= x.is_finite();
+            if x.abs() > best {
+                best = x.abs();
+                pivot = i;
+            }
+        }
+        *f = col[pivot].is_sign_negative();
+    }
+    if !all_finite {
+        return Err(LinalgError::NonFinite);
+    }
+    for (col, &f) in vectors.as_mut_slice().chunks_exact_mut(n).zip(flip.iter()) {
+        if f {
+            for x in col {
+                *x = -*x;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::linalg::{ComplexMatrix, GemmWorkspace, MatrixOp};
+    use num_complex::Complex64;
+
+    /// The three input sweeps and the two output sweeps of `solve_into` before
+    /// REDUCED-EIGEN-CHECKS, kept verbatim as the reference.
+    fn input_check_reference(a: &RealMatrix) -> Result<(), LinalgError> {
+        finite(a.as_ref())?;
+        let allowed = crate::linalg::HERMITIAN_TOLERANCE
+            * a.as_slice().iter().map(|v| v.abs()).fold(1., f64::max);
+        let mut defect: f64 = 0.;
+        for j in 0..a.cols {
+            for i in 0..j {
+                defect = defect.max((a[(i, j)] - a[(j, i)]).abs());
+            }
+        }
+        if defect > allowed {
+            return Err(LinalgError::NotHermitian { defect, allowed });
+        }
+        Ok(())
+    }
+    fn sign_reference(vectors: &mut RealMatrix) -> Result<(), LinalgError> {
+        let n = vectors.rows();
         finite(vectors.as_ref())?;
         for j in 0..n {
             let mut pivot = 0;
@@ -2028,13 +2128,118 @@ impl RealEighWorkspace {
         }
         Ok(())
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::linalg::{ComplexMatrix, GemmWorkspace, MatrixOp};
-    use num_complex::Complex64;
+    /// REDUCED-EIGEN-CHECKS: the fused tiled input check and the one-sweep sign
+    /// convention return the same results (error kinds, reported defect and
+    /// allowance bits, output bits) as the former sweeps, on sizes around the
+    /// 32 tile, symmetric and slightly or grossly asymmetric inputs, ties of the
+    /// pivot magnitude, negative zeros and non-finite entries anywhere.
+    #[test]
+    fn reduced_eigen_checks_match_former_sweeps() {
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+        };
+        let mut cases = 0;
+        for &n in &[1usize, 2, 3, 31, 32, 33, 63, 64, 65, 100] {
+            for variant in 0..9 {
+                let mut a = RealMatrix::zeros(n, n).unwrap();
+                for j in 0..n {
+                    for i in 0..=j {
+                        let v = next() * if variant == 7 { 1e300 } else { 3.0 };
+                        a[(i, j)] = v;
+                        a[(j, i)] = v;
+                    }
+                }
+                let (i, j) = (
+                    ((next() + 0.5) * n as f64) as usize % n,
+                    ((next() + 0.5) * n as f64) as usize % n,
+                );
+                match variant {
+                    1 => a[(i, j)] += 1e-13,
+                    2 => a[(i, j)] += 1e-9,
+                    3 => a[(i, j)] = f64::NAN,
+                    4 => a[(i, j)] = f64::INFINITY,
+                    5 => a[(i, j)] = -0.0,
+                    6 => {
+                        // Ties: every entry of a column with the same magnitude.
+                        for r in 0..n {
+                            a[(r, j)] = if r % 2 == 0 { -0.25 } else { 0.25 };
+                        }
+                    }
+                    7 => a[(i, j)] = -a[(i, j)],
+                    8 => {
+                        a[(i, j)] = 0.0;
+                        a[(j, i)] = -0.0;
+                    }
+                    _ => {}
+                }
+                let fused = symmetric_input_check(&a);
+                let reference = input_check_reference(&a);
+                match (&fused, &reference) {
+                    (
+                        Err(LinalgError::NotHermitian {
+                            defect: d1,
+                            allowed: a1,
+                        }),
+                        Err(LinalgError::NotHermitian {
+                            defect: d2,
+                            allowed: a2,
+                        }),
+                    ) => {
+                        assert_eq!(d1.to_bits(), d2.to_bits(), "n={n} variant={variant}");
+                        assert_eq!(a1.to_bits(), a2.to_bits(), "n={n} variant={variant}");
+                    }
+                    _ => assert_eq!(
+                        format!("{fused:?}"),
+                        format!("{reference:?}"),
+                        "n={n} variant={variant}"
+                    ),
+                }
+                let mut v1 = RealMatrix::new(n, n, a.as_slice().to_vec()).unwrap();
+                let mut v2 = RealMatrix::new(n, n, a.as_slice().to_vec()).unwrap();
+                let mut flip = vec![false; n];
+                let r1 = sign_convention(&mut v1, &mut flip);
+                let r2 = sign_reference(&mut v2);
+                assert_eq!(
+                    format!("{r1:?}"),
+                    format!("{r2:?}"),
+                    "n={n} variant={variant}"
+                );
+                if r1.is_ok() {
+                    let b1: Vec<u64> = v1.as_slice().iter().map(|x| x.to_bits()).collect();
+                    let b2: Vec<u64> = v2.as_slice().iter().map(|x| x.to_bits()).collect();
+                    assert_eq!(b1, b2, "n={n} variant={variant}");
+                }
+                cases += 1;
+            }
+        }
+        assert_eq!(cases, 90);
+        // Whole solve: unchanged convention (largest component positive).
+        let mut a = RealMatrix::zeros(40, 40).unwrap();
+        for j in 0..40 {
+            for i in 0..=j {
+                let v = next();
+                a[(i, j)] = v;
+                a[(j, i)] = v;
+            }
+        }
+        let (values, vectors) = symmetric_eigh(&a).unwrap();
+        assert!(values.windows(2).all(|w| w[0] <= w[1]));
+        for col in vectors.as_slice().as_chunks::<40>().0 {
+            let mut pivot = 0;
+            for i in 1..40 {
+                if col[i].abs() > col[pivot].abs() {
+                    pivot = i;
+                }
+            }
+            assert!(col[pivot] > 0.0);
+        }
+    }
+
     /// F11: `slices_route` selects dgemm exactly when the dgemm condition of
     /// `multiply_slices_impl` before the counters held (copied verbatim here).
     #[cfg(feature = "mkl")]

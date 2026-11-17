@@ -251,6 +251,8 @@ struct Snap {
     /// Engine and operator M2 counters (the `lazy_*` ones are reported).
     m2_counts: Vec<(String, usize)>,
     reductions: (u64, u64),
+    /// Per solver reduction site: (site, calls, doubles).
+    reduction_sites: Vec<(&'static str, u64, u64)>,
     reduced: dft_solvers::distributed_davidson::ReducedSolveStats,
     rotation_flops: u64,
     start_gram: (u64, u64),
@@ -283,6 +285,7 @@ fn snap() -> Snap {
             red.1.iter().map(|s| s.calls).sum(),
             red.1.iter().map(|s| s.payload).sum(),
         ),
+        reduction_sites: red.1.iter().map(|s| (s.site, s.calls, s.payload)).collect(),
         reduced: parallel::reduced_solve_stats(),
         rotation_flops: dft_solvers::distributed_davidson::rotation_stats().flops,
         start_gram: dft_solvers::distributed_davidson::start_gram_stats(),
@@ -399,6 +402,10 @@ fn delta(a: &Snap, b: &Snap, p: u64) -> (BTreeMap<String, Value>, BTreeMap<Strin
     }
     put("dist.reductions.calls", b.reductions.0 - a.reductions.0);
     put("dist.reductions.doubles", b.reductions.1 - a.reductions.1);
+    for ((site, c1, d1), (_, c0, d0)) in b.reduction_sites.iter().zip(&a.reduction_sites) {
+        put(&format!("dist.reductions.{site}.calls"), c1 - c0);
+        put(&format!("dist.reductions.{site}.doubles"), d1 - d0);
+    }
     put("dist.reduced_solves", b.reduced.solves - a.reduced.solves);
     put(
         "dist.reduced_sum_m3",

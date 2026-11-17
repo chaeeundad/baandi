@@ -113,7 +113,11 @@ fn zero_moment_spin_uses_the_atomic_start_and_keeps_the_unpolarized_scf_count() 
         assert_eq!(a.atomic_orbitals, b.atomic_orbitals);
         // SPIN_SHARE (default on since 2026-11-17): the two identical channels share one
         // Rayleigh-Ritz and one initial H application; the shared result is bit-identical.
-        assert_eq!(a.evd_orders.len(), 1, "one shared Rayleigh-Ritz for equal channels");
+        assert_eq!(
+            a.evd_orders.len(),
+            1,
+            "one shared Rayleigh-Ritz for equal channels"
+        );
         assert_eq!(a.initial_h_applications, b.initial_h_applications);
         // Ticket criterion: same SCF count within 1, same verification count.
         assert!(p.spin.history.len().abs_diff(p.closed.history.len()) <= 1);

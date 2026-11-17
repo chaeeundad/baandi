@@ -430,12 +430,14 @@ impl<C: Collective> Collective for Counted<'_, C> {
 }
 
 /// Solver-only agreement: the operator uses the underlying communicator, then
-/// records a local failure. The next existing solver sum carries one status
-/// double. Scratch is reserved at entry, never allocated by an iteration.
+/// records a local failure. On failure only, a quiet NaN replaces the first
+/// scalar of the next nonempty solver sum. IEEE addition propagates it to
+/// every rank; no failed numerical payload is consumed. Ordinary inputs and
+/// payload sizes are unchanged. The operator does not use this wrapper.
 struct ApplyAgreement<'a, C: Collective> {
     inner: &'a C,
     failed: std::cell::Cell<bool>,
-    scratch: std::cell::RefCell<(Vec<f64>, Vec<f64>)>,
+    scratch: std::cell::RefCell<Vec<f64>>,
 }
 impl<C: Collective> Collective for ApplyAgreement<'_, C> {
     fn rank(&self) -> usize {
@@ -467,19 +469,19 @@ impl<C: Collective> Collective for ApplyAgreement<'_, C> {
         self.inner.alltoall_f64(send, block, recv)
     }
     fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
-        let len = local.len();
-        let mut scratch = self.scratch.borrow_mut();
-        let (input, output) = &mut *scratch;
-        input[..len].copy_from_slice(local);
-        input[len] = f64::from(u8::from(self.failed.get()));
-        self.inner
-            .tree_sum_f64(&input[..len + 1], &mut output[..len + 1])?;
-        if output[len] != 0.0 {
+        if self.failed.get() && !local.is_empty() {
+            let mut input = self.scratch.borrow_mut();
+            input[..local.len()].copy_from_slice(local);
+            input[0] = f64::NAN;
+            self.inner.tree_sum_f64(&input[..local.len()], out)?;
+        } else {
+            self.inner.tree_sum_f64(local, out)?;
+        }
+        if out.first().is_some_and(|x| x.is_nan()) {
             return Err(dft_mpi::MpiError::State(
                 "distributed operator failed on at least one rank",
             ));
         }
-        out.copy_from_slice(&output[..len]);
         Ok(())
     }
 }
@@ -1529,13 +1531,17 @@ impl crate::RealDavidson {
                         && rows.as_slice() == mine
                 })
             });
-            let mut flag = [0.0; 2];
+            let mut flag = [0.0];
             comm.tree_sum_f64(
-                &[f64::from(u8::from(!hit)), f64::from(u8::from(invalid))],
+                &[if invalid {
+                    f64::NAN
+                } else {
+                    f64::from(u8::from(!hit))
+                }],
                 &mut flag,
             )
             .map_err(comm_error)?;
-            if flag[1] != 0.0 {
+            if flag[0].is_nan() {
                 return Err(SolverError::InvalidParameter(
                     "invalid local rows, diagonal or start",
                 ));
@@ -1549,24 +1555,19 @@ impl crate::RealDavidson {
             LAYOUT_CACHE.with(|l| l.borrow().as_ref().expect("checked above").1.clone())
         } else {
             // Setup (once per solve): every rank learns the row lists of all ranks.
-            let mut counts_f = vec![0.0; 2 * ranks];
+            let mut counts_f = vec![0.0; ranks];
             comm.allgatherv_f64(
-                &[mine.len() as f64, f64::from(u8::from(invalid))],
-                &vec![2; ranks],
+                &[if invalid { f64::NAN } else { mine.len() as f64 }],
+                &vec![1; ranks],
                 &mut counts_f,
             )
             .map_err(comm_error)?;
-            if counts_f.as_chunks::<2>().0.iter().any(|v| v[1] != 0.0) {
+            if counts_f.iter().any(|v| v.is_nan()) {
                 return Err(SolverError::InvalidParameter(
                     "invalid local rows, diagonal or start",
                 ));
             }
-            let counts: Vec<usize> = counts_f
-                .as_chunks::<2>()
-                .0
-                .iter()
-                .map(|v| v[0] as usize)
-                .collect();
+            let counts: Vec<usize> = counts_f.iter().map(|&v| v as usize).collect();
             if counts.iter().sum::<usize>() != n {
                 return Err(SolverError::InvalidParameter(
                     "row partition does not cover the basis",
@@ -1606,7 +1607,7 @@ impl crate::RealDavidson {
         let agreement = ApplyAgreement {
             inner: comm,
             failed: std::cell::Cell::new(false),
-            scratch: std::cell::RefCell::new((vec![0.0; payload], vec![0.0; payload])),
+            scratch: std::cell::RefCell::new(vec![0.0; payload]),
         };
         stage_add(STAGE_SETUP, t_setup);
         if tuning.workspace || tuning.selected_roots || tuning.lean_algebra {

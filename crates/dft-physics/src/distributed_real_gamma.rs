@@ -538,7 +538,7 @@ impl DistributedRealHamiltonian {
             out[c * points + p] = weights[c] * v * v / volume
         })?;
         stage_add(Stage::Density, start);
-        COUNTS[Count::Densities as usize].fetch_add(1, Ordering::Relaxed);
+        bump(Count::Densities, 1);
         Ok(())
     }
 
@@ -582,7 +582,7 @@ impl DistributedRealHamiltonian {
             out[p] += weights[c] * v * v / volume
         })?;
         stage_add(Stage::Density, start);
-        COUNTS[Count::Densities as usize].fetch_add(1, Ordering::Relaxed);
+        bump(Count::Densities, 1);
         Ok(())
     }
 
@@ -605,7 +605,7 @@ impl DistributedRealHamiltonian {
         }
         self.band_planes(comm, x, None, |c, p, v| out[c * points + p] = v)?;
         stage_add(Stage::Values, start);
-        COUNTS[Count::Values as usize].fetch_add(1, Ordering::Relaxed);
+        bump(Count::Values, 1);
         Ok(())
     }
 
@@ -650,7 +650,7 @@ impl DistributedRealHamiltonian {
         }
         self.fft
             .begin_to_real_batch(comm, &self.hbuf[..pairs * ll], pairs)?;
-        COUNTS[Count::InversePairs as usize].fetch_add(pairs, Ordering::Relaxed);
+        bump(Count::InversePairs, pairs);
         let (rows, nz) = (self.fft.rows(), self.fft.shape()[2]);
         let line = rows * nz;
         let pp = self.fft.plane_points();
@@ -721,7 +721,7 @@ impl DistributedRealHamiltonian {
             *o = sum;
         }
         stage_add(Stage::NonlocalEnergy, start);
-        COUNTS[Count::NonlocalEnergies as usize].fetch_add(1, Ordering::Relaxed);
+        bump(Count::NonlocalEnergies, 1);
         Ok(())
     }
 
@@ -869,8 +869,8 @@ impl DistributedRealHamiltonian {
             }
         }
         stage_add(Stage::Fft, t0);
-        COUNTS[Count::InversePairs as usize].fetch_add(pairs, Ordering::Relaxed);
-        COUNTS[Count::ForwardPairs as usize].fetch_add(pairs, Ordering::Relaxed);
+        bump(Count::InversePairs, pairs);
+        bump(Count::ForwardPairs, pairs);
         // (3) mirror h back, unpack; kinetic term.
         self.mirror_back_and_unpack(comm, m, y, Some(xs))?;
 
@@ -926,7 +926,7 @@ impl DistributedRealHamiltonian {
             Count::UnbatchedApplies
         } as usize]
             .fetch_add(1, Ordering::Relaxed);
-        COUNTS[Count::Columns as usize].fetch_add(m, Ordering::Relaxed);
+        bump(Count::Columns, m);
         Ok(())
     }
 
@@ -1078,10 +1078,10 @@ impl DistributedRealHamiltonian {
             planes,
         )?;
         stage_add(Stage::Fft, t0);
-        COUNTS[Count::InversePairs as usize].fetch_add(pairs - kept_pairs, Ordering::Relaxed);
-        COUNTS[Count::ForwardPairs as usize].fetch_add(pairs, Ordering::Relaxed);
-        COUNTS[Count::KeptPlanePairs as usize].fetch_add(kept_pairs, Ordering::Relaxed);
-        COUNTS[Count::ChangeColumns as usize].fetch_add(m, Ordering::Relaxed);
+        bump(Count::InversePairs, pairs - kept_pairs);
+        bump(Count::ForwardPairs, pairs);
+        bump(Count::KeptPlanePairs, kept_pairs);
+        bump(Count::ChangeColumns, m);
         self.mirror_back_and_unpack(comm, m, y, None)
     }
 }
@@ -1161,6 +1161,22 @@ const COUNT_NAMES: [&str; 10] = [
     "potential_change_columns",
 ];
 static COUNTS: [AtomicUsize; 10] = [const { AtomicUsize::new(0) }; 10];
+/// Add `v` to a counter and mirror the work counts (applied columns, potential
+/// change columns, pair transforms, kept pairs) per thread for the engine's
+/// phase profile (`dft_numerics::stage_clock::local`, off: one relaxed load).
+fn bump(c: Count, v: usize) {
+    COUNTS[c as usize].fetch_add(v, Ordering::Relaxed);
+    use dft_numerics::stage_clock::local::{OP_COUNT, add_n};
+    let slot = match c {
+        Count::Columns => 0,
+        Count::ChangeColumns => 1,
+        Count::ForwardPairs => 2,
+        Count::InversePairs => 3,
+        Count::KeptPlanePairs => 4,
+        _ => return,
+    };
+    add_n(OP_COUNT + slot, 0, v as u64);
+}
 
 /// (counter name, value) list and (stage name, wall seconds) list.
 pub type M2Counters = (Vec<(&'static str, usize)>, Vec<(&'static str, f64)>);

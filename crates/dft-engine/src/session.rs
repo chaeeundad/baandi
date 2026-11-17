@@ -430,6 +430,18 @@ impl ScfSession {
         #[cfg(test)]
         let identity = identity || self.problem.force_energy_identity;
         self.problem.energy_identity = identity;
+        // BREAKTHROUGH-0-INSTRUMENT: context of the map (snapshot labels,
+        // first-block records) and its phase-profile bucket.
+        let context = crate::profile::context();
+        crate::profile::set_context(crate::profile::Context {
+            kind: if previous.is_none() {
+                "cold"
+            } else {
+                "ordinary"
+            },
+            iteration,
+            ..context
+        });
         let mut step = self
             .problem
             .step_session(
@@ -447,6 +459,7 @@ impl ScfSession {
                 other => other,
             })?;
         let mut standard_error_ha = self.problem.stop_error(n, &step.density)?;
+        crate::profile::map_commit(crate::profile::MapKind::Ordinary);
         let standard_redo = iteration == 1
             && standard_error_ha.is_some_and(|e| e < tolerance * self.problem.electrons.max(1.0));
         if standard_redo {
@@ -456,9 +469,15 @@ impl ScfSession {
                 self.problem.electrons,
             );
             let (warm, warm_lazy) = split_warm(Some(&step.k_points));
+            crate::profile::set_context(crate::profile::Context {
+                kind: "redo",
+                iteration,
+                ..context
+            });
             let mut redo =
                 self.problem
                     .step_session(n, warm.as_deref(), &warm_lazy, tolerance, false)?;
+            crate::profile::map_commit(crate::profile::MapKind::Redo);
             // Charge every discarded first solve, including its potential,
             // density and audit work. No mixer history exists before the redo.
             for (new, old) in redo.k_points.iter_mut().zip(&step.k_points) {
@@ -630,6 +649,13 @@ impl ScfSession {
         // run stage (a coarse-stage certificate stays in the coarse stage).
         let verification = dft_numerics::work_timers::in_fine_stage().then(|| {
             dft_numerics::work_timers::enter(dft_numerics::work_timers::RunStage::Verification)
+        });
+        // Phase profile: the certificate block is its own top-level bucket.
+        let profile_verification = converged.then(|| {
+            (
+                crate::profile::enter(crate::profile::Top::Verification),
+                crate::profile::context_stage("verification"),
+            )
         });
         let screen_start = Instant::now();
         let screen = if converged && standard.is_none() {
@@ -887,6 +913,7 @@ impl ScfSession {
         // Fields kept by the screen belong to this certificate only.
         self.problem.clear_reused_fields();
         drop(verification);
+        drop(profile_verification);
         if self.certificate_attempted {
             crate::phase_clock::add_certificate(certificate_clock);
         }
@@ -1077,6 +1104,7 @@ impl ScfSession {
         }
         n.as_slice_mut().unwrap().copy_from_slice(&mixed);
         history.last_mut().unwrap().timings.mixing = mix_start.elapsed();
+        crate::profile::add_mixing(mix_start.elapsed().as_secs_f64());
         // MPI-LAZY-ORBITALS: lazy blocks travel with their distributed rows.
         let verification_orbitals = verification_reuse.map(|(_, (o, _))| o);
         let (warm, lazy) = match (rescued, verification_orbitals) {
@@ -1852,6 +1880,11 @@ fn verify_fixed_point(
         .threshold_ha;
     let eigen_tolerance = StandardProfile::ratchet(tolerance, standard_error_ha, problem.electrons);
     let (warm, warm_lazy) = split_warm(Some(points));
+    crate::profile::set_context(crate::profile::Context {
+        stage: "verification",
+        kind: "verify",
+        iteration,
+    });
     let check = problem.step_session(
         density,
         warm.as_deref(),
@@ -1916,6 +1949,14 @@ fn verify_fixed_point(
             .max(problem.negative_charge(&check.density));
         clipped = ScfProblem::validate_clipped_charge(charge, problem.electrons).err();
     }
+    // Phase profile: file the verification map by its outcome; the snapshot
+    // manifest of this map records it too (outside any timed phase).
+    crate::profile::map_commit(if passed && clipped.is_none() {
+        crate::profile::MapKind::VerifyPass
+    } else {
+        crate::profile::MapKind::VerifyFail
+    });
+    crate::snapshot::annotate_verification(passed && clipped.is_none());
     if passed && clipped.is_none() {
         problem.check_gap(&check.k_points)?;
     }

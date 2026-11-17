@@ -787,6 +787,8 @@ pub fn execute_mode(
     }
     let electrons = problem.electron_count();
     let setup = start.elapsed().as_secs_f64();
+    // BREAKTHROUGH-0-INSTRUMENT: problem construction is the `init` bucket.
+    dft_engine::profile::add_init(setup);
     let clock_start = dft_engine::phase_clock::snapshot();
     let ladder = crate::config::Scf::cutoff_ladder(config.scf.as_ref())
         .map_err(|e| error(1, e.to_string()))?;
@@ -841,6 +843,8 @@ pub fn execute_mode(
         }
     };
     let r = outcome.result;
+    // Everything from here to the results file is output materialization.
+    let io_clock = Instant::now();
     let ngrid = r.density.len();
     let bands = r.occupations.len();
     let npw = prepared.wavefunctions.vectors().len();
@@ -1362,6 +1366,28 @@ pub fn execute_mode(
                 "state":"converged step's own state (ADR 0043 V4); stress uses the same formulas as the strict path"});
         }
     }
+    // BREAKTHROUGH-0-INSTRUMENT: exclusive phase profile (BAANDI_PHASE_PROFILE=on)
+    // and first-block diagnostic (BAANDI_FIRST_BLOCK=on); both absent otherwise.
+    dft_engine::profile::add_io(io_clock.elapsed().as_secs_f64());
+    if let Some(mine) = dft_engine::profile::finish_rank(crate::parallel::rank()) {
+        let ranks = match dft_engine::parallel::SharedComm::active() {
+            Some(comm) => dft_engine::profile::gather(&comm, &mine).map_err(|e| error(5, e))?,
+            None => vec![mine],
+        };
+        let report = dft_engine::profile::Report::from_ranks(&ranks);
+        let table = report.table(Some(total));
+        console.push_str(&table);
+        let phases = profile_json(&report, total);
+        if crate::parallel::size() > 1 {
+            result["parallel"]["phases"] = phases.clone();
+        }
+        result["phase_profile"] = phases;
+    }
+    let first_block = dft_engine::first_block::take_records();
+    if !first_block.is_empty() {
+        console.push_str(&dft_engine::first_block::table(&first_block));
+        result["convergence"]["work"]["first_block"] = first_block_json(&first_block);
+    }
     write_json(&out.join("results.json"), &result)?;
     Ok(RunReport {
         console,
@@ -1575,6 +1601,45 @@ fn stress_table(s: &dft_engine::stress::StressResult) -> String {
         }
     }
     text
+}
+
+/// Exclusive phase profile (`BAANDI_PHASE_PROFILE=on`): per bucket the maximum
+/// and minimum over ranks of every entry (seconds, then counts).
+pub fn profile_json(report: &dft_engine::profile::Report, run_wall: f64) -> serde_json::Value {
+    let covered = report.covered_wall();
+    json!({
+        "schema": "phase-profile-1",
+        "ranks": report.ranks,
+        "stage_timers": if dft_numerics::stage_clock::on() { "on" } else { "off" },
+        "run_wall_s": run_wall,
+        "covered_wall_s": covered,
+        "remainder_s": run_wall - covered,
+        "buckets": report.entries().into_iter().map(|(label, entries)| {
+            json!({
+                "bucket": label,
+                "max": entries.iter().map(|(k, mx, _)| (k.to_string(), json!(mx))).collect::<serde_json::Map<_, _>>(),
+                "min": entries.iter().map(|(k, _, mn)| (k.to_string(), json!(mn))).collect::<serde_json::Map<_, _>>(),
+            })
+        }).collect::<Vec<_>>(),
+        "note": "top-level buckets are mutually exclusive (init, coarse, fine, fine_redo, verify_pass, verify_fail, materialize); wall = potential + solve + density + energy (+ mixing, atomic start, io); solve.* are exclusive stages inside solve (solve.other = the remainder); coll.* and m2.* are inside the stages, not exclusive; seconds = max over ranks (critical path) and min over ranks (imbalance), never summed over ranks; counts are per rank (max); with BAANDI_STAGE_TIMERS=off only the counts and the map phase clocks are filled"
+    })
+}
+
+/// First-block residual records (`BAANDI_FIRST_BLOCK=on`).
+pub fn first_block_json(records: &[dft_engine::first_block::Record]) -> serde_json::Value {
+    json!(records.iter().map(|r| json!({
+        "stage": r.stage, "kind": r.kind, "iteration": r.iteration,
+        "bands": r.bands, "occupied": r.occupied, "tolerance_ha": r.tolerance,
+        "buffer_tolerance_ha": r.buffer_tolerance, "kept_hx": r.kept_hx,
+        "overlap_defect": r.overlap_defect, "boundary_gap_ha": r.boundary_gap,
+        "ritz_values_ha": r.ritz_values, "residual_norms": r.residual_norms,
+        "true_unconverged_all": r.true_unconverged_all,
+        "true_unconverged_occupied": r.true_unconverged_occupied,
+        "ritz_rule_unconverged": r.ritz_rule_unconverged,
+        "singular_values": r.singular_values,
+        "rank_1e1": r.rank_1e1, "rank_1e2": r.rank_1e2, "rank_1e3": r.rank_1e3, "rank_1e4": r.rank_1e4,
+        "rank_above_tolerance": r.rank_above_tolerance,
+    })).collect::<Vec<_>>())
 }
 
 /// Real-Davidson stage timers (`BAANDI_DAVIDSON_STAGES=on`; zeros otherwise),

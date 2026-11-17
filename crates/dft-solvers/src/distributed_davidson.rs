@@ -57,7 +57,11 @@ use std::time::Instant;
 /// extraction of the start, kept-start check, initial orthonormalization; the
 /// initial apply is in `apply_total`). `solve_return`: the kept return and the
 /// N x B gather of the eigenvectors at a converged return (MPI-SCALING-GAP).
-pub const STAGES: [&str; 10] = [
+/// `restart` (BREAKTHROUGH-0-INSTRUMENT): the restart block of the workspace
+/// paths (Gram defect of X, contraction copy or re-orthonormalization and
+/// re-application of the basis; the lean contraction's basis replacement).
+/// Its rotation is counted in `rotate`.
+pub const STAGES: [&str; 11] = [
     "reduced_gram",
     "reduced_eigen",
     "rotate",
@@ -68,9 +72,10 @@ pub const STAGES: [&str; 10] = [
     "other_solve",
     "solve_start",
     "solve_return",
+    "restart",
 ];
-static STAGE_NANOS: [AtomicU64; 10] = [const { AtomicU64::new(0) }; 10];
-static STAGE_CALLS: [AtomicU64; 10] = [const { AtomicU64::new(0) }; 10];
+static STAGE_NANOS: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
+static STAGE_CALLS: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
 
 /// Wall seconds of this process in each stage of the distributed solver (cheap
 /// per-stage accumulation, no I/O in the loop; read once for the run report).
@@ -94,12 +99,12 @@ pub fn stage_calls() -> Vec<(&'static str, u64)> {
 /// F21: `start` from `dft_numerics::stage_clock::start` (`None` count-only).
 fn stage_add(i: usize, start: Option<Instant>) {
     STAGE_CALLS[i].fetch_add(1, Ordering::Relaxed);
+    let ns = dft_numerics::stage_clock::elapsed_ns(start);
     if start.is_some() {
-        STAGE_NANOS[i].fetch_add(
-            dft_numerics::stage_clock::elapsed_ns(start),
-            Ordering::Relaxed,
-        );
+        STAGE_NANOS[i].fetch_add(ns, Ordering::Relaxed);
     }
+    // Per-thread mirror for the engine's phase profile (off: one relaxed load).
+    dft_numerics::stage_clock::local::add(dft_numerics::stage_clock::local::DIST_STAGE + i, ns);
 }
 
 // Reduced eigenproblem accounting (docs/performance/mpi-reduced-eigen-analysis.md):
@@ -530,6 +535,26 @@ impl DistributedKeptStart {
     /// (initial differs from X, or the Gram defect of X exceeds 1e-12).
     pub fn declined(&self) -> bool {
         self.declined
+    }
+    /// Whether the next solve is armed to try the kept start.
+    pub fn armed(&self) -> bool {
+        self.armed
+    }
+    /// H X of the latest keeping return, if stored (read).
+    pub fn stored(&self) -> Option<&RealMatrix> {
+        self.stored.then_some(&self.hx)
+    }
+    /// A kept start holding `hx` as its stored H X (snapshot replay,
+    /// BREAKTHROUGH-0-INSTRUMENT): stored, not armed, keeping off.
+    pub fn with_stored(hx: RealMatrix) -> Self {
+        Self {
+            hx,
+            keep: false,
+            stored: true,
+            armed: false,
+            taken: false,
+            declined: false,
+        }
     }
 }
 

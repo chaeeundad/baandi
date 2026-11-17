@@ -448,6 +448,9 @@ fn coarse_stage(
 ) -> Result<CoarseState, ScfError> {
     // P0.2: Davidson and operator work of this stage is reported as ladder coarse.
     let _run_stage = dft_numerics::work_timers::enter(dft_numerics::work_timers::RunStage::Coarse);
+    // Phase profile and snapshot context: the coarse bucket.
+    let _profile_stage = crate::profile::enter(crate::profile::Top::Coarse);
+    let _context_stage = crate::profile::context_stage("coarse");
     let basis = coarse.states[0].basis.clone();
     let session_start = Instant::now();
     let clock = crate::phase_clock::snapshot();

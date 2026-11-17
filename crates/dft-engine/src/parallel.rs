@@ -65,12 +65,12 @@ fn timed<R>(op: usize, values: usize, f: impl FnOnce() -> R) -> R {
     let r = f();
     CALLS[op].fetch_add(1, Ordering::Relaxed);
     BYTES[op].fetch_add(8 * values as u64, Ordering::Relaxed);
+    let ns = dft_numerics::stage_clock::elapsed_ns(start);
     if start.is_some() {
-        NANOS[op].fetch_add(
-            dft_numerics::stage_clock::elapsed_ns(start),
-            Ordering::Relaxed,
-        );
+        NANOS[op].fetch_add(ns, Ordering::Relaxed);
     }
+    // Per-thread mirror for the phase profile (`crate::profile`).
+    dft_numerics::stage_clock::local::add(dft_numerics::stage_clock::local::COLLECTIVE + op, ns);
     r
 }
 

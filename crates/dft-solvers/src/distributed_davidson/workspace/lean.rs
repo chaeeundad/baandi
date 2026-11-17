@@ -694,13 +694,16 @@ pub(super) fn run<C: Collective>(
         let mut ritz_base = true;
         if contracted {
             // Contraction restart: the basis becomes X (S-orthonormal Ritz
-            // vectors), factored afresh in the border below.
+            // vectors), factored afresh in the border below (`restart` stage:
+            // the copies; the rotation above is `rotate`).
+            let t_restart = dft_numerics::stage_clock::start();
             restarts += 1;
             contractions += 1;
             assign(basis, vectors)?;
             assign(products, rotated)?;
             (factored, h_width, a_width) = (0, 0, 0);
             ritz_base = false;
+            stage_add(10, t_restart);
         }
         // 4. Raw corrections appended without projection. ONE tree sum gives
         // the S border (the whole fresh part after a contraction), |E_j|^2 and

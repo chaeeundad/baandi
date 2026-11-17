@@ -2054,6 +2054,7 @@ impl ScfProblem {
             );
         }
         crate::phase_clock::add_atomic_start(atomic_clock);
+        crate::profile::add_atomic_start(atomic_clock.elapsed().as_secs_f64());
         Ok(Some(guesses))
     }
 
@@ -2141,6 +2142,28 @@ impl ScfProblem {
         materialize_kpoints(k_points)
     }
 
+    /// Snapshot replay (BREAKTHROUGH-0-INSTRUMENT, `davidson_bench --snapshot`;
+    /// measurement only, never used by the SCF): one session map at density
+    /// `n` whose real Gamma solve starts from `start` (this rank's rows on the
+    /// M2 path, the full ORC block on the threads path) with its kept H X
+    /// armed when given, exactly as the captured solve did. One k point only.
+    #[doc(hidden)]
+    pub fn replay_solve(
+        &mut self,
+        n: &Array3<f64>,
+        start: crate::snapshot::ReplayStart,
+        tolerance: f64,
+    ) -> Result<ScfStep, ScfError> {
+        if self.states.len() != 1 {
+            return Err(ScfError::InvalidInput("replay needs one k point"));
+        }
+        let bands = self.occupations.len();
+        crate::snapshot::inject(crate::profile::rank_key(), start);
+        let placeholder =
+            vec![ComplexMatrix::zeros(0, bands).map_err(dft_solvers::SolverError::from)?];
+        self.step_session(n, Some(&placeholder), &[None], tolerance, false)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn step_map(
         &mut self,
@@ -2200,6 +2223,10 @@ impl ScfProblem {
         if n.shape() != self.grid.dims() {
             return Err(ScfError::InvalidInput("input density grid"));
         }
+        // BREAKTHROUGH-0-INSTRUMENT: a new map for the phase profile; the
+        // snapshot capture takes a copy of the input density (both default off).
+        crate::profile::map_begin();
+        crate::snapshot::set_density(n);
         let start = Instant::now();
         if let Some(symmetry) = &mut self.symmetry
             && !symmetry.check_invariant(n, &mut self.fft)?
@@ -2254,6 +2281,11 @@ impl ScfProblem {
             potential: start.elapsed(),
             ..Default::default()
         };
+        crate::profile::map_phase(
+            crate::profile::Phase::Potential,
+            timings.potential.as_secs_f64(),
+        );
+        crate::profile::solve_begin();
         let start = Instant::now();
         let solver = Davidson {
             bands: self.occupations.len(),
@@ -2450,6 +2482,24 @@ impl ScfProblem {
                 )?
             };
         timings.diagonalization = start.elapsed();
+        // Snapshot file writing (inside the solve window) is not solve time.
+        let io = crate::snapshot::take_io_seconds();
+        if io > 0.0 {
+            timings.diagonalization = timings
+                .diagonalization
+                .saturating_sub(std::time::Duration::from_secs_f64(io));
+        }
+        crate::profile::map_phase(
+            crate::profile::Phase::Solve,
+            timings.diagonalization.as_secs_f64(),
+        );
+        crate::profile::solve_end(
+            k_points.iter().map(|k| k.solution.iterations).sum(),
+            k_points
+                .iter()
+                .map(|k| k.solution.operator_applications)
+                .sum(),
+        );
         if let Some(w) = finite.as_mut() {
             for (k, point) in k_points.iter().enumerate() {
                 w.eigenvalues[k * w.bands..(k + 1) * w.bands]
@@ -2531,6 +2581,10 @@ impl ScfProblem {
             symmetry.apply(&mut output, &mut self.fft)?;
         }
         timings.density = start.elapsed();
+        crate::profile::map_phase(
+            crate::profile::Phase::Density,
+            timings.density.as_secs_f64(),
+        );
         let start = Instant::now();
         let m2_xc = crate::m2::active().and_then(|comm| {
             crate::m2::xc(
@@ -2666,6 +2720,7 @@ impl ScfProblem {
             output_negative_charge: self.negative_charge(&output),
         });
         timings.energy = start.elapsed();
+        crate::profile::map_phase(crate::profile::Phase::Energy, timings.energy.as_secs_f64());
         Ok(ScfStep {
             crystal_density_group: self.options.crystal_density_group,
             solution: k_points[0].solution.clone(),

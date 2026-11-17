@@ -132,6 +132,7 @@ fn run(case: &str, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult
         label: "Si",
         potential: &pp,
     }];
+    let t_construct = Instant::now();
     let problem = ScfProblem::new(
         &cell,
         &atoms,
@@ -145,6 +146,9 @@ fn run(case: &str, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult
         },
     )
     .unwrap();
+    // BREAKTHROUGH-0-INSTRUMENT: construction is the `init` bucket of the
+    // phase profile (BAANDI_PHASE_PROFILE=on; otherwise a no-op).
+    dft_engine::profile::add_init(t_construct.elapsed().as_secs_f64());
     let result = if std::env::var("M2_PROFILE_LADDER").as_deref() == Ok("on") {
         let out = dft_engine::cutoff_ladder::run_ladder(
             problem,
@@ -175,9 +179,52 @@ fn run(case: &str, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult
     } else {
         problem.run().unwrap()
     };
+    dft_engine::profile::finish_rank(parallel::SharedComm::active().map_or(0, |c| c.rank()));
     parallel::set_communicator(None);
     parallel::set_m2_override(None);
     result
+}
+
+/// Phase profile of the run just finished (all ranks of a simulated run, or the
+/// serial run): the table and a JSON object (max over ranks of every entry,
+/// `wall_min` the minimum). Empty without `BAANDI_PHASE_PROFILE=on`.
+fn profile_block(wall: f64) -> String {
+    let profiles = dft_engine::profile::take_registry();
+    if profiles.is_empty() {
+        return String::new();
+    }
+    let report = dft_engine::profile::Report::from_ranks(&profiles);
+    print!("{}", report.table(Some(wall)));
+    let buckets: Vec<String> = report
+        .entries()
+        .into_iter()
+        .map(|(label, entries)| {
+            let items: Vec<String> = entries
+                .iter()
+                .map(|(k, mx, _)| format!("\"{k}\":{mx:.6}"))
+                .chain(
+                    entries
+                        .iter()
+                        .take(1)
+                        .map(|(_, _, mn)| format!("\"wall_min\":{mn:.6}")),
+                )
+                .collect();
+            format!("\"{label}\":{{{}}}", items.join(","))
+        })
+        .collect();
+    format!(
+        ",\"profile\":{{\"ranks\":{},\"covered_wall_s\":{:.6},{}}}",
+        report.ranks,
+        report.covered_wall(),
+        buckets.join(",")
+    )
+}
+
+fn print_first_block() {
+    let records = dft_engine::first_block::take_records();
+    if !records.is_empty() {
+        print!("{}", dft_engine::first_block::table(&records));
+    }
 }
 
 fn work(r: &ScfResult) -> (usize, usize, usize) {
@@ -245,6 +292,8 @@ fn m2_entry_cost_profile() {
         "  serial h_apply parts: apply {:.3} local {:.3} nonlocal_projection {:.3} nonlocal_back {:.3} columns {}",
         wt.apply, wt.local, wt.nonlocal_projection, wt.nonlocal_back, wt.apply_columns
     );
+    let _ = profile_block(serial_wall);
+    print_first_block();
     for &p in &ranks {
         distributed_rows(&case, p, Some(&serial));
     }
@@ -470,7 +519,7 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
         let mix = dft_solvers::mixing::mixer_counters();
         let stop = dft_engine::stop_metric_counters();
         j.push_str(&format!(
-            ",\"grid_counters\":{{\"mix_calls\":{},\"mix_diffs\":{},\"mix_dots\":{},\"mix_metric\":{},\"stop_kept\":{},\"stop_fft\":{}}}}}",
+            ",\"grid_counters\":{{\"mix_calls\":{},\"mix_diffs\":{},\"mix_dots\":{},\"mix_metric\":{},\"stop_kept\":{},\"stop_fft\":{}}}",
             (mix[0] - grid_before.0[0]) / p as u64,
             (mix[1] - grid_before.0[1]) / p as u64,
             (mix[2] - grid_before.0[2]) / p as u64,
@@ -478,6 +527,11 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
             (stop[0] - grid_before.1[0]) / p as u64,
             (stop[1] - grid_before.1[1]) / p as u64,
         ));
+        // BREAKTHROUGH-0-INSTRUMENT: exclusive phase profile (per rank, max
+        // over ranks) and the first-block residual table (both default off).
+        j.push_str(&profile_block(wall));
+        print_first_block();
+        j.push('}');
         println!("M2SCREEN_JSON {j}");
     }
 }

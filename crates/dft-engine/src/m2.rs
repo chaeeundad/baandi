@@ -293,12 +293,15 @@ static STAGE_CALLS: [AtomicUsize; 10] = [const { AtomicUsize::new(0) }; 10];
 /// with `BAANDI_STAGE_TIMERS=off` counts the entry without reading a clock.
 pub(crate) fn add(stage: Stage, start: Option<Instant>) {
     STAGE_CALLS[stage as usize].fetch_add(1, Ordering::Relaxed);
+    let ns = dft_numerics::stage_clock::elapsed_ns(start);
     if start.is_some() {
-        STAGE_NANOS[stage as usize].fetch_add(
-            dft_numerics::stage_clock::elapsed_ns(start),
-            Ordering::Relaxed,
-        );
+        STAGE_NANOS[stage as usize].fetch_add(ns, Ordering::Relaxed);
     }
+    // Per-thread mirror for the phase profile (`crate::profile`).
+    dft_numerics::stage_clock::local::add(
+        dft_numerics::stage_clock::local::M2_STAGE + stage as usize,
+        ns,
+    );
 }
 #[derive(Clone, Copy)]
 pub(crate) enum Count {

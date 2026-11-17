@@ -1390,6 +1390,10 @@ fn solve_on<C: Collective>(
                 )?;
                 stage_add(2, t0);
             }
+            // `restart` stage: the Gram defect and the contraction copy; a
+            // re-orthonormalization is counted as `orthonormalize` and its
+            // application as `apply_total` (exclusive stages).
+            let t_restart = dft_numerics::stage_clock::start();
             fit(defect, bands, bands)?;
             fit(partial, bands, bands)?;
             site(Site::RestartDefect);
@@ -1416,8 +1420,12 @@ fn solve_on<C: Collective>(
                 basis.as_mut_slice().copy_from_slice(vectors.as_slice());
                 fit(products, nl, bands)?;
                 products.as_mut_slice().copy_from_slice(rotated.as_slice());
+                stage_add(10, t_restart);
             } else {
+                stage_add(10, t_restart);
+                let t0 = dft_numerics::stage_clock::start();
                 ortho_into(comm, gemm, None, vectors, &tuning, panel, ortho, basis)?;
+                stage_add(4, t0);
                 fit(products, nl, basis.cols())?;
                 apply(basis, products)?;
                 applications += basis.cols();

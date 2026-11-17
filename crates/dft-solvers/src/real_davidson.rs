@@ -195,6 +195,31 @@ impl RealDavidsonWorkspace {
             k.projection_count = 0;
         }
     }
+    /// Whether the kept start is armed for the next lean solve.
+    pub fn kept_start_armed(&self) -> bool {
+        self.kept.as_ref().is_some_and(|k| k.valid && k.armed)
+    }
+    /// Snapshot replay (BREAKTHROUGH-0-INSTRUMENT, measurement only): load `x`
+    /// and `hx` (n x bands each) as the kept X and H X of this workspace and arm
+    /// the start, as if the previous lean solve had returned them and the
+    /// caller had brought H X to the current operator. Keeping stays on.
+    pub fn load_kept_start(&mut self, x: &RealMatrix, hx: &RealMatrix) -> Result<(), SolverError> {
+        if x.rows() != self.n
+            || hx.rows() != self.n
+            || x.cols() != self.bands
+            || hx.cols() != self.bands
+        {
+            return Err(SolverError::InvalidParameter("kept start shape"));
+        }
+        self.keep_returned_products(true)?;
+        let k = self.kept.as_mut().expect("allocated above");
+        k.vectors.as_mut_slice().copy_from_slice(x.as_slice());
+        k.products.as_mut_slice().copy_from_slice(hx.as_slice());
+        k.valid = true;
+        k.armed = true;
+        k.projection_count = 0;
+        Ok(())
+    }
 }
 impl RealDavidsonWorkspace {
     fn new(

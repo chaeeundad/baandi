@@ -864,8 +864,23 @@ pub(crate) fn solve_real_gamma(
     // enter the solver directly when every rank's rows match its operator
     // (one 1-double tree sum); otherwise the block is gathered and packed.
     let mut lazy_start: Option<RealMatrix> = None;
-    let initial = match (initial, initial_lazy) {
-        (Some(m), Some(h)) if m.rows() == 0 => {
+    // Snapshot replay (BREAKTHROUGH-0-INSTRUMENT): an injected start (this
+    // rank's rows on the M2 path, the ORC block on the threads path) and its
+    // kept H X replace the placeholder `initial` of `ScfProblem::replay_solve`.
+    let injected = crate::snapshot::take_injection();
+    let mut injected_packed: Option<RealMatrix> = None;
+    let mut injected_hx: Option<RealMatrix> = None;
+    let initial = match (initial, initial_lazy, injected) {
+        (Some(m), _, Some(inj)) if m.rows() == 0 => {
+            if comm.is_some() && state.dist.is_some() {
+                lazy_start = Some(inj.x);
+            } else {
+                injected_packed = Some(inj.x);
+            }
+            injected_hx = inj.hx;
+            None
+        }
+        (Some(m), Some(h), _) if m.rows() == 0 => {
             let mut local = false;
             if lazy_path && let (Some(c), Some(d)) = (comm.as_ref(), state.dist.as_ref()) {
                 let mismatch = !h.matches(d.local_rows(), n);
@@ -885,14 +900,16 @@ pub(crate) fn solve_real_gamma(
                 Some(h.materialize()?)
             }
         }
-        (Some(m), None) if m.rows() == 0 => {
+        (Some(m), None, _) if m.rows() == 0 => {
             return Err(ScfError::InvalidInput(
                 "lazy warm start without its distributed rows",
             ));
         }
-        (m, _) => m,
+        (m, _, _) => m,
     };
-    let packed = if let Some(initial) = initial {
+    let packed = if let Some(p) = injected_packed.take() {
+        Some(p)
+    } else if let Some(initial) = initial {
         let mut packed = RealMatrix::zeros(n, initial.cols()).map_err(SolverError::from)?;
         if let Err(e) = pool.install(|| {
             pair_columns(initial.as_slice(), packed.as_mut_slice(), n, &|src, dst| {
@@ -939,6 +956,82 @@ pub(crate) fn solve_real_gamma(
     {
         ws.keep_returned_products(false)?;
     }
+    // Snapshot replay on the threads path: the captured kept X and H X.
+    if comm.is_none()
+        && let (Some(x), Some(hx)) = (packed.as_ref(), injected_hx.take())
+    {
+        match state.workspace.as_mut() {
+            Some(ws) => ws.load_kept_start(x, &hx)?,
+            None => {
+                eprintln!("snapshot replay: no solver workspace (REUSE_PSI off): kept H X not used")
+            }
+        }
+    }
+    // BREAKTHROUGH-0-INSTRUMENT: snapshot capture and the first-block
+    // diagnostic of a threads-only solve (M2 solves are handled below, where
+    // their rows and kept H X are known).
+    let policy_occupied = policy.strict_bands.min(bands);
+    let capacity_per_band = options.davidson_capacity_per_band;
+    let threads_capture = if comm.is_none() {
+        let ws = state.workspace.as_ref();
+        let armed = ws.is_some_and(|w| w.kept_start_armed());
+        let kept = ws.and_then(|w| w.kept_start());
+        let hx = kept.map(|(_, hx)| hx);
+        // The basis of a taken kept start is the kept X itself, not the
+        // round-tripped `packed` start: capture and analyse that block.
+        let x_block: Option<&RealMatrix> = if armed {
+            kept.map(|(x, _)| x)
+        } else {
+            packed.as_ref()
+        };
+        if crate::first_block::enabled()
+            && let Some(x) = x_block
+        {
+            let op_ref = &state.op;
+            let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), String> {
+                op_ref.apply_block(x, y).map_err(|e| e.to_string())
+            };
+            crate::first_block::evaluate::<crate::parallel::SharedComm>(
+                None,
+                crate::first_block::Input {
+                    x,
+                    hx: hx.filter(|_| armed),
+                    bands,
+                    occupied: policy_occupied,
+                    tolerance,
+                    strict_bands: policy.strict_bands,
+                    buffer_tolerance: policy.buffer_tolerance,
+                    capacity,
+                    pool: pool.clone(),
+                },
+                &mut apply,
+            )
+            .map_err(ScfError::Numerical)?;
+        }
+        crate::snapshot::capture_entry(crate::snapshot::Entry {
+            rank: 0,
+            ranks: 1,
+            layout: crate::snapshot::Layout::OrcFull,
+            x: x_block,
+            hx,
+            armed,
+            rows_fnv: 0,
+            n_global: n,
+            bands,
+            occupied: policy_occupied,
+            tolerance,
+            strict_bands: policy.strict_bands,
+            buffer_tolerance: policy.buffer_tolerance,
+            ritz: options.standard.is_some(),
+            potential: state.op.h.borrow().potential(),
+            grid: state.op.h.borrow().grid_dims(),
+            cutoff_hartree: options.cutoff_hartree,
+            electrons: 2.0 * policy_occupied as f64,
+            capacity_per_band,
+        })
+    } else {
+        None
+    };
     let op = &state.op;
     let dist = state.dist.as_mut();
     // The SCF driver supplies the same ratcheted tolerance and band policy to
@@ -959,12 +1052,38 @@ pub(crate) fn solve_real_gamma(
             use dft_solvers::distributed_davidson::{DistributedKeptStart, DistributedStart};
             let mut x_local = previous_local
                 .unwrap_or_else(|| RealMatrix::new(0, 0, Vec::new()).expect("empty matrix"));
+            // Snapshot replay: the injected rows are the kept X; the injected
+            // H X is the stored return brought to this potential (no delta).
+            if let (Some(hx), Some(l)) = (injected_hx.take(), lazy_start.as_ref()) {
+                x_local = RealMatrix::new(l.rows(), l.cols(), l.as_slice().to_vec())
+                    .map_err(SolverError::from)?;
+                state.m2_reuse = Some(M2Reuse {
+                    kept: DistributedKeptStart::with_stored(hx),
+                    v_old: dist.potential().to_vec(),
+                    delta: Vec::new(),
+                    image: RealMatrix::new(0, 0, Vec::new()).expect("empty matrix"),
+                    planes: Vec::new(),
+                    kept_pairs: 0,
+                    collect: true,
+                    gated: false,
+                });
+            }
             let start = match (&lazy_start, &packed) {
                 (Some(l), _) => Some(DistributedStart::Local(l)),
                 (None, Some(p)) => Some(DistributedStart::Global(p)),
                 (None, None) => None,
             };
             let gather = !lazy_path;
+            // This rank's rows of the start (for the capture and the diagnostic).
+            let start_rows: Option<RealMatrix> = match (&lazy_start, &packed) {
+                (Some(_), _) => None,
+                (None, Some(p)) => Some(
+                    dist.extract_local(p)
+                        .map_err(|e| ScfError::Numerical(e.to_string()))?,
+                ),
+                (None, None) => None,
+            };
+            let x_rows: Option<&RealMatrix> = lazy_start.as_ref().or(start_rows.as_ref());
             let result = if m2_kept {
                 let r = state.m2_reuse.get_or_insert_with(|| M2Reuse {
                     kept: DistributedKeptStart::new(),
@@ -977,6 +1096,56 @@ pub(crate) fn solve_real_gamma(
                     gated: false,
                 });
                 prepare_m2_kept_start(comm, dist, r, &x_local, start.is_some(), bands)?;
+                let armed = r.kept.armed();
+                let hx = r.kept.stored().filter(|_| armed);
+                // The solver's basis of a taken kept start is the kept X
+                // itself (`x_local`), not the round-tripped start: capture
+                // and analyse that block when the start is armed.
+                let x_rows: Option<&RealMatrix> = if armed { Some(&x_local) } else { x_rows };
+                if crate::first_block::enabled()
+                    && let Some(x) = x_rows
+                {
+                    let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), String> {
+                        dist.apply_block(comm, x, y).map_err(|e| e.to_string())
+                    };
+                    crate::first_block::evaluate(
+                        Some(comm),
+                        crate::first_block::Input {
+                            x,
+                            hx,
+                            bands,
+                            occupied: policy_occupied,
+                            tolerance,
+                            strict_bands: policy.strict_bands,
+                            buffer_tolerance: policy.buffer_tolerance,
+                            capacity,
+                            pool: pool.clone(),
+                        },
+                        &mut apply,
+                    )
+                    .map_err(ScfError::Numerical)?;
+                }
+                let capture = crate::snapshot::capture_entry(crate::snapshot::Entry {
+                    rank: comm.rank(),
+                    ranks: comm.size(),
+                    layout: crate::snapshot::Layout::StickRows,
+                    x: x_rows,
+                    hx,
+                    armed,
+                    rows_fnv: crate::snapshot::fnv_usize(dist.local_rows()),
+                    n_global: n,
+                    bands,
+                    occupied: policy_occupied,
+                    tolerance,
+                    strict_bands: policy.strict_bands,
+                    buffer_tolerance: policy.buffer_tolerance,
+                    ritz: true,
+                    potential: dist.potential(),
+                    grid: dist.grid_shape(),
+                    cutoff_hartree: options.cutoff_hartree,
+                    electrons: 2.0 * policy_occupied as f64,
+                    capacity_per_band,
+                });
                 let solved = solver.solve_distributed_rows_local(
                     comm,
                     dist,
@@ -998,6 +1167,14 @@ pub(crate) fn solve_real_gamma(
                     crate::m2::count(crate::m2::Count::ReuseDeclined);
                 }
                 let result = solved?;
+                if let Some(c) = capture {
+                    crate::snapshot::capture_exit(c, &result, r.kept.taken());
+                }
+                crate::profile::note_solve(
+                    result.restarts,
+                    result.contracted_restarts,
+                    r.kept.taken(),
+                );
                 // The density build of this map may keep slabs for the stored X.
                 r.collect = r.kept.is_stored();
                 r.kept_pairs = 0;
@@ -1008,7 +1185,51 @@ pub(crate) fn solve_real_gamma(
                 // MPI-LAZY-ORBITALS without the kept start: a kept-start object
                 // that never keeps (only the local rows are returned in x_local).
                 let mut plain = DistributedKeptStart::new();
-                solver.solve_distributed_rows_local(
+                if crate::first_block::enabled()
+                    && let Some(x) = x_rows
+                {
+                    let mut apply = |x: &RealMatrix, y: &mut RealMatrix| -> Result<(), String> {
+                        dist.apply_block(comm, x, y).map_err(|e| e.to_string())
+                    };
+                    crate::first_block::evaluate(
+                        Some(comm),
+                        crate::first_block::Input {
+                            x,
+                            hx: None,
+                            bands,
+                            occupied: policy_occupied,
+                            tolerance,
+                            strict_bands: policy.strict_bands,
+                            buffer_tolerance: policy.buffer_tolerance,
+                            capacity,
+                            pool: pool.clone(),
+                        },
+                        &mut apply,
+                    )
+                    .map_err(ScfError::Numerical)?;
+                }
+                let capture = crate::snapshot::capture_entry(crate::snapshot::Entry {
+                    rank: comm.rank(),
+                    ranks: comm.size(),
+                    layout: crate::snapshot::Layout::StickRows,
+                    x: x_rows,
+                    hx: None,
+                    armed: false,
+                    rows_fnv: crate::snapshot::fnv_usize(dist.local_rows()),
+                    n_global: n,
+                    bands,
+                    occupied: policy_occupied,
+                    tolerance,
+                    strict_bands: policy.strict_bands,
+                    buffer_tolerance: policy.buffer_tolerance,
+                    ritz: true,
+                    potential: dist.potential(),
+                    grid: dist.grid_shape(),
+                    cutoff_hartree: options.cutoff_hartree,
+                    electrons: 2.0 * policy_occupied as f64,
+                    capacity_per_band,
+                });
+                let result = solver.solve_distributed_rows_local(
                     comm,
                     dist,
                     start,
@@ -1021,7 +1242,12 @@ pub(crate) fn solve_real_gamma(
                     &mut x_local,
                     &mut plain,
                     gather,
-                )?
+                )?;
+                if let Some(c) = capture {
+                    crate::snapshot::capture_exit(c, &result, false);
+                }
+                crate::profile::note_solve(result.restarts, result.contracted_restarts, false);
+                result
             };
             if lazy_path && result.eigenvectors.rows() == 0 {
                 // The block stays on the ranks: this rank's rows are its state.
@@ -1047,6 +1273,36 @@ pub(crate) fn solve_real_gamma(
             state.m2_local = Some(x_local);
             result
         } else {
+            // Strict (residual) solves and the allocating path: capture only
+            // (no kept start exists here).
+            let start_rows = match packed.as_ref() {
+                Some(p) => Some(
+                    dist.extract_local(p)
+                        .map_err(|e| ScfError::Numerical(e.to_string()))?,
+                ),
+                None => None,
+            };
+            let capture = crate::snapshot::capture_entry(crate::snapshot::Entry {
+                rank: comm.rank(),
+                ranks: comm.size(),
+                layout: crate::snapshot::Layout::StickRows,
+                x: start_rows.as_ref(),
+                hx: None,
+                armed: false,
+                rows_fnv: crate::snapshot::fnv_usize(dist.local_rows()),
+                n_global: n,
+                bands,
+                occupied: policy_occupied,
+                tolerance,
+                strict_bands: policy.strict_bands,
+                buffer_tolerance: policy.buffer_tolerance,
+                ritz: options.standard.is_some(),
+                potential: dist.potential(),
+                grid: dist.grid_shape(),
+                cutoff_hartree: options.cutoff_hartree,
+                electrons: 2.0 * policy_occupied as f64,
+                capacity_per_band,
+            });
             let result = solver.solve_distributed_rows(
                 comm,
                 dist,
@@ -1057,6 +1313,10 @@ pub(crate) fn solve_real_gamma(
                 certify && options.standard.is_none(),
                 options.davidson_capacity_per_band,
             )?;
+            if let Some(c) = capture {
+                crate::snapshot::capture_exit(c, &result, false);
+            }
+            crate::profile::note_solve(result.restarts, result.contracted_restarts, false);
             // M2d: keep this rank's rows for the distributed density and energy.
             state.m2_local = Some(
                 dist.extract_local(&result.eigenvectors)
@@ -1077,7 +1337,11 @@ pub(crate) fn solve_real_gamma(
             options.davidson_capacity_per_band,
         )?
     } else {
-        solver.solve_reusing_with_preconditioner(
+        let armed_before = state
+            .workspace
+            .as_ref()
+            .is_some_and(|w| w.kept_start_armed());
+        let result = solver.solve_reusing_with_preconditioner(
             op,
             packed.as_ref(),
             &diagonal,
@@ -1087,7 +1351,20 @@ pub(crate) fn solve_real_gamma(
             options.davidson_capacity_per_band,
             &mut state.workspace,
             options.preconditioner,
-        )?
+        )?;
+        // An armed kept start that is no longer armed after the solve was
+        // consumed (taken, or declined and dropped): the lean counters tell
+        // which; here the taken flag is the armed-before flag.
+        let kept_taken = armed_before
+            && !state
+                .workspace
+                .as_ref()
+                .is_some_and(|w| w.kept_start_armed());
+        if let Some(c) = threads_capture {
+            crate::snapshot::capture_exit(c, &result, kept_taken);
+        }
+        crate::profile::note_solve(result.restarts, result.contracted_restarts, kept_taken);
+        result
     };
     if reuse && let (Some(r), Some(ws)) = (state.reuse.as_mut(), state.workspace.as_ref()) {
         // The density build of this map may keep psi(r) for the kept X.

@@ -526,3 +526,42 @@ switch for the lazy and kept-start conditions in `gamma_real.rs`.
 `tests/m2_lean_algebra.rs`: production standard SCF on the M2 path, defaults and
 the pending stack, cubic and skewed cells, P 2/3: standard class against
 threads-only, verified, ranks bit-equal, reproducible.
+
+## Measurement infrastructure (BREAKTHROUGH-0-INSTRUMENT, 2026-11-17; all default off)
+
+Three switches, none of which touches the arithmetic (test `tests/instrument.rs`:
+threads-only and 2 simulated ranks, energy and density bits equal with every
+switch on and off):
+- `BAANDI_PHASE_PROFILE=on` (`profile.rs`): exclusive nested phase profile per
+  rank thread (buckets init / coarse / fine / fine_redo / verify_pass /
+  verify_fail / materialize; map phases inside; exclusive solve stages inside
+  `solve`, with `solve.other` the remainder; collectives and M2 stages beside
+  them). Per-thread counter mirrors come from `dft_numerics::stage_clock::local`
+  (the solver, M2, collective and operator sites add to them when the profile
+  turned the mirror on). `enter(Top)` guards at the ladder coarse stage and the
+  certificate block, `map_begin`/`map_phase`/`solve_begin`/`solve_end` in
+  `step_map`, `map_commit(kind)` from the session (ordinary, redo, verification
+  pass/fail), `add_mixing`, `add_atomic_start` (filed under init, excluded from
+  the first map's potential), caller-reported `add_init`/`add_io`. `finish_rank`
+  publishes to a registry (simulated ranks) and returns the profile; `gather`
+  does the real-MPI allgatherv; `Report::from_ranks` takes max and min over
+  ranks (never a sum). Printed by dft-cli (results.json `phase_profile`,
+  `parallel.phases`), `tests/m2_entry_cost.rs` and `davidson_bench`. Count-only
+  with `BAANDI_STAGE_TIMERS=off`. `force(Some(..))` is the test hook.
+- `BAANDI_FIRST_BLOCK=on` (`first_block.rs`, review E3): before every warm real
+  Gamma solve a small Rayleigh-Ritz on the kept B vectors, the true residuals of
+  the B Ritz pairs, the singular values of the occupied residual block and its
+  effective ranks; one record per solve on rank 0, `table()` prints them. Uses
+  the kept H X when armed, else applies H once (B columns, visible in the
+  operator counters only). The solver is unchanged.
+- `BAANDI_SNAPSHOT_DIR=<abs dir>` (`snapshot.rs`, review 13.3): every real Gamma
+  solve writes its manifest (rank 0), the input density (rank 0) and this rank's
+  start rows with the armed kept H X (`write_rank_file`), outside the stage
+  clocks and subtracted from the map's `diagonalization` time. The captured X
+  is the solver's basis of a taken kept start (the kept X itself, not the
+  round-tripped start). `ScfProblem::replay_solve` injects a `ReplayStart`
+  through `inject`/`take_injection` (keyed by rank) and runs the session map;
+  the delta-V update is not replayed (its H X is stored), so the replay
+  reproduces the solver's own counters and eigenvalues. The context (stage,
+  kind, iteration) comes from `profile::set_context` (session, ladder,
+  verification).

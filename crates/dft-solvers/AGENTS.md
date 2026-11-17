@@ -265,3 +265,15 @@ unchanged. Counters `lean_algebra_stats()`, reduction site `lean_border`. Tests
 `tests/distributed_lean_algebra.rs` (ranks 1 to 4: class against the orthonormal
 path, rank decisions equal to the serial lean solver, fallbacks, bits),
 dft-engine `tests/m2_lean_algebra.rs`. Design docs/design/mpi-overlap-davidson.md.
+
+## Measurement hooks (BREAKTHROUGH-0-INSTRUMENT, 2026-11-17)
+
+`distributed_davidson::STAGES` has an eleventh stage `restart` (the Gram defect
+and contraction copy of the workspace path, the basis replacement of the lean
+contraction; a re-orthonormalization at a restart counts as `orthonormalize`,
+its application as `apply_total`, so the stages stay exclusive). `stage_add` and
+`davidson_stages::Timers::stop` also add to the per-thread mirror
+`dft_numerics::stage_clock::local` (one relaxed load when the engine's profile is
+off). `DistributedKeptStart::{armed, stored, with_stored}` and
+`RealDavidsonWorkspace::{kept_start_armed, load_kept_start}` serve the engine's
+snapshot capture and replay only; no solver branch reads them.

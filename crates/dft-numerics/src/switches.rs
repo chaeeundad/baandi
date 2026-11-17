@@ -352,6 +352,13 @@ table! {
         "print per-site dgemm timers at exit (dgemm-timers builds)";
     PSEUDO_DIR: Kind::Path, "platform cache", "absolute path",
         "pseudopotential cache directory";
+    // Measurement infrastructure (ticket BREAKTHROUGH-0-INSTRUMENT); all default off, results unchanged.
+    PHASE_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "exclusive nested phase profile per rank (init / coarse SCF / fine ordinary SCF / verification pass and fail / materialization; map phases and solve stages inside; maximum over ranks and imbalance); clocks follow BAANDI_STAGE_TIMERS (off: counts only); printed by dft-cli (results.json phase_profile, parallel.phases), m2_entry_cost and davidson_bench";
+    FIRST_BLOCK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "first-correction-block residual diagnostic (review E3): before every warm real Gamma solve a small Rayleigh-Ritz on the kept B vectors, the occupied residual block R_o = H X_o - X_o A_o, its singular values and effective ranks, and the unconverged-root counts of the Ritz-change rule against the true residual; read-only (the solve is unchanged; B extra H columns per solve when no kept H X exists)";
+    SNAPSHOT_DIR: Kind::Path, "unset", "absolute directory",
+        "SCF snapshot capture: every real Gamma solve of the run writes the state that replays it (input density, this rank's orbital rows, kept H X and its armed flag, tolerance, policy, layout hash, context) to this directory outside the timed map phases; replay with davidson_bench --snapshot <manifest.json>";
 }
 
 struct Resolved {

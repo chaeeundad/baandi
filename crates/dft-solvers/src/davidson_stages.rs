@@ -297,7 +297,13 @@ impl Timers {
     #[inline]
     pub(crate) fn stop(self, start: Option<Instant>, stage: Stage) {
         if let Some(t) = start {
-            STAGE_NANOS[run_stage()][stage as usize].fetch_add(nanos(t), Relaxed);
+            let ns = nanos(t);
+            STAGE_NANOS[run_stage()][stage as usize].fetch_add(ns, Relaxed);
+            // Per-thread mirror for the engine's phase profile.
+            dft_numerics::stage_clock::local::add(
+                dft_numerics::stage_clock::local::SERIAL_STAGE + stage as usize,
+                ns,
+            );
         }
     }
     /// Whole-iteration wall time, bucketed by the correction width it appended.

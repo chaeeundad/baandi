@@ -55,3 +55,104 @@ pub fn keep(clock: Instant) -> Option<Instant> {
 pub fn elapsed_ns(start: Option<Instant>) -> u64 {
     start.map_or(0, |s| s.elapsed().as_nanos() as u64)
 }
+
+/// Per-thread mirror of the stage, collective and operator counters
+/// (ticket BREAKTHROUGH-0-INSTRUMENT, the exclusive phase profile of
+/// `dft_engine::profile`). Every counted site adds its call (and, in time mode,
+/// its nanoseconds) to a fixed slot of the calling thread when the mirror is
+/// enabled (one relaxed load otherwise). The engine takes snapshots of the
+/// calling thread at phase boundaries and attributes the deltas to the phase in
+/// progress; with simulated ranks (threads of one process) every rank thread
+/// therefore has its own counts, which the process-wide atomics cannot give.
+/// No allocation, no I/O; nothing numerical reads these values.
+pub mod local {
+    use std::cell::Cell;
+    use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+
+    /// Distributed solver stages (`dft_solvers::distributed_davidson::STAGES` order).
+    pub const DIST_STAGE: usize = 0;
+    /// Engine M2 stages (`dft_engine::m2` stage order).
+    pub const M2_STAGE: usize = 16;
+    /// Collectives: allgatherv, tree_sum, bcast, alltoall, barrier.
+    pub const COLLECTIVE: usize = 32;
+    /// Distributed operator counts (calls only): applied columns, potential
+    /// change columns, forward pair transforms, inverse pair transforms, kept
+    /// plane pairs.
+    pub const OP_COUNT: usize = 40;
+    /// Serial Davidson stages (`dft_solvers::davidson_stages::Stage` order).
+    pub const SERIAL_STAGE: usize = 48;
+    /// Number of slots.
+    pub const SLOTS: usize = 64;
+
+    static ENABLED: AtomicBool = AtomicBool::new(false);
+    thread_local! {
+        static NANOS: [Cell<u64>; SLOTS] = const { [const { Cell::new(0) }; SLOTS] };
+        static CALLS: [Cell<u64>; SLOTS] = const { [const { Cell::new(0) }; SLOTS] };
+    }
+
+    /// Turn the mirror on for the process (the engine does it when its phase
+    /// profile is requested). Off by default: the sites cost one relaxed load.
+    pub fn enable(on: bool) {
+        ENABLED.store(on, Relaxed);
+    }
+    #[inline]
+    pub fn enabled() -> bool {
+        ENABLED.load(Relaxed)
+    }
+    /// Add one call and `nanos` to `slot` on this thread.
+    #[inline]
+    pub fn add(slot: usize, nanos: u64) {
+        if ENABLED.load(Relaxed) {
+            add_n(slot, nanos, 1);
+        }
+    }
+    /// Add `calls` calls and `nanos` to `slot` on this thread.
+    #[inline]
+    pub fn add_n(slot: usize, nanos: u64, calls: u64) {
+        if ENABLED.load(Relaxed) && slot < SLOTS {
+            NANOS.with(|n| n[slot].set(n[slot].get().wrapping_add(nanos)));
+            CALLS.with(|c| c[slot].set(c[slot].get().wrapping_add(calls)));
+        }
+    }
+
+    /// Cumulative values of the calling thread.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Snapshot {
+        pub nanos: [u64; SLOTS],
+        pub calls: [u64; SLOTS],
+    }
+    impl Default for Snapshot {
+        fn default() -> Self {
+            Self {
+                nanos: [0; SLOTS],
+                calls: [0; SLOTS],
+            }
+        }
+    }
+    impl Snapshot {
+        /// Values accumulated after `earlier` was taken.
+        pub fn since(&self, earlier: &Snapshot) -> Snapshot {
+            let mut out = Snapshot::default();
+            for i in 0..SLOTS {
+                out.nanos[i] = self.nanos[i].wrapping_sub(earlier.nanos[i]);
+                out.calls[i] = self.calls[i].wrapping_sub(earlier.calls[i]);
+            }
+            out
+        }
+    }
+    /// The calling thread's cumulative counters.
+    pub fn snapshot() -> Snapshot {
+        let mut out = Snapshot::default();
+        NANOS.with(|n| {
+            for (o, c) in out.nanos.iter_mut().zip(n.iter()) {
+                *o = c.get();
+            }
+        });
+        CALLS.with(|n| {
+            for (o, c) in out.calls.iter_mut().zip(n.iter()) {
+                *o = c.get();
+            }
+        });
+        out
+    }
+}

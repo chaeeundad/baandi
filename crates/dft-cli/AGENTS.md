@@ -105,3 +105,18 @@ Checkpoint v1 carries the verification option and attempts (`docs/checkpoint-for
 that need strict set `BAANDI_REFERENCE_STRICT=on` (`tests/run.rs` `Case::run`), use
 `run::options_with_reference(config, true)` or the engine's `ScfOptions::strict_reference()`;
 `tests/single_path.rs` and `tests/onepath_last_fallbacks.rs` cover the default path.
+
+## Measurement outputs (BREAKTHROUGH-0-INSTRUMENT, 2026-11-17)
+
+`run` writes results.json `phase_profile` (and `parallel.phases` on MPI runs,
+gathered over ranks: max and min per entry) with `BAANDI_PHASE_PROFILE=on`
+(`run::profile_json`), and `convergence.work.first_block` with
+`BAANDI_FIRST_BLOCK=on`; both tables also go to the console. Problem
+construction is reported to the profile as `init`, the output materialization
+after the SCF as `materialize` io. `examples/davidson_bench.rs --snapshot
+<manifest.json>` replays a captured solve (`BAANDI_SNAPSHOT_DIR`): the timed
+kind is `replay` (one map at the captured density from the captured start),
+the manifest's cutoff rebuilds a coarse-stage problem, and the report prints
+whether the Davidson iterations, H columns and eigenvalue FNV of the captured
+solve were reproduced (`DAVBENCH_JSON` field `snapshot`). Both harnesses print
+the phase profile and the first-block table when their switches are on.

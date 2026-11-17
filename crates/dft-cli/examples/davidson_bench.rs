@@ -78,11 +78,72 @@ struct Args {
     /// Recompute the atomic start inside every cold map (the SCF's own code path)
     /// instead of passing the vectors computed once (identical solve; slower).
     cold_internal: bool,
+    /// Snapshot replay (BREAKTHROUGH-0-INSTRUMENT): the manifest written by
+    /// `BAANDI_SNAPSHOT_DIR`; the timed kind is then `replay` (one map at the
+    /// captured density from the captured start, kept H X armed when captured).
+    snapshot: Option<PathBuf>,
+}
+
+/// The parts of a snapshot manifest the replay needs.
+struct Manifest {
+    dir: PathBuf,
+    label: String,
+    stage: String,
+    kind: String,
+    iteration: u64,
+    ranks: usize,
+    layout: String,
+    bands: usize,
+    plane_waves: usize,
+    grid: [usize; 3],
+    cutoff_hartree: f64,
+    tolerance: f64,
+    start: String,
+    kept_armed: bool,
+    density_file: Option<String>,
+    result_iterations: u64,
+    result_h_columns: u64,
+    result_eigen_fnv: String,
+    result_kept_taken: bool,
+}
+
+fn read_manifest(path: &Path) -> Manifest {
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| usage(&format!("--snapshot: {e}")));
+    let v: Value =
+        serde_json::from_str(&text).unwrap_or_else(|e| usage(&format!("--snapshot: {e}")));
+    if v["schema"] != "baandi-snapshot-1" {
+        usage("--snapshot: not a baandi-snapshot-1 manifest");
+    }
+    let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
+    let u = |k: &str| v[k].as_u64().unwrap_or(0);
+    let g = v["grid"].as_array().cloned().unwrap_or_default();
+    let grid = [0, 1, 2].map(|i| g.get(i).and_then(Value::as_u64).unwrap_or(0) as usize);
+    Manifest {
+        dir: path.parent().unwrap_or(Path::new(".")).to_path_buf(),
+        label: s("label"),
+        stage: s("stage"),
+        kind: s("kind"),
+        iteration: u("iteration"),
+        ranks: u("ranks") as usize,
+        layout: s("layout"),
+        bands: u("bands") as usize,
+        plane_waves: u("plane_waves") as usize,
+        grid,
+        cutoff_hartree: v["cutoff_hartree"].as_f64().unwrap_or(0.0),
+        tolerance: v["tolerance_ha"].as_f64().unwrap_or(0.0),
+        start: s("start"),
+        kept_armed: v["kept_armed"].as_bool().unwrap_or(false),
+        density_file: v["density_file"].as_str().map(str::to_string),
+        result_iterations: v["result"]["davidson_iterations"].as_u64().unwrap_or(0),
+        result_h_columns: v["result"]["h_columns"].as_u64().unwrap_or(0),
+        result_eigen_fnv: v["result"]["eigen_fnv"].as_str().unwrap_or("").to_string(),
+        result_kept_taken: v["result"]["kept_taken"].as_bool().unwrap_or(false),
+    }
 }
 
 fn usage(msg: &str) -> ! {
     eprintln!(
-        "davidson_bench: {msg}\nusage: davidson_bench --input FILE.toml [--density density.bin] [--repeats N] [--kinds cold,warm] [--sim-ranks P] [--prev-tol X] [--mix X] [--cold-tol X] [--warm-tol X] [--cold-start once|internal]"
+        "davidson_bench: {msg}\nusage: davidson_bench --input FILE.toml [--density density.bin] [--repeats N] [--kinds cold,warm] [--sim-ranks P] [--prev-tol X] [--mix X] [--cold-tol X] [--warm-tol X] [--cold-start once|internal] [--snapshot MANIFEST.json]"
     );
     std::process::exit(2)
 }
@@ -99,6 +160,7 @@ fn parse_args() -> Args {
         cold_tol: StandardProfile::CAP_HA,
         warm_tol: None,
         cold_internal: false,
+        snapshot: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -124,16 +186,23 @@ fn parse_args() -> Args {
                     _ => usage("--cold-start is once or internal"),
                 }
             }
+            "--snapshot" => a.snapshot = Some(v().into()),
             _ => usage(&format!("unknown argument {k}")),
         }
     }
     if a.input.as_os_str().is_empty() {
         usage("--input is required");
     }
+    if a.snapshot.is_some() {
+        a.kinds = vec!["replay".into()];
+    }
     if a.repeats == 0 || a.sim_ranks == 0 || !(a.mix > 0.0 && a.mix <= 1.0) {
         usage("repeats and sim-ranks must be positive, mix in (0, 1]");
     }
-    if a.kinds.iter().any(|k| k != "cold" && k != "warm") {
+    if a.kinds
+        .iter()
+        .any(|k| k != "cold" && k != "warm" && k != "replay")
+    {
         usage("kinds are cold and warm");
     }
     a
@@ -402,6 +471,8 @@ struct RankOut {
     warm_tol: f64,
     e_h_change: f64,
     kinds: Vec<(String, KindOut)>,
+    /// Replay mode: the manifest summary and the captured solve's counters.
+    snapshot: Option<Value>,
 }
 
 fn bench(args: &Args, comm: Option<&dyn Collective>, p: u64) -> RankOut {
@@ -414,7 +485,23 @@ fn bench(args: &Args, comm: Option<&dyn Collective>, p: u64) -> RankOut {
     };
     let text = std::fs::read_to_string(&args.input).expect("read --input");
     let config = Config::parse(&text).expect("parse --input");
-    let opts = dft_cli::run::options(&config).expect("options");
+    let mut opts = dft_cli::run::options(&config).expect("options");
+    let manifest = args.snapshot.as_deref().map(read_manifest);
+    if let Some(m) = &manifest {
+        // A coarse-stage snapshot: the ladder's coarse problem is the same
+        // input at the fraction of the cutoff without a fixed grid.
+        if (m.cutoff_hartree - opts.cutoff_hartree).abs() > 1e-12 * opts.cutoff_hartree.abs() {
+            opts.cutoff_hartree = m.cutoff_hartree;
+            opts.grid_override = None;
+        }
+        let ranks = comm.map_or(1, |c| c.size());
+        if m.ranks != ranks {
+            usage(&format!(
+                "--snapshot was captured with {} ranks, this run has {ranks}",
+                m.ranks
+            ));
+        }
+    }
     let base_dir = args.input.parent().unwrap_or(Path::new("."));
     let mut potentials = Vec::new();
     for (name, path) in &config.pseudopotentials {
@@ -460,6 +547,11 @@ fn bench(args: &Args, comm: Option<&dyn Collective>, p: u64) -> RankOut {
     }
     let dims = problem.grid_dimensions();
     let electrons = problem.electron_count();
+    let construct_s = t0.elapsed().as_secs_f64();
+    dft_engine::profile::add_init(construct_s);
+    if let Some(m) = &manifest {
+        return replay(args, m, &mut problem, comm, p, dims, electrons, construct_s);
+    }
     let (rho0, base_density) = match &args.density {
         Some(path) => {
             let bytes = std::fs::read(path).expect("read --density");
@@ -498,7 +590,6 @@ fn bench(args: &Args, comm: Option<&dyn Collective>, p: u64) -> RankOut {
         let (warm, lazy) = dft_engine::split_warm(Some(&step.k_points));
         (warm.expect("one block"), lazy)
     };
-    let construct_s = t0.elapsed().as_secs_f64();
     // Atomic-start vectors of a cold map at rho0, computed once (the SCF's own
     // routine, `ScfProblem::atomic_start_vectors`); None without atomic orbitals
     // (then a cold map starts from the solver's own guess).
@@ -609,6 +700,142 @@ fn bench(args: &Args, comm: Option<&dyn Collective>, p: u64) -> RankOut {
         warm_tol,
         e_h_change,
         kinds,
+        snapshot: None,
+    }
+}
+
+/// Snapshot replay: `--repeats` timed maps (plus one discarded warm-up) at the
+/// captured density from the captured start, each injected afresh.
+#[allow(clippy::too_many_arguments)]
+fn replay(
+    args: &Args,
+    m: &Manifest,
+    problem: &mut ScfProblem,
+    comm: Option<&dyn Collective>,
+    p: u64,
+    dims: [usize; 3],
+    electrons: f64,
+    construct_s: f64,
+) -> RankOut {
+    let rank0 = comm.is_none_or(|c| c.rank() == 0);
+    let rank = comm.map_or(0, |c| c.rank());
+    let barrier = || {
+        if let Some(c) = comm {
+            c.barrier().expect("barrier");
+        }
+    };
+    if dims != m.grid {
+        usage(&format!(
+            "--snapshot grid {:?} differs from the problem grid {dims:?}",
+            m.grid
+        ));
+    }
+    let density_file = m
+        .density_file
+        .as_deref()
+        .unwrap_or_else(|| usage("--snapshot manifest has no density file"));
+    let rho = dft_engine::snapshot::read_density_file(&m.dir.join(density_file), dims)
+        .unwrap_or_else(|e| usage(&e));
+    let (x, hx, rows_fnv, layout) = if m.start == "none" {
+        (None, None, 0, m.layout.clone())
+    } else {
+        let path = m.dir.join(format!("{}.rank{rank}.bin", m.label));
+        let (x, hx, f, l) =
+            dft_engine::snapshot::read_rank_file(&path).unwrap_or_else(|e| usage(&e));
+        (Some(x), hx, f, l)
+    };
+    if let Some(x) = &x
+        && x.cols() != m.bands
+    {
+        usage(&format!(
+            "--snapshot start has {} columns, manifest bands {}",
+            x.cols(),
+            m.bands
+        ));
+    }
+    if rank0 {
+        eprintln!(
+            "davidson_bench: replay {} ({} {} iteration {}): start {} (kept armed {}, H X {}), layout {layout}, rows fnv {rows_fnv:#018x}, tolerance {:.3e} Ha; captured solve: Davidson {} H columns {} kept taken {}",
+            m.label,
+            m.stage,
+            m.kind,
+            m.iteration,
+            m.start,
+            m.kept_armed,
+            hx.is_some(),
+            m.tolerance,
+            m.result_iterations,
+            m.result_h_columns,
+            m.result_kept_taken
+        );
+    }
+    let setup_s = construct_s;
+    let mut repeats = Vec::new();
+    for r in 0..=args.repeats {
+        barrier();
+        let before = snap();
+        let t = Instant::now();
+        let step: ScfStep = match &x {
+            Some(x) => problem
+                .replay_solve(
+                    &rho,
+                    dft_engine::snapshot::ReplayStart {
+                        x: x.clone(),
+                        hx: hx.clone(),
+                    },
+                    m.tolerance,
+                )
+                .expect("replay map"),
+            None => problem
+                .step_kpoints_lazy(&rho, None, &[], m.tolerance, false)
+                .expect("replay cold map"),
+        };
+        let map_s = t.elapsed().as_secs_f64();
+        barrier();
+        let after = snap();
+        if r == 0 {
+            continue;
+        }
+        let s = &step.k_points[0].solution;
+        let (counters, seconds) = delta(&before, &after, p);
+        repeats.push(Repeat {
+            diag_s: step.timings.diagonalization.as_secs_f64(),
+            map_s,
+            iterations: s.iterations,
+            h_columns: s.operator_applications,
+            eig_fnv: fnv(&s.eigenvalues),
+            eigenvalues: s.eigenvalues.clone(),
+            residuals: s.residuals.clone(),
+            converged: s.converged.iter().filter(|&&c| c).count(),
+            counters,
+            seconds,
+        });
+    }
+    let bands = m.bands;
+    RankOut {
+        setup_s,
+        base_density: format!("snapshot {density_file}"),
+        electrons,
+        bands,
+        plane_waves: m.plane_waves,
+        grid: dims,
+        gamma_real: problem.gamma_real_diagnostics().all(|d| d.gamma_real_used),
+        warm_tol: m.tolerance,
+        e_h_change: f64::NAN,
+        kinds: vec![(
+            "replay".to_string(),
+            KindOut {
+                tolerance: m.tolerance,
+                repeats,
+            },
+        )],
+        snapshot: Some(json!({
+            "manifest": args.snapshot.as_ref().map(|p| p.display().to_string()),
+            "label": m.label, "stage": m.stage, "kind": m.kind, "iteration": m.iteration,
+            "start": m.start, "kept_armed": m.kept_armed, "layout": layout,
+            "captured": {"davidson_iterations": m.result_iterations, "h_columns": m.result_h_columns,
+                "eigen_fnv": m.result_eigen_fnv, "kept_taken": m.result_kept_taken},
+        })),
     }
 }
 
@@ -630,6 +857,7 @@ fn report(
     mode: &str,
     diag: &[Vec<f64>],
     map: &[Vec<f64>],
+    profile: Option<Value>,
 ) {
     let mut kinds = Vec::new();
     println!(
@@ -671,6 +899,25 @@ fn report(
             first.eigenvalues.len(),
             first.eig_fnv
         );
+        if let Some(s) = &out.snapshot {
+            let c = &s["captured"];
+            let work_reproduced = c["davidson_iterations"].as_u64()
+                == Some(first.iterations as u64)
+                && c["h_columns"].as_u64() == Some(first.h_columns as u64);
+            let eigen_reproduced =
+                c["eigen_fnv"].as_str() == Some(&format!("{:#018x}", first.eig_fnv));
+            println!(
+                "  replay of {} ({} {} iteration {}, start {}): captured Davidson {} H columns {} eigenvalue FNV {}; work reproduced {work_reproduced}, eigenvalues reproduced {eigen_reproduced}",
+                s["label"].as_str().unwrap_or(""),
+                s["stage"].as_str().unwrap_or(""),
+                s["kind"].as_str().unwrap_or(""),
+                s["iteration"],
+                s["start"].as_str().unwrap_or(""),
+                c["davidson_iterations"],
+                c["h_columns"],
+                c["eigen_fnv"].as_str().unwrap_or("")
+            );
+        }
         kinds.push(json!({
             "kind": kind,
             "tolerance_ha": k.tolerance,
@@ -711,8 +958,28 @@ fn report(
         "repeats": args.repeats,
         "mkl_backend": dft_numerics::MKL_BACKEND,
         "kinds": kinds,
+        "snapshot": out.snapshot,
+        "phase_profile": profile,
     });
     println!("DAVBENCH_JSON {doc}");
+}
+
+/// Phase profile of the process (`BAANDI_PHASE_PROFILE=on`): the per-rank
+/// profiles gathered (real MPI) or taken from the registry (simulated ranks).
+fn profile_report(profiles: Vec<dft_engine::profile::RankProfile>) -> Option<Value> {
+    if profiles.is_empty() {
+        return None;
+    }
+    let report = dft_engine::profile::Report::from_ranks(&profiles);
+    print!("{}", report.table(None));
+    Some(dft_cli::run::profile_json(&report, f64::NAN))
+}
+
+fn print_first_block() {
+    let records = dft_engine::first_block::take_records();
+    if !records.is_empty() {
+        print!("{}", dft_engine::first_block::table(&records));
+    }
 }
 
 fn main() {
@@ -746,6 +1013,7 @@ fn main() {
             parallel::set_m2_override(Some(true));
             parallel::set_communicator(Some(Arc::new(comm.clone()) as Shared));
             let out = bench(&args, Some(comm as &dyn Collective), p as u64);
+            dft_engine::profile::finish_rank(comm.rank());
             parallel::set_communicator(None);
             parallel::set_m2_override(None);
             out
@@ -753,7 +1021,9 @@ fn main() {
         let refs: Vec<&RankOut> = outs.iter().collect();
         let diag = maxima(&refs, |r| r.diag_s);
         let map = maxima(&refs, |r| r.map_s);
-        report(&args, &outs[0], p, "simulated", &diag, &map);
+        let profile = profile_report(dft_engine::profile::take_registry());
+        print_first_block();
+        report(&args, &outs[0], p, "simulated", &diag, &map, profile);
         return;
     }
     let size = world.size();
@@ -784,8 +1054,17 @@ fn main() {
     };
     let diag = gather(|r| r.diag_s);
     let map = gather(|r| r.map_s);
+    let profiles = match dft_engine::profile::finish_rank(world.rank()) {
+        Some(mine) => match &comm {
+            Some(c) => dft_engine::profile::gather(c.as_ref(), &mine).expect("profile gather"),
+            None => vec![mine],
+        },
+        None => Vec::new(),
+    };
     parallel::set_communicator(None);
     if world.rank() == 0 {
+        let profile = profile_report(profiles);
+        print_first_block();
         report(
             &args,
             &out,
@@ -793,6 +1072,7 @@ fn main() {
             if size > 1 { "mpi" } else { "threads" },
             &diag,
             &map,
+            profile,
         );
     }
 }

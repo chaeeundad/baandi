@@ -29,6 +29,11 @@ pub use session::{CompletionMode, ScfSession, StepReport, StepStatus};
 
 pub mod diagnostics;
 pub mod phase_clock;
+// BREAKTHROUGH-0-INSTRUMENT: exclusive phase profile, SCF snapshots, the
+// first-block residual diagnostic (all default off).
+pub mod first_block;
+pub mod profile;
+pub mod snapshot;
 
 pub mod checkpoint;
 

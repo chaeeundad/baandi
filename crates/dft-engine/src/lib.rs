@@ -50,9 +50,14 @@ pub use stress::{StressResult, StressState, stress};
 
 pub use dft_solvers::locking::Locking;
 
+pub mod advance;
 pub mod gamma_real;
 pub mod m2;
 pub mod parallel;
+pub use advance::{
+    ADVANCE_INNER_RATIO, AdvanceCounters, AdvanceRecord, CompletionTrigger,
+    counters as advance_counters,
+};
 pub use dft_solvers::real_davidson::{
     StageSeconds as StageSecondsReport, WIDTH_LABELS as DAVIDSON_WIDTH_LABELS, algebra_counters,
     b1_counters, b5_counters, flop_counters, lean_counters, ortho_counters, second_vector_columns,

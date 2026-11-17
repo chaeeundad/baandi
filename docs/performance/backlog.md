@@ -115,6 +115,7 @@ Common gates (details in the brief): energy within 1e-12 Ha of the stored baseli
 
 ### B05 Thick restart with previous directions (V-4)
 - Keep previous Ritz differences of unconverged roots across the 14 si8 restarts; unknown gain; do not combine with smaller capacity before measuring (H3b premise, B17).
+- 2026-11-17 (BREAKTHROUGH-1-RESTART): implemented as `BAANDI_RESTART_KEEP` on the lean paths (serial and distributed lean algebra), REJECT at the current capacities (ledger RESTART-KEEP-R1B: H -0.6 to +0.6 % at SCF level, rotation up; the threads path has no contraction at capacity 6). The only open part is the capacity-2 pair (ledger RESTART-KEEP-CAP2-LEAD: -19 % H against plain capacity 2, still +17 % against capacity 3); dev08 job in requests/breakthrough-restart.md. Same-H continuation of the redo (R1-a) closed: no redo in the default runs.
 
 ### B16 Hartree-metric Pulay least squares and mixer reset survey (S-1, S-5)
 - Same update, inner product in the Hartree kernel over the density sphere (G=0 excluded); 0-3 SCF iterations and, more importantly, noise tolerance that P14A showed missing; QE history 8, beta 0.7 untested here. Survey `mixing_resets` before any change. Mixing itself is 0.1-1% of the run.
@@ -259,3 +260,9 @@ Evidence: on si32 strict (perturbed seed 601) 66.4 percent of Davidson apply cal
 - Fresh-basis borders (start, contraction): V^T V and V^T (H V) could also be one product V^T [V | H V], and their diagonal blocks are symmetric (half the flops of the k x k block, dsyrk on MKL); about 2 % of a warm solve (factor_fresh), more in solves with contractions. Not implemented.
 - Narrow NN rotations stay far below the GEMM rate even after PACK_FIXED (k <= 4: GEMV shaped); a streaming kernel for X_s = V C_s with k <= 4 (one pass over V, like NARROW_PROJ for the TN side) is the remaining pure-build lever; on MKL check the per-call rate first (Part A0).
 - Algebra work per H column is about twice QE's (22 against about 10 to 12 MFLOP at si32, basis size): any capacity change must pass the SCF-level screens (A13 / SERIAL-CAPACITY-SCREEN premises), not stage 0 alone.
+
+## Bounded subspace SCF follow-ups (2026-11-17, BREAKTHROUGH-3; docs/design/bounded-subspace-scf.md, ledger BT3-*)
+- The `Advance` contract exists (`RealDavidson::advance_reusing`, `BAANDI_SCF_ADVANCE`, default off) and lost at stage 1 on si16 (three seeds) and si-skew: the standard ratchet already makes exact warm maps cheap (3 to 7 Davidson iterations), so bounding the block count saves 20 to 30 percent of a map at best and the completions, extra SCF steps and extra verification attempts pay it back. Do not re-run the same screen; the premise that changes it is a cheaper FIRST block (review R2: residual-rank selection of the first correction, so a 1-block advance is not an all-band block) or a solver whose per-block cost is far below the exact solve's (R4 periodic RR). With such a first block the Advance contract can be re-screened in one run (`BAANDI_SCF_ADVANCE=on`, `SCF_ADVANCE_GROWTH=off`).
+- MPI path: not implemented (declines with `distributed solver`); only worth adding after a serial win.
+- Mixer re-weighting of approximate pairs (design section 6) was not needed: no accepted advanced map showed the mixer learning noise (E tracked the exact path). Keep as a note, not a task.
+- Ladder (review R5): judge the coarse stage by the fine hand-off quality (fine H columns after hand-off), not by coarse cost; BT3-COARSE shows a cheaper coarse stage paying back in the fine stage.

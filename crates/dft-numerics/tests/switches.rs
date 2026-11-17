@@ -230,5 +230,14 @@ fn legacy_defaults_are_unchanged() {
     // MPI-REMAINING grid switches stay opt-in until dev08.
     assert_eq!(value(Id::MIX_INCREMENTAL), Value::Choice("on"));
     assert_eq!(value(Id::STOP_METRIC), Value::Choice("kept"));
-    assert_eq!(TABLE.len(), 83);
+    // BREAKTHROUGH-1-RESTART R1-b stays off (REJECT at stage 0 and 1).
+    assert_eq!(value(Id::RESTART_KEEP), Value::Choice("off"));
+    // BREAKTHROUGH-3 bounded subspace SCF stays off (rejected at stage 1, ledger BT3-*).
+    assert_eq!(value(Id::SCF_ADVANCE), Value::Choice("off"));
+    assert_eq!(value(Id::SCF_ADVANCE_BLOCKS), Value::Number(Some(2.0)));
+    // BREAKTHROUGH-0-INSTRUMENT measurement switches stay off (results unchanged either way).
+    assert_eq!(value(Id::PHASE_PROFILE), Value::Choice("off"));
+    assert_eq!(value(Id::FIRST_BLOCK), Value::Choice("off"));
+    assert_eq!(value(Id::SNAPSHOT_DIR), Value::Raw(None));
+    assert_eq!(TABLE.len(), 92);
 }

@@ -700,6 +700,12 @@ fn solve_on<C: Collective>(
     }
     if lean_mode {
         lean::prepare(&mut ws.lean, capacity, bands, &pool)?;
+        if tuning.restart_keep.directions(bands) > 0 {
+            // R1-b: the contraction rotation forms X and the kept directions.
+            for m in [&mut ws.vectors, &mut ws.rotated] {
+                reserve(m, nl * capacity)?;
+            }
+        }
     }
     let mut rng = Rng(solver.seed);
     let panel = tuning.panel_width(max_rows.max(1));

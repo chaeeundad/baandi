@@ -38,6 +38,9 @@ impl GammaReal {
 pub struct GammaRealDiagnostics {
     pub gamma_real_used: bool,
     pub fallback_reason: Option<String>,
+    /// BREAKTHROUGH-3: the session's `Advance` request for the coming map and
+    /// its outcome (taken by `step_map` after the solve; never set otherwise).
+    pub(crate) advance: Option<crate::advance::AdvanceSlot>,
 }
 impl GammaRealDiagnostics {
     pub(crate) fn fallback(
@@ -1044,6 +1047,12 @@ pub(crate) fn solve_real_gamma(
     if !m2_kept {
         state.m2_reuse = None;
     }
+    if comm.is_some()
+        && let Some(slot) = diagnostics.advance.as_mut()
+    {
+        // BREAKTHROUGH-3: the distributed solvers have no Advance contract yet.
+        slot.declined = Some("distributed solver");
+    }
     let result = if let (Some(comm), Some(dist)) = (&comm, dist) {
         crate::parallel::count_distributed_solve();
         crate::parallel::count_distributed_rows_solve();
@@ -1336,7 +1345,52 @@ pub(crate) fn solve_real_gamma(
             certify && options.standard.is_none(),
             options.davidson_capacity_per_band,
         )?
+    } else if let Some(slot) = diagnostics
+        .advance
+        .as_mut()
+        .filter(|_| options.standard.is_some())
+    {
+        // BREAKTHROUGH-3: bounded subspace update of this map. A solver
+        // configuration that cannot advance (classic Davidson, second
+        // vector) or a solver error declines with its reason and the ordinary
+        // converging solve runs instead.
+        match solver.advance_reusing(
+            op,
+            packed.as_ref(),
+            &diagonal,
+            policy,
+            slot.budget,
+            options.davidson_capacity_per_band,
+            &mut state.workspace,
+            options.preconditioner,
+        ) {
+            Ok(advanced) => {
+                slot.outcome = Some(advanced.diagnostics);
+                advanced.solution
+            }
+            Err(e) => {
+                slot.declined = Some(match e {
+                    SolverError::InvalidParameter(_) => "lean Ritz-change solver not active",
+                    SolverError::NotConverged { .. } => "advance exhausted its iteration limit",
+                    _ => "advance solver error",
+                });
+                solver.solve_reusing_with_preconditioner(
+                    op,
+                    packed.as_ref(),
+                    &diagonal,
+                    policy,
+                    true,
+                    false,
+                    options.davidson_capacity_per_band,
+                    &mut state.workspace,
+                    options.preconditioner,
+                )?
+            }
+        }
     } else {
+        if let Some(slot) = diagnostics.advance.as_mut() {
+            slot.declined = Some("strict solve");
+        }
         let armed_before = state
             .workspace
             .as_ref()

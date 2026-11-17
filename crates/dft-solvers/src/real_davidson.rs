@@ -6,8 +6,8 @@ use crate::davidson_stages::{
 };
 pub use crate::davidson_stages::{
     AlgebraCounters, B1Counters, B1Mode, B5Counters, FlopCounters, LeanCounters, ResearchOptions,
-    SketchKind, StageSeconds, WIDTH_LABELS, algebra_counters, b1_counters, b5_counters,
-    flop_counters, lean_counters, stage_seconds, stage_seconds_by_run_stage,
+    RestartKeep, SketchKind, StageSeconds, WIDTH_LABELS, algebra_counters, b1_counters,
+    b5_counters, flop_counters, lean_counters, stage_seconds, stage_seconds_by_run_stage,
 };
 #[path = "lean_davidson.rs"]
 pub(crate) mod lean;
@@ -37,6 +37,57 @@ pub struct RealEigenSolution {
     pub certification_attempts: usize,
     /// Largest live basis width, for capacity and dispatch validation.
     pub max_basis_dimension: usize,
+}
+
+/// Work budget of an `Advance` call (BREAKTHROUGH-3-BOUNDED-SUBSPACE, design
+/// `docs/design/bounded-subspace-scf.md`): deterministic counts, never time.
+/// A correction block is one Davidson iteration that appends corrections of
+/// the unconverged roots; `h_columns` bounds the operator columns applied in
+/// the call (the kept start applies none).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SubspaceBudget {
+    pub correction_blocks: usize,
+    pub h_columns: usize,
+}
+
+/// What a solve is asked to deliver. `Converge` is the ordinary contract
+/// (Ritz-change or residual stopping rule); `Advance` runs at most the budget
+/// and returns the approximate occupied subspace explicitly typed as such.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SolveIntent {
+    Converge,
+    Advance(SubspaceBudget),
+}
+
+/// Why an `Advance` call returned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BudgetStop {
+    /// Every root met its Ritz-change rule inside the budget (an exact return).
+    Converged,
+    CorrectionBlocks,
+    HColumns,
+}
+
+/// Count-only diagnostics of one `Advance` call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SubspaceDiagnostics {
+    pub correction_blocks: usize,
+    pub h_columns: usize,
+    pub stop: BudgetStop,
+    /// Started from the kept X and H X (no initial operator application).
+    pub kept_start: bool,
+    /// Roots whose Ritz-value change was still above their threshold.
+    pub unconverged_roots: usize,
+}
+
+/// An approximate occupied subspace: all-band Ritz vectors, Ritz values and
+/// residual norms of the current basis after a bounded number of correction
+/// blocks. `solution.converged` holds the true Ritz-change flags (not a
+/// convergence claim). The workspace keeps X and H X as after a lean return.
+#[derive(Debug, Clone)]
+pub struct AdvancedSubspace {
+    pub solution: RealEigenSolution,
+    pub diagnostics: SubspaceDiagnostics,
 }
 
 /// Block size is bands; default capacity is min(n, max(max_subspace, 6*bands)).
@@ -458,6 +509,97 @@ impl RealDavidson {
             preconditioner,
             ResearchOptions::from_env(),
         )
+    }
+
+    /// `Advance(budget)` on the lean Ritz-change solver (BREAKTHROUGH-3):
+    /// at most `budget.correction_blocks` correction blocks and
+    /// `budget.h_columns` operator columns from the kept start (or `initial`),
+    /// then the all-band Ritz vectors, values, residual norms and H images
+    /// (kept in the workspace) are returned as an `AdvancedSubspace`. Nothing
+    /// in the returned state claims convergence. Requires the lean solver
+    /// (`ResearchOptions::lean`) and the Ritz-change mode; any other
+    /// configuration is an `InvalidParameter` error so the caller falls back
+    /// to the converging solve with a recorded reason.
+    #[allow(clippy::too_many_arguments)]
+    pub fn advance_reusing(
+        &self,
+        op: &dyn RealLinearOperator,
+        initial: Option<&RealMatrix>,
+        diagonal: &[f64],
+        policy: BandTolerances,
+        budget: SubspaceBudget,
+        capacity_per_band: usize,
+        workspace: &mut Option<RealDavidsonWorkspace>,
+        preconditioner: crate::DavidsonPreconditioner,
+    ) -> Result<AdvancedSubspace, SolverError> {
+        let options = ResearchOptions::from_env();
+        if !options.lean || SecondVector::from_env() != SecondVector::Off {
+            return Err(SolverError::InvalidParameter(
+                "advance requires the lean Ritz-change Davidson",
+            ));
+        }
+        if budget.correction_blocks == 0 || budget.h_columns == 0 {
+            return Err(SolverError::InvalidParameter(
+                "advance budget must allow at least one correction block and one column",
+            ));
+        }
+        let n = op.dimension();
+        if diagonal.len() != n {
+            return Err(LinalgError::Dimension.into());
+        }
+        self.validate_research(diagonal, policy, capacity_per_band)?;
+        let capacity = self
+            .max_subspace
+            .max(self.bands.saturating_mul(capacity_per_band))
+            .min(n);
+        let pool = match op.worker_pool() {
+            Some(pool) => pool,
+            None => WorkerPool::new(op.inner_threads())
+                .map_err(|e| SolverError::Application(e.to_string()))?,
+        };
+        self.ensure_workspace(n, capacity, &pool, workspace)?;
+        workspace.as_mut().unwrap().returned_projections = false;
+        lean::solve_with_intent(
+            self,
+            op,
+            initial,
+            diagonal,
+            policy,
+            capacity,
+            workspace.as_mut().unwrap(),
+            preconditioner,
+            options,
+            SolveIntent::Advance(budget),
+        )
+    }
+
+    fn validate_research(
+        &self,
+        diagonal: &[f64],
+        policy: BandTolerances,
+        capacity_per_band: usize,
+    ) -> Result<(), SolverError> {
+        if !(2..=12).contains(&capacity_per_band) {
+            return Err(SolverError::InvalidParameter(
+                "davidson_capacity_per_band must be an integer from 2 to 12 (minimum 2 for a full correction block)",
+            ));
+        }
+        let n = diagonal.len();
+        crate::validate_bands(n, self.bands)?;
+        finite(diagonal)?;
+        if !self.tolerance.is_finite()
+            || self.tolerance <= 0.
+            || self.max_iterations == 0
+            || policy.strict_bands == 0
+            || policy.strict_bands > self.bands
+            || !policy.buffer_tolerance.is_finite()
+            || policy.buffer_tolerance < self.tolerance
+        {
+            return Err(SolverError::InvalidParameter(
+                "invalid tolerance, iteration limit or strict prefix",
+            ));
+        }
+        Ok(())
     }
 
     /// Research entry point with explicit switches (the other entry points read

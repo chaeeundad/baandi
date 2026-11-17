@@ -565,3 +565,21 @@ switch on and off):
   reproduces the solver's own counters and eigenvalues. The context (stage,
   kind, iteration) comes from `profile::set_context` (session, ladder,
   verification).
+
+## Bounded subspace SCF (BREAKTHROUGH-3, 2026-11-17; default off, rejected as a speed idea)
+
+`BAANDI_SCF_ADVANCE=on|off` (default off; per-thread override
+`advance::set_override`; design `docs/design/bounded-subspace-scf.md`, ledger
+BT3-*). `advance.rs` owns the contract on the engine side: the session asks
+eligible intermediate standard maps (history exists, previous E at or above the
+threshold, one k point, equal integer occupations, serial real Gamma lean path)
+for `SolveIntent::Advance(SubspaceBudget)` through
+`GammaRealDiagnostics.advance` -> `ScfStep.advance`, builds density, audit and
+the Pulay pair from the approximate state, never stops on it, and completes it
+with the exact solve at the same density (`completion_trigger`: candidate,
+inner noise B > `ADVANCE_INNER_RATIO` x E, growth, gap). The first map, its
+redo, every completion, the stop step and the verification are exact; ADR 0043
+V1-V6 unchanged. `IterationRecord.advance` (not carried by checkpoint v1) and
+the counters `advance_counters()` -> results.json `convergence.work.scf_advance`
+are the diagnostics. Test `tests/scf_advance.rs`. Every other configuration
+(MPI, complex solver, classic Davidson, strict) declines with a recorded reason.

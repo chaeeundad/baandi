@@ -494,7 +494,31 @@ fn history_json(r: &IterationRecord) -> Value {
         result["standard_error_ha"] = json!(e);
         result["standard_first_iteration_redo"] = json!(r.standard_redo);
     }
+    if let Some(a) = &r.advance {
+        // BREAKTHROUGH-3: bounded subspace update of this map (research diagnostic).
+        result["advance"] = json!({"budget_blocks":a.budget_blocks,"blocks_used":a.blocks_used,"h_columns":a.h_columns,
+            "kept_start":a.kept_start,"unconverged_roots":a.unconverged_roots,"inner_estimate_ha":a.inner_estimate_ha,
+            "scf_error_ha":a.scf_error_ha,"inner_scf_ratio":if a.scf_error_ha > 0.0 {a.inner_estimate_ha / a.scf_error_ha} else {f64::INFINITY},
+            "completion":a.completion.map(|t| t.name()),"completion_h_columns":a.completion_h_columns});
+    }
     result
+}
+
+/// BREAKTHROUGH-3 (`BAANDI_SCF_ADVANCE`) counters of this process (count only).
+fn scf_advance_json() -> serde_json::Value {
+    let c = dft_engine::advance_counters();
+    json!({
+        "mode":dft_numerics::switches::choice(dft_numerics::switches::Id::SCF_ADVANCE),
+        "starting_blocks":dft_numerics::switches::number(dft_numerics::switches::Id::SCF_ADVANCE_BLOCKS),
+        "inner_ratio_rule":dft_engine::ADVANCE_INNER_RATIO,
+        "maps_advanced":c.maps_advanced,"maps_exact":c.maps_exact,"declined":c.declined,
+        "completions":c.completions(),"completion_candidate":c.completion_candidate,"completion_inner_noise":c.completion_inner_noise,
+        "completion_growth":c.completion_growth,"completion_gap":c.completion_gap,
+        "advance_h_columns":c.advance_h_columns,"completion_h_columns":c.completion_h_columns,"advance_blocks":c.advance_blocks,
+        "kept_starts":c.kept_starts,"converged_within_budget":c.converged_within_budget,
+        "ratio_below_rule":c.ratio_below_rule,"ratio_above_rule":c.ratio_above_rule,
+        "note":"maps_advanced = standard maps run as a bounded subspace update (Advance), maps_exact = eligible-path maps that ran the converging solve (first map, redo, candidates), declined = requests the solver could not honour; completions = advanced maps followed by the exact solve at the same density, by trigger; advance_h_columns / completion_h_columns = operator columns of the advance calls and of their completions (both inside h_vectors_recorded); ratio_* = advanced maps whose B / E was at or below / above the rule"
+    })
 }
 /// Gregorian UTC conversion from nonnegative Unix seconds, including leap years.
 pub fn timestamp(seconds: u64) -> String {
@@ -913,6 +937,7 @@ pub fn execute_mode(
                 "algebra_stream":algebra_stream_json(),
                 "davidson_lean":davidson_lean_json(),
                 "reuse_psi":reuse_psi_json(),
+                "scf_advance":scf_advance_json(),
                 "gemm_dispatch":gemm_dispatch_json(),
                 "h_vectors_recorded":r.history.iter().map(|h|h.operator_applications).sum::<usize>(),
                 "certificate_h_vectors":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.operator_applications).sum::<usize>(),
@@ -1742,6 +1767,9 @@ fn davidson_lean_json() -> serde_json::Value {
             "kept_loads":c.proj_cache_kept_loads,"columns_copied":c.proj_cache_columns,
             "audits_from_cache":dft_engine::nl_audit_counters().0,
             "audits_direct":dft_engine::nl_audit_counters().1},
+        "restart_keep":{"mode":dft_numerics::switches::choice(dft_numerics::switches::Id::RESTART_KEEP),
+            "keep_contractions":c.keep_contractions,"kept_directions":c.kept_directions,
+            "dropped":c.keep_dropped,"fallbacks":c.keep_fallbacks},
         "note":"process totals of the serial real Davidson (all solves, both paths; MPI distributed solver not counted)"
     })
 }

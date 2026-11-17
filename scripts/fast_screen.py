@@ -55,7 +55,7 @@ def displaced(atoms, seed, amp):
     return [[(x + rng.uniform(-amp, amp)) % 1.0 for x in a] for a in atoms]
 
 
-def case_input(case, upf, seed, amp, threads, scf_extra):
+def case_input(case, upf, seed, amp, threads, scf_extra, xc="lda-pz"):
     lines = ["[system]", f"name = {json.dumps(case['id'])}", 'lattice_unit = "bohr"',
              f"lattice_vectors = {json.dumps(case['lattice'])}"]
     for site in displaced(case["atoms"], seed, amp):
@@ -69,7 +69,7 @@ def case_input(case, upf, seed, amp, threads, scf_extra):
         lines += ["kpoints = [[0.0, 0.0, 0.0]]"]
     if "fft_grid" in case:
         lines += [f"fft_grid = {json.dumps(case['fft_grid'])}"]
-    lines += ["[xc]", 'functional = "lda-pz"', "[scf]", f"seed = {seed}", f"threads = {threads}",
+    lines += ["[xc]", f"functional = {json.dumps(xc)}", "[scf]", f"seed = {seed}", f"threads = {threads}",
               f"max_iterations = {case.get('max_iterations', 100)}"]
     if "nbands" in case:
         lines += [f"nbands = {case['nbands']}"]
@@ -151,6 +151,7 @@ def main(argv=None):
     p.add_argument("--binary", required=True)
     p.add_argument("--binary-b", help="second binary for arm B (default: --binary)")
     p.add_argument("--upf", required=True)
+    p.add_argument("--xc", default="lda-pz", help="xc.functional of the input (lda-pz, pbe); must match the UPF")
     p.add_argument("--case", default="benchmarks/cases/si32-gamma.toml")
     p.add_argument("--seed", type=int, default=601)
     p.add_argument("--amp", type=float, default=1e-3, help="fractional displacement amplitude")
@@ -188,7 +189,7 @@ def main(argv=None):
     for arm, extra in (("A", a.scf_a), ("B", a.scf_b)):
         srcs[arm] = work / f"input_{arm}.toml"
         srcs[arm].write_text(case_input(case, Path(a.upf).resolve(), a.seed, a.amp, a.threads,
-                                        a.scf + extra))
+                                        a.scf + extra, a.xc))
     src = srcs["A"]
     sha = lambda f: hashlib.sha256(Path(f).read_bytes()).hexdigest()[:16]
     print(f"case {case['id']} seed {a.seed} amp {a.amp} T={a.threads} pairs {a.pairs}; input {src}")

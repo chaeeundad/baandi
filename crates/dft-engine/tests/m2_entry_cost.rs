@@ -510,6 +510,15 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
                 "lean_factored_starts",
                 la.factored_starts - lb.factored_starts,
             ),
+            // BREAKTHROUGH-1-RESTART R1-b (`BAANDI_RESTART_KEEP`).
+            ("lean_contractions", la.contractions - lb.contractions),
+            (
+                "keep_contractions",
+                la.keep_contractions - lb.keep_contractions,
+            ),
+            ("kept_directions", la.kept_directions - lb.kept_directions),
+            ("keep_dropped", la.keep_dropped - lb.keep_dropped),
+            ("keep_fallbacks", la.keep_fallbacks - lb.keep_fallbacks),
         ] {
             counters.push(format!("\"{n}\":{}", v / p as u64));
         }

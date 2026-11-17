@@ -45,8 +45,9 @@ use dft_numerics::real::RealOp;
 
 // solves, iterations, border reductions, appends, appended columns,
 // reprojections, Ritz-basis fallbacks, rebuilds, wasted H columns,
-// kept/gram starts taken by the factor test
-static LEAN_COUNTS: [AtomicU64; 10] = [const { AtomicU64::new(0) }; 10];
+// kept/gram starts taken by the factor test, contractions, R1-b contractions
+// that kept directions, kept directions, dropped candidates, R1-b fallbacks
+static LEAN_COUNTS: [AtomicU64; 15] = [const { AtomicU64::new(0) }; 15];
 // Smallest accepted or rejected pivot ratio seen (f64 bits; starts at +inf).
 static LEAN_MIN_PIVOT: AtomicU64 = AtomicU64::new(0x7ff0_0000_0000_0000);
 
@@ -70,6 +71,16 @@ pub struct LeanAlgebraStats {
     pub wasted_columns: u64,
     /// Kept or Gram-checked starts accepted by the pivot test.
     pub factored_starts: u64,
+    /// Contraction restarts.
+    pub contractions: u64,
+    /// R1-b (`BAANDI_RESTART_KEEP`): contractions that kept previous
+    /// directions, directions kept, candidates dropped by the pivot rule in
+    /// coefficient space, and contractions whose new basis failed the factor
+    /// test and fell back to X alone (one extra border reduction each).
+    pub keep_contractions: u64,
+    pub kept_directions: u64,
+    pub keep_dropped: u64,
+    pub keep_fallbacks: u64,
     /// Smallest pivot ratio (squared pivot over the overlap diagonal) seen.
     pub min_pivot: f64,
 }
@@ -88,6 +99,11 @@ pub fn lean_algebra_stats() -> LeanAlgebraStats {
         rebuilds: l(7),
         wasted_columns: l(8),
         factored_starts: l(9),
+        contractions: l(10),
+        keep_contractions: l(11),
+        kept_directions: l(12),
+        keep_dropped: l(13),
+        keep_fallbacks: l(14),
         min_pivot: f64::from_bits(LEAN_MIN_PIVOT.load(Ordering::Relaxed)),
     }
 }
@@ -442,6 +458,14 @@ pub(super) fn run<C: Collective>(
     let (n, nl, bands) = (layout.n, layout.nl(), solver.bands);
     let wide = tuning.wide_gemm;
     count(0, 1);
+    // R1-b: previous directions kept at a contraction (0 = the plain restart).
+    let keep_r = tuning.restart_keep.directions(bands);
+    if keep_r > 0 {
+        ls.keep_prepare(bands);
+    }
+    // Kept direction columns of the current fresh contraction basis [X | P]
+    // (until its factor test).
+    let mut p_cols = 0usize;
     let threshold = |j: usize| {
         // Ritz-change thresholds: the last mandatory root uses the buffer one.
         if j + 1 < policy.strict_bands {
@@ -516,6 +540,7 @@ pub(super) fn run<C: Collective>(
                     applications += rebuild(
                         comm, apply, &tuning, panel, basis, products, extra, gemm, ortho, m,
                     )?;
+                    ls.keep_invalidate();
                     (factored, h_width, a_width) = (0, 0, 0);
                     stage_add(4, t0);
                     continue;
@@ -644,18 +669,32 @@ pub(super) fn run<C: Collective>(
         let t0 = dft_numerics::stage_clock::start();
         if contracted {
             ritz_coefficients(small, ls, coefficients, m, bands, None)?;
+            // R1-b: kept direction coefficients appended to C (replicated
+            // arithmetic on the reduced S; no reduction, no H application).
+            let (kept_now, dropped) = if keep_r > 0 {
+                ls.keep_directions(m, bands, selected, keep_r.min(capacity - bands - k))?
+            } else {
+                (0, 0)
+            };
+            count(13, dropped);
+            p_cols = kept_now;
+            let cols = bands + kept_now;
             rotate_ritz(
                 gemm,
                 basis,
                 products,
-                &ls.c.as_slice()[..m * bands],
-                bands,
+                &ls.c.as_slice()[..m * cols],
+                cols,
                 vectors,
                 rotated,
                 wide,
             )?;
         } else {
             ritz_coefficients(small, ls, coefficients, m, k, Some(&selected[..]))?;
+            if keep_r > 0 {
+                // R1-b history: this iteration's selected Ritz coefficients.
+                ls.keep_record(m, selected);
+            }
             rotate_ritz(
                 gemm,
                 basis,
@@ -699,10 +738,15 @@ pub(super) fn run<C: Collective>(
             let t_restart = dft_numerics::stage_clock::start();
             restarts += 1;
             contractions += 1;
+            count(10, 1);
             assign(basis, vectors)?;
             assign(products, rotated)?;
             (factored, h_width, a_width) = (0, 0, 0);
             ritz_base = false;
+            if keep_r > 0 {
+                // The history of the next iteration: the columns of X.
+                ls.keep_identity(bands, selected);
+            }
             stage_add(10, t_restart);
         }
         // 4. Raw corrections appended without projection. ONE tree sum gives
@@ -769,6 +813,32 @@ pub(super) fn run<C: Collective>(
             }
             stage_add(0, t0);
             let t0 = dft_numerics::stage_clock::start();
+            if p_cols > 0 {
+                // R1-b: the fresh basis is [X | P]; factor X, then P (pivot
+                // rule). Any failure falls back to the plain restart from X
+                // alone: P is cut, the raw corrections are appended again and
+                // the border is repeated (one extra reduction, counted).
+                let (x_ok, _) = extend_factor(small, ls, 0, bands)?;
+                let p_ok = x_ok && {
+                    let (ok, ratio) = extend_factor(small, ls, bands, append_base)?;
+                    pivot(ratio);
+                    ok
+                };
+                let kept_now = std::mem::replace(&mut p_cols, 0);
+                if p_ok {
+                    factored = append_base;
+                    count(11, 1);
+                    count(12, kept_now);
+                } else {
+                    count(14, 1);
+                    truncate(basis, bands)?;
+                    truncate(products, bands)?;
+                    append_base = bands;
+                    append_in_place(basis, corrections)?;
+                    stage_add(1, t0);
+                    continue;
+                }
+            }
             if factored < append_base {
                 // The fresh contraction basis X.
                 let (ok, ratio) = extend_factor(small, ls, factored, append_base)?;
@@ -788,6 +858,7 @@ pub(super) fn run<C: Collective>(
                         ortho,
                         append_base,
                     )?;
+                    ls.keep_invalidate();
                     (factored, h_width, a_width) = (0, 0, 0);
                     rebuilt = true;
                     stage_add(4, t0);
@@ -924,6 +995,10 @@ pub(super) fn run<C: Collective>(
                     assign(products, rotated)?;
                     (factored, h_width, a_width) = (0, 0, 0);
                     ritz_base = false;
+                    if keep_r > 0 {
+                        // R1-b: root j is column j of the full Ritz basis.
+                        ls.keep_identity(base, selected);
+                    }
                 }
                 ortho_into(
                     comm,

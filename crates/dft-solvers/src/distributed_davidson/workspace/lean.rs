@@ -382,13 +382,14 @@ fn rebuild<C: Collective>(
     gemm: &mut RealGemmWorkspace,
     ortho: &mut OrthoScratch,
     wasted: usize,
+    bands: usize,
 ) -> Result<usize, SolverError> {
     count(7, 1);
     count(8, wasted);
     ortho_into(comm, gemm, None, basis, tuning, panel, ortho, extra)?;
-    if extra.cols() == 0 {
+    if extra.cols() < bands {
         return Err(SolverError::Application(
-            "distributed lean Davidson: rebuilt basis is empty".into(),
+            "distributed lean Davidson: rebuilt basis has fewer columns than required bands".into(),
         ));
     }
     assign(basis, extra)?;
@@ -538,7 +539,7 @@ pub(super) fn run<C: Collective>(
                     }
                     let t0 = dft_numerics::stage_clock::start();
                     applications += rebuild(
-                        comm, apply, &tuning, panel, basis, products, extra, gemm, ortho, m,
+                        comm, apply, &tuning, panel, basis, products, extra, gemm, ortho, m, bands,
                     )?;
                     ls.keep_invalidate();
                     (factored, h_width, a_width) = (0, 0, 0);
@@ -603,16 +604,65 @@ pub(super) fn run<C: Collective>(
             )?;
             stage_add(2, t0);
             let t0 = dft_numerics::stage_clock::start();
-            residual_into(
-                comm,
+            // Verify the actual returned block, not just C^T S C. Its Gram
+            // entries ride in the existing all-band residual reduction.
+            residual_local(
                 rotated,
                 vectors,
+                None,
                 &values[..bands],
-                true,
                 residual,
-                norms,
-                norm_partial,
+                &mut pending_local[..bands],
             )?;
+            fit(partial, bands, bands + 1)?;
+            partial.as_mut_slice()[..bands].copy_from_slice(&pending_local[..bands]);
+            partial.as_mut_slice()[bands..].fill(0.0);
+            if nl > 0 {
+                gemm.multiply_slices_into(
+                    GemmSite::Other,
+                    vectors.as_slice(),
+                    nl,
+                    bands,
+                    nl,
+                    RealOp::Transpose,
+                    vectors.as_slice(),
+                    bands,
+                    nl,
+                    partial.as_mut().subcols_mut(1, bands),
+                )?;
+            }
+            fit(sum, bands, bands + 1)?;
+            site(Site::ResidualNorms);
+            comm.tree_sum_f64(partial.as_slice(), sum.as_mut_slice())
+                .map_err(comm_error)?;
+            norms.clear();
+            norms.extend(sum.as_slice()[..bands].iter().map(|x| x.sqrt()));
+            let mut defect = 0.0_f64;
+            for j in 0..bands {
+                for i in 0..bands {
+                    let error = (sum[(i, j + 1)] - if i == j { 1.0 } else { 0.0 }).abs();
+                    if !error.is_finite() {
+                        defect = f64::INFINITY;
+                    }
+                    defect = defect.max(error);
+                }
+            }
+            if defect > 1e-12 {
+                // Reuse the existing rebuild path, then reconfirm Ritz changes.
+                assign(basis, vectors)?;
+                applications += rebuild(
+                    comm, apply, &tuning, panel, basis, products, extra, gemm, ortho, bands, bands,
+                )?;
+                ls.keep_invalidate();
+                (factored, h_width, a_width) = (0, 0, 0);
+                previous.fill(f64::NAN);
+                if iteration == solver.max_iterations {
+                    return Err(SolverError::Application(
+                        "distributed lean Davidson: return Gram defect exceeds 1e-12".into(),
+                    ));
+                }
+                continue;
+            }
             stage_add(3, t0);
             let maximum = norms.iter().copied().fold(0.0, f64::max);
             history.push(maximum);
@@ -849,9 +899,22 @@ pub(super) fn run<C: Collective>(
                 // The fresh contraction basis X.
                 let (ok, ratio) = extend_factor(small, ls, factored, append_base)?;
                 pivot(ratio);
-                if !ok {
+                let mut defect = 0.0_f64;
+                for j in 0..bands {
+                    for i in 0..=j {
+                        let error = (ls.s[(i, j)] - if i == j { 1.0 } else { 0.0 }).abs();
+                        if !error.is_finite() {
+                            defect = f64::INFINITY;
+                        }
+                        defect = defect.max(error);
+                    }
+                }
+                if !ok || defect > 1e-12 {
                     stage_add(1, t0);
                     let t0 = dft_numerics::stage_clock::start();
+                    // Corrections have not been applied: rebuild the contraction
+                    // basis alone, retaining at least every requested band.
+                    truncate(basis, append_base)?;
                     applications += rebuild(
                         comm,
                         apply,
@@ -863,6 +926,7 @@ pub(super) fn run<C: Collective>(
                         gemm,
                         ortho,
                         append_base,
+                        bands,
                     )?;
                     ls.keep_invalidate();
                     (factored, h_width, a_width) = (0, 0, 0);
@@ -875,6 +939,8 @@ pub(super) fn run<C: Collective>(
             let (ok, ratio) = extend_factor(small, ls, factored, m)?;
             pivot(ratio);
             stage_add(1, t0);
+            #[cfg(test)]
+            let ok = tests::force_stage_two(ok, contracted, stage);
             if ok {
                 factored = m;
                 break;
@@ -1066,4 +1132,164 @@ pub(super) fn run<C: Collective>(
         }
     }
     unreachable!("validated positive iteration limit")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    thread_local! {
+        static FORCE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+    }
+    pub(super) fn force_stage_two(ok: bool, contracted: bool, stage: u8) -> bool {
+        FORCE.with(|f| {
+            if contracted && ((f.get() == 2 && stage == 0) || (f.get() == 1 && stage == 1)) {
+                f.set(f.get() - 1);
+                false
+            } else {
+                ok
+            }
+        })
+    }
+
+    #[test]
+    fn rebuild_rejects_nonempty_rank_loss_before_applying() {
+        dft_mpi::simulate(2, |comm| {
+            let mut basis = RealMatrix::zeros(2, 2).unwrap();
+            if comm.rank() == 0 {
+                basis[(0, 0)] = 1.0;
+                basis[(0, 1)] = 1.0;
+            }
+            let mut products = RealMatrix::zeros(2, 2).unwrap();
+            let mut extra = RealMatrix::zeros(2, 2).unwrap();
+            let mut ortho = OrthoScratch::new();
+            let mut gemm = RealGemmWorkspace::with_pool(2, 4, WorkerPool::new(1).unwrap()).unwrap();
+            let mut apply = |_: &RealMatrix, _: &mut RealMatrix| -> Result<(), SolverError> {
+                panic!("a rank-deficient rebuild must not apply H");
+            };
+            let error = rebuild(
+                comm,
+                &mut apply,
+                &DistributedTuning::from_env(),
+                2,
+                &mut basis,
+                &mut products,
+                &mut extra,
+                &mut gemm,
+                &mut ortho,
+                2,
+                2,
+            )
+            .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("fewer columns than required bands")
+            );
+        });
+    }
+
+    struct Chain {
+        rows: Vec<usize>,
+        n: usize,
+    }
+    impl DistributedRealOperator for Chain {
+        fn global_len(&self) -> usize {
+            self.n
+        }
+        fn local_rows(&self) -> &[usize] {
+            &self.rows
+        }
+        fn apply_block<C: Collective>(
+            &mut self,
+            comm: &C,
+            x: &RealMatrix,
+            y: &mut RealMatrix,
+        ) -> Result<(), SolverError> {
+            let mut local = vec![0.0; self.n * x.cols()];
+            for j in 0..x.cols() {
+                for (i, &r) in self.rows.iter().enumerate() {
+                    local[r + j * self.n] = x[(i, j)];
+                }
+            }
+            let mut full = local.clone();
+            comm.tree_sum_f64(&local, &mut full).map_err(comm_error)?;
+            for j in 0..x.cols() {
+                for (i, &r) in self.rows.iter().enumerate() {
+                    y[(i, j)] = 2.0 * full[r + j * self.n]
+                        - if r > 0 {
+                            0.5 * full[r - 1 + j * self.n]
+                        } else {
+                            0.0
+                        }
+                        - if r + 1 < self.n {
+                            0.5 * full[r + 1 + j * self.n]
+                        } else {
+                            0.0
+                        };
+                }
+            }
+            Ok(())
+        }
+    }
+    #[test]
+    fn forced_stage_two_after_contraction_has_true_residual_and_exact_spectrum() {
+        let n = 12;
+        for ranks in 1..=4 {
+            dft_mpi::simulate(ranks, |comm| {
+                FORCE.with(|f| f.set(2));
+                let mut op = Chain {
+                    rows: (0..n).filter(|i| i % ranks == comm.rank()).collect(),
+                    n,
+                };
+                let diagonal = vec![2.0; op.rows.len()];
+                let sol = crate::RealDavidson {
+                    bands: 2,
+                    tolerance: 1e-13,
+                    max_iterations: 400,
+                    max_subspace: 6,
+                    seed: 42,
+                }
+                .solve_distributed_rows_tuned(
+                    comm,
+                    &mut op,
+                    None,
+                    &diagonal,
+                    BandTolerances {
+                        strict_bands: 2,
+                        buffer_tolerance: 1e-13,
+                    },
+                    true,
+                    false,
+                    3,
+                    DistributedTuning {
+                        lean_algebra: true,
+                        ..DistributedTuning::from_env()
+                    },
+                )
+                .unwrap();
+                assert_eq!(
+                    FORCE.with(|f| f.replace(0)),
+                    0,
+                    "both fallback stages must be forced after contraction"
+                );
+                assert!(sol.contracted_restarts > 0);
+                for j in 0..2 {
+                    let exact =
+                        2.0 - (((j + 1) as f64 * std::f64::consts::PI) / (n + 1) as f64).cos();
+                    assert!((sol.eigenvalues[j] - exact).abs() < 1e-10);
+                    let x = &sol.eigenvectors;
+                    let norm = (0..n)
+                        .map(|i| {
+                            let r = (2.0 - sol.eigenvalues[j]) * x[(i, j)]
+                                - if i > 0 { 0.5 * x[(i - 1, j)] } else { 0.0 }
+                                - if i + 1 < n { 0.5 * x[(i + 1, j)] } else { 0.0 };
+                            r * r
+                        })
+                        .sum::<f64>()
+                        .sqrt();
+                    assert!(norm < 1e-6, "band {j}: true residual {norm:e} Ha");
+                }
+            });
+        }
+    }
 }

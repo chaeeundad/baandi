@@ -750,6 +750,19 @@ pub(crate) fn extend_factor(
         {
             return Ok((false, 0.));
         }
+        // Componentwise Gram rounding is amplified by the weighted row
+        // sums of T: eps * (sum_j |T_ij| sqrt(S_jj))^2. A pivot alone
+        // cannot bound this (a bidiagonal chain has uniformly good pivots).
+        // Reject loss of half the working digits; this is an early guard,
+        // not an orthogonality certificate (the actual return is checked).
+        for i in p0..p0 + w {
+            let growth: f64 = (0..=i)
+                .map(|j| lean.t[(i, j)].abs() * lean.s[(j, j)].sqrt())
+                .sum();
+            if !growth.is_finite() || f64::EPSILON * growth * growth > f64::EPSILON.sqrt() {
+                return Ok((false, min_ratio));
+            }
+        }
         p0 += w;
     }
     Ok((true, min_ratio))
@@ -1348,6 +1361,26 @@ pub(super) fn solve_with_intent(
                 &pool,
                 timers,
             )?;
+            if orthogonality_defect(vectors) > 1e-12 {
+                lean_add(LeanCount::Rebuilds, 1);
+                projection.run_into(vectors, None, gemm, basis)?;
+                if basis.cols() < bands {
+                    return Err(SolverError::Application(
+                        "lean Davidson: return rebuild lost required bands".into(),
+                    ));
+                }
+                apply_into(op, basis, &mut applications, &mut work, products, timers)?;
+                proj_load(&mut proj, op, 0, bands);
+                lean.keep_invalidate();
+                (factored, prefix) = (0, 0);
+                previous.fill(f64::NAN);
+                if iteration == solver.max_iterations {
+                    return Err(SolverError::Application(
+                        "lean Davidson: return Gram defect exceeds 1e-12".into(),
+                    ));
+                }
+                continue;
+            }
             let maximum = residuals.iter().copied().fold(0., f64::max);
             history.push(maximum);
             work.residuals(iteration, residuals);
@@ -1789,6 +1822,24 @@ pub(super) fn solve_with_intent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn inverse_growth_rejects_chain_with_good_pivots() {
+        let n = 8;
+        let mut v = RealMatrix::zeros(n, n).unwrap();
+        v[(0, 0)] = 1.0;
+        for j in 1..n {
+            v[(j - 1, j)] = 0.99_f64.sqrt();
+            v[(j, j)] = 0.1;
+        }
+        let mut gemm = RealGemmWorkspace::with_pool(n, n, WorkerPool::new(1).unwrap()).unwrap();
+        let mut lean = LeanScratch::new(n, n).unwrap();
+        overlap_border(&mut gemm, &v, 0, n, &mut lean.s).unwrap();
+        assert!(
+            !extend_factor(&mut gemm, &mut lean, 0, n).unwrap().0,
+            "every pivot passes, but the inverse amplifies overlap rounding"
+        );
+    }
+
     /// T = L^{-1} from panel-wise extension satisfies T S T^T = I for several
     /// split points of the same basis.
     #[test]

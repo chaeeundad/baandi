@@ -383,6 +383,7 @@ fn panel_gs_into<C: Collective>(
                 comm,
                 &y.as_slice()[first * rows..kept * rows],
                 rows,
+                kept - first,
                 v,
                 local,
                 sums,
@@ -878,7 +879,8 @@ fn solve_on<C: Collective>(
             partial,
             defect,
         )?;
-        let accept = if let Some(state) = lean_state.as_mut().filter(|_| lean_mode) {
+        let accept = if let Some(state) = lean_state.as_mut().filter(|_| lean_mode && w == bands) {
+            // Partial starts must be orthonormal before random completion.
             // Lean algebra: the pivot rule decides; the factor is kept.
             let ok = lean::factor_start(state, defect, w)?;
             if ok {

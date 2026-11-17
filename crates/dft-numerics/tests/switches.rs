@@ -232,5 +232,8 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::STOP_METRIC), Value::Choice("kept"));
     // BREAKTHROUGH-1-RESTART R1-b stays off (REJECT at stage 0 and 1).
     assert_eq!(value(Id::RESTART_KEEP), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 84);
+    // BREAKTHROUGH-3 bounded subspace SCF stays off (rejected at stage 1, ledger BT3-*).
+    assert_eq!(value(Id::SCF_ADVANCE), Value::Choice("off"));
+    assert_eq!(value(Id::SCF_ADVANCE_BLOCKS), Value::Number(Some(2.0)));
+    assert_eq!(TABLE.len(), 89);
 }

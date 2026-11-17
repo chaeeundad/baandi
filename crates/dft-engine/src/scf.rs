@@ -381,6 +381,10 @@ pub struct IterationRecord {
     pub mixing_raw_recovery: bool,
     pub fixed_point_certificate: Option<FixedPointCertificate>,
     pub timings: PhaseTimings,
+    /// BREAKTHROUGH-3 (`BAANDI_SCF_ADVANCE=on`): Some when this map ran a
+    /// bounded subspace update (its completion, if any, is inside); None on
+    /// an ordinary converging map. Not carried by checkpoint v1.
+    pub advance: Option<crate::advance::AdvanceRecord>,
 }
 #[derive(Clone, Debug)]
 pub struct FixedPointCertificate {
@@ -848,6 +852,10 @@ pub struct ScfStep {
     /// True when `energy.nonlocal` comes from the band-sum identity (B2,
     /// `BAANDI_ENERGY_IDENTITY=on`, non-final iterations only).
     pub nonlocal_from_identity: bool,
+    /// BREAKTHROUGH-3: the session's `Advance` request of this map with its
+    /// outcome (`Some(diagnostics)`) or the reason it was declined. None when
+    /// no advance was requested: the map is an ordinary converging solve.
+    pub(crate) advance: Option<crate::advance::AdvanceSlot>,
 }
 impl ScfProblem {
     /// Exact-continuation checkpoint hook: the kept REUSE-PSI state is not part of
@@ -2450,6 +2458,17 @@ impl ScfProblem {
                 )?
             };
         timings.diagonalization = start.elapsed();
+        // BREAKTHROUGH-3: the advance slot belongs to exactly one map.
+        let advance = self
+            .states
+            .first_mut()
+            .and_then(|s| s.gamma_real.advance.take())
+            .map(|mut slot| {
+                if slot.outcome.is_none() && slot.declined.is_none() {
+                    slot.declined = Some("complex solver path");
+                }
+                slot
+            });
         if let Some(w) = finite.as_mut() {
             for (k, point) in k_points.iter().enumerate() {
                 w.eigenvalues[k * w.bands..(k + 1) * w.bands]
@@ -2674,6 +2693,7 @@ impl ScfProblem {
             energy,
             timings,
             nonlocal_from_identity: identity,
+            advance,
         })
     }
     /// Original success-only API; exhausted budgets remain errors.
@@ -3223,6 +3243,7 @@ mod tests {
             mixing_raw_recovery: false,
             fixed_point_certificate: None,
             timings: PhaseTimings::default(),
+            advance: None,
         };
         assert!(converged(&good, &o));
         let mut bad = good.clone();

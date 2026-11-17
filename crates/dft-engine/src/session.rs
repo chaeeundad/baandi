@@ -74,6 +74,9 @@ pub struct ScfSession {
     strict_seed: Option<f64>,
     /// ADR 0043: attempts of the post-convergence verification.
     verification: VerificationReport,
+    /// BREAKTHROUGH-3 (`BAANDI_SCF_ADVANCE=on`): correction blocks of the next
+    /// advanced map (adapted from the previous advanced map's inner/SCF ratio).
+    advance_blocks: usize,
 }
 impl ScfSession {
     pub(crate) fn prepare_boundary_policy(
@@ -201,7 +204,49 @@ impl ScfSession {
             standard_seed: None,
             strict_seed: None,
             verification: VerificationReport::default(),
+            advance_blocks: crate::advance::starting_blocks(),
         })
+    }
+
+    /// BREAKTHROUGH-3: whether the coming ordinary map may run as a bounded
+    /// subspace update (design `docs/design/bounded-subspace-scf.md`, section
+    /// 5): switch on, standard path, a history exists (iteration 1 and its
+    /// redo initialize the subspace exactly), the previous map's SCF residual
+    /// is at or above the threshold (otherwise the stop rule is in reach and
+    /// the map must be exact), one k point, closed-shell fixed occupations
+    /// (equal occupation of every occupied band, so P = X X^T is the density
+    /// matrix) and no runtime solver override.
+    fn advance_eligible(problem: &ScfProblem, history: &[IterationRecord]) -> bool {
+        let Some(profile) = problem.options.standard else {
+            return false;
+        };
+        if !crate::advance::enabled() || problem.states.len() != 1 {
+            return false;
+        }
+        if crate::advance::fine_only() && !dft_numerics::work_timers::in_fine_stage() {
+            return false;
+        }
+        let Some(last) = history.last() else {
+            return false;
+        };
+        if last
+            .standard_error_ha
+            .is_none_or(|e| e < profile.threshold_ha)
+        {
+            return false;
+        }
+        let occupied: Vec<f64> = problem
+            .occupations
+            .iter()
+            .copied()
+            .filter(|&f| f > 0.0)
+            .collect();
+        !occupied.is_empty()
+            && occupied.iter().all(|&f| f == occupied[0])
+            && matches!(
+                problem.options.eigensolver,
+                dft_solvers::SolverChoice::Davidson
+            )
     }
     pub fn initialize(&mut self) -> Result<(), ScfError> {
         if self.continuation.is_some() || self.status != StepStatus::Created {
@@ -430,6 +475,19 @@ impl ScfSession {
         #[cfg(test)]
         let identity = identity || self.problem.force_energy_identity;
         self.problem.energy_identity = identity;
+        // BREAKTHROUGH-3: request a bounded subspace update of this map.
+        let advance_requested = Self::advance_eligible(&self.problem, history);
+        if advance_requested {
+            // The block count decides; the column cap only bounds a start
+            // that is not the kept one (its initial application is one block).
+            let bands = self.problem.occupations.len();
+            self.problem.states[0].gamma_real.advance = Some(crate::advance::AdvanceSlot::new(
+                dft_solvers::real_davidson::SubspaceBudget {
+                    correction_blocks: self.advance_blocks,
+                    h_columns: (self.advance_blocks + 1).saturating_mul(bands).max(1),
+                },
+            ));
+        }
         let mut step = self
             .problem
             .step_session(
@@ -447,6 +505,98 @@ impl ScfSession {
                 other => other,
             })?;
         let mut standard_error_ha = self.problem.stop_error(n, &step.density)?;
+        // BREAKTHROUGH-3: completion rules of an advanced map (design section 5).
+        let mut advance_record = None;
+        match step.advance.take() {
+            Some(slot) => match slot.outcome {
+                Some(diagnostics) => {
+                    let error = standard_error_ha.expect("standard history metric");
+                    let inner = StandardProfile::residual_energy_estimate(
+                        step.k_points
+                            .iter()
+                            .map(|k| (k.point.weight, k.solution.residuals.as_slice())),
+                        &self.problem.occupations,
+                    );
+                    let occupied = self
+                        .problem
+                        .occupations
+                        .iter()
+                        .filter(|&&f| f > 0.0)
+                        .count();
+                    let values = &step.k_points[0].solution.eigenvalues;
+                    let gap_stable = occupied == 0
+                        || occupied >= values.len()
+                        || values[occupied - 1] < values[occupied];
+                    let threshold = standard.expect("standard profile").threshold_ha;
+                    let previous_error = history.last().and_then(|r| r.standard_error_ha);
+                    let trigger = crate::advance::completion_trigger(
+                        error,
+                        inner,
+                        threshold,
+                        previous_error,
+                        gap_stable,
+                    );
+                    let mut record = crate::advance::AdvanceRecord {
+                        budget_blocks: slot.budget.correction_blocks,
+                        blocks_used: diagnostics.correction_blocks,
+                        h_columns: diagnostics.h_columns,
+                        kept_start: diagnostics.kept_start,
+                        unconverged_roots: diagnostics.unconverged_roots,
+                        inner_estimate_ha: inner,
+                        scf_error_ha: error,
+                        completion: trigger,
+                        completion_h_columns: 0,
+                    };
+                    if trigger.is_some() {
+                        // Completion: the exact solve at the same density from
+                        // the advanced orbitals (the kept start applies, the
+                        // potential is unchanged). The advance is charged to
+                        // the step like a first-iteration redo.
+                        let (warm, warm_lazy) = split_warm(Some(&step.k_points));
+                        let mut redo = self
+                            .problem
+                            .step_session(n, warm.as_deref(), &warm_lazy, tolerance, false)
+                            .map_err(|e| match e {
+                                ScfError::NonFinite => ScfError::Diverged {
+                                    reason: "nonfinite SCF arithmetic".into(),
+                                    history: history.clone(),
+                                },
+                                other => other,
+                            })?;
+                        record.completion_h_columns = redo
+                            .k_points
+                            .iter()
+                            .map(|k| k.solution.operator_applications)
+                            .sum();
+                        for (new, old) in redo.k_points.iter_mut().zip(&step.k_points) {
+                            new.solution.iterations += old.solution.iterations;
+                            new.solution.operator_applications +=
+                                old.solution.operator_applications;
+                        }
+                        redo.timings.potential += step.timings.potential;
+                        redo.timings.diagonalization += step.timings.diagonalization;
+                        redo.timings.density += step.timings.density;
+                        redo.timings.energy += step.timings.energy;
+                        step = redo;
+                        standard_error_ha = self.problem.stop_error(n, &step.density)?;
+                    }
+                    let ratio = if error > 0.0 {
+                        inner / error
+                    } else {
+                        f64::INFINITY
+                    };
+                    self.advance_blocks =
+                        crate::advance::adapt_blocks(self.advance_blocks, ratio, trigger);
+                    crate::advance::count_record(&record, &diagnostics);
+                    advance_record = Some(record);
+                }
+                None => crate::advance::count_declined(),
+            },
+            None if crate::advance::enabled() && standard.is_some() => {
+                crate::advance::count_exact_map();
+            }
+            None => {}
+        }
         let standard_redo = iteration == 1
             && standard_error_ha.is_some_and(|e| e < tolerance * self.problem.electrons.max(1.0));
         if standard_redo {
@@ -548,6 +698,7 @@ impl ScfSession {
             input_charge_error,
             min_density: step.density.iter().copied().fold(f64::INFINITY, f64::min),
             timings: step.timings,
+            advance: advance_record,
         };
         let converged = if let Some(p) = standard {
             let stop = standard_error_ha.is_some_and(|e| {

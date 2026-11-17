@@ -255,7 +255,7 @@ table! {
         "ortho, gram",
         "start of a distributed Davidson solve (workspace path): ortho (panel Gram-Schmidt of the start block) or gram (one Gram matrix and one reduction; a start block with Gram defect at most 1e-12, the restart contraction rule, is taken as the basis without Gram-Schmidt, otherwise ortho; rounding class)";
     // MPI overlap-matrix Davidson (ticket MPI-OVERLAP-DAVIDSON, docs/design/mpi-overlap-davidson.md); default off.
-    M2_LEAN_ALGEBRA: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    M2_LEAN_ALGEBRA: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "MPI-OVERLAP-DAVIDSON: standard (Ritz-change) distributed Davidson solves run the serial lean algebra: unit-norm corrections appended without Gram-Schmidt, the overlap S = V^T V kept beside H_r with its inverse Cholesky factor (pivot rule eps/1e-12, reprojection and Ritz-basis fallbacks), reduced problem T H_r T^T; the S border, the H border and the selected residual norms share one tree sum per iteration; strict solves unchanged; implies the workspace path; rounding class";
     // MPI lazy orbitals (ticket MPI-LAZY-ORBITALS, docs/design/mpi-lazy-orbitals.md); default off.
     M2_LAZY: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",

@@ -212,9 +212,65 @@ fn check(a: &RealMatrix, sol: &RealEigenSolution) -> (Vec<f64>, f64) {
     (res, defect)
 }
 
+/// Hash the ordered collective kinds and payload shapes, including operator
+/// collectives. This is an instrumentation-only wrapper for before/after logs.
+struct Trace<'a> {
+    inner: &'a SimRank,
+    hash: std::cell::Cell<u64>,
+}
+impl Trace<'_> {
+    fn record(&self, kind: u64, shape: &[usize]) {
+        let mut h = (self.hash.get() ^ kind).wrapping_mul(0x100000001b3);
+        for &n in shape {
+            h = (h ^ n as u64).wrapping_mul(0x100000001b3);
+        }
+        self.hash.set(h);
+    }
+}
+impl Collective for Trace<'_> {
+    fn rank(&self) -> usize {
+        self.inner.rank()
+    }
+    fn size(&self) -> usize {
+        self.inner.size()
+    }
+    fn barrier(&self) -> Result<(), dft_mpi::MpiError> {
+        self.record(0, &[]);
+        self.inner.barrier()
+    }
+    fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
+        self.record(1, &[local.len(), out.len()]);
+        self.inner.tree_sum_f64(local, out)
+    }
+    fn allgatherv_f64(
+        &self,
+        local: &[f64],
+        counts: &[usize],
+        out: &mut [f64],
+    ) -> Result<(), dft_mpi::MpiError> {
+        self.record(2, counts);
+        self.record(3, &[local.len(), out.len()]);
+        self.inner.allgatherv_f64(local, counts, out)
+    }
+    fn bcast_f64(&self, data: &mut [f64], root: usize) -> Result<(), dft_mpi::MpiError> {
+        self.record(4, &[data.len(), root]);
+        self.inner.bcast_f64(data, root)
+    }
+    fn alltoall_f64(
+        &self,
+        send: &[f64],
+        block: usize,
+        recv: &mut [f64],
+    ) -> Result<(), dft_mpi::MpiError> {
+        self.record(5, &[send.len(), block, recv.len()]);
+        self.inner.alltoall_f64(send, block, recv)
+    }
+}
+
 struct Run {
     cold: RealEigenSolution,
     warm: RealEigenSolution,
+    trace: u64,
 }
 
 /// Cold solve of `a`, then a warm solve of `b` from the cold eigenvectors.
@@ -239,6 +295,11 @@ fn solve(
     };
     let t = tuning(lean);
     simulate(ranks, |sim: &SimRank| {
+        let traced = Trace {
+            inner: sim,
+            hash: std::cell::Cell::new(0xcbf29ce484222325),
+        };
+        let sim = &traced;
         let mut op = RowsOp::new(a, sim.rank(), ranks);
         let diag = op.diagonal();
         let cold = solver
@@ -261,7 +322,11 @@ fn solve(
                 t,
             )
             .unwrap();
-        Run { cold, warm }
+        Run {
+            cold,
+            warm,
+            trace: traced.hash.get(),
+        }
     })
 }
 
@@ -312,6 +377,17 @@ fn lean_algebra_agrees_with_orthonormal_path() {
                 let stats1 = lean_algebra_stats();
                 let sums2 = tree_sums();
                 let tag = format!("{name} cap {per_band} ranks {ranks}");
+                for (rank, run) in lean.iter().enumerate() {
+                    // Unit-occupation band sums (Ha), not total SCF energies.
+                    let cold: f64 = run.cold.eigenvalues.iter().sum();
+                    let warm: f64 = run.warm.eigenvalues.iter().sum();
+                    eprintln!(
+                        "TRACE {tag} rank {rank}: {:016x} band_Ha_bits {:016x} {:016x}",
+                        run.trace,
+                        cold.to_bits(),
+                        warm.to_bits()
+                    );
+                }
                 eprintln!(
                     "WORK {tag}: gemm_calls {} gemm_flop {} red_payload {}",
                     w1.0 - w0.0,

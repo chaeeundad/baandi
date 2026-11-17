@@ -75,6 +75,88 @@ thread_local! {
     static PROBE: Cell<Option<fn(usize)>> = const { Cell::new(None) };
 }
 
+/// Requested allocation sizes for agreement and previous-Ritz scratch in the
+/// latest row solve. `allocations`/`bytes` describe agreement storage;
+/// `previous_*` describe the previous-Ritz buffer.
+/// These are named-site counters, not a process allocator census. Output-owned
+/// vectors, layout construction and numerical library allocations are excluded.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ScratchAllocationStats {
+    pub allocations: usize,
+    pub bytes: usize,
+    pub previous_allocations: usize,
+    pub previous_bytes: usize,
+}
+
+thread_local! {
+    static SCRATCH_PROFILE: Cell<Option<ScratchAllocationStats>> = const { Cell::new(None) };
+}
+
+/// Enable per-rank agreement allocation accounting. Disabled by default;
+/// no clocks, atomics, or per-collective accounting are used when disabled.
+pub fn set_scratch_allocation_profile(enabled: bool) {
+    SCRATCH_PROFILE.with(|p| p.set(enabled.then(ScratchAllocationStats::default)));
+}
+
+/// Read this rank's latest solve, or None when profiling is disabled.
+pub fn scratch_allocation_stats() -> Option<ScratchAllocationStats> {
+    SCRATCH_PROFILE.with(Cell::get)
+}
+
+/// Temporarily lends the workspace buffer to the agreement communicator. Drop
+/// returns it even on an early error; the failure flag belongs to the solve,
+/// never to this storage. The allocating reference path keeps local storage.
+pub(super) struct AgreementScratch {
+    pub(super) buffer: RefCell<Vec<f64>>,
+    persistent: bool,
+}
+impl AgreementScratch {
+    pub(super) fn acquire(len: usize, persistent: bool) -> Self {
+        let mut buffer = if persistent {
+            WORKSPACE.with(|w| {
+                let mut slot = w.borrow_mut();
+                let ws = slot.get_or_insert_with(|| Box::new(DistributedDavidsonWorkspace::new()));
+                std::mem::take(&mut ws.agreement)
+            })
+        } else {
+            Vec::new()
+        };
+        let grows = buffer.capacity() < len;
+        SCRATCH_PROFILE.with(|p| {
+            if p.get().is_some() {
+                p.set(Some(ScratchAllocationStats {
+                    allocations: usize::from(grows),
+                    bytes: if grows { len * size_of::<f64>() } else { 0 },
+                    ..ScratchAllocationStats::default()
+                }));
+            }
+        });
+        if grows {
+            buffer.reserve_exact(len - buffer.len());
+        }
+        // Only initialize new storage. The failure branch overwrites every
+        // active element before inserting its NaN; stale status cannot escape.
+        if buffer.len() < len {
+            buffer.resize(len, 0.0);
+        }
+        Self {
+            buffer: RefCell::new(buffer),
+            persistent,
+        }
+    }
+}
+impl Drop for AgreementScratch {
+    fn drop(&mut self) {
+        if self.persistent {
+            WORKSPACE.with(|w| {
+                if let Some(ws) = w.borrow_mut().as_mut() {
+                    ws.agreement = std::mem::take(self.buffer.get_mut());
+                }
+            });
+        }
+    }
+}
+
 /// Drop the calling thread's (rank's) persistent workspace.
 pub fn release_workspace() {
     WORKSPACE.with(|w| w.borrow_mut().take());
@@ -128,6 +210,25 @@ fn fit_vec(v: &mut Vec<f64>, len: usize) {
     }
 }
 
+/// The previous Ritz values are temporary even though history/buffer flags in
+/// the returned solution transfer ownership to the caller.
+fn prepare_previous(previous: &mut Vec<f64>, bands: usize) -> &mut [f64] {
+    if previous.capacity() < bands {
+        SCRATCH_PROFILE.with(|p| {
+            if let Some(mut stats) = p.get() {
+                stats.previous_allocations += 1;
+                stats.previous_bytes += bands * size_of::<f64>();
+                p.set(Some(stats));
+            }
+        });
+        previous.reserve_exact(bands - previous.len());
+    }
+    fit_vec(previous, bands);
+    let active = &mut previous[..bands];
+    active.fill(f64::NAN);
+    active
+}
+
 fn empty() -> RealMatrix {
     RealMatrix::new(0, 0, Vec::new()).expect("empty matrix")
 }
@@ -172,6 +273,10 @@ pub struct DistributedDavidsonWorkspace {
     own_pool: Option<(usize, Arc<WorkerPool>)>,
     eig: Option<(usize, RealEighWorkspace)>,
     b5: Option<((usize, usize), Bordered, RealGemmWorkspace)>,
+    agreement: Vec<f64>,
+    previous: Vec<f64>,
+    cold_diagonal: Vec<f64>,
+    gathered_diagonal: Vec<f64>,
     eigen_buffer: Vec<f64>,
     basis: RealMatrix,
     products: RealMatrix,
@@ -210,6 +315,10 @@ impl DistributedDavidsonWorkspace {
             own_pool: None,
             eig: None,
             b5: None,
+            agreement: Vec::new(),
+            previous: Vec::new(),
+            cold_diagonal: Vec::new(),
+            gathered_diagonal: Vec::new(),
             eigen_buffer: Vec::new(),
             basis: empty(),
             products: empty(),
@@ -719,6 +828,9 @@ fn solve_on<C: Collective>(
         eig,
         b5,
         eigen_buffer,
+        previous,
+        cold_diagonal,
+        gathered_diagonal,
         basis,
         products,
         held,
@@ -758,13 +870,15 @@ fn solve_on<C: Collective>(
         // MPI-LAZY-ORBITALS: the rows are this rank's (checked below).
         Some(DistributedStart::Local(x)) => x,
         None => {
-            let full: Vec<f64> = match full_diagonal {
-                Some(d) => d.to_vec(),
+            let full: &[f64] = match full_diagonal {
+                Some(d) => d,
                 None => {
-                    let mut flat = vec![0.0; n];
-                    comm.allgatherv_f64(diag_local, &layout.counts, &mut flat)
+                    fit_vec(gathered_diagonal, n);
+                    let flat = &mut gathered_diagonal[..n];
+                    comm.allgatherv_f64(diag_local, &layout.counts, flat)
                         .map_err(comm_error)?;
-                    let mut d = vec![0.0; n];
+                    fit_vec(cold_diagonal, n);
+                    let d = &mut cold_diagonal[..n];
                     let mut at = 0;
                     for (r, &c) in layout.counts.iter().enumerate() {
                         for (&g, &v) in layout.index[r].iter().zip(&flat[at..at + c]) {
@@ -775,7 +889,7 @@ fn solve_on<C: Collective>(
                     d
                 }
             };
-            cold = free_electron_initial_guess(&full, bands)?;
+            cold = free_electron_initial_guess(full, bands)?;
             &cold
         }
     };
@@ -970,6 +1084,7 @@ fn solve_on<C: Collective>(
                 reduced,
                 coefficients,
                 values,
+                previous,
                 vectors,
                 rotated,
                 residual,
@@ -1004,7 +1119,7 @@ fn solve_on<C: Collective>(
     };
     let mut history = Vec::with_capacity(solver.max_iterations);
     let (mut restarts, mut contractions, mut certificates) = (0usize, 0usize, 0usize);
-    let mut previous = vec![f64::NAN; bands];
+    let previous = prepare_previous(previous, bands);
     let mut reduced_width = 0usize;
     let mut max_basis = 0usize;
     let buffer: Vec<bool> = (0..bands).map(|j| j >= policy.strict_bands).collect();

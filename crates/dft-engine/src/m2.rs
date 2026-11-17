@@ -262,8 +262,24 @@ pub(crate) enum Stage {
     LazyMaterialize,
     /// MPI-LAZY-ORBITALS: kinetic energy of the audit from the local rows.
     LazyKinetic,
+    /// BREAKTHROUGH-4: MPI-KEPT-START update of the kept H X to the new
+    /// potential (the delta-V application of `prepare_m2_kept_start`).
+    KeptUpdate,
+    /// BREAKTHROUGH-4: the solve interface between the preparation and the
+    /// solver call (local diagonal, start rows, kept-start bookkeeping).
+    SolveEntry,
+    /// BREAKTHROUGH-4: the solve interface after the solver call (lazy handle
+    /// copy of the local rows, kept-start flags, the old potential copy).
+    SolveFinish,
+    /// BREAKTHROUGH-4 (`BAANDI_PHASE_WAIT=on` only): timed barrier at the entry
+    /// of every M2 solve (arrival skew of the ranks after the potential phase).
+    EntryWait,
+    /// BREAKTHROUGH-4: `ensure_state` of a real Gamma solve (the replicated
+    /// serial real Hamiltonian: reused with a potential copy, or rebuilt from
+    /// the complex operator after a new problem or a ladder stage).
+    RealState,
 }
-const STAGE_NAMES: [&str; 10] = [
+const STAGE_NAMES: [&str; 15] = [
     "density",
     "xc",
     "nonlocal_energy",
@@ -274,8 +290,13 @@ const STAGE_NAMES: [&str; 10] = [
     "solve_unpack",
     "lazy_materialize",
     "lazy_kinetic",
+    "kept_update",
+    "solve_entry",
+    "solve_finish",
+    "entry_wait",
+    "real_state",
 ];
-const STAGE_CALL_NAMES: [&str; 10] = [
+const STAGE_CALL_NAMES: [&str; 15] = [
     "calls.density",
     "calls.xc",
     "calls.nonlocal_energy",
@@ -286,9 +307,14 @@ const STAGE_CALL_NAMES: [&str; 10] = [
     "calls.solve_unpack",
     "calls.lazy_materialize",
     "calls.lazy_kinetic",
+    "calls.kept_update",
+    "calls.solve_entry",
+    "calls.solve_finish",
+    "calls.entry_wait",
+    "calls.real_state",
 ];
-static STAGE_NANOS: [AtomicU64; 10] = [const { AtomicU64::new(0) }; 10];
-static STAGE_CALLS: [AtomicUsize; 10] = [const { AtomicUsize::new(0) }; 10];
+static STAGE_NANOS: [AtomicU64; 15] = [const { AtomicU64::new(0) }; 15];
+static STAGE_CALLS: [AtomicUsize; 15] = [const { AtomicUsize::new(0) }; 15];
 /// F21: `start` from `dft_numerics::stage_clock::start` (or `keep`); `None`
 /// with `BAANDI_STAGE_TIMERS=off` counts the entry without reading a clock.
 pub(crate) fn add(stage: Stage, start: Option<Instant>) {

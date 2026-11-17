@@ -516,7 +516,9 @@ impl ScfSession {
                 },
                 other => other,
             })?;
+        let stop_clock = crate::profile::clock();
         let mut standard_error_ha = self.problem.stop_error(n, &step.density)?;
+        crate::profile::between(crate::profile::BetweenPart::StopRule, stop_clock);
         crate::profile::map_commit(crate::profile::MapKind::Ordinary);
         // BREAKTHROUGH-3: completion rules of an advanced map (design section 5).
         let mut advance_record = None;
@@ -643,6 +645,7 @@ impl ScfSession {
             step = redo;
             standard_error_ha = self.problem.stop_error(n, &step.density)?;
         }
+        let stop_clock = crate::profile::clock();
         if dft_solvers::replay::ENABLED {
             // Measurement only: signed density residual, normalized FFT, density
             // sphere and G=0 omission. Do not pass a signed field to the physical
@@ -785,6 +788,7 @@ impl ScfSession {
                 history: std::mem::take(history),
             });
         }
+        crate::profile::between(crate::profile::BetweenPart::StopRule, stop_clock);
         // Certify the returned output density itself, not just the input
         // fixed-point residual. A small-gap response can amplify that residual.
         self.problem.energy_identity = false;
@@ -2046,6 +2050,7 @@ fn verify_fixed_point(
         // Same flag as an ordinary step (the standard path ignores it).
         eigen_tolerance <= problem.options.eigen_tolerance,
     )?;
+    let glue_clock = crate::profile::clock();
     let coulomb_error_ha = problem
         .stop_error(density, &check.density)?
         .expect("standard Coulomb metric");
@@ -2113,6 +2118,7 @@ fn verify_fixed_point(
     if passed && clipped.is_none() {
         problem.check_gap(&check.k_points)?;
     }
+    crate::profile::between(crate::profile::BetweenPart::VerifyGlue, glue_clock);
     let residuals = |buffered: bool| -> Vec<Vec<f64>> {
         check
             .k_points

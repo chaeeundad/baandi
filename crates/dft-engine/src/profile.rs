@@ -60,8 +60,11 @@ pub enum Bucket {
     VerifyPass = 4,
     VerifyFail = 5,
     Materialize = 6,
+    /// BREAKTHROUGH-4: named work between the maps that no other bucket covers
+    /// (ladder hand-off, session set-up, stop rule and iteration record).
+    Between = 7,
 }
-pub const BUCKETS: usize = 7;
+pub const BUCKETS: usize = 8;
 pub const BUCKET_LABELS: [&str; BUCKETS] = [
     "init",
     "coarse",
@@ -70,6 +73,7 @@ pub const BUCKET_LABELS: [&str; BUCKETS] = [
     "verify_pass",
     "verify_fail",
     "materialize",
+    "between",
 ];
 
 /// How a recorded map is filed.
@@ -90,8 +94,15 @@ pub enum Phase {
     Energy,
 }
 
-// Seconds slots.
-pub const SEC_LABELS: [&str; 32] = [
+// Seconds slots. Slots 32 and above (BREAKTHROUGH-4-OTHER-AND-INIT): the solve
+// time the earlier stages left in `solve.other` (solver `setup`,
+// `precondition`, `append`; engine interface `kept_update`, `entry`, `finish`,
+// `entry_wait`), the split of the rest into the solver's loop body
+// (`other_solver` = solver call minus its stages) and the engine interface
+// (`other_engine`), the wait-probe time inside the solver's collectives
+// (`solve.wait`, not exclusive), the parts of `init` (problem construction and
+// the atomic start) and the named parts of the `between` bucket.
+pub const SEC_LABELS: [&str; NSEC] = [
     "wall",
     "potential",
     "solve",
@@ -124,6 +135,41 @@ pub const SEC_LABELS: [&str; 32] = [
     "m2.lazy_materialize",
     "m2.atomic_start",
     "m2.screen",
+    "solve.setup",
+    "solve.precondition",
+    "solve.append",
+    "solve.kept_update",
+    "solve.entry",
+    "solve.finish",
+    "solve.entry_wait",
+    "solve.wait",
+    "solve.solver_total",
+    "solve.other_solver",
+    "solve.other_engine",
+    "init.cli",
+    "init.basis",
+    "init.ionic_local",
+    "init.densities",
+    "init.states",
+    "init.atomic_prepare",
+    "init.ewald",
+    "init.rest",
+    "atomic.span",
+    "atomic.hq",
+    "atomic.ritz",
+    "between.ladder_handoff",
+    "between.session_setup",
+    "between.stop_rule",
+    "between.verify_glue",
+    "solve.real_state",
+    "atomic.radial",
+    "atomic.fill",
+    "atomic.orthonormalize",
+    "atomic.finish",
+    "atomic.gram",
+    "atomic.eigh",
+    "atomic.rotate",
+    "between.ladder_truncation",
 ];
 const S_WALL: usize = 0;
 const S_POTENTIAL: usize = 1;
@@ -146,7 +192,116 @@ const S_SOLVE_OTHER: usize = 17;
 const S_COLL: usize = 18;
 const S_M2: usize = 23;
 const S_M2_LAZY_MATERIALIZE: usize = 29;
-pub const NSEC: usize = 32;
+const S_M2_SOLVE_PREPARE: usize = 26;
+const S_M2_SOLVE_UNPACK: usize = 27;
+const S_SOLVE_SETUP: usize = 32;
+const S_SOLVE_PRECONDITION: usize = 33;
+const S_SOLVE_APPEND: usize = 34;
+const S_SOLVE_KEPT_UPDATE: usize = 35;
+const S_SOLVE_ENTRY: usize = 36;
+const S_SOLVE_FINISH: usize = 37;
+const S_SOLVE_ENTRY_WAIT: usize = 38;
+const S_SOLVE_WAIT: usize = 39;
+const S_SOLVER_TOTAL: usize = 40;
+const S_OTHER_SOLVER: usize = 41;
+const S_OTHER_ENGINE: usize = 42;
+const S_INIT_PART: usize = 43;
+const S_ATOMIC_PART: usize = 51;
+const S_BETWEEN_PART: usize = 54;
+const BETWEEN_PARTS: usize = 4;
+const S_SOLVE_REAL_STATE: usize = 58;
+const S_ATOMIC_DETAIL: usize = 59;
+const S_BETWEEN_TRUNCATION: usize = 66;
+pub const NSEC: usize = 67;
+
+/// Parts of problem construction (`init` bucket; seconds only, the bucket wall
+/// is the caller's construction clock).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InitPart {
+    /// Caller work before the engine (input parsing, preflight, basis
+    /// preparation and pseudopotential reading of the CLI).
+    Cli = 0,
+    /// Wavefunction and density bases and FFT grid specifications.
+    Basis = 1,
+    /// Ionic local potential on the density sphere.
+    IonicLocal = 2,
+    /// FFT plan, core density, atomic start density and the real-space ionic
+    /// potential.
+    Densities = 3,
+    /// Worker pool and the k states (basis, nonlocal projectors, Hamiltonian,
+    /// band-density workspace).
+    States = 4,
+    /// Atomic-orbital radial tables of the atomic start.
+    AtomicPrepare = 5,
+    /// Ewald energy.
+    Ewald = 6,
+    /// Validation, worker FFT plans, Coulomb metric, force model.
+    Rest = 7,
+}
+/// Parts of the atomic start (`init` bucket; seconds only). `Span`, `Hq` and
+/// `Ritz` are the three steps; the others split them (span: radial tables,
+/// column fill, orthonormalization, plane-wave completion; Ritz: H and the
+/// Gram matrix, small eigenproblem, rotation to the start vectors).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AtomicPart {
+    /// Atomic-orbital span on the plane-wave basis.
+    Span,
+    /// H applied to the span (threads path with ATOMIC-REAL only).
+    Hq,
+    /// Gram, small eigenproblem and rotation (Rayleigh-Ritz).
+    Ritz,
+    Radial,
+    Fill,
+    Orthonormalize,
+    Finish,
+    Gram,
+    Eigh,
+    Rotate,
+}
+impl AtomicPart {
+    fn slot(self) -> usize {
+        match self {
+            Self::Span => S_ATOMIC_PART,
+            Self::Hq => S_ATOMIC_PART + 1,
+            Self::Ritz => S_ATOMIC_PART + 2,
+            Self::Radial => S_ATOMIC_DETAIL,
+            Self::Fill => S_ATOMIC_DETAIL + 1,
+            Self::Orthonormalize => S_ATOMIC_DETAIL + 2,
+            Self::Finish => S_ATOMIC_DETAIL + 3,
+            Self::Gram => S_ATOMIC_DETAIL + 4,
+            Self::Eigh => S_ATOMIC_DETAIL + 5,
+            Self::Rotate => S_ATOMIC_DETAIL + 6,
+        }
+    }
+}
+/// Named parts of the `between` bucket (each adds to its wall).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BetweenPart {
+    /// Cutoff ladder: orbital and density prolongation of the hand-off.
+    LadderHandoff,
+    /// Session construction and initialization (mixer validation, imported
+    /// state, seeds).
+    SessionSetup,
+    /// Stop-rule estimate, density residual and the iteration record of an
+    /// SCF step (outside its map).
+    StopRule,
+    /// Verification block outside its map (set-up and bookkeeping).
+    VerifyGlue,
+    /// Cutoff ladder: the report's atomic truncation distance (prolongation
+    /// of the coarse atomic start density).
+    LadderTruncation,
+}
+impl BetweenPart {
+    fn slot(self) -> usize {
+        match self {
+            Self::LadderHandoff => S_BETWEEN_PART,
+            Self::SessionSetup => S_BETWEEN_PART + 1,
+            Self::StopRule => S_BETWEEN_PART + 2,
+            Self::VerifyGlue => S_BETWEEN_PART + 3,
+            Self::LadderTruncation => S_BETWEEN_TRUNCATION,
+        }
+    }
+}
 
 // Count slots.
 pub const COUNT_LABELS: [&str; 20] = [
@@ -233,6 +388,19 @@ impl Accum {
         self.counts[C_EIGEN_CALLS] += d.calls[DIST_STAGE + 1];
         self.counts[C_RESTART_CALLS] += d.calls[DIST_STAGE + 10];
         self.counts[C_ORTHO_CALLS] += d.calls[DIST_STAGE + 4];
+        // BREAKTHROUGH-4 solver labels (setup, precondition, append, wait,
+        // solver_total) and engine interface stages (m2 kept_update,
+        // solve_entry, solve_finish, entry_wait).
+        self.seconds[S_SOLVE_SETUP] += ns(DIST_STAGE + 11);
+        self.seconds[S_SOLVE_PRECONDITION] += ns(DIST_STAGE + 12);
+        self.seconds[S_SOLVE_APPEND] += ns(DIST_STAGE + 13);
+        self.seconds[S_SOLVE_WAIT] += ns(DIST_STAGE + 14);
+        self.seconds[S_SOLVER_TOTAL] += ns(DIST_STAGE + 15);
+        self.seconds[S_SOLVE_KEPT_UPDATE] += ns(M2_STAGE + 10);
+        self.seconds[S_SOLVE_ENTRY] += ns(M2_STAGE + 11);
+        self.seconds[S_SOLVE_FINISH] += ns(M2_STAGE + 12);
+        self.seconds[S_SOLVE_ENTRY_WAIT] += ns(M2_STAGE + 13);
+        self.seconds[S_SOLVE_REAL_STATE] += ns(M2_STAGE + 14);
         // Serial Davidson stages (Stage order: reduced, eigen, rotate, residual,
         // orthonormalize, h_apply, sketch, precondition), only with
         // BAANDI_DAVIDSON_STAGES=on.
@@ -520,6 +688,45 @@ pub fn add_init(seconds: f64) {
         a.seconds[S_WALL] += seconds;
     });
 }
+/// A clock for a profile part: `Some(now)` only when the profile is on (no
+/// clock read otherwise).
+pub fn clock() -> Option<std::time::Instant> {
+    enabled().then(std::time::Instant::now)
+}
+fn since(clock: Option<std::time::Instant>) -> f64 {
+    clock.map_or(0.0, |c| c.elapsed().as_secs_f64())
+}
+/// Seconds of one part of problem construction since `clock` (under `init`,
+/// not added to its wall: the caller's construction clock is the wall).
+pub fn init_part(part: InitPart, clock: Option<std::time::Instant>) {
+    if clock.is_none() {
+        return;
+    }
+    let s = since(clock);
+    with(|st| st.buckets[Bucket::Init as usize].seconds[S_INIT_PART + part as usize] += s);
+}
+/// Seconds of one part of the atomic start since `clock` (under `init`; the
+/// atomic start total is its wall).
+pub(crate) fn atomic_part(part: AtomicPart, clock: Option<std::time::Instant>) {
+    if clock.is_none() {
+        return;
+    }
+    let s = since(clock);
+    with(|st| st.buckets[Bucket::Init as usize].seconds[part.slot()] += s);
+}
+/// Seconds of one named part of the `between` bucket since `clock` (added to
+/// that bucket's wall).
+pub fn between(part: BetweenPart, clock: Option<std::time::Instant>) {
+    if clock.is_none() {
+        return;
+    }
+    let s = since(clock);
+    with(|st| {
+        let a = &mut st.buckets[Bucket::Between as usize];
+        a.seconds[part.slot()] += s;
+        a.seconds[S_WALL] += s;
+    });
+}
 /// Output / materialization seconds (caller-reported), under `materialize`.
 pub fn add_io(seconds: f64) {
     with(|s| {
@@ -593,6 +800,41 @@ pub fn gather<C: Collective + ?Sized>(
     Ok(out)
 }
 
+/// `solve.other` of one rank's bucket: the solve wall not covered by the
+/// exclusive stages (solver stages, the BREAKTHROUGH-4 solver labels and the
+/// engine's solve interface stages), split into the solver's uncovered loop
+/// body (`other_solver`: the solver call minus its stages) and the rest
+/// (`other_engine`). The serial path's sketch/precondition seconds already in
+/// `solve.other` count as covered.
+fn derive_other(a: &mut Accum) {
+    let solver_parts: f64 = (S_SOLVE_START..=S_SOLVE_RETURN)
+        .chain([S_SOLVE_SETUP, S_SOLVE_PRECONDITION, S_SOLVE_APPEND])
+        .map(|i| a.seconds[i])
+        .sum();
+    let engine_parts: f64 = [
+        S_M2_SOLVE_PREPARE,
+        S_M2_SOLVE_UNPACK,
+        S_SOLVE_KEPT_UPDATE,
+        S_SOLVE_ENTRY,
+        S_SOLVE_FINISH,
+        S_SOLVE_ENTRY_WAIT,
+        S_SOLVE_REAL_STATE,
+    ]
+    .iter()
+    .map(|&i| a.seconds[i])
+    .sum();
+    let parts = solver_parts + engine_parts + a.seconds[S_SOLVE_OTHER];
+    let other = (a.seconds[S_SOLVE] - parts).max(0.0);
+    a.seconds[S_SOLVE_OTHER] = other;
+    let in_solver = if a.seconds[S_SOLVER_TOTAL] > 0.0 {
+        (a.seconds[S_SOLVER_TOTAL] - solver_parts).clamp(0.0, other)
+    } else {
+        0.0
+    };
+    a.seconds[S_OTHER_SOLVER] = in_solver;
+    a.seconds[S_OTHER_ENGINE] = other - in_solver;
+}
+
 /// One report entry: (label, maximum over ranks, minimum over ranks).
 pub type Entry = (&'static str, f64, f64);
 
@@ -607,6 +849,16 @@ impl Report {
     pub fn from_ranks(profiles: &[RankProfile]) -> Self {
         let mut max = [Accum::default(); BUCKETS];
         let mut min = [Accum::default(); BUCKETS];
+        // BREAKTHROUGH-4: the derived `solve.other` entries are formed per rank
+        // first (a sum of per-stage maxima over different ranks can exceed any
+        // rank's solve), then reduced like every other entry.
+        let mut derived: Vec<RankProfile> = profiles.to_vec();
+        for p in &mut derived {
+            for a in &mut p.buckets {
+                derive_other(a);
+            }
+        }
+        let profiles = &derived[..];
         for b in 0..BUCKETS {
             for i in 0..NSEC {
                 let it = profiles.iter().map(|p| p.buckets[b].seconds[i]);
@@ -620,14 +872,6 @@ impl Report {
                 let it = profiles.iter().map(|p| p.buckets[b].counts[i]);
                 max[b].counts[i] = it.clone().max().unwrap_or(0);
                 min[b].counts[i] = it.min().unwrap_or(0);
-            }
-            // `solve.other`: the solve wall not covered by the exclusive stages.
-            for a in [&mut max[b], &mut min[b]] {
-                let parts: f64 = (S_SOLVE_START..=S_SOLVE_RETURN)
-                    .map(|i| a.seconds[i])
-                    .sum::<f64>()
-                    + a.seconds[S_SOLVE_OTHER];
-                a.seconds[S_SOLVE_OTHER] = (a.seconds[S_SOLVE] - parts).max(0.0);
             }
         }
         Self {
@@ -677,9 +921,38 @@ impl Report {
             if b == Bucket::Init as usize {
                 let _ = writeln!(
                     out,
-                    "  {:<12} atomic start {:.4} s",
-                    "", mx.seconds[S_ATOMIC]
+                    "  {:<12} atomic start {:.4} s (span {:.4} = radial {:.4} + fill {:.4} + orthonormalize {:.4} + finish {:.4}; H span {:.4}; Ritz {:.4} = gram {:.4} + eigh {:.4} + rotate {:.4})",
+                    "",
+                    mx.seconds[S_ATOMIC],
+                    mx.seconds[S_ATOMIC_PART],
+                    mx.seconds[S_ATOMIC_DETAIL],
+                    mx.seconds[S_ATOMIC_DETAIL + 1],
+                    mx.seconds[S_ATOMIC_DETAIL + 2],
+                    mx.seconds[S_ATOMIC_DETAIL + 3],
+                    mx.seconds[S_ATOMIC_PART + 1],
+                    mx.seconds[S_ATOMIC_PART + 2],
+                    mx.seconds[S_ATOMIC_DETAIL + 4],
+                    mx.seconds[S_ATOMIC_DETAIL + 5],
+                    mx.seconds[S_ATOMIC_DETAIL + 6]
                 );
+                let parts: Vec<String> = (S_INIT_PART..S_ATOMIC_PART)
+                    .map(|i| {
+                        format!(
+                            "{} {:.4} [{:.4}]",
+                            &SEC_LABELS[i][5..],
+                            mx.seconds[i],
+                            mn.seconds[i]
+                        )
+                    })
+                    .collect();
+                let _ = writeln!(out, "  {:<12} construction: {}", "", parts.join(", "));
+            }
+            if b == Bucket::Between as usize {
+                let parts: Vec<String> = (S_BETWEEN_PART..S_BETWEEN_PART + BETWEEN_PARTS)
+                    .chain([S_BETWEEN_TRUNCATION])
+                    .map(|i| format!("{} {:.4}", &SEC_LABELS[i][8..], mx.seconds[i]))
+                    .collect();
+                let _ = writeln!(out, "  {:<12} {}", "", parts.join(", "));
             }
             if b == Bucket::Materialize as usize {
                 let _ = writeln!(
@@ -737,6 +1010,43 @@ impl Report {
                 mx.seconds[S_COLL + 1],
                 mx.counts[C_COLL + 3],
                 mx.seconds[S_COLL + 3]
+            );
+        }
+        let _ = writeln!(
+            out,
+            "  solve labels (BREAKTHROUGH-4; exclusive except wait; seconds max [min]): bucket | setup precondition append | real_state prepare entry kept_update finish unpack entry_wait | other = other_solver + other_engine | wait (inside stages), barrier"
+        );
+        for (b, label) in BUCKET_LABELS.iter().enumerate() {
+            let (mx, mn) = (&self.max[b], &self.min[b]);
+            if mx.seconds[S_SOLVE] == 0.0 {
+                continue;
+            }
+            let f = |idx: &[usize]| -> String {
+                idx.iter()
+                    .map(|&i| format!("{:.4} [{:.4}]", mx.seconds[i], mn.seconds[i]))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            let _ = writeln!(
+                out,
+                "  {:<12} | {} | {} | {:.4} = {:.4} + {:.4} | {:.4}, {:.4} ({} calls)",
+                label,
+                f(&[S_SOLVE_SETUP, S_SOLVE_PRECONDITION, S_SOLVE_APPEND]),
+                f(&[
+                    S_SOLVE_REAL_STATE,
+                    S_M2_SOLVE_PREPARE,
+                    S_SOLVE_ENTRY,
+                    S_SOLVE_KEPT_UPDATE,
+                    S_SOLVE_FINISH,
+                    S_M2_SOLVE_UNPACK,
+                    S_SOLVE_ENTRY_WAIT
+                ]),
+                mx.seconds[S_SOLVE_OTHER],
+                mx.seconds[S_OTHER_SOLVER],
+                mx.seconds[S_OTHER_ENGINE],
+                mx.seconds[S_SOLVE_WAIT],
+                mx.seconds[S_COLL + 4],
+                mx.counts[C_COLL + 4]
             );
         }
         out

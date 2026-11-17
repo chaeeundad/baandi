@@ -29,7 +29,7 @@ impl Default for EwaldOptions {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct EwaldEnergy {
     pub energy: Hartree,
     pub real: Hartree,

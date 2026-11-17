@@ -61,7 +61,19 @@ use std::time::Instant;
 /// paths (Gram defect of X, contraction copy or re-orthonormalization and
 /// re-application of the basis; the lean contraction's basis replacement).
 /// Its rotation is counted in `rotate`.
-pub const STAGES: [&str; 11] = [
+///
+/// BREAKTHROUGH-4-OTHER-AND-INIT (finer exclusive labels of the code the
+/// earlier stages did not cover): `setup` (the per-solve row-index exchange of
+/// `solve_rows_impl` and the workspace preparation before `solve_start`),
+/// `precondition` (convergence flags, selected-root bookkeeping, coefficient
+/// copies and the preconditioned correction block), `append` (copies of the new
+/// columns into the basis and product storage and the finiteness scan of every
+/// applied block). `wait` is NOT exclusive: with `BAANDI_PHASE_WAIT=on` a timed
+/// barrier before every collective of the solver measures the time spent
+/// waiting for the last rank (inside whichever stage issued the collective).
+/// `solver_total` is the whole solver call (the container of every other
+/// stage; solve time outside it belongs to the engine's interface).
+pub const STAGES: [&str; 16] = [
     "reduced_gram",
     "reduced_eigen",
     "rotate",
@@ -73,9 +85,62 @@ pub const STAGES: [&str; 11] = [
     "solve_start",
     "solve_return",
     "restart",
+    "setup",
+    "precondition",
+    "append",
+    "wait",
+    "solver_total",
 ];
-static STAGE_NANOS: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
-static STAGE_CALLS: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
+/// Stage indices of the BREAKTHROUGH-4 labels (see `STAGES`).
+pub(crate) const STAGE_SETUP: usize = 11;
+pub(crate) const STAGE_PRECONDITION: usize = 12;
+pub(crate) const STAGE_APPEND: usize = 13;
+const STAGE_WAIT: usize = 14;
+const STAGE_TOTAL: usize = 15;
+static STAGE_NANOS: [AtomicU64; 16] = [const { AtomicU64::new(0) }; 16];
+static STAGE_CALLS: [AtomicU64; 16] = [const { AtomicU64::new(0) }; 16];
+
+thread_local! {
+    /// This rank's local rows and the row layout of its previous solve
+    /// (`BAANDI_M2_LAYOUT_CACHE=on`).
+    static LAYOUT_CACHE: std::cell::RefCell<Option<(Vec<usize>, std::sync::Arc<Layout>)>> =
+        const { std::cell::RefCell::new(None) };
+    static LAYOUT_CACHE_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+// Solves that reused the cached layout, solves that exchanged and stored it.
+static LAYOUT_COUNTS: [AtomicU64; 2] = [const { AtomicU64::new(0) }; 2];
+/// `BAANDI_M2_LAYOUT_CACHE=on|off` (default off; per-thread override for
+/// simulated ranks): reuse the row-index layout of the previous solve when
+/// every rank's local rows are unchanged (bit-identical: same layout).
+fn layout_cache() -> bool {
+    LAYOUT_CACHE_OVERRIDE.with(|o| o.get()).unwrap_or_else(|| {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::M2_LAYOUT_CACHE))
+    })
+}
+/// Override `BAANDI_M2_LAYOUT_CACHE` on the calling thread (`None`: the switch).
+pub fn set_layout_cache_override(on: Option<bool>) {
+    LAYOUT_CACHE_OVERRIDE.with(|o| o.set(on));
+    if on == Some(false) {
+        LAYOUT_CACHE.with(|l| *l.borrow_mut() = None);
+    }
+}
+/// (solves that reused the cached layout, solves that exchanged and stored it)
+/// of `BAANDI_M2_LAYOUT_CACHE=on`, summed over the threads of this process.
+pub fn layout_cache_stats() -> (u64, u64) {
+    (
+        LAYOUT_COUNTS[0].load(Ordering::Relaxed),
+        LAYOUT_COUNTS[1].load(Ordering::Relaxed),
+    )
+}
+
+/// `BAANDI_PHASE_WAIT=on` (read once): a timed barrier before every collective
+/// of the distributed solver (diagnostic; timing only, the arithmetic is
+/// unchanged).
+pub fn wait_probe() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::PHASE_WAIT))
+}
 
 /// Wall seconds of this process in each stage of the distributed solver (cheap
 /// per-stage accumulation, no I/O in the loop; read once for the run report).
@@ -97,7 +162,7 @@ pub fn stage_calls() -> Vec<(&'static str, u64)> {
         .collect()
 }
 /// F21: `start` from `dft_numerics::stage_clock::start` (`None` count-only).
-fn stage_add(i: usize, start: Option<Instant>) {
+pub(crate) fn stage_add(i: usize, start: Option<Instant>) {
     STAGE_CALLS[i].fetch_add(1, Ordering::Relaxed);
     let ns = dft_numerics::stage_clock::elapsed_ns(start);
     if start.is_some() {
@@ -310,6 +375,19 @@ pub fn reduction_stats() -> (u64, Vec<ReductionSite>) {
 struct Counted<'a, C: Collective> {
     inner: &'a C,
 }
+impl<C: Collective> Counted<'_, C> {
+    /// `BAANDI_PHASE_WAIT=on`: a timed barrier before the collective, so the
+    /// time spent waiting for the last rank is reported as `wait` and the
+    /// collective's own clock measures the transfer (one load when off).
+    fn probe(&self) -> Result<(), dft_mpi::MpiError> {
+        if wait_probe() && self.inner.size() > 1 {
+            let t = dft_numerics::stage_clock::start();
+            self.inner.barrier()?;
+            stage_add(STAGE_WAIT, t);
+        }
+        Ok(())
+    }
+}
 impl<C: Collective> Collective for Counted<'_, C> {
     fn rank(&self) -> usize {
         self.inner.rank()
@@ -326,15 +404,18 @@ impl<C: Collective> Collective for Counted<'_, C> {
         counts: &[usize],
         out: &mut [f64],
     ) -> Result<(), dft_mpi::MpiError> {
+        self.probe()?;
         self.inner.allgatherv_f64(local, counts, out)
     }
     fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
         let s = SITE.with(|c| c.get());
         REDUCTION_CALLS[s][bucket(local.len())].fetch_add(1, Ordering::Relaxed);
         REDUCTION_PAYLOAD[s].fetch_add(local.len() as u64, Ordering::Relaxed);
+        self.probe()?;
         self.inner.tree_sum_f64(local, out)
     }
     fn bcast_f64(&self, data: &mut [f64], root: usize) -> Result<(), dft_mpi::MpiError> {
+        self.probe()?;
         self.inner.bcast_f64(data, root)
     }
     fn alltoall_f64(
@@ -343,6 +424,7 @@ impl<C: Collective> Collective for Counted<'_, C> {
         block: usize,
         recv: &mut [f64],
     ) -> Result<(), dft_mpi::MpiError> {
+        self.probe()?;
         self.inner.alltoall_f64(send, block, recv)
     }
 }
@@ -1363,46 +1445,80 @@ impl crate::RealDavidson {
             k.taken = false;
             k.declined = false;
         }
+        let t_total = dft_numerics::stage_clock::start();
+        let t_setup = dft_numerics::stage_clock::start();
         let counted = Counted { inner: comm };
         let comm = &counted;
         REDUCTION_SOLVES.fetch_add(1, Ordering::Relaxed);
         site(Site::Setup);
         let n = op.global_len();
-        let mine: Vec<usize> = op.local_rows().to_vec();
+        let mine: &[usize] = op.local_rows();
         if diagonal_local.len() != mine.len() || mine.iter().any(|&r| r >= n) {
             return Err(SolverError::InvalidParameter("bands or diagonal length"));
         }
-        // Setup (once per solve): every rank learns the row lists of all ranks.
         let ranks = comm.size();
-        let mut counts_f = vec![0.0; ranks];
-        comm.allgatherv_f64(&[mine.len() as f64], &vec![1; ranks], &mut counts_f)
-            .map_err(comm_error)?;
-        let counts: Vec<usize> = counts_f.iter().map(|&c| c as usize).collect();
-        if counts.iter().sum::<usize>() != n {
-            return Err(SolverError::InvalidParameter(
-                "row partition does not cover the basis",
-            ));
-        }
-        let mut flat = vec![0.0; n];
-        let mine_f: Vec<f64> = mine.iter().map(|&r| r as f64).collect();
-        comm.allgatherv_f64(&mine_f, &counts, &mut flat)
-            .map_err(comm_error)?;
-        let mut at = 0;
-        let index: Vec<Vec<usize>> = counts
-            .iter()
-            .map(|&c| {
-                let v = flat[at..at + c].iter().map(|&r| r as usize).collect();
-                at += c;
-                v
-            })
-            .collect();
-        let layout = Layout {
-            n,
-            rank: comm.rank(),
-            counts,
-            index,
+        // BREAKTHROUGH-4 (`BAANDI_M2_LAYOUT_CACHE=on`): the row lists of all
+        // ranks are reused from this thread's previous solve when every rank
+        // holds the same local rows (one 1-double reduction decides, so the
+        // decision is replicated); otherwise exchanged as before.
+        let cache = layout_cache();
+        let reuse = if cache {
+            let hit = LAYOUT_CACHE.with(|l| {
+                l.borrow().as_ref().is_some_and(|(rows, lay)| {
+                    lay.n == n
+                        && lay.rank == comm.rank()
+                        && lay.counts.len() == ranks
+                        && rows.as_slice() == mine
+                })
+            });
+            let mut flag = [0.0];
+            comm.tree_sum_f64(&[f64::from(u8::from(!hit))], &mut flag)
+                .map_err(comm_error)?;
+            flag[0] == 0.0
+        } else {
+            false
+        };
+        let layout: std::sync::Arc<Layout> = if reuse {
+            LAYOUT_COUNTS[0].fetch_add(1, Ordering::Relaxed);
+            LAYOUT_CACHE.with(|l| l.borrow().as_ref().expect("checked above").1.clone())
+        } else {
+            // Setup (once per solve): every rank learns the row lists of all ranks.
+            let mut counts_f = vec![0.0; ranks];
+            comm.allgatherv_f64(&[mine.len() as f64], &vec![1; ranks], &mut counts_f)
+                .map_err(comm_error)?;
+            let counts: Vec<usize> = counts_f.iter().map(|&c| c as usize).collect();
+            if counts.iter().sum::<usize>() != n {
+                return Err(SolverError::InvalidParameter(
+                    "row partition does not cover the basis",
+                ));
+            }
+            let mut flat = vec![0.0; n];
+            let mine_f: Vec<f64> = mine.iter().map(|&r| r as f64).collect();
+            comm.allgatherv_f64(&mine_f, &counts, &mut flat)
+                .map_err(comm_error)?;
+            let mut at = 0;
+            let index: Vec<Vec<usize>> = counts
+                .iter()
+                .map(|&c| {
+                    let v = flat[at..at + c].iter().map(|&r| r as usize).collect();
+                    at += c;
+                    v
+                })
+                .collect();
+            let layout = std::sync::Arc::new(Layout {
+                n,
+                rank: comm.rank(),
+                counts,
+                index,
+            });
+            if cache {
+                LAYOUT_COUNTS[1].fetch_add(1, Ordering::Relaxed);
+                LAYOUT_CACHE.with(|l| *l.borrow_mut() = Some((mine.to_vec(), layout.clone())));
+            }
+            layout
         };
         let nl = layout.nl();
+        stage_add(STAGE_SETUP, t_setup);
         if tuning.workspace || tuning.selected_roots || tuning.lean_algebra {
             let supplied = op.worker_pool();
             let threads = op.inner_threads();
@@ -1413,14 +1529,17 @@ impl crate::RealDavidson {
                 op.apply_block(comm, x, y)?;
                 stage_add(5, start);
                 stage_add(6, start);
-                if y.as_slice().iter().any(|v| !v.is_finite()) {
+                let scan = dft_numerics::stage_clock::start();
+                let invalid = y.as_slice().iter().any(|v| !v.is_finite());
+                stage_add(STAGE_APPEND, scan);
+                if invalid {
                     return Err(SolverError::Application(
                         "operator returned an invalid block".into(),
                     ));
                 }
                 Ok(())
             };
-            return workspace::solve_core_ws(
+            let result = workspace::solve_core_ws(
                 self,
                 comm,
                 &layout,
@@ -1438,6 +1557,8 @@ impl crate::RealDavidson {
                 kept,
                 gather,
             );
+            stage_add(STAGE_TOTAL, t_total);
+            return result;
         }
         // The allocating path has no kept start: drop it, then give the local
         // rows of the result below.
@@ -1496,6 +1617,7 @@ impl crate::RealDavidson {
         if let Some((x, _)) = kept {
             *x = local_rows(&layout, &result.eigenvectors)?;
         }
+        stage_add(STAGE_TOTAL, t_total);
         Ok(result)
     }
 

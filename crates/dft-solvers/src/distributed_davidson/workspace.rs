@@ -609,6 +609,8 @@ fn solve_on<C: Collective>(
     mut kept: Option<(&mut RealMatrix, &mut DistributedKeptStart)>,
     gather: bool,
 ) -> Result<RealEigenSolution, SolverError> {
+    // BREAKTHROUGH-4: workspace preparation is the `setup` stage.
+    let t_setup = dft_numerics::stage_clock::start();
     let n = layout.n;
     if !(2..=12).contains(&capacity_per_band) {
         return Err(SolverError::InvalidParameter(
@@ -745,6 +747,7 @@ fn solve_on<C: Collective>(
         ..
     } = ws;
     let gemm = &mut gemm.as_mut().expect("GEMM workspace").1;
+    stage_add(STAGE_SETUP, t_setup);
 
     // Initial basis.
     let t_start = dft_numerics::stage_clock::start();
@@ -1102,6 +1105,7 @@ fn solve_on<C: Collective>(
             // F05: convergence from the Ritz-value change first; Ritz vectors,
             // H images and residuals of the unconverged roots only. All bands
             // are rotated only at return and at a restart (below).
+            let t0 = dft_numerics::stage_clock::start();
             converged.clear();
             converged.extend(
                 (0..bands).map(|j| iteration > 1 && (values[j] - previous[j]).abs() < threshold(j)),
@@ -1110,6 +1114,7 @@ fn solve_on<C: Collective>(
             let finished = converged.iter().all(|&b| b)
                 || (iteration == solver.max_iterations
                     && converged[..policy.strict_bands].iter().all(|&b| b));
+            stage_add(STAGE_PRECONDITION, t0);
             if finished || iteration == solver.max_iterations {
                 let t0 = dft_numerics::stage_clock::start();
                 rotate_ritz(
@@ -1174,6 +1179,7 @@ fn solve_on<C: Collective>(
                 history.push(0.0);
                 continue;
             }
+            let t0 = dft_numerics::stage_clock::start();
             selected.clear();
             selected.extend(
                 (0..bands)
@@ -1188,6 +1194,7 @@ fn solve_on<C: Collective>(
                     .copy_from_slice(&coefficients.as_slice()[j * m..(j + 1) * m]);
                 sel_values.push(values[j]);
             }
+            stage_add(STAGE_PRECONDITION, t0);
             // A restart follows in this iteration: rotate all bands once (the
             // contraction basis) and take the selected residuals from it.
             full_rotated = basis.cols() + k > capacity;
@@ -1232,6 +1239,7 @@ fn solve_on<C: Collective>(
             for (slot, &j) in selected.iter().enumerate() {
                 band_residuals[j] = sel_norms[slot];
             }
+            let t0 = dft_numerics::stage_clock::start();
             maximum = sel_norms.iter().copied().fold(0.0, f64::max);
             history.push(maximum);
             // Corrections: residual column `slot` belongs to root selected[slot].
@@ -1246,6 +1254,7 @@ fn solve_on<C: Collective>(
                     *c = precondition(d, values[j], r);
                 }
             }
+            stage_add(STAGE_PRECONDITION, t0);
         } else {
             let t0 = dft_numerics::stage_clock::start();
             rotate_ritz(
@@ -1294,6 +1303,7 @@ fn solve_on<C: Collective>(
                 certified = true;
                 trusted = meets_policy(norms);
             }
+            let t0 = dft_numerics::stage_clock::start();
             maximum = norms.iter().copied().fold(0.0, f64::max);
             history.push(maximum);
             converged.clear();
@@ -1308,6 +1318,7 @@ fn solve_on<C: Collective>(
             let finished = converged.iter().all(|&b| b)
                 || (iteration == solver.max_iterations
                     && converged[..policy.strict_bands].iter().all(|&b| b));
+            stage_add(STAGE_PRECONDITION, t0);
             if finished {
                 let t0 = dft_numerics::stage_clock::start();
                 keep_return(
@@ -1353,6 +1364,7 @@ fn solve_on<C: Collective>(
                 continue;
             }
             // Corrections for the unconverged roots (row-local preconditioning).
+            let t0 = dft_numerics::stage_clock::start();
             selected.clear();
             selected.extend(
                 (0..bands)
@@ -1377,6 +1389,7 @@ fn solve_on<C: Collective>(
                     }
                 }
             }
+            stage_add(STAGE_PRECONDITION, t0);
         }
         if !trusted || basis.cols() + corrections.cols() > capacity {
             restarts += 1;
@@ -1477,8 +1490,10 @@ fn solve_on<C: Collective>(
         fit(extra_products, nl, extra.cols())?;
         apply(extra, extra_products)?;
         applications += extra.cols();
+        let t0 = dft_numerics::stage_clock::start();
         append_in_place(products, extra_products)?;
         append_in_place(basis, extra)?;
+        stage_add(STAGE_APPEND, t0);
     }
     unreachable!("validated positive iteration limit")
 }

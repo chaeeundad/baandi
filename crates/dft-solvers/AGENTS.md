@@ -304,3 +304,16 @@ return. `Converge` is the ordinary `solve`, bit for bit (the budget check never
 fires). Classic Davidson or the second-vector experiment decline with
 `InvalidParameter`. Test `tests/lean_davidson.rs::advance_respects_its_block_budget_and_converges_when_allowed`.
 Engine use and the negative stage-1 result: docs/design/bounded-subspace-scf.md.
+
+## Other labels and the layout cache (BREAKTHROUGH-4-OTHER-AND-INIT, 2026-11-17)
+
+`distributed_davidson::STAGES` has 16 entries: `setup` (row-index exchange and
+workspace preparation), `precondition`, `append` (exclusive), `wait`
+(`BAANDI_PHASE_WAIT=on`: the `Counted` wrapper puts a timed barrier before every
+collective; not exclusive) and `solver_total` (container of the solver call).
+The per-thread mirror has exactly 16 distributed-stage slots
+(`stage_clock::local::DIST_STAGE..M2_STAGE`): a further stage needs a new slot
+range. `BAANDI_M2_LAYOUT_CACHE=on|off` (default off; per-thread override
+`set_layout_cache_override`, counters `layout_cache_stats`): `solve_rows_impl`
+reuses the previous solve's `Layout` (an `Arc`) when every rank's local rows
+are unchanged, decided by one 1-double tree sum (replicated); bit-identical.

@@ -290,6 +290,28 @@ pub fn set_m2_lazy_override(value: Option<bool>) {
     M2_LAZY_OVERRIDE.with(|o| o.set(value));
 }
 
+/// BREAKTHROUGH-4: block capacity of the serial real Hamiltonian on the M2
+/// path with `BAANDI_M2_LIGHT_STATE=on` (one pair plan; it is never applied).
+const LIGHT_CAPACITY: usize = 2;
+/// `BAANDI_M2_LIGHT_STATE=on|off` (default off; per-thread override
+/// `set_m2_light_state_override`): build the replicated serial real
+/// Hamiltonian of an M2 solve state with the minimal block capacity.
+/// Bit-identical (that operator only supplies the ORC half sphere there).
+pub(crate) fn m2_light_state() -> bool {
+    M2_LIGHT_OVERRIDE.with(|o| o.get()).unwrap_or_else(|| {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::M2_LIGHT_STATE))
+    })
+}
+thread_local! {
+    static M2_LIGHT_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+/// Override `BAANDI_M2_LIGHT_STATE` for the calling thread (simulated ranks
+/// in tests); `None` restores the environment.
+pub fn set_m2_light_state_override(value: Option<bool>) {
+    M2_LIGHT_OVERRIDE.with(|o| o.set(value));
+}
+
 /// MPI-LAZY-ORBITALS: the eigenvectors of one standard M2 solve held as this
 /// rank's stick rows (ORC real coordinates, the operator's `local_rows` order),
 /// the authoritative SCF state of the M2 path. The complex N x B block is
@@ -800,12 +822,46 @@ pub(crate) fn solve_real_gamma(
         return Ok(None);
     }
     let capacity = real_capacity(options, bands, kinetic.len());
-    if let Err(e) = ensure_state(hamiltonian, basis, bands, capacity, options, &pool, state) {
+    let t_state = dft_numerics::stage_clock::start();
+    // BREAKTHROUGH-4 (`BAANDI_M2_LIGHT_STATE=on`): on the M2 path the serial
+    // real Hamiltonian only supplies its half sphere (ORC packing) and is
+    // never applied, so it is built with the minimal block capacity (one pair
+    // plan instead of capacity / 2 full-grid pair plans and scratch per rank).
+    // Replicated condition; the full operator is rebuilt below if the
+    // distributed operator cannot be built (the M1 fallback applies it).
+    let light = comm.is_some() && crate::parallel::m2_enabled() && m2_light_state();
+    let state_capacity = if light {
+        LIGHT_CAPACITY.min(capacity)
+    } else {
+        capacity
+    };
+    let ensured = ensure_state(
+        hamiltonian,
+        basis,
+        bands,
+        state_capacity,
+        options,
+        &pool,
+        state,
+    );
+    crate::m2::add(crate::m2::Stage::RealState, t_state);
+    if let Err(e) = ensured {
         *state = None;
         diagnostics.fallback(option, format!("real Hamiltonian construction: {e}"))?;
         return Ok(None);
     }
     let state = state.as_mut().unwrap();
+    // BREAKTHROUGH-4 (`BAANDI_PHASE_WAIT=on`, diagnostic): the arrival skew of
+    // the ranks at the solve entry, apart from the solve's own work. The
+    // condition is replicated (every rank reaches this point for this map).
+    if let Some(c) = comm.as_ref().filter(|_| {
+        crate::parallel::m2_enabled() && dft_solvers::distributed_davidson::wait_probe()
+    }) {
+        let t = dft_numerics::stage_clock::start();
+        c.barrier()
+            .map_err(|e| ScfError::Numerical(format!("entry wait: {e}")))?;
+        crate::m2::add(crate::m2::Stage::EntryWait, t);
+    }
     state.nl_valid = false;
     state.lazy_latest = None;
     // MPI-KEPT-START: the previous solve's local rows are the kept X (and the
@@ -842,6 +898,25 @@ pub(crate) fn solve_real_gamma(
             state.m2_density = None;
             state.m2_reuse = None;
         }
+    }
+    if light && state.dist.is_none() {
+        // The M1 fallback applies the serial operator: build it in full.
+        let mut full = None;
+        if let Err(e) = ensure_state(
+            hamiltonian,
+            basis,
+            bands,
+            capacity,
+            options,
+            &pool,
+            &mut full,
+        ) {
+            diagnostics.fallback(option, format!("real Hamiltonian construction: {e}"))?;
+            return Ok(None);
+        }
+        let full = full.expect("built above");
+        state.op = full.op;
+        state.key = full.key;
     }
     let real = state.op.h.borrow();
     let half = real.half_sphere();
@@ -1054,6 +1129,7 @@ pub(crate) fn solve_real_gamma(
         slot.declined = Some("distributed solver");
     }
     let result = if let (Some(comm), Some(dist)) = (&comm, dist) {
+        let t_entry = dft_numerics::stage_clock::start();
         crate::parallel::count_distributed_solve();
         crate::parallel::count_distributed_rows_solve();
         let local_diagonal: Vec<f64> = dist.local_rows().iter().map(|&r| diagonal[r]).collect();
@@ -1093,6 +1169,8 @@ pub(crate) fn solve_real_gamma(
                 (None, None) => None,
             };
             let x_rows: Option<&RealMatrix> = lazy_start.as_ref().or(start_rows.as_ref());
+            // BREAKTHROUGH-4: clock of the interface after the solver call.
+            let t_finish;
             let result = if m2_kept {
                 let r = state.m2_reuse.get_or_insert_with(|| M2Reuse {
                     kept: DistributedKeptStart::new(),
@@ -1104,7 +1182,10 @@ pub(crate) fn solve_real_gamma(
                     collect: false,
                     gated: false,
                 });
+                crate::m2::add(crate::m2::Stage::SolveEntry, t_entry);
+                let t_kept = dft_numerics::stage_clock::start();
                 prepare_m2_kept_start(comm, dist, r, &x_local, start.is_some(), bands)?;
+                crate::m2::add(crate::m2::Stage::KeptUpdate, t_kept);
                 let armed = r.kept.armed();
                 let hx = r.kept.stored().filter(|_| armed);
                 // The solver's basis of a taken kept start is the kept X
@@ -1169,6 +1250,7 @@ pub(crate) fn solve_real_gamma(
                     &mut r.kept,
                     gather,
                 );
+                t_finish = dft_numerics::stage_clock::start();
                 if r.kept.taken() {
                     crate::m2::count(crate::m2::Count::ReuseTaken);
                     crate::m2::count_n(crate::m2::Count::ReuseColumnsSaved, bands);
@@ -1238,6 +1320,7 @@ pub(crate) fn solve_real_gamma(
                     electrons: 2.0 * policy_occupied as f64,
                     capacity_per_band,
                 });
+                crate::m2::add(crate::m2::Stage::SolveEntry, t_entry);
                 let result = solver.solve_distributed_rows_local(
                     comm,
                     dist,
@@ -1252,6 +1335,7 @@ pub(crate) fn solve_real_gamma(
                     &mut plain,
                     gather,
                 )?;
+                t_finish = dft_numerics::stage_clock::start();
                 if let Some(c) = capture {
                     crate::snapshot::capture_exit(c, &result, false);
                 }
@@ -1280,6 +1364,7 @@ pub(crate) fn solve_real_gamma(
             // M2d: this rank's rows for the distributed density and energy,
             // straight from the solver (F07: no extraction from the gathered block).
             state.m2_local = Some(x_local);
+            crate::m2::add(crate::m2::Stage::SolveFinish, t_finish);
             result
         } else {
             // Strict (residual) solves and the allocating path: capture only

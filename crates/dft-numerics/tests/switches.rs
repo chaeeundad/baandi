@@ -239,5 +239,11 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::PHASE_PROFILE), Value::Choice("off"));
     assert_eq!(value(Id::FIRST_BLOCK), Value::Choice("off"));
     assert_eq!(value(Id::SNAPSHOT_DIR), Value::Raw(None));
-    assert_eq!(TABLE.len(), 92);
+    // BREAKTHROUGH-4-OTHER-AND-INIT: wait probe and the three removal switches
+    // stay off until dev08 (all bit-identical; the probe changes timing only).
+    assert_eq!(value(Id::PHASE_WAIT), Value::Choice("off"));
+    assert_eq!(value(Id::EWALD_CACHE), Value::Choice("off"));
+    assert_eq!(value(Id::M2_LIGHT_STATE), Value::Choice("off"));
+    assert_eq!(value(Id::M2_LAYOUT_CACHE), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 96);
 }

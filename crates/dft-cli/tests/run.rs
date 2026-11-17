@@ -686,7 +686,8 @@ fn expressions_preserve_energy_and_record_resolutions() {
     // Switch manifest (work order A1): the whole table, effective value and source.
     let switches = plain["scf"]["switches"].as_object().unwrap();
     // 89 = 83 + RESTART_KEEP (BREAKTHROUGH-1) + the five BREAKTHROUGH-3 switches (SCF_ADVANCE, _BLOCKS, _GROWTH, _ADAPT, _SCOPE).
-    assert_eq!(switches.len(), 92);
+    // 96 = 92 + the four BREAKTHROUGH-4 switches (PHASE_WAIT, EWALD_CACHE, M2_LIGHT_STATE, M2_LAYOUT_CACHE).
+    assert_eq!(switches.len(), 96);
     let ladder = &switches["BAANDI_CUTOFF_LADDER"];
     assert_eq!(
         (&ladder["value"], &ladder["source"]),

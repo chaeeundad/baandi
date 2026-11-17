@@ -97,6 +97,8 @@ pub(super) fn span(
     };
     // Radial transforms per orbital (cached by |G|^2), then one descriptor per
     // column in the established column order: species, orbital, position, m.
+    use crate::profile::{AtomicPart, atomic_part, clock};
+    let part = clock();
     let mut radials = Vec::new();
     let mut columns = Vec::with_capacity(count);
     for sp in species {
@@ -132,6 +134,7 @@ pub(super) fn span(
             radials.push(radial);
         }
     }
+    atomic_part(AtomicPart::Radial, part);
     let fill = |j: usize, column: &mut [Complex64]| -> Result<(), ScfError> {
         let (r, l, m, pos, il) = columns[j];
         let radial = &radials[r];
@@ -150,6 +153,7 @@ pub(super) fn span(
         }
         Ok(())
     };
+    let part = clock();
     if let Some(comm) = split.filter(|_| npw > 0) {
         let (rank, ranks) = (comm.rank(), comm.size());
         let mine: Vec<usize> = (rank..count).step_by(ranks).collect();
@@ -161,8 +165,14 @@ pub(super) fn span(
                 c[0] = Complex64::new(f64::NAN, 0.0);
             }
         }
+        atomic_part(AtomicPart::Fill, part);
+        let part = clock();
         let ortho = orthonormalize_split(comm, own, &mine, npw, count)?;
-        return finish_span(basis, grid, bands, ortho, npw, report);
+        atomic_part(AtomicPart::Orthonormalize, part);
+        let part = clock();
+        let span = finish_span(basis, grid, bands, ortho, npw, report);
+        atomic_part(AtomicPart::Finish, part);
+        return span;
     }
     let mut raw = ComplexMatrix::zeros(npw, count).map_err(numerical)?;
     let ortho = match pool {
@@ -172,16 +182,28 @@ pub(super) fn span(
                     fill(first / npw, column)
                 })
             })?;
-            dft_numerics::linalg::orthonormalize_pooled(&raw, None, pool).map_err(numerical)?
+            atomic_part(AtomicPart::Fill, part);
+            let part = clock();
+            let ortho =
+                dft_numerics::linalg::orthonormalize_pooled(&raw, None, pool).map_err(numerical)?;
+            atomic_part(AtomicPart::Orthonormalize, part);
+            ortho
         }
         _ => {
             for j in 0..count {
                 fill(j, raw.column_mut(j))?;
             }
-            orthonormalize(&raw, None).map_err(numerical)?
+            atomic_part(AtomicPart::Fill, part);
+            let part = clock();
+            let ortho = orthonormalize(&raw, None).map_err(numerical)?;
+            atomic_part(AtomicPart::Orthonormalize, part);
+            ortho
         }
     };
-    finish_span(basis, grid, bands, ortho, npw, report)
+    let part = clock();
+    let span = finish_span(basis, grid, bands, ortho, npw, report);
+    atomic_part(AtomicPart::Finish, part);
+    span
 }
 
 /// Rank check and the plane-wave completion of the span (replicated).
@@ -423,6 +445,8 @@ pub(super) fn ritz(
     hq: Option<ComplexMatrix>,
     split: Option<&crate::parallel::SharedComm>,
 ) -> Result<(ComplexMatrix, AtomicStartReport), ScfError> {
+    use crate::profile::{AtomicPart, atomic_part, clock};
+    let part = clock();
     let q = &span.q;
     let hq = hq.filter(|m| m.rows() == q.rows() && m.cols() == q.cols());
     let mut small = match (hq, split) {
@@ -439,6 +463,8 @@ pub(super) fn ritz(
             gemm(q, MatrixOp::Adjoint, &hq, MatrixOp::Identity).map_err(numerical)?
         }
     };
+    atomic_part(AtomicPart::Gram, part);
+    let part = clock();
     for j in 0..small.cols() {
         for i in 0..=j {
             let v = (small[(i, j)] + small[(j, i)].conj()) * 0.5;
@@ -457,11 +483,14 @@ pub(super) fn ritz(
         }
     }
     let (_, rot) = hermitian_eigh(&small).map_err(numerical)?;
+    atomic_part(AtomicPart::Eigh, part);
+    let part = clock();
     let mut selected = ComplexMatrix::zeros(q.cols(), bands).map_err(numerical)?;
     for j in 0..bands {
         selected.column_mut(j).copy_from_slice(rot.column(j));
     }
     let guess = gemm(q, MatrixOp::Identity, &selected, MatrixOp::Identity).map_err(numerical)?;
+    atomic_part(AtomicPart::Rotate, part);
     let mut report = span.report.clone();
     report.initial_h_applications = q.cols();
     report.gram_rotation_macs = q.rows() * q.cols() * (q.cols() + bands);

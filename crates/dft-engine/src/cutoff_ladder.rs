@@ -454,12 +454,14 @@ fn coarse_stage(
     let basis = coarse.states[0].basis.clone();
     let session_start = Instant::now();
     let clock = crate::phase_clock::snapshot();
+    let setup_clock = crate::profile::clock();
     let mut session = ScfSession::new(
         coarse,
         CompletionMode::RetainLast,
         crate::events::ExecutionConfig::default(),
     )?;
     session.initialize()?;
+    crate::profile::between(crate::profile::BetweenPart::SessionSetup, setup_clock);
     loop {
         let status = session.step()?.status;
         let last = session
@@ -618,9 +620,14 @@ pub fn run_ladder(
     let start = match coarse_problem(&fine, potentials, ladder) {
         Ok(coarse) => {
             report.coarse_setup = setup.elapsed();
+            // BREAKTHROUGH-4: the coarse problem's construction is `init`
+            // work (the phase profile's construction bucket).
+            crate::profile::add_init(report.coarse_setup.as_secs_f64());
+            let handoff_clock = crate::profile::clock();
             report.coarse_grid = coarse.grid.dims();
             report.coarse_plane_waves = coarse.states[0].basis.vectors().len();
             report.atomic_truncation_distance = atomic_truncation_distance(&fine, &coarse);
+            crate::profile::between(crate::profile::BetweenPart::LadderTruncation, handoff_clock);
             if ladder.coarse_rule == CoarseStopRule::Atomic
                 && let Some(d) = report.atomic_truncation_distance
             {
@@ -629,7 +636,9 @@ pub fn run_ladder(
             let stop_level = report.coarse_stop_level;
             coarse_stage(coarse, ladder, stop_level, &mut report).and_then(|c| {
                 let prolong = Instant::now();
+                let handoff_clock = crate::profile::clock();
                 let state = hand_off(&fine, &c.basis, &c.density, &c.orbitals);
+                crate::profile::between(crate::profile::BetweenPart::LadderHandoff, handoff_clock);
                 report.coarse_prolong = prolong.elapsed();
                 state.map(|state| (state, c))
             })
@@ -741,6 +750,7 @@ fn finish_from(
     } else {
         CompletionMode::Strict
     };
+    let setup_clock = crate::profile::clock();
     let mut session = ScfSession::new(fine, completion, crate::events::ExecutionConfig::default())?;
     session.initialize_electronic(start)?;
     if let Some(t) = report.standard_seed_ha {
@@ -755,6 +765,7 @@ fn finish_from(
             Err(e) => report.secant_fallback = Some(e.to_string()),
         }
     }
+    crate::profile::between(crate::profile::BetweenPart::SessionSetup, setup_clock);
     while session.step()?.status == StepStatus::Ready {}
     if !retain_last && session.result().is_none() {
         return Err(ScfError::NotConverged {

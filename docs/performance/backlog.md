@@ -266,3 +266,10 @@ Evidence: on si32 strict (perturbed seed 601) 66.4 percent of Davidson apply cal
 - MPI path: not implemented (declines with `distributed solver`); only worth adding after a serial win.
 - Mixer re-weighting of approximate pairs (design section 6) was not needed: no accepted advanced map showed the mixer learning noise (E tracked the exact path). Keep as a note, not a task.
 - Ladder (review R5): judge the coarse stage by the fine hand-off quality (fine H columns after hand-off), not by coarse cost; BT3-COARSE shows a cheaper coarse stage paying back in the fine stage.
+
+## Other and init follow-ups (2026-11-17, BREAKTHROUGH-4-OTHER-AND-INIT; docs/performance/profile-2026-11-17-other-init.md, ledger BT4-*)
+- dev08 decides the three bit-identical removal switches (`M2_LIGHT_STATE`, `EWALD_CACHE`, `M2_LAYOUT_CACHE`; request breakthrough-other-init.md). If light state wins, the next step is to stop building the serial real Hamiltonian at all on the M2 path (a half-sphere-only state; the light build still converts every projector to real, `real_state` 0.011 s fine O).
+- Keep the slab of the partly occupied pair in the M2 density build so that only the empty pair is transformed both ways at `kept_update` (fine 0.072 s O); the mirror exchange stays while any pair is not kept.
+- Replicated construction work per rank (O, two constructions at si32 np=8): `ionic_local` 0.044 s (per-G independent: G-range split plus one allgatherv, bit-identical), the remaining Ewald evaluation (reciprocal G split: rounding class of E only, density untouched), `DistributedRealHamiltonian::new` packing every projector over all N before keeping the local rows.
+- Atomic start at np=8: block orthonormalization of the 128 span columns (Gram + Cholesky with the dependence rule) instead of the 128-broadcast chain (rounding class of the trajectory: stage 1 to convergence); split the Ritz rotation Q C by band columns (one allgatherv).
+- `between` (O, si32 np=8): session set-up 0.036 s, stop rule 0.019 s, ladder hand-off 0.028 s: replicated full-grid passes; distribute only if dev08 shows them above 1 %.

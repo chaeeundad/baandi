@@ -577,6 +577,7 @@ pub(super) fn run<C: Collective>(
             )?;
         }
         stage_add(1, t0);
+        let t0 = dft_numerics::stage_clock::start();
         converged.clear();
         converged.extend(
             (0..bands).map(|j| iteration > 1 && (values[j] - previous[j]).abs() < threshold(j)),
@@ -585,6 +586,7 @@ pub(super) fn run<C: Collective>(
         let finished = converged.iter().all(|&b| b)
             || (iteration == solver.max_iterations
                 && converged[..policy.strict_bands].iter().all(|&b| b));
+        stage_add(STAGE_PRECONDITION, t0);
         if finished || iteration == solver.max_iterations {
             // Ritz vectors, H images and residual norms of all bands, once.
             let t0 = dft_numerics::stage_clock::start();
@@ -651,6 +653,7 @@ pub(super) fn run<C: Collective>(
             continue;
         }
         // 3. Residuals of the unconverged roots only (norms reduced below).
+        let t0 = dft_numerics::stage_clock::start();
         selected.clear();
         selected.extend(
             (0..bands)
@@ -666,6 +669,7 @@ pub(super) fn run<C: Collective>(
         sel_values.clear();
         sel_values.extend(selected.iter().map(|&j| values[j]));
         let contracted = m + k > capacity;
+        stage_add(STAGE_PRECONDITION, t0);
         let t0 = dft_numerics::stage_clock::start();
         if contracted {
             ritz_coefficients(small, ls, coefficients, m, bands, None)?;
@@ -754,7 +758,9 @@ pub(super) fn run<C: Collective>(
         // the selected residual norms; normalization, pivot test and the
         // fallbacks run before H is applied to the accepted block.
         let mut append_base = basis.cols();
+        let t0 = dft_numerics::stage_clock::start();
         append_in_place(basis, corrections)?;
+        stage_add(STAGE_APPEND, t0);
         count(3, 1);
         let mut stage = 0u8;
         let mut pending = k;
@@ -1044,14 +1050,18 @@ pub(super) fn run<C: Collective>(
             // 5. H on the accepted block only.
             let m = basis.cols();
             let kk = m - append_base;
+            let t0 = dft_numerics::stage_clock::start();
             fit(extra, nl, kk)?;
             extra
                 .as_mut_slice()
                 .copy_from_slice(&basis.as_slice()[append_base * nl..m * nl]);
             fit(extra_products, nl, kk)?;
+            stage_add(STAGE_APPEND, t0);
             apply(extra, extra_products)?;
             applications += kk;
+            let t0 = dft_numerics::stage_clock::start();
             append_in_place(products, extra_products)?;
+            stage_add(STAGE_APPEND, t0);
             count(4, kk);
         }
     }

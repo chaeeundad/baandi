@@ -743,6 +743,68 @@ fn stop_metric_kept() -> bool {
 fn unclamped(n: &Array3<f64>) -> bool {
     n.iter().all(|v| v.to_bits() == v.max(0.0).to_bits())
 }
+
+// BREAKTHROUGH-4 (`BAANDI_EWALD_CACHE=on`, default off): constructions on the
+// same thread with bit-equal lattice, charges and fractional positions reuse
+// the Ewald energy (the cutoff-ladder coarse problem after the full-cutoff
+// one). The energy is a pure function of exactly these inputs and the default
+// options, so a hit is bit-identical to recomputing it.
+static EWALD_CACHE_COUNTS: [std::sync::atomic::AtomicU64; 2] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 2];
+thread_local! {
+    static EWALD_CACHE_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    static EWALD_LAST: std::cell::RefCell<Option<(Vec<u64>, ewald::EwaldEnergy)>> =
+        const { std::cell::RefCell::new(None) };
+}
+/// (hits, computed) Ewald energies of problem constructions since process
+/// start (hits only with `BAANDI_EWALD_CACHE=on`).
+pub fn ewald_cache_counters() -> [u64; 2] {
+    use std::sync::atomic::Ordering::Relaxed;
+    [
+        EWALD_CACHE_COUNTS[0].load(Relaxed),
+        EWALD_CACHE_COUNTS[1].load(Relaxed),
+    ]
+}
+/// Override `BAANDI_EWALD_CACHE` for constructions on the calling thread
+/// (tests); `None` restores the environment.
+pub fn set_ewald_cache_override(on: Option<bool>) {
+    EWALD_CACHE_OVERRIDE.with(|o| o.set(on));
+}
+fn ewald_energy(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfError> {
+    use std::sync::atomic::Ordering::Relaxed;
+    let on = EWALD_CACHE_OVERRIDE
+        .with(|o| o.get())
+        .unwrap_or_else(|| dft_numerics::switches::on(dft_numerics::switches::Id::EWALD_CACHE));
+    if !on {
+        EWALD_CACHE_COUNTS[1].fetch_add(1, Relaxed);
+        return Ok(ewald::energy(cell, ions, EwaldOptions::default())?);
+    }
+    let mut key = Vec::with_capacity(9 + 4 * ions.len());
+    key.extend(
+        cell.lattice_columns_bohr()
+            .iter()
+            .flatten()
+            .map(|v| v.to_bits()),
+    );
+    for ion in ions {
+        key.push(ion.charge.to_bits());
+        key.extend(ion.fractional_position.iter().map(|v| v.to_bits()));
+    }
+    let hit = EWALD_LAST.with(|l| {
+        l.borrow()
+            .as_ref()
+            .filter(|(k, _)| *k == key)
+            .map(|(_, e)| e.clone())
+    });
+    if let Some(e) = hit {
+        EWALD_CACHE_COUNTS[0].fetch_add(1, Relaxed);
+        return Ok(e);
+    }
+    EWALD_CACHE_COUNTS[1].fetch_add(1, Relaxed);
+    let e = ewald::energy(cell, ions, EwaldOptions::default())?;
+    EWALD_LAST.with(|l| *l.borrow_mut() = Some((key, e.clone())));
+    Ok(e)
+}
 fn same_bits(kept: &[f64], n: &Array3<f64>) -> bool {
     kept.len() == n.len()
         && kept
@@ -1016,6 +1078,9 @@ impl ScfProblem {
         {
             return Err(ScfError::InvalidInput("locking requires strict Davidson"));
         }
+        // BREAKTHROUGH-4: construction parts for the phase profile (no clock is
+        // read when the profile is off).
+        let part = crate::profile::clock();
         kpoints::validate(points)
             .map_err(|_| ScfError::InvalidInput("invalid k-point quadrature"))?;
         let start = Instant::now();
@@ -1128,10 +1193,14 @@ impl ScfProblem {
                 "strain reference requires a frozen FFT grid",
             ));
         }
+        crate::profile::init_part(crate::profile::InitPart::Rest, part);
+        let part = crate::profile::clock();
         let gamma = options.basis(cell, [0.; 3], 1.0)?;
         let density_basis = options.basis(cell, [0.; 3], 4.0)?;
         let grid = FftGridSpec::new(&gamma, &density_basis, options.grid_override)?;
         let dg = FftGridSpec::new(&density_basis, &density_basis, Some(grid.dims()))?;
+        crate::profile::init_part(crate::profile::InitPart::Basis, part);
+        let part = crate::profile::clock();
         let species: Vec<_> = potentials
             .iter()
             .zip(&positions)
@@ -1147,6 +1216,8 @@ impl ScfProblem {
             options.local_mesh,
             options.radial_even_rule,
         )?)?;
+        crate::profile::init_part(crate::profile::InitPart::IonicLocal, part);
+        let part = crate::profile::clock();
         let mut fft = FftPlan3d::new(grid.dims())?;
         let core_density = dft_physics::data::core_density_with_rule(
             &density_basis,
@@ -1182,6 +1253,8 @@ impl ScfProblem {
             return Err(ScfError::Numerical("ionic imaginary potential".into()));
         }
         let ionic_real = ionic.mapv(|z| z.re);
+        crate::profile::init_part(crate::profile::InitPart::Densities, part);
+        let part = crate::profile::clock();
         let pool =
             WorkerPool::new(options.threads).map_err(|e| ScfError::Numerical(e.to_string()))?;
         // Every k solve shares the persistent pool. A full-pool budget lets
@@ -1236,6 +1309,8 @@ impl ScfProblem {
                 })
             },
         )?;
+        crate::profile::init_part(crate::profile::InitPart::States, part);
+        let part = crate::profile::clock();
         let mut atomic_start = AtomicStartReport::default();
         let atomic_species = if options.start_wavefunctions == StartWavefunctions::Atomic {
             // ONEPATH-3B: spin channels (collinear fixed sector) prepare the
@@ -1267,10 +1342,16 @@ impl ScfProblem {
         } else {
             None
         };
+        crate::profile::init_part(crate::profile::InitPart::AtomicPrepare, part);
+        let part = crate::profile::clock();
         let worker_ffts = (0..options.threads.max(1).min(states.len()))
             .map(|_| FftPlan3d::new(grid.dims()))
             .collect::<Result<Vec<_>, _>>()?;
-        let ewald = ewald::energy(cell, &ions, EwaldOptions::default())?;
+        crate::profile::init_part(crate::profile::InitPart::Rest, part);
+        let part = crate::profile::clock();
+        let ewald = ewald_energy(cell, &ions)?;
+        crate::profile::init_part(crate::profile::InitPart::Ewald, part);
+        let part = crate::profile::clock();
         let occupations = (0..bands)
             .map(|b| {
                 if b < occupied {
@@ -1292,6 +1373,7 @@ impl ScfProblem {
             grid.dims(),
             states.iter().map(|s| s.point).collect(),
         );
+        crate::profile::init_part(crate::profile::InitPart::Rest, part);
         Ok(Self {
             #[cfg(test)]
             force_real_rebuild: false,
@@ -2010,6 +2092,7 @@ impl ScfProblem {
         let split = crate::m2::active().filter(|_| crate::m2::tuning().atomic_split);
         let mut guesses = Vec::with_capacity(self.states.len());
         for state in &mut self.states {
+            let part = crate::profile::clock();
             let span = atomic_start::span(
                 &self.cell,
                 &state.basis,
@@ -2021,6 +2104,8 @@ impl ScfProblem {
                     .then_some(&*self.pool),
                 split.as_ref(),
             )?;
+            crate::profile::atomic_part(crate::profile::AtomicPart::Span, part);
+            let part = crate::profile::clock();
             // ATOMIC-REAL: H Q on the real Gamma path when eligible.
             let hq = if crate::gamma_real::atomic_real() {
                 crate::gamma_real::atomic_apply_real(
@@ -2036,6 +2121,8 @@ impl ScfProblem {
             } else {
                 None
             };
+            crate::profile::atomic_part(crate::profile::AtomicPart::Hq, part);
+            let part = crate::profile::clock();
             let (guess, report) = atomic_start::ritz(
                 &span,
                 &state.hamiltonian,
@@ -2044,6 +2131,7 @@ impl ScfProblem {
                 hq,
                 split.as_ref(),
             )?;
+            crate::profile::atomic_part(crate::profile::AtomicPart::Ritz, part);
             self.atomic_start.atomic_orbitals += report.atomic_orbitals;
             self.atomic_start.initial_h_applications += report.initial_h_applications;
             self.atomic_start.gram_rotation_macs += report.gram_rotation_macs;

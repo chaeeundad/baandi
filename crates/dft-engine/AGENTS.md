@@ -583,3 +583,30 @@ V1-V6 unchanged. `IterationRecord.advance` (not carried by checkpoint v1) and
 the counters `advance_counters()` -> results.json `convergence.work.scf_advance`
 are the diagnostics. Test `tests/scf_advance.rs`. Every other configuration
 (MPI, complex solver, classic Davidson, strict) declines with a recorded reason.
+
+## Other and init labels, removal switches (BREAKTHROUGH-4-OTHER-AND-INIT, 2026-11-17)
+
+Phase profile (`profile.rs`, still off by default, never touches the arithmetic):
+new seconds slots 32 and above (solver `setup`/`precondition`/`append`/
+`solver_total`, engine m2 stages `kept_update`, `solve_entry`, `solve_finish`,
+`entry_wait`, `real_state`; `solve.other` is derived PER RANK in
+`derive_other` and split into `other_solver` / `other_engine`), init parts
+(`profile::init_part`, `InitPart`; construction in `ScfProblem::construct`, the
+CLI part, the ladder's coarse construction reported through `add_init`),
+atomic-start parts (`atomic_part`, `AtomicPart`, in `atomic_guesses` and
+`atomic_start.rs`) and the `between` bucket (`profile::between`,
+`BetweenPart`: ladder hand-off and truncation, session set-up, stop rule,
+verification glue). `profile::clock()` reads no clock when the profile is off.
+Every new solve-window timer must be subtracted in `derive_other` or it
+reappears as `other`. `BAANDI_PHASE_WAIT=on`: timed barrier at every M2 solve
+entry (replicated condition) and before every collective of the distributed
+solver (diagnostic; timing only).
+Removal switches (default off, bit-identical; test `tests/other_init.rs`):
+`BAANDI_M2_LIGHT_STATE` (`gamma_real::m2_light_state`, per-thread override;
+the serial real Hamiltonian of an M2 solve state is built with
+`LIGHT_CAPACITY` = 2 because on the M2 path it only supplies the ORC half
+sphere; when the distributed operator cannot be built the full operator is
+built before the M1 fallback), `BAANDI_EWALD_CACHE` (`scf::ewald_energy`,
+per-thread last-construction cache keyed by lattice, charges and fractional
+position bits; counters `ewald_cache_counters`). Do not apply the serial
+operator on the M2 path without checking the light state.

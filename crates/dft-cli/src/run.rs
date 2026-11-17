@@ -782,6 +782,11 @@ pub fn execute_mode(
             &bytes, record,
         );
     }
+    // BREAKTHROUGH-4: the CLI's part of `init` (input, preflight, prepared
+    // basis, pseudopotential reading) before the engine constructs the problem.
+    if dft_engine::profile::enabled() {
+        dft_engine::profile::init_part(dft_engine::profile::InitPart::Cli, Some(start));
+    }
     let mut problem = if config.basis.legacy_gamma() {
         ScfProblem::new(&prepared.cell, &atoms, &refs, opts.clone())
     } else {

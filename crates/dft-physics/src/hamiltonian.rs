@@ -84,10 +84,7 @@ pub fn ionic_local_rows(
     rows: std::ops::Range<usize>,
 ) -> Result<Vec<Complex64>, HamiltonianError> {
     volume(volume_bohr3)?;
-    let vectors = density
-        .vectors()
-        .get(rows)
-        .ok_or(HamiltonianError::Shape)?;
+    let vectors = density.vectors().get(rows).ok_or(HamiltonianError::Shape)?;
     let mut result = vec![Complex64::default(); vectors.len()];
     for s in species {
         let local = s.potential.local_transform(volume_bohr3, None)?;
@@ -1538,10 +1535,7 @@ pub fn ionic_local_with_conventions_rows(
     }
 
     volume(volume_bohr3)?;
-    let vectors = density
-        .vectors()
-        .get(rows)
-        .ok_or(HamiltonianError::Shape)?;
+    let vectors = density.vectors().get(rows).ok_or(HamiltonianError::Shape)?;
     let mut result = vec![Complex64::default(); vectors.len()];
     for s in species {
         let local = s

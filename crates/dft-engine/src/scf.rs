@@ -786,13 +786,7 @@ fn ionic_local_coefficients(
 ) -> Result<Vec<Complex64>, ScfError> {
     use dft_mpi::Collective;
     let full = || {
-        hamiltonian::ionic_local_with_conventions(
-            density,
-            volume_bohr3,
-            species,
-            local_mesh,
-            rule,
-        )
+        hamiltonian::ionic_local_with_conventions(density, volume_bohr3, species, local_mesh, rule)
     };
     let Some(comm) = crate::parallel::SharedComm::active() else {
         return Ok(full()?);
@@ -842,6 +836,60 @@ fn ionic_local_coefficients(
     Ok(result)
 }
 
+/// Ewald energy (INIT-SCALE-3, always on). With a registered communicator of
+/// two or more ranks every rank evaluates the terms of its contiguous block of
+/// the real-space and the reciprocal candidates (`ewald::EwaldPlan`, the
+/// expensive erfc and structure-factor work), then the two running sums pass
+/// down the ranks: rank r adds its terms in order to the sums received from
+/// rank r - 1 and broadcasts them (P broadcasts of three values). This is the
+/// serial loop's association exactly, so the result is bit-identical to
+/// `ewald::energy` for any rank count. A failure on any rank (coincident ions)
+/// is carried in the third value and makes every rank repeat the serial call,
+/// which returns the serial error. Collective with a communicator.
+fn ewald_evaluate(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfError> {
+    use dft_mpi::Collective;
+    let serial = || Ok(ewald::energy(cell, ions, EwaldOptions::default())?);
+    let Some(comm) = crate::parallel::SharedComm::active() else {
+        return serial();
+    };
+    // The plan depends only on replicated inputs: every rank succeeds or fails alike.
+    let Ok(plan) = ewald::EwaldPlan::new(cell, ions, EwaldOptions::default()) else {
+        return serial();
+    };
+    let (rank, ranks) = (comm.rank(), comm.size());
+    let block = |n: usize| {
+        let counts = dft_mpi::block_counts(n, ranks);
+        let first: usize = counts[..rank].iter().sum();
+        first..first + counts[rank]
+    };
+    let (mut real, mut reciprocal) = (Vec::new(), Vec::new());
+    let failed = plan
+        .real_terms(block(plan.real_candidates()), &mut real)
+        .is_err();
+    if !failed {
+        plan.reciprocal_terms(block(plan.reciprocal_candidates()), &mut reciprocal);
+    }
+    // [real sum, reciprocal sum, failure flag], passed from rank 0 to P - 1.
+    let mut state = [0.0; 3];
+    for root in 0..ranks {
+        if root == rank {
+            if failed {
+                state[2] = 1.0;
+            } else if state[2] == 0.0 {
+                state[0] = ewald::accumulate(state[0], &real);
+                state[1] = ewald::accumulate(state[1], &reciprocal);
+            }
+        }
+        comm.bcast_f64(&mut state, root)
+            .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    }
+    if state[2] != 0.0 {
+        return serial();
+    }
+    crate::m2::count(crate::m2::Count::EwaldSplits);
+    Ok(plan.finish_sums(state[0], state[1])?)
+}
+
 fn ewald_energy(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfError> {
     use std::sync::atomic::Ordering::Relaxed;
     let on = EWALD_CACHE_OVERRIDE
@@ -849,7 +897,7 @@ fn ewald_energy(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfErro
         .unwrap_or_else(|| dft_numerics::switches::on(dft_numerics::switches::Id::EWALD_CACHE));
     if !on {
         EWALD_CACHE_COUNTS[1].fetch_add(1, Relaxed);
-        return Ok(ewald::energy(cell, ions, EwaldOptions::default())?);
+        return ewald_evaluate(cell, ions);
     }
     let mut key = Vec::with_capacity(9 + 4 * ions.len());
     key.extend(
@@ -873,7 +921,7 @@ fn ewald_energy(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfErro
         return Ok(e);
     }
     EWALD_CACHE_COUNTS[1].fetch_add(1, Relaxed);
-    let e = ewald::energy(cell, ions, EwaldOptions::default())?;
+    let e = ewald_evaluate(cell, ions)?;
     EWALD_LAST.with(|l| *l.borrow_mut() = Some((key, e.clone())));
     Ok(e)
 }
@@ -1598,6 +1646,12 @@ impl ScfProblem {
     #[doc(hidden)]
     pub fn ionic_potential(&self) -> &Array3<f64> {
         &self.ionic_real
+    }
+    /// The Ewald energy terms computed at construction. Read-only; identity
+    /// tests of the distributed construction.
+    #[doc(hidden)]
+    pub fn ewald_terms(&self) -> &ewald::EwaldEnergy {
+        &self.ewald
     }
     /// First SCF input density: the atomic superposition when requested and
     /// available, otherwise the uniform density.

@@ -384,8 +384,11 @@ pub(crate) enum Count {
     /// INIT-SCALE-2: constructions whose ionic local coefficients were split
     /// over the ranks (one allgatherv; bit-identical).
     IonicLocalSplits,
+    /// INIT-SCALE-3: Ewald evaluations split over the ranks (two allgathervs;
+    /// bit-identical).
+    EwaldSplits,
 }
-const COUNT_NAMES: [&str; 23] = [
+const COUNT_NAMES: [&str; 24] = [
     "density_builds",
     "xc_evaluations",
     "nonlocal_energy_audits",
@@ -409,8 +412,9 @@ const COUNT_NAMES: [&str; 23] = [
     "atomic_block_starts",
     "atomic_block_fallbacks",
     "ionic_local_splits",
+    "ewald_splits",
 ];
-static COUNTS: [AtomicUsize; 23] = [const { AtomicUsize::new(0) }; 23];
+static COUNTS: [AtomicUsize; 24] = [const { AtomicUsize::new(0) }; 24];
 pub(crate) fn count_atomic_block_fallback() {
     count(Count::AtomicBlockFallbacks);
 }

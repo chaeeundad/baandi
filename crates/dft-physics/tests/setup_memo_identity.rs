@@ -323,3 +323,97 @@ fn local_mesh_panels_and_empty_projectors() {
         );
     }
 }
+
+/// INIT-SCALE-2: the contiguous row blocks of every partition into 1 to 7 parts
+/// (the engine's `dft_mpi::block_counts` per rank count), concatenated,
+/// reproduce the full ionic local coefficients bit for bit: cubic, skewed,
+/// elongated and slab-like cells, two species, Gamma and general k density
+/// spheres, both local-mesh/even-rule branches. Out-of-range rows reject.
+#[test]
+fn ionic_local_row_blocks_are_bit_identical_for_every_rank_count() {
+    use dft_upf::radial::{LocalMesh, RadialEvenRule};
+    let shapes = [
+        [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],
+        [[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]],
+        [[4., 0., 0.], [0., 5., 0.], [0., 0., 14.]],
+        [[7., 0., 0.], [0., 8., 0.], [0.3, 0., 18.]],
+    ];
+    let p = pseudo(&[0, 1], 81);
+    let q = pseudo(&[0], 66);
+    let conventions = [
+        (LocalMesh::Baandi, RadialEvenRule::Simpson3_8),
+        (LocalMesh::QeLike, RadialEvenRule::SimpsonQuadraticEnd),
+        (LocalMesh::QeLikeG0, RadialEvenRule::Simpson3_8),
+    ];
+    let mut cases = 0;
+    for rows in shapes {
+        let cell = Cell::from_user_rows_bohr(rows).unwrap();
+        let positions: Vec<_> = (0..5)
+            .map(|i| {
+                cell.fractional_to_cartesian_bohr([
+                    ((i * 7 + 1) % 23) as f64 / 23.,
+                    ((i * 11 + 2) % 29) as f64 / 29.,
+                    ((i * 13 + 3) % 31) as f64 / 31.,
+                ])
+            })
+            .collect();
+        let species = [
+            hamiltonian::Species {
+                potential: &p,
+                positions_bohr: &positions[..3],
+            },
+            hamiltonian::Species {
+                potential: &q,
+                positions_bohr: &positions[3..],
+            },
+        ];
+        for k in [[0.; 3], [0.13, -0.21, 0.07]] {
+            let basis = PlaneWaveBasis::at_k(&cell, Hartree(0.6), k).unwrap();
+            let density = basis.density_basis(&cell).unwrap();
+            let n = density.vectors().len();
+            for (mesh, rule) in conventions {
+                let full = hamiltonian::ionic_local_with_conventions(
+                    &density,
+                    cell.volume_bohr3(),
+                    &species,
+                    mesh,
+                    rule,
+                )
+                .unwrap();
+                for parts in 1..=7usize {
+                    let mut joined = Vec::with_capacity(n);
+                    let mut first = 0;
+                    for part in 0..parts {
+                        let count = n / parts + usize::from(part < n % parts);
+                        joined.extend(
+                            hamiltonian::ionic_local_with_conventions_rows(
+                                &density,
+                                cell.volume_bohr3(),
+                                &species,
+                                mesh,
+                                rule,
+                                first..first + count,
+                            )
+                            .unwrap(),
+                        );
+                        first += count;
+                    }
+                    assert_bits(&joined, &full);
+                    cases += 1;
+                }
+                assert!(
+                    hamiltonian::ionic_local_with_conventions_rows(
+                        &density,
+                        cell.volume_bohr3(),
+                        &species,
+                        mesh,
+                        rule,
+                        n - 1..n + 1,
+                    )
+                    .is_err()
+                );
+            }
+        }
+    }
+    println!("{cases} shape/k/convention/partition cases bit-identical");
+}

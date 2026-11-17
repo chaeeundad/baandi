@@ -381,8 +381,11 @@ pub(crate) enum Count {
     /// Block attempts that fell back to the split Gram-Schmidt (a rank could
     /// not fill its rows, a pivot below the dependence guard, nonfinite data).
     AtomicBlockFallbacks,
+    /// INIT-SCALE-2: constructions whose ionic local coefficients were split
+    /// over the ranks (one allgatherv; bit-identical).
+    IonicLocalSplits,
 }
-const COUNT_NAMES: [&str; 22] = [
+const COUNT_NAMES: [&str; 23] = [
     "density_builds",
     "xc_evaluations",
     "nonlocal_energy_audits",
@@ -405,8 +408,9 @@ const COUNT_NAMES: [&str; 22] = [
     "lazy_start_mismatches",
     "atomic_block_starts",
     "atomic_block_fallbacks",
+    "ionic_local_splits",
 ];
-static COUNTS: [AtomicUsize; 22] = [const { AtomicUsize::new(0) }; 22];
+static COUNTS: [AtomicUsize; 23] = [const { AtomicUsize::new(0) }; 23];
 pub(crate) fn count_atomic_block_fallback() {
     count(Count::AtomicBlockFallbacks);
 }

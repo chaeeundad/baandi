@@ -770,6 +770,78 @@ pub fn ewald_cache_counters() -> [u64; 2] {
 pub fn set_ewald_cache_override(on: Option<bool>) {
     EWALD_CACHE_OVERRIDE.with(|o| o.set(on));
 }
+/// Ionic local coefficients over the density sphere (INIT-SCALE-2, always on).
+/// With a registered communicator of two or more ranks every rank evaluates
+/// its contiguous block of G vectors with the per-G arithmetic of the full call
+/// (`ionic_local_with_conventions_rows`) and one allgatherv assembles them:
+/// bit-identical to the replicated evaluation for any rank count. When any
+/// rank failed, every rank repeats the replicated call, which returns the
+/// replicated error. Collective with a communicator.
+fn ionic_local_coefficients(
+    density: &PlaneWaveBasis,
+    volume_bohr3: f64,
+    species: &[Species<'_>],
+    local_mesh: dft_upf::radial::LocalMesh,
+    rule: dft_upf::radial::RadialEvenRule,
+) -> Result<Vec<Complex64>, ScfError> {
+    use dft_mpi::Collective;
+    let full = || {
+        hamiltonian::ionic_local_with_conventions(
+            density,
+            volume_bohr3,
+            species,
+            local_mesh,
+            rule,
+        )
+    };
+    let Some(comm) = crate::parallel::SharedComm::active() else {
+        return Ok(full()?);
+    };
+    let n = density.vectors().len();
+    let counts = dft_mpi::block_counts(n, comm.size());
+    let first: usize = counts[..comm.rank()].iter().sum();
+    let local = hamiltonian::ionic_local_with_conventions_rows(
+        density,
+        volume_bohr3,
+        species,
+        local_mesh,
+        rule,
+        first..first + counts[comm.rank()],
+    );
+    // Per rank: 2 values per coefficient, then a failure flag.
+    let mut send = vec![0.0; 2 * counts[comm.rank()] + 1];
+    match &local {
+        Ok(values) => {
+            for (b, z) in send.as_chunks_mut::<2>().0.iter_mut().zip(values) {
+                b[0] = z.re;
+                b[1] = z.im;
+            }
+        }
+        Err(_) => *send.last_mut().unwrap() = 1.0,
+    }
+    let gathered: Vec<usize> = counts.iter().map(|c| 2 * c + 1).collect();
+    let mut all = vec![0.0; gathered.iter().sum()];
+    comm.allgatherv_f64(&send, &gathered, &mut all)
+        .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    let mut result = Vec::with_capacity(n);
+    let mut at = 0;
+    for &c in &counts {
+        if all[at + 2 * c] != 0.0 {
+            return Ok(full()?);
+        }
+        result.extend(
+            all[at..at + 2 * c]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|b| Complex64::new(b[0], b[1])),
+        );
+        at += 2 * c + 1;
+    }
+    crate::m2::count(crate::m2::Count::IonicLocalSplits);
+    Ok(result)
+}
+
 fn ewald_energy(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfError> {
     use std::sync::atomic::Ordering::Relaxed;
     let on = EWALD_CACHE_OVERRIDE
@@ -1209,7 +1281,7 @@ impl ScfProblem {
                 positions_bohr: r,
             })
             .collect();
-        let ionic_g = dg.scatter(&hamiltonian::ionic_local_with_conventions(
+        let ionic_g = dg.scatter(&ionic_local_coefficients(
             &density_basis,
             cell.volume_bohr3(),
             &species,
@@ -1520,6 +1592,12 @@ impl ScfProblem {
     }
     pub fn uniform_density(&self) -> Array3<f64> {
         Array3::from_elem(self.grid.dims(), self.electrons / self.cell.volume_bohr3())
+    }
+    /// The real-space ionic local potential built at construction (Hartree,
+    /// FFT grid). Read-only; identity tests of the distributed construction.
+    #[doc(hidden)]
+    pub fn ionic_potential(&self) -> &Array3<f64> {
+        &self.ionic_real
     }
     /// First SCF input density: the atomic superposition when requested and
     /// available, otherwise the uniform density.

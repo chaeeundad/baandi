@@ -144,6 +144,8 @@ fn spin_fixed_sector_records_the_atomic_start() {
     assert_eq!(a["requested"], "atomic");
     assert_eq!(a["fallback_reason"], Value::Null);
     assert_eq!(a["atomic_orbitals_used"], 1);
-    assert_eq!(a["evd_orders"].as_array().unwrap().len(), 2);
+    // n_up == n_down: with BAANDI_SPIN_SHARE on (default since 2026-11-17) the two identical
+    // channels share one atomic-start EVD (bit-identical to solving them separately).
+    assert_eq!(a["evd_orders"].as_array().unwrap().len(), 1);
     fs::remove_dir_all(dir).unwrap();
 }

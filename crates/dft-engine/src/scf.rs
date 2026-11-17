@@ -836,6 +836,17 @@ fn ionic_local_coefficients(
     Ok(result)
 }
 
+/// Smallest communicator for which the Ewald sum is split over the ranks
+/// (INIT-EWALD-GATE). dev08 (master e7c94c8, 10-step screens, max over ranks):
+/// at np=2 the split was 83 to 102 % slower than the replicated sum (si32
+/// 0.0595 -> 0.1089 s, si64 0.2451 -> 0.4949 s: per-rank candidate setup plus
+/// the chained broadcasts outweigh halving the terms), at np=8 it was 48 %
+/// faster. The result is bit-identical on both sides of the gate.
+pub const EWALD_SPLIT_MIN_RANKS: usize = 4;
+/// Whether `ewald_evaluate` splits the sum on a communicator of `ranks` ranks.
+pub fn ewald_split_applies(ranks: usize) -> bool {
+    ranks >= EWALD_SPLIT_MIN_RANKS
+}
 /// Ewald energy (INIT-SCALE-3, always on). With a registered communicator of
 /// two or more ranks every rank evaluates the terms of its contiguous block of
 /// the real-space and the reciprocal candidates (`ewald::EwaldPlan`, the
@@ -846,12 +857,19 @@ fn ionic_local_coefficients(
 /// `ewald::energy` for any rank count. A failure on any rank (coincident ions)
 /// is carried in the third value and makes every rank repeat the serial call,
 /// which returns the serial error. Collective with a communicator.
+///
+/// The split runs only for communicators of at least
+/// [`EWALD_SPLIT_MIN_RANKS`] ranks; smaller ones evaluate the serial sum on
+/// every rank (bit-identical either way, no collective).
 fn ewald_evaluate(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfError> {
     use dft_mpi::Collective;
     let serial = || Ok(ewald::energy(cell, ions, EwaldOptions::default())?);
     let Some(comm) = crate::parallel::SharedComm::active() else {
         return serial();
     };
+    if !ewald_split_applies(comm.size()) {
+        return serial();
+    }
     // The plan depends only on replicated inputs: every rank succeeds or fails alike.
     let Ok(plan) = ewald::EwaldPlan::new(cell, ions, EwaldOptions::default()) else {
         return serial();

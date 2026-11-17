@@ -7,7 +7,9 @@
 //! without a communicator bit for bit on every rank, for a cubic one-atom cell
 //! and a skewed two-atom cell, with the default and the QE-like local-mesh
 //! convention (Ewald cache off, so each construction evaluates); both split
-//! paths are actually taken.
+//! paths are actually taken. INIT-EWALD-GATE: the Ewald split runs only from
+//! `EWALD_SPLIT_MIN_RANKS` ranks on; below it every rank evaluates the serial
+//! sum (no split counted), with the same bits on both sides of the gate.
 #[allow(dead_code)]
 #[path = "../../dft-cli/tests/common/mod.rs"]
 mod common;
@@ -91,12 +93,20 @@ fn distributed_construction_is_bit_identical_for_every_rank_count() {
         for mesh in [LocalMesh::Baandi, LocalMesh::QeLike] {
             let serial = construction_bits(kind, mesh);
             for ranks in 2..=7 {
+                let ewald_before_p = count("ewald_splits");
                 let got = simulate(ranks, |comm: &SimRank| {
                     parallel::set_communicator(Some(Arc::new(comm.clone())));
                     let bits = construction_bits(kind, mesh);
                     parallel::set_communicator(None);
                     bits
                 });
+                let split = count("ewald_splits") > ewald_before_p;
+                assert_eq!(
+                    split,
+                    dft_engine::ewald_split_applies(ranks),
+                    "kind {kind} {mesh:?} P={ranks}: Ewald split taken = {split}"
+                );
+                assert_eq!(split, ranks >= dft_engine::EWALD_SPLIT_MIN_RANKS);
                 for (rank, (ionic, ewald)) in got.iter().enumerate() {
                     assert!(
                         *ionic == serial.0,

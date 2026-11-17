@@ -636,7 +636,9 @@ blocks, `ionic_local_with_conventions_rows`, one allgatherv; counter
 
 running sums passed down the ranks by P broadcasts so the serial association is
 
-kept; counter `ewald_splits`). Any failure on a rank makes every rank repeat the
+kept; counter `ewald_splits`; only for communicators of at least
+
+`EWALD_SPLIT_MIN_RANKS` = 4 ranks, INIT-EWALD-GATE). Any failure on a rank makes every rank repeat the
 
 serial call (same error). Do not construct a problem on a subset of the ranks
 

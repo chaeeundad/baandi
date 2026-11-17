@@ -377,6 +377,8 @@ pub(crate) fn capture_entry(e: Entry<'_>) -> Option<Capture> {
             sw_psi = dft_numerics::switches::choice(dft_numerics::switches::Id::REUSE_PSI),
             sw_dav = dft_numerics::switches::choice(dft_numerics::switches::Id::DAVIDSON),
         );
+        // ISSUE-18: the operator fingerprint (separate field, appended).
+        head.push_str(&operator_field());
         manifest = Some(dir.join(format!("{label}.json")));
     }
     with_slot(|s| s.io_seconds += clock.elapsed().as_secs_f64());
@@ -460,4 +462,445 @@ pub(crate) fn take_injection() -> Option<ReplayStart> {
         INJECT_PENDING.store(false, std::sync::atomic::Ordering::Relaxed);
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// ISSUE-18 (ticket ISSUE18-SNAPSHOT-IDENTITY): replay identity. A capture
+// records a versioned operator fingerprint; a checked replay
+// (`ScfProblem::replay_checked`) compares it with the current operator before
+// injecting anything, and the solver entry (`gamma_real.rs`) compares this
+// rank's row mapping, dimensions, potential, stopping profile and kept-product
+// status with the captured ones, agreed over all ranks before any solve.
+// ---------------------------------------------------------------------------
+
+/// Version of the operator fingerprint written into the manifest.
+pub const FINGERPRINT_VERSION: u32 = 1;
+/// Normalization and layout convention of the captured rows.
+pub const CONVENTION: &str =
+    "psi=omega^-1/2*sum_G c(G) exp(iGr);orc-half-sphere-real;column-major;f64-le;hartree-bohr";
+
+/// The physical operator of a map, independent of solver settings: cell and
+/// ordered positions, pseudopotential content as seen by the operator (local
+/// ionic field, core density, nonlocal projectors and couplings), XC, spin and
+/// occupations, cutoff, ordered reciprocal basis, grid, input density and the
+/// layout convention. Entries are ordered (key, value) strings so that a
+/// mismatch names its components.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OperatorFingerprint {
+    pub entries: Vec<(String, String)>,
+}
+impl OperatorFingerprint {
+    pub fn push(&mut self, key: &str, value: impl Into<String>) {
+        self.entries.push((key.to_string(), value.into()));
+    }
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.entries
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    }
+    /// The components that differ, `key: captured -> current`.
+    pub fn differences(&self, current: &Self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (k, v) in &self.entries {
+            match current.get(k) {
+                Some(c) if c == v => {}
+                c => out.push(format!("{k}: {v} -> {}", c.unwrap_or("absent"))),
+            }
+        }
+        for (k, c) in &current.entries {
+            if self.get(k).is_none() {
+                out.push(format!("{k}: absent -> {c}"));
+            }
+        }
+        out
+    }
+    /// One-line JSON object (values contain no quotes, commas or braces).
+    pub fn to_json(&self) -> String {
+        let body: Vec<String> = self
+            .entries
+            .iter()
+            .map(|(k, v)| format!("\"{k}\": \"{v}\""))
+            .collect();
+        format!("{{{}}}", body.join(", "))
+    }
+    /// The `"operator_fingerprint"` object of a manifest, when present.
+    pub fn from_manifest(text: &str) -> Option<Self> {
+        let key = "\"operator_fingerprint\": {";
+        let at = text.find(key)? + key.len();
+        let body = &text[at..at + text[at..].find('}')?];
+        let mut fp = Self::default();
+        for part in body.split(", ").filter(|s| !s.trim().is_empty()) {
+            let (k, v) = part.split_once(": ")?;
+            fp.push(k.trim().trim_matches('"'), v.trim().trim_matches('"'));
+        }
+        Some(fp)
+    }
+}
+
+/// An FNV-1a value in the manifest's hex form.
+pub fn hex(h: u64) -> String {
+    format!("{h:#018x}")
+}
+
+static OPERATOR: Mutex<Vec<Option<String>>> = Mutex::new(Vec::new());
+/// The operator fingerprint of the map about to solve (set only when capturing).
+pub(crate) fn set_operator(fp: &OperatorFingerprint) {
+    put(&OPERATOR, Some(fp.to_json()));
+}
+/// The manifest field of the current operator (empty when none was set).
+fn operator_field() -> String {
+    let r = profile::rank_key();
+    let v = OPERATOR.lock().expect("snapshot operator");
+    match v.get(r).and_then(Option::as_ref) {
+        Some(json) => format!(",\n  \"operator_fingerprint\": {json}"),
+        None => String::new(),
+    }
+}
+
+/// How a replay may differ from the captured solve.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReplayMode {
+    /// Exact replay: the operator, rows, potential bits, stopping profile and
+    /// kept-product status must all equal the captured ones; any mismatch is
+    /// an error before the solver runs.
+    Exact,
+    /// Algorithm A/B on the same physical problem: the operator fingerprint
+    /// and the row mapping must match; solver settings (stopping profile) may
+    /// differ and are reported; a potential whose rounding changed drops the
+    /// stored H X so that the solver recomputes it.
+    AbSamePhysics,
+    /// A manifest without a fingerprint: dimensions are checked only, with a
+    /// printed warning. Never an exact replay.
+    Legacy,
+}
+impl ReplayMode {
+    pub fn name(self) -> &'static str {
+        match self {
+            ReplayMode::Exact => "exact",
+            ReplayMode::AbSamePhysics => "ab-same-physics",
+            ReplayMode::Legacy => "legacy-unchecked",
+        }
+    }
+}
+
+/// The captured contract a replay is checked against (manifest plus this
+/// rank's file header).
+#[derive(Clone, Debug)]
+pub struct ReplayContract {
+    pub mode: ReplayMode,
+    pub label: String,
+    pub operator: Option<OperatorFingerprint>,
+    pub grid: [usize; 3],
+    pub ranks: usize,
+    pub plane_waves: usize,
+    pub bands: usize,
+    /// Manifest layout (`stick_rows` / `orc_full`).
+    pub layout: String,
+    /// This rank's row-list FNV-1a and layout from its rank file.
+    pub rows_fnv: Option<u64>,
+    pub rank_layout: Option<String>,
+    pub potential_fnv: Option<u64>,
+    pub density_fnv: Option<u64>,
+    pub tolerance: f64,
+    pub strict_bands: usize,
+    pub buffer_tolerance: f64,
+    pub ritz: bool,
+    pub kept_armed: bool,
+    pub has_hx: bool,
+}
+
+/// A top-level scalar of a manifest written by `capture_entry`.
+fn manifest_field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    let pat = format!("\n  \"{key}\": ");
+    let at = text.find(&pat)? + pat.len();
+    let rest = &text[at..];
+    let end = rest.find([',', '\n']).unwrap_or(rest.len());
+    Some(rest[..end].trim().trim_matches('"'))
+}
+fn parse_hex(s: &str) -> Option<u64> {
+    u64::from_str_radix(s.trim_start_matches("0x"), 16).ok()
+}
+
+impl ReplayContract {
+    /// Parse the manifest text. Exact and A/B modes need the fingerprint; a
+    /// manifest without one loads only in `Legacy` mode.
+    pub fn from_manifest(text: &str, mode: ReplayMode) -> Result<Self, String> {
+        let need = |k: &str| manifest_field(text, k).ok_or(format!("manifest lacks {k}"));
+        let num = |k: &str| -> Result<f64, String> {
+            need(k)?.parse::<f64>().map_err(|e| format!("{k}: {e}"))
+        };
+        let int = |k: &str| -> Result<usize, String> {
+            need(k)?.parse::<usize>().map_err(|e| format!("{k}: {e}"))
+        };
+        let flag = |k: &str| -> Result<bool, String> { Ok(need(k)? == "true") };
+        if need("schema")? != "baandi-snapshot-1" {
+            return Err("not a baandi-snapshot-1 manifest".into());
+        }
+        let operator = OperatorFingerprint::from_manifest(text);
+        if mode != ReplayMode::Legacy {
+            match &operator {
+                None => {
+                    return Err(format!(
+                        "manifest has no operator fingerprint: {} replay refused (legacy mode only)",
+                        mode.name()
+                    ));
+                }
+                Some(fp) if fp.get("version") != Some(&FINGERPRINT_VERSION.to_string()) => {
+                    return Err(format!(
+                        "operator fingerprint version {:?}, this build reads {FINGERPRINT_VERSION}",
+                        fp.get("version")
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+        let grid = {
+            let pat = "\n  \"grid\": [";
+            let at = text.find(pat).ok_or("manifest lacks grid")? + pat.len();
+            let close = text[at..].find(']').ok_or("bad grid")?;
+            let v: Vec<usize> = text[at..at + close]
+                .split(',')
+                .map(|s| s.trim().parse().map_err(|e| format!("grid: {e}")))
+                .collect::<Result<_, _>>()?;
+            if v.len() != 3 {
+                return Err("grid needs three dimensions".into());
+            }
+            [v[0], v[1], v[2]]
+        };
+        Ok(Self {
+            mode,
+            label: need("label")?.to_string(),
+            operator,
+            grid,
+            ranks: int("ranks")?,
+            plane_waves: int("plane_waves")?,
+            bands: int("bands")?,
+            layout: need("layout")?.to_string(),
+            rows_fnv: None,
+            rank_layout: None,
+            potential_fnv: parse_hex(need("potential_fnv")?),
+            density_fnv: parse_hex(need("density_fnv")?).filter(|&f| f != 0),
+            tolerance: num("tolerance_ha")?,
+            strict_bands: int("strict_bands")?,
+            buffer_tolerance: num("buffer_tolerance_ha")?,
+            ritz: flag("ritz")?,
+            kept_armed: flag("kept_armed")?,
+            has_hx: flag("has_hx")?,
+        })
+    }
+    /// This rank's file header (`read_rank_file`).
+    pub fn with_rank_file(mut self, rows_fnv: u64, layout: &str) -> Self {
+        self.rows_fnv = Some(rows_fnv);
+        self.rank_layout = Some(layout.to_string());
+        self
+    }
+}
+
+/// What a checked replay did (per rank).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReplayReport {
+    pub mode: ReplayMode,
+    /// The captured H X was handed to the solver.
+    pub hx_injected: bool,
+    /// A captured H X was dropped (A/B with a changed potential rounding) and
+    /// the solver applied H to X itself.
+    pub hx_recomputed: bool,
+    /// Accepted differences (A/B: stopping profile, potential rounding;
+    /// legacy: unchecked).
+    pub notes: Vec<String>,
+}
+
+static CONTRACTS: Mutex<Vec<Option<ReplayContract>>> = Mutex::new(Vec::new());
+static REPORTS: Mutex<Vec<Option<ReplayReport>>> = Mutex::new(Vec::new());
+fn put<T>(m: &Mutex<Vec<Option<T>>>, value: Option<T>) {
+    let r = profile::rank_key();
+    let mut v = m.lock().expect("replay slot");
+    if v.len() <= r {
+        v.resize_with(r + 1, || None);
+    }
+    v[r] = value;
+}
+fn take<T>(m: &Mutex<Vec<Option<T>>>) -> Option<T> {
+    let r = profile::rank_key();
+    m.lock()
+        .expect("replay slot")
+        .get_mut(r)
+        .and_then(Option::take)
+}
+/// The contract of the next injected solve on this rank.
+pub(crate) fn set_contract(c: Option<ReplayContract>) {
+    put(&CONTRACTS, c);
+}
+pub(crate) fn take_contract() -> Option<ReplayContract> {
+    take(&CONTRACTS)
+}
+pub(crate) fn set_report(r: Option<ReplayReport>) {
+    put(&REPORTS, r);
+}
+pub(crate) fn take_report() -> Option<ReplayReport> {
+    take(&REPORTS)
+}
+
+/// The solver-entry state an injected start is checked against.
+pub(crate) struct SolveIdentity<'a> {
+    pub layout: Layout,
+    /// This rank's global rows (stick rows), `None` on the threads path.
+    pub rows: Option<&'a [usize]>,
+    pub n_global: usize,
+    pub bands: usize,
+    pub x_rows: usize,
+    pub x_cols: usize,
+    pub has_hx: bool,
+    pub potential: &'a [f64],
+    pub tolerance: f64,
+    pub strict_bands: usize,
+    pub buffer_tolerance: f64,
+    pub ritz: bool,
+}
+
+/// Mismatch classes, agreed over ranks as one flag each.
+pub(crate) const CHECK_CLASSES: [&str; 5] = [
+    "rows/layout",
+    "dimensions",
+    "potential",
+    "stopping profile",
+    "kept-product status",
+];
+
+/// The rank-local verdict: one error flag per `CHECK_CLASSES` entry, the
+/// messages, whether to drop the injected H X, and the accepted notes.
+pub(crate) struct Verdict {
+    pub errors: [bool; 5],
+    pub messages: Vec<String>,
+    pub drop_hx: bool,
+    pub notes: Vec<String>,
+}
+impl Verdict {
+    fn fail(&mut self, class: usize, msg: String) {
+        self.errors[class] = true;
+        self.messages
+            .push(format!("{}: {msg}", CHECK_CLASSES[class]));
+    }
+    /// An error in exact mode, an accepted note otherwise.
+    fn strict_only(&mut self, exact: bool, class: usize, msg: String) {
+        if exact {
+            self.fail(class, msg);
+        } else {
+            self.notes.push(format!("{}: {msg}", CHECK_CLASSES[class]));
+        }
+    }
+}
+pub(crate) fn check_solve(c: &ReplayContract, s: &SolveIdentity<'_>) -> Verdict {
+    let mut v = Verdict {
+        errors: [false; 5],
+        messages: Vec::new(),
+        drop_hx: false,
+        notes: Vec::new(),
+    };
+    // Dimensions (every mode).
+    if s.x_cols != c.bands || s.bands != c.bands {
+        v.fail(
+            1,
+            format!(
+                "bands captured {} start columns {} current {}",
+                c.bands, s.x_cols, s.bands
+            ),
+        );
+    }
+    if s.n_global != c.plane_waves {
+        v.fail(
+            1,
+            format!(
+                "plane waves captured {} current {}",
+                c.plane_waves, s.n_global
+            ),
+        );
+    }
+    let want_rows = s.rows.map_or(s.n_global, <[usize]>::len);
+    if s.x_rows != want_rows {
+        v.fail(
+            1,
+            format!("start rows {} current local rows {want_rows}", s.x_rows),
+        );
+    }
+    if c.mode == ReplayMode::Legacy {
+        v.notes
+            .push("legacy manifest: operator, rows, potential and profile unchecked".into());
+        return v;
+    }
+    let exact = c.mode == ReplayMode::Exact;
+    // Rows and layout (exact and A/B).
+    let layout = s.layout.name();
+    if c.layout != layout || c.rank_layout.as_deref().is_some_and(|l| l != layout) {
+        v.fail(
+            0,
+            format!(
+                "layout captured {} (rank file {:?}) current {layout}",
+                c.layout, c.rank_layout
+            ),
+        );
+    }
+    if let Some(rows) = s.rows {
+        let now = fnv_usize(rows);
+        if c.rows_fnv != Some(now) {
+            v.fail(
+                0,
+                format!(
+                    "local rows fnv captured {} current {}",
+                    c.rows_fnv.map_or("absent".into(), hex),
+                    hex(now)
+                ),
+            );
+        }
+    }
+    // Potential bits: exact replay fails; A/B recomputes H X.
+    let pot = fnv(s.potential);
+    if c.potential_fnv != Some(pot) {
+        let msg = format!(
+            "potential fnv captured {} current {}",
+            c.potential_fnv.map_or("absent".into(), hex),
+            hex(pot)
+        );
+        if exact {
+            v.fail(2, msg);
+        } else {
+            v.drop_hx = s.has_hx;
+            v.notes
+                .push(format!("{msg}: stored H X dropped, H applied to X again"));
+        }
+    }
+    // Stopping profile (criterion, tolerance policy).
+    let mut profile = Vec::new();
+    if c.tolerance.to_bits() != s.tolerance.to_bits() {
+        profile.push(format!("tolerance {:e} -> {:e}", c.tolerance, s.tolerance));
+    }
+    if c.strict_bands != s.strict_bands {
+        profile.push(format!(
+            "strict bands {} -> {}",
+            c.strict_bands, s.strict_bands
+        ));
+    }
+    if c.buffer_tolerance.to_bits() != s.buffer_tolerance.to_bits() {
+        profile.push(format!(
+            "buffer tolerance {:e} -> {:e}",
+            c.buffer_tolerance, s.buffer_tolerance
+        ));
+    }
+    if c.ritz != s.ritz {
+        let name = |r: bool| if r { "standard" } else { "strict" };
+        profile.push(format!("criterion {} -> {}", name(c.ritz), name(s.ritz)));
+    }
+    if !profile.is_empty() {
+        v.strict_only(exact, 3, profile.join(", "));
+    }
+    // Kept-product status.
+    if c.has_hx != s.has_hx {
+        v.strict_only(
+            exact,
+            4,
+            format!("captured H X {} start H X {}", c.has_hx, s.has_hx),
+        );
+    }
+    v
 }

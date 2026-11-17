@@ -947,7 +947,86 @@ pub(crate) fn solve_real_gamma(
     // Snapshot replay (BREAKTHROUGH-0-INSTRUMENT): an injected start (this
     // rank's rows on the M2 path, the ORC block on the threads path) and its
     // kept H X replace the placeholder `initial` of `ScfProblem::replay_solve`.
-    let injected = crate::snapshot::take_injection();
+    let mut injected = crate::snapshot::take_injection();
+    // ISSUE-18: check the injected start against the captured contract
+    // (rows, dimensions, potential, stopping profile, kept-product status)
+    // before the solver sees it; the verdict is agreed over all ranks (one
+    // tree sum of the mismatch classes; every replaying rank reaches this
+    // point) so that no rank enters a divergent solve.
+    if let Some(inj) = injected.as_mut() {
+        let contract = crate::snapshot::take_contract();
+        let mode = contract
+            .as_ref()
+            .map_or(crate::snapshot::ReplayMode::Legacy, |c| c.mode);
+        let stick = comm.is_some() && state.dist.is_some();
+        let (verdict, notes) = match &contract {
+            Some(c) => {
+                let d = state.dist.as_ref().filter(|_| stick);
+                let v = crate::snapshot::check_solve(
+                    c,
+                    &crate::snapshot::SolveIdentity {
+                        layout: if stick {
+                            crate::snapshot::Layout::StickRows
+                        } else {
+                            crate::snapshot::Layout::OrcFull
+                        },
+                        rows: d.map(|d| d.local_rows()),
+                        n_global: n,
+                        bands,
+                        x_rows: inj.x.rows(),
+                        x_cols: inj.x.cols(),
+                        has_hx: inj.hx.is_some(),
+                        potential: d.map_or_else(|| real.potential(), |d| d.potential()),
+                        tolerance,
+                        strict_bands: policy.strict_bands,
+                        buffer_tolerance: policy.buffer_tolerance,
+                        ritz: options.standard.is_some(),
+                    },
+                );
+                let notes = v.notes.clone();
+                (Some(v), notes)
+            }
+            None => (None, vec!["legacy replay_solve: unchecked".to_string()]),
+        };
+        let mut flags: Vec<f64> = verdict.as_ref().map_or(vec![0.0; 5], |v| {
+            v.errors.iter().map(|&e| f64::from(u8::from(e))).collect()
+        });
+        if let Some(c) = comm.as_ref() {
+            let mut out = vec![0.0; flags.len()];
+            c.tree_sum_f64(&flags, &mut out)
+                .map_err(|e| ScfError::Numerical(format!("replay identity agreement: {e}")))?;
+            flags = out;
+        }
+        if flags.iter().any(|&f| f > 0.0) {
+            let classes: Vec<&str> = crate::snapshot::CHECK_CLASSES
+                .iter()
+                .zip(&flags)
+                .filter(|(_, f)| **f > 0.0)
+                .map(|(c, _)| *c)
+                .collect();
+            let local = verdict.map(|v| v.messages).unwrap_or_default();
+            return Err(ScfError::Numerical(format!(
+                "snapshot replay ({}): identity mismatch [{}] (classes agreed over ranks): {}",
+                mode.name(),
+                classes.join(", "),
+                if local.is_empty() {
+                    "on another rank".to_string()
+                } else {
+                    local.join("; ")
+                }
+            )));
+        }
+        let recompute = verdict.as_ref().is_some_and(|v| v.drop_hx);
+        if recompute {
+            inj.hx = None;
+        }
+        crate::snapshot::set_report(Some(crate::snapshot::ReplayReport {
+            mode,
+            hx_injected: inj.hx.is_some(),
+            hx_recomputed: recompute,
+            notes,
+        }));
+    }
     let mut injected_packed: Option<RealMatrix> = None;
     let mut injected_hx: Option<RealMatrix> = None;
     let initial = match (initial, initial_lazy, injected) {
@@ -1043,6 +1122,20 @@ pub(crate) fn solve_real_gamma(
         match state.workspace.as_mut() {
             Some(ws) => ws.load_kept_start(x, &hx)?,
             None => {
+                // ISSUE-18: a checked replay must not silently drop the
+                // captured kept-product status (threads path: no collective).
+                if let Some(r) = crate::snapshot::take_report() {
+                    if r.mode == crate::snapshot::ReplayMode::Exact {
+                        return Err(ScfError::Numerical(
+                            "snapshot replay (exact): kept-product status: no solver workspace (REUSE_PSI off), captured H X cannot be used".into(),
+                        ));
+                    }
+                    let mut r = r;
+                    r.hx_injected = false;
+                    r.hx_recomputed = true;
+                    r.notes.push("no solver workspace: H X recomputed".into());
+                    crate::snapshot::set_report(Some(r));
+                }
                 eprintln!("snapshot replay: no solver workspace (REUSE_PSI off): kept H X not used")
             }
         }

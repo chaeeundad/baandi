@@ -84,6 +84,13 @@ done; done
 ```
 (alternate the arm order per pair as the screen does; three pairs per np). Each process takes seconds (si32) and prints `solve_ms` per repeat, the per-rank counters (`coll.*`, `dist.*`) and the eigenvalue FNV; `BAANDI_MPI_TREE=rd` is read by the binary at MPI start like the CLI. Report: binary sha256, the JSON lines, load before and after.
 
+### Snapshot replay: exact replay vs algorithm A/B (ISSUE-18, 2026-11-17)
+`davidson_bench --snapshot <manifest.json> [--replay-mode exact|ab|legacy]` (`ScfProblem::replay_checked`). The manifest carries a versioned `operator_fingerprint` (cell, ordered positions, pseudopotential content as the operator sees it: local ionic field, core density, projectors and couplings; XC, spin, occupations, cutoff, ordered reciprocal basis, grid, input density, convention); the rank files carry each rank's row-list hash.
+- **exact** (default): before any injection the current fingerprint and density bytes must equal the captured ones; at the solver entry each rank's rows and layout, dimensions, effective-potential bits, stopping profile (tolerance, strict bands, buffer tolerance, criterion) and kept-H X status must match. The verdict is agreed over all ranks (tree sum of the mismatch classes) before any solve, so a rank-local mismatch is one agreed error. Mismatch: exit 3. An exact replay that does not reproduce the captured Davidson iterations, H columns and eigenvalue FNV: exit 4 (after the report).
+- **ab**: algorithm A/B on the same physical problem. Fingerprint, density and rows must still match; a changed stopping profile is reported, and a changed potential rounding (a permitted kernel change) drops the stored H X so the solver applies H to X again (`hx_recomputed` in the JSON). Never reported as an exact replay.
+- **legacy**: manifests written before ISSUE-18 (no fingerprint); dimensions only, printed warning, labeled `legacy-unchecked`. `replay_solve` is this unchecked path.
+Tests: `crates/dft-engine/tests/snapshot_identity.rs`.
+
 ## Stage 1: screen (minutes, one case, one binary)
 - One representative case per parallel model: threads = si32 standard f1e-3 seed 601 T=1 (and T=8 when the idea touches threading); MPI = si32 standard np=4 seed 601; add si64 only for ideas about large-N terms (EVD, memory).
 - Same binary, environment A/B (switch off/on), three alternating pairs, load gate as before. Report the median per-arm wall, the spread and the deterministic counters.

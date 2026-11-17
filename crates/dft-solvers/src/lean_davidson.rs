@@ -796,6 +796,38 @@ pub(super) fn solve(
     preconditioner: crate::DavidsonPreconditioner,
     options: ResearchOptions,
 ) -> Result<RealEigenSolution, SolverError> {
+    solve_with_intent(
+        solver,
+        op,
+        initial,
+        diagonal,
+        policy,
+        capacity,
+        workspace,
+        preconditioner,
+        options,
+        SolveIntent::Converge,
+    )
+    .map(|a| a.solution)
+}
+
+/// The lean loop under an explicit intent (BREAKTHROUGH-3). `Converge` is the
+/// ordinary solve bit for bit; `Advance(budget)` returns after the budget's
+/// correction blocks or operator columns with the all-band Ritz state and its
+/// true Ritz-change flags (the kept start is stored exactly as at a return).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn solve_with_intent(
+    solver: &RealDavidson,
+    op: &dyn RealLinearOperator,
+    initial: Option<&RealMatrix>,
+    diagonal: &[f64],
+    policy: BandTolerances,
+    capacity: usize,
+    workspace: &mut RealDavidsonWorkspace,
+    preconditioner: crate::DavidsonPreconditioner,
+    options: ResearchOptions,
+    intent: SolveIntent,
+) -> Result<AdvancedSubspace, SolverError> {
     let n = op.dimension();
     let bands = solver.bands;
     if workspace
@@ -969,6 +1001,9 @@ pub(super) fn solve(
     // remaining appends take the separate path (bounds the discarded H
     // columns to one block per solve on systems where the test fails often).
     let mut fuse_allowed = options.lean_border_fused && !options.narrow_reduced;
+    // BREAKTHROUGH-3: correction blocks appended in this call (the budget of
+    // an `Advance` intent); `applications` counts its operator columns.
+    let mut blocks_appended = 0usize;
     for iteration in 1..=solver.max_iterations {
         lean_add(LeanCount::Iterations, 1);
         let iteration_clock = timers.start();
@@ -1049,7 +1084,18 @@ pub(super) fn solve(
         let finished = converged.iter().all(|&b| b)
             || (iteration == solver.max_iterations
                 && converged[..policy.strict_bands].iter().all(|&b| b));
-        if finished || iteration == solver.max_iterations {
+        // An `Advance` budget ends the call after its blocks or columns; the
+        // `Converge` intent never sets it (identical control flow).
+        let budget_stop = match intent {
+            SolveIntent::Advance(b) if !finished && blocks_appended >= b.correction_blocks => {
+                Some(BudgetStop::CorrectionBlocks)
+            }
+            SolveIntent::Advance(b) if !finished && applications >= b.h_columns => {
+                Some(BudgetStop::HColumns)
+            }
+            _ => None,
+        };
+        if finished || budget_stop.is_some() || iteration == solver.max_iterations {
             // All-band Ritz vectors, H images and residual norms (the standard
             // stop guard reads them), once.
             let t = timers.start();
@@ -1077,7 +1123,7 @@ pub(super) fn solve(
             history.push(maximum);
             work.residuals(iteration, residuals);
             timers.iteration(iteration_clock, 0);
-            if !finished {
+            if !finished && budget_stop.is_none() {
                 result_residuals.copy_from_slice(residuals);
                 return Err(SolverError::NotConverged {
                     iterations: iteration,
@@ -1126,20 +1172,30 @@ pub(super) fn solve(
                 .copy_from_slice(vectors.as_slice());
             result_residuals.copy_from_slice(residuals);
             result_converged.copy_from_slice(converged);
-            return Ok(RealEigenSolution {
-                eigenvalues: result_values,
-                eigenvectors: result_vectors,
-                residuals: result_residuals,
-                converged: result_converged,
-                buffer,
-                residuals_certified: false,
-                iterations: iteration,
-                history,
-                operator_applications: applications,
-                restarts,
-                contracted_restarts: contractions,
-                certification_attempts: 0,
-                max_basis_dimension,
+            let diagnostics = SubspaceDiagnostics {
+                correction_blocks: blocks_appended,
+                h_columns: applications,
+                stop: budget_stop.unwrap_or(BudgetStop::Converged),
+                kept_start: from_kept,
+                unconverged_roots: converged.iter().filter(|&&c| !c).count(),
+            };
+            return Ok(AdvancedSubspace {
+                solution: RealEigenSolution {
+                    eigenvalues: result_values,
+                    eigenvectors: result_vectors,
+                    residuals: result_residuals,
+                    converged: result_converged,
+                    buffer,
+                    residuals_certified: false,
+                    iterations: iteration,
+                    history,
+                    operator_applications: applications,
+                    restarts,
+                    contracted_restarts: contractions,
+                    certification_attempts: 0,
+                    max_basis_dimension,
+                },
+                diagnostics,
             });
         }
         if iteration == 1 && m == n {
@@ -1316,6 +1372,7 @@ pub(super) fn solve(
                 factored = basis.cols();
                 lean_add(LeanCount::FusedBorders, 1);
                 lean_add(LeanCount::AppendedColumns, k);
+                blocks_appended += 1;
                 timers.iteration(iteration_clock, k);
                 continue;
             }
@@ -1440,6 +1497,7 @@ pub(super) fn solve(
         append_into(products, extra_products)?;
         factored = basis.cols();
         lean_add(LeanCount::AppendedColumns, k);
+        blocks_appended += 1;
         timers.iteration(iteration_clock, k);
     }
     unreachable!("validated positive iteration limit")

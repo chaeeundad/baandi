@@ -116,6 +116,9 @@ fn b1_rows_valid(v: f64) -> bool {
 fn coarse_stop_valid(v: f64) -> bool {
     v.is_finite() && v > 0.0 && v < 1.0
 }
+fn advance_blocks_valid(v: f64) -> bool {
+    v.fract() == 0.0 && (1.0..=8.0).contains(&v)
+}
 fn cutoff_ladder_valid(v: &str) -> bool {
     matches!(v, "off" | "on")
         || v.parse::<f64>()
@@ -196,6 +199,16 @@ table! {
         "P48F: thread the atomic start (span build, two-pass Gram-Schmidt right-looking) on the SCF pool; bit-identical";
     REUSE_PSI: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "C2: a lean real Gamma Davidson solve that starts from the previous solve's orbitals X takes H X from that solve's rotated H images plus (V_new - V_old) X, formed from the psi(r) the density build kept (one forward transform per pair; no inverse transform, nonlocal product or kinetic pass); falls back to the plain apply when X, the operator or the grid changed or the cache exceeds its memory gate; rounding class";
+    SCF_ADVANCE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "BREAKTHROUGH-3 (docs/design/bounded-subspace-scf.md): intermediate standard-path maps of the serial real Gamma lean path run a bounded subspace update (`Advance`: at most SCF_ADVANCE_BLOCKS correction blocks from the kept start) instead of a solve to the ratchet tolerance; the map is completed by the exact solve at the same density when its residual estimate exceeds 0.1 x the Coulomb SCF residual, when the SCF residual is below the threshold (convergence candidate) or grew, or when the occupied/empty Ritz values cross; the stop rule, the verification and the delivered state use exact maps only; trajectory change, standard class unchanged";
+    SCF_ADVANCE_BLOCKS: Kind::Number { default: Some(2.0), valid: advance_blocks_valid }, "2", "integer in [1, 8]",
+        "starting number of correction blocks per advanced map (SCF_ADVANCE=on); the session adapts it by one block from the inner/SCF residual ratio of the previous advanced map";
+    SCF_ADVANCE_GROWTH: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "SCF_ADVANCE research: complete an advanced map whose Coulomb SCF residual grew against the previous map (off: growth is left to the mixer, as on the exact path)";
+    SCF_ADVANCE_ADAPT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
+        "SCF_ADVANCE research: adapt the block budget from the previous advanced map's inner/SCF ratio (off: the budget stays at SCF_ADVANCE_BLOCKS)";
+    SCF_ADVANCE_SCOPE: Kind::Choice { allowed: &["all", "fine"], default: "all" }, "all", "all, fine",
+        "SCF_ADVANCE research: advanced maps in every standard session (all) or only outside the cutoff-ladder coarse stage (fine)";
     VERIFY_REUSE: Kind::Choice { allowed: &["off", "warm", "feed", "feed2", "replace", "half"], default: "half" }, "half", "off, warm, feed, feed2, replace, half",
         "reuse of a failed fixed-point verification solve (F at the delivered density rho_out): warm = the next SCF step starts from its orbitals (so the REUSE_PSI kept start is taken); feed = warm and the pair (rho_out, F(rho_out)) also enters the mixer after the step's own pair, so the next input density is mixed from it (the verification map counts as an SCF map); off = discarded; rounding class (trajectory changes, acceptance still needs a passed verification)";
     // MPI entry cost (docs/performance/mpi-entry-cost-analysis.md). Adopted 2026-11-15 on dev08 A/B: M2_DGEMM, M2_ORTHO=serial and M2_LEAN default on; M2_FFT stays rust (neutral).

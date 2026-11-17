@@ -265,3 +265,16 @@ unchanged. Counters `lean_algebra_stats()`, reduction site `lean_border`. Tests
 `tests/distributed_lean_algebra.rs` (ranks 1 to 4: class against the orthonormal
 path, rank decisions equal to the serial lean solver, fallbacks, bits),
 dft-engine `tests/m2_lean_algebra.rs`. Design docs/design/mpi-overlap-davidson.md.
+
+## Advance intent of the lean solver (BREAKTHROUGH-3, 2026-11-17)
+
+`SolveIntent::{Converge, Advance(SubspaceBudget)}`, `RealDavidson::advance_reusing`
+and `lean_davidson::solve_with_intent`: an `Advance` call runs at most
+`correction_blocks` correction blocks / `h_columns` operator columns of the lean
+Ritz-change loop from the kept start (or `initial`) and returns an
+`AdvancedSubspace` (all-band Ritz vectors, values, residual norms, the true
+Ritz-change flags, `SubspaceDiagnostics`); X and H X are kept as at a lean
+return. `Converge` is the ordinary `solve`, bit for bit (the budget check never
+fires). Classic Davidson or the second-vector experiment decline with
+`InvalidParameter`. Test `tests/lean_davidson.rs::advance_respects_its_block_budget_and_converges_when_allowed`.
+Engine use and the negative stage-1 result: docs/design/bounded-subspace-scf.md.

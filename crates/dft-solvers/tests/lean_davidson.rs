@@ -772,3 +772,164 @@ fn percore_fused_border_thread_independent() {
         assert!(solution_bits(&solve(threads)) == reference, "T={threads}");
     }
 }
+
+/// BREAKTHROUGH-3 (`RealDavidson::advance_reusing`, design
+/// docs/design/bounded-subspace-scf.md): an `Advance` call stops after its
+/// correction blocks (one block: the all-band first correction, so the
+/// operator columns are the initial application plus one block), returns the
+/// all-band Ritz state with true Ritz-change flags (not all converged) and
+/// keeps X and H X for the next start; a column budget below one block stops
+/// on columns; a budget large enough to converge returns `Converged` with the
+/// same eigenvalues (bit for bit), iterations and operator count as the
+/// converging solve; a zero budget is an input error. On a classic-Davidson
+/// process (`BAANDI_DAVIDSON=classic`) the entry declines.
+#[test]
+fn advance_respects_its_block_budget_and_converges_when_allowed() {
+    use dft_solvers::real_davidson::{BudgetStop, SubspaceBudget};
+    let (op, diag) = skew(260, 1);
+    let bands = 10;
+    let s = solver(bands, 1e-9);
+    let policy = BandTolerances {
+        strict_bands: 8,
+        buffer_tolerance: 5e-6,
+    };
+    let start = {
+        let mut ws = None;
+        s.solve_research(
+            &op,
+            None,
+            &diag,
+            policy,
+            true,
+            false,
+            6,
+            &mut ws,
+            DavidsonPreconditioner::Default,
+            options(true),
+        )
+        .unwrap()
+    };
+    // Perturbed solution: corrections are needed again.
+    let mut x0 = start.eigenvectors.clone();
+    for (i, v) in x0.as_mut_slice().iter_mut().enumerate() {
+        *v += 1e-3 * ((i * 13 + 5) as f64).sin();
+    }
+    let lean_env = ResearchOptions::from_env().lean;
+    let mut ws = None;
+    s.prepare_workspace(&op, 6, &mut ws)
+        .unwrap()
+        .keep_returned_products(true)
+        .unwrap();
+    let one = s.advance_reusing(
+        &op,
+        Some(&x0),
+        &diag,
+        policy,
+        SubspaceBudget {
+            correction_blocks: 1,
+            h_columns: 10 * bands,
+        },
+        6,
+        &mut ws,
+        DavidsonPreconditioner::Default,
+    );
+    if !lean_env {
+        assert!(matches!(one, Err(SolverError::InvalidParameter(_))));
+        return;
+    }
+    let one = one.unwrap();
+    assert_eq!(one.diagnostics.correction_blocks, 1);
+    assert_eq!(one.diagnostics.stop, BudgetStop::CorrectionBlocks);
+    assert!(!one.diagnostics.kept_start);
+    assert_eq!(one.diagnostics.h_columns, 2 * bands);
+    assert_eq!(one.solution.operator_applications, 2 * bands);
+    assert!(one.diagnostics.unconverged_roots > 0);
+    assert!(one.solution.converged.iter().any(|c| !c));
+    assert_eq!(one.solution.residuals.len(), bands);
+    assert!(
+        one.solution
+            .residuals
+            .iter()
+            .all(|r| r.is_finite() && *r > 0.)
+    );
+    let (x, _) = ws
+        .as_ref()
+        .unwrap()
+        .kept_start()
+        .expect("kept at the advance return");
+    assert_eq!(x.as_slice(), one.solution.eigenvectors.as_slice());
+    let mut ws2 = None;
+    let cols = s
+        .advance_reusing(
+            &op,
+            Some(&x0),
+            &diag,
+            policy,
+            SubspaceBudget {
+                correction_blocks: 8,
+                h_columns: bands + 1,
+            },
+            6,
+            &mut ws2,
+            DavidsonPreconditioner::Default,
+        )
+        .unwrap();
+    assert_eq!(cols.diagnostics.stop, BudgetStop::HColumns);
+    assert_eq!(cols.diagnostics.correction_blocks, 1);
+    let mut ws3 = None;
+    let full = s
+        .advance_reusing(
+            &op,
+            Some(&x0),
+            &diag,
+            policy,
+            SubspaceBudget {
+                correction_blocks: 400,
+                h_columns: usize::MAX,
+            },
+            6,
+            &mut ws3,
+            DavidsonPreconditioner::Default,
+        )
+        .unwrap();
+    assert_eq!(full.diagnostics.stop, BudgetStop::Converged);
+    assert_eq!(full.diagnostics.unconverged_roots, 0);
+    let mut ws4 = None;
+    let reference = s
+        .solve_research(
+            &op,
+            Some(&x0),
+            &diag,
+            policy,
+            true,
+            false,
+            6,
+            &mut ws4,
+            DavidsonPreconditioner::Default,
+            options(true),
+        )
+        .unwrap();
+    assert_eq!(full.solution.eigenvalues, reference.eigenvalues);
+    assert_eq!(
+        full.solution.operator_applications,
+        reference.operator_applications
+    );
+    assert_eq!(full.solution.iterations, reference.iterations);
+    let mut ws5 = None;
+    assert!(matches!(
+        s.advance_reusing(
+            &op,
+            Some(&x0),
+            &diag,
+            policy,
+            SubspaceBudget {
+                correction_blocks: 0,
+                h_columns: 1
+            },
+            6,
+            &mut ws5,
+            DavidsonPreconditioner::Default,
+        ),
+        Err(SolverError::InvalidParameter(_))
+    ));
+}

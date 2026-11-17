@@ -130,6 +130,8 @@ pub(in crate::distributed_davidson) struct LeanState {
     key: (usize, usize, usize),
     scratch: LeanScratch,
     small: RealGemmWorkspace,
+    /// The rank's executor, for the replicated return Gram screen.
+    pool: Arc<WorkerPool>,
     partial: RealMatrix,
     sum: RealMatrix,
     /// Local squared norms of the pending selected residuals.
@@ -159,6 +161,7 @@ pub(super) fn prepare(
         key,
         scratch: LeanScratch::new(cap, bands)?,
         small: RealGemmWorkspace::with_pool(cap, cap, pool.clone())?,
+        pool: pool.clone(),
         partial,
         sum,
         pending: vec![0.0; bands],
@@ -458,6 +461,7 @@ pub(super) fn run<C: Collective>(
         sum,
         pending: pending_local,
         lens,
+        pool: lean_pool,
         ..
     } = lean;
     let (n, nl, bands) = (layout.n, layout.nl(), solver.bands);
@@ -610,7 +614,7 @@ pub(super) fn run<C: Collective>(
             let t0 = dft_numerics::stage_clock::start();
             // S has been measured for the current basis (including every
             // contraction). C^T S C and the sensitivity decision are replicated.
-            let (mut defect, direct) = return_gram_defect(ls, m, bands)?;
+            let (mut defect, direct) = return_gram_defect(ls, m, bands, lean_pool)?;
             if direct {
                 // Only cancellation-sensitive / near-threshold cases retain
                 // the direct Gram in the existing residual reduction.

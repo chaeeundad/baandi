@@ -888,64 +888,225 @@ pub(crate) fn return_gram_defect(
     lean: &mut LeanScratch,
     m: usize,
     bands: usize,
+    pool: &WorkerPool,
 ) -> Result<(f64, bool), SolverError> {
     lean.p.reshape_within_storage(m, bands)?;
     lean.z.reshape_within_storage(m, bands)?;
+    let cap = lean.cap;
+    let s = lean.s.as_slice();
+    let c = &lean.c.as_slice()[..m * bands];
+    // Growth g_j, in the original order over i.
     let mut growth = 0.0_f64;
     for j in 0..bands {
         let mut g = 0.0;
         for i in 0..m {
-            g += lean.c[(i, j)].abs() * lean.s[(i, i)].sqrt();
-            let mut sc = 0.0;
-            let mut correction = 0.0;
-            let mut absolute = 0.0;
-            // S is stored symmetric. Read its contiguous column rather
-            // than striding through a row; summation order is unchanged.
-            let si = &lean.s.as_slice()[i * lean.cap..i * lean.cap + m];
-            let cj = &lean.c.as_slice()[j * m..(j + 1) * m];
-            for (&s, &c) in si.iter().zip(cj) {
-                let product = s * c;
-                let adjusted = product - correction;
-                let next = sc + adjusted;
-                correction = (next - sc) - adjusted;
-                sc = next;
-                absolute += product.abs();
-            }
-            lean.p[(i, j)] = sc;
-            lean.z[(i, j)] = absolute;
+            g += c[i + j * m].abs() * s[i + i * cap].sqrt();
         }
         if !g.is_finite() {
             return Ok((f64::INFINITY, true));
         }
         growth = growth.max(g);
     }
-    let mut defect = 0.0_f64;
-    let mut amplification = 0.0_f64;
-    for j in 0..bands {
-        for i in 0..=j {
-            let mut gram = 0.0;
-            let mut correction = 0.0;
-            let mut absolute = 0.0;
-            let ci = &lean.c.as_slice()[i * m..(i + 1) * m];
-            let pj = &lean.p.as_slice()[j * m..(j + 1) * m];
-            let zj = &lean.z.as_slice()[j * m..(j + 1) * m];
-            for ((&c, &p), &z) in ci.iter().zip(pj).zip(zj) {
-                let adjusted = c * p - correction;
-                let next = gram + adjusted;
-                correction = (next - gram) - adjusted;
-                gram = next;
-                absolute += c.abs() * z;
-            }
-            amplification = amplification.max(absolute);
-            let error = (gram - if i == j { 1.0 } else { 0.0 }).abs();
-            if !error.is_finite() {
-                return Ok((f64::INFINITY, true));
-            }
-            defect = defect.max(error);
-        }
+    // Every column j below is independent and formed by the same operations
+    // whichever worker runs it; the maxima are order independent, so the
+    // result is identical for every thread count.
+    let p = &mut lean.p.as_mut_slice()[..m * bands];
+    let z = &mut lean.z.as_mut_slice()[..m * bands];
+    pool.install(|| gram_sc_columns(s, cap, c, m, 0, p, z));
+    let p = &lean.p.as_slice()[..m * bands];
+    let z = &lean.z.as_slice()[..m * bands];
+    let (defect, amplification) = pool.install(|| gram_ctp_columns(c, p, z, m, 0, bands));
+    if !defect.is_finite() {
+        return Ok((f64::INFINITY, true));
     }
     let allowance = 4.0 * f64::EPSILON * (amplification + growth * growth);
     Ok((defect, defect + allowance >= 1e-12))
+}
+
+/// Columns `first..` of P = S C and Z = |S| |C| (`p`, `z` hold whole columns
+/// of m rows). Entry (i, j) is the compensated sum over k of S(k, i) C(k, j),
+/// k ascending, exactly as a scalar loop forms it. S is stored bitwise
+/// symmetric (every writer mirrors), so S(k, i) is read as S(i, k) from the
+/// contiguous column k; `GRAM_LANES` rows advance in lockstep, each with its
+/// own unchanged operation sequence (vectorizable, bit-identical).
+fn gram_sc_columns(
+    s: &[f64],
+    cap: usize,
+    c: &[f64],
+    m: usize,
+    first: usize,
+    p: &mut [f64],
+    z: &mut [f64],
+) {
+    let count = p.len() / m.max(1);
+    if count > 2 {
+        let split = count / 2;
+        let (pl, pr) = p.split_at_mut(split * m);
+        let (zl, zr) = z.split_at_mut(split * m);
+        WorkerPool::join(
+            || gram_sc_columns(s, cap, c, m, first, pl, zl),
+            || gram_sc_columns(s, cap, c, m, first + split, pr, zr),
+        );
+        return;
+    }
+    for (jj, (pj, zj)) in p.chunks_exact_mut(m).zip(z.chunks_exact_mut(m)).enumerate() {
+        let j = first + jj;
+        let cj = &c[j * m..(j + 1) * m];
+        let mut i0 = 0;
+        while i0 < m {
+            let w = (m - i0).min(GRAM_LANES);
+            let (pb, zb) = (&mut pj[i0..i0 + w], &mut zj[i0..i0 + w]);
+            if w == GRAM_LANES {
+                gram_lanes_s::<GRAM_LANES>(s, cap, cj, i0, pb, zb);
+            } else {
+                gram_lanes_s_tail(s, cap, cj, i0, pb, zb);
+            }
+            i0 += w;
+        }
+    }
+}
+
+/// Upper triangle (i <= j) of C^T P for the columns `from..to`: the maximum
+/// of |C^T P - I| (infinite on any non-finite entry) and of |C|^T Z. Each
+/// entry is the compensated sum over k, k ascending; eight columns i of C
+/// share one column j of P and Z (independent chains).
+fn gram_ctp_columns(
+    c: &[f64],
+    p: &[f64],
+    z: &[f64],
+    m: usize,
+    from: usize,
+    to: usize,
+) -> (f64, f64) {
+    if to - from > 2 {
+        // Split the triangle into halves of equal work (j + 1 entries per column).
+        let total = (to * (to + 1) - from * (from + 1)) / 2;
+        let mut mid = from + 1;
+        while mid < to - 1 && (mid * (mid + 1) - from * (from + 1)) / 2 < total / 2 {
+            mid += 1;
+        }
+        let (a, b) = WorkerPool::join(
+            || gram_ctp_columns(c, p, z, m, from, mid),
+            || gram_ctp_columns(c, p, z, m, mid, to),
+        );
+        let defect = if a.0.is_finite() && b.0.is_finite() {
+            a.0.max(b.0)
+        } else {
+            f64::INFINITY
+        };
+        return (defect, a.1.max(b.1));
+    }
+    let mut defect = 0.0_f64;
+    let mut amplification = 0.0_f64;
+    for j in from..to {
+        let pj = &p[j * m..(j + 1) * m];
+        let zj = &z[j * m..(j + 1) * m];
+        let mut i0 = 0;
+        while i0 <= j {
+            let w = (j + 1 - i0).min(8);
+            let mut gram = [0.0_f64; 8];
+            let mut correction = [0.0_f64; 8];
+            let mut absolute = [0.0_f64; 8];
+            if w == 8 {
+                let cols: [&[f64]; 8] = std::array::from_fn(|l| &c[(i0 + l) * m..(i0 + l + 1) * m]);
+                for k in 0..m {
+                    let (pk, zk) = (pj[k], zj[k]);
+                    for l in 0..8 {
+                        let ck = cols[l][k];
+                        let adjusted = ck * pk - correction[l];
+                        let next = gram[l] + adjusted;
+                        correction[l] = (next - gram[l]) - adjusted;
+                        gram[l] = next;
+                        absolute[l] += ck.abs() * zk;
+                    }
+                }
+            } else {
+                for l in 0..w {
+                    let ci = &c[(i0 + l) * m..(i0 + l + 1) * m];
+                    for ((&ck, &pk), &zk) in ci.iter().zip(pj).zip(zj) {
+                        let adjusted = ck * pk - correction[l];
+                        let next = gram[l] + adjusted;
+                        correction[l] = (next - gram[l]) - adjusted;
+                        gram[l] = next;
+                        absolute[l] += ck.abs() * zk;
+                    }
+                }
+            }
+            for l in 0..w {
+                let i = i0 + l;
+                amplification = amplification.max(absolute[l]);
+                let error = (gram[l] - if i == j { 1.0 } else { 0.0 }).abs();
+                if !error.is_finite() {
+                    return (f64::INFINITY, amplification);
+                }
+                defect = defect.max(error);
+            }
+            i0 += w;
+        }
+    }
+    (defect, amplification)
+}
+
+/// Rows per lockstep block of `return_gram_defect`'s S C pass.
+const GRAM_LANES: usize = 16;
+
+/// `L` compensated sums sum_k S(i0 + l, k) C(k, j) in lockstep (see
+/// `return_gram_defect`); each lane's operations are those of one scalar sum.
+#[inline(always)]
+fn gram_lanes_s<const L: usize>(
+    s: &[f64],
+    cap: usize,
+    cj: &[f64],
+    i0: usize,
+    p_out: &mut [f64],
+    z_out: &mut [f64],
+) {
+    let mut sc = [0.0_f64; L];
+    let mut correction = [0.0_f64; L];
+    let mut absolute = [0.0_f64; L];
+    for (k, &ck) in cj.iter().enumerate() {
+        let row: &[f64; L] = s[k * cap + i0..k * cap + i0 + L]
+            .try_into()
+            .expect("lane block inside S");
+        for l in 0..L {
+            let product = row[l] * ck;
+            let adjusted = product - correction[l];
+            let next = sc[l] + adjusted;
+            correction[l] = (next - sc[l]) - adjusted;
+            sc[l] = next;
+            absolute[l] += product.abs();
+        }
+    }
+    p_out.copy_from_slice(&sc);
+    z_out.copy_from_slice(&absolute);
+}
+
+/// Tail of `gram_lanes_s` (fewer than `GRAM_LANES` rows), same operations.
+fn gram_lanes_s_tail(
+    s: &[f64],
+    cap: usize,
+    cj: &[f64],
+    i0: usize,
+    p_out: &mut [f64],
+    z_out: &mut [f64],
+) {
+    let w = p_out.len();
+    let mut sc = [0.0_f64; GRAM_LANES];
+    let mut correction = [0.0_f64; GRAM_LANES];
+    let mut absolute = [0.0_f64; GRAM_LANES];
+    for (k, &ck) in cj.iter().enumerate() {
+        let row = &s[k * cap + i0..k * cap + i0 + w];
+        for l in 0..w {
+            let product = row[l] * ck;
+            let adjusted = product - correction[l];
+            let next = sc[l] + adjusted;
+            correction[l] = (next - sc[l]) - adjusted;
+            sc[l] = next;
+            absolute[l] += product.abs();
+        }
+    }
+    p_out.copy_from_slice(&sc[..w]);
+    z_out.copy_from_slice(&absolute[..w]);
 }
 
 /// Fallback stage 1 for an append whose pivot test failed (basis at m + k
@@ -1438,7 +1599,7 @@ pub(super) fn solve_with_intent(
                 &pool,
                 timers,
             )?;
-            let (mut defect, direct) = return_gram_defect(lean, m, bands)?;
+            let (mut defect, direct) = return_gram_defect(lean, m, bands, &pool)?;
             if direct {
                 defect = orthogonality_defect(vectors);
             }
@@ -1903,22 +2064,124 @@ pub(super) fn solve_with_intent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The scalar form of `return_gram_defect` (one compensated sum at a
+    /// time, commit 7320cd8), kept as the bitwise reference of the lockstep form.
+    fn return_gram_defect_reference(lean: &mut LeanScratch, m: usize, bands: usize) -> (f64, bool) {
+        let mut growth = 0.0_f64;
+        let mut p = vec![0.0; m * bands];
+        let mut z = vec![0.0; m * bands];
+        for j in 0..bands {
+            let mut g = 0.0;
+            for i in 0..m {
+                g += lean.c[(i, j)].abs() * lean.s[(i, i)].sqrt();
+                let (mut sc, mut correction, mut absolute) = (0.0, 0.0, 0.0);
+                for k in 0..m {
+                    let product = lean.s[(k, i)] * lean.c[(k, j)];
+                    let adjusted = product - correction;
+                    let next = sc + adjusted;
+                    correction = (next - sc) - adjusted;
+                    sc = next;
+                    absolute += product.abs();
+                }
+                p[i + j * m] = sc;
+                z[i + j * m] = absolute;
+            }
+            if !g.is_finite() {
+                return (f64::INFINITY, true);
+            }
+            growth = growth.max(g);
+        }
+        let (mut defect, mut amplification) = (0.0_f64, 0.0_f64);
+        for j in 0..bands {
+            for i in 0..=j {
+                let (mut gram, mut correction, mut absolute) = (0.0, 0.0, 0.0);
+                for k in 0..m {
+                    let c = lean.c[(k, i)];
+                    let adjusted = c * p[k + j * m] - correction;
+                    let next = gram + adjusted;
+                    correction = (next - gram) - adjusted;
+                    gram = next;
+                    absolute += c.abs() * z[k + j * m];
+                }
+                amplification = amplification.max(absolute);
+                let error = (gram - if i == j { 1.0 } else { 0.0 }).abs();
+                if !error.is_finite() {
+                    return (f64::INFINITY, true);
+                }
+                defect = defect.max(error);
+            }
+        }
+        let allowance = 4.0 * f64::EPSILON * (amplification + growth * growth);
+        (defect, defect + allowance >= 1e-12)
+    }
+
+    #[test]
+    fn return_gram_lockstep_matches_scalar_reference_bitwise() {
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+        };
+        for &(cap, m, bands) in &[
+            (40, 37, 9),
+            (64, 64, 17),
+            (50, 16, 16),
+            (30, 5, 3),
+            (70, 49, 1),
+        ] {
+            let mut lean = LeanScratch::new(cap, bands).unwrap();
+            // A near-identity symmetric S (mirrored as the solver stores it)
+            // and C close to S^{-1/2}-like scaling: a realistic small defect.
+            for j in 0..m {
+                for i in 0..=j {
+                    let v = if i == j {
+                        1.0 + 1e-3 * next()
+                    } else {
+                        1e-3 * next()
+                    };
+                    lean.s[(i, j)] = v;
+                    lean.s[(j, i)] = v;
+                }
+            }
+            lean.c.reshape_within_storage(m, bands).unwrap();
+            for j in 0..bands {
+                for i in 0..m {
+                    lean.c[(i, j)] = if i == j { 1.0 } else { 0.0 } + 1e-2 * next();
+                }
+            }
+            let expected = return_gram_defect_reference(&mut lean, m, bands);
+            for threads in [1, 3, 4] {
+                let pool = WorkerPool::new(threads).unwrap();
+                let got = return_gram_defect(&mut lean, m, bands, &pool).unwrap();
+                assert_eq!(
+                    got.0.to_bits(),
+                    expected.0.to_bits(),
+                    "cap {cap} m {m} bands {bands} T {threads}"
+                );
+                assert_eq!(got.1, expected.1);
+            }
+        }
+    }
+
     #[test]
     fn return_gram_uses_measured_overlap_and_screens_cancellation() {
+        let serial = WorkerPool::new(1).unwrap();
         let mut lean = LeanScratch::new(2, 2).unwrap();
         lean.c.reshape_within_storage(2, 2).unwrap();
         lean.s[(0, 0)] = 4.0;
         lean.s[(1, 1)] = 9.0;
         lean.c[(0, 0)] = 0.5;
         lean.c[(1, 1)] = 1.0 / 3.0;
-        let (defect, direct) = return_gram_defect(&mut lean, 2, 2).unwrap();
+        let (defect, direct) = return_gram_defect(&mut lean, 2, 2, &serial).unwrap();
         assert!(defect <= 1e-15 && !direct);
         // Borderline cases retain the original direct 1e-12 check, rather
         // than trusting the rounded reduced Gram at the threshold.
         lean.c[(0, 0)] = 0.5 * (1.0 + 0.4995e-12);
-        assert!(return_gram_defect(&mut lean, 2, 2).unwrap().1);
+        assert!(return_gram_defect(&mut lean, 2, 2, &serial).unwrap().1);
         lean.c[(0, 0)] = 0.5 * (1.0 + 2e-12);
-        assert!(return_gram_defect(&mut lean, 2, 2).unwrap().0 > 1e-12);
+        assert!(return_gram_defect(&mut lean, 2, 2, &serial).unwrap().0 > 1e-12);
         // A normalized difference of almost parallel vectors: the reduced
         // Gram can be close to one despite amplification of errors in S.
         let delta = 1e-6_f64;
@@ -1929,7 +2192,7 @@ mod tests {
         lean.c.reshape_within_storage(2, 1).unwrap();
         lean.c[(0, 0)] = (2.0 * delta).sqrt().recip();
         lean.c[(1, 0)] = -lean.c[(0, 0)];
-        assert!(return_gram_defect(&mut lean, 2, 1).unwrap().1);
+        assert!(return_gram_defect(&mut lean, 2, 1, &serial).unwrap().1);
     }
 
     #[test]

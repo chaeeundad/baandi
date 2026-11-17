@@ -79,6 +79,8 @@ fn operator_options_bands_and_executor_invalidate_cached_state() {
             .as_ref()
             .unwrap()
             .op
+            .as_ref()
+            .unwrap()
             .h
             .borrow()
             .half_sphere()

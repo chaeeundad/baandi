@@ -247,5 +247,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::M2_LIGHT_STATE), Value::Choice("on"));
     assert_eq!(value(Id::M2_DENSITY), Value::Choice("fused"));
     assert_eq!(value(Id::M2_LAYOUT_CACHE), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 97);
+    // ISSUE-20: lazy serial operator of M2 states, off until dev08.
+    assert_eq!(value(Id::M2_LAZY_SERIAL), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 98);
 }

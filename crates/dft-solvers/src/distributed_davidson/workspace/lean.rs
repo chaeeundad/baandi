@@ -40,7 +40,8 @@
 //! values only, so all ranks take the same branches.
 use super::*;
 use crate::real_davidson::lean::{
-    LeanScratch, extend_factor, reduced_border, return_gram_defect, ritz_coefficients,
+    LeanScratch, extend_factor, reduced_border, return_gram_columns, return_gram_decision,
+    return_gram_growth, return_gram_range, ritz_coefficients,
 };
 use dft_numerics::GemmSite;
 use dft_numerics::real::RealOp;
@@ -613,8 +614,50 @@ pub(super) fn run<C: Collective>(
             stage_add(2, t0);
             let t0 = dft_numerics::stage_clock::start();
             // S has been measured for the current basis (including every
-            // contraction). C^T S C and the sensitivity decision are replicated.
-            let (mut defect, direct) = return_gram_defect(ls, m, bands, lean_pool)?;
+            // contraction). RETURN-GRAM-DISTRIBUTED: each rank forms the
+            // maxima of C^T S C over its own column range (replicated S and
+            // C, the serial per-column arithmetic) and sends them in its own
+            // two slots of the residual-norm reduction (every other rank adds
+            // exact zeros there), so every rank obtains the replicated maxima
+            // and the sensitivity decision bit for bit, at 1/np of the work.
+            let growth = return_gram_growth(ls, m, bands);
+            let (mut defect, mut direct) = (f64::INFINITY, true);
+            if growth.is_finite() {
+                let (rank, ranks) = (comm.rank(), comm.size().max(1));
+                let (from, to) = return_gram_range(m, bands, rank, ranks);
+                let (d, a) = return_gram_columns(ls, m, bands, from, to, lean_pool)?;
+                residual_local(
+                    rotated,
+                    vectors,
+                    None,
+                    &values[..bands],
+                    residual,
+                    &mut pending_local[..bands],
+                )?;
+                let len = bands + 2 * ranks;
+                fit(partial, len, 1)?;
+                let local = partial.as_mut_slice();
+                local[..bands].copy_from_slice(&pending_local[..bands]);
+                local[bands..].fill(0.0);
+                local[bands + 2 * rank] = d;
+                local[bands + 2 * rank + 1] = a;
+                fit(sum, len, 1)?;
+                site(Site::ResidualNorms);
+                comm.tree_sum_f64(partial.as_slice(), sum.as_mut_slice())
+                    .map_err(comm_error)?;
+                norms.clear();
+                norms.extend(sum.as_slice()[..bands].iter().map(|x| x.sqrt()));
+                let (mut dmax, mut amax) = (0.0_f64, 0.0_f64);
+                for slot in sum.as_slice()[bands..].as_chunks::<2>().0 {
+                    dmax = if dmax.is_finite() && slot[0].is_finite() {
+                        dmax.max(slot[0])
+                    } else {
+                        f64::INFINITY
+                    };
+                    amax = amax.max(slot[1]);
+                }
+                (defect, direct) = return_gram_decision(dmax, amax, growth);
+            }
             if direct {
                 // Only cancellation-sensitive / near-threshold cases retain
                 // the direct Gram in the existing residual reduction.
@@ -659,17 +702,6 @@ pub(super) fn run<C: Collective>(
                         defect = defect.max(error);
                     }
                 }
-            } else {
-                residual_into(
-                    comm,
-                    rotated,
-                    vectors,
-                    &values[..bands],
-                    true,
-                    residual,
-                    norms,
-                    norm_partial,
-                )?;
             }
             if defect > 1e-12 {
                 // Reuse the existing rebuild path, then reconfirm Ritz changes.

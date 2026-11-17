@@ -884,18 +884,31 @@ pub(crate) fn ritz_coefficients(
 /// matrix of norm bounds avoids treating an orthogonal basis as parallel.
 /// This is a sensitivity screen, not a certificate for an arbitrarily stale S:
 /// contractions/rebuilds must refresh S before calling this routine.
+///
+/// The distributed lean solver forms the same quantities column range by
+/// column range on its ranks (`return_gram_growth`, `return_gram_columns`,
+/// `return_gram_decision`; RETURN-GRAM-DISTRIBUTED): every column's
+/// arithmetic is unchanged, so the maxima and the decision are bit-identical.
 pub(crate) fn return_gram_defect(
     lean: &mut LeanScratch,
     m: usize,
     bands: usize,
     pool: &WorkerPool,
 ) -> Result<(f64, bool), SolverError> {
-    lean.p.reshape_within_storage(m, bands)?;
-    lean.z.reshape_within_storage(m, bands)?;
+    let growth = return_gram_growth(lean, m, bands);
+    if !growth.is_finite() {
+        return Ok((f64::INFINITY, true));
+    }
+    let (defect, amplification) = return_gram_columns(lean, m, bands, 0, bands, pool)?;
+    Ok(return_gram_decision(defect, amplification, growth))
+}
+
+/// g = max_j sum_i |C_ij| sqrt(S_ii) of `return_gram_defect`, in the original
+/// order over i; infinite as soon as one column sum is not finite.
+pub(crate) fn return_gram_growth(lean: &LeanScratch, m: usize, bands: usize) -> f64 {
     let cap = lean.cap;
     let s = lean.s.as_slice();
     let c = &lean.c.as_slice()[..m * bands];
-    // Growth g_j, in the original order over i.
     let mut growth = 0.0_f64;
     for j in 0..bands {
         let mut g = 0.0;
@@ -903,24 +916,81 @@ pub(crate) fn return_gram_defect(
             g += c[i + j * m].abs() * s[i + i * cap].sqrt();
         }
         if !g.is_finite() {
-            return Ok((f64::INFINITY, true));
+            return f64::INFINITY;
         }
         growth = growth.max(g);
     }
-    // Every column j below is independent and formed by the same operations
-    // whichever worker runs it; the maxima are order independent, so the
-    // result is identical for every thread count.
-    let p = &mut lean.p.as_mut_slice()[..m * bands];
-    let z = &mut lean.z.as_mut_slice()[..m * bands];
-    pool.install(|| gram_sc_columns(s, cap, c, m, 0, p, z));
+    growth
+}
+
+/// The maxima of |C^T S C - I| (infinite on any non-finite entry) and of
+/// |C|^T |S| |C| over the upper-triangle entries (i <= j) of the columns
+/// `from..to`. Every column is formed by the same operations whichever range,
+/// worker or rank forms it, so the maxima over a partition of 0..bands equal
+/// those of one call over 0..bands bit for bit.
+pub(crate) fn return_gram_columns(
+    lean: &mut LeanScratch,
+    m: usize,
+    bands: usize,
+    from: usize,
+    to: usize,
+    pool: &WorkerPool,
+) -> Result<(f64, f64), SolverError> {
+    lean.p.reshape_within_storage(m, bands)?;
+    lean.z.reshape_within_storage(m, bands)?;
+    let cap = lean.cap;
+    let s = lean.s.as_slice();
+    let c = &lean.c.as_slice()[..m * bands];
+    let p = &mut lean.p.as_mut_slice()[from * m..to * m];
+    let z = &mut lean.z.as_mut_slice()[from * m..to * m];
+    pool.install(|| gram_sc_columns(s, cap, c, m, from, p, z));
     let p = &lean.p.as_slice()[..m * bands];
     let z = &lean.z.as_slice()[..m * bands];
-    let (defect, amplification) = pool.install(|| gram_ctp_columns(c, p, z, m, 0, bands));
+    Ok(pool.install(|| gram_ctp_columns(c, p, z, m, from, to)))
+}
+
+/// The decision of `return_gram_defect` from the maxima (finite growth).
+pub(crate) fn return_gram_decision(defect: f64, amplification: f64, growth: f64) -> (f64, bool) {
     if !defect.is_finite() {
-        return Ok((f64::INFINITY, true));
+        return (f64::INFINITY, true);
     }
     let allowance = 4.0 * f64::EPSILON * (amplification + growth * growth);
-    Ok((defect, defect + allowance >= 1e-12))
+    (defect, defect + allowance >= 1e-12)
+}
+
+/// Column range `from..to` of rank `rank` out of `ranks` for the distributed
+/// return Gram: contiguous ranges of nearly equal work (column j costs m^2
+/// for S C and |S| |C| plus m (j + 1) for its triangle of C^T P), a function
+/// of replicated sizes only.
+pub(crate) fn return_gram_range(
+    m: usize,
+    bands: usize,
+    rank: usize,
+    ranks: usize,
+) -> (usize, usize) {
+    let ranks = ranks.max(1) as u128;
+    let cost = |j: usize| (m as u128) * (m as u128 + j as u128 + 1);
+    let total: u128 = (0..bands).map(cost).sum();
+    // Boundary b(r): the first column whose preceding work reaches r/ranks of the total.
+    let boundary = |r: u128| {
+        if r == 0 {
+            return 0;
+        }
+        if r >= ranks {
+            return bands;
+        }
+        let target = total * r / ranks;
+        let mut acc = 0u128;
+        for j in 0..bands {
+            if acc >= target {
+                return j;
+            }
+            acc += cost(j);
+        }
+        bands
+    };
+    let r = rank as u128;
+    (boundary(r), boundary(r + 1))
 }
 
 /// Columns `first..` of P = S C and Z = |S| |C| (`p`, `z` hold whole columns
@@ -2159,6 +2229,85 @@ mod tests {
                     got.0.to_bits(),
                     expected.0.to_bits(),
                     "cap {cap} m {m} bands {bands} T {threads}"
+                );
+                assert_eq!(got.1, expected.1);
+            }
+        }
+    }
+
+    /// RETURN-GRAM-DISTRIBUTED: the rank column ranges partition 0..bands and
+    /// the maxima combined as the distributed solver combines them (disjoint
+    /// reduction slots, zeros elsewhere) give the replicated defect and
+    /// decision bit for bit, for every rank count, including a non-finite case.
+    #[test]
+    fn return_gram_column_ranges_reproduce_replicated_screen_bitwise() {
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+        };
+        let pool = WorkerPool::new(2).unwrap();
+        for &(cap, m, bands, poison) in &[
+            (40, 37, 9, false),
+            (64, 64, 17, false),
+            (50, 16, 16, false),
+            (30, 5, 3, false),
+            (70, 49, 1, false),
+            (40, 37, 9, true),
+        ] {
+            let mut lean = LeanScratch::new(cap, bands).unwrap();
+            for j in 0..m {
+                for i in 0..=j {
+                    let v = if i == j {
+                        1.0 + 1e-3 * next()
+                    } else {
+                        1e-3 * next()
+                    };
+                    lean.s[(i, j)] = v;
+                    lean.s[(j, i)] = v;
+                }
+            }
+            lean.c.reshape_within_storage(m, bands).unwrap();
+            for j in 0..bands {
+                for i in 0..m {
+                    // Small perturbation: a defect around 1e-13, near the screen.
+                    lean.c[(i, j)] = if i == j { 1.0 } else { 0.0 } + 1e-13 * next();
+                }
+            }
+            if poison {
+                lean.s[(3, 2)] = f64::NAN;
+                lean.s[(2, 3)] = f64::NAN;
+            }
+            let expected = return_gram_defect(&mut lean, m, bands, &pool).unwrap();
+            let growth = return_gram_growth(&lean, m, bands);
+            for ranks in 1..=7 {
+                let mut slots = vec![0.0_f64; 2 * ranks];
+                let mut covered = 0;
+                for rank in 0..ranks {
+                    let (from, to) = return_gram_range(m, bands, rank, ranks);
+                    assert_eq!(from, covered, "contiguous ranges");
+                    covered = to;
+                    let (d, a) = return_gram_columns(&mut lean, m, bands, from, to, &pool).unwrap();
+                    slots[2 * rank] += d;
+                    slots[2 * rank + 1] += a;
+                }
+                assert_eq!(covered, bands);
+                let (mut dmax, mut amax) = (0.0_f64, 0.0_f64);
+                for slot in slots.as_chunks::<2>().0 {
+                    dmax = if dmax.is_finite() && slot[0].is_finite() {
+                        dmax.max(slot[0])
+                    } else {
+                        f64::INFINITY
+                    };
+                    amax = amax.max(slot[1]);
+                }
+                let got = return_gram_decision(dmax, amax, growth);
+                assert_eq!(
+                    got.0.to_bits(),
+                    expected.0.to_bits(),
+                    "m {m} B {bands} np {ranks}"
                 );
                 assert_eq!(got.1, expected.1);
             }

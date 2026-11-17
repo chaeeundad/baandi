@@ -238,6 +238,38 @@ original arithmetic. Contraction checks and the inverse-factor growth guard
 are unchanged. The latter scans new triangular entries in O(to^2-from^2),
 at most O(w^2) for width w, and makes no additional GEMM call.
 
+### Return check distributed over the ranks (RETURN-GRAM-DISTRIBUTED, 2026-11-17)
+
+The replicated C^T S C above costs O(m^2 B) on every rank, on the rank's
+single core, and does not shrink with the rank count; the direct N x B Gram it
+replaced cost O(N B^2 / np). At si64 np=8 (m 150..360, B 132) it was about
+1.5 to 5.7 ms per return per rank (Mac, simulated ranks, contended), which is
+the order of the dev08 residual of the distributed lean path. Now each rank
+forms the same compensated column sums for its own contiguous column range
+(`return_gram_range`: ranges of nearly equal work m^2 + m (j + 1) per column,
+a function of replicated sizes only) and sends its two maxima (defect,
+amplification) in its own two slots of the return's residual-norm reduction
+(payload B + 2 np doubles instead of B; every other rank adds exact zeros to
+those slots, and the elementwise tree sum of the norms is unchanged). Every
+column is formed by exactly the serial lockstep arithmetic, so the maxima, the
+decision and the defect are bit-identical to the replicated screen for every
+rank count (test `return_gram_column_ranges_reproduce_replicated_screen_bitwise`,
+ranks 1 to 7, including a non-finite S). The growth g stays replicated (O(m B)).
+A non-finite g still takes the direct Gram without the combined reduction. A
+return the screen flags now costs one more reduction: the combined one, then
+the unchanged direct Gram reduction (B + B^2 doubles). No other branch changed.
+
+Evaluated and rejected first: forming C^T S C through the GEMM workspace
+(faer/dgemm). Uncompensated GEMM error is bounded only by about m eps a
+(a = max |C|^T |S| |C|, measured 10 to 1e5 on si32/si64 returns), which sent
+ordinary si32 warm returns (m 244, a 11) to the direct Gram, the failure the
+paragraph above describes for naive m-scaled screens. A blocked variant (GEMM
+inside blocks of 32 terms, Kahan sums of the block results; rigorous extra
+allowance 1.01 (32 + 6) eps a, flags equal to the compensated screen on every
+probed return) kept the decisions but was no faster than the vectorized
+lockstep kernel: per call 0.74 to 1.32 times its time (si64 np=8 total 354 vs
+372 ms per run, si32 np=8 106 vs 104, si32 T=8 2.55 vs 2.51 ms).
+
 ### Error agreement without an extra scalar
 
 A rank that has completed the operator's collectives but received an operator

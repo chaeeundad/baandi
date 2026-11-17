@@ -128,6 +128,7 @@ fn legacy_defaults_are_unchanged() {
         Id::PROJECT_WIDE,
         Id::B1_NARROW,
         Id::REFERENCE_STRICT,
+        Id::SPIN_SHARE,
         Id::M2_B5,
         Id::LEAN_PROJ_CACHE,
         Id::PACK_FIXED,
@@ -245,5 +246,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::EWALD_CACHE), Value::Choice("off"));
     assert_eq!(value(Id::M2_LIGHT_STATE), Value::Choice("off"));
     assert_eq!(value(Id::M2_LAYOUT_CACHE), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 96);
+    assert_eq!(TABLE.len(), 97);
 }

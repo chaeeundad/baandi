@@ -686,8 +686,8 @@ fn expressions_preserve_energy_and_record_resolutions() {
     // Switch manifest (work order A1): the whole table, effective value and source.
     let switches = plain["scf"]["switches"].as_object().unwrap();
     // 89 = 83 + RESTART_KEEP (BREAKTHROUGH-1) + the five BREAKTHROUGH-3 switches (SCF_ADVANCE, _BLOCKS, _GROWTH, _ADAPT, _SCOPE).
-    // 96 = 92 + the four BREAKTHROUGH-4 switches (PHASE_WAIT, EWALD_CACHE, M2_LIGHT_STATE, M2_LAYOUT_CACHE).
-    assert_eq!(switches.len(), 96);
+    // 97 = 96 + SPIN_SHARE (ONEPATH-5).
+    assert_eq!(switches.len(), 97);
     let ladder = &switches["BAANDI_CUTOFF_LADDER"];
     assert_eq!(
         (&ladder["value"], &ladder["source"]),
@@ -1240,4 +1240,87 @@ fn final_spectral_guard_is_additive_and_audits_only_reported_state() {
     );
     status(&bad, 1);
     assert!(String::from_utf8_lossy(&bad.stderr).contains("scf.spectral_guard"));
+}
+
+/// ONEPATH-5: both collinear writers expose count-only sharing diagnostics.
+#[test]
+fn spin_share_results_include_shared_and_fallback_counts() {
+    let c = Case::new(false);
+    fs::write(
+        c.dir.join("spin.xml"),
+        common::gaussian_with(2., 1., true, 401)
+            .replace("SLA PZ", "SLA PW")
+            .replace("element=\"Xx\"", "element=\"He\""),
+    )
+    .unwrap();
+    let base = "[system]\nname='spin share counters'\nlattice_unit='bohr'\nlattice_vectors=[[5.0,0.0,0.0],[0.5,5.0,0.0],[0.3,0.2,5.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.0,0.0,0.0]\n[pseudopotentials]\nHe='spin.xml'\n[basis]\necutwfc_ry=5.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pw'\n[scf]\nnbands=4\n[spin]\nmode='collinear'\nn_up=1\nn_down=1\ninitial_moment_seed=0.0\n";
+    let mut fixed_counts = Vec::new();
+    for (name, mode, finite, reason) in [
+        ("shared", "on", false, None),
+        ("disabled", "off", false, Some("disabled")),
+        ("finite", "on", true, Some("finite_temperature")),
+        ("seeded", "on", false, Some("nonzero_seed")),
+    ] {
+        let mut input = base.to_owned();
+        if finite {
+            input.push_str("[occupations]\nmode='fermi_dirac'\nsmearing_ha=0.01\nband_cap=8\n");
+        }
+        if name == "seeded" {
+            input = input.replace("initial_moment_seed=0.0", "initial_moment_seed=0.5");
+        }
+        fs::write(c.dir.join("spin.toml"), input).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+            .current_dir(&c.dir)
+            .args(["run", "spin.toml", "--output-dir", name])
+            .env("BAANDI_SPIN_SHARE", mode)
+            .env("BAANDI_REFERENCE_STRICT", "off")
+            .env("BAANDI_CUTOFF_LADDER", "off")
+            .output()
+            .unwrap();
+        status(&output, 0);
+        let result = c.json(name, "results.json");
+        assert_eq!(result["convergence"]["converged"], true);
+        assert_eq!(result["verified"], true);
+        let report = &result["spin"]["spin_share"];
+        let shared = report["shared_maps"].as_u64().unwrap();
+        let fallback = report["fallback_maps"].as_u64().unwrap();
+        let reasons = report["fallback_counts"].as_object().unwrap();
+        assert_eq!(reasons.len(), 9);
+        assert_eq!(
+            fallback,
+            reasons.values().map(|v| v.as_u64().unwrap()).sum::<u64>()
+        );
+        assert_eq!(report.as_object().unwrap().len(), 5);
+        assert!(report["operator_applications"].as_u64().unwrap() > 0);
+        assert!(report["logical_davidson_iterations"].as_u64().unwrap() > 0);
+        if let Some(reason) = reason {
+            assert_eq!(shared, 0);
+            assert!(fallback > 0);
+            assert_eq!(reasons[reason].as_u64().unwrap(), fallback);
+        } else {
+            assert!(shared > 0);
+            assert_eq!(fallback, 0);
+        }
+        // Execution counters do not enter the physical state schema or digests.
+        assert!(
+            result["state_contracts"]["spin"]
+                .get("spin_share")
+                .is_none()
+        );
+        if name == "shared" || name == "disabled" {
+            fixed_counts.push(report.clone());
+        }
+    }
+    assert_eq!(
+        fixed_counts[0]["shared_maps"],
+        fixed_counts[1]["fallback_maps"]
+    );
+    assert_eq!(
+        fixed_counts[0]["logical_davidson_iterations"],
+        fixed_counts[1]["logical_davidson_iterations"]
+    );
+    assert_eq!(
+        2 * fixed_counts[0]["operator_applications"].as_u64().unwrap(),
+        fixed_counts[1]["operator_applications"].as_u64().unwrap()
+    );
 }

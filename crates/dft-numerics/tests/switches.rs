@@ -128,7 +128,6 @@ fn legacy_defaults_are_unchanged() {
         Id::PROJECT_WIDE,
         Id::B1_NARROW,
         Id::REFERENCE_STRICT,
-        Id::SPIN_SHARE,
         Id::M2_B5,
         Id::LEAN_PROJ_CACHE,
         Id::PACK_FIXED,
@@ -136,6 +135,7 @@ fn legacy_defaults_are_unchanged() {
         assert!(!on(id), "{id:?} must default off");
     }
     assert_eq!(switches::choice(Id::LEAN_BORDER), "separate");
+    assert!(on(Id::SPIN_SHARE), "SPIN_SHARE defaults on");
     assert!(on(Id::M2_DGEMM) && on(Id::M2_LEAN) && on(Id::REUSE_PSI) && on(Id::M2_SELECTED_ROOTS));
     assert_eq!(
         switches::resolve(switches::switch(Id::VERIFY_REUSE), None).0,

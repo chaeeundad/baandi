@@ -101,6 +101,227 @@ pub(crate) struct LeanScratch {
     pair: RealMatrix,
     fb: RealMatrix,
     pending: Option<(usize, usize)>,
+    /// R1-b (`BAANDI_RESTART_KEEP`): history and scratch of the kept
+    /// directions, allocated at the first solve with the switch on.
+    keep: Option<Box<KeepScratch>>,
+}
+
+/// R1-b history-preserving restart (ticket BREAKTHROUGH-1-RESTART,
+/// docs/design/restart-keep.md). The history holds the basis coefficients D of
+/// the latest Ritz vectors Y = V D of the unconverged roots (the previous
+/// iteration's selected roots, or the columns of X right after a contraction
+/// or a Ritz-basis fallback rotation). At a contraction with Ritz coefficients
+/// C (X = V C, C^T S C = I) the kept directions are
+///   A = C^T S D,  G = D - C A,  P = V G,  H P = (H V) G,
+/// formed by the same rotation as X (no H application; the X component is
+/// removed twice in coefficient space). Candidates are taken greedily in
+/// ascending root order; a candidate is kept when |P| > DEPENDENCE_TOLERANCE
+/// |Y| (the classic rank floor on a unit input) and its squared pivot against
+/// the directions kept before it over |P|^2 is at least `PIVOT_RATIO_MIN` (the
+/// pivot rule of every lean append); the kept columns are S-orthonormalized in
+/// coefficient space (G L^{-T}). The caller then factors the true overlap of
+/// [X | P] with the same pivot rule and falls back to X alone on a failure. All of this is small replicated arithmetic in
+/// a fixed order (identical on every rank, independent of the thread count).
+pub(crate) struct KeepScratch {
+    /// Basis columns the history coefficients refer to (a prefix of the basis).
+    hist_m: usize,
+    /// The history is expressed in the current basis.
+    valid: bool,
+    /// Roots of the history columns, ascending.
+    roots: Vec<usize>,
+    /// History coefficients, compact hist_m x roots.len().
+    hist: Vec<f64>,
+    /// Per-candidate columns D, S D, S G (m each) and C^T S D (bands).
+    d: Vec<f64>,
+    sd: Vec<f64>,
+    a: Vec<f64>,
+    /// S G of the kept columns, compact m x kept.
+    sg: Vec<f64>,
+    /// Cholesky factor of the kept columns' Gram G^T S G, kept x kept.
+    l: Vec<f64>,
+}
+impl KeepScratch {
+    fn new(cap: usize, bands: usize) -> Self {
+        Self {
+            hist_m: 0,
+            valid: false,
+            roots: Vec::with_capacity(bands),
+            hist: vec![0.; cap * bands],
+            d: vec![0.; cap],
+            sd: vec![0.; cap],
+            a: vec![0.; bands],
+            sg: vec![0.; cap * bands],
+            l: vec![0.; bands * bands],
+        }
+    }
+}
+impl LeanScratch {
+    /// Make the R1-b scratch available (first use only).
+    pub(crate) fn keep_prepare(&mut self, bands: usize) {
+        if self.keep.as_ref().is_none_or(|k| k.a.len() != bands) {
+            self.keep = Some(Box::new(KeepScratch::new(self.cap, bands)));
+        }
+        if let Some(k) = self.keep.as_mut() {
+            k.valid = false;
+        }
+    }
+    /// Forget the history (the basis changed in a way it does not follow).
+    pub(crate) fn keep_invalidate(&mut self) {
+        if let Some(k) = self.keep.as_mut() {
+            k.valid = false;
+        }
+    }
+    /// The history becomes the selected Ritz coefficients of this iteration
+    /// (`self.c`, compact m x roots.len(), from `ritz_coefficients` with
+    /// `Some(roots)`).
+    pub(crate) fn keep_record(&mut self, m: usize, roots: &[usize]) {
+        let Some(k) = self.keep.as_mut() else {
+            return;
+        };
+        let len = m * roots.len();
+        k.hist[..len].copy_from_slice(&self.c.as_slice()[..len]);
+        k.roots.clear();
+        k.roots.extend_from_slice(roots);
+        k.hist_m = m;
+        k.valid = true;
+    }
+    /// The history becomes basis columns: root j is column j (right after a
+    /// contraction, whose basis starts with X, or a Ritz-basis rotation).
+    pub(crate) fn keep_identity(&mut self, m: usize, roots: &[usize]) {
+        let Some(k) = self.keep.as_mut() else {
+            return;
+        };
+        k.roots.clear();
+        k.roots.extend(roots.iter().copied().filter(|&j| j < m));
+        let len = m * k.roots.len();
+        k.hist[..len].fill(0.);
+        for (slot, &j) in k.roots.iter().enumerate() {
+            k.hist[slot * m + j] = 1.;
+        }
+        k.hist_m = m;
+        k.valid = true;
+    }
+    /// At a contraction of the m-column basis (S[:m, :m] in `self.s`, C =
+    /// `self.c` compact m x bands): append up to `limit` kept direction
+    /// coefficient columns G to `self.c` (compact m x (bands + kept)) for the
+    /// roots in `roots` (ascending) that the history holds. Returns (kept,
+    /// candidates dropped by the pivot rule).
+    pub(crate) fn keep_directions(
+        &mut self,
+        m: usize,
+        bands: usize,
+        roots: &[usize],
+        limit: usize,
+    ) -> Result<(usize, usize), SolverError> {
+        let cap = self.cap;
+        let Some(k) = self.keep.as_mut() else {
+            return Ok((0, 0));
+        };
+        if !k.valid || limit == 0 || k.hist_m > m || bands + limit > cap {
+            return Ok((0, 0));
+        }
+        let hm = k.hist_m;
+        let (s, c) = (&self.s, &mut self.c);
+        c.reshape_within_storage(m, bands + limit)?;
+        let mut kept = 0;
+        let mut dropped = 0;
+        for &root in roots {
+            if kept == limit {
+                break;
+            }
+            let Ok(slot) = k.roots.binary_search(&root) else {
+                continue;
+            };
+            // D (zero below the history prefix), S D and |Y|^2 = D^T S D.
+            let d = &mut k.d[..m];
+            d[..hm].copy_from_slice(&k.hist[slot * hm..(slot + 1) * hm]);
+            d[hm..].fill(0.);
+            let sd = &mut k.sd[..m];
+            for (i, x) in sd.iter_mut().enumerate() {
+                *x = (0..hm).map(|l| s[(i, l)] * d[l]).sum();
+            }
+            let length: f64 = d.iter().zip(sd.iter()).map(|(a, b)| a * b).sum();
+            // G = D - C A with A = C^T S D, twice (the second pass removes
+            // the rounding left in the X component; written as column
+            // bands + kept of c), then S G.
+            let col = bands + kept;
+            let (head, tail) = c.as_mut_slice().split_at_mut(col * m);
+            let g = &mut tail[..m];
+            g.copy_from_slice(d);
+            let sg = &mut k.sg[kept * m..(kept + 1) * m];
+            for pass in 0..2 {
+                let source: &[f64] = if pass == 0 { sd } else { sg };
+                for (b, a) in k.a.iter_mut().enumerate() {
+                    *a = head[b * m..(b + 1) * m]
+                        .iter()
+                        .zip(source)
+                        .map(|(x, y)| x * y)
+                        .sum();
+                }
+                for (b, &a) in k.a.iter().enumerate() {
+                    for (x, &cc) in g.iter_mut().zip(&head[b * m..(b + 1) * m]) {
+                        *x -= cc * a;
+                    }
+                }
+                for (i, x) in sg.iter_mut().enumerate() {
+                    *x = (0..m).map(|l| s[(i, l)] * g[l]).sum();
+                }
+            }
+            // |P|^2 and the new row of the Cholesky factor of G^T S G.
+            let sg = &k.sg[..(kept + 1) * m];
+            let norm2 = g
+                .iter()
+                .zip(&sg[kept * m..])
+                .map(|(a, b)| a * b)
+                .sum::<f64>();
+            let mut pivot = norm2;
+            let lw = bands;
+            for p in 0..kept {
+                let gp = &head[(bands + p) * m..(bands + p + 1) * m];
+                let mut x: f64 = gp.iter().zip(&sg[kept * m..]).map(|(a, b)| a * b).sum();
+                for q in 0..p {
+                    x -= k.l[kept + q * lw] * k.l[p + q * lw];
+                }
+                let x = x / k.l[p + p * lw];
+                k.l[kept + p * lw] = x;
+                pivot -= x * x;
+            }
+            // Rank floor of a unit input (|Y| = 1 in the S norm) and the pivot
+            // rule against the directions kept before.
+            let ratio = pivot / norm2;
+            if !(norm2.is_finite()
+                && norm2.sqrt() > DEPENDENCE_TOLERANCE * length.sqrt()
+                && ratio >= PIVOT_RATIO_MIN)
+            {
+                dropped += 1;
+                continue;
+            }
+            k.l[kept + kept * lw] = pivot.sqrt();
+            kept += 1;
+        }
+        // S-orthonormalize the kept columns: G <- G L^{-T}, column by column.
+        let lw = bands;
+        let data = c.as_mut_slice();
+        for q in 0..kept {
+            let (done, rest) = data.split_at_mut((bands + q) * m);
+            let gq = &mut rest[..m];
+            for p in 0..q {
+                let lqp = k.l[q + p * lw];
+                for (x, &y) in gq
+                    .iter_mut()
+                    .zip(&done[(bands + p) * m..(bands + p + 1) * m])
+                {
+                    *x -= lqp * y;
+                }
+            }
+            let inv = 1. / k.l[q + q * lw];
+            for x in gq.iter_mut() {
+                *x *= inv;
+            }
+        }
+        c.reshape_within_storage(m, bands + kept)?;
+        Ok((kept, dropped))
+    }
 }
 impl LeanScratch {
     pub(crate) fn new(cap: usize, bands: usize) -> Result<Self, SolverError> {
@@ -125,6 +346,7 @@ impl LeanScratch {
             pair: RealMatrix::zeros(0, 0)?,
             fb: RealMatrix::zeros(cap, 2 * bands)?,
             pending: None,
+            keep: None,
         })
     }
 }
@@ -753,7 +975,7 @@ fn factor_fresh(
     work: &mut crate::work_accounting::Trace,
     timers: Timers,
     proj: &mut Option<&mut ProjCache>,
-) -> Result<(), SolverError> {
+) -> Result<bool, SolverError> {
     let m = basis.cols();
     lean.pending = None;
     let t = timers.start();
@@ -763,9 +985,11 @@ fn factor_fresh(
     let (ok, _) = extend_factor(gemm, lean, 0, m)?;
     timers.stop(t, Stage::Eigen);
     if ok {
-        return Ok(());
+        return Ok(false);
     }
     lean_add(LeanCount::Rebuilds, 1);
+    // R1-b: the rebuilt basis is not followed by the history.
+    lean.keep_invalidate();
     scratch.reshape_within_storage(basis.rows(), m)?;
     scratch.as_mut_slice().copy_from_slice(basis.as_slice());
     let t = timers.start();
@@ -781,7 +1005,7 @@ fn factor_fresh(
             "lean Davidson: orthonormalized basis failed the overlap pivot test".into(),
         ));
     }
-    Ok(())
+    Ok(true)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -835,6 +1059,11 @@ pub(super) fn solve(
         ..
     } = workspace;
     let lean = lean.as_mut().unwrap();
+    // R1-b: previous directions kept at a contraction (0 = the plain restart).
+    let keep_r = options.restart_keep.directions(bands);
+    if keep_r > 0 {
+        lean.keep_prepare(bands);
+    }
     // C3a: projector products of the basis columns (switch and operator support).
     let mut proj = if options.lean_proj_cache {
         ProjCache::activate(lean_proj, op, capacity, bands)?
@@ -1169,6 +1398,12 @@ pub(super) fn solve(
         let t = timers.start();
         ritz_coefficients(gemm, lean, coefficients, m, k, Some(&selected[..]))?;
         timers.stop(t, Stage::Eigen);
+        // Whether the basis becomes the Ritz basis of the bands in this iteration.
+        let contracted = m + k > capacity;
+        if keep_r > 0 && !contracted {
+            // R1-b history: this iteration's selected Ritz coefficients.
+            lean.keep_record(m, selected);
+        }
         vectors.reshape_within_storage(n, k)?;
         rotated_products.reshape_within_storage(n, k)?;
         residual_block.reshape_within_storage(n, k)?;
@@ -1207,8 +1442,6 @@ pub(super) fn solve(
             &values[..bands],
         )?;
         timers.stop(t, Stage::Precondition);
-        // Whether the basis became the Ritz basis of the bands in this iteration.
-        let contracted = m + k > capacity;
         if contracted {
             // Contraction restart: X and H X of all bands (QE's last).
             restarts += 1;
@@ -1217,39 +1450,85 @@ pub(super) fn solve(
             lean_add(LeanCount::Contractions, 1);
             let t = timers.start();
             ritz_coefficients(gemm, lean, coefficients, m, bands, None)?;
+            // R1-b: kept direction coefficients appended to C (room is left
+            // for this iteration's correction block).
+            let (kept, dropped) = if keep_r > 0 {
+                lean.keep_directions(m, bands, selected, keep_r.min(capacity - bands - k))?
+            } else {
+                (0, 0)
+            };
+            lean_add(LeanCount::KeepDropped, dropped);
             timers.stop(t, Stage::Eigen);
-            vectors.reshape_within_storage(n, bands)?;
-            rotated_products.reshape_within_storage(n, bands)?;
+            let cols = bands + kept;
+            vectors.reshape_within_storage(n, cols)?;
+            rotated_products.reshape_within_storage(n, cols)?;
             let t = timers.start();
-            flops_add(FlopSite::Contraction, n, m, 2 * bands);
+            flops_add(FlopSite::Contraction, n, m, 2 * cols);
             gemm.rotate_pair_slices(
                 basis.as_slice(),
                 products.as_slice(),
                 m,
-                &lean.c.as_slice()[..m * bands],
-                bands,
+                &lean.c.as_slice()[..m * cols],
+                cols,
                 vectors.as_mut_slice(),
                 rotated_products.as_mut_slice(),
             )?;
             if let Some(c) = proj.as_mut() {
-                c.contract(gemm, &lean.c.as_slice()[..m * bands], m, bands)?;
+                if kept == 0 {
+                    c.contract(gemm, &lean.c.as_slice()[..m * bands], m, bands)?;
+                } else {
+                    // The cache holds bands columns of P^T X only.
+                    c.valid = false;
+                }
             }
             timers.stop(t, Stage::Rotate);
             std::mem::swap(basis, vectors);
             std::mem::swap(products, rotated_products);
-            factor_fresh(
-                op,
-                gemm,
-                projection,
-                basis,
-                products,
-                vectors,
-                lean,
-                &mut applications,
-                &mut work,
-                timers,
-                &mut proj,
-            )?;
+            let mut plain = kept == 0;
+            if !plain {
+                // Factor X, then the kept directions (pivot rule); any failure
+                // falls back to the plain restart from X alone.
+                lean.pending = None;
+                let t = timers.start();
+                overlap_border(gemm, basis, 0, cols, &mut lean.s)?;
+                timers.stop(t, Stage::Orthonormalize);
+                let t = timers.start();
+                let (x_ok, _) = extend_factor(gemm, lean, 0, bands)?;
+                let p_ok = x_ok && {
+                    let (ok, ratio) = extend_factor(gemm, lean, bands, cols)?;
+                    lean_pivot(ratio);
+                    ok
+                };
+                timers.stop(t, Stage::Eigen);
+                if p_ok {
+                    lean_add(LeanCount::KeepContractions, 1);
+                    lean_add(LeanCount::KeptDirections, kept);
+                } else {
+                    lean_add(LeanCount::KeepFallbacks, 1);
+                    basis.reshape_within_storage(n, bands)?;
+                    products.reshape_within_storage(n, bands)?;
+                    plain = !x_ok;
+                }
+            }
+            let rebuilt = plain
+                && factor_fresh(
+                    op,
+                    gemm,
+                    projection,
+                    basis,
+                    products,
+                    vectors,
+                    lean,
+                    &mut applications,
+                    &mut work,
+                    timers,
+                    &mut proj,
+                )?;
+            if keep_r > 0 && !rebuilt {
+                // The history of the next iteration: the columns of X (a
+                // rebuild has invalidated it).
+                lean.keep_identity(bands, selected);
+            }
             prefix = 0;
         }
         let m = basis.cols();
@@ -1378,7 +1657,7 @@ pub(super) fn solve(
                 if let Some(c) = proj.as_mut() {
                     c.valid = false;
                 }
-                factor_fresh(
+                let rebuilt = factor_fresh(
                     op,
                     gemm,
                     projection,
@@ -1391,6 +1670,10 @@ pub(super) fn solve(
                     timers,
                     &mut proj,
                 )?;
+                if keep_r > 0 && !rebuilt {
+                    // R1-b: the basis is the full Ritz basis; root j is column j.
+                    lean.keep_identity(m, selected);
+                }
             }
             prefix = 0;
             let m = basis.cols();

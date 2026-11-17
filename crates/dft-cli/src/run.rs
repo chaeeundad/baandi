@@ -1677,6 +1677,9 @@ fn davidson_lean_json() -> serde_json::Value {
             "kept_loads":c.proj_cache_kept_loads,"columns_copied":c.proj_cache_columns,
             "audits_from_cache":dft_engine::nl_audit_counters().0,
             "audits_direct":dft_engine::nl_audit_counters().1},
+        "restart_keep":{"mode":dft_numerics::switches::choice(dft_numerics::switches::Id::RESTART_KEEP),
+            "keep_contractions":c.keep_contractions,"kept_directions":c.kept_directions,
+            "dropped":c.keep_dropped,"fallbacks":c.keep_fallbacks},
         "note":"process totals of the serial real Davidson (all solves, both paths; MPI distributed solver not counted)"
     })
 }

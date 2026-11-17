@@ -115,6 +115,7 @@ Common gates (details in the brief): energy within 1e-12 Ha of the stored baseli
 
 ### B05 Thick restart with previous directions (V-4)
 - Keep previous Ritz differences of unconverged roots across the 14 si8 restarts; unknown gain; do not combine with smaller capacity before measuring (H3b premise, B17).
+- 2026-11-17 (BREAKTHROUGH-1-RESTART): implemented as `BAANDI_RESTART_KEEP` on the lean paths (serial and distributed lean algebra), REJECT at the current capacities (ledger RESTART-KEEP-R1B: H -0.6 to +0.6 % at SCF level, rotation up; the threads path has no contraction at capacity 6). The only open part is the capacity-2 pair (ledger RESTART-KEEP-CAP2-LEAD: -19 % H against plain capacity 2, still +17 % against capacity 3); dev08 job in requests/breakthrough-restart.md. Same-H continuation of the redo (R1-a) closed: no redo in the default runs.
 
 ### B16 Hartree-metric Pulay least squares and mixer reset survey (S-1, S-5)
 - Same update, inner product in the Hartree kernel over the density sphere (G=0 excluded); 0-3 SCF iterations and, more importantly, noise tolerance that P14A showed missing; QE history 8, beta 0.7 untested here. Survey `mixing_resets` before any change. Mixing itself is 0.1-1% of the run.

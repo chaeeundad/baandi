@@ -230,5 +230,7 @@ fn legacy_defaults_are_unchanged() {
     // MPI-REMAINING grid switches stay opt-in until dev08.
     assert_eq!(value(Id::MIX_INCREMENTAL), Value::Choice("on"));
     assert_eq!(value(Id::STOP_METRIC), Value::Choice("kept"));
-    assert_eq!(TABLE.len(), 83);
+    // BREAKTHROUGH-1-RESTART R1-b stays off (REJECT at stage 0 and 1).
+    assert_eq!(value(Id::RESTART_KEEP), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 84);
 }

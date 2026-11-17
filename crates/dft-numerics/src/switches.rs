@@ -311,6 +311,12 @@ table! {
     LEAN_BORDER: Kind::Choice { allowed: &["separate", "fused"], default: "separate" }, "separate",
         "separate, fused",
         "PERCORE-KERNELS: borders of the lean real Gamma Davidson: separate (overlap border V^T E before the H apply, reduced border V^T (H E) in the next iteration, two transposed products) or fused (H applied to the unit corrections first, then one transposed product V^T [E | H E] of twice the width forms both borders, so the basis is streamed once; the pivot test follows it and a failing append discards the images, takes the separate fallback and ends fusing for the rest of that solve; only blocks with 4 k <= m (basis width m) fuse, wider blocks such as the first append of every solve keep the separate products; bit-identical on the aarch64 pure kernel, rounding class on MKL and x86)";
+    // History-preserving restart (ticket BREAKTHROUGH-1-RESTART, docs/design/restart-keep.md); default off.
+    RESTART_KEEP: Kind::Choice {
+        allowed: &["off", "1", "2", "4", "8", "b/8", "b/4", "b/2"],
+        default: "off",
+    }, "off", "off, 1, 2, 4, 8, b/8, b/4, b/2",
+        "BREAKTHROUGH-1-RESTART R1-b: at a contraction restart of the lean Davidson (serial lean path and the distributed lean algebra) keep, besides the Ritz vectors X and H X, up to r previous Ritz vectors of the unconverged roots with their X component removed (P = Y - X A, H P = (H V)(D - C A): no new H application); r is a count or a fraction of the band count (b/4 = bands / 4, at least 1), limited by the room left for the next correction block; directions whose squared sine to span(X and the kept directions) falls below the pivot rule eps/1e-12 are dropped, and the restart falls back to X alone when the factor of the new basis fails the pivot rule; off = the plain restart (bit-identical)";
     // Physics (dft-physics).
     MKL_NONLOCAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "nonlocal products by dgemm on the real Gamma path";

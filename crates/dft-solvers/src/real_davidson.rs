@@ -6,8 +6,8 @@ use crate::davidson_stages::{
 };
 pub use crate::davidson_stages::{
     AlgebraCounters, B1Counters, B1Mode, B5Counters, FlopCounters, LeanCounters, ResearchOptions,
-    SketchKind, StageSeconds, WIDTH_LABELS, algebra_counters, b1_counters, b5_counters,
-    flop_counters, lean_counters, stage_seconds, stage_seconds_by_run_stage,
+    RestartKeep, SketchKind, StageSeconds, WIDTH_LABELS, algebra_counters, b1_counters,
+    b5_counters, flop_counters, lean_counters, stage_seconds, stage_seconds_by_run_stage,
 };
 #[path = "lean_davidson.rs"]
 pub(crate) mod lean;

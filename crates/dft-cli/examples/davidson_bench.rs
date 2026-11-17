@@ -238,6 +238,16 @@ fn delta(a: &Snap, b: &Snap, p: u64) -> (BTreeMap<String, Value>, BTreeMap<Strin
         l1.appended_columns - l0.appended_columns,
     );
     put("lean.contractions", l1.contractions - l0.contractions);
+    put(
+        "lean.keep_contractions",
+        l1.keep_contractions - l0.keep_contractions,
+    );
+    put(
+        "lean.kept_directions",
+        l1.kept_directions - l0.kept_directions,
+    );
+    put("lean.keep_dropped", l1.keep_dropped - l0.keep_dropped);
+    put("lean.keep_fallbacks", l1.keep_fallbacks - l0.keep_fallbacks);
     put("lean.fallbacks", l1.fallbacks - l0.fallbacks);
     put("lean.kept_starts", l1.kept_starts - l0.kept_starts);
     put("lean.kept_declined", l1.kept_declined - l0.kept_declined);
@@ -327,6 +337,18 @@ fn delta(a: &Snap, b: &Snap, p: u64) -> (BTreeMap<String, Value>, BTreeMap<Strin
         "dist.lean_factored_starts",
         lb.factored_starts - la.factored_starts,
     );
+    // BREAKTHROUGH-1-RESTART R1-b (`BAANDI_RESTART_KEEP`).
+    put("dist.lean_contractions", lb.contractions - la.contractions);
+    put(
+        "dist.keep_contractions",
+        lb.keep_contractions - la.keep_contractions,
+    );
+    put(
+        "dist.kept_directions",
+        lb.kept_directions - la.kept_directions,
+    );
+    put("dist.keep_dropped", lb.keep_dropped - la.keep_dropped);
+    put("dist.keep_fallbacks", lb.keep_fallbacks - la.keep_fallbacks);
     let (t0, t1) = (&a.stages, &b.stages);
     for (k, v) in [
         ("stage.reduced", t1.reduced - t0.reduced),

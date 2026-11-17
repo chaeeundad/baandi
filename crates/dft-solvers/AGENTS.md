@@ -265,3 +265,18 @@ unchanged. Counters `lean_algebra_stats()`, reduction site `lean_border`. Tests
 `tests/distributed_lean_algebra.rs` (ranks 1 to 4: class against the orthonormal
 path, rank decisions equal to the serial lean solver, fallbacks, bits),
 dft-engine `tests/m2_lean_algebra.rs`. Design docs/design/mpi-overlap-davidson.md.
+
+## History-preserving restart (BREAKTHROUGH-1-RESTART, 2026-11-17; REJECT, default off)
+
+`BAANDI_RESTART_KEEP=off|1|2|4|8|b/8|b/4|b/2` (`RestartKeep`, `ResearchOptions::restart_keep`,
+`DistributedTuning::restart_keep`): at a lean contraction (serial lean solver and the
+distributed lean algebra) keep up to r previous Ritz vectors of the unconverged roots
+minus their X component, P = V (D - C A) and H P = (H V)(D - C A) from the contraction
+rotation (no H application, no extra reduction). History and the coefficient-space
+selection live in `LeanScratch` (`KeepScratch`: `keep_record`, `keep_identity`,
+`keep_directions`); rank floor `DEPENDENCE_TOLERANCE`, pivot rule `PIVOT_RATIO_MIN`, the
+new basis [X | P] is factored with the same rule and falls back to X alone. Off is
+bit-identical, and so is any solve without a contraction. Counters
+`lean_counters().keep_*`, `lean_algebra_stats().{contractions, keep_*}`. Tests
+`tests/restart_keep.rs` (full grids ignored in debug; release command in the file).
+Results: ledger RESTART-KEEP-*, design docs/design/restart-keep.md.

@@ -588,6 +588,10 @@ pub struct DistributedTuning {
     /// selected-root rotation on those solves; strict solves are unchanged.
     /// Rounding class.
     pub lean_algebra: bool,
+    /// `BAANDI_RESTART_KEEP` (ticket BREAKTHROUGH-1-RESTART, R1-b): previous
+    /// directions kept at a contraction of the lean algebra path
+    /// (`RestartKeep`; default off = the plain restart, bit for bit).
+    pub restart_keep: crate::real_davidson::RestartKeep,
 }
 
 /// In-panel reduction scheme of the distributed panel Gram-Schmidt
@@ -641,6 +645,7 @@ impl DistributedTuning {
                 _ => PanelGs::Classic,
             },
             lean_algebra: on(Id::M2_LEAN_ALGEBRA),
+            restart_keep: crate::real_davidson::RestartKeep::from_env(),
         }
     }
     /// The tuning of the calling thread: the test override when set

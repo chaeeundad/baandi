@@ -156,6 +156,52 @@ pub struct ResearchOptions {
     /// product V^T [E | H E] (one stream of the basis instead of two). Bit-
     /// identical on the aarch64 pure kernel, rounding class elsewhere.
     pub lean_border_fused: bool,
+    /// BREAKTHROUGH-1-RESTART R1-b (`BAANDI_RESTART_KEEP`, default off): previous
+    /// directions kept at a lean contraction restart (`RestartKeep`).
+    pub restart_keep: RestartKeep,
+}
+
+/// R1-b history-preserving restart (`BAANDI_RESTART_KEEP=off|1|2|4|8|b/8|b/4|b/2`,
+/// docs/design/restart-keep.md): the most previous directions a lean
+/// contraction restart keeps beside the Ritz vectors. A count, or a fraction of
+/// the band count (at least one); no material or system rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RestartKeep {
+    /// The plain restart (X and H X only), bit for bit.
+    #[default]
+    Off,
+    /// At most this many directions.
+    Count(usize),
+    /// At most bands / divisor directions (at least one).
+    Fraction(usize),
+}
+impl RestartKeep {
+    /// The switch value of this process.
+    pub fn from_env() -> Self {
+        Self::parse(dft_numerics::switches::choice(
+            dft_numerics::switches::Id::RESTART_KEEP,
+        ))
+    }
+    /// Parse a switch value (`off` and unknown values give `Off`).
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "b/8" => Self::Fraction(8),
+            "b/4" => Self::Fraction(4),
+            "b/2" => Self::Fraction(2),
+            v => match v.parse::<usize>() {
+                Ok(c) if c > 0 => Self::Count(c),
+                _ => Self::Off,
+            },
+        }
+    }
+    /// The most directions kept for `bands` bands (0 when off).
+    pub fn directions(self, bands: usize) -> usize {
+        match self {
+            Self::Off => 0,
+            Self::Count(c) => c,
+            Self::Fraction(d) => (bands / d.max(1)).max(1),
+        }
+    }
 }
 impl Default for ResearchOptions {
     /// Every research switch off (B1 off, margin 0.5, automatic rows).
@@ -177,6 +223,7 @@ impl Default for ResearchOptions {
             lean: false,
             lean_proj_cache: false,
             lean_border_fused: false,
+            restart_keep: RestartKeep::Off,
         }
     }
 }
@@ -226,6 +273,7 @@ impl ResearchOptions {
             lean_border_fused: dft_numerics::switches::choice(
                 dft_numerics::switches::Id::LEAN_BORDER,
             ) == "fused",
+            restart_keep: RestartKeep::from_env(),
         }
     }
 }
@@ -662,6 +710,14 @@ pub struct LeanCounters {
     /// H again to its own columns; expected zero, like the fallback rate).
     pub fused_borders: u64,
     pub fused_wasted_columns: u64,
+    /// R1-b (`BAANDI_RESTART_KEEP`): contractions that kept at least one
+    /// previous direction, directions kept, candidates dropped by the pivot
+    /// rule in coefficient space, and contractions whose new basis failed the
+    /// factor test and fell back to X alone.
+    pub keep_contractions: u64,
+    pub kept_directions: u64,
+    pub keep_dropped: u64,
+    pub keep_fallbacks: u64,
 }
 impl LeanCounters {
     /// Stage-2 fallbacks (basis orthonormalizations) per append (the
@@ -708,8 +764,12 @@ pub(crate) enum LeanCount {
     ProjCacheColumns = 21,
     FusedBorders = 22,
     FusedWasted = 23,
+    KeepContractions = 24,
+    KeptDirections = 25,
+    KeepDropped = 26,
+    KeepFallbacks = 27,
 }
-static LEAN_COUNTS: [AtomicU64; 24] = [const { AtomicU64::new(0) }; 24];
+static LEAN_COUNTS: [AtomicU64; 28] = [const { AtomicU64::new(0) }; 28];
 /// Smallest pivot ratio, as f64 bits (positive floats order like their bits).
 static LEAN_PIVOT_MIN: AtomicU64 = AtomicU64::new(0x3ff0_0000_0000_0000);
 #[inline]
@@ -758,5 +818,9 @@ pub fn lean_counters() -> LeanCounters {
         proj_cache_columns: g(LeanCount::ProjCacheColumns),
         fused_borders: g(LeanCount::FusedBorders),
         fused_wasted_columns: g(LeanCount::FusedWasted),
+        keep_contractions: g(LeanCount::KeepContractions),
+        kept_directions: g(LeanCount::KeptDirections),
+        keep_dropped: g(LeanCount::KeepDropped),
+        keep_fallbacks: g(LeanCount::KeepFallbacks),
     }
 }

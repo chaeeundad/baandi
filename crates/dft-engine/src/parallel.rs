@@ -71,6 +71,9 @@ fn timed<R>(op: usize, values: usize, f: impl FnOnce() -> R) -> R {
     }
     // Per-thread mirror for the phase profile (`crate::profile`).
     dft_numerics::stage_clock::local::add(dft_numerics::stage_clock::local::COLLECTIVE + op, ns);
+    // Per run stage and inside distributed H applications (BAANDI_DAVIDSON_STAGES=on;
+    // off: one relaxed load).
+    dft_numerics::work_timers::collective(op, ns);
     r
 }
 

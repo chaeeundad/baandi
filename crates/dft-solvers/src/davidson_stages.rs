@@ -369,6 +369,33 @@ fn nanos(t: Instant) -> u64 {
     u64::try_from(t.elapsed().as_nanos()).unwrap_or(u64::MAX)
 }
 
+/// Distributed solver (`distributed_davidson::STAGES` index `dist`, `ns` of one
+/// stage entry, 0 count-only): charge the matching serial stage of the current
+/// run stage, so that `stage_seconds_by_run_stage` covers the MPI path too.
+/// Mapping: reduced_gram -> reduced, reduced_eigen -> eigen, rotate, residual,
+/// orthonormalize, apply_total -> h_apply, precondition; solver_total counts
+/// one timed solve. The other distributed labels have no serial counterpart
+/// (they stay in the phase profile). Called only with the work timers on
+/// (`BAANDI_DAVIDSON_STAGES=on`); not mirrored to the per-thread profile slots
+/// (the profile reads the distributed slots already).
+pub(crate) fn add_distributed(dist: usize, ns: u64) {
+    let stage = match dist {
+        0 => Stage::Reduced,
+        1 => Stage::Eigen,
+        2 => Stage::Rotate,
+        3 => Stage::Residual,
+        4 => Stage::Orthonormalize,
+        5 => Stage::HApply,
+        12 => Stage::Precondition,
+        15 => {
+            TIMED_SOLVES[run_stage()].fetch_add(1, Relaxed);
+            return;
+        }
+        _ => return,
+    };
+    STAGE_NANOS[run_stage()][stage as usize].fetch_add(ns, Relaxed);
+}
+
 /// Cumulative stage timers of this process, seconds. All zero unless some solve
 /// ran with `BAANDI_DAVIDSON_STAGES=on`.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

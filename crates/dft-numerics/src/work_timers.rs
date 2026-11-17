@@ -139,8 +139,20 @@ pub enum Slot {
     /// REUSE-PSI: orbital columns carried by them.
     KeptColumns = 20,
 }
+/// Number of named slots (the [`Slot`] enum). The indices after them are the
+/// collective slots of the distributed path ([`collective`]).
+const NAMED_SLOTS: usize = 21;
+/// Collectives counted per run stage (index order of [`COLLECTIVE_LABELS`]).
+pub const COLLECTIVES: usize = 5;
+/// Collective labels, in the order of the engine's collective counters.
+pub const COLLECTIVE_LABELS: [&str; COLLECTIVES] =
+    ["allgatherv", "tree_sum", "bcast", "alltoall", "barrier"];
+const COLL_CALLS: usize = NAMED_SLOTS;
+const COLL_NS: usize = COLL_CALLS + COLLECTIVES;
+const APPLY_COLL_CALLS: usize = COLL_NS + COLLECTIVES;
+const APPLY_COLL_NS: usize = APPLY_COLL_CALLS + COLLECTIVES;
 /// Number of slots.
-pub const SLOTS: usize = 21;
+pub const SLOTS: usize = APPLY_COLL_NS + COLLECTIVES;
 
 static COUNTS: [[AtomicU64; SLOTS]; RUN_STAGES] =
     [const { [const { AtomicU64::new(0) }; SLOTS] }; RUN_STAGES];
@@ -148,7 +160,11 @@ static COUNTS: [[AtomicU64; SLOTS]; RUN_STAGES] =
 /// Add `value` to `slot` of the current run stage.
 #[inline]
 pub fn add(slot: Slot, value: u64) {
-    COUNTS[run_stage()][slot as usize].fetch_add(value, Relaxed);
+    add_index(slot as usize, value);
+}
+#[inline]
+fn add_index(slot: usize, value: u64) {
+    COUNTS[run_stage()][slot].fetch_add(value, Relaxed);
 }
 /// `Some(now)` when the timers are on.
 #[inline]
@@ -251,6 +267,15 @@ pub struct WorkTimes {
     pub kept_forward: f64,
     pub kept_transforms: u64,
     pub kept_columns: u64,
+    /// Distributed path: collective calls and seconds of the run stage (every
+    /// collective issued while the timers were on; index order of
+    /// [`COLLECTIVE_LABELS`]). Seconds 0 with `BAANDI_STAGE_TIMERS=off`.
+    pub coll_calls: [u64; COLLECTIVES],
+    pub coll: [f64; COLLECTIVES],
+    /// The subset issued inside distributed H applications (mirror alltoall,
+    /// FFT transposes, projector tree sum).
+    pub apply_coll_calls: [u64; COLLECTIVES],
+    pub apply_coll: [f64; COLLECTIVES],
 }
 impl WorkTimes {
     /// Element-wise sum.
@@ -277,6 +302,12 @@ impl WorkTimes {
             kept_forward: self.kept_forward + o.kept_forward,
             kept_transforms: self.kept_transforms + o.kept_transforms,
             kept_columns: self.kept_columns + o.kept_columns,
+            coll_calls: std::array::from_fn(|i| self.coll_calls[i] + o.coll_calls[i]),
+            coll: std::array::from_fn(|i| self.coll[i] + o.coll[i]),
+            apply_coll_calls: std::array::from_fn(|i| {
+                self.apply_coll_calls[i] + o.apply_coll_calls[i]
+            }),
+            apply_coll: std::array::from_fn(|i| self.apply_coll[i] + o.apply_coll[i]),
         }
     }
 }
@@ -309,6 +340,167 @@ pub fn snapshot() -> [WorkTimes; RUN_STAGES] {
             kept_forward: s(Slot::KeptForwardNs),
             kept_transforms: g(Slot::KeptTransforms),
             kept_columns: g(Slot::KeptColumns),
+            coll_calls: std::array::from_fn(|i| COUNTS[stage][COLL_CALLS + i].load(Relaxed)),
+            coll: std::array::from_fn(|i| COUNTS[stage][COLL_NS + i].load(Relaxed) as f64 * 1e-9),
+            apply_coll_calls: std::array::from_fn(|i| {
+                COUNTS[stage][APPLY_COLL_CALLS + i].load(Relaxed)
+            }),
+            apply_coll: std::array::from_fn(|i| {
+                COUNTS[stage][APPLY_COLL_NS + i].load(Relaxed) as f64 * 1e-9
+            }),
         }
     })
+}
+
+// ---------------------------------------------------------------------------
+// Distributed (MPI M2) path. Gate: the work timers (`BAANDI_DAVIDSON_STAGES=on`)
+// for every count, and in addition the stage-clock time mode
+// (`BAANDI_STAGE_TIMERS`, default on) for every clock read, so that
+// `BAANDI_STAGE_TIMERS=off` keeps the distributed path count-only like its
+// other counters. With the work timers off each site is one relaxed load and a
+// predicted branch per call (block applications and collectives, never inside
+// a loop over grid points or rows); nothing numerical reads these values.
+
+thread_local! {
+    /// Set on the calling (rank) thread while a timed distributed H
+    /// application is in progress: collectives issued meanwhile are also
+    /// charged to the in-apply collective slots.
+    static IN_APPLY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// One collective of the distributed path (called by the engine's collective
+/// wrapper; `op` in [`COLLECTIVE_LABELS`] order, `ns` 0 count-only). No-op when
+/// the work timers are off.
+#[inline]
+pub fn collective(op: usize, ns: u64) {
+    if !enabled() || op >= COLLECTIVES {
+        return;
+    }
+    add_index(COLL_CALLS + op, 1);
+    add_index(COLL_NS + op, ns);
+    if IN_APPLY.with(|f| f.get()) {
+        add_index(APPLY_COLL_CALLS + op, 1);
+        add_index(APPLY_COLL_NS + op, ns);
+    }
+}
+
+/// Kind of a distributed transform batch outside the H application.
+#[derive(Debug, Clone, Copy)]
+pub enum DistKind {
+    /// Band densities (one inverse pair transform per pair).
+    Density,
+    /// Potential change on kept planes (MPI-KEPT-START): one forward transform
+    /// per pair; the inverse transforms of the pairs that were not kept are
+    /// inside the same seconds (their count is in the phase profile).
+    Kept,
+}
+
+/// A distributed transform batch of `pairs` pair transforms carrying `columns`
+/// orbital columns, timed from `start` (the site's stage clock; `None`
+/// count-only). No-op when the work timers are off.
+#[inline]
+pub fn dist_transforms(kind: DistKind, start: Option<Instant>, pairs: usize, columns: usize) {
+    if !enabled() {
+        return;
+    }
+    let (ns, n, c) = match kind {
+        DistKind::Density => (
+            Slot::DensityNs,
+            Slot::DensityTransforms,
+            Slot::DensityColumns,
+        ),
+        DistKind::Kept => (Slot::KeptForwardNs, Slot::KeptTransforms, Slot::KeptColumns),
+    };
+    if let Some(t) = start {
+        add(ns, nanos(t));
+    }
+    add(n, pairs as u64);
+    add(c, columns as u64);
+}
+
+/// Part of a distributed H application ([`DistApply::lap`]).
+#[derive(Debug, Clone, Copy)]
+pub enum DistPart {
+    /// Mirror exchange, pack, distributed pair FFTs with their transposes and
+    /// the local potential, mirror-h exchange, unpack and kinetic term.
+    Local,
+    /// Nonlocal projection P^T X (local product and the tree sum).
+    Projection,
+    /// Nonlocal coupling, P W and the image update.
+    Back,
+}
+
+/// Recorder of one distributed H application: the whole call, its local,
+/// projection and back parts, and the pair FFTs. With the work timers off it
+/// holds `on == false` and every method returns at once (no clock read).
+pub struct DistApply {
+    on: bool,
+    start: Option<Instant>,
+    last: Option<Instant>,
+}
+impl DistApply {
+    /// Begin an application (marks the calling thread as inside it for the
+    /// collective attribution until `finish` or drop).
+    #[inline]
+    pub fn begin() -> Self {
+        let on = enabled();
+        let start = if on {
+            IN_APPLY.with(|f| f.set(true));
+            crate::stage_clock::start()
+        } else {
+            None
+        };
+        Self {
+            on,
+            start,
+            last: start,
+        }
+    }
+    /// Charge the time since the previous lap to `part`.
+    #[inline]
+    pub fn lap(&mut self, part: DistPart) {
+        if let Some(last) = self.last {
+            let now = Instant::now();
+            add(
+                match part {
+                    DistPart::Local => Slot::LocalNs,
+                    DistPart::Projection => Slot::NonlocalProjectionNs,
+                    DistPart::Back => Slot::NonlocalBackNs,
+                },
+                u64::try_from((now - last).as_nanos()).unwrap_or(u64::MAX),
+            );
+            self.last = Some(now);
+        }
+    }
+    /// The distributed pair FFTs of this application (one inverse and one
+    /// forward pair transform each; transposes and the potential multiply
+    /// included, no phase split), timed from the site's stage clock.
+    #[inline]
+    pub fn pair_fft(&self, start: Option<Instant>, pairs: usize, columns: usize) {
+        if self.on {
+            if let Some(t) = start {
+                add(Slot::PairUnsplitNs, nanos(t));
+            }
+            add(Slot::PairTransforms, pairs as u64);
+            add(Slot::PairColumns, columns as u64);
+        }
+    }
+    /// End of the application of `columns` columns.
+    #[inline]
+    pub fn finish(self, columns: usize) {
+        if self.on {
+            if let Some(t) = self.start {
+                add(Slot::ApplyNs, nanos(t));
+            }
+            add(Slot::ApplyCalls, 1);
+            add(Slot::ApplyColumns, columns as u64);
+        }
+    }
+}
+impl Drop for DistApply {
+    fn drop(&mut self) {
+        if self.on {
+            IN_APPLY.with(|f| f.set(false));
+        }
+    }
 }

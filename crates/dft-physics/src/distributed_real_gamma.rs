@@ -540,6 +540,12 @@ impl DistributedRealHamiltonian {
             out[c * points + p] = weights[c] * v * v / volume
         })?;
         stage_add(Stage::Density, start);
+        dft_numerics::work_timers::dist_transforms(
+            dft_numerics::work_timers::DistKind::Density,
+            start,
+            x.cols().div_ceil(2),
+            x.cols(),
+        );
         bump(Count::Densities, 1);
         Ok(())
     }
@@ -584,6 +590,12 @@ impl DistributedRealHamiltonian {
             out[p] += weights[c] * v * v / volume
         })?;
         stage_add(Stage::Density, start);
+        dft_numerics::work_timers::dist_transforms(
+            dft_numerics::work_timers::DistKind::Density,
+            start,
+            x.cols().div_ceil(2),
+            x.cols(),
+        );
         bump(Count::Densities, 1);
         Ok(())
     }
@@ -831,6 +843,8 @@ impl DistributedRealHamiltonian {
         let pairs = m.div_ceil(2);
         let local_len = self.fft.local_len();
         let xs = x.as_slice();
+        // h_apply parts (BAANDI_DAVIDSON_STAGES=on; off: no clock, no-op).
+        let mut parts = dft_numerics::work_timers::DistApply::begin();
 
         // (1) mirror rows to the ranks that own the minus positions.
         let t0 = dft_numerics::stage_clock::start();
@@ -871,16 +885,19 @@ impl DistributedRealHamiltonian {
             }
         }
         stage_add(Stage::Fft, t0);
+        parts.pair_fft(t0, pairs, m);
         bump(Count::InversePairs, pairs);
         bump(Count::ForwardPairs, pairs);
         // (3) mirror h back, unpack; kinetic term.
         self.mirror_back_and_unpack(comm, m, y, Some(xs))?;
+        parts.lap(dft_numerics::work_timers::DistPart::Local);
 
         // Nonlocal: P^T X local + tree_sum, replicated coupling, P W local.
         let t0 = dft_numerics::stage_clock::start();
         let count = self.count;
         if count > 0 {
             self.projections_reduced(comm, x)?;
+            parts.lap(dft_numerics::work_timers::DistPart::Projection);
             for atom in &self.coupling {
                 for band in 0..m {
                     for j in 0..atom.count {
@@ -922,6 +939,8 @@ impl DistributedRealHamiltonian {
             }
         }
         stage_add(Stage::Nonlocal, t0);
+        parts.lap(dft_numerics::work_timers::DistPart::Back);
+        parts.finish(m);
         COUNTS[if self.batched {
             Count::BatchedApplies
         } else {
@@ -1080,6 +1099,12 @@ impl DistributedRealHamiltonian {
             planes,
         )?;
         stage_add(Stage::Fft, t0);
+        dft_numerics::work_timers::dist_transforms(
+            dft_numerics::work_timers::DistKind::Kept,
+            t0,
+            pairs,
+            m,
+        );
         bump(Count::InversePairs, pairs - kept_pairs);
         bump(Count::ForwardPairs, pairs);
         bump(Count::KeptPlanePairs, kept_pairs);

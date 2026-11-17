@@ -657,3 +657,16 @@ lib `block_cholesky_qr_matches_gram_schmidt_and_falls_back_together`; physics
 `setup_memo_identity::ionic_local_row_blocks_are_bit_identical_for_every_rank_count`,
 
 lib `ewald::tests`. Ledger INIT-*.
+
+## M2 Davidson stage and h_apply timers (M2-STAGE-TIMERS, 2026-11-18)
+
+`BAANDI_DAVIDSON_STAGES=on` (with `BAANDI_STAGE_TIMERS=on` for the clocks) fills
+the serial `davidson_stages` buckets and `dft_numerics::work_timers` on the M2
+path: `distributed_davidson::stage_add` forwards to
+`davidson_stages::add_distributed`, the distributed operator records
+`work_timers::DistApply` laps (local / projection / back) and
+`dist_transforms` (density, kept), and `parallel::timed` charges every
+collective to `work_timers::collective` (per run stage, and separately while a
+distributed apply is in progress). dft-cli merges the block over ranks (max,
+`min_over_ranks`). Off: one relaxed load per call site, no clock. Test
+`tests/m2_stage_timers.rs`.

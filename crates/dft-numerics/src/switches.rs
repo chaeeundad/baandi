@@ -270,6 +270,8 @@ table! {
     M2_ATOMIC: Kind::Choice { allowed: &["replicated", "split"], default: "split" }, "split",
         "replicated, split",
         "atomic start on the M2 path: replicated, or split (span columns, two-pass Gram-Schmidt first passes, H Q and the Gram columns split over ranks with one broadcast per column and one allgatherv; Gram-Schmidt bit-identical, Gram block GEMM rounding class)";
+    M2_ATOMIC_BLOCK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "INIT-SCALE: with M2_ATOMIC=split, every rank fills its contiguous block of span rows (same elementwise arithmetic) and the span is orthonormalized by a row-distributed CholQR2 (local Gram GEMM, one tree_sum, replicated Cholesky and triangular inverse, local update; twice; one allgatherv of the rows) instead of the column-cyclic two-pass Gram-Schmidt whose second pass is a serial chain over the columns; falls back to the split Gram-Schmidt when a pivot is below the dependence guard or data is nonfinite; rounding class (span and trajectory change)";
     // Replicated grid stages outside the solve (ticket MPI-REMAINING, docs/performance/mpi-remaining.md); default off.
     STOP_METRIC: Kind::Choice { allowed: &["fft", "kept"], default: "kept" }, "kept", "fft, kept",
         "standard stop-rule Coulomb estimate E_H[rho_out - rho_in]: fft (transform the residual forward and back on the full grid) or kept (Parseval sum over the map's own Fourier coefficients of rho_in, kept from the Hartree potential, and rho_out, kept from the energy audit; no FFT; falls back to fft when a density was clamped or the kept coefficients do not belong to the two densities; rounding class of the estimate only)";

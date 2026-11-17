@@ -249,5 +249,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::M2_LAYOUT_CACHE), Value::Choice("off"));
     // ISSUE-20: lazy serial operator of M2 states, off until dev08.
     assert_eq!(value(Id::M2_LAZY_SERIAL), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 98);
+    assert_eq!(TABLE.len(), 99);
 }

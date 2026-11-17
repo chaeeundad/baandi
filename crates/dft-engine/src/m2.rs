@@ -46,6 +46,11 @@ pub struct EngineTuning {
     /// `BAANDI_M2_ATOMIC=split`: atomic-start span, Gram-Schmidt first passes,
     /// H Q and Gram columns split over ranks.
     pub atomic_split: bool,
+    /// `BAANDI_M2_ATOMIC_BLOCK=on` (default off, rounding class): with
+    /// `atomic_split`, the span is filled by row blocks and orthonormalized by
+    /// a row-distributed CholQR2 instead of the column-cyclic two-pass
+    /// Gram-Schmidt (whose second pass is a serial chain over the columns).
+    pub atomic_block: bool,
 }
 impl EngineTuning {
     pub fn from_env() -> Self {
@@ -53,6 +58,7 @@ impl EngineTuning {
         Self {
             screen_dist: choice(Id::M2_SCREEN) == "dist",
             atomic_split: choice(Id::M2_ATOMIC) == "split",
+            atomic_block: choice(Id::M2_ATOMIC_BLOCK) == "on",
         }
     }
 }
@@ -369,8 +375,14 @@ pub(crate) enum Count {
     /// Lazy starts whose rows did not match the operator on some rank (then
     /// gathered and packed; expected 0).
     LazyStartMismatches,
+    /// `BAANDI_M2_ATOMIC_BLOCK=on`: atomic starts orthonormalized by the
+    /// row-distributed CholQR2.
+    AtomicBlockStarts,
+    /// Block attempts that fell back to the split Gram-Schmidt (a rank could
+    /// not fill its rows, a pivot below the dependence guard, nonfinite data).
+    AtomicBlockFallbacks,
 }
-const COUNT_NAMES: [&str; 20] = [
+const COUNT_NAMES: [&str; 22] = [
     "density_builds",
     "xc_evaluations",
     "nonlocal_energy_audits",
@@ -391,8 +403,13 @@ const COUNT_NAMES: [&str; 20] = [
     "lazy_starts",
     "lazy_materializations",
     "lazy_start_mismatches",
+    "atomic_block_starts",
+    "atomic_block_fallbacks",
 ];
-static COUNTS: [AtomicUsize; 20] = [const { AtomicUsize::new(0) }; 20];
+static COUNTS: [AtomicUsize; 22] = [const { AtomicUsize::new(0) }; 22];
+pub(crate) fn count_atomic_block_fallback() {
+    count(Count::AtomicBlockFallbacks);
+}
 pub(crate) fn count_max(c: Count, n: usize) {
     COUNTS[c as usize].fetch_max(n, Ordering::Relaxed);
 }

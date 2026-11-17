@@ -42,8 +42,9 @@ pub trait DistributedRealOperator {
 
 mod workspace;
 pub use workspace::{
-    DistributedDavidsonWorkspace, LeanAlgebraStats, WorkspaceStats, lean_algebra_stats,
-    release_workspace, set_iteration_probe, start_gram_stats, workspace_stats,
+    DistributedDavidsonWorkspace, LeanAlgebraStats, ScratchAllocationStats, WorkspaceStats,
+    lean_algebra_stats, release_workspace, scratch_allocation_stats, set_iteration_probe,
+    set_scratch_allocation_profile, start_gram_stats, workspace_stats,
 };
 
 fn comm_error(e: dft_mpi::MpiError) -> SolverError {
@@ -437,7 +438,7 @@ impl<C: Collective> Collective for Counted<'_, C> {
 struct ApplyAgreement<'a, C: Collective> {
     inner: &'a C,
     failed: std::cell::Cell<bool>,
-    scratch: std::cell::RefCell<Vec<f64>>,
+    scratch: workspace::AgreementScratch,
 }
 impl<C: Collective> Collective for ApplyAgreement<'_, C> {
     fn rank(&self) -> usize {
@@ -470,7 +471,7 @@ impl<C: Collective> Collective for ApplyAgreement<'_, C> {
     }
     fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
         if self.failed.get() && !local.is_empty() {
-            let mut input = self.scratch.borrow_mut();
+            let mut input = self.scratch.buffer.borrow_mut();
             input[..local.len()].copy_from_slice(local);
             input[0] = f64::NAN;
             self.inner.tree_sum_f64(&input[..local.len()], out)?;
@@ -1604,10 +1605,11 @@ impl crate::RealDavidson {
             .max(self.bands.saturating_mul(capacity_per_band))
             .min(n);
         let payload = 2 * cap * cap + 2 * cap + 1;
+        let persistent = tuning.workspace || tuning.selected_roots || tuning.lean_algebra;
         let agreement = ApplyAgreement {
             inner: comm,
             failed: std::cell::Cell::new(false),
-            scratch: std::cell::RefCell::new(vec![0.0; payload]),
+            scratch: workspace::AgreementScratch::acquire(payload, persistent),
         };
         stage_add(STAGE_SETUP, t_setup);
         if tuning.workspace || tuning.selected_roots || tuning.lean_algebra {

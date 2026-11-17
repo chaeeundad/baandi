@@ -223,6 +223,7 @@ pub(super) struct Bufs<'a> {
     pub reduced: &'a mut RealMatrix,
     pub coefficients: &'a mut RealMatrix,
     pub values: &'a mut Vec<f64>,
+    pub previous: &'a mut Vec<f64>,
     pub vectors: &'a mut RealMatrix,
     pub rotated: &'a mut RealMatrix,
     pub residual: &'a mut RealMatrix,
@@ -433,6 +434,7 @@ pub(super) fn run<C: Collective>(
         reduced,
         coefficients,
         values,
+        previous,
         vectors,
         rotated,
         residual,
@@ -489,7 +491,7 @@ pub(super) fn run<C: Collective>(
     let buffer: Vec<bool> = (0..bands).map(|j| j >= policy.strict_bands).collect();
     let mut history = Vec::with_capacity(solver.max_iterations);
     let (mut restarts, mut contractions) = (0usize, 0usize);
-    let mut previous = vec![f64::NAN; bands];
+    let previous = prepare_previous(previous, bands);
     let mut max_basis = 0usize;
     band_residuals.clear();
     band_residuals.resize(bands, 0.0);

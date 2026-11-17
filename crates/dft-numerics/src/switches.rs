@@ -360,6 +360,8 @@ table! {
         default: if crate::MKL_BACKEND { "pruned" } else { "grid" },
     }, if crate::MKL_BACKEND { "pruned" } else { "grid" }, "grid, pruned",
         "pair FFT plan of MKL builds (pruned: stick lanes)";
+    SPIN_SHARE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "share exactly degenerate fixed-sector standard spin solves (bit-identical effective potentials and occupations; default off pending dev08)";
     // CLI (dft-cli).
     CUTOFF_LADDER: Kind::Override { valid: cutoff_ladder_valid }, "config", "off, on, fraction in (0, 1)",
         "overrides scf.cutoff_ladder / fraction of the input file";

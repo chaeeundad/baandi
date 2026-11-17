@@ -128,6 +128,7 @@ fn legacy_defaults_are_unchanged() {
         Id::PROJECT_WIDE,
         Id::B1_NARROW,
         Id::REFERENCE_STRICT,
+        Id::SPIN_SHARE,
         Id::M2_B5,
         Id::LEAN_PROJ_CACHE,
         Id::PACK_FIXED,
@@ -239,5 +240,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::PHASE_PROFILE), Value::Choice("off"));
     assert_eq!(value(Id::FIRST_BLOCK), Value::Choice("off"));
     assert_eq!(value(Id::SNAPSHOT_DIR), Value::Raw(None));
-    assert_eq!(TABLE.len(), 92);
+    assert_eq!(TABLE.len(), 93);
 }

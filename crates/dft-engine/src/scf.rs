@@ -1405,7 +1405,13 @@ impl ScfProblem {
             options.threads,
             &pool,
             |_, point| {
-                let basis = options.basis(cell, point.fractional, 1.0)?;
+                // INIT-REUSE: the exact Gamma point reuses the Gamma basis built
+                // above (the same call with the same arguments).
+                let basis = if point.fractional.map(f64::to_bits) == [0; 3] {
+                    gamma.clone()
+                } else {
+                    options.basis(cell, point.fractional, 1.0)?
+                };
                 // The solvers apply the configured per-band capacity floor, so use
                 // the same effective capacity instead of the raw option.
                 if !bands_fit_subspace(
@@ -1419,9 +1425,12 @@ impl ScfProblem {
                     ));
                 }
                 let k_grid = FftGridSpec::new(&basis, &density_basis, Some(grid.dims()))?;
-                let hamiltonian = Hamiltonian::new(
-                    cell,
+                // INIT-REUSE: the k grid is the Hamiltonian's grid (same basis,
+                // same density sphere vectors, same dims); passing it avoids
+                // building the density sphere again per k state.
+                let hamiltonian = Hamiltonian::new_with_grid(
                     &basis,
+                    k_grid.clone(),
                     ionic_real.clone(),
                     NonlocalOperator::new_with_rule(
                         &basis,
@@ -1501,7 +1510,7 @@ impl ScfProblem {
             .collect();
         let coulomb = options
             .standard
-            .map(|_| CoulombMetric::new(cell, &options, grid.dims()))
+            .map(|_| CoulombMetric::with_sphere(cell, &density_basis, grid.dims()))
             .transpose()?;
         let force_model = crate::force_identity::ModelDescription::new(
             cell,

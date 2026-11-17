@@ -161,3 +161,18 @@ change only (no kinetic, no nonlocal), kept pairs forward-transformed from their
 slabs, the rest both ways; `potential()` accessor. Counters
 `inverse_pair_transforms`, `forward_pair_transforms`, `kept_plane_pairs`,
 `potential_change_columns`. Test `potential_change_from_kept_planes_matches_plain_apply`.
+
+## Packed projector table and grid reuse (INIT-PACKED / INIT-REUSE, 2026-11-18)
+
+`NonlocalOperator` stores every atom's projector columns once, in one
+column-major table (`rows` x channels, atom order) shared through an `Arc`;
+`AtomProjectors::columns()` returns a borrowed `ProjectorColumns` view
+(`len`, `iter`, `column(j)`, `[j]`). The P48C block path multiplies that table
+directly, so `set_block` only sets a flag and no second packed copy exists
+(`block_bytes` reports the shared table when the block path is on). The
+physical constructors fill the table directly (same products, same bits:
+`tests/setup_memo_identity.rs` compares against a verbatim old constructor);
+fixtures use `NonlocalOperator::from_columns`. `Hamiltonian::new_with_grid`
+takes the caller's k grid (checked in O(N_G) against `map_miller`) instead of
+building the density sphere again; test
+`new_with_grid_matches_new_and_checks_the_grid`.

@@ -150,16 +150,109 @@ pub fn ionic_local_rows(
 }
 /// A single atom's projector columns, ordered by radial index then m=-l..l.
 /// D is expanded only over channels with equal l and m.
+///
+/// INIT-PACKED: the columns of all atoms of one operator live in a single
+/// column-major table (`rows` x total channels, channels in atom order), the
+/// matrix the P48C block path multiplies. An atom holds a shared handle to
+/// that table and its channel range, so the block path reads the table itself
+/// instead of a second packed copy (same values, same bits).
+#[derive(Clone)]
 pub struct AtomProjectors {
-    columns: Vec<Vec<Complex64>>,
+    table: Arc<Vec<Complex64>>,
+    rows: usize,
+    start: usize,
+    count: usize,
     coupling: Vec<f64>,
 }
 impl AtomProjectors {
-    pub fn columns(&self) -> &[Vec<Complex64>] {
-        &self.columns
+    /// This atom's projector columns (each `rows` long, the basis length).
+    pub fn columns(&self) -> ProjectorColumns<'_> {
+        ProjectorColumns {
+            data: &self.table[self.start * self.rows..(self.start + self.count) * self.rows],
+            rows: self.rows,
+            count: self.count,
+        }
     }
     pub fn coupling_hartree(&self) -> &[f64] {
         &self.coupling
+    }
+}
+/// Borrowed view of one atom's projector columns (contiguous, column-major).
+#[derive(Clone, Copy)]
+pub struct ProjectorColumns<'a> {
+    data: &'a [Complex64],
+    rows: usize,
+    count: usize,
+}
+impl<'a> ProjectorColumns<'a> {
+    /// Number of channels.
+    pub fn len(&self) -> usize {
+        self.count
+    }
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+    /// Channel `j` (panics when out of range, as slice indexing).
+    pub fn column(&self, j: usize) -> &'a [Complex64] {
+        assert!(j < self.count, "projector channel out of range");
+        &self.data[j * self.rows..(j + 1) * self.rows]
+    }
+    pub fn iter(&self) -> ProjectorColumnIter<'a> {
+        ProjectorColumnIter {
+            data: self.data,
+            rows: self.rows,
+            next: 0,
+            end: self.count,
+        }
+    }
+}
+impl std::ops::Index<usize> for ProjectorColumns<'_> {
+    type Output = [Complex64];
+    fn index(&self, j: usize) -> &[Complex64] {
+        self.column(j)
+    }
+}
+impl<'a> IntoIterator for ProjectorColumns<'a> {
+    type Item = &'a [Complex64];
+    type IntoIter = ProjectorColumnIter<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+impl<'a> IntoIterator for &ProjectorColumns<'a> {
+    type Item = &'a [Complex64];
+    type IntoIter = ProjectorColumnIter<'a>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+/// Iterator over the columns of `ProjectorColumns`.
+#[derive(Clone)]
+pub struct ProjectorColumnIter<'a> {
+    data: &'a [Complex64],
+    rows: usize,
+    next: usize,
+    end: usize,
+}
+impl<'a> Iterator for ProjectorColumnIter<'a> {
+    type Item = &'a [Complex64];
+    fn next(&mut self) -> Option<&'a [Complex64]> {
+        (self.next < self.end).then(|| {
+            self.next += 1;
+            &self.data[(self.next - 1) * self.rows..self.next * self.rows]
+        })
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.end - self.next, Some(self.end - self.next))
+    }
+}
+impl ExactSizeIterator for ProjectorColumnIter<'_> {}
+impl DoubleEndedIterator for ProjectorColumnIter<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        (self.next < self.end).then(|| {
+            self.end -= 1;
+            &self.data[self.end * self.rows..(self.end + 1) * self.rows]
+        })
     }
 }
 /// Band vectors sharing one pass over a projector column in `expectation_values`.
@@ -193,40 +286,90 @@ pub fn nonlocal_block_gate(basis_len: usize, projectors: usize) -> bool {
         >= NONLOCAL_BLOCK_GATE_BYTES
 }
 
-/// P48C packed projector matrix B (n x p, column-major, channels in atom
-/// order, each atom's channels as in `AtomProjectors::columns`). A copy of
-/// the existing columns made once at construction; no radial recomputation.
-struct BlockProjectors {
-    packed: Vec<Complex64>,
-    count: usize,
-}
-
 /// O(N_G * N_projectors) storage, never an N_G by N_G matrix.
+/// INIT-PACKED: one column-major table B (`rows` x p, channels in atom order,
+/// each atom's channels as in `AtomProjectors::columns`), shared by the
+/// per-band path (column views) and the P48C block path (the whole matrix).
 pub struct NonlocalOperator {
     basis: Vec<GVector>,
+    table: Arc<Vec<Complex64>>,
+    rows: usize,
     atoms: Vec<AtomProjectors>,
     max_channels: usize,
-    block: Option<BlockProjectors>,
+    /// P48C block path enabled (it reads `table` directly).
+    block: bool,
 }
 impl NonlocalOperator {
-    /// Shared tail of the constructors: the packed block matrix is built only
-    /// when the `BAANDI_NONLOCAL_BLOCK` mode selects the block path, so the
-    /// per-band path carries no copy.
-    fn assemble(basis: Vec<GVector>, atoms: Vec<AtomProjectors>, max_channels: usize) -> Self {
+    /// Shared tail of the constructors. `table` holds the columns of every
+    /// atom in order (`rows` per column); `atoms` gives each atom's channel
+    /// count and coupling. The block path is chosen by the
+    /// `BAANDI_NONLOCAL_BLOCK` mode.
+    fn assemble(
+        basis: Vec<GVector>,
+        table: Vec<Complex64>,
+        rows: usize,
+        atoms: Vec<(usize, Vec<f64>)>,
+        max_channels: usize,
+    ) -> Self {
+        let table = Arc::new(table);
+        let mut start = 0;
+        let atoms = atoms
+            .into_iter()
+            .map(|(count, coupling)| {
+                let atom = AtomProjectors {
+                    table: table.clone(),
+                    rows,
+                    start,
+                    count,
+                    coupling,
+                };
+                start += count;
+                atom
+            })
+            .collect();
+        assert_eq!(start * rows, table.len(), "projector table shape");
         let mut op = Self {
             basis,
+            table,
+            rows,
             atoms,
             max_channels,
-            block: None,
+            block: false,
         };
         op.set_block_mode(dft_numerics::switches::choice(
             dft_numerics::switches::Id::NONLOCAL_BLOCK,
         ));
         op
     }
+    /// Operator from explicit per-atom columns (each column `rows` long) and
+    /// row-major couplings, packed into the shared table in atom order. Test
+    /// fixtures and synthetic operators; the physical constructors fill the
+    /// table directly.
+    pub fn from_columns(
+        basis: Vec<GVector>,
+        atoms: Vec<(Vec<Vec<Complex64>>, Vec<f64>)>,
+        max_channels: usize,
+    ) -> Self {
+        let rows = atoms
+            .iter()
+            .flat_map(|(columns, _)| columns.first())
+            .map(Vec::len)
+            .next()
+            .unwrap_or(basis.len());
+        let mut table = Vec::new();
+        let mut meta = Vec::with_capacity(atoms.len());
+        for (columns, coupling) in atoms {
+            for col in &columns {
+                assert_eq!(col.len(), rows, "projector columns must share one length");
+                table.extend_from_slice(col);
+            }
+            meta.push((columns.len(), coupling));
+        }
+        Self::assemble(basis, table, rows, meta, max_channels)
+    }
     /// Total projector channels (columns of the packed matrix).
     pub fn projector_count(&self) -> usize {
-        self.atoms.iter().map(|a| a.columns.len()).sum()
+        self.atoms.iter().map(|a| a.count).sum()
     }
     /// Apply a `BAANDI_NONLOCAL_BLOCK` mode: `on` always uses the block path,
     /// `off` never, `auto` (any other value) uses it when
@@ -239,43 +382,35 @@ impl NonlocalOperator {
         };
         self.set_block(on);
     }
-    /// Enable or disable the P48C block path (builds or drops the packed copy
-    /// of the projector columns). Test and experiment hook; the engine uses the
-    /// `BAANDI_NONLOCAL_BLOCK` mode read at construction.
+    /// Enable or disable the P48C block path. INIT-PACKED: the block path
+    /// reads the shared projector table, so this only sets the flag (no copy).
+    /// Test and experiment hook; the engine uses the `BAANDI_NONLOCAL_BLOCK`
+    /// mode read at construction.
     pub fn set_block(&mut self, on: bool) {
-        if !on {
-            self.block = None;
-            return;
-        }
-        if self.block.is_some() {
-            return;
-        }
-        let n = self.basis.len();
-        let count = self.projector_count();
-        let mut packed = Vec::with_capacity(n * count);
-        for atom in &self.atoms {
-            for col in &atom.columns {
-                packed.extend_from_slice(&col[..n]);
-            }
-        }
-        self.block = Some(BlockProjectors { packed, count });
+        self.block = on;
     }
     /// Whether band blocks of width >= 2 use the P48C two-GEMM path.
     pub fn block_enabled(&self) -> bool {
-        self.block.is_some()
-    }
-    /// Bytes of the packed projector copy (zero when the block path is off).
-    pub fn block_bytes(&self) -> usize {
         self.block
-            .as_ref()
-            .map_or(0, |b| b.packed.len() * size_of::<Complex64>())
+    }
+    /// Bytes of the projector matrix the block path multiplies (zero when the
+    /// block path is off). Since INIT-PACKED this is the shared table itself,
+    /// not an additional copy.
+    pub fn block_bytes(&self) -> usize {
+        if self.block {
+            self.table.len() * size_of::<Complex64>()
+        } else {
+            0
+        }
     }
     /// Per-worker scratch of one band panel: projections and weights
     /// (p x 32 each) and the image (n x 32); zero when the block path is off.
     fn block_scratch_len(&self) -> usize {
-        self.block.as_ref().map_or(0, |b| {
-            (2 * b.count + self.basis.len()) * NONLOCAL_BAND_PANEL
-        })
+        if self.block {
+            (2 * self.projector_count() + self.basis.len()) * NONLOCAL_BAND_PANEL
+        } else {
+            0
+        }
     }
     /// Y += B D B^H X for one panel of `w` <= 32 bands: `x` and `y` are the
     /// contiguous n x w column-major panels. Pk = B^H X and the image B W are
@@ -289,11 +424,14 @@ impl NonlocalOperator {
         w: usize,
         scratch: &mut [Complex64],
     ) -> Result<(), HamiltonianError> {
-        let Some(block) = self.block.as_ref() else {
+        if !self.block {
             return Err(HamiltonianError::Shape);
-        };
+        }
         let n = self.basis.len();
-        let p = block.count;
+        let p = self.projector_count();
+        if self.rows != n || self.table.len() != n * p {
+            return Err(HamiltonianError::Shape);
+        }
         if x.len() != n * w || y.len() != n * w || w > NONLOCAL_BAND_PANEL {
             return Err(HamiltonianError::Shape);
         }
@@ -307,22 +445,14 @@ impl NonlocalOperator {
             &mut weights[..p * w],
             &mut image[..n * w],
         );
-        dft_numerics::linalg::complex_gemm_slices_into(
-            &block.packed,
-            n,
-            p,
-            true,
-            x,
-            w,
-            projections,
-        )
-        .map_err(|_| HamiltonianError::Shape)?;
+        dft_numerics::linalg::complex_gemm_slices_into(&self.table, n, p, true, x, w, projections)
+            .map_err(|_| HamiltonianError::Shape)?;
         for band in 0..w {
             let pk = &projections[band * p..(band + 1) * p];
             let wk = &mut weights[band * p..(band + 1) * p];
             let mut start = 0;
             for atom in &self.atoms {
-                let nc = atom.columns.len();
+                let nc = atom.count;
                 for i in 0..nc {
                     wk[start + i] = (0..nc)
                         .map(|j| atom.coupling[i * nc + j] * pk[start + j])
@@ -331,16 +461,8 @@ impl NonlocalOperator {
                 start += nc;
             }
         }
-        dft_numerics::linalg::complex_gemm_slices_into(
-            &block.packed,
-            n,
-            p,
-            false,
-            weights,
-            w,
-            image,
-        )
-        .map_err(|_| HamiltonianError::Shape)?;
+        dft_numerics::linalg::complex_gemm_slices_into(&self.table, n, p, false, weights, w, image)
+            .map_err(|_| HamiltonianError::Shape)?;
         for (out, v) in y.iter_mut().zip(image.iter()) {
             *out += v;
         }
@@ -356,6 +478,19 @@ impl NonlocalOperator {
         volume(volume_bohr3)?;
         let mut atoms = Vec::new();
         let mut max_channels = 0;
+        // Exact capacity: no reallocation while the table is filled.
+        let channels_total: usize = species
+            .iter()
+            .map(|s| {
+                s.positions_bohr.len()
+                    * s.potential
+                        .projectors()
+                        .iter()
+                        .map(|p| 2 * p.l() + 1)
+                        .sum::<usize>()
+            })
+            .sum();
+        let mut packed = Vec::with_capacity(channels_total * basis.momenta().len());
         for s in species {
             let pp = s.potential;
             let np = pp.projectors().len();
@@ -427,26 +562,22 @@ impl NonlocalOperator {
                     .iter()
                     .map(|g| phase(g.cartesian, r))
                     .collect::<Result<Vec<_>, _>>()?;
-                let columns: Vec<Vec<_>> = table
-                    .iter()
-                    .map(|col| {
-                        col.iter()
-                            .zip(&phases)
-                            .map(|(p, phase)| p * phase)
-                            .collect()
-                    })
-                    .collect();
-                if !columns.iter().flatten().all(finite) {
+                // INIT-PACKED: the atom's columns go straight into the shared
+                // table (the same products p * phase as the former columns).
+                let first = packed.len();
+                for col in &table {
+                    packed.extend(col.iter().zip(&phases).map(|(p, phase)| p * phase));
+                }
+                if !packed[first..].iter().all(finite) {
                     return Err(HamiltonianError::NonFinite);
                 }
-                atoms.push(AtomProjectors {
-                    columns,
-                    coupling: coupling.clone(),
-                });
+                atoms.push((nc, coupling.clone()));
             }
         }
         Ok(Self::assemble(
             basis.momenta().to_vec(),
+            packed,
+            basis.momenta().len(),
             atoms,
             max_channels,
         ))
@@ -457,11 +588,11 @@ impl NonlocalOperator {
     fn add(&self, x: &[Complex64], y: &mut [Complex64], scratch: &mut [Complex64]) {
         let (projections, weights) = scratch.split_at_mut(self.max_channels);
         for atom in &self.atoms {
-            let nc = atom.columns.len();
+            let nc = atom.count;
             if nc == 0 {
                 continue;
             }
-            for (p, col) in projections.iter_mut().zip(&atom.columns) {
+            for (p, col) in projections.iter_mut().zip(atom.columns()) {
                 *p = col.iter().zip(x).map(|(b, c)| b.conj() * c).sum();
             }
             for (i, weight) in weights[..nc].iter_mut().enumerate() {
@@ -472,7 +603,7 @@ impl NonlocalOperator {
             // Original loop structure (one pass over y per projector channel).
             // A 256-element blocked traversal (P10I) was measured 2.9x slower in
             // this function on dev08 (0.929 s versus 0.323 s, MKL T=1 si8).
-            for (col, &weight) in atom.columns.iter().zip(&weights[..nc]) {
+            for (col, &weight) in atom.columns().iter().zip(&weights[..nc]) {
                 for (out, b) in y.iter_mut().zip(col) {
                     *out += b * weight;
                 }
@@ -514,8 +645,8 @@ impl NonlocalOperator {
         let mut energy = [0.0_f64; B];
         let mut projections = vec![[Complex64::default(); B]; self.max_channels];
         for atom in &self.atoms {
-            let nc = atom.columns.len();
-            for (p, col) in projections.iter_mut().zip(&atom.columns) {
+            let nc = atom.count;
+            for (p, col) in projections.iter_mut().zip(atom.columns()) {
                 let mut re = [0.0_f64; B];
                 let mut im = [0.0_f64; B];
                 let n = col.len();
@@ -651,6 +782,38 @@ impl Hamiltonian {
             potential.shape()[2],
         ];
         let grid = FftGridSpec::new(basis, &basis.density_basis(cell)?, Some(dims))?;
+        Self::new_with_grid(basis, grid, potential, nonlocal)
+    }
+    /// As `new` with the FFT grid of `basis` built by the caller as
+    /// `FftGridSpec::new(basis, density, Some(dims))` for a density sphere
+    /// equal to `basis.density_basis(cell)` (INIT-REUSE: the engine's k grid),
+    /// so the sphere is not built again. Checked in O(N_G): the grid has the
+    /// potential's dimensions and maps every basis vector to the FFT index
+    /// `FftGridSpec::map_miller` gives it (otherwise `Shape`).
+    pub fn new_with_grid(
+        basis: &PlaneWaveBasis,
+        grid: FftGridSpec,
+        potential: Array3<f64>,
+        nonlocal: NonlocalOperator,
+    ) -> Result<Self, HamiltonianError> {
+        if basis.momenta() != nonlocal.basis {
+            return Err(HamiltonianError::Shape);
+        }
+        let dims = [
+            potential.shape()[0],
+            potential.shape()[1],
+            potential.shape()[2],
+        ];
+        if grid.dims() != dims
+            || grid.g_to_fft().len() != basis.vectors().len()
+            || basis
+                .vectors()
+                .iter()
+                .zip(grid.g_to_fft())
+                .any(|(g, &at)| FftGridSpec::map_miller(g.miller, dims).ok() != Some(at))
+        {
+            return Err(HamiltonianError::Shape);
+        }
         if !potential.iter().all(|x| x.is_finite()) {
             return Err(HamiltonianError::NonFinite);
         }
@@ -1204,15 +1367,13 @@ mod fused_tests {
         let cell =
             Cell::from_user_rows_bohr([[5., 0., 0.], [0.7, 6., 0.], [0.2, 0.3, 7.]]).unwrap();
         let basis = PlaneWaveBasis::at_k(&cell, dft_units::Hartree(2.), k).unwrap();
-        let nonlocal = NonlocalOperator {
-            basis: basis.momenta().to_vec(),
-            max_channels: channels,
-            block: None,
-            atoms: vec![AtomProjectors {
-                columns: (0..channels)
+        let mut nonlocal = NonlocalOperator::from_columns(
+            basis.momenta().to_vec(),
+            vec![(
+                (0..channels)
                     .map(|i| vector(basis.vectors().len(), i))
                     .collect(),
-                coupling: (0..channels * channels)
+                (0..channels * channels)
                     .map(|i| {
                         if i / channels == i % channels {
                             0.03
@@ -1221,8 +1382,10 @@ mod fused_tests {
                         }
                     })
                     .collect(),
-            }],
-        };
+            )],
+            channels,
+        );
+        nonlocal.set_block(false);
         let potential = Array3::from_shape_vec(
             shape,
             vector(shape.iter().product(), 4)
@@ -1233,6 +1396,52 @@ mod fused_tests {
         .unwrap();
         Hamiltonian::new(&cell, &basis, potential, nonlocal).unwrap()
     }
+
+    /// INIT-REUSE: `new_with_grid` with the caller's k grid gives the same
+    /// operator as `new` (apply bits equal, Gamma and general k) and rejects a
+    /// grid of other dimensions or of another basis.
+    #[test]
+    fn new_with_grid_matches_new_and_checks_the_grid() {
+        let cell =
+            Cell::from_user_rows_bohr([[5., 0., 0.], [0.7, 6., 0.], [0.2, 0.3, 7.]]).unwrap();
+        for k in [[0.; 3], [0.25, -0.25, 0.125]] {
+            let basis = PlaneWaveBasis::at_k(&cell, dft_units::Hartree(2.), k).unwrap();
+            let density = basis.density_basis(&cell).unwrap();
+            let dims = FftGridSpec::new(&basis, &density, None).unwrap().dims();
+            let grid = FftGridSpec::new(&basis, &density, Some(dims)).unwrap();
+            let potential = Array3::from_shape_vec(
+                dims,
+                vector(dims.iter().product(), 4)
+                    .iter()
+                    .map(|z| z.re)
+                    .collect(),
+            )
+            .unwrap();
+            let nonlocal = || NonlocalOperator::new(&basis, cell.volume_bohr3(), &[]).unwrap();
+            let a = Hamiltonian::new(&cell, &basis, potential.clone(), nonlocal()).unwrap();
+            let b = Hamiltonian::new_with_grid(&basis, grid.clone(), potential.clone(), nonlocal())
+                .unwrap();
+            let n = basis.vectors().len();
+            let x = vector(n, 9);
+            let (mut ya, mut yb) = (vec![Complex64::default(); n], vec![Complex64::default(); n]);
+            a.apply(&x, &mut ya).unwrap();
+            b.apply(&x, &mut yb).unwrap();
+            assert_eq!(bits(&ya), bits(&yb), "k {k:?}");
+            let bigger = [dims[0] + 2, dims[1], dims[2]];
+            let other = FftGridSpec::new(&basis, &density, Some(bigger)).unwrap();
+            assert!(matches!(
+                Hamiltonian::new_with_grid(&basis, other, potential.clone(), nonlocal()),
+                Err(HamiltonianError::Shape)
+            ));
+            let shifted =
+                PlaneWaveBasis::at_k(&cell, dft_units::Hartree(2.), [0.5, 0., 0.]).unwrap();
+            let wrong = FftGridSpec::new(&shifted, &density, Some(dims)).unwrap();
+            assert!(matches!(
+                Hamiltonian::new_with_grid(&basis, wrong, potential, nonlocal()),
+                Err(HamiltonianError::Shape)
+            ));
+        }
+    }
     // Independent pre-P10J traversal oracle, retained for bitwise comparison.
     fn legacy_nonlocal(
         op: &NonlocalOperator,
@@ -1241,11 +1450,11 @@ mod fused_tests {
         p: &mut [Complex64],
     ) {
         for atom in &op.atoms {
-            let nc = atom.columns.len();
-            for (p, col) in p.iter_mut().zip(&atom.columns) {
+            let nc = atom.columns().len();
+            for (p, col) in p.iter_mut().zip(atom.columns()) {
                 *p = col.iter().zip(x).map(|(b, c)| b.conj() * c).sum();
             }
-            for (i, col) in atom.columns.iter().enumerate() {
+            for (i, col) in atom.columns().iter().enumerate() {
                 let weight: Complex64 = (0..nc).map(|j| atom.coupling[i * nc + j] * p[j]).sum();
                 for (out, b) in y.iter_mut().zip(col) {
                     *out += b * weight;
@@ -1255,21 +1464,24 @@ mod fused_tests {
     }
 
     fn nonlocal_fixture(atoms: usize, rows: usize, channels: usize) -> NonlocalOperator {
-        NonlocalOperator {
-            basis: Vec::new(),
-            max_channels: channels,
-            block: None,
-            atoms: (0..atoms)
-                .map(|a| AtomProjectors {
-                    columns: (0..channels)
-                        .map(|c| vector(rows, a * channels + c))
-                        .collect(),
-                    coupling: (0..channels * channels)
-                        .map(|i| if i % (channels + 1) == 0 { 0.7 } else { 0.03 })
-                        .collect(),
+        let mut op = NonlocalOperator::from_columns(
+            Vec::new(),
+            (0..atoms)
+                .map(|a| {
+                    (
+                        (0..channels)
+                            .map(|c| vector(rows, a * channels + c))
+                            .collect(),
+                        (0..channels * channels)
+                            .map(|i| if i % (channels + 1) == 0 { 0.7 } else { 0.03 })
+                            .collect(),
+                    )
                 })
                 .collect(),
-        }
+            channels,
+        );
+        op.set_block(false);
+        op
     }
 
     #[test]
@@ -1616,6 +1828,19 @@ impl NonlocalOperator {
         volume(volume_bohr3)?;
         let mut atoms = Vec::new();
         let mut max_channels = 0;
+        // Exact capacity: no reallocation while the table is filled.
+        let channels_total: usize = species
+            .iter()
+            .map(|s| {
+                s.positions_bohr.len()
+                    * s.potential
+                        .projectors()
+                        .iter()
+                        .map(|p| 2 * p.l() + 1)
+                        .sum::<usize>()
+            })
+            .sum();
+        let mut packed = Vec::with_capacity(channels_total * basis.momenta().len());
         for s in species {
             let pp = s.potential;
             let np = pp.projectors().len();
@@ -1687,26 +1912,22 @@ impl NonlocalOperator {
                     .iter()
                     .map(|g| phase(g.cartesian, r))
                     .collect::<Result<Vec<_>, _>>()?;
-                let columns: Vec<Vec<_>> = table
-                    .iter()
-                    .map(|col| {
-                        col.iter()
-                            .zip(&phases)
-                            .map(|(p, phase)| p * phase)
-                            .collect()
-                    })
-                    .collect();
-                if !columns.iter().flatten().all(finite) {
+                // INIT-PACKED: the atom's columns go straight into the shared
+                // table (the same products p * phase as the former columns).
+                let first = packed.len();
+                for col in &table {
+                    packed.extend(col.iter().zip(&phases).map(|(p, phase)| p * phase));
+                }
+                if !packed[first..].iter().all(finite) {
                     return Err(HamiltonianError::NonFinite);
                 }
-                atoms.push(AtomProjectors {
-                    columns,
-                    coupling: coupling.clone(),
-                });
+                atoms.push((nc, coupling.clone()));
             }
         }
         Ok(Self::assemble(
             basis.momenta().to_vec(),
+            packed,
+            basis.momenta().len(),
             atoms,
             max_channels,
         ))
@@ -1744,29 +1965,27 @@ mod block_tests {
         let atoms = channels
             .iter()
             .enumerate()
-            .map(|(a, &nc)| AtomProjectors {
-                columns: (0..nc)
-                    .map(|c| vector(n, 7 * a + c).into_iter().map(|z| z * 0.05).collect())
-                    .collect(),
-                coupling: (0..nc * nc)
-                    .map(|i| {
-                        if i / nc == i % nc {
-                            0.7 - 0.1 * a as f64
-                        } else if (i / nc + i % nc) % 3 == 0 {
-                            0.03
-                        } else {
-                            0.0
-                        }
-                    })
-                    .collect(),
+            .map(|(a, &nc)| {
+                (
+                    (0..nc)
+                        .map(|c| vector(n, 7 * a + c).into_iter().map(|z| z * 0.05).collect())
+                        .collect(),
+                    (0..nc * nc)
+                        .map(|i| {
+                            if i / nc == i % nc {
+                                0.7 - 0.1 * a as f64
+                            } else if (i / nc + i % nc) % 3 == 0 {
+                                0.03
+                            } else {
+                                0.0
+                            }
+                        })
+                        .collect(),
+                )
             })
             .collect();
-        let nonlocal = NonlocalOperator {
-            basis: basis.momenta().to_vec(),
-            atoms,
-            max_channels: 9,
-            block: None,
-        };
+        let mut nonlocal = NonlocalOperator::from_columns(basis.momenta().to_vec(), atoms, 9);
+        nonlocal.set_block(false);
         let grid = FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None).unwrap();
         let potential = Array3::from_shape_vec(
             grid.dims(),
@@ -1872,8 +2091,8 @@ mod block_tests {
     /// Operator with a dummy basis of `n` vectors and `atoms` x `channels`
     /// projector columns, packed copy not built.
     fn shaped(n: usize, atoms: usize, channels: usize) -> NonlocalOperator {
-        NonlocalOperator {
-            basis: vec![
+        let mut op = NonlocalOperator::from_columns(
+            vec![
                 GVector {
                     miller: [0; 3],
                     cartesian: [0.0; 3],
@@ -1881,15 +2100,18 @@ mod block_tests {
                 };
                 n
             ],
-            max_channels: channels,
-            block: None,
-            atoms: (0..atoms)
-                .map(|a| AtomProjectors {
-                    columns: (0..channels).map(|c| vector(n, a * channels + c)).collect(),
-                    coupling: vec![0.0; channels * channels],
+            (0..atoms)
+                .map(|a| {
+                    (
+                        (0..channels).map(|c| vector(n, a * channels + c)).collect(),
+                        vec![0.0; channels * channels],
+                    )
                 })
                 .collect(),
-        }
+            channels,
+        );
+        op.set_block(false);
+        op
     }
 
     #[test]
@@ -1964,8 +2186,8 @@ mod block_tests {
             ("si16-class", 16, 4, 5990),
             ("si64-class", 64, 4, 23960),
         ] {
-            let mut op = NonlocalOperator {
-                basis: vec![
+            let mut op = NonlocalOperator::from_columns(
+                vec![
                     GVector {
                         miller: [0; 3],
                         cartesian: [0.0; 3],
@@ -1973,17 +2195,18 @@ mod block_tests {
                     };
                     n
                 ],
-                max_channels: channels,
-                block: None,
-                atoms: (0..atoms)
-                    .map(|a| AtomProjectors {
-                        columns: (0..channels).map(|c| vector(n, a * channels + c)).collect(),
-                        coupling: (0..channels * channels)
-                            .map(|i| if i % (channels + 1) == 0 { 0.7 } else { 0.03 })
-                            .collect(),
+                (0..atoms)
+                    .map(|a| {
+                        (
+                            (0..channels).map(|c| vector(n, a * channels + c)).collect(),
+                            (0..channels * channels)
+                                .map(|i| if i % (channels + 1) == 0 { 0.7 } else { 0.03 })
+                                .collect(),
+                        )
                     })
                     .collect(),
-            };
+                channels,
+            );
             op.set_block(true);
             let p = atoms * channels;
             let mut scratch = vec![Complex64::default(); op.block_scratch_len()];

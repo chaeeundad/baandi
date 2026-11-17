@@ -262,8 +262,10 @@ fn nonlocal_dense_phases_and_rotation() {
     let herm = (dot(&x, &ay) - dot(&ax, &y)).norm() / dot(&x, &ay).norm().max(dot(&ax, &y).norm());
     let mut rotation: f64 = 0.;
     for (i, g) in b.vectors().iter().enumerate().skip(1) {
-        let measured: f64 = op.atoms()[0].columns()[2..]
+        let measured: f64 = op.atoms()[0]
+            .columns()
             .iter()
+            .skip(2)
             .map(|c| c[i].norm_sqr())
             .sum();
         let expected = 3. / (4. * PI * cell.volume_bohr3())

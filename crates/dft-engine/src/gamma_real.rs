@@ -786,6 +786,8 @@ pub(crate) fn solve_real_gamma(
     bands: usize,
     tolerance: f64,
     policy: BandTolerances,
+    occupations: &[f64],
+    electrons: f64,
     certify: bool,
     options: &ScfOptions,
     pool: Arc<WorkerPool>,
@@ -1048,7 +1050,12 @@ pub(crate) fn solve_real_gamma(
     // BREAKTHROUGH-0-INSTRUMENT: snapshot capture and the first-block
     // diagnostic of a threads-only solve (M2 solves are handled below, where
     // their rows and kept H X are known).
-    let policy_occupied = policy.strict_bands.min(bands);
+    let occupied = occupations.iter().filter(|&&f| f > 0.0).count();
+    let criterion = if options.standard.is_some() {
+        crate::first_block::Criterion::RitzChange
+    } else {
+        crate::first_block::Criterion::ResidualNorm
+    };
     let capacity_per_band = options.davidson_capacity_per_band;
     let threads_capture = if comm.is_none() {
         let ws = state.workspace.as_ref();
@@ -1075,7 +1082,9 @@ pub(crate) fn solve_real_gamma(
                     x,
                     hx: hx.filter(|_| armed),
                     bands,
-                    occupied: policy_occupied,
+                    occupations,
+                    electrons,
+                    criterion,
                     tolerance,
                     strict_bands: policy.strict_bands,
                     buffer_tolerance: policy.buffer_tolerance,
@@ -1096,7 +1105,9 @@ pub(crate) fn solve_real_gamma(
             rows_fnv: 0,
             n_global: n,
             bands,
-            occupied: policy_occupied,
+            occupied,
+            occupations,
+            criterion,
             tolerance,
             strict_bands: policy.strict_bands,
             buffer_tolerance: policy.buffer_tolerance,
@@ -1104,7 +1115,7 @@ pub(crate) fn solve_real_gamma(
             potential: state.op.h.borrow().potential(),
             grid: state.op.h.borrow().grid_dims(),
             cutoff_hartree: options.cutoff_hartree,
-            electrons: 2.0 * policy_occupied as f64,
+            electrons,
             capacity_per_band,
         })
     } else {
@@ -1204,7 +1215,9 @@ pub(crate) fn solve_real_gamma(
                             x,
                             hx,
                             bands,
-                            occupied: policy_occupied,
+                            occupations,
+                            electrons,
+                            criterion,
                             tolerance,
                             strict_bands: policy.strict_bands,
                             buffer_tolerance: policy.buffer_tolerance,
@@ -1225,7 +1238,9 @@ pub(crate) fn solve_real_gamma(
                     rows_fnv: crate::snapshot::fnv_usize(dist.local_rows()),
                     n_global: n,
                     bands,
-                    occupied: policy_occupied,
+                    occupied,
+                    occupations,
+                    criterion,
                     tolerance,
                     strict_bands: policy.strict_bands,
                     buffer_tolerance: policy.buffer_tolerance,
@@ -1233,7 +1248,7 @@ pub(crate) fn solve_real_gamma(
                     potential: dist.potential(),
                     grid: dist.grid_shape(),
                     cutoff_hartree: options.cutoff_hartree,
-                    electrons: 2.0 * policy_occupied as f64,
+                    electrons,
                     capacity_per_band,
                 });
                 let solved = solver.solve_distributed_rows_local(
@@ -1288,7 +1303,9 @@ pub(crate) fn solve_real_gamma(
                             x,
                             hx: None,
                             bands,
-                            occupied: policy_occupied,
+                            occupations,
+                            electrons,
+                            criterion,
                             tolerance,
                             strict_bands: policy.strict_bands,
                             buffer_tolerance: policy.buffer_tolerance,
@@ -1309,7 +1326,9 @@ pub(crate) fn solve_real_gamma(
                     rows_fnv: crate::snapshot::fnv_usize(dist.local_rows()),
                     n_global: n,
                     bands,
-                    occupied: policy_occupied,
+                    occupied,
+                    occupations,
+                    criterion,
                     tolerance,
                     strict_bands: policy.strict_bands,
                     buffer_tolerance: policy.buffer_tolerance,
@@ -1317,7 +1336,7 @@ pub(crate) fn solve_real_gamma(
                     potential: dist.potential(),
                     grid: dist.grid_shape(),
                     cutoff_hartree: options.cutoff_hartree,
-                    electrons: 2.0 * policy_occupied as f64,
+                    electrons,
                     capacity_per_band,
                 });
                 crate::m2::add(crate::m2::Stage::SolveEntry, t_entry);
@@ -1386,7 +1405,9 @@ pub(crate) fn solve_real_gamma(
                 rows_fnv: crate::snapshot::fnv_usize(dist.local_rows()),
                 n_global: n,
                 bands,
-                occupied: policy_occupied,
+                occupied,
+                occupations,
+                criterion,
                 tolerance,
                 strict_bands: policy.strict_bands,
                 buffer_tolerance: policy.buffer_tolerance,
@@ -1394,7 +1415,7 @@ pub(crate) fn solve_real_gamma(
                 potential: dist.potential(),
                 grid: dist.grid_shape(),
                 cutoff_hartree: options.cutoff_hartree,
-                electrons: 2.0 * policy_occupied as f64,
+                electrons,
                 capacity_per_band,
             });
             let result = solver.solve_distributed_rows(

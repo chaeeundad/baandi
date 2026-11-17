@@ -1,5 +1,18 @@
 # First-correction-block residual spectrum of real SCF solves (BREAKTHROUGH-0-INSTRUMENT, review E3)
 
+> **Superseded diagnostic evidence — ISSUE17-FIRST-BLOCK-DIAG / [issue #17](../../tickets/issues/ISSUE-17.md).**
+> The historical tables below counted the mandatory first empty root as occupied
+> (Si32: 65 instead of 64, Si16: 33 instead of 32, Si8: 17 instead of 16).
+> Their gap is therefore not the HOMO/LUMO gap, and their occupied residual
+> spectra include an empty state. Residual norms were also compared with a
+> Ritz-change tolerance: the `unc_*` columns do not establish standard-path
+> convergence. Findings 1–2 cannot support an optimization decision.
+> The correction in `crates/dft-engine/src/first_block.rs` carries physical
+> occupations/electrons and the solver criterion separately; entry Ritz changes
+> are unavailable, not residual-derived. Production density used the correct
+> occupations already. These tables are preserved unchanged as history;
+> corrected dev08 tables remain the orchestrator's follow-up. No speedup is claimed.
+
 Review 2026-11-17 section 6 (R2) argued that the first Davidson iteration of every warm solve corrects
 all B roots because the Ritz-change rule has no previous value, and asked for a measurement before any
 implementation: at real SCF states, what is the singular spectrum of the occupied residual block

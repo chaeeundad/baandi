@@ -1663,12 +1663,18 @@ pub fn first_block_json(records: &[dft_engine::first_block::Record]) -> serde_js
         "buffer_tolerance_ha": r.buffer_tolerance, "kept_hx": r.kept_hx,
         "overlap_defect": r.overlap_defect, "boundary_gap_ha": r.boundary_gap,
         "ritz_values_ha": r.ritz_values, "residual_norms": r.residual_norms,
-        "true_unconverged_all": r.true_unconverged_all,
-        "true_unconverged_occupied": r.true_unconverged_occupied,
-        "ritz_rule_unconverged": r.ritz_rule_unconverged,
+        "electrons": r.electrons, "occupations": r.occupations,
+        "mandatory_roots": r.mandatory_roots, "density_carrying_roots": r.occupied,
+        "empty_buffer_roots": r.empty_buffer_roots,
+        "convergence_criterion": r.criterion.name(), "root_thresholds_ha": r.root_thresholds,
+        "ritz_changes_ha": r.ritz_changes,
+        "diagnostic_operator_applications": r.diagnostic_operator_applications,
+        "residual_unconverged_all": r.residual_unconverged_all,
+        "residual_unconverged_occupied": r.residual_unconverged_occupied,
+        "ritz_first_correction_capacity": r.ritz_first_correction_capacity,
         "singular_values": r.singular_values,
         "rank_1e1": r.rank_1e1, "rank_1e2": r.rank_1e2, "rank_1e3": r.rank_1e3, "rank_1e4": r.rank_1e4,
-        "rank_above_tolerance": r.rank_above_tolerance,
+        "rank_above_residual_tolerance": r.rank_above_residual_tolerance,
     })).collect::<Vec<_>>())
 }
 

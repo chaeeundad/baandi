@@ -12,7 +12,9 @@
 //! 110976 doubles (m x c borders of si32/si64) to calibrate
 //! `dft_mpi::HALVING_MIN_DOUBLES`; `rhd-forced` times the halving pattern on
 //! every payload (threshold 0) for the crossover.
-use dft_mpi::{HALVING_MIN_DOUBLES, TreeSum, Universe, set_halving_min_doubles, set_tree_sum};
+use dft_mpi::{
+    HALVING_AUTO, HALVING_MIN_DOUBLES, TreeSum, Universe, set_halving_min_doubles, set_tree_sum,
+};
 
 fn main() {
     let universe = Universe::init().expect("MPI init");
@@ -51,7 +53,7 @@ fn main() {
         let mut d = vec![0.0; n];
         set_halving_min_doubles(0);
         world.tree_sum_f64(&local, &mut d).expect("halving forced");
-        set_halving_min_doubles(HALVING_MIN_DOUBLES);
+        set_halving_min_doubles(HALVING_AUTO);
         let same = a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits())
             && a.iter().zip(&c).all(|(x, y)| x.to_bits() == y.to_bits())
             && a.iter().zip(&d).all(|(x, y)| x.to_bits() == y.to_bits());
@@ -102,7 +104,7 @@ fn main() {
         }
     }
     set_tree_sum(TreeSum::Binomial);
-    set_halving_min_doubles(HALVING_MIN_DOUBLES);
+    set_halving_min_doubles(HALVING_AUTO);
     if rank == 0 {
         println!(
             "mpi_tree_bench OK on {size} rank(s) (bit check {})",

@@ -68,17 +68,36 @@ pub enum TreeSum {
 /// crossover of the machine, not of the physics: calibrate with
 /// `examples/mpi_tree_bench.rs` on the target node.
 pub const HALVING_MIN_DOUBLES: usize = 2048;
+/// Sentinel: choose the crossover from the communicator size (see
+/// [`halving_min_doubles_for`]).
+pub const HALVING_AUTO: usize = usize::MAX;
 static HALVING_MIN: std::sync::atomic::AtomicUsize =
-    std::sync::atomic::AtomicUsize::new(HALVING_MIN_DOUBLES);
+    std::sync::atomic::AtomicUsize::new(HALVING_AUTO);
 /// Override the halving crossover of this process (measurement only: the
 /// microbenchmark forces 0 to time and bit-check the halving pattern on every
 /// payload; any value gives the same bits).
 pub fn set_halving_min_doubles(doubles: usize) {
     HALVING_MIN.store(doubles, std::sync::atomic::Ordering::Relaxed);
 }
-/// The halving crossover in use (default [`HALVING_MIN_DOUBLES`]).
+/// The halving crossover override in use ([`HALVING_AUTO`] = size dependent).
 pub fn halving_min_doubles() -> usize {
     HALVING_MIN.load(std::sync::atomic::Ordering::Relaxed)
+}
+/// Crossover for a communicator of `size` ranks. dev08 microbenchmark
+/// (mpi_tree_bench, Open MPI 5.0.8, 2026-11-18; us per call, worst rank): halving
+/// beats doubling from about 55000 doubles at 2 ranks, 4096 at 4 ranks and 8192 at
+/// 8 ranks; at the former fixed 2048 it was 28-59 % slower than doubling. Any
+/// value gives the same bits.
+pub fn halving_min_doubles_for(size: usize) -> usize {
+    let forced = halving_min_doubles();
+    if forced != HALVING_AUTO {
+        return forced;
+    }
+    match size {
+        0..=2 => 55_000,
+        3..=4 => 4_096,
+        _ => 8_192,
+    }
 }
 static TREE_SUM: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 /// Select the message pattern of `tree_sum_f64` for this process.

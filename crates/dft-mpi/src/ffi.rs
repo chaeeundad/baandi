@@ -273,7 +273,7 @@ impl World {
         let pattern = crate::tree_sum_pattern();
         let halving = size.is_power_of_two()
             && pattern == crate::TreeSum::HalvingDoubling
-            && local.len() >= crate::halving_min_doubles();
+            && local.len() >= crate::halving_min_doubles_for(size);
         let doubling = size.is_power_of_two() && pattern != crate::TreeSum::Binomial;
         RECV_SCRATCH.with(|scratch| {
             let incoming = &mut *scratch.borrow_mut();

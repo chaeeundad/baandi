@@ -1099,8 +1099,10 @@ fn main() {
     let args = parse_args();
     let universe = dft_mpi::Universe::init().expect("MPI init");
     let world = universe.world();
-    if dft_numerics::switches::choice(dft_numerics::switches::Id::MPI_TREE) == "rd" {
-        dft_mpi::set_tree_sum(dft_mpi::TreeSum::RecursiveDoubling);
+    match dft_numerics::switches::choice(dft_numerics::switches::Id::MPI_TREE) {
+        "rd" => dft_mpi::set_tree_sum(dft_mpi::TreeSum::RecursiveDoubling),
+        "rhd" => dft_mpi::set_tree_sum(dft_mpi::TreeSum::HalvingDoubling),
+        _ => {}
     }
     let maxima = |outs: &[&RankOut], f: fn(&Repeat) -> f64| -> Vec<Vec<f64>> {
         (0..outs[0].kinds.len())

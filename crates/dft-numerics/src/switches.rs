@@ -260,9 +260,9 @@ table! {
     // MPI lazy orbitals (ticket MPI-LAZY-ORBITALS, docs/design/mpi-lazy-orbitals.md); default off.
     M2_LAZY: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "MPI-LAZY-ORBITALS: a standard (Ritz-change) M2 solve inside the SCF session returns only this rank's stick rows of the eigenvectors (no N x B allgatherv, no complex unpack); the next solve starts from those rows, the density, nonlocal and kinetic energy are formed from them (kinetic: one reduction of B values), and the full complex block is gathered once, on first demand (result, checkpoint, ladder hand-off, spectral audit, explicit nonlocal audit), and cached; gathered blocks are bit-identical, the energy is rounding class (distributed kinetic sum)";
-    MPI_TREE: Kind::Choice { allowed: &["binomial", "rd"], default: "rd" }, "rd",
-        "binomial, rd",
-        "message pattern of the deterministic MPI tree sum: binomial (reduce to rank 0 plus broadcast, 2 log2 P rounds) or rd (recursive doubling with MPI_Sendrecv, log2 P rounds; bit-identical for power-of-two rank counts, other counts stay binomial); read by the CLI at MPI start";
+    MPI_TREE: Kind::Choice { allowed: &["binomial", "rd", "rhd"], default: "rd" }, "rd",
+        "binomial, rd, rhd",
+        "message pattern of the deterministic MPI tree sum: binomial (reduce to rank 0 plus broadcast, 2 log2 P rounds), rd (recursive doubling with MPI_Sendrecv, log2 P rounds) or rhd (REL-TREE-RHD: payloads of at least 2048 doubles by a recursive-halving reduce-scatter plus a recursive-doubling allgather, 2 (P-1)/P of the payload moved instead of log2 P times it; smaller payloads rd); all bit-identical for power-of-two rank counts, other counts stay binomial; read by the CLI at MPI start";
     // MPI coarse stage and certificate (docs/performance/mpi-coarse-certificate-analysis.md); default off.
     M2_SCREEN: Kind::Choice { allowed: &["replicated", "dist"], default: "dist" }, "dist",
         "replicated, dist",

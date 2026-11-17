@@ -52,21 +52,105 @@ pub enum TreeSum {
     /// Recursive doubling (pairwise exchange with rank XOR 2^s): log2(P)
     /// rounds, every rank ends with the sum.
     RecursiveDoubling,
+    /// REL-TREE-RHD: for payloads of at least [`halving_min_doubles`] doubles a
+    /// reduce-scatter by recursive halving (partner rank XOR 2^s in the same
+    /// order 1, 2, 4, ... as recursive doubling, each rank keeps the lower or
+    /// upper half of the shared segment by bit s of its rank) followed by an
+    /// allgather by recursive doubling (pure copies, reverse order): 2 log2(P)
+    /// rounds moving 2 (P - 1) / P of the payload instead of log2(P) times the
+    /// payload. Every element is associated exactly as in recursive doubling
+    /// ([`halving_doubling_associate`]), so the bits are those of the binomial
+    /// tree. Smaller payloads use recursive doubling.
+    HalvingDoubling,
+}
+/// Smallest payload (doubles) for which `HalvingDoubling` uses the halving
+/// pattern (below it the doubling pattern, latency-bound). A message-size
+/// crossover of the machine, not of the physics: calibrate with
+/// `examples/mpi_tree_bench.rs` on the target node.
+pub const HALVING_MIN_DOUBLES: usize = 2048;
+static HALVING_MIN: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(HALVING_MIN_DOUBLES);
+/// Override the halving crossover of this process (measurement only: the
+/// microbenchmark forces 0 to time and bit-check the halving pattern on every
+/// payload; any value gives the same bits).
+pub fn set_halving_min_doubles(doubles: usize) {
+    HALVING_MIN.store(doubles, std::sync::atomic::Ordering::Relaxed);
+}
+/// The halving crossover in use (default [`HALVING_MIN_DOUBLES`]).
+pub fn halving_min_doubles() -> usize {
+    HALVING_MIN.load(std::sync::atomic::Ordering::Relaxed)
 }
 static TREE_SUM: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 /// Select the message pattern of `tree_sum_f64` for this process.
 pub fn set_tree_sum(pattern: TreeSum) {
     TREE_SUM.store(
-        u8::from(pattern == TreeSum::RecursiveDoubling),
+        match pattern {
+            TreeSum::Binomial => 0,
+            TreeSum::RecursiveDoubling => 1,
+            TreeSum::HalvingDoubling => 2,
+        },
         std::sync::atomic::Ordering::Relaxed,
     );
 }
 /// The message pattern selected by `set_tree_sum` (default `Binomial`).
 pub fn tree_sum_pattern() -> TreeSum {
-    if TREE_SUM.load(std::sync::atomic::Ordering::Relaxed) == 1 {
-        TreeSum::RecursiveDoubling
+    match TREE_SUM.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => TreeSum::RecursiveDoubling,
+        2 => TreeSum::HalvingDoubling,
+        _ => TreeSum::Binomial,
+    }
+}
+/// The arithmetic of the halving/doubling exchange (`TreeSum::HalvingDoubling`
+/// on payloads it splits) over contributions in rank order, for P a power of
+/// two: the segment bookkeeping and the additions of the reduce-scatter, then
+/// the copies of the allgather, exactly as `World::tree_sum_f64` performs them.
+pub fn halving_doubling_associate(contributions: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let size = contributions.len();
+    assert!(size.is_power_of_two(), "halving needs 2^k ranks");
+    let n = contributions.first().map_or(0, Vec::len);
+    let mut held: Vec<Vec<f64>> = contributions.to_vec();
+    // Reduce-scatter: (segment before the round, kept segment) per rank.
+    let mut seg: Vec<(usize, usize)> = vec![(0, n); size];
+    let mut history: Vec<Vec<(usize, usize)>> = Vec::new();
+    let mut step = 1;
+    while step < size {
+        history.push(seg.clone());
+        let before = held.clone();
+        for r in 0..size {
+            let (lo, hi) = seg[r];
+            let (keep, _) = halving_split(lo, hi, r & step != 0);
+            let partner = r ^ step;
+            assert_eq!(seg[partner], (lo, hi), "partners share the segment");
+            for i in keep.0..keep.1 {
+                held[r][i] = before[r][i] + before[partner][i];
+            }
+        }
+        for (r, s) in seg.iter_mut().enumerate() {
+            *s = halving_split(s.0, s.1, r & step != 0).0;
+        }
+        step <<= 1;
+    }
+    // Allgather: reverse rounds, the partner's kept segment is copied in.
+    while let Some(parent) = history.pop() {
+        step >>= 1;
+        let before = held.clone();
+        for (r, h) in held.iter_mut().enumerate() {
+            let partner = r ^ step;
+            let (lo, hi) = seg[partner];
+            h[lo..hi].copy_from_slice(&before[partner][lo..hi]);
+        }
+        seg = parent;
+    }
+    held
+}
+/// (kept, sent) halves of the shared segment [lo, hi) in a halving round: the
+/// rank with the round's bit clear keeps the lower half.
+pub(crate) fn halving_split(lo: usize, hi: usize, upper: bool) -> ((usize, usize), (usize, usize)) {
+    let mid = lo + (hi - lo) / 2;
+    if upper {
+        ((mid, hi), (lo, mid))
     } else {
-        TreeSum::Binomial
+        ((lo, mid), (mid, hi))
     }
 }
 /// The arithmetic of the recursive-doubling exchange over contributions in rank
@@ -159,8 +243,43 @@ mod tests {
         }
         set_tree_sum(TreeSum::RecursiveDoubling);
         assert_eq!(tree_sum_pattern(), TreeSum::RecursiveDoubling);
+        set_tree_sum(TreeSum::HalvingDoubling);
+        assert_eq!(tree_sum_pattern(), TreeSum::HalvingDoubling);
         set_tree_sum(TreeSum::Binomial);
         assert_eq!(tree_sum_pattern(), TreeSum::Binomial);
+    }
+    /// REL-TREE-RHD: halving/doubling reproduces the binomial association bit
+    /// for bit on every rank for P = 1..16 (powers of two) and payload lengths
+    /// shorter than, equal to and longer than P, odd and even (segments of
+    /// length zero included), with values where the association matters.
+    #[test]
+    fn halving_doubling_equals_the_binomial_tree() {
+        for size in [1usize, 2, 4, 8, 16] {
+            for n in [0usize, 1, 2, 3, 5, 7, 8, 15, 16, 17, 33, 100] {
+                let contributions: Vec<Vec<f64>> = (0..size)
+                    .map(|r| {
+                        (0..n)
+                            .map(|i| {
+                                let x = (r * 7 + i * 3) as f64;
+                                0.1 * x + 1e-17 * x * x - (if r % 3 == 0 { 1e16 } else { 0.0 })
+                                    + (if (r + i) % 3 == 1 { 1e16 } else { 0.0 })
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let tree = tree_associate(&mut contributions.clone());
+                for (r, held) in halving_doubling_associate(&contributions)
+                    .iter()
+                    .enumerate()
+                {
+                    assert_eq!(
+                        held.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                        tree.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                        "P={size} n={n} rank={r}"
+                    );
+                }
+            }
+        }
     }
     #[test]
     fn stand_in_is_a_single_rank() {

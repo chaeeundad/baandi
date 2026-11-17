@@ -287,8 +287,10 @@ fn main() -> ExitCode {
         }
     };
     let world = universe.world();
-    if dft_numerics::switches::choice(dft_numerics::switches::Id::MPI_TREE) == "rd" {
-        dft_mpi::set_tree_sum(dft_mpi::TreeSum::RecursiveDoubling);
+    match dft_numerics::switches::choice(dft_numerics::switches::Id::MPI_TREE) {
+        "rd" => dft_mpi::set_tree_sum(dft_mpi::TreeSum::RecursiveDoubling),
+        "rhd" => dft_mpi::set_tree_sum(dft_mpi::TreeSum::HalvingDoubling),
+        _ => {}
     }
     dft_cli::parallel::set(world.rank(), world.size());
     if world.size() > 1 {

@@ -270,14 +270,19 @@ impl World {
         let (rank, size) = (self.rank(), self.size());
         let n = count(local.len(), "tree_sum count")?;
         out.copy_from_slice(local);
-        let doubling = size.is_power_of_two()
-            && crate::tree_sum_pattern() == crate::TreeSum::RecursiveDoubling;
+        let pattern = crate::tree_sum_pattern();
+        let halving = size.is_power_of_two()
+            && pattern == crate::TreeSum::HalvingDoubling
+            && local.len() >= crate::halving_min_doubles();
+        let doubling = size.is_power_of_two() && pattern != crate::TreeSum::Binomial;
         RECV_SCRATCH.with(|scratch| {
             let incoming = &mut *scratch.borrow_mut();
             if incoming.len() < local.len() {
                 incoming.resize(local.len(), 0.0);
             }
-            if doubling {
+            if halving {
+                self.halving_doubling_steps(rank, size, out, &mut incoming[..local.len()])
+            } else if doubling {
                 self.doubling_steps(rank, size, n, out, &mut incoming[..local.len()])
             } else {
                 self.tree_steps(rank, size, n, out, &mut incoming[..local.len()])
@@ -330,6 +335,103 @@ impl World {
                 *a += *b;
             }
             step <<= 1;
+        }
+        Ok(())
+    }
+    /// Halving/doubling rounds of `tree_sum_f64` (REL-TREE-RHD, P a power of
+    /// two): a reduce-scatter by recursive halving with partners rank XOR 1, 2,
+    /// 4, ... (both partners hold the same segment; the rank with the round's bit
+    /// clear keeps its lower half, see `crate::halving_split`) and own + incoming
+    /// on the kept half, then an allgather by recursive doubling in reverse order
+    /// (copies only). The association equals recursive doubling element by
+    /// element (`crate::halving_doubling_associate`), so the bits equal the
+    /// binomial reduce plus broadcast on every rank.
+    fn halving_doubling_steps(
+        &self,
+        rank: usize,
+        size: usize,
+        out: &mut [f64],
+        incoming: &mut [f64],
+    ) -> Result<(), MpiError> {
+        // log2(P) <= 63 rounds: the segment before each round.
+        let mut parents = [(0usize, 0usize); 64];
+        let mut rounds = 0;
+        let (mut lo, mut hi) = (0, out.len());
+        let mut step = 1;
+        while step < size {
+            let (keep, send) = crate::halving_split(lo, hi, rank & step != 0);
+            let partner = (rank ^ step) as c_int;
+            let (ns, nk) = (
+                count(send.1 - send.0, "tree_sum segment")?,
+                count(keep.1 - keep.0, "tree_sum segment")?,
+            );
+            // SAFETY: the send range lies inside `out`, the receive buffer is the
+            // first keep-length doubles of `incoming` (as long as `out`), the two
+            // buffers do not overlap, both live through the blocking call; the
+            // partner sends exactly the length of this rank's kept half (same
+            // segment, opposite half); the null status pointer is
+            // MPI_STATUS_IGNORE in the Open MPI ABI.
+            check("MPI_Sendrecv", unsafe {
+                MPI_Sendrecv(
+                    out[send.0..send.1].as_ptr().cast(),
+                    ns,
+                    self.double(),
+                    partner,
+                    7003,
+                    incoming.as_mut_ptr().cast(),
+                    nk,
+                    self.double(),
+                    partner,
+                    7003,
+                    self.comm(),
+                    std::ptr::null_mut(),
+                )
+            })?;
+            // IEEE addition is commutative: own + incoming has the bits of
+            // (lower partner's partial) + (higher partner's partial).
+            for (a, b) in out[keep.0..keep.1].iter_mut().zip(incoming.iter()) {
+                *a += *b;
+            }
+            parents[rounds] = (lo, hi);
+            rounds += 1;
+            (lo, hi) = keep;
+            step <<= 1;
+        }
+        while rounds > 0 {
+            rounds -= 1;
+            step >>= 1;
+            let parent = parents[rounds];
+            // The partner kept the half this rank sent in that round.
+            let (mine, other) = crate::halving_split(parent.0, parent.1, rank & step != 0);
+            debug_assert_eq!(mine, (lo, hi));
+            let partner = (rank ^ step) as c_int;
+            let (ns, nr) = (
+                count(hi - lo, "tree_sum segment")?,
+                count(other.1 - other.0, "tree_sum segment")?,
+            );
+            let base = out.as_mut_ptr();
+            // SAFETY: [lo, hi) and `other` are the two disjoint halves of the
+            // parent segment inside `out` (pointer offsets in bounds, regions do
+            // not overlap), so sending one while receiving into the other through
+            // raw pointers of the same live exclusive borrow is sound for the
+            // blocking call; the partner sends exactly `other` (its kept half).
+            check("MPI_Sendrecv", unsafe {
+                MPI_Sendrecv(
+                    base.add(lo).cast_const().cast(),
+                    ns,
+                    self.double(),
+                    partner,
+                    7004,
+                    base.add(other.0).cast(),
+                    nr,
+                    self.double(),
+                    partner,
+                    7004,
+                    self.comm(),
+                    std::ptr::null_mut(),
+                )
+            })?;
+            (lo, hi) = parent;
         }
         Ok(())
     }

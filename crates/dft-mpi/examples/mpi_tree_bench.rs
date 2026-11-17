@@ -3,16 +3,35 @@
 //! `mpirun -np P target/release/examples/mpi_tree_bench` (build with `--features mpi`).
 //! 1. Bit check: for several payloads the binomial and the recursive-doubling
 //!    patterns return the same bits on every rank (P a power of two).
-//! 2. Latency: microseconds per call of both patterns for payloads of 1, 8, 64,
+//! 2. Latency: microseconds per call of the patterns for payloads of 1, 8, 64,
 //!    408 and 27744 doubles (the in-panel dot/norm sizes and a 408 x 68 Gram),
 //!    rank 0 prints one line per payload.
-use dft_mpi::{TreeSum, Universe, set_tree_sum};
+//!
+//! REL-TREE-RHD (2026-11-18): the halving/doubling pattern (`BAANDI_MPI_TREE=rhd`)
+//! joins the bit check and the timing, with the lean border payloads 2048 to
+//! 110976 doubles (m x c borders of si32/si64) to calibrate
+//! `dft_mpi::HALVING_MIN_DOUBLES`; `rhd-forced` times the halving pattern on
+//! every payload (threshold 0) for the crossover.
+use dft_mpi::{HALVING_MIN_DOUBLES, TreeSum, Universe, set_halving_min_doubles, set_tree_sum};
 
 fn main() {
     let universe = Universe::init().expect("MPI init");
     let world = universe.world();
     let (rank, size) = (world.rank(), world.size());
-    let payloads = [1usize, 8, 64, 408, 408 * 68];
+    let payloads = [
+        1usize,
+        8,
+        64,
+        408,
+        1024,
+        2048,
+        4096,
+        8192,
+        204 * 68,
+        408 * 68,
+        408 * 136,
+        816 * 136,
+    ];
     for &n in &payloads {
         let local: Vec<f64> = (0..n)
             .map(|i| {
@@ -26,7 +45,16 @@ fn main() {
         world.tree_sum_f64(&local, &mut a).expect("binomial");
         set_tree_sum(TreeSum::RecursiveDoubling);
         world.tree_sum_f64(&local, &mut b).expect("doubling");
-        let same = a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits());
+        let mut c = vec![0.0; n];
+        set_tree_sum(TreeSum::HalvingDoubling);
+        world.tree_sum_f64(&local, &mut c).expect("halving");
+        let mut d = vec![0.0; n];
+        set_halving_min_doubles(0);
+        world.tree_sum_f64(&local, &mut d).expect("halving forced");
+        set_halving_min_doubles(HALVING_MIN_DOUBLES);
+        let same = a.iter().zip(&b).all(|(x, y)| x.to_bits() == y.to_bits())
+            && a.iter().zip(&c).all(|(x, y)| x.to_bits() == y.to_bits())
+            && a.iter().zip(&d).all(|(x, y)| x.to_bits() == y.to_bits());
         if size.is_power_of_two() {
             assert!(same, "rank {rank}: patterns differ at payload {n}");
         }
@@ -43,8 +71,15 @@ fn main() {
         for (name, pattern) in [
             ("binomial", TreeSum::Binomial),
             ("rd", TreeSum::RecursiveDoubling),
+            ("rhd", TreeSum::HalvingDoubling),
+            ("rhd-forced", TreeSum::HalvingDoubling),
         ] {
             set_tree_sum(pattern);
+            set_halving_min_doubles(if name == "rhd-forced" {
+                0
+            } else {
+                HALVING_MIN_DOUBLES
+            });
             for _ in 0..50 {
                 world.tree_sum_f64(&local, &mut out).expect("warm");
             }
@@ -67,6 +102,7 @@ fn main() {
         }
     }
     set_tree_sum(TreeSum::Binomial);
+    set_halving_min_doubles(HALVING_MIN_DOUBLES);
     if rank == 0 {
         println!(
             "mpi_tree_bench OK on {size} rank(s) (bit check {})",

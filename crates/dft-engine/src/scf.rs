@@ -2253,11 +2253,176 @@ impl ScfProblem {
         if self.states.len() != 1 {
             return Err(ScfError::InvalidInput("replay needs one k point"));
         }
+        eprintln!(
+            "snapshot replay: legacy-unchecked (no operator/row identity check); use replay_checked"
+        );
         let bands = self.occupations.len();
+        crate::snapshot::set_contract(None);
         crate::snapshot::inject(crate::profile::rank_key(), start);
         let placeholder =
             vec![ComplexMatrix::zeros(0, bands).map_err(dft_solvers::SolverError::from)?];
         self.step_session(n, Some(&placeholder), &[None], tolerance, false)
+    }
+
+    /// Checked snapshot replay (ISSUE-18, measurement only). Before anything
+    /// is injected, the current operator's fingerprint (`operator_fingerprint`
+    /// of `n`) must equal the captured one and the density bytes must equal
+    /// the captured density (exact and A/B modes); the result is agreed over
+    /// all ranks (one tree sum) so that every rank returns the same error
+    /// before any solve. The solver entry then checks this rank's rows,
+    /// dimensions, potential, stopping profile and kept-product status
+    /// against `contract` (agreed again). The captured tolerance is restored.
+    /// `Legacy` mode skips the identity checks with a printed warning.
+    pub fn replay_checked(
+        &mut self,
+        n: &Array3<f64>,
+        start: crate::snapshot::ReplayStart,
+        contract: &crate::snapshot::ReplayContract,
+    ) -> Result<(ScfStep, crate::snapshot::ReplayReport), ScfError> {
+        use crate::snapshot::ReplayMode;
+        if self.states.len() != 1 {
+            return Err(ScfError::InvalidInput("replay needs one k point"));
+        }
+        let mut problems = Vec::new();
+        if contract.mode == ReplayMode::Legacy {
+            eprintln!(
+                "snapshot replay {}: LEGACY manifest without operator fingerprint: operator, rows, potential and profile are NOT checked; not an exact replay",
+                contract.label
+            );
+        } else {
+            let current = self.operator_fingerprint(n);
+            match &contract.operator {
+                Some(captured) => problems.extend(captured.differences(&current)),
+                None => problems.push("operator fingerprint: absent".to_string()),
+            }
+            let density = crate::snapshot::fnv(n.as_slice().unwrap_or(&[]));
+            if contract.density_fnv != Some(density) {
+                problems.push(format!(
+                    "density bytes: manifest {} file {}",
+                    contract
+                        .density_fnv
+                        .map_or("absent".into(), crate::snapshot::hex),
+                    crate::snapshot::hex(density)
+                ));
+            }
+        }
+        // Agreement before any rank injects or solves.
+        let mut any = f64::from(u8::from(!problems.is_empty()));
+        if let Some(c) = crate::parallel::SharedComm::active() {
+            use dft_mpi::Collective;
+            let mut out = [0.0];
+            c.tree_sum_f64(&[any], &mut out)
+                .map_err(|e| ScfError::Numerical(format!("replay identity agreement: {e}")))?;
+            any = out[0];
+        }
+        if any > 0.0 {
+            return Err(ScfError::Numerical(format!(
+                "snapshot {} ({} replay): operator identity mismatch: {}",
+                contract.label,
+                contract.mode.name(),
+                if problems.is_empty() {
+                    "on another rank".to_string()
+                } else {
+                    problems.join("; ")
+                }
+            )));
+        }
+        let bands = self.occupations.len();
+        crate::snapshot::set_report(None);
+        crate::snapshot::set_contract(Some(contract.clone()));
+        crate::snapshot::inject(crate::profile::rank_key(), start);
+        let placeholder =
+            vec![ComplexMatrix::zeros(0, bands).map_err(dft_solvers::SolverError::from)?];
+        let step = self.step_session(n, Some(&placeholder), &[None], contract.tolerance, false);
+        // A solve that never reached the real Gamma entry leaves its contract.
+        crate::snapshot::set_contract(None);
+        let step = step?;
+        let report = crate::snapshot::take_report().ok_or(ScfError::InvalidInput(
+            "snapshot replay: the injected start did not reach the real Gamma solver",
+        ))?;
+        Ok((step, report))
+    }
+
+    /// The operator fingerprint of a map at input density `n` (ISSUE-18;
+    /// computed only for snapshot capture and replay, never in a plain SCF).
+    pub fn operator_fingerprint(&self, n: &Array3<f64>) -> crate::snapshot::OperatorFingerprint {
+        use crate::snapshot::{fnv, hex};
+        let words = |h: u64, v: &[u64]| {
+            v.iter()
+                .fold(h, |h, x| (h ^ x).wrapping_mul(0x0100_0000_01b3))
+        };
+        const SEED: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut fp = crate::snapshot::OperatorFingerprint::default();
+        fp.push("version", crate::snapshot::FINGERPRINT_VERSION.to_string());
+        fp.push("convention", crate::snapshot::CONVENTION);
+        let cell = self.cell.lattice_columns_bohr();
+        fp.push("cell", hex(fnv(cell.as_flattened())));
+        let species: Vec<&str> = self.atoms.iter().map(|a| a.species.as_str()).collect();
+        fp.push("species", species.join("+"));
+        let positions: Vec<f64> = self
+            .atoms
+            .iter()
+            .flat_map(|a| a.fractional_position)
+            .collect();
+        fp.push("positions", hex(fnv(&positions)));
+        // Pseudopotential content as the operator sees it: local ionic field
+        // (G space), core density, and per state the nonlocal projector
+        // columns and couplings.
+        let mut pseudo = SEED;
+        for z in self.ionic_g.iter() {
+            pseudo = words(pseudo, &[z.re.to_bits(), z.im.to_bits()]);
+        }
+        if let Some(core) = &self.core_density {
+            pseudo = words(pseudo, &[core.len() as u64]);
+            for x in core.iter() {
+                pseudo = words(pseudo, &[x.to_bits()]);
+            }
+        }
+        let mut basis = SEED;
+        let mut basis_len = Vec::new();
+        for state in &self.states {
+            for atom in state.hamiltonian.nonlocal().atoms() {
+                pseudo = words(pseudo, &[fnv(atom.coupling_hartree())]);
+                for column in atom.columns() {
+                    for z in column {
+                        pseudo = words(pseudo, &[z.re.to_bits(), z.im.to_bits()]);
+                    }
+                }
+            }
+            let momenta = state.hamiltonian.basis_momenta();
+            basis_len.push(momenta.len().to_string());
+            for g in momenta {
+                basis = words(basis, &g.miller.map(|m| m as i64 as u64));
+            }
+            basis = words(basis, &state.point.fractional.map(f64::to_bits));
+        }
+        fp.push("pseudo", hex(pseudo));
+        fp.push(
+            "xc",
+            format!(
+                "{}/{:?}/{:?}/{:?}",
+                self.options.functional.name(),
+                self.options.pw92_prefactor,
+                self.options.local_mesh,
+                self.options.radial_even_rule
+            ),
+        );
+        fp.push("spin", "unpolarized");
+        fp.push("occupations", hex(fnv(&self.occupations)));
+        fp.push("electrons", hex(self.electrons.to_bits()));
+        fp.push("cutoff", hex(self.options.cutoff_hartree.to_bits()));
+        fp.push("basis", hex(basis));
+        fp.push("basis_len", basis_len.join("+"));
+        let d = self.grid.dims();
+        fp.push("grid", format!("{}x{}x{}", d[0], d[1], d[2]));
+        fp.push(
+            "density_floor",
+            self.density_floor
+                .map_or("none".into(), |f| hex(f.to_bits())),
+        );
+        fp.push("symmetry_ops", self.force_model.symmetry.len().to_string());
+        fp.push("density", hex(fnv(n.as_slice().unwrap_or(&[]))));
+        fp
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2323,6 +2488,10 @@ impl ScfProblem {
         // snapshot capture takes a copy of the input density (both default off).
         crate::profile::map_begin();
         crate::snapshot::set_density(n);
+        // ISSUE-18: the operator fingerprint of the captured map (capture only).
+        if crate::snapshot::dir().is_some() {
+            crate::snapshot::set_operator(&self.operator_fingerprint(n));
+        }
         let start = Instant::now();
         if let Some(symmetry) = &mut self.symmetry
             && !symmetry.check_invariant(n, &mut self.fft)?

@@ -51,6 +51,7 @@
 //! an A/B runs the binary twice. With `BAANDI_DAVIDSON_STAGES=on` the FFT pair
 //! counts and stage seconds are filled (timer cost: never for the timed arms).
 use dft_cli::config::Config;
+use dft_engine::snapshot::{ReplayContract, ReplayMode};
 use dft_engine::{ScfProblem, ScfStep, SpeciesPotential, StandardProfile, parallel};
 use dft_geometry::Atom;
 use dft_mpi::Collective;
@@ -82,10 +83,18 @@ struct Args {
     /// `BAANDI_SNAPSHOT_DIR`; the timed kind is then `replay` (one map at the
     /// captured density from the captured start, kept H X armed when captured).
     snapshot: Option<PathBuf>,
+    /// ISSUE-18: `exact` (default: operator, rows, potential, profile and
+    /// kept status must match; a mismatch exits 3, an unreproduced solve
+    /// exits 4), `ab` (algorithm A/B on the same physical problem: solver
+    /// settings may differ, a changed potential rounding recomputes H X),
+    /// `legacy` (manifest without fingerprint, unchecked, labeled).
+    replay_mode: ReplayMode,
 }
 
 /// The parts of a snapshot manifest the replay needs.
 struct Manifest {
+    /// ISSUE-18: the captured contract (fingerprint, profile, potential).
+    contract: ReplayContract,
     dir: PathBuf,
     label: String,
     stage: String,
@@ -107,18 +116,23 @@ struct Manifest {
     result_kept_taken: bool,
 }
 
-fn read_manifest(path: &Path) -> Manifest {
+fn read_manifest(path: &Path, mode: ReplayMode) -> Manifest {
     let text = std::fs::read_to_string(path).unwrap_or_else(|e| usage(&format!("--snapshot: {e}")));
     let v: Value =
         serde_json::from_str(&text).unwrap_or_else(|e| usage(&format!("--snapshot: {e}")));
     if v["schema"] != "baandi-snapshot-1" {
         usage("--snapshot: not a baandi-snapshot-1 manifest");
     }
+    let contract = ReplayContract::from_manifest(&text, mode).unwrap_or_else(|e| {
+        eprintln!("davidson_bench: replay identity check FAILED: --snapshot: {e}");
+        std::process::exit(3)
+    });
     let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
     let u = |k: &str| v[k].as_u64().unwrap_or(0);
     let g = v["grid"].as_array().cloned().unwrap_or_default();
     let grid = [0, 1, 2].map(|i| g.get(i).and_then(Value::as_u64).unwrap_or(0) as usize);
     Manifest {
+        contract,
         dir: path.parent().unwrap_or(Path::new(".")).to_path_buf(),
         label: s("label"),
         stage: s("stage"),
@@ -143,7 +157,7 @@ fn read_manifest(path: &Path) -> Manifest {
 
 fn usage(msg: &str) -> ! {
     eprintln!(
-        "davidson_bench: {msg}\nusage: davidson_bench --input FILE.toml [--density density.bin] [--repeats N] [--kinds cold,warm] [--sim-ranks P] [--prev-tol X] [--mix X] [--cold-tol X] [--warm-tol X] [--cold-start once|internal] [--snapshot MANIFEST.json]"
+        "davidson_bench: {msg}\nusage: davidson_bench --input FILE.toml [--density density.bin] [--repeats N] [--kinds cold,warm] [--sim-ranks P] [--prev-tol X] [--mix X] [--cold-tol X] [--warm-tol X] [--cold-start once|internal] [--snapshot MANIFEST.json [--replay-mode exact|ab|legacy]]"
     );
     std::process::exit(2)
 }
@@ -161,6 +175,7 @@ fn parse_args() -> Args {
         warm_tol: None,
         cold_internal: false,
         snapshot: None,
+        replay_mode: ReplayMode::Exact,
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -187,6 +202,14 @@ fn parse_args() -> Args {
                 }
             }
             "--snapshot" => a.snapshot = Some(v().into()),
+            "--replay-mode" => {
+                a.replay_mode = match v().as_str() {
+                    "exact" => ReplayMode::Exact,
+                    "ab" => ReplayMode::AbSamePhysics,
+                    "legacy" => ReplayMode::Legacy,
+                    _ => usage("--replay-mode is exact, ab or legacy"),
+                }
+            }
             _ => usage(&format!("unknown argument {k}")),
         }
     }
@@ -508,7 +531,10 @@ fn bench(args: &Args, comm: Option<&dyn Collective>, p: u64) -> RankOut {
     let text = std::fs::read_to_string(&args.input).expect("read --input");
     let config = Config::parse(&text).expect("parse --input");
     let mut opts = dft_cli::run::options(&config).expect("options");
-    let manifest = args.snapshot.as_deref().map(read_manifest);
+    let manifest = args
+        .snapshot
+        .as_deref()
+        .map(|p| read_manifest(p, args.replay_mode));
     if let Some(m) = &manifest {
         // A coarse-stage snapshot: the ladder's coarse problem is the same
         // input at the fraction of the cutoff without a fixed grid.
@@ -791,6 +817,44 @@ fn replay(
             m.result_kept_taken
         );
     }
+    // ISSUE-18: this rank's contract (manifest plus its rank-file header).
+    let contract = m.contract.clone().with_rank_file(rows_fnv, &layout);
+    let identity_failed = |e: &dyn std::fmt::Display| -> ! {
+        eprintln!("davidson_bench: replay identity check FAILED (rank {rank}): {e}");
+        std::process::exit(3)
+    };
+    // A cold snapshot has no injected start: the operator fingerprint and the
+    // density bytes are still checked (agreed over ranks) before any solve.
+    if x.is_none() && contract.mode != ReplayMode::Legacy {
+        let current = problem.operator_fingerprint(&rho);
+        let mut problems = contract
+            .operator
+            .as_ref()
+            .map_or(vec!["operator fingerprint absent".into()], |c| {
+                c.differences(&current)
+            });
+        let density = dft_engine::snapshot::fnv(rho.as_slice().unwrap_or(&[]));
+        if contract.density_fnv != Some(density) {
+            problems.push(format!(
+                "density bytes {}",
+                dft_engine::snapshot::hex(density)
+            ));
+        }
+        let mut any = [f64::from(u8::from(!problems.is_empty()))];
+        if let Some(c) = comm {
+            let mut out = [0.0];
+            c.tree_sum_f64(&any, &mut out).expect("identity agreement");
+            any = out;
+        }
+        if any[0] > 0.0 {
+            identity_failed(&if problems.is_empty() {
+                "mismatch on another rank".to_string()
+            } else {
+                problems.join("; ")
+            });
+        }
+    }
+    let mut replay_report: Option<dft_engine::snapshot::ReplayReport> = None;
     let setup_s = construct_s;
     let mut repeats = Vec::new();
     for r in 0..=args.repeats {
@@ -798,16 +862,20 @@ fn replay(
         let before = snap();
         let t = Instant::now();
         let step: ScfStep = match &x {
-            Some(x) => problem
-                .replay_solve(
-                    &rho,
-                    dft_engine::snapshot::ReplayStart {
-                        x: x.clone(),
-                        hx: hx.clone(),
-                    },
-                    m.tolerance,
-                )
-                .expect("replay map"),
+            Some(x) => {
+                let (step, rep) = problem
+                    .replay_checked(
+                        &rho,
+                        dft_engine::snapshot::ReplayStart {
+                            x: x.clone(),
+                            hx: hx.clone(),
+                        },
+                        &contract,
+                    )
+                    .unwrap_or_else(|e| identity_failed(&e));
+                replay_report = Some(rep);
+                step
+            }
             None => problem
                 .step_kpoints_lazy(&rho, None, &[], m.tolerance, false)
                 .expect("replay cold map"),
@@ -855,6 +923,10 @@ fn replay(
             "manifest": args.snapshot.as_ref().map(|p| p.display().to_string()),
             "label": m.label, "stage": m.stage, "kind": m.kind, "iteration": m.iteration,
             "start": m.start, "kept_armed": m.kept_armed, "layout": layout,
+            "replay_mode": contract.mode.name(),
+            "hx_injected": replay_report.as_ref().map(|r| r.hx_injected),
+            "hx_recomputed": replay_report.as_ref().map(|r| r.hx_recomputed),
+            "replay_notes": replay_report.as_ref().map(|r| r.notes.clone()),
             "captured": {"davidson_iterations": m.result_iterations, "h_columns": m.result_h_columns,
                 "eigen_fnv": m.result_eigen_fnv, "kept_taken": m.result_kept_taken},
         })),
@@ -882,6 +954,7 @@ fn report(
     profile: Option<Value>,
 ) {
     let mut kinds = Vec::new();
+    let mut unreproduced = false;
     println!(
         "davidson_bench {mode} ranks {ranks}: bands {} plane waves {} grid {:?} electrons {} base density {} gamma_real {}; setup {:.3} s; E_H[rho_out - rho0] {:.3e} Ha, warm tolerance {:.3e} Ha",
         out.bands,
@@ -928,6 +1001,11 @@ fn report(
                 && c["h_columns"].as_u64() == Some(first.h_columns as u64);
             let eigen_reproduced =
                 c["eigen_fnv"].as_str() == Some(&format!("{:#018x}", first.eig_fnv));
+            // ISSUE-18: an exact replay that does not reproduce its captured
+            // contract fails the run (after the report is printed).
+            if s["replay_mode"] == "exact" && !(work_reproduced && eigen_reproduced) {
+                unreproduced = true;
+            }
             println!(
                 "  replay of {} ({} {} iteration {}, start {}): captured Davidson {} H columns {} eigenvalue FNV {}; work reproduced {work_reproduced}, eigenvalues reproduced {eigen_reproduced}",
                 s["label"].as_str().unwrap_or(""),
@@ -984,6 +1062,12 @@ fn report(
         "phase_profile": profile,
     });
     println!("DAVBENCH_JSON {doc}");
+    if unreproduced {
+        eprintln!(
+            "davidson_bench: exact replay did not reproduce the captured work/eigenvalues: FAILED"
+        );
+        std::process::exit(4);
+    }
 }
 
 /// Phase profile of the process (`BAANDI_PHASE_PROFILE=on`): the per-rank

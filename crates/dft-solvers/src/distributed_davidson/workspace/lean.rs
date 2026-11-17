@@ -39,7 +39,9 @@
 //! application (counted; expected zero). Every branch depends on reduced
 //! values only, so all ranks take the same branches.
 use super::*;
-use crate::real_davidson::lean::{LeanScratch, extend_factor, reduced_border, ritz_coefficients};
+use crate::real_davidson::lean::{
+    LeanScratch, extend_factor, reduced_border, return_gram_defect, ritz_coefficients,
+};
 use dft_numerics::GemmSite;
 use dft_numerics::real::RealOp;
 
@@ -604,48 +606,64 @@ pub(super) fn run<C: Collective>(
             )?;
             stage_add(2, t0);
             let t0 = dft_numerics::stage_clock::start();
-            // Verify the actual returned block, not just C^T S C. Its Gram
-            // entries ride in the existing all-band residual reduction.
-            residual_local(
-                rotated,
-                vectors,
-                None,
-                &values[..bands],
-                residual,
-                &mut pending_local[..bands],
-            )?;
-            fit(partial, bands, bands + 1)?;
-            partial.as_mut_slice()[..bands].copy_from_slice(&pending_local[..bands]);
-            partial.as_mut_slice()[bands..].fill(0.0);
-            if nl > 0 {
-                gemm.multiply_slices_into(
-                    GemmSite::Other,
-                    vectors.as_slice(),
-                    nl,
-                    bands,
-                    nl,
-                    RealOp::Transpose,
-                    vectors.as_slice(),
-                    bands,
-                    nl,
-                    partial.as_mut().subcols_mut(1, bands),
+            // S has been measured for the current basis (including every
+            // contraction). C^T S C and the sensitivity decision are replicated.
+            let (mut defect, direct) = return_gram_defect(ls, m, bands)?;
+            if direct {
+                // Only cancellation-sensitive / near-threshold cases retain
+                // the direct Gram in the existing residual reduction.
+                residual_local(
+                    rotated,
+                    vectors,
+                    None,
+                    &values[..bands],
+                    residual,
+                    &mut pending_local[..bands],
                 )?;
-            }
-            fit(sum, bands, bands + 1)?;
-            site(Site::ResidualNorms);
-            comm.tree_sum_f64(partial.as_slice(), sum.as_mut_slice())
-                .map_err(comm_error)?;
-            norms.clear();
-            norms.extend(sum.as_slice()[..bands].iter().map(|x| x.sqrt()));
-            let mut defect = 0.0_f64;
-            for j in 0..bands {
-                for i in 0..bands {
-                    let error = (sum[(i, j + 1)] - if i == j { 1.0 } else { 0.0 }).abs();
-                    if !error.is_finite() {
-                        defect = f64::INFINITY;
-                    }
-                    defect = defect.max(error);
+                fit(partial, bands, bands + 1)?;
+                partial.as_mut_slice()[..bands].copy_from_slice(&pending_local[..bands]);
+                partial.as_mut_slice()[bands..].fill(0.0);
+                if nl > 0 {
+                    gemm.multiply_slices_into(
+                        GemmSite::Other,
+                        vectors.as_slice(),
+                        nl,
+                        bands,
+                        nl,
+                        RealOp::Transpose,
+                        vectors.as_slice(),
+                        bands,
+                        nl,
+                        partial.as_mut().subcols_mut(1, bands),
+                    )?;
                 }
+                fit(sum, bands, bands + 1)?;
+                site(Site::ResidualNorms);
+                comm.tree_sum_f64(partial.as_slice(), sum.as_mut_slice())
+                    .map_err(comm_error)?;
+                norms.clear();
+                norms.extend(sum.as_slice()[..bands].iter().map(|x| x.sqrt()));
+                defect = 0.0;
+                for j in 0..bands {
+                    for i in 0..bands {
+                        let error = (sum[(i, j + 1)] - if i == j { 1.0 } else { 0.0 }).abs();
+                        if !error.is_finite() {
+                            defect = f64::INFINITY;
+                        }
+                        defect = defect.max(error);
+                    }
+                }
+            } else {
+                residual_into(
+                    comm,
+                    rotated,
+                    vectors,
+                    &values[..bands],
+                    true,
+                    residual,
+                    norms,
+                    norm_partial,
+                )?;
             }
             if defect > 1e-12 {
                 // Reuse the existing rebuild path, then reconfirm Ritz changes.

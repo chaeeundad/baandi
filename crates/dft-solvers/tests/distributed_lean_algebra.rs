@@ -274,6 +274,15 @@ fn bits(s: &RealEigenSolution) -> Vec<u64> {
         .collect()
 }
 
+fn work_counts() -> (u64, u64, u64) {
+    let gemm = dft_numerics::gemm_dispatch::rows();
+    (
+        gemm.iter().map(|r| r.calls).sum(),
+        gemm.iter().map(|r| r.flops).sum(),
+        reduction_stats().1.iter().map(|s| s.payload).sum(),
+    )
+}
+
 fn tree_sums() -> u64 {
     reduction_stats().1.iter().map(|s| s.calls).sum()
 }
@@ -297,10 +306,18 @@ fn lean_algebra_agrees_with_orthonormal_path() {
                 let plain = solve(ranks, &a, &b, bands, per_band, false);
                 let sums1 = tree_sums();
                 let stats0 = lean_algebra_stats();
+                let w0 = work_counts();
                 let lean = solve(ranks, &a, &b, bands, per_band, true);
+                let w1 = work_counts();
                 let stats1 = lean_algebra_stats();
                 let sums2 = tree_sums();
                 let tag = format!("{name} cap {per_band} ranks {ranks}");
+                eprintln!(
+                    "WORK {tag}: gemm_calls {} gemm_flop {} red_payload {}",
+                    w1.0 - w0.0,
+                    w1.1 - w0.1,
+                    w1.2 - w0.2
+                );
                 let hash = |s: &RealEigenSolution| {
                     bits(s).into_iter().fold(0xcbf29ce484222325u64, |h, b| {
                         (h ^ b).wrapping_mul(0x100000001b3)

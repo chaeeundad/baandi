@@ -52,7 +52,7 @@ Tests (C): on 1 to 4 ranks the distributed solver takes exactly the serial lean 
 
 ## 5. Reproducibility and accuracy
 - Fixed rank count: bit-reproducible (fixed-order tree sums; replicated small GEMMs on fixed panels). Ranks agree bit for bit. Different rank counts differ by rounding (the tree sums group the rows differently), as on the orthonormal path.
-- Accuracy class unchanged: standard solves stop on the Ritz-value change as before; returned residual norms are formed explicitly from the returned X and H X (all bands); the actual returned X must pass a maximum-entry Gram-defect check of 1e-12. The pivot ratio alone does not imply this bound. The Gram entries ride with the existing all-band residual reduction; failure rebuilds and reconfirms Ritz changes, or returns an error at the iteration limit. Strict solves (residual criterion, certificate) never take this path. No tolerance changed.
+- Accuracy class unchanged: standard solves stop on the Ritz-value change as before; returned residual norms are formed explicitly from the returned X and H X (all bands); the returned block must pass a maximum-entry Gram-defect check of 1e-12. The pivot ratio alone does not imply this bound. Section 10 evaluates the check from the current measured S and C, retaining a direct Gram for cancellation-sensitive or borderline cases. Failure rebuilds and reconfirms Ritz changes, or returns an error at the iteration limit. Strict solves (residual criterion, certificate) never take this path. No tolerance changed.
 
 ## 6. Rejected variant: one tree sum per iteration (C, O)
 First version: S border, H border and residual norms in ONE tree sum after H was applied to the raw corrections (the pivot test then runs after the application; H E scaled with E). On the warm si32 solve (capacity 3) 15 of 22 appends fail the pivot test (stage 1), so 42 H columns per solve were applied to rejected blocks: H columns 272 -> 314 (+15 percent), alltoall calls +64 percent. The H application is the stage that scales; trading it for one reduction is a loss on dev08. Rejected before measurement on dev08; the two-reduction form applies H only to accepted blocks (H columns equal to the orthonormal path in every screen).
@@ -88,7 +88,11 @@ Occupied eigenvalues moved by at most 3.3e-14 Ha; eigenvalues reproducible withi
 | si32 np=8 | S -> S + L (S = mirror sticks, Gram start, kept start) | 3.162 -> 2.835 s (-10.3 %, 0.23 s) | 4494 -> 511 (-88.6 %) | every panel and ortho site -> 0, lean_border 105, restart_defect 31 -> 20 | 0 (energy bits equal) |
 SCF, Davidson and H counts unchanged in every cell; density reproducible within each arm; 22 lean solves per rank per si32 run carry every standard iteration (127 iterations: 127 S borders + 105 H borders), no fallback, no rebuild in any SCF screen. With `M2_START=ortho` (default) the start orthonormalization is the remaining chain (panel_dot 1426 per rank); with the stack's Gram start (factored by the pivot rule, `factored_starts` 22) it disappears: 511 tree sums per rank for the whole si32 run.
 
-## 9. LEAN-ALGEBRA-HARDEN (2026-11-17)
+## 9. LEAN-ALGEBRA-HARDEN (2026-11-17; implementation ad7a5c0)
+
+This section records the first hardening implementation. Section 10 supersedes
+its unconditional direct return Gram and additional status-double payload;
+the thresholds, recovery rules and regression evidence remain in force.
 
 The review's bidiagonal chain (`v0 = e0`, `vj = sqrt(0.99) e[j-1] +
 0.1 e[j]`) passes every original pivot test but amplifies overlap rounding.
@@ -184,3 +188,154 @@ The dense-oracle fixture test completes within the approximately 10 s debug
 budget (whole integration binary 6.43 s in the recorded run).
 
 `scripts/check.sh dft-solvers` exited 0: build, test, fmt and clippy all PASS.
+
+## 10. Hardening overhead follow-up (2026-11-17)
+
+Motivation, **relayed by the orchestrator**, not measured here: on dev08 the
+hardening added 2.15% / 2.36% GEMM FLOP (si32 / si64, np=8), 1.1–1.4% GEMM
+calls, approximately 5% reduction payload, and 0.65% si64 wall. Safety checks
+remain enabled; this change removes their unnecessary large-array work.
+
+### Return check and its exceptional direct path
+
+Both lean solvers now compute `G = C^T S C`, with `C` the actual current Ritz
+coefficients and `S` the measured overlap of their basis. Small fixed-order
+compensated dot products reuse `LeanScratch.p` and `.z`, without allocation or
+GEMM dispatch. They cost O(m^2 B + m B^2) scalar operations instead of an
+N-by-B Gram. These scalar operations are **not included** in the GEMM FLOP
+counter: identical GEMM counters do not mean the safety check does zero work.
+No eigenvalue, vector, residual, factor or convergence operand is changed.
+
+The defect and the decision to use a direct Gram use replicated matrices only:
+all ranks take the same branch. The acceptance threshold remains **1e-12**.
+Let `d = max |G-I|`, `a = max (|C|^T |S| |C|)`, and
+`g = max_j sum_i |C_ij| sqrt(S_ii)`. The direct check is retained exactly when
+an input/intermediate is nonfinite or
+
+```
+d + 4 eps (a + g^2) >= 1e-12.
+```
+
+Compensated summation removes the first-order m factor from reduced dot-product
+summation error. The positive `a` and `g^2` terms screen product rounding and
+amplification of overlap error; they are a conservative sensitivity screen,
+not a theorem about arbitrary corrupt/stale S. A naive m-scaled screen was
+tried first: it sent ordinary warm solves back to the full Gram and did not
+remove the cost, so it is not the delivered implementation. The final screen
+is based on the same general rounding quantities for every system, without a
+material, band-count, rank-count or benchmark-specific branch.
+
+**Overlap freshness is a required invariant.** A contraction or stage-2 basis
+rotation resets `factored` to zero; its next border measures the new basis
+before solving/returning. A rebuild does the same. Kept/Gram starts use their
+measured start Gram. Thus no path substitutes I or reuses the old basis's S
+for a contracted basis. S still contains floating-point Gram/normalization
+error; large coefficient cancellation or a defect near the threshold is the
+condition for retaining the direct check. In that case MPI folds the original
+full Gram into the existing residual reduction, with exactly the old 1e-12
+check and rebuild. Ordinary returns reduce residual norms alone, with their
+original arithmetic. Contraction checks and the inverse-factor growth guard
+are unchanged. The latter scans new triangular entries in O(to^2-from^2),
+at most O(w^2) for width w, and makes no additional GEMM call.
+
+### Error agreement without an extra scalar
+
+A rank that has completed the operator's collectives but received an operator
+error/nonfinite output retains the local failure flag and substitutes a quiet
+NaN for the first scalar of the next nonempty solver reduction. IEEE addition
+propagates the sentinel to every rank; the wrapper rejects the reduced payload
+before it is used. The failed numerical payload was already unusable. On the
+normal path the wrapper forwards the original slice directly, without packing
+or copying. Empty reductions are forwarded and the flag is retained until a
+nonempty reduction; operator collectives still use the underlying communicator.
+The startup row-count exchange and layout-cache sum similarly use NaN only on
+invalid input. Counts, bytes and numerical data are unchanged on valid input.
+The existing error/NaN/shape timeout tests still cover first and later applies.
+
+### Measurements: pure Rust, simulated ranks, counters only
+
+Built with `cargo build --release -p dft-cli --offline --example davidson_bench`.
+Three binaries: original numerical sources from `0fb09c0`, hardening `ad7a5c0`,
+and this uncommitted follow-up. The original binary was built by temporarily
+restoring the four solver source files from `0fb09c0`; all other numerical
+sources are unchanged between those commits. Sources were restored afterwards.
+SHA-256, including the actual binary build metadata:
+
+| Artifact | SHA-256 |
+|---|---|
+| Original binary `/tmp/lean-follow-base-bench` | `03073477bb1a64fd712d205625a1f8423ff6d69daf088ae9e07754895043c84e` |
+| Hardening binary `/tmp/lean-follow-hard-bench` | `7cbb740270b874b731936a785ecc13513d449996fcc13bf3e900f4a5aa878469` |
+| Follow-up binary `/tmp/lean-follow-final-bench` | `fc7f393235168013243760ec03d206a3b03e9fd694a652c02a3bc274cd929fe5` |
+| Input `/tmp/lean-follow-si32.toml` | `a34cba3f80788eb18acd238db099e4c47808dddf6f304a136d1bb77a8bfd2e2d` |
+| Density `/tmp/lean-follow-si32-density.bin` | `9491950d470503bf3e5c0efbb2f0991912fbcfea1904bb7eeb9f3a44dccb24af` |
+| External Si UPF | `e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217` |
+
+Input generated with `python3 -I scripts/fast_screen_dav.py --upf
+../pseudo/Si.pz-vbc.UPF --case si32 --emit-input /tmp/lean-follow-si32.toml`:
+seed 601, fractional displacement 0.001, one thread per simulated rank,
+11,877 plane waves, 68 bands, 72 x 72 x 36 FFT. The supplied density is the
+existing converged `fbdav-work/si32-after/density.bin` (its adjacent results
+record convergence); its input `si32-gamma-s601-a0.001-T1.toml` is byte-identical
+to this input. Both cold and warm use this fixed base density. Command for
+each binary and P=4,8:
+
+```
+BINARY --input /tmp/lean-follow-si32.toml --density /tmp/lean-follow-si32-density.bin --sim-ranks P --repeats 2
+```
+
+Counters are per rank, per timed map containing one Davidson solve and its
+unchanged surrounding map work (two repeats identical). `red_payload`
+is doubles (`dist.reductions.doubles`); `coll_bytes` sums every `coll.*.bytes`.
+
+| np | kind | version | gemm_calls | gemm_gflop | red_payload | coll_bytes |
+|---|---|---|---:|---:|---:|---:|
+| 4 | cold | original = follow-up | 44 | 0.949565804 | 73373 | 37450848 |
+| 4 | cold | hardening | 45 | 0.977025428 | 78005 | 37487936 |
+| 4 | warm | original = follow-up | 396 | 1.441010662 | 119740 | 47111520 |
+| 4 | warm | hardening | 397 | 1.468470286 | 124524 | 47149824 |
+| 8 | cold | original = follow-up | 44 | 0.489712118 | 73373 | 22106240 |
+| 8 | cold | hardening | 45 | 0.503441930 | 78005 | 22143360 |
+| 8 | warm | original = follow-up | 396 | 0.745362895 | 119740 | 27343232 |
+| 8 | warm | hardening | 397 | 0.759092707 | 124524 | 27381568 |
+
+**Every** benchmark counter, all eigenvalues, residuals and occupied band-energy
+bits match the original in all four ordinary cases, not only the four counters
+in the table. Eigenvalue FNV: np4 cold `0xf58b72257aba54b9`, warm
+`0xdf5548b326d935c4`; np8 cold `0x772dbd8d468fd617`, warm
+`0x4a3e106bfd5aadc9`. The 24 synthetic fixture `WORK` records likewise match
+original GEMM calls/FLOP/payload exactly, and all 30 prior result-bit/decision
+records match. Local raw logs: `/tmp/lean-follow-{base,hard,final}-rho-np{4,8}.log`
+and `/tmp/lean-follow-{base,final}-fixtures.log`.
+
+### Deliberately retained cost outside the ordinary cases
+
+Also ran the same input **without** `--density` (uniform density, two follow-up
+repeats). Both cold solves match original counts/bits. Both warm solves trigger
+the cancellation/borderline screen and retain the full Gram: removing this cost
+would weaken the check. At np4 the original hardening already rebuilds once
+(32 iterations / 753 H columns versus original 30 / 617); the follow-up keeps
+that repair and its eigenvalue FNV `0x85440bf8b00d238f`. This is not introduced by
+the follow-up. At np8 no rebuild is needed and original eigenvalue bits remain,
+but the direct check is retained because the reduced check is sensitive.
+
+| uniform warm | original | hardening | follow-up |
+|---|---:|---:|---:|
+| np4 GEMM calls | 435 | 479 | 478 |
+| np4 GEMM FLOP | 4119666493 | 4762850445 | 4735390821 |
+| np4 reduction doubles | 361898 | 420949 | 416176 |
+| np4 collective bytes | 107690192 | 127903304 | 127865088 |
+| np8 GEMM calls | 435 | 436 | 436 |
+| np8 GEMM FLOP | 2142353840 | 2156083652 | 2156083652 |
+| np8 reduction doubles | 361898 | 366592 | 366522 |
+| np8 collective bytes | 59997424 | 60035040 | 60034416 |
+
+No wall-time speedup is claimed from these shared-host simulations. The
+orchestrator should repeat its dev08 measurement on this change; no remote
+server was accessed or modified.
+
+Follow-up verification: `cargo test -p dft-solvers --offline` exit 0
+(134 passed, 25 ignored across 27 groups); all nine `lean_harden` integration
+tests pass unchanged, including their direct 1e-12 Gram checks. The added
+unit test covers nonidentity S, the near-threshold direct branch, and
+cancellation-sensitive coefficients. `scripts/check.sh dft-solvers` exit 0:
+build, test, fmt, clippy all PASS. Only owned files changed; uncommitted.

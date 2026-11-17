@@ -871,6 +871,83 @@ pub(crate) fn ritz_coefficients(
     Ok(())
 }
 
+/// Gram defect of the returned Ritz block from its current, measured overlap:
+/// X = V C implies X^T X = C^T S C. Only replicated inputs participate.
+/// Fixed-order compensated reduced dot products reuse `p` and `z`; no GEMM dispatch, N-sized work,
+/// allocation or communication. S must belong to exactly the basis of C.
+///
+/// The second result requests the direct Gram when cancellation could hide
+/// a threshold crossing. Compensated sums remove the first-order m factor
+/// of naive summation; the screening allowance is 4 eps (a + g^2),
+/// where a = max |C|^T |S| |C|
+/// and g = max_j sum_i |C_ij| sqrt(S_ii). Using |S| rather than a
+/// matrix of norm bounds avoids treating an orthogonal basis as parallel.
+/// This is a sensitivity screen, not a certificate for an arbitrarily stale S:
+/// contractions/rebuilds must refresh S before calling this routine.
+pub(crate) fn return_gram_defect(
+    lean: &mut LeanScratch,
+    m: usize,
+    bands: usize,
+) -> Result<(f64, bool), SolverError> {
+    lean.p.reshape_within_storage(m, bands)?;
+    lean.z.reshape_within_storage(m, bands)?;
+    let mut growth = 0.0_f64;
+    for j in 0..bands {
+        let mut g = 0.0;
+        for i in 0..m {
+            g += lean.c[(i, j)].abs() * lean.s[(i, i)].sqrt();
+            let mut sc = 0.0;
+            let mut correction = 0.0;
+            let mut absolute = 0.0;
+            // S is stored symmetric. Read its contiguous column rather
+            // than striding through a row; summation order is unchanged.
+            let si = &lean.s.as_slice()[i * lean.cap..i * lean.cap + m];
+            let cj = &lean.c.as_slice()[j * m..(j + 1) * m];
+            for (&s, &c) in si.iter().zip(cj) {
+                let product = s * c;
+                let adjusted = product - correction;
+                let next = sc + adjusted;
+                correction = (next - sc) - adjusted;
+                sc = next;
+                absolute += product.abs();
+            }
+            lean.p[(i, j)] = sc;
+            lean.z[(i, j)] = absolute;
+        }
+        if !g.is_finite() {
+            return Ok((f64::INFINITY, true));
+        }
+        growth = growth.max(g);
+    }
+    let mut defect = 0.0_f64;
+    let mut amplification = 0.0_f64;
+    for j in 0..bands {
+        for i in 0..=j {
+            let mut gram = 0.0;
+            let mut correction = 0.0;
+            let mut absolute = 0.0;
+            let ci = &lean.c.as_slice()[i * m..(i + 1) * m];
+            let pj = &lean.p.as_slice()[j * m..(j + 1) * m];
+            let zj = &lean.z.as_slice()[j * m..(j + 1) * m];
+            for ((&c, &p), &z) in ci.iter().zip(pj).zip(zj) {
+                let adjusted = c * p - correction;
+                let next = gram + adjusted;
+                correction = (next - gram) - adjusted;
+                gram = next;
+                absolute += c.abs() * z;
+            }
+            amplification = amplification.max(absolute);
+            let error = (gram - if i == j { 1.0 } else { 0.0 }).abs();
+            if !error.is_finite() {
+                return Ok((f64::INFINITY, true));
+            }
+            defect = defect.max(error);
+        }
+    }
+    let allowance = 4.0 * f64::EPSILON * (amplification + growth * growth);
+    Ok((defect, defect + allowance >= 1e-12))
+}
+
 /// Fallback stage 1 for an append whose pivot test failed (basis at m + k
 /// columns, unit-norm block E in `extra`, overlap border computed): one
 /// explicit projection E' = E - V T^T T (V^T E) against the basis through the
@@ -1361,7 +1438,11 @@ pub(super) fn solve_with_intent(
                 &pool,
                 timers,
             )?;
-            if orthogonality_defect(vectors) > 1e-12 {
+            let (mut defect, direct) = return_gram_defect(lean, m, bands)?;
+            if direct {
+                defect = orthogonality_defect(vectors);
+            }
+            if defect > 1e-12 {
                 lean_add(LeanCount::Rebuilds, 1);
                 projection.run_into(vectors, None, gemm, basis)?;
                 if basis.cols() < bands {
@@ -1822,6 +1903,35 @@ pub(super) fn solve_with_intent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn return_gram_uses_measured_overlap_and_screens_cancellation() {
+        let mut lean = LeanScratch::new(2, 2).unwrap();
+        lean.c.reshape_within_storage(2, 2).unwrap();
+        lean.s[(0, 0)] = 4.0;
+        lean.s[(1, 1)] = 9.0;
+        lean.c[(0, 0)] = 0.5;
+        lean.c[(1, 1)] = 1.0 / 3.0;
+        let (defect, direct) = return_gram_defect(&mut lean, 2, 2).unwrap();
+        assert!(defect <= 1e-15 && !direct);
+        // Borderline cases retain the original direct 1e-12 check, rather
+        // than trusting the rounded reduced Gram at the threshold.
+        lean.c[(0, 0)] = 0.5 * (1.0 + 0.4995e-12);
+        assert!(return_gram_defect(&mut lean, 2, 2).unwrap().1);
+        lean.c[(0, 0)] = 0.5 * (1.0 + 2e-12);
+        assert!(return_gram_defect(&mut lean, 2, 2).unwrap().0 > 1e-12);
+        // A normalized difference of almost parallel vectors: the reduced
+        // Gram can be close to one despite amplification of errors in S.
+        let delta = 1e-6_f64;
+        lean.s[(0, 0)] = 1.0;
+        lean.s[(1, 1)] = 1.0;
+        lean.s[(0, 1)] = 1.0 - delta;
+        lean.s[(1, 0)] = 1.0 - delta;
+        lean.c.reshape_within_storage(2, 1).unwrap();
+        lean.c[(0, 0)] = (2.0 * delta).sqrt().recip();
+        lean.c[(1, 0)] = -lean.c[(0, 0)];
+        assert!(return_gram_defect(&mut lean, 2, 1).unwrap().1);
+    }
+
     #[test]
     fn inverse_growth_rejects_chain_with_good_pivots() {
         let n = 8;

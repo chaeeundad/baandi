@@ -241,7 +241,7 @@ table! {
     M2_PANEL_GS: Kind::Choice { allowed: &["classic", "pythag", "fused"], default: "fused" }, "fused",
         "classic, pythag, fused",
         "distributed panel Gram-Schmidt reductions per column: classic (two dot reductions and one norm), pythag (norm rides with the second dots, Pythagorean update, 2 reductions), fused (input norm rides with the first dots, second pass only when the per-column DGKS rule of BAANDI_ORTHO fails, about 1 reduction); rounding class";
-    M2_DENSITY: Kind::Choice { allowed: &["bands", "fused"], default: "bands" }, "bands",
+    M2_DENSITY: Kind::Choice { allowed: &["bands", "fused"], default: "fused" }, "fused",
         "bands, fused",
         "M2 distributed density on the standard path: bands (per-band plane contributions kept, then summed) or fused (plane density accumulated in ascending band order, no bands x plane buffer; the per-band data only serves the strict certificate screen); bit-identical";
     // MPI kept start (ticket MPI-KEPT-START, docs/design/mpi-kept-start.md); default off until dev08.
@@ -376,11 +376,11 @@ table! {
     // Measurement infrastructure (ticket BREAKTHROUGH-0-INSTRUMENT); all default off, results unchanged.
     PHASE_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "exclusive nested phase profile per rank (init / coarse SCF / fine ordinary SCF / verification pass and fail / materialization; map phases and solve stages inside; maximum over ranks and imbalance); clocks follow BAANDI_STAGE_TIMERS (off: counts only); printed by dft-cli (results.json phase_profile, parallel.phases), m2_entry_cost and davidson_bench";
-    M2_LIGHT_STATE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    M2_LIGHT_STATE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "BREAKTHROUGH-4: on the M2 path the replicated serial real Gamma Hamiltonian of a solve state (rebuilt at every new problem and ladder stage) is built with the minimal block capacity 2 instead of the Davidson capacity: one pair FFT plan and scratch instead of capacity / 2 full-grid plans per rank; it only supplies the ORC half sphere there and is never applied (the full operator is built if the distributed operator is unavailable); bit-identical";
     M2_LAYOUT_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "BREAKTHROUGH-4: the distributed solver reuses the row-index layout (row counts and global row lists of every rank) of its previous solve on the same thread when every rank's local rows are unchanged (one 1-double reduction decides, replicated), instead of two allgathervs (one of N doubles) and the index rebuild per solve; bit-identical";
-    EWALD_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    EWALD_CACHE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "BREAKTHROUGH-4: problem construction reuses the Ewald energy of the previous construction on the same thread when the lattice, the ion charges and the fractional positions are bit-equal (the cutoff-ladder coarse problem after the full-cutoff one); bit-identical (the same pure function of the same inputs)";
     PHASE_WAIT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "wait probe of the phase profile (ticket BREAKTHROUGH-4-OTHER-AND-INIT): a timed barrier before every collective of the distributed solver and at the entry of every M2 solve, so that the time ranks spend waiting for the last rank (load imbalance, arrival skew) is reported apart from the collective's own transfer (`solve.wait`, `solve.entry_wait`, `coll.barrier`); changes the timing (extra barriers), never the arithmetic; diagnostic only, never an acceptance arm";

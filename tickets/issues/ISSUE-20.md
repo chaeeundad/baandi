@@ -42,3 +42,15 @@ Incremental gains and lower per-rank memory/initialization cost. After the large
 ### Validation and adoption
 
 Use the current two-lane fast-loop protocol and the **new defaults**. Start with one short case and an identity/correctness smoke. Include full SCF and verification for adoption, and Stage 1 for any trajectory change, with the existing accuracy/generality and same-model/same-rank comparisons. Retain measurable small gains under the existing adoption rule. Keep M2 fallback and invalidation tests; report negative results as well as wins.
+
+### Progress (repository, 2026-11-18)
+
+
+
+- Part 1: `BAANDI_M2_LAZY_SERIAL` (1aefb43; default off until dev08).
+
+- Part 2: owned kinetic/projector rows (ef81fd8; always on).
+
+- Part 4, ionic local: distributed by contiguous G blocks with one allgatherv, bit-identical for every rank count, always on (ledger INIT-IONIC-SPLIT). The Ewald sum is split too (INIT-EWALD-SPLIT, bit-identical). The block atomic-start orthogonalization is a separate experiment behind `BAANDI_M2_ATOMIC_BLOCK` (default off, rounding class; INIT-ATOMIC-BLOCK).
+
+- Part 3 (geometry/potential/plan descriptor split) not started. The complex nonlocal table built per rank in `states` is its largest remaining replicated piece (INIT-NONLOCAL-TABLE).

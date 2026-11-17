@@ -658,4 +658,14 @@ lib `block_cholesky_qr_matches_gram_schmidt_and_falls_back_together`; physics
 
 `setup_memo_identity::ionic_local_row_blocks_are_bit_identical_for_every_rank_count`,
 
+INIT-SCALE-2: the opt-in atomic start density is split the same way
+
+(`start_density::split_superposition`, counter `density_splits`); construction
+
+passes its k grid to `Hamiltonian::new_with_grid` and its density list to
+
+`CoulombMetric::with_sphere` (no extra density spheres); the exact Gamma point
+
+reuses the Gamma basis. All bit-identical;
+
 lib `ewald::tests`. Ledger INIT-*.

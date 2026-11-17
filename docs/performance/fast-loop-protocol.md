@@ -1,3 +1,8 @@
+## Hard rule (user, 2026-11-17): everything except the final benchmark finishes in 10 minutes
+- Every stage 0, stage 1 and stage 2 job must be sized to finish within 10 minutes (the dev08 queue runner kills jobs of these classes at 600 s and moves them to failed/). Only the final QE comparison tables (job names starting with `final-`) may run longer.
+- Stage 0 is ONE case, ONE rank count (np=8 for MPI ideas, T=1 for single-process ideas), candidate against default, 3 alternating pairs, one diagonalization. The np 2/4/8, si64 and multi-arm grids are stage 2, run only after a stage-0/1 CANDIDATE.
+- A request document that lists a larger grid is cut down by the orchestrator before it is queued; implementers write requests that fit the rule from the start (a stage-0 request lists one point, an expansion list is separate).
+
 # Fast optimization loop: screen on one case, confirm on the set (user request, 2026-11-16)
 
 Running the whole generality set for every idea is expensive (hours of dev08 time, most of it spent on ideas that do not pay). The loop is split into four stages. The Generality rule and the Adoption rule (AGENTS.md) are unchanged: a default is adopted only after stage 3.

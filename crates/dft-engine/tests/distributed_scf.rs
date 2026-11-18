@@ -242,6 +242,11 @@ fn run_m2_profile(
     standard: bool,
 ) -> ScfResult {
     parallel::set_m2_override(Some(true));
+    // These tests count the replicated-path stages (M2d counters, panel Gram-Schmidt
+    // tree sums); the distributed grid stages and mixer (default on since 2026-11-18)
+    // are covered by tests/m2_grid.rs, so pin them off here.
+    dft_engine::grid_dist::set_override(Some(false));
+    dft_engine::mix_dist::set_override(Some(false));
     parallel::set_communicator(comm);
     let rows = if kind == 0 {
         [[4., 0., 0.], [0., 4., 0.], [0., 0., 4.]]
@@ -273,6 +278,8 @@ fn run_m2_profile(
     .run()
     .unwrap();
     parallel::set_communicator(None);
+    dft_engine::mix_dist::set_override(None);
+    dft_engine::grid_dist::set_override(None);
     parallel::set_m2_override(None);
     result
 }

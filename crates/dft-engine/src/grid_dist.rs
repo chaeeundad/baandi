@@ -1346,6 +1346,81 @@ impl GridPlan {
         bump(C_STOP);
         Ok(energy.max(0.0))
     }
+
+    /// Coulomb (Hartree) metric forms of signed plane fields (SCF-TRAJECTORY
+    /// guard of the distributed mixer, `BAANDI_MIX_COULOMB_GUARD`): for every
+    /// pair (a, b) the value N sum_G w(G) Re(conj(F_a(G)) F_b(G)) with w the
+    /// stop-rule weights (`CoulombMetric::weights`: V / (2N) 4 pi / G^2 on the
+    /// density sphere, 0 at G = 0) and F the forward transform of the plane
+    /// field (`to_reciprocal` normalization, no density check: residuals are
+    /// signed). By Parseval this is a^T C b of the replicated `CoulombMetric`
+    /// (rounding class). Per-stick partials in ascending local order, ONE
+    /// allgatherv, sums in canonical stick order: the bits do not depend on the
+    /// rank count. Collective (one distributed transform per field).
+    pub(crate) fn coulomb_forms<K: Collective>(
+        &mut self,
+        comm: &K,
+        fields: &[&[f64]],
+        pairs: &[(usize, usize)],
+    ) -> Result<Vec<f64>, ScfError> {
+        if self.stop_weights.is_empty() {
+            return Err(ScfError::InvalidInput("M2 Coulomb forms without weights"));
+        }
+        let points = self.points();
+        if fields.iter().any(|f| f.len() != points) {
+            return Err(ScfError::InvalidInput("M2 Coulomb forms: field length"));
+        }
+        let err = |e: dft_solvers::distributed_fft::DistFftError| {
+            ScfError::Numerical(format!("M2 Coulomb transform: {e}"))
+        };
+        let nz = self.nz;
+        let mut hats: Vec<Vec<C>> = Vec::with_capacity(fields.len());
+        for f in fields {
+            for i in 0..self.planes {
+                for y in 0..self.rows {
+                    let line = self.line(Field::Planes(f), i, y);
+                    let slab = self.fft.plane_mut();
+                    for (z, &v) in line.iter().enumerate() {
+                        slab[y * nz + z] = C::new(v, 0.0);
+                    }
+                }
+                self.fft.to_reciprocal_plane(i).map_err(err)?;
+            }
+            let mut hat = vec![C::default(); self.coef.len()];
+            self.fft.finish_to_reciprocal(comm, &mut hat).map_err(err)?;
+            hats.push(hat);
+        }
+        let k = pairs.len();
+        self.send.clear();
+        self.send.resize(self.local_sticks * k, 0.0);
+        for (idx, (&w, &s)) in self.stop_weights.iter().zip(&self.stick_of).enumerate() {
+            if w != 0.0 {
+                let row = &mut self.send[s as usize * k..(s as usize + 1) * k];
+                for (o, &(a, b)) in row.iter_mut().zip(pairs) {
+                    let (p, q) = (hats[a][idx], hats[b][idx]);
+                    *o += w * (p.re * q.re + p.im * q.im);
+                }
+            }
+        }
+        let counts: Vec<usize> = self.stick_counts.iter().map(|c| c * k).collect();
+        self.recv.resize(counts.iter().sum(), 0.0);
+        comm.allgatherv_f64(&self.send, &counts, &mut self.recv)
+            .map_err(|e| ScfError::Numerical(format!("M2 Coulomb forms: {e}")))?;
+        // The gathered buffer is the concatenation of the rank stick blocks,
+        // the positions `stick_order` index.
+        let mut sums = vec![0.0; k];
+        for &pos in &self.stick_order {
+            for (q, s) in sums.iter_mut().enumerate() {
+                *s += self.recv[pos * k + q];
+            }
+        }
+        let n = self.dims.iter().product::<usize>() as f64;
+        sums.iter_mut().for_each(|s| *s *= n);
+        if sums.iter().any(|s| !s.is_finite()) {
+            return Err(ScfError::NonFinite);
+        }
+        Ok(sums)
+    }
 }
 
 fn comm_rank<K: Collective>(comm: &K) -> usize {

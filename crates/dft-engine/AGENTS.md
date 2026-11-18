@@ -782,6 +782,15 @@ runtime_control, spin (collinear driver), functional (non-LDA). Consumers of
 the delivered result (forces, stress, volumetric/density output) need no
 decline. Do not add a reader of active-boundary state without a declaration.
 Test `tests/m2_owned_decline.rs` (one test per reason).
+Coulomb guard of the distributed mixer (MIX-COULOMB-GUARD-DIST,
+`BAANDI_MIX_COULOMB_GUARD=trace|on`, default off): `session::guard_plan`
+builds a separate `GridPlan` with the stop-rule weights for both
+`DistributedPulay` variants; `GridPlan::coulomb_forms` gives a^T C b of plane
+fields (canonical stick sums, rank-count independent). Off and trace are
+bit-identical to no guard; the per-map `history[].pulay` record is filled
+for the distributed mixers from the existing charge reduction. Counters
+`mix_dist::guard_counters()` (checks, refits, transforms). Test
+`mix_dist::tests::coulomb_guard_matches_the_replicated_guard_for_every_rank_count`.
 
 ## Run configuration (RUN-CONFIG, 2026-11-18)
 

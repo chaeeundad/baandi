@@ -6,7 +6,7 @@ pub use atomic_start::{AtomicStartReport, StartWavefunctions};
 pub use dft_solvers::DavidsonPreconditioner;
 pub use start_density::StartDensity;
 #[path = "convergence.rs"]
-mod convergence;
+pub(crate) mod convergence;
 use convergence::CoulombMetric;
 pub use convergence::{StandardProfile, Verification, VerificationAttempt, VerificationReport};
 #[path = "collinear.rs"]

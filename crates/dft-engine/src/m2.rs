@@ -394,7 +394,7 @@ pub(crate) enum Count {
     /// reads no orbitals; no gather at delivery).
     LazyResults,
 }
-const COUNT_NAMES: [&str; 25] = [
+const COUNT_NAMES: [&str; 26] = [
     "density_builds",
     "xc_evaluations",
     "nonlocal_energy_audits",
@@ -422,7 +422,7 @@ const COUNT_NAMES: [&str; 25] = [
     "density_splits",
     "lazy_results",
 ];
-static COUNTS: [AtomicUsize; 25] = [const { AtomicUsize::new(0) }; 25];
+static COUNTS: [AtomicUsize; 26] = [const { AtomicUsize::new(0) }; 26];
 pub(crate) fn count_atomic_block_fallback() {
     count(Count::AtomicBlockFallbacks);
 }

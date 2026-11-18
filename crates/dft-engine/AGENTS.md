@@ -657,3 +657,36 @@ lib `block_cholesky_qr_matches_gram_schmidt_and_falls_back_together`; physics
 `setup_memo_identity::ionic_local_row_blocks_are_bit_identical_for_every_rank_count`,
 
 lib `ewald::tests`. Ledger INIT-*.
+
+
+## Distributed full-grid stages (M2-GRID, 2026-11-18; both default off, rounding class)
+
+`BAANDI_M2_GRID=on` (`grid_dist.rs`, per-thread override `grid_dist::set_override`):
+on the M2 path with LDA PZ/PW (modified PW92), no core density, density floor or
+symmetry, `ScfProblem::map_fields` (the SCF map's fields; `input_fields` stays the
+replicated routine for every other caller) runs the input density's Hartree FFT
+pair, the XC and the effective potential on a `GridPlan`: the M2a
+`DistributedPairFft` with every grid point as an index (owned real-space planes,
+owned sticks, two transposes per transform), one allgatherv of the effective
+potential plus partial sums. V_H and V_xc stay on the planes; the returned
+`HartreeGrid`/`XcGrid` carry the energies and EMPTY potential arrays (the marker
+that `evaluate_shared_with_kinetic` accepts; it never reads them). The audit of the
+same map (`dist_fields`) takes `GridPlan::audit` (output transform, charge, double
+counting, Bregman linear terms, local energy in its real-space form, output XC
+energy; one allgatherv) through `SharedAudit::from_distributed`; the stop rule
+takes `GridPlan::stop_error` when `StopKept::matches_dist`. Every sum is a
+canonical per-plane / per-stick partial added in a fixed order: the bits do not
+depend on the rank count. Do not hand the empty-potential grids to any other
+consumer; a reused-fields map (certificate screen) and every non-eligible map take
+the replicated path. Counters `grid_dist::counters()` (potential, audit, stop,
+plans, declined).
+`BAANDI_M2_MIX=on` (`mix_dist.rs`, override `mix_dist::set_override`):
+`session::make_mixer` builds `DistributedPulay` for plain Pulay (no Hartree
+metric) on the M2 path: window on the rank's block of 4096-point chunks, Gram row
+and charge sums as chunk partials (one allgatherv each), replicated small
+eigenproblem, one allgatherv of the new density. Exact checkpoints reject it
+(opaque `MixerHistory::checkpoint`). Counters `mix_dist::counters()`.
+Tests: lib `grid_dist::tests` (ranks 1..7, cubic and skewed, odd and even grids,
+PZ and PW), lib `mix_dist::tests` (ranks 1..7 against `PulayMixer`),
+`tests/m2_grid.rs` (production standard SCF, cubic and skewed, P 2/3). dev08
+request `docs/performance/requests/m2-grid.md`; ledger M2-GRID-*.

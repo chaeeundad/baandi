@@ -191,8 +191,6 @@ impl GridPlan {
             ScfError::Numerical(format!("M2 grid plan: {e}"))
         };
         let fft = DistributedPairFft::new(dims, &indices, rank, ranks).map_err(err)?;
-        let owners =
-            dft_solvers::distributed_fft::position_owners(dims, &indices, ranks).map_err(err)?;
         drop(indices);
         let first = fft.first_axis();
         let n_other = dims[1 - first];
@@ -203,15 +201,36 @@ impl GridPlan {
             k * n_other + if first == 0 { j } else { i }
         };
         let sticks_total = nz * n_other;
-        let mut stick_owner = vec![usize::MAX; sticks_total];
-        for (g, &o) in owners.iter().enumerate() {
-            stick_owner[stick_id(g)] = o;
+        // Stick owners from every rank's owned sticks (two small allgathervs;
+        // cheaper than a second partition of the full index set).
+        let mut mine: Vec<usize> = fft.local_positions().iter().map(|&g| stick_id(g)).collect();
+        mine.sort_unstable();
+        mine.dedup();
+        let gather_err = |e: dft_mpi::MpiError| ScfError::Numerical(format!("M2 grid plan: {e}"));
+        let mut stick_counts_f = vec![0.0; ranks];
+        comm.allgatherv_f64(&[mine.len() as f64], &vec![1; ranks], &mut stick_counts_f)
+            .map_err(gather_err)?;
+        let stick_counts: Vec<usize> = stick_counts_f.iter().map(|&c| c as usize).collect();
+        let mut all = vec![0.0; stick_counts.iter().sum()];
+        let mine_f: Vec<f64> = mine.iter().map(|&s| s as f64).collect();
+        comm.allgatherv_f64(&mine_f, &stick_counts, &mut all)
+            .map_err(gather_err)?;
+        if all.len() != sticks_total {
+            return Err(ScfError::Numerical("M2 grid plan: stick partition".into()));
         }
-        let mut stick_counts = vec![0usize; ranks];
+        let mut stick_owner = vec![usize::MAX; sticks_total];
         let mut slot_in_rank = vec![0usize; sticks_total];
-        for (s, &o) in stick_owner.iter().enumerate() {
-            slot_in_rank[s] = stick_counts[o];
-            stick_counts[o] += 1;
+        let mut at = 0;
+        for (r, &count) in stick_counts.iter().enumerate() {
+            for slot in 0..count {
+                let s = all[at] as usize;
+                stick_owner[s] = r;
+                slot_in_rank[s] = slot;
+                at += 1;
+            }
+        }
+        if stick_owner.contains(&usize::MAX) {
+            return Err(ScfError::Numerical("M2 grid plan: stick partition".into()));
         }
         let stick_offsets: Vec<usize> = std::iter::once(0)
             .chain(stick_counts.iter().scan(0, |a, &c| {

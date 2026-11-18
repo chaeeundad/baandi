@@ -64,6 +64,139 @@ pub fn structure_factor(
 ) -> Result<Complex64, HamiltonianError> {
     positions_bohr.iter().map(|&r| phase(g, r)).sum()
 }
+thread_local! {
+    static IONIC_FAST_OVERRIDE: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+/// Override `BAANDI_IONIC_FAST` on the calling thread (tests); `None` restores
+/// the environment.
+pub fn set_ionic_fast_override(on: Option<bool>) {
+    IONIC_FAST_OVERRIDE.with(|o| o.set(on));
+}
+fn ionic_fast() -> bool {
+    IONIC_FAST_OVERRIDE
+        .with(|o| o.get())
+        .unwrap_or_else(|| dft_numerics::switches::on(dft_numerics::switches::Id::IONIC_FAST))
+}
+
+/// Structure factor sum_I exp(-i G.tau_I) from per-ion, per-axis phase tables
+/// (INIT-IONIC-FAST, `BAANDI_IONIC_FAST`): with b_k the Cartesian vectors of
+/// the unit Miller indices of the list, G = sum_k m_k b_k and
+/// exp(-i G.tau) = prod_k exp(-i m_k b_k.tau), two complex products per ion
+/// and G instead of one sine/cosine pair. The tables depend only on the full
+/// vector list and the positions, so every row block of a partition uses the
+/// same tables (same bits for any partition). Rounding class against the
+/// direct phase (about 1e-13 relative).
+struct PhaseTables {
+    unit: [[f64; 3]; 3],
+    lo: [i32; 3],
+    hi: [i32; 3],
+    ions: usize,
+    tables: [Vec<Complex64>; 3],
+    /// (row -> offset or usize::MAX, row products), filled lazily.
+    rows: RefCell<(Vec<usize>, Vec<Complex64>)>,
+}
+impl PhaseTables {
+    /// None when a unit Miller vector is missing from the list or a phase is
+    /// not finite (the caller then evaluates the direct phase).
+    fn new(vectors: &[GVector], positions: &[[f64; 3]]) -> Option<Self> {
+        let mut unit = [None; 3];
+        let mut lo = [0i32; 3];
+        let mut hi = [0i32; 3];
+        for g in vectors {
+            for k in 0..3 {
+                lo[k] = lo[k].min(g.miller[k]);
+                hi[k] = hi[k].max(g.miller[k]);
+                let mut e = [0; 3];
+                e[k] = 1;
+                if g.miller == e {
+                    unit[k] = Some(g.cartesian);
+                }
+            }
+        }
+        let unit = [unit[0]?, unit[1]?, unit[2]?];
+        let ions = positions.len();
+        let mut tables: [Vec<Complex64>; 3] = Default::default();
+        for k in 0..3 {
+            let theta: Vec<f64> = positions
+                .iter()
+                .map(|r| unit[k].iter().zip(r).map(|(b, x)| b * x).sum())
+                .collect();
+            if !theta.iter().all(|t: &f64| t.is_finite()) {
+                return None;
+            }
+            let table = &mut tables[k];
+            table.reserve((hi[k] - lo[k] + 1) as usize * ions);
+            for m in lo[k]..=hi[k] {
+                for t in &theta {
+                    table.push(Complex64::from_polar(1.0, -f64::from(m) * t));
+                }
+            }
+        }
+        let row_count = (hi[0] - lo[0] + 1) as usize * (hi[1] - lo[1] + 1) as usize;
+        Some(Self {
+            unit,
+            lo,
+            hi,
+            ions,
+            tables,
+            rows: RefCell::new((vec![usize::MAX; row_count], Vec::new())),
+        })
+    }
+    /// None when G is not the Miller combination of the unit vectors (to
+    /// 1e-14 (1 + |G|) per component) or outside the tables.
+    #[inline]
+    fn structure_factor(&self, g: &GVector) -> Option<Complex64> {
+        let m = g.miller;
+        let scale = 1e-14 * (1.0 + g.norm_squared.sqrt());
+        for c in 0..3 {
+            let rebuilt: f64 = (0..3).map(|k| f64::from(m[k]) * self.unit[k][c]).sum();
+            // A NaN deviation also falls back.
+            let within = (rebuilt - g.cartesian[c]).abs() <= scale;
+            if !within {
+                return None;
+            }
+        }
+        let n = self.ions;
+        if (0..3).any(|k| m[k] < self.lo[k] || m[k] > self.hi[k]) {
+            return None;
+        }
+        // Row products T0[m0] T1[m1], filled on first use; (x y) z is the
+        // association of x * y * z, so the cache does not change the bits.
+        let len1 = (self.hi[1] - self.lo[1] + 1) as usize;
+        let row = (m[0] - self.lo[0]) as usize * len1 + (m[1] - self.lo[1]) as usize;
+        let mut cache = self.rows.borrow_mut();
+        if cache.0[row] == usize::MAX {
+            let at = cache.1.len();
+            let r0 = &self.tables[0][(m[0] - self.lo[0]) as usize * n..][..n];
+            let r1 = &self.tables[1][(m[1] - self.lo[1]) as usize * n..][..n];
+            cache.1.extend(r0.iter().zip(r1).map(|(x, y)| x * y));
+            cache.0[row] = at;
+        }
+        let at = cache.0[row];
+        let xy = &cache.1[at..at + n];
+        let z = &self.tables[2][(m[2] - self.lo[2]) as usize * n..][..n];
+        let mut sum = Complex64::new(0.0, 0.0);
+        for (a, b) in xy.iter().zip(z) {
+            sum += a * b;
+        }
+        Some(sum)
+    }
+}
+
+/// Structure factor of `g` for one species: from the tables when present and
+/// applicable, else the direct sum.
+#[inline]
+fn species_structure_factor(
+    tables: Option<&PhaseTables>,
+    g: &GVector,
+    positions_bohr: &[[f64; 3]],
+) -> Result<Complex64, HamiltonianError> {
+    match tables.and_then(|t| t.structure_factor(g)) {
+        Some(s) => Ok(s),
+        None => structure_factor(g.cartesian, positions_bohr),
+    }
+}
+
 /// Coefficients in the supplied density-sphere order; zero outside that sphere.
 /// The caller supplies the density basis belonging to its wavefunction basis/cell.
 pub fn ionic_local(
@@ -86,7 +219,13 @@ pub fn ionic_local_rows(
     volume(volume_bohr3)?;
     let vectors = density.vectors().get(rows).ok_or(HamiltonianError::Shape)?;
     let mut result = vec![Complex64::default(); vectors.len()];
+    let fast = ionic_fast();
     for s in species {
+        let tables = if fast {
+            PhaseTables::new(density.vectors(), s.positions_bohr)
+        } else {
+            None
+        };
         let local = s.potential.local_transform(volume_bohr3, None)?;
         // Keep LocalTransform's endpoint and quadrature, but hoist only the
         // G-independent parenthesized expression. In particular, rab must
@@ -109,12 +248,18 @@ pub fn ionic_local_rows(
         let mut integrand = vec![0.0; n];
         // At most one entry per G; reserve up front so misses never allocate.
         let mut cache = std::collections::HashMap::with_capacity(vectors.len());
+        let mut last_shell: Option<(u64, f64)> = None;
         for (out, g) in result.iter_mut().zip(vectors) {
             let v = if g.miller == [0; 3] {
                 local.alpha_z()?
             } else {
                 let key = g.norm_squared.to_bits();
-                if let Some(&v) = cache.get(&key) {
+                // Density lists are sorted by |G|^2: the previous shell first
+                // (same cached value, no hash; INIT-IONIC-FAST, bit-identical).
+                if let Some((_, v)) = last_shell.filter(|(k, _)| *k == key) {
+                    v
+                } else if let Some(&v) = cache.get(&key) {
+                    last_shell = Some((key, v));
                     v
                 } else {
                     let q = g.norm_squared.sqrt();
@@ -137,10 +282,11 @@ pub fn ionic_local_rows(
                         .into());
                     }
                     cache.insert(key, v);
+                    last_shell = Some((key, v));
                     v
                 }
             };
-            *out += v * structure_factor(g.cartesian, s.positions_bohr)?;
+            *out += v * species_structure_factor(tables.as_ref(), g, s.positions_bohr)?;
         }
     }
     if !result.iter().all(finite) {
@@ -1749,7 +1895,13 @@ pub fn ionic_local_with_conventions_rows(
     volume(volume_bohr3)?;
     let vectors = density.vectors().get(rows).ok_or(HamiltonianError::Shape)?;
     let mut result = vec![Complex64::default(); vectors.len()];
+    let fast = ionic_fast();
     for s in species {
+        let tables = if fast {
+            PhaseTables::new(density.vectors(), s.positions_bohr)
+        } else {
+            None
+        };
         let local = s
             .potential
             .local_transform_with_conventions(volume_bohr3, local_mesh, rule)?;
@@ -1774,12 +1926,18 @@ pub fn ionic_local_with_conventions_rows(
         let mut integrand = vec![0.0; n];
         // At most one entry per G; reserve up front so misses never allocate.
         let mut cache = std::collections::HashMap::with_capacity(vectors.len());
+        let mut last_shell: Option<(u64, f64)> = None;
         for (out, g) in result.iter_mut().zip(vectors) {
             let v = if g.miller == [0; 3] {
                 local.alpha_z()?
             } else {
                 let key = g.norm_squared.to_bits();
-                if let Some(&v) = cache.get(&key) {
+                // Density lists are sorted by |G|^2: the previous shell first
+                // (same cached value, no hash; INIT-IONIC-FAST, bit-identical).
+                if let Some((_, v)) = last_shell.filter(|(k, _)| *k == key) {
+                    v
+                } else if let Some(&v) = cache.get(&key) {
+                    last_shell = Some((key, v));
                     v
                 } else {
                     let q = g.norm_squared.sqrt();
@@ -1802,10 +1960,11 @@ pub fn ionic_local_with_conventions_rows(
                         .into());
                     }
                     cache.insert(key, v);
+                    last_shell = Some((key, v));
                     v
                 }
             };
-            *out += v * structure_factor(g.cartesian, s.positions_bohr)?;
+            *out += v * species_structure_factor(tables.as_ref(), g, s.positions_bohr)?;
         }
     }
     if !result.iter().all(finite) {

@@ -417,3 +417,102 @@ fn ionic_local_row_blocks_are_bit_identical_for_every_rank_count() {
     }
     println!("{cases} shape/k/convention/partition cases bit-identical");
 }
+
+/// INIT-IONIC-FAST (`BAANDI_IONIC_FAST`, per-thread override): the phase-table
+/// structure factor (a) gives the same bits for every row partition (tables
+/// from the full list), (b) agrees with the direct phases to 1e-13 of the
+/// largest coefficient (pre-registered cap; cubic, skewed, elongated, slab;
+/// two species, five ions; every local-mesh convention), and (c) falls back to
+/// the direct phases bit for bit when a unit Miller vector is outside the
+/// density sphere (1.5 Bohr axis).
+#[test]
+fn ionic_phase_tables_match_direct_phases_and_partitions() {
+    use dft_upf::radial::{LocalMesh, RadialEvenRule};
+    let p = pseudo(&[0, 1], 81);
+    let q = pseudo(&[0], 66);
+    let conventions = [
+        (LocalMesh::Baandi, RadialEvenRule::Simpson3_8),
+        (LocalMesh::QeLike, RadialEvenRule::SimpsonQuadraticEnd),
+        (LocalMesh::QeLikeG0, RadialEvenRule::Simpson3_8),
+    ];
+    let mut worst: f64 = 0.0;
+    for (index, rows) in [
+        [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],
+        [[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]],
+        [[4., 0., 0.], [0., 5., 0.], [0., 0., 14.]],
+        [[7., 0., 0.], [0., 8., 0.], [0.3, 0., 18.]],
+        [[1.5, 0., 0.], [0., 6., 0.], [0., 0., 6.]],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let fallback = index == 4;
+        let cell = Cell::from_user_rows_bohr(rows).unwrap();
+        let positions: Vec<_> = (0..5)
+            .map(|i| {
+                cell.fractional_to_cartesian_bohr([
+                    ((i * 7 + 1) % 23) as f64 / 23. - 0.4,
+                    ((i * 11 + 2) % 29) as f64 / 29.,
+                    ((i * 13 + 3) % 31) as f64 / 31. + 1.0,
+                ])
+            })
+            .collect();
+        let species = [
+            hamiltonian::Species {
+                potential: &p,
+                positions_bohr: &positions[..3],
+            },
+            hamiltonian::Species {
+                potential: &q,
+                positions_bohr: &positions[3..],
+            },
+        ];
+        let density = PlaneWaveBasis::new(&cell, Hartree(0.6))
+            .unwrap()
+            .density_basis(&cell)
+            .unwrap();
+        let n = density.vectors().len();
+        for (mesh, rule) in conventions {
+            let run = |fast: bool, range: std::ops::Range<usize>| {
+                hamiltonian::set_ionic_fast_override(Some(fast));
+                let v = hamiltonian::ionic_local_with_conventions_rows(
+                    &density,
+                    cell.volume_bohr3(),
+                    &species,
+                    mesh,
+                    rule,
+                    range,
+                )
+                .unwrap();
+                hamiltonian::set_ionic_fast_override(None);
+                v
+            };
+            let direct = run(false, 0..n);
+            let fast = run(true, 0..n);
+            for parts in 1..=7usize {
+                let mut joined = Vec::with_capacity(n);
+                let mut first = 0;
+                for part in 0..parts {
+                    let count = n / parts + usize::from(part < n % parts);
+                    joined.extend(run(true, first..first + count));
+                    first += count;
+                }
+                assert_bits(&joined, &fast);
+            }
+            if fallback {
+                assert_bits(&fast, &direct);
+                continue;
+            }
+            let scale = direct.iter().map(|z| z.norm()).fold(0.0, f64::max);
+            let diff = direct
+                .iter()
+                .zip(&fast)
+                .map(|(a, b)| (a - b).norm())
+                .fold(0.0, f64::max);
+            assert!(diff <= 1e-13 * scale, "shape {index}: {diff} vs {scale}");
+            assert!(direct != fast || diff == 0.0);
+            worst = worst.max(diff / scale);
+        }
+    }
+    println!("largest relative phase-table deviation {worst:.3e}");
+}

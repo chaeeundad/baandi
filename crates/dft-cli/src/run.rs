@@ -940,7 +940,7 @@ pub fn execute_mode(
                 "certificate_davidson_iterations":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.davidson_iterations).sum::<usize>(),
                 "certificate_solves":r.history.iter().filter(|h|h.fixed_point_certificate.is_some()).count(),
                 "second_vector_columns":dft_engine::second_vector_columns(),
-                "davidson_stages":davidson_stages_json(),
+                "davidson_stages":over_ranks(davidson_stages_json())?,
                 "b1":b1_json(),
                 "b5":{"mode":dft_numerics::switches::choice(dft_numerics::switches::Id::B5),"bordered":dft_engine::b5_counters().bordered,"declined":dft_engine::b5_counters().declined,"full":dft_engine::b5_counters().full},
                 "ortho":{"mode":dft_numerics::switches::text(dft_numerics::switches::Id::ORTHO).unwrap_or("dgks:0.1 (default)"),"second_pass_skipped":dft_engine::ortho_counters().0,"second_pass_repeated":dft_engine::ortho_counters().1},
@@ -1700,6 +1700,7 @@ fn davidson_stages_json() -> serde_json::Value {
         });
     out["fft"] = fft_json(&pooled);
     out["h_apply_parts"] = h_apply_parts_json(&pooled);
+    out["collectives"] = collectives_json(&pooled);
     let stages = dft_engine::stage_seconds_by_run_stage();
     out["by_run_stage"] = dft_numerics::work_timers::RUN_STAGE_LABELS
         .iter()
@@ -1708,14 +1709,91 @@ fn davidson_stages_json() -> serde_json::Value {
             let mut block = stage_block_json(s);
             block["fft"] = fft_json(w);
             block["h_apply_parts"] = h_apply_parts_json(w);
+            block["collectives"] = collectives_json(w);
             (label.to_string(), block)
         })
         .collect::<serde_json::Map<_, _>>()
         .into();
     out["work_timers_note"] = json!(
-        "BAANDI_DAVIDSON_STAGES=on. fft and h_apply_parts: seconds summed over worker threads (thread-seconds; at T>1 compare with wall only after dividing by the busy threads), counts independent of the thread count. fft.pair_*: paired orbital transforms of the real Gamma h_apply (one inverse and one forward transform per pair, as QE's fftw count of wave transforms); pair_potential_s is the grid multiply between them, not FFT. fft.density_*: density transforms (one inverse each). fft.other_*: other wave transforms (complex-path local applies, folded odd tail), one inverse and one forward each. fft.kept_*: REUSE-PSI forward transforms of kept psi(r) times the potential change (one forward each, no inverse). h_apply_parts: real Gamma block applications (apply_s whole call, local_s wall of the local part on the calling thread including pack/unpack, nonlocal projection P^T X and back product); remainder_s = apply - local - nonlocal (kinetic, scans). by_run_stage splits every block by run stage (fine, ladder coarse, verification = certificate block); the pooled keys are the sums."
+        "BAANDI_DAVIDSON_STAGES=on. fft and h_apply_parts: seconds summed over worker threads (thread-seconds; at T>1 compare with wall only after dividing by the busy threads), counts independent of the thread count. fft.pair_*: paired orbital transforms of the real Gamma h_apply (one inverse and one forward transform per pair, as QE's fftw count of wave transforms); pair_potential_s is the grid multiply between them, not FFT. fft.density_*: density transforms (one inverse each). fft.other_*: other wave transforms (complex-path local applies, folded odd tail), one inverse and one forward each. fft.kept_*: REUSE-PSI forward transforms of kept psi(r) times the potential change (one forward each, no inverse). h_apply_parts: real Gamma block applications (apply_s whole call, local_s wall of the local part on the calling thread including pack/unpack, nonlocal projection P^T X and back product); remainder_s = apply - local - nonlocal (kinetic, scans). by_run_stage splits every block by run stage (fine, ladder coarse, verification = certificate block); the pooled keys are the sums. MPI M2 path (distributed solver and operator): stage_s maps the distributed solver stages (reduced_gram -> reduced, reduced_eigen -> eigen, rotate, residual, orthonormalize, apply_total -> h_apply incl. the per-block finiteness scan outside it, precondition; sketch 0; iteration widths are not recorded); h_apply_parts: local_s = mirror exchange, pack, distributed pair FFTs with transposes and potential, mirror-h exchange, unpack and kinetic term; nonlocal_projection_s = local P^T X and its tree sum; nonlocal_back_s = coupling, P W and image update; fft.pair_unsplit_s = the distributed pair FFT call (transposes included), fft.density_* the band-density pair transforms (one inverse per pair), fft.kept_* the potential-change transforms (forward per pair; inverse of non-kept pairs inside the seconds); collectives.* = calls and seconds of every collective of the run stage (all) and of those inside H applications (in_h_apply). Seconds need BAANDI_STAGE_TIMERS=on (off: counts only). With two or more ranks every number is the MAXIMUM over ranks (critical path, entries derived per rank first), min_over_ranks the minimum (imbalance), never a sum; simulated ranks (threads of one process) share the process counters."
     );
     out
+}
+fn collectives_json(w: &dft_numerics::work_timers::WorkTimes) -> serde_json::Value {
+    let block = |calls: &[u64], secs: &[f64]| {
+        dft_numerics::work_timers::COLLECTIVE_LABELS
+            .iter()
+            .enumerate()
+            .map(|(i, l)| (l.to_string(), json!({"calls":calls[i],"s":secs[i]})))
+            .collect::<serde_json::Map<_, _>>()
+    };
+    json!({"all":block(&w.coll_calls, &w.coll),"in_h_apply":block(&w.apply_coll_calls, &w.apply_coll)})
+}
+
+/// With two or more ranks (registered communicator): every number of `value`
+/// replaced by its maximum over ranks, plus `min_over_ranks` (the same tree
+/// with the minima) and `ranks`. Collective: every rank must call with a tree
+/// of the same shape (one allgatherv of the numbers in traversal order).
+fn over_ranks(value: serde_json::Value) -> Result<serde_json::Value, RunError> {
+    // Without the work timers every entry is 0: no collective (the switch is
+    // replicated, so every rank takes the same branch).
+    if !dft_numerics::work_timers::enabled() {
+        return Ok(value);
+    }
+    match dft_engine::parallel::SharedComm::active() {
+        Some(comm) => over_ranks_with(&comm, value),
+        None => Ok(value),
+    }
+}
+fn over_ranks_with<C: dft_mpi::Collective + ?Sized>(
+    comm: &C,
+    value: serde_json::Value,
+) -> Result<serde_json::Value, RunError> {
+    fn flatten(v: &serde_json::Value, out: &mut Vec<f64>) {
+        match v {
+            serde_json::Value::Number(n) => out.push(n.as_f64().unwrap_or(0.0)),
+            serde_json::Value::Array(a) => a.iter().for_each(|x| flatten(x, out)),
+            serde_json::Value::Object(m) => m.values().for_each(|x| flatten(x, out)),
+            _ => {}
+        }
+    }
+    fn refill(v: &mut serde_json::Value, vals: &[f64], at: &mut usize) {
+        match v {
+            serde_json::Value::Number(n) => {
+                let x = vals[*at];
+                *at += 1;
+                *v = if n.is_u64() {
+                    json!(x as u64)
+                } else if n.is_i64() {
+                    json!(x as i64)
+                } else {
+                    json!(x)
+                };
+            }
+            serde_json::Value::Array(a) => a.iter_mut().for_each(|x| refill(x, vals, at)),
+            serde_json::Value::Object(m) => m.values_mut().for_each(|x| refill(x, vals, at)),
+            _ => {}
+        }
+    }
+    let mut flat = Vec::new();
+    flatten(&value, &mut flat);
+    let (n, ranks) = (flat.len(), comm.size());
+    let mut all = vec![0.0; n * ranks];
+    comm.allgatherv_f64(&flat, &vec![n; ranks], &mut all)
+        .map_err(|e| error(5, e))?;
+    let reduce = |f: fn(f64, f64) -> f64| -> Vec<f64> {
+        (0..n)
+            .map(|i| (1..ranks).fold(all[i], |a, r| f(a, all[r * n + i])))
+            .collect()
+    };
+    let (max, min) = (reduce(f64::max), reduce(f64::min));
+    let mut hi = value.clone();
+    refill(&mut hi, &max, &mut 0);
+    let mut lo = value;
+    refill(&mut lo, &min, &mut 0);
+    hi["min_over_ranks"] = lo;
+    hi["ranks"] = json!(ranks);
+    Ok(hi)
 }
 fn stage_block_json(s: &dft_engine::StageSecondsReport) -> serde_json::Value {
     let labels = dft_engine::DAVIDSON_WIDTH_LABELS;
@@ -1850,6 +1928,29 @@ fn algebra_stream_json() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// M2-STAGE-TIMERS: the davidson_stages rank merge takes the maximum and
+    /// the minimum of every number over ranks and keeps integers integral.
+    #[test]
+    fn davidson_stages_rank_merge_takes_max_and_min() {
+        use dft_mpi::Collective;
+        let out = dft_mpi::simulate(3, |comm: &dft_mpi::SimRank| {
+            let r = comm.rank();
+            let v = json!({"note":"x","a":{"s":0.5 + r as f64,"calls":10 - r as u64},
+                "list":[r as f64 * 2.0, -(r as f64)]});
+            over_ranks_with(comm, v).unwrap()
+        });
+        for o in &out {
+            assert_eq!(o["ranks"], 3);
+            assert_eq!(o["note"], "x");
+            assert_eq!(o["a"]["s"], 2.5);
+            assert_eq!(o["a"]["calls"], 10);
+            assert!(o["a"]["calls"].is_u64());
+            assert_eq!(o["list"], json!([4.0, 0.0]));
+            assert_eq!(o["min_over_ranks"]["a"]["s"], 0.5);
+            assert_eq!(o["min_over_ranks"]["a"]["calls"], 8);
+            assert_eq!(o["min_over_ranks"]["list"], json!([0.0, -2.0]));
+        }
+    }
     #[test]
     fn utc_dates() {
         for (s, t) in [

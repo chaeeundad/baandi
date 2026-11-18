@@ -171,6 +171,11 @@ pub(crate) fn stage_add(i: usize, start: Option<Instant>) {
     }
     // Per-thread mirror for the engine's phase profile (off: one relaxed load).
     dft_numerics::stage_clock::local::add(dft_numerics::stage_clock::local::DIST_STAGE + i, ns);
+    // Serial-stage accumulators of `BAANDI_DAVIDSON_STAGES=on` (results.json
+    // davidson_stages.by_run_stage.*.stage_s; off: one relaxed load).
+    if dft_numerics::work_timers::enabled() {
+        crate::davidson_stages::add_distributed(i, ns);
+    }
 }
 
 // Reduced eigenproblem accounting (docs/performance/mpi-reduced-eigen-analysis.md):

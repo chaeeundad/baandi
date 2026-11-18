@@ -14,6 +14,9 @@
 //! `start_density = Atomic`, a Gaussian atomic charge substituted for the
 //! synthetic zero PP_RHOATOM) is split by G blocks too; its grid values are
 //! bit-identical on every rank count and the split is counted.
+//! INIT-EWALD-FAST / INIT-IONIC-FAST: the same contract with the balanced Ewald
+//! scheme and the phase-table structure factor (per-thread overrides set in
+//! every rank thread), against the serial construction with the same switches.
 #[allow(dead_code)]
 #[path = "../../dft-cli/tests/common/mod.rs"]
 mod common;
@@ -42,7 +45,13 @@ fn with_atomic_charge(z: f64, points: usize) -> String {
 
 type Bits = (Vec<u64>, Vec<u64>, Vec<u64>);
 
-fn construction_bits(kind: usize, mesh: dft_upf::radial::LocalMesh) -> Bits {
+fn construction_bits(kind: usize, mesh: dft_upf::radial::LocalMesh, fast: bool) -> Bits {
+    dft_physics::ewald::set_scheme_override(Some(if fast {
+        dft_physics::ewald::Scheme::Balanced
+    } else {
+        dft_physics::ewald::Scheme::Reference
+    }));
+    dft_physics::hamiltonian::set_ionic_fast_override(Some(fast));
     let (rows, atoms, z) = if kind == 0 {
         (
             [[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]],
@@ -80,6 +89,8 @@ fn construction_bits(kind: usize, mesh: dft_upf::radial::LocalMesh) -> Bits {
     )
     .unwrap();
     dft_engine::set_ewald_cache_override(None);
+    dft_physics::ewald::set_scheme_override(None);
+    dft_physics::hamiltonian::set_ionic_fast_override(None);
     let e = problem.ewald_terms();
     let ewald = [
         e.energy.0,
@@ -121,14 +132,14 @@ fn distributed_construction_is_bit_identical_for_every_rank_count() {
     use dft_upf::radial::LocalMesh;
     let (ionic_before, ewald_before) = (count("ionic_local_splits"), count("ewald_splits"));
     let density_before = count("density_splits");
-    for kind in 0..2 {
+    for (kind, fast) in [(0, false), (1, false), (0, true), (1, true)] {
         for mesh in [LocalMesh::Baandi, LocalMesh::QeLike] {
-            let serial = construction_bits(kind, mesh);
+            let serial = construction_bits(kind, mesh, fast);
             for ranks in 2..=7 {
                 let ewald_before_p = count("ewald_splits");
                 let got = simulate(ranks, |comm: &SimRank| {
                     parallel::set_communicator(Some(Arc::new(comm.clone())));
-                    let bits = construction_bits(kind, mesh);
+                    let bits = construction_bits(kind, mesh, fast);
                     parallel::set_communicator(None);
                     bits
                 });
@@ -136,7 +147,7 @@ fn distributed_construction_is_bit_identical_for_every_rank_count() {
                 assert_eq!(
                     split,
                     dft_engine::ewald_split_applies(ranks),
-                    "kind {kind} {mesh:?} P={ranks}: Ewald split taken = {split}"
+                    "kind {kind} fast {fast} {mesh:?} P={ranks}: Ewald split taken = {split}"
                 );
                 assert_eq!(split, ranks >= dft_engine::EWALD_SPLIT_MIN_RANKS);
                 for (rank, (ionic, ewald, start)) in got.iter().enumerate() {

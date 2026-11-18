@@ -326,9 +326,16 @@ impl<K: Collective> DensityMixer for DistributedPulay<K> {
             })
             .collect();
         let mut full = vec![0.0; self.size];
+        let clock = dft_numerics::stage_clock::start();
         self.comm
             .allgatherv_f64(&next, &counts, &mut full)
             .map_err(|e| SolverError::Application(e.to_string()))?;
+        {
+            use crate::grid_dist as g;
+            g::owned_add(g::O_MIXER_GATHERS, 1);
+            g::owned_add(g::O_MIXER_GATHER_VALUES, self.size as u64);
+            g::owned_time(g::T_MIXER_GATHER, clock);
+        }
         if full.iter().any(|v| !v.is_finite()) {
             return Err(dft_numerics::linalg::LinalgError::NonFinite.into());
         }

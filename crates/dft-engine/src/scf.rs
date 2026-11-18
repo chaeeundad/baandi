@@ -629,6 +629,9 @@ pub struct ScfProblem {
     /// `BAANDI_M2_GRID=on` (ticket M2-GRID, default off): slab plan of the
     /// distributed full-grid stages, built at the first eligible map.
     grid_dist: Option<crate::grid_dist::GridPlan>,
+    /// M2-OWNED (`BAANDI_M2_LOCAL_FIELDS` / `_LOCAL_DENSITY`, default off):
+    /// epoch-tagged owned fields of the M2 path.
+    pub(crate) owned: crate::grid_dist::OwnedFields,
     cell: Cell,
     states: Vec<KState>,
     grid: FftGridSpec,
@@ -1595,6 +1598,7 @@ impl ScfProblem {
             stop_kept: (coulomb.is_some() && stop_metric_kept())
                 .then(|| StopKept::new(grid.dims())),
             grid_dist: None,
+            owned: Default::default(),
             coulomb,
             cell: cell.clone(),
             states,
@@ -1892,10 +1896,88 @@ impl ScfProblem {
     /// eligible (`true`: V_H and V_xc stay on the plan's planes, the returned
     /// grids carry only the energies and empty potential arrays), otherwise
     /// `input_fields`. Collective on the M2 path.
+    /// M2-OWNED (`BAANDI_M2_LOCAL_FIELDS=on`): whether this map's effective
+    /// potential may stay on the owned planes (replicated conditions only: the
+    /// distributed grid path, the standard profile, one exact-Gamma state whose
+    /// previous map used the distributed operator, a warm start so that no
+    /// atomic start applies the complex Hamiltonian, no snapshot capture, no
+    /// finite temperature). Counts the reason of a decline.
+    fn local_fields_eligible(&self, warm: bool, finite: bool) -> bool {
+        use crate::grid_dist as g;
+        if !g::local_fields_requested() || crate::m2::active().is_none() {
+            return false;
+        }
+        let reason = if self.grid_dist_lda().is_none() {
+            Some(0)
+        } else if self.options.standard.is_none() {
+            Some(1)
+        } else if self.states.len() != 1 {
+            Some(2)
+        } else if !warm {
+            Some(3)
+        } else if self.states[0]
+            .real_solve
+            .as_ref()
+            .is_none_or(|r| r.dist.is_none())
+            || !self.states[0].gamma_real.gamma_real_used
+            || self.gamma_real_exclusion.is_some()
+        {
+            Some(4)
+        } else if crate::snapshot::dir().is_some() {
+            Some(5)
+        } else if finite {
+            Some(6)
+        } else {
+            None
+        };
+        if let Some(r) = reason {
+            g::owned_declined(r);
+            return false;
+        }
+        true
+    }
+
+    /// M2-OWNED: the complex Hamiltonians hold the potential of the latest map
+    /// again (one allgatherv of the owned effective potential, charged as a
+    /// consumer gather) when an owned map left them stale; a no-op otherwise.
+    /// Every consumer of the full local potential calls it first. Collective
+    /// (the stale flag is replicated).
+    pub(crate) fn ensure_complex_potential(&mut self) -> Result<(), ScfError> {
+        if !self.owned.complex_stale {
+            return Ok(());
+        }
+        let comm = crate::m2::active().ok_or(ScfError::InvalidInput(
+            "M2 owned potential without a communicator",
+        ))?;
+        let plan = self
+            .grid_dist
+            .as_mut()
+            .ok_or(ScfError::InvalidInput("M2 owned potential without a plan"))?;
+        let clock = dft_numerics::stage_clock::start();
+        let mut full = Array3::zeros(self.grid.dims());
+        let local = std::mem::take(&mut self.owned.scratch);
+        let mut local = local;
+        local.clear();
+        local.extend_from_slice(plan.effective_planes());
+        let gathered = plan.gather_field(&comm, &local, full.as_slice_mut().expect("standard"));
+        self.owned.scratch = local;
+        gathered?;
+        for state in &mut self.states {
+            state.hamiltonian.set_local_potential(full.clone())?;
+        }
+        use crate::grid_dist as g;
+        g::owned_add(g::O_CONSUMER_GATHERS, 1);
+        g::owned_add(g::O_CONSUMER_GATHER_VALUES, full.len() as u64);
+        g::owned_time(g::T_CONSUMER_GATHER, clock);
+        self.owned.complex_stale = false;
+        Ok(())
+    }
+
     fn map_fields(
         &mut self,
         n: &Array3<f64>,
-    ) -> Result<(hartree::HartreeGrid, xc::XcGrid, Array3<f64>, bool), ScfError> {
+        owned_ok: bool,
+    ) -> Result<(hartree::HartreeGrid, xc::XcGrid, Array3<f64>, bool, bool), ScfError> {
         let comm = crate::m2::active();
         let lda = comm.as_ref().and(self.grid_dist_lda());
         let (Some(comm), Some(lda), Some(values), Some(ionic)) =
@@ -1905,7 +1987,7 @@ impl ScfProblem {
                 crate::grid_dist::count_declined();
             }
             let (h, x, effective) = self.input_fields(n)?;
-            return Ok((h, x, effective, false));
+            return Ok((h, x, effective, false, false));
         };
         let dims = self.grid.dims();
         if self.grid_dist.as_ref().map(|p| p.dims()) != Some(dims) {
@@ -1920,13 +2002,59 @@ impl ScfProblem {
             )?);
         }
         let plan = self.grid_dist.as_mut().expect("plan built above");
-        let mut effective = Array3::zeros(dims);
-        let (hartree_energy, xc_energy, xc_integral) = plan.potential(
-            &comm,
-            values,
-            ionic,
-            effective.as_slice_mut().expect("standard layout"),
-        )?;
+        let (effective, (hartree_energy, xc_energy, xc_integral)) = if owned_ok {
+            // M2-OWNED: the effective potential stays on the planes; the
+            // distributed operator takes its planes (moved to the operator's
+            // plane layout when the axes differ). No full-grid gather.
+            let energies =
+                plan.potential_field(&comm, crate::grid_dist::Field::Full(values), ionic, None)?;
+            let first_b = self.states[0]
+                .real_solve
+                .as_ref()
+                .and_then(|r| r.dist.as_ref())
+                .map(|d| d.plane_layout().0)
+                .ok_or(ScfError::InvalidInput("M2 owned fields without operator"))?;
+            let first_a = plan.first_axis();
+            let rank = dft_mpi::Collective::rank(&comm);
+            let ranks = dft_mpi::Collective::size(&comm);
+            if !self
+                .owned
+                .map
+                .as_ref()
+                .is_some_and(|m| m.matches(dims, first_a, first_b))
+            {
+                self.owned.map = Some(crate::grid_dist::PlaneMap::new(
+                    dims, rank, ranks, first_a, first_b,
+                ));
+            }
+            let epoch = self.owned.next_epoch();
+            let mut values = self
+                .owned
+                .potential
+                .take()
+                .map(|o| o.values)
+                .unwrap_or_default();
+            self.owned.map.as_mut().expect("built above").a_to_b(
+                &comm,
+                plan.effective_planes(),
+                &mut values,
+            )?;
+            use crate::grid_dist as g;
+            g::owned_add(g::O_FIELDS_OWNED_MAPS, 1);
+            g::owned_max(g::O_PLANE_VALUES, values.len() as u64);
+            self.owned.potential = Some(crate::grid_dist::Owned { epoch, values });
+            self.owned.complex_stale = true;
+            (Array3::zeros((0, 0, 0)), energies)
+        } else {
+            let mut effective = Array3::zeros(dims);
+            let energies = plan.potential(
+                &comm,
+                values,
+                ionic,
+                effective.as_slice_mut().expect("standard layout"),
+            )?;
+            (effective, energies)
+        };
         if let Some(kept) = self.stop_kept.as_mut() {
             kept.set_input_dist(n);
         }
@@ -1944,6 +2072,7 @@ impl ScfProblem {
             },
             effective,
             true,
+            owned_ok,
         ))
     }
 
@@ -2069,8 +2198,15 @@ impl ScfProblem {
             }
         }
         let mut full = Array3::zeros(dims);
+        let gather_clock = dft_numerics::stage_clock::start();
         dist.gather_planes(&comm, &local, full.as_slice_mut().unwrap())
             .map_err(err)?;
+        {
+            use crate::grid_dist as g;
+            g::owned_add(g::O_DENSITY_GATHERS, 1);
+            g::owned_add(g::O_DENSITY_GATHER_VALUES, full.len() as u64);
+            g::owned_time(g::T_DENSITY_GATHER, gather_clock);
+        }
         if full.iter().any(|n: &f64| !n.is_finite()) {
             return Err(ScfError::NonFinite);
         }
@@ -2195,6 +2331,8 @@ impl ScfProblem {
         const CLUSTER_GAP_HA: f64 = 1e-3;
         const MAX_CLUSTER: usize = 24;
         self.reused_fields = None;
+        // M2-OWNED: the screen reads the complex Hamiltonian's full potential.
+        self.ensure_complex_potential()?;
         if k_points.len() != self.states.len() {
             return Ok(None);
         }
@@ -2388,6 +2526,11 @@ impl ScfProblem {
     /// potential currently set on the states; None without atomic species.
     /// The single implementation used by every cold map.
     fn atomic_guesses(&mut self) -> Result<Option<Vec<ComplexMatrix>>, ScfError> {
+        if self.atomic_species.is_none() {
+            return Ok(None);
+        }
+        // M2-OWNED: the atomic start applies the complex Hamiltonian.
+        self.ensure_complex_potential()?;
         let Some(species) = &self.atomic_species else {
             return Ok(None);
         };
@@ -2804,7 +2947,7 @@ impl ScfProblem {
                 "symmetry.density: input breaks the selected symmetry; use full mesh",
             ));
         }
-        let (h, x, effective, dist_fields) = match self.reused_fields.take() {
+        let (h, x, effective, dist_fields, owned_fields) = match self.reused_fields.take() {
             Some(r)
                 if r.density.shape() == n.shape()
                     && r.density
@@ -2812,19 +2955,44 @@ impl ScfProblem {
                         .zip(n.iter())
                         .all(|(a, b)| a.to_bits() == b.to_bits()) =>
             {
-                (r.hartree, r.xc, r.effective, false)
+                (r.hartree, r.xc, r.effective, false, false)
             }
-            _ => self.map_fields(n)?,
+            _ => {
+                let owned_ok = self.local_fields_eligible(initial.is_some(), finite.is_some());
+                self.map_fields(n, owned_ok)?
+            }
         };
-        ordered_solves(
-            &mut self.states,
-            self.options.threads,
-            &self.pool,
-            |_, state| {
-                state.hamiltonian.set_local_potential(effective.clone())?;
-                Ok(())
-            },
-        )?;
+        if owned_fields {
+            // M2-OWNED: the complex Hamiltonians keep their older potential
+            // (`owned.complex_stale`); the distributed operator takes the
+            // owned planes in the solve below.
+        } else {
+            ordered_solves(
+                &mut self.states,
+                self.options.threads,
+                &self.pool,
+                |_, state| {
+                    state.hamiltonian.set_local_potential(effective.clone())?;
+                    Ok(())
+                },
+            )?;
+            if crate::m2::active().is_some() {
+                use crate::grid_dist as g;
+                g::owned_add(g::O_FULL_COPIES, self.states.len() as u64);
+                g::owned_add(
+                    g::O_FULL_COPY_VALUES,
+                    (self.states.len() * effective.len()) as u64,
+                );
+            }
+            self.owned.complex_stale = false;
+            self.owned.potential = None;
+        }
+        // Taken for the solve and put back after it (no copy).
+        let owned_potential = if owned_fields {
+            self.owned.potential.take()
+        } else {
+            None
+        };
         // Only a cold map may create atomic vectors. Existing restart/warm
         // vectors pass unchanged through both solver bridges.
         let atomic_initial = if self.options.start_wavefunctions == StartWavefunctions::Atomic {
@@ -2922,10 +3090,35 @@ impl ScfProblem {
                             .or(finite.as_ref().map(|_| "Fermi-Dirac occupations")),
                         &mut state.gamma_real,
                         &mut state.real_solve,
+                        owned_potential.as_ref().map(|o| (&o.values[..], o.epoch)),
                     )?;
                     let solution = if let Some(solution) = real_solution {
                         solution
                     } else {
+                        // M2-OWNED: the complex solver applies the full local
+                        // potential; gather the owned one first (the same
+                        // gather as `ensure_complex_potential`, replicated
+                        // fallback decision).
+                        if owned_fields && self.owned.complex_stale {
+                            let comm = crate::m2::active()
+                                .ok_or(ScfError::InvalidInput("M2 owned fallback"))?;
+                            let plan = self
+                                .grid_dist
+                                .as_mut()
+                                .ok_or(ScfError::InvalidInput("M2 owned fallback"))?;
+                            let clock = dft_numerics::stage_clock::start();
+                            let mut full = Array3::zeros(state.grid.dims());
+                            let local = plan.effective_planes().to_vec();
+                            plan.gather_field(&comm, &local, full.as_slice_mut().unwrap())?;
+                            let values = full.len() as u64;
+                            state.hamiltonian.set_local_potential(full)?;
+                            use crate::grid_dist as g;
+                            g::owned_add(g::O_CONSUMER_GATHERS, 1);
+                            g::owned_add(g::O_CONSUMER_GATHER_VALUES, values);
+                            g::owned_time(g::T_CONSUMER_GATHER, clock);
+                            // One state (eligibility): every Hamiltonian is current.
+                            self.owned.complex_stale = false;
+                        }
                         // A lazy warm start of a solve that left the real path
                         // (replicated options) is gathered first.
                         let gathered;
@@ -3015,6 +3208,7 @@ impl ScfProblem {
                                 .or(finite.as_ref().map(|_| "Fermi-Dirac occupations")),
                             &mut state.gamma_real,
                             &mut state.real_solve,
+                            None,
                         )?;
                         let solution = if let Some(solution) = real_solution {
                             solution
@@ -3055,6 +3249,9 @@ impl ScfProblem {
                 )?
             };
         timings.diagonalization = start.elapsed();
+        if owned_potential.is_some() {
+            self.owned.potential = owned_potential;
+        }
         // Snapshot file writing (inside the solve window) is not solve time.
         let io = crate::snapshot::take_io_seconds();
         if io > 0.0 {
@@ -3181,7 +3378,12 @@ impl ScfProblem {
             self.ionic_real.as_slice(),
         ) {
             (true, Some(comm), Some(plan), Some(input), Some(out), Some(ionic)) => {
-                Some(plan.audit(&comm, input, out, ionic)?)
+                Some(plan.audit(
+                    &comm,
+                    crate::grid_dist::Field::Full(input),
+                    crate::grid_dist::Field::Full(out),
+                    ionic,
+                )?)
             }
             _ => None,
         };

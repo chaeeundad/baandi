@@ -536,6 +536,71 @@ fn distributed_update_from_complex_follows_the_potential() {
     );
 }
 
+/// M2-OWNED: an operator fed only its owned planes of a new potential applies
+/// H with the bits of the full-grid update, holds NaN outside its planes (a
+/// stale full-grid read cannot pass unnoticed), carries the epoch tag, and a
+/// full update from the complex Hamiltonian clears the tag. Ranks 1..4, cubic
+/// and skewed cells.
+#[test]
+fn owned_plane_potential_applies_like_the_full_potential() {
+    for rows in [
+        [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],
+        [[6.4, 0.4, 0.2], [1., 7.3, 0.3], [0.5, 0.7, 8.4]],
+    ] {
+        let (basis, h0) = fixture(rows, 2, 1.2);
+        let n = dft_basis::HalfSphere::new(&basis, h0.fft_grid())
+            .unwrap()
+            .full_len();
+        let x = block(n, 5, 77);
+        for ranks in 1..=4 {
+            let ok = simulate(ranks, |comm| {
+                let (basis, mut h) = fixture(rows, 2, 1.2);
+                let dims = h.fft_grid().dims();
+                let v_new = Array3::from_shape_fn(dims, |(i, j, k)| {
+                    0.2 * ((i * 5 + j * 11 + k * 3) as f64).sin() - 0.1
+                });
+                let mk = |h: &Hamiltonian| {
+                    DistributedRealHamiltonian::new(
+                        h,
+                        &basis,
+                        6,
+                        comm.rank(),
+                        ranks,
+                        WorkerPool::new(1).unwrap(),
+                    )
+                    .unwrap()
+                };
+                // Owned: built at the old potential, fed the new planes.
+                let mut owned = mk(&h);
+                let mut planes = Vec::new();
+                owned.read_planes(v_new.as_slice().unwrap(), &mut planes);
+                owned.set_owned_potential(&planes, 7).unwrap();
+                // Full: the complex Hamiltonian at the new potential.
+                h.set_local_potential(v_new.clone()).unwrap();
+                let mut full = mk(&h);
+                let xl = full.extract_local(&x).unwrap();
+                let mut a = RealMatrix::zeros(xl.rows(), 5).unwrap();
+                let mut b = RealMatrix::zeros(xl.rows(), 5).unwrap();
+                owned.apply_block(comm, &xl, &mut a).unwrap();
+                full.apply_block(comm, &xl, &mut b).unwrap();
+                let same = a
+                    .as_slice()
+                    .iter()
+                    .zip(b.as_slice())
+                    .all(|(p, q)| p.to_bits() == q.to_bits());
+                let nan_outside = owned.potential().iter().filter(|v| v.is_nan()).count()
+                    == owned.potential().len() - owned.plane_points();
+                let tagged = owned.owned_epoch() == Some(7) && full.owned_epoch().is_none();
+                assert!(owned.same_operator(&h, &basis));
+                let cleared =
+                    owned.update_from_complex(&h, &basis) && owned.owned_epoch().is_none();
+                same && nan_outside && tagged && cleared
+            });
+            assert!(ok.iter().all(|&v| v), "P={ranks}");
+        }
+    }
+}
+
 // ---- M2d: batched transposes, distributed density and nonlocal energies ----
 
 /// H x on `ranks` simulated ranks with batched or per-pair transposes:

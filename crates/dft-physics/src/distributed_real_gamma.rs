@@ -124,6 +124,11 @@ pub struct DistributedRealHamiltonian {
     capacity: usize,
     kinetic: Vec<f64>,
     potential: Vec<f64>,
+    /// M2-OWNED (`BAANDI_M2_LOCAL_FIELDS`): Some(epoch) when `potential` holds
+    /// only this rank's planes of the owned field of that epoch (every other
+    /// entry NaN, never read by the apply); None when it is the full grid copied
+    /// from the complex Hamiltonian.
+    owned_epoch: Option<u64>,
     fft: DistributedPairFft,
     src: Vec<Src>,
     reps: Vec<Rep>,
@@ -306,6 +311,7 @@ impl DistributedRealHamiltonian {
             capacity,
             kinetic,
             potential: source.local_potential_values().to_vec(),
+            owned_epoch: None,
             src,
             reps,
             out_items,
@@ -348,7 +354,69 @@ impl DistributedRealHamiltonian {
         }
         self.potential
             .copy_from_slice(source.local_potential_values());
+        self.owned_epoch = None;
         true
+    }
+
+    /// The identity checks of `update_from_complex` without copying the
+    /// potential (M2-OWNED: the owned planes are set by `set_owned_potential`).
+    pub fn same_operator(&self, source: &Hamiltonian, basis: &PlaneWaveBasis) -> bool {
+        Arc::ptr_eq(&self.source_identity, &source.operator_identity())
+            && source.basis_momenta() == basis.momenta()
+            && basis.k_fractional() == [0.; 3]
+            && self.potential.len() == source.local_potential_values().len()
+    }
+
+    /// M2-OWNED: set the local potential from this rank's planes (`plane_points()`
+    /// values, [plane][row][z], the layout of `band_densities`) of an owned field
+    /// tagged `epoch`. The apply reads only these planes, so the result is
+    /// bit-identical to a full-grid potential with the same plane values. The
+    /// other entries are NaN (set once on entering the owned mode), so a full-grid
+    /// reader of `potential()` sees non-finite values instead of a stale field.
+    pub fn set_owned_potential(
+        &mut self,
+        planes: &[f64],
+        epoch: u64,
+    ) -> Result<(), DistributedRealError> {
+        if planes.len() != self.fft.plane_points() {
+            return Err(DistributedRealError::Shape);
+        }
+        if self.owned_epoch.is_none() {
+            self.potential.fill(f64::NAN);
+        }
+        write_planes(&self.fft, planes, &mut self.potential);
+        self.owned_epoch = Some(epoch);
+        Ok(())
+    }
+
+    /// Epoch of the owned field the potential holds (None: full grid).
+    pub fn owned_epoch(&self) -> Option<u64> {
+        self.owned_epoch
+    }
+
+    /// This rank's planes of a full row-major grid field into `out`
+    /// (`plane_points()` values, [plane][row][z]).
+    pub fn read_planes(&self, full: &[f64], out: &mut Vec<f64>) {
+        let (rows, nz) = (self.fft.rows(), self.fft.shape()[2]);
+        out.clear();
+        for i in 0..self.fft.plane_count() {
+            for y in 0..rows {
+                let s = self.fft.grid_start(i, y);
+                out.extend_from_slice(&full[s..s + nz]);
+            }
+        }
+    }
+
+    /// Write this rank's planes (`plane_points()` values) into a full row-major
+    /// grid field (other entries untouched).
+    pub fn write_planes(&self, planes: &[f64], full: &mut [f64]) {
+        write_planes(&self.fft, planes, full);
+    }
+
+    /// First FFT axis (the axis of the owned real-space planes) and the grid
+    /// index of this rank's first plane.
+    pub fn plane_layout(&self) -> (usize, usize) {
+        (self.fft.first_axis(), self.fft.plane_x(0))
     }
 
     /// ORC row indices owned by this rank, ascending; local row l is ORC row `local_rows()[l]`.
@@ -1110,6 +1178,18 @@ impl DistributedRealHamiltonian {
         bump(Count::KeptPlanePairs, kept_pairs);
         bump(Count::ChangeColumns, m);
         self.mirror_back_and_unpack(comm, m, y, None)
+    }
+}
+
+/// Copy plane-local values ([plane][row][z]) into a full row-major grid.
+fn write_planes(fft: &DistributedPairFft, planes: &[f64], full: &mut [f64]) {
+    let (rows, nz) = (fft.rows(), fft.shape()[2]);
+    for i in 0..fft.plane_count() {
+        for y in 0..rows {
+            let s = fft.grid_start(i, y);
+            let at = (i * rows + y) * nz;
+            full[s..s + nz].copy_from_slice(&planes[at..at + nz]);
+        }
     }
 }
 

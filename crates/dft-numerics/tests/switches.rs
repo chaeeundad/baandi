@@ -256,5 +256,8 @@ fn legacy_defaults_are_unchanged() {
     // M2-GRID: distributed full-grid stages of the M2 path, rounding class, off until dev08.
     assert_eq!(value(Id::M2_GRID), Value::Choice("off"));
     assert_eq!(value(Id::M2_MIX), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 103);
+    // M2-OWNED: owned potential and density prototype, off until dev08.
+    assert_eq!(value(Id::M2_LOCAL_FIELDS), Value::Choice("off"));
+    assert_eq!(value(Id::M2_LOCAL_DENSITY), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 105);
 }

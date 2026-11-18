@@ -256,9 +256,9 @@ fn legacy_defaults_are_unchanged() {
     // M2-GRID: distributed full-grid stages of the M2 path, rounding class, off until dev08.
     assert_eq!(value(Id::M2_GRID), Value::Choice("on"));
     assert_eq!(value(Id::M2_MIX), Value::Choice("on"));
-    // INIT-EWALD-FAST / INIT-IONIC-FAST: rounding-class init schemes, off until dev08.
-    assert_eq!(value(Id::EWALD_FAST), Value::Choice("off"));
-    assert_eq!(value(Id::IONIC_FAST), Value::Choice("off"));
+    // INIT-EWALD-FAST / INIT-IONIC-FAST: rounding-class init schemes, on since 2026-11-18 (independent reference: the default Ewald sum is 1.794e-9 Ha low at si64).
+    assert_eq!(value(Id::EWALD_FAST), Value::Choice("on"));
+    assert_eq!(value(Id::IONIC_FAST), Value::Choice("on"));
     // SCF-TRAJECTORY: Coulomb guard of the L2 Pulay fit, off until dev08.
     assert_eq!(value(Id::MIX_COULOMB_GUARD), Value::Choice("off"));
     // M2-OWNED: owned potential and density prototype, off until dev08.

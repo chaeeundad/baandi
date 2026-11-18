@@ -4,6 +4,7 @@ use crate::events::{EventKind, EventQueue, ExecutionConfig, ExecutionMode, Failu
 use crate::policy::{PolicyChange, ToleranceFloors, prepare_policy};
 use crate::runtime::ControlError;
 use crate::state_view::StateSnapshot;
+use dft_solvers::mixing::DensityMixer as _;
 
 /// Prepared under the runtime's exclusive session ownership. All fallible work
 /// precedes journal publication; commit performs only owned replacements.
@@ -38,8 +39,13 @@ pub struct StepReport {
     pub mixing_applied: bool,
 }
 struct Continuation {
+    /// Next input density; an EMPTY array in the owned density loop
+    /// (`owned`), whose input lives in `problem.owned.input`.
     n: Array3<f64>,
     mixer: Box<dyn MixerHistory>,
+    /// M2-OWNED (`BAANDI_M2_LOCAL_DENSITY`): the plane-mode distributed Pulay
+    /// mixer of the owned density loop (then `mixer` is not used).
+    owned: Option<crate::mix_dist::DistributedPulay<crate::parallel::SharedComm>>,
     previous: Option<Vec<ComplexMatrix>>,
     /// MPI-LAZY-ORBITALS: distributed rows of the blocks of `previous` that are
     /// 0 x B placeholders (same order; empty when none is lazy).
@@ -331,8 +337,7 @@ impl ScfSession {
             ));
         }
         self.initialize()?;
-        self.continuation.as_mut().unwrap().n = density.clone();
-        Ok(())
+        self.set_next_input(density.clone())
     }
     fn make_mixer(&self, mixing: &Mixing) -> Result<Box<dyn MixerHistory>, ScfError> {
         let mixer: Box<dyn MixerHistory> = match *mixing {
@@ -413,9 +418,37 @@ impl ScfSession {
         )?;
         mixer.reset();
         let weight = self.problem.cell.volume_bohr3() / n.len() as f64;
+        // M2-OWNED (`BAANDI_M2_LOCAL_DENSITY`, default off): the density stays
+        // on the slab planes through the audit, the mixer and the next
+        // potential; static replicated eligibility (no spectral audit here).
+        let owned = if self.spectral_report.is_none() && self.problem.owned_density_eligible() {
+            let Mixing::Pulay { beta, history } = self.problem.options.mixing else {
+                unreachable!("eligibility requires plain Pulay");
+            };
+            let input = self.problem.owned_from_full(&n)?;
+            let total = n.len();
+            let (comm, plan) = self.problem.grid_plan()?;
+            let (len, counts) = (plan.plane_len(), plan.plane_counts().to_vec());
+            let m = crate::mix_dist::DistributedPulay::new_planes(
+                comm, beta, history, total, len, &counts,
+            )?;
+            self.problem.owned.input = Some(input);
+            self.problem.owned.density_mode = true;
+            Some(m)
+        } else {
+            self.problem.owned.input = None;
+            self.problem.owned.density_mode = false;
+            None
+        };
+        let n = if owned.is_some() {
+            Array3::zeros((0, 0, 0))
+        } else {
+            n
+        };
         self.continuation = Some(Continuation {
             n,
             mixer,
+            owned,
             previous: None,
             previous_lazy: Vec::new(),
             history: Vec::new(),
@@ -433,6 +466,7 @@ impl ScfSession {
         let Continuation {
             n,
             mixer,
+            owned,
             previous,
             previous_lazy,
             history,
@@ -443,9 +477,19 @@ impl ScfSession {
             start,
         } = self.continuation.as_mut().unwrap();
         let weight = *weight;
-        if n.iter()
-            .any(|n| !n.is_finite() || *n < -xc::NEGATIVE_ROUNDOFF)
-        {
+        if owned.is_some() && !n.is_empty() {
+            // A materialized copy (`materialize_density`) of the owned input:
+            // the owned planes stay authoritative; the copy is dropped so that
+            // it cannot go stale.
+            *n = Array3::zeros((0, 0, 0));
+        }
+        let invalid = if owned.is_some() {
+            self.problem.owned_input_invalid()?
+        } else {
+            n.iter()
+                .any(|n| !n.is_finite() || *n < -xc::NEGATIVE_ROUNDOFF)
+        };
+        if invalid {
             return Err(ScfError::Diverged {
                 reason: "mixed density is nonfinite or negative beyond 1e-14 Bohr^-3".into(),
                 history: std::mem::take(history),
@@ -531,7 +575,9 @@ impl ScfSession {
                 other => other,
             })?;
         let stop_clock = crate::profile::clock();
-        let mut standard_error_ha = self.problem.stop_error(n, &step.density)?;
+        let mut standard_error_ha =
+            self.problem
+                .stop_error_step(n, &step.density, step.owned_density.as_ref())?;
         crate::profile::between(crate::profile::BetweenPart::StopRule, stop_clock);
         crate::profile::map_commit(crate::profile::MapKind::Ordinary);
         // BREAKTHROUGH-3: completion rules of an advanced map (design section 5).
@@ -607,7 +653,11 @@ impl ScfSession {
                         redo.timings.density += step.timings.density;
                         redo.timings.energy += step.timings.energy;
                         step = redo;
-                        standard_error_ha = self.problem.stop_error(n, &step.density)?;
+                        standard_error_ha = self.problem.stop_error_step(
+                            n,
+                            &step.density,
+                            step.owned_density.as_ref(),
+                        )?;
                         // Phase profile: the completion solve is filed as a redo.
                         crate::profile::map_commit(crate::profile::MapKind::Redo);
                     }
@@ -657,7 +707,9 @@ impl ScfSession {
             redo.timings.density += step.timings.density;
             redo.timings.energy += step.timings.energy;
             step = redo;
-            standard_error_ha = self.problem.stop_error(n, &step.density)?;
+            standard_error_ha =
+                self.problem
+                    .stop_error_step(n, &step.density, step.owned_density.as_ref())?;
         }
         let stop_clock = crate::profile::clock();
         if dft_solvers::replay::ENABLED {
@@ -677,16 +729,15 @@ impl ScfSession {
             )?;
             dft_solvers::replay::metric(iteration, dr2_ry, self.problem.electrons);
         }
-        let residual = density_distance(
-            &step.density,
-            n,
-            self.problem.cell.volume_bohr3(),
-            self.problem.electrons,
-        );
-        let charge = step.density.sum() * weight;
+        // M2-OWNED: owned pairs reduce their per-plane partials (one
+        // allgatherv); full pairs keep the row-major arithmetic.
+        let (residual, output_sum, input_sum, min_density) =
+            self.problem
+                .step_metrics(n, &step.density, step.owned_density.as_ref())?;
+        let charge = output_sum * weight;
         let charge_error = (charge - self.problem.electrons).abs() / self.problem.electrons;
         let input_charge_error =
-            (n.sum() * weight - self.problem.electrons).abs() / self.problem.electrons;
+            (input_sum * weight - self.problem.electrons).abs() / self.problem.electrons;
         let energy_change = history
             .last()
             .map(|r| step.energy.total_hartree() - r.energy.total_hartree());
@@ -734,7 +785,7 @@ impl ScfSession {
                 .collect(),
             charge_error,
             input_charge_error,
-            min_density: step.density.iter().copied().fold(f64::INFINITY, f64::min),
+            min_density,
             timings: step.timings,
             advance: advance_record,
         };
@@ -912,6 +963,7 @@ impl ScfSession {
                 let (attempt, record, clipped, reuse) = verify_fixed_point(
                     &mut self.problem,
                     &step.density,
+                    step.owned_density.as_ref(),
                     &step.k_points,
                     tolerance,
                     standard_error_ha.expect("standard history metric"),
@@ -1122,6 +1174,10 @@ impl ScfSession {
             } else {
                 None
             };
+            // M2-OWNED: the delivered density is gathered once here (output).
+            if let Some(o) = step.owned_density.take() {
+                step.density = self.problem.materialize_owned(&o)?;
+            }
             let gap_hartree = if certified {
                 self.problem.check_gap(&step.k_points)?
             } else {
@@ -1221,12 +1277,92 @@ impl ScfSession {
         let feed = verification_reuse
             .as_ref()
             .filter(|(mode, _)| *mode != VerifyReuse::Warm)
-            .map(|(mode, (_, d))| (*mode, d));
+            .map(|(mode, (_, d, _))| (*mode, d));
         let mean = self.problem.electrons / self.problem.cell.volume_bohr3();
         let diverged = |e: dft_solvers::SolverError| ScfError::Diverged {
             reason: e.to_string(),
             history: history.clone(),
         };
+        if let Some(om) = owned.as_mut() {
+            // M2-OWNED: the Pulay update, the feed of a failed verification and
+            // the convex safeguard on this rank's planes; the next input stays
+            // owned (no gather). The same branch structure as below.
+            if rescued.is_some() || history.last().is_some_and(|r| r.mixer_reset) {
+                om.reset();
+            }
+            let input = self
+                .problem
+                .owned
+                .input
+                .take()
+                .ok_or(ScfError::InvalidInput("M2 owned mixing without input"))?;
+            let out = step
+                .owned_density
+                .as_ref()
+                .ok_or(ScfError::InvalidInput("M2 owned mixing without output"))?;
+            let fed = verification_reuse
+                .as_ref()
+                .filter(|(mode, _)| *mode != VerifyReuse::Warm)
+                .map(|(mode, (_, _, d))| (*mode, d.as_ref()));
+            let mut mixed = match fed {
+                Some((VerifyReuse::Replace, _)) => Vec::new(),
+                _ => om
+                    .mix_block(&input.values, &out.values, mean)
+                    .map_err(diverged)?,
+            };
+            if let Some((mode, fed)) = fed {
+                let fed = fed.ok_or(ScfError::InvalidInput("M2 owned feed without density"))?;
+                let step_proposal = std::mem::take(&mut mixed);
+                mixed = om
+                    .mix_block(&out.values, &fed.values, mean)
+                    .map_err(diverged)?;
+                if mode == VerifyReuse::Half {
+                    for (m, s) in mixed.iter_mut().zip(&step_proposal) {
+                        *m = 0.5 * (*m + s);
+                    }
+                }
+            }
+            let base: &[f64] = if fed.is_some() {
+                &out.values
+            } else {
+                &input.values
+            };
+            history.last_mut().unwrap().mixing_history_used =
+                Some(om.history_len().saturating_sub(1));
+            history.last_mut().unwrap().mixing_raw_recovery = om.used_raw_recovery();
+            let fraction = self.problem.owned_convex_fraction(base, &mixed)?;
+            if fraction < 1.0 {
+                for (b, a) in mixed.iter_mut().zip(base) {
+                    *b = a + fraction * (*b - a);
+                }
+                om.reset();
+                let record = history.last_mut().unwrap();
+                record.mixing_fraction = fraction;
+                record.mixer_reset = true;
+                *mixing_resets += 1;
+                record.mixing_resets = *mixing_resets;
+            }
+            let epoch = self.problem.owned.next_epoch();
+            self.problem.owned.input = Some(crate::grid_dist::Owned {
+                epoch,
+                values: mixed,
+            });
+            history.last_mut().unwrap().timings.mixing = mix_start.elapsed();
+            crate::profile::add_mixing(mix_start.elapsed().as_secs_f64());
+            let verification_orbitals = verification_reuse.map(|(_, (o, _, _))| o);
+            let (warm, lazy) = match (rescued, verification_orbitals) {
+                (Some(r), _) => (r, Vec::new()),
+                (None, Some(points)) => split_points(points),
+                (None, None) => split_points(step.k_points),
+            };
+            *previous = Some(warm);
+            *previous_lazy = lazy;
+            return if iteration == self.problem.options.max_iterations {
+                Ok(StepStatus::NotConverged)
+            } else {
+                Ok(StepStatus::Ready)
+            };
+        }
         let mut mixed = match feed {
             Some((VerifyReuse::Replace, _)) => Vec::new(),
             _ => mixer
@@ -1285,7 +1421,7 @@ impl ScfSession {
         history.last_mut().unwrap().timings.mixing = mix_start.elapsed();
         crate::profile::add_mixing(mix_start.elapsed().as_secs_f64());
         // MPI-LAZY-ORBITALS: lazy blocks travel with their distributed rows.
-        let verification_orbitals = verification_reuse.map(|(_, (o, _))| o);
+        let verification_orbitals = verification_reuse.map(|(_, (o, _, _))| o);
         let (warm, lazy) = match (rescued, verification_orbitals) {
             (Some(r), _) => (r, Vec::new()),
             (None, Some(points)) => split_points(points),
@@ -1430,15 +1566,66 @@ impl ScfSession {
             .unwrap_or(&[])
     }
     /// Next input density at an active boundary, returned output at a terminal one.
+    /// None at an active boundary of the owned density loop
+    /// (`BAANDI_M2_LOCAL_DENSITY`): the input is held on the ranks' planes;
+    /// `materialize_density` gathers it (collective).
     pub fn density(&self) -> Option<&Array3<f64>> {
         self.outcome
             .as_ref()
             .map(|o| &o.result.density)
-            .or_else(|| self.continuation.as_ref().map(|c| &c.n))
+            .or_else(|| {
+                self.continuation
+                    .as_ref()
+                    .filter(|c| c.owned.is_none() || !c.n.is_empty())
+                    .map(|c| &c.n)
+            })
+    }
+    /// M2-OWNED: gather the owned next input density into the continuation so
+    /// that `density()` returns it (one allgatherv, charged as a
+    /// materialization; a no-op otherwise). Collective: every rank calls it at
+    /// the same boundary. The owned loop continues from its owned input.
+    pub fn materialize_density(&mut self) -> Result<(), ScfError> {
+        let Some(c) = self.continuation.as_mut() else {
+            return Ok(());
+        };
+        if c.owned.is_none() || !c.n.is_empty() {
+            return Ok(());
+        }
+        let input = self
+            .problem
+            .owned
+            .input
+            .take()
+            .ok_or(ScfError::InvalidInput("M2 owned boundary without input"))?;
+        let full = self.problem.materialize_owned(&input);
+        self.problem.owned.input = Some(input);
+        c.n = full?;
+        Ok(())
+    }
+    /// The next input density of an active boundary: kept on the planes in
+    /// the owned loop (the full array is cleared so it cannot go stale).
+    fn set_next_input(&mut self, n: Array3<f64>) -> Result<(), ScfError> {
+        let owned = self
+            .continuation
+            .as_ref()
+            .is_some_and(|c| c.owned.is_some());
+        let n = if owned {
+            let o = self.problem.owned_from_full(&n)?;
+            self.problem.owned.input = Some(o);
+            Array3::zeros((0, 0, 0))
+        } else {
+            n
+        };
+        if let Some(c) = self.continuation.as_mut() {
+            c.n = n;
+        }
+        Ok(())
     }
     /// C1 ladder hand-off: next input density and warm orbitals at an active boundary.
-    /// Lazy blocks (MPI-LAZY-ORBITALS) are gathered here (collective).
-    pub(crate) fn warm_state(&self) -> Result<Option<WarmState<'_>>, ScfError> {
+    /// Lazy blocks (MPI-LAZY-ORBITALS) and an owned density (M2-OWNED) are
+    /// gathered here (collective).
+    pub(crate) fn warm_state(&mut self) -> Result<Option<WarmState<'_>>, ScfError> {
+        self.materialize_density()?;
         let Some(c) = self.continuation.as_ref() else {
             return Ok(None);
         };
@@ -1467,6 +1654,29 @@ impl ScfSession {
             ));
         }
         let mean = self.problem.electrons / self.problem.cell.volume_bohr3();
+        if self
+            .continuation
+            .as_ref()
+            .is_some_and(|c| c.owned.is_some())
+        {
+            // M2-OWNED: the seeds enter the plane-mode mixer as this rank's
+            // planes (no collective).
+            let (_, plan) = self.problem.grid_plan()?;
+            let block = |v: &Vec<f64>| {
+                let mut out = Vec::new();
+                plan.planes_of(v, &mut out);
+                out
+            };
+            let bx: Vec<Vec<f64>> = dx.iter().map(block).collect();
+            let br: Vec<Vec<f64>> = dr.iter().map(block).collect();
+            let c = self.continuation.as_mut().expect("checked");
+            return c
+                .owned
+                .as_mut()
+                .expect("checked")
+                .seed_block(&bx, &br, mean)
+                .map_err(|e| ScfError::Numerical(format!("seed_mixer_differences: {e}")));
+        }
         let c = self
             .continuation
             .as_mut()
@@ -1806,8 +2016,12 @@ impl ScfSession {
             }
             Some(previous)
         };
+        if self.continuation.is_none() {
+            return Err(R::Boundary);
+        }
+        // M2-OWNED: the imported density becomes the owned input of the loop.
+        self.set_next_input(n).map_err(|_| R::Grid)?;
         let c = self.continuation.as_mut().ok_or(R::Boundary)?;
-        c.n = n;
         c.previous = previous;
         c.previous_lazy = Vec::new();
         Ok(())
@@ -2012,7 +2226,13 @@ fn full_previous(c: &Continuation) -> Result<Option<Vec<ComplexMatrix>>, ScfErro
 
 /// Orbitals (k points, possibly lazy) and output density F(rho_out) of a
 /// verification solve.
-type VerificationMap = (Vec<KPointSolution>, Array3<f64>);
+/// The third entry is the owned F(rho_out) of the owned density loop (the
+/// array is then empty).
+type VerificationMap = (
+    Vec<KPointSolution>,
+    Array3<f64>,
+    Option<crate::grid_dist::Owned>,
+);
 
 /// Owned warm-start blocks and their lazy rows (MPI-LAZY-ORBITALS), moved out
 /// of k points; the lazy list is empty when no block is lazy.
@@ -2049,6 +2269,32 @@ type VerificationOutcome = (
 fn verify_fixed_point(
     problem: &mut ScfProblem,
     density: &Array3<f64>,
+    owned: Option<&crate::grid_dist::Owned>,
+    points: &[KPointSolution],
+    tolerance: f64,
+    standard_error_ha: f64,
+    iteration: usize,
+) -> Result<VerificationOutcome, ScfError> {
+    // M2-OWNED: the verification map's input is the delivered (owned) output;
+    // the loop's own input is restored afterwards on every path.
+    let saved = owned.map(|o| problem.owned.input.replace(o.clone()));
+    let result = verify_fixed_point_inner(
+        problem,
+        density,
+        points,
+        tolerance,
+        standard_error_ha,
+        iteration,
+    );
+    if let Some(s) = saved {
+        problem.owned.input = s;
+    }
+    result
+}
+
+fn verify_fixed_point_inner(
+    problem: &mut ScfProblem,
+    density: &Array3<f64>,
     points: &[KPointSolution],
     tolerance: f64,
     standard_error_ha: f64,
@@ -2077,7 +2323,7 @@ fn verify_fixed_point(
     )?;
     let glue_clock = crate::profile::clock();
     let coulomb_error_ha = problem
-        .stop_error(density, &check.density)?
+        .stop_error_step(density, &check.density, check.owned_density.as_ref())?
         .expect("standard Coulomb metric");
     let residual_bound_ha = dft_numerics::switches::on(
         dft_numerics::switches::Id::STANDARD_RESIDUAL_GUARD,
@@ -2091,12 +2337,8 @@ fn verify_fixed_point(
             &problem.occupations,
         )
     });
-    let density_residual = density_distance(
-        &check.density,
-        density,
-        problem.cell.volume_bohr3(),
-        problem.electrons,
-    );
+    let (density_residual, _, _, _) =
+        problem.step_metrics(density, &check.density, check.owned_density.as_ref())?;
     let occupied_eigenvalue_change_ha = check
         .k_points
         .iter()
@@ -2208,7 +2450,12 @@ fn verify_fixed_point(
         chemical_potential_change_ha: None,
         moment_change: None,
     };
-    Ok((attempt, record, clipped, (check.k_points, check.density)))
+    Ok((
+        attempt,
+        record,
+        clipped,
+        (check.k_points, check.density, check.owned_density),
+    ))
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

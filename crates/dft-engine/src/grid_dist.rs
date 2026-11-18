@@ -119,20 +119,15 @@ pub(crate) const O_REDISTRIBUTIONS: usize = 6;
 pub(crate) const O_REDISTRIBUTION_VALUES: usize = 7;
 pub(crate) const O_FULL_COPIES: usize = 8;
 pub(crate) const O_FULL_COPY_VALUES: usize = 9;
-#[allow(dead_code)] // LOCAL_DENSITY (next step)
 pub(crate) const O_DENSITY_OWNED_MAPS: usize = 10;
-#[allow(dead_code)] // LOCAL_DENSITY (next step)
 pub(crate) const O_DENSITY_DECLINED: usize = 11;
 pub(crate) const O_DENSITY_GATHERS: usize = 12;
 pub(crate) const O_DENSITY_GATHER_VALUES: usize = 13;
 pub(crate) const O_MIXER_GATHERS: usize = 14;
 pub(crate) const O_MIXER_GATHER_VALUES: usize = 15;
-#[allow(dead_code)] // LOCAL_DENSITY (next step)
 pub(crate) const O_MATERIALIZATIONS: usize = 16;
-#[allow(dead_code)] // LOCAL_DENSITY (next step)
 pub(crate) const O_MATERIALIZATION_VALUES: usize = 17;
 pub(crate) const O_EPOCH_CHECKS: usize = 18;
-#[allow(dead_code)] // LOCAL_DENSITY (next step)
 pub(crate) const O_OWNED_REDUCTIONS: usize = 19;
 pub(crate) const O_PLANE_VALUES: usize = 20;
 const OWNED_NAMES: [&str; 21] = [
@@ -164,9 +159,7 @@ pub(crate) const T_CONSUMER_GATHER: usize = 1;
 pub(crate) const T_REDISTRIBUTE: usize = 2;
 pub(crate) const T_DENSITY_GATHER: usize = 3;
 pub(crate) const T_MIXER_GATHER: usize = 4;
-#[allow(dead_code)] // LOCAL_DENSITY (next step)
 pub(crate) const T_MATERIALIZE: usize = 5;
-#[allow(dead_code)] // LOCAL_DENSITY (next step)
 pub(crate) const T_OWNED_REDUCE: usize = 6;
 const OWNED_TIME_NAMES: [&str; 7] = [
     "potential_gather",
@@ -257,6 +250,12 @@ pub(crate) struct OwnedFields {
     pub(crate) complex_stale: bool,
     pub(crate) map: Option<PlaneMap>,
     pub(crate) scratch: Vec<f64>,
+    /// `BAANDI_M2_LOCAL_DENSITY` loop active (set by the session): maps keep
+    /// their output density on the slab planes (`output`), and a map given an
+    /// empty input array reads its input from `input`.
+    pub(crate) density_mode: bool,
+    pub(crate) input: Option<Owned>,
+    pub(crate) output: Option<Owned>,
 }
 impl OwnedFields {
     /// A new epoch for a field produced now (monotonic per problem).
@@ -316,7 +315,6 @@ impl PlaneMap {
             recv: Vec::new(),
         }
     }
-    #[allow(dead_code)] // LOCAL_DENSITY (next step)
     pub(crate) fn identity(&self) -> bool {
         self.first_a == self.first_b
     }
@@ -339,7 +337,6 @@ impl PlaneMap {
         r
     }
     /// Layout B -> layout A. Collective unless `identity()`.
-    #[allow(dead_code)] // LOCAL_DENSITY (next step)
     pub(crate) fn b_to_a<K: Collective>(
         &mut self,
         comm: &K,
@@ -461,7 +458,6 @@ impl AuditTerms {
 #[derive(Clone, Copy)]
 pub(crate) enum Field<'a> {
     Full(&'a [f64]),
-    #[allow(dead_code)] // LOCAL_DENSITY (next step)
     Planes(&'a [f64]),
 }
 
@@ -673,10 +669,13 @@ impl GridPlan {
     fn points(&self) -> usize {
         self.planes * self.rows * self.nz
     }
-    /// Grid points of this rank's planes (length of a plane-local field).
-    #[allow(dead_code)] // LOCAL_DENSITY (next step)
-    pub(crate) fn plane_points(&self) -> usize {
-        self.points()
+    /// Grid points of one plane.
+    pub(crate) fn plane_len(&self) -> usize {
+        self.rows * self.nz
+    }
+    /// Planes per rank (ascending plane order is rank order).
+    pub(crate) fn plane_counts(&self) -> &[usize] {
+        &self.plane_counts
     }
     /// First FFT axis of the slab layout (the axis of the planes).
     pub(crate) fn first_axis(&self) -> usize {
@@ -700,7 +699,6 @@ impl GridPlan {
         }
     }
     /// This rank's planes of a full row-major field (no collective).
-    #[allow(dead_code)] // LOCAL_DENSITY (next step)
     pub(crate) fn planes_of(&self, full: &[f64], out: &mut Vec<f64>) {
         out.clear();
         for i in 0..self.planes {
@@ -748,7 +746,6 @@ impl GridPlan {
     /// writes the `k` partial sums of plane i; `maxes` are combined by max
     /// (order free, exact). One allgatherv; sums added in ascending plane
     /// order, so the result does not depend on the rank count. Collective.
-    #[allow(dead_code)] // LOCAL_DENSITY (next step)
     pub(crate) fn plane_reduce<K: Collective>(
         &mut self,
         comm: &K,
@@ -998,7 +995,8 @@ impl GridPlan {
     /// density `n` (replicated, row-major). Returns (E_H, E_xc, integral
     /// n v_xc, effective potential on the full grid); V_H and V_xc stay on the
     /// planes for the audit, the owned stick coefficients for the stop rule.
-    /// Collective.
+    /// Collective. (The engine calls `potential_field`; tests use this form.)
+    #[cfg(test)]
     pub(crate) fn potential<K: Collective>(
         &mut self,
         comm: &K,

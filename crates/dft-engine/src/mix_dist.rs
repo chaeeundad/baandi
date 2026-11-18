@@ -69,6 +69,13 @@ pub(crate) struct DistributedPulay<K: Collective> {
     size: usize,
     lo: usize,
     hi: usize,
+    /// Points per canonical chunk: `CHUNK` (row-major chunks) or one slab
+    /// plane (plane mode, M2-OWNED).
+    chunk: usize,
+    /// Plane mode (`BAANDI_M2_LOCAL_DENSITY`): the block is this rank's slab
+    /// planes, handed to `mix_block` directly; `mix` (full arrays) is refused.
+    planes: bool,
+    rank: usize,
     /// Chunk counts per rank (allgatherv layout).
     chunk_counts: Vec<usize>,
     mean: Option<f64>,
@@ -112,6 +119,9 @@ impl<K: Collective> DistributedPulay<K> {
             size,
             lo,
             hi,
+            chunk: CHUNK,
+            planes: false,
+            rank,
             chunk_counts,
             mean: None,
             last: None,
@@ -125,8 +135,37 @@ impl<K: Collective> DistributedPulay<K> {
         })
     }
 
+    /// Plane mode (M2-OWNED): the window lives on this rank's slab planes of
+    /// `plane_len` points each (`plane_counts` planes per rank, ascending plane
+    /// order = rank order); every canonical partial sum is per plane, so the
+    /// results do not depend on the rank count.
+    pub(crate) fn new_planes(
+        comm: K,
+        beta: f64,
+        history: usize,
+        size: usize,
+        plane_len: usize,
+        plane_counts: &[usize],
+    ) -> Result<Self, SolverError> {
+        let mut m = Self::new(comm, beta, history, size)?;
+        if plane_len == 0 || plane_counts.len() != m.comm.size() {
+            return Err(SolverError::InvalidParameter("plane layout"));
+        }
+        m.chunk = plane_len;
+        m.planes = true;
+        m.chunk_counts = plane_counts.to_vec();
+        m.lo = 0;
+        m.hi = plane_counts[m.rank] * plane_len;
+        Ok(m)
+    }
+
     fn local_chunks(&self) -> usize {
-        (self.hi - self.lo).div_ceil(CHUNK)
+        self.chunk_counts[self.rank]
+    }
+
+    /// Length of this rank's block.
+    pub(crate) fn block_len(&self) -> usize {
+        self.hi - self.lo
     }
 
     /// Canonical sums of `k` quantities: `fill(c, out)` writes the k partial
@@ -188,11 +227,12 @@ impl<K: Collective> DistributedPulay<K> {
     /// Two uniform charge corrections of the block (`mixing::charge`), each
     /// with the canonical global sum.
     fn charge(&mut self, next: &mut [f64], mean: f64) -> Result<(), SolverError> {
+        let chunk = self.chunk;
         for _ in 0..2 {
             let block: &[f64] = next;
             let sums = self.chunk_sums(1, |c, out| {
-                let a = c * CHUNK;
-                let b = ((c + 1) * CHUNK).min(block.len());
+                let a = c * chunk;
+                let b = ((c + 1) * chunk).min(block.len());
                 out[0] = block[a..b].iter().sum::<f64>();
             })?;
             let shift = mean - sums[0] / self.size as f64;
@@ -227,13 +267,72 @@ impl<K: Collective> DensityMixer for DistributedPulay<K> {
                 "finite equal nonempty densities, positive mean and beta required",
             ));
         }
+        if self.planes {
+            return Err(SolverError::InvalidParameter(
+                "plane-mode mixer takes owned blocks (mix_block)",
+            ));
+        }
+        let (lo, hi) = (self.lo, self.hi);
+        let mut next = self.mix_block(&input[lo..hi], &output[lo..hi], mean)?;
+        if next.iter().any(|v| !v.is_finite()) {
+            // Every rank must take the same branch: the flag rides with the gather.
+            next.iter_mut().for_each(|v| *v = f64::NAN);
+        }
+        let counts: Vec<usize> = (0..self.chunk_counts.len())
+            .map(|q| {
+                let start: usize = self.chunk_counts[..q].iter().sum();
+                let a = (start * CHUNK).min(self.size);
+                let b = ((start + self.chunk_counts[q]) * CHUNK).min(self.size);
+                b - a
+            })
+            .collect();
+        let mut full = vec![0.0; self.size];
+        let clock = dft_numerics::stage_clock::start();
+        self.comm
+            .allgatherv_f64(&next, &counts, &mut full)
+            .map_err(|e| SolverError::Application(e.to_string()))?;
+        {
+            use crate::grid_dist as g;
+            g::owned_add(g::O_MIXER_GATHERS, 1);
+            g::owned_add(g::O_MIXER_GATHER_VALUES, self.size as u64);
+            g::owned_time(g::T_MIXER_GATHER, clock);
+        }
+        if full.iter().any(|v| !v.is_finite()) {
+            return Err(dft_numerics::linalg::LinalgError::NonFinite.into());
+        }
+        Ok(full)
+    }
+}
+
+impl<K: Collective> DistributedPulay<K> {
+    /// The Pulay update on this rank's block (`input` and `output` are the
+    /// block's values, `block_len()` each): the next input density on the
+    /// block, without a gather (M2-OWNED plane mode; also the body of `mix`).
+    /// Collective (Gram row and charge sums). The inputs are not validated
+    /// locally (an early error on one rank would desynchronize the
+    /// collectives): a nonfinite value reaches every rank through the charge
+    /// sums, and every rank's result is then nonfinite.
+    pub(crate) fn mix_block(
+        &mut self,
+        x: &[f64],
+        output: &[f64],
+        mean: f64,
+    ) -> Result<Vec<f64>, SolverError> {
+        if x.len() != self.block_len()
+            || output.len() != x.len()
+            || !mean.is_finite()
+            || mean <= 0.0
+        {
+            return Err(SolverError::InvalidParameter(
+                "mix_block: block length or mean",
+            ));
+        }
         if self.mean != Some(mean) {
             self.reset();
         }
         self.mean = Some(mean);
-        let (lo, hi, beta) = (self.lo, self.hi, self.beta);
-        let x = &input[lo..hi];
-        let r: Vec<f64> = output[lo..hi].iter().zip(x).map(|(b, a)| b - a).collect();
+        let (beta, chunk) = (self.beta, self.chunk);
+        let r: Vec<f64> = output.iter().zip(x).map(|(b, a)| b - a).collect();
         if let Some((x0, r0)) = self.last.take() {
             self.push_diff(
                 x.iter().zip(&x0).map(|(a, b)| a - b),
@@ -262,8 +361,8 @@ impl<K: Collective> DensityMixer for DistributedPulay<K> {
             let k = missing.len() + m;
             let diffs = std::mem::take(&mut self.diffs);
             let sums = self.chunk_sums(k, |c, out| {
-                let a = c * CHUNK;
-                let b = ((c + 1) * CHUNK).min(r.len());
+                let a = c * chunk;
+                let b = ((c + 1) * chunk).min(r.len());
                 for (o, &(i, j)) in out.iter_mut().zip(&missing) {
                     *o = diffs[i].dr[a..b]
                         .iter()
@@ -313,33 +412,34 @@ impl<K: Collective> DensityMixer for DistributedPulay<K> {
             }
         }
         self.charge(&mut next, mean)?;
-        if next.iter().any(|v| !v.is_finite()) {
-            // Every rank must take the same branch: the flag rides with the gather.
-            next.iter_mut().for_each(|v| *v = f64::NAN);
-        }
-        let counts: Vec<usize> = (0..self.chunk_counts.len())
-            .map(|q| {
-                let start: usize = self.chunk_counts[..q].iter().sum();
-                let a = (start * CHUNK).min(self.size);
-                let b = ((start + self.chunk_counts[q]) * CHUNK).min(self.size);
-                b - a
-            })
-            .collect();
-        let mut full = vec![0.0; self.size];
-        let clock = dft_numerics::stage_clock::start();
-        self.comm
-            .allgatherv_f64(&next, &counts, &mut full)
-            .map_err(|e| SolverError::Application(e.to_string()))?;
+        Ok(next)
+    }
+
+    /// `seed_differences` from block values (plane mode; `block_len()` each).
+    pub(crate) fn seed_block(
+        &mut self,
+        dx: &[Vec<f64>],
+        dr: &[Vec<f64>],
+        mean: f64,
+    ) -> Result<(), SolverError> {
+        if self.pairs != 0
+            || self.seeds != 0
+            || dx.len() != dr.len()
+            || !mean.is_finite()
+            || mean <= 0.0
+            || dx.iter().chain(dr).any(|v| v.len() != self.block_len())
         {
-            use crate::grid_dist as g;
-            g::owned_add(g::O_MIXER_GATHERS, 1);
-            g::owned_add(g::O_MIXER_GATHER_VALUES, self.size as u64);
-            g::owned_time(g::T_MIXER_GATHER, clock);
+            return Err(SolverError::InvalidParameter(
+                "seed_block: empty history, equal block pairs and positive mean required",
+            ));
         }
-        if full.iter().any(|v| !v.is_finite()) {
-            return Err(dft_numerics::linalg::LinalgError::NonFinite.into());
+        let skip = dx.len().saturating_sub(self.capacity);
+        for (x, r) in dx[skip..].iter().zip(&dr[skip..]) {
+            self.push_diff(x.iter().copied(), r.iter().copied());
+            self.seeds += 1;
         }
-        Ok(full)
+        self.mean = Some(mean);
+        Ok(())
     }
 }
 
@@ -354,6 +454,11 @@ impl<K: Collective> MixerHistory for DistributedPulay<K> {
         mean: f64,
     ) -> Result<(), SolverError> {
         let size = dx.first().map_or(0, Vec::len);
+        if self.planes {
+            return Err(SolverError::InvalidParameter(
+                "plane-mode mixer takes owned blocks (seed_block)",
+            ));
+        }
         if self.pairs != 0
             || self.seeds != 0
             || dx.len() != dr.len()
@@ -438,6 +543,87 @@ mod tests {
             out.push(x.clone());
         }
         out
+    }
+
+    /// Plane mode (M2-OWNED): blocks of whole planes, no gather; the
+    /// concatenated blocks stay in the rounding class of the replicated mixer
+    /// and have the same bits for every rank count.
+    #[test]
+    fn plane_mode_matches_the_replicated_mixer_for_every_rank_count() {
+        let (plane, planes) = (517, 9);
+        let size = plane * planes;
+        let model = Model::new(size, 3);
+        let mut s = 11;
+        let seeds: (Vec<Vec<f64>>, Vec<Vec<f64>>) = (0..3)
+            .map(|_| {
+                let dx: Vec<f64> = (0..size).map(|_| 0.01 * (lcg(&mut s) - 0.5)).collect();
+                let dr = dx
+                    .iter()
+                    .zip(&model.diag)
+                    .map(|(d, a)| (a - 1.0) * d)
+                    .collect();
+                (dx, dr)
+            })
+            .unzip();
+        let mut serial = PulayMixer::new(0.5, 3).unwrap();
+        let reference = trajectory(&mut serial, &model, size, &seeds);
+        let mut first: Option<Vec<Vec<u64>>> = None;
+        for ranks in 1..=7 {
+            let counts: Vec<usize> = (0..ranks)
+                .map(|r| {
+                    let st = |r: usize| r * (planes / ranks) + r.min(planes % ranks);
+                    st(r + 1) - st(r)
+                })
+                .collect();
+            let runs = simulate(ranks, |comm: &SimRank| {
+                let rank = dft_mpi::Collective::rank(comm);
+                let lo = counts[..rank].iter().sum::<usize>() * plane;
+                let hi = lo + counts[rank] * plane;
+                let mut m =
+                    DistributedPulay::new_planes(comm.clone(), 0.5, 3, size, plane, &counts)
+                        .unwrap();
+                let block = |v: &Vec<f64>| v[lo..hi].to_vec();
+                let sx: Vec<Vec<f64>> = seeds.0.iter().map(block).collect();
+                let sr: Vec<Vec<f64>> = seeds.1.iter().map(block).collect();
+                m.seed_block(&sx, &sr, 1.0).unwrap();
+                let mut x: Vec<f64> = (0..size)
+                    .map(|i| 1.0 + 0.1 * ((i % 7) as f64 - 3.0))
+                    .collect();
+                let mut out = Vec::new();
+                for step in 0..10 {
+                    if step == 5 {
+                        m.reset();
+                    }
+                    let y = model.apply(&x);
+                    let next = m.mix_block(&x[lo..hi], &y[lo..hi], 1.0).unwrap();
+                    // Assemble the full vector for the model (test only).
+                    let mut full = vec![0.0; size];
+                    let c: Vec<usize> = counts.iter().map(|c| c * plane).collect();
+                    comm.allgatherv_f64(&next, &c, &mut full).unwrap();
+                    x = full;
+                    out.push(x.clone());
+                }
+                out
+            });
+            for run in &runs {
+                for (a, b) in run.iter().zip(&reference) {
+                    let worst = a
+                        .iter()
+                        .zip(b)
+                        .fold(0.0_f64, |w, (p, q)| w.max((p - q).abs()));
+                    assert!(worst < 1e-11, "P={ranks}: {worst:e}");
+                }
+                assert_eq!(run, &runs[0]);
+            }
+            let bits: Vec<Vec<u64>> = runs[0]
+                .iter()
+                .map(|v| v.iter().map(|x| x.to_bits()).collect())
+                .collect();
+            match &first {
+                None => first = Some(bits),
+                Some(f) => assert!(&bits == f, "P={ranks}: rank-count dependent bits"),
+            }
+        }
     }
 
     #[test]

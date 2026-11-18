@@ -52,6 +52,12 @@ def flatten(record: dict) -> tuple[dict[str, float], dict[str, float]]:
         counters[f"m2.{name}"] = float(value)
     for name, value in record.get("grid_counters", {}).items():
         counters[f"grid.{name}"] = float(value)
+    # M2-OWNED: counts are deterministic counters, *_s entries are timings.
+    for name, value in record.get("owned_counters", {}).items():
+        if name.endswith("_s"):
+            timings[f"owned.{name}"] = float(value)
+        else:
+            counters[f"owned.{name}"] = float(value)
     for name, value in record.get("phases", {}).items():
         timings[f"phase.{name}"] = float(value)
     for name, value in record.get("stages", {}).items():

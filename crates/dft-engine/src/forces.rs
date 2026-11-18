@@ -134,6 +134,13 @@ pub struct ForceState<'a> {
 }
 
 pub fn forces(state: &ForceState<'_>) -> Result<ForceResult, ScfError> {
+    if let ElectronicState::Fixed(r) = &state.electronic
+        && !r.orbitals_delivered()
+    {
+        return Err(ScfError::InvalidInput(
+            "forces need the delivered orbitals: call ScfResult::materialize_orbitals",
+        ));
+    }
     let crystal_density = match &state.electronic {
         ElectronicState::Fixed(r) => r.crystal_density_group,
         ElectronicState::FiniteTemperature(r) => r.state.crystal_density_group,

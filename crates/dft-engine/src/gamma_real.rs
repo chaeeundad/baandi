@@ -355,6 +355,26 @@ pub fn set_m2_dist_disabled_for_tests(value: bool) {
     M2_DIST_DISABLED.with(|o| o.set(value));
 }
 
+thread_local! {
+    static DELIVER_ORBITALS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+/// LAZY-RESULT: tell the engine whether the caller on this thread will read
+/// the delivered orbitals of the following SCF runs (`ScfResult::orbitals`,
+/// `k_points[..].solution.eigenvectors`: forces, stress, orbital volumetric
+/// outputs, checkpoints, warm starts). Default `true` (always gathered). With
+/// `false` and `BAANDI_M2_LAZY_RESULT=on` (default) a result whose blocks are
+/// lazy on the M2 path keeps them distributed (0 x B placeholders) until
+/// `ScfResult::materialize_orbitals` (collective). Every rank must pass the
+/// same value (a replicated decision, e.g. from the parsed input).
+pub fn set_delivered_orbitals(needed: bool) {
+    DELIVER_ORBITALS.with(|d| d.set(needed));
+}
+/// Whether the delivery point may keep lazy blocks (see `set_delivered_orbitals`).
+pub(crate) fn lazy_result_allowed() -> bool {
+    !DELIVER_ORBITALS.with(|d| d.get())
+        && dft_numerics::switches::on(dft_numerics::switches::Id::M2_LAZY_RESULT)
+}
+
 /// MPI-LAZY-ORBITALS: the eigenvectors of one standard M2 solve held as this
 /// rank's stick rows (ORC real coordinates, the operator's `local_rows` order),
 /// the authoritative SCF state of the M2 path. The complex N x B block is

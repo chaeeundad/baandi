@@ -1080,8 +1080,16 @@ impl ScfSession {
         {
             // MPI-LAZY-ORBITALS: the delivered state carries full blocks (one
             // gather per lazy k block; every rank reaches this point together).
+            // LAZY-RESULT: kept distributed when the caller declared it reads
+            // no delivered orbitals (replicated decision) and the identity
+            // audit below does not need them; `ScfResult::materialize_orbitals`
+            // gathers them later. `orbitals` is then the 0 x B placeholder.
             if step.k_points.iter().any(|k| k.lazy.is_some()) {
-                materialize_kpoints(&mut step.k_points)?;
+                if step.nonlocal_from_identity || !crate::gamma_real::lazy_result_allowed() {
+                    materialize_kpoints(&mut step.k_points)?;
+                } else {
+                    crate::m2::count(crate::m2::Count::LazyResults);
+                }
                 if let Some(first) = step.k_points.first() {
                     step.solution.eigenvectors = first.solution.eigenvectors.clone();
                 }

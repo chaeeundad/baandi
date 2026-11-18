@@ -387,8 +387,11 @@ pub(crate) enum Count {
     /// INIT-SCALE-3: Ewald evaluations split over the ranks (two allgathervs;
     /// bit-identical).
     EwaldSplits,
+    /// LAZY-RESULT: delivered results that kept their lazy blocks (the caller
+    /// reads no orbitals; no gather at delivery).
+    LazyResults,
 }
-const COUNT_NAMES: [&str; 24] = [
+const COUNT_NAMES: [&str; 25] = [
     "density_builds",
     "xc_evaluations",
     "nonlocal_energy_audits",
@@ -413,8 +416,9 @@ const COUNT_NAMES: [&str; 24] = [
     "atomic_block_fallbacks",
     "ionic_local_splits",
     "ewald_splits",
+    "lazy_results",
 ];
-static COUNTS: [AtomicUsize; 24] = [const { AtomicUsize::new(0) }; 24];
+static COUNTS: [AtomicUsize; 25] = [const { AtomicUsize::new(0) }; 25];
 pub(crate) fn count_atomic_block_fallback() {
     count(Count::AtomicBlockFallbacks);
 }

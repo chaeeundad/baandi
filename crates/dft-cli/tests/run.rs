@@ -689,7 +689,8 @@ fn expressions_preserve_energy_and_record_resolutions() {
     // 97 = 96 + SPIN_SHARE (ONEPATH-5).
     // 98 = 97 + M2_LAZY_SERIAL (ISSUE-20).
     // 100 = 99 + IMPORT_CHECK (LADDER-IMPORT-SPLIT).
-    assert_eq!(switches.len(), 100);
+    // 101 = 100 + M2_LAZY_RESULT (LAZY-RESULT).
+    assert_eq!(switches.len(), 101);
     let ladder = &switches["BAANDI_CUTOFF_LADDER"];
     assert_eq!(
         (&ladder["value"], &ladder["source"]),

@@ -128,6 +128,12 @@ fn run(case: &str, comm: Option<Arc<dyn Collective + Send + Sync>>) -> ScfResult
         parallel::set_m2_override(Some(true));
     }
     parallel::set_communicator(comm);
+    // LAZY-RESULT: M2_PROFILE_ORBITALS=off declares that no delivered orbital
+    // is read, as `dft-cli run` does without forces, stress or orbital
+    // volumetric output.
+    dft_engine::gamma_real::set_delivered_orbitals(
+        std::env::var("M2_PROFILE_ORBITALS").as_deref() != Ok("off"),
+    );
     let potentials = [SpeciesPotential {
         label: "Si",
         potential: &pp,

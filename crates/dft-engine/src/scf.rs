@@ -422,7 +422,9 @@ pub struct KPointSolution {
     /// MPI-LAZY-ORBITALS (`BAANDI_M2_LAZY=on`, session maps only): the block
     /// held as distributed stick rows; `solution.eigenvectors` is then a
     /// 0 x bands placeholder until `ScfProblem::materialize_orbitals`. Never set
-    /// on results, public `step_kpoints*` maps or with the switch off.
+    /// on public `step_kpoints*` maps or with the switch off; set on a result
+    /// only after `gamma_real::set_delivered_orbitals(false)` (LAZY-RESULT,
+    /// `ScfResult::materialize_orbitals`).
     pub(crate) lazy: Option<crate::gamma_real::LazyOrbitals>,
 }
 
@@ -452,6 +454,27 @@ pub(crate) fn materialize_kpoints(k_points: &mut [KPointSolution]) -> Result<(),
         }
     }
     Ok(())
+}
+
+impl ScfResult {
+    /// LAZY-RESULT: whether every k block is held as a full complex block
+    /// (false only for an M2 result delivered lazily after
+    /// `gamma_real::set_delivered_orbitals(false)`).
+    pub fn orbitals_delivered(&self) -> bool {
+        self.k_points.iter().all(|k| k.lazy.is_none())
+    }
+    /// Gather lazily delivered orbital blocks (collective on the M2 path:
+    /// every rank must call it at the same point); a no-op otherwise.
+    pub fn materialize_orbitals(&mut self) -> Result<(), ScfError> {
+        if self.orbitals_delivered() {
+            return Ok(());
+        }
+        materialize_kpoints(&mut self.k_points)?;
+        if let Some(first) = self.k_points.first() {
+            self.orbitals = first.solution.eigenvectors.clone();
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]

@@ -49,3 +49,15 @@ thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 toml = "1"
 clap = { version = "4", features = ["derive"] }
+
+# Debug/test builds only (the release profile is unchanged). Optimizing the dev
+# profile cut the debug test run of scripts/check.sh from 379 s to 104 s (cold
+# gate 458 s -> 256 s, Mac, 2026-11-18, docs/performance/slow-tests.md) with the
+# same 695 passed tests, bit-comparison tests included: rustc does not contract
+# or reorder floating-point operations at any opt-level, and debug assertions
+# and overflow checks stay on.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2

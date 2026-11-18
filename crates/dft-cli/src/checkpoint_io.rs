@@ -1985,7 +1985,12 @@ fn finish(session: &mut dft_engine::ScfSession) -> Result<(), Error> {
     Ok(())
 }
 pub fn create(input: &Path, output: &Path, iteration: usize, kind: Kind) -> Result<(), Error> {
-    let (problem, model, execution) = context(input)?;
+    let (mut problem, model, execution) = context(input)?;
+    if !matches!(kind, Kind::Result) {
+        // M2-OWNED: the checkpoint reads the density and mixer at an active
+        // boundary; the owned modes (and the distributed mixer) decline.
+        problem.decline_owned(dft_engine::grid_dist::OwnedDecline::Checkpoint);
+    }
     let mut session = dft_engine::ScfSession::new(
         problem,
         CompletionMode::RetainLast,

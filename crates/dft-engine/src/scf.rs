@@ -1976,8 +1976,10 @@ impl ScfProblem {
         if !g::local_fields_requested() || crate::m2::active().is_none() {
             return false;
         }
-        let reason = if self.grid_dist_lda().is_none() {
-            Some(0)
+        let reason = if let Some(d) = self.owned.declined {
+            Some(d.index())
+        } else if self.grid_dist_lda().is_none() {
+            Some(self.grid_path_reason())
         } else if self.options.standard.is_none() {
             Some(1)
         } else if self.states.len() != 1 {
@@ -2052,20 +2054,64 @@ impl ScfProblem {
         if !g::local_density_requested() {
             return false;
         }
-        let ok = g::local_fields_requested()
-            && crate::mix_dist::requested()
-            && crate::m2::active().is_some()
-            && self.grid_dist_lda().is_some()
-            && self.options.standard.is_some()
-            && self.states.len() == 1
-            && matches!(self.options.mixing, Mixing::Pulay { .. })
-            && !self.options.hartree_mixing
-            && crate::snapshot::dir().is_none()
-            && !dft_solvers::replay::ENABLED;
-        if !ok {
-            g::owned_add(g::O_DENSITY_DECLINED, 1);
+        let reason = if let Some(d) = self.owned.declined {
+            Some(d.index())
+        } else if crate::m2::active().is_none() || !crate::mix_dist::requested() {
+            Some(g::R_GRID_PATH)
+        } else if self.grid_dist_lda().is_none() {
+            Some(self.grid_path_reason())
+        } else if self.options.standard.is_none() {
+            Some(1)
+        } else if self.states.len() != 1 {
+            Some(2)
+        } else if crate::snapshot::dir().is_some() || dft_solvers::replay::ENABLED {
+            Some(5)
+        } else if !g::local_fields_requested()
+            || !matches!(self.options.mixing, Mixing::Pulay { .. })
+            || self.options.hartree_mixing
+        {
+            Some(g::R_GRID_PATH)
+        } else {
+            None
+        };
+        if let Some(r) = reason {
+            g::density_declined(r);
+            return false;
         }
-        ok
+        true
+    }
+
+    /// Why `grid_dist_lda` is None: `functional` for a non-LDA functional
+    /// (PBE and other GGAs) with `BAANDI_M2_GRID` on, else `grid_path`
+    /// (switch off, core density, density floor, symmetry, PW92 prefactor).
+    fn grid_path_reason(&self) -> usize {
+        use crate::grid_dist as g;
+        if g::requested()
+            && !matches!(
+                self.options.functional,
+                Functional::LdaPz | Functional::LdaPw
+            )
+        {
+            g::R_FUNCTIONAL
+        } else {
+            g::R_GRID_PATH
+        }
+    }
+
+    /// M2-OWNED: declare a consumer of active-boundary state before the
+    /// session is initialized (`grid_dist::OwnedDecline`). Both owned modes
+    /// then take the gathered path for this problem with the reason counted;
+    /// `Checkpoint` also selects the replicated Pulay mixer (whose state an
+    /// exact checkpoint carries). Every rank must declare the same reason.
+    /// The first declaration is kept.
+    pub fn decline_owned(&mut self, reason: crate::grid_dist::OwnedDecline) {
+        if self.owned.declined.is_none() {
+            self.owned.declined = Some(reason);
+        }
+    }
+    /// The declared owned-mode decline, if any.
+    pub fn owned_declined(&self) -> Option<crate::grid_dist::OwnedDecline> {
+        self.owned.declined
     }
 
     /// The slab plan of the distributed grid stages (built once per grid).
@@ -3013,6 +3059,9 @@ impl ScfProblem {
                 Ok(())
             },
         )?;
+        // M2-OWNED: the complex Hamiltonians now hold the potential of `n`;
+        // an earlier owned map's planes must not overwrite it.
+        self.owned.complex_stale = false;
         self.atomic_guesses()
     }
 

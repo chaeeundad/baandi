@@ -171,8 +171,10 @@ const OWNED_TIME_NAMES: [&str; 7] = [
     "owned_reduce",
 ];
 static OWNED_NANOS: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
-/// Reasons a map that asked for owned fields took the gathered path.
-pub(crate) const DECLINE_REASONS: [&str; 7] = [
+/// Reasons a map (fields) or a session (density) that asked for the owned
+/// mode took the gathered path. Indices 7.. are the declared or automatic
+/// consumer declines (`OwnedDecline`) and the model reasons spin/functional.
+pub(crate) const DECLINE_REASONS: [&str; 11] = [
     "grid_path",
     "standard",
     "kpoints",
@@ -180,8 +182,65 @@ pub(crate) const DECLINE_REASONS: [&str; 7] = [
     "operator",
     "snapshot",
     "finite_temperature",
+    "checkpoint",
+    "runtime_control",
+    "spin",
+    "functional",
 ];
-static DECLINED: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
+pub(crate) const R_GRID_PATH: usize = 0;
+pub(crate) const R_SPIN: usize = 9;
+pub(crate) const R_FUNCTIONAL: usize = 10;
+static DECLINED: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
+static DENSITY_DECLINED: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
+
+/// A consumer that needs the full density, potential or mixer state at an
+/// ACTIVE SCF boundary, declared before the session is initialized
+/// (`ScfProblem::decline_owned`; the session declares `RuntimeControl` itself
+/// for agent-controlled runs and `Checkpoint` for an exact restore). The run
+/// then takes the gathered path for both owned switches (and, for
+/// `Checkpoint`, the replicated Pulay mixer, whose state checkpoint v1 can
+/// carry), counted as `owned.fields_declined.<reason>` /
+/// `owned.density_declined.<reason>`. Consumers of the DELIVERED result
+/// (forces, stress, volumetric output, density files) need no decline: the
+/// delivered density and orbitals are gathered at delivery.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwnedDecline {
+    /// Exact or warm checkpoint of an active boundary, or an exact restore.
+    Checkpoint,
+    /// Runtime policy control (mixer replacement, session density at a
+    /// boundary): `ExecutionMode::AgentControlled`.
+    RuntimeControl,
+}
+impl OwnedDecline {
+    pub(crate) fn index(self) -> usize {
+        match self {
+            Self::Checkpoint => 7,
+            Self::RuntimeControl => 8,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        DECLINE_REASONS[self.index()]
+    }
+}
+/// Count a decline of the owned density loop with its reason (once per
+/// session initialization that asked for it).
+pub(crate) fn density_declined(reason: usize) {
+    DENSITY_DECLINED[reason].fetch_add(1, Ordering::Relaxed);
+    owned_add(O_DENSITY_DECLINED, 1);
+}
+/// A spin (collinear) SCF asked for the owned mode: it has its own driver
+/// and always takes the gathered path (counted once per run, both switches).
+pub(crate) fn count_spin_decline() {
+    if crate::m2::active().is_none() {
+        return;
+    }
+    if local_fields_requested() {
+        owned_declined(R_SPIN);
+    }
+    if local_density_requested() {
+        density_declined(R_SPIN);
+    }
+}
 pub(crate) fn owned_add(i: usize, n: u64) {
     OWNED[i].fetch_add(n, Ordering::Relaxed);
 }
@@ -213,6 +272,12 @@ pub fn owned_stats() -> crate::parallel::M2Stats {
     counts.extend(DECLINE_REASONS.iter().zip(&DECLINED).map(|(n, c)| {
         (
             format!("owned.fields_declined.{n}"),
+            c.load(Ordering::Relaxed) as usize,
+        )
+    }));
+    counts.extend(DECLINE_REASONS.iter().zip(&DENSITY_DECLINED).map(|(n, c)| {
+        (
+            format!("owned.density_declined.{n}"),
             c.load(Ordering::Relaxed) as usize,
         )
     }));
@@ -256,6 +321,9 @@ pub(crate) struct OwnedFields {
     pub(crate) density_mode: bool,
     pub(crate) input: Option<Owned>,
     pub(crate) output: Option<Owned>,
+    /// Declared consumer of active-boundary state (`OwnedDecline`): both
+    /// owned modes decline for this problem.
+    pub(crate) declined: Option<OwnedDecline>,
 }
 impl OwnedFields {
     /// A new epoch for a field produced now (monotonic per problem).

@@ -473,6 +473,35 @@ pub(crate) fn note_switch_paths(rc: dft_numerics::switches::RunConfig) {
         };
         rc.note_path(Id::M2_MIX, path, why);
     }
+    // M2-OWNED: the owned modes' path and the reasons of every decline
+    // (`owned.fields_declined.<reason>` / `owned.density_declined.<reason>`).
+    let owned: std::collections::BTreeMap<String, usize> =
+        dft_engine::grid_dist::owned_stats().0.into_iter().collect();
+    for (id, used_key, prefix) in [
+        (
+            Id::M2_LOCAL_FIELDS,
+            "owned.fields_owned_maps",
+            "owned.fields_declined.",
+        ),
+        (
+            Id::M2_LOCAL_DENSITY,
+            "owned.density_owned_maps",
+            "owned.density_declined.",
+        ),
+    ] {
+        if !rc.consulted(id) {
+            continue;
+        }
+        let used = owned.get(used_key).copied().unwrap_or(0);
+        let reasons: Vec<&str> = owned
+            .iter()
+            .filter(|(k, v)| **v > 0 && k.starts_with(prefix))
+            .map(|(k, _)| &k[prefix.len()..])
+            .collect();
+        let reason = (!reasons.is_empty()).then(|| reasons.join(","));
+        let path = if used > 0 { "owned" } else { "gathered" };
+        rc.note_path(id, path, reason.as_deref().filter(|_| rc.on(id)));
+    }
     if rc.consulted(Id::STOP_METRIC) {
         let c = rc.counters();
         let (kept, fft) = (

@@ -348,6 +348,8 @@ impl ScfSession {
             // path keeps its window on the rank's grid block.
             Mixing::Pulay { beta, history }
                 if !self.problem.options.hartree_mixing
+                    && self.problem.owned.declined
+                        != Some(crate::grid_dist::OwnedDecline::Checkpoint)
                     && crate::mix_dist::requested()
                     && crate::m2::active().is_some() =>
             {
@@ -425,6 +427,12 @@ impl ScfSession {
     }
     fn initialize_inner(&mut self) -> Result<(), ScfError> {
         let start = Instant::now();
+        // M2-OWNED: an agent-controlled run may replace the mixer or read the
+        // density at an active boundary; the owned modes decline for it.
+        if self.config.mode == crate::events::ExecutionMode::AgentControlled {
+            self.problem
+                .decline_owned(crate::grid_dist::OwnedDecline::RuntimeControl);
+        }
         let mut mixer = self.make_mixer(&self.problem.options.mixing)?;
         // Validate mixer parameters even if a future system converges immediately.
         let n = self.problem.starting_density();
@@ -2069,12 +2077,14 @@ impl ScfSession {
         Self::restore_exact_inner(problem, checkpoint, model, execution)
     }
     pub(crate) fn restore_exact_inner(
-        problem: ScfProblem,
+        mut problem: ScfProblem,
         checkpoint: &crate::checkpoint::Checkpoint,
         model: &crate::checkpoint::ModelIdentity,
         execution: &crate::checkpoint::ExecutionIdentity,
     ) -> Result<Self, crate::checkpoint::Rejection> {
         use crate::checkpoint::*;
+        // M2-OWNED: the restored mixer history and density are full arrays.
+        problem.decline_owned(crate::grid_dist::OwnedDecline::Checkpoint);
         checkpoint.compatible(CheckpointKind::ExactContinuation, model, execution)?;
         let c = checkpoint.continuation.as_ref().ok_or(Rejection::Kind)?;
         if checkpoint.result.is_some() {

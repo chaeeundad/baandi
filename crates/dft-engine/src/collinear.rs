@@ -802,6 +802,8 @@ impl CollinearProblem {
         })
     }
     pub fn run(mut self) -> Result<CollinearResult, ScfError> {
+        // M2-OWNED: the collinear driver keeps full densities (gathered path).
+        crate::grid_dist::count_spin_decline();
         let o = self.channels[0].options.clone();
         let dims = self.grid_dimensions();
         let volume = self.channels[0].cell.volume_bohr3();

@@ -769,6 +769,19 @@ runtime mixer replacement is refused). Rounding class. Counters
 `mix_dist::tests::plane_mode_*`, physics
 `owned_plane_potential_applies_like_the_full_potential`. dev08 request
 `docs/performance/requests/m2-owned.md`; ledger M2-OWNED-*.
+Declines (M2-OWNED-DECLINE): a consumer of ACTIVE-boundary state (session
+density, mixer state, checkpoint) declares itself before initialization with
+`ScfProblem::decline_owned(grid_dist::OwnedDecline::..)`; both owned modes
+then take the gathered path (`Checkpoint` also the replicated Pulay mixer).
+`restore_exact` declares `Checkpoint` and every `AgentControlled` session
+`RuntimeControl` by themselves; the CLI `checkpoint` subcommand declares it
+for exact/warm kinds. Reasons: `owned.fields_declined.<r>` (per map) and
+`owned.density_declined.<r>` (per session), r in grid_path, standard, kpoints,
+cold_map, operator, snapshot, finite_temperature, checkpoint,
+runtime_control, spin (collinear driver), functional (non-LDA). Consumers of
+the delivered result (forces, stress, volumetric/density output) need no
+decline. Do not add a reader of active-boundary state without a declaration.
+Test `tests/m2_owned_decline.rs` (one test per reason).
 
 ## Run configuration (RUN-CONFIG, 2026-11-18)
 

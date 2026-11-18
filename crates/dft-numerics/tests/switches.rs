@@ -249,5 +249,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::M2_LAYOUT_CACHE), Value::Choice("off"));
     // ISSUE-20: lazy serial operator of M2 states, on since dev08 (si64 -1.22 %, bit-identical).
     assert_eq!(value(Id::M2_LAZY_SERIAL), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 99);
+    // LADDER-IMPORT-SPLIT: split import check (same verdict, bit-identical results).
+    assert_eq!(value(Id::IMPORT_CHECK), Value::Choice("split"));
+    assert_eq!(TABLE.len(), 100);
 }

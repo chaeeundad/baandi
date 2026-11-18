@@ -688,7 +688,8 @@ fn expressions_preserve_energy_and_record_resolutions() {
     // 89 = 83 + RESTART_KEEP (BREAKTHROUGH-1) + the five BREAKTHROUGH-3 switches (SCF_ADVANCE, _BLOCKS, _GROWTH, _ADAPT, _SCOPE).
     // 97 = 96 + SPIN_SHARE (ONEPATH-5).
     // 98 = 97 + M2_LAZY_SERIAL (ISSUE-20).
-    assert_eq!(switches.len(), 99);
+    // 100 = 99 + IMPORT_CHECK (LADDER-IMPORT-SPLIT).
+    assert_eq!(switches.len(), 100);
     let ladder = &switches["BAANDI_CUTOFF_LADDER"];
     assert_eq!(
         (&ladder["value"], &ladder["source"]),

@@ -626,6 +626,9 @@ pub struct ScfProblem {
     /// of the latest map's input and output densities for the stop-rule
     /// estimate; None when the switch is off or there is no Coulomb metric.
     stop_kept: Option<StopKept>,
+    /// `BAANDI_M2_GRID=on` (ticket M2-GRID, default off): slab plan of the
+    /// distributed full-grid stages, built at the first eligible map.
+    grid_dist: Option<crate::grid_dist::GridPlan>,
     cell: Cell,
     states: Vec<KState>,
     grid: FftGridSpec,
@@ -740,6 +743,10 @@ pub(crate) struct StopKept {
     output: Vec<f64>,
     output_hat: Array3<Complex64>,
     output_ok: bool,
+    /// M2-GRID: the distributed plan holds the owned coefficients of `input`
+    /// (set by the distributed potential) and of `output` (distributed audit).
+    dist_input: bool,
+    dist_output: bool,
 }
 static STOP_KEPT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static STOP_FFT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -982,14 +989,38 @@ impl StopKept {
             output: Vec::new(),
             output_hat: Array3::zeros(dims),
             output_ok: false,
+            dist_input: false,
+            dist_output: false,
         }
     }
     fn set_input(&mut self, n: &Array3<f64>) {
         self.input.clear();
         self.input.extend(n.iter());
         self.input_ok = unclamped(n);
+        self.dist_input = false;
+    }
+    /// M2-GRID: the input density whose owned coefficients the plan keeps.
+    fn set_input_dist(&mut self, n: &Array3<f64>) {
+        self.input.clear();
+        self.input.extend(n.iter());
+        self.input_ok = false;
+        self.dist_input = true;
+    }
+    /// M2-GRID: the output density whose owned coefficients the plan keeps.
+    fn set_output_dist(&mut self, n: &Array3<f64>) {
+        self.output.clear();
+        self.output.extend(n.iter());
+        self.output_ok = false;
+        self.dist_output = true;
+    }
+    fn matches_dist(&self, input: &Array3<f64>, output: &Array3<f64>) -> bool {
+        self.dist_input
+            && self.dist_output
+            && same_bits(&self.input, input)
+            && same_bits(&self.output, output)
     }
     fn set_output(&mut self, n: &Array3<f64>, hat: Array3<Complex64>) {
+        self.dist_output = false;
         self.output.clear();
         self.output.extend(n.iter());
         self.output_ok = hat.shape() == self.output_hat.shape() && unclamped(n);
@@ -1563,6 +1594,7 @@ impl ScfProblem {
             force_model,
             stop_kept: (coulomb.is_some() && stop_metric_kept())
                 .then(|| StopKept::new(grid.dims())),
+            grid_dist: None,
             coulomb,
             cell: cell.clone(),
             states,
@@ -1766,6 +1798,18 @@ impl ScfProblem {
         let Some(metric) = self.coulomb.as_mut() else {
             return Ok(None);
         };
+        // M2-GRID: owned coefficients of both densities on the slab plan
+        // (replicated conditions; one small allgatherv).
+        if self
+            .stop_kept
+            .as_ref()
+            .is_some_and(|k| k.matches_dist(input, output))
+            && let Some(comm) = crate::m2::active()
+            && let Some(plan) = self.grid_dist.as_mut().filter(|p| p.stop_ready())
+        {
+            STOP_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            return plan.stop_error(&comm).map(Some);
+        }
         if let Some(kept) = self.stop_kept.as_ref().filter(|k| k.matches(input, output)) {
             STOP_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return metric
@@ -1823,6 +1867,84 @@ impl ScfProblem {
             *v += h.re + x;
         }
         Ok((h, x, effective))
+    }
+
+    /// The pointwise LDA flavour when the distributed grid stages apply to this
+    /// problem (`BAANDI_M2_GRID=on`, M2 path, LDA PZ/PW with the modified PW92
+    /// prefactor, no core density, density floor or symmetry); replicated.
+    fn grid_dist_lda(&self) -> Option<crate::grid_dist::Lda> {
+        if !crate::grid_dist::requested()
+            || self.core_density.is_some()
+            || self.density_floor.is_some()
+            || self.symmetry.is_some()
+            || self.options.pw92_prefactor != crate::Pw92Prefactor::Modified
+        {
+            return None;
+        }
+        match self.options.functional {
+            Functional::LdaPz => Some(crate::grid_dist::Lda::Pz),
+            Functional::LdaPw => Some(crate::grid_dist::Lda::Pw),
+            _ => None,
+        }
+    }
+
+    /// Fields of an SCF map's input density: the distributed grid stages when
+    /// eligible (`true`: V_H and V_xc stay on the plan's planes, the returned
+    /// grids carry only the energies and empty potential arrays), otherwise
+    /// `input_fields`. Collective on the M2 path.
+    fn map_fields(
+        &mut self,
+        n: &Array3<f64>,
+    ) -> Result<(hartree::HartreeGrid, xc::XcGrid, Array3<f64>, bool), ScfError> {
+        let comm = crate::m2::active();
+        let lda = comm.as_ref().and(self.grid_dist_lda());
+        let (Some(comm), Some(lda), Some(values), Some(ionic)) =
+            (comm, lda, n.as_slice(), self.ionic_real.as_slice())
+        else {
+            if crate::grid_dist::requested() && crate::m2::active().is_some() {
+                crate::grid_dist::count_declined();
+            }
+            let (h, x, effective) = self.input_fields(n)?;
+            return Ok((h, x, effective, false));
+        };
+        let dims = self.grid.dims();
+        if self.grid_dist.as_ref().map(|p| p.dims()) != Some(dims) {
+            let weights = self.coulomb.as_ref().map(|c| c.weights());
+            self.grid_dist = Some(crate::grid_dist::GridPlan::new(
+                &comm,
+                dims,
+                self.cell.reciprocal_columns_inverse_bohr(),
+                self.cell.volume_bohr3(),
+                lda,
+                weights,
+            )?);
+        }
+        let plan = self.grid_dist.as_mut().expect("plan built above");
+        let mut effective = Array3::zeros(dims);
+        let (hartree_energy, xc_energy, xc_integral) = plan.potential(
+            &comm,
+            values,
+            ionic,
+            effective.as_slice_mut().expect("standard layout"),
+        )?;
+        if let Some(kept) = self.stop_kept.as_mut() {
+            kept.set_input_dist(n);
+        }
+        let empty = (0, 0, 0);
+        Ok((
+            hartree::HartreeGrid {
+                potential: Array3::zeros(empty),
+                reciprocal_potential: Array3::zeros(empty),
+                energy: Hartree(hartree_energy),
+            },
+            xc::XcGrid {
+                potential: Array3::zeros(empty),
+                energy: Hartree(xc_energy),
+                potential_integral: Hartree(xc_integral),
+            },
+            effective,
+            true,
+        ))
     }
 
     /// M2d: occupation-weighted output density of the latest solve from the
@@ -2682,7 +2804,7 @@ impl ScfProblem {
                 "symmetry.density: input breaks the selected symmetry; use full mesh",
             ));
         }
-        let (h, x, effective) = match self.reused_fields.take() {
+        let (h, x, effective, dist_fields) = match self.reused_fields.take() {
             Some(r)
                 if r.density.shape() == n.shape()
                     && r.density
@@ -2690,9 +2812,9 @@ impl ScfProblem {
                         .zip(n.iter())
                         .all(|(a, b)| a.to_bits() == b.to_bits()) =>
             {
-                (r.hartree, r.xc, r.effective)
+                (r.hartree, r.xc, r.effective, false)
             }
-            _ => self.input_fields(n)?,
+            _ => self.map_fields(n)?,
         };
         ordered_solves(
             &mut self.states,
@@ -3048,18 +3170,39 @@ impl ScfProblem {
             timings.density.as_secs_f64(),
         );
         let start = Instant::now();
-        let m2_xc = crate::m2::active().and_then(|comm| {
-            crate::m2::xc(
-                &comm,
-                &self.options,
-                &output,
-                self.core_density.as_ref(),
-                self.density_floor,
-                volume,
-            )
-        });
+        // M2-GRID: the audit terms from the distributed output density (the
+        // plan holds V_H and V_xc of this map's input on its planes).
+        let dist_terms = match (
+            dist_fields,
+            crate::m2::active(),
+            self.grid_dist.as_mut().filter(|p| p.has_fields()),
+            n.as_slice(),
+            output.as_slice(),
+            self.ionic_real.as_slice(),
+        ) {
+            (true, Some(comm), Some(plan), Some(input), Some(out), Some(ionic)) => {
+                Some(plan.audit(&comm, input, out, ionic)?)
+            }
+            _ => None,
+        };
+        let m2_xc = if dist_terms.is_some() {
+            None
+        } else {
+            crate::m2::active().and_then(|comm| {
+                crate::m2::xc(
+                    &comm,
+                    &self.options,
+                    &output,
+                    self.core_density.as_ref(),
+                    self.density_floor,
+                    volume,
+                )
+            })
+        };
         let output_xc = if let Some(x) = m2_xc {
             Some(x?)
+        } else if dist_terms.is_some() {
+            None
         } else if self.core_density.is_some()
             || self.density_floor.is_some()
             || self.options.pw92_prefactor == crate::Pw92Prefactor::Original
@@ -3075,29 +3218,36 @@ impl ScfProblem {
         } else {
             None
         };
-        let mut shared_audit = energy::prepare_shared(
-            &AuditInput {
-                cell: &self.cell,
-                basis: &self.states[0].basis,
-                grid: &self.states[0].grid,
-                ionic_g: &self.ionic_g,
-                nonlocal: self.states[0].hamiltonian.nonlocal(),
-                orbitals: &orbitals[0],
-                occupations: finite.map_or(self.occupations.as_slice(), |w| w.block(0, 0)),
-                eigenvalues: &k_points[0].solution.eigenvalues,
-                eigen_residuals: &k_points[0].solution.residuals,
-                input_density: n,
-                output_density: &output,
-                input_hartree: &h,
-                input_xc: &x,
-                ewald: self.ewald.energy.0,
-            },
-            &mut self.fft,
-            self.options.functional,
-            output_xc.as_ref(),
-            self.core_density.as_ref(),
-        )?;
-        if let Some(kept) = self.stop_kept.as_mut() {
+        let mut shared_audit = if let Some(terms) = dist_terms {
+            if let Some(kept) = self.stop_kept.as_mut() {
+                kept.set_output_dist(&output);
+            }
+            energy::SharedAudit::from_distributed(terms.values(), self.ionic_g[[0, 0, 0]].re)
+        } else {
+            energy::prepare_shared(
+                &AuditInput {
+                    cell: &self.cell,
+                    basis: &self.states[0].basis,
+                    grid: &self.states[0].grid,
+                    ionic_g: &self.ionic_g,
+                    nonlocal: self.states[0].hamiltonian.nonlocal(),
+                    orbitals: &orbitals[0],
+                    occupations: finite.map_or(self.occupations.as_slice(), |w| w.block(0, 0)),
+                    eigenvalues: &k_points[0].solution.eigenvalues,
+                    eigen_residuals: &k_points[0].solution.residuals,
+                    input_density: n,
+                    output_density: &output,
+                    input_hartree: &h,
+                    input_xc: &x,
+                    ewald: self.ewald.energy.0,
+                },
+                &mut self.fft,
+                self.options.functional,
+                output_xc.as_ref(),
+                self.core_density.as_ref(),
+            )?
+        };
+        if !dist_fields && let Some(kept) = self.stop_kept.as_mut() {
             kept.set_output(&output, shared_audit.take_density_reciprocal());
         }
         // B2: Fermi-Dirac occupations fall back to the explicit audit.

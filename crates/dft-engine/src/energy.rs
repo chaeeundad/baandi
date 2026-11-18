@@ -489,6 +489,25 @@ pub(crate) fn prepare_shared(
 }
 
 impl SharedAudit {
+    /// M2-GRID: the shared terms from the distributed grid stages
+    /// (`grid_dist::GridPlan::audit`, in this order: local, charge, hartree,
+    /// xc, double counting, rh, rx; no core density on that path, no kept
+    /// full-grid coefficients).
+    #[allow(dead_code)] // the test crates that include this file do not call it
+    pub(crate) fn from_distributed(terms: [f64; 7], ionic_g0: f64) -> Self {
+        let [local, charge, hartree, xc, double_counting, rh, rx] = terms;
+        Self {
+            local,
+            local_zero_mode: charge * ionic_g0,
+            hartree,
+            xc,
+            double_counting,
+            rh,
+            rx,
+            nlcc: None,
+            density_reciprocal: Array3::zeros((0, 0, 0)),
+        }
+    }
     /// Fourier coefficients of the checked output density of this audit
     /// (moved out; the audit's later stages do not read them).
     pub(crate) fn take_density_reciprocal(&mut self) -> Array3<Complex64> {
@@ -543,8 +562,10 @@ pub(crate) fn evaluate_shared_with_kinetic(
         || a.eigen_residuals.len() != a.occupations.len()
         || n.shape() != a.grid.dims()
         || a.input_density.shape() != n.shape()
-        || a.input_hartree.potential.shape() != n.shape()
-        || a.input_xc.potential.shape() != n.shape()
+        // The potentials are not read here; an empty array marks fields kept
+        // on the distributed planes (M2-GRID).
+        || (a.input_hartree.potential.shape() != n.shape() && !a.input_hartree.potential.is_empty())
+        || (a.input_xc.potential.shape() != n.shape() && !a.input_xc.potential.is_empty())
     {
         return Err(ScfError::InvalidInput("energy dimensions"));
     }

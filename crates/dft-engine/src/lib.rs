@@ -52,7 +52,9 @@ pub use dft_solvers::locking::Locking;
 
 pub mod advance;
 pub mod gamma_real;
+pub mod grid_dist;
 pub mod m2;
+pub mod mix_dist;
 pub mod parallel;
 pub use advance::{
     ADVANCE_INNER_RATIO, AdvanceCounters, AdvanceRecord, CompletionTrigger,

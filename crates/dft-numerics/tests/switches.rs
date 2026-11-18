@@ -253,5 +253,8 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::IMPORT_CHECK), Value::Choice("split"));
     // LAZY-RESULT: lazy delivered orbitals when the caller reads none.
     assert_eq!(value(Id::M2_LAZY_RESULT), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 101);
+    // M2-GRID: distributed full-grid stages of the M2 path, rounding class, off until dev08.
+    assert_eq!(value(Id::M2_GRID), Value::Choice("off"));
+    assert_eq!(value(Id::M2_MIX), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 103);
 }

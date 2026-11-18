@@ -314,6 +314,8 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
         let grid_before = (
             dft_solvers::mixing::mixer_counters(),
             dft_engine::stop_metric_counters(),
+            dft_engine::grid_dist::counters(),
+            dft_engine::mix_dist::counters(),
         );
         let before = snapshot();
         let t = Instant::now();
@@ -533,14 +535,25 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
         // simulated ranks, divided by the rank count like every other entry).
         let mix = dft_solvers::mixing::mixer_counters();
         let stop = dft_engine::stop_metric_counters();
+        // M2-GRID: distributed potential maps, audits, stop estimates, plans, declined.
+        let dist = dft_engine::grid_dist::counters();
+        let dmix = dft_engine::mix_dist::counters();
         j.push_str(&format!(
-            ",\"grid_counters\":{{\"mix_calls\":{},\"mix_diffs\":{},\"mix_dots\":{},\"mix_metric\":{},\"stop_kept\":{},\"stop_fft\":{}}}",
+            ",\"grid_counters\":{{\"mix_calls\":{},\"mix_diffs\":{},\"mix_dots\":{},\"mix_metric\":{},\"stop_kept\":{},\"stop_fft\":{},\"dist_potential\":{},\"dist_audit\":{},\"dist_stop\":{},\"dist_plans\":{},\"dist_declined\":{},\"dist_mix_calls\":{},\"dist_mix_gram\":{},\"dist_mixers\":{}}}",
             (mix[0] - grid_before.0[0]) / p as u64,
             (mix[1] - grid_before.0[1]) / p as u64,
             (mix[2] - grid_before.0[2]) / p as u64,
             (mix[3] - grid_before.0[3]) / p as u64,
             (stop[0] - grid_before.1[0]) / p as u64,
             (stop[1] - grid_before.1[1]) / p as u64,
+            (dist[0] - grid_before.2[0]) / p as u64,
+            (dist[1] - grid_before.2[1]) / p as u64,
+            (dist[2] - grid_before.2[2]) / p as u64,
+            (dist[3] - grid_before.2[3]) / p as u64,
+            (dist[4] - grid_before.2[4]) / p as u64,
+            (dmix[0] - grid_before.3[0]) / p as u64,
+            (dmix[1] - grid_before.3[1]) / p as u64,
+            (dmix[2] - grid_before.3[2]) / p as u64,
         ));
         // BREAKTHROUGH-0-INSTRUMENT: exclusive phase profile (per rank, max
         // over ranks) and the first-block residual table (both default off).

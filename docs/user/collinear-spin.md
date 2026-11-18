@@ -146,9 +146,9 @@ pseudopotentials and a requested reference run; none is claimed by this ticket.
 
 ```sh
 scripts/check.sh
-cargo test -p dft-physics --test spin_oracles -- --nocapture
-cargo test -p dft-physics --test spin_grid -- --nocapture
-cargo test --release -p dft-engine --test collinear -- --include-ignored --nocapture
+cargo test -p dft-physics --test all spin_oracles:: -- --nocapture
+cargo test -p dft-physics --test all spin_grid:: -- --nocapture
+cargo test --release -p dft-engine --test all collinear:: -- --include-ignored --nocapture
 cargo test -p dft-cli --test spin -- --nocapture
 python3 -I scripts/tests/test_readme_figures.py
 ```

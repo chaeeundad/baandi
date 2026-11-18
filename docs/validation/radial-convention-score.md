@@ -178,7 +178,7 @@ Final verification (all commands below exited 0):
 | --- | --- |
 | `scripts/check.sh` | PASS build, test, fmt, clippy |
 | `cargo test --offline -p dft-upf` | Includes polynomial, specified-weight, odd-identity and existing transform tests |
-| `cargo test --offline -p dft-physics --test radial_convention_score` | Two tests passed: endpoint/ionic consistency and core/projector polynomial oracle |
+| `cargo test --offline -p dft-physics --test all radial_convention_score::` | Two tests passed: endpoint/ionic consistency and core/projector polynomial oracle |
 | `cargo test --offline -p dft-cli --test pseudo_convention_config` | Two tests passed: strict config and exact/warm restart in both directions for each knob |
 | Material runner above | 24 converged score SCFs plus six omission SCFs; all six explicit-default identities passed |
 | Five benchmark commands above | 25/25 zero-energy-change, byte-identical density comparisons |
@@ -220,7 +220,7 @@ files carry the implementation or its verification:
 - UPF: `crates/dft-upf/src/radial.rs` (enums, additive transforms, quadrature tests).
 - Physics: `crates/dft-physics/src/hamiltonian.rs` (local/projector dispatch),
   `crates/dft-physics/src/data.rs` (core dispatch),
-  `crates/dft-physics/tests/radial_convention_score.rs` (synthetic oracles).
+  `crates/dft-physics/tests/all/radial_convention_score.rs` (synthetic oracles).
 - Engine: `crates/dft-engine/src/lib.rs` (enum facade),
   `crates/dft-engine/src/scf.rs` (defaulted options, setup and result fields),
   `crates/dft-engine/src/session.rs` (result metadata),

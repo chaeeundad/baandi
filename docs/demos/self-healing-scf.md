@@ -1,6 +1,6 @@
 # Self-healing SCF demonstration protocol
 
-Status: the initial budget-recovery protocol is executed by P11E (results below). Instability recovery and performance claims remain unvalidated. P11E owns the harness and stored results. Wraps the fixture constructors in `crates/dft-engine/tests/scf.rs`, `ScfProblem::run_outcome` and the proposed session. Use [diagnostics](../research/self-healing-scf.md), [safety](../validation/intervention-safety.md) and [equivalence](../validation/runtime-equivalence.md).
+Status: the initial budget-recovery protocol is executed by P11E (results below). Instability recovery and performance claims remain unvalidated. P11E owns the harness and stored results. Wraps the fixture constructors in `crates/dft-engine/tests/all/scf.rs`, `ScfProblem::run_outcome` and the proposed session. Use [diagnostics](../research/self-healing-scf.md), [safety](../validation/intervention-safety.md) and [equivalence](../validation/runtime-equivalence.md).
 
 ## Reproducible baseline and honest scope
 
@@ -30,7 +30,7 @@ To earn a broader “self-healing instability” claim, P11E must additionally f
 
 For each arm retain expanded input/hash, generator revision, build/backend/thread identity, start-state hash, event JSONL, policy/audit JSONL, outcome/certificate and final array manifest. Report status, ordinary SCF iterations, certificate solves, ordinary plus certificate operator applications, final E (Ha), abs(E-E_reference) (Ha), density residual (Bohr^-3/2), occupied eigenvalue change (Ha), charge errors (relative), interventions accepted/rejected and reasons, wall seconds and observer overhead. Missing final certified energy stays null, not an apparent zero error. No fabricated numbers or QE-reference label. Run each deterministic arm twice; replay must preserve numerical outputs. A release harness command and exact output paths must be supplied by P11E before claiming this protocol executed.
 
-Existing baseline-only reproduction command: `cargo test --release -p dft-engine --test scf divergence_and_iteration_budget -- --ignored --exact --nocapture`. This existing test is ignored in the ordinary debug suite; a debug invocation without `--ignored` does not reproduce its assertions. The release command tests failure behavior, not the future three-arm runtime, and was not executed in this design ticket. Tests over about 10 s debug must be ignored with a documented release command. Extend evaluation across P10G system variety before recommending recovery defaults; this two-atom synthetic demonstration is deliberately narrow.
+Existing baseline-only reproduction command: `cargo test --release -p dft-engine --test all scf::divergence_and_iteration_budget -- --ignored --exact --nocapture`. This existing test is ignored in the ordinary debug suite; a debug invocation without `--ignored` does not reproduce its assertions. The release command tests failure behavior, not the future three-arm runtime, and was not executed in this design ticket. Tests over about 10 s debug must be ignored with a documented release command. Extend evaluation across P10G system variety before recommending recovery defaults; this two-atom synthetic demonstration is deliberately narrow.
 
 ## Three-mode/control-request extension
 
@@ -54,7 +54,7 @@ python3 -I scripts/make_readme_figures.py
 
 Requires the pinned Rust toolchain and the repository's vendored dependencies;
 no real UPF, external server, network, or LLM is used. The script runs the ignored
-release integration test in `crates/dft-cli/tests/self_healing.rs`. The adapter
+release integration test in `crates/dft-cli/tests/all/self_healing.rs`. The adapter
 `src/heal.rs` is compiled by that test using a path module, deliberately avoiding
 changes to the independently owned CLI command dispatcher. There is no new
 `dft heal` subcommand. Override `DFT_HEAL_OUTPUT` to write an independent bundle;

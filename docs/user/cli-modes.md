@@ -189,7 +189,7 @@ validated spec, not to the original sentence. No translator is implemented here.
 
 ## Verification and limits
 
-`cargo test -p dft-cli --test run execution_modes -- --nocapture` compares a
+`cargo test -p dft-cli --test all run::execution_modes -- --nocapture` compares a
 three-iteration synthetic small-cell fixture across the existing Classic entry,
 the alias and Observed. `agent_socket_mode` extends this to AgentControlled
 without intervention. It checks exact
@@ -203,8 +203,8 @@ socket tests are ignored in the normal gate because the Codex sandbox rejects
 Unix bind with EPERM; run them in a host environment that permits local sockets:
 
 ```
-cargo test -p dft-cli --test run agent_socket_mode -- --ignored --nocapture
-cargo test -p dft-cli --test run observed_socket -- --ignored --nocapture
+cargo test -p dft-cli --test all run::agent_socket_mode -- --ignored --nocapture
+cargo test -p dft-cli --test all run::observed_socket -- --ignored --nocapture
 ```
 
 These tests cover AgentControlled end-to-end equivalence, socket mirroring and
@@ -217,7 +217,7 @@ gates are `scripts/check.sh dft-cli` and `scripts/check.sh`.
 - `scripts/check.sh`: exit 0; all four workspace gates passed after replacing the
   second Cargo binary with the compatibility launcher. This preserves the
   existing UPF test's unqualified `cargo run -p dft-cli` invocation.
-- `cargo test -p dft-cli --test run execution_modes -- --nocapture`: exit 0;
+- `cargo test -p dft-cli --test all run::execution_modes -- --nocapture`: exit 0;
   three SCF iterations, Classic/launcher/Observed density bytes and numerical JSON
   identical; energy difference 0 Ha. Agent socket-mode equivalence remains a
   host-only test and is not included in this result.

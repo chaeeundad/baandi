@@ -43,7 +43,7 @@ for backend in rust mkl; do
         CARGO_TARGET_DIR="target/p10b-$backend" taskset -c "$P10B_CORE" cargo run --release -p dft-numerics \
             --example lib_bench "${feature[@]}" > "$P10B_OUT/kernels-$backend-$trial.log" 2>&1
         CARGO_TARGET_DIR="target/p10b-$backend" taskset -c "$P10B_CPUS" cargo test \
-            --release -p dft-physics -p dft-numerics "${feature[@]}" --test hamiltonian conventional_cell_block_timing \
+            --release -p dft-physics -p dft-numerics "${feature[@]}" --test all hamiltonian::conventional_cell_block_timing \
             -- --ignored --nocapture > "$P10B_OUT/hamiltonian-$backend-$trial.log" 2>&1
     done
     compare=()

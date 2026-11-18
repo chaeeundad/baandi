@@ -103,7 +103,7 @@ For an opt-in real-Si run, use your own supported NC LDA Si UPF:
 ```sh
 DFT_SI_UPF=/absolute/path/to/Si.UPF \
 DFT_VOLUMETRIC_OUTPUT=/absolute/path/to/new-output \
-cargo test --offline --release -p dft-cli --test volumetric real_si_example -- --ignored --nocapture
+cargo test --offline --release -p dft-cli --test all volumetric::real_si_example -- --ignored --nocapture
 ```
 
 It writes all fields and prints the independently read density integral and ELF

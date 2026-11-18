@@ -50,8 +50,8 @@ curvature are recorded in [relaxation](relaxation.md).
 
 ## Fixture S: reproducible synthetic coverage
 
-Reuse the analytic fixture definitions in `crates/dft-engine/tests/scf.rs`,
-`crates/dft-engine/tests/checkpoint.rs` and `crates/dft-physics/tests/pbe.rs`;
+Reuse the analytic fixture definitions in `crates/dft-engine/tests/all/scf.rs`,
+`crates/dft-engine/tests/all/checkpoint.rs` and `crates/dft-physics/tests/all/pbe.rs`;
 implementation tickets must record generator/input hashes so changes are visible.
 Add explicit model-independent matrix/occupation fixtures above. Proposed geometry
 variants use lattice columns (in Bohr) (8,0,0),(0,8,0),(0,0,8);

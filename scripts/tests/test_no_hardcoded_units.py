@@ -15,7 +15,7 @@ import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-REFERENCE_TESTS = {"crates/dft-units/tests/units.rs"}
+REFERENCE_TESTS = {"crates/dft-units/tests/all/units.rs"}
 EXCLUDED_DIRS = {"target", "vendor", ".git", ".agents", ".codex"}
 # Match decimal Rust literals, including digit separators and scientific notation.
 LITERAL = re.compile(r"(?<![\w.])(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:[eE][+-]?\d[\d_]*)?")

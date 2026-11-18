@@ -115,10 +115,10 @@ starting densities, mixers, solver stopping criteria or tolerances changed.
 
 ```sh
 PATH=/opt/homebrew/opt/rustup/bin:$PATH scripts/check.sh
-cargo test --release -p dft-engine --test atomic_start_contract
-cargo test --release -p dft-cli --test atomic_start --test atomic_start_checkpoint
-cargo test -p dft-upf --test atomic_wavefunctions
-P46A_SI_UPF=/absolute/Si.pz-vbc.UPF P46A_CASES=si8-gamma,si16-gamma P46A_ARM=atomic P46A_GAMMA_REAL=off P46A_SEED_BASE=201 cargo test --release -p dft-engine --test atomic_start_option sweep -- --ignored --nocapture --test-threads=1
+cargo test --release -p dft-engine --test all atomic_start_contract::
+cargo test --release -p dft-cli --test all atomic_start:: --test atomic_start_checkpoint
+cargo test -p dft-upf --test all atomic_wavefunctions::
+P46A_SI_UPF=/absolute/Si.pz-vbc.UPF P46A_CASES=si8-gamma,si16-gamma P46A_ARM=atomic P46A_GAMMA_REAL=off P46A_SEED_BASE=201 cargo test --release -p dft-engine --test all atomic_start_option::sweep -- --ignored --nocapture --test-threads=1
 # Repeat with P46A_GAMMA_REAL=on for consistency controls only.
 python3 P46A-evidence/threads.py
 python3 P46A-evidence/identity.py after

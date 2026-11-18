@@ -222,7 +222,7 @@ def main():
             run("self-healing", ["bash", "scripts/demo_self_healing.sh"],
                 extra={"DFT_HEAL_OUTPUT": str(out / "self-healing")})
             run("self-healing-rejections", ["cargo", "test", "--offline", "--locked", "--release",
-                "-p", "dft-cli", "--test", "self_healing", "--", "--skip", "three_arm_demo"])
+                "-p", "dft-cli", "--test", "all", "self_healing::", "--", "--skip", "three_arm_demo"])
             if args.verify:
                 current = json.loads((out / "self-healing/results.json").read_text())
                 old = json.loads((REFERENCE / "self-healing/results.json").read_text())

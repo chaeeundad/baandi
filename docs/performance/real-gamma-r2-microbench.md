@@ -49,7 +49,7 @@ re-exports. No engine caller or existing numerical kernel was changed.
 
 ## Component evidence
 
-`cargo test -p dft-numerics --test real_gamma_pair -- --nocapture`: exit 0,
+`cargo test -p dft-numerics --test all real_gamma_pair:: -- --nocapture`: exit 0,
 5 passed and 1 ignored, 0.53 s in debug. The reusable-storage unit test also
 passes in the crate/workspace gates. Both ordered and generic Rust fallback
 plans produce the following relative L2 errors against two single complex
@@ -80,7 +80,7 @@ skip behavior; invalid weights leave density and transform counts unchanged.
 ## Pair application microbenchmark (Mac observation)
 
 ```sh
-cargo test --release -p dft-numerics --test real_gamma_pair \
+cargo test --release -p dft-numerics --test all real_gamma_pair:: \
   pair_microbenchmark -- --ignored --nocapture
 ```
 

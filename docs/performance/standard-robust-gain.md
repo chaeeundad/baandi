@@ -271,7 +271,7 @@ Run from this worktree with the external UPFs at the paths recorded in provenanc
 `python3 -I P29B-evidence/run_phase_a.py` produces all 220 reference/paired runs;
 `run_candidate.py train-c1` and `run_candidate.py heldout-c1` reproduce the
 20 training and 50 held-out runs. The harness runs via
-`cargo test --release -p dft-engine --test standard_robust_trajectory sweep --
+`cargo test --release -p dft-engine --test all standard_robust_trajectory::sweep --
 --ignored --nocapture --test-threads=1`. Environment selectors and exact commands
 are recorded by the runners. Analysis: analyze.py, analyze_training.py,
 analyze_heldout.py, verify_reference.py; identity.py captures before/final gates.

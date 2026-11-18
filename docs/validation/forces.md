@@ -97,7 +97,7 @@ actual CLI output. No jsonschema package is required.
 Fast tests:
 
 ```
-cargo test -p dft-engine --test forces
+cargo test -p dft-engine --test all forces::
 cargo test -p dft-cli --test forces
 ```
 
@@ -105,9 +105,9 @@ Release-only scans (each displacement holds cell, basis sphere and FFT grid
 fixed; every atom/Cartesian component uses h=0.01,0.005,0.0025 Bohr):
 
 ```
-cargo test --release -p dft-engine --test forces converged -- --ignored --nocapture
-cargo test --release -p dft-engine --test forces spin_core_and_finite -- --ignored --nocapture
-DFT_NC_DIR=/external/pseudodojo cargo test --release -p dft-engine --test forces real_files -- --ignored --nocapture
+cargo test --release -p dft-engine --test all forces::converged -- --ignored --nocapture
+cargo test --release -p dft-engine --test all forces::spin_core_and_finite -- --ignored --nocapture
+DFT_NC_DIR=/external/pseudodojo cargo test --release -p dft-engine --test all forces::real_files -- --ignored --nocapture
 ```
 
 Synthetic cap is 1e-6 Ha/Bohr, net force 1e-8 Ha/Bohr on a resolved grid.

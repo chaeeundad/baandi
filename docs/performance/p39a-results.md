@@ -108,10 +108,10 @@ cargo build --release -p dft-cli
 python3 -I P39A-evidence/identity.py before
 python3 -I P39A-evidence/identity.py after
 DFT_SI_UPF=/absolute/Si.pz-vbc.UPF P33A_SNAPSHOTS=/absolute/snapshot-directory \
-  cargo test --release -p dft-engine --test gamma_workspace_snapshot -- --ignored --nocapture
+  cargo test --release -p dft-engine --test all gamma_workspace_snapshot:: -- --ignored --nocapture
 python3 -I P39A-evidence/compare_snapshots.py
 cargo test --release -p dft-numerics --test pair_fused_plan -- --include-ignored --nocapture --test-threads=1
-cargo test --release -p dft-numerics --test real_gamma_pair pair_microbenchmark -- --ignored --nocapture --test-threads=1
+cargo test --release -p dft-numerics --test all real_gamma_pair::pair_microbenchmark -- --ignored --nocapture --test-threads=1
 python3 -I P39A-evidence/measure.py
 scripts/check.sh
 python3 -I scripts/make_readme_figures.py
@@ -238,14 +238,14 @@ speedups or dev08 performance acceptance. The revised accuracy gate passes.
 |---|---:|---|
 | `cargo build --release -p dft-cli` before/after/final | 0 each | Saved before/after binaries |
 | `cargo test --release -p dft-numerics --test pair_fused_plan -- --include-ignored --nocapture --test-threads=1` | 0 | Three tests, ten shapes, six zero-allocation probes |
-| `cargo test --release -p dft-engine --test gamma_workspace_snapshot -- --ignored --nocapture` before/after, with UPF/snapshot variables | 0 each | 70 snapshots per build |
+| `cargo test --release -p dft-engine --test all gamma_workspace_snapshot:: -- --ignored --nocapture` before/after, with UPF/snapshot variables | 0 each | 70 snapshots per build |
 | `python3 -I P39A-evidence/compare_snapshots.py` corrected parser | 0 | Strict snapshot energy and thread checks pass |
 | `python3 -I P39A-evidence/identity.py before` and `after` (final binary rerun) | 0 each | Five bench_scf commands per invocation, all exit 0 |
 | `python3 -I P39A-evidence/verify_off.py` | 0 | Exact energy bits, density hashes and main/certificate work in all 25 comparisons |
-| `cargo test --release -p dft-engine --test gamma_real_scf standard_real_complex_and_threads -- --ignored --nocapture --test-threads=1` | 101 | Historical slab absolute standard cap fails; relative caps pass |
-| `DFT_SI_UPF=... cargo test --release -p dft-engine --test gamma_real_materials -- --include-ignored --nocapture --test-threads=1` | 101 | Standard material test passes; historical primitive strict count test fails |
+| `cargo test --release -p dft-engine --test all gamma_real_scf::standard_real_complex_and_threads -- --ignored --nocapture --test-threads=1` | 101 | Historical slab absolute standard cap fails; relative caps pass |
+| `DFT_SI_UPF=... cargo test --release -p dft-engine --test all gamma_real_materials:: -- --include-ignored --nocapture --test-threads=1` | 101 | Standard material test passes; historical primitive strict count test fails |
 | `scripts/check.sh` (whole workspace, no crate argument; repeated 2026-11-08) | 0 | PASS build/test/fmt/clippy |
-| `cargo test --release -p dft-numerics --test real_gamma_pair pair_microbenchmark -- --ignored --nocapture --test-threads=1` | 0 | All original rows preserved; mirror rows and raw samples added |
+| `cargo test --release -p dft-numerics --test all real_gamma_pair::pair_microbenchmark -- --ignored --nocapture --test-threads=1` | 0 | All original rows preserved; mirror rows and raw samples added |
 | `python3 -I P39A-evidence/measure.py` | 0 | Eight conditions, five retained alternating pairs each |
 | `python3 -I P39A-evidence/summarize.py` (original gate, 2026-11-07) | 1 | Historical inter-trajectory gate failure; superseded by the architect decision |
 | `python3 -I P39A-evidence/tight_references.py` | 0 | Recomputed seven snapshot and two exact benchmark tight references, same target tree |

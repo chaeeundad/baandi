@@ -216,7 +216,7 @@ Binary/source hashes and machine information: `P32A-evidence/metadata.json`.
   the analogous `after-runs .../after` command: 20 rows, five runs each.
 - `python3 -I P32A-evidence/identity.py before P32A-evidence/before` and
   `... identity.py after P32A-evidence/after`: five commands per build.
-- `cargo test --release -p dft-numerics --test real_algebra panel_alternatives -- --ignored --nocapture --test-threads=1`.
+- `cargo test --release -p dft-numerics --test all real_algebra::panel_alternatives -- --ignored --nocapture --test-threads=1`.
 - `python3 -I P32A-evidence/validate.py`: exact constituent commands, exit codes
   and log paths are recorded in `validation.json`, including failures.
 - `python3 -I P32A-evidence/profile.py`: both denied attachment attempts.

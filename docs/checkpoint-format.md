@@ -158,7 +158,7 @@ verification report equals the live session's continued after the checkpoint
 session forget its kept REUSE_PSI state, so the restart reproduces the
 checkpointed session; against a run that never checkpointed it is bit-identical
 with `BAANDI_REUSE_PSI=off` and in the REUSE_PSI rounding class otherwise
-(`crates/dft-cli/tests/onepath_last_fallbacks.rs`, bound 1e-10 Ha).
+(`crates/dft-cli/tests/all/onepath_last_fallbacks.rs`, bound 1e-10 Ha).
 
 ## Identity and runtime boundary
 
@@ -194,7 +194,7 @@ UnsupportedCapability: no agent-to-filesystem authority is introduced here.
 
 ```sh
 scripts/check.sh
-cargo test --release -p dft-engine --test checkpoint -- --include-ignored --nocapture --test-threads=1
+cargo test --release -p dft-engine --test all checkpoint:: -- --include-ignored --nocapture --test-threads=1
 cargo test --release -p dft-cli --test checkpoint_io -- --include-ignored --nocapture --test-threads=1
 ```
 

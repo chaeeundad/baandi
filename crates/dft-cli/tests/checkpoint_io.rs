@@ -394,7 +394,7 @@ fn command_line_cross_process() {
         // ONEPATH-4: the CLI checkpoint commands run the standard path with the
         // verification. An exact checkpoint makes the live session forget its
         // kept REUSE_PSI state, so the comparison with an uninterrupted run is
-        // bit for bit with REUSE_PSI off (tests/onepath_last_fallbacks.rs covers on).
+        // bit for bit with REUSE_PSI off (tests/all/onepath_last_fallbacks.rs covers on).
         let o = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
             .current_dir(&dir)
             .env("BAANDI_REUSE_PSI", "off")

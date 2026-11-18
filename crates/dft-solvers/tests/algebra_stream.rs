@@ -1,8 +1,8 @@
 //! Algebra-stream switches of the serial real Davidson
 //! (docs/performance/requests/algebra-stream.md), on the fixed operators of
-//! `tests/real_davidson.rs` (kinetic-coupled, Householder spectra with known
+//! `tests/all/real_davidson.rs` (kinetic-coupled, Householder spectra with known
 //! eigenvalues, degenerate triples) and the clustered spectra of
-//! `tests/distributed_davidson.rs`:
+//! `tests/all/distributed_davidson.rs`:
 //! * RITZ-FUSED (`ritz_fused`) returns the default solution bit for bit;
 //! * NARROW-PROJ, NARROW-REDUCED and B5=par (rounding class) keep every root
 //!   within 1e-11 Ha of the default path, certified strict returns, an

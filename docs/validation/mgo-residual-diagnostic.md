@@ -2,7 +2,7 @@
 
 2026-11-07. Test-only diagnostic; no engine, default, tolerance, dependency or
 UPF change. No QE source was accessed. Implementation:
-`crates/dft-physics/tests/radial_convention_diag.rs`.
+`crates/dft-physics/tests/all/radial_convention_diag.rs`.
 
 ## Conclusion
 
@@ -179,7 +179,7 @@ cargo build --release -p dft-cli
 python3 -I scripts/run_materials_smoke.py --cases si-20,mgo-40 \
   --work-dir /tmp/p27c-materials --output /tmp/p27c-materials/smoke.json
 RADIAL_DIAG_DENSITIES=/tmp/p27c-materials \
-  cargo test --release -p dft-physics --test radial_convention_diag \
+  cargo test --release -p dft-physics --test all radial_convention_diag:: \
   -- --include-ignored --nocapture
 ```
 
@@ -204,7 +204,7 @@ Measured command:
 ```sh
 DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex \
 RADIAL_DIAG_DENSITIES=/tmp/p27-xc-final \
-cargo test --release -p dft-physics --test radial_convention_diag \
+cargo test --release -p dft-physics --test all radial_convention_diag:: \
   -- --include-ignored --nocapture
 ```
 
@@ -239,8 +239,8 @@ measurement. The pure radial test can run without any density directory.
 | Executed command | Exit | Result |
 | --- | ---: | --- |
 | Measured external command above | 0 | 3 passed; radial and fixed-density diagnostics executed |
-| `env -u DFT_NC_DIR -u RADIAL_DIAG_DENSITIES cargo test --release -p dft-physics --test radial_convention_diag -- --include-ignored --nocapture` | 0 | Polynomial passed; two explicit external-data SKIPs |
-| `DFT_NC_DIR=/tmp/p27c-absent cargo test --release -p dft-physics --test radial_convention_diag radial_conventions -- --ignored --nocapture` | 0 | Explicit missing-UPF SKIP |
+| `env -u DFT_NC_DIR -u RADIAL_DIAG_DENSITIES cargo test --release -p dft-physics --test all radial_convention_diag:: -- --include-ignored --nocapture` | 0 | Polynomial passed; two explicit external-data SKIPs |
+| `DFT_NC_DIR=/tmp/p27c-absent cargo test --release -p dft-physics --test all radial_convention_diag::radial_conventions -- --ignored --nocapture` | 0 | Explicit missing-UPF SKIP |
 | `scripts/check.sh` (final source tree) | 0 | PASS build, test, fmt, clippy; `/tmp/p27c-check-final.log` |
 | `git diff --check` | 0 | No tracked whitespace errors; new owned files separately checked for trailing whitespace |
 

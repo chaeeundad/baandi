@@ -245,7 +245,7 @@ Claude will perform the separate QE 7.6 bands comparison remotely after merge.
 ```sh
 scripts/check.sh
 python3 -I -m unittest discover -s scripts/tests
-DFT_SI_UPF=/absolute/path/to/Si.pz-vbc.UPF cargo test --offline --release -p dft-engine --test nscf real_si -- --ignored --nocapture
+DFT_SI_UPF=/absolute/path/to/Si.pz-vbc.UPF cargo test --offline --release -p dft-engine --test all nscf::real_si -- --ignored --nocapture
 ```
 
 The synthetic SCF-grid comparison checks 1e-8 Ha agreement; measured maximum

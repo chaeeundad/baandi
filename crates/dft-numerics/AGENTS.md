@@ -92,7 +92,7 @@ inside external backends. The existing allocation-free FFT contract applies.
 
 Validation, reproduction commands, numerical results and Mac-only timings:
 `docs/performance/real-gamma-r2-microbench.md`. The ignored release test is
-`cargo test --release -p dft-numerics --test real_gamma_pair pair_microbenchmark
+`cargo test --release -p dft-numerics --test all real_gamma_pair::pair_microbenchmark 
 -- --ignored --nocapture`. No engine caller or performance default is changed;
 dev08 remains the performance acceptance authority.
 
@@ -115,7 +115,7 @@ packs full eight-row strips and stores full tile columns with constant-length co
 (no `memmove` call per eight doubles), and packs transposed strips in gather order.
 Pure data movement, bit-identical; no effect on x86 (faer packed) or MKL builds.
 Microbenchmark of the lean Davidson shapes and the fused-border identity test:
-`tests/percore_kernels.rs`.
+`tests/all/percore_kernels.rs`.
 
 ## Run configuration (RUN-CONFIG, 2026-11-18)
 

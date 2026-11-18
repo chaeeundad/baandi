@@ -36,7 +36,7 @@ impl Case {
         fs::write(self.dir.join("input.toml"), text).unwrap();
         // These tests check the strict reference (certificate, digests): since
         // ONEPATH-3 spin runs take the standard path unless the reference switch
-        // is on (tests/onepath_spin_metals.rs covers the standard path).
+        // is on (tests/all/onepath_spin_metals.rs covers the standard path).
         Command::new(env!("CARGO_BIN_EXE_dft-cli"))
             .env("BAANDI_REFERENCE_STRICT", "on")
             .current_dir(&self.dir)

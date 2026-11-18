@@ -124,7 +124,7 @@ basis mapping, FFT round trips/Parseval, complex eigensolves, radial transforms,
 Hartree modes, XC derivatives and Ewald behavior. Independent cross-checks include
 Davidson versus the dense solver, local convolution versus explicit matrices,
 exchange versus test-only xcx, and the Gaussian electrostatic identity in
-[engine tests](../crates/dft-engine/tests/electrostatic.rs). Synthetic fixtures
+[engine tests](../crates/dft-engine/tests/all/electrostatic.rs). Synthetic fixtures
 are not real-material references.
 
 Long tests are `#[ignore]` in the debug gate. Release invocations include:
@@ -132,7 +132,7 @@ Long tests are `#[ignore]` in the debug gate. Release invocations include:
 ```sh
 cargo test --offline --release -p dft-solvers -- --ignored --nocapture
 cargo test --offline --release -p dft-engine -- --ignored --nocapture
-cargo test --offline --release -p dft-cli --test run -- --ignored --nocapture
+cargo test --offline --release -p dft-cli --test all run:: -- --ignored --nocapture
 python3 -I -m unittest discover -s scripts/tests -v
 ```
 

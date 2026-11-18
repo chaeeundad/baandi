@@ -26,9 +26,9 @@ from a residual certificate. Rank tolerance is the shared 1e-12 dimensionless
 constant; restart contraction requires orthogonality defect <=1e-12; the kinetic
 denominator floor stays 0.1 Ha.
 
-Fast fixed-operator tests: `cargo test -p dft-solvers --test real_davidson`.
+Fast fixed-operator tests: `cargo test -p dft-solvers --test all real_davidson::`.
 Parallel dispatch and timing observation (ignored in debug):
-`cargo test --release -p dft-solvers --test real_davidson -- --include-ignored --nocapture --test-threads=1`.
+`cargo test --release -p dft-solvers --test all real_davidson:: -- --include-ignored --nocapture --test-threads=1`.
 Evidence and limitations: `docs/performance/real-gamma-r4-notes.md`.
 
 ## Research switches of the real Davidson (2026-11-10)
@@ -38,7 +38,7 @@ entry point reads them from the environment (`davidson_stages.rs`): stage timers
 `BAANDI_DAVIDSON_STAGES=on`, B1 selected-root products `BAANDI_B1=standard|strict|on`
 with `BAANDI_B1_SKETCH=count`, B5 bordered eigen-update `BAANDI_B5=on` (`bordered.rs`),
 B6 cached projector products for the return certificate `BAANDI_B6=on` (operators opt in
-through the `RealLinearOperator` default methods; test `tests/b6_certificate.rs`).
+through the `RealLinearOperator` default methods; test `tests/all/b6_certificate.rs`).
 Micro switches read at construction: `BAANDI_WIDE_DOT=on` (eight-lane MGS dot, rounding
 class); see docs/performance/requests/micro-stack.md.
 Algebra-stream switches (docs/performance/requests/algebra-stream.md, test
@@ -48,7 +48,7 @@ and `BAANDI_NARROW_REDUCED=on` (blocks of at most `NARROW_WIDTH` columns by stre
 dot kernels; rounding class), `BAANDI_B5=par` (B5 with root-parallel secular solve and
 column-group parallel product; bit-identical to `BAANDI_B5=on` on faer).
 All default off and bit-identical when off. Tests: `tests/b1_selected_roots.rs`,
-`tests/b5_reduced_eigen.rs`; B4 harness `tests/b4_inner_iterations.rs` (ignored).
+`tests/b5_reduced_eigen.rs`; B4 harness `tests/all/b4_inner_iterations.rs` (ignored).
 Plan and pre-registered rules: docs/performance/requests/b1-b4-b5-davidson.md.
 
 ## MPI entry-cost switches (2026-11-14)
@@ -191,7 +191,7 @@ finds `initial` equal to X to `KEPT_START_TOLERANCE` on every rank and the Gram
 defect of X is at most 1e-12 (the restart contraction rule). Flags must be set
 under replicated conditions. `DistributedPairFft::apply_local_batch_kept` takes
 kept real-space slabs for the leading vectors (bit-identical to
-`apply_local_batch` for the same slabs). Tests `tests/distributed_kept_start.rs`,
+`apply_local_batch` for the same slabs). Tests `tests/all/distributed_kept_start.rs`,
 lib `kept_planes_batch_equals_plain_batch_bitwise`.
 
 ## MPI scaling gap (MPI-SCALING-GAP, 2026-11-17)
@@ -219,7 +219,7 @@ allgatherv and returns a 0 x bands eigenvector placeholder, the rows living only
 `x_local`. The non-workspace path gathers a local start and always returns the full
 block (callers check `eigenvectors.rows()`). `solve_distributed_rows_kept` is this
 entry with `Global` and `gather = true` (unchanged). Test
-`tests/distributed_lazy_rows.rs` (1 to 4 ranks, workspace full/selected and the
+`tests/all/distributed_lazy_rows.rs` (1 to 4 ranks, workspace full/selected and the
 allocating path, bits). Engine design: docs/design/mpi-lazy-orbitals.md.
 
 ## Incremental Pulay update (MPI-REMAINING, 2026-11-17)

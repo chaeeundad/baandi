@@ -387,7 +387,7 @@ band_cap=12
     assert_eq!(result["occupations"]["policy"], "fermi_dirac");
     // ONEPATH-3: FD runs take the standard path with the fixed-point
     // verification (the strict certificate is the BAANDI_REFERENCE_STRICT
-    // reference, exercised by tests/onepath_spin_metals.rs).
+    // reference, exercised by tests/all/onepath_spin_metals.rs).
     assert_eq!(result["single_path"]["status"], "applied");
     assert_eq!(result["verified"], true);
     assert_eq!(result["verification"]["passed"], true);

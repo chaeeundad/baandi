@@ -9,12 +9,12 @@
 
 ## MF03 polarized XC (P13B)
 
-`tests/spin_oracles.rs` validates the vendored xcx 0.3.1 polarized LDA exchange,
+`tests/all/spin_oracles.rs` validates the vendored xcx 0.3.1 polarized LDA exchange,
 standard PW92 correlation, and PBE exchange/correlation boundary. Production `spin.rs` supplies tagged density, LDA-PW/PBE spin XC, and reusable
 spectral/Poisson buffers. The engine owns spin SCF. Run:
 
 ```sh
-cargo test -p dft-physics --test spin_oracles -- --nocapture
+cargo test -p dft-physics --test all spin_oracles:: -- --nocapture
 ```
 
 The independent PW92 oracle is transcribed from the architect-supplied equations
@@ -48,7 +48,7 @@ Existing solver and mixer ownership APIs retain their existing allocations;
 this is not a claim of a wholly allocation-free SCF. No production XC formula
 is transcribed. PZ remains unpolarized only. No measured optimization is claimed.
 
-`tests/spin_grid.rs` checks functional perturbations on 12x14x16 and 15x12x10
+`tests/all/spin_grid.rs` checks functional perturbations on 12x14x16 and 15x12x10
 skew grids, zero-spin grid reduction, tagged density validation and retained
 output storage. Maximum extrapolated grid-derivative error was
 6.5800906390300895e-12 Ha. It also establishes bit-identical Poisson energy
@@ -105,7 +105,7 @@ All supported l=0..3 channels have a two-projector coupled-D fixture; solid
 harmonic derivatives avoid polar-axis singularities. No numerical projector
 finite differences or SCF hot-loop calls are used. See
 `docs/validation/stress.md` for equations, conventions and scope.
-Run `cargo test --release -p dft-physics --test stress_terms -- --include-ignored --nocapture`.
+Run `cargo test --release -p dft-physics --test all stress_terms:: -- --include-ignored --nocapture`.
 
 ## P26C real Gamma Hamiltonian (R3, library only)
 
@@ -127,9 +127,9 @@ norms must satisfy R2's factor-1e3 debug assertion. Local pairs are serial;
 real GEMM uses the persistent pool with its existing fixed panel decomposition.
 
 ```sh
-cargo test -p dft-physics --test real_gamma_hamiltonian -- --nocapture
-cargo test --release -p dft-physics --test real_gamma_hamiltonian large_parallel -- --ignored --nocapture
-cargo test --release -p dft-physics --test real_gamma_hamiltonian timing_blocks -- --ignored --nocapture --test-threads=1
+cargo test -p dft-physics --test all real_gamma_hamiltonian:: -- --nocapture
+cargo test --release -p dft-physics --test all real_gamma_hamiltonian::large_parallel -- --ignored --nocapture
+cargo test --release -p dft-physics --test all real_gamma_hamiltonian::timing_blocks -- --ignored --nocapture --test-threads=1
 ```
 
 The latter two tests are ignored in the fast debug gate. Ten small synthetic

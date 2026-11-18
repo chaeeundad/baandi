@@ -14,7 +14,7 @@ calibration runs, and repeats seeds 2026/2027 at T=1/8. All tolerances remain
 unchanged. Command (exit 0):
 
 ```
-cargo test --release -p dft-engine --test gamma_real_scf calibrate_complex_noise -- --ignored --nocapture
+cargo test --release -p dft-engine --test all gamma_real_scf::calibrate_complex_noise -- --ignored --nocapture
 ```
 
 | Shape | max energy spread (Ha) | max occupied eigenvalue spread (Ha) | density L2 spread (Bohr^-3/2) |
@@ -168,11 +168,11 @@ Final release CLI SHA-256
 
 ```
 # Synthetic accuracy, calibrated noise, fallback, threads, derivatives and restart:
-cargo test --release -p dft-engine --test gamma_real_scf -- --include-ignored --nocapture
+cargo test --release -p dft-engine --test all gamma_real_scf:: -- --include-ignored --nocapture
 # CLI config and optional checkpoint field:
 cargo test --release -p dft-cli --test gamma_real_config
 # External materials; currently exits 101 for Gamma SCF 10 -> 12:
-DFT_SI_UPF=/path/Si.pz-vbc.UPF cargo test --release -p dft-engine --test gamma_real_materials -- --ignored --nocapture
+DFT_SI_UPF=/path/Si.pz-vbc.UPF cargo test --release -p dft-engine --test all gamma_real_materials:: -- --ignored --nocapture
 # Run for T=1,2,4,8,12; baseline is the pre-edit executable on the same HEAD:
 python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /path/Si.pz-vbc.UPF --cases gamma,k222s,k222,k444s,si8 --threads T --repeats 1 --baseline /tmp/r5-baseline.json --require-identical
 ```
@@ -361,10 +361,10 @@ SHA-256 are the same as R5):
 | Command | Exit | Result |
 | --- | ---: | --- |
 | `scripts/check.sh` (workspace, no crate argument) | 0 | build/test/fmt/clippy PASS |
-| `cargo test --release -p dft-solvers --test real_davidson -- --include-ignored --nocapture` | 0 | 8 passed, including unchanged R4 tests |
-| `cargo test --release -p dft-engine --test gamma_real_scf -- --include-ignored --nocapture` | 0 | 8 passed; calibration, derivatives, restart, fallback unchanged |
-| `DFT_SI_UPF=... cargo test --release -p dft-engine --test gamma_real_materials --test gamma_real_scf -- --include-ignored --nocapture` | 101 | material accuracy and T=1,2,4,8,12 pass for both; unchanged primitive SCF-count assertion fails, stopping before synthetic binary (run separately above) |
-| `DFT_SI_UPF=... cargo test --release -p dft-engine --test gamma_real_diagnosis -- --ignored --nocapture` | 0 | 1 diagnostic passed |
+| `cargo test --release -p dft-solvers --test all real_davidson:: -- --include-ignored --nocapture` | 0 | 8 passed, including unchanged R4 tests |
+| `cargo test --release -p dft-engine --test all gamma_real_scf:: -- --include-ignored --nocapture` | 0 | 8 passed; calibration, derivatives, restart, fallback unchanged |
+| `DFT_SI_UPF=... cargo test --release -p dft-engine --test all gamma_real_materials:: --test all gamma_real_scf:: -- --include-ignored --nocapture` | 101 | material accuracy and T=1,2,4,8,12 pass for both; unchanged primitive SCF-count assertion fails, stopping before synthetic binary (run separately above) |
+| `DFT_SI_UPF=... cargo test --release -p dft-engine --test all gamma_real_diagnosis:: -- --ignored --nocapture` | 0 | 1 diagnostic passed |
 | `cargo build --release -p dft-cli` | 0 | portable build |
 | `python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf ... --cases gamma,k222s,k222,k444s,si8 --threads T --repeats 1 --baseline /tmp/r5-baseline.json --require-identical` | 0 each | T=1,2,4,8,12; 25/25 identical, delta E exactly 0 Ha |
 | `python3 -I scripts/make_readme_figures.py` | 0 | no tracked generated changes |
@@ -547,10 +547,10 @@ python3 -I scripts/bench_scf.py --binary /tmp/p26g-baseline-cli \
 # After editing/building: same cases/UPF/profile, T = 1,2,4,8,12,
 # --binary target/release/dft-cli --baseline /tmp/p26g-base-PROFILE.json
 # --require-identical --record /tmp/p26g-off-PROFILE-tT.json
-cargo test --release -p dft-engine --test gamma_real_scf \
+cargo test --release -p dft-engine --test all gamma_real_scf:: \
   -- --include-ignored --nocapture --test-threads=1
 DFT_SI_UPF=/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF \
-  cargo test --release -p dft-engine --test gamma_real_materials standard \
+  cargo test --release -p dft-engine --test all gamma_real_materials::standard \
   -- --include-ignored --nocapture --test-threads=1
 cargo test --release -p dft-cli --test gamma_real_config
 scripts/check.sh
@@ -760,9 +760,9 @@ Final completed follow-up commands:
 | Command | Exit | Outcome |
 | --- | ---: | --- |
 | `scripts/check.sh` | 0 | build/test/fmt/clippy PASS on revised tests |
-| `cargo test --release -p dft-engine --test gamma_real_scf -- --include-ignored --nocapture --test-threads=1` | 101 | 10 passed; revised slab absolute-energy gate failed |
-| `DFT_SI_UPF=... cargo test --release -p dft-engine --test gamma_real_materials standard -- --include-ignored --nocapture --test-threads=1` | 0 | both material standard cases pass revised gates |
-| `DFT_SI_UPF=... cargo test --release -p dft-engine --test gamma_real_materials -- --include-ignored --nocapture --test-threads=1` | 101 | standard passed; unchanged R5 strict primitive SCF-count failure (10→12); strict energy/eigen/density/thread checks pass |
+| `cargo test --release -p dft-engine --test all gamma_real_scf:: -- --include-ignored --nocapture --test-threads=1` | 101 | 10 passed; revised slab absolute-energy gate failed |
+| `DFT_SI_UPF=... cargo test --release -p dft-engine --test all gamma_real_materials::standard -- --include-ignored --nocapture --test-threads=1` | 0 | both material standard cases pass revised gates |
+| `DFT_SI_UPF=... cargo test --release -p dft-engine --test all gamma_real_materials:: -- --include-ignored --nocapture --test-threads=1` | 101 | standard passed; unchanged R5 strict primitive SCF-count failure (10→12); strict energy/eigen/density/thread checks pass |
 | `python3 -I scripts/make_readme_figures.py` | 0 | generated output unchanged |
 | `python3 -I scripts/tests/test_readme_figures.py` | 0 | 9 passed |
 | `git diff --check` | 0 | clean |

@@ -89,7 +89,7 @@ delta F, mu change and moment change are information only. Measured on three
 synthetic fixtures against the strict reference (Mac, release): |dF| 2.0e-12
 and 5.5e-11 Ha, |dmu| 8.9e-7 and 6.6e-6 Ha, sum w|df| 3.8e-6 and 6.7e-6
 electrons (bounds 5e-9 Ha, 1e-4 Ha, 1e-4 electrons; ledger ONEPATH-3,
-`crates/dft-cli/tests/onepath_spin_metals.rs`). Design and limits:
+`crates/dft-cli/tests/all/onepath_spin_metals.rs`). Design and limits:
 [onepath3-spin-metals](../design/onepath3-spin-metals.md).
 
 Unconstrained collinear FD uses one mu and allows channel populations to change.
@@ -107,7 +107,7 @@ Run from the repository root (add the pinned rustup bin directory to PATH):
 cargo test -p dft-physics --lib occupations -- --nocapture
 cargo test -p dft-engine --lib finite_temperature -- --nocapture
 cargo test -p dft-cli --lib finite_cli -- --nocapture
-cargo test -p dft-engine --test collinear -- --nocapture
+cargo test -p dft-engine --test all collinear:: -- --nocapture
 scripts/check.sh
 python3 -I scripts/tests/test_readme_figures.py
 DFT_NC_DIR=/path/to/nc/files cargo test --release -p dft-engine --lib real_al_finite -- --ignored --nocapture

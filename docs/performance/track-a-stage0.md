@@ -1,6 +1,6 @@
 # Track A stage 0: all-band direct minimization (variant A0) as a pre-converger
 
-Date 2026-11-10. Proposal: speed-restructure proposal section 3 (Track A). Ledger row: TRACK-A0. Code: `crates/dft-engine/src/direct_min.rs`, bench and gates `crates/dft-engine/tests/direct_min.rs`. Raw outputs: `tests/reference/perf/track-a/stage0-mac-t1.txt` (unperturbed, all fixtures) and `tests/reference/perf/track-a/stage0-mac-seeds.txt` (kill-rule cells, seeds 601-603). All numbers are Mac observations (Apple Silicon, release, pure Rust, T=1); counts are exact on any machine, wall is not evidence.
+Date 2026-11-10. Proposal: speed-restructure proposal section 3 (Track A). Ledger row: TRACK-A0. Code: `crates/dft-engine/src/direct_min.rs`, bench and gates `crates/dft-engine/tests/all/direct_min.rs`. Raw outputs: `tests/reference/perf/track-a/stage0-mac-t1.txt` (unperturbed, all fixtures) and `tests/reference/perf/track-a/stage0-mac-seeds.txt` (kill-rule cells, seeds 601-603). All numbers are Mac observations (Apple Silicon, release, pure Rust, T=1); counts are exact on any machine, wall is not evidence.
 
 ## Verdict
 The pre-registered kill rule fires on the Mac fixtures: the median total H columns of A0 (minimizer + hand-off recorded + hand-off certificate) exceed the strict-only total (recorded + certificate) on si32 (ratio 1.26) and on all four non-silicon fixtures (1.35 to 1.89). **Track A stops for variant A0.** The module stays in the tree, default off, as an isolated switchable research module (generality rule); no default changes.

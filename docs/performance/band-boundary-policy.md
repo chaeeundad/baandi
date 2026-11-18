@@ -257,11 +257,11 @@ collector generates synthetic UPFs only in temporary directories, retaining
 the generator inputs and hashes, never committing or copying UPFs here.
 
 ```sh
-cargo test --release -p dft-engine --test band_boundary_scan --no-run
+cargo test --release -p dft-engine --test all band_boundary_scan:: --no-run
 python3 -I P42A-evidence/collect.py train
 python3 -I P42A-evidence/large_partition.py
 python3 -I P42A-evidence/collect.py heldout
-cargo test --release -p dft-engine --test band_boundary_spectrum --no-run
+cargo test --release -p dft-engine --test all band_boundary_spectrum:: --no-run
 python3 -I P42A-evidence/wide.py
 python3 -I P42A-evidence/analyze.py
 python3 -I P42A-evidence/relations.py

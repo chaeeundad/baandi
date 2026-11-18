@@ -45,14 +45,14 @@ change: 0.
 
 | Test | Old debug s | Debug s at opt 1 | Protects |
 |---|---|---|---|
-| `dft-solvers --test distributed_davidson serial_order_orthonormalization_matches_serial_eigenpairs` | 26.1 | 2.2 | MPI Davidson orthonormalization order equals serial eigenpairs |
+| `dft-solvers --test all distributed_davidson::serial_order_orthonormalization_matches_serial_eigenpairs ` | 26.1 | 2.2 | MPI Davidson orthonormalization order equals serial eigenpairs |
 | `dft-physics --lib ewald::tests::serial_and_partitioned_ewald_match_the_previous_evaluator_bit_for_bit` | 21.2 | 3.2 | INIT-SCALE-3 rank-split Ewald sum, bit-identical (changed 2026-11-18) |
 | `dft-solvers --test b1_selected_roots b1_results_do_not_depend_on_threads` | 16.6 | 0.8 | selected-roots path thread independence |
-| `dft-cli --test onepath_last_fallbacks checkpoint_restart_carries_the_verification` | 15.6 | 1.3 | checkpoint restart keeps the verification step |
+| `dft-cli --test all onepath_last_fallbacks::checkpoint_restart_carries_the_verification ` | 15.6 | 1.3 | checkpoint restart keeps the verification step |
 | `dft-solvers --test lean_davidson percore_fused_border_and_ritz_loop` | 14.9 | 1.2 | per-core fused border and Ritz loop |
 | `dft-solvers --test b1_selected_roots strict_profile_keeps_decisions_and_certifies_every_return` | 13.0 | 0.2 | strict profile decisions and certificate |
-| `dft-solvers --test distributed_davidson bordered_reduced_update_stays_in_the_rounding_class` | 12.2 | 0.8 | bordered reduced update rounding class |
-| `dft-solvers --test distributed_davidson root_eigen_broadcast_is_bit_identical_to_replicated` | 12.1 | 0.8 | root eigen broadcast bit identity |
+| `dft-solvers --test all distributed_davidson::bordered_reduced_update_stays_in_the_rounding_class ` | 12.2 | 0.8 | bordered reduced update rounding class |
+| `dft-solvers --test all distributed_davidson::root_eigen_broadcast_is_bit_identical_to_replicated ` | 12.1 | 0.8 | root eigen broadcast bit identity |
 | `dft-solvers --test algebra_stream rounding_class_switches_keep_roots_and_thread_identity` | 11.0 | 0.8 | rounding-class switches, thread identity |
 | `dft-solvers --test algebra_stream ritz_fused_is_bit_identical` | 10.9 | 0.3 | fused Ritz bit identity |
 

@@ -3493,8 +3493,9 @@ pub(crate) fn band_tolerances(
 /// unchanged). `BAANDI_EMPTY_LOOSE=off` restores the strict first empty band in
 /// every step; see `step_with_occupations`.
 fn empty_loose() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::EMPTY_LOOSE))
+    // RUN-CONFIG: read from the run's configuration (thread scope or process),
+    // not cached per process; called once per construction / step / audit.
+    dft_numerics::switches::on(dft_numerics::switches::Id::EMPTY_LOOSE)
 }
 /// Residual floor of the empty buffer bands in SCF steps whose eigen tolerance is
 /// above its floor: default 1e-3 since the adoption rule (dev08 BUFFER-TOL: si32
@@ -3502,10 +3503,9 @@ fn empty_loose() -> bool {
 /// past the turn; certificates stay strict). `BAANDI_BUFFER_TOL=<x>` (1e-5 to
 /// 1e-1) overrides; 1e-5 restores the old floor.
 fn buffer_loose_floor() -> f64 {
-    static FLOOR: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
-    *FLOOR.get_or_init(|| {
-        dft_numerics::switches::number(dft_numerics::switches::Id::BUFFER_TOL).unwrap_or(1e-3)
-    })
+    // RUN-CONFIG: read from the run's configuration (thread scope or process),
+    // not cached per process; called once per construction / step / audit.
+    dft_numerics::switches::number(dft_numerics::switches::Id::BUFFER_TOL).unwrap_or(1e-3)
 }
 pub fn density_distance(a: &Array3<f64>, b: &Array3<f64>, volume: f64, electrons: f64) -> f64 {
     if a.shape() != b.shape()

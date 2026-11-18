@@ -136,7 +136,7 @@ The real workspace caches storage, not the selection; each call reads the option
 Runtime requests to switch a nondefault preconditioner to the hybrid solver
 are rejected before policy mutation. Spin and FD default paths are untouched.
 
-`cargo test --release -p dft-solvers --test preconditioner_variants` passes
+`cargo test --release -p dft-solvers --test all preconditioner_variants::` passes
 2 tests: selected-band scaling, the pure-G=0 floor, stable large-x evaluation,
 positive Ritz clipping, dimension rejection, an analytic tridiagonal spectrum,
 and complete eigenvalue/vector-bit identity at T=1,2,4,8,12 in both representations.

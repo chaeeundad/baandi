@@ -97,12 +97,12 @@ Reference-mode reproduction from the worktree root:
 export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 cargo build --offline --release -p dft-cli
 DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex \
-  cargo test --offline --release -p dft-cli --test reference_mode_equivalence \
+  cargo test --offline --release -p dft-cli --test all reference_mode_equivalence:: \
   material_mode_matches_manual -- --ignored --nocapture
 python3 -I crates/dft-engine/tests/reference_mode_materials.py \
   --binary target/release/dft-cli --evidence P44A-evidence/materials
-cargo test --offline -p dft-cli --test reference_mode_config \
-  --test reference_mode_restart --test reference_mode_equivalence
+cargo test --offline -p dft-cli --test all reference_mode_config:: \
+  --test reference_mode_restart --test all reference_mode_equivalence::
 scripts/check.sh
 ```
 
@@ -187,12 +187,12 @@ cargo build --offline --release -p dft-cli
 python3 -I P44A-evidence/identity.py final
 python3 -I P44A-evidence/rejections.py
 DFT_REFERENCE_BASELINE="$PWD/P44A-evidence/baseline-cli" \
-  cargo test --offline --release -p dft-cli --test reference_mode_relaxation \
+  cargo test --offline --release -p dft-cli --test all reference_mode_relaxation:: \
   -- --ignored --nocapture
 DFT_NC_DIR="$PWD/../pseudo/pseudodojo/ex" \
-  cargo test --offline --release -p dft-cli --test relaxation \
+  cargo test --offline --release -p dft-cli --test all relaxation:: \
   -- --include-ignored --nocapture --test-threads=1
-cargo test --offline --release -p dft-cli --test cell_relaxation \
+cargo test --offline --release -p dft-cli --test all cell_relaxation:: \
   -- --include-ignored --skip real_files --nocapture --test-threads=1
 scripts/check.sh
 ```
@@ -235,9 +235,9 @@ was created. Source-file inventory and raw-evidence inventory are recorded in
 - `crates/dft-cli/src/preflight.rs`
 - `crates/dft-cli/src/relax.rs`
 - `crates/dft-cli/src/run.rs`
-- `crates/dft-cli/tests/reference_mode_config.rs`
-- `crates/dft-cli/tests/reference_mode_equivalence.rs`
-- `crates/dft-cli/tests/reference_mode_relaxation.rs`
+- `crates/dft-cli/tests/all/reference_mode_config.rs`
+- `crates/dft-cli/tests/all/reference_mode_equivalence.rs`
+- `crates/dft-cli/tests/all/reference_mode_relaxation.rs`
 - `crates/dft-cli/tests/reference_mode_restart.rs`
 - `crates/dft-engine/src/checkpoint.rs`
 - `crates/dft-engine/src/scf.rs`

@@ -251,7 +251,7 @@ python3 P30A-evidence/build-harness.py P30A-evidence/synthetic-before
 P30A-evidence/synthetic-before 1 > P30A-evidence/synthetic-before-T1.txt
 python3 P30A-evidence/regression.py before
 # Apply the patch, then:
-cargo test --release -p dft-numerics --test real_gamma_pair
+cargo test --release -p dft-numerics --test all real_gamma_pair::
 cargo build --release -p dft-cli
 python3 P30A-evidence/build-harness.py P30A-evidence/synthetic-after
 for t in 1 2 4 8 12; do
@@ -259,7 +259,7 @@ for t in 1 2 4 8 12; do
   cmp P30A-evidence/synthetic-before-T1.txt "P30A-evidence/synthetic-after-T$t.txt"
 done
 python3 P30A-evidence/regression.py after
-cargo test --release -p dft-physics --test real_gamma_hamiltonian -- --include-ignored --nocapture
+cargo test --release -p dft-physics --test all real_gamma_hamiltonian:: -- --include-ignored --nocapture
 scripts/check.sh
 python3 -I scripts/make_readme_figures.py
 python3 -I scripts/tests/test_readme_figures.py

@@ -14,12 +14,12 @@ No new dependencies, hot-loop work or external-code reference is introduced.
 
 ```sh
 scripts/check.sh
-cargo test --release -p dft-cli --test cell_relaxation -- --ignored --skip real_files --nocapture
-cargo test -p dft-engine --test density_transfer
+cargo test --release -p dft-cli --test all cell_relaxation:: -- --ignored --skip real_files --nocapture
+cargo test -p dft-engine --test all density_transfer::
 cargo test -p dft-cli --lib combined_enthalpy -- --nocapture
 python3 -I scripts/tests/test_readme_figures.py
 # Only with readable external PseudoDojo files Si.upf, Mg.upf, O.upf:
-DFT_NC_DIR=/external/NC cargo test --release -p dft-cli --test cell_relaxation real_files -- --ignored --nocapture
+DFT_NC_DIR=/external/NC cargo test --release -p dft-cli --test all cell_relaxation::real_files -- --ignored --nocapture
 ```
 
 The ignored CLI tests cover multi-step SCFs and must use release mode. Stored
@@ -232,7 +232,7 @@ failed comparison and all its numbers remain in `real-followup/`.
 ```sh
 DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex \
 DFT_CELL_REBUILD_WORK_DIR=/tmp/p23-rebuild-acceptance \
-cargo test --release -p dft-cli --test cell_relaxation \
+cargo test --release -p dft-cli --test all cell_relaxation:: \
   real_files_rebuild_start_agreement -- --ignored --nocapture
 # Equivalent standalone recipe; --materials MgO limits it to the required oxide:
 python3 -I tests/reference/relaxation/cell/rebuild_protocol.py \

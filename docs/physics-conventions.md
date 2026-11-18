@@ -707,7 +707,7 @@ export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 export RUSTUP_HOME=/private/tmp/p0c-rustup
 scripts/check.sh
 cargo test --offline -p dft-physics -p dft-upf -- --nocapture
-cargo test --offline --release -p dft-physics --test hamiltonian projector_norm_convergence -- --ignored --nocapture
+cargo test --offline --release -p dft-physics --test all hamiltonian::projector_norm_convergence -- --ignored --nocapture
 ```
 
 These comparisons are mathematical synthetic tests, not QE references.
@@ -741,7 +741,7 @@ section 21. It is ignored in debug and must be run with:
 ```sh
 export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 export RUSTUP_HOME=/private/tmp/p0c-rustup
-cargo test --offline --release -p dft-physics --test hamiltonian projector_norm_isolation_and_images -- --ignored --nocapture
+cargo test --offline --release -p dft-physics --test all hamiltonian::projector_norm_isolation_and_images -- --ignored --nocapture
 scripts/check.sh
 ```
 

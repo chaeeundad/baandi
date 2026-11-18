@@ -261,12 +261,12 @@ release builds; the long sweep is ignored by ordinary debug gates.
 
 ```sh
 P29A_SI_UPF="$PWD/../pseudo/Si.pz-vbc.UPF" \
-  cargo test --release -p dft-engine --test standard_stall_trajectory sweep \
+  cargo test --release -p dft-engine --test all standard_stall_trajectory::sweep \
   -- --ignored --nocapture --test-threads=1 > P29A-evidence/off-si.log 2>&1
 P29A_SI_UPF="$PWD/../pseudo/Si.pz-vbc.UPF" \
   DFT_NC_DIR="$PWD/../pseudo/pseudodojo/ex" \
   P29A_CASES=material-si-20,material-mgo-40 \
-  cargo test --release -p dft-engine --test standard_stall_trajectory sweep \
+  cargo test --release -p dft-engine --test all standard_stall_trajectory::sweep \
   -- --ignored --nocapture --test-threads=1 > P29A-evidence/off-material.log 2>&1
 # Repeat with P29A_START_RUN=2 P29A_GUARD=on, using the same cases/seeds.
 ```

@@ -11,7 +11,7 @@ No UPF is copied or committed.
 ```sh
 cargo build --offline --release -p dft-cli
 DFT_NC_DIR=/absolute/path/to/pseudodojo/ex python3 -I scripts/run_materials_smoke.py
-DFT_NC_DIR=/absolute/path/to/pseudodojo/ex cargo test --offline --release -p dft-cli --test materials -- --ignored --nocapture
+DFT_NC_DIR=/absolute/path/to/pseudodojo/ex cargo test --offline --release -p dft-cli --test all materials:: -- --ignored --nocapture
 ```
 
 The Python runner uses only the standard library, including on Python 3.9.

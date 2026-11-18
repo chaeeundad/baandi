@@ -21,7 +21,7 @@ See `docs/user/collinear-spin.md` for supported combinations and format losses.
 P13C: `inspect-upf --json --manifest PATH` matches provenance by SHA-256 and
 reports header facts even when SCF support fails. The independent stdlib reader
 is `scripts/check_upf_headers.py`; external files are selected by `DFT_NC_DIR`.
-`tests/inspect_upf.rs::real_nc_headers` is ignored and checks inspection only,
+`tests/all/inspect_upf.rs::real_nc_headers` is ignored and checks inspection only,
 not SCF or material qualification. Engine tests cover NLCC and real atom smoke;
 see docs/cli.md. NLCC local-potential export includes the core in XC only.
 NLCC ledger data cannot be silently serialized into checkpoint v1.
@@ -102,9 +102,9 @@ since ONEPATH-3, forces/relaxation since ONEPATH-1, stress/variable-cell since O
 Checkpoint v1 carries the verification option and attempts (`docs/checkpoint-format.md`);
 `bands`/`dos` record `scf_path`. Every result records `single_path` and `execution`
 (review F01); MPI runs without a distributed solve report `mpi_replicated` (F02). Tests
-that need strict set `BAANDI_REFERENCE_STRICT=on` (`tests/run.rs` `Case::run`), use
+that need strict set `BAANDI_REFERENCE_STRICT=on` (`tests/all/run.rs` `Case::run`), use
 `run::options_with_reference(config, true)` or the engine's `ScfOptions::strict_reference()`;
-`tests/single_path.rs` and `tests/onepath_last_fallbacks.rs` cover the default path.
+`tests/all/single_path.rs` and `tests/all/onepath_last_fallbacks.rs` cover the default path.
 
 ## Measurement outputs (BREAKTHROUGH-0-INSTRUMENT, 2026-11-17)
 
@@ -137,4 +137,4 @@ run-local counters and the completion marker `completed: true` (written last).
 `phase_profile` is `phase-profile-2` with `per_rank` and `closure`.
 `scripts/parse_results.py` validates a results file (rejects truncated, stale
 binary, missing/zero clocks of an active path, impossible rows); unit tests
-`scripts/tests/test_parse_results.py`, real-output checks in `tests/run_config.rs`.
+`scripts/tests/test_parse_results.py`, real-output checks in `tests/all/run_config.rs`.

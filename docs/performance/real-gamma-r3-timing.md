@@ -36,7 +36,7 @@ Potential/projectors are snapshots; updating the source does not update them.
 
 ## Component evidence
 
-`cargo test -p dft-physics --test real_gamma_hamiltonian -- --nocapture`
+`cargo test -p dft-physics --test all real_gamma_hamiltonian:: -- --nocapture`
 passed (exit 0). The ten cases have respectively (atoms, rows, bands):
 (1,19,3), (2,21,4), (4,23,3), (8,71,4), (12,19,3), (16,25,4),
 (20,23,3), (3,77,4), (6,27,3), (10,31,4). Geometries cover cubic,
@@ -56,7 +56,7 @@ real image back to the full complex sphere; they do not discard the imaginary
 part of the complex reference. Empty nonlocal, zero-width blocks, bad dimensions,
 nonfinite input and the G=0 rejection helper are also tested.
 
-`cargo test --release -p dft-physics --test real_gamma_hamiltonian large_parallel -- --ignored --nocapture`
+`cargo test --release -p dft-physics --test all real_gamma_hamiltonian::large_parallel -- --ignored --nocapture`
 is the reproducible large test (also executed together with the timing test,
 exit 0). It uses 3,035 rows, 360 projector columns, 17 bands and 20 atoms:
 18,574,200 multiply-adds per GEMM, crossing the actual four-panel / 1,048,576-MAC
@@ -76,7 +76,7 @@ No baseline/main/branch speed ratio, scaling claim or dev08 acceptance is made.
 Command (exit 0):
 
 ```sh
-cargo test --release -p dft-physics --test real_gamma_hamiltonian timing_blocks -- --ignored --nocapture --test-threads=1
+cargo test --release -p dft-physics --test all real_gamma_hamiltonian::timing_blocks -- --ignored --nocapture --test-threads=1
 ```
 
 One warmup per path; 30 alternating real/complex pairs; T=1; construction,

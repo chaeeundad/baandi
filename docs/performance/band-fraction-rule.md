@@ -67,7 +67,7 @@ The test is ignored in debug; release command:
 P29A_SI_UPF=../pseudo/Si.pz-vbc.UPF P43A_INPUT=P43A-evidence/si16-skew.toml \
 P29A_CASES=si16-skew P29A_EXTRA_BANDS=4 P29A_GAMMA_REAL=on \
 P43A_OUT=P43A-evidence/runs/on/4 cargo test --release -p dft-engine \
-  --test band_fraction_scan sweep -- --ignored --nocapture --test-threads=1
+  --test all band_fraction_scan::sweep -- --ignored --nocapture --test-threads=1
 ```
 
 Workspace gate is scripts/check.sh (without literal `all`, which names a
@@ -153,7 +153,7 @@ No UPF was copied. The archive was extracted outside the repository.
 Reproduce the collected study and checks from the repository root:
 
 ```sh
-cargo test --release -p dft-engine --test band_fraction_scan --no-run
+cargo test --release -p dft-engine --test all band_fraction_scan:: --no-run
 python3 -I P43A-evidence/collect.py on
 python3 -I P43A-evidence/collect.py off
 python3 -I P43A-evidence/analyze.py

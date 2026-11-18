@@ -139,7 +139,7 @@ export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 export P29A_SI_UPF="$PWD/../pseudo/Si.pz-vbc.UPF"
 export DFT_NC_DIR="$PWD/../pseudo/pseudodojo/ex"
 P40A_CONFIG=A P29A_GAMMA_REAL=off cargo test --release -p dft-engine \
-  --test mixing_survey sweep -- --ignored --nocapture --test-threads=1 \
+  --test all mixing_survey::sweep -- --ignored --nocapture --test-threads=1 \
   > P40A-evidence/A-off.log 2>&1
 # Repeat A–E with off and on; on explicitly skips the three mesh cases.
 # After frozen selection, repeat F with P40A_F_BASE=B (or C/D as selected).

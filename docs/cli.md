@@ -189,8 +189,8 @@ The integral is `sum(samples)*volume/Ngrid` and equals N_e to numerical roundoff
 export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 export RUSTUP_HOME=/private/tmp/p0c-rustup  # this sandbox's offline toolchain
 scripts/check.sh
-cargo test --offline -p dft-cli --test run -- --nocapture
-cargo test --offline --release -p dft-cli --test run -- --ignored --nocapture
+cargo test --offline -p dft-cli --test all run:: -- --nocapture
+cargo test --offline --release -p dft-cli --test all run:: -- --ignored --nocapture
 ```
 
 The fast suite covers a small synthetic cell, option/date conversion, all exit
@@ -890,11 +890,11 @@ Reproduction (all real files remain external):
 export DFT_NC_DIR=/absolute/external/pseudodojo/ex
 python3 -I scripts/check_upf_headers.py --binary target/debug/dft-cli \
   --output tests/reference/datasets/pseudodojo-headers.json
-cargo test --release -p dft-cli --test inspect_upf real_nc_headers -- --ignored --nocapture
-cargo test --release -p dft-engine --test nlcc -- --include-ignored --nocapture
-cargo test --release -p dft-engine --test real_nc -- --ignored --nocapture --test-threads=1
+cargo test --release -p dft-cli --test all inspect_upf::real_nc_headers -- --ignored --nocapture
+cargo test --release -p dft-engine --test all nlcc:: -- --include-ignored --nocapture
+cargo test --release -p dft-engine --test all real_nc:: -- --ignored --nocapture --test-threads=1
 # Additional discretization diagnostic; does not change engine defaults:
-DFT_NC_CUTOFF=30 cargo test --release -p dft-engine --test real_nc isolated_atoms_pbe_smoke -- --ignored --nocapture
+DFT_NC_CUTOFF=30 cargo test --release -p dft-engine --test all real_nc::isolated_atoms_pbe_smoke -- --ignored --nocapture
 ```
 
 Frozen synthetic caps: radial/atomic integrals 1e-10 relative, XC directional

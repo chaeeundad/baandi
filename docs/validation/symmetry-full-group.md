@@ -132,8 +132,8 @@ python3 P34A-evidence/identity.py baseline  # requires saved pre-edit baseline-c
 python3 P34A-evidence/identity.py candidate
 python3 P34A-evidence/prediction.py
 python3 P34A-evidence/analyze.py
-cargo test -p dft-engine --test symmetry_full_group
-DFT_SI_UPF="$PWD/../pseudo/Si.pz-vbc.UPF" cargo test --release -p dft-engine --test symmetry_full_group -- --ignored --nocapture
+cargo test -p dft-engine --test all symmetry_full_group::
+DFT_SI_UPF="$PWD/../pseudo/Si.pz-vbc.UPF" cargo test --release -p dft-engine --test all symmetry_full_group:: -- --ignored --nocapture
 cargo test -p dft-cli density_group
 scripts/check.sh
 ```
@@ -166,7 +166,7 @@ and checkpoint boundary), `checkpoint.rs` (exact comparison), `collinear.rs`
 (spin rejection), `forces.rs` (force/stress rejection). The last two are solely
 fail-closed plumbing for the explicitly excluded modes. CLI files: `config.rs`,
 `run.rs`, `preflight.rs`, `checkpoint_io.rs`. New integration test:
-`crates/dft-engine/tests/symmetry_full_group.rs`. Documentation: this study and
+`crates/dft-engine/tests/all/symmetry_full_group.rs`. Documentation: this study and
 append-only performance ledger entry. The existing physics projector is unchanged.
 
 No new QE run, source inspection, dev08 timing, general performance acceptance,

@@ -1,5 +1,5 @@
 """Rejection rules of scripts/parse_results.py on synthetic results documents
-(no engine run; the CLI test crates/dft-cli/tests/run_config.rs runs the parser
+(no engine run; the CLI test crates/dft-cli/tests/all/run_config.rs runs the parser
 on real dft-cli output)."""
 from pathlib import Path
 import copy

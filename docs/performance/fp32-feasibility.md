@@ -37,7 +37,7 @@ Two ignored integration-test harnesses contain all Rust experiment code:
   H vectors and block calls. Saves early and converged physical Si orbitals and
   H components through public APIs. The converged snapshots are **standard,
   uncertified**, not strict certificate outputs.
-- `crates/dft-numerics/tests/fp32_feasibility.rs`: rustfft f32/f64 full-grid lanes,
+- `crates/dft-numerics/tests/all/fp32_feasibility.rs`: rustfft f32/f64 full-grid lanes,
   real pairs, faer sequential nonlocal products and Davidson GEMM shapes. Plans,
   inputs and output buffers are constructed outside the timed loop. Library
   internal GEMM packing is included. Storage conversions are excluded. Each
@@ -81,11 +81,11 @@ P14A_WORK_ACCOUNTING=1 P47B_SKIP_SNAPSHOTS=1 cargo test --offline --release \
   -p dft-engine --test fp32_snapshots -- --ignored --nocapture --test-threads=1 \
   > P47B-evidence/engine-wall.log 2>&1
 P14A_WORK_ACCOUNTING=1 P47B_SI32_N=11877 cargo test --offline --release \
-  -p dft-numerics --test fp32_feasibility -- --ignored --nocapture --test-threads=1 \
+  -p dft-numerics --test all fp32_feasibility:: -- --ignored --nocapture --test-threads=1 \
   > P47B-evidence/ordinary.log 2>&1
 CARGO_TARGET_DIR=target/p47b-native RUSTFLAGS='-C target-cpu=native' \
   P14A_WORK_ACCOUNTING=1 P47B_SI32_N=11877 cargo test --offline --release \
-  -p dft-numerics --test fp32_feasibility -- --ignored --nocapture --test-threads=1 \
+  -p dft-numerics --test all fp32_feasibility:: -- --ignored --nocapture --test-threads=1 \
   > P47B-evidence/native.log 2>&1
 python3 -I P47B-evidence/analyze.py
 python3 -I P47B-evidence/decision.py

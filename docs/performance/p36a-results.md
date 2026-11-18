@@ -170,11 +170,11 @@ Prefix cargo with `/opt/homebrew/opt/rustup/bin` in PATH. External UPF is
 `../pseudo/Si.pz-vbc.UPF`; SHA-256 is recorded in `P36A-evidence/environment.json`.
 
 ```sh
-DFT_SI_UPF=/external/Si.pz-vbc.UPF P33A_SNAPSHOTS=/absolute/output cargo test --release -p dft-engine --test gamma_workspace_snapshot -- --ignored --nocapture
+DFT_SI_UPF=/external/Si.pz-vbc.UPF P33A_SNAPSHOTS=/absolute/output cargo test --release -p dft-engine --test all gamma_workspace_snapshot:: -- --ignored --nocapture
 cargo test --release -p dft-engine --lib real_state_full_scf -- --ignored --nocapture
-cargo test --release -p dft-solvers --test real_workspace no_allocations_after_initial_h -- --ignored --nocapture --test-threads=1
-cargo test --release -p dft-solvers --test real_workspace no_allocations_after_persistent_initial_h -- --ignored --nocapture --test-threads=1
-cargo test --release -p dft-solvers --test real_workspace localize_allocations -- --ignored --nocapture --test-threads=1
+cargo test --release -p dft-solvers --test all real_workspace::no_allocations_after_initial_h -- --ignored --nocapture --test-threads=1
+cargo test --release -p dft-solvers --test all real_workspace::no_allocations_after_persistent_initial_h -- --ignored --nocapture --test-threads=1
+cargo test --release -p dft-solvers --test all real_workspace::localize_allocations -- --ignored --nocapture --test-threads=1
 python3 -I P36A-evidence/measure.py before
 python3 -I P36A-evidence/measure.py workspace
 python3 -I P36A-evidence/measure.py final

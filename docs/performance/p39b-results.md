@@ -82,7 +82,7 @@ export MKLROOT=/opt/intel/oneapi/mkl/2026.1
 source "$MKLROOT/env/vars.sh"
 export MKL_NUM_THREADS=1 OMP_NUM_THREADS=1
 cargo test --offline --release -p dft-mkl --features mkl --test in_place in_place_matches_wrapper_bits -- --nocapture
-cargo test --offline --release -p dft-numerics --features mkl --test in_place -- --nocapture
+cargo test --offline --release -p dft-numerics --features mkl --test all in_place:: -- --nocapture
 cargo test --offline --release -p dft-numerics --features mkl
 # Pin the benchmark harness and its single test thread to one CPU.
 taskset -c 0 cargo test --offline --release -p dft-mkl --features mkl --test in_place in_place_microbenchmark -- --ignored --nocapture --test-threads=1
@@ -182,7 +182,7 @@ Commands actually executed (PATH included `/opt/homebrew/opt/rustup/bin`):
 | `python3 -I scripts/tests/test_readme_figures.py` | 0 |
 | `git diff --check` | 0 |
 | `cargo test --offline -p dft-mkl caller_buffer_length_contract` (1 contract test passed) | 0 |
-| `cargo test --offline -p dft-numerics --test in_place` (2 tests passed) | 0 |
+| `cargo test --offline -p dft-numerics --test all in_place::` (2 tests passed) | 0 |
 | `bench_scf.py`, baseline loop below, all five T values | 0 |
 | `bench_scf.py`, candidate loop below, all five T values | 0 |
 | Python post-check of energy `.hex()`, density SHA-256 and all five recorded work fields | 0 |

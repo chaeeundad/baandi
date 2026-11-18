@@ -61,7 +61,7 @@ the existing reference bundles. Final CLI binary SHA-256:
 
 ## Complete SCF systems and measured gaps
 
-The ignored cross-layer test `crates/dft-solvers/tests/mixing_scf.rs` contains the
+The ignored cross-layer test `crates/dft-solvers/tests/all/mixing_scf.rs` contains the
 complete input generator. It invokes the actual CLI without introducing an
 engine dependency into solvers. Temporary Gaussian-ion UPFs use the formulas
 from `dft-engine/tests/common/mod.rs`, evaluated by Python math.erf, with 1201
@@ -428,10 +428,10 @@ cargo test --offline -p dft-solvers -p dft-cli
 CARGO_NET_OFFLINE=true scripts/check.sh
 cargo test --release --offline -p dft-engine -- --ignored
 DFT_MIXING_REPEATS=3 DFT_MIXING_EVIDENCE=/private/tmp/p10d-final \
-  cargo test --release --offline -p dft-solvers --test mixing_scf -- --ignored --nocapture
+  cargo test --release --offline -p dft-solvers --test all mixing_scf:: -- --ignored --nocapture
 DFT_MIXING_REPEATS=1 DFT_MIXING_CASES=synthetic-cubic-z2-p0,synthetic-fcc-z4-p3,si-gamma \
   DFT_MIXING_EVIDENCE=/private/tmp/p10d-acceptance \
-  cargo test --release --offline -p dft-solvers --test mixing_kerker --test mixing_scf \
+  cargo test --release --offline -p dft-solvers --test all mixing_kerker:: --test all mixing_scf:: \
   -- --include-ignored --nocapture
 python3 -I scripts/bench_scf.py --binary target/release/dft-cli \
   --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF \

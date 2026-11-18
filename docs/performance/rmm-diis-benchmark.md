@@ -96,10 +96,10 @@ cargo test --offline --release -p dft-solvers -- --ignored --nocapture
 ```
 
 The synthetic driver is the ignored `benchmark` test in
-`crates/dft-solvers/tests/rmm.rs`:
+`crates/dft-solvers/tests/all/rmm.rs`:
 
 ```sh
-RMM_REPEATS=5 cargo test --offline --release -p dft-solvers --test rmm benchmark -- --ignored --nocapture
+RMM_REPEATS=5 cargo test --offline --release -p dft-solvers --test all rmm::benchmark -- --ignored --nocapture
 # Optional: RMM_BANDS=8,16; RMM_SOLVER=davidson or hybrid; RMM_HISTORY=1.
 ```
 
@@ -408,7 +408,7 @@ change leaves the default solver implementation and its tests unchanged.
 
 - `scripts/check.sh`: build, test, fmt and clippy all pass. Use
   `CARGO_NET_OFFLINE=true RUSTUP_HOME=/private/tmp/p0c-rustup` on this host.
-- `cargo test --offline --release -p dft-solvers --test rmm -- --nocapture`:
+- `cargo test --offline --release -p dft-solvers --test all rmm:: -- --nocapture`:
   8 passed, 1 ignored benchmark, including explicit duplicate-vector fallback,
   strict/loose buffer certificate and terminal warm-up/fallback diagnostics.
 - `cargo test --offline --release -p dft-solvers --lib -- --ignored --nocapture`:

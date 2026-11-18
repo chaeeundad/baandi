@@ -126,7 +126,7 @@ Unverified standard, unconverged or mismatched states reject. `preconditions`
 has a strict branch and a standard branch (threshold, verification attempts,
 last Coulomb residual) in the results proposal schema. Standard against strict
 stress differences on synthetic fixtures: ledger row ONEPATH-2 and
-`crates/dft-cli/tests/onepath_stress.rs`. Validation
+`crates/dft-cli/tests/all/onepath_stress.rs`. Validation
 currently reuses the force pass; its work is included in analytic elapsed time
 and reported separately as `precondition_force_band_passes`. This conservative
 implementation has overhead; no performance optimization is claimed.
@@ -162,12 +162,12 @@ isotropy is checked at 1e-9 Ha/Bohr^3; all supported totals enforce the
 antisymmetric norm gate.
 
 ```sh
-cargo test --release -p dft-physics --test stress_terms -- --include-ignored --nocapture
-cargo test --release -p dft-engine --test stress synthetic_local_nonlocal -- --ignored --nocapture
-cargo test --release -p dft-engine --test stress synthetic_models -- --ignored --nocapture
-cargo test --release -p dft-engine --test stress symmetry_preconditions -- --ignored --nocapture
-DFT_NC_DIR=/path/to/NC cargo test --release -p dft-engine --test stress real_files -- --ignored --nocapture
-cargo test -p dft-cli --test stress -- --nocapture
+cargo test --release -p dft-physics --test all stress_terms:: -- --include-ignored --nocapture
+cargo test --release -p dft-engine --test all stress::synthetic_local_nonlocal -- --ignored --nocapture
+cargo test --release -p dft-engine --test all stress::synthetic_models -- --ignored --nocapture
+cargo test --release -p dft-engine --test all stress::symmetry_preconditions -- --ignored --nocapture
+DFT_NC_DIR=/path/to/NC cargo test --release -p dft-engine --test all stress::real_files -- --ignored --nocapture
+cargo test -p dft-cli --test all stress:: -- --nocapture
 python3 -I tests/reference/stress/measure_cost.py --binary target/release/dft-cli --upf /path/Si.pz-vbc.UPF --output tests/reference/stress/cost.json
 ```
 
@@ -218,7 +218,7 @@ ASE's own strain-energy oracle differs by at most
 with zero skips, including native/CLI equality and existing relaxation tests.
 The explicit CLI stress schema test additionally covers fixed, fixed-collinear,
 FD and collinear-FD output. Its spin/FD group takes over 10 s in debug, so run
-`cargo test --release -p dft-cli --test stress -- --include-ignored --nocapture`.
+`cargo test --release -p dft-cli --test all stress:: -- --include-ignored --nocapture`.
 
 | Mac T=1 observation (one pair) | SCF, s | Analytic pass, s | Pass / (SCF+pass) | Separate Pulay scans, s | Retained bands / force-validation bands |
 | --- | ---: | ---: | ---: | ---: | ---: |

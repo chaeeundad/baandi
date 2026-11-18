@@ -1,7 +1,7 @@
 //! P31A measurement harness; no production initialization or tolerance changes.
 //! Run in release mode, redirecting stdout to durable evidence storage:
 //! P31A_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release -p dft-engine
-//! --test standard_stall_trajectory sweep -- --ignored --nocapture --test-threads=1
+//! --test all standard_stall_trajectory::sweep -- --ignored --nocapture --test-threads=1
 //! P31A_CASES selects comma-separated benchmark IDs (or material-si-20/material-mgo-40).
 //! P31A_CAPACITY=2..12, P31A_PROFILE=strict|standard, P31A_REAL=off|on.
 //! Runs 0/1 are tight references; 2..6 are five deterministic perturbations.

@@ -14,4 +14,4 @@ DFT_HEAL_OUTPUT="$(cd "$DFT_HEAL_OUTPUT" && pwd)"
   git rev-parse HEAD
   git status --short
 } > "$DFT_HEAL_OUTPUT/build.txt"
-cargo test --offline --release -p dft-cli --test self_healing three_arm_demo -- --ignored --exact --nocapture --test-threads=1
+cargo test --offline --release -p dft-cli --test all self_healing::three_arm_demo -- --ignored --exact --nocapture --test-threads=1

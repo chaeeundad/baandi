@@ -80,8 +80,8 @@ within and across arms. Missing references make the decision unqualified.
 Reproduction (workspace root, same target directory):
 
 ```sh
-PATH=/opt/homebrew/opt/rustup/bin:$PATH cargo test --release -p dft-engine --test atomic_start_prototype
-P45A_SI_UPF=/absolute/Si.pz-vbc.UPF P45A_CASES=si8-gamma,si16-gamma P45A_ARM=atomic P45A_GAMMA_REAL=off cargo test --release -p dft-engine --test atomic_start_prototype sweep -- --ignored --nocapture --test-threads=1
+PATH=/opt/homebrew/opt/rustup/bin:$PATH cargo test --release -p dft-engine --test all atomic_start_prototype::
+P45A_SI_UPF=/absolute/Si.pz-vbc.UPF P45A_CASES=si8-gamma,si16-gamma P45A_ARM=atomic P45A_GAMMA_REAL=off cargo test --release -p dft-engine --test all atomic_start_prototype::sweep -- --ignored --nocapture --test-threads=1
 ```
 
 Repeat with arm `default` and Gamma path `on`; each invocation runs two tight
@@ -215,7 +215,7 @@ separately. All files remain uncommitted.
 Verification commands (latest logs carry the actual results):
 
 - `scripts/check.sh` (no argument means all workspace crates): build/test/fmt/clippy.
-- `cargo test --release -p dft-engine --test atomic_start_prototype`: two fast tests, heavy sweep ignored.
+- `cargo test --release -p dft-engine --test all atomic_start_prototype::`: two fast tests, heavy sweep ignored.
 - `python3 -I scripts/tests/test_readme_figures.py`: nine passing freshness tests.
 - `python3 P45A-evidence/identity.py`: ten successful benchmark commands, 25 identity pairs.
 - `python3 P45A-evidence/analyze.py` and `python3 P45A-evidence/verify.py`: recorded evidence checks.

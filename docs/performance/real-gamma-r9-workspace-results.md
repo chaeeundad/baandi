@@ -136,9 +136,9 @@ historical real-versus-complex SCF-count gates. Snapshot comparison is bytewise.
 Commands (prefix cargo commands with `/opt/homebrew/opt/rustup/bin` in PATH):
 
 ```
-cargo test --release -p dft-solvers --test real_workspace routine_split -- --ignored --nocapture --test-threads=1
-cargo test --release -p dft-solvers --test real_davidson -- --include-ignored --nocapture --test-threads=1
-DFT_SI_UPF=/external/Si.pz-vbc.UPF P33A_SNAPSHOTS=/absolute/output cargo test --release -p dft-engine --test gamma_workspace_snapshot -- --ignored --nocapture
+cargo test --release -p dft-solvers --test all real_workspace::routine_split -- --ignored --nocapture --test-threads=1
+cargo test --release -p dft-solvers --test all real_davidson:: -- --include-ignored --nocapture --test-threads=1
+DFT_SI_UPF=/external/Si.pz-vbc.UPF P33A_SNAPSHOTS=/absolute/output cargo test --release -p dft-engine --test all gamma_workspace_snapshot:: -- --ignored --nocapture
 python3 -I P33A-evidence/measure.py before
 python3 -I P33A-evidence/measure.py final
 scripts/check.sh
@@ -185,7 +185,7 @@ provenance. No default or algorithm change is requested.
   No new accepted reference result was invented to update the README.
 
 The only additive plumbing outside the owned implementation/test files is
-`crates/dft-engine/tests/gamma_workspace_snapshot.rs`, an ignored output-snapshot
+`crates/dft-engine/tests/all/gamma_workspace_snapshot.rs`, an ignored output-snapshot
 harness reusing the R5 fixtures. It changes no production engine code.
 Raw evidence is untracked under P33A-evidence and should be archived before
 worktree cleanup. Capacity-sized backing storage trades peak reserved memory

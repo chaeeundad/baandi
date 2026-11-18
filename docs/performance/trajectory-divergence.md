@@ -174,7 +174,7 @@ P41A_SI_UPF=/absolute/Si.pz-vbc.UPF \
 DFT_NC_DIR=/absolute/pseudodojo/ex P41A_CASES=si8-gamma \
 P41A_GAMMA_REAL=on P41A_PROFILE=standard P41A_ARM=default \
 P41A_AMPLITUDE=1e-10 cargo test --release -p dft-engine \
-  --test trajectory_divergence sweep -- --ignored --nocapture --test-threads=1
+  --test all trajectory_divergence::sweep -- --ignored --nocapture --test-threads=1
 python3 -u P41A-evidence/run.py
 python3 P41A-evidence/analyze.py
 python3 -u P41A-evidence/trace_snapshot.py

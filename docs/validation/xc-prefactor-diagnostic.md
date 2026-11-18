@@ -2,7 +2,7 @@
 
 2026-11-07. Diagnostic only; no engine behavior, default, tolerance, dependency,
 or pseudopotential changed. No QE source was accessed. The implementation is
-`crates/dft-physics/tests/xc_prefactor_diag.rs`.
+`crates/dft-physics/tests/all/xc_prefactor_diag.rs`.
 
 ## Result
 
@@ -147,7 +147,7 @@ cargo build --offline --release -p dft-cli
 DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex \
 XC_DIAG_WORK=/tmp/p27-xc-final \
 XC_DIAG_CASES=si-20,mgo-40,si-30,si-40,mgo-50,mgo-60 \
-cargo test --offline --release -p dft-physics --test xc_prefactor_diag \
+cargo test --offline --release -p dft-physics --test all xc_prefactor_diag:: \
   -- --include-ignored --nocapture
 scripts/check.sh dft-physics
 scripts/check.sh
@@ -201,8 +201,8 @@ Mac arm64, rustc 1.99.1 (58cf8f9c3 2026-10-13), base commit
 | --- | ---: | --- |
 | `cargo build --offline --release -p dft-cli` | 0 | Release CLI built |
 | Release diagnostic, all six cases, `--include-ignored --nocapture` with environment above | 0 | 2 passed; six SCFs converged; 27.34 s test runtime |
-| `env -u DFT_NC_DIR cargo test --offline --release -p dft-physics --test xc_prefactor_diag materials_prefactor_diagnostic -- --ignored --nocapture` | 0 | Explicit missing-variable SKIP |
-| `DFT_NC_DIR=/tmp/p27-no-upfs cargo test --offline --release -p dft-physics --test xc_prefactor_diag materials_prefactor_diagnostic -- --ignored --nocapture` | 0 | Explicit missing-files SKIP |
+| `env -u DFT_NC_DIR cargo test --offline --release -p dft-physics --test all xc_prefactor_diag::materials_prefactor_diagnostic -- --ignored --nocapture` | 0 | Explicit missing-variable SKIP |
+| `DFT_NC_DIR=/tmp/p27-no-upfs cargo test --offline --release -p dft-physics --test all xc_prefactor_diag::materials_prefactor_diagnostic -- --ignored --nocapture` | 0 | Explicit missing-files SKIP |
 | Initial `scripts/check.sh dft-physics` | 1 | Build/test/fmt passed; clippy requested `as_chunks` instead of `chunks_exact` |
 | Final `scripts/check.sh dft-physics` | 0 | Build/test/fmt/clippy all PASS after byte-reader idiom fix |
 | `scripts/check.sh` | 0 | Workspace build/test/fmt/clippy all PASS |
@@ -290,10 +290,10 @@ numerical path or caller had been changed. No git metadata was written.
 ```sh
 export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 cargo build --offline --release -p dft-cli
-cargo test --offline -p dft-physics --test pbe_pw92_oracles -- --nocapture
+cargo test --offline -p dft-physics --test all pbe_pw92_oracles:: -- --nocapture
 DFT_NC_DIR=/Users/mino/Develop/rust-dft-wt/pseudo/pseudodojo/ex \
 PW92_WORK=/tmp/p27b-materials-final PW92_BASELINE_CLI=/tmp/p27b-baseline-cli \
-cargo test --offline --release -p dft-physics --test pbe_pw92_materials \
+cargo test --offline --release -p dft-physics --test all pbe_pw92_materials:: \
   -- --ignored --nocapture
 cargo test --offline --release -p dft-cli --test pw92_prefactor_config \
   -- --include-ignored --nocapture
@@ -328,7 +328,7 @@ reported PASS for build, test, fmt and clippy; gates were not relaxed.
 
 | Command | Exit | Result |
 | --- | ---: | --- |
-| `cargo test --offline -p dft-physics --test pbe_pw92_oracles -- --nocapture` | 0 | Two point/grid oracle tests passed |
+| `cargo test --offline -p dft-physics --test all pbe_pw92_oracles:: -- --nocapture` | 0 | Two point/grid oracle tests passed |
 | Six-material release test with PW92_BASELINE_CLI, command above | 0 | All six original SCFs converged; real-grid gates passed; baseline default and explicit-modified energy/density identical; 114.90 s including extra SCFs |
 | Release CLI convention suite with `--include-ignored --nocapture` | 0 | Config, exact/warm restart and force/stress tests passed |
 | `scripts/check.sh` | 0 | All workspace gates passed, including convention wire tests |

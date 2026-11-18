@@ -84,9 +84,9 @@ pseudopotential transferability or global-minimum behavior.
 ```sh
 scripts/check.sh
 cargo test -p dft-cli --lib relax -- --nocapture
-cargo test --release -p dft-engine --test density_transfer -- --include-ignored --nocapture
-cargo test --release -p dft-cli --test relaxation -- --include-ignored --skip real_si_and_mgo --nocapture
-DFT_NC_DIR=/path/to/nc cargo test --release -p dft-cli --test relaxation real_si_and_mgo -- --ignored --nocapture
+cargo test --release -p dft-engine --test all density_transfer:: -- --include-ignored --nocapture
+cargo test --release -p dft-cli --test all relaxation:: -- --include-ignored --skip real_si_and_mgo --nocapture
+DFT_NC_DIR=/path/to/nc cargo test --release -p dft-cli --test all relaxation::real_si_and_mgo -- --ignored --nocapture
 python3 -I tests/reference/relaxation/check_mgo_curvature.py --binary target/release/dft-cli --nc-dir /path/to/nc
 python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /absolute/path/Si.pz-vbc.UPF --cases gamma,k222,si8,k444s --repeats 1 --baseline tests/reference/forces/followup-legacy.json --require-identical
 python3 -I scripts/tests/test_readme_figures.py

@@ -15,6 +15,6 @@ control radial numerics. `raw()` is the normalized compatibility model;
 `header_facts` preserves original metadata and must never authorize SCF.
 PP_NLCC is a density in electrons/Bohr^3, transformed by
 `radial::spherical_density_transform` with the shared Simpson/3/8 quadrature.
-Synthetic parser/Gaussian tests run by default. `tests/real_nc.rs` is ignored,
+Synthetic parser/Gaussian tests run by default. `tests/all/real_nc.rs` is ignored,
 reads DFT_NC_DIR and records the exact third-party error plus adapter support.
 See docs/cli.md for full conventions, reproduction and qualification limits.

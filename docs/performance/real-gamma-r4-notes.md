@@ -70,8 +70,8 @@ Single-run times below are **Mac observations**, not speed acceptance, not a
 statistical comparison, and not dev08 evidence. Commands run from this worktree:
 
 ```sh
-cargo test -p dft-solvers --test real_davidson -- --nocapture
-cargo test --release -p dft-solvers --test real_davidson -- --include-ignored --nocapture --test-threads=1
+cargo test -p dft-solvers --test all real_davidson:: -- --nocapture
+cargo test --release -p dft-solvers --test all real_davidson:: -- --include-ignored --nocapture --test-threads=1
 ```
 
 The 49-dimensional dense fixtures are (0) deterministic random Householder

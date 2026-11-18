@@ -22,7 +22,7 @@ an exact UTC timestamp. No new numerical or performance results are invented.
 | Offset explained by G=0 integral convention | `docs/validation.md` R4 narrative | Historical local diagnostic, 2026-11-03 | Diagnostic program/results not committed: explanation not independently reproducible from stored files; TODO |
 | Checkpoint: 162 memory + 18 binary comparisons; warm max 8.22e-15 Ha; paused audit and cross-process restart | `tests/reference/checkpoint/{results.json,engine.txt,cli.txt,check.txt}` | Local synthetic tests, P11C 2026-11-04 | Commands/source hashes in results; same build, timings excluded; 1e-10 Ha warm tolerance |
 | Self-healing: four arms twice; reference/rules/agent 30 iterations, -4.684561184277879 Ha, zero error; baseline fails at 1; applied/rejected 0/0,0/0,1/0,1/1 | `tests/reference/runtime/generated/results.json` and arm subdirectories (`arrays.json`, `audit.jsonl`, summaries) | Local `scripts/demo_self_healing.sh`, 2026-11-04 | Budget repair, not general instability recovery; 1e-10 Ha gate; invalid beta=1.1 rejection |
-| PBE closed forms “2e-16 Ha”; LDA unchanged bits | ADR 0018 implementation results; `crates/dft-physics/tests/pbe.rs`; historical snapshot hashes in ADR | Local oracle/snapshot experiment, 2026-11-03 | Maximum is 2.220446049250313e-16 Ha; README rounds. Original snapshot harness/raw output not retained |
+| PBE closed forms “2e-16 Ha”; LDA unchanged bits | ADR 0018 implementation results; `crates/dft-physics/tests/all/pbe.rs`; historical snapshot hashes in ADR | Local oracle/snapshot experiment, 2026-11-03 | Maximum is 2.220446049250313e-16 Ha; README rounds. Original snapshot harness/raw output not retained |
 | Gamma k-point engine reproduces prior density bits | R6 narrative; `tests/reference/si30_ours/ours/density.bin`; engine k-point tests | Local historical regression, 2026-11-03 | Paired historical density/build records not stored together; test is not evidence of that exact historical pair |
 | uom/arithmetic input leave real-Si density bits unchanged | README narrative and historical progress log | Historical local claim | No paired before/after result/hash bundle identified in tests/reference: TODO retain it; do not infer from current tests |
 | Fast gates and Python regression tests pass | Current commands below; historical test logs under runtime/checkpoint | Local; current 2026-11-05 checks are scoped explicitly | Current README test has 3 tests, not the entire Python suite |
@@ -92,7 +92,7 @@ with existing unclosed-file ResourceWarnings. No native MKL or QE process ran.
 Checkpoint commands/build/source hashes are in `checkpoint/results.json.commands`
 and `source_sha256`; runtime benchmark commands and versions are in its README
 and JSON; stagnation commands/hashes are in `verification.json`. PBE oracle:
-`cargo test --offline -p dft-physics --test pbe -- --nocapture` (historical command,
+`cargo test --offline -p dft-physics --test all pbe:: -- --nocapture` (historical command,
 not separately executed in this audit). Historical density verifier invocation is
 in `tests/reference/reports/si30_density.md`/R5. No absent command is marked passing.
 

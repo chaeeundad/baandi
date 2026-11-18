@@ -172,10 +172,9 @@ fn band_nonlocal(
 /// for occupied bands only, blocks of bands sharing each pass over a projector
 /// column. `BAANDI_NL_ENERGY=exact` restores the band-by-band operator application.
 fn fast_nonlocal_energy() -> bool {
-    static MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| {
-        dft_numerics::switches::choice(dft_numerics::switches::Id::NL_ENERGY) != "exact"
-    })
+    // RUN-CONFIG: read from the run's configuration (thread scope or process),
+    // not cached per process; called once per construction / step / audit.
+    dft_numerics::switches::choice(dft_numerics::switches::Id::NL_ENERGY) != "exact"
 }
 
 fn expectation_tree(
@@ -254,8 +253,9 @@ pub(crate) fn explicit_nonlocal_energy(
 /// (`band_form`). The explicit audit stays at the certificate solve and the
 /// final state.
 pub(crate) fn energy_identity_requested() -> bool {
-    static MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::ENERGY_IDENTITY))
+    // RUN-CONFIG: read from the run's configuration (thread scope or process),
+    // not cached per process; called once per construction / step / audit.
+    dft_numerics::switches::on(dft_numerics::switches::Id::ENERGY_IDENTITY)
 }
 
 /// Replace the nonlocal term of a k-weighted audit by the band-sum identity

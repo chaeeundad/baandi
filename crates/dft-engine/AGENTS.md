@@ -68,7 +68,7 @@ state versions advance once for initialization and each completed/failed step.
 
 Validation: `scripts/check.sh dft-engine`; the complete equivalence matrix is
 ignored in debug to keep gates fast. Run
-`cargo test --release -p dft-engine --test stepwise_equivalence -- --include-ignored --nocapture --test-threads=1`.
+`cargo test --release -p dft-engine --test all stepwise_equivalence:: -- --include-ignored --nocapture --test-threads=1`.
 It covers Gamma, four k points, skew multi-species/nonlocal-plus-local fixtures,
 Linear/Pulay/KerkerPulay, threads 1/4, all modes, full array bits and scientific
 history/certificates excluding wall-clock durations. Release fingerprints also
@@ -82,7 +82,7 @@ session is read-only, apart from draining telemetry. No runtime object, policy,
 audit buffer or new per-iteration branch is installed in ordinary `run` or direct
 `ScfSession::step`. The original advance/step implementation is unchanged.
 The only shared setup refactor extracts construction of the existing mixers.
-`tests/stepwise_equivalence.rs` is unchanged.
+`tests/all/stepwise_equivalence.rs` is unchanged.
 
 Lifecycle: Created -> Initialized -> Running -> Initialized, with certificate-only
 Converged, budget Exhausted, numerical Failed and controlled Cancelled terminal
@@ -189,8 +189,8 @@ or new agent decisions are substituted for the recorded committed decisions.
 
 Validation commands:
 - `scripts/check.sh dft-engine` and `scripts/check.sh`.
-- `cargo test --release -p dft-engine --test runtime_policy -- --include-ignored --nocapture --test-threads=1`.
-- `cargo test --release -p dft-engine --test stepwise_equivalence modes_mixers_threads_and_species_are_bit_identical -- --ignored --nocapture --test-threads=1`.
+- `cargo test --release -p dft-engine --test all runtime_policy:: -- --include-ignored --nocapture --test-threads=1`.
+- `cargo test --release -p dft-engine --test all stepwise_equivalence::modes_mixers_threads_and_species_are_bit_identical -- --ignored --nocapture --test-threads=1`.
 
 The runtime tests cover the complete 10-state/10-trigger matrix, rejection followed
 by identical future trajectory (including hidden mixer history), stale/expired
@@ -251,11 +251,11 @@ ONEPATH-3B (ADR 0042 amendment): cold fixed-sector solves start from the atomic
 subspace (span once per k shared by both channels, `atomic_start::ritz` per
 channel); FD problems call `ScfProblem::clear_atomic_start` ("Fermi-Dirac
 occupations"). `CollinearResult.atomic_start` reports it. Test
-`tests/spin_atomic_start.rs` (its header records why the 1e-10 bound holds for
+`tests/all/spin_atomic_start.rs` (its header records why the 1e-10 bound holds for
 the free-electron start only: the atomic start amplifies rounding).
 
 The geometry/mesh test exceeds the debug budget and is ignored by default:
-`cargo test --release -p dft-engine --test collinear -- --include-ignored --nocapture`.
+`cargo test --release -p dft-engine --test all collinear:: -- --include-ignored --nocapture`.
 Run `scripts/check.sh` and the unchanged SCF benchmark identity check too.
 
 ## MF06 NLCC (P13C)
@@ -302,7 +302,7 @@ SCF kernels to calculate forces. The adapter must not reuse a certificate after
 mutating result arrays. See `docs/validation/forces.md` for force term ownership,
 FD stationarity, independent oracles and versioned force schemas.
 
-Fast tests: `cargo test -p dft-engine --test forces`. Ignored displacement tests
+Fast tests: `cargo test -p dft-engine --test all forces::`. Ignored displacement tests
 must run in release mode with the commands in that note. Do not weaken the
 1e-6 synthetic, 1e-4 real-file or 1e-8 resolved-grid net-force caps.
 
@@ -314,7 +314,7 @@ all other identity, sampling, occupation, symmetry and grid checks. Validate
 shape, finite/XC-feasible values and relative charge <=1e-8 before mutation.
 Do not renormalize or restore orbitals/mixer/history/certification. The caller
 records `warm_transfer`, never exact replay. Ordinary initialization and iteration
-kernels remain unchanged. Run `cargo test -p dft-engine --test density_transfer`
+kernels remain unchanged. Run `cargo test -p dft-engine --test all density_transfer::`
 and the release ignored three-structure warm/fresh energy oracle.
 
 ## NC stress (P22A)
@@ -328,14 +328,14 @@ It reports frozen-Miller tensor/pressure and an independent isotropic cutoff
 estimate. `frozen_stress` omits that estimate explicitly. Neither claims cutoff
 convergence. The opt-in boxed `ScfOptions.strain_reference` requires a fixed FFT
 grid and is part of derivative identity. Default None retains legacy setup.
-See `docs/validation/stress.md` and release oracles in `tests/stress.rs`.
+See `docs/validation/stress.md` and release oracles in `tests/all/stress.rs`.
 
 P23A adds `initialize_cell_density_transfer`: compare the setup model while
 allowing cell/ordered positions to differ, require identical nonempty frozen
 reference and fractional grid, scale samples by old/new volume, and retain all
 fixed-cell charge/feasibility/policy checks. No interpolation, orbitals, histories
 or certificate transfer. Ordinary initialization and numerical kernels are
-unchanged. `tests/density_transfer.rs` checks charge/scaling and rejection paths.
+unchanged. `tests/all/density_transfer.rs` checks charge/scaling and rejection paths.
 
 P23A real-file follow-up: `ScfOptions::basis` must propagate the frozen density
 reference through the wavefunction basis into Hamiltonian construction. Freezing
@@ -360,7 +360,7 @@ and omits off; different paths require explicit WarmStart, with complex-to-real
 Auto allowed to retain the complex path when the saved gauge is incompatible.
 
 Release validation (calibration must precede real comparisons):
-`cargo test --release -p dft-engine --test gamma_real_scf -- --include-ignored --nocapture`.
+`cargo test --release -p dft-engine --test all gamma_real_scf:: -- --include-ignored --nocapture`.
 See `docs/performance/real-gamma-r5-results.md` for fixed comparison thresholds,
 Mac observations, failed exploratory commands and outstanding dev08 acceptance.
 
@@ -373,20 +373,20 @@ index and density by Fourier zero padding, and finishes through the Track A
 import (`initialize_electronic`) with the unchanged strict session. Only the
 full-cutoff certificate converges; ineligible problems run `direct_min::finish`
 with a recorded reason. Session accessors `warm_state`/`problem_ref` are
-crate-private and read-only. Fast gates: `cargo test -p dft-engine --test cutoff_ladder`.
+crate-private and read-only. Fast gates: `cargo test -p dft-engine --test all cutoff_ladder::`.
 S1/S2 switches (default off, `CutoffLadderOptions::baseline()` reads no environment):
 `standard` makes the standard profile eligible (fine first-step tolerance via
 `seed_standard_tolerance`); `secant_pairs` seeds the fine Pulay mixer through
 `seed_mixer_differences` (closed block of prolonged coarse differences, carried
 by `PulayState.seed_dx/seed_dr`). A pending standard seed makes an exact
 checkpoint reject before the first step. Count bench (ignored, release):
-`cargo test --release -p dft-engine --test cutoff_ladder ladder_standard_secant_bench -- --ignored --nocapture --test-threads=1`.
+`cargo test --release -p dft-engine --test all cutoff_ladder::ladder_standard_secant_bench -- --ignored --nocapture --test-threads=1`.
 D1 knobs (defaults = adopted ladder, bit-identical): `coarse_density_residual`
 (`BAANDI_LADDER_COARSE_STOP`), `coarse_rule` (`BAANDI_LADDER_COARSE_RULE`, atomic
 start-density truncation distance, never lowers the level) and `first_tolerance`
 (`BAANDI_LADDER_FIRST_TOL`; strict seeds go through `seed_strict_tolerance`, used
 only by the residual schedule; a pending strict seed also rejects an exact
-checkpoint). Scan bench: `cargo test --release -p dft-engine --test cutoff_ladder
+checkpoint). Scan bench: `cargo test --release -p dft-engine --test all cutoff_ladder::
 ladder_d1_scan -- --ignored --nocapture --test-threads=1` (env in the test file).
 `ScfProblem::atomic_superposition_density` (C3 relax predictor) exposes the
 atomic start density built with `start_density = Atomic`; no arithmetic changed.
@@ -750,7 +750,7 @@ cutoff ladder builds and runs its coarse problem under the fine problem's
 configuration (`CutoffLadderOptions::from_run`). Run-local counters: stop
 estimates (kept/fft), Ewald hits/computed, problems, session steps,
 verification maps. Per-thread override hooks keep precedence. Test
-`tests/run_config.rs`: two concurrent runs with opposite `STOP_METRIC` in one
+`tests/all/run_config.rs`: two concurrent runs with opposite `STOP_METRIC` in one
 process, no lock, each bit-identical to its solo run, independent counters.
 Phase profile (RUN-REPORT): `RankProfile.wall` (caller-set, carried by
 `gather`), `Report::per_rank` / `closure()` close each rank's exclusive tree on

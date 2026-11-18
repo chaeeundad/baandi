@@ -3,7 +3,7 @@ use crate::scf::ScfError;
 use dft_basis::FftGridSpec;
 use dft_physics::data::*;
 use dft_physics::density::{FusedOperator, FusedPlan, SplitPairDensity};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 /// DENSITY-PAIR (opt-in `BAANDI_DENSITY_PAIR=on`, default off): on a real Gamma
 /// solve (Hermitian-completed eigenvectors) two occupied bands share one inverse
@@ -12,16 +12,18 @@ use std::sync::{Arc, OnceLock};
 /// Pairs are fixed as (0,1), (2,3), ... and worker ranges are even-aligned, so the
 /// result does not depend on the thread count. Rounding class, not bit-identical.
 fn density_pair() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::DENSITY_PAIR))
+    // RUN-CONFIG: read from the run's configuration (thread scope or process),
+    // not cached per process; called once per construction / step / audit.
+    dft_numerics::switches::on(dft_numerics::switches::Id::DENSITY_PAIR)
 }
 /// DENSITY-REDUCE (opt-in `BAANDI_DENSITY_REDUCE=on`, default off): the band sum
 /// runs over fixed grid blocks (pool-parallel) with every point still summed in
 /// ascending band order, and contributions of zero-occupation bands (exact +0
 /// grids) are neither cleared again nor added. Bit-identical to the default.
 fn density_reduce() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::DENSITY_REDUCE))
+    // RUN-CONFIG: read from the run's configuration (thread scope or process),
+    // not cached per process; called once per construction / step / audit.
+    dft_numerics::switches::on(dft_numerics::switches::Id::DENSITY_REDUCE)
 }
 /// Grid points per reduction block (fixed; independent of the thread budget).
 const REDUCE_BLOCK: usize = 4096;

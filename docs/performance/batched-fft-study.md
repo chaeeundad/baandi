@@ -1262,10 +1262,10 @@ cp target/release/dft-cli /tmp/p10c-evidence/before-cli
 python3 -I scripts/bench_scf.py --binary /tmp/p10c-evidence/before-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222 --threads 1 --repeats 3 --baseline docs/performance/baseline-after-o2.json --require-identical --record /tmp/p10c-evidence/before.json
 # After implementation:
 scripts/check.sh
-CARGO_PROFILE_RELEASE_DEBUG=true cargo test --release -p dft-numerics --test fused -- --include-ignored --nocapture --test-threads=1
+CARGO_PROFILE_RELEASE_DEBUG=true cargo test --release -p dft-numerics --test all fused:: -- --include-ignored --nocapture --test-threads=1
 CARGO_PROFILE_RELEASE_DEBUG=true cargo test --release -p dft-numerics grouped_band_study -- --ignored --nocapture
 CARGO_PROFILE_RELEASE_DEBUG=true P10C_SI_UPF=/Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF cargo test --release -p dft-physics complete_hamiltonian_timing -- --ignored --nocapture
-CARGO_PROFILE_RELEASE_DEBUG=true cargo test --release -p dft-engine --test scf full_schedule_equivalence -- --ignored --nocapture
+CARGO_PROFILE_RELEASE_DEBUG=true cargo test --release -p dft-engine --test all scf::full_schedule_equivalence -- --ignored --nocapture
 CARGO_PROFILE_RELEASE_DEBUG=true cargo build --release -p dft-cli
 cp target/release/dft-cli /tmp/p10c-evidence/ordered-cli
 python3 -I /tmp/p10c-evidence/synthetic.py /tmp/p10c-evidence/before-cli before
@@ -1694,7 +1694,7 @@ its constructor, with task files temporarily restored as described above):
 
 ```sh
 scripts/check.sh
-CARGO_PROFILE_RELEASE_DEBUG=true cargo test --release -p dft-numerics --test fused -- --include-ignored --nocapture --test-threads=1
+CARGO_PROFILE_RELEASE_DEBUG=true cargo test --release -p dft-numerics --test all fused:: -- --include-ignored --nocapture --test-threads=1
 CARGO_PROFILE_RELEASE_DEBUG=true cargo test --release -p dft-numerics fused::tests -- --nocapture
 python3 -I scripts/bench_scf.py --binary /tmp/p10c-resume/main-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,si8 --threads 1 --repeats 3 --baseline docs/performance/baseline-after-o4c.json --require-identical --record /tmp/p10c-resume/main-bench.json
 python3 -I scripts/bench_scf.py --binary /tmp/p10c-resume/fused-cli --upf /Users/mino/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases gamma,k222s,k222,si8 --threads 1 --repeats 3 --baseline /tmp/p10c-resume/main-bench.json --require-identical --record /tmp/p10c-resume/fused-bench.json

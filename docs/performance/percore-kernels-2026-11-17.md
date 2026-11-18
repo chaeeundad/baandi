@@ -8,7 +8,7 @@ Labels: **O** Mac observation (Apple M6 core, pure build: no MKL, every GEMM on 
 - Harness: `crates/dft-cli/examples/davidson_bench.rs`, `scripts/fast_screen_dav.py`. Inputs `fast_screen_dav.py --emit-input` (si32-gamma / si64-gamma, seed 601, fractional amplitude 1e-3, T=1), base density = converged `dft-cli run` density.bin of the same input. Cold = atomic start at 5e-3 Ha; warm = kept start (REUSE-PSI) at the ratchet tolerance (si32 3.59e-11 Ha), i.e. the typical mid-SCF solve.
 - Stage seconds: `BAANDI_DAVIDSON_STAGES=on` (3 repeats; timer runs are not used for A/B timing). FLOP and calls: `gemm_dispatch` rows (C). Function shares: macOS `sample` 1 ms, 12 s of repeated warm maps, 6995 samples below `lean::solve` (O; includes the untimed re-arm solves of the harness).
 - Per-iteration shapes (C): a temporary trace (not committed). si32 warm: (basis m after the append, block k) = (68, 68), (136, 64), (200, 10), (210, 7), (217, 7), (224, 7), (231, 6), (237, 5), (242, 2), return at m = 244; cold: (68, 68), (136, 54), return at m = 190. So a warm solve has two wide appends and seven narrow ones (k <= 10).
-- Kernel microbenchmark at exactly these shapes: `cargo test --release -p dft-numerics --test percore_kernels -- --ignored --nocapture percore_kernel_microbench` (new, this ticket) and the existing `pure_gemm_microbench` (achievable rate of the build's library kernel, faer `matmul` with full packing = "library" column).
+- Kernel microbenchmark at exactly these shapes: `cargo test --release -p dft-numerics --test all -- --ignored --nocapture percore_kernels::percore_kernel_microbench` (new, this ticket) and the existing `pure_gemm_microbench` (achievable rate of the build's library kernel, faer `matmul` with full packing = "library" column).
 
 ## 2. Per-kernel table, si32, one core (Mac pure build, O; counters C)
 
@@ -93,7 +93,7 @@ target/release/dft-cli run <dir>/si32.toml --output-dir <dir>/si32-cli
 BAANDI_DAVIDSON_STAGES=on target/release/examples/davidson_bench --input <dir>/si32.toml --density <dir>/si32-cli/density.bin --repeats 3
 python3 -I scripts/fast_screen_dav.py --upf <UPF> --case si32 --density <dir>/si32-cli/density.bin --b BAANDI_LEAN_BORDER=fused --expect lean.fused_borders:up
 python3 -I scripts/fast_screen_dav.py --upf <UPF> --case si32 --density <dir>/si32-cli/density.bin --b BAANDI_PACK_FIXED=on
-cargo test --release -p dft-numerics --test percore_kernels -- --ignored --nocapture percore_kernel_microbench
-cargo test --release -p dft-numerics --test pure_gemm -- --ignored --nocapture pure_gemm_microbench
+cargo test --release -p dft-numerics --test all -- --ignored --nocapture percore_kernels::percore_kernel_microbench
+cargo test --release -p dft-numerics --test all -- --ignored --nocapture pure_gemm::pure_gemm_microbench
 ```
 dev08 request: [requests/percore-kernels.md](requests/percore-kernels.md).

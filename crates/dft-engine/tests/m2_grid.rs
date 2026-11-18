@@ -1,4 +1,4 @@
-//! M2-GRID (`BAANDI_M2_GRID=on|off`, default off, rounding class): the
+//! M2-GRID (`BAANDI_M2_GRID=on|off`, default on since 2026-11-18, rounding class): the
 //! distributed full-grid stages of the M2 path (Hartree FFT pair, XC and
 //! effective potential on the planes of a slab FFT, the energy audit's
 //! output-density transform and grid sums, the stop-rule estimate from kept
@@ -113,11 +113,14 @@ fn distributed_grid_stages_keep_the_standard_class() {
         let threads = run(kind, &pp);
         let default = ranks_run(2, kind, &pp, None);
         let off = ranks_run(2, kind, &pp, Some(false));
+        let on_default = ranks_run(2, kind, &pp, Some(true));
+        // M2_GRID and M2_MIX default on since 2026-11-18 (dev08, np 4 and 8, si32 and si64).
         assert_eq!(
             bits(&default[0]),
-            bits(&off[0]),
-            "default path is the off arm"
+            bits(&on_default[0]),
+            "default path is the on arm"
         );
+        assert_ne!(off.len(), 0);
         let c0 = dft_engine::grid_dist::counters();
         let on = ranks_run(2, kind, &pp, Some(true));
         let c1 = dft_engine::grid_dist::counters();
@@ -168,11 +171,14 @@ fn distributed_mixing_keeps_the_standard_class() {
         let threads = run(kind, &pp);
         let default = ranks_run_mix(2, kind, &pp, None, None);
         let off = ranks_run_mix(2, kind, &pp, Some(false), Some(false));
+        let both = ranks_run_mix(2, kind, &pp, Some(true), Some(true));
+        // Both switches default on since 2026-11-18.
         assert_eq!(
             bits(&default[0]),
-            bits(&off[0]),
-            "default path is the off arm"
+            bits(&both[0]),
+            "default path is the grid+mix on arm"
         );
+        assert_ne!(off.len(), 0);
         let c0 = dft_engine::mix_dist::counters();
         let mix = ranks_run_mix(2, kind, &pp, Some(false), Some(true));
         let c1 = dft_engine::mix_dist::counters();

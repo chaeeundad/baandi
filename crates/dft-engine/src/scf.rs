@@ -872,7 +872,10 @@ fn ionic_local_coefficients(
 /// 0.0595 -> 0.1089 s, si64 0.2451 -> 0.4949 s: per-rank candidate setup plus
 /// the chained broadcasts outweigh halving the terms), at np=8 it was 48 %
 /// faster. The result is bit-identical on both sides of the gate.
-pub const EWALD_SPLIT_MIN_RANKS: usize = 4;
+/// Re-measured on 6be8f09 (master, si64 np=2 `init.ewald`): split 0.4977 s, the
+/// gated (replicated) path 0.8178 s, i.e. the gate made np=2 worse (si32 0.1084
+/// vs 0.1813 s): the split is now the faster branch from 2 ranks on.
+pub const EWALD_SPLIT_MIN_RANKS: usize = 2;
 /// Whether `ewald_evaluate` splits the sum on a communicator of `ranks` ranks.
 pub fn ewald_split_applies(ranks: usize) -> bool {
     ranks >= EWALD_SPLIT_MIN_RANKS

@@ -385,6 +385,65 @@ impl std::fmt::Debug for LazyOrbitals {
             .finish()
     }
 }
+/// LAZY-ASSEMBLE-FUSED: the complex N x B block from the gathered rank
+/// segments (`flat`: per rank, its `counts[r]` local rows of every column,
+/// column-major; `index`: the global ORC coordinate of each gathered row).
+/// Every ORC coordinate goes straight to its two complex slots of the column
+/// (the representative and its mirror), column by column so one column stays
+/// in cache across the rank segments: the arithmetic of `HalfSphere::unpack`
+/// (G = 0 real, x / sqrt2 for both parts, the mirror's imaginary part
+/// negated), so the block is bit-identical to scattering into a global ORC
+/// block first and unpacking it (the former path, `assemble_reference` in the
+/// tests), without that N x B intermediate. Same errors: a length that is not
+/// the half sphere's, any nonfinite gathered value.
+fn assemble_lazy_block(
+    half: &dft_basis::HalfSphere,
+    counts: &[usize],
+    index: &[f64],
+    flat: &[f64],
+    n: usize,
+    bands: usize,
+) -> Result<ComplexMatrix, ScfError> {
+    let fail = |e: dft_basis::HalfSphereError| ScfError::Numerical(format!("lazy orbitals: {e}"));
+    if n != half.full_len() {
+        return Err(fail(dft_basis::HalfSphereError::Dimension));
+    }
+    if flat.iter().any(|x| !x.is_finite()) {
+        return Err(fail(dft_basis::HalfSphereError::InvalidCoefficients));
+    }
+    let (plus, minus) = (half.plus(), half.minus());
+    let s = std::f64::consts::SQRT_2;
+    let mut full = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
+    for j in 0..bands {
+        let column = full.column_mut(j);
+        let (mut at, mut offset) = (0, 0);
+        for &c in counts {
+            let rows = &index[offset..offset + c];
+            let src = &flat[at + j * c..at + (j + 1) * c];
+            for (&g, &v) in rows.iter().zip(src) {
+                let g = g as usize;
+                if g == 0 {
+                    column[0] = Complex64::new(v, 0.);
+                    continue;
+                }
+                let i = g.div_ceil(2);
+                let (p, m) = (plus[i] as usize, minus[i] as usize);
+                let w = v / s;
+                if g % 2 == 1 {
+                    column[p].re = w;
+                    column[m].re = w;
+                } else {
+                    column[p].im = w;
+                    column[m].im = -w;
+                }
+            }
+            at += c * bands;
+            offset += c;
+        }
+    }
+    Ok(full)
+}
+
 impl LazyOrbitals {
     pub fn bands(&self) -> usize {
         self.0.x.cols()
@@ -446,27 +505,7 @@ impl LazyOrbitals {
         let mut flat = vec![0.0; n * bands];
         comm.allgatherv_f64(inner.x.as_slice(), &block, &mut flat)
             .map_err(err)?;
-        // Scatter to global ORC order, column by column (exact data movement).
-        let mut real = vec![0.0; n * bands];
-        let (mut at, mut offset) = (0, 0);
-        for &c in &counts {
-            let rows = &index[offset..offset + c];
-            for j in 0..bands {
-                let src = &flat[at + j * c..at + (j + 1) * c];
-                for (&g, &v) in rows.iter().zip(src) {
-                    real[j * n + g as usize] = v;
-                }
-            }
-            at += c * bands;
-            offset += c;
-        }
-        let mut full = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
-        for j in 0..bands {
-            inner
-                .half
-                .unpack(&real[j * n..(j + 1) * n], full.column_mut(j))
-                .map_err(|e| ScfError::Numerical(format!("lazy orbitals: {e}")))?;
-        }
+        let full = assemble_lazy_block(&inner.half, &counts, &index, &flat, n, bands)?;
         let _ = inner.full.set(full);
         crate::m2::count(crate::m2::Count::LazyMaterializations);
         crate::m2::add(crate::m2::Stage::LazyMaterialize, start);
@@ -2326,5 +2365,108 @@ mod lazy_serial_tests {
         ensure_state_with(&h, &basis, 3, c2, &options, &pool, &mut state, false).unwrap();
         assert_ne!(half_ptr(&state), previous);
         assert!(!has_op(&state));
+    }
+}
+
+#[cfg(test)]
+mod lazy_assemble_tests {
+    use super::*;
+    use dft_geometry::Cell;
+
+    /// The former assembly: scatter into a global ORC block, then unpack column
+    /// by column.
+    fn assemble_reference(
+        half: &dft_basis::HalfSphere,
+        counts: &[usize],
+        index: &[f64],
+        flat: &[f64],
+        n: usize,
+        bands: usize,
+    ) -> Result<ComplexMatrix, ScfError> {
+        let mut real = vec![0.0; n * bands];
+        let (mut at, mut offset) = (0, 0);
+        for &c in counts {
+            let rows = &index[offset..offset + c];
+            for j in 0..bands {
+                let src = &flat[at + j * c..at + (j + 1) * c];
+                for (&g, &v) in rows.iter().zip(src) {
+                    real[j * n + g as usize] = v;
+                }
+            }
+            at += c * bands;
+            offset += c;
+        }
+        let mut full = ComplexMatrix::zeros(n, bands).map_err(SolverError::from)?;
+        for j in 0..bands {
+            half.unpack(&real[j * n..(j + 1) * n], full.column_mut(j))
+                .map_err(|e| ScfError::Numerical(format!("lazy orbitals: {e}")))?;
+        }
+        Ok(full)
+    }
+
+    /// LAZY-ASSEMBLE-FUSED: bit-identical blocks for cubic, skewed and
+    /// elongated cells, 1 to 5 rank segments of uneven sizes with permuted
+    /// rows, signed zeros and tiny values; the same errors for a nonfinite
+    /// value and a wrong length.
+    #[test]
+    fn fused_assembly_matches_scatter_then_unpack() {
+        for rows in [
+            [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],
+            [[6., 1., 0.], [0., 5.5, 1.2], [0.7, 0., 6.5]],
+            [[4., 0., 0.], [0., 4.5, 0.], [0., 0., 14.]],
+        ] {
+            let cell = Cell::from_user_rows_bohr(rows).unwrap();
+            let basis = dft_basis::PlaneWaveBasis::new(&cell, dft_units::Hartree(2.)).unwrap();
+            let grid = dft_basis::FftGridSpec::new(&basis, &basis, None).unwrap();
+            let half = dft_basis::HalfSphere::new(&basis, &grid).unwrap();
+            let n = half.full_len();
+            let bands = 5;
+            // A fixed permutation of the ORC coordinates (multiplicative step).
+            let step = (1..n).rev().find(|s| gcd(*s, n) == 1).unwrap_or(1);
+            let order: Vec<usize> = (0..n).map(|k| (k * step + 3) % n).collect();
+            for parts in 1..=5usize {
+                let mut counts = vec![n / parts; parts];
+                counts[0] += n % parts;
+                if parts > 2 {
+                    // Uneven: move rows from the last segment to the second.
+                    let d = counts[parts - 1] / 3;
+                    counts[parts - 1] -= d;
+                    counts[1] += d;
+                }
+                let index: Vec<f64> = order.iter().map(|&g| g as f64).collect();
+                let mut flat = Vec::with_capacity(n * bands);
+                let mut offset = 0;
+                for &c in &counts {
+                    for j in 0..bands {
+                        for (k, &g) in order[offset..offset + c].iter().enumerate() {
+                            let v = ((g * 13 + j * 7 + k) as f64).sin() * 1e-3;
+                            flat.push(match (g + j) % 11 {
+                                0 => -0.0,
+                                1 => 1e-310,
+                                _ => v,
+                            });
+                        }
+                    }
+                    offset += c;
+                }
+                let a = assemble_lazy_block(&half, &counts, &index, &flat, n, bands).unwrap();
+                let b = assemble_reference(&half, &counts, &index, &flat, n, bands).unwrap();
+                for (x, y) in a.as_slice().iter().zip(b.as_slice()) {
+                    assert_eq!(x.re.to_bits(), y.re.to_bits());
+                    assert_eq!(x.im.to_bits(), y.im.to_bits());
+                }
+                let mut bad = flat.clone();
+                bad[flat.len() / 2] = f64::NAN;
+                let ea = assemble_lazy_block(&half, &counts, &index, &bad, n, bands).unwrap_err();
+                let eb = assemble_reference(&half, &counts, &index, &bad, n, bands).unwrap_err();
+                assert_eq!(ea.to_string(), eb.to_string());
+            }
+            let e = assemble_lazy_block(&half, &[n - 1], &vec![0.0; n - 1], &[], n - 1, 0);
+            assert!(e.is_err());
+        }
+    }
+
+    fn gcd(a: usize, b: usize) -> usize {
+        if b == 0 { a } else { gcd(b, a % b) }
     }
 }

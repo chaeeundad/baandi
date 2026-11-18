@@ -734,7 +734,7 @@ PZ and PW), lib `mix_dist::tests` (ranks 1..7 against `PulayMixer`),
 `tests/m2_grid.rs` (production standard SCF, cubic and skewed, P 2/3). dev08
 request `docs/performance/requests/m2-grid.md`; ledger M2-GRID-*.
 
-## Owned potential and density (M2-OWNED, 2026-11-18; both default off)
+## Owned potential and density (M2-OWNED, 2026-11-18; both default ON since M2-OWNED-DEFAULT)
 
 `BAANDI_M2_LOCAL_FIELDS=on` (needs M2_GRID; override
 `grid_dist::set_owned_override`): eligible maps (`local_fields_eligible`:

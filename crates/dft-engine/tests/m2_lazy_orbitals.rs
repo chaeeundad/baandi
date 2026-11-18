@@ -211,7 +211,9 @@ fn m2_lazy_checkpoint_gathers_the_warm_orbitals() {
     let capture = |lazy: bool| {
         simulate(ranks, |comm: &SimRank| {
             with_switches(Some(Arc::new(comm.clone())), lazy, false, || {
-                let problem = problem(1, &pp);
+                let mut problem = problem(1, &pp);
+                // M2-OWNED-DECLINE: a boundary checkpoint is declared.
+                problem.decline_owned(dft_engine::grid_dist::OwnedDecline::Checkpoint);
                 let electrons = problem.electron_count();
                 let mut session =
                     ScfSession::new(problem, CompletionMode::Strict, ExecutionConfig::default())

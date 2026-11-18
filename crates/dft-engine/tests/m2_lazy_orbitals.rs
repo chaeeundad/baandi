@@ -11,7 +11,11 @@ use dft_engine::{
 };
 use dft_geometry::{Atom, Cell};
 use dft_mpi::{Collective, SimRank, simulate};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+/// Both tests read and bump process-wide counters (lazy materializations,
+/// allgatherv bytes): run them one at a time.
+static LOCK: Mutex<()> = Mutex::new(());
 
 fn m2_count(name: &str) -> usize {
     parallel::m2_stats()
@@ -120,6 +124,7 @@ fn work(r: &ScfResult) -> (usize, usize, usize, usize) {
 /// bit-reproducible. The allgatherv volume drops.
 #[test]
 fn m2_lazy_orbitals_match_the_gathered_path() {
+    let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let pp = common::potential(4., 1., true, 401);
     for kind in 0..2 {
         for ranks in [2usize, 3] {
@@ -200,6 +205,7 @@ fn m2_lazy_orbitals_match_the_gathered_path() {
 /// continues to the same result afterwards.
 #[test]
 fn m2_lazy_checkpoint_gathers_the_warm_orbitals() {
+    let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let pp = common::potential(4., 1., true, 401);
     let ranks = 2;
     let capture = |lazy: bool| {

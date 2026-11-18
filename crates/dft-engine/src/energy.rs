@@ -557,10 +557,13 @@ pub(crate) fn evaluate_shared_with_kinetic(
     kinetic: Option<f64>,
 ) -> Result<EnergyAudit, ScfError> {
     let n = a.output_density;
+    // The densities are not read here either; two empty arrays mark densities
+    // kept on the owned planes (M2-OWNED, `BAANDI_M2_LOCAL_DENSITY`).
+    let owned_densities = n.is_empty() && a.input_density.is_empty();
     if a.orbitals.len() != a.occupations.len()
         || a.eigenvalues.len() != a.occupations.len()
         || a.eigen_residuals.len() != a.occupations.len()
-        || n.shape() != a.grid.dims()
+        || (n.shape() != a.grid.dims() && !owned_densities)
         || a.input_density.shape() != n.shape()
         // The potentials are not read here; an empty array marks fields kept
         // on the distributed planes (M2-GRID).

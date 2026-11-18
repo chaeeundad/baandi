@@ -700,7 +700,8 @@ fn expressions_preserve_energy_and_record_resolutions() {
     // 101 = 99 + M2_GRID + M2_MIX (M2-GRID).
     // 105 = 103 + EWALD_FAST + IONIC_FAST (INIT-EWALD-FAST, INIT-IONIC-FAST).
     // 106 = 105 + MIX_COULOMB_GUARD (SCF-TRAJECTORY).
-    assert_eq!(switches.len(), 106);
+    // 108 = 106 + M2_LOCAL_FIELDS + M2_LOCAL_DENSITY (M2-OWNED).
+    assert_eq!(switches.len(), 108);
     let ladder = &switches["BAANDI_CUTOFF_LADDER"];
     assert_eq!(
         (&ladder["value"], &ladder["source"]),

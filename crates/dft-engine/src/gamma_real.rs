@@ -605,6 +605,9 @@ pub(crate) struct M2Reuse {
     pub(crate) kept: dft_solvers::distributed_davidson::DistributedKeptStart,
     /// Potential (Ha, full grid) the stored H X belongs to.
     v_old: Vec<f64>,
+    /// M2-OWNED: `v_old` holds only this rank's operator planes (replicated
+    /// flag: set by every rank for the same solve).
+    v_old_owned: bool,
     delta: Vec<f64>,
     /// (V_new - V_old) X on the local rows.
     image: RealMatrix,
@@ -992,6 +995,10 @@ pub(crate) fn solve_real_gamma(
     exclusion: Option<&str>,
     diagnostics: &mut GammaRealDiagnostics,
     state: &mut Option<RealSolveState>,
+    // M2-OWNED (`BAANDI_M2_LOCAL_FIELDS`): this map's effective potential on
+    // the distributed operator's planes and its epoch; the complex
+    // Hamiltonian's potential is then stale and must not reach the operator.
+    owned: Option<(&[f64], u64)>,
 ) -> Result<Option<EigenSolution>, ScfError> {
     let option = options.gamma_real;
     let comm = crate::parallel::SharedComm::active();
@@ -1076,10 +1083,24 @@ pub(crate) fn solve_real_gamma(
     // M2c: the distributed Hamiltonian follows the SCF potential like the serial one.
     match comm.as_ref().filter(|_| crate::parallel::m2_enabled()) {
         Some(c) => {
-            let fresh = state
-                .dist
-                .as_mut()
-                .is_some_and(|d| d.update_from_complex(hamiltonian, basis));
+            // M2-OWNED: identity check only; the owned planes are set below
+            // (the complex potential is stale and must not be copied).
+            let fresh = match owned {
+                Some(_) => state
+                    .dist
+                    .as_ref()
+                    .is_some_and(|d| d.same_operator(hamiltonian, basis)),
+                None => state.dist.as_mut().is_some_and(|d| {
+                    let fresh = d.update_from_complex(hamiltonian, basis);
+                    if fresh {
+                        // The full-grid potential copy of the gathered path.
+                        use crate::grid_dist as g;
+                        g::owned_add(g::O_FULL_COPIES, 1);
+                        g::owned_add(g::O_FULL_COPY_VALUES, d.potential().len() as u64);
+                    }
+                    fresh
+                }),
+            };
             if !fresh {
                 state.dist = if M2_DIST_DISABLED.with(|o| o.get()) {
                     None
@@ -1100,6 +1121,27 @@ pub(crate) fn solve_real_gamma(
             }
             if let Some(d) = state.dist.as_mut() {
                 d.set_batched(crate::m2::batched_transposes());
+            }
+            match (owned, state.dist.as_mut()) {
+                (Some((planes, epoch)), Some(d)) => {
+                    if d.owned_epoch().is_none() {
+                        // Entering the owned mode fills the full buffer with NaN once.
+                        use crate::grid_dist as g;
+                        g::owned_add(g::O_FULL_COPIES, 1);
+                        g::owned_add(g::O_FULL_COPY_VALUES, d.potential().len() as u64);
+                    }
+                    d.set_owned_potential(planes, epoch)
+                        .map_err(|e| ScfError::Numerical(format!("M2 owned potential: {e}")))?;
+                }
+                // The serial (M1) fallback would apply the stale complex
+                // potential: refuse (replicated: the operator exists on every
+                // rank or on none).
+                (Some(_), None) => {
+                    return Err(ScfError::Numerical(
+                        "M2 owned potential: distributed operator unavailable".into(),
+                    ));
+                }
+                _ => {}
             }
         }
         None => {
@@ -1473,6 +1515,19 @@ pub(crate) fn solve_real_gamma(
         slot.declined = Some("distributed solver");
     }
     let result = if let (Some(comm), Some(dist)) = (&comm, dist) {
+        // M2-OWNED: the operator must hold exactly this map's owned field (or
+        // the full complex potential when nothing is owned); anything else is
+        // a stale potential and is rejected here, at the consumer.
+        let expected = owned.map(|(_, e)| e);
+        if dist.owned_epoch() != expected {
+            return Err(ScfError::Numerical(format!(
+                "M2 owned potential: operator epoch {:?}, map epoch {expected:?}",
+                dist.owned_epoch()
+            )));
+        }
+        if expected.is_some() {
+            crate::grid_dist::owned_add(crate::grid_dist::O_EPOCH_CHECKS, 1);
+        }
         let t_entry = dft_numerics::stage_clock::start();
         crate::parallel::count_distributed_solve();
         crate::parallel::count_distributed_rows_solve();
@@ -1489,6 +1544,7 @@ pub(crate) fn solve_real_gamma(
                 state.m2_reuse = Some(M2Reuse {
                     kept: DistributedKeptStart::with_stored(hx),
                     v_old: dist.potential().to_vec(),
+                    v_old_owned: false,
                     delta: Vec::new(),
                     image: RealMatrix::new(0, 0, Vec::new()).expect("empty matrix"),
                     planes: Vec::new(),
@@ -1519,6 +1575,7 @@ pub(crate) fn solve_real_gamma(
                 let r = state.m2_reuse.get_or_insert_with(|| M2Reuse {
                     kept: DistributedKeptStart::new(),
                     v_old: Vec::new(),
+                    v_old_owned: false,
                     delta: Vec::new(),
                     image: RealMatrix::new(0, 0, Vec::new()).expect("empty matrix"),
                     planes: Vec::new(),
@@ -1528,7 +1585,15 @@ pub(crate) fn solve_real_gamma(
                 });
                 crate::m2::add(crate::m2::Stage::SolveEntry, t_entry);
                 let t_kept = dft_numerics::stage_clock::start();
-                prepare_m2_kept_start(comm, dist, r, &x_local, start.is_some(), bands)?;
+                prepare_m2_kept_start(
+                    comm,
+                    dist,
+                    r,
+                    &x_local,
+                    start.is_some(),
+                    bands,
+                    owned.is_some(),
+                )?;
                 crate::m2::add(crate::m2::Stage::KeptUpdate, t_kept);
                 let armed = r.kept.armed();
                 let hx = r.kept.stored().filter(|_| armed);
@@ -1618,7 +1683,15 @@ pub(crate) fn solve_real_gamma(
                 r.collect = r.kept.is_stored();
                 r.kept_pairs = 0;
                 r.v_old.clear();
-                r.v_old.extend_from_slice(dist.potential());
+                if owned.is_some() {
+                    // M2-OWNED: the potential of the stored H X on this
+                    // rank's planes only (the other entries are not held).
+                    dist.read_planes(dist.potential(), &mut r.v_old);
+                    r.v_old_owned = true;
+                } else {
+                    r.v_old.extend_from_slice(dist.potential());
+                    r.v_old_owned = false;
+                }
                 result
             } else {
                 // MPI-LAZY-ORBITALS without the kept start: a kept-start object
@@ -2050,23 +2123,61 @@ fn prepare_m2_kept_start(
     x: &RealMatrix,
     has_initial: bool,
     bands: usize,
+    owned: bool,
 ) -> Result<(), ScfError> {
     r.kept.set_keep(true);
     let collected = std::mem::replace(&mut r.collect, false);
     let grid = dist.potential().len();
     let stored = r.kept.is_stored();
-    if !(collected && stored && has_initial && r.v_old.len() == grid && x.cols() == bands) {
+    // `v_old_owned` is replicated; an owned v_old has this rank's plane count.
+    let v_old_valid = if r.v_old_owned {
+        r.v_old.len() == dist.plane_points()
+    } else {
+        r.v_old.len() == grid
+    };
+    if !(collected && stored && has_initial && v_old_valid && x.cols() == bands) {
         r.kept.invalidate();
         crate::m2::count(crate::m2::Count::ReuseNotKept);
         return Ok(());
     }
-    r.delta.clear();
-    let mut changed = false;
-    for (&new, &old) in dist.potential().iter().zip(&r.v_old) {
-        let d = new - old;
-        changed |= d != 0.;
-        r.delta.push(d);
-    }
+    let changed = if owned {
+        // M2-OWNED: V_new - V_old on this rank's planes only (the apply reads
+        // no other entry; the rest of `delta` stays 0); the "changed" decision
+        // is agreed over the ranks by one 1-double tree sum (the full-grid
+        // test of the replicated path, same verdict).
+        let mut planes = Vec::new();
+        dist.read_planes(dist.potential(), &mut planes);
+        let mut old = Vec::new();
+        let old: &[f64] = if r.v_old_owned {
+            &r.v_old
+        } else {
+            dist.read_planes(&r.v_old, &mut old);
+            &old
+        };
+        let mut local = false;
+        for (p, &o) in planes.iter_mut().zip(old) {
+            *p -= o;
+            local |= *p != 0.;
+        }
+        if r.delta.len() != grid {
+            r.delta.clear();
+            r.delta.resize(grid, 0.);
+        }
+        dist.write_planes(&planes, &mut r.delta);
+        let mut any = [0.0];
+        comm.tree_sum_f64(&[f64::from(u8::from(local))], &mut any)
+            .map_err(|e| ScfError::Numerical(format!("M2 kept start: {e}")))?;
+        any[0] != 0.
+    } else {
+        r.delta.clear();
+        let mut changed = false;
+        for (&new, &old) in dist.potential().iter().zip(&r.v_old) {
+            let d = new - old;
+            changed |= d != 0.;
+            r.delta.push(d);
+        }
+        changed
+    };
     if changed {
         if r.image.rows() != x.rows() || r.image.cols() != bands {
             r.image = RealMatrix::zeros(x.rows(), bands).map_err(SolverError::from)?;

@@ -256,5 +256,8 @@ fn legacy_defaults_are_unchanged() {
     // M2-GRID: distributed full-grid stages of the M2 path, rounding class, off until dev08.
     assert_eq!(value(Id::M2_GRID), Value::Choice("on"));
     assert_eq!(value(Id::M2_MIX), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 103);
+    // INIT-EWALD-FAST / INIT-IONIC-FAST: rounding-class init schemes, off until dev08.
+    assert_eq!(value(Id::EWALD_FAST), Value::Choice("off"));
+    assert_eq!(value(Id::IONIC_FAST), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 105);
 }

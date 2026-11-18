@@ -883,7 +883,9 @@ pub fn ewald_split_applies(ranks: usize) -> bool {
 /// Ewald energy (INIT-SCALE-3, always on). With a registered communicator of
 /// two or more ranks every rank evaluates the terms of its contiguous block of
 /// the real-space and the reciprocal candidates (`ewald::EwaldPlan`, the
-/// expensive erfc and structure-factor work), then the two running sums pass
+/// expensive erfc and structure-factor work; INIT-EWALD-FAST: a real-space
+/// candidate is an ion pair and enumeration row in the reference scheme, an
+/// ion pair i <= j in the balanced scheme), then the two running sums pass
 /// down the ranks: rank r adds its terms in order to the sums received from
 /// rank r - 1 and broadcasts them (P broadcasts of three values). This is the
 /// serial loop's association exactly, so the result is bit-identical to
@@ -950,7 +952,10 @@ fn ewald_energy(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfErro
         EWALD_CACHE_COUNTS[1].fetch_add(1, Relaxed);
         return ewald_evaluate(cell, ions);
     }
-    let mut key = Vec::with_capacity(9 + 4 * ions.len());
+    let mut key = Vec::with_capacity(10 + 4 * ions.len());
+    // The scheme (BAANDI_EWALD_FAST or a per-thread override) selects a
+    // different pure function: part of the key.
+    key.push(u64::from(ewald::scheme() == ewald::Scheme::Balanced));
     key.extend(
         cell.lattice_columns_bohr()
             .iter()

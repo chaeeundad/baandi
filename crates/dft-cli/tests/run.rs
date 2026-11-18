@@ -691,7 +691,8 @@ fn expressions_preserve_energy_and_record_resolutions() {
     // 100 = 99 + IMPORT_CHECK (LADDER-IMPORT-SPLIT).
     // 101 = 100 + M2_LAZY_RESULT (LAZY-RESULT).
     // 101 = 99 + M2_GRID + M2_MIX (M2-GRID).
-    assert_eq!(switches.len(), 103);
+    // 105 = 103 + EWALD_FAST + IONIC_FAST (INIT-EWALD-FAST, INIT-IONIC-FAST).
+    assert_eq!(switches.len(), 105);
     let ladder = &switches["BAANDI_CUTOFF_LADDER"];
     assert_eq!(
         (&ladder["value"], &ladder["source"]),

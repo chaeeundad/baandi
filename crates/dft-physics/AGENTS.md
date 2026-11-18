@@ -176,3 +176,20 @@ fixtures use `NonlocalOperator::from_columns`. `Hamiltonian::new_with_grid`
 takes the caller's k grid (checked in O(N_G) against `map_miller`) instead of
 building the density sphere again; test
 `new_with_grid_matches_new_and_checks_the_grid`.
+
+## Ewald schemes and ionic phase tables (INIT-EWALD-FAST, 2026-11-18)
+
+`ewald::Scheme` (`BAANDI_EWALD_FAST`, per-thread `set_scheme_override`): the
+default `Reference` keeps eta sqrt(pi)/Omega^(1/3) and the historical cutoffs;
+its real-space images go through `ImageWalker` (conservative pruning of the old
+box, exact old predicate, same order), bit-identical to eecd57f for energy,
+forces, stress and every plan partition (verbatim copy in
+`src/ewald/tests/old_reference.rs`). `Balanced` (rounding class) picks eta from
+the cost balance (`BALANCE_COST_RATIO`), cutoffs from rigorous tail bounds,
+pairs i <= j and the reciprocal half space with phase tables. Do not change the
+reference scheme's arithmetic or order. `BAANDI_IONIC_FAST`
+(`hamiltonian::set_ionic_fast_override`): `PhaseTables` structure factor in
+`ionic_local*`, built from the full density list so row blocks stay
+bit-identical. Release accuracy check:
+`cargo test --release -p dft-physics --lib ewald::tests -- --include-ignored --nocapture`;
+benches `examples/ewald_bench`, `examples/ionic_bench <UPF>`.

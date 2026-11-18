@@ -337,6 +337,20 @@ impl ScfSession {
     fn make_mixer(&self, mixing: &Mixing) -> Result<Box<dyn MixerHistory>, ScfError> {
         let mixer: Box<dyn MixerHistory> = match *mixing {
             Mixing::Linear { beta } => Box::new(LinearMixer { beta }),
+            // M2-GRID (`BAANDI_M2_MIX=on`, default off): plain Pulay on the M2
+            // path keeps its window on the rank's grid block.
+            Mixing::Pulay { beta, history }
+                if !self.problem.options.hartree_mixing
+                    && crate::mix_dist::requested()
+                    && crate::m2::active().is_some() =>
+            {
+                Box::new(crate::mix_dist::DistributedPulay::new(
+                    crate::m2::active().expect("checked"),
+                    beta,
+                    history,
+                    self.problem.grid.dims().iter().product(),
+                )?)
+            }
             Mixing::Pulay { beta, history } => {
                 let mut p = PulayMixer::new(beta, history)?;
                 if self.problem.options.hartree_mixing {

@@ -251,5 +251,6 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::M2_LAZY_SERIAL), Value::Choice("on"));
     // M2-GRID: distributed full-grid stages of the M2 path, rounding class, off until dev08.
     assert_eq!(value(Id::M2_GRID), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 100);
+    assert_eq!(value(Id::M2_MIX), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 101);
 }

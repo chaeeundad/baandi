@@ -63,14 +63,27 @@ fn ranks_run(
     pp: &dft_upf::Pseudopotential,
     grid: Option<bool>,
 ) -> Vec<ScfResult> {
+    ranks_run_mix(ranks, kind, pp, grid, None)
+}
+
+/// As `ranks_run` with `BAANDI_M2_MIX` (None: default).
+fn ranks_run_mix(
+    ranks: usize,
+    kind: usize,
+    pp: &dft_upf::Pseudopotential,
+    grid: Option<bool>,
+    mix: Option<bool>,
+) -> Vec<ScfResult> {
     simulate(ranks, |comm: &SimRank| {
         parallel::set_m2_override(Some(true));
         dft_engine::set_stop_metric_override(Some(true));
         dft_engine::grid_dist::set_override(grid);
+        dft_engine::mix_dist::set_override(mix);
         let shared: Arc<dyn Collective + Send + Sync> = Arc::new(comm.clone());
         parallel::set_communicator(Some(shared));
         let r = run(kind, pp);
         parallel::set_communicator(None);
+        dft_engine::mix_dist::set_override(None);
         dft_engine::grid_dist::set_override(None);
         dft_engine::set_stop_metric_override(None);
         parallel::set_m2_override(None);
@@ -138,6 +151,58 @@ fn distributed_grid_stages_keep_the_standard_class() {
         }
         assert_eq!(
             bits(&on[0]),
+            bits(&again[0]),
+            "fixed rank count reproducible"
+        );
+    }
+}
+
+/// `BAANDI_M2_MIX=on` (distributed Pulay window on the rank's grid block),
+/// alone and with `BAANDI_M2_GRID=on`: standard class, verification passed,
+/// ranks bit-equal, reproducible, default bit-identical to off.
+#[test]
+fn distributed_mixing_keeps_the_standard_class() {
+    let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let pp = common::potential(4., 1., true, 401);
+    for kind in [0, 1] {
+        let threads = run(kind, &pp);
+        let default = ranks_run_mix(2, kind, &pp, None, None);
+        let off = ranks_run_mix(2, kind, &pp, Some(false), Some(false));
+        assert_eq!(
+            bits(&default[0]),
+            bits(&off[0]),
+            "default path is the off arm"
+        );
+        let c0 = dft_engine::mix_dist::counters();
+        let mix = ranks_run_mix(2, kind, &pp, Some(false), Some(true));
+        let c1 = dft_engine::mix_dist::counters();
+        assert!(
+            c1[0] > c0[0] && c1[2] > c0[2],
+            "distributed mixer ran {c0:?} -> {c1:?}"
+        );
+        let both = ranks_run_mix(2, kind, &pp, Some(true), Some(true));
+        let again = ranks_run_mix(2, kind, &pp, Some(true), Some(true));
+        let both3 = ranks_run_mix(3, kind, &pp, Some(true), Some(true));
+        for (label, arm) in [
+            ("mix P=2", &mix),
+            ("mix+grid P=2", &both),
+            ("mix+grid P=3", &both3),
+        ] {
+            for r in arm.iter() {
+                assert!(r.verification.as_ref().is_some_and(|v| v.passed()));
+                assert_eq!(bits(r), bits(&arm[0]), "ranks agree, {label}");
+            }
+            let d_off = (arm[0].total_hartree() - off[0].total_hartree()).abs();
+            let d_thr = (arm[0].total_hartree() - threads.total_hartree()).abs();
+            println!(
+                "cell {kind} {label}: |dE| vs replicated M2 {d_off:.3e} Ha, vs threads-only {d_thr:.3e} Ha, SCF {} (off {})",
+                arm[0].history.len(),
+                off[0].history.len()
+            );
+            assert!(d_off <= STANDARD_CLASS_HA && d_thr <= STANDARD_CLASS_HA);
+        }
+        assert_eq!(
+            bits(&both[0]),
             bits(&again[0]),
             "fixed rank count reproducible"
         );

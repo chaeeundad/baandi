@@ -733,3 +733,26 @@ Tests: lib `grid_dist::tests` (ranks 1..7, cubic and skewed, odd and even grids,
 PZ and PW), lib `mix_dist::tests` (ranks 1..7 against `PulayMixer`),
 `tests/m2_grid.rs` (production standard SCF, cubic and skewed, P 2/3). dev08
 request `docs/performance/requests/m2-grid.md`; ledger M2-GRID-*.
+
+## Run configuration (RUN-CONFIG, 2026-11-18)
+
+`ScfProblem` owns a `RunConfig` (`run_config()`), taken from the calling
+thread's configuration at construction; `set_run_config(rc)` is the explicit
+per-call form (re-resolves the session switches and the `STOP_METRIC`
+choice; construction-only switches such as `EWALD_CACHE` keep the
+construction's value: construct under `rc.enter()`). Session switches are
+resolved once into `session::SessionSwitches` (`STANDARD_STOP`,
+`STANDARD_RESIDUAL_GUARD`, `IMPORT_CHECK`, `VERIFY_REUSE`, `CERT_SCREEN`,
+`POTENTIAL_REUSE`, `MIX_GROWTH_RESET`, `EIGEN_FACTOR`; formerly per-process
+OnceLocks). `ScfSession::initialize`/`step` enter the problem's configuration
+as the thread scope, so unmigrated deep reads (and pool workers) see it; the
+cutoff ladder builds and runs its coarse problem under the fine problem's
+configuration (`CutoffLadderOptions::from_run`). Run-local counters: stop
+estimates (kept/fft), Ewald hits/computed, problems, session steps,
+verification maps. Per-thread override hooks keep precedence. Test
+`tests/run_config.rs`: two concurrent runs with opposite `STOP_METRIC` in one
+process, no lock, each bit-identical to its solo run, independent counters.
+Phase profile (RUN-REPORT): `RankProfile.wall` (caller-set, carried by
+`gather`), `Report::per_rank` / `closure()` close each rank's exclusive tree on
+that rank; `covered_wall()` (sum of per-bucket maxima) is legacy. Tests: lib
+`profile::closure_tests`, `tests/instrument.rs::per_rank_closure_*`.

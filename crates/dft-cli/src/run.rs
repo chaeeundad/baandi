@@ -394,13 +394,155 @@ fn switches_json() -> Value {
             V::Raw(s) => json!(s),
             V::Present(b) => json!(b),
         };
+        let (path, fallback) = e.note.map_or((None, None), |n| (Some(n.path), n.fallback));
         m.insert(
             e.switch.name.into(),
             json!({"value":value,"source":e.source.as_str(),"default":e.switch.default,
-                "allowed":e.switch.allowed,"meaning":e.switch.meaning}),
+                "allowed":e.switch.allowed,"meaning":e.switch.meaning,
+                "requested":e.requested,"consulted":e.consulted,
+                "path":path,"fallback_reason":fallback}),
         );
     }
     Value::Object(m)
+}
+
+/// RUN-CONFIG: the path a consulted switch actually took, derived from the
+/// engine's counters after the run (process totals: one run per CLI process),
+/// with the reason when it did not act as requested.
+pub(crate) fn note_switch_paths(rc: dft_numerics::switches::RunConfig) {
+    use dft_numerics::switches::{Id, RunCounter};
+    let ranks = crate::parallel::size();
+    let dist = dft_engine::parallel::distributed_solves();
+    let rows = dft_engine::parallel::distributed_rows_solves();
+    if rc.consulted(Id::MPI_M2) {
+        let (path, why) = match (dist, rows) {
+            (0, _) => (
+                "none",
+                Some(if ranks <= 1 {
+                    "one rank (threads path)"
+                } else {
+                    "no distributed eigensolve"
+                }),
+            ),
+            (_, 0) => (
+                "m1_row_block",
+                rc.on(Id::MPI_M2).then_some("M2 not eligible"),
+            ),
+            _ => ("m2_stick_rows", None),
+        };
+        rc.note_path(Id::MPI_M2, path, why);
+    }
+    if rc.consulted(Id::M2_GRID) {
+        let [potential, _, _, _, declined] = dft_engine::grid_dist::counters();
+        let (path, why) = if potential > 0 {
+            (
+                "distributed",
+                (declined > 0).then_some("some maps not eligible (replicated)"),
+            )
+        } else if !rc.on(Id::M2_GRID) {
+            ("replicated", None)
+        } else if rows == 0 {
+            (
+                "replicated",
+                Some("not the M2 path (one rank or row-block path)"),
+            )
+        } else {
+            (
+                "replicated",
+                Some("not eligible (functional, core density, density floor or symmetry)"),
+            )
+        };
+        rc.note_path(Id::M2_GRID, path, why);
+    }
+    if rc.consulted(Id::M2_MIX) {
+        let [_, _, built] = dft_engine::mix_dist::counters();
+        let (path, why) = if built > 0 {
+            ("distributed", None)
+        } else if !rc.on(Id::M2_MIX) {
+            ("replicated", None)
+        } else if rows == 0 {
+            (
+                "replicated",
+                Some("not the M2 path (one rank or row-block path)"),
+            )
+        } else {
+            (
+                "replicated",
+                Some("mixer not eligible (Hartree metric, Kerker or linear)"),
+            )
+        };
+        rc.note_path(Id::M2_MIX, path, why);
+    }
+    if rc.consulted(Id::STOP_METRIC) {
+        let c = rc.counters();
+        let (kept, fft) = (
+            c[RunCounter::StopKept as usize],
+            c[RunCounter::StopFft as usize],
+        );
+        let path = match (kept > 0, fft > 0) {
+            (true, false) => "kept",
+            (false, true) => "fft",
+            (true, true) => "kept+fft",
+            (false, false) => "unused",
+        };
+        let why = (rc.choice(Id::STOP_METRIC) == "kept" && fft > 0)
+            .then_some("some estimates transformed: density clamped or coefficients not kept");
+        rc.note_path(Id::STOP_METRIC, path, why);
+    }
+    if rc.consulted(Id::REUSE_PSI) {
+        let r = dft_engine::gamma_real::reuse_psi_counters();
+        let (path, why) = if r.armed > 0 {
+            ("kept_start", None)
+        } else if rc.on(Id::REUSE_PSI) {
+            (
+                "plain_start",
+                Some("no warm lean real Gamma solve took the kept start"),
+            )
+        } else {
+            ("plain_start", None)
+        };
+        rc.note_path(Id::REUSE_PSI, path, why);
+    }
+    if rc.consulted(Id::EWALD_CACHE) {
+        let hits = rc.counters()[RunCounter::EwaldHits as usize];
+        rc.note_path(
+            Id::EWALD_CACHE,
+            if hits > 0 { "hit" } else { "computed" },
+            None,
+        );
+    }
+}
+
+/// SHA-256 of the running executable (computed once, after the timed run).
+pub(crate) fn binary_identity() -> Value {
+    type Identity = (Option<String>, Option<String>);
+    static ID: std::sync::OnceLock<Identity> = std::sync::OnceLock::new();
+    let (path, sha) = ID.get_or_init(|| {
+        let path = std::env::current_exe().ok();
+        let sha = path
+            .as_ref()
+            .and_then(|p| fs::read(p).ok())
+            .map(|b| sha256(&b));
+        (path.map(|p| p.display().to_string()), sha)
+    });
+    json!({"path":path,"sha256":sha})
+}
+
+/// RUN-REPORT (`run` block of results.json): schema, run ID, exit reason, the
+/// binary identity, the switch agreement hash, the run-local counters and the
+/// completion marker. A results.json without `run.completed = true` is an
+/// interrupted or foreign file (scripts/parse_results.py rejects it).
+pub(crate) fn run_block(rc: dft_numerics::switches::RunConfig, exit_reason: &str) -> Value {
+    let counters: serde_json::Map<_, _> = dft_numerics::switches::RUN_COUNTER_LABELS
+        .iter()
+        .zip(rc.counters())
+        .map(|(k, v)| ((*k).to_string(), json!(v)))
+        .collect();
+    json!({"schema":"run-report-1","run_id":rc.run_id_hex(),"exit_reason":exit_reason,
+        "source_commit":env!("DFT_GIT_COMMIT"),"binary":binary_identity(),
+        "rank":crate::parallel::rank(),"ranks":crate::parallel::size(),
+        "switch_agreement_hash":format!("{:016x}", rc.agreement_hash()),
+        "counters":counters,"completed":true})
 }
 fn energy_json(e: &EnergyAudit) -> Value {
     let mut m = serde_json::Map::new();
@@ -606,6 +748,9 @@ pub fn execute_mode(
     let bytes = fs::read(input).map_err(|e| error(5, format!("{}: {e}", input.display())))?;
     let text = std::str::from_utf8(&bytes).map_err(|e| error(1, e))?;
     let config = Config::parse(text).map_err(|e| error(1, e))?;
+    // RUN-CONFIG: this run's switch configuration (the process object in the
+    // CLI binary; a thread scope for in-process callers with other values).
+    let (run_config, _run_scope) = crate::run_config::for_run(&config).map_err(|e| error(1, e))?;
     if (config.collinear()
         || config
             .finite_temperature()
@@ -878,6 +1023,17 @@ pub fn execute_mode(
                         failure["certified"] = json!(false);
                         failure["standard_threshold_ha"] = json!(p.threshold_ha);
                     }
+                    run_config.freeze_consulted();
+                    note_switch_paths(run_config);
+                    failure["scf"] = options_json(&opts);
+                    failure["run"] = run_block(
+                        run_config,
+                        if matches!(e, ScfError::Diverged { .. }) {
+                            "diverged"
+                        } else {
+                            "not_converged"
+                        },
+                    );
                     write_json(&out.join("results.json"), &failure)?;
                     fs::write(
                         out.join("scf.log"),
@@ -893,6 +1049,9 @@ pub fn execute_mode(
         }
     };
     let r = outcome.result;
+    // RUN-CONFIG: what the computation consulted (result writers below read
+    // more switches for their report blocks; those reads do not count).
+    run_config.freeze_consulted();
     // Everything from here to the results file is output materialization.
     let io_clock = Instant::now();
     let ngrid = r.density.len();
@@ -1420,7 +1579,9 @@ pub fn execute_mode(
     // BREAKTHROUGH-0-INSTRUMENT: exclusive phase profile (BAANDI_PHASE_PROFILE=on)
     // and first-block diagnostic (BAANDI_FIRST_BLOCK=on); both absent otherwise.
     dft_engine::profile::add_io(io_clock.elapsed().as_secs_f64());
-    if let Some(mine) = dft_engine::profile::finish_rank(crate::parallel::rank()) {
+    if let Some(mut mine) = dft_engine::profile::finish_rank(crate::parallel::rank()) {
+        // RUN-REPORT: this rank's own external wall closes its exclusive tree.
+        mine.wall = start.elapsed().as_secs_f64();
         let ranks = match dft_engine::parallel::SharedComm::active() {
             Some(comm) => dft_engine::profile::gather(&comm, &mine).map_err(|e| error(5, e))?,
             None => vec![mine],
@@ -1439,6 +1600,16 @@ pub fn execute_mode(
         console.push_str(&dft_engine::first_block::table(&first_block));
         result["convergence"]["work"]["first_block"] = first_block_json(&first_block);
     }
+    note_switch_paths(run_config);
+    result["scf"]["switches"] = switches_json();
+    result["run"] = run_block(
+        run_config,
+        if outcome.converged {
+            "converged"
+        } else {
+            "not_converged"
+        },
+    );
     write_json(&out.join("results.json"), &result)?;
     Ok(RunReport {
         console,
@@ -1658,12 +1829,24 @@ fn stress_table(s: &dft_engine::stress::StressResult) -> String {
 /// and minimum over ranks of every entry (seconds, then counts).
 pub fn profile_json(report: &dft_engine::profile::Report, run_wall: f64) -> serde_json::Value {
     let covered = report.covered_wall();
+    let closure = report.closure();
     json!({
-        "schema": "phase-profile-1",
+        "schema": "phase-profile-2",
+        "per_rank": report.per_rank.iter().map(|r| json!({
+            "rank": r.rank, "wall_s": r.wall, "covered_s": r.covered, "residual_s": r.residual,
+        })).collect::<Vec<_>>(),
+        "closure": closure.map(|c| json!({
+            "covered_max_s": c.covered_max, "covered_min_s": c.covered_min,
+            "critical_rank": c.critical_rank, "imbalance": c.imbalance,
+            "wall_max_s": c.wall_max, "wall_min_s": c.wall_min,
+            "residual_max_s": c.residual_max, "residual_min_s": c.residual_min,
+            "note": "each rank's exclusive tree is closed on that rank (sum of its own bucket walls against its own external wall); max/min over ranks of the closed figures; the external wall stays the verdict",
+        })),
         "ranks": report.ranks,
         "stage_timers": if dft_numerics::stage_clock::on() { "on" } else { "off" },
         "run_wall_s": run_wall,
         "covered_wall_s": covered,
+        "covered_wall_note": "legacy: sum over buckets of the per-bucket maximum over ranks (maxima may belong to different ranks; not a closed tree, see closure)",
         "remainder_s": run_wall - covered,
         "buckets": report.entries().into_iter().map(|(label, entries)| {
             json!({

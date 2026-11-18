@@ -444,6 +444,9 @@ impl Accum {
 pub struct RankProfile {
     pub rank: usize,
     pub buckets: [Accum; BUCKETS],
+    /// RUN-REPORT: this rank's own external run wall (seconds), set by the
+    /// caller before `gather`; 0 = not reported (no closure residual).
+    pub wall: f64,
 }
 
 struct State {
@@ -747,6 +750,7 @@ pub fn finish_rank(rank: usize) -> Option<RankProfile> {
         let p = RankProfile {
             rank,
             buckets: s.buckets,
+            wall: 0.0,
         };
         *s = State::new();
         p
@@ -766,9 +770,10 @@ pub fn gather<C: Collective + ?Sized>(
     comm: &C,
     mine: &RankProfile,
 ) -> Result<Vec<RankProfile>, String> {
-    let per = 1 + BUCKETS * (NSEC + NCOUNT);
+    let per = 2 + BUCKETS * (NSEC + NCOUNT);
     let mut local = Vec::with_capacity(per);
     local.push(mine.rank as f64);
+    local.push(mine.wall);
     for b in &mine.buckets {
         local.extend_from_slice(&b.seconds);
         local.extend(b.counts.iter().map(|&c| c as f64));
@@ -783,8 +788,9 @@ pub fn gather<C: Collective + ?Sized>(
             let mut p = RankProfile {
                 rank: c[0] as usize,
                 buckets: [Accum::default(); BUCKETS],
+                wall: c[1],
             };
-            let mut at = 1;
+            let mut at = 2;
             for b in &mut p.buckets {
                 b.seconds.copy_from_slice(&c[at..at + NSEC]);
                 at += NSEC;
@@ -844,6 +850,37 @@ pub struct Report {
     pub ranks: usize,
     pub max: [Accum; BUCKETS],
     pub min: [Accum; BUCKETS],
+    /// RUN-REPORT: each rank's exclusive tree closed on that rank alone.
+    pub per_rank: Vec<RankClosure>,
+}
+
+/// One rank's closed exclusive tree: the sum of its own bucket walls
+/// (`covered`, every bucket of the SAME rank) against its own external wall.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RankClosure {
+    pub rank: usize,
+    /// External wall of the rank (None when the caller did not report it).
+    pub wall: Option<f64>,
+    pub covered: f64,
+    /// `wall - covered` (None without a wall): the rank's unattributed time.
+    /// Negative beyond clock granularity means double counting.
+    pub residual: Option<f64>,
+}
+
+/// Closure summary over ranks (each figure from per-rank closed trees, never a
+/// sum of maxima taken on different ranks).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Closure {
+    pub covered_max: f64,
+    pub covered_min: f64,
+    /// Rank with the largest covered time (the critical rank).
+    pub critical_rank: usize,
+    /// (max - min) / max of the covered time, 0 for one rank.
+    pub imbalance: f64,
+    pub wall_max: Option<f64>,
+    pub wall_min: Option<f64>,
+    pub residual_max: Option<f64>,
+    pub residual_min: Option<f64>,
 }
 impl Report {
     pub fn from_ranks(profiles: &[RankProfile]) -> Self {
@@ -874,15 +911,64 @@ impl Report {
                 min[b].counts[i] = it.min().unwrap_or(0);
             }
         }
+        let per_rank = profiles
+            .iter()
+            .map(|p| {
+                let covered: f64 = p.buckets.iter().map(|a| a.seconds[S_WALL]).sum();
+                let wall = (p.wall > 0.0).then_some(p.wall);
+                RankClosure {
+                    rank: p.rank,
+                    wall,
+                    covered,
+                    residual: wall.map(|w| w - covered),
+                }
+            })
+            .collect();
         Self {
             ranks: profiles.len(),
             max,
             min,
+            per_rank,
         }
     }
-    /// Sum of the bucket walls (maximum over ranks per bucket).
+    /// Sum of the bucket walls (maximum over ranks per bucket). Legacy figure:
+    /// the maxima of different buckets can belong to different ranks, so this
+    /// is not a closed tree; use [`Report::closure`].
     pub fn covered_wall(&self) -> f64 {
         self.max.iter().map(|a| a.seconds[S_WALL]).sum()
+    }
+    /// Per-rank closure summary (None without ranks).
+    pub fn closure(&self) -> Option<Closure> {
+        let first = self.per_rank.first()?;
+        let mut c = Closure {
+            covered_max: first.covered,
+            covered_min: first.covered,
+            critical_rank: first.rank,
+            imbalance: 0.0,
+            wall_max: first.wall,
+            wall_min: first.wall,
+            residual_max: first.residual,
+            residual_min: first.residual,
+        };
+        let opt = |a: Option<f64>, b: Option<f64>, f: fn(f64, f64) -> f64| match (a, b) {
+            (Some(a), Some(b)) => Some(f(a, b)),
+            _ => None,
+        };
+        for r in &self.per_rank[1..] {
+            if r.covered > c.covered_max {
+                c.covered_max = r.covered;
+                c.critical_rank = r.rank;
+            }
+            c.covered_min = c.covered_min.min(r.covered);
+            c.wall_max = opt(c.wall_max, r.wall, f64::max);
+            c.wall_min = opt(c.wall_min, r.wall, f64::min);
+            c.residual_max = opt(c.residual_max, r.residual, f64::max);
+            c.residual_min = opt(c.residual_min, r.residual, f64::min);
+        }
+        if c.covered_max > 0.0 {
+            c.imbalance = (c.covered_max - c.covered_min) / c.covered_max;
+        }
+        Some(c)
     }
     /// Compact text table (seconds are the maximum over ranks, `[min]` the
     /// minimum; `run_wall` gives the remainder line).
@@ -1128,4 +1214,68 @@ pub fn context_stage(stage: &'static str) -> ContextGuard {
     let previous = context();
     set_context(Context { stage, ..previous });
     ContextGuard(previous)
+}
+
+#[cfg(test)]
+mod closure_tests {
+    use super::*;
+
+    fn rank(rank: usize, init: f64, fine: f64, wall: f64) -> RankProfile {
+        let mut buckets = [Accum::default(); BUCKETS];
+        buckets[Bucket::Init as usize].seconds[S_WALL] = init;
+        buckets[Bucket::Fine as usize].seconds[S_WALL] = fine;
+        RankProfile {
+            rank,
+            buckets,
+            wall,
+        }
+    }
+
+    /// Rank imbalance with the bucket maxima on different ranks: the legacy
+    /// sum of maxima exceeds every rank's wall (an impossible row), the
+    /// per-rank closure does not.
+    #[test]
+    fn per_rank_closure_differs_from_sum_of_maxima() {
+        let r = Report::from_ranks(&[rank(0, 1.0, 3.0, 4.5), rank(1, 2.0, 1.5, 4.0)]);
+        assert_eq!(r.covered_wall(), 5.0);
+        let c = r.closure().unwrap();
+        assert_eq!(
+            (c.covered_max, c.covered_min, c.critical_rank),
+            (4.0, 3.5, 0)
+        );
+        assert_eq!(c.imbalance, 0.125);
+        assert_eq!((c.wall_max, c.wall_min), (Some(4.5), Some(4.0)));
+        assert_eq!((c.residual_max, c.residual_min), (Some(0.5), Some(0.5)));
+        assert!(r.covered_wall() > c.wall_max.unwrap());
+        assert!(r.per_rank.iter().all(|p| p.residual.unwrap() >= 0.0));
+        // No wall reported: no residual.
+        let r = Report::from_ranks(&[rank(0, 1.0, 1.0, 0.0)]);
+        assert_eq!(r.closure().unwrap().residual_max, None);
+    }
+
+    /// The wall travels with the profile through the real-MPI gather path
+    /// (simulated ranks).
+    #[test]
+    fn gather_carries_the_rank_wall() {
+        let out = dft_mpi::simulate(3, |comm| {
+            let mine = rank(
+                comm.rank(),
+                0.5,
+                comm.rank() as f64,
+                1.0 + comm.rank() as f64,
+            );
+            gather(comm, &mine).unwrap()
+        });
+        for all in out {
+            assert_eq!(all.len(), 3);
+            for (r, p) in all.iter().enumerate() {
+                assert_eq!(p.rank, r);
+                assert_eq!(p.wall, 1.0 + r as f64);
+                assert_eq!(p.buckets[Bucket::Fine as usize].seconds[S_WALL], r as f64);
+            }
+            let c = Report::from_ranks(&all).closure().unwrap();
+            assert_eq!(c.critical_rank, 2);
+            assert_eq!(c.residual_min, Some(0.5));
+        }
+    }
 }

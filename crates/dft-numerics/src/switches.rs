@@ -11,8 +11,15 @@
 //! No other source file reads a `BAANDI_*` variable; a workspace test scans
 //! `crates/*/src` for that. Values are fixed for the process lifetime: setting a
 //! variable after the first accessor call has no effect.
+//!
+//! RUN-CONFIG (2026-11-18): the same table is also settable from the input
+//! file (`[performance]` and `[profile]` tables, key = name without `BAANDI_`
+//! in lower case) with precedence environment > input > default, resolved once
+//! per run into an immutable [`RunConfig`] (see the section comment there).
+use std::cell::Cell;
 use std::ffi::{OsStr, OsString};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 /// How a switch value is parsed.
 #[derive(Debug, Clone, Copy)]
@@ -55,6 +62,8 @@ pub enum Value {
 pub enum Source {
     Default,
     Env,
+    /// The input file's `[performance]` / `[profile]` table (RUN-CONFIG).
+    Input,
     /// The variable was set but not accepted; the call site falls back to the
     /// default value.
     InvalidToDefault,
@@ -68,6 +77,7 @@ impl Source {
         match self {
             Self::Default => "default",
             Self::Env => "env",
+            Self::Input => "input",
             Self::InvalidToDefault => "invalid -> default",
             Self::InvalidToOff => "invalid -> off",
             Self::InvalidToError => "invalid -> error",
@@ -94,6 +104,15 @@ pub struct Entry {
     pub switch: &'static Switch,
     pub value: Value,
     pub source: Source,
+    /// The requested text: the environment value if set, else the input
+    /// file's value (`None`: neither, the default applies).
+    pub requested: Option<String>,
+    /// Whether the switch was read under the configuration (by the time the
+    /// manifest was taken).
+    pub consulted: bool,
+    /// The path the switch actually took and the fallback reason, when the
+    /// code that acted on it (or the result writer) recorded one.
+    pub note: Option<PathNote>,
 }
 
 const ON_OFF: &[&str] = &["on", "off"];
@@ -409,8 +428,102 @@ table! {
 struct Resolved {
     raw: Option<OsString>,
     text: Option<String>,
+    /// The input file's text for this switch (`[performance]` / `[profile]`).
+    input: Option<String>,
     value: Value,
     source: Source,
+}
+
+/// Input-file table a switch belongs to (RUN-CONFIG, 2026-11-18).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Table {
+    /// `[performance]`: numerical and path switches.
+    Performance,
+    /// `[profile]`: measurement switches (clocks, counters, captures); they
+    /// never change the arithmetic.
+    Profile,
+    /// Not settable from the input file (environment only).
+    EnvOnly,
+}
+impl Table {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Performance => "performance",
+            Self::Profile => "profile",
+            Self::EnvOnly => "environment only",
+        }
+    }
+}
+
+/// Table of a switch in the input file.
+pub fn table_of(id: Id) -> Table {
+    use Id::*;
+    match id {
+        PHASE_PROFILE | STAGE_TIMERS | DAVIDSON_STAGES | SNAPSHOT_DIR | PHASE_WAIT
+        | FIRST_BLOCK | DGEMM_TIMERS => Table::Profile,
+        // Overrides of input-file values (`scf.cutoff_ladder`, the relaxation
+        // extrapolation) and the pseudopotential cache location.
+        CUTOFF_LADDER | RELAX_EXTRAPOLATION | PSEUDO_DIR => Table::EnvOnly,
+        _ => Table::Performance,
+    }
+}
+
+/// Input-file key of a switch: the registry name without `BAANDI_`, lower case
+/// (`BAANDI_M2_GRID` -> `m2_grid`).
+pub fn input_key(id: Id) -> String {
+    switch(id)
+        .name
+        .trim_start_matches("BAANDI_")
+        .to_ascii_lowercase()
+}
+
+/// Whether a switch takes part in the cross-rank agreement hash: every switch
+/// except locations and the exit-time dgemm report (a rank may differ there
+/// without changing what the ranks compute or which collectives they enter).
+pub fn in_agreement(id: Id) -> bool {
+    !matches!(id, Id::PSEUDO_DIR | Id::SNAPSHOT_DIR | Id::DGEMM_TIMERS)
+}
+
+/// Parse an input-file value. Strict: a value the environment rule would
+/// replace by the default is an input error here.
+fn resolve_input(switch: &Switch, text: &str) -> Result<Value, String> {
+    let bad = || {
+        format!(
+            "[{}] {} = {text:?}: allowed values {}",
+            table_of(switch.id).as_str(),
+            input_key(switch.id),
+            switch.allowed
+        )
+    };
+    match switch.kind {
+        Kind::Choice { allowed, .. } => allowed
+            .iter()
+            .find(|a| **a == text)
+            .map(|a| Value::Choice(a))
+            .ok_or_else(bad),
+        Kind::Number { valid, .. } => text
+            .parse::<f64>()
+            .ok()
+            .filter(|x| valid(*x))
+            .map(|x| Value::Number(Some(x)))
+            .ok_or_else(bad),
+        Kind::Ortho => match resolve(switch, Some(OsStr::new(text))) {
+            (v, Source::Env) => Ok(v),
+            _ => Err(bad()),
+        },
+        Kind::Override { valid } => valid(text)
+            .then(|| Value::Raw(Some(text.to_string())))
+            .ok_or_else(bad),
+        Kind::Presence => match text {
+            "on" => Ok(Value::Present(true)),
+            "off" => Ok(Value::Present(false)),
+            _ => Err(bad()),
+        },
+        Kind::Path => std::path::Path::new(text)
+            .is_absolute()
+            .then(|| Value::Raw(Some(text.to_string())))
+            .ok_or_else(bad),
+    }
 }
 
 /// Parse one switch from its raw environment value (`None` = unset). Pure; the
@@ -492,28 +605,461 @@ pub fn resolve(switch: &Switch, raw: Option<&OsStr>) -> (Value, Source) {
     }
 }
 
-fn state() -> &'static [Resolved] {
-    static STATE: OnceLock<Vec<Resolved>> = OnceLock::new();
-    STATE.get_or_init(|| {
+// ---------------------------------------------------------------------------
+// Run configuration (RUN-CONFIG, 2026-11-18).
+//
+// A `RunConfig` is the immutable resolution of every switch for one run:
+// environment > input file (`[performance]` / `[profile]` tables) > registry
+// default. It is leaked once (`&'static`, Copy, no reference count), so values
+// and texts can be handed out with the `'static` lifetime the legacy accessors
+// return. Besides the values it carries the run's mutable bookkeeping, all
+// cheap relaxed atomics or a lock taken outside hot loops: which switches were
+// consulted, the path a switch actually took and its fallback reason, the run
+// ID and the run-local counters.
+//
+// The legacy free functions (`choice`, `on`, ...) read the CURRENT
+// configuration: the thread's scope (`RunConfig::enter`, propagated by
+// `pool::WorkerPool` into its workers) if any, else the process configuration
+// (`install_process`, or the environment alone at the first read). New code
+// resolves its switches from an explicit `RunConfig` at session or plan
+// creation and never looks one up inside a hot loop.
+// ---------------------------------------------------------------------------
+
+/// Run-local counters (cheap relaxed atomics in the run's configuration, so
+/// two runs in one process count independently). Process-global counters of
+/// the same events are kept as before for the existing result blocks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunCounter {
+    /// Stop-rule Coulomb estimates from kept Fourier coefficients.
+    StopKept = 0,
+    /// Stop-rule Coulomb estimates that transformed the residual.
+    StopFft = 1,
+    /// Ewald energies reused from the previous construction.
+    EwaldHits = 2,
+    /// Ewald energies computed.
+    EwaldComputed = 3,
+    /// Problems constructed under this configuration.
+    Problems = 4,
+    /// SCF session steps.
+    SessionSteps = 5,
+    /// Fixed-point verification maps (passed or failed).
+    Verifications = 6,
+}
+pub const RUN_COUNTERS: usize = 7;
+pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
+    "stop_kept",
+    "stop_fft",
+    "ewald_hits",
+    "ewald_computed",
+    "problems",
+    "session_steps",
+    "verifications",
+];
+
+/// The path a consulted switch actually took (recorded by the code that acted
+/// on it, or by the result writer from its counters).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathNote {
+    pub path: String,
+    pub fallback: Option<String>,
+}
+
+pub struct RunState {
+    run_id: AtomicU64,
+    entries: Box<[Resolved]>,
+    consulted: Box<[AtomicBool]>,
+    /// The consulted set at the end of the computation (`freeze_consulted`),
+    /// before result writers read switches for their report blocks.
+    frozen: OnceLock<Box<[bool]>>,
+    notes: Mutex<Vec<Option<PathNote>>>,
+    counters: [AtomicU64; RUN_COUNTERS],
+}
+impl std::fmt::Debug for RunState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RunState")
+            .field("run_id", &self.run_id.load(Ordering::Relaxed))
+            .finish_non_exhaustive()
+    }
+}
+
+/// Immutable switch values of one run (see the section comment).
+#[derive(Clone, Copy, Debug)]
+pub struct RunConfig(&'static RunState);
+
+impl PartialEq for RunConfig {
+    /// Same configuration object (not merely equal values: see
+    /// [`RunConfig::agreement_hash`] for value equality).
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self.0, other.0)
+    }
+}
+
+fn fresh_run_id() -> u64 {
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    // splitmix64 of time, pid and a sequence number: distinct per process run
+    // and per configuration within a process.
+    let mut z = nanos ^ (u64::from(std::process::id()) << 32) ^ seq.wrapping_mul(0x9e37);
+    z = z.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
+}
+
+impl RunConfig {
+    /// Resolve every switch from `env` (a variable lookup; the process
+    /// environment for production runs) and the input file's switch values
+    /// (`(table, key, text)`), with precedence environment > input > default.
+    /// Environment values keep the legacy rules exactly (an invalid value falls
+    /// back as before); input values are strict: an unknown key, a key in the
+    /// wrong table or a value outside the allowed set is an error.
+    pub fn resolve_with(
+        env: impl Fn(&str) -> Option<OsString>,
+        input: &[(Table, String, String)],
+    ) -> Result<Self, String> {
+        let mut texts: Vec<Option<String>> = vec![None; TABLE.len()];
+        for (table, key, text) in input {
+            let Some(s) = TABLE.iter().find(|s| input_key(s.id) == key.as_str()) else {
+                return Err(format!(
+                    "[{}] {key}: unknown switch (keys are the registry names without BAANDI_, lower case)",
+                    table.as_str()
+                ));
+            };
+            let home = table_of(s.id);
+            if home != *table {
+                return Err(match home {
+                    Table::EnvOnly => format!(
+                        "[{}] {key}: {} is not settable from the input file (environment only)",
+                        table.as_str(),
+                        s.name
+                    ),
+                    _ => format!(
+                        "[{}] {key}: belongs to the [{}] table",
+                        table.as_str(),
+                        home.as_str()
+                    ),
+                });
+            }
+            if texts[s.id as usize].replace(text.clone()).is_some() {
+                return Err(format!("[{}] {key}: given twice", table.as_str()));
+            }
+        }
+        let mut entries = Vec::with_capacity(TABLE.len());
+        for (s, input) in TABLE.iter().zip(texts) {
+            let raw = env(s.name);
+            let text = raw.as_ref().and_then(|r| r.to_str()).map(str::to_string);
+            let (value, source) = match (&raw, &input) {
+                (None, Some(t)) => (resolve_input(s, t)?, Source::Input),
+                _ => resolve(s, raw.as_deref()),
+            };
+            entries.push(Resolved {
+                raw,
+                text,
+                input,
+                value,
+                source,
+            });
+        }
+        Ok(Self::leak(entries))
+    }
+
+    /// The process environment and the input file's values.
+    pub fn resolve_env_and_input(input: &[(Table, String, String)]) -> Result<Self, String> {
+        Self::resolve_with(|name| std::env::var_os(name), input)
+    }
+
+    /// Registry defaults and the given input values only (no environment):
+    /// for tests and in-process comparisons that must not see the caller's
+    /// environment.
+    pub fn from_input(input: &[(Table, String, String)]) -> Result<Self, String> {
+        Self::resolve_with(|_| None, input)
+    }
+
+    /// `(key, text)` pairs of the `[performance]` table plus `[profile]` ones,
+    /// convenience for tests: `RunConfig::from_pairs(&[("stop_metric", "fft")])`
+    /// (the table is taken from the registry).
+    pub fn from_pairs(pairs: &[(&str, &str)]) -> Result<Self, String> {
+        let input: Vec<_> = pairs
+            .iter()
+            .map(|(k, v)| {
+                let table = TABLE
+                    .iter()
+                    .find(|s| input_key(s.id) == *k)
+                    .map_or(Table::Performance, |s| table_of(s.id));
+                (table, (*k).to_string(), (*v).to_string())
+            })
+            .collect();
+        Self::from_input(&input)
+    }
+
+    fn leak(entries: Vec<Resolved>) -> Self {
+        let consulted = (0..entries.len()).map(|_| AtomicBool::new(false)).collect();
+        let notes = Mutex::new(vec![None; entries.len()]);
+        Self(Box::leak(Box::new(RunState {
+            run_id: AtomicU64::new(fresh_run_id()),
+            entries: entries.into_boxed_slice(),
+            consulted,
+            frozen: OnceLock::new(),
+            notes,
+            counters: [const { AtomicU64::new(0) }; RUN_COUNTERS],
+        })))
+    }
+
+    /// The configuration the calling thread sees: its scope, else the process
+    /// configuration.
+    pub fn current() -> Self {
+        SCOPE.with(Cell::get).unwrap_or_else(process)
+    }
+
+    /// The thread's scope only (`None` outside [`RunConfig::enter`]).
+    pub fn scoped() -> Option<Self> {
+        SCOPE.with(Cell::get)
+    }
+
+    /// Make this the configuration of the calling thread until the guard is
+    /// dropped (nested scopes restore the previous one). Legacy accessors on
+    /// this thread, and on `WorkerPool` workers running its parallel regions,
+    /// read this configuration.
+    #[must_use]
+    pub fn enter(self) -> ScopeGuard {
+        ScopeGuard(SCOPE.with(|s| s.replace(Some(self))))
+    }
+
+    /// Run `f` with `scope` as the thread's configuration (`None`: unchanged).
+    /// The worker pool wraps its tasks with it.
+    pub fn with_scope<R>(scope: Option<Self>, f: impl FnOnce() -> R) -> R {
+        match scope {
+            Some(c) => {
+                let _g = c.enter();
+                f()
+            }
+            None => f(),
+        }
+    }
+
+    fn get(self, id: Id) -> &'static Resolved {
+        let i = id as usize;
+        let c = &self.0.consulted[i];
+        if !c.load(Ordering::Relaxed) {
+            c.store(true, Ordering::Relaxed);
+        }
+        &self.0.entries[i]
+    }
+
+    /// Effective value of a choice switch.
+    pub fn choice(self, id: Id) -> &'static str {
+        match self.get(id).value {
+            Value::Choice(v) => v,
+            _ => panic!("{} is not a choice switch", switch(id).name),
+        }
+    }
+    /// `true` when the effective value of an on/off switch is `on`.
+    pub fn on(self, id: Id) -> bool {
+        self.choice(id) == "on"
+    }
+    /// Effective value of a number switch.
+    pub fn number(self, id: Id) -> Option<f64> {
+        match self.get(id).value {
+            Value::Number(v) => v,
+            _ => panic!("{} is not a number switch", switch(id).name),
+        }
+    }
+    /// The environment text, else the input text (`None` when neither is set).
+    pub fn text(self, id: Id) -> Option<&'static str> {
+        let r = self.get(id);
+        if r.raw.is_some() {
+            r.text.as_deref()
+        } else {
+            r.input.as_deref()
+        }
+    }
+    /// The variable's raw environment value (`None` when unset).
+    pub fn os(self, id: Id) -> Option<&'static OsStr> {
+        self.get(id).raw.as_deref()
+    }
+    /// Whether the switch was set (environment, any value; input file: a
+    /// presence switch set to `on`, any other switch given).
+    pub fn present(self, id: Id) -> bool {
+        let r = self.get(id);
+        r.raw.is_some()
+            || match (&r.input, &r.value) {
+                (Some(_), Value::Present(p)) => *p,
+                (Some(_), _) => true,
+                (None, _) => false,
+            }
+    }
+    /// Where the effective value came from.
+    pub fn source(self, id: Id) -> Source {
+        self.0.entries[id as usize].source
+    }
+    /// Whether the switch was read under this configuration.
+    pub fn consulted(self, id: Id) -> bool {
+        match self.0.frozen.get() {
+            Some(f) => f[id as usize],
+            None => self.0.consulted[id as usize].load(Ordering::Relaxed),
+        }
+    }
+    /// Freeze the consulted set (the first call wins): the computation is
+    /// over, later reads (result writers reporting a switch) do not count.
+    pub fn freeze_consulted(self) {
+        let _ = self.0.frozen.get_or_init(|| {
+            self.0
+                .consulted
+                .iter()
+                .map(|c| c.load(Ordering::Relaxed))
+                .collect()
+        });
+    }
+
+    /// Record the path a switch actually took and, when it did not act as
+    /// requested, why (the last note wins). Outside hot loops only.
+    pub fn note_path(self, id: Id, path: &str, fallback: Option<&str>) {
+        if let Ok(mut n) = self.0.notes.lock() {
+            n[id as usize] = Some(PathNote {
+                path: path.to_string(),
+                fallback: fallback.map(str::to_string),
+            });
+        }
+    }
+    pub fn path_note(self, id: Id) -> Option<PathNote> {
+        self.0
+            .notes
+            .lock()
+            .ok()
+            .and_then(|n| n[id as usize].clone())
+    }
+
+    /// Add to a run-local counter.
+    pub fn count(self, c: RunCounter, n: u64) {
+        self.0.counters[c as usize].fetch_add(n, Ordering::Relaxed);
+    }
+    /// Run-local counters in [`RUN_COUNTER_LABELS`] order.
+    pub fn counters(self) -> [u64; RUN_COUNTERS] {
+        std::array::from_fn(|i| self.0.counters[i].load(Ordering::Relaxed))
+    }
+
+    /// Run ID (random per configuration; MPI runs adopt rank 0's value).
+    pub fn run_id(self) -> u64 {
+        self.0.run_id.load(Ordering::Relaxed)
+    }
+    pub fn run_id_hex(self) -> String {
+        format!("{:016x}", self.run_id())
+    }
+    /// Adopt another run ID (MPI: rank 0's, after the agreement exchange).
+    pub fn adopt_run_id(self, id: u64) {
+        self.0.run_id.store(id, Ordering::Relaxed);
+    }
+
+    /// FNV-1a hash of the effective values of every switch in the agreement
+    /// set ([`in_agreement`]), in table order. Equal on every rank of a run
+    /// whose ranks will take the same branches and enter the same collectives.
+    pub fn agreement_hash(self) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut eat = |bytes: &[u8]| {
+            for b in bytes {
+                h ^= u64::from(*b);
+                h = h.wrapping_mul(0x0100_0000_01b3);
+            }
+        };
+        for (s, r) in TABLE.iter().zip(self.0.entries.iter()) {
+            if !in_agreement(s.id) {
+                continue;
+            }
+            eat(s.name.as_bytes());
+            eat(b"=");
+            match &r.value {
+                Value::Choice(c) => eat(c.as_bytes()),
+                Value::Number(Some(x)) => eat(&x.to_bits().to_le_bytes()),
+                Value::Number(None) => eat(b"none"),
+                Value::Raw(Some(t)) => eat(t.as_bytes()),
+                Value::Raw(None) => eat(b"unset"),
+                Value::Present(p) => eat(if *p { b"1" } else { b"0" }),
+            }
+            eat(b";");
+        }
+        h
+    }
+
+    /// The whole table with effective values, sources and the run's notes.
+    pub fn manifest(self) -> Vec<Entry> {
+        let notes = self
+            .0
+            .notes
+            .lock()
+            .map(|n| n.clone())
+            .unwrap_or_else(|_| vec![None; TABLE.len()]);
         TABLE
             .iter()
-            .map(|s| {
-                let raw = std::env::var_os(s.name);
-                let (value, source) = resolve(s, raw.as_deref());
-                let text = raw.as_ref().and_then(|r| r.to_str()).map(str::to_string);
-                Resolved {
-                    raw,
-                    text,
-                    value,
-                    source,
-                }
+            .zip(self.0.entries.iter())
+            .zip(notes)
+            .enumerate()
+            .map(|(i, ((s, r), note))| Entry {
+                switch: s,
+                value: r.value.clone(),
+                source: r.source,
+                requested: if r.raw.is_some() {
+                    Some(
+                        r.text
+                            .clone()
+                            .unwrap_or_else(|| "<non-unicode>".to_string()),
+                    )
+                } else {
+                    r.input.clone()
+                },
+                consulted: self.consulted(TABLE[i].id),
+                note,
             })
             .collect()
+    }
+}
+
+/// Restores the previous thread scope on drop.
+pub struct ScopeGuard(Option<RunConfig>);
+impl Drop for ScopeGuard {
+    fn drop(&mut self) {
+        let previous = self.0.take();
+        SCOPE.with(|s| s.set(previous));
+    }
+}
+
+thread_local! {
+    static SCOPE: Cell<Option<RunConfig>> = const { Cell::new(None) };
+}
+static PROCESS: OnceLock<RunConfig> = OnceLock::new();
+
+fn process() -> RunConfig {
+    *PROCESS.get_or_init(|| {
+        RunConfig::resolve_with(|name| std::env::var_os(name), &[])
+            .expect("the environment alone always resolves")
     })
 }
 
-fn get(id: Id) -> &'static Resolved {
-    &state()[id as usize]
+/// Make `config` the process configuration (the CLI does this once, before
+/// the first switch is read, with the input file's tables). If the process
+/// configuration exists already (a switch was read first, or another run of
+/// this process installed one), the call succeeds only when the effective
+/// values agree ([`RunConfig::agreement_hash`]); otherwise it reports the
+/// conflict and the caller must use a thread scope.
+pub fn install_process(config: RunConfig) -> Result<(), String> {
+    let mut installed = false;
+    let current = *PROCESS.get_or_init(|| {
+        installed = true;
+        config
+    });
+    if installed || current.agreement_hash() == config.agreement_hash() {
+        Ok(())
+    } else {
+        Err("switches were resolved for this process before the input file's [performance]/[profile] tables; the run uses a thread-scoped configuration".to_string())
+    }
+}
+
+/// The process configuration (resolving it from the environment if nothing
+/// was installed).
+pub fn process_config() -> RunConfig {
+    process()
 }
 
 /// Table entry of a switch.
@@ -521,12 +1067,9 @@ pub fn switch(id: Id) -> &'static Switch {
     &TABLE[id as usize]
 }
 
-/// Effective value of a choice switch.
+/// Effective value of a choice switch (current configuration).
 pub fn choice(id: Id) -> &'static str {
-    match get(id).value {
-        Value::Choice(v) => v,
-        _ => panic!("{} is not a choice switch", switch(id).name),
-    }
+    RunConfig::current().choice(id)
 }
 
 /// `true` when the effective value of an on/off switch is `on`.
@@ -537,39 +1080,30 @@ pub fn on(id: Id) -> bool {
 /// Effective value of a number switch (`BAANDI_ORTHO`: DGKS ratio, `None` =
 /// two passes always).
 pub fn number(id: Id) -> Option<f64> {
-    match get(id).value {
-        Value::Number(v) => v,
-        _ => panic!("{} is not a number switch", switch(id).name),
-    }
+    RunConfig::current().number(id)
 }
 
-/// The variable's text as read at startup (`None` when unset or not Unicode).
-/// For override switches and legacy reports of the raw value.
+/// The variable's text as read at startup, else the input file's text (`None`
+/// when neither is set or the variable is not Unicode). For override switches
+/// and legacy reports of the raw value.
 pub fn text(id: Id) -> Option<&'static str> {
-    get(id).text.as_deref()
+    RunConfig::current().text(id)
 }
 
 /// The variable's raw value as read at startup (`None` when unset).
 pub fn os(id: Id) -> Option<&'static OsStr> {
-    get(id).raw.as_deref()
+    RunConfig::current().os(id)
 }
 
-/// Whether the variable was set (any value).
+/// Whether the switch was set (environment or input file).
 pub fn present(id: Id) -> bool {
-    get(id).raw.is_some()
+    RunConfig::current().present(id)
 }
 
-/// The whole table with effective values and sources, in table order.
+/// The whole table with effective values and sources, in table order
+/// (current configuration).
 pub fn manifest() -> Vec<Entry> {
-    TABLE
-        .iter()
-        .zip(state())
-        .map(|(s, r)| Entry {
-            switch: s,
-            value: r.value.clone(),
-            source: r.source,
-        })
-        .collect()
+    RunConfig::current().manifest()
 }
 
 #[cfg(test)]
@@ -739,6 +1273,141 @@ mod tests {
         assert_eq!(
             eval(Id::M2_FFT, Some("fftw")),
             (Value::Choice("rust"), InvalidToDefault)
+        );
+    }
+
+    fn env_of(pairs: &'static [(&'static str, &'static str)]) -> impl Fn(&str) -> Option<OsString> {
+        move |name| {
+            pairs
+                .iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| OsString::from(v))
+        }
+    }
+    fn perf(key: &str, value: &str) -> (Table, String, String) {
+        (Table::Performance, key.to_string(), value.to_string())
+    }
+
+    #[test]
+    fn run_config_precedence_env_over_input_over_default() {
+        let input = [perf("m2_grid", "off"), perf("eigen_factor", "0.05")];
+        let c = RunConfig::resolve_with(env_of(&[("BAANDI_M2_GRID", "on")]), &input).unwrap();
+        assert_eq!(c.choice(Id::M2_GRID), "on");
+        assert_eq!(c.source(Id::M2_GRID), Source::Env);
+        assert_eq!(c.number(Id::EIGEN_FACTOR), Some(0.05));
+        assert_eq!(c.source(Id::EIGEN_FACTOR), Source::Input);
+        assert_eq!(c.text(Id::EIGEN_FACTOR), Some("0.05"));
+        assert_eq!(c.choice(Id::B6), "on");
+        assert_eq!(c.source(Id::B6), Source::Default);
+        // Legacy environment semantics are unchanged even with an input value.
+        let c = RunConfig::resolve_with(env_of(&[("BAANDI_M2_GRID", "yes")]), &input).unwrap();
+        assert_eq!(c.choice(Id::M2_GRID), "on");
+        assert_eq!(c.source(Id::M2_GRID), Source::InvalidToDefault);
+        let m = c.manifest();
+        let e = &m[Id::M2_GRID as usize];
+        assert_eq!(e.requested.as_deref(), Some("yes"));
+        assert!(e.consulted);
+        assert!(!m[Id::B5 as usize].consulted);
+    }
+
+    #[test]
+    fn run_config_input_is_strict() {
+        let err = |input: &[(Table, String, String)]| RunConfig::from_input(input).unwrap_err();
+        assert!(err(&[perf("m2_grid", "maybe")]).contains("allowed values on, off"));
+        assert!(err(&[perf("no_such", "on")]).contains("unknown switch"));
+        assert!(err(&[perf("phase_profile", "on")]).contains("belongs to the [profile] table"));
+        assert!(err(&[perf("pseudo_dir", "/x")]).contains("environment only"));
+        assert!(err(&[perf("b6", "on"), perf("b6", "off")]).contains("given twice"));
+        assert!(err(&[perf("buffer_tol", "1e-6")]).contains("allowed values"));
+        let c = RunConfig::from_input(&[
+            (Table::Profile, "phase_profile".into(), "on".into()),
+            (Table::Profile, "dgemm_timers".into(), "on".into()),
+            perf("ortho", "dgks:0.5"),
+        ])
+        .unwrap();
+        assert!(c.on(Id::PHASE_PROFILE));
+        assert!(c.present(Id::DGEMM_TIMERS));
+        assert_eq!(c.number(Id::ORTHO), Some(0.5));
+        let off = RunConfig::from_pairs(&[("dgemm_timers", "off")]).unwrap();
+        assert!(!off.present(Id::DGEMM_TIMERS));
+    }
+
+    #[test]
+    fn run_config_scopes_are_per_thread_and_follow_the_pool() {
+        let a = RunConfig::from_pairs(&[("stop_metric", "fft")]).unwrap();
+        let b = RunConfig::from_pairs(&[("stop_metric", "kept")]).unwrap();
+        let pool = crate::pool::WorkerPool::new(3).unwrap();
+        let run = |c: RunConfig, want: &'static str| {
+            let pool = pool.clone();
+            std::thread::spawn(move || {
+                let _g = c.enter();
+                for _ in 0..200 {
+                    assert_eq!(choice(Id::STOP_METRIC), want);
+                    let (l, r) = pool.install(|| {
+                        crate::pool::WorkerPool::join(
+                            || choice(Id::STOP_METRIC),
+                            || choice(Id::STOP_METRIC),
+                        )
+                    });
+                    assert_eq!((l, r), (want, want));
+                    c.count(RunCounter::SessionSteps, 1);
+                }
+            })
+        };
+        let (ta, tb) = (run(a, "fft"), run(b, "kept"));
+        ta.join().unwrap();
+        tb.join().unwrap();
+        assert_eq!(a.counters()[RunCounter::SessionSteps as usize], 200);
+        assert_eq!(b.counters()[RunCounter::SessionSteps as usize], 200);
+        assert!(RunConfig::scoped().is_none());
+        assert_ne!(a.run_id(), b.run_id());
+        {
+            let _outer = a.enter();
+            {
+                let _inner = b.enter();
+                assert_eq!(RunConfig::current(), b);
+            }
+            assert_eq!(RunConfig::current(), a);
+        }
+        assert!(RunConfig::scoped().is_none());
+    }
+
+    #[test]
+    fn agreement_hash_tracks_effective_values_only() {
+        let d1 = RunConfig::from_input(&[]).unwrap();
+        let d2 = RunConfig::from_pairs(&[("m2_grid", "on")]).unwrap();
+        assert_eq!(
+            d1.agreement_hash(),
+            d2.agreement_hash(),
+            "on is the default"
+        );
+        let x = RunConfig::from_pairs(&[("m2_grid", "off")]).unwrap();
+        assert_ne!(d1.agreement_hash(), x.agreement_hash());
+        let s = RunConfig::from_pairs(&[("snapshot_dir", "/tmp/x")]).unwrap();
+        assert_eq!(
+            d1.agreement_hash(),
+            s.agreement_hash(),
+            "locations excluded"
+        );
+        let p = RunConfig::from_pairs(&[("phase_wait", "on")]).unwrap();
+        assert_ne!(
+            d1.agreement_hash(),
+            p.agreement_hash(),
+            "collective-gating profile switches are included"
+        );
+    }
+
+    #[test]
+    fn path_notes_are_reported_in_the_manifest() {
+        let c = RunConfig::from_pairs(&[("m2_grid", "on")]).unwrap();
+        c.note_path(Id::M2_GRID, "replicated", Some("one rank"));
+        let e = &c.manifest()[Id::M2_GRID as usize];
+        assert_eq!(
+            e.note,
+            Some(PathNote {
+                path: "replicated".into(),
+                fallback: Some("one rank".into())
+            })
         );
     }
 }

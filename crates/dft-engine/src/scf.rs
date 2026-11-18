@@ -619,6 +619,11 @@ pub struct ScfProblem {
     #[cfg(test)]
     pub(crate) force_verify_reuse: Option<session::VerifyReuse>,
     force_model: crate::force_identity::ModelDescription,
+    /// RUN-CONFIG: the run's switch configuration (the calling thread's at
+    /// construction; `set_run_config` replaces it) and the session switches
+    /// resolved from it once.
+    run: dft_numerics::switches::RunConfig,
+    pub(crate) sw: session::SessionSwitches,
     atoms: Vec<Atom>,
     symmetry: Option<dft_physics::symmetry::DensitySymmetrizer>,
     coulomb: Option<CoulombMetric>,
@@ -765,10 +770,10 @@ thread_local! {
 pub fn set_stop_metric_override(kept: Option<bool>) {
     STOP_METRIC_OVERRIDE.with(|o| o.set(kept));
 }
-fn stop_metric_kept() -> bool {
-    STOP_METRIC_OVERRIDE.with(|o| o.get()).unwrap_or_else(|| {
-        dft_numerics::switches::choice(dft_numerics::switches::Id::STOP_METRIC) == "kept"
-    })
+fn stop_metric_kept(run: dft_numerics::switches::RunConfig) -> bool {
+    STOP_METRIC_OVERRIDE
+        .with(|o| o.get())
+        .unwrap_or_else(|| run.choice(dft_numerics::switches::Id::STOP_METRIC) == "kept")
 }
 fn unclamped(n: &Array3<f64>) -> bool {
     n.iter().all(|v| v.to_bits() == v.max(0.0).to_bits())
@@ -943,13 +948,19 @@ fn ewald_evaluate(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfEr
     Ok(plan.finish_sums(state[0], state[1])?)
 }
 
-fn ewald_energy(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfError> {
+fn ewald_energy(
+    cell: &Cell,
+    ions: &[Ion],
+    run: dft_numerics::switches::RunConfig,
+) -> Result<ewald::EwaldEnergy, ScfError> {
+    use dft_numerics::switches::RunCounter;
     use std::sync::atomic::Ordering::Relaxed;
     let on = EWALD_CACHE_OVERRIDE
         .with(|o| o.get())
-        .unwrap_or_else(|| dft_numerics::switches::on(dft_numerics::switches::Id::EWALD_CACHE));
+        .unwrap_or_else(|| run.on(dft_numerics::switches::Id::EWALD_CACHE));
     if !on {
         EWALD_CACHE_COUNTS[1].fetch_add(1, Relaxed);
+        run.count(RunCounter::EwaldComputed, 1);
         return ewald_evaluate(cell, ions);
     }
     let mut key = Vec::with_capacity(10 + 4 * ions.len());
@@ -974,9 +985,11 @@ fn ewald_energy(cell: &Cell, ions: &[Ion]) -> Result<ewald::EwaldEnergy, ScfErro
     });
     if let Some(e) = hit {
         EWALD_CACHE_COUNTS[0].fetch_add(1, Relaxed);
+        run.count(RunCounter::EwaldHits, 1);
         return Ok(e);
     }
     EWALD_CACHE_COUNTS[1].fetch_add(1, Relaxed);
+    run.count(RunCounter::EwaldComputed, 1);
     let e = ewald_evaluate(cell, ions)?;
     EWALD_LAST.with(|l| *l.borrow_mut() = Some((key, e.clone())));
     Ok(e)
@@ -1201,6 +1214,10 @@ impl ScfProblem {
         minimum_gap: Option<f64>,
         channel: Option<usize>,
     ) -> Result<Self, ScfError> {
+        // RUN-CONFIG: construction resolves its switches from the calling
+        // thread's configuration (scope or process) once.
+        let run = dft_numerics::switches::RunConfig::current();
+        run.count(dft_numerics::switches::RunCounter::Problems, 1);
         if options.pw92_prefactor == crate::Pw92Prefactor::Original
             && (options.functional != Functional::Pbe || channel.is_some())
         {
@@ -1558,7 +1575,7 @@ impl ScfProblem {
             .collect::<Result<Vec<_>, _>>()?;
         crate::profile::init_part(crate::profile::InitPart::Rest, part);
         let part = crate::profile::clock();
-        let ewald = ewald_energy(cell, &ions)?;
+        let ewald = ewald_energy(cell, &ions, run)?;
         crate::profile::init_part(crate::profile::InitPart::Ewald, part);
         let part = crate::profile::clock();
         let occupations = (0..bands)
@@ -1600,8 +1617,10 @@ impl ScfProblem {
             atomic_species,
             atomic_start,
             force_model,
-            stop_kept: (coulomb.is_some() && stop_metric_kept())
+            stop_kept: (coulomb.is_some() && stop_metric_kept(run))
                 .then(|| StopKept::new(grid.dims())),
+            run,
+            sw: session::SessionSwitches::resolve(run),
             grid_dist: None,
             coulomb,
             cell: cell.clone(),
@@ -1816,15 +1835,21 @@ impl ScfProblem {
             && let Some(plan) = self.grid_dist.as_mut().filter(|p| p.stop_ready())
         {
             STOP_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.run
+                .count(dft_numerics::switches::RunCounter::StopKept, 1);
             return plan.stop_error(&comm).map(Some);
         }
         if let Some(kept) = self.stop_kept.as_ref().filter(|k| k.matches(input, output)) {
             STOP_KEPT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.run
+                .count(dft_numerics::switches::RunCounter::StopKept, 1);
             return metric
                 .error_reciprocal(&kept.input_hat, &kept.output_hat)
                 .map(Some);
         }
         STOP_FFT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.run
+            .count(dft_numerics::switches::RunCounter::StopFft, 1);
         metric.error(input, output).map(Some)
     }
 
@@ -3351,6 +3376,26 @@ impl ScfProblem {
             nonlocal_from_identity: identity,
             advance,
         })
+    }
+    /// RUN-CONFIG: the run configuration of this problem.
+    pub fn run_config(&self) -> dft_numerics::switches::RunConfig {
+        self.run
+    }
+    /// RUN-CONFIG: run this problem under `run` (the explicit per-call way;
+    /// construction took the calling thread's configuration). The session
+    /// switches and the construction-time choices that depend on run switches
+    /// (`BAANDI_STOP_METRIC`) are resolved again from it; sessions enter it as
+    /// their thread scope while they initialize and step, so code that still
+    /// reads the legacy accessors sees it too. Construction-only switches
+    /// (`BAANDI_EWALD_CACHE`, the Ewald and ionic schemes) keep the values the
+    /// construction used: to construct under `run`, enter `run.enter()` first.
+    pub fn set_run_config(&mut self, run: dft_numerics::switches::RunConfig) {
+        self.run = run;
+        self.sw = session::SessionSwitches::resolve(run);
+        let want = self.coulomb.is_some() && stop_metric_kept(run);
+        if want != self.stop_kept.is_some() {
+            self.stop_kept = want.then(|| StopKept::new(self.grid.dims()));
+        }
     }
     /// Original success-only API; exhausted budgets remain errors.
     pub fn run(self) -> Result<ScfResult, ScfError> {

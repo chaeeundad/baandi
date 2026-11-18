@@ -51,6 +51,15 @@ pub struct Config {
     pub bands: Option<Bands>,
     pub dos: Option<Dos>,
     pub relax: Option<crate::relax::Settings>,
+    /// RUN-CONFIG: switch values by registry name (`m2_grid = "on"`); see
+    /// `crate::run_config` (environment > input > default).
+    #[serde(default)]
+    pub performance: BTreeMap<String, toml::Value>,
+    /// RUN-CONFIG: measurement switches (`phase_profile`, `stage_timers`,
+    /// `davidson_stages`, `snapshot_dir`, `phase_wait`, `first_block`,
+    /// `dgemm_timers`).
+    #[serde(default)]
+    pub profile: BTreeMap<String, toml::Value>,
 }
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]

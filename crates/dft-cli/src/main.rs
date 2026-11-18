@@ -287,6 +287,14 @@ fn main() -> ExitCode {
         }
     };
     let world = universe.world();
+    let cli = Cli::parse();
+    // RUN-CONFIG: resolve the input file's [performance]/[profile] tables with
+    // the environment (environment > input > default) and install them as the
+    // process configuration before the first switch is read.
+    if let Err(e) = dft_cli::run_config::install_for_input(input_of(&cli.command)) {
+        eprintln!("error: {e}");
+        return ExitCode::from(1);
+    }
     match dft_numerics::switches::choice(dft_numerics::switches::Id::MPI_TREE) {
         "rd" => dft_mpi::set_tree_sum(dft_mpi::TreeSum::RecursiveDoubling),
         "rhd" => dft_mpi::set_tree_sum(dft_mpi::TreeSum::HalvingDoubling),
@@ -294,9 +302,17 @@ fn main() -> ExitCode {
     }
     dft_cli::parallel::set(world.rank(), world.size());
     if world.size() > 1 {
+        // Every rank must resolve the same switch values before any optional
+        // collective; a mismatch is the same error on every rank.
+        if let Err(e) =
+            dft_cli::run_config::agree(&world, dft_numerics::switches::RunConfig::current())
+        {
+            eprintln!("error: {e}");
+            return ExitCode::from(1);
+        }
         dft_engine::parallel::set_communicator(Some(std::sync::Arc::new(world)));
     }
-    let code = real_main();
+    let code = real_main(cli);
     if dft_numerics::switches::present(dft_numerics::switches::Id::DGEMM_TIMERS) {
         for (site, calls, nanos, flops) in dft_numerics::dgemm_site_report() {
             eprintln!(
@@ -308,8 +324,27 @@ fn main() -> ExitCode {
     }
     code
 }
-fn real_main() -> ExitCode {
-    let cli = Cli::parse();
+/// The input file of a command that reads one (RUN-CONFIG).
+fn input_of(command: &Command) -> Option<&std::path::Path> {
+    match command {
+        Command::Relax { input, .. }
+        | Command::Checkpoint { input, .. }
+        | Command::Restart { input, .. }
+        | Command::Bands { input, .. }
+        | Command::Dos { input, .. }
+        | Command::Run { input, .. }
+        | Command::Validate { input, .. }
+        | Command::Grid { input } => Some(input),
+        Command::PreflightReview { .. }
+        | Command::Eval { .. }
+        | Command::Convert { .. }
+        | Command::Status { .. }
+        | Command::Explain { .. }
+        | Command::InspectUpf { .. }
+        | Command::Pseudo { .. } => None,
+    }
+}
+fn real_main(cli: Cli) -> ExitCode {
     let post = match &cli.command {
         Command::Relax {
             input,

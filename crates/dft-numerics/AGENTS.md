@@ -116,3 +116,23 @@ packs full eight-row strips and stores full tile columns with constant-length co
 Pure data movement, bit-identical; no effect on x86 (faer packed) or MKL builds.
 Microbenchmark of the lean Davidson shapes and the fused-border identity test:
 `tests/percore_kernels.rs`.
+
+## Run configuration (RUN-CONFIG, 2026-11-18)
+
+`switches.rs` resolves the registry into an immutable `RunConfig` (leaked
+`&'static`, Copy): environment > input file (`[performance]` / `[profile]`
+tables, key = name without `BAANDI_`, lower case; `table_of` says which table,
+`EnvOnly` for `CUTOFF_LADDER`, `RELAX_EXTRAPOLATION`, `PSEUDO_DIR`) > default.
+Environment parsing and its invalid-value fallbacks are unchanged; input values
+are strict (unknown key, wrong table, value outside the allowed set: error).
+The legacy free accessors read `RunConfig::current()`: the thread scope
+(`RunConfig::enter`, propagated by `WorkerPool::install`/`join` to its
+workers; every parallel region of the workspace goes through the pool) or the
+process configuration (`install_process`, else the environment at first read).
+Per run: consulted flags (`freeze_consulted` at the end of the computation),
+path notes (`note_path`), run ID, run-local counters (`RunCounter`) and
+`agreement_hash` (every switch except locations and the exit-time dgemm
+report; MPI ranks compare it before any optional collective). New code
+resolves its switches from an explicit `RunConfig` at session/plan creation,
+never inside a hot loop. Tests: lib `switches::tests::run_config_*`,
+`agreement_hash_*`, `path_notes_*`.

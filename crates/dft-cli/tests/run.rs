@@ -152,6 +152,8 @@ fn strip_times(v: &mut Value) {
         Value::Object(m) => {
             m.remove("timestamp");
             m.remove("timings");
+            // RUN-REPORT: the run ID identifies a run, it is not a result.
+            m.remove("run_id");
             for x in m.values_mut() {
                 strip_times(x);
             }
@@ -173,8 +175,9 @@ fn verify(large: bool) {
     // Legacy fields plus additive per-band accuracy, checked on actual output.
     // 24 legacy keys plus gamma_real_used and gamma_real_fallback_reason (default Auto
     // mode, ADR 0040), atomic_start (default atomic start, ADR 0042), single_path
-    // (ADR 0043) and execution (review F01).
-    assert_eq!(first.as_object().unwrap().len(), 29);
+    // (ADR 0043), execution (review F01) and run (RUN-REPORT: run ID, exit
+    // reason, binary SHA-256, completion marker).
+    assert_eq!(first.as_object().unwrap().len(), 30);
     assert!(first.get("kpoints").is_none());
     for key in [
         "preflight",
@@ -738,6 +741,8 @@ fn expressions_preserve_energy_and_record_resolutions() {
         // ADR 0043 path record and review F01 execution record (every run).
         "single_path",
         "execution",
+        // RUN-REPORT block (every run).
+        "run",
     ];
     let keys: std::collections::BTreeSet<_> = plain
         .as_object()

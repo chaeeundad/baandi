@@ -249,6 +249,8 @@ impl ScfSession {
             )
     }
     pub fn initialize(&mut self) -> Result<(), ScfError> {
+        // RUN-CONFIG: legacy switch reads below see the problem's configuration.
+        let _run = self.problem.run.enter();
         if self.continuation.is_some() || self.status != StepStatus::Created {
             return Err(ScfError::InvalidInput(
                 "session already initialized or failed",
@@ -471,6 +473,7 @@ impl ScfSession {
         } else if self.problem.options.residual_eigen_schedule {
             residual_schedule(
                 &self.problem.options,
+                self.problem.sw.eigen_factor,
                 history.last().map(|r| r.density_residual),
                 self.strict_seed.unwrap_or(1e-2),
             )
@@ -741,8 +744,7 @@ impl ScfSession {
         let converged = if let Some(p) = standard {
             let stop = standard_error_ha.is_some_and(|e| {
                 e < p.threshold_ha
-                    || (dft_numerics::switches::choice(dft_numerics::switches::Id::STANDARD_STOP)
-                        == "confirm"
+                    || (self.problem.sw.standard_stop_confirm
                         && history
                             .last()
                             .and_then(|r| r.standard_error_ha)
@@ -760,9 +762,7 @@ impl ScfSession {
             // estimator does not see the second-order band-energy error of loose
             // eigensolves, so also require that estimate below the class
             // threshold. Only evaluated when the density rule already stops.
-            if stop
-                && dft_numerics::switches::on(dft_numerics::switches::Id::STANDARD_RESIDUAL_GUARD)
-            {
+            if stop && self.problem.sw.residual_guard {
                 let bound = StandardProfile::residual_energy_estimate(
                     step.k_points
                         .iter()
@@ -830,11 +830,15 @@ impl ScfSession {
         });
         let screen_start = Instant::now();
         let screen = if converged && standard.is_none() {
-            match cert_screen_mode() {
+            match self.problem.sw.cert_screen {
                 CertScreen::Off => None,
                 mode => self
                     .problem
-                    .certificate_shift_estimate(&step.density, &step.k_points, potential_reuse())?
+                    .certificate_shift_estimate(
+                        &step.density,
+                        &step.k_points,
+                        self.problem.sw.potential_reuse,
+                    )?
                     .map(|bound| (mode, bound)),
             }
         } else {
@@ -1205,7 +1209,7 @@ impl ScfSession {
         // Experimental guard (BAANDI_MIX_GROWTH_RESET=<factor>, default off): a density
         // residual that grew by more than the factor since the previous iteration means
         // the Pulay history produced a bad step and is ill-conditioned; drop it.
-        if let Some(limit) = growth_reset_limit() {
+        if let Some(limit) = self.problem.sw.growth_reset {
             let record = history.last_mut().unwrap();
             if record.density_contraction.is_some_and(|c| c > limit) && !record.mixer_reset {
                 mixer.reset();
@@ -1307,6 +1311,12 @@ impl ScfSession {
         if self.continuation.is_none() || self.status != StepStatus::Ready {
             return Err(ScfError::InvalidInput("session is not ready"));
         }
+        // RUN-CONFIG: legacy switch reads below (and on the problem's worker
+        // pool) see the problem's configuration.
+        let _run = self.problem.run.enter();
+        self.problem
+            .run
+            .count(dft_numerics::switches::RunCounter::SessionSteps, 1);
         if self.state_version == u64::MAX - 1 {
             let error = ScfError::Numerical("state version exhausted".into());
             self.fail(&error);
@@ -1506,9 +1516,14 @@ impl ScfSession {
         if o.standard.is_some() || !o.residual_eigen_schedule {
             return None;
         }
-        self.history()
-            .last()
-            .map(|r| residual_schedule(o, Some(r.density_residual), 1e-2))
+        self.history().last().map(|r| {
+            residual_schedule(
+                o,
+                self.problem.sw.eigen_factor,
+                Some(r.density_residual),
+                1e-2,
+            )
+        })
     }
     pub fn events(&mut self) -> Option<&mut EventQueue> {
         self.events.as_mut()
@@ -1789,9 +1804,7 @@ impl ScfSession {
                 // split over the ranks of a registered communicator (every
                 // rank imports the same replicated state), one verdict
                 // reduction; `serial` is the former replicated scalar loop.
-                let split =
-                    dft_numerics::switches::choice(dft_numerics::switches::Id::IMPORT_CHECK)
-                        == "split";
+                let split = self.problem.sw.import_split;
                 let orthonormal = if split {
                     let comm = crate::parallel::SharedComm::active();
                     orthonormal_split(&m, comm.as_ref().map(|c| c as &dyn dft_mpi::Collective))
@@ -2067,6 +2080,9 @@ fn verify_fixed_point(
         kind: "verify",
         iteration,
     });
+    problem
+        .run
+        .count(dft_numerics::switches::RunCounter::Verifications, 1);
     let check = problem.step_session(
         density,
         warm.as_deref(),
@@ -2079,10 +2095,7 @@ fn verify_fixed_point(
     let coulomb_error_ha = problem
         .stop_error(density, &check.density)?
         .expect("standard Coulomb metric");
-    let residual_bound_ha = dft_numerics::switches::on(
-        dft_numerics::switches::Id::STANDARD_RESIDUAL_GUARD,
-    )
-    .then(|| {
+    let residual_bound_ha = problem.sw.residual_guard.then(|| {
         StandardProfile::residual_energy_estimate(
             check
                 .k_points
@@ -2226,17 +2239,57 @@ fn verify_reuse(#[allow(unused_variables)] problem: &ScfProblem) -> VerifyReuse 
     if let Some(mode) = problem.force_verify_reuse {
         return mode;
     }
-    static MODE: std::sync::OnceLock<VerifyReuse> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| {
-        match dft_numerics::switches::choice(dft_numerics::switches::Id::VERIFY_REUSE) {
-            "warm" => VerifyReuse::Warm,
-            "feed" => VerifyReuse::Feed,
-            "feed2" => VerifyReuse::Feed2,
-            "replace" => VerifyReuse::Replace,
-            "half" => VerifyReuse::Half,
-            _ => VerifyReuse::Off,
+    problem.sw.verify_reuse
+}
+
+/// RUN-CONFIG (2026-11-18): the switches of the SCF session, resolved once
+/// from the problem's run configuration at construction (and again by
+/// `ScfProblem::set_run_config`), never looked up inside the iteration. The
+/// parsing rules are those of the former per-process accessors.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SessionSwitches {
+    /// `BAANDI_STANDARD_STOP=confirm`.
+    pub(crate) standard_stop_confirm: bool,
+    /// `BAANDI_STANDARD_RESIDUAL_GUARD=on`.
+    pub(crate) residual_guard: bool,
+    /// `BAANDI_IMPORT_CHECK=split`.
+    pub(crate) import_split: bool,
+    /// `BAANDI_VERIFY_REUSE`.
+    pub(crate) verify_reuse: VerifyReuse,
+    /// `BAANDI_CERT_SCREEN`.
+    pub(crate) cert_screen: CertScreen,
+    /// `BAANDI_POTENTIAL_REUSE=on`.
+    pub(crate) potential_reuse: bool,
+    /// `BAANDI_MIX_GROWTH_RESET`.
+    pub(crate) growth_reset: Option<f64>,
+    /// `BAANDI_EIGEN_FACTOR` (default 0.1).
+    pub(crate) eigen_factor: f64,
+}
+impl SessionSwitches {
+    pub(crate) fn resolve(run: dft_numerics::switches::RunConfig) -> Self {
+        use dft_numerics::switches::Id;
+        Self {
+            standard_stop_confirm: run.choice(Id::STANDARD_STOP) == "confirm",
+            residual_guard: run.on(Id::STANDARD_RESIDUAL_GUARD),
+            import_split: run.choice(Id::IMPORT_CHECK) == "split",
+            verify_reuse: match run.choice(Id::VERIFY_REUSE) {
+                "warm" => VerifyReuse::Warm,
+                "feed" => VerifyReuse::Feed,
+                "feed2" => VerifyReuse::Feed2,
+                "replace" => VerifyReuse::Replace,
+                "half" => VerifyReuse::Half,
+                _ => VerifyReuse::Off,
+            },
+            cert_screen: match run.choice(Id::CERT_SCREEN) {
+                "off" => CertScreen::Off,
+                "trace" => CertScreen::Trace,
+                _ => CertScreen::On,
+            },
+            potential_reuse: run.on(Id::POTENTIAL_REUSE),
+            growth_reset: run.number(Id::MIX_GROWTH_RESET),
+            eigen_factor: run.number(Id::EIGEN_FACTOR).unwrap_or(0.1),
         }
-    })
+    }
 }
 
 /// Largest occupied-eigenvalue change (Ha) the fixed-point certificate accepts.
@@ -2246,42 +2299,20 @@ const CERT_EIGENVALUE_LIMIT_HA: f64 = 1e-7;
 const CERT_SCREEN_MARGIN: f64 = 1.02;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CertScreen {
+pub(crate) enum CertScreen {
     Off,
     On,
     Trace,
 }
 
-/// Certificate screen: default ON since the user's adopt-what-improves rule
-/// (2026-11-10; dev08 ledger SINGLE-NODE-AB1: bit-identical density and energy in
-/// 40 of 40 pairs, -19 percent wall on si32 strict). `BAANDI_CERT_SCREEN=off`
-/// restores the unscreened path, `trace` prints the estimates.
-fn cert_screen_mode() -> CertScreen {
-    static MODE: std::sync::OnceLock<CertScreen> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| {
-        match dft_numerics::switches::choice(dft_numerics::switches::Id::CERT_SCREEN) {
-            "off" => CertScreen::Off,
-            "trace" => CertScreen::Trace,
-            _ => CertScreen::On,
-        }
-    })
-}
-
-/// POTENTIAL-REUSE: with the screen active (`on` or `trace`), the Hartree/XC
-/// fields it builds for the output density are reused by the certificate solve
-/// at that same density. Bit-identical either way; `BAANDI_POTENTIAL_REUSE=off`
-/// disables the reuse for A/B checks. Without the screen nothing is kept.
-fn potential_reuse() -> bool {
-    static MODE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| dft_numerics::switches::on(dft_numerics::switches::Id::POTENTIAL_REUSE))
-}
-
-fn growth_reset_limit() -> Option<f64> {
-    static LIMIT: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
-    *LIMIT.get_or_init(|| {
-        dft_numerics::switches::number(dft_numerics::switches::Id::MIX_GROWTH_RESET)
-    })
-}
+// Certificate screen (`SessionSwitches::cert_screen`): default ON since the
+// user's adopt-what-improves rule (2026-11-10; dev08 ledger SINGLE-NODE-AB1:
+// bit-identical density and energy in 40 of 40 pairs, -19 percent wall on si32
+// strict). `BAANDI_CERT_SCREEN=off` restores the unscreened path, `trace`
+// prints the estimates. POTENTIAL-REUSE (`SessionSwitches::potential_reuse`):
+// with the screen active, the Hartree/XC fields it builds for the output
+// density are reused by the certificate solve at that same density
+// (bit-identical either way). MIX_GROWTH_RESET: `SessionSwitches::growth_reset`.
 
 /// Coefficient of the residual-driven eigen tolerance schedule (tolerance =
 /// factor x density residual). Default 0.1 (the established empirical value);
@@ -2289,17 +2320,16 @@ fn growth_reset_limit() -> Option<f64> {
 /// Strict residual eigen schedule: factor x last density residual (the
 /// normalized density L2 norm in atomic units; 0.1 is an empirical scheduling
 /// coefficient), `first` without history, clamped to [0.1 eigen_tolerance, 1e-2].
-fn residual_schedule(options: &ScfOptions, last_residual: Option<f64>, first: f64) -> f64 {
+fn residual_schedule(
+    options: &ScfOptions,
+    factor: f64,
+    last_residual: Option<f64>,
+    first: f64,
+) -> f64 {
     last_residual
-        .map_or(first, |r| schedule_factor() * r)
+        .map_or(first, |r| factor * r)
         .min(1e-2)
         .max(0.1 * options.eigen_tolerance)
-}
-fn schedule_factor() -> f64 {
-    static FACTOR: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
-    *FACTOR.get_or_init(|| {
-        dft_numerics::switches::number(dft_numerics::switches::Id::EIGEN_FACTOR).unwrap_or(0.1)
-    })
 }
 
 /// Import check of a warm orbital block: every overlap <c_i|c_j> (i <= j) within

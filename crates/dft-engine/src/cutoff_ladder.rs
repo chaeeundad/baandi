@@ -129,36 +129,32 @@ impl Default for CutoffLadderOptions {
     /// S1/S2 experiment switches read from the environment (an invalid value
     /// means off / the default).
     fn default() -> Self {
+        Self::from_run(dft_numerics::switches::RunConfig::current())
+    }
+}
+impl CutoffLadderOptions {
+    /// RUN-CONFIG: the pre-registered values with the experiment switches of
+    /// `run` (the explicit per-call form of `default`).
+    pub fn from_run(run: dft_numerics::switches::RunConfig) -> Self {
         Self {
-            standard: dft_numerics::switches::on(
-                dft_numerics::switches::Id::CUTOFF_LADDER_STANDARD,
-            ),
-            standard_seed: match dft_numerics::switches::choice(
-                dft_numerics::switches::Id::LADDER_STANDARD_SEED,
-            ) {
+            standard: run.on(dft_numerics::switches::Id::CUTOFF_LADDER_STANDARD),
+            standard_seed: match run.choice(dft_numerics::switches::Id::LADDER_STANDARD_SEED) {
                 "cap" => StandardSeed::Cap,
                 _ => StandardSeed::Coarse,
             },
-            secant_pairs: match dft_numerics::switches::choice(
-                dft_numerics::switches::Id::LADDER_SECANT,
-            ) {
+            secant_pairs: match run.choice(dft_numerics::switches::Id::LADDER_SECANT) {
                 "off" => 0,
                 "on" => 4,
                 v => v.parse().unwrap_or(0),
             },
-            coarse_density_residual: dft_numerics::switches::number(
-                dft_numerics::switches::Id::LADDER_COARSE_STOP,
-            )
-            .unwrap_or(1e-4),
-            coarse_rule: match dft_numerics::switches::choice(
-                dft_numerics::switches::Id::LADDER_COARSE_RULE,
-            ) {
+            coarse_density_residual: run
+                .number(dft_numerics::switches::Id::LADDER_COARSE_STOP)
+                .unwrap_or(1e-4),
+            coarse_rule: match run.choice(dft_numerics::switches::Id::LADDER_COARSE_RULE) {
                 "atomic" => CoarseStopRule::Atomic,
                 _ => CoarseStopRule::Fixed,
             },
-            first_tolerance: match dft_numerics::switches::choice(
-                dft_numerics::switches::Id::LADDER_FIRST_TOL,
-            ) {
+            first_tolerance: match run.choice(dft_numerics::switches::Id::LADDER_FIRST_TOL) {
                 "cap" => FirstTolerance::Cap,
                 "coarse" => FirstTolerance::Coarse,
                 "next" => FirstTolerance::Next,
@@ -416,7 +412,13 @@ fn coarse_problem(
     options.grid_override = None;
     // ADR 0043: the coarse stage only supplies a start; verification belongs to the fine run.
     options.verification = crate::Verification::Off;
-    let mut coarse = ScfProblem::new(&fine.cell, &fine.atoms, potentials, options)?;
+    // RUN-CONFIG: the coarse problem is constructed and run under the fine
+    // problem's configuration.
+    let mut coarse = {
+        let _run = fine.run_config().enter();
+        ScfProblem::new(&fine.cell, &fine.atoms, potentials, options)?
+    };
+    coarse.set_run_config(fine.run_config());
     if let Some(floor) = fine.density_floor {
         coarse.set_density_floor(floor)?;
     }
@@ -603,6 +605,7 @@ pub fn run_ladder(
     ladder: &CutoffLadderOptions,
     retain_last: bool,
 ) -> Result<LadderOutcome, ScfError> {
+    let _run = fine.run_config().enter();
     let mut report = CutoffLadderReport {
         standard: fine.options.standard.is_some(),
         secant_requested: ladder.secant_pairs,

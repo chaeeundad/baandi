@@ -120,3 +120,21 @@ the manifest's cutoff rebuilds a coarse-stage problem, and the report prints
 whether the Davidson iterations, H columns and eigenvalue FNV of the captured
 solve were reproduced (`DAVBENCH_JSON` field `snapshot`). Both harnesses print
 the phase profile and the first-block table when their switches are on.
+
+## Run configuration and run report (RUN-CONFIG / RUN-REPORT, 2026-11-18)
+
+`[performance]` and `[profile]` input tables set switches by registry name
+(`run_config.rs`). `main` installs the input's configuration as the process
+configuration before the first switch read (`MPI_TREE`) and, with two or more
+ranks, checks `agreement_hash` across ranks (one allgatherv; mismatch = the
+same error and exit 1 on every rank; rank 0's run ID adopted). `execute_mode`
+uses the process object or a thread scope (`run_config::for_run`). results.json:
+`scf.switches.<name>` gains `requested`, `consulted` (frozen after the SCF, so
+report blocks do not count), `path`, `fallback_reason` (from counters,
+`note_switch_paths`) and source `input`; the `run` block holds schema
+`run-report-1`, run ID, exit reason, binary path and SHA-256, agreement hash,
+run-local counters and the completion marker `completed: true` (written last).
+`phase_profile` is `phase-profile-2` with `per_rank` and `closure`.
+`scripts/parse_results.py` validates a results file (rejects truncated, stale
+binary, missing/zero clocks of an active path, impossible rows); unit tests
+`scripts/tests/test_parse_results.py`, real-output checks in `tests/run_config.rs`.

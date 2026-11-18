@@ -43,7 +43,11 @@ impl WorkerPool {
     pub fn install<R: Send>(&self, work: impl FnOnce() -> R + Send) -> R {
         let _span = analysis::Span::new("pool_install");
         let context = analysis::context();
-        let work = || analysis::with_context(context, work);
+        // RUN-CONFIG: the caller's switch scope follows the work onto the worker.
+        let scope = crate::switches::RunConfig::scoped();
+        let work = || {
+            crate::switches::RunConfig::with_scope(scope, || analysis::with_context(context, work))
+        };
         match &self.pool {
             Some(pool) => pool.install(work),
             None => work(),
@@ -62,8 +66,13 @@ impl WorkerPool {
     ) -> (A, B) {
         let context = analysis::context();
         let other = context.clone();
-        let left = || analysis::with_context(context, left);
-        let right = || analysis::with_context(other, right);
+        let scope = crate::switches::RunConfig::scoped();
+        let left = || {
+            crate::switches::RunConfig::with_scope(scope, || analysis::with_context(context, left))
+        };
+        let right = || {
+            crate::switches::RunConfig::with_scope(scope, || analysis::with_context(other, right))
+        };
         if rayon::current_thread_index().is_some() {
             rayon::join(left, right)
         } else {

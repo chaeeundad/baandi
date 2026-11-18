@@ -171,8 +171,10 @@ const OWNED_TIME_NAMES: [&str; 7] = [
     "owned_reduce",
 ];
 static OWNED_NANOS: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
-/// Reasons a map that asked for owned fields took the gathered path.
-pub(crate) const DECLINE_REASONS: [&str; 7] = [
+/// Reasons a map (fields) or a session (density) that asked for the owned
+/// mode took the gathered path. Indices 7.. are the declared or automatic
+/// consumer declines (`OwnedDecline`) and the model reasons spin/functional.
+pub(crate) const DECLINE_REASONS: [&str; 11] = [
     "grid_path",
     "standard",
     "kpoints",
@@ -180,8 +182,65 @@ pub(crate) const DECLINE_REASONS: [&str; 7] = [
     "operator",
     "snapshot",
     "finite_temperature",
+    "checkpoint",
+    "runtime_control",
+    "spin",
+    "functional",
 ];
-static DECLINED: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
+pub(crate) const R_GRID_PATH: usize = 0;
+pub(crate) const R_SPIN: usize = 9;
+pub(crate) const R_FUNCTIONAL: usize = 10;
+static DECLINED: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
+static DENSITY_DECLINED: [AtomicU64; 11] = [const { AtomicU64::new(0) }; 11];
+
+/// A consumer that needs the full density, potential or mixer state at an
+/// ACTIVE SCF boundary, declared before the session is initialized
+/// (`ScfProblem::decline_owned`; the session declares `RuntimeControl` itself
+/// for agent-controlled runs and `Checkpoint` for an exact restore). The run
+/// then takes the gathered path for both owned switches (and, for
+/// `Checkpoint`, the replicated Pulay mixer, whose state checkpoint v1 can
+/// carry), counted as `owned.fields_declined.<reason>` /
+/// `owned.density_declined.<reason>`. Consumers of the DELIVERED result
+/// (forces, stress, volumetric output, density files) need no decline: the
+/// delivered density and orbitals are gathered at delivery.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OwnedDecline {
+    /// Exact or warm checkpoint of an active boundary, or an exact restore.
+    Checkpoint,
+    /// Runtime policy control (mixer replacement, session density at a
+    /// boundary): `ExecutionMode::AgentControlled`.
+    RuntimeControl,
+}
+impl OwnedDecline {
+    pub(crate) fn index(self) -> usize {
+        match self {
+            Self::Checkpoint => 7,
+            Self::RuntimeControl => 8,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        DECLINE_REASONS[self.index()]
+    }
+}
+/// Count a decline of the owned density loop with its reason (once per
+/// session initialization that asked for it).
+pub(crate) fn density_declined(reason: usize) {
+    DENSITY_DECLINED[reason].fetch_add(1, Ordering::Relaxed);
+    owned_add(O_DENSITY_DECLINED, 1);
+}
+/// A spin (collinear) SCF asked for the owned mode: it has its own driver
+/// and always takes the gathered path (counted once per run, both switches).
+pub(crate) fn count_spin_decline() {
+    if crate::m2::active().is_none() {
+        return;
+    }
+    if local_fields_requested() {
+        owned_declined(R_SPIN);
+    }
+    if local_density_requested() {
+        density_declined(R_SPIN);
+    }
+}
 pub(crate) fn owned_add(i: usize, n: u64) {
     OWNED[i].fetch_add(n, Ordering::Relaxed);
 }
@@ -213,6 +272,12 @@ pub fn owned_stats() -> crate::parallel::M2Stats {
     counts.extend(DECLINE_REASONS.iter().zip(&DECLINED).map(|(n, c)| {
         (
             format!("owned.fields_declined.{n}"),
+            c.load(Ordering::Relaxed) as usize,
+        )
+    }));
+    counts.extend(DECLINE_REASONS.iter().zip(&DENSITY_DECLINED).map(|(n, c)| {
+        (
+            format!("owned.density_declined.{n}"),
             c.load(Ordering::Relaxed) as usize,
         )
     }));
@@ -256,6 +321,9 @@ pub(crate) struct OwnedFields {
     pub(crate) density_mode: bool,
     pub(crate) input: Option<Owned>,
     pub(crate) output: Option<Owned>,
+    /// Declared consumer of active-boundary state (`OwnedDecline`): both
+    /// owned modes decline for this problem.
+    pub(crate) declined: Option<OwnedDecline>,
 }
 impl OwnedFields {
     /// A new epoch for a field produced now (monotonic per problem).
@@ -1277,6 +1345,81 @@ impl GridPlan {
         }
         bump(C_STOP);
         Ok(energy.max(0.0))
+    }
+
+    /// Coulomb (Hartree) metric forms of signed plane fields (SCF-TRAJECTORY
+    /// guard of the distributed mixer, `BAANDI_MIX_COULOMB_GUARD`): for every
+    /// pair (a, b) the value N sum_G w(G) Re(conj(F_a(G)) F_b(G)) with w the
+    /// stop-rule weights (`CoulombMetric::weights`: V / (2N) 4 pi / G^2 on the
+    /// density sphere, 0 at G = 0) and F the forward transform of the plane
+    /// field (`to_reciprocal` normalization, no density check: residuals are
+    /// signed). By Parseval this is a^T C b of the replicated `CoulombMetric`
+    /// (rounding class). Per-stick partials in ascending local order, ONE
+    /// allgatherv, sums in canonical stick order: the bits do not depend on the
+    /// rank count. Collective (one distributed transform per field).
+    pub(crate) fn coulomb_forms<K: Collective>(
+        &mut self,
+        comm: &K,
+        fields: &[&[f64]],
+        pairs: &[(usize, usize)],
+    ) -> Result<Vec<f64>, ScfError> {
+        if self.stop_weights.is_empty() {
+            return Err(ScfError::InvalidInput("M2 Coulomb forms without weights"));
+        }
+        let points = self.points();
+        if fields.iter().any(|f| f.len() != points) {
+            return Err(ScfError::InvalidInput("M2 Coulomb forms: field length"));
+        }
+        let err = |e: dft_solvers::distributed_fft::DistFftError| {
+            ScfError::Numerical(format!("M2 Coulomb transform: {e}"))
+        };
+        let nz = self.nz;
+        let mut hats: Vec<Vec<C>> = Vec::with_capacity(fields.len());
+        for f in fields {
+            for i in 0..self.planes {
+                for y in 0..self.rows {
+                    let line = self.line(Field::Planes(f), i, y);
+                    let slab = self.fft.plane_mut();
+                    for (z, &v) in line.iter().enumerate() {
+                        slab[y * nz + z] = C::new(v, 0.0);
+                    }
+                }
+                self.fft.to_reciprocal_plane(i).map_err(err)?;
+            }
+            let mut hat = vec![C::default(); self.coef.len()];
+            self.fft.finish_to_reciprocal(comm, &mut hat).map_err(err)?;
+            hats.push(hat);
+        }
+        let k = pairs.len();
+        self.send.clear();
+        self.send.resize(self.local_sticks * k, 0.0);
+        for (idx, (&w, &s)) in self.stop_weights.iter().zip(&self.stick_of).enumerate() {
+            if w != 0.0 {
+                let row = &mut self.send[s as usize * k..(s as usize + 1) * k];
+                for (o, &(a, b)) in row.iter_mut().zip(pairs) {
+                    let (p, q) = (hats[a][idx], hats[b][idx]);
+                    *o += w * (p.re * q.re + p.im * q.im);
+                }
+            }
+        }
+        let counts: Vec<usize> = self.stick_counts.iter().map(|c| c * k).collect();
+        self.recv.resize(counts.iter().sum(), 0.0);
+        comm.allgatherv_f64(&self.send, &counts, &mut self.recv)
+            .map_err(|e| ScfError::Numerical(format!("M2 Coulomb forms: {e}")))?;
+        // The gathered buffer is the concatenation of the rank stick blocks,
+        // the positions `stick_order` index.
+        let mut sums = vec![0.0; k];
+        for &pos in &self.stick_order {
+            for (q, s) in sums.iter_mut().enumerate() {
+                *s += self.recv[pos * k + q];
+            }
+        }
+        let n = self.dims.iter().product::<usize>() as f64;
+        sums.iter_mut().for_each(|s| *s *= n);
+        if sums.iter().any(|s| !s.is_finite()) {
+            return Err(ScfError::NonFinite);
+        }
+        Ok(sums)
     }
 }
 

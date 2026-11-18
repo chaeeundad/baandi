@@ -734,7 +734,7 @@ PZ and PW), lib `mix_dist::tests` (ranks 1..7 against `PulayMixer`),
 `tests/m2_grid.rs` (production standard SCF, cubic and skewed, P 2/3). dev08
 request `docs/performance/requests/m2-grid.md`; ledger M2-GRID-*.
 
-## Owned potential and density (M2-OWNED, 2026-11-18; both default off)
+## Owned potential and density (M2-OWNED, 2026-11-18; both default ON since M2-OWNED-DEFAULT)
 
 `BAANDI_M2_LOCAL_FIELDS=on` (needs M2_GRID; override
 `grid_dist::set_owned_override`): eligible maps (`local_fields_eligible`:
@@ -769,6 +769,28 @@ runtime mixer replacement is refused). Rounding class. Counters
 `mix_dist::tests::plane_mode_*`, physics
 `owned_plane_potential_applies_like_the_full_potential`. dev08 request
 `docs/performance/requests/m2-owned.md`; ledger M2-OWNED-*.
+Declines (M2-OWNED-DECLINE): a consumer of ACTIVE-boundary state (session
+density, mixer state, checkpoint) declares itself before initialization with
+`ScfProblem::decline_owned(grid_dist::OwnedDecline::..)`; both owned modes
+then take the gathered path (`Checkpoint` also the replicated Pulay mixer).
+`restore_exact` declares `Checkpoint` and every `AgentControlled` session
+`RuntimeControl` by themselves; the CLI `checkpoint` subcommand declares it
+for exact/warm kinds. Reasons: `owned.fields_declined.<r>` (per map) and
+`owned.density_declined.<r>` (per session), r in grid_path, standard, kpoints,
+cold_map, operator, snapshot, finite_temperature, checkpoint,
+runtime_control, spin (collinear driver), functional (non-LDA). Consumers of
+the delivered result (forces, stress, volumetric/density output) need no
+decline. Do not add a reader of active-boundary state without a declaration.
+Test `tests/m2_owned_decline.rs` (one test per reason).
+Coulomb guard of the distributed mixer (MIX-COULOMB-GUARD-DIST,
+`BAANDI_MIX_COULOMB_GUARD=trace|on`, default off): `session::guard_plan`
+builds a separate `GridPlan` with the stop-rule weights for both
+`DistributedPulay` variants; `GridPlan::coulomb_forms` gives a^T C b of plane
+fields (canonical stick sums, rank-count independent). Off and trace are
+bit-identical to no guard; the per-map `history[].pulay` record is filled
+for the distributed mixers from the existing charge reduction. Counters
+`mix_dist::guard_counters()` (checks, refits, transforms). Test
+`mix_dist::tests::coulomb_guard_matches_the_replicated_guard_for_every_rank_count`.
 
 ## Run configuration (RUN-CONFIG, 2026-11-18)
 

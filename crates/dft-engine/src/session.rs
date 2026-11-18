@@ -341,6 +341,38 @@ impl ScfSession {
         self.initialize()?;
         self.set_next_input(density.clone())
     }
+    /// SCF-TRAJECTORY Coulomb guard of the distributed mixer
+    /// (`BAANDI_MIX_COULOMB_GUARD=trace|on`): a slab plan of the M2 grid with
+    /// the Coulomb-metric weights (the plane layout of the owned density; only
+    /// its Coulomb part is used) and the refit flag. None when off.
+    /// Collective (plan construction).
+    fn guard_plan(&self) -> Result<Option<(crate::grid_dist::GridPlan, bool)>, ScfError> {
+        let guard = dft_numerics::switches::choice(dft_numerics::switches::Id::MIX_COULOMB_GUARD);
+        if guard == "off" {
+            return Ok(None);
+        }
+        let comm = crate::m2::active().ok_or(ScfError::InvalidInput(
+            "distributed Coulomb guard without the M2 path",
+        ))?;
+        let dims = self.problem.grid.dims();
+        let built;
+        let weights = match self.problem.coulomb.as_ref() {
+            Some(c) => c.weights(),
+            None => {
+                built = CoulombMetric::new(&self.problem.cell, &self.problem.options, dims)?;
+                built.weights()
+            }
+        };
+        let plan = crate::grid_dist::GridPlan::new(
+            &comm,
+            dims,
+            self.problem.cell.reciprocal_columns_inverse_bohr(),
+            self.problem.cell.volume_bohr3(),
+            crate::grid_dist::Lda::Pz,
+            Some(weights),
+        )?;
+        Ok(Some((plan, guard == "on")))
+    }
     fn make_mixer(&self, mixing: &Mixing) -> Result<Box<dyn MixerHistory>, ScfError> {
         let mixer: Box<dyn MixerHistory> = match *mixing {
             Mixing::Linear { beta } => Box::new(LinearMixer { beta }),
@@ -348,15 +380,21 @@ impl ScfSession {
             // path keeps its window on the rank's grid block.
             Mixing::Pulay { beta, history }
                 if !self.problem.options.hartree_mixing
+                    && self.problem.owned.declined
+                        != Some(crate::grid_dist::OwnedDecline::Checkpoint)
                     && crate::mix_dist::requested()
                     && crate::m2::active().is_some() =>
             {
-                Box::new(crate::mix_dist::DistributedPulay::new(
+                let mut m = crate::mix_dist::DistributedPulay::new(
                     crate::m2::active().expect("checked"),
                     beta,
                     history,
                     self.problem.grid.dims().iter().product(),
-                )?)
+                )?;
+                if let Some((plan, refit)) = self.guard_plan()? {
+                    m.set_coulomb_guard(plan, refit);
+                }
+                Box::new(m)
             }
             Mixing::Pulay { beta, history } => {
                 let mut p = PulayMixer::new(beta, history)?;
@@ -425,6 +463,12 @@ impl ScfSession {
     }
     fn initialize_inner(&mut self) -> Result<(), ScfError> {
         let start = Instant::now();
+        // M2-OWNED: an agent-controlled run may replace the mixer or read the
+        // density at an active boundary; the owned modes decline for it.
+        if self.config.mode == crate::events::ExecutionMode::AgentControlled {
+            self.problem
+                .decline_owned(crate::grid_dist::OwnedDecline::RuntimeControl);
+        }
         let mut mixer = self.make_mixer(&self.problem.options.mixing)?;
         // Validate mixer parameters even if a future system converges immediately.
         let n = self.problem.starting_density();
@@ -446,9 +490,12 @@ impl ScfSession {
             let total = n.len();
             let (comm, plan) = self.problem.grid_plan()?;
             let (len, counts) = (plan.plane_len(), plan.plane_counts().to_vec());
-            let m = crate::mix_dist::DistributedPulay::new_planes(
+            let mut m = crate::mix_dist::DistributedPulay::new_planes(
                 comm, beta, history, total, len, &counts,
             )?;
+            if let Some((plan, refit)) = self.guard_plan()? {
+                m.set_coulomb_guard(plan, refit);
+            }
             self.problem.owned.input = Some(input);
             self.problem.owned.density_mode = true;
             Some(m)
@@ -1350,6 +1397,7 @@ impl ScfSession {
             history.last_mut().unwrap().mixing_history_used =
                 Some(om.history_len().saturating_sub(1));
             history.last_mut().unwrap().mixing_raw_recovery = om.used_raw_recovery();
+            history.last_mut().unwrap().pulay = om.pulay_step();
             let fraction = self.problem.owned_convex_fraction(base, &mixed)?;
             if fraction < 1.0 {
                 for (b, a) in mixed.iter_mut().zip(base) {
@@ -2069,12 +2117,14 @@ impl ScfSession {
         Self::restore_exact_inner(problem, checkpoint, model, execution)
     }
     pub(crate) fn restore_exact_inner(
-        problem: ScfProblem,
+        mut problem: ScfProblem,
         checkpoint: &crate::checkpoint::Checkpoint,
         model: &crate::checkpoint::ModelIdentity,
         execution: &crate::checkpoint::ExecutionIdentity,
     ) -> Result<Self, crate::checkpoint::Rejection> {
         use crate::checkpoint::*;
+        // M2-OWNED: the restored mixer history and density are full arrays.
+        problem.decline_owned(crate::grid_dist::OwnedDecline::Checkpoint);
         checkpoint.compatible(CheckpointKind::ExactContinuation, model, execution)?;
         let c = checkpoint.continuation.as_ref().ok_or(Rejection::Kind)?;
         if checkpoint.result.is_some() {

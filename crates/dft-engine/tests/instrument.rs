@@ -51,6 +51,10 @@ fn results(ranks: usize, pp: &dft_upf::Pseudopotential) -> Vec<ScfResult> {
     }
     simulate(ranks, |comm: &SimRank| {
         parallel::set_m2_override(Some(true));
+        // Snapshot capture declines the owned modes (reason snapshot), so the
+        // plain arm pins them off: the comparison stays bit for bit
+        // (M2-OWNED defaults on since 2026-11-18).
+        dft_engine::grid_dist::set_owned_override(Some((false, false)));
         dft_engine::gamma_real::set_m2_reuse_override(Some(true));
         let shared: Arc<dyn Collective + Send + Sync> = Arc::new(comm.clone());
         parallel::set_communicator(Some(shared));
@@ -58,6 +62,7 @@ fn results(ranks: usize, pp: &dft_upf::Pseudopotential) -> Vec<ScfResult> {
         dft_engine::profile::finish_rank(comm.rank());
         parallel::set_communicator(None);
         dft_engine::gamma_real::set_m2_reuse_override(None);
+        dft_engine::grid_dist::set_owned_override(None);
         parallel::set_m2_override(None);
         r
     })

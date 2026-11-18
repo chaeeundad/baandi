@@ -390,6 +390,9 @@ pub(crate) enum Count {
     /// INIT-DENSITY-SPLIT: atomic-superposition start densities whose
     /// coefficients were split over the ranks (one allgatherv; bit-identical).
     DensitySplits,
+    /// LAZY-RESULT: delivered results that kept their lazy blocks (the caller
+    /// reads no orbitals; no gather at delivery).
+    LazyResults,
 }
 const COUNT_NAMES: [&str; 25] = [
     "density_builds",
@@ -417,6 +420,7 @@ const COUNT_NAMES: [&str; 25] = [
     "ionic_local_splits",
     "ewald_splits",
     "density_splits",
+    "lazy_results",
 ];
 static COUNTS: [AtomicUsize; 25] = [const { AtomicUsize::new(0) }; 25];
 pub(crate) fn count_atomic_block_fallback() {

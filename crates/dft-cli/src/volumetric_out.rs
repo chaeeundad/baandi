@@ -147,6 +147,17 @@ fn selection(config: &Config) -> Option<&Volumetric> {
     config.output.as_ref()?.volumetric.as_ref()
 }
 
+/// LAZY-RESULT: whether a requested volumetric quantity reads the delivered
+/// orbitals (anything but the density-only fields `density`, `hartree`,
+/// `local_potential`; an unknown name counts as reading them).
+pub fn reads_orbitals(config: &Config) -> bool {
+    selection(config).is_some_and(|v| {
+        v.quantities
+            .iter()
+            .any(|q| !matches!(q.as_str(), "density" | "hartree" | "local_potential"))
+    })
+}
+
 /// Reject existing files/symlinks before SCF and never overwrite them at write.
 pub fn preflight(config: &Config, out: &Path) -> Result<()> {
     if let Some(v) = selection(config) {

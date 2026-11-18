@@ -66,6 +66,13 @@ pub struct StressResult {
 /// Complete analytic derivative at fixed Miller set. Explicitly does not claim
 /// cutoff convergence; `stress` additionally estimates the cutoff correction.
 pub fn frozen_stress(state: &StressState<'_>) -> Result<StressResult, ScfError> {
+    if let ElectronicState::Fixed(r) = &state.electronic
+        && !r.orbitals_delivered()
+    {
+        return Err(ScfError::InvalidInput(
+            "stress needs the delivered orbitals: call ScfResult::materialize_orbitals",
+        ));
+    }
     if state.options.local_mesh != crate::LocalMesh::Baandi
         || state.options.radial_even_rule != crate::RadialEvenRule::Simpson3_8
     {

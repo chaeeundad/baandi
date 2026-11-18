@@ -526,10 +526,14 @@ fn coarse_stage(
             let outcome = session.result().ok_or(ScfError::InvalidInput(
                 "cutoff_ladder: coarse state unavailable",
             ))?;
-            (
-                outcome.result.density.clone(),
-                outcome.result.k_points[0].solution.eigenvectors.clone(),
-            )
+            // LAZY-RESULT: a lazily delivered coarse block is gathered here
+            // (collective; every rank takes this branch together).
+            let k = &outcome.result.k_points[0];
+            let orbitals = match &k.lazy {
+                Some(lazy) => lazy.materialize()?.clone(),
+                None => k.solution.eigenvectors.clone(),
+            };
+            (outcome.result.density.clone(), orbitals)
         }
     };
     Ok(CoarseState {

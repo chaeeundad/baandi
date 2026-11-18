@@ -827,6 +827,22 @@ pub fn execute_mode(
     let ladder = crate::config::Scf::cutoff_ladder(config.scf.as_ref())
         .map_err(|e| error(1, e.to_string()))?;
     let mut ladder_report = None;
+    // LAZY-RESULT: a classic run without forces, stress or orbital volumetric
+    // output never reads the delivered orbitals, so an M2 result may keep them
+    // distributed (no N x B gather on every rank). Replicated: every rank
+    // parses the same input. Reset to the engine default after the SCF.
+    let orbitals_needed = mode.observe
+        || mode.agent
+        || config.output.as_ref().is_some_and(|o| o.forces || o.stress)
+        || volumetric_out::reads_orbitals(&config);
+    struct RestoreDelivery;
+    impl Drop for RestoreDelivery {
+        fn drop(&mut self) {
+            dft_engine::gamma_real::set_delivered_orbitals(true);
+        }
+    }
+    let _restore_delivery = RestoreDelivery;
+    dft_engine::gamma_real::set_delivered_orbitals(orbitals_needed);
     let outcome = if mode.observe || mode.agent {
         crate::telemetry::drive(problem, mode, &out)?
     } else {

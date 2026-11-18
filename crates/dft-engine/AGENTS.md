@@ -682,3 +682,22 @@ collective to `work_timers::collective` (per run stage, and separately while a
 distributed apply is in progress). dft-cli merges the block over ranks (max,
 `min_over_ranks`). Off: one relaxed load per call site, no clock. Test
 `tests/m2_stage_timers.rs`.
+## Between and materialize (BETWEEN-MATERIALIZE, 2026-11-18)
+
+`BAANDI_IMPORT_CHECK=split|serial` (default split): the orthonormality check
+of `import_electronic` (ladder and direct-min hand-off) runs
+`session::orthonormal_split` (same per-entry overlaps, lockstep, columns j mod
+P per rank, one tree sum of the verdict) when a communicator is registered;
+every rank must import the same block. `LazyOrbitals::materialize` assembles
+through `gamma_real::assemble_lazy_block` (fused scatter and Hermitian
+completion, bit-identical to scatter then `HalfSphere::unpack`).
+LAZY-RESULT: `gamma_real::set_delivered_orbitals(false)` (per thread, default
+true; dft-cli `run` sets it from the input) with `BAANDI_M2_LAZY_RESULT=on`
+(default) delivers an M2 result with its lazy blocks; call
+`ScfResult::materialize_orbitals` (collective) before reading orbitals.
+`forces` and `frozen_stress` reject a result with `orbitals_delivered() ==
+false`. Do not add a consumer of delivered orbitals to `dft-cli run` without
+adding it to the `orbitals_needed` rule there. Tests: lib
+`split_import_check_matches_serial_verdict`,
+`fused_assembly_matches_scatter_then_unpack`, `tests/m2_lazy_result.rs`.
+`tests/m2_entry_cost.rs` takes `M2_PROFILE_ORBITALS=off` (as `run` does).

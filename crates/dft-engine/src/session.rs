@@ -1080,8 +1080,16 @@ impl ScfSession {
         {
             // MPI-LAZY-ORBITALS: the delivered state carries full blocks (one
             // gather per lazy k block; every rank reaches this point together).
+            // LAZY-RESULT: kept distributed when the caller declared it reads
+            // no delivered orbitals (replicated decision) and the identity
+            // audit below does not need them; `ScfResult::materialize_orbitals`
+            // gathers them later. `orbitals` is then the 0 x B placeholder.
             if step.k_points.iter().any(|k| k.lazy.is_some()) {
-                materialize_kpoints(&mut step.k_points)?;
+                if step.nonlocal_from_identity || !crate::gamma_real::lazy_result_allowed() {
+                    materialize_kpoints(&mut step.k_points)?;
+                } else {
+                    crate::m2::count(crate::m2::Count::LazyResults);
+                }
                 if let Some(first) = step.k_points.first() {
                     step.solution.eigenvectors = first.solution.eigenvectors.clone();
                 }
@@ -1762,20 +1770,23 @@ impl ScfSession {
                         .collect(),
                 )
                 .map_err(|_| R::Orbitals)?;
-                for j in 0..m.cols() {
-                    for i in 0..=j {
-                        let overlap: Complex64 = m
-                            .column(i)
-                            .iter()
-                            .zip(m.column(j))
-                            .map(|(a, b)| a.conj() * b)
-                            .sum();
-                        if (overlap - Complex64::new(if i == j { 1.0 } else { 0.0 }, 0.0)).norm()
-                            > 1e-8
-                        {
-                            return Err(R::Orbitals);
-                        }
-                    }
+                // LADDER-IMPORT-SPLIT (`BAANDI_IMPORT_CHECK=split`, default):
+                // the same per-entry overlaps, lockstep over column blocks and
+                // split over the ranks of a registered communicator (every
+                // rank imports the same replicated state), one verdict
+                // reduction; `serial` is the former replicated scalar loop.
+                let split =
+                    dft_numerics::switches::choice(dft_numerics::switches::Id::IMPORT_CHECK)
+                        == "split";
+                let orthonormal = if split {
+                    let comm = crate::parallel::SharedComm::active();
+                    orthonormal_split(&m, comm.as_ref().map(|c| c as &dyn dft_mpi::Collective))
+                        .map_err(|_| R::Orbitals)?
+                } else {
+                    orthonormal_serial(&m)
+                };
+                if !orthonormal {
+                    return Err(R::Orbitals);
                 }
                 previous.push(m);
             }
@@ -2275,4 +2286,157 @@ fn schedule_factor() -> f64 {
     *FACTOR.get_or_init(|| {
         dft_numerics::switches::number(dft_numerics::switches::Id::EIGEN_FACTOR).unwrap_or(0.1)
     })
+}
+
+/// Import check of a warm orbital block: every overlap <c_i|c_j> (i <= j) within
+/// 1e-8 of the identity, each overlap the sequential sum over rows of
+/// conj(c_i) c_j from zero (the former replicated loop; kept for
+/// `BAANDI_IMPORT_CHECK=serial` and as the reference of the tests).
+pub(crate) fn orthonormal_serial(m: &ComplexMatrix) -> bool {
+    for j in 0..m.cols() {
+        for i in 0..=j {
+            let overlap: Complex64 = m
+                .column(i)
+                .iter()
+                .zip(m.column(j))
+                .map(|(a, b)| a.conj() * b)
+                .sum();
+            if (overlap - Complex64::new(if i == j { 1.0 } else { 0.0 }, 0.0)).norm() > 1e-8 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Lockstep width of `orthonormal_split` (independent accumulators per row pass).
+const IMPORT_LOCKSTEP: usize = 8;
+
+/// LADDER-IMPORT-SPLIT: the verdict of `orthonormal_serial` with the same
+/// per-entry arithmetic (each overlap the sequential row sum from zero of
+/// conj(c_i) c_j, so every overlap is bit-identical), computed IMPORT_LOCKSTEP
+/// columns i at a time against one column j (independent accumulators instead
+/// of one latency-bound chain) and, with a communicator, for the columns j of
+/// this rank only (j mod P == rank; the triangle work balances cyclically).
+/// One 1-double tree sum of the failure flags gives every rank the same
+/// verdict. Collective when `comm` is given: every rank must call it with the
+/// same block.
+pub(crate) fn orthonormal_split(
+    m: &ComplexMatrix,
+    comm: Option<&dyn dft_mpi::Collective>,
+) -> Result<bool, dft_mpi::MpiError> {
+    let (rank, size) = comm.map_or((0, 1), |c| (c.rank(), c.size()));
+    let mut bad = false;
+    'columns: for j in (rank..m.cols()).step_by(size.max(1)) {
+        let cj = m.column(j);
+        let mut i0 = 0;
+        while i0 <= j {
+            let w = IMPORT_LOCKSTEP.min(j + 1 - i0);
+            let mut acc = [Complex64::new(0.0, 0.0); IMPORT_LOCKSTEP];
+            let cols: [&[Complex64]; IMPORT_LOCKSTEP] =
+                std::array::from_fn(|t| m.column(if t < w { i0 + t } else { i0 }));
+            for (k, &b) in cj.iter().enumerate() {
+                for t in 0..w {
+                    // AddAssign adds re and im separately, as `acc + x` does.
+                    acc[t] += cols[t][k].conj() * b;
+                }
+            }
+            for (t, overlap) in acc.iter().take(w).enumerate() {
+                let i = i0 + t;
+                if (overlap - Complex64::new(if i == j { 1.0 } else { 0.0 }, 0.0)).norm() > 1e-8 {
+                    bad = true;
+                    break 'columns;
+                }
+            }
+            i0 += w;
+        }
+    }
+    let Some(c) = comm else {
+        return Ok(!bad);
+    };
+    let mut flag = [0.0];
+    c.tree_sum_f64(&[f64::from(u8::from(bad))], &mut flag)?;
+    Ok(flag[0] == 0.0)
+}
+
+#[cfg(test)]
+mod import_check_tests {
+    use super::*;
+
+    fn block(rows: usize, cols: usize, seed: u64) -> ComplexMatrix {
+        // Orthonormal columns by twice-repeated Gram-Schmidt of a pseudo-random block.
+        let mut s = seed;
+        let mut next = || {
+            s = s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((s >> 11) as f64 / (1u64 << 53) as f64) - 0.5
+        };
+        let mut m = ComplexMatrix::zeros(rows, cols).unwrap();
+        for j in 0..cols {
+            for v in m.column_mut(j).iter_mut() {
+                *v = Complex64::new(next(), next());
+            }
+            for _ in 0..2 {
+                for i in 0..j {
+                    let p: Complex64 = m
+                        .column(i)
+                        .iter()
+                        .zip(m.column(j))
+                        .map(|(a, b)| a.conj() * b)
+                        .sum();
+                    let ci = m.column(i).to_vec();
+                    for (v, a) in m.column_mut(j).iter_mut().zip(ci) {
+                        *v -= p * a;
+                    }
+                }
+            }
+            let n = m.column(j).iter().map(|z| z.norm_sqr()).sum::<f64>().sqrt();
+            for v in m.column_mut(j).iter_mut() {
+                *v /= n;
+            }
+        }
+        m
+    }
+
+    /// Verdict identical to the serial loop: orthonormal blocks, defects just
+    /// above and below 1e-8 at varied (i, j), NaN and infinity, for 1 to 5
+    /// simulated ranks and widths around the lockstep width.
+    #[test]
+    fn split_import_check_matches_serial_verdict() {
+        let mut cases = Vec::new();
+        for (rows, cols) in [(1, 1), (7, 3), (40, 8), (61, 9), (90, 17), (33, 33)] {
+            let m = block(rows, cols, rows as u64 * 31 + cols as u64);
+            cases.push(m.clone());
+            for (i, j, scale) in [(0, 0, 2e-8), (0, 0, 2e-9), (cols / 2, cols - 1, 3e-8)] {
+                let mut d = m.clone();
+                // Add a little of column i to column j: an overlap (or norm)
+                // defect of about `scale`.
+                let ci = d.column(i).to_vec();
+                for (v, a) in d.column_mut(j).iter_mut().zip(ci) {
+                    *v += scale * a;
+                }
+                cases.push(d);
+            }
+            let mut nan = m.clone();
+            nan.column_mut(cols - 1)[rows - 1] = Complex64::new(f64::NAN, 0.0);
+            cases.push(nan);
+            let mut inf = m.clone();
+            inf.column_mut(0)[0] = Complex64::new(f64::INFINITY, 0.0);
+            cases.push(inf);
+        }
+        let mut verdicts = [0usize; 2];
+        for m in &cases {
+            let want = orthonormal_serial(m);
+            verdicts[usize::from(want)] += 1;
+            assert_eq!(orthonormal_split(m, None).unwrap(), want);
+            for ranks in 2..=5 {
+                let got = dft_mpi::simulate(ranks, |r| {
+                    orthonormal_split(m, Some(r as &dyn dft_mpi::Collective)).unwrap()
+                });
+                assert!(got.iter().all(|&g| g == want), "ranks {ranks}");
+            }
+        }
+        assert!(verdicts[0] > 0 && verdicts[1] > 0, "{verdicts:?}");
+    }
 }

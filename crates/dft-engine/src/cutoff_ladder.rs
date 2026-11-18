@@ -260,6 +260,16 @@ pub struct CutoffLadderReport {
     pub fine_iterations: usize,
     pub fine_h_vectors: usize,
     pub fine_certificate_h_vectors: usize,
+    /// SCF-TRAJECTORY: the coarse session's per-map records (the fine
+    /// history is the run's own history).
+    pub coarse_history: Vec<IterationRecord>,
+    /// Effective start of the coarse stage (the first stage of the run): the
+    /// density it started from ("atomic" = superposition of the UPF atomic
+    /// charges, "uniform") and its atomic start-wavefunction report (None when
+    /// `start_wavefunctions` is not atomic). The full-cutoff stage always
+    /// starts from the prolonged coarse density and orbitals.
+    pub coarse_start_density: Option<&'static str>,
+    pub coarse_atomic_start: Option<AtomicStartReport>,
 }
 impl CutoffLadderReport {
     /// D1: coarse stage cost in fine-step equivalents: full-grid-equivalent
@@ -500,6 +510,16 @@ fn coarse_stage(
         })
         .sum();
     report.coarse_start_h_vectors = session.problem_ref().atomic_start.initial_h_applications;
+    report.coarse_history = history.to_vec();
+    let coarse_problem = session.problem_ref();
+    report.coarse_start_density = Some(if coarse_problem.start_density.is_some() {
+        "atomic"
+    } else {
+        "uniform"
+    });
+    report.coarse_atomic_start = (coarse_problem.options.start_wavefunctions
+        == StartWavefunctions::Atomic)
+        .then(|| coarse_problem.atomic_start.clone());
     let standard_next = history.last().and_then(|r| {
         r.standard_error_ha.map(|e| {
             StandardProfile::ratchet(

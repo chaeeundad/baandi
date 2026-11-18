@@ -385,6 +385,11 @@ pub struct IterationRecord {
     /// bounded subspace update (its completion, if any, is inside); None on
     /// an ordinary converging map. Not carried by checkpoint v1.
     pub advance: Option<crate::advance::AdvanceRecord>,
+    /// SCF-TRAJECTORY: what the mixer did with this map's pair (coefficients,
+    /// Gram conditioning, predicted residual, step length). Diagnostic only;
+    /// None when no mixing followed or the mixer reports none. Not carried by
+    /// checkpoint v1.
+    pub pulay: Option<dft_solvers::mixing::PulayStepDiagnostics>,
 }
 #[derive(Clone, Debug)]
 pub struct FixedPointCertificate {
@@ -3900,6 +3905,7 @@ mod tests {
             fixed_point_certificate: None,
             timings: PhaseTimings::default(),
             advance: None,
+            pulay: None,
         };
         assert!(converged(&good, &o));
         let mut bad = good.clone();

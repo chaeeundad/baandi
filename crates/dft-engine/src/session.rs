@@ -359,6 +359,21 @@ impl ScfSession {
                         &self.problem.options,
                         self.problem.grid.dims(),
                     )?));
+                } else {
+                    // SCF-TRAJECTORY (`BAANDI_MIX_COULOMB_GUARD`, default off).
+                    let guard = dft_numerics::switches::choice(
+                        dft_numerics::switches::Id::MIX_COULOMB_GUARD,
+                    );
+                    if guard != "off" {
+                        p.set_coulomb_guard(
+                            Box::new(CoulombMetric::new(
+                                &self.problem.cell,
+                                &self.problem.options,
+                                self.problem.grid.dims(),
+                            )?),
+                            guard == "on",
+                        );
+                    }
                 }
                 Box::new(p)
             }
@@ -737,6 +752,7 @@ impl ScfSession {
             min_density: step.density.iter().copied().fold(f64::INFINITY, f64::min),
             timings: step.timings,
             advance: advance_record,
+            pulay: None,
         };
         let converged = if let Some(p) = standard {
             let stop = standard_error_ha.is_some_and(|e| {
@@ -1256,6 +1272,7 @@ impl ScfSession {
         history.last_mut().unwrap().mixing_history_used =
             Some(mixer.history_len().saturating_sub(1));
         history.last_mut().unwrap().mixing_raw_recovery = mixer.used_raw_recovery();
+        history.last_mut().unwrap().pulay = mixer.pulay_step();
         // Anderson extrapolation is unconstrained. A convex step toward its
         // proposal preserves charge and Fourier support while keeping XC in
         // its density domain. Never clip individual spatial samples.

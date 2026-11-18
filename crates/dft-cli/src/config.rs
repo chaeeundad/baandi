@@ -1146,6 +1146,7 @@ fn normalize(
     Ok(())
 }
 
+#[derive(Debug)]
 pub struct PreparedInput {
     pub cell: Cell,
     pub wavefunctions: PlaneWaveBasis,

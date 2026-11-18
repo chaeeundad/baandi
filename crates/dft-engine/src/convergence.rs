@@ -236,9 +236,21 @@ impl CoulombMetric {
         options: &ScfOptions,
         dims: [usize; 3],
     ) -> Result<Self, ScfError> {
+        let sphere = options.basis(cell, [0.0; 3], 1.0)?.density_basis(cell)?;
+        Self::with_sphere(cell, &sphere, dims)
+    }
+    /// As `new` with the density sphere supplied by the caller (INIT-REUSE:
+    /// problem construction passes its own density list, whose vectors equal
+    /// `options.basis(cell, [0; 3], 1.0)?.density_basis(cell)?` element for
+    /// element, frozen strain reference included, so the weights are the same
+    /// bits without building the sphere again).
+    pub(crate) fn with_sphere(
+        cell: &Cell,
+        sphere: &dft_basis::PlaneWaveBasis,
+        dims: [usize; 3],
+    ) -> Result<Self, ScfError> {
         let fft = FftPlan3d::new(dims)?;
         let mut weights = vec![0.0; dims.iter().product()];
-        let sphere = options.basis(cell, [0.0; 3], 1.0)?.density_basis(cell)?;
         let scale = cell.volume_bohr3() / (2.0 * weights.len() as f64);
         for g in sphere.vectors() {
             if g.norm_squared > 0.0 {

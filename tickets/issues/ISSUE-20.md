@@ -54,3 +54,5 @@ Use the current two-lane fast-loop protocol and the **new defaults**. Start with
 - Part 4, ionic local: distributed by contiguous G blocks with one allgatherv, bit-identical for every rank count, always on (ledger INIT-IONIC-SPLIT). The Ewald sum is split too (INIT-EWALD-SPLIT, bit-identical). The block atomic-start orthogonalization is a separate experiment behind `BAANDI_M2_ATOMIC_BLOCK` (default off, rounding class; INIT-ATOMIC-BLOCK).
 
 - Part 3 (geometry/potential/plan descriptor split) not started. The complex nonlocal table built per rank in `states` is its largest remaining replicated piece (INIT-NONLOCAL-TABLE).
+
+- INIT-SCALE-2 (2026-11-18): the duplicate packed projector copy and two of three density-sphere builds per construction are gone (INIT-PACKED, INIT-REUSE; bit-identical). Owned-row construction of the complex table is still blocked by its consumers on every rank: the split atomic-start Gram applies the complex H to column blocks over all rows (a row-distributed P^H D P would change rounding: default-off switch work), and the materialization audits read the full table.

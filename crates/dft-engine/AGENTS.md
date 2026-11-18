@@ -636,7 +636,9 @@ blocks, `ionic_local_with_conventions_rows`, one allgatherv; counter
 
 running sums passed down the ranks by P broadcasts so the serial association is
 
-kept; counter `ewald_splits`). Any failure on a rank makes every rank repeat the
+kept; counter `ewald_splits`; only for communicators of at least
+
+`EWALD_SPLIT_MIN_RANKS` = 4 ranks, INIT-EWALD-GATE). Any failure on a rank makes every rank repeat the
 
 serial call (same error). Do not construct a problem on a subset of the ranks
 
@@ -655,5 +657,15 @@ Ritz rotation (`rotate_rows`). Tests `tests/init_scale.rs`,
 lib `block_cholesky_qr_matches_gram_schmidt_and_falls_back_together`; physics
 
 `setup_memo_identity::ionic_local_row_blocks_are_bit_identical_for_every_rank_count`,
+
+INIT-SCALE-2: the opt-in atomic start density is split the same way
+
+(`start_density::split_superposition`, counter `density_splits`); construction
+
+passes its k grid to `Hamiltonian::new_with_grid` and its density list to
+
+`CoulombMetric::with_sphere` (no extra density spheres); the exact Gamma point
+
+reuses the Gamma basis. All bit-identical;
 
 lib `ewald::tests`. Ledger INIT-*.

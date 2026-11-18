@@ -216,6 +216,15 @@ fn assert_bits(a: &[Complex64], b: &[Complex64]) {
 
 #[test]
 fn setup_matches_old_bits() {
+    // IONIC_FAST (default on since 2026-11-18) moves ionic_local by an ulp; these tests pin the
+    // bits of the default (direct-phase) scheme against the old construction.
+    let _fast_off = dft_numerics::switches::RunConfig::from_pairs(&[
+        ("ionic_fast", "off"),
+        ("ewald_fast", "off"),
+    ])
+    .unwrap()
+    .enter();
+
     let shapes = [
         [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],
         [[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]],
@@ -294,6 +303,15 @@ fn setup_matches_old_bits() {
 
 #[test]
 fn local_mesh_panels_and_empty_projectors() {
+    // IONIC_FAST (default on since 2026-11-18) moves ionic_local by an ulp; these tests pin the
+    // bits of the default (direct-phase) scheme against the old construction.
+    let _fast_off = dft_numerics::switches::RunConfig::from_pairs(&[
+        ("ionic_fast", "off"),
+        ("ewald_fast", "off"),
+    ])
+    .unwrap()
+    .enter();
+
     let cell = Cell::from_user_rows_bohr([[6., 0., 0.], [0., 6.000000000000001, 0.], [0., 0., 6.]])
         .unwrap();
     let basis = PlaneWaveBasis::new(&cell, Hartree(1.)).unwrap();

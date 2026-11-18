@@ -96,6 +96,8 @@ fn reuse_psi_switch_keeps_energy_and_reuses_starts() {
             .env("BAANDI_CUTOFF_LADDER", "off")
             .env("BAANDI_DAVIDSON", "lean")
             .env("BAANDI_REUSE_PSI", mode)
+            .env("BAANDI_EWALD_FAST", "off")
+            .env("BAANDI_IONIC_FAST", "off")
             .env(extra.0, extra.1)
             .current_dir(&c.dir)
             .args(["run", "input.toml", "--output-dir", &out])

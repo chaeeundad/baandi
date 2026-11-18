@@ -69,6 +69,13 @@ const BASELINE_ENERGY_BITS: u64 = 13829793526668695510;
 
 #[test]
 fn off_preserves_main_bits() {
+    // Pin the init schemes of the recorded baseline (EWALD_FAST/IONIC_FAST default on since 2026-11-18).
+    let _fast_off = dft_numerics::switches::RunConfig::from_pairs(&[
+        ("ionic_fast", "off"),
+        ("ewald_fast", "off"),
+    ])
+    .unwrap()
+    .enter();
     let mut p = fixture(1);
     p.force_spin_share(false);
     let r = p.run().unwrap();
@@ -221,6 +228,8 @@ fn environment_switch_is_used_without_override() {
             ])
             .env(CHILD, mode)
             .env("BAANDI_SPIN_SHARE", mode)
+            .env("BAANDI_EWALD_FAST", "off")
+            .env("BAANDI_IONIC_FAST", "off")
             .output()
             .unwrap();
         assert!(

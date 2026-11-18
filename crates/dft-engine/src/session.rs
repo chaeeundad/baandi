@@ -1035,6 +1035,7 @@ impl ScfSession {
                     tolerance,
                     standard_error_ha.expect("standard history metric"),
                     iteration,
+                    (n, step.energy.total_hartree()),
                 )
                 .map_err(|e| match e {
                     ScfError::NonFinite => ScfError::Diverged {
@@ -2346,6 +2347,8 @@ type VerificationOutcome = (
 /// with the residual guard on, the residual estimate of that solve (V2). Strict
 /// certificate quantities are computed as information only (V3). Returns the
 /// attempt, its record for the history entry, and a clipped-charge failure.
+/// `stop_map` (input density, energy) feeds only the SCF-TAIL cross estimate.
+#[allow(clippy::too_many_arguments)]
 fn verify_fixed_point(
     problem: &mut ScfProblem,
     density: &Array3<f64>,
@@ -2354,6 +2357,7 @@ fn verify_fixed_point(
     tolerance: f64,
     standard_error_ha: f64,
     iteration: usize,
+    stop_map: (&Array3<f64>, f64),
 ) -> Result<VerificationOutcome, ScfError> {
     // M2-OWNED: the verification map's input is the delivered (owned) output;
     // the loop's own input is restored afterwards on every path.
@@ -2365,6 +2369,7 @@ fn verify_fixed_point(
         tolerance,
         standard_error_ha,
         iteration,
+        stop_map,
     );
     if let Some(s) = saved {
         problem.owned.input = s;
@@ -2379,6 +2384,7 @@ fn verify_fixed_point_inner(
     tolerance: f64,
     standard_error_ha: f64,
     iteration: usize,
+    (stop_input, stop_energy_ha): (&Array3<f64>, f64),
 ) -> Result<VerificationOutcome, ScfError> {
     let clock = Instant::now();
     let threshold = problem
@@ -2439,9 +2445,32 @@ fn verify_fixed_point_inner(
     {
         return Err(ScfError::NonFinite);
     }
+    let guard_ok = residual_bound_ha.is_none_or(|b| b < threshold);
     #[allow(unused_mut)]
-    let mut passed =
-        coulomb_error_ha < threshold && residual_bound_ha.is_none_or(|b| b < threshold);
+    let mut passed = coulomb_error_ha < threshold && guard_ok;
+    // SCF-TAIL (`BAANDI_STOP_PREDICTOR`): the cross estimate needs the stop
+    // map's input and both outputs as full arrays (the owned-plane loop keeps
+    // them on the planes: old criterion only).
+    if problem.sw.stop_predictor != StopPredictor::Off
+        && !stop_input.is_empty()
+        && !density.is_empty()
+        && !check.density.is_empty()
+        && let Some(metric) = problem.coulomb.as_mut()
+    {
+        let sum_ha = metric.error(stop_input, &check.density)?;
+        let cross_ha = verification_cross(standard_error_ha, coulomb_error_ha, sum_ha);
+        let cross_pass = cross_ha > 0.0
+            && cross_ha < threshold / CROSS_SAFETY
+            && standard_error_ha < threshold
+            && guard_ok;
+        eprintln!(
+            "STOP-PREDICTOR iter={iteration} stop_ha={standard_error_ha:.6e} verify_ha={coulomb_error_ha:.6e} cross_ha={cross_ha:.6e} verify_energy_change_ha={:.6e} stop_energy_ha={stop_energy_ha:.15e} threshold_ha={threshold:.3e} old_pass={passed} cross_pass={cross_pass}",
+            check.energy.total_hartree() - stop_energy_ha,
+        );
+        if problem.sw.stop_predictor == StopPredictor::On && !passed && cross_pass {
+            passed = true;
+        }
+    }
     #[cfg(test)]
     if problem.force_verification_failures > 0 {
         problem.force_verification_failures -= 1;
@@ -2578,6 +2607,41 @@ pub(crate) struct SessionSwitches {
     pub(crate) growth_reset: Option<f64>,
     /// `BAANDI_EIGEN_FACTOR` (default 0.1).
     pub(crate) eigen_factor: f64,
+    /// `BAANDI_STOP_PREDICTOR` (SCF-TAIL, default off).
+    pub(crate) stop_predictor: StopPredictor,
+}
+
+/// SCF-TAIL (`BAANDI_STOP_PREDICTOR=off|trace|on`, default off): the cross
+/// estimate of the fixed-point verification (`verification_cross`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StopPredictor {
+    Off,
+    Trace,
+    On,
+}
+
+/// Safety factor of the cross estimate (SCF-TAIL calibration, ledger
+/// SCF-TAIL-PREDICTOR): an attempt passes on it only below threshold / factor;
+/// the smallest measured -X / T (calibration systems) is 0.654, so 4 leaves a
+/// margin of 2.6 over it.
+pub(crate) const CROSS_SAFETY: f64 = 4.0;
+
+/// Cross estimate of a verification (SCF-TAIL), returned as -X >= 0 in the
+/// model. With r0 = rho_out - rho_in (the stop map's residual, E_H[r0] =
+/// `stop_ha`) and r1 = F(rho_out) - rho_out (the verification's, E_H[r1] =
+/// `verify_ha`), `sum_ha` = E_H[r0 + r1] = E_H[F(rho_out) - rho_in] gives the
+/// Coulomb form X = r0 K r1 by polarization. Linear Hartree model
+/// (rho_out = rho* + J delta, J = chi0 v = -v^-1/2 A v^1/2, A = v^1/2 (-chi0)
+/// v^1/2 >= 0, x = v^1/2 delta): r0 = -(1 + A) x, r1 = A (1 + A) x; true
+/// energy error of the delivered output T = x A (1 + A) x / 2, E_H[r0] =
+/// x (1 + A)^2 x / 2, E_H[r1] = x A^2 (1 + A)^2 x / 2 and -X =
+/// x A (1 + A)^2 x / 2, so -X / T = 1 + A >= 1 per mode while E_H[r1] / T =
+/// A (1 + A) (below 1 for A < 0.618, eps (eps - 1) for screened long-wavelength
+/// modes). Not a proof for the real map (XC kernel, inexact solves,
+/// nonlinearity): measured -X / T reaches 0.654 (ledger SCF-TAIL-PREDICTOR), so
+/// the pass rule carries the safety factor `CROSS_SAFETY`.
+pub(crate) fn verification_cross(stop_ha: f64, verify_ha: f64, sum_ha: f64) -> f64 {
+    -0.5 * (sum_ha - stop_ha - verify_ha)
 }
 impl SessionSwitches {
     pub(crate) fn resolve(run: dft_numerics::switches::RunConfig) -> Self {
@@ -2602,6 +2666,11 @@ impl SessionSwitches {
             potential_reuse: run.on(Id::POTENTIAL_REUSE),
             growth_reset: run.number(Id::MIX_GROWTH_RESET),
             eigen_factor: run.number(Id::EIGEN_FACTOR).unwrap_or(0.1),
+            stop_predictor: match run.choice(Id::STOP_PREDICTOR) {
+                "trace" => StopPredictor::Trace,
+                "on" => StopPredictor::On,
+                _ => StopPredictor::Off,
+            },
         }
     }
 }

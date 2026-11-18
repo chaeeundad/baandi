@@ -814,3 +814,18 @@ Phase profile (RUN-REPORT): `RankProfile.wall` (caller-set, carried by
 `gather`), `Report::per_rank` / `closure()` close each rank's exclusive tree on
 that rank; `covered_wall()` (sum of per-bucket maxima) is legacy. Tests: lib
 `profile::closure_tests`, `tests/instrument.rs::per_rank_closure_*`.
+
+## Verification cross estimate (SCF-TAIL, 2026-11-18; default off)
+
+`BAANDI_STOP_PREDICTOR=off|trace|on` (`SessionSwitches::stop_predictor`).
+`verify_fixed_point` receives the stop map's input density and energy; with
+the switch on and full (replicated) densities it evaluates E_H[F(rho_out) -
+rho_in] once more and forms -X = -<rho_out - rho_in, F(rho_out) - rho_out>_C
+(`verification_cross`, polarization). trace prints a `STOP-PREDICTOR` line per
+attempt (stderr) and changes nothing; on also passes an attempt whose old
+criterion fails when 0 < -X < threshold / `CROSS_SAFETY` (4), the stop
+estimate is below the threshold and the residual guard passes. The owned-plane
+loop keeps the old criterion. Measured -X / T >= 0.654 only (not a bound);
+the Mac evidence does not support `on` (ledger SCF-TAIL-*). Tests:
+`verification_tests::verification_cross_matches_the_linear_model`,
+`stop_predictor_trace_is_inert_and_on_keeps_the_class`.

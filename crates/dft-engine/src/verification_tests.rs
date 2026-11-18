@@ -420,3 +420,63 @@ fn exact_checkpoint_after_failed_verification_resumes_bit_for_bit() {
         Some(Rejection::Options)
     );
 }
+
+/// SCF-TAIL (`BAANDI_STOP_PREDICTOR`): the cross estimate reproduces the linear
+/// Hartree model per mode (-X = (1 + A) T, E_H[r1] = A (1 + A) T) through the
+/// polarization identity it uses, on a diagonal quadratic form with three
+/// modes of different screening A.
+#[test]
+fn verification_cross_matches_the_linear_model() {
+    use super::session::verification_cross;
+    let k = [0.7, 0.2, 1.3];
+    let a = [0.3, 2.0, 11.0];
+    let x = [1e-5, -3e-6, 2e-6];
+    let form = |u: &[f64; 3], v: &[f64; 3]| (0..3).map(|i| k[i] * u[i] * v[i]).sum::<f64>();
+    let r0: [f64; 3] = std::array::from_fn(|i| -(1.0 + a[i]) * x[i]);
+    let r1: [f64; 3] = std::array::from_fn(|i| a[i] * (1.0 + a[i]) * x[i]);
+    let sum: [f64; 3] = std::array::from_fn(|i| r0[i] + r1[i]);
+    let truth: f64 = (0..3)
+        .map(|i| k[i] * a[i] * (1.0 + a[i]) * x[i] * x[i])
+        .sum();
+    let cross = verification_cross(form(&r0, &r0), form(&r1, &r1), form(&sum, &sum));
+    let model: f64 = (0..3)
+        .map(|i| k[i] * a[i] * (1.0 + a[i]).powi(2) * x[i] * x[i])
+        .sum();
+    assert!(
+        (cross - model).abs() <= 1e-12 * model,
+        "{cross:e} vs {model:e}"
+    );
+    assert!(cross >= truth, "the model estimate is an upper bound");
+}
+
+/// SCF-TAIL: `trace` is the default path bit for bit; `on` (with a forced
+/// first failure of the old criterion) still ends on a passed verification at
+/// the default fixed point (standard class gate 5e-9 Ha).
+#[test]
+fn stop_predictor_trace_is_inert_and_on_keeps_the_class() {
+    use super::session::StopPredictor;
+    let pp = super::pool_fixture::potential(2.0, 1.0, true, 401);
+    let run = |mode: StopPredictor, failures: usize| {
+        let mut p = problem(&pp, Some(5e-9), Verification::FixedPoint).unwrap();
+        p.sw.stop_predictor = mode;
+        p.force_verification_failures = failures;
+        p.run_outcome().unwrap()
+    };
+    let off = run(StopPredictor::Off, 0);
+    let trace = run(StopPredictor::Trace, 0);
+    assert_eq!(
+        off.result.energy.total_hartree().to_bits(),
+        trace.result.energy.total_hartree().to_bits()
+    );
+    assert!(
+        off.result
+            .density
+            .iter()
+            .zip(&trace.result.density)
+            .all(|(a, b)| a.to_bits() == b.to_bits())
+    );
+    let on = run(StopPredictor::On, 1);
+    assert!(on.converged && on.result.verification.as_ref().unwrap().passed());
+    let de = (on.result.energy.total_hartree() - off.result.energy.total_hartree()).abs();
+    assert!(de < 5e-9, "|dE| {de:e} Ha");
+}

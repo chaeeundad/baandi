@@ -264,5 +264,5 @@ fn legacy_defaults_are_unchanged() {
     // M2-OWNED: owned potential and density prototype, off until dev08.
     assert_eq!(value(Id::M2_LOCAL_FIELDS), Value::Choice("on"));
     assert_eq!(value(Id::M2_LOCAL_DENSITY), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 108);
+    assert_eq!(TABLE.len(), 109);
 }

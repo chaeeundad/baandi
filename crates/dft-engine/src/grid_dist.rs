@@ -81,6 +81,337 @@ pub(crate) fn count_declined() {
     bump(C_DECLINED);
 }
 
+// ---------------------------------------------------------------------------
+// M2-OWNED (`BAANDI_M2_LOCAL_FIELDS`, `BAANDI_M2_LOCAL_DENSITY`, default off):
+// switches, counters and the plane redistribution of the owned fields.
+
+thread_local! {
+    static OWNED_OVERRIDE: std::cell::Cell<Option<(bool, bool)>> =
+        const { std::cell::Cell::new(None) };
+}
+/// Override (local fields, local density) for the calling thread (simulated
+/// ranks in tests; every rank thread must set the same value).
+pub fn set_owned_override(v: Option<(bool, bool)>) {
+    OWNED_OVERRIDE.with(|o| o.set(v));
+}
+/// `BAANDI_M2_LOCAL_FIELDS=on` on this thread.
+pub fn local_fields_requested() -> bool {
+    OWNED_OVERRIDE.with(|o| o.get()).map_or_else(
+        || dft_numerics::switches::on(dft_numerics::switches::Id::M2_LOCAL_FIELDS),
+        |v| v.0,
+    )
+}
+/// `BAANDI_M2_LOCAL_DENSITY=on` on this thread.
+pub fn local_density_requested() -> bool {
+    OWNED_OVERRIDE.with(|o| o.get()).map_or_else(
+        || dft_numerics::switches::on(dft_numerics::switches::Id::M2_LOCAL_DENSITY),
+        |v| v.1,
+    )
+}
+
+pub(crate) const O_FIELDS_OWNED_MAPS: usize = 0;
+pub(crate) const O_FIELDS_DECLINED_MAPS: usize = 1;
+pub(crate) const O_POTENTIAL_GATHERS: usize = 2;
+pub(crate) const O_POTENTIAL_GATHER_VALUES: usize = 3;
+pub(crate) const O_CONSUMER_GATHERS: usize = 4;
+pub(crate) const O_CONSUMER_GATHER_VALUES: usize = 5;
+pub(crate) const O_REDISTRIBUTIONS: usize = 6;
+pub(crate) const O_REDISTRIBUTION_VALUES: usize = 7;
+pub(crate) const O_FULL_COPIES: usize = 8;
+pub(crate) const O_FULL_COPY_VALUES: usize = 9;
+pub(crate) const O_DENSITY_OWNED_MAPS: usize = 10;
+pub(crate) const O_DENSITY_DECLINED: usize = 11;
+pub(crate) const O_DENSITY_GATHERS: usize = 12;
+pub(crate) const O_DENSITY_GATHER_VALUES: usize = 13;
+pub(crate) const O_MIXER_GATHERS: usize = 14;
+pub(crate) const O_MIXER_GATHER_VALUES: usize = 15;
+pub(crate) const O_MATERIALIZATIONS: usize = 16;
+pub(crate) const O_MATERIALIZATION_VALUES: usize = 17;
+pub(crate) const O_EPOCH_CHECKS: usize = 18;
+pub(crate) const O_OWNED_REDUCTIONS: usize = 19;
+pub(crate) const O_PLANE_VALUES: usize = 20;
+const OWNED_NAMES: [&str; 21] = [
+    "fields_owned_maps",
+    "fields_declined_maps",
+    "potential_gathers",
+    "potential_gather_values",
+    "consumer_potential_gathers",
+    "consumer_potential_gather_values",
+    "redistributions",
+    "redistribution_values",
+    "full_copies",
+    "full_copy_values",
+    "density_owned_maps",
+    "density_declined_maps",
+    "density_gathers",
+    "density_gather_values",
+    "mixer_gathers",
+    "mixer_gather_values",
+    "density_materializations",
+    "density_materialization_values",
+    "epoch_checks",
+    "owned_reductions",
+    "plane_values_per_rank_max",
+];
+static OWNED: [AtomicU64; 21] = [const { AtomicU64::new(0) }; 21];
+pub(crate) const T_POTENTIAL_GATHER: usize = 0;
+pub(crate) const T_CONSUMER_GATHER: usize = 1;
+pub(crate) const T_REDISTRIBUTE: usize = 2;
+pub(crate) const T_DENSITY_GATHER: usize = 3;
+pub(crate) const T_MIXER_GATHER: usize = 4;
+pub(crate) const T_MATERIALIZE: usize = 5;
+pub(crate) const T_OWNED_REDUCE: usize = 6;
+const OWNED_TIME_NAMES: [&str; 7] = [
+    "potential_gather",
+    "consumer_potential_gather",
+    "redistribute",
+    "density_gather",
+    "mixer_gather",
+    "density_materialize",
+    "owned_reduce",
+];
+static OWNED_NANOS: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
+/// Reasons a map that asked for owned fields took the gathered path.
+pub(crate) const DECLINE_REASONS: [&str; 7] = [
+    "grid_path",
+    "standard",
+    "kpoints",
+    "cold_map",
+    "operator",
+    "snapshot",
+    "finite_temperature",
+];
+static DECLINED: [AtomicU64; 7] = [const { AtomicU64::new(0) }; 7];
+pub(crate) fn owned_add(i: usize, n: u64) {
+    OWNED[i].fetch_add(n, Ordering::Relaxed);
+}
+pub(crate) fn owned_max(i: usize, n: u64) {
+    OWNED[i].fetch_max(n, Ordering::Relaxed);
+}
+/// Charge the time since `start` (None with `BAANDI_STAGE_TIMERS=off`: no clock).
+pub(crate) fn owned_time(i: usize, start: Option<std::time::Instant>) {
+    if start.is_some() {
+        OWNED_NANOS[i].fetch_add(
+            dft_numerics::stage_clock::elapsed_ns(start),
+            Ordering::Relaxed,
+        );
+    }
+}
+pub(crate) fn owned_declined(reason: usize) {
+    DECLINED[reason].fetch_add(1, Ordering::Relaxed);
+    owned_add(O_FIELDS_DECLINED_MAPS, 1);
+}
+/// M2-OWNED counters (`owned.<name>`, process-wide, simulated ranks add up)
+/// and exposed seconds (`owned.<stage>`, 0 with `BAANDI_STAGE_TIMERS=off`).
+/// Values are f64 doubles (8 bytes each). results.json `parallel.m2`.
+pub fn owned_stats() -> crate::parallel::M2Stats {
+    let mut counts: Vec<(String, usize)> = OWNED_NAMES
+        .iter()
+        .zip(&OWNED)
+        .map(|(n, c)| (format!("owned.{n}"), c.load(Ordering::Relaxed) as usize))
+        .collect();
+    counts.extend(DECLINE_REASONS.iter().zip(&DECLINED).map(|(n, c)| {
+        (
+            format!("owned.fields_declined.{n}"),
+            c.load(Ordering::Relaxed) as usize,
+        )
+    }));
+    let stages = OWNED_TIME_NAMES
+        .iter()
+        .zip(&OWNED_NANOS)
+        .map(|(n, c)| {
+            (
+                format!("owned.{n}"),
+                c.load(Ordering::Relaxed) as f64 * 1e-9,
+            )
+        })
+        .collect();
+    (counts, stages)
+}
+
+/// Epoch-tagged plane-local field of the slab layout (M2-OWNED): the values
+/// of this rank's planes and the epoch of the map that produced them. A
+/// consumer compares the epoch it expects with the tag, so a stale field is
+/// rejected instead of used.
+#[derive(Clone, Debug)]
+pub(crate) struct Owned {
+    pub(crate) epoch: u64,
+    pub(crate) values: Vec<f64>,
+}
+
+/// Owned-field state of one problem (M2-OWNED). `potential` is the effective
+/// potential of the latest owned map on the distributed operator's planes;
+/// `complex_stale` says that the complex Hamiltonians still hold an older full
+/// potential (a consumer of the full potential gathers it first).
+#[derive(Default)]
+pub(crate) struct OwnedFields {
+    epoch: u64,
+    pub(crate) potential: Option<Owned>,
+    pub(crate) complex_stale: bool,
+    pub(crate) map: Option<PlaneMap>,
+    pub(crate) scratch: Vec<f64>,
+    /// `BAANDI_M2_LOCAL_DENSITY` loop active (set by the session): maps keep
+    /// their output density on the slab planes (`output`), and a map given an
+    /// empty input array reads its input from `input`.
+    pub(crate) density_mode: bool,
+    pub(crate) input: Option<Owned>,
+    pub(crate) output: Option<Owned>,
+}
+impl OwnedFields {
+    /// A new epoch for a field produced now (monotonic per problem).
+    pub(crate) fn next_epoch(&mut self) -> u64 {
+        self.epoch += 1;
+        self.epoch
+    }
+}
+
+/// Plane start of rank r for n0 planes over `ranks` ranks (the rule of
+/// `DistributedPairFft`: r * (n0 / P) + min(r, n0 % P)).
+fn plane_starts(n0: usize, ranks: usize) -> Vec<usize> {
+    (0..=ranks)
+        .map(|r| r * (n0 / ranks) + r.min(n0 % ranks))
+        .collect()
+}
+
+/// Redistribution of plane-local fields between two slab layouts of one grid
+/// (layout A: the slab plan, planes along `first_a`; layout B: the distributed
+/// operator, planes along `first_b`). Both use the same plane rule, so equal
+/// axes mean equal layouts and the move is a local copy; otherwise one
+/// alltoall of equal padded blocks (every rank sends its A planes cut by the
+/// B plane ranges). A pure permutation: the values keep their bits.
+pub(crate) struct PlaneMap {
+    dims: [usize; 3],
+    rank: usize,
+    first_a: usize,
+    first_b: usize,
+    starts_a: Vec<usize>,
+    starts_b: Vec<usize>,
+    block: usize,
+    send: Vec<f64>,
+    recv: Vec<f64>,
+}
+
+impl PlaneMap {
+    pub(crate) fn new(
+        dims: [usize; 3],
+        rank: usize,
+        ranks: usize,
+        first_a: usize,
+        first_b: usize,
+    ) -> Self {
+        let starts_a = plane_starts(dims[first_a], ranks);
+        let starts_b = plane_starts(dims[first_b], ranks);
+        let max = |s: &[usize]| s.windows(2).map(|w| w[1] - w[0]).max().unwrap_or(0);
+        let block = max(&starts_a) * max(&starts_b) * dims[2];
+        Self {
+            dims,
+            rank,
+            first_a,
+            first_b,
+            starts_a,
+            starts_b,
+            block,
+            send: Vec::new(),
+            recv: Vec::new(),
+        }
+    }
+    pub(crate) fn identity(&self) -> bool {
+        self.first_a == self.first_b
+    }
+    pub(crate) fn matches(&self, dims: [usize; 3], first_a: usize, first_b: usize) -> bool {
+        self.dims == dims && self.first_a == first_a && self.first_b == first_b
+    }
+    /// Layout A -> layout B. Collective unless `identity()`.
+    pub(crate) fn a_to_b<K: Collective>(
+        &mut self,
+        comm: &K,
+        src: &[f64],
+        dst: &mut Vec<f64>,
+    ) -> Result<(), ScfError> {
+        let (sa, sb) = (
+            std::mem::take(&mut self.starts_a),
+            std::mem::take(&mut self.starts_b),
+        );
+        let r = self.moved(comm, (self.first_a, &sa), (self.first_b, &sb), src, dst);
+        (self.starts_a, self.starts_b) = (sa, sb);
+        r
+    }
+    /// Layout B -> layout A. Collective unless `identity()`.
+    pub(crate) fn b_to_a<K: Collective>(
+        &mut self,
+        comm: &K,
+        src: &[f64],
+        dst: &mut Vec<f64>,
+    ) -> Result<(), ScfError> {
+        let (sa, sb) = (
+            std::mem::take(&mut self.starts_a),
+            std::mem::take(&mut self.starts_b),
+        );
+        let r = self.moved(comm, (self.first_b, &sb), (self.first_a, &sa), src, dst);
+        (self.starts_a, self.starts_b) = (sa, sb);
+        r
+    }
+    fn moved<K: Collective>(
+        &mut self,
+        comm: &K,
+        (fs, ss): (usize, &[usize]),
+        (ft, st): (usize, &[usize]),
+        src: &[f64],
+        dst: &mut Vec<f64>,
+    ) -> Result<(), ScfError> {
+        let nz = self.dims[2];
+        let rank = self.rank;
+        let ranks = ss.len() - 1;
+        if fs == ft {
+            dst.clear();
+            dst.extend_from_slice(src);
+            return Ok(());
+        }
+        let clock = dft_numerics::stage_clock::start();
+        // Rows of the source layout run along the target's plane axis and
+        // vice versa (the two axes are 0 and 1).
+        let (rows_s, rows_t) = (self.dims[ft], self.dims[fs]);
+        let (s0, s1) = (ss[rank], ss[rank + 1]);
+        if src.len() != (s1 - s0) * rows_s * nz {
+            return Err(ScfError::InvalidInput("M2 owned redistribution: length"));
+        }
+        self.send.clear();
+        self.send.resize(self.block * ranks, 0.0);
+        for q in 0..ranks {
+            let mut k = q * self.block;
+            for x in s0..s1 {
+                for y in st[q]..st[q + 1] {
+                    let at = ((x - s0) * rows_s + y) * nz;
+                    self.send[k..k + nz].copy_from_slice(&src[at..at + nz]);
+                    k += nz;
+                }
+            }
+        }
+        self.recv.resize(self.block * ranks, 0.0);
+        if self.block > 0 {
+            comm.alltoall_f64(&self.send, self.block, &mut self.recv)
+                .map_err(|e| ScfError::Numerical(format!("M2 owned redistribution: {e}")))?;
+        }
+        let (t0, t1) = (st[rank], st[rank + 1]);
+        dst.clear();
+        dst.resize((t1 - t0) * rows_t * nz, 0.0);
+        for r in 0..ranks {
+            let mut k = r * self.block;
+            for x in ss[r]..ss[r + 1] {
+                for y in t0..t1 {
+                    let at = ((y - t0) * rows_t + x) * nz;
+                    dst[at..at + nz].copy_from_slice(&self.recv[k..k + nz]);
+                    k += nz;
+                }
+            }
+        }
+        owned_add(O_REDISTRIBUTIONS, 1);
+        owned_add(O_REDISTRIBUTION_VALUES, (self.block * ranks) as u64);
+        owned_time(T_REDISTRIBUTE, clock);
+        Ok(())
+    }
+}
+
 /// Pointwise LDA flavour of the distributed XC (the m2 path's eligibility).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Lda {
@@ -120,6 +451,14 @@ impl AuditTerms {
             self.rx,
         ]
     }
+}
+
+/// A density or field handed to the slab plan: the replicated full row-major
+/// grid, or this rank's planes of the slab layout ([plane][row][z], M2-OWNED).
+#[derive(Clone, Copy)]
+pub(crate) enum Field<'a> {
+    Full(&'a [f64]),
+    Planes(&'a [f64]),
 }
 
 pub(crate) struct GridPlan {
@@ -330,6 +669,126 @@ impl GridPlan {
     fn points(&self) -> usize {
         self.planes * self.rows * self.nz
     }
+    /// Grid points of one plane.
+    pub(crate) fn plane_len(&self) -> usize {
+        self.rows * self.nz
+    }
+    /// Planes per rank (ascending plane order is rank order).
+    pub(crate) fn plane_counts(&self) -> &[usize] {
+        &self.plane_counts
+    }
+    /// First FFT axis of the slab layout (the axis of the planes).
+    pub(crate) fn first_axis(&self) -> usize {
+        self.fft.first_axis()
+    }
+    /// Effective potential of the latest `potential_field` call on this rank's planes.
+    pub(crate) fn effective_planes(&self) -> &[f64] {
+        &self.effective_planes
+    }
+    /// The z-line (plane i, row y) of a field.
+    fn line<'a>(&self, f: Field<'a>, i: usize, y: usize) -> &'a [f64] {
+        match f {
+            Field::Full(n) => {
+                let s = self.lines[i * self.rows + y];
+                &n[s..s + self.nz]
+            }
+            Field::Planes(p) => {
+                let s = (i * self.rows + y) * self.nz;
+                &p[s..s + self.nz]
+            }
+        }
+    }
+    /// This rank's planes of a full row-major field (no collective).
+    pub(crate) fn planes_of(&self, full: &[f64], out: &mut Vec<f64>) {
+        out.clear();
+        for i in 0..self.planes {
+            for y in 0..self.rows {
+                out.extend_from_slice(self.line(Field::Full(full), i, y));
+            }
+        }
+    }
+
+    /// Full row-major grid from every rank's plane-local field `local` (one
+    /// allgatherv; a pure permutation, bit-identical for every rank count).
+    /// Collective. Counted as one owned-field gather of the given kind.
+    pub(crate) fn gather_field<K: Collective>(
+        &mut self,
+        comm: &K,
+        local: &[f64],
+        full: &mut [f64],
+    ) -> Result<(), ScfError> {
+        let plane_points = self.rows * self.nz;
+        let total: usize = self.dims.iter().product();
+        if local.len() != self.points() || full.len() != total {
+            return Err(ScfError::InvalidInput("M2 owned gather: field length"));
+        }
+        let counts: Vec<usize> = self.plane_counts.iter().map(|p| p * plane_points).collect();
+        self.recv.resize(total, 0.0);
+        comm.allgatherv_f64(local, &counts, &mut self.recv)
+            .map_err(|e| ScfError::Numerical(format!("M2 owned gather: {e}")))?;
+        let first = self.fft.first_axis();
+        let nz = self.nz;
+        for x in 0..self.dims[first] {
+            for y in 0..self.rows {
+                let start = if first == 0 {
+                    (x * self.dims[1] + y) * nz
+                } else {
+                    (y * self.dims[1] + x) * nz
+                };
+                let src = (x * self.rows + y) * nz;
+                full[start..start + nz].copy_from_slice(&self.recv[src..src + nz]);
+            }
+        }
+        Ok(())
+    }
+
+    /// Canonical global reduction of plane-local partials: `fill(i, out)`
+    /// writes the `k` partial sums of plane i; `maxes` are combined by max
+    /// (order free, exact). One allgatherv; sums added in ascending plane
+    /// order, so the result does not depend on the rank count. Collective.
+    pub(crate) fn plane_reduce<K: Collective>(
+        &mut self,
+        comm: &K,
+        k: usize,
+        mut fill: impl FnMut(usize, &mut [f64]),
+        maxes: &[f64],
+    ) -> Result<(Vec<f64>, Vec<f64>), ScfError> {
+        self.send.clear();
+        self.send.resize(self.planes * k, 0.0);
+        for i in 0..self.planes {
+            fill(i, &mut self.send[i * k..(i + 1) * k]);
+        }
+        self.send.extend_from_slice(maxes);
+        let counts: Vec<usize> = self
+            .plane_counts
+            .iter()
+            .map(|p| p * k + maxes.len())
+            .collect();
+        self.recv.resize(counts.iter().sum(), 0.0);
+        comm.allgatherv_f64(&self.send, &counts, &mut self.recv)
+            .map_err(|e| ScfError::Numerical(format!("M2 owned reduction: {e}")))?;
+        let mut sums = vec![0.0; k];
+        let mut max = vec![f64::NEG_INFINITY; maxes.len()];
+        let mut at = 0;
+        for &planes in &self.plane_counts {
+            for p in 0..planes {
+                for (q, s) in sums.iter_mut().enumerate() {
+                    *s += self.recv[at + p * k + q];
+                }
+            }
+            at += planes * k;
+            for (m, v) in max.iter_mut().zip(&self.recv[at..at + maxes.len()]) {
+                // NaN propagates (a nonfinite value on any rank).
+                *m = if v.is_nan() || m.is_nan() {
+                    f64::NAN
+                } else {
+                    m.max(*v)
+                };
+            }
+            at += maxes.len();
+        }
+        Ok((sums, max))
+    }
     fn weight(&self) -> f64 {
         self.volume / self.dims.iter().product::<usize>() as f64
     }
@@ -339,7 +798,7 @@ impl GridPlan {
     fn forward<K: Collective>(
         &mut self,
         comm: &K,
-        n: &[f64],
+        n: Field<'_>,
         flags: &mut [f64; FLAGS],
     ) -> Result<(), ScfError> {
         let err = |e: dft_solvers::distributed_fft::DistFftError| {
@@ -347,10 +806,10 @@ impl GridPlan {
         };
         let nz = self.nz;
         for i in 0..self.planes {
-            let slab = self.fft.plane_mut();
             for y in 0..self.rows {
-                let start = self.lines[i * self.rows + y];
-                for (z, &v) in n[start..start + nz].iter().enumerate() {
+                let line = self.line(n, i, y);
+                let slab = self.fft.plane_mut();
+                for (z, &v) in line.iter().enumerate() {
                     // `checked_density`: invalid below -NEGATIVE_ROUNDOFF or nonfinite.
                     let c = match xc_checked(v) {
                         Some(c) => c,
@@ -475,7 +934,7 @@ impl GridPlan {
     /// [energy, integral] partial sums (unweighted) appended at `out[2p..]`.
     fn xc_planes(
         &self,
-        n: &[f64],
+        n: Field<'_>,
         mut vxc: Option<&mut [f64]>,
         out: &mut [f64],
         stride: usize,
@@ -489,8 +948,7 @@ impl GridPlan {
             match self.lda {
                 Lda::Pz => {
                     for y in 0..rows {
-                        let start = self.lines[i * rows + y];
-                        for (z, &v) in n[start..start + nz].iter().enumerate() {
+                        for (z, &v) in self.line(n, i, y).iter().enumerate() {
                             match xc::lda_pz(v) {
                                 Ok(p) => {
                                     let nn = v.max(0.0);
@@ -509,8 +967,7 @@ impl GridPlan {
                 Lda::Pw => {
                     block.clear();
                     for y in 0..rows {
-                        let start = self.lines[i * rows + y];
-                        block.extend_from_slice(&n[start..start + nz]);
+                        block.extend_from_slice(self.line(n, i, y));
                     }
                     let len = block.len();
                     // Volume = point count makes the library weight exactly 1.
@@ -538,13 +995,29 @@ impl GridPlan {
     /// density `n` (replicated, row-major). Returns (E_H, E_xc, integral
     /// n v_xc, effective potential on the full grid); V_H and V_xc stay on the
     /// planes for the audit, the owned stick coefficients for the stop rule.
-    /// Collective.
+    /// Collective. (The engine calls `potential_field`; tests use this form.)
+    #[cfg(test)]
     pub(crate) fn potential<K: Collective>(
         &mut self,
         comm: &K,
         n: &[f64],
         ionic: &[f64],
         effective: &mut [f64],
+    ) -> Result<(f64, f64, f64), ScfError> {
+        self.potential_field(comm, Field::Full(n), ionic, Some(effective))
+    }
+
+    /// `potential` for a full or plane-local input density. With `effective`
+    /// None (M2-OWNED, `BAANDI_M2_LOCAL_FIELDS`) the effective potential stays
+    /// on this rank's planes (`effective_planes`) and the allgatherv carries
+    /// only the partial sums; the energies have the same bits either way.
+    /// Collective.
+    pub(crate) fn potential_field<K: Collective>(
+        &mut self,
+        comm: &K,
+        n: Field<'_>,
+        ionic: &[f64],
+        effective: Option<&mut [f64]>,
     ) -> Result<(f64, f64, f64), ScfError> {
         let start = dft_numerics::stage_clock::start();
         let (mut vh, mut vxc) = match self.fields.take() {
@@ -596,11 +1069,21 @@ impl GridPlan {
                 }
             }
         }
-        let gathered = self.gather(comm, Some(&eff), POT_PLANE, &flags);
+        let with_prefix = effective.is_some();
+        let gather_clock = dft_numerics::stage_clock::start();
+        let gathered = self.gather(comm, with_prefix.then_some(&eff[..]), POT_PLANE, &flags);
+        if with_prefix {
+            owned_add(O_POTENTIAL_GATHERS, 1);
+            owned_add(
+                O_POTENTIAL_GATHER_VALUES,
+                self.dims.iter().product::<usize>() as u64,
+            );
+            owned_time(T_POTENTIAL_GATHER, gather_clock);
+        }
         self.effective_planes = eff;
         gathered?;
         let mut sums = [0.0; POT_PLANE];
-        let (stick_sum, flags) = self.reduce(true, POT_PLANE, &mut sums);
+        let (stick_sum, flags) = self.reduce(with_prefix, POT_PLANE, &mut sums);
         if flags[0] != 0.0 {
             return Err(PhysicsError::Density(-1.0).into());
         }
@@ -610,7 +1093,9 @@ impl GridPlan {
             ));
         }
         // Planes of the concatenation in ascending first-axis order.
-        self.scatter_planes(effective);
+        if let Some(effective) = effective {
+            self.scatter_planes(effective);
+        }
         let weight = self.weight();
         let hartree = 0.5 * self.volume * stick_sum;
         let (xe, xi) = (sums[0] * weight, sums[1] * weight);
@@ -667,8 +1152,8 @@ impl GridPlan {
     pub(crate) fn audit<K: Collective>(
         &mut self,
         comm: &K,
-        input: &[f64],
-        out: &[f64],
+        input: Field<'_>,
+        out: Field<'_>,
         ionic: &[f64],
     ) -> Result<AuditTerms, ScfError> {
         let start = dft_numerics::stage_clock::start();
@@ -694,8 +1179,9 @@ impl GridPlan {
             for y in 0..rows {
                 let start = self.lines[i * rows + y];
                 let at = (i * rows + y) * nz;
+                let (out_line, in_line) = (self.line(out, i, y), self.line(input, i, y));
                 for z in 0..nz {
-                    let (o, a) = (out[start + z], input[start + z]);
+                    let (o, a) = (out_line[z], in_line[z]);
                     let (h, x) = (fields.vh[at + z], fields.vxc[at + z]);
                     charge += o;
                     dc += o * (h + x);
@@ -932,11 +1418,51 @@ mod tests {
             let t = plan
                 .audit(
                     comm,
-                    n_in.as_slice().unwrap(),
-                    n_out.as_slice().unwrap(),
+                    Field::Full(n_in.as_slice().unwrap()),
+                    Field::Full(n_out.as_slice().unwrap()),
                     ionic.as_slice().unwrap(),
                 )
                 .unwrap();
+            // M2-OWNED: the same stages from plane-local inputs, without the
+            // effective-potential gather, keep every bit; the gathered field
+            // equals the full output.
+            let mut planes_in = Vec::new();
+            let mut planes_out = Vec::new();
+            plan.planes_of(n_in.as_slice().unwrap(), &mut planes_in);
+            plan.planes_of(n_out.as_slice().unwrap(), &mut planes_out);
+            let e_owned = plan
+                .potential_field(
+                    comm,
+                    Field::Planes(&planes_in),
+                    ionic.as_slice().unwrap(),
+                    None,
+                )
+                .unwrap();
+            assert_eq!(
+                [e.0, e.1, e.2].map(f64::to_bits),
+                [e_owned.0, e_owned.1, e_owned.2].map(f64::to_bits)
+            );
+            let mut gathered = vec![0.0; total];
+            let local = plan.effective_planes().to_vec();
+            plan.gather_field(comm, &local, &mut gathered).unwrap();
+            assert!(
+                gathered
+                    .iter()
+                    .zip(&eff)
+                    .all(|(a, b)| a.to_bits() == b.to_bits())
+            );
+            let t_owned = plan
+                .audit(
+                    comm,
+                    Field::Planes(&planes_in),
+                    Field::Planes(&planes_out),
+                    ionic.as_slice().unwrap(),
+                )
+                .unwrap();
+            assert_eq!(
+                t.values().map(f64::to_bits),
+                t_owned.values().map(f64::to_bits)
+            );
             assert!(plan.stop_ready());
             let stop = plan.stop_error(comm).unwrap();
             (eff, e, t, stop)
@@ -987,6 +1513,47 @@ mod tests {
                     run(cell, dims, ranks, lda) == reference,
                     "{dims:?} P={ranks}"
                 );
+            }
+        }
+    }
+
+    /// PlaneMap: A -> B -> A is the identity for equal and for crossed axes, and
+    /// A -> B equals slicing the full field in layout B, on 1..7 ranks.
+    #[test]
+    fn plane_map_redistributes_between_slab_layouts() {
+        let dims = [7, 9, 5];
+        let full: Vec<f64> = (0..dims.iter().product::<usize>())
+            .map(|g| g as f64 * 0.5 + 1.0)
+            .collect();
+        // Planes of a full field in a layout with planes along `first`.
+        let slice = |first: usize, rank: usize, ranks: usize| -> Vec<f64> {
+            let starts = plane_starts(dims[first], ranks);
+            let mut out = Vec::new();
+            for x in starts[rank]..starts[rank + 1] {
+                for y in 0..dims[1 - first] {
+                    let s = if first == 0 {
+                        (x * dims[1] + y) * dims[2]
+                    } else {
+                        (y * dims[1] + x) * dims[2]
+                    };
+                    out.extend_from_slice(&full[s..s + dims[2]]);
+                }
+            }
+            out
+        };
+        for ranks in 1..=7 {
+            for (fa, fb) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+                let ok = simulate(ranks, |comm: &SimRank| {
+                    let rank = comm.rank();
+                    let mut map = PlaneMap::new(dims, rank, ranks, fa, fb);
+                    let a = slice(fa, rank, ranks);
+                    let mut b = Vec::new();
+                    map.a_to_b(comm, &a, &mut b).unwrap();
+                    let mut back = Vec::new();
+                    map.b_to_a(comm, &b, &mut back).unwrap();
+                    b == slice(fb, rank, ranks) && back == a
+                });
+                assert!(ok.iter().all(|&v| v), "P={ranks} axes {fa}->{fb}");
             }
         }
     }

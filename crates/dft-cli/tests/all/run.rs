@@ -176,9 +176,16 @@ fn verify(large: bool) {
     // Legacy fields plus additive per-band accuracy, checked on actual output.
     // 24 legacy keys plus gamma_real_used and gamma_real_fallback_reason (default Auto
     // mode, ADR 0040), atomic_start (default atomic start, ADR 0042), single_path
-    // (ADR 0043), execution (review F01) and run (RUN-REPORT: run ID, exit
+    // (ADR 0043) and execution (review F01); 30 with effective_start (SCF-TRAJECTORY:
+    // the start each stage actually used); 31 with run (RUN-REPORT: run ID, exit
     // reason, binary SHA-256, completion marker).
-    assert_eq!(first.as_object().unwrap().len(), 30);
+    assert_eq!(first.as_object().unwrap().len(), 31);
+    let start = first["effective_start"].as_array().unwrap();
+    assert!(!start.is_empty());
+    let stage = start[0]["stage"].as_str().unwrap();
+    assert!(stage == "coarse" || stage == "single", "{stage}");
+    assert_eq!(start[0]["density"], "uniform");
+    assert_eq!(start[0]["wavefunctions"], "atomic");
     assert!(first.get("kpoints").is_none());
     for key in [
         "preflight",
@@ -696,7 +703,9 @@ fn expressions_preserve_energy_and_record_resolutions() {
     // 101 = 100 + M2_LAZY_RESULT (LAZY-RESULT).
     // 101 = 99 + M2_GRID + M2_MIX (M2-GRID).
     // 105 = 103 + EWALD_FAST + IONIC_FAST (INIT-EWALD-FAST, INIT-IONIC-FAST).
-    assert_eq!(switches.len(), 105);
+    // 106 = 105 + MIX_COULOMB_GUARD (SCF-TRAJECTORY).
+    // 108 = 106 + M2_LOCAL_FIELDS + M2_LOCAL_DENSITY (M2-OWNED).
+    assert_eq!(switches.len(), 108);
     let ladder = &switches["BAANDI_CUTOFF_LADDER"];
     assert_eq!(
         (&ladder["value"], &ladder["source"]),
@@ -744,6 +753,8 @@ fn expressions_preserve_energy_and_record_resolutions() {
         "execution",
         // RUN-REPORT block (every run).
         "run",
+        // SCF-TRAJECTORY: the start each stage actually used.
+        "effective_start",
     ];
     let keys: std::collections::BTreeSet<_> = plain
         .as_object()

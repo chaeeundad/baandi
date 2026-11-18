@@ -76,6 +76,48 @@ pub struct PulayMixer {
     /// `BAANDI_MIX_INCREMENTAL=on` (ticket MPI-REMAINING): keep the differences
     /// and Gram entries across calls (bit-identical; see `Incremental`).
     incremental: Option<Incremental>,
+    /// Diagnostics of the last `mix` call (read-only; never feeds back).
+    last: Option<PulayStepDiagnostics>,
+    /// SCF-TRAJECTORY Coulomb guard (`BAANDI_MIX_COULOMB_GUARD`): the metric
+    /// in which the L2 fit's predicted residual is checked, and whether a
+    /// predicted growth refits the step in that metric (false = trace only).
+    guard: Option<(Box<dyn ResidualMetric>, bool)>,
+}
+/// What the last Pulay update did (SCF-TRAJECTORY research output). Reading it
+/// never changes a proposal; it costs three grid dot products per call.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PulayStepDiagnostics {
+    /// Difference pairs in the least squares (seeds included); 0 = plain step.
+    pub differences: usize,
+    /// Gram eigen-directions kept by the spectral cut (<= differences).
+    pub kept: usize,
+    /// Largest / smallest Gram eigenvalue (fit metric); infinite when the
+    /// smallest is not positive, 1 without differences.
+    pub gram_condition: f64,
+    /// Extrapolation coefficients gamma, oldest difference first.
+    pub coefficients: Vec<f64>,
+    /// L2 norm (plain sum over grid points) of the residual R = out - in.
+    pub residual_norm: f64,
+    /// Fit-metric norm of the predicted residual R - dR gamma divided by the
+    /// fit-metric norm of R (1 without differences; 0 = R fully explained).
+    pub predicted_ratio: f64,
+    /// L2 norm (same sum) of the proposed step next - input, before the
+    /// charge projection; step_norm / residual_norm = beta for a plain step.
+    pub step_norm: f64,
+    /// Coulomb guard (trace or on): sqrt(P^T C P / R^T C R) with P = R - dR gamma
+    /// of the L2 fit and C the guard metric; None without a guard or differences.
+    pub coulomb_predicted_ratio: Option<f64>,
+    /// The guard refitted this step in the Coulomb metric (ratio > 1, mode on).
+    pub coulomb_refit: bool,
+}
+/// Least-squares summary of one update, for `PulayStepDiagnostics`.
+struct FitSummary {
+    kept: usize,
+    smallest: f64,
+    largest: f64,
+    gamma: Vec<f64>,
+    gamma_rhs: f64,
+    rr_fit: f64,
 }
 /// Cross-call memory of the incremental Pulay update. Every pair and seed gets
 /// a serial number when it enters the history; a difference is identified by
@@ -144,6 +186,8 @@ impl Clone for PulayMixer {
             metric_vectors: self.metric_vectors.clone(),
             metric_r: self.metric_r.clone(),
             incremental: self.incremental.clone(),
+            last: self.last.clone(),
+            guard: self.guard.as_ref().map(|(m, act)| (m.duplicate(), *act)),
         }
     }
 }
@@ -164,7 +208,22 @@ impl PulayMixer {
             seeds: Vec::new(),
             mean: None,
             incremental: incremental_switch().then(Incremental::default),
+            last: None,
+            guard: None,
         })
+    }
+    /// SCF-TRAJECTORY Coulomb guard (see `BAANDI_MIX_COULOMB_GUARD`): after the
+    /// L2 fit, the predicted residual P = R - dR gamma is measured in `metric`;
+    /// with `refit` and P^T C P > R^T C R the step's coefficients are solved
+    /// again in that metric (same spectral cut). Only for the unweighted fit
+    /// (ignored when a fit metric is set). History is not changed.
+    pub fn set_coulomb_guard(&mut self, metric: Box<dyn ResidualMetric>, refit: bool) {
+        self.guard = Some((metric, refit));
+    }
+    /// Diagnostics of the last `mix` call; None before the first call and
+    /// after `reset`.
+    pub fn last_step(&self) -> Option<&PulayStepDiagnostics> {
+        self.last.as_ref()
     }
     /// Force the incremental update on or off (tests; the constructor reads
     /// `BAANDI_MIX_INCREMENTAL`). Clears the history.
@@ -276,7 +335,7 @@ impl PulayMixer {
         r: &[f64],
         next: &mut [f64],
         m: usize,
-    ) -> Result<(), SolverError> {
+    ) -> Result<FitSummary, SolverError> {
         let Self {
             beta,
             metric,
@@ -381,7 +440,125 @@ impl PulayMixer {
                 *n -= g * (d.dx[i] + *beta * d.dr[i]);
             }
         }
-        Ok(())
+        let rr_fit = dot(
+            r,
+            if weighted_metric {
+                metric_r.as_slice()
+            } else {
+                r
+            },
+        );
+        Ok(FitSummary::new(&values, largest, gamma, &rhs, rr_fit))
+    }
+}
+impl FitSummary {
+    fn new(values: &[f64], largest: f64, gamma: Vec<f64>, rhs: &[f64], rr_fit: f64) -> Self {
+        Self {
+            kept: values.iter().filter(|v| **v > 1e-12 * largest).count(),
+            smallest: values.iter().copied().fold(f64::INFINITY, f64::min),
+            largest,
+            gamma_rhs: gamma.iter().zip(rhs).map(|(g, b)| g * b).sum(),
+            gamma,
+            rr_fit,
+        }
+    }
+}
+impl PulayMixer {
+    /// Differences (dx, dr) of the current history, seeds first, then the
+    /// window differences (the plain path's formulas and order).
+    fn differences(&self) -> (Vec<Vec<f64>>, Vec<Vec<f64>>) {
+        let window = |k: usize| {
+            self.pairs.windows(2).map(move |p| {
+                p[1].0
+                    .iter()
+                    .zip(&p[0].0)
+                    .zip(p[1].1.iter().zip(&p[0].1))
+                    .map(|((a, b), (c, d))| if k == 0 { a - b } else { c - d })
+                    .collect::<Vec<f64>>()
+            })
+        };
+        let dx = self
+            .seeds
+            .iter()
+            .map(|s| s.0.clone())
+            .chain(window(0))
+            .collect();
+        let dr = self
+            .seeds
+            .iter()
+            .map(|s| s.1.clone())
+            .chain(window(1))
+            .collect();
+        (dx, dr)
+    }
+    /// SCF-TRAJECTORY Coulomb guard of an unweighted fit: returns the predicted
+    /// Coulomb ratio and whether the step was refitted (then `next` and `fit`
+    /// are replaced by the Coulomb-metric solution). Runs once per SCF map,
+    /// outside every inner loop; allocates m + 3 grid vectors.
+    fn coulomb_guard(
+        &mut self,
+        input: &[f64],
+        r: &[f64],
+        next: &mut [f64],
+        fit: &mut FitSummary,
+    ) -> Result<(f64, bool), SolverError> {
+        let (dx, dr) = self.differences();
+        let beta = self.beta;
+        let mut pred = r.to_vec();
+        for (d, g) in dr.iter().zip(&fit.gamma) {
+            for (p, v) in pred.iter_mut().zip(d) {
+                *p -= g * v;
+            }
+        }
+        let (metric, refit) = self.guard.as_mut().expect("guard set");
+        let mut cr = vec![0.0; r.len()];
+        metric.apply(r, &mut cr)?;
+        let mut cp = vec![0.0; r.len()];
+        metric.apply(&pred, &mut cp)?;
+        let (qr, qp) = (dot(r, &cr), dot(&pred, &cp));
+        let ratio = if qr > 0.0 {
+            (qp.max(0.0) / qr).sqrt()
+        } else {
+            0.0
+        };
+        if !*refit || qp <= qr || qr <= 0.0 {
+            return Ok((ratio, false));
+        }
+        let m = dr.len();
+        let mut weighted = vec![vec![0.0; r.len()]; m];
+        for (s, w) in dr.iter().zip(weighted.iter_mut()) {
+            metric.apply(s, w)?;
+        }
+        let mut gram = ComplexMatrix::zeros(m, m)?;
+        for i in 0..m {
+            for j in 0..m {
+                gram[(i, j)] =
+                    (0.5 * (dot(&dr[i], &weighted[j]) + dot(&dr[j], &weighted[i]))).into();
+            }
+        }
+        let (values, vectors) = hermitian_eigh(&gram)?;
+        let largest = values.iter().copied().fold(0.0, f64::max);
+        let rhs: Vec<f64> = dr.iter().map(|d| dot(d, &cr)).collect();
+        let mut gamma = vec![0.0; m];
+        for (k, &value) in values.iter().enumerate() {
+            if value > 1e-12 * largest {
+                let projection: f64 =
+                    (0..m).map(|i| vectors[(i, k)].re * rhs[i]).sum::<f64>() / value;
+                for i in 0..m {
+                    gamma[i] += vectors[(i, k)].re * projection;
+                }
+            }
+        }
+        for (i, n) in next.iter_mut().enumerate() {
+            *n = input[i] + beta * r[i];
+        }
+        for j in 0..m {
+            for (i, n) in next.iter_mut().enumerate() {
+                *n -= gamma[j] * (dx[j][i] + beta * dr[j][i]);
+            }
+        }
+        *fit = FitSummary::new(&values, largest, gamma, &rhs, qr);
+        Ok((ratio, true))
     }
 }
 impl Default for PulayMixer {
@@ -394,6 +571,7 @@ impl DensityMixer for PulayMixer {
         self.pairs.clear();
         self.seeds.clear();
         self.mean = None;
+        self.last = None;
         if let Some(inc) = &mut self.incremental {
             inc.forget(0, 0);
         }
@@ -441,8 +619,9 @@ impl DensityMixer for PulayMixer {
         if m > 0 {
             bump(&MIX_CALLS, 1);
         }
+        let mut fit = None;
         if m > 0 && self.incremental.is_some() {
-            self.incremental_update(&r, &mut next, m)?;
+            fit = Some(self.incremental_update(&r, &mut next, m)?);
         } else if m > 0 {
             bump(&MIX_DIFFS, m);
             bump(&MIX_DOTS, m * m + m);
@@ -520,7 +699,63 @@ impl DensityMixer for PulayMixer {
                     *n -= gamma[j] * (dx[j][i] + self.beta * dr[j][i]);
                 }
             }
+            let rr_fit = dot(
+                &r,
+                if self.metric.is_some() {
+                    weighted_r.as_slice()
+                } else {
+                    r.as_slice()
+                },
+            );
+            fit = Some(FitSummary::new(&values, largest, gamma, &rhs, rr_fit));
         }
+        let mut coulomb = (None, false);
+        if self.guard.is_some()
+            && self.metric.is_none()
+            && let Some(f) = fit.as_mut()
+        {
+            let (ratio, refit) = self.coulomb_guard(input, &r, &mut next, f)?;
+            coulomb = (Some(ratio), refit);
+        }
+        let residual_norm = r.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let step_norm = next
+            .iter()
+            .zip(input)
+            .map(|(n, x)| (n - x) * (n - x))
+            .sum::<f64>()
+            .sqrt();
+        self.last = Some(match fit {
+            Some(f) => PulayStepDiagnostics {
+                differences: m,
+                kept: f.kept,
+                gram_condition: if f.smallest > 0.0 {
+                    f.largest / f.smallest
+                } else {
+                    f64::INFINITY
+                },
+                coefficients: f.gamma,
+                residual_norm,
+                predicted_ratio: if f.rr_fit > 0.0 {
+                    ((f.rr_fit - f.gamma_rhs).max(0.0) / f.rr_fit).sqrt()
+                } else {
+                    0.0
+                },
+                step_norm,
+                coulomb_predicted_ratio: coulomb.0,
+                coulomb_refit: coulomb.1,
+            },
+            None => PulayStepDiagnostics {
+                differences: 0,
+                kept: 0,
+                gram_condition: 1.0,
+                coefficients: Vec::new(),
+                residual_norm,
+                predicted_ratio: 1.0,
+                step_norm,
+                coulomb_predicted_ratio: None,
+                coulomb_refit: false,
+            },
+        });
         charge(next, mean)
     }
 }
@@ -955,5 +1190,104 @@ mod incremental_tests {
         assert_eq!(inc.diffs.len(), 6);
         assert_eq!(inc.gram.len(), 36);
         assert!(inc.spare.len() <= 1);
+    }
+
+    /// Per-entry weights (a stand-in for the Coulomb metric's 4 pi / G^2).
+    #[derive(Debug, Clone)]
+    struct Weights4([f64; 4]);
+    impl ResidualMetric for Weights4 {
+        fn duplicate(&self) -> Box<dyn ResidualMetric> {
+            Box::new(self.clone())
+        }
+        fn apply(&mut self, r: &[f64], out: &mut [f64]) -> Result<(), SolverError> {
+            for ((v, r), w) in out.iter_mut().zip(r).zip(self.0) {
+                *v = r * w;
+            }
+            Ok(())
+        }
+    }
+    /// Two zero-mean modes: u (entries 0, 1) is screened (output fixed, linear
+    /// mixing at 0.5 halves it), v (entries 2, 3) is over-responding (output
+    /// deviation -3 v, linear mixing at 0.5 flips its sign: charge sloshing).
+    /// With u >> v the one-difference L2 fit gives gamma near -1 and predicts a
+    /// tripled v residual: the SCF-TRAJECTORY bounce in two numbers.
+    fn sloshing(x: &[f64]) -> Vec<f64> {
+        let v = (x[2] - x[3]) / 2.0;
+        vec![1.0, 1.0, 1.0 - 3.0 * v, 1.0 + 3.0 * v]
+    }
+    fn start() -> Vec<f64> {
+        vec![1.0 + 1e-2, 1.0 - 1e-2, 1.0 + 1e-4, 1.0 - 1e-4]
+    }
+    #[test]
+    fn diagnostics_describe_the_step_without_changing_it() {
+        let mut p = PulayMixer::new(0.5, 6).unwrap();
+        assert!(p.last_step().is_none());
+        let x0 = start();
+        let x1 = p.mix(&x0, &sloshing(&x0), 1.0).unwrap();
+        let d = p.last_step().unwrap().clone();
+        assert_eq!((d.differences, d.kept, d.coefficients.len()), (0, 0, 0));
+        assert_eq!(d.predicted_ratio, 1.0);
+        assert!((d.step_norm / d.residual_norm - 0.5).abs() < 1e-14);
+        assert!(d.coulomb_predicted_ratio.is_none() && !d.coulomb_refit);
+        p.mix(&x1, &sloshing(&x1), 1.0).unwrap();
+        let d = p.last_step().unwrap();
+        assert_eq!((d.differences, d.kept), (1, 1));
+        // Closed form of the one-difference fit: dR = (u/2, 8v) per mode
+        // entry, R = (-u/2, 4v): gamma = (-u^2/4 + 32 v^2) / (u^2/4 + 64 v^2).
+        let (u, v) = (1e-2f64, 1e-4f64);
+        let exact = (-u * u / 4.0 + 32.0 * v * v) / (u * u / 4.0 + 64.0 * v * v);
+        assert!(
+            (d.coefficients[0] - exact).abs() < 1e-12,
+            "gamma {:?}",
+            d.coefficients
+        );
+        assert!(d.predicted_ratio < 1.0 && d.gram_condition == 1.0);
+        // The L2 step doubles the plain one (the bounce precursor).
+        assert!(d.step_norm / d.residual_norm > 0.9);
+        p.reset();
+        assert!(p.last_step().is_none());
+    }
+    #[test]
+    fn coulomb_guard_trace_is_inert_and_on_refits_only_a_predicted_growth() {
+        let run = |guard: Option<bool>, incremental: bool| {
+            let mut p = PulayMixer::new(0.5, 6).unwrap();
+            p.set_incremental(incremental);
+            if let Some(refit) = guard {
+                p.set_coulomb_guard(Box::new(Weights4([1.0, 1.0, 1e6, 1e6])), refit);
+            }
+            let mut x = start();
+            let mut steps = Vec::new();
+            for _ in 0..2 {
+                x = p.mix(&x, &sloshing(&x), 1.0).unwrap();
+                steps.push((x.clone(), p.last_step().unwrap().clone()));
+            }
+            steps
+        };
+        for incremental in [false, true] {
+            let plain = run(None, incremental);
+            let trace = run(Some(false), incremental);
+            let on = run(Some(true), incremental);
+            for ((a, _), (b, t)) in plain.iter().zip(&trace) {
+                let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+                assert_eq!(bits(a), bits(b));
+                assert!(!t.coulomb_refit);
+            }
+            // Step 2: the L2 fit predicts an almost tripled v residual (the
+            // predicted v residual is 4v - 8v gamma; the metric weights v by
+            // 1e6, so the ratio is |1 - 2 gamma| up to the u part), trace
+            // records it, on refits.
+            let gamma = trace[1].1.coefficients[0];
+            let ratio = trace[1].1.coulomb_predicted_ratio.unwrap();
+            assert!((ratio - (1.0 - 2.0 * gamma)).abs() < 1e-3, "ratio {ratio}");
+            assert!(ratio > 2.5);
+            assert!(on[1].1.coulomb_refit && !on[0].1.coulomb_refit);
+            // The refit coefficient removes the predicted v growth: the next
+            // input has |v| no larger than the current one, the L2 step had 3x.
+            let v = |x: &[f64]| (x[2] - x[3]).abs() / 2.0;
+            let x1 = &plain[0].0;
+            assert!(v(&on[1].0) <= 1.01 * v(x1), "{} vs {}", v(&on[1].0), v(x1));
+            assert!(v(&plain[1].0) > 2.0 * v(x1));
+            assert!((on[1].1.coefficients[0] - 0.5).abs() < 0.05);
+        }
     }
 }

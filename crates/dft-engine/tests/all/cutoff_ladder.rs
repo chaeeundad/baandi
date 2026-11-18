@@ -679,6 +679,71 @@ fn atomic_coarse_rule_only_raises_the_stop_level() {
     assert!(de < 1e-10, "energy difference {de:e} Ha");
 }
 
+/// SCF-TRAJECTORY: `start_density = Atomic` reaches the FIRST stage of a
+/// ladder run (the coarse session starts from the atomic superposition, so its
+/// first map differs from the uniform start), the report says which start each
+/// stage used, and the coarse maps are recorded with their mixer steps. The
+/// full-cutoff session always starts from the prolonged coarse state, so its
+/// own atomic-start report says "supplied initial vectors retained" by design.
+#[test]
+fn ladder_reports_the_start_of_each_stage() {
+    let mut model = synthetic_skew();
+    model.species = vec![
+        (
+            "Xx".into(),
+            common::potential_with_atomic_charge(2.0, 1.0, true, 401),
+        ),
+        (
+            "Yy".into(),
+            common::potential_with_atomic_charge(2.0, 1.3, false, 401),
+        ),
+    ];
+    let ladder = CutoffLadderOptions::baseline();
+    let uniform = run_with(&model, model.options.clone(), &ladder);
+    let atomic_options = ScfOptions {
+        start_density: dft_engine::StartDensity::Atomic,
+        ..model.options.clone()
+    };
+    let atomic = run_with(&model, atomic_options.clone(), &ladder);
+    assert!(uniform.report.used && atomic.report.used);
+    assert_eq!(uniform.report.coarse_start_density, Some("uniform"));
+    assert_eq!(atomic.report.coarse_start_density, Some("atomic"));
+    // The atomic start changes the first coarse map (not a dead option).
+    let first = |l: &cutoff_ladder::LadderOutcome| l.report.coarse_history[0].density_residual;
+    assert_ne!(first(&uniform).to_bits(), first(&atomic).to_bits());
+    // The coarse history is the coarse session's, with one mixer step per
+    // map that was mixed (the last map of a stopped coarse stage is mixed too).
+    for l in [&uniform, &atomic] {
+        let h = &l.report.coarse_history;
+        assert_eq!(h.len(), l.report.coarse_iterations);
+        assert_eq!(
+            h.iter().map(|r| r.operator_applications).sum::<usize>(),
+            l.report.coarse_h_vectors
+        );
+        let p = h[0].pulay.as_ref().expect("first coarse map is mixed");
+        assert_eq!(p.differences, 0);
+        assert!(p.coefficients.is_empty() && p.coulomb_predicted_ratio.is_none());
+        // One record per mixed map; its difference count is the history the
+        // session reports (a feasibility reset restarts it at zero).
+        assert!(h.iter().all(|r| {
+            r.pulay.as_ref().is_some_and(|p| {
+                Some(p.differences) == r.mixing_history_used
+                    && p.coefficients.len() == p.differences
+                    && !p.coulomb_refit
+            })
+        }));
+        assert!(h.iter().any(|r| r.pulay.as_ref().unwrap().differences >= 2));
+        assert!(l.outcome.converged);
+    }
+    // Both starts reach the same strict fixed point.
+    let de = (uniform.outcome.result.total_hartree() - atomic.outcome.result.total_hartree()).abs();
+    assert!(de < 1e-10, "energy difference {de:e} Ha");
+    println!(
+        "start per stage: uniform coarse {} maps, atomic coarse {} maps, dE {de:e} Ha",
+        uniform.report.coarse_iterations, atomic.report.coarse_iterations
+    );
+}
+
 #[test]
 fn d1_knobs_on_a_k_point_problem_fall_back_bit_identically() {
     // Four k points in a cubic cell (the stepwise-equivalence k fixture).

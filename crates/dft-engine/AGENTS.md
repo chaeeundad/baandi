@@ -734,6 +734,42 @@ PZ and PW), lib `mix_dist::tests` (ranks 1..7 against `PulayMixer`),
 `tests/m2_grid.rs` (production standard SCF, cubic and skewed, P 2/3). dev08
 request `docs/performance/requests/m2-grid.md`; ledger M2-GRID-*.
 
+## Owned potential and density (M2-OWNED, 2026-11-18; both default off)
+
+`BAANDI_M2_LOCAL_FIELDS=on` (needs M2_GRID; override
+`grid_dist::set_owned_override`): eligible maps (`local_fields_eligible`:
+grid path, standard, one k state, warm start, operator from the previous map,
+no snapshot, no finite T; declines counted per reason) keep the effective
+potential on the slab planes (`GridPlan::potential_field(.., None)`), move it
+to the operator's plane layout (`PlaneMap`, identity when the plane axes are
+equal, else one alltoall) and hand it to `solve_real_gamma` as
+`owned: Some((planes, epoch))`; `DistributedRealHamiltonian::set_owned_potential`
+stores only the owned planes (the rest NaN) with the epoch, and the solve
+rejects an operator whose epoch differs (stale potential). The complex
+Hamiltonians then hold an older potential (`owned.complex_stale`): every
+consumer of the full potential calls `ensure_complex_potential` (atomic start,
+certificate screen) or gathers inline (complex fallback); the M1 fallback
+errors. Kept-start delta V on owned planes (`M2Reuse::v_old_owned`, changed
+flag agreed by one tree sum). Bit-identical to M2_GRID alone.
+`BAANDI_M2_LOCAL_DENSITY=on` (needs FIELDS and M2_MIX; `owned_density_eligible`,
+fixed at session initialization): the session keeps the input density in
+`problem.owned.input` (epoch-tagged slab planes) and an EMPTY `Continuation.n`;
+maps given an empty input read it, `m2_density` keeps the output on the planes
+(`ScfStep.owned_density`, empty `density`), the audit and the stop rule take
+plane fields (`StopKept` matches by epochs), the session metrics come from
+`step_metrics` (per-plane canonical sums), the plane-mode `DistributedPulay`
+(`new_planes`, `mix_block`, `seed_block`) mixes without a gather, the convex
+safeguard is an exact global min. The full density is gathered only at
+delivery, `warm_state` (ladder hand-off) and `materialize_density`; `density()`
+is None at an active owned boundary (exact checkpoints reject with Boundary;
+runtime mixer replacement is refused). Rounding class. Counters
+`grid_dist::owned_stats()` -> `parallel::m2_stats()` (`owned.*`, results.json
+`parallel.m2`). Tests: `tests/m2_owned.rs`, lib `grid_dist::tests`
+(`plane_map_redistributes_between_slab_layouts`, owned stages in the grid test),
+`mix_dist::tests::plane_mode_*`, physics
+`owned_plane_potential_applies_like_the_full_potential`. dev08 request
+`docs/performance/requests/m2-owned.md`; ledger M2-OWNED-*.
+
 ## Run configuration (RUN-CONFIG, 2026-11-18)
 
 `ScfProblem` owns a `RunConfig` (`run_config()`), taken from the calling

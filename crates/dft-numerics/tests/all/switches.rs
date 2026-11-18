@@ -259,5 +259,10 @@ fn legacy_defaults_are_unchanged() {
     // INIT-EWALD-FAST / INIT-IONIC-FAST: rounding-class init schemes, off until dev08.
     assert_eq!(value(Id::EWALD_FAST), Value::Choice("off"));
     assert_eq!(value(Id::IONIC_FAST), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 105);
+    // SCF-TRAJECTORY: Coulomb guard of the L2 Pulay fit, off until dev08.
+    assert_eq!(value(Id::MIX_COULOMB_GUARD), Value::Choice("off"));
+    // M2-OWNED: owned potential and density prototype, off until dev08.
+    assert_eq!(value(Id::M2_LOCAL_FIELDS), Value::Choice("off"));
+    assert_eq!(value(Id::M2_LOCAL_DENSITY), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 108);
 }

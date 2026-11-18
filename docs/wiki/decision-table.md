@@ -6,7 +6,8 @@ Status words: ADOPTED (default), OPT-IN (in main, off by default), REJECTED, OPE
 |---|---|---|---|
 | Real Gamma path (half sphere, paired FFT, real Davidson) | ADOPTED default auto | 1.1 to 3.2x over complex path | ADR 0040, GR-AUTO |
 | Atomic start wavefunctions | ADOPTED default | si32 strict 40.6 to 19.9 s at T=1, SCF spread to 0 | ADR 0042, ATOMIC-DEFAULT, R3 |
-| Atomic charge superposition start density | OPT-IN | no gain in SCF count on si8/si16 | QE-START |
+| Atomic charge superposition start density | OPT-IN, dev08 candidate | before the ladder no gain on si8/si16; with the ladder the coarse stage shrinks to 4 maps, Mac total H -6.8 % (si8/si16/si32/si-skew), mgo8 -16 % | QE-START, START-DENSITY-ATOMIC-LADDER |
+| Coulomb guard on the L2 Pulay fit (`BAANDI_MIX_COULOMB_GUARD`) | OPT-IN, dev08 candidate | removes the first-Pulay-step bounce; H to the 5e-9 band -11.7 %, full runs -2.0 % (stop-estimate verification failures dilute it) | SCF-BOUNCE-ATTRIBUTION, MIX-COULOMB-GUARD |
 | MKL dgemm for real Davidson products (R1, R2) | ADOPTED on MKL builds | -8 to -27 percent combined | MKL-R1, MKL-R2 |
 | Blocked Gram-Schmidt | ADOPTED on MKL builds only | serial MGS is a T=8 bottleneck; pure builds lose | MGS-B, R2 |
 | MKL dsyevd reduced eigensolver | ADOPTED on MKL builds | 1.6 to 1.9x faster than faer, -5.7 percent at T=8 si32 | MKL-EVD |

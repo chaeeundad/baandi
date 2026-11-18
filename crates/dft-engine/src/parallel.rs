@@ -106,11 +106,15 @@ pub fn m2_stats() -> M2Stats {
     let mut counts = vec![("rows_solves".to_string(), distributed_rows_solves())];
     counts.extend(op_counts.into_iter().map(|(n, v)| (n.to_string(), v)));
     counts.extend(engine_counts.into_iter().map(|(n, v)| (n.to_string(), v)));
+    // M2-OWNED: gathers, redistributions and copies of the owned fields.
+    let (owned_counts, owned_stages) = crate::grid_dist::owned_stats();
+    counts.extend(owned_counts);
     let mut stages: Vec<(String, f64)> = engine_stages
         .into_iter()
         .map(|(n, v)| (n.to_string(), v))
         .collect();
     stages.extend(op_stages.into_iter().map(|(n, v)| (format!("op.{n}"), v)));
+    stages.extend(owned_stages);
     (counts, stages)
 }
 

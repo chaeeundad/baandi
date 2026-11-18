@@ -636,6 +636,14 @@ fn history_json(r: &IterationRecord) -> Value {
         result["standard_error_ha"] = json!(e);
         result["standard_first_iteration_redo"] = json!(r.standard_redo);
     }
+    if let Some(p) = &r.pulay {
+        // SCF-TRAJECTORY: what the mixer did with this map's pair (diagnostic).
+        result["pulay"] = json!({"differences":p.differences,"kept":p.kept,
+            "gram_condition":p.gram_condition.is_finite().then_some(p.gram_condition),
+            "coefficients":p.coefficients,"residual_l2_sum":p.residual_norm,
+            "predicted_ratio":p.predicted_ratio,"step_l2_sum":p.step_norm,
+            "coulomb_predicted_ratio":p.coulomb_predicted_ratio,"coulomb_refit":p.coulomb_refit});
+    }
     if let Some(a) = &r.advance {
         // BREAKTHROUGH-3: bounded subspace update of this map (research diagnostic).
         result["advance"] = json!({"budget_blocks":a.budget_blocks,"blocks_used":a.blocks_used,"h_columns":a.h_columns,
@@ -972,6 +980,7 @@ pub fn execute_mode(
     let ladder = crate::config::Scf::cutoff_ladder(config.scf.as_ref())
         .map_err(|e| error(1, e.to_string()))?;
     let mut ladder_report = None;
+    let atomic_density_built = problem.atomic_superposition_density().is_some();
     // LAZY-RESULT: a classic run without forces, stress or orbital volumetric
     // output never reads the delivered orbitals, so an M2 result may keep them
     // distributed (no N x B gather on every rank). Replicated: every rank
@@ -1164,8 +1173,30 @@ pub fn execute_mode(
             }).filter(|x| x.is_finite()),
             "total_step_equivalents":l.coarse_fine_step_equivalents().map(|c| c + l.fine_iterations as f64),
             "total_h_full_grid_equivalents":l.coarse_h_equivalents() + (l.fine_h_vectors + l.fine_certificate_h_vectors) as f64,
-            "note":"coarse stage supplies the start only; convergence, energy audit and certificate are at the full cutoff (history and work above are full-cutoff only). D1: coarse_fine_step_equivalents = coarse_h_full_grid_equivalents / (fine_h_vectors / fine_scf_steps) (recorded H per fine step, certificate excluded); coarse_wall_fine_step_equivalents = coarse_stage_s / ((timings.steps_s - timings.certificate.wall_s) / fine_scf_steps); total_step_equivalents = fine_scf_steps + coarse_fine_step_equivalents; total_h_full_grid_equivalents = coarse equivalents + fine recorded + fine certificate H; distances in the density-residual norm (Bohr^-3/2)"});
+            "coarse_history":l.coarse_history.iter().map(history_json).collect::<Vec<_>>(),
+            "note":"coarse stage supplies the start only; convergence, energy audit and certificate are at the full cutoff (history and work above are full-cutoff only; coarse_history holds the coarse maps, energies at the coarse cutoff). D1: coarse_fine_step_equivalents = coarse_h_full_grid_equivalents / (fine_h_vectors / fine_scf_steps) (recorded H per fine step, certificate excluded); coarse_wall_fine_step_equivalents = coarse_stage_s / ((timings.steps_s - timings.certificate.wall_s) / fine_scf_steps); total_step_equivalents = fine_scf_steps + coarse_fine_step_equivalents; total_h_full_grid_equivalents = coarse equivalents + fine recorded + fine certificate H; distances in the density-residual norm (Bohr^-3/2)"});
     }
+    // SCF-TRAJECTORY (ISSUE: start_density looked dead on dev08): the start
+    // each stage actually used. With the ladder the coarse stage is the first
+    // stage and takes the requested start; the full-cutoff stage always starts
+    // from the prolonged coarse density and orbitals, so the top-level
+    // `atomic_start` block (the full-cutoff session's) reads "supplied initial
+    // vectors retained" by design.
+    result["effective_start"] = match ladder_report.as_ref().filter(|l| l.used) {
+        Some(l) => json!([
+            {"stage":"coarse","density":l.coarse_start_density,
+             "wavefunctions":opts.start_wavefunctions.name(),
+             "atomic_orbitals_used":l.coarse_atomic_start.as_ref().map(|a| a.atomic_orbitals),
+             "atomic_start_h_applications":l.coarse_atomic_start.as_ref().map(|a| a.initial_h_applications),
+             "atomic_fallback_reason":l.coarse_atomic_start.as_ref().and_then(|a| a.fallback_reason.clone())},
+            {"stage":"fine","density":"prolonged coarse density","wavefunctions":"prolonged coarse orbitals"}]),
+        None => json!([
+            {"stage":"single","density":if atomic_density_built {"atomic"} else {"uniform"},
+             "wavefunctions":opts.start_wavefunctions.name(),
+             "atomic_orbitals_used":(opts.start_wavefunctions == dft_engine::StartWavefunctions::Atomic).then_some(r.atomic_start.atomic_orbitals),
+             "atomic_start_h_applications":(opts.start_wavefunctions == dft_engine::StartWavefunctions::Atomic).then_some(r.atomic_start.initial_h_applications),
+             "atomic_fallback_reason":r.atomic_start.fallback_reason}]),
+    };
     if let Some(c) = &r.energy_identity {
         // B2 (BAANDI_ENERGY_IDENTITY=on): history energies of non-final iterations
         // use the band-sum identity; the final energy is the explicit audit.

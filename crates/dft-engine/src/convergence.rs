@@ -460,6 +460,7 @@ mod tests {
             fixed_point_certificate: None,
             timings: PhaseTimings::default(),
             advance: None,
+            pulay: None,
         }
     }
 

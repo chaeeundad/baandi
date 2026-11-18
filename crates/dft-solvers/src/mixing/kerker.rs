@@ -323,6 +323,11 @@ pub trait MixerHistory: DensityMixer {
     fn used_raw_recovery(&self) -> bool {
         false
     }
+    /// Diagnostics of the last Pulay update (research output, read-only);
+    /// None for mixers without one.
+    fn pulay_step(&self) -> Option<crate::mixing::PulayStepDiagnostics> {
+        None
+    }
     /// Seed an empty history with difference pairs from a related map (see
     /// `PulayMixer::seed_differences`). Mixers without that memory reject.
     fn seed_differences(
@@ -364,6 +369,9 @@ impl MixerHistory for PulayMixer {
 
     fn history_len(&self) -> usize {
         self.history_len()
+    }
+    fn pulay_step(&self) -> Option<crate::mixing::PulayStepDiagnostics> {
+        self.last_step().cloned()
     }
     fn seed_differences(
         &mut self,
@@ -425,5 +433,9 @@ impl<P: ResidualPreconditioner> MixerHistory for PreconditionedPulay<P> {
     }
     fn history_len(&self) -> usize {
         self.pulay.history_len()
+    }
+    /// The inner Pulay update in preconditioned variables.
+    fn pulay_step(&self) -> Option<crate::mixing::PulayStepDiagnostics> {
+        self.pulay.last_step().cloned()
     }
 }

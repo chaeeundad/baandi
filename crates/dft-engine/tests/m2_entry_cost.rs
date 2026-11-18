@@ -317,6 +317,8 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
             dft_engine::grid_dist::counters(),
             dft_engine::mix_dist::counters(),
         );
+        // M2-OWNED: gathers, redistributions, copies and seconds of the owned fields.
+        let owned_before = dft_engine::grid_dist::owned_stats();
         let before = snapshot();
         let t = Instant::now();
         let results = simulate(p, |comm: &SimRank| run(case, Some(Arc::new(comm.clone()))));
@@ -555,6 +557,32 @@ fn distributed_rows(case: &str, p: usize, serial: Option<&ScfResult>) {
             (dmix[1] - grid_before.3[1]) / p as u64,
             (dmix[2] - grid_before.3[2]) / p as u64,
         ));
+        // M2-OWNED: per-rank averages over the simulated ranks (process-wide
+        // counters divided by p; `plane_values_per_rank_max` is a maximum).
+        let owned_after = dft_engine::grid_dist::owned_stats();
+        let owned: Vec<String> = owned_after
+            .0
+            .iter()
+            .zip(&owned_before.0)
+            .map(|((n, a), (_, b))| {
+                let v = if n.ends_with("_max") { *a } else { (a - b) / p };
+                format!("\"{}\":{v}", n.trim_start_matches("owned."))
+            })
+            .chain(
+                owned_after
+                    .1
+                    .iter()
+                    .zip(&owned_before.1)
+                    .map(|((n, a), (_, b))| {
+                        format!(
+                            "\"{}_s\":{:.6}",
+                            n.trim_start_matches("owned."),
+                            (a - b) / p as f64
+                        )
+                    }),
+            )
+            .collect();
+        j.push_str(&format!(",\"owned_counters\":{{{}}}", owned.join(",")));
         // BREAKTHROUGH-0-INSTRUMENT: exclusive phase profile (per rank, max
         // over ranks) and the first-block residual table (both default off).
         j.push_str(&profile_block(wall));

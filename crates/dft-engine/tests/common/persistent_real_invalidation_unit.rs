@@ -70,6 +70,7 @@ fn operator_options_bands_and_executor_invalidate_cached_state() {
                 None,
                 diagnostics,
                 state,
+                None,
             )
             .unwrap()
             .unwrap()

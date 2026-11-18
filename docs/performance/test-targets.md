@@ -62,7 +62,7 @@ crate boundaries (one per crate, not mergeable across crates). Integration binar
 | dft-engine | `generalized_gram_stage0` | crate root: uses `crate::` paths of its own root |
 | dft-engine | `capacity_trajectory`, `fp32_snapshots`, `hybrid_budget`, `preconditioner_study` | reads process-global counters or registries (deltas would mix with concurrent tests) |
 | dft-engine | `init_scale`, `m2_coarse_certificate`, `m2_entry_cost`, `m2_kept_start`, `m2_lazy_orbitals`, `m2_lazy_result`, `m2_stage_timers`, `scf_advance`, `stage_timers` | forced switch / per-thread override / communicator registration; reads process-global counters |
-| dft-engine | `distributed_scf`, `first_block_diag`, `instrument`, `m2_grid`, `m2_lazy_serial`, `m2_remaining`, `other_init` | forced switch / override / communicator; process-global counters; serialized by a static lock |
+| dft-engine | `distributed_scf`, `first_block_diag`, `instrument`, `m2_grid`, `m2_lazy_serial`, `m2_owned` (added on main after the count), `m2_remaining`, `other_init` | forced switch / override / communicator; process-global counters; serialized by a static lock |
 | dft-engine | `m2_lean_algebra`, `snapshot_identity` | forced switch / override / communicator; serialized by a static lock |
 | dft-engine | `spin_share` | mutates the process environment; forced switch / override |
 | dft-geometry | `symmetry` | only integration file of its crate |

@@ -1,5 +1,6 @@
 use super::*;
 
+mod independent;
 mod old_reference;
 use old_reference::{old_energy, old_forces, old_stress};
 

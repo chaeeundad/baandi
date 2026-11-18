@@ -193,3 +193,12 @@ reference scheme's arithmetic or order. `BAANDI_IONIC_FAST`
 bit-identical. Release accuracy check:
 `cargo test --release -p dft-physics --lib ewald::tests -- --include-ignored --nocapture`;
 benches `examples/ewald_bench`, `examples/ionic_bench <UPF>`.
+
+Independent accuracy reference (INIT-EWALD-INDEPENDENT-REFERENCE, 2026-11-18):
+`src/ewald/tests/independent.rs` is a test-only double-double evaluator that
+shares no code with either scheme (Madelung, supercell, finite-difference and
+eta-independence checks; si32/si64 benchmark geometry in
+`benchmark_positions.rs`). It shows that the default scheme's naive real-space
+sum loses 1.8e-9 Ha at si64 (one-sided rounding of millions of sub-ulp terms)
+while `Balanced` is within 3e-14 Ha. Keep it independent: do not route it
+through engine helpers. Runs in the debug gate (1.9 s).

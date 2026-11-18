@@ -30,7 +30,7 @@ done
 ```
 
 ## Rows to report (median of 3, max over ranks)
-`init` wall and the construction rows `init.ewald` and `init.ionic_local` (plus `init.states`, `init.basis`, `init.rest`), total wall, total energy, Ewald energy, density SHA-256. Arm R energy and density SHA must equal base B (bit-identical changes). Arm F: |E_F - E_R| (expected about 2e-9 Ha at si64: the reference scheme's own summation rounding over 3.9M real-space terms; the balanced scheme agrees with a compensated tight reference to 8e-15 Ha/atom on the Mac).
+`init` wall and the construction rows `init.ewald` and `init.ionic_local` (plus `init.states`, `init.basis`, `init.rest`), total wall, total energy, Ewald energy, density SHA-256. Arm R energy and density SHA must equal base B (bit-identical changes). Arm F: |E_F - E_R| (expected about 2e-9 Ha at si64: the reference scheme's own summation rounding over 3.9M real-space terms; the balanced scheme agrees with a compensated tight reference to 8e-15 Ha/atom on the Mac). Confirmed by an independent double-double evaluator (ledger INIT-EWALD-INDEPENDENT-REFERENCE): at the benchmark geometry the reference scheme is low by 1.794e-9 Ha (si64) and 5.7e-11 Ha (si32), the balanced scheme within 3.1e-14 Ha.
 
 ## Expected (Mac O, release, one thread)
 - `init.ewald` si64 one core: R about 0.95x of the eecd57f evaluator (dev08 eecd57f replicated about 0.245 s, main 0.813 s), F about 0.6 ms (116x below R).

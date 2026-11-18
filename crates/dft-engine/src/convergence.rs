@@ -257,6 +257,10 @@ impl CoulombMetric {
             weights,
         })
     }
+    /// Full-grid weights (row-major; zero outside the density sphere and at G=0).
+    pub(crate) fn weights(&self) -> &[f64] {
+        &self.weights
+    }
     fn transform(&mut self) -> Result<(), dft_solvers::SolverError> {
         for (z, r) in self.source.iter_mut().zip(&self.residual) {
             *z = (*r).into();

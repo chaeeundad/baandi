@@ -249,5 +249,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::M2_LAYOUT_CACHE), Value::Choice("off"));
     // ISSUE-20: lazy serial operator of M2 states, on since dev08 (si64 -1.22 %, bit-identical).
     assert_eq!(value(Id::M2_LAZY_SERIAL), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 99);
+    // M2-GRID: distributed full-grid stages of the M2 path, rounding class, off until dev08.
+    assert_eq!(value(Id::M2_GRID), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 100);
 }

@@ -52,6 +52,7 @@ pub use dft_solvers::locking::Locking;
 
 pub mod advance;
 pub mod gamma_real;
+pub mod grid_dist;
 pub mod m2;
 pub mod parallel;
 pub use advance::{

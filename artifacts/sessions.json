@@ -3688,5 +3688,23 @@
     "ended_at": "2026-11-19T07:54:35Z",
     "exit_code": 0,
     "note": ""
+  },
+  {
+    "run_id": "G-SCHED-OVERHEAD#1",
+    "task_id": "G-SCHED-OVERHEAD",
+    "mode": "new",
+    "role": "implementer",
+    "status": "done",
+    "codex_pid": 46506,
+    "wrapper_pid": 46489,
+    "session_id": "01a1f2e9-b919-75c0-aa81-006aab48a7b3",
+    "branch": "task/G-SCHED-OVERHEAD",
+    "worktree": "/Volumes/990-2TB/Develop/rust-dft/../rust-dft-wt/G-SCHED-OVERHEAD",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/G-SCHED-OVERHEAD.md",
+    "report": "/Volumes/990-2TB/Develop/rust-dft/.delegate/G-SCHED-OVERHEAD/report.json",
+    "started_at": "2026-11-19T08:26:05Z",
+    "ended_at": "2026-11-19T08:42:00Z",
+    "exit_code": 0,
+    "note": ""
   }
 ]

@@ -49,7 +49,9 @@ if [[ "$mode" == "new" || "$mode" == "fork" ]]; then
   fi
 fi
 
-common=(-C "$wt" -s workspace-write --json
+# User rule 2026-11-19: Codex has plenty of tokens, use the high reasoning effort by default
+# (override with CODEX_EFFORT=medium|high|xhigh; model comes from ~/.codex/config.toml).
+common=(-C "$wt" -s workspace-write --json -c "model_reasoning_effort=\"${CODEX_EFFORT:-high}\""
         --output-schema "$repo/docs/schemas/report.schema.json"
         -o "$out/report.json")
 case "$mode" in

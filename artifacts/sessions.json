@@ -3706,5 +3706,23 @@
     "ended_at": "2026-11-19T08:42:00Z",
     "exit_code": 0,
     "note": ""
+  },
+  {
+    "run_id": "G-LADDER-MINGRID#1",
+    "task_id": "G-LADDER-MINGRID",
+    "mode": "new",
+    "role": "implementer",
+    "status": "done",
+    "codex_pid": 56029,
+    "wrapper_pid": 56002,
+    "session_id": "01a1f32e-9c36-7e91-9cf4-cbd3ea0a6e25",
+    "branch": "task/G-LADDER-MINGRID",
+    "worktree": "/Volumes/990-2TB/Develop/rust-dft/../rust-dft-wt/G-LADDER-MINGRID",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/G-LADDER-MINGRID.md",
+    "report": "/Volumes/990-2TB/Develop/rust-dft/.delegate/G-LADDER-MINGRID/report.json",
+    "started_at": "2026-11-19T09:41:20Z",
+    "ended_at": "2026-11-19T09:51:45Z",
+    "exit_code": 0,
+    "note": ""
   }
 ]

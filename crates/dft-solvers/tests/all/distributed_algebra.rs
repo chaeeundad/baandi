@@ -58,7 +58,11 @@ fn gram_matches_serial_within_rounding_and_is_identical_on_every_rank() {
                 );
             }
         }
-        if ranks == 1 {
+        // The Rust backend uses the same sums for both entry points. MKL's
+        // serial multiply_into and distributed multiply_slices_into can pick
+        // different GEMM groupings even at P=1: use the rounding bound above.
+        // Cross-rank bits and repeatability remain exact for every backend.
+        if ranks == 1 && !dft_numerics::MKL_BACKEND {
             assert_eq!(
                 bits(&results[0]),
                 bits(&serial),

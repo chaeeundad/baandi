@@ -610,7 +610,8 @@ mod tests {
 
     /// dev08 (MKL builds only): the mirror-slab plan on MKL DFTI lanes equals
     /// the rustfft lanes to relative 1e-14 (local and pair density), is
-    /// repeatable bit for bit, and the default `MklPairPlan` stays the grid plan.
+    /// repeatable bit for bit, and `MklPairPlan` selects the configured variant
+    /// (MKL defaults to pruned; the explicit grid override remains available).
     /// cargo test --features mkl -p dft-numerics --lib mkl_lanes_match_rust_lanes
     #[cfg(feature = "mkl")]
     #[test]
@@ -664,12 +665,20 @@ mod tests {
                 .sqrt();
             assert!(diff <= 1e-14 * norm, "{shape:?} density {diff:e}");
         }
-        // The switch is read once per process; tests in this module do not set it.
-        if crate::switches::text(crate::switches::Id::PAIR_FFT).is_none() {
-            assert!(matches!(
-                MklPairPlan::new([6, 6, 6], &[[0, 0, 0]]).unwrap(),
-                MklPairPlan::Grid(_)
-            ));
+        // The registry default is pruned with MKL, independent of grid shape.
+        // Scope the configuration so the caller's environment cannot skip or
+        // redirect this check; exercise both explicit variants as well.
+        for (pairs, pruned) in [
+            (&[][..], true),
+            (&[("pair_fft", "grid")][..], false),
+            (&[("pair_fft", "pruned")][..], true),
+        ] {
+            let _config = crate::switches::RunConfig::from_pairs(pairs)
+                .unwrap()
+                .enter();
+            let plan = MklPairPlan::new([6, 6, 6], &[[0, 0, 0]]).unwrap();
+            assert_eq!(matches!(&plan, MklPairPlan::Pruned(_)), pruned);
+            assert_eq!(matches!(&plan, MklPairPlan::Grid(_)), !pruned);
         }
     }
 }

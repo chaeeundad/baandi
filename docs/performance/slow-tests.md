@@ -6,6 +6,38 @@ stay fast. This file is the single list of such tests and records how the gate
 time was measured. Update it whenever a test is ignored for its runtime or the
 gate changes.
 
+## Platform-dependent baselines (PLATFORM-TESTS, 2026-11-19)
+
+Recorded aarch64 energy bits remain exact on aarch64. Cross-platform rounding
+is checked separately; no test is removed or newly ignored, and no production
+algorithm, switch default or tolerance changes.
+
+| Test assertion | aarch64 | Other targets / backend distinction |
+| --- | --- | --- |
+| `spin_share` off and environment-child baseline energy | Exact stored bits `13829793526668695510` | Absolute difference from that baseline <= 1e-12 Ha (synthetic toy); same-platform sharing and thread identities remain exact |
+| CLI `reuse_psi` SCF iterations | Exact on/off equality | Absolute count difference <= 3, existing 5e-9 Ha standard energy gate; reuse work identities stay exact |
+| `algebra_stream` rounding-switch iteration bound | Original 10 percent bound | Existing 1e-11 Ha root agreement, strict residual certificates and convergence protect the trajectory; original H-column bound and exact thread identity remain on all targets |
+| Distributed Gram, one rank versus serial | Original exact bits on Rust | Exact on Rust on every architecture; MKL uses the existing `8 * n * EPSILON * scale` rounding bound (different GEMM entry points). Rank-to-rank bits and repeatability stay exact |
+| Selected-root versus full-rotation residual | Original `1e-10 * max(ra, 1e-6)` bound | `1e-12 * max(1, abs(ra), abs(rb))` Ha: relative to a unit-Ha floor because residuals subtract operator-scale terms. Independent true-residual check and exact same-platform work counts unchanged |
+
+The selected-root rule explicitly uses a unit-scale floor, **not** pure relative
+error of 1e-12 against the residual itself: the relayed values near 3.82567544e-7
+Ha differ by about 2e-16 Ha, exceeding a pure-relative limit of about 3.8e-19 Ha.
+
+The MKL `[6,6,6]` plan failure was a stale test assumption, not unsupported
+lanes or a constructor bug: `PAIR_FFT` defaults to `pruned` when `MKL_BACKEND`
+is true, and `MklPairPlan::new` dispatches only on that choice, not the shape.
+The test now checks the default and explicit `grid`/`pruned` choices in scoped,
+environment-independent configurations. Existing lane comparisons (four shapes,
+local application and density at relative 1e-14, repeatability) are unchanged.
+Local validation: `TMPDIR_990=/private/tmp/baandi-platform-tests CHECK_NICE=0
+scripts/check.sh fast dft-engine dft-cli dft-solvers dft-numerics` exited 0:
+64 binaries, 583 passed, 0 failed, 157 existing ignored; all four gates passed.
+MKL-feature test code also passed `cargo clippy -p dft-numerics -p dft-solvers
+--tests --features dft-numerics/mkl -- -D warnings` with `MKLROOT` unset
+(type checking only). The x86/MKL assertions require confirmation through the
+[dev08 gate lane](requests/gate-on-dev08.md); Mac runs cannot establish them.
+
 ## Gate speed under load (GATE-SPEED, Mac, 2026-11-19)
 
 Problem: after big merges `scripts/check.sh` took 40 to 50 minutes on the shared Mac (log: 83

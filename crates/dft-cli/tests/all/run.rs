@@ -79,7 +79,7 @@ impl Drop for Case {
 /// REUSE-PSI (`BAANDI_REUSE_PSI`, work order C2): on a real Gamma standard
 /// (Ritz-value) run the switch reuses H X of every solve after the first
 /// (armed and taken starts, kept psi(r) pairs, columns not applied), keeps
-/// convergence and the SCF count, and moves the energy only within the
+/// convergence (and the exact aarch64 SCF count), and moves the energy only within the
 /// standard accuracy class, as an existing rounding-class switch does on the
 /// same toy; off leaves the counters at zero. Davidson iteration counts of
 /// this slowly converging toy shuffle under any rounding change (ledger C.11)
@@ -121,9 +121,21 @@ fn reuse_psi_switch_keeps_energy_and_reuses_starts() {
     let offr = &off["convergence"]["work"]["reuse_psi"];
     assert_eq!(offr["mode"], "off");
     assert_eq!(offr["armed_starts"], 0);
-    for key in ["converged", "iterations"] {
-        assert_eq!(on["convergence"][key], off["convergence"][key], "{key}");
-    }
+    assert_eq!(
+        on["convergence"]["converged"],
+        off["convergence"]["converged"]
+    );
+    let off_iterations = off["convergence"]["iterations"].as_u64().unwrap();
+    #[cfg(target_arch = "aarch64")]
+    assert_eq!(iterations, off_iterations);
+    // This rounding-class switch changes the toy's trajectory on x86 too:
+    // allow at most three SCF steps, retaining the 5e-9 Ha energy gate below.
+    // The reuse work identities above remain exact on every platform.
+    #[cfg(not(target_arch = "aarch64"))]
+    assert!(
+        iterations.abs_diff(off_iterations) <= 3,
+        "SCF iterations {iterations} vs {off_iterations}"
+    );
     // Standard accuracy class (5e-9 Ha). This toy stops at a threshold whose
     // delivered energy moves by a few 1e-9 Ha under any rounding change: the
     // existing rounding-class switch DENSITY_PAIR=off moves it by 2.2e-9 Ha,

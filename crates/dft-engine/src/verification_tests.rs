@@ -564,3 +564,103 @@ fn verification_schedule_forecast_and_fallbacks() {
     h[4].mixer_reset = true;
     assert_eq!(verification_schedule(&h[..5], &[a]).extra_maps, 0);
 }
+
+/// No predictor evaluation on a trajectory whose first attempt passes. The
+/// required audit is produced only at that attempt, not on its ordinary maps.
+#[test]
+fn verification_schedule_no_failure_has_zero_predictor_work() {
+    let pp = super::pool_fixture::potential(2.0, 1.0, true, 401);
+    let run = |mode| {
+        let mut p = problem(&pp, Some(5e-9), Verification::FixedPoint).unwrap();
+        p.sw.verify_schedule = mode;
+        p.run().unwrap()
+    };
+    let off = run("off");
+    assert!(off.verification.as_ref().unwrap().schedule.is_none());
+    for mode in ["on", "trace"] {
+        let r = run(mode);
+        assert_eq!(off.total_hartree().to_bits(), r.total_hartree().to_bits());
+        assert!(
+            off.density
+                .iter()
+                .zip(&r.density)
+                .all(|(a, b)| a.to_bits() == b.to_bits())
+        );
+        assert_eq!(off.history.len(), r.history.len());
+        for (a, b) in off.history.iter().zip(&r.history) {
+            assert_eq!(a.operator_applications, b.operator_applications);
+            assert_eq!(a.davidson_iterations, b.davidson_iterations);
+            assert_eq!(
+                a.standard_error_ha.map(f64::to_bits),
+                b.standard_error_ha.map(f64::to_bits)
+            );
+        }
+        let report = r.verification.as_ref().unwrap();
+        assert_eq!(report.attempts.len(), 1);
+        assert!(report.attempts[0].passed);
+        let audit = report.schedule.as_ref().unwrap();
+        assert_eq!(audit.prediction_evaluations, 0);
+        assert_eq!(audit.records.len(), 1);
+        let row = &audit.records[0];
+        assert_eq!(row.iteration, r.history.len());
+        assert_eq!(row.predicted_additional_maps, 0);
+        assert_eq!(row.action, "attempt");
+        assert_eq!(row.passed, Some(true));
+        assert_eq!(
+            row.coulomb_error_ha,
+            Some(report.attempts[0].coulomb_error_ha)
+        );
+        assert_eq!(row.ratio_to_previous_attempt, None);
+    }
+}
+
+/// A predicted wait contains no measured error or pass, and diagnostic data
+/// never become the authority for convergence. The last budgeted map attempts.
+#[test]
+fn verification_schedule_wait_is_not_a_pass() {
+    use super::session::schedule_attempt;
+    let pp = super::pool_fixture::potential(2.0, 1.0, true, 401);
+    let r = problem(&pp, Some(5e-9), Verification::FixedPoint)
+        .unwrap()
+        .run()
+        .unwrap();
+    let mut report = r.verification.unwrap();
+    let a = &mut report.attempts[0];
+    a.passed = false;
+    a.iteration = 4;
+    a.threshold_ha = 1e-10;
+    a.coulomb_error_ha = 1e-7;
+    let mut h = vec![r.history[0].clone(); 5];
+    for (i, row) in h.iter_mut().enumerate() {
+        row.iteration = i + 1;
+        row.standard_error_ha = Some(1e-3 * 0.1f64.powi(i as i32));
+        row.mixer_reset = false;
+        row.mixing_raw_recovery = false;
+    }
+    assert!(schedule_attempt(&h, &mut report, "on", 10, true));
+    assert!(!report.passed());
+    let audit = report.schedule.as_ref().unwrap();
+    assert_eq!(audit.prediction_evaluations, 1);
+    assert_eq!(audit.records[0].action, "wait");
+    assert_eq!(audit.records[0].passed, None);
+    assert_eq!(audit.records[0].coulomb_error_ha, None);
+    assert_eq!(audit.records[0].ratio_to_previous_attempt, None);
+    let capacity = audit.records.capacity();
+    assert!(!schedule_attempt(&h, &mut report, "on", 5, true));
+    assert_eq!(
+        report.schedule.as_ref().unwrap().records.capacity(),
+        capacity
+    );
+    assert_eq!(
+        report.schedule.as_ref().unwrap().records[1].action,
+        "attempt"
+    );
+    // Even a corrupted diagnostic pass cannot manufacture a certificate.
+    report.schedule.as_mut().unwrap().records[0].passed = Some(true);
+    assert!(!report.passed());
+    report.schedule = None;
+    assert!(!schedule_attempt(&h, &mut report, "trace", 10, true));
+    let row = &report.schedule.as_ref().unwrap().records[0];
+    assert!(row.would_wait);
+    assert_eq!(row.action, "attempt");
+}

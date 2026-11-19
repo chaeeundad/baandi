@@ -1362,3 +1362,64 @@ fn spin_share_results_include_shared_and_fallback_counts() {
         fixed_counts[1]["operator_applications"].as_u64().unwrap()
     );
 }
+
+/// Schedule diagnostics are durable JSON, not stderr-only messages. A first
+/// passing attempt performs zero predictor work and keeps scientific bits.
+#[test]
+fn verification_schedule_json_is_lazy_and_optional() {
+    let case = Case::new(false);
+    fs::write(
+        case.dir.join("schedule.toml"),
+        format!(
+            "{}\n[scf]\nmax_iterations=100\nstandard_threshold_ha=5e-9\n",
+            case.text
+        ),
+    )
+    .unwrap();
+    let mut results = Vec::new();
+    for mode in ["off", "trace", "on"] {
+        let dest = case.dir.join(mode);
+        let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+            .current_dir(&case.dir)
+            .env("BAANDI_REFERENCE_STRICT", "off")
+            .env("BAANDI_CUTOFF_LADDER", "off")
+            .env("BAANDI_VERIFY_SCHEDULE", mode)
+            .args(["run", "schedule.toml", "--output-dir"])
+            .arg(&dest)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let r: Value =
+            serde_json::from_slice(&fs::read(dest.join("results.json")).unwrap()).unwrap();
+        let v = &r["verification"];
+        assert_eq!(v["attempts"].as_array().unwrap().len(), 1);
+        if mode == "off" {
+            assert!(v.get("schedule").is_none());
+        } else {
+            let schedule = &v["schedule"];
+            assert_eq!(schedule["mode"], mode);
+            assert_eq!(schedule["prediction_evaluations"], 0);
+            let records = schedule["records"].as_array().unwrap();
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0]["map_index"], v["attempts"][0]["iteration"]);
+            assert_eq!(records[0]["predicted_additional_maps"], 0);
+            assert_eq!(records[0]["action"], "attempt");
+            assert_eq!(records[0]["pass"], true);
+            assert_eq!(
+                records[0]["coulomb_error_ha"],
+                v["attempts"][0]["coulomb_error_ha"]
+            );
+            assert!(records[0]["ratio_to_previous_attempt"].is_null());
+        }
+        results.push((r, fs::read(dest.join("density.bin")).unwrap()));
+    }
+    for (r, density) in &results[1..] {
+        assert_eq!(r["total_energy"], results[0].0["total_energy"]);
+        assert_eq!(*density, results[0].1);
+        assert_eq!(r["work"], results[0].0["work"]);
+    }
+}

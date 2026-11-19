@@ -189,10 +189,34 @@ pub struct VerificationAttempt {
     pub moment_change: Option<f64>,
 }
 
+/// Diagnostic decisions at eligible verification boundaries, never certificates.
+#[derive(Clone, Debug)]
+pub struct VerificationScheduleEntry {
+    pub iteration: usize,
+    pub predicted_additional_maps: usize,
+    /// Actual action: trace always attempts; on may wait.
+    pub action: &'static str,
+    pub would_wait: bool,
+    /// Absent on a wait, which evaluates no verification map.
+    pub coulomb_error_ha: Option<f64>,
+    pub ratio_to_previous_attempt: Option<f64>,
+    pub passed: Option<bool>,
+}
+
+/// Lazily allocated at the first attempt, outside the ordinary-map path.
+#[derive(Clone, Debug)]
+pub struct VerificationSchedule {
+    pub mode: &'static str,
+    pub prediction_evaluations: usize,
+    pub records: Vec<VerificationScheduleEntry>,
+}
+
 /// All verification attempts of one run; passed when the last one passed.
 #[derive(Clone, Debug, Default)]
 pub struct VerificationReport {
     pub attempts: Vec<VerificationAttempt>,
+    /// None in off mode. Diagnostic history only; never consulted by `passed`.
+    pub schedule: Option<VerificationSchedule>,
 }
 impl VerificationReport {
     pub fn passed(&self) -> bool {

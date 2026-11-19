@@ -1,7 +1,190 @@
 # Verification scheduling experiment (F-VERIFY-SCHEDULE)
 
-Status: negative closure (NO-GO); default off. Certificate and stop rule
-unchanged. Scope: closed-shell `ScfSession`, including the scalar histories used by owned-plane MPI densities (MPI not measured); spectral-audit sessions decline scheduling.
+Status: follow-up implemented; default OFF. Adoption remains the orchestrator's
+decision after remeasurement on dev08. The original Mac NO-GO below is historical
+and is superseded as a universal conclusion by the relayed dev08 Si64 result.
+Certificate and stop rule unchanged. Scope: closed-shell `ScfSession`; MPI
+measurements below are relayed, not reproduced locally. Spectral-audit sessions
+decline scheduling.
+
+## Follow-up: lazy prediction and durable trace
+
+The earlier version printed trace only to **stderr**, not stdout or results.json.
+The follow-up removes that output and writes an optional `verification.schedule`
+section in results.json in both trace and on modes; off has no section. The
+follow-up request authorizes the necessary additive report types in
+`convergence.rs`, CLI serialization in `run.rs`, and CLI output tests in addition
+to the original ticket's files.
+
+Scheduling now lives **inside the existing eligible-verification branch**. There
+is no schedule condition, call, prediction, allocation, logging or counter update
+on ordinary maps before the first failed attempt. At the first real attempt the
+journal is allocated lazily (capacity = current maximum iterations); prediction
+is bypassed. After a failure, only eligible retry boundaries call the pure,
+allocation-free scalar predictor. The helper is cold and not inlined into the
+ordinary-map path. The journal is preallocated for a fixed iteration budget;
+explicit runtime budget increases may require journal growth at later attempt
+boundaries. No numerical kernel knows JSON or writes files.
+
+The counter `prediction_evaluations` counts actual predictor calls, including
+fallback forecasts. It is **zero** for a no-failure run. Output allocation and
+JSON serialization at the terminal attempt are intentionally additional work;
+zero **per-map/predictor** work is not a claim of zero total reporting cost or a
+measured zero wall-time delta. Scientific bits and counters must match, while
+the requested schedule metadata necessarily differs from off.
+
+Each `verification.schedule.records` row contains:
+
+| Key | Meaning |
+| --- | --- |
+| `map_index` | One-based ordinary map index at the eligible boundary |
+| `predicted_additional_maps` | Forecast n, before the last-budget-map override |
+| `action` | Actual `attempt` or `wait`; trace always attempts |
+| `would_wait` | Counterfactual on decision including budget/scope guards |
+| `coulomb_error_ha` | Measured real-attempt error, null on a wait |
+| `ratio_to_previous_attempt` | Current/previous real-attempt Coulomb error; null on waits, first attempt, zero denominator or nonfinite ratio |
+| `pass` | Real attempt's verdict; null on a wait |
+
+The section also contains `mode` and `prediction_evaluations`. No schedule
+record declares convergence: `VerificationReport::passed` reads only actual
+attempts. The caller forces `passed = false` on a wait. Measurement fields are
+filled only **after** `verify_fixed_point` returns. A final-budget boundary
+attempts even when the forecast would otherwise defer.
+
+The journal is diagnostic, not checkpoint state. Exact continuation restores the
+existing attempts/history, so the numerical schedule remains reconstructible;
+the emitted journal covers the resumed session's boundaries only. It does not
+invent predictions for attempts made before that checkpoint. Spin/FD drivers do
+not use this closed-shell scheduler and do not emit this section.
+
+### Relayed dev08 evidence (user, commit 41d2d79; before this follow-up)
+
+These are supplied measurements, not local reruns. Each ratio compares on/off
+within the stated parallel model; no cross-model speed comparison is made.
+
+| Model / case | On vs off wall | Crossed-pair evidence | Work and state |
+| --- | ---: | --- | --- |
+| One core / Si64 | -7.06% | 4/4 pairs negative; abs(mean)/SE = 218 | Attempts [11,12,13] -> [11,13]; failures 2 -> 1; Davidson 71 -> 69; H 4008 -> 3871; abs(dE) = 4.11e-11 Ha |
+| One core / Si32 | +0.28% | 4/4 pairs positive; abs(mean)/SE = 4.87 | No failed attempts; identical bits and counts; predictor-machinery overhead identified by the master |
+| MPI np=8 / Si64 | No effect | Schedule unchanged | No scheduling gain reported |
+
+**Rounding/path class, not path-identical:** skipping an attempt that would have
+failed removes that solve and its state/reuse perturbation from the continuation.
+The delivered state may therefore differ at the 1e-11 Ha level. The reported
+4.11e-11 Ha difference is inside the strict 1e-10 Ha class and was accepted by the
+user; it must not be called path identity. This on/off agreement is not by itself
+an independent absolute-error oracle. Certificate, criterion, class thresholds,
+and default OFF remain unchanged. Trace preserves the original numerical path.
+
+
+### Follow-up Mac validation and counters
+
+Source baseline: local HEAD `6ca9dad` (the prior scheduler); uncommitted follow-up.
+Release, pure Rust, one thread; same eight systems, seeds 601–603, fractional
+amplitude 1e-3 and thresholds 5e-9 / 1e-10 Ha as the historical study. **48 triples
+(144 SCFs) completed, all converged and verified.** For every geometry, each
+new arm is bit-identical to its corresponding previous arm in energy, density
+bytes, eigenvalues, occupations, energy components, scientific history, attempts
+and work counts (timings and the new diagnostic section excluded). Off vs trace
+also matches in all 48 pairs. Thus the scheduling policy and its path-class
+behavior have not changed in this overhead/reporting fix.
+
+**19 no-failure geometries, 120 fine ordinary maps:** on and trace each perform
+**zero predictor evaluations**, emit exactly one attempt record at the terminal
+map, and match off scientific bits and counts. All modes have the same total
+14,017 H columns over those geometries (coarse + coarse start + fine + attempts).
+The following small-case rows cover all three seeds, not selected examples.
+
+| Case | Seeds | Threshold (Ha) | Fine maps off/on per seed | Total H off/on per seed | Attempts off/on | Predictor evaluations on/trace |
+| --- | --- | ---: | --- | --- | --- | --- |
+| syn-p3 | 601,602,603 | 5e-9 | 5/5, 5/5, 5/5 | 13/13, 13/13, 13/13 | 1/1 each | 0/0 each |
+| syn-p3 | 601,602,603 | 1e-10 | 6/6, 6/6, 6/6 | 14/14, 14/14, 14/14 | 1/1 each | 0/0 each |
+| syn-spd | 601,602,603 | 5e-9 | 3/3, 3/3, 3/3 | 11/11, 11/11, 11/11 | 1/1 each | 0/0 each |
+| syn-spd | 601,602,603 | 1e-10 | 5/5, 5/5, 5/5 | 13/13, 13/13, 13/13 | 1/1 each | 0/0 each |
+| si32 | 601,602 | 5e-9 | 10/10, 10/10 | 3064/3064, 3077/3077 | 1/1 each | 0/0 each |
+
+Across the whole on study, 37 eligible post-failure boundaries call the predictor;
+81 actual attempts and **4 wait rows** are reported. All 4 waits have null measured
+error, ratio and pass. Every real-attempt row matches the attempt array exactly,
+including its ratio to the previous real attempt. Trace reports all 85 actual
+attempts, with `action=attempt` even on its counterfactual waits. Off emits no
+`schedule` key. Original aggregate on/off H counts remain 48,676 / 48,944;
+there is no additional H or Davidson work from this follow-up.
+
+Example of an actual on journal (si16 seed 601, 1e-10 Ha):
+
+```json
+{
+  "mode": "on",
+  "prediction_evaluations": 2,
+  "records": [
+    {
+      "action": "attempt",
+      "coulomb_error_ha": 2.522448026517058e-09,
+      "map_index": 10,
+      "pass": false,
+      "predicted_additional_maps": 0,
+      "ratio_to_previous_attempt": null,
+      "would_wait": false
+    },
+    {
+      "action": "wait",
+      "coulomb_error_ha": null,
+      "map_index": 11,
+      "pass": null,
+      "predicted_additional_maps": 1,
+      "ratio_to_previous_attempt": null,
+      "would_wait": true
+    },
+    {
+      "action": "attempt",
+      "coulomb_error_ha": 1.1032070222183943e-11,
+      "map_index": 12,
+      "pass": true,
+      "predicted_additional_maps": 0,
+      "ratio_to_previous_attempt": 0.004373556999474351,
+      "would_wait": false
+    }
+  ]
+}
+```
+
+Validation:
+
+- `CHECK_SCCACHE=0 scripts/check.sh fast dft-engine dft-numerics dft-cli`: exit 1;
+  build/fmt/clippy PASS, 50 test binaries: **463 passed, 3 failed, 134 ignored**.
+  Only the three known CLI pseudo-cache tests reject the required in-repository
+  TMPDIR. Sandbox `ps` load collection is denied; the gates still execute.
+- New engine tests prove no-failure on/trace identity and zero predictions,
+  wait rows cannot pass, even a corrupted diagnostic pass cannot certify a
+  state, trace attempts despite a positive forecast, and budget exhaustion
+  overrides a wait. Journal capacity remains unchanged on the tested retry.
+- New CLI test reads results.json for all three modes and checks the optional
+  section, measured fields, zero-prediction counter, density bytes and counts.
+- The complete `verify_fixed_point`/inner region remains byte-identical to HEAD:
+  SHA-256 `4d6528a178dcd5c67f232cf92af9eaf861d60bd9ac1ec9072a7360b6cda53acc`.
+- Mac timings are not an overhead acceptance measurement: this counter study
+  overlapped builds and uses one count sample per arm/geometry. In particular,
+  it does not establish that dev08's former +0.28% wall delta is now zero.
+
+Reproduce from the scratch harness printed at the end of this document:
+
+```sh
+export TMPDIR_990="$PWD/target/scratch" TMPDIR="$PWD/target/scratch"
+cargo build --release -p dft-cli
+SCHEDULE_BINARY="$PWD/target/release/dft-cli" \
+  python3 -I target/scratch/study.py off,on,trace followup-ab-fresh
+# Each */{on,trace}/results.json has verification.schedule; off omits it.
+```
+
+Raw current evidence: `target/scratch/followup-ab`, `followup-summary.json`,
+`followup-analyze.py`, `followup-check.log`. Analysis verifies every recorded
+attempt/ratio, null wait values, all numerical identities, and no-failure counters.
+Raw files are uncommitted scratch; preserve them before cleanup.
+
+Follow-up binary SHA-256: `d0f77cc8895a39e57028c4ef5ba9afb0930432d24b4aa7dcff32ffd95e7b9f5b`.
+
+Follow-up summary SHA-256: `967d9d48899e757e89a60bbf878da6d548432790bcce73fe8aebd301589bbebc`.
 
 ## Predictor and cost model (revised after initial trace)
 
@@ -35,8 +218,8 @@ history does not represent the continuation after reuse. The revised candidate
 above uses an observed post-failure change, with no fitted multiplier. This is
 an explicit revision, not a successful pre-registered test of the initial rule.
 
-Trace emits this prediction at eligible attempt boundaries and performs the
-original attempt. All predictor inputs come from checkpointed history and
+Trace records this prediction at eligible attempt boundaries and performs the
+original attempt; the CLI writes the journal to `verification.schedule`. All predictor inputs come from checkpointed history and
 attempts; no countdown or hidden restart state. Off avoids prediction entirely.
 On was implemented only after the revised trace calibration below, then tested in real A/B runs. Passing always requires the
 unchanged real verification. Missing history, nonfinite data, reset histories,
@@ -56,10 +239,10 @@ benefit, close as negative; no default adoption from Mac times.
 Scratch and raw evidence live under `target/scratch`; UPFs remain external.
 Dashboard/README/reference artifacts are outside the ticket's owned files.
 
-## Mac result: NO-GO (negative closure)
+## Original Mac result: NO-GO (historical)
 
 Completed 2026-11-19, source `dba7d8242fe74494300ba9bc6e2474f8dc3b047d` plus this uncommitted patch; pure Rust release, one thread, macOS-27.0.1-arm64-arm-64bit.
-Only **3 of 8 systems** show any H-column reduction (4 of 48 runs). Even the liberal aggregate-per-system test misses the required four systems; every system's median paired reduction is zero. **Do not promote the switch. Default remains off.** On is retained only as the bounded, explicit experiment for review and reproduction. No dev08 timing was performed.
+Only **3 of 8 systems** show any H-column reduction (4 of 48 runs). Even the liberal aggregate-per-system test misses the required four systems; every system's median paired reduction is zero. **Original local decision: do not promote. Default remains off pending the follow-up dev08 decision.** On is retained only as the bounded, explicit experiment for review and reproduction. No dev08 timing was performed.
 
 Final A/B: **48/48 converge and pass a real verification in both arms**; total H columns **48,944 -> 48,676 (-0.547565%)**, attempts **85 -> 81**, failed attempts **37 -> 33**. Fine maps after the first attempt total **37 -> 37**. No run adds an ordinary map or increases total H. All 24 runs at 5e-9 Ha are unchanged. At 1e-10 Ha, four runs improve. Mac wall times were deliberately not used: studies overlapped builds and other study processes; these are deterministic work counts.
 
@@ -181,7 +364,8 @@ MgO uses the existing `ladder_handoff.fixture` geometry: 7.956 Bohr cubic rocksa
 
 ## dev08 reproduction request (not executed here)
 
-The Mac go/no-go below controls promotion. These commands are supplied for the
+The orchestrator decides adoption after remeasuring this follow-up, including
+the residual reporting cost on no-failure Si32. These commands are supplied for the
 master, not authorization for this implementer to access dev08. Use the reviewed
 commit, the master's quiet-node protocol (load below 0.30), and no overlapping
 builds/runs. Preserve stdout/stderr, inputs, binary and UPF hashes. Compare arms
@@ -219,8 +403,10 @@ meta = {'commit': subprocess.check_output(['git','rev-parse','HEAD'],text=True).
         'upf_sha256': sha(upf), 'binaries': {m: sha(root/'target'/b/'release/dft-cli')
                                            for m,_,b,_ in models}}
 (out/'provenance.json').write_text(json.dumps(meta,indent=2))
-with (out/'attempts.csv').open('w') as af, (out/'runs.csv').open('w') as rf:
-    attempts = csv.writer(af); runs = csv.writer(rf)
+with (out/'attempts.csv').open('w') as af, (out/'runs.csv').open('w') as rf, (out/'schedule.csv').open('w') as sf:
+    attempts = csv.writer(af); runs = csv.writer(rf); schedule_rows = csv.writer(sf)
+    schedule_rows.writerow(["model","seed","threshold_ha","pair","mode","map","predicted_n",
+                            "action","would_wait","measured_coulomb_ha","ratio_to_previous_attempt","pass"])
     attempts.writerow(['model','seed','threshold_ha','pair','arm','map','H_columns',
                        'dav_iterations','tol_ha','coulomb_error_ha','pass'])
     runs.writerow(['model','seed','threshold_ha','pair','arm','exit','wall_s',
@@ -235,8 +421,10 @@ with (out/'attempts.csv').open('w') as af, (out/'runs.csv').open('w') as rf:
                 src = out/f'{model}-{seed}-{threshold:g}.toml'
                 src.write_text(screen.case_input(case,upf,seed,1e-3,1,
                     [f'standard_threshold_ha = {threshold}', 'verify = "fixed_point"']))
-                for pair in range(4):
-                    for arm in (('off','on') if pair%2 == 0 else ('on','off')):
+                for pair in range(5):
+                    # Four timed crossed pairs, then one diagnostic trace.
+                    order = ('trace',) if pair == 4 else (('off','on') if pair%2 == 0 else ('on','off'))
+                    for arm in order:
                         dest = out/f'{model}-{seed}-{threshold:g}-{pair}-{arm}'
                         dest.mkdir()
                         env = {k:v for k,v in os.environ.items() if not k.startswith('BAANDI_')}
@@ -251,6 +439,17 @@ with (out/'attempts.csv').open('w') as af, (out/'runs.csv').open('w') as rf:
                         r = json.loads((dest/'results.json').read_text())
                         assert r['convergence']['converged'] and r['verified']
                         v = r['verification']; aa = v['attempts']; w = r['convergence']['work']
+                        if arm == 'off':
+                            assert 'schedule' not in v
+                        else:
+                            journal = v['schedule']
+                            if len(aa) == 1:
+                                assert journal['prediction_evaluations'] == 0
+                            for q in journal['records']:
+                                schedule_rows.writerow([model,seed,threshold,pair,arm,q['map_index'],
+                                    q['predicted_additional_maps'],q['action'],q['would_wait'],
+                                    q['coulomb_error_ha'],q['ratio_to_previous_attempt'],q['pass']])
+                            sf.flush()
                         ladder = w.get('cutoff_ladder') or {}
                         total = (w['h_vectors_recorded']+w['certificate_h_vectors']
                                  +ladder.get('coarse_h_vectors',0)+ladder.get('coarse_start_h_vectors',0))
@@ -268,8 +467,7 @@ PY
 
 Run a strict reference for each identical geometry through its **same launcher**
 with `BAANDI_REFERENCE_STRICT=on BAANDI_VERIFY_SCHEDULE=off`, separate from the
-timed pairs, and compare delivered energy to 5e-9 / 1e-10 Ha respectively. Also
-run one trace arm per geometry: its energy bits, density SHA, scientific history
+timed pairs, and compare delivered energy to 5e-9 / 1e-10 Ha respectively. The fifth pass above is trace (excluded from timing ratios): its energy bits, density SHA, scientific history
 and counters must match off. Take median paired wall ratios within each model
 and report the entire seed distribution, including regressions. MPI uses the
 production owned-density path; no `M2_LOCAL_DENSITY=off` override is needed for

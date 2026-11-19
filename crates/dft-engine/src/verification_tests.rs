@@ -480,3 +480,87 @@ fn stop_predictor_trace_is_inert_and_on_keeps_the_class() {
     let de = (on.result.energy.total_hartree() - off.result.energy.total_hartree()).abs();
     assert!(de < 5e-9, "|dE| {de:e} Ha");
 }
+
+/// Schedule trace observes the same trajectory, including failed-attempt reuse.
+#[test]
+fn verification_schedule_trace_preserves_failed_attempts() {
+    let pp = super::pool_fixture::potential(2.0, 1.0, true, 401);
+    let run = |mode| {
+        let mut p = problem(&pp, Some(5e-9), Verification::FixedPoint).unwrap();
+        p.sw.verify_schedule = mode;
+        p.force_verification_failures = 2;
+        p.run().unwrap()
+    };
+    let off = run("off");
+    let trace = run("trace");
+    assert_eq!(
+        off.total_hartree().to_bits(),
+        trace.total_hartree().to_bits()
+    );
+    assert!(
+        off.density
+            .iter()
+            .zip(&trace.density)
+            .all(|(a, b)| a.to_bits() == b.to_bits())
+    );
+    assert_eq!(off.history.len(), trace.history.len());
+    let attempts = |r: &ScfResult| {
+        r.verification
+            .as_ref()
+            .unwrap()
+            .attempts
+            .iter()
+            .map(|a| {
+                (
+                    a.iteration,
+                    a.passed,
+                    a.coulomb_error_ha.to_bits(),
+                    a.eigen_tolerance_ha.to_bits(),
+                    a.operator_applications,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(attempts(&off), attempts(&trace));
+    assert_eq!(attempts(&off).len(), 3);
+    let on = run("on");
+    let passed = on.verification.as_ref().unwrap().attempts.last().unwrap();
+    assert!(passed.passed && passed.operator_applications > 0);
+    assert_eq!(passed.iteration, on.history.last().unwrap().iteration);
+    assert!(passed.coulomb_error_ha < 5e-9);
+    assert!((on.total_hartree() - off.total_hartree()).abs() < 5e-9);
+}
+
+/// Analytical geometric history: a large failed residual at q=0.1 reaches
+/// the bounded retry horizon; missing or unreliable history never defers.
+#[test]
+fn verification_schedule_forecast_and_fallbacks() {
+    use super::session::verification_schedule;
+    let pp = super::pool_fixture::potential(2.0, 1.0, true, 401);
+    let r = problem(&pp, Some(5e-9), Verification::FixedPoint)
+        .unwrap()
+        .run()
+        .unwrap();
+    let mut a = r.verification.unwrap().attempts.remove(0);
+    a.passed = false;
+    a.iteration = 4;
+    a.threshold_ha = 1e-10;
+    a.coulomb_error_ha = 1e-7;
+    let mut h = vec![r.history[0].clone(); 7];
+    for (i, row) in h.iter_mut().enumerate() {
+        row.iteration = i + 1;
+        row.standard_error_ha = Some(1e-3 * 0.1f64.powi(i as i32));
+        row.mixer_reset = false;
+        row.mixing_raw_recovery = false;
+    }
+    assert_eq!(verification_schedule(&h[..5], &[]).extra_maps, 0);
+    assert_eq!(verification_schedule(&h[..5], &[a.clone()]).extra_maps, 2);
+    assert_eq!(verification_schedule(&h, &[a.clone()]).extra_maps, 0);
+    h[3].standard_error_ha = Some(1.0);
+    assert_eq!(verification_schedule(&h[..5], &[a.clone()]).extra_maps, 0);
+    h[3].standard_error_ha = Some(f64::NAN);
+    assert_eq!(verification_schedule(&h[..5], &[a.clone()]).extra_maps, 0);
+    h[3].standard_error_ha = Some(1e-6);
+    h[4].mixer_reset = true;
+    assert_eq!(verification_schedule(&h[..5], &[a]).extra_maps, 0);
+}

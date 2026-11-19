@@ -3670,5 +3670,23 @@
     "ended_at": "2026-11-19T07:37:14Z",
     "exit_code": 0,
     "note": ""
+  },
+  {
+    "run_id": "F-VERIFY-SCHEDULE#2",
+    "task_id": "F-VERIFY-SCHEDULE",
+    "mode": "resume",
+    "role": "implementer",
+    "status": "done",
+    "codex_pid": 42585,
+    "wrapper_pid": 42573,
+    "session_id": "01a1f298-162b-7de2-90fb-59cf41ddcc8e",
+    "branch": "task/F-VERIFY-SCHEDULE",
+    "worktree": "/Volumes/990-2TB/Develop/rust-dft/../rust-dft-wt/F-VERIFY-SCHEDULE",
+    "ticket": "/Users/mino/Develop/rust-dft/tickets/msgs/VSCHED-followup.md",
+    "report": "/Volumes/990-2TB/Develop/rust-dft/.delegate/F-VERIFY-SCHEDULE/report.json",
+    "started_at": "2026-11-19T07:44:53Z",
+    "ended_at": "2026-11-19T07:54:35Z",
+    "exit_code": 0,
+    "note": ""
   }
 ]

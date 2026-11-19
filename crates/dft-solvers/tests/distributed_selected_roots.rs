@@ -3,8 +3,8 @@
 //! full-rotation path on synthetic problems (scattered, clustered and
 //! degenerate spectra; default and contracting capacities; 1 to 4 simulated
 //! ranks): identical iteration, H-column, restart and contraction counts,
-//! identical convergence flags and root ordering, eigenvalues and every band's
-//! returned residual within rounding, every returned residual equal to an
+//! identical convergence flags and root ordering, eigenvalues and residuals
+//! (cluster invariants for degenerate roots) within rounding, every residual equal to an
 //! independent residual with the full matrix; fewer rotation columns, GEMM
 //! flops and reduction payload. Strict (residual) solves are unchanged bit for bit.
 use dft_mpi::{Collective, MpiError, SimRank, simulate};
@@ -243,6 +243,41 @@ fn true_residual(a: &RealMatrix, x: &[f64], lambda: f64) -> f64 {
         .sqrt()
 }
 
+/// Adjacent Ritz gaps below 1e-8 of the common spectrum scale (at least 1 Ha)
+/// identify numerical degeneracy. This exceeds the 1e-12 cross-path root
+/// rounding allowance and the O(residual^2 / gap) Ritz splitting of these
+/// converged fixtures, but is far below their distinct-level gaps (>= 0.05 Ha
+/// for the constructed spectra). Use the same scale for both paths and require
+/// identical partitions; a change of cluster membership must not hide a failure.
+fn residual_clusters(values: &[f64], gap_tolerance: f64) -> Vec<std::ops::Range<usize>> {
+    let mut clusters = Vec::new();
+    let mut start = 0;
+    for j in 1..values.len() {
+        if values[j] - values[j - 1] >= gap_tolerance {
+            clusters.push(start..j);
+            start = j;
+        }
+    }
+    if start < values.len() {
+        clusters.push(start..values.len());
+    }
+    clusters
+}
+
+#[test]
+fn residual_clusters_preserve_distinct_levels_and_boundary() {
+    let tol = 1e-8;
+    assert_eq!(
+        residual_clusters(&[], tol),
+        Vec::<std::ops::Range<usize>>::new()
+    );
+    assert_eq!(
+        residual_clusters(&[0., 0.25 * tol, 0.5 * tol, 0.05, 0.05 + 0.25 * tol], tol),
+        vec![0..3, 3..5]
+    );
+    assert_eq!(residual_clusters(&[0., tol], tol), vec![0..1, 1..2]);
+}
+
 struct Problem {
     name: &'static str,
     a: RealMatrix,
@@ -329,6 +364,21 @@ fn compare(ranks_list: &[usize]) {
                 let r2 = rotation_stats();
                 let (a, b) = (&off[0].solution, &on[0].solution);
                 let tag = format!("{} capacity {capacity} P={ranks}", p.name);
+                // Check every returned residual against its own vector FIRST,
+                // for both paths. A basis-dependent cross-path comparison (or
+                // a work/root assertion) must not hide this independent oracle.
+                let n = p.a.rows();
+                for (label, solution) in [("full", a), ("selected", b)] {
+                    for j in 0..p.bands {
+                        let x = &solution.eigenvectors.as_slice()[j * n..(j + 1) * n];
+                        let t = true_residual(&p.a, x, solution.eigenvalues[j]);
+                        let r = solution.residuals[j];
+                        assert!(
+                            (t - r).abs() <= 1e-9 * t.max(1e-6) + 1e-12,
+                            "{tag}: {label} band {j} returned residual {r:e}, true {t:e}"
+                        );
+                    }
+                }
                 // Work and control flow.
                 assert_eq!(a.iterations, b.iterations, "{tag}: iterations");
                 assert_eq!(
@@ -356,9 +406,23 @@ fn compare(ranks_list: &[usize]) {
                         "{tag}: band {j} {x} vs {y}"
                     );
                 }
-                // Every band's returned residual: rounding agreement with the
-                // full path and with an independent residual from the matrix.
-                let n = p.a.rows();
+                let scale = a
+                    .eigenvalues
+                    .iter()
+                    .chain(&b.eigenvalues)
+                    .fold(1.0_f64, |scale, value| scale.max(value.abs()));
+                let gap_tolerance = 1e-8 * scale;
+                let clusters = residual_clusters(&a.eigenvalues, gap_tolerance);
+                assert_eq!(
+                    clusters,
+                    residual_clusters(&b.eigenvalues, gap_tolerance),
+                    "{tag}: cluster membership"
+                );
+                println!(
+                    "{tag}: residual clusters {clusters:?}, gap tolerance {gap_tolerance:e} Ha"
+                );
+                // Preserve every original aarch64 per-band bound, including
+                // degenerate roots. Other targets compare isolated roots only.
                 for j in 0..p.bands {
                     let (ra, rb) = (a.residuals[j], b.residuals[j]);
                     #[cfg(target_arch = "aarch64")]
@@ -366,25 +430,33 @@ fn compare(ranks_list: &[usize]) {
                         (ra - rb).abs() <= 1e-10 * ra.max(1e-6),
                         "{tag}: band {j} residual {ra:e} vs {rb:e}"
                     );
-                    // Subset/full GEMMs can round H X differently on x86/MKL.
-                    // A small residual subtracts O(1 Ha) terms, so use 1e-12
-                    // relative to a unit-Ha floor, not to the tiny residual:
-                    // the reported ~2e-16 Ha difference at ~3.8e-7 Ha cannot
-                    // satisfy a pure relative 1e-12 bound (~3.8e-19 Ha).
-                    // Keep the aarch64 bound and independent true-residual
-                    // check unchanged, as well as every work-count identity.
-                    #[cfg(not(target_arch = "aarch64"))]
-                    assert!(
-                        (ra - rb).abs() <= 1e-12 * ra.abs().max(rb.abs()).max(1.0),
-                        "{tag}: band {j} residual {ra:e} vs {rb:e}"
-                    );
-                    let x = &b.eigenvectors.as_slice()[j * n..(j + 1) * n];
-                    let t = true_residual(&p.a, x, b.eigenvalues[j]);
-                    assert!(
-                        (t - rb).abs() <= 1e-9 * t.max(1e-6) + 1e-12,
-                        "{tag}: band {j} returned residual {rb:e}, true {t:e}"
-                    );
                     exact &= ra.to_bits() == rb.to_bits();
+                }
+                for cluster in clusters {
+                    if cluster.len() == 1 {
+                        #[cfg(not(target_arch = "aarch64"))]
+                        {
+                            let j = cluster.start;
+                            let (ra, rb) = (a.residuals[j], b.residuals[j]);
+                            assert!(
+                                (ra - rb).abs() <= 1e-12 * ra.abs().max(rb.abs()).max(1.0),
+                                "{tag}: band {j} residual {ra:e} vs {rb:e}"
+                            );
+                        }
+                    } else {
+                        // ||H X - X Lambda||_F^2 = sum_j ||r_j||^2 is
+                        // invariant under orthogonal changes of basis inside
+                        // an exactly degenerate eigenspace. Per-band norms
+                        // are not. Check this on aarch64 too, in addition to
+                        // its unchanged original per-band assertions.
+                        let squared = |r: &[f64]| r.iter().map(|x| x * x).sum::<f64>();
+                        let sa = squared(&a.residuals[cluster.clone()]);
+                        let sb = squared(&b.residuals[cluster.clone()]);
+                        assert!(
+                            (sa - sb).abs() <= 1e-12 * sa.max(sb).max(1.0),
+                            "{tag}: cluster {cluster:?} squared residual {sa:e} vs {sb:e} Ha^2"
+                        );
+                    }
                 }
                 // Ranks agree bit for bit.
                 for r in &on {

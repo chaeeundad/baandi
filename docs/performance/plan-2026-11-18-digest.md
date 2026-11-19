@@ -25,3 +25,6 @@ W0 provenance and timers; W1 M2_GRID; W2 M2_MIX; W3 init-2 / owned state (no mor
 - W3: init-2 landed (shared projector table, preflight reuse, density split, Ewald gate np >= 4); owned-row construction of the complex table not done (conflicts with bit identity of the split atomic-start Gram).
 - W4: BETWEEN-MATERIALIZE landed (import check split over ranks, fused lazy assembly, lazy delivered orbitals); dev08 A/B pending.
 - MPI stage timers landed (BAANDI_DAVIDSON_STAGES now fills on the M2 path).
+
+## User decision 2026-11-19: threads (OpenMP) lane dropped
+Scope is the one-core lane and the MPI lane only (same parallel model on both sides). No new threads-vs-OpenMP measurements and no thread-path optimization tickets. The last threads data (6c31696: BAANDI T1->T8 1.16x si8, 1.57x si16, 1.96x si32, 2.54x si64; QE OpenMP 1.72x si32 and 1.97x si64; BAANDI/QE 1.74 si32 and 2.15 si64 at T=8) stays as a reference record only. AGENTS.md (frozen) still lists three models; this note records the user's later decision.

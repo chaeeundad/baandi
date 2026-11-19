@@ -55,6 +55,10 @@ use super::*;
 use crate::checkpoint::{ElectronicState, Orbitals};
 use std::collections::HashMap;
 
+// Offline experiment only: no production switch or additional SCF work.
+#[cfg(test)]
+use super::pool_fixture as handoff_fixtures;
+
 /// First-step eigen tolerance of the full-cutoff standard session after a
 /// ladder hand-off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -841,4 +845,665 @@ fn hand_off(
         }],
         occupations: fine.occupations.clone(),
     })
+}
+
+#[cfg(test)]
+mod handoff_experiment {
+    use super::*;
+    use dft_numerics::{real::RealMatrix, switches::RunConfig, work_timers};
+    use dft_physics::real_gamma::RealHamiltonian;
+    use std::{collections::BTreeMap, path::Path};
+
+    struct Fixture {
+        cell: Cell,
+        atoms: Vec<Atom>,
+        species: Vec<(String, Pseudopotential)>,
+        options: ScfOptions,
+    }
+    impl Fixture {
+        fn load(path: &Path) -> Self {
+            let text = std::fs::read_to_string(path).unwrap();
+            let mut rows = Vec::new();
+            let mut atoms = Vec::new();
+            let mut species = Vec::new();
+            let mut options = ScfOptions::default();
+            for line in text.lines() {
+                let p: Vec<_> = line.split_whitespace().collect();
+                let number = |i: usize| p[i].parse::<f64>().unwrap();
+                match p[0] {
+                    "row" => rows.push([number(1), number(2), number(3)]),
+                    "atom" => atoms.push(Atom::new(p[1], [number(2), number(3), number(4)])),
+                    "cutoff" => options.cutoff_hartree = number(1),
+                    "seed" => options.seed = p[1].parse().unwrap(),
+                    "bands" => options.bands = Some(p[1].parse().unwrap()),
+                    "pbe" => options.functional = Functional::Pbe,
+                    "pp" => species.push((
+                        p[1].into(),
+                        dft_upf::parse_upf(&std::fs::read_to_string(p[2]).unwrap()).unwrap(),
+                    )),
+                    "synthetic" => species.push((
+                        p[1].into(),
+                        handoff_fixtures::potential(number(2), number(3), p[4] == "nonlocal", 401),
+                    )),
+                    _ => panic!("unknown fixture line {line}"),
+                }
+            }
+            Self {
+                cell: Cell::from_user_rows_bohr(rows.try_into().unwrap()).unwrap(),
+                atoms,
+                species,
+                options,
+            }
+        }
+        fn refs(&self) -> Vec<SpeciesPotential<'_>> {
+            self.species
+                .iter()
+                .map(|(label, potential)| SpeciesPotential { label, potential })
+                .collect()
+        }
+        fn problem(&self, options: ScfOptions) -> ScfProblem {
+            let mut p = ScfProblem::new(&self.cell, &self.atoms, &self.refs(), options).unwrap();
+            if p.core_density().is_some() {
+                p.set_density_floor(1e-10).unwrap();
+            }
+            p
+        }
+    }
+
+    // The high-G projection is onto the complement of the coarse PW space,
+    // not merely the complement of the occupied subspace. Full-complex rows
+    // include both +/-G, so no extra factor of two is applied.
+    fn weighted_residual(
+        basis: &PlaneWaveBasis,
+        coarse: &PlaneWaveBasis,
+        x: &ComplexMatrix,
+        hx: &ComplexMatrix,
+        occupations: &[f64],
+        shift: f64,
+    ) -> (f64, f64) {
+        let coarse: std::collections::HashSet<_> =
+            coarse.vectors().iter().map(|g| g.miller).collect();
+        let mut high = 0.;
+        let mut low = 0.;
+        for (j, &occupation) in occupations.iter().take(x.cols()).enumerate() {
+            let projected: Vec<Complex64> = (0..x.cols())
+                .map(|k| {
+                    x.column(k)
+                        .iter()
+                        .zip(hx.column(j))
+                        .map(|(a, b)| a.conj() * b)
+                        .sum()
+                })
+                .collect();
+            for (i, g) in basis.vectors().iter().enumerate() {
+                let r = hx.column(j)[i]
+                    - projected
+                        .iter()
+                        .enumerate()
+                        .map(|(k, &a)| x.column(k)[i] * a)
+                        .sum::<Complex64>();
+                let v = occupation * r.norm_sqr() / (0.5 * g.norm_squared + shift);
+                if coarse.contains(&g.miller) {
+                    low += v;
+                } else {
+                    high += v;
+                }
+            }
+        }
+        (high, low)
+    }
+
+    #[test]
+    fn high_g_indicator_has_the_known_diagonal_value() {
+        let cell = handoff_fixtures::cell();
+        let coarse = PlaneWaveBasis::new(&cell, dft_units::Hartree(0.01)).unwrap();
+        let fine = PlaneWaveBasis::new(&cell, dft_units::Hartree(2.)).unwrap();
+        let mut x = ComplexMatrix::zeros(fine.vectors().len(), 1).unwrap();
+        let mut hx = x.clone();
+        let zero = fine
+            .vectors()
+            .iter()
+            .position(|g| g.miller == [0; 3])
+            .unwrap();
+        let high = fine
+            .vectors()
+            .iter()
+            .position(|g| g.miller != [0; 3])
+            .unwrap();
+        x.column_mut(0)[zero] = Complex64::new(1., 0.);
+        hx.column_mut(0)[zero] = Complex64::new(3., 0.);
+        hx.column_mut(0)[high] = Complex64::new(0.2, 0.3);
+        let (a, b) = weighted_residual(&fine, &coarse, &x, &hx, &[2.], 1.);
+        let expected = 2. * 0.13 / (0.5 * fine.vectors()[high].norm_squared + 1.);
+        assert!((a - expected).abs() < 1e-15);
+        assert_eq!(b, 0.);
+        assert_eq!(weighted_residual(&fine, &fine, &x, &hx, &[2.], 1.).0, 0.);
+        assert_eq!(
+            weighted_residual(&fine, &coarse, &x, &hx, &[0.], 1.),
+            (0., 0.)
+        );
+    }
+
+    // Offline coarse-only schedule experiment. Its factor=1 control must
+    // reproduce coarse_stage bit for bit on every fixture before factor=4 is
+    // measured. No session policy or production tolerance is modified.
+    fn loose_stage(
+        mut problem: ScfProblem,
+        ladder: &CutoffLadderOptions,
+        factor: f64,
+        report: &mut CutoffLadderReport,
+    ) -> (CoarseState, Vec<f64>, Vec<f64>) {
+        use dft_solvers::mixing::DensityMixer;
+        let _scope = problem.run_config().enter();
+        let _stage = work_timers::enter(work_timers::RunStage::Coarse);
+        let _profile = crate::profile::enter(crate::profile::Top::Coarse);
+        let _context = crate::profile::context_stage("coarse");
+        let clock = Instant::now();
+        let Mixing::Pulay { beta, history } = problem.options.mixing else {
+            panic!("Pulay required")
+        };
+        assert!(!problem.options.hartree_mixing);
+        assert_eq!(
+            problem
+                .run_config()
+                .choice(dft_numerics::switches::Id::MIX_COULOMB_GUARD),
+            "off"
+        );
+        let mut mixer = PulayMixer::new(beta, history).unwrap();
+        let mut n = problem.starting_density();
+        let mut warm: Option<Vec<ComplexMatrix>> = None;
+        let mut tolerance = StandardProfile::CAP_HA;
+        let mut errors = Vec::new();
+        let mut tolerances = Vec::new();
+        for iteration in 1..=ladder.coarse_max_iterations {
+            crate::profile::set_context(crate::profile::Context {
+                stage: "coarse",
+                kind: "ordinary",
+                iteration,
+            });
+            if let Some(&error) = errors.last() {
+                tolerance = (factor
+                    * StandardProfile::ratchet(tolerance, error, problem.electrons))
+                .min(tolerance)
+                .min(StandardProfile::CAP_HA);
+            }
+            let mut step = problem
+                .step_session(
+                    &n,
+                    warm.as_deref(),
+                    &[],
+                    tolerance,
+                    tolerance <= problem.options.eigen_tolerance,
+                )
+                .unwrap();
+            let mut error = problem.stop_error(&n, &step.density).unwrap().unwrap();
+            if iteration == 1 && error < tolerance * problem.electrons.max(1.) {
+                tolerance = (factor
+                    * StandardProfile::ratchet(tolerance, error, problem.electrons))
+                .min(tolerance);
+                let guess = vec![step.k_points[0].solution.eigenvectors.clone()];
+                crate::profile::set_context(crate::profile::Context {
+                    stage: "coarse",
+                    kind: "redo",
+                    iteration,
+                });
+                let mut redo = problem
+                    .step_session(&n, Some(&guess), &[], tolerance, false)
+                    .unwrap();
+                for (new, old) in redo.k_points.iter_mut().zip(&step.k_points) {
+                    new.solution.iterations += old.solution.iterations;
+                    new.solution.operator_applications += old.solution.operator_applications;
+                }
+                redo.timings.potential += step.timings.potential;
+                redo.timings.diagonalization += step.timings.diagonalization;
+                redo.timings.density += step.timings.density;
+                redo.timings.energy += step.timings.energy;
+                step = redo;
+                error = problem.stop_error(&n, &step.density).unwrap().unwrap();
+            }
+            report.coarse_final_density_residual = density_distance(
+                &step.density,
+                &n,
+                problem.cell.volume_bohr3(),
+                problem.electrons,
+            );
+            report.coarse_h_vectors += step
+                .k_points
+                .iter()
+                .map(|k| k.solution.operator_applications)
+                .sum::<usize>();
+            report.coarse_phases.potential += step.timings.potential;
+            report.coarse_phases.diagonalization += step.timings.diagonalization;
+            report.coarse_phases.density += step.timings.density;
+            report.coarse_phases.energy += step.timings.energy;
+            errors.push(error);
+            tolerances.push(tolerance);
+            let mix_clock = Instant::now();
+            let mut mixed = mixer
+                .mix(
+                    n.as_slice().unwrap(),
+                    step.density.as_slice().unwrap(),
+                    problem.electrons / problem.cell.volume_bohr3(),
+                )
+                .unwrap();
+            let fraction = n
+                .iter()
+                .zip(&mixed)
+                .filter(|(_, b)| **b < 0.)
+                .map(|(a, b)| 0.9 * a / (a - b))
+                .fold(1., f64::min);
+            if fraction < 1. {
+                for (b, a) in mixed.iter_mut().zip(n.iter()) {
+                    *b = a + fraction * (*b - a);
+                }
+                mixer.reset();
+            }
+            n.as_slice_mut().unwrap().copy_from_slice(&mixed);
+            report.coarse_phases.mixing += mix_clock.elapsed();
+            warm = Some(
+                step.k_points
+                    .into_iter()
+                    .map(|k| k.solution.eigenvectors)
+                    .collect(),
+            );
+            if report.coarse_final_density_residual <= ladder.coarse_density_residual {
+                break;
+            }
+        }
+        report.coarse_iterations = tolerances.len();
+        report.coarse_start_h_vectors = problem.atomic_start.initial_h_applications;
+        report.coarse_session = clock.elapsed();
+        let state = CoarseState {
+            basis: problem.states[0].basis.clone(),
+            density: n,
+            orbitals: warm.unwrap().remove(0),
+            mixer: None,
+            standard_next: Some(StandardProfile::ratchet(
+                tolerance,
+                *errors.last().unwrap(),
+                problem.electrons,
+            )),
+            strict_next: None,
+            last_tolerance: Some(tolerance),
+        };
+        (state, tolerances, errors)
+    }
+
+    fn save_f64(path: &Path, values: impl Iterator<Item = f64>) {
+        use std::io::Write;
+        let mut file = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
+        for v in values {
+            file.write_all(&v.to_le_bytes()).unwrap();
+        }
+        file.flush().unwrap();
+    }
+
+    /// Run through scripts/ladder_handoff.py. Every job has one geometry and
+    /// one process, with a strict reference, candidates, and optional snapshots.
+    #[test]
+    #[ignore = "offline full-SCF experiment; release only, scripts/ladder_handoff.py"]
+    fn measure() {
+        let input = std::env::var("HANDOFF_INPUT").expect("HANDOFF_INPUT");
+        let fixture = Fixture::load(Path::new(&input));
+        let root = std::env::var("HANDOFF_OUTPUT").expect("HANDOFF_OUTPUT");
+        let root = Path::new(&root);
+        std::fs::create_dir_all(root).unwrap();
+        let run = RunConfig::from_pairs(&[
+            ("phase_profile", "on"),
+            ("stage_timers", "on"),
+            ("davidson_stages", "on"),
+        ])
+        .unwrap();
+        let _scope = run.enter();
+        work_timers::set_enabled(true);
+        crate::snapshot::force_dir(Some(None));
+        let mut strict = fixture.options.clone();
+        strict.standard = None;
+        strict.verification = Verification::Off;
+        strict.mixing = ScfOptions::strict_reference().mixing;
+        strict.energy_tolerance = 1e-11;
+        strict.density_tolerance = 1e-9;
+        strict.eigen_tolerance = 1e-10;
+        let reference = fixture.problem(strict).run_outcome().unwrap();
+        assert!(reference.converged, "strict reference did not converge");
+        let e_ref = reference.result.total_hartree();
+        let arms = std::env::var("HANDOFF_ARMS").unwrap_or_else(|_| "0.5:0.0001:default".into());
+        for (index, arm) in arms.split(',').enumerate() {
+            let parts: Vec<_> = arm.split(':').collect();
+            let fraction: f64 = parts[0].parse().unwrap();
+            let stop: f64 = parts[1].parse().unwrap();
+            let mode = parts[2];
+            let ladder = CutoffLadderOptions {
+                fraction,
+                coarse_density_residual: stop,
+                standard: true,
+                ..CutoffLadderOptions::from_run(run)
+            };
+            let dir = root.join(format!("arm-{index}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            let capture = std::env::var("HANDOFF_CAPTURE").as_deref() == Ok("on");
+            if capture {
+                std::fs::create_dir_all(dir.join("snapshots")).unwrap();
+                crate::snapshot::force_dir(Some(Some(dir.join("snapshots"))));
+            }
+            if mode == "loose4" {
+                crate::snapshot::force_dir(Some(None));
+                let f = fixture.problem(fixture.options.clone());
+                let mut normal = CutoffLadderReport::default();
+                let expected = coarse_stage(
+                    coarse_problem(&f, &fixture.refs(), &ladder).unwrap(),
+                    &ladder,
+                    stop,
+                    &mut normal,
+                )
+                .unwrap();
+                let mut control = CutoffLadderReport::default();
+                let (actual, _, _) = loose_stage(
+                    coarse_problem(&f, &fixture.refs(), &ladder).unwrap(),
+                    &ladder,
+                    1.,
+                    &mut control,
+                );
+                assert_eq!(
+                    actual.density, expected.density,
+                    "coarse factor=1 density control"
+                );
+                assert_eq!(
+                    actual.orbitals.as_slice(),
+                    expected.orbitals.as_slice(),
+                    "coarse factor=1 orbital control"
+                );
+                assert_eq!(control.coarse_h_vectors, normal.coarse_h_vectors);
+                if capture {
+                    crate::snapshot::force_dir(Some(Some(dir.join("snapshots"))));
+                }
+            }
+            let begin = work_timers::snapshot();
+            let reuse_begin = crate::gamma_real::reuse_psi_counters();
+            let wall = Instant::now();
+            let fine = fixture.problem(fixture.options.clone());
+            assert!(ineligibility(&fine, &ladder).is_none());
+            let fine_grid = fine.grid.dims();
+            let mut coarse = coarse_problem(&fine, &fixture.refs(), &ladder).unwrap();
+            if mode == "minimal-grid" {
+                let mut options = coarse.options.clone();
+                let density_basis = coarse.states[0].basis.density_basis(&fixture.cell).unwrap();
+                let mut dims = [1; 3];
+                for g in density_basis.vectors() {
+                    for (i, d) in dims.iter_mut().enumerate() {
+                        *d = (*d).max(2 * g.miller[i].unsigned_abs() as usize + 1);
+                    }
+                }
+                options.grid_override = Some(dims);
+                coarse = fixture.problem(options);
+            } else {
+                assert!(mode == "default" || mode == "loose4");
+            }
+            let coarse_grid = coarse.grid.dims();
+            let mut report = CutoffLadderReport {
+                standard: true,
+                coarse_grid,
+                fine_grid,
+                ..Default::default()
+            };
+            let (c, tolerances, errors) = if mode == "loose4" {
+                loose_stage(coarse, &ladder, 4., &mut report)
+            } else {
+                let c = coarse_stage(coarse, &ladder, stop, &mut report).unwrap();
+                let t = report
+                    .coarse_history
+                    .iter()
+                    .map(|r| r.requested_eigen_tolerance)
+                    .collect::<Vec<_>>();
+                let e = report
+                    .coarse_history
+                    .iter()
+                    .map(|r| r.standard_error_ha.unwrap())
+                    .collect::<Vec<_>>();
+                (c, t, e)
+            };
+            let transfer = Instant::now();
+            let state = hand_off(&fine, &c.basis, &c.density, &c.orbitals).unwrap();
+            let transfer_s = transfer.elapsed().as_secs_f64();
+            report.standard_seed_ha = c.standard_next;
+            let outcome = finish_from(fine, &state, None, true, &mut report).unwrap();
+            let wall_s = wall.elapsed().as_secs_f64();
+            let end = work_timers::snapshot();
+            let reuse_end = crate::gamma_real::reuse_psi_counters();
+            crate::snapshot::force_dir(Some(None));
+            assert!(outcome.converged, "candidate {arm} did not converge");
+            assert!(
+                outcome
+                    .result
+                    .verification
+                    .as_ref()
+                    .is_some_and(|v| v.passed())
+            );
+            if capture {
+                assert!(
+                    std::fs::read_dir(dir.join("snapshots")).unwrap().any(|e| e
+                        .unwrap()
+                        .path()
+                        .extension()
+                        .is_some_and(|s| s == "json")),
+                    "snapshot capture produced no manifests"
+                );
+            }
+            save_f64(
+                &dir.join("coarse-orbitals.bin"),
+                c.orbitals.as_slice().iter().flat_map(|z| [z.re, z.im]),
+            );
+            save_f64(&dir.join("coarse-density.bin"), c.density.iter().copied());
+            // Explicit solved handoff state; the existing snapshots are solver entries.
+            save_f64(
+                &dir.join("handoff-density.bin"),
+                state.density.iter().copied(),
+            );
+            save_f64(
+                &dir.join("handoff-orbitals.bin"),
+                state.orbitals[0].coefficients.iter().copied(),
+            );
+            // A separate fine problem prevents diagnostic H/cache changes from
+            // entering the measured SCF or its work counters.
+            let probe_clock = Instant::now();
+            let mut probe = fixture.problem(fixture.options.clone());
+            let probe_build_s = probe_clock.elapsed().as_secs_f64();
+            let fields_clock = Instant::now();
+            let n = Array3::from_shape_vec(state.grid, state.density.clone()).unwrap();
+            let (_, _, potential) = probe.input_fields(&n).unwrap();
+            probe.states[0]
+                .hamiltonian
+                .set_local_potential(potential)
+                .unwrap();
+            let probe_fields_s = fields_clock.elapsed().as_secs_f64();
+            let basis = &probe.states[0].basis;
+            let x_all = prolong_orbitals(&c.basis, basis, &c.orbitals).unwrap();
+            let occupied = probe.occupations.iter().filter(|&&f| f > 0.).count();
+            let mut x = ComplexMatrix::zeros(x_all.rows(), occupied).unwrap();
+            for j in 0..occupied {
+                x.column_mut(j).copy_from_slice(x_all.column(j));
+            }
+            let mut real = RealHamiltonian::from_complex(
+                &probe.states[0].hamiltonian,
+                basis,
+                occupied,
+                probe.pool.clone(),
+            )
+            .unwrap();
+            let mut xr = RealMatrix::zeros(x.rows(), occupied).unwrap();
+            let mut hr = RealMatrix::zeros(x.rows(), occupied).unwrap();
+            for j in 0..occupied {
+                real.half_sphere()
+                    .pack(
+                        x.column(j),
+                        &mut xr.as_mut_slice()[j * x.rows()..(j + 1) * x.rows()],
+                    )
+                    .unwrap();
+            }
+            let apply_clock = Instant::now();
+            real.apply_block(&xr, &mut hr).unwrap();
+            let probe_apply_s = apply_clock.elapsed().as_secs_f64();
+            let mut hx = ComplexMatrix::zeros(x.rows(), occupied).unwrap();
+            for j in 0..occupied {
+                real.half_sphere()
+                    .unpack(
+                        &hr.as_slice()[j * x.rows()..(j + 1) * x.rows()],
+                        hx.column_mut(j),
+                    )
+                    .unwrap();
+            }
+            let indicators: Vec<_> = [0.5, 1., 2.]
+                .iter()
+                .map(|&shift| {
+                    weighted_residual(basis, &c.basis, &x, &hx, &probe.occupations, shift)
+                })
+                .collect();
+            let probe_s = probe_clock.elapsed().as_secs_f64();
+            // Independent complex H application validates ORC packing and multiplicity.
+            if index == 0 {
+                use dft_solvers::LinearOperator;
+                let mut independent = ComplexMatrix::zeros(x.rows(), occupied).unwrap();
+                probe.states[0]
+                    .hamiltonian
+                    .apply_block(&x, &mut independent)
+                    .unwrap();
+                let error = independent
+                    .as_slice()
+                    .iter()
+                    .zip(hx.as_slice())
+                    .map(|(a, b)| (*a - *b).norm())
+                    .fold(0., f64::max);
+                assert!(error < 1e-11, "real/complex probe mismatch {error}");
+            }
+            let history = &outcome.result.history;
+            let verify = outcome.result.verification.as_ref().unwrap();
+            let mut row = BTreeMap::<String, String>::new();
+            macro_rules! put {
+                ($k:expr,$v:expr) => {
+                    row.insert($k.into(), format!("{:?}", $v));
+                };
+            }
+            put!("arm", arm);
+            put!("capture", capture);
+            put!("fraction", fraction);
+            put!("stop", stop);
+            put!("coarse_maps", report.coarse_iterations);
+            put!("fine_maps", history.len());
+            put!("coarse_grid", coarse_grid);
+            put!("coarse_plane_waves", c.basis.vectors().len());
+            put!("fine_plane_waves", x.rows());
+            put!("bands", state.orbitals[0].cols);
+            put!("occupied", occupied);
+            put!("fine_grid", fine_grid);
+            put!("coarse_h", report.coarse_h_vectors);
+            put!("coarse_start_h", report.coarse_start_h_vectors);
+            put!(
+                "fine_history_h",
+                history
+                    .iter()
+                    .map(|r| r.operator_applications)
+                    .sum::<usize>()
+            );
+            put!(
+                "verification_h",
+                verify
+                    .attempts
+                    .iter()
+                    .map(|v| v.operator_applications)
+                    .sum::<usize>()
+            );
+            put!("verification_maps", verify.attempts.len());
+            put!("coarse_residual", report.coarse_final_density_residual);
+            put!("coarse_tolerances", tolerances);
+            put!("coarse_standard_errors", errors);
+            put!("loose_driver_identity", mode == "loose4");
+            put!(
+                "coarse_solve_s",
+                report.coarse_phases.diagonalization.as_secs_f64()
+            );
+            put!(
+                "coarse_density_s",
+                report.coarse_phases.density.as_secs_f64()
+            );
+            put!(
+                "coarse_potential_s",
+                report.coarse_phases.potential.as_secs_f64()
+            );
+            put!("coarse_energy_s", report.coarse_phases.energy.as_secs_f64());
+            put!("coarse_mixing_s", report.coarse_phases.mixing.as_secs_f64());
+            put!("coarse_session_s", report.coarse_session.as_secs_f64());
+            put!("transfer_s", transfer_s);
+            put!("wall_s", wall_s);
+            put!("energy_ha", outcome.result.total_hartree());
+            put!("reference_ha", e_ref);
+            put!("error_ha", (outcome.result.total_hartree() - e_ref).abs());
+            put!(
+                "indicator_high_ha",
+                indicators.iter().map(|v| v.0).collect::<Vec<_>>()
+            );
+            put!(
+                "indicator_low_ha",
+                indicators.iter().map(|v| v.1).collect::<Vec<_>>()
+            );
+            put!("probe_h", occupied);
+            put!("probe_calls", 1);
+            put!("probe_s", probe_s);
+            put!("probe_build_s", probe_build_s);
+            put!("probe_fields_s", probe_fields_s);
+            put!(
+                "delta_apply_calls",
+                reuse_end.armed
+                    - reuse_begin.armed
+                    - (reuse_end.unchanged_potential - reuse_begin.unchanged_potential)
+            );
+            put!("probe_apply_s", probe_apply_s);
+            for (s, label) in ["fine", "coarse", "verification"].iter().enumerate() {
+                put!(
+                    format!("{label}_apply_calls"),
+                    end[s].apply_calls - begin[s].apply_calls
+                );
+                put!(
+                    format!("{label}_apply_h"),
+                    end[s].apply_columns - begin[s].apply_columns
+                );
+                put!(
+                    format!("{label}_wave_h"),
+                    end[s].pair_columns + end[s].other_columns
+                        - begin[s].pair_columns
+                        - begin[s].other_columns
+                );
+                put!(
+                    format!("{label}_kept_h"),
+                    end[s].kept_columns - begin[s].kept_columns
+                );
+            }
+            // One exact off-path oracle per job, including delivered density.
+            if index == 0 && mode == "default" {
+                let ordinary = run_ladder(
+                    fixture.problem(fixture.options.clone()),
+                    &fixture.refs(),
+                    &ladder,
+                    true,
+                )
+                .unwrap();
+                assert_eq!(
+                    ordinary.outcome.result.total_hartree().to_bits(),
+                    outcome.result.total_hartree().to_bits()
+                );
+                assert_eq!(ordinary.outcome.result.density, outcome.result.density);
+                assert_eq!(ordinary.report.coarse_h_vectors, report.coarse_h_vectors);
+                assert_eq!(ordinary.report.fine_iterations, history.len());
+                put!("baseline_identity", true);
+            }
+            let json = format!(
+                "{{{}}}",
+                row.iter()
+                    .map(|(k, v)| format!("{k:?}:{v}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+            std::fs::write(dir.join("measurement.json"), format!("{json}\n")).unwrap();
+            println!("HANDOFF {json}");
+        }
+    }
 }

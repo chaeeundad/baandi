@@ -1912,3 +1912,223 @@ retain this qualification or collect the public per-rank snapshots in the master
 harness. Report bytes including padding and the additional reduction latency.
 Then repeat the paired launches with `BAANDI_PHASE_PROFILE=off` for uninstrumented
 launch-to-exit acceptance. A local timing benefit does not flip the default.
+
+### G-HANDOFF-OWNED: dev08 rejection and collective-budget audit
+
+The orchestrator relayed the following dev08 result for `70f01fd`: 10 crossed
+pairs in a clean window, Si64 MPI8, all 10 pairs slower with owned handoff,
+mean whole-run increase **0.278 s / 3.12%**. `between.ladder_handoff` fell from
+0.0967 to 0.0352 s; orbital gathered bytes fell from approximately 8.9 MB to
+zero and materializations from one to zero. The mechanism worked but the
+candidate **failed the production speed screen**. These are relayed numbers,
+not runs performed in this worktree; raw launch/input/binary hashes were not
+provided in this message. Keep `BAANDI_M2_OWNED_HANDOFF` default OFF. The previous
+Mac results do not establish adoption. The orchestrator limits a revision to
+at most two handoff collectives and will close the ticket on another regression.
+The available whole-run saving ceiling is only about 0.06–0.10 s.
+
+Source audit on worktree HEAD `84643cf` (the implemented handoff, preceding the
+relayed dev08 integration commit): the 13 tree sums are **not per-column or
+per-chunk loops**. All are fixed transaction-level calls:
+
+| Site | tree_sum calls |
+| --- | ---: |
+| `run_ladder`: eligibility agreement | 1 |
+| `warm_owned_handoff`: availability, density-present agreement | 2 |
+| `prolong_owned`: local shape/finite check, header identity, partition size, ownership/plan validity, Miller mapping | 5 |
+| `initialize_owned_ladder`: imported shape, overlap input validity, Gram reduction, overlap verdict, density-import verdict | 5 |
+| Total | 13 |
+
+The same measured scope also contains **9 allgatherv calls** and **1 all-to-all**:
+three orbital ownership/header exchanges, one coarse owned-density gather, three
+fine-session dummy mixer-validation gathers (the mixed value is discarded and
+history reset), and two fine `GridPlan::new` stick-ownership exchanges. Thus the
+current normal-path handoff is **23 collectives**, not 13. Batching scalar flags
+alone cannot meet a two-collective *whole-handoff* limit. Even eliminating all
+orbital metadata/validation calls leaves six pre-existing density/setup gathers.
+Do not move them before/after timer boundaries or relabel them to pass the gate.
+
+A fresh Mac audit on the unchanged code reproduced the exact 9/13/1 counts:
+`M2_PROFILE_MODE=production M2_PROFILE_LADDER=on`, Si64, 8 simulated ranks,
+`BAANDI_PHASE_PROFILE=on BAANDI_M2_OWNED_HANDOFF=on`. One observation, no A/B claim:
+wall 11.024827 s, exclusive rank-mean handoff 0.157631 s, energy
+-253.37811763030507 Ha, zero orbital gathered bytes and zero materializations.
+This is a baseline reproduction, **not a revised implementation or improvement**.
+Command (exit 0; raw output `target/scratch/batch-audit-si64.log`):
+
+```sh
+TMPDIR="$PWD/target/scratch" DFT_SI_UPF="$PWD/../pseudo/Si.pz-vbc.UPF" M2_PROFILE_SERIAL=off M2_PROFILE_CASE=si64 M2_PROFILE_RANKS=8 M2_PROFILE_MODE=production M2_PROFILE_LADDER=on BAANDI_PHASE_PROFILE=on BAANDI_M2_OWNED_HANDOFF=on cargo test --offline --release -p dft-engine --test m2_entry_cost -- --ignored --nocapture
+```
+
+Required revision design (not yet implemented): a fixed-size descriptor/status
+exchange establishes safe payload dimensions and shared eligibility; a single
+owner-directed payload exchange carries coefficients together with repeated
+validation/Gram contributions and the coarse density blocks. Every rank sees
+the same validation contributions, including flags from sources whose orbital
+rows it does not own. In particular, receiver-local row-coverage checks cannot
+return early before peers agree. The density gather must disappear into that
+payload, the discarded initial mixer validation must be performed locally with
+the same parameter/data predicates, and the fine-grid stick ownership must be
+computed locally from the deterministic partition rather than communicated.
+Existing norm-threshold ambiguity fallback must remain collectively agreed;
+its extra oracle communication cannot be silently excluded from the counters.
+The requested count assertion must sum *all five* operation counters over the
+handoff on ranks 2..7, not just `tree_sum` or the transfer function.
+
+Scope dependency: `GridPlan::new` is in `crates/dft-engine/src/grid_dist.rs`, which
+is not in OWNED_FILES or the previously granted gamma_real/scf/session extension.
+Its two stick-ownership allgathervs must be removed for the fine-handoff
+construction to fit this budget. A narrow constructor scope extension was
+requested, specifically to calculate those identical metadata arrays from the
+existing deterministic partition. No change to grid arithmetic, FFTs or ordinary
+map behavior is proposed. The scope question is pending; no numerical code,
+collective counters, default, test expectation or timing boundary was changed
+in this audit, and no second dev08 candidate is ready.
+
+Audit verification: `TMPDIR_990="$PWD/target/scratch" CHECK_SCCACHE=0
+scripts/check.sh fast dft-engine dft-numerics dft-cli` exited 1: 458 passed,
+3 failed, 134 ignored; build, fmt and clippy passed. The three failures are
+the acknowledged CLI cache tests rejecting an in-repository temporary cache;
+raw output is `target/scratch/batch-audit-check.log`. No revised collective-count
+test is claimed: the unchanged implementation still performs 23 calls.
+
+### G-HANDOFF-OWNED: batched transaction after the dev08 rejection (2026-11-19)
+
+**Status: implemented, default OFF; awaiting the orchestrator's second dev08
+screen. No speed adoption claim.** The user approved the narrow `grid_dist.rs`
+constructor extension. The old owned implementation used 13 tree reductions,
+9 allgathervs and 1 all-to-all (23 calls). The revised normal handoff uses
+**one allgatherv and one all-to-all, zero tree reductions, two total calls**.
+All counts include export, transfer, import and fine session initialization;
+no initialization work or collective was moved outside the measured spans.
+
+Transaction and error contract:
+
+- The first exchange combines eligibility/availability, integer-layout and
+  consumer fingerprints, local row/payload lengths, finite/shape flags and all
+  overlap partial sums. Its extent uses the *completed coarse SCF's* common
+  band count, not the local lazy handle's potentially invalid column count.
+  A malformed local handle, including a wrong band count, cannot change the
+  descriptor exchange size. The coarse solve already requires common bands
+  and numerical inputs; this does not add a new cross-rank input contract.
+- Reconstruct the existing binomial-tree sum locally from those contributions.
+  The second exchange sends populated coefficient rows directly to their fine
+  owners and repeats only ownership metadata and coarse density planes to all
+  peers. Every rank checks the same complete row partition, density lengths and
+  Gram data before consuming its destination-only coefficients. Missing blocks,
+  duplicate/missing rows, nonfinite coefficients, local consumer/layout/band
+  mismatches and malformed density blocks produce an agreed error.
+- A norm/overlap within the existing rounding envelope of the 1e-8 admission
+  boundary selects the original sequential complex oracle on **every rank**.
+  That decision is made after the first exchange: only in this rare case the
+  second payload replicates coefficients as well. It still takes **two calls**,
+  preserves the original verdict, and records fallback/materialization bytes.
+  The ordinary path has zero orbital materializations and gathered bytes.
+  This is an oracle fallback, not a relaxed tolerance or changed norm convention.
+- The initial mixer trial is discarded by the original constructor. The owned
+  import constructor validates its plain Pulay parameters and starting density
+  locally; no dummy distributed charge reductions are needed. Fine GridPlan
+  metadata uses the existing deterministic partition and the same sorted stick
+  order. This constructor branch is scoped to owned handoff setup and the ON
+  switch, independently of profiling: coarse initialization and default OFF
+  retain their original communication. Grid arithmetic, potential state,
+  checkpoint fallbacks and the ordinary session constructor are unchanged.
+
+Validation (all scratch below `target/scratch`): release `owned_handoff` **5
+passed**, including the 1..7 rank/cubic/skew/odd/even matrix, completed fine
+certificates, profile on/off and full-route bit identity, unsupported consumer
+fallbacks and a named whole-handoff <=2-calls test on ranks 2..7. Release
+`owned_handoff_tests` **4 passed**: arbitrary/reversed source ownership, Gamma
+packing/G=0/signed zeros/subnormals, rank-local faults and missing blocks/bad
+density, and norm-boundary oracle verdicts. The boundary test uses an independent
+transport wrapper to assert exactly two calls, including boundary-oracle cases,
+on every rank count 2..7. Wrong-band descriptors are also tested. Final
+`scripts/check.sh fast dft-engine dft-numerics dft-cli` exited **1**: **460 passed,
+3 failed, 134 ignored**; build/fmt/clippy pass. The same three acknowledged CLI
+cache tests reject the in-repository scratch location. No unrelated cache fix.
+Raw logs: `batch-owned-final.log`, `batch-unit-final.log`, `batch-final-check.log`.
+
+Mac observations, three crossed pairs per case, production ladder, eight
+simulated ranks, same binary SHA-256
+`a9ba16717189f4cab15ecd1f4f20adc44fd933f6dd767d671e444291fadb2e86`.
+A is full route (switch OFF); B is revised owned route (ON). Handoff seconds
+are the median of each run's **sum of the ten exclusive handoff parts**, with
+`materialize_collective` excluded from that sum. These harness numbers are
+rank means, not sums of per-part maxima.
+
+| Observation | Si32 OFF -> ON | Si64 OFF -> ON |
+| --- | ---: | ---: |
+| Exclusive handoff median (s) | 0.034584 -> 0.033829 | 0.179371 -> 0.095521 |
+| Median per-run handoff share (%) | 1.944 -> 1.872 | 2.329 -> 1.214 |
+| Orbital gathered bytes/rank (B) | 2,312,392 -> 0 | 8,947,240 -> 0 |
+| Orbital materializations | 1 -> 0 | 1 -> 0 |
+| Handoff allgatherv/tree_sum/alltoall | 9/1/0 -> 1/0/1 | 9/1/0 -> 1/0/1 |
+| ON submitted transfer bytes/rank, padding included (B) | 1,615,728 | 3,946,288 |
+| ON populated coefficient bytes/rank (B) | 284,852 | 1,109,988 |
+| ON mean rank-local peak buffer bound (B) | 4,287,624 | 12,014,816 |
+| Whole-run allgatherv delivered bytes/rank (B) | 33,528,112 -> 29,414,088 | 109,060,088 -> 96,938,704 |
+| Whole-run median (s) | 1.795946 -> 1.802706 | 7.691011 -> 7.847321 |
+| Whole-run median change (%) | +0.376 | +2.032 |
+| Harness wall spread (s) | 0.149924 | 0.243944 |
+
+The transfer byte counter includes the submitted descriptor/Gram and padded
+all-to-all send buffer. It is an API payload count, not a measurement of MPI's
+network algorithm. Peak bounds include coefficient and transaction buffers,
+exclude allocator/RSS and other SCF storage, and the simulated harness reports
+an average of rank-local high-water bounds, **not the worst rank's RSS**.
+No boundary oracle occurred in these screens. Energy bits, density hashes,
+SCF/Davidson/H work are identical in both arms (Si32 -126.70328593997024 Ha,
+density `0x928361d517f75f05`; Si64 -253.37811763030507 Ha, density
+`0x37808e2041c875bd`). The OFF fingerprints match the previous implementation's
+saved screen records too.
+
+For comparison with the rejected owned implementation, the fresh pre-revision
+Si64 ON audit above recorded **0.157631 s**, 13 tree reductions and 23 total
+calls; the revised ON median is **0.095521 s**, zero tree reductions and two
+calls, with gathered orbital bytes **0 -> 0**. These are different Mac windows
+(single old observation versus three new pairs), not a paired speed estimate.
+The earlier three-pair owned observations were 0.034637 s (Si32) and 0.106210 s
+(Si64); they likewise are not a current timing control. The same-binary current
+A/B whole-run medians are slower on the ON arm, within the observed spreads.
+The harness's `CANDIDATE` label reflects its counter screen; it is **not** a
+whole-run speed/adoption result. The dev08 ceiling remains the measured
+approximately 0.06–0.10 s, never the 1.2 s coarse stage. A second dev08 regression
+closes this attempt under the orchestrator's decision.
+
+Reproduction (each release test and screen exited 0; the final check exited 1
+for the known cache failures):
+
+```sh
+export TMPDIR_990="$PWD/target/scratch" TMPDIR="$PWD/target/scratch"
+cargo test --offline --release -p dft-engine --lib owned_handoff_tests -- --nocapture
+cargo test --offline --release -p dft-engine --test owned_handoff -- --include-ignored
+cargo test --offline --release -p dft-engine --test m2_entry_cost --no-run
+M2_PROFILE_MODE=production M2_PROFILE_LADDER=on python3 -I scripts/fast_screen_mpi.py --binary target/release/deps/m2_entry_cost-27ed8b949e92fddf --upf ../pseudo/Si.pz-vbc.UPF --case si64 --ranks 8 --pairs 3 --a BAANDI_PHASE_PROFILE=on,BAANDI_M2_OWNED_HANDOFF=off --b BAANDI_PHASE_PROFILE=on,BAANDI_M2_OWNED_HANDOFF=on --expect m2.handoff.tree_sum:down --expect m2.handoff.materializations:down --json-out target/scratch/batched-si64-final.json
+M2_PROFILE_MODE=production M2_PROFILE_LADDER=on python3 -I scripts/fast_screen_mpi.py --binary target/release/deps/m2_entry_cost-27ed8b949e92fddf --upf ../pseudo/Si.pz-vbc.UPF --case si32 --ranks 8 --pairs 3 --a BAANDI_PHASE_PROFILE=on,BAANDI_M2_OWNED_HANDOFF=off --b BAANDI_PHASE_PROFILE=on,BAANDI_M2_OWNED_HANDOFF=on --expect m2.handoff.tree_sum:down --expect m2.handoff.materializations:down --json-out target/scratch/batched-si32-final.json
+CHECK_SCCACHE=0 scripts/check.sh fast dft-engine dft-numerics dft-cli
+```
+
+Master-session dev08 command templates (**not executed here**). Use the existing
+approved MPI+MKL build/input and load gate; repeat ten crossed pairs, unique
+output directories, with identical binding/start/PP/grid/bands/threshold and
+certificate policy. Keep raw external wall, binary/input/PP hashes, scientific
+fingerprints, handoff counters and exclusive part timings for every arm. The
+acceptance conditions are zero handoff tree reductions, at most two handoff
+collectives on the supported owned route, zero ordinary orbital gathers,
+unchanged accuracy/work/certificate, and no repeat of the whole-run regression.
+
+```sh
+export TMPDIR_990="$PWD/target/scratch" TMPDIR="$PWD/target/scratch"
+cargo build --offline --release -p dft-cli --features mpi,mkl
+sha256sum target/release/dft-cli ~/fastbench/si64.toml
+# One crossed pair; orchestrator repeats/reverses order under its load gate.
+env MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 BAANDI_PHASE_PROFILE=on BAANDI_M2_OWNED_HANDOFF=off \
+  mpirun -np 8 --map-by core --bind-to core target/release/dft-cli run ~/fastbench/si64.toml \
+  --output-dir "$PWD/target/scratch/owned-handoff-si64-p8-off-1"
+env MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 BAANDI_PHASE_PROFILE=on BAANDI_M2_OWNED_HANDOFF=on \
+  mpirun -np 8 --map-by core --bind-to core target/release/dft-cli run ~/fastbench/si64.toml \
+  --output-dir "$PWD/target/scratch/owned-handoff-si64-p8-on-1"
+```
+
+Async coarse/fine fork/join remains unimplemented and needs its own economic
+screen. Changes remain uncommitted for Claude's review.

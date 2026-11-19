@@ -598,7 +598,6 @@ impl GridPlan {
             ScfError::Numerical(format!("M2 grid plan: {e}"))
         };
         let fft = DistributedPairFft::new(dims, &indices, rank, ranks).map_err(err)?;
-        drop(indices);
         let first = fft.first_axis();
         let n_other = dims[1 - first];
         let nz = dims[2];
@@ -614,14 +613,41 @@ impl GridPlan {
         mine.sort_unstable();
         mine.dedup();
         let gather_err = |e: dft_mpi::MpiError| ScfError::Numerical(format!("M2 grid plan: {e}"));
-        let mut stick_counts_f = vec![0.0; ranks];
-        comm.allgatherv_f64(&[mine.len() as f64], &vec![1; ranks], &mut stick_counts_f)
-            .map_err(gather_err)?;
-        let stick_counts: Vec<usize> = stick_counts_f.iter().map(|&c| c as usize).collect();
-        let mut all = vec![0.0; stick_counts.iter().sum()];
-        let mine_f: Vec<f64> = mine.iter().map(|&s| s as f64).collect();
-        comm.allgatherv_f64(&mine_f, &stick_counts, &mut all)
-            .map_err(gather_err)?;
+        let (stick_counts, all) = if crate::cutoff_ladder::local_handoff_setup()
+            && dft_numerics::switches::on(dft_numerics::switches::Id::M2_OWNED_HANDOFF)
+        {
+            // The partition is deterministic; reconstruct exactly the same sorted
+            // rank lists locally. No field values or numerical ordering change.
+            let owners = dft_solvers::distributed_fft::position_owners(dims, &indices, ranks)
+                .map_err(err)?;
+            let mut lists = vec![Vec::new(); ranks];
+            for (g, &owner) in owners.iter().enumerate() {
+                lists[owner].push(stick_id(g));
+            }
+            for list in &mut lists {
+                list.sort_unstable();
+                list.dedup();
+            }
+            (
+                lists.iter().map(Vec::len).collect::<Vec<_>>(),
+                lists
+                    .into_iter()
+                    .flatten()
+                    .map(|s| s as f64)
+                    .collect::<Vec<_>>(),
+            )
+        } else {
+            let mut stick_counts_f = vec![0.0; ranks];
+            comm.allgatherv_f64(&[mine.len() as f64], &vec![1; ranks], &mut stick_counts_f)
+                .map_err(gather_err)?;
+            let stick_counts: Vec<usize> = stick_counts_f.iter().map(|&c| c as usize).collect();
+            let mut all = vec![0.0; stick_counts.iter().sum()];
+            let mine_f: Vec<f64> = mine.iter().map(|&s| s as f64).collect();
+            comm.allgatherv_f64(&mine_f, &stick_counts, &mut all)
+                .map_err(gather_err)?;
+            (stick_counts, all)
+        };
+        drop(indices);
         if all.len() != sticks_total {
             return Err(ScfError::Numerical("M2 grid plan: stick partition".into()));
         }

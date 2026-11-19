@@ -99,6 +99,11 @@ fn compare_case(ranks: usize, skew: bool, terminal: bool, fallback: usize) {
     let off = run(false, false);
     let on = run(true, false);
     let direct = run(true, true);
+    let unprofiled_direct = run(false, true);
+    for (a, b) in direct.iter().zip(&unprofiled_direct) {
+        assert_eq!(a.0, b.0, "owned setup depends on profiling");
+        assert_eq!(b.1.collectives, [0; 5]);
+    }
     profile::force(None);
     for (a, b) in on.iter().zip(&direct) {
         assert_eq!(
@@ -107,6 +112,12 @@ fn compare_case(ranks: usize, skew: bool, terminal: bool, fallback: usize) {
         );
         if ranks > 1 && !terminal && fallback == 0 {
             assert_eq!(b.1.owned[0], 1);
+            assert!(
+                b.1.collectives.iter().sum::<u64>() <= 2,
+                "whole handoff P={ranks}: {:?}",
+                b.1.collectives
+            );
+            assert_eq!(b.1.collectives[1], 0, "no handoff tree reductions");
             assert_eq!(b.1.materializations, 0);
             assert_eq!(b.1.gathered_bytes, 0);
             assert!(b.1.owned[1] > 0);
@@ -153,6 +164,14 @@ fn profile_matrix_one_through_seven_ranks() {
         for skew in [false, true] {
             compare(ranks, skew, false);
         }
+    }
+}
+
+#[test]
+fn whole_handoff_uses_at_most_two_collectives_on_two_through_seven_ranks() {
+    let _lock = LOCK.lock().unwrap();
+    for ranks in 2..=7 {
+        compare(ranks, false, false);
     }
 }
 

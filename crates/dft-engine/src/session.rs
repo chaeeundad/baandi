@@ -255,6 +255,9 @@ impl ScfSession {
             )
     }
     pub fn initialize(&mut self) -> Result<(), ScfError> {
+        self.initialize_mode(false)
+    }
+    fn initialize_mode(&mut self, handoff: bool) -> Result<(), ScfError> {
         // RUN-CONFIG: legacy switch reads below see the problem's configuration.
         let _run = self.problem.run.enter();
         if self.continuation.is_some() || self.status != StepStatus::Created {
@@ -262,7 +265,7 @@ impl ScfSession {
                 "session already initialized or failed",
             ));
         }
-        match self.initialize_inner() {
+        match self.initialize_inner(handoff) {
             Ok(()) => {
                 self.state_version += 1;
                 self.status = StepStatus::Ready;
@@ -461,7 +464,7 @@ impl ScfSession {
         };
         Ok(mixer)
     }
-    fn initialize_inner(&mut self) -> Result<(), ScfError> {
+    fn initialize_inner(&mut self, handoff: bool) -> Result<(), ScfError> {
         let start = Instant::now();
         // M2-OWNED: an agent-controlled run may replace the mixer or read the
         // density at an active boundary; the owned modes decline for it.
@@ -472,11 +475,25 @@ impl ScfSession {
         let mut mixer = self.make_mixer(&self.problem.options.mixing)?;
         // Validate mixer parameters even if a future system converges immediately.
         let n = self.problem.starting_density();
-        mixer.mix(
-            n.as_slice().unwrap(),
-            n.as_slice().unwrap(),
-            self.problem.electrons / self.problem.cell.volume_bohr3(),
-        )?;
+        if handoff {
+            // The initial trial is discarded. Validate the same density and
+            // Pulay parameters locally instead of communicating three times.
+            // Eligibility is restricted to plain Pulay for this constructor.
+            let Mixing::Pulay { beta, history } = self.problem.options.mixing else {
+                return Err(ScfError::InvalidInput("owned handoff requires Pulay"));
+            };
+            PulayMixer::new(beta, history)?.mix(
+                n.as_slice().unwrap(),
+                n.as_slice().unwrap(),
+                self.problem.electrons / self.problem.cell.volume_bohr3(),
+            )?;
+        } else {
+            mixer.mix(
+                n.as_slice().unwrap(),
+                n.as_slice().unwrap(),
+                self.problem.electrons / self.problem.cell.volume_bohr3(),
+            )?;
+        }
         mixer.reset();
         let weight = self.problem.cell.volume_bohr3() / n.len() as f64;
         // M2-OWNED (`BAANDI_M2_LOCAL_DENSITY`, default off): the density stays
@@ -1714,11 +1731,12 @@ impl ScfSession {
         );
         Ok(Some((&c.n, full_previous(c)?)))
     }
-    /// Owned ladder export; availability is agreed before choosing whether
-    /// every rank retains rows or every rank takes the full-matrix fallback.
+    /// Export local planes and a lazy block. The descriptor agrees
+    /// availability, consumer identity, overlaps and payload sizes in one collective.
     pub(crate) fn warm_owned_handoff(
         &mut self,
-    ) -> Result<Option<(Array3<f64>, crate::gamma_real::LazyOrbitals)>, ScfError> {
+        fine: &ScfProblem,
+    ) -> Result<Option<crate::cutoff_ladder::OwnedExport>, ScfError> {
         use dft_mpi::Collective;
         let Some(comm) = crate::parallel::SharedComm::active() else {
             return Ok(None);
@@ -1735,29 +1753,65 @@ impl ScfSession {
             })
             .filter(|h| !h.handoff_materialized())
             .cloned();
-        let mut available = [0.];
-        comm.tree_sum_f64(&[f64::from(lazy.is_some())], &mut available)
-            .map_err(|e| ScfError::Numerical(format!("owned handoff availability: {e}")))?;
-        if available[0] != 0. && available[0] != comm.size() as f64 {
-            return Err(ScfError::InvalidInput(
-                "owned handoff: availability differs across ranks",
-            ));
-        }
-        if available[0] == 0. {
-            return Ok(None);
-        }
-        let _span = crate::cutoff_ladder::HandoffSpan::enter(
-            crate::cutoff_ladder::HandoffPart::ExportDensity,
-        );
-        self.materialize_density()?;
-        let density = self
-            .continuation
-            .as_ref()
-            .map(|c| c.n.clone())
-            .or_else(|| self.result().map(|r| r.result.density.clone()));
-        let h = lazy.expect("agreed available");
-        h.handoff_agree(density.is_some())?;
-        Ok(Some((density.expect("agreed density"), h)))
+        let dims = self.problem.grid.dims();
+        let (density, axis) = if self.problem.owned.density_mode {
+            let values = self
+                .problem
+                .owned
+                .input
+                .as_ref()
+                .map(|n| n.values.clone())
+                .unwrap_or_default();
+            let axis = self.problem.grid_plan()?.1.first_axis();
+            (values, axis)
+        } else {
+            let full = self
+                .continuation
+                .as_ref()
+                .map(|c| &c.n)
+                .or_else(|| self.result().map(|r| &r.result.density));
+            let total = dims.iter().product::<usize>();
+            let start = comm.rank() * (total / comm.size()) + comm.rank().min(total % comm.size());
+            let len = total / comm.size() + usize::from(comm.rank() < total % comm.size());
+            (
+                full.and_then(|n| n.as_slice())
+                    .and_then(|n| n.get(start..start + len))
+                    .unwrap_or_default()
+                    .to_vec(),
+                2,
+            )
+        };
+        // A deterministic fingerprint covers the fine consumer's validation
+        // inputs. A local options/layout mismatch rejects before payload exchange.
+        let identity = format!(
+            "{:?}/{:?}/{:?}/{:?}",
+            fine.options,
+            fine.occupations,
+            fine.electrons,
+            fine.cell.lattice_columns_bohr()
+        )
+        .bytes()
+        .fold(0xcbf29ce484222325u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x100000001b3)
+        });
+        let eligible = fine.options.standard.is_some()
+            && fine.owned_declined().is_none()
+            && matches!(fine.options.mixing, Mixing::Pulay { .. })
+            && !fine.options.hartree_mixing
+            && crate::snapshot::dir().is_none()
+            && crate::gamma_real::owned_handoff_supported();
+        crate::cutoff_ladder::OwnedExport::prepare(
+            lazy,
+            density,
+            dims,
+            axis,
+            &self.problem.states[0].basis,
+            &fine.states[0].basis,
+            fine.states[0].hamiltonian.fft_grid(),
+            eligible,
+            identity,
+            self.problem.occupations.len(),
+        )
     }
     pub(crate) fn problem_ref(&self) -> &ScfProblem {
         &self.problem
@@ -2093,22 +2147,21 @@ impl ScfSession {
         state: &crate::checkpoint::ElectronicState,
         owned: crate::gamma_real::LazyOrbitals,
     ) -> Result<(), ScfError> {
-        self.initialize()?;
+        let _setup = crate::cutoff_ladder::OwnedSetup::enter();
+        self.initialize_mode(true)?;
         let _import =
             crate::cutoff_ladder::HandoffSpan::enter(crate::cutoff_ladder::HandoffPart::Import);
-        owned.handoff_agree(
-            state.orbitals.is_empty()
-                && owned.global_len() == self.problem.states[0].basis.vectors().len()
-                && owned.bands() == self.problem.occupations.len(),
-        )?;
-        let check = crate::cutoff_ladder::HandoffSpan::check();
-        let valid = owned.handoff_orthonormal()?;
-        drop(check);
-        owned.handoff_agree(valid)?;
-        // The original density/charge/occupation checks and owned-density
-        // installation, without a replicated orbital block.
-        let imported = self.import_electronic(state);
-        owned.handoff_agree(imported.is_ok())?;
+        // The transcript already validated the global shape, overlaps and
+        // identical consumer configuration. Density is replicated identically;
+        // these unchanged import checks therefore have the same result everywhere.
+        if !state.orbitals.is_empty()
+            || owned.global_len() != self.problem.states[0].basis.vectors().len()
+            || owned.bands() != self.problem.occupations.len()
+        {
+            return Err(ScfError::InvalidInput("owned handoff consumer shape"));
+        }
+        self.import_electronic(state)
+            .map_err(|e| ScfError::Numerical(format!("owned handoff import: {e}")))?;
         let c = self.continuation.as_mut().expect("initialized");
         c.previous = Some(vec![
             ComplexMatrix::zeros(0, owned.bands())

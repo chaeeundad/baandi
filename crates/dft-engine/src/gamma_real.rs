@@ -2667,6 +2667,47 @@ mod owned_handoff_tests {
     use dft_basis::{FftGridSpec, HalfSphere};
     use dft_mpi::{Collective, SimRank, simulate};
 
+    thread_local! { static CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+    struct Counted(SimRank);
+    impl Collective for Counted {
+        fn rank(&self) -> usize {
+            self.0.rank()
+        }
+        fn size(&self) -> usize {
+            self.0.size()
+        }
+        fn barrier(&self) -> Result<(), dft_mpi::MpiError> {
+            CALLS.with(|c| c.set(c.get() + 1));
+            self.0.barrier()
+        }
+        fn allgatherv_f64(
+            &self,
+            local: &[f64],
+            counts: &[usize],
+            out: &mut [f64],
+        ) -> Result<(), dft_mpi::MpiError> {
+            CALLS.with(|c| c.set(c.get() + 1));
+            self.0.allgatherv_f64(local, counts, out)
+        }
+        fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
+            CALLS.with(|c| c.set(c.get() + 1));
+            self.0.tree_sum_f64(local, out)
+        }
+        fn bcast_f64(&self, data: &mut [f64], root: usize) -> Result<(), dft_mpi::MpiError> {
+            CALLS.with(|c| c.set(c.get() + 1));
+            self.0.bcast_f64(data, root)
+        }
+        fn alltoall_f64(
+            &self,
+            send: &[f64],
+            block: usize,
+            recv: &mut [f64],
+        ) -> Result<(), dft_mpi::MpiError> {
+            CALLS.with(|c| c.set(c.get() + 1));
+            self.0.alltoall_f64(send, block, recv)
+        }
+    }
+
     fn fixture(skew: bool, cutoff: f64, odd: bool) -> (PlaneWaveBasis, FftGridSpec) {
         let cell = dft_geometry::Cell::from_user_rows_bohr(if skew {
             [[6., 0., 0.], [0.8, 7., 0.], [0.4, 0.6, 8.]]
@@ -2690,7 +2731,8 @@ mod owned_handoff_tests {
         fault: usize,
         norm: Option<f64>,
     ) -> LazyOrbitals {
-        crate::parallel::set_communicator(Some(Arc::new(comm.clone())));
+        CALLS.with(|c| c.set(0));
+        crate::parallel::set_communicator(Some(Arc::new(Counted(comm.clone()))));
         let half = HalfSphere::new(basis, grid).unwrap();
         let n = half.full_len();
         // Deliberately unrelated to the fine stick ownership, reversed local
@@ -2724,8 +2766,14 @@ mod owned_handoff_tests {
         if fault == 2 && comm.rank() == 0 && !values.is_empty() {
             values[0] = f64::NAN;
         }
+        let bands = if fault == 4 && comm.rank() == 0 {
+            values.truncate(rows.len());
+            1
+        } else {
+            2
+        };
         LazyOrbitals(Arc::new(LazyInner {
-            x: RealMatrix::new(rows.len(), 2, values).unwrap(),
+            x: RealMatrix::new(rows.len(), bands, values).unwrap(),
             rows: rows.into(),
             n,
             half: Arc::new(half),
@@ -2749,7 +2797,7 @@ mod owned_handoff_tests {
                             h.materialize().unwrap(),
                         )
                         .unwrap();
-                        let got = h.prolong_owned(&coarse, &fine, &fg).unwrap();
+                        let got = h.prolong_owned(&coarse, &fine, &fg, 2).unwrap();
                         let actual = got.materialize().unwrap();
                         for (a, b) in expected.as_slice().iter().zip(actual.as_slice()) {
                             assert_eq!(
@@ -2779,18 +2827,19 @@ mod owned_handoff_tests {
         for ranks in 2..=7 {
             let (coarse, cg) = fixture(true, 1., false);
             let (fine, fg) = fixture(true, 2., true);
-            for fault in 1..=3 {
+            for fault in 1..=4 {
                 let errors = simulate(ranks, |comm| {
                     let h = handle(comm, &coarse, &cg, fault, None);
                     // One rank supplies a different fine layout; agreement
                     // must precede differently sized messages.
                     let (wrong, wg) = fixture(true, 1.5, true);
                     let result = if fault == 3 && comm.rank() == 0 {
-                        h.prolong_owned(&coarse, &wrong, &wg)
+                        h.prolong_owned(&coarse, &wrong, &wg, 2)
                     } else {
-                        h.prolong_owned(&coarse, &fine, &fg)
+                        h.prolong_owned(&coarse, &fine, &fg, 2)
                     };
                     crate::parallel::set_communicator(None);
+                    assert!(CALLS.with(|c| c.get()) <= 2);
                     result.unwrap_err().to_string()
                 });
                 assert!(errors.iter().all(|e| e == &errors[0]));
@@ -2798,13 +2847,62 @@ mod owned_handoff_tests {
         }
     }
     #[test]
+    fn owned_missing_block_and_bad_density_are_agreed() {
+        for ranks in 2..=7 {
+            let (basis, grid) = fixture(false, 1., true);
+            for missing in [true, false] {
+                let errors = simulate(ranks, |comm| {
+                    let h = handle(comm, &basis, &grid, 0, Some(1.));
+                    let lazy = (!(missing && comm.rank() == 0)).then_some(h);
+                    let density = if comm.rank() == 0 {
+                        if missing { vec![1.] } else { vec![1., 2.] }
+                    } else {
+                        Vec::new()
+                    };
+                    let result = crate::cutoff_ladder::OwnedExport::prepare(
+                        lazy, density, [1; 3], 2, &basis, &basis, &grid, true, 0, 2,
+                    )
+                    .and_then(|e| e.expect("available on peers").transfer(true));
+                    assert!(CALLS.with(|c| c.get()) <= 2);
+                    crate::parallel::set_communicator(None);
+                    result.unwrap_err().to_string()
+                });
+                assert!(errors.iter().all(|e| e == &errors[0]));
+            }
+        }
+    }
+
+    #[test]
     fn owned_overlap_boundary_uses_original_verdict() {
         for ranks in 2..=7 {
             let (basis, grid) = fixture(false, 1., true);
             for defect in [0., 0.5e-8, 0.99999e-8, 1e-8, 1.00001e-8, 2e-8] {
                 simulate(ranks, |comm| {
                     let h = handle(comm, &basis, &grid, 0, Some((1f64 + defect).sqrt()));
-                    let actual = h.handoff_orthonormal().unwrap();
+                    let export = crate::cutoff_ladder::OwnedExport::prepare(
+                        Some(h.clone()),
+                        if comm.rank() == 0 {
+                            vec![1.]
+                        } else {
+                            Vec::new()
+                        },
+                        [1; 3],
+                        2,
+                        &basis,
+                        &basis,
+                        &grid,
+                        true,
+                        0,
+                        2,
+                    )
+                    .unwrap()
+                    .unwrap();
+                    let actual = export.transfer(true).is_ok();
+                    assert_eq!(
+                        CALLS.with(|c| c.get()),
+                        2,
+                        "boundary oracle must fit two exchanges"
+                    );
                     let expected =
                         crate::scf::session::orthonormal_serial(h.materialize().unwrap());
                     assert_eq!(actual, expected, "P={ranks} defect={defect}");

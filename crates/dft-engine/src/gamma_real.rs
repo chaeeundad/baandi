@@ -394,6 +394,9 @@ struct LazyInner {
     half: Arc<dft_basis::HalfSphere>,
     comm: crate::parallel::SharedComm,
     full: std::sync::OnceLock<ComplexMatrix>,
+    // Injected fine rows materialize as +0 complex entries, exactly like
+    // prolong_orbitals (ordinary Hermitian unpack makes mirror imaginary -0).
+    handoff_zero_pairs: Option<Arc<[usize]>>,
 }
 impl std::fmt::Debug for LazyOrbitals {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -464,7 +467,53 @@ fn assemble_lazy_block(
     Ok(full)
 }
 
+pub(crate) fn owned_handoff_supported() -> bool {
+    crate::m2::active().is_some() && m2_lazy() && !M2_DIST_DISABLED.with(|v| v.get())
+}
+
+/// Read-only storage view for the cutoff-ladder adapter. No potential or
+/// solver state is exposed or modified by the transfer.
+pub(crate) struct HandoffView<'a> {
+    pub x: &'a RealMatrix,
+    pub rows: &'a [usize],
+    pub half: &'a dft_basis::HalfSphere,
+    pub comm: &'a crate::parallel::SharedComm,
+}
+
 impl LazyOrbitals {
+    pub(crate) fn handoff_view(&self) -> HandoffView<'_> {
+        HandoffView {
+            x: &self.0.x,
+            rows: &self.0.rows,
+            half: &self.0.half,
+            comm: &self.0.comm,
+        }
+    }
+    /// The caller has agreed shape/partition validity on every rank. Rows
+    /// contain raw ORC coordinates; the existing warm-start round trip remains
+    /// responsible for the exact complex-unpack/pack arithmetic.
+    pub(crate) fn from_owned_handoff(
+        x: RealMatrix,
+        rows: Vec<usize>,
+        half: dft_basis::HalfSphere,
+        comm: crate::parallel::SharedComm,
+        zero_pairs: Vec<usize>,
+    ) -> Self {
+        Self(Arc::new(LazyInner {
+            n: half.full_len(),
+            x,
+            rows: rows.into(),
+            half: Arc::new(half),
+            comm,
+            full: std::sync::OnceLock::new(),
+            handoff_zero_pairs: Some(zero_pairs.into()),
+        }))
+    }
+
+    pub(crate) fn handoff_materialized(&self) -> bool {
+        self.0.full.get().is_some()
+    }
+
     pub fn bands(&self) -> usize {
         self.0.x.cols()
     }
@@ -525,8 +574,17 @@ impl LazyOrbitals {
         let mut flat = vec![0.0; n * bands];
         comm.allgatherv_f64(inner.x.as_slice(), &block, &mut flat)
             .map_err(err)?;
-        let full = assemble_lazy_block(&inner.half, &counts, &index, &flat, n, bands)?;
+        let mut full = assemble_lazy_block(&inner.half, &counts, &index, &flat, n, bands)?;
+        if let Some(pairs) = &inner.handoff_zero_pairs {
+            for j in 0..bands {
+                for &i in pairs.iter() {
+                    full.column_mut(j)[inner.half.plus()[i] as usize] = Complex64::new(0., 0.);
+                    full.column_mut(j)[inner.half.minus()[i] as usize] = Complex64::new(0., 0.);
+                }
+            }
+        }
         let _ = inner.full.set(full);
+        crate::cutoff_ladder::handoff_materialized(n, bands, size);
         crate::m2::count(crate::m2::Count::LazyMaterializations);
         crate::m2::add(crate::m2::Stage::LazyMaterialize, start);
         Ok(inner.full.get().expect("set above"))
@@ -1783,6 +1841,7 @@ pub(crate) fn solve_real_gamma(
                     half: state.lazy_half.clone().expect("set on the lazy path"),
                     comm: comm.clone(),
                     full: std::sync::OnceLock::new(),
+                    handoff_zero_pairs: None,
                 })));
                 crate::m2::count(crate::m2::Count::LazyReturns);
             }
@@ -2599,5 +2658,159 @@ mod lazy_assemble_tests {
 
     fn gcd(a: usize, b: usize) -> usize {
         if b == 0 { a } else { gcd(b, a % b) }
+    }
+}
+
+#[cfg(test)]
+mod owned_handoff_tests {
+    use super::*;
+    use dft_basis::{FftGridSpec, HalfSphere};
+    use dft_mpi::{Collective, SimRank, simulate};
+
+    fn fixture(skew: bool, cutoff: f64, odd: bool) -> (PlaneWaveBasis, FftGridSpec) {
+        let cell = dft_geometry::Cell::from_user_rows_bohr(if skew {
+            [[6., 0., 0.], [0.8, 7., 0.], [0.4, 0.6, 8.]]
+        } else {
+            [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]]
+        })
+        .unwrap();
+        let basis = PlaneWaveBasis::new(&cell, dft_units::Hartree(cutoff)).unwrap();
+        let grid = FftGridSpec::new(
+            &basis,
+            &basis.density_basis(&cell).unwrap(),
+            Some(if odd { [15, 17, 19] } else { [16, 18, 20] }),
+        )
+        .unwrap();
+        (basis, grid)
+    }
+    fn handle(
+        comm: &SimRank,
+        basis: &PlaneWaveBasis,
+        grid: &FftGridSpec,
+        fault: usize,
+        norm: Option<f64>,
+    ) -> LazyOrbitals {
+        crate::parallel::set_communicator(Some(Arc::new(comm.clone())));
+        let half = HalfSphere::new(basis, grid).unwrap();
+        let n = half.full_len();
+        // Deliberately unrelated to the fine stick ownership, reversed local
+        // row order, including ranks with no rows in larger communicator tests.
+        let mut rows: Vec<usize> = (0..n)
+            .rev()
+            .filter(|r| (r + 1) % comm.size() == comm.rank())
+            .collect();
+        if fault == 1 && comm.rank() == 0 && !rows.is_empty() {
+            rows[0] = (rows[0] + 1) % n;
+        }
+        let mut values = Vec::new();
+        for j in 0..2 {
+            for &r in &rows {
+                let v = if let Some(scale) = norm {
+                    if r == j {
+                        if j == 0 { scale } else { 1. }
+                    } else {
+                        0.
+                    }
+                } else {
+                    match (r + j) % 7 {
+                        0 => -0.,
+                        1 => 1e-310,
+                        _ => ((r * 11 + j) as f64).sin() * 0.01,
+                    }
+                };
+                values.push(v);
+            }
+        }
+        if fault == 2 && comm.rank() == 0 && !values.is_empty() {
+            values[0] = f64::NAN;
+        }
+        LazyOrbitals(Arc::new(LazyInner {
+            x: RealMatrix::new(rows.len(), 2, values).unwrap(),
+            rows: rows.into(),
+            n,
+            half: Arc::new(half),
+            comm: crate::parallel::SharedComm::active().unwrap(),
+            full: std::sync::OnceLock::new(),
+            handoff_zero_pairs: None,
+        }))
+    }
+    #[test]
+    fn owned_permutation_matches_complex_injection_and_packing() {
+        for ranks in 2..=7 {
+            for skew in [false, true] {
+                for odd in [false, true] {
+                    let (coarse, cg) = fixture(skew, 1., !odd);
+                    let (fine, fg) = fixture(skew, 2., odd);
+                    simulate(ranks, |comm| {
+                        let h = handle(comm, &coarse, &cg, 0, None);
+                        let expected = crate::cutoff_ladder::prolong_orbitals(
+                            &coarse,
+                            &fine,
+                            h.materialize().unwrap(),
+                        )
+                        .unwrap();
+                        let got = h.prolong_owned(&coarse, &fine, &fg).unwrap();
+                        let actual = got.materialize().unwrap();
+                        for (a, b) in expected.as_slice().iter().zip(actual.as_slice()) {
+                            assert_eq!(
+                                [a.re.to_bits(), a.im.to_bits()],
+                                [b.re.to_bits(), b.im.to_bits()]
+                            );
+                        }
+                        let packed = got.round_trip_start().unwrap();
+                        for j in 0..2 {
+                            let mut full = vec![0.; got.global_len()];
+                            got.0.half.pack(expected.column(j), &mut full).unwrap();
+                            for (l, &r) in got.0.rows.iter().enumerate() {
+                                assert_eq!(
+                                    packed.as_slice()[j * got.0.rows.len() + l].to_bits(),
+                                    full[r].to_bits()
+                                );
+                            }
+                        }
+                        crate::parallel::set_communicator(None);
+                    });
+                }
+            }
+        }
+    }
+    #[test]
+    fn owned_rank_local_faults_are_agreed_before_transfer() {
+        for ranks in 2..=7 {
+            let (coarse, cg) = fixture(true, 1., false);
+            let (fine, fg) = fixture(true, 2., true);
+            for fault in 1..=3 {
+                let errors = simulate(ranks, |comm| {
+                    let h = handle(comm, &coarse, &cg, fault, None);
+                    // One rank supplies a different fine layout; agreement
+                    // must precede differently sized messages.
+                    let (wrong, wg) = fixture(true, 1.5, true);
+                    let result = if fault == 3 && comm.rank() == 0 {
+                        h.prolong_owned(&coarse, &wrong, &wg)
+                    } else {
+                        h.prolong_owned(&coarse, &fine, &fg)
+                    };
+                    crate::parallel::set_communicator(None);
+                    result.unwrap_err().to_string()
+                });
+                assert!(errors.iter().all(|e| e == &errors[0]));
+            }
+        }
+    }
+    #[test]
+    fn owned_overlap_boundary_uses_original_verdict() {
+        for ranks in 2..=7 {
+            let (basis, grid) = fixture(false, 1., true);
+            for defect in [0., 0.5e-8, 0.99999e-8, 1e-8, 1.00001e-8, 2e-8] {
+                simulate(ranks, |comm| {
+                    let h = handle(comm, &basis, &grid, 0, Some((1f64 + defect).sqrt()));
+                    let actual = h.handoff_orthonormal().unwrap();
+                    let expected =
+                        crate::scf::session::orthonormal_serial(h.materialize().unwrap());
+                    assert_eq!(actual, expected, "P={ranks} defect={defect}");
+                    crate::parallel::set_communicator(None);
+                });
+            }
+        }
     }
 }

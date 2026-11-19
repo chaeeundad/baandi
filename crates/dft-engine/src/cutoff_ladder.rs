@@ -53,7 +53,493 @@
 //! its stopping rule, certificate and verification are untouched.
 use super::*;
 use crate::checkpoint::{ElectronicState, Orbitals};
+use dft_mpi::Collective;
+use dft_numerics::real::RealMatrix;
+use dft_solvers::SolverError;
 use std::collections::HashMap;
+
+/// Exclusive handoff diagnostics. Enabled only by `BAANDI_PHASE_PROFILE`.
+/// Process sums are exported through the existing M2 counters; `handoff_profile`
+/// returns this rank's measurements, avoiding sums/maxima of unrelated ranks.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct HandoffProfile {
+    /// Exclusive seconds in `HANDOFF_PART_LABELS` order; sum is handoff wall
+    /// on this rank (not the sum of independently selected rank maxima).
+    pub seconds: [f64; 10],
+    pub collectives: [u64; 5],
+    pub materializations: u64,
+    /// Delivered orbital gather payload (not MPI wire traffic).
+    pub gathered_bytes: u64,
+    /// Full complex coefficient storage per rank (coarse plus fine).
+    pub full_matrix_bytes: u64,
+    /// Upper bound on live coefficient-buffer payload, excluding allocator,
+    /// density, solver and immutable operator storage. Not process RSS.
+    pub coefficient_peak_bound_bytes: u64,
+    /// Collective wall inside the materialization span (subset of seconds[0]).
+    pub materialize_collective_seconds: f64,
+    /// transfers, bytes sent including transport padding, populated bytes,
+    /// ambiguous-check fallbacks, coefficient peak bytes (per handoff).
+    pub owned: [u64; 5],
+}
+impl HandoffProfile {
+    pub fn seconds(&self) -> f64 {
+        self.seconds.iter().sum()
+    }
+}
+thread_local! {
+    static HANDOFF: std::cell::RefCell<HandoffProfile> = Default::default();
+    static HANDOFF_CHILD_NS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+/// Cumulative diagnostics on the calling rank; no additional collectives.
+pub fn handoff_profile() -> HandoffProfile {
+    HANDOFF.with(|h| *h.borrow())
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum HandoffPart {
+    Materialize,
+    OrbitalCopy,
+    DensityCopy,
+    Encode,
+    Setup,
+    Import,
+    Check,
+    ExportDensity,
+    ExportCopy,
+    Transfer,
+}
+pub const HANDOFF_PART_LABELS: [&str; 10] = [
+    "handoff.materialize",
+    "handoff.orbital_copy",
+    "handoff.density_copy",
+    "handoff.encode",
+    "handoff.setup",
+    "handoff.import",
+    "handoff.check",
+    "handoff.export_density",
+    "handoff.export_copy",
+    "handoff.transfer",
+];
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+static HANDOFF_NS: [AtomicU64; 10] = [const { AtomicU64::new(0) }; 10];
+static HANDOFF_COUNTS: [AtomicU64; 9] = [const { AtomicU64::new(0) }; 9];
+static HANDOFF_GATHER_NS: AtomicU64 = AtomicU64::new(0);
+const HANDOFF_COUNT_NAMES: [&str; 9] = [
+    "handoff.allgatherv",
+    "handoff.tree_sum",
+    "handoff.bcast",
+    "handoff.alltoall",
+    "handoff.barrier",
+    "handoff.materializations",
+    "handoff.gathered_bytes",
+    "handoff.full_matrix_bytes",
+    "handoff.coefficient_peak_bound_bytes",
+];
+static OWNED_HANDOFF: [AtomicU64; 5] = [const { AtomicU64::new(0) }; 5];
+const OWNED_HANDOFF_NAMES: [&str; 5] = [
+    "handoff.owned_transfers",
+    "handoff.sent_bytes_with_padding",
+    "handoff.populated_payload_bytes",
+    "handoff.check_fallbacks",
+    "handoff.owned_peak_bytes_sum",
+];
+pub(crate) fn handoff_owned_count(i: usize, n: usize) {
+    if crate::profile::enabled() {
+        OWNED_HANDOFF[i].fetch_add(n as u64, Relaxed);
+        HANDOFF.with(|h| h.borrow_mut().owned[i] += n as u64);
+    }
+}
+pub(crate) fn handoff_owned_peak(bytes: usize) {
+    if !crate::profile::enabled() {
+        return;
+    }
+    HANDOFF.with(|h| {
+        let mut h = h.borrow_mut();
+        let old = h.owned[4];
+        h.owned[4] = old.max(bytes as u64);
+        OWNED_HANDOFF[4].fetch_add(h.owned[4] - old, Relaxed);
+    });
+}
+
+pub(crate) fn handoff_stats() -> dft_physics::distributed_real_gamma::M2Counters {
+    (
+        HANDOFF_COUNT_NAMES
+            .iter()
+            .zip(&HANDOFF_COUNTS)
+            .map(|(&n, v)| (n, v.load(Relaxed) as usize))
+            .chain(
+                OWNED_HANDOFF_NAMES
+                    .iter()
+                    .zip(&OWNED_HANDOFF)
+                    .map(|(&n, v)| (n, v.load(Relaxed) as usize)),
+            )
+            .collect(),
+        HANDOFF_PART_LABELS
+            .iter()
+            .zip(&HANDOFF_NS)
+            .map(|(&n, v)| (n, v.load(Relaxed) as f64 * 1e-9))
+            .chain(std::iter::once((
+                "handoff.materialize_collective",
+                HANDOFF_GATHER_NS.load(Relaxed) as f64 * 1e-9,
+            )))
+            .collect(),
+    )
+}
+
+/// Nested spans subtract child time. Collective deltas are recorded only on
+/// the outer span, so import/check collectives are not counted twice.
+pub(crate) struct HandoffSpan {
+    part: HandoffPart,
+    start: Instant,
+    child_ns: u64,
+    before: dft_numerics::stage_clock::local::Snapshot,
+    parent: bool,
+}
+thread_local! { static HANDOFF_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+impl HandoffSpan {
+    pub(crate) fn check() -> Option<Self> {
+        if !crate::profile::enabled() || HANDOFF_DEPTH.with(|d| d.get()) == 0 {
+            return None;
+        }
+        Self::enter(HandoffPart::Check)
+    }
+    pub(crate) fn enter(part: HandoffPart) -> Option<Self> {
+        if !crate::profile::enabled() {
+            return None;
+        }
+        let parent = HANDOFF_DEPTH.with(|d| {
+            let v = d.get();
+            d.set(v + 1);
+            v > 0
+        });
+        Some(Self {
+            part,
+            start: Instant::now(),
+            child_ns: HANDOFF_CHILD_NS.with(|n| n.get()),
+            before: dft_numerics::stage_clock::local::snapshot(),
+            parent,
+        })
+    }
+}
+impl Drop for HandoffSpan {
+    fn drop(&mut self) {
+        let ns = self.start.elapsed().as_nanos() as u64;
+        let exclusive = HANDOFF_CHILD_NS.with(|n| {
+            let children = n.get() - self.child_ns;
+            n.set(self.child_ns + ns);
+            ns.saturating_sub(children)
+        });
+        let part = self.part as usize;
+        HANDOFF_NS[part].fetch_add(exclusive, Relaxed);
+        HANDOFF.with(|h| h.borrow_mut().seconds[part] += exclusive as f64 * 1e-9);
+        HANDOFF_DEPTH.with(|d| d.set(d.get() - 1));
+        let delta = dft_numerics::stage_clock::local::snapshot().since(&self.before);
+        if matches!(self.part, HandoffPart::Materialize) {
+            let offset = dft_numerics::stage_clock::local::COLLECTIVE;
+            let ns: u64 = delta.nanos[offset..offset + 5].iter().sum();
+            HANDOFF_GATHER_NS.fetch_add(ns, Relaxed);
+            HANDOFF.with(|h| h.borrow_mut().materialize_collective_seconds += ns as f64 * 1e-9);
+        }
+        if !self.parent {
+            HANDOFF.with(|h| {
+                let mut h = h.borrow_mut();
+                for (i, count) in h.collectives.iter_mut().enumerate() {
+                    let n = delta.calls[dft_numerics::stage_clock::local::COLLECTIVE + i];
+                    *count += n;
+                    HANDOFF_COUNTS[i].fetch_add(n, Relaxed);
+                }
+            });
+        }
+    }
+}
+
+fn handoff_storage(coarse: usize, fine: usize, bands: usize) {
+    if !crate::profile::enabled() {
+        return;
+    }
+    let bytes = (16 * (coarse + fine) * bands) as u64;
+    HANDOFF.with(|h| h.borrow_mut().full_matrix_bytes += bytes);
+    HANDOFF_COUNTS[7].fetch_add(bytes, Relaxed);
+    // Lazy unpack: gathered real block + cached and cloned complex blocks.
+    // Prolong/encode: coarse complex + two fine complex-size buffers.
+    let peak = (40 * coarse * bands).max(16 * coarse * bands + 32 * fine * bands) as u64;
+    HANDOFF.with(|h| {
+        let mut h = h.borrow_mut();
+        let previous = h.coefficient_peak_bound_bytes;
+        h.coefficient_peak_bound_bytes = previous.max(peak);
+        // Process sum of rank-local high-water bounds (the simulated harness
+        // divides by P). Repeated ladders on a rank do not inflate its peak.
+        HANDOFF_COUNTS[8].fetch_add(h.coefficient_peak_bound_bytes - previous, Relaxed);
+    });
+}
+/// Called only at an actual lazy materialization inside a handoff span.
+pub(crate) fn handoff_materialized(rows: usize, bands: usize, ranks: usize) {
+    if !crate::profile::enabled() || HANDOFF_DEPTH.with(|d| d.get()) == 0 {
+        return;
+    }
+    let bytes = (8 * (ranks + rows + rows * bands)) as u64;
+    HANDOFF.with(|h| {
+        let mut h = h.borrow_mut();
+        h.materializations += 1;
+        h.gathered_bytes += bytes;
+    });
+    HANDOFF_COUNTS[5].fetch_add(1, Relaxed);
+    HANDOFF_COUNTS[6].fetch_add(bytes, Relaxed);
+}
+
+// The transfer and import policy belong to the ladder. Gamma-real exposes
+// only a read-only view and a constructor for its existing owned handle.
+impl crate::gamma_real::LazyOrbitals {
+    /// Agree a local validation outcome before entering any subsequent
+    /// collective. No rank returns early on local shape/nonfinite errors.
+    pub(crate) fn handoff_agree(&self, valid: bool) -> Result<(), ScfError> {
+        let mut bad = [0.];
+        self.handoff_view()
+            .comm
+            .tree_sum_f64(&[f64::from(!valid)], &mut bad)
+            .map_err(|e| ScfError::Numerical(format!("owned handoff agreement: {e}")))?;
+        if bad[0] != 0. {
+            return Err(ScfError::InvalidInput(
+                "owned handoff: agreed validation failure",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Validate overlaps in distributed storage using the complex unpack
+    /// convention, not raw ORC norms. The threshold remains 1e-8. Close to
+    /// that boundary use the existing sequential complex-row oracle so a
+    /// changed reduction order cannot change admission.
+    pub(crate) fn handoff_orthonormal(&self) -> Result<bool, ScfError> {
+        let inner = self.handoff_view();
+        self.handoff_agree(
+            inner.rows.len() == inner.x.rows() && inner.x.as_slice().iter().all(|v| v.is_finite()),
+        )?;
+        let b = self.bands();
+        let mut local = vec![0.; b * b];
+        let s = std::f64::consts::SQRT_2;
+        for j in 0..b {
+            for i in 0..=j {
+                let mut sum = 0.;
+                for (l, &row) in inner.rows.iter().enumerate() {
+                    let a = inner.x.as_slice()[i * inner.x.rows() + l];
+                    let c = inner.x.as_slice()[j * inner.x.rows() + l];
+                    sum += if row == 0 {
+                        a * c
+                    } else {
+                        2. * ((a / s) * (c / s))
+                    };
+                }
+                local[j * b + i] = sum;
+            }
+        }
+        crate::cutoff_ladder::handoff_owned_peak(8 * (inner.x.as_slice().len() + 2 * local.len()));
+        let mut gram = vec![0.; local.len()];
+        inner
+            .comm
+            .tree_sum_f64(&local, &mut gram)
+            .map_err(|e| ScfError::Numerical(format!("owned handoff overlap: {e}")))?;
+        let mut ambiguous = false;
+        let mut valid = gram.iter().all(|v| v.is_finite());
+        for j in 0..b {
+            for i in 0..=j {
+                let error = (gram[j * b + i] - if i == j { 1. } else { 0. }).abs();
+                // Conservative dot-product rounding envelope, scaled by
+                // Cauchy-Schwarz norms; no admission tolerance is widened.
+                let bound = 64.
+                    * f64::EPSILON
+                    * self.global_len() as f64
+                    * (gram[i * b + i].abs() * gram[j * b + j].abs())
+                        .sqrt()
+                        .max(1.);
+                ambiguous |= (error - 1e-8).abs() <= bound;
+                valid &= error <= 1e-8;
+            }
+        }
+        if ambiguous && gram.iter().all(|v| v.is_finite()) {
+            crate::cutoff_ladder::handoff_owned_count(3, 1);
+            let full = self.materialize()?;
+            return crate::scf::session::orthonormal_split(full, Some(inner.comm))
+                .map_err(|e| ScfError::Numerical(format!("owned handoff overlap oracle: {e}")));
+        }
+        Ok(valid)
+    }
+
+    /// One precomputed coarse/fine permutation and one equal-block all-to-all.
+    /// Only coarse rows are payload; absent fine rows are zeroed locally.
+    /// The existing transport requires padding to the largest peer message;
+    /// its full size (including padding) is recorded, never hidden as payload.
+    pub(crate) fn prolong_owned(
+        &self,
+        coarse: &PlaneWaveBasis,
+        fine: &PlaneWaveBasis,
+        grid: &dft_basis::FftGridSpec,
+    ) -> Result<Self, ScfError> {
+        use std::collections::HashMap;
+        let _span =
+            crate::cutoff_ladder::HandoffSpan::enter(crate::cutoff_ladder::HandoffPart::Transfer);
+        let inner = self.handoff_view();
+        let (p, rank, b, nc) = (
+            inner.comm.size(),
+            inner.comm.rank(),
+            self.bands(),
+            self.global_len(),
+        );
+        let err = |e: dft_mpi::MpiError| ScfError::Numerical(format!("owned handoff: {e}"));
+        let half = dft_basis::HalfSphere::new(fine, grid);
+        self.handoff_agree(
+            half.is_ok()
+                && coarse.vectors().len() == nc
+                && inner.x.rows() == inner.rows.len()
+                && b > 0
+                && inner.rows.iter().all(|&r| r < nc)
+                && inner.x.as_slice().iter().all(|v| v.is_finite()),
+        )?;
+        let half = half.map_err(|e| ScfError::Numerical(e.to_string()))?;
+        // All dimensions and integer layout identity agree before variable
+        // messages. Hash words are encoded exactly as two u32-valued f64s.
+        let mut hash = 0xcbf29ce484222325u64;
+        for word in coarse
+            .vectors()
+            .iter()
+            .chain(fine.vectors())
+            .flat_map(|g| g.miller)
+            .map(|v| v as u32 as u64)
+            .chain(grid.dims().into_iter().map(|v| v as u64))
+        {
+            hash = (hash ^ word).wrapping_mul(0x100000001b3);
+        }
+        let header = [
+            nc as f64,
+            half.full_len() as f64,
+            b as f64,
+            (hash as u32) as f64,
+            (hash >> 32) as f64,
+        ];
+        let mut headers = vec![0.; p * header.len()];
+        inner
+            .comm
+            .allgatherv_f64(&header, &vec![header.len(); p], &mut headers)
+            .map_err(err)?;
+        self.handoff_agree(headers.chunks(header.len()).all(|h| h == header))?;
+        let mut lengths = vec![0.; p];
+        inner
+            .comm
+            .allgatherv_f64(&[inner.rows.len() as f64], &vec![1; p], &mut lengths)
+            .map_err(err)?;
+        let counts: Vec<usize> = lengths.iter().map(|&n| n as usize).collect();
+        self.handoff_agree(counts.iter().sum::<usize>() == nc)?;
+        let mut global_rows = vec![0.; nc];
+        let rows: Vec<f64> = inner.rows.iter().map(|&r| r as f64).collect();
+        inner
+            .comm
+            .allgatherv_f64(&rows, &counts, &mut global_rows)
+            .map_err(err)?;
+        let mut source = vec![usize::MAX; nc];
+        let mut offset = 0;
+        let mut valid = true;
+        for (r, &n) in counts.iter().enumerate() {
+            for &g in &global_rows[offset..offset + n] {
+                let i = g as usize;
+                if i >= nc || source[i] != usize::MAX {
+                    valid = false;
+                } else {
+                    source[i] = r;
+                }
+            }
+            offset += n;
+        }
+        let owners = dft_solvers::distributed_fft::position_owners(grid.dims(), grid.g_to_fft(), p);
+        self.handoff_agree(valid && owners.is_ok())?;
+        let owners = owners.map_err(|e| ScfError::Numerical(e.to_string()))?;
+        let fine_index: HashMap<_, _> = half
+            .plus()
+            .iter()
+            .enumerate()
+            .map(|(i, &g)| (fine.vectors()[g as usize].miller, i))
+            .collect();
+        let mut mapping = vec![0; nc];
+        let mut populated = vec![false; half.plus().len()];
+        for (i, (&plus, &minus)) in inner.half.plus().iter().zip(inner.half.minus()).enumerate() {
+            let g = coarse.vectors()[plus as usize].miller;
+            let Some(&f) = fine_index.get(&g) else {
+                valid = false;
+                continue;
+            };
+            valid &= coarse.vectors()[minus as usize].miller
+                == fine.vectors()[half.minus()[f] as usize].miller
+                && (i == 0) == (f == 0);
+            populated[f] = true;
+            if i == 0 {
+                mapping[0] = 0;
+            } else {
+                mapping[2 * i - 1] = 2 * f - 1;
+                mapping[2 * i] = 2 * f;
+            }
+        }
+        self.handoff_agree(valid)?;
+        let nf = half.full_len();
+        let target: Vec<usize> = (0..nf)
+            .map(|r| owners[half.plus()[r.div_ceil(2)] as usize])
+            .collect();
+        let fine_rows: Vec<usize> = (0..nf).filter(|&r| target[r] == rank).collect();
+        let mut slot = vec![usize::MAX; nf];
+        for (i, &r) in fine_rows.iter().enumerate() {
+            slot[r] = i;
+        }
+        // Both sides enumerate edges in global coarse ORC order, independent
+        // of source storage order. This is the one pair-of-layouts plan.
+        let mut edges = vec![Vec::new(); p * p];
+        for (r, &f) in mapping.iter().enumerate() {
+            edges[source[r] * p + target[f]].push(r);
+        }
+        let block = edges.iter().map(Vec::len).max().unwrap_or(0) * b;
+        let mut send = vec![0.; p * block];
+        let mut recv = vec![0.; p * block];
+        let mut coarse_slot = vec![usize::MAX; nc];
+        for (l, &r) in inner.rows.iter().enumerate() {
+            coarse_slot[r] = l;
+        }
+        for dest in 0..p {
+            for (i, &r) in edges[rank * p + dest].iter().enumerate() {
+                for j in 0..b {
+                    send[dest * block + i * b + j] =
+                        inner.x.as_slice()[j * inner.x.rows() + coarse_slot[r]];
+                }
+            }
+        }
+        inner
+            .comm
+            .alltoall_f64(&send, block, &mut recv)
+            .map_err(err)?;
+        let mut x = RealMatrix::zeros(fine_rows.len(), b).map_err(SolverError::from)?;
+        for src in 0..p {
+            for (i, &r) in edges[src * p + rank].iter().enumerate() {
+                for j in 0..b {
+                    x.as_mut_slice()[j * fine_rows.len() + slot[mapping[r]]] =
+                        recv[src * block + i * b + j];
+                }
+            }
+        }
+        crate::cutoff_ladder::handoff_owned_count(0, 1);
+        crate::cutoff_ladder::handoff_owned_count(1, 8 * send.len());
+        crate::cutoff_ladder::handoff_owned_count(2, 8 * inner.x.as_slice().len());
+        crate::cutoff_ladder::handoff_owned_peak(
+            8 * (inner.x.as_slice().len() + x.as_slice().len() + send.len() + recv.len()),
+        );
+        Ok(Self::from_owned_handoff(
+            x,
+            fine_rows,
+            half,
+            inner.comm.clone(),
+            populated
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &yes)| (!yes).then_some(i))
+                .collect(),
+        ))
+    }
+}
 
 // Offline experiment only: no production switch or additional SCF work.
 #[cfg(test)]
@@ -345,6 +831,7 @@ pub fn prolong_orbitals(
     fine: &PlaneWaveBasis,
     orbitals: &ComplexMatrix,
 ) -> Result<ComplexMatrix, ScfError> {
+    let _span = HandoffSpan::enter(HandoffPart::OrbitalCopy);
     if orbitals.rows() != coarse.vectors().len() {
         return Err(ScfError::InvalidInput(
             "cutoff_ladder: orbital rows differ from the coarse basis",
@@ -443,6 +930,7 @@ fn coarse_problem(
 struct CoarseState {
     density: Array3<f64>,
     orbitals: ComplexMatrix,
+    owned: Option<crate::gamma_real::LazyOrbitals>,
     basis: PlaneWaveBasis,
     /// Pulay memory of the coarse session (only when S2 asks for it).
     mixer: Option<crate::checkpoint::MixerState>,
@@ -461,6 +949,7 @@ fn coarse_stage(
     ladder: &CutoffLadderOptions,
     stop_level: f64,
     report: &mut CutoffLadderReport,
+    owned_handoff: bool,
 ) -> Result<CoarseState, ScfError> {
     // P0.2: Davidson and operator work of this stage is reported as ladder coarse.
     let _run_stage = dft_numerics::work_timers::enter(dft_numerics::work_timers::RunStage::Coarse);
@@ -542,29 +1031,48 @@ fn coarse_stage(
     } else {
         None
     };
+    let export_span = HandoffSpan::enter(HandoffPart::ExportCopy);
+    let owned_state = if owned_handoff {
+        session.warm_owned_handoff()?
+    } else {
+        None
+    };
+    let owned = owned_state.as_ref().map(|(_, h)| h.clone());
     // MPI-LAZY-ORBITALS: `warm_state` gathers a lazy coarse block (once).
-    let (density, orbitals) = match session.warm_state()? {
-        Some((n, Some(mut orbitals))) if orbitals.len() == 1 => {
-            (n.clone(), orbitals.pop().expect("one block"))
-        }
-        _ => {
-            // Terminal coarse session (converged or exhausted): use its result.
-            let outcome = session.result().ok_or(ScfError::InvalidInput(
-                "cutoff_ladder: coarse state unavailable",
-            ))?;
-            // LAZY-RESULT: a lazily delivered coarse block is gathered here
-            // (collective; every rank takes this branch together).
-            let k = &outcome.result.k_points[0];
-            let orbitals = match &k.lazy {
-                Some(lazy) => lazy.materialize()?.clone(),
-                None => k.solution.eigenvectors.clone(),
-            };
-            (outcome.result.density.clone(), orbitals)
+    let (density, orbitals) = if let Some((density, h)) = owned_state {
+        (
+            density,
+            ComplexMatrix::zeros(0, h.bands()).map_err(|e| ScfError::Numerical(e.to_string()))?,
+        )
+    } else {
+        match session.warm_state()? {
+            Some((n, Some(mut orbitals))) if orbitals.len() == 1 => {
+                (n.clone(), orbitals.pop().expect("one block"))
+            }
+            _ => {
+                // Terminal coarse session (converged or exhausted): use its result.
+                let outcome = session.result().ok_or(ScfError::InvalidInput(
+                    "cutoff_ladder: coarse state unavailable",
+                ))?;
+                // LAZY-RESULT: a lazily delivered coarse block is gathered here
+                // (collective; every rank takes this branch together).
+                let k = &outcome.result.k_points[0];
+                let orbitals = match &k.lazy {
+                    Some(lazy) => {
+                        let _span = HandoffSpan::enter(HandoffPart::Materialize);
+                        lazy.materialize()?.clone()
+                    }
+                    None => k.solution.eigenvectors.clone(),
+                };
+                (outcome.result.density.clone(), orbitals)
+            }
         }
     };
+    drop(export_span);
     Ok(CoarseState {
         density,
         orbitals,
+        owned,
         basis,
         mixer,
         standard_next,
@@ -647,6 +1155,30 @@ pub fn run_ladder(
         let outcome = direct_min::finish(fine, None, retain_last)?;
         return Ok(LadderOutcome { outcome, report });
     }
+    let requested = dft_numerics::switches::on(dft_numerics::switches::Id::M2_OWNED_HANDOFF);
+    let eligible = requested
+        && fine.options.standard.is_some()
+        && fine.owned_declined().is_none()
+        && crate::snapshot::dir().is_none()
+        && crate::gamma_real::owned_handoff_supported();
+    let owned_handoff = if requested {
+        if let Some(comm) = crate::parallel::SharedComm::active() {
+            let _span = HandoffSpan::enter(HandoffPart::Transfer);
+            let mut count = [0.];
+            comm.tree_sum_f64(&[f64::from(eligible)], &mut count)
+                .map_err(|e| ScfError::Numerical(format!("owned handoff eligibility: {e}")))?;
+            if count[0] != 0. && count[0] != comm.size() as f64 {
+                return Err(ScfError::InvalidInput(
+                    "owned handoff: eligibility differs across ranks",
+                ));
+            }
+            count[0] == comm.size() as f64
+        } else {
+            false
+        }
+    } else {
+        false
+    };
     let setup = Instant::now();
     let start = match coarse_problem(&fine, potentials, ladder) {
         Ok(coarse) => {
@@ -665,10 +1197,21 @@ pub fn run_ladder(
                 report.coarse_stop_level = report.coarse_stop_level.max(d);
             }
             let stop_level = report.coarse_stop_level;
-            coarse_stage(coarse, ladder, stop_level, &mut report).and_then(|c| {
+            coarse_stage(coarse, ladder, stop_level, &mut report, owned_handoff).and_then(|c| {
                 let prolong = Instant::now();
                 let handoff_clock = crate::profile::clock();
-                let state = hand_off(&fine, &c.basis, &c.density, &c.orbitals);
+                let state = if let Some(h) = &c.owned {
+                    h.prolong_owned(
+                        &c.basis,
+                        &fine.states[0].basis,
+                        fine.states[0].hamiltonian.fft_grid(),
+                    )
+                    .and_then(|owned| {
+                        handoff_density(&fine, &c.density).map(|state| (state, Some(owned)))
+                    })
+                } else {
+                    hand_off(&fine, &c.basis, &c.density, &c.orbitals).map(|state| (state, None))
+                };
                 crate::profile::between(crate::profile::BetweenPart::LadderHandoff, handoff_clock);
                 report.coarse_prolong = prolong.elapsed();
                 state.map(|state| (state, c))
@@ -676,8 +1219,8 @@ pub fn run_ladder(
         }
         Err(e) => Err(e),
     };
-    let (electronic, seeds) = match start {
-        Ok((state, coarse)) => {
+    let (electronic, seeds, owned) = match start {
+        Ok(((state, owned), coarse)) => {
             report.used = true;
             let standard = fine.options.standard.is_some();
             let seed = match ladder.first_tolerance {
@@ -710,11 +1253,11 @@ pub fn run_ladder(
             } else {
                 None
             };
-            (Some(state), seeds)
+            (Some(state), seeds, owned)
         }
         Err(e) => {
             report.fallback_reason = Some(format!("coarse stage: {e}"));
-            (None, None)
+            (None, None, None)
         }
     };
     report.coarse_time = setup.elapsed();
@@ -725,7 +1268,7 @@ pub fn run_ladder(
     let handoff = Array3::from_shape_vec(electronic.grid, electronic.density.clone())
         .map_err(|e| ScfError::Numerical(format!("cutoff_ladder: {e}")))?;
     let (volume, electrons) = (fine.cell.volume_bohr3(), fine.electrons);
-    let outcome = finish_from(fine, &electronic, seeds, retain_last, &mut report)?;
+    let outcome = finish_from(fine, &electronic, seeds, retain_last, &mut report, owned)?;
     let h = &outcome.result.history;
     report.fine_iterations = h.len();
     report.fine_h_vectors = h.iter().map(|r| r.operator_applications).sum();
@@ -772,18 +1315,21 @@ fn finish_from(
     seeds: Option<SecantPairs>,
     retain_last: bool,
     report: &mut CutoffLadderReport,
+    owned: Option<crate::gamma_real::LazyOrbitals>,
 ) -> Result<ScfOutcome, ScfError> {
-    if report.standard_seed_ha.is_none() && report.strict_seed_ha.is_none() && seeds.is_none() {
-        return direct_min::finish(fine, Some(start), retain_last);
-    }
     let completion = if retain_last {
         CompletionMode::RetainLast
     } else {
         CompletionMode::Strict
     };
     let setup_clock = crate::profile::clock();
+    let handoff_setup = HandoffSpan::enter(HandoffPart::Setup);
     let mut session = ScfSession::new(fine, completion, crate::events::ExecutionConfig::default())?;
-    session.initialize_electronic(start)?;
+    if let Some(owned) = owned {
+        session.initialize_owned_ladder(start, owned)?;
+    } else {
+        session.initialize_ladder_electronic(start)?;
+    }
     if let Some(t) = report.standard_seed_ha {
         session.seed_standard_tolerance(t)?;
     }
@@ -797,6 +1343,7 @@ fn finish_from(
         }
     }
     crate::profile::between(crate::profile::BetweenPart::SessionSetup, setup_clock);
+    drop(handoff_setup);
     while session.step()?.status == StepStatus::Ready {}
     if !retain_last && session.result().is_none() {
         return Err(ScfError::NotConverged {
@@ -818,7 +1365,30 @@ fn hand_off(
     orbitals: &ComplexMatrix,
 ) -> Result<ElectronicState, ScfError> {
     let fine_basis = &fine.states[0].basis;
+    handoff_storage(
+        coarse_basis.vectors().len(),
+        fine_basis.vectors().len(),
+        orbitals.cols(),
+    );
     let prolonged = prolong_orbitals(coarse_basis, fine_basis, orbitals)?;
+    let state = handoff_density(fine, density)?;
+    let _encode = HandoffSpan::enter(HandoffPart::Encode);
+    let mut coefficients = Vec::with_capacity(2 * prolonged.rows() * prolonged.cols());
+    coefficients.extend(prolonged.as_slice().iter().flat_map(|z| [z.re, z.im]));
+    Ok(ElectronicState {
+        grid: fine.grid.dims(),
+        density: state.density,
+        orbitals: vec![Orbitals {
+            rows: prolonged.rows(),
+            cols: prolonged.cols(),
+            coefficients,
+        }],
+        occupations: fine.occupations.clone(),
+    })
+}
+
+fn handoff_density(fine: &ScfProblem, density: &Array3<f64>) -> Result<ElectronicState, ScfError> {
+    let density_span = HandoffSpan::enter(HandoffPart::DensityCopy);
     let n = prolong_density(density, fine.grid.dims())?;
     if n.iter()
         .any(|v| !v.is_finite() || *v < -xc::NEGATIVE_ROUNDOFF)
@@ -833,16 +1403,11 @@ fn hand_off(
             "cutoff_ladder: prolonged density charge error exceeds 1e-8",
         ));
     }
-    let mut coefficients = Vec::with_capacity(2 * prolonged.rows() * prolonged.cols());
-    coefficients.extend(prolonged.as_slice().iter().flat_map(|z| [z.re, z.im]));
+    drop(density_span);
     Ok(ElectronicState {
         grid: fine.grid.dims(),
         density: n.iter().copied().collect(),
-        orbitals: vec![Orbitals {
-            rows: prolonged.rows(),
-            cols: prolonged.cols(),
-            coefficients,
-        }],
+        orbitals: Vec::new(),
         occupations: fine.occupations.clone(),
     })
 }
@@ -1117,6 +1682,7 @@ mod handoff_experiment {
             basis: problem.states[0].basis.clone(),
             density: n,
             orbitals: warm.unwrap().remove(0),
+            owned: None,
             mixer: None,
             standard_next: Some(StandardProfile::ratchet(
                 tolerance,
@@ -1195,6 +1761,7 @@ mod handoff_experiment {
                     &ladder,
                     stop,
                     &mut normal,
+                    false,
                 )
                 .unwrap();
                 let mut control = CutoffLadderReport::default();
@@ -1249,7 +1816,7 @@ mod handoff_experiment {
             let (c, tolerances, errors) = if mode == "loose4" {
                 loose_stage(coarse, &ladder, 4., &mut report)
             } else {
-                let c = coarse_stage(coarse, &ladder, stop, &mut report).unwrap();
+                let c = coarse_stage(coarse, &ladder, stop, &mut report, false).unwrap();
                 let t = report
                     .coarse_history
                     .iter()
@@ -1266,7 +1833,7 @@ mod handoff_experiment {
             let state = hand_off(&fine, &c.basis, &c.density, &c.orbitals).unwrap();
             let transfer_s = transfer.elapsed().as_secs_f64();
             report.standard_seed_ha = c.standard_next;
-            let outcome = finish_from(fine, &state, None, true, &mut report).unwrap();
+            let outcome = finish_from(fine, &state, None, true, &mut report, None).unwrap();
             let wall_s = wall.elapsed().as_secs_f64();
             let end = work_timers::snapshot();
             let reuse_end = crate::gamma_real::reuse_psi_counters();

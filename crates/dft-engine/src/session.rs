@@ -1701,11 +1701,63 @@ impl ScfSession {
     /// Lazy blocks (MPI-LAZY-ORBITALS) and an owned density (M2-OWNED) are
     /// gathered here (collective).
     pub(crate) fn warm_state(&mut self) -> Result<Option<WarmState<'_>>, ScfError> {
+        let density_span = crate::cutoff_ladder::HandoffSpan::enter(
+            crate::cutoff_ladder::HandoffPart::ExportDensity,
+        );
         self.materialize_density()?;
+        drop(density_span);
         let Some(c) = self.continuation.as_ref() else {
             return Ok(None);
         };
+        let _span = crate::cutoff_ladder::HandoffSpan::enter(
+            crate::cutoff_ladder::HandoffPart::Materialize,
+        );
         Ok(Some((&c.n, full_previous(c)?)))
+    }
+    /// Owned ladder export; availability is agreed before choosing whether
+    /// every rank retains rows or every rank takes the full-matrix fallback.
+    pub(crate) fn warm_owned_handoff(
+        &mut self,
+    ) -> Result<Option<(Array3<f64>, crate::gamma_real::LazyOrbitals)>, ScfError> {
+        use dft_mpi::Collective;
+        let Some(comm) = crate::parallel::SharedComm::active() else {
+            return Ok(None);
+        };
+        let lazy = self
+            .continuation
+            .as_ref()
+            .and_then(|c| c.previous_lazy.first())
+            .and_then(Option::as_ref)
+            .or_else(|| {
+                self.result()
+                    .and_then(|r| r.result.k_points.first())
+                    .and_then(|k| k.lazy.as_ref())
+            })
+            .filter(|h| !h.handoff_materialized())
+            .cloned();
+        let mut available = [0.];
+        comm.tree_sum_f64(&[f64::from(lazy.is_some())], &mut available)
+            .map_err(|e| ScfError::Numerical(format!("owned handoff availability: {e}")))?;
+        if available[0] != 0. && available[0] != comm.size() as f64 {
+            return Err(ScfError::InvalidInput(
+                "owned handoff: availability differs across ranks",
+            ));
+        }
+        if available[0] == 0. {
+            return Ok(None);
+        }
+        let _span = crate::cutoff_ladder::HandoffSpan::enter(
+            crate::cutoff_ladder::HandoffPart::ExportDensity,
+        );
+        self.materialize_density()?;
+        let density = self
+            .continuation
+            .as_ref()
+            .map(|c| c.n.clone())
+            .or_else(|| self.result().map(|r| r.result.density.clone()));
+        let h = lazy.expect("agreed available");
+        h.handoff_agree(density.is_some())?;
+        Ok(Some((density.expect("agreed density"), h)))
     }
     pub(crate) fn problem_ref(&self) -> &ScfProblem {
         &self.problem
@@ -2024,6 +2076,47 @@ impl ScfSession {
         self.import_electronic(state)
             .map_err(|e| ScfError::Numerical(format!("direct_min hand-off state rejected: {e}")))
     }
+    /// The ladder scopes initialization and import separately; ordinary
+    /// checkpoint/direct-min consumers retain their existing entry point.
+    pub(crate) fn initialize_ladder_electronic(
+        &mut self,
+        state: &crate::checkpoint::ElectronicState,
+    ) -> Result<(), ScfError> {
+        self.initialize()?;
+        let _span =
+            crate::cutoff_ladder::HandoffSpan::enter(crate::cutoff_ladder::HandoffPart::Import);
+        self.import_electronic(state)
+            .map_err(|e| ScfError::Numerical(format!("direct_min hand-off state rejected: {e}")))
+    }
+    pub(crate) fn initialize_owned_ladder(
+        &mut self,
+        state: &crate::checkpoint::ElectronicState,
+        owned: crate::gamma_real::LazyOrbitals,
+    ) -> Result<(), ScfError> {
+        self.initialize()?;
+        let _import =
+            crate::cutoff_ladder::HandoffSpan::enter(crate::cutoff_ladder::HandoffPart::Import);
+        owned.handoff_agree(
+            state.orbitals.is_empty()
+                && owned.global_len() == self.problem.states[0].basis.vectors().len()
+                && owned.bands() == self.problem.occupations.len(),
+        )?;
+        let check = crate::cutoff_ladder::HandoffSpan::check();
+        let valid = owned.handoff_orthonormal()?;
+        drop(check);
+        owned.handoff_agree(valid)?;
+        // The original density/charge/occupation checks and owned-density
+        // installation, without a replicated orbital block.
+        let imported = self.import_electronic(state);
+        owned.handoff_agree(imported.is_ok())?;
+        let c = self.continuation.as_mut().expect("initialized");
+        c.previous = Some(vec![
+            ComplexMatrix::zeros(0, owned.bands())
+                .map_err(|e| ScfError::Numerical(e.to_string()))?,
+        ]);
+        c.previous_lazy = vec![Some(owned)];
+        Ok(())
+    }
     fn import_electronic(
         &mut self,
         state: &crate::checkpoint::ElectronicState,
@@ -2081,6 +2174,7 @@ impl ScfSession {
                 // rank imports the same replicated state), one verdict
                 // reduction; `serial` is the former replicated scalar loop.
                 let split = self.problem.sw.import_split;
+                let check_span = crate::cutoff_ladder::HandoffSpan::check();
                 let orthonormal = if split {
                     let comm = crate::parallel::SharedComm::active();
                     orthonormal_split(&m, comm.as_ref().map(|c| c as &dyn dft_mpi::Collective))
@@ -2088,6 +2182,7 @@ impl ScfSession {
                 } else {
                     orthonormal_serial(&m)
                 };
+                drop(check_span);
                 if !orthonormal {
                     return Err(R::Orbitals);
                 }

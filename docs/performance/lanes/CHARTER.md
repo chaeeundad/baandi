@@ -1,4 +1,13 @@
-# Lane charter (user decision 2026-11-20)
+# Lane charter (user decision 2026-11-20, revised: profiling runs on dev08, not on the Mac)
+
+## Where things run (revision)
+The Mac (Apple Silicon, no MKL/MPI parity, shared with other work) is for **compiling, correctness and equivalence only. No timing from the Mac may support a performance conclusion.** All profiling and all A/B timing run on dev08 (exclusive socket-0 window, real MPI, MKL) through the orchestrator relay (master session). Each lane therefore runs in phases:
+- **Phase 0 (agent, Mac):** read the code and ledger, add lane-specific instrumentation (timers/counters, active only under PHASE_PROFILE/STAGE_TIMERS or a default-off switch, no cost when off), and write `docs/performance/lanes/<LANE>/profile-request.md`: exact dev08 commands (cells: si64 np8, si32 np8, si16 np8, si32 and si64 one core as relevant; repeat counts; which counters/timers to return and the JSON paths), plus a script `scripts/lane_<lane>_parse.py` that turns the returned results.json into the lane's tables. Verify on the Mac that instrumentation changes no result (bit-identical energy/density) and the parser works on a Mac-generated file. Stop with status PROFILE_REQUEST.
+- **Phase 1 (orchestrator, dev08):** profile run in an exclusive window, raw results preserved under /data/sig-dft/lanes/<LANE>/ and relayed back.
+- **Phase 2 (agent, Mac code + dev08 data):** diagnose from the dev08 numbers, write `diagnosis.md`, propose >= 2 candidates, implement one behind a default-off switch, validate equivalence on the Mac, write `dev08-request.md` (A/B). Stop.
+- **Phase 3 (orchestrator, dev08):** A/B, approval or rejection; a rejected agent returns to Phase 2 with the data.
+Duties 2 and 4 below read accordingly: the diagnosis and all timing evidence come from dev08.
+
 
 The SCF computation is split into independent units ("lanes"). Each lane has its own Codex agent that diagnoses, designs and implements improvements on its own judgment. dev08 tests each result; the orchestrator (Claude) approves or rejects. A rejected lane agent brings an alternative.
 

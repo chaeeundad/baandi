@@ -33,6 +33,7 @@ def sha(path):
 
 
 def fixture(case, seed, amp, pseudo):
+    # si64 is shipped as si64-gamma.toml too; covered by ladder_2x2_tests.py.
     aliases = {f"si{n}": f"si{n}-gamma" for n in [8, 16, 32, 64]}
     pp = []
     if case.startswith("si"):

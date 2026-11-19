@@ -2301,3 +2301,71 @@ Plateau pairs (same coarse FFT grid): si32 np8 0.40 -> 0.41 wall -2.01 % (coarse
 | ID | Change / status | Measured result | Lesson / evidence |
 | --- | --- | --- | --- |
 | G-PHASE-VALIDATE | Default-off `BAANDI_PHASE_VALIDATE=on`: owned-projector validation scans finite component maxima once (G per constructor, positions per species); maxima <= 2^500 prove every three-product dot finite. Otherwise original loop/errors. Factor/norm checks, actual phases, lazy table and collectives unchanged. Rank/run-local constructor/call/pair/accept/fallback counters; exclusive nanoseconds only under PHASE_PROFILE. | Mac arm64 pure release, Si64 15/7.5 Ha: exactly 2 constructors and 2,065,920 checks per owned rank; on 0 checks / 2 fast accepts / 0 fallbacks. One-thread constructor A0,A1,B0,B1,A2, 12 retained groups: off median 0.000780146 s, on 0.0000717085 s; paired median saving 0.0007075205 s, off/off SD 0.0000703289222 s, 10.06x noise (resolved >=3x). Off scan 3.77028% of constructor wall, not full engine init. Actual one-core engine path: zero calls, zero saving. Two simulated ranks separately confirm counts; scan/init fractions 1.21008%/1.21761% off -> 0.107290%/0.099016% on; simulations are not MPI timing. | Implemented; no default or whole-run speed claim until dev08. 30 numerical edge cases, 160 off/on constructor pairs across 4 cell shapes / 2 k types / 2 radial rules; 13,360 complex coefficients bit-identical, exact errors and lazy-once behavior; existing eager coefficient oracle also passes with switch on. Required gate exit 1: build/fmt/clippy PASS, 559 passed / 3 known in-repo TMPDIR cache failures / 152 ignored. Real MPI unavailable; per-rank critical wall and complete init denominator remain for master dev08 A/B. Proof depends only on binary64 range, never material/cutoff. Raw spans, commands, hashes, reproducible harness and scope: [phase-validate.md](../design/phase-validate.md). No QE source or QE run. |
+## F-LADDER-2X2 — captured-state/seed causal test (2026-11-19 UTC)
+
+**Closed for a universal tight-seed rule; defaults unchanged.** Unlike the earlier
+0.40 six-/seven-map state ablation, this crosses the actual natural 0.50/0.40
+handoff density AND warm orbitals with both observed seeds. Mac pure release,
+T=1, si32 and held-out size si64, fractional displacement ±0.001, seeds 601–603.
+The source base is `d6be1d0cab87cb0654d6b6de2c45f8c9a1fe6cfb`; no QE/dev08 run.
+
+- **72/72** continuations and **18/18** unsplit natural controls converge;
+  unchanged standard verification passes. **48** diagonal/repeated-control
+  comparisons are byte-identical in energy/eigenvalues, density, orbitals and
+  recorded scientific history. A 0.45 natural cross-check is kept for every
+  geometry. The complete record has **824** maps and **30** unique cells.
+- Si32/601, cells `(state50,seed50)/(state50,seed40)/(state40,seed50)/(state40,seed40)`:
+  maps **10/11/11/13**, fine+verification H **1918/1987/2455/2233**. Tightening
+  state40 removes two maps but adds **222 H (+9.94%)**. Loosening state50 adds
+  one map and 69 H. The map/H interactions are **+1 / −291**.
+- Si32/602: all four cells take ten maps and seed40 is already tighter than
+  seed50. Si32/603: *loosening* state40 removes a map (12 → 11), H 2211 → 2064.
+  Si64/601: state40 takes 12 maps/4061 H at either seed. Si64/602: tightening
+  state50 worsens 12 → 13 maps, H 4556 → 4690. Si64/603 has a 40.3x seed jump
+  at the 7 → 6 coarse-map crossing, yet tightening state40 leaves 12 maps and
+  raises H **4154 → 4861 (+17.02%)**. These are geometry-dependent interactions,
+  not support for a new controller. No default-off production rule was added;
+  the conditional seven-system rule-validation stage was not triggered.
+- Si64/603 state50+seed40 is the only unique first-redo cell: injected
+  6.152031800255166e-6 Ha becomes effective **5.426896967241076e-7 Ha**; first-map
+  cost 706 H / 6 blocks includes both solves. All resets/refits are zero.
+  Failed verification attempts, per-map H/blocks, Coulomb error, charge and
+  complete measured setup/fine/verified times are retained. Common-low-G density
+  error and complete occupied principal-angle spectra compare each state to its
+  geometry's strict reference with a common 0.40 PW domain.
+- Largest absolute strict-reference difference **3.001474624397815e-10 Ha**,
+  below the standard 5e-9 Ha gate; **17/30** unique cells also lie within strict
+  1e-10 Ha. No assertion that all standard results meet strict accuracy. Maximum
+  output charge error **2.2737367544323206e-12 electrons**.
+- Test-only harness: reuse exact captures, explicit `first-seed:<Ha>` override,
+  native-host seed discovery, alternating full-construction pairs and A/A floor.
+  Pristine-parent si32 natural trajectories reproduce at 0.50/0.40/0.45. The
+  minimal-grid arm now plans its old grid before one constructor, eliminating
+  its discarded coarse problem; si16 default/minimal before-after arrays,
+  histories, energies and H counters match. The si64 alias was already present
+  at this base; a real-fixture regression test now protects it. Production source
+  before the test module is byte-identical; no session/switch/default edit.
+- **14/14** full-construction smoke arms pass, each rebuilt handoff matching the
+  capture. One retained si32/601 pair has full seconds 4.3911/4.6240 for state50
+  and 4.7793/4.4706 for state40 (seed50/seed40). Retained A/A is +1.836%; one pair
+  is not acceptance. Matrix A/A drift reaches 39.8% on si32/602. All Mac wall
+  values are observations; no small timing effect is claimed.
+
+Full cells, all unique per-map records, commands, hashes, diagnostics and dev08
+order-alternated/A/A recipe: [ladder-2x2.md](../design/ladder-2x2.md). Raw evidence:
+`target/scratch/{2x2,baseline-natural,minimal-before,minimal-after,full-pairs-smoke}`;
+archive before cleanup. No production optimization is adopted. **Lesson:** map
+recovery can buy more H work, the seed ordering itself changes with geometry,
+and the ordinary redo can change the delivered initial tolerance. Keep the
+default and distinguish these effects before fitting any handoff policy.
+
+Validation: final required gate exit **1**, build/fmt/clippy PASS, **470 passed /
+3 failed / 135 ignored**, 51 binaries, 17 s. The three failures are the known
+in-repository TMPDIR pseudo-cache restrictions. The initial gate also found an
+ignored-driver `useless_vec`, fixed to a six-element array; a fresh final-build
+si32/601 six-arm run reproduces **49** binary/history files byte for byte.
+Python fixture/pair tests **3 passed**; complete matrix analysis and all extra
+harness checks exit 0. README check separately has its existing stale-phrase
+failure (8 pass / 1 fail). Source, logs, exact failures and final build hashes
+are in the design note. The overall required gate remains red. All edits stay
+inside OWNED_FILES, and changes remain uncommitted.

@@ -167,7 +167,7 @@ macro_rules! table {
 
 table! {
     // Engine (dft-engine).
-    INIT_OWNED_STATES: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    INIT_OWNED_STATES: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "owned Gamma projector rows and fixed-chunk atomic-start projections (rounding class)";
     CERT_SCREEN: Kind::Choice { allowed: &["on", "off", "trace"], default: "on" }, "on", "on, off, trace",
         "certificate screen (trace prints the estimates)";

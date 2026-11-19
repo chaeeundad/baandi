@@ -3658,17 +3658,17 @@
     "task_id": "G-HANDOFF-OWNED",
     "mode": "resume",
     "role": "implementer",
-    "status": "running",
+    "status": "done",
     "codex_pid": 36279,
     "wrapper_pid": 36267,
-    "session_id": null,
+    "session_id": "01a1f25c-95aa-7871-9f82-e71ca8a29904",
     "branch": "task/G-HANDOFF-OWNED",
     "worktree": "/Volumes/990-2TB/Develop/rust-dft/../rust-dft-wt/G-HANDOFF-OWNED",
     "ticket": "/Users/mino/Develop/rust-dft/tickets/msgs/HANDOFF-scope2.md",
-    "report": null,
+    "report": "/Volumes/990-2TB/Develop/rust-dft/.delegate/G-HANDOFF-OWNED/report.json",
     "started_at": "2026-11-19T07:20:59Z",
-    "ended_at": null,
-    "exit_code": null,
+    "ended_at": "2026-11-19T07:37:14Z",
+    "exit_code": 0,
     "note": ""
   }
 ]

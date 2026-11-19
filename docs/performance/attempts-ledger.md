@@ -2138,3 +2138,77 @@ screen. Changes remain uncommitted for Claude's review.
 
 | F-VERIFY-SCHEDULE-LAZY-TRACE | Follow-up to dev08 41d2d79 (user-relayed crossed A/B): one core Si64 -7.06%, all 4 pairs faster, abs(mean)/SE 218, attempts [11,12,13] -> [11,13], H 4008 -> 3871, Davidson 71 -> 69, abs(dE) 4.11e-11 Ha; one core Si32 +0.28%, all 4 pairs slower, abs(mean)/SE 4.87, no failures and identical bits/counts; MPI np=8 Si64 unchanged. | Default OFF; adoption pending master's post-fix dev08 measurements. Prior Mac NO-GO is historical, not a veto on the new dev08 evidence. | Scheduler moved entirely inside eligible verification branch; first attempt bypasses prediction, later predictions require a failed real attempt. Cold helper, scalar allocation-free predictor, audit journal allocated once at first attempt and preallocated for the fixed budget; no ordinary-map schedule branch/call/counter/logging. Optional `verification.schedule` in JSON for trace/on, absent off: map, predicted n, actual action, would_wait, measured error, actual-attempt ratio and pass; waits have null measured/pass fields. Mac 48 off/on/trace triples (144 SCFs): each arm numerically identical to prior implementation, 48/48 off/trace identities. No-failure subset 19 geometries / 120 fine maps: zero predictor calls, identical science/counts, 14,017 total H per arm. Small syn-p3 seeds 601–603: standard maps 5/5, H 13/13, one attempt, zero predictions; tight maps 6/6, H 14/14. Full on journal: 81 attempts + 4 waits, 37 post-failure predictor calls. | Rounding/path class, not path-identical: omitting a failed solve changes reuse/continuation; dev08 abs(dE) 4.11e-11 Ha is accepted inside strict 1e-10. Trace remains numerically inert. Zero per-map work is not zero reporting cost; JSON construction and journal allocation still occur at attempt/output boundaries. No local wall-time adoption claim. Check build/fmt/clippy pass; 463 tests pass, 3 known pseudo-cache TMPDIR failures, 134 ignored. | docs/design/verification-schedule.md (field contract, Mac counters, relayed dev08 numbers, crossed commands plus schedule.csv); target/scratch/followup-ab and followup-summary.json. |
 | F-VERIFY-SCHEDULE-DEFAULT-ON | 2026-11-19 | BAANDI_VERIFY_SCHEDULE default on. dev08 crossed pairs, clean windows: one core si64 -6.81 % (6/6 pairs negative, |mean|/se 177.5; earlier 41d2d79 -7.06 %): attempts [11,12,13] -> [11,13], failures 2 -> 1, Davidson 71 -> 69, H 4008 -> 3871, |dE| 4.11e-11 Ha (path class within 1e-10; not path-identical); MPI np8 si64 no effect (schedule unchanged, -0.18 % unresolved); one core si32 control +0.29 % (8/8 pairs positive, |mean|/se 6.4, bits identical, prediction_evaluations 0: the cost is bookkeeping about 2.3 ms per map, not prediction arithmetic); trace records verification.schedule correctly (predicted n=1, waited, pass at map 13). | ADOPTED | Net positive at the target sizes; small cells pay about 0.3 %. Follow-up: locate the 2.3 ms/map bookkeeping. Delivered state can differ at the 1e-11 Ha level when an attempt that would have failed is skipped. |
+
+## G-SCHED-OVERHEAD (2026-11-19): ordinary-map allocation audit
+
+Baseline `b58a5a35523419a2ae829fd39c36a1a326307e23`, default-on schedule;
+uncommitted candidate, Mac pure release, one thread. **Implemented, dev08
+performance confirmation pending.** The relayed Si32 +0.29% (23 ms / ten maps)
+does not locate that time in ordinary-map bookkeeping: both source inspection
+and a test-only counting allocator find **zero added allocations per nonterminal
+ordinary map in the baseline already**. No schedule-specific history/spectrum
+clone, formatting, JSON, timer, environment read or branch runs there.
+
+The actual redundant work was at the first eligible verification and output:
+reserve `max_iterations` diagnostic rows, push/fill the first row, then clone
+the journal into the result. The candidate bypasses scheduling before any
+failure, creates retry storage on the first failure, creates only one output
+row when the first attempt passes, and moves an existing journal into the
+terminal result. No policy, certificate, arithmetic, tolerance or default change.
+
+Counting allocator, real seven-map skew/nonlocal SCF: off counts
+`[440,59,60,45,58,57,96]`; baseline on/trace
+`[440,59,60,45,58,57,98]`; candidate on/trace
+`[440,59,60,45,58,57,97]`. Ordinary added allocations stay **0**; final reporting
+allocations fall **2 -> 1**, with first-success capacity **100 -> 1**. The
+required public diagnostic Vec/JSON is not allocation-free. The regression
+test checks this distinction, full scientific identity, and a live allocator
+probe. A helper test proves the first boundary needs neither history access
+nor journal creation. The forced-failure trace rows and predictor fallbacks
+remain covered; the synthetic wait test now clears its real fixture's
+inherited default-on journal before replacing its history.
+
+Eight alternating off/on pairs collected for each build/case; conservatively
+exclude the potentially overlapping last baseline Si32 / first baseline Si16
+pairs. Results below are **on minus off mean ± sample SE, ms per fine map**,
+where ordinary time is steps minus certificate wall; ten fine maps in each run.
+
+| Build | Case | Pairs | Ordinary mean ± SE (ms/map) | abs(mean)/SE | Shared-host load |
+| --- | --- | ---: | ---: | ---: | --- |
+| Before | Si32 | 7 | -0.566346 ± 3.405864 | 0.17 | 4.25–6.25 |
+| Before | Si16 | 7 | +0.811029 ± 3.256482 | 0.25 | 4.46–4.95 |
+| Candidate | Si32 | 8 | -5.159820 ± 3.574622 | 1.44 | 8.12–20.04 |
+| Candidate | Si16 | 8 | -1.092127 ± 2.031926 | 0.54 | 6.43–8.12 |
+
+All deltas are unresolved. No before/after-window subtraction or speedup claim.
+Si32 is the no-failure control (attempt 10, zero predictions); Si16 has one
+failure, attempts [9,10], one prediction and no wait. All 64 timing runs have
+identical scientific results across builds and off/on (timing/journal metadata
+excluded), including density bytes and work. Si32 E = -126.70343204998852 Ha;
+Si16 E = -63.129095464190456 Ha. These are internal identity checks, not QE
+references. The predictor and complete verification function regions are
+byte-identical to baseline.
+
+Validation: `CHECK_SCCACHE=0 scripts/check.sh fast dft-engine dft-numerics dft-cli`
+exit 1: build/fmt/clippy PASS, **466 passed / 3 known CLI in-repository TMPDIR
+cache failures / 134 ignored**, 51 binaries. Final release schedule tests:
+4 passed; allocation gate: 1 passed. README freshness suite: 8 passed / 1
+pre-existing scope-text expectation failure (`standard profile is unsupported`);
+README and figure freshness assertions themselves pass. No out-of-scope fix.
+
+Lesson: allocating at a terminal boundary is not per-map allocation, and dividing
+whole-run wall by map count is not attribution. This patch removes measured
+redundant storage but does **not** establish the origin or elimination of the
+relayed 23 ms. Master remeasures one-core Si32 eight alternating pairs and
+one-core Si64 crossed A/B, preserving [11,13] and trace records. If the regression
+persists, inspect verification/allocator-cache/output effects on dev08.
+Detailed operations, hashes, phase-bucket timings, commands and raw evidence
+locations: `docs/design/verification-schedule.md`, `target/scratch/summary.json`.
+
+Failed-attempt same-mode baseline/candidate identity: six off/on/trace pairs
+(12 SCFs), Si16 at 1e-10 Ha and Si64 at 5e-9 Ha, seed 601. Si16 on [10,12]
+with a wait at 11; Si64 on **[11,13]** with a wait at 12. Off/trace remain
+[10,11,12] and [11,12,13], respectively. Both predictor counters remain 2;
+all trace rows, science and density bytes are identical to the corresponding
+baseline arm. Scratch `identity-summary.json` SHA-256
+`8ad80c4b33b825993f131d1cba60548ca0a789942622df380aaaea11632a102c`.

@@ -1,11 +1,205 @@
 # Verification scheduling experiment (F-VERIFY-SCHEDULE)
 
-Status: follow-up implemented; default OFF. Adoption remains the orchestrator's
-decision after remeasurement on dev08. The original Mac NO-GO below is historical
+Status: default ON since 4c3d09d (user-relayed dev08 acceptance).
+G-SCHED-OVERHEAD removes redundant diagnostic storage; its performance effect
+awaits the orchestrator's dev08 remeasurement. The original Mac NO-GO below is historical
 and is superseded as a universal conclusion by the relayed dev08 Si64 result.
 Certificate and stop rule unchanged. Scope: closed-shell `ScfSession`; MPI
 measurements below are relayed, not reproduced locally. Spectral-audit sessions
 decline scheduling.
+
+## G-SCHED-OVERHEAD: allocation audit and lazy diagnostic storage
+
+Source baseline: `b58a5a35523419a2ae829fd39c36a1a326307e23`; Mac pure-Rust
+release, one thread. The user-relayed +0.29% Si32 regression is a **whole-run**
+measurement. Dividing its 23 ms by ten maps does not identify where it occurs.
+Source inspection and a counting allocator show **no schedule operations or
+allocations on ordinary non-eligible maps even before this patch**. There is no
+per-map history/spectrum clone, string formatting, JSON, timer or environment
+lookup attributable to the switch. The pre-existing clocks, history construction
+and numerical work are shared by off/on.
+
+| Boundary | Before | After |
+| --- | --- | --- |
+| Ordinary, not eligible for verification | No scheduler branch/call/allocation/copy | Unchanged, zero |
+| First eligible attempt, before verification | Mode comparison, cold helper call, history-last read, schedule initialization, `Vec::with_capacity(max_iterations)`, zero prediction, scalar decision row push | Failed-attempt check is false; no scheduler call or allocation |
+| First successful attempt | Fill scalar error/ratio/pass fields | Use the existing actual attempt; no retry journal |
+| First failure | Fill the already allocated row | Lazily allocate retry journal and record that same zero-forecast attempt |
+| Eligible retries | Existing scalar predictor, counter and decision rows | Same policy, counters and rows |
+| Final result | Clone the journal's live rows (second allocation); drop the original with the session | Move an existing journal; if the first attempt passed, create exactly one diagnostic row at output |
+| CLI serialization | Serialize required optional schedule metadata | Unchanged; outside this ticket's ownership |
+
+The first-failure journal still reserves the maximum iteration budget, so retry
+pushes have the same capacity behavior. Forecast arithmetic and the complete
+`verify_fixed_point` / inner certificate region are byte-identical to HEAD.
+Their SHA-256 values are respectively
+`82c6e5f53f368c4fc7cdf008db59f8d80a0ebeb89f2147573251e797d26a16a2` and
+`749fdf5f373f7584300abea7a019f9100b2ca18f324803c09cb0c1ee073b250b`.
+Attempts remain in the session as before; only diagnostic storage is moved to
+its terminal result. A restored session emits no synthetic row for an attempt
+before the restored boundary. No new public type, dependency or switch is added.
+
+### Allocation evidence
+
+`tests/verify_schedule_alloc.rs` installs a test-only forwarding System allocator
+and counts alloc/alloc_zeroed/realloc around each real `ScfSession::step`. One
+test function and a one-thread skew-cell, nonlocal synthetic fixture avoid other
+test threads. Setup, warmup, assertions and output are outside counting. A known
+allocation checks that the probe is live. Off/on/trace scientific state is fully
+compared (energy, density, orbitals, history, attempts and work; clocks and the
+diagnostic journal excluded).
+
+Before: off allocation counts by map `[440, 59, 60, 45, 58, 57, 96]`;
+on/trace `[440, 59, 60, 45, 58, 57, 98]`. After: on/trace
+`[440, 59, 60, 45, 58, 57, 97]` in release. Thus **zero added allocations for
+each nonterminal ordinary map**, before and after; **two -> one** added
+allocation at the terminal/output boundary. The surviving allocation is the
+required one-row public `Vec` diagnostic, with capacity one instead of 100.
+This is deliberately not a claim of zero total allocations in the SCF or zero
+allocation for serialized diagnostics. The regression test asserts this exact
+boundary distinction rather than hiding the output allocation.
+
+The no-failure unit test also calls the production helper with empty history
+and no attempts, proving it returns before touching history or creating a
+journal. The forced-failure trace test checks every real-attempt row, first
+zero forecast, measured ratios and prediction count. The synthetic wait test
+clears the fixture's default-on journal before replacing its history; otherwise
+the real passing row incorrectly precedes the artificial wait row (an existing
+test assumption invalidated by default-on).
+
+### Failed-attempt identity and verification gates
+
+A separate old/new release comparison ran Si16 at 1e-10 Ha and Si64 at 5e-9 Ha,
+seed 601 / fractional amplitude 1e-3, in off/on/trace: **six same-mode
+comparisons (12 SCFs), all bit-identical** in energy, density bytes, eigenvalues,
+occupations, energy components, scientific history, attempts, work and the
+complete schedule journal (only timing fields excluded).
+
+| Case | Off / trace attempts, before = after | On attempts, before = after | On journal |
+| --- | --- | --- | --- |
+| Si16, 1e-10 Ha | [10,11,12] | [10,12] | First attempt fails; wait at 11 with predicted n=1; pass at 12 |
+| Si64, 5e-9 Ha | [11,12,13] | [11,13] | First attempt fails; wait at 12 with predicted n=1; pass at 13 |
+
+Both on/trace journals have two predictor evaluations. Trace always attempts,
+including the counterfactual wait, and its measured errors/ratios/pass values
+match the baseline exactly. On Si64, the measured first failure is
+5.310026608990284e-8 Ha; the final pass is 1.1717501795885816e-9 Ha, ratio
+0.022066747793781642. These are local internal measurements, not the relayed
+dev08 energy values. Same-mode before/after identity does not imply on/off
+identity when scheduling skips a failed solve.
+
+- Requested `CHECK_SCCACHE=0 scripts/check.sh fast dft-engine dft-numerics dft-cli`:
+  exit **1**, build/fmt/clippy PASS; 51 binaries, **466 passed, 3 failed,
+  134 ignored**, 184 s wall. The three failures are the known CLI pseudo-cache
+  rejection of an in-repository TMPDIR. The sandbox also denies `ps` load
+  collection; the build/test/fmt/clippy gates still execute.
+- Final release `--lib verification_schedule`: **4 passed**, exit 0.
+- Final release `--test verify_schedule_alloc`: **1 passed**, exit 0.
+- `python3 -I target/scratch/analyze.py` and `identity.py`: exit 0. The analysis
+  compares every timing run's full scientific JSON (excluding clocks, timing
+  derivatives and journal) and density SHA against the baseline.
+- Optional `python3 -I scripts/tests/test_readme_figures.py`: exit **1**, 8 of
+  9 pass. The unchanged structural-scope test expects the obsolete phrase
+  `standard profile is unsupported`; generated README and figure freshness
+  tests pass. Reporting sources were not edited outside ownership.
+- An initial schedule-test run exposed the inherited-journal assumption
+  described above; after fixing the fixture, all four release schedule tests
+  and the engine fast suite pass. No tolerance was changed.
+
+Summary SHA-256:
+`d91cef1bdc53fc43205605fc0bb6f4f46a422cfc00cfd7bc05669153b0d246a5`.
+Identity summary SHA-256:
+`8ad80c4b33b825993f131d1cba60548ca0a789942622df380aaaea11632a102c`.
+
+### Measurement protocol and remaining acceptance boundary
+
+Use the checked-in `fast_screen.py` input stream: seed 601, fractional
+amplitude 1e-3, Gamma, one thread, 30 Ry, LDA-PZ, production ladder/defaults,
+standard threshold 5e-9 Ha. Both cases finish ten fine maps. Si32 is the
+no-failure control (one actual attempt at map 10, zero predictions); Si16 has
+attempts at maps 9 and 10, one failure and one predictor evaluation, without a
+wait. Do not call the Si16 run a no-failure control.
+
+For each metric X and pair i, compute `d_i = 1000 * (X_on - X_off) / 10`
+in ms per fine map. Report `mean(d_i)`, sample `stdev(d_i)/sqrt(N)`, and
+`abs(mean)/SE`. No outliers are removed. Eight AB/BA alternating pairs were
+collected per case/build. The last baseline Si32 and first baseline Si16 pairs
+are conservatively excluded because their launch windows might overlap: the
+baseline tables use seven pairs each. Candidate cases run sequentially, with
+no local build/test running during either timing series, using eight pairs.
+The Mac is shared; load and raw timings are retained. These are screening
+observations, not small-gain adoption evidence. Separate before/after windows
+must not be subtracted to claim a speedup.
+
+`ordinary` means `timings.steps_s - timings.certificate.wall_s`; it includes
+fine ordinary numerical work and session overhead. `bookkeeping` is the existing
+`timings.closure.step_overhead_s` bucket, not a scheduler-exclusive timer.
+`wall` is process wall time including setup, coarse ladder, verification and
+output, divided by the number of fine maps only for normalization. It is not
+an actual map timer. No additional clocks are placed in production code.
+
+### Mac paired observations (milliseconds per fine map, on minus off)
+
+| Build / case | Pairs | Ordinary mean ± SE | abs(mean)/SE | Bookkeeping mean ± SE | Whole process mean ± SE | 1-min load range |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| before / si16 | 7 | +0.811029 ± 3.256482 | 0.25 | +0.003192 ± 0.021432 | +0.472154 ± 4.888665 | 4.46–4.95 |
+| before / si32 | 7 | -0.566346 ± 3.405864 | 0.17 | +0.018304 ± 0.038778 | -2.626031 ± 9.529771 | 4.25–6.25 |
+| after / si16 | 8 | -1.092127 ± 2.031926 | 0.54 | +0.009663 ± 0.007714 | -1.242311 ± 2.475990 | 6.43–8.12 |
+| after / si32 | 8 | -5.159820 ± 3.574622 | 1.44 | +0.012437 ± 0.020274 | -12.563878 ± 7.306373 | 8.12–20.04 |
+
+No delta is resolved by this sample. In particular, these numbers do **not**
+prove that the dev08 +0.29% disappeared, or support a Mac speedup claim. There
+was no dedicated process warmup; first runs remain in the sample except for the
+two potentially overlapping pairs explicitly excluded above. Candidate Si32
+starts after the gate build, with elevated decaying load. Source/counter evidence
+is stronger than these timings for locating work.
+
+All 64 timing runs converge and verify. Every before/after off/on result for a
+given case has identical energy, density bytes, eigenvalues, occupations,
+energy components, full scientific history, attempts and work counters
+(timing fields and the optional schedule journal excluded). Si32 energy is
+`-126.70343204998852 Ha`; Si16 is `-63.129095464190456 Ha`. These are internal
+same-input identities, not QE or absolute-accuracy references.
+
+Reproduce each timing series (use distinct output directories):
+
+```sh
+export PATH=/opt/homebrew/opt/rustup/bin:$PATH
+export TMPDIR_990="$PWD/target/scratch" TMPDIR="$PWD/target/scratch"
+cargo build --offline --release -p dft-cli
+python3 -I scripts/fast_screen.py --binary target/release/dft-cli \
+  --upf ../pseudo/Si.pz-vbc.UPF --case benchmarks/cases/si32-gamma.toml \
+  --pairs 8 --env-a BAANDI_VERIFY_SCHEDULE=off \
+  --env-b BAANDI_VERIFY_SCHEDULE=on \
+  --out target/scratch/after-si32 --json target/scratch/after-si32.json
+# Repeat sequentially for si16-gamma.toml and after-si16.
+cargo test --offline --release -p dft-engine --test verify_schedule_alloc -- --nocapture
+cargo test --offline --release -p dft-engine --lib verification_schedule -- --nocapture
+CHECK_SCCACHE=0 scripts/check.sh fast dft-engine dft-numerics dft-cli
+```
+
+Baseline binary SHA-256:
+`919a2ebfc36a6ae1b3aee030342cec0e18b1fbd8359e765a78a0940a52420594`.
+Candidate binary SHA-256:
+`0e3a4bbfdefdb522aebc20589ccdd6365ce053392768845035a7ac0cb71213b5`.
+External Si UPF SHA-256:
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+Platform: macOS 27.0.1 arm64, no extra release flags. Raw evidence and the
+analysis/identity scripts are in `target/scratch/{before,after}-si{16,32}*`,
+`alloc-{before,after}.log`, `identity-*`, `manifest.json`, `source-identity.json`,
+`summary.json` and `check.log`; preserve this scratch before worktree cleanup.
+No UPF is committed. README, dashboard/session JSON and optimization-log files
+are outside the ticket's owned files; the master owns their publication.
+
+**dev08 handoff:** repeat one-core Si32 eight alternating off/on pairs and
+one-core Si64 crossed A/B within a single clean window. Retain the existing
+input/PP/build/binding/threshold/start conditions, full phase timings, binary
+hashes and scientific fingerprints. Compare candidate on with baseline on,
+as well as candidate off/on; verify Si64 on attempts `[11,13]` and the exact
+trace records. No remote run is claimed here. The source/allocator audit does
+not establish the cause of the relayed 23 ms, nor that this patch removes it.
+If it persists, profile the verification solve, allocator/cache effects and
+CLI output on dev08 rather than attributing it to nonexistent per-map records.
 
 ## Follow-up: lazy prediction and durable trace
 

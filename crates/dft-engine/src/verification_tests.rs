@@ -523,6 +523,23 @@ fn verification_schedule_trace_preserves_failed_attempts() {
     };
     assert_eq!(attempts(&off), attempts(&trace));
     assert_eq!(attempts(&off).len(), 3);
+    let report = trace.verification.as_ref().unwrap();
+    let journal = report.schedule.as_ref().unwrap();
+    assert_eq!(journal.records.len(), report.attempts.len());
+    assert_eq!(journal.prediction_evaluations, 2);
+    for (i, (row, attempt)) in journal.records.iter().zip(&report.attempts).enumerate() {
+        assert_eq!(row.iteration, attempt.iteration);
+        assert_eq!(row.action, "attempt");
+        assert_eq!(row.passed, Some(attempt.passed));
+        assert_eq!(row.coulomb_error_ha, Some(attempt.coulomb_error_ha));
+        assert_eq!(
+            row.ratio_to_previous_attempt,
+            i.checked_sub(1)
+                .map(|j| attempt.coulomb_error_ha / report.attempts[j].coulomb_error_ha)
+        );
+    }
+    assert_eq!(journal.records[0].predicted_additional_maps, 0);
+    assert!(!journal.records[0].would_wait);
     let on = run("on");
     let passed = on.verification.as_ref().unwrap().attempts.last().unwrap();
     assert!(passed.passed && passed.operator_applications > 0);
@@ -569,6 +586,19 @@ fn verification_schedule_forecast_and_fallbacks() {
 /// required audit is produced only at that attempt, not on its ordinary maps.
 #[test]
 fn verification_schedule_no_failure_has_zero_predictor_work() {
+    // The first eligible boundary must not create retry storage. Its real
+    // verification is unconditional; only a failure needs a retry journal.
+    for mode in ["on", "trace"] {
+        let mut report = VerificationReport::default();
+        assert!(!super::session::schedule_attempt(
+            &[],
+            &mut report,
+            mode,
+            100,
+            true
+        ));
+        assert!(report.schedule.is_none());
+    }
     let pp = super::pool_fixture::potential(2.0, 1.0, true, 401);
     let run = |mode| {
         let mut p = problem(&pp, Some(5e-9), Verification::FixedPoint).unwrap();
@@ -626,6 +656,8 @@ fn verification_schedule_wait_is_not_a_pass() {
         .unwrap();
     let mut report = r.verification.unwrap();
     // VERIFY_SCHEDULE is default on (2026-11-19): the run already wrote its own audit; start from a clean one.
+    // Build a fresh synthetic retry history, independent of the default-on
+    // diagnostic row emitted by the fixture's real successful run.
     report.schedule = None;
     let a = &mut report.attempts[0];
     a.passed = false;

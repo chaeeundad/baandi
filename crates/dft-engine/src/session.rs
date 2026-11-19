@@ -1043,7 +1043,8 @@ impl ScfSession {
             if passed && self.problem.options.verification == Verification::FixedPoint {
                 // No scheduling branch, call or bookkeeping on ordinary maps.
                 // The predictor itself is called only after a real failure.
-                let defer = self.problem.sw.verify_schedule != "off"
+                let defer = self.verification.attempts.last().is_some_and(|a| !a.passed)
+                    && self.problem.sw.verify_schedule != "off"
                     && schedule_attempt(
                         history,
                         &mut self.verification,
@@ -1095,6 +1096,19 @@ impl ScfSession {
                             VerifyReuse::Feed2 if earlier_failures == 0 => None,
                             mode => Some((mode, reuse)),
                         };
+                    }
+                    // The first failure creates the retry journal. A passing
+                    // first attempt needs only its existing attempt record;
+                    // its diagnostic row is constructed with the final output.
+                    if !passed
+                        && self.problem.sw.verify_schedule != "off"
+                        && self.verification.schedule.is_none()
+                    {
+                        self.verification.schedule = Some(first_schedule_record(
+                            self.problem.sw.verify_schedule,
+                            &attempt,
+                            self.problem.options.max_iterations,
+                        ));
                     }
                     if let Some(schedule) = &mut self.verification.schedule {
                         let decision = schedule.records.last_mut().expect("attempt decision");
@@ -1328,7 +1342,29 @@ impl ScfSession {
                     certified: certified && standard.is_none(),
                     verification: (standard.is_some()
                         && self.problem.options.verification != Verification::Off)
-                        .then(|| self.verification.clone()),
+                        .then(|| {
+                            // The terminal session no longer needs the diagnostic
+                            // journal. Move it instead of cloning its allocation.
+                            let schedule = self.verification.schedule.take();
+                            let mut report = self.verification.clone();
+                            report.schedule = schedule.or_else(|| {
+                                report
+                                    .attempts
+                                    .last()
+                                    .filter(|a| {
+                                        a.iteration == iteration
+                                            && self.problem.sw.verify_schedule != "off"
+                                    })
+                                    .map(|attempt| {
+                                        first_schedule_record(
+                                            self.problem.sw.verify_schedule,
+                                            attempt,
+                                            1,
+                                        )
+                                    })
+                            });
+                            report
+                        }),
                     spectral_completeness: self.spectral_report.clone().map(|mut r| {
                         r.passed &= certified;
                         r
@@ -2480,7 +2516,7 @@ fn full_previous(c: &Continuation) -> Result<Option<Vec<ComplexMatrix>>, ScfErro
 }
 
 /// Called exclusively at an otherwise eligible attempt, never per ordinary map.
-/// Allocation is confined to the first diagnostic boundary. Prediction uses
+/// Allocation is confined to boundaries after a failure. Prediction uses
 /// existing scalar history and stack storage only; there is no logging here.
 #[cold]
 #[inline(never)]
@@ -2492,6 +2528,9 @@ pub(crate) fn schedule_attempt(
     eligible: bool,
 ) -> bool {
     use super::convergence::{VerificationSchedule, VerificationScheduleEntry};
+    if !report.attempts.last().is_some_and(|a| !a.passed) {
+        return false;
+    }
     let iteration = history.last().expect("attempt history").iteration;
     let schedule = report.schedule.get_or_insert_with(|| VerificationSchedule {
         mode,
@@ -2516,6 +2555,32 @@ pub(crate) fn schedule_attempt(
         passed: None,
     });
     wait
+}
+
+/// A first actual attempt has no forecast or previous-attempt ratio. Called
+/// on first failure (retry storage) or at output (one passing diagnostic row).
+#[cold]
+fn first_schedule_record(
+    mode: &'static str,
+    attempt: &VerificationAttempt,
+    capacity: usize,
+) -> super::convergence::VerificationSchedule {
+    use super::convergence::{VerificationSchedule, VerificationScheduleEntry};
+    let mut records = Vec::with_capacity(capacity);
+    records.push(VerificationScheduleEntry {
+        iteration: attempt.iteration,
+        predicted_additional_maps: 0,
+        action: "attempt",
+        would_wait: false,
+        coulomb_error_ha: Some(attempt.coulomb_error_ha),
+        ratio_to_previous_attempt: None,
+        passed: Some(attempt.passed),
+    });
+    VerificationSchedule {
+        mode,
+        prediction_evaluations: 0,
+        records,
+    }
 }
 
 /// Cost proxy from the measured attempt/map ratio: m / (m + 1.3 m).

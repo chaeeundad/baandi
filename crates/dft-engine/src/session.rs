@@ -929,6 +929,26 @@ impl ScfSession {
         // occupied-eigenvalue criterion from first-order perturbation theory before
         // paying for the tight re-solve. It can only reject; passing still needs
         // the full solve below. `trace` prints the bound and runs the solve anyway.
+        // Scheduling only vetoes an attempt. A deferred boundary continues
+        // ordinary mixing; only the unchanged verification below can pass.
+        let defer_verification = if converged
+            && standard.is_some()
+            && self.problem.options.verification == Verification::FixedPoint
+            && self.problem.sw.verify_schedule != "off"
+            && self.spectral_report.is_none()
+        {
+            let prediction = verification_schedule(history, &self.verification.attempts);
+            let wait = prediction.extra_maps > 0 && iteration < self.problem.options.max_iterations;
+            if self.problem.sw.verify_schedule == "trace" {
+                eprintln!(
+                    "VERIFY-SCHEDULE map={iteration} samples={} failure_vote={:.6} extra_maps={} would_wait={wait}",
+                    prediction.samples, prediction.failure_vote, prediction.extra_maps,
+                );
+            }
+            self.problem.sw.verify_schedule == "on" && wait
+        } else {
+            false
+        };
         let certificate_clock = Instant::now();
         // P0.2: work of the certificate block is reported as the verification
         // run stage (a coarse-stage certificate stays in the coarse stage).
@@ -966,7 +986,9 @@ impl ScfSession {
             (mode == CertScreen::On && bound > CERT_SCREEN_MARGIN * CERT_EIGENVALUE_LIMIT_HA)
                 .then_some(bound)
         });
-        let certified = if let Some(bound) = screened {
+        let certified = if defer_verification {
+            false
+        } else if let Some(bound) = screened {
             // Certain failure: the next SCF iteration continues exactly as after a
             // failed solve (that solve's result is discarded either way). The record
             // carries the step's own residuals, zero solver work, the first-order
@@ -2400,6 +2422,94 @@ fn full_previous(c: &Continuation) -> Result<Option<Vec<ComplexMatrix>>, ScfErro
     Ok(Some(out))
 }
 
+/// Cost proxy from the measured attempt/map ratio: m / (m + 1.3 m).
+const VERIFY_WAIT_BREAK_EVEN: f64 = 1.0 / 2.3;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct VerificationPrediction {
+    pub(crate) samples: usize,
+    pub(crate) failure_vote: f64,
+    pub(crate) extra_maps: usize,
+}
+
+/// A stateless retry forecast. Only existing scalar history is inspected; this
+/// does not evaluate a density, alter a tolerance or certify a state. Keeping
+/// all inputs in history also preserves exact checkpoint continuation.
+pub(crate) fn verification_schedule(
+    history: &[IterationRecord],
+    attempts: &[VerificationAttempt],
+) -> VerificationPrediction {
+    let fallback = VerificationPrediction::default();
+    let Some(last) = attempts.last().filter(|a| !a.passed) else {
+        return fallback;
+    };
+    let Some(current) = history.last() else {
+        return fallback;
+    };
+    let elapsed = current.iteration.saturating_sub(last.iteration);
+    // Three maps is a bounded experiment, never an unbounded convergence veto.
+    if elapsed >= 3
+        || !last.coulomb_error_ha.is_finite()
+        || last.coulomb_error_ha <= last.threshold_ha
+    {
+        return fallback;
+    }
+    let Some(end) = history.iter().position(|r| r.iteration == last.iteration) else {
+        return fallback;
+    };
+    if history[end..]
+        .iter()
+        .any(|r| r.mixer_reset || r.mixing_raw_recovery)
+    {
+        return fallback;
+    }
+    let Some(anchor) = history[end].standard_error_ha else {
+        return fallback;
+    };
+    let Some(now) = current.standard_error_ha else {
+        return fallback;
+    };
+    if !anchor.is_finite() || anchor <= 0.0 || !now.is_finite() || now <= 0.0 {
+        return fallback;
+    }
+    // Re-anchor after the ordinary maps actually performed. Pre-failure
+    // contraction alone is poorly calibrated when a failure feeds the mixer.
+    let estimate = last.coulomb_error_ha * (now / anchor);
+    let start = history.len().saturating_sub(2);
+    let Some(previous) = history.get(start).and_then(|r| r.standard_error_ha) else {
+        return fallback;
+    };
+    let mut q = now / previous;
+    if !estimate.is_finite() || !q.is_finite() || q <= 0.0 || q >= 1.0 {
+        return fallback;
+    }
+    // A second failed attempt supplies an independent per-map rate. Combine
+    // rates geometrically, without fitting a material-dependent scale.
+    if attempts.len() >= 2 {
+        let previous = &attempts[attempts.len() - 2];
+        let distance = last.iteration.saturating_sub(previous.iteration);
+        if distance == 0 {
+            return fallback;
+        }
+        let measured =
+            (last.coulomb_error_ha / previous.coulomb_error_ha).powf(1.0 / distance as f64);
+        if !measured.is_finite() || measured <= 0.0 || measured >= 1.0 {
+            return fallback;
+        }
+        q = (q * measured).sqrt();
+    }
+    // This point forecast is a 0/1 vote, not a probabilistic bound. Its
+    // empirical calibration against real attempts is reported in the design.
+    let vote = |extra: usize| f64::from(estimate * q.powi(extra as i32) >= last.threshold_ha);
+    VerificationPrediction {
+        samples: 1,
+        failure_vote: vote(0),
+        extra_maps: (0..=3 - elapsed)
+            .find(|&extra| vote(extra) <= VERIFY_WAIT_BREAK_EVEN)
+            .unwrap_or(3 - elapsed),
+    }
+}
+
 /// Orbitals (k points, possibly lazy) and output density F(rho_out) of a
 /// verification solve.
 /// The third entry is the owned F(rho_out) of the owned density loop (the
@@ -2704,6 +2814,8 @@ pub(crate) struct SessionSwitches {
     pub(crate) eigen_factor: f64,
     /// `BAANDI_STOP_PREDICTOR` (SCF-TAIL, default off).
     pub(crate) stop_predictor: StopPredictor,
+    /// F-VERIFY-SCHEDULE: resolved once; no environment reads in the loop.
+    pub(crate) verify_schedule: &'static str,
 }
 
 /// SCF-TAIL (`BAANDI_STOP_PREDICTOR=off|trace|on`, default off): the cross
@@ -2761,6 +2873,7 @@ impl SessionSwitches {
             potential_reuse: run.on(Id::POTENTIAL_REUSE),
             growth_reset: run.number(Id::MIX_GROWTH_RESET),
             eigen_factor: run.number(Id::EIGEN_FACTOR).unwrap_or(0.1),
+            verify_schedule: run.choice(Id::VERIFY_SCHEDULE),
             stop_predictor: match run.choice(Id::STOP_PREDICTOR) {
                 "trace" => StopPredictor::Trace,
                 "on" => StopPredictor::On,

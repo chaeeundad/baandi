@@ -1800,7 +1800,7 @@ pub(crate) fn driver_standard_json(
 /// ADR 0043 verification record: every attempt, the pass criterion (Coulomb
 /// fixed-point residual against the threshold) and information-only strict criteria.
 fn verification_json(v: &dft_engine::VerificationReport) -> Value {
-    json!({"mode":"fixed_point","passed":v.passed(),"wall_s":v.wall().as_secs_f64(),
+    let mut result = json!({"mode":"fixed_point","passed":v.passed(),"wall_s":v.wall().as_secs_f64(),
         "attempts":v.attempts.iter().map(|a| json!({"iteration":a.iteration,"passed":a.passed,
             "coulomb_error_ha":a.coulomb_error_ha,"threshold_ha":a.threshold_ha,
             "eigen_tolerance_ha":a.eigen_tolerance_ha,"residual_bound_ha":a.residual_bound_ha,
@@ -1822,7 +1822,23 @@ fn verification_json(v: &dft_engine::VerificationReport) -> Value {
                 record
             }).collect::<Vec<_>>(),
         "criterion":"E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
-        "note":"delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate"})
+        "note":"delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate"});
+    if let Some(schedule) = &v.schedule {
+        result["schedule"] = json!({
+            "mode": schedule.mode,
+            "prediction_evaluations": schedule.prediction_evaluations,
+            "records": schedule.records.iter().map(|r| json!({
+                "map_index": r.iteration,
+                "predicted_additional_maps": r.predicted_additional_maps,
+                "action": r.action,
+                "would_wait": r.would_wait,
+                "coulomb_error_ha": r.coulomb_error_ha,
+                "ratio_to_previous_attempt": r.ratio_to_previous_attempt,
+                "pass": r.passed,
+            })).collect::<Vec<_>>()
+        });
+    }
+    result
 }
 
 /// Reporting boundary only; untested states never receive a passing flag.

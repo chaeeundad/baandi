@@ -946,26 +946,6 @@ impl ScfSession {
         // occupied-eigenvalue criterion from first-order perturbation theory before
         // paying for the tight re-solve. It can only reject; passing still needs
         // the full solve below. `trace` prints the bound and runs the solve anyway.
-        // Scheduling only vetoes an attempt. A deferred boundary continues
-        // ordinary mixing; only the unchanged verification below can pass.
-        let defer_verification = if converged
-            && standard.is_some()
-            && self.problem.options.verification == Verification::FixedPoint
-            && self.problem.sw.verify_schedule != "off"
-            && self.spectral_report.is_none()
-        {
-            let prediction = verification_schedule(history, &self.verification.attempts);
-            let wait = prediction.extra_maps > 0 && iteration < self.problem.options.max_iterations;
-            if self.problem.sw.verify_schedule == "trace" {
-                eprintln!(
-                    "VERIFY-SCHEDULE map={iteration} samples={} failure_vote={:.6} extra_maps={} would_wait={wait}",
-                    prediction.samples, prediction.failure_vote, prediction.extra_maps,
-                );
-            }
-            self.problem.sw.verify_schedule == "on" && wait
-        } else {
-            false
-        };
         let certificate_clock = Instant::now();
         // P0.2: work of the certificate block is reported as the verification
         // run stage (a coarse-stage certificate stays in the coarse stage).
@@ -1003,9 +983,7 @@ impl ScfSession {
             (mode == CertScreen::On && bound > CERT_SCREEN_MARGIN * CERT_EIGENVALUE_LIMIT_HA)
                 .then_some(bound)
         });
-        let certified = if defer_verification {
-            false
-        } else if let Some(bound) = screened {
+        let certified = if let Some(bound) = screened {
             // Certain failure: the next SCF iteration continues exactly as after a
             // failed solve (that solve's result is discarded either way). The record
             // carries the step's own residuals, zero solver work, the first-order
@@ -1063,50 +1041,76 @@ impl ScfSession {
                 passed = report.passed;
             }
             if passed && self.problem.options.verification == Verification::FixedPoint {
-                // ADR 0043: one more map at the delivered density; the delivered
-                // state stays the converged step's own (V4).
-                self.certificate_attempted = true;
-                let (attempt, record, clipped, reuse) = verify_fixed_point(
-                    &mut self.problem,
-                    &step.density,
-                    step.owned_density.as_ref(),
-                    &step.k_points,
-                    tolerance,
-                    standard_error_ha.expect("standard history metric"),
-                    iteration,
-                    (n, step.energy.total_hartree()),
-                )
-                .map_err(|e| match e {
-                    ScfError::NonFinite => ScfError::Diverged {
-                        reason: "nonfinite verification arithmetic".into(),
-                        history: history.clone(),
-                    },
-                    other => other,
-                })?;
-                if let Some(reason) = clipped {
-                    return Err(ScfError::Diverged {
-                        reason,
-                        history: std::mem::take(history),
-                    });
+                // No scheduling branch, call or bookkeeping on ordinary maps.
+                // The predictor itself is called only after a real failure.
+                let defer = self.problem.sw.verify_schedule != "off"
+                    && schedule_attempt(
+                        history,
+                        &mut self.verification,
+                        self.problem.sw.verify_schedule,
+                        self.problem.options.max_iterations,
+                        self.spectral_report.is_none(),
+                    );
+                if defer {
+                    passed = false;
+                } else {
+                    // ADR 0043: one more map at the delivered density; the delivered
+                    // state stays the converged step's own (V4).
+                    self.certificate_attempted = true;
+                    let (attempt, record, clipped, reuse) = verify_fixed_point(
+                        &mut self.problem,
+                        &step.density,
+                        step.owned_density.as_ref(),
+                        &step.k_points,
+                        tolerance,
+                        standard_error_ha.expect("standard history metric"),
+                        iteration,
+                        (n, step.energy.total_hartree()),
+                    )
+                    .map_err(|e| match e {
+                        ScfError::NonFinite => ScfError::Diverged {
+                            reason: "nonfinite verification arithmetic".into(),
+                            history: history.clone(),
+                        },
+                        other => other,
+                    })?;
+                    if let Some(reason) = clipped {
+                        return Err(ScfError::Diverged {
+                            reason,
+                            history: std::mem::take(history),
+                        });
+                    }
+                    passed = attempt.passed;
+                    if !passed {
+                        // feed2: the first failed attempt keeps the default
+                        // continuation; repeated failures feed.
+                        let earlier_failures = self
+                            .verification
+                            .attempts
+                            .iter()
+                            .filter(|a| !a.passed)
+                            .count();
+                        verification_reuse = match verify_reuse(&self.problem) {
+                            VerifyReuse::Off => None,
+                            VerifyReuse::Feed2 if earlier_failures == 0 => None,
+                            mode => Some((mode, reuse)),
+                        };
+                    }
+                    if let Some(schedule) = &mut self.verification.schedule {
+                        let decision = schedule.records.last_mut().expect("attempt decision");
+                        decision.coulomb_error_ha = Some(attempt.coulomb_error_ha);
+                        decision.ratio_to_previous_attempt = self
+                            .verification
+                            .attempts
+                            .last()
+                            .filter(|a| a.coulomb_error_ha > 0.0)
+                            .map(|a| attempt.coulomb_error_ha / a.coulomb_error_ha)
+                            .filter(|ratio| ratio.is_finite());
+                        decision.passed = Some(attempt.passed);
+                    }
+                    self.verification.attempts.push(attempt);
+                    history.last_mut().unwrap().fixed_point_certificate = Some(record);
                 }
-                passed = attempt.passed;
-                if !passed {
-                    // feed2: the first failed attempt keeps the default
-                    // continuation; repeated failures feed.
-                    let earlier_failures = self
-                        .verification
-                        .attempts
-                        .iter()
-                        .filter(|a| !a.passed)
-                        .count();
-                    verification_reuse = match verify_reuse(&self.problem) {
-                        VerifyReuse::Off => None,
-                        VerifyReuse::Feed2 if earlier_failures == 0 => None,
-                        mode => Some((mode, reuse)),
-                    };
-                }
-                self.verification.attempts.push(attempt);
-                history.last_mut().unwrap().fixed_point_certificate = Some(record);
             }
             if passed {
                 self.problem.check_gap(&step.k_points)?;
@@ -2475,13 +2479,50 @@ fn full_previous(c: &Continuation) -> Result<Option<Vec<ComplexMatrix>>, ScfErro
     Ok(Some(out))
 }
 
+/// Called exclusively at an otherwise eligible attempt, never per ordinary map.
+/// Allocation is confined to the first diagnostic boundary. Prediction uses
+/// existing scalar history and stack storage only; there is no logging here.
+#[cold]
+#[inline(never)]
+pub(crate) fn schedule_attempt(
+    history: &[IterationRecord],
+    report: &mut VerificationReport,
+    mode: &'static str,
+    max_iterations: usize,
+    eligible: bool,
+) -> bool {
+    use super::convergence::{VerificationSchedule, VerificationScheduleEntry};
+    let iteration = history.last().expect("attempt history").iteration;
+    let schedule = report.schedule.get_or_insert_with(|| VerificationSchedule {
+        mode,
+        prediction_evaluations: 0,
+        records: Vec::with_capacity(max_iterations),
+    });
+    let prediction = if eligible && report.attempts.last().is_some_and(|a| !a.passed) {
+        schedule.prediction_evaluations += 1;
+        verification_schedule(history, &report.attempts)
+    } else {
+        VerificationPrediction::default()
+    };
+    let would_wait = prediction.extra_maps > 0 && iteration < max_iterations;
+    let wait = mode == "on" && would_wait;
+    schedule.records.push(VerificationScheduleEntry {
+        iteration,
+        predicted_additional_maps: prediction.extra_maps,
+        action: if wait { "wait" } else { "attempt" },
+        would_wait,
+        coulomb_error_ha: None,
+        ratio_to_previous_attempt: None,
+        passed: None,
+    });
+    wait
+}
+
 /// Cost proxy from the measured attempt/map ratio: m / (m + 1.3 m).
 const VERIFY_WAIT_BREAK_EVEN: f64 = 1.0 / 2.3;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct VerificationPrediction {
-    pub(crate) samples: usize,
-    pub(crate) failure_vote: f64,
     pub(crate) extra_maps: usize,
 }
 
@@ -2555,8 +2596,6 @@ pub(crate) fn verification_schedule(
     // empirical calibration against real attempts is reported in the design.
     let vote = |extra: usize| f64::from(estimate * q.powi(extra as i32) >= last.threshold_ha);
     VerificationPrediction {
-        samples: 1,
-        failure_vote: vote(0),
         extra_maps: (0..=3 - elapsed)
             .find(|&extra| vote(extra) <= VERIFY_WAIT_BREAK_EVEN)
             .unwrap_or(3 - elapsed),

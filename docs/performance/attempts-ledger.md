@@ -1277,3 +1277,62 @@ Load at completion: **14.76 / 37.76 / 29.82**; these observations do not establi
 a speedup over the earlier batches. The remaining ~36 ms is dominated by exact
 hashing on the Mac; no inference about dev08 MPI startup/finalize is made.
 | PLATFORM-TESTS | Platform-aware test baselines: preserve aarch64 assertions; distinguish rounding trajectories from exact same-platform work/rank/thread identities; correct stale MKL pair-plan default assumption | Mac fast gate PASS; dev08 confirmation pending | Mac fast gate: 64 binaries, 583 passed, 0 failed, 157 existing ignored; build/test/fmt/clippy exit 0, 13 s wall (observation only); MKL-feature test clippy/type-check exit 0 on Mac (no linking or MKL execution). First run exit 1: three unrelated pseudo-cache tests rejected the repository-local TMPDIR; rerun with /private/tmp scratch passed. Relayed e4186f9 failures: spin energy bit patterns differ by 32 ULP = 3.552713678800501e-15 Ha (derived from the supplied integers, not the ticket's 6-ULP label); reuse SCF 29 vs 26; clustered Davidson 39 vs 35; MKL one-rank Gram differs by 1-2 ULP; selected residual difference about 2e-16 Ha. No speed measurement | MKL PAIR_FFT defaults to pruned, independent of shape. Toy energy 1e-12 Ha, standard energy 5e-9 Ha, roots 1e-11 Ha; residual uses 1e-12 relative to a unit-Ha floor on non-aarch64 (pure relative 1e-12 would reject the supplied values). No production changes or new ignored tests. Follow-up: relayed 7a8ffe2 dev08 gate passed 6/7 failures; degenerate4 residual delta 1.386e-11 Ha exposed per-band basis dependence. Compare cluster residual squared norms at 1e-12 with unit-scale floor; cluster gaps < 1e-8 times common spectrum scale, partitions agree between paths. Original aarch64 bounds retained; independent true residual checked FIRST for both arms. Mac detected singleton scattered/clustered, quartets [0..4,4..8], triplets [0..3,3..6] plus singleton [6..7] at capacities 3/6 and P=2/3; targeted tests 4 passed, 1 existing ignored; all 140 solver unit/integration tests passed, 25 existing ignored; clippy/fmt exit 0. Full cargo test exit 1 at rustdoc scratch-directory creation. Requested fast gate blocked before execution by sandbox denial of mktemp in the required external-volume scratch directory | docs/performance/slow-tests.md, platform-dependent baselines; tickets/PLATFORM-TESTS.md |
+
+## F-LADDER-HANDOFF — closed negative experiment (2026-11-19)
+
+- Source `7243075`, Mac pure Rust, one core, no new QE run. Current solved
+  coarse orbitals are prolonged to the unchanged final basis/grid; one occupied
+  fine H block supplies the kinetic-inverse high-G indicator (shifts 0.5/1/2
+  Ha, policy shift 1 Ha). This is an empirical indicator, not an LDA/PBE bound.
+  The earlier sandbox blocker was resolved by the user's worktree-local
+  `TMPDIR_990=$PWD/target/scratch` correction; no wider permissions were used.
+- **Scientific status CLOSED / policy NO-GO.** 126 fixed-stop candidates on
+  si8, si16, si32, si-skew, MgO8, synthetic skew and synthetic slab, seeds
+  601–603; all converged and verified. Six stops from 1e-2 to 3e-5, fraction
+  0.5. Counts include atomic start, handoff, all fine/redo solves, every
+  verification attempt, and delta-potential updates. H columns and block calls
+  are separate; every requested probe is charged (one block, 2–64 fine columns).
+- Registered sparse-trigger energy-balance rule, q in {0.001, 0.01, 0.1, 1},
+  trained on seed 601: best q=0.1 already has mean work ratio 1.004606.
+  Held-out seeds 602/603, median paired total-work proxy / adopted rule:
+  MgO **0.906958**, Si8 **0.980086**, syn-slab **0.853172**; si16 **1.074884**,
+  si32 **1.074247**, syn-skew2 **1.000143**, si-skew **1.000000**. Only **3/7**
+  wins and no skewed win, below the four-system gate. The global fixed-stop
+  training optimum is 1e-2 (ratio 0.904042), also not uniformly better on the
+  held-out systems. No indicator switch or production default was added.
+- Calibration: high-G variation over unique states is only **0.58–5.08 %**
+  within a system, while remaining fine/verification work varies substantially;
+  its association with recovery work is not transferable. All 21 coarse
+  trajectory prefixes agree across stops. Analytic weighted-residual test,
+  real-versus-complex H probes (1e-11 Ha entry tolerance), 21 exact ordinary
+  ladder controls and 21 capture-on/off energy/work comparisons pass. An
+  independent reader validates **2,202** snapshot manifests and binary shapes.
+- Additional **105** capture-disabled configuration runs, all converged and
+  verified. Fraction 0.35 reduces the work proxy on four systems, but every
+  one needs more fine work; 0.4 improves three. Minimum valid coarse grids
+  improve the proxy on five, but observed Mac walls regress on MgO (1.361),
+  syn-skew2 (1.144) and syn-slab (1.063): grid-volume weighting misses FFT
+  factorization costs. A coarse-only 4x looser ratchet helps MgO/si16 only;
+  its factor=1 driver matches density/orbitals/H exactly on all 21 geometries.
+  No configuration default changes; no Mac wall observation is adoption evidence.
+- Accuracy against accurately completed strict fine references of the same
+  geometries: max |dE| **1.30466659698e-9 Ha** (handoff scan),
+  **4.31099822507e-9 Ha** (configuration scan), both below the unchanged
+  5e-9 Ha standard class. All fine cutoffs, grids, PPs and verification unchanged.
+- **Required gate not green:** `scripts/check.sh fast dft-engine dft-numerics
+  dft-cli` exits **1**. Build/fmt/clippy pass; **446 passed, 3 failed,
+  133 ignored**, 48 binaries. Three unchanged CLI pseudo-cache tests require
+  caches outside repositories and reject the mandated in-worktree TMPDIR.
+  The experiment's initial duplicate-fixture-module lint was fixed; the final
+  clippy gate passes. Scope isolation `scripts/check.sh fast dft-engine
+  dft-numerics` exits **0** (315 passed, 0 failed, 93 ignored; all four gates
+  pass); it does not waive the required gate. Cache-policy/test changes are
+  outside this ticket's scope.
+- [Complete design, per-candidate counts, coarse phase/tolerance tables,
+  commands, hashes and limitations](../design/ladder-handoff.md).
+  Reproducer: `scripts/ladder_handoff.py`; raw JSON/CSV and snapshots:
+  `target/scratch/handoff-{main,config,analysis}`. Preserve/export those raw
+  artifacts before worktree cleanup. The implementation is test-only and the
+  long experiment is ignored by normal gates. **Lesson:** an almost constant
+  high-G discretization floor does not select a cheaper handoff reliably;
+  reduced coarse work must earn back its fine recovery and probe costs.

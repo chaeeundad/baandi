@@ -625,6 +625,8 @@ fn verification_schedule_wait_is_not_a_pass() {
         .run()
         .unwrap();
     let mut report = r.verification.unwrap();
+    // VERIFY_SCHEDULE is default on (2026-11-19): the run already wrote its own audit; start from a clean one.
+    report.schedule = None;
     let a = &mut report.attempts[0];
     a.passed = false;
     a.iteration = 4;

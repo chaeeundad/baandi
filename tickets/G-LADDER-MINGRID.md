@@ -1,0 +1,21 @@
+TASK_ID: G-LADDER-MINGRID
+GOAL: |
+  F-LADDER-HANDOFF (docs/design/ladder-handoff.md, section "Cheaper coarse configurations") found on the Mac that using the SMALLEST VALID coarse FFT grid (the smallest grid that still represents the coarse density sphere, not an aliased or invalid grid) reduces the work metric W on 5 of 7 systems with no median fine-work increase on 4 of them (Si-skew, Si16, Si32, syn-slab); it is not universally faster in wall time (MgO wall ratio 1.361, syn-skew2 1.144, syn-slab 1.063, because smaller non-smooth FFT dimensions can cost more than fewer points), and the experiment ran through an offline driver with no production hook. The coarse stage costs 1.2 s of 8.9 s at si64 np=8 (13 %) and 5.07 s of 41.7 s at one-core si64 (12 %), so this is the largest remaining measured term after the verification schedule. TASK: add a production switch BAANDI_LADDER_COARSE_GRID=default|min (default `default` = unchanged behavior; add to crates/dft-numerics/src/switches.rs and update the switch-count tests crates/dft-numerics/tests/all/switches.rs and crates/dft-cli/tests/all/run.rs) that makes the coarse stage of the cutoff ladder choose, among the valid FFT grid dimensions for its cutoff, the smallest one that represents the coarse density sphere, with FFT-friendly sizes only (use the same size-selection routine the engine already uses for grids; the smallest valid size must still be a good FFT size: if the smallest valid size is non-smooth (large prime factors) choose the next smooth size; document the rule; no cutoff or accuracy change in the final stage; final cutoff, final grid, PP, tolerance and verification unchanged). Everything the coarse stage needs on its grid (density, potential, XC, Hartree, mixing, distributed M2 grid ownership, atomic start on the coarse grid, the prolongation to the fine basis by Miller index which does not depend on the grid) must be consistent; verify with tests: (a) on the Mac simulated ranks 1..7 incl. skewed/elongated cells, odd/even grids, the converged energy equals the default within the standard class (5e-9 Ha) and the strict reference path is unaffected; (b) with the switch default the results are bit-identical to before; (c) the switch is a no-op (bit-identical) for systems that already use the minimum grid (Si8); (d) a counts table over >= 5 systems x 3 seeds on the Mac (si8, si16, si32, si-skew, mgo8, syn-slab, syn-skew2 as in the F-LADDER-HANDOFF fixtures: reuse scripts/ladder_handoff.py) reporting coarse/fine/verify maps, H columns, and the coarse FFT grid dimensions chosen vs default. The wall-time decision will be made by the orchestrator on dev08 (si64 and si32 np=8, one-core si64 and si32; crossed A/B with the pairwise-mean/standard-error method), so give the dev08 command lines in your report; do not claim speed from Mac counts. Keep the coarse-grid choice general (derived from the cutoff and cell, no material-specific constants). Scratch inside your worktree (TMPDIR_990="$PWD/target/scratch"; never /tmp).
+OWNED_FILES:
+  - crates/dft-engine/src/cutoff_ladder.rs
+  - crates/dft-engine/src/scf.rs   # only the coarse-grid selection plumbing if it lives there
+  - crates/dft-numerics/src/switches.rs
+  - crates/dft-numerics/tests/all/switches.rs
+  - crates/dft-cli/tests/all/run.rs   # switch count only
+  - crates/dft-engine/tests/ladder_mingrid.rs   # new
+  - docs/performance/attempts-ledger.md
+READ_ONLY_CONTEXT: AGENTS.md, docs/design/ladder-handoff.md, scripts/ladder_handoff.py, ledger rows LADDER-*, F-LADDER-HANDOFF
+IMPLEMENTATION_STEPS:
+  1. Read how the ladder picks the coarse grid; implement the minimum valid grid choice behind the switch (smooth sizes).
+  2. Tests (a)-(c), then the counts table (d); scripts/check.sh fast dft-engine dft-numerics dft-cli (known: 3 CLI cache tests reject in-repo TMPDIR and pass on dev08).
+TEST_COMMANDS:
+  - scripts/check.sh fast dft-engine dft-numerics dft-cli
+ACCEPTANCE_CRITERIA: default bit-identical; switch on keeps results within the standard class and reports the coarse grids; clippy/fmt clean.
+NON_GOALS: changing the handoff rule, coarse tolerance or fraction defaults.
+GIT: leave changes uncommitted; Claude commits after review.
+RETURN_FORMAT: docs/schemas/report.schema.json

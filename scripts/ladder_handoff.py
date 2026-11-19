@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""F-LADDER-HANDOFF offline experiment; outputs stay under worktree target/scratch.
+"""Offline handoff/fraction experiments; outputs stay under worktree target/scratch.
 
 Build: cargo test --release -p dft-engine --lib --no-run
-Run with the resulting dft_engine test executable (--binary). No production switches
-are added. Captures and accurate references are deliberately outside timing claims.
+Run with the resulting dft_engine test executable (--binary). Fraction candidates
+use explicit run-owned switches; defaults stay unchanged. Captures and accurate
+references are deliberately outside timing claims.
 """
 import argparse
 import csv
@@ -17,6 +18,7 @@ import platform
 import subprocess
 import statistics
 import struct
+import shutil
 from collections import defaultdict
 import sys
 
@@ -31,7 +33,7 @@ def sha(path):
 
 
 def fixture(case, seed, amp, pseudo):
-    aliases = {"si8": "si8-gamma", "si16": "si16-gamma", "si32": "si32-gamma"}
+    aliases = {f"si{n}": f"si{n}-gamma" for n in [8, 16, 32, 64]}
     pp = []
     if case.startswith("si"):
         c = fast.load_case(ROOT / "benchmarks/cases" / (aliases.get(case, case) + ".toml"))
@@ -72,6 +74,7 @@ def main():
     p.add_argument("--arms", default=",".join(f"0.5:{s}:default" for s in ["1e-4", "1e-2", "3e-3", "1e-3", "3e-4", "3e-5"]))
     p.add_argument("--pseudo", type=Path, default=ROOT.parent / "pseudo")
     p.add_argument("--capture", action="store_true")
+    p.add_argument("--trace-pulay", action="store_true")
     p.add_argument("--timeout", type=int, default=900)
     args = p.parse_args()
     scratch = (ROOT / "target/scratch").resolve()
@@ -81,17 +84,21 @@ def main():
     if out.exists() and any(out.iterdir()):
         p.error("--out must be empty; use a fresh directory to prevent stale evidence")
     out.mkdir(parents=True, exist_ok=True)
-    binary = args.binary.resolve()
+    source_binary = args.binary.resolve()
+    # A later build must not replace the executable between geometry jobs.
+    binary = out / "experiment"
+    shutil.copy2(source_binary, binary)
     # Do not inherit algorithm overrides from the shell; the experiment is the
     # current default stack plus explicitly listed run-owned profiling controls.
     env = {k: v for k, v in os.environ.items() if not k.startswith("BAANDI_")}
     env.update(TMPDIR_990=str(scratch), TMPDIR=str(scratch), HANDOFF_ARMS=args.arms,
+               HANDOFF_TRACE="on" if args.trace_pulay else "off",
                HANDOFF_CAPTURE="on" if args.capture else "off")
     provenance = {"binary": str(binary), "binary_sha256": sha(binary),
                   "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                   "engine_source_sha256": sha(ROOT / "crates/dft-engine/src/cutoff_ladder.rs"),
                   "script_sha256": sha(__file__), "synthetic_source_sha256": sha(ROOT / "crates/dft-engine/tests/common/mod.rs"), "platform": platform.platform(),
-                  "arms": args.arms, "capture": args.capture, "amplitude_fractional": args.amp,
+                  "arms": args.arms, "capture": args.capture, "trace_pulay": args.trace_pulay, "amplitude_fractional": args.amp,
                   "load_start": os.getloadavg(), "threads": 1}
     (out / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
     all_rows = []

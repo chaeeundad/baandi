@@ -1119,6 +1119,115 @@ pub fn prolong_density(
     Ok(real.mapv(|z| z.re))
 }
 
+/// F-LADDER-FRACTION: setup-only experimental rules, resolved from this run.
+/// Off performs no basis construction and preserves the requested options.
+fn fraction_options(
+    fine: &ScfProblem,
+    requested: &CutoffLadderOptions,
+) -> Result<CutoffLadderOptions, ScfError> {
+    use dft_numerics::switches::Id;
+    let run = fine.run_config();
+    let grid_rule = run.choice(Id::LADDER_FRACTION_RULE) == "grid";
+    let mode_rule = run.choice(Id::LADDER_STOP_RULE) == "modes";
+    let mut result = requested.clone();
+    if !grid_rule && !mode_rule {
+        return Ok(result);
+    }
+    let basis = |fraction: f64, scale: f64| {
+        let mut options = fine.options.clone();
+        options.cutoff_hartree *= fraction;
+        options.basis(&fine.cell, [0.; 3], scale)
+    };
+    let mut density = basis(result.fraction, 4.)?;
+    if grid_rule {
+        let wave = basis(result.fraction, 1.)?;
+        let dims = FftGridSpec::new(&wave, &density, None)?.dims();
+        let full_density = basis(1., 4.)?;
+        let boundary = full_density
+            .vectors()
+            .iter()
+            .find(|g| (0..3).any(|i| 2 * g.miller[i].unsigned_abs() as usize + 1 > dims[i]));
+        if let Some(g) = boundary {
+            // Density cutoff is four times the orbital cutoff. Account for
+            // the basis inclusion tolerance and round inward at each division.
+            let cutoff = (g.norm_squared / 8. / (1. + dft_basis::CUTOFF_TOLERANCE)).next_down();
+            let fraction = (cutoff / fine.options.cutoff_hartree).next_down();
+            if fraction > result.fraction && fraction < 1. {
+                let candidate_density = basis(fraction, 4.)?;
+                let candidate_wave = basis(fraction, 1.)?;
+                if FftGridSpec::new(&candidate_wave, &candidate_density, None)?.dims() == dims {
+                    result.fraction = fraction;
+                    density = candidate_density;
+                }
+            }
+        }
+        run.note_path(
+            Id::LADDER_FRACTION_RULE,
+            &format!(
+                "grid plateau: requested={} effective={} dims={dims:?}",
+                requested.fraction, result.fraction
+            ),
+            None,
+        );
+    }
+    if mode_rule {
+        // G=0 has no residual under the charge constraint. Parseval makes
+        // R/sqrt(M) the RMS coefficient-error budget (common volume/charge).
+        // The established half-cutoff stop supplies the reference budget;
+        // this does not purport to bound missing-basis response.
+        let reference = basis(CutoffLadderOptions::baseline().fraction, 4.)?;
+        let modes = density.vectors().len().saturating_sub(1);
+        let reference_modes = reference.vectors().len().saturating_sub(1);
+        if modes > 0 && reference_modes > 0 {
+            result.coarse_density_residual *=
+                ((modes as f64 / reference_modes as f64).sqrt()).min(1.);
+        }
+        run.note_path(
+            Id::LADDER_STOP_RULE,
+            &format!(
+                "modes={modes} reference_modes={reference_modes} stop={}",
+                result.coarse_density_residual
+            ),
+            None,
+        );
+    }
+    Ok(result)
+}
+
+#[derive(Debug)]
+struct FineForecast {
+    predicted_maps: usize,
+    first_excess: Option<usize>,
+}
+
+/// The initial two fine maps define E_k = E_1 q^(k-1). This is an
+/// observational extrapolation, not a convergence guarantee for Pulay.
+fn fine_forecast(history: &[IterationRecord], threshold: f64) -> Option<FineForecast> {
+    let first = history.first()?.standard_error_ha?;
+    let second = history.get(1)?.standard_error_ha?;
+    let q = second / first;
+    if !(first > threshold && threshold > 0. && q > 0. && q < 1.) {
+        return None;
+    }
+    let predicted = (threshold / first).ln() / q.ln();
+    if !predicted.is_finite() || predicted >= usize::MAX as f64 - 1. {
+        return None;
+    }
+    let first_excess = history
+        .iter()
+        .take(4)
+        .skip(2)
+        .find(|r| {
+            r.standard_error_ha
+                .is_some_and(|e| e > first * q.powi(r.iteration as i32 - 1))
+        })
+        .map(|r| r.iteration);
+    Some(FineForecast {
+        predicted_maps: 1 + predicted.ceil() as usize,
+        first_excess,
+    })
+}
+
 fn coarse_problem(
     fine: &ScfProblem,
     potentials: &[SpeciesPotential<'_>],
@@ -1356,6 +1465,13 @@ pub fn run_ladder(
     retain_last: bool,
 ) -> Result<LadderOutcome, ScfError> {
     let _run = fine.run_config().enter();
+    // Ineligible paths keep their established fallback without extra setup.
+    let effective = if ineligibility(&fine, ladder).is_none() {
+        fraction_options(&fine, ladder)?
+    } else {
+        ladder.clone()
+    };
+    let ladder = &effective;
     let mut report = CutoffLadderReport {
         standard: fine.options.standard.is_some(),
         secant_requested: ladder.secant_pairs,
@@ -1517,6 +1633,9 @@ fn finish_from(
     report: &mut CutoffLadderReport,
     owned: Option<crate::gamma_real::LazyOrbitals>,
 ) -> Result<ScfOutcome, ScfError> {
+    let run = fine.run_config();
+    let watch = run.on(dft_numerics::switches::Id::LADDER_WATCH);
+    let threshold = fine.options.standard.map(|p| p.threshold_ha);
     let completion = if retain_last {
         CompletionMode::RetainLast
     } else {
@@ -1545,6 +1664,19 @@ fn finish_from(
     crate::profile::between(crate::profile::BetweenPart::SessionSetup, setup_clock);
     drop(handoff_setup);
     while session.step()?.status == StepStatus::Ready {}
+    if watch {
+        let forecast = threshold.and_then(|t| fine_forecast(session.history(), t));
+        let note = match forecast {
+            Some(f) => format!(
+                "observed_maps={} forecast_maps={} early_excess={:?}; diagnostic only, no work discarded",
+                session.history().len(),
+                f.predicted_maps,
+                f.first_excess
+            ),
+            None => "initial error contraction unavailable; diagnostic only".into(),
+        };
+        run.note_path(dft_numerics::switches::Id::LADDER_WATCH, &note, None);
+    }
     if !retain_last && session.result().is_none() {
         return Err(ScfError::NotConverged {
             history: session.history().to_vec(),
@@ -1749,6 +1881,154 @@ mod handoff_experiment {
         );
     }
 
+    #[test]
+    fn fraction_rules_preserve_grid_and_parseval_budget() {
+        let potential = handoff_fixtures::potential(2., 1., true, 81);
+        let species = [SpeciesPotential {
+            label: "Xx",
+            potential: &potential,
+        }];
+        for rows in [
+            [[5., 0., 0.], [0., 5., 0.], [0., 0., 5.]],
+            [[5., 0., 0.], [0.5, 4., 0.], [0.2, 0.4, 6.]],
+            [[4., 0., 0.], [0., 4., 0.], [0., 0., 10.]],
+        ] {
+            let cell = Cell::from_user_rows_bohr(rows).unwrap();
+            let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+            let mut fine = ScfProblem::new(
+                &cell,
+                &atoms,
+                &species,
+                ScfOptions {
+                    cutoff_hartree: 4.,
+                    bands: Some(4),
+                    ..ScfOptions::default()
+                },
+            )
+            .unwrap();
+            for fraction in [0.35, 0.4, 0.45, 0.5, 0.8] {
+                let requested = CutoffLadderOptions {
+                    fraction,
+                    standard: true,
+                    ..CutoffLadderOptions::baseline()
+                };
+                fine.set_run_config(RunConfig::from_pairs(&[]).unwrap());
+                let off = fraction_options(&fine, &requested).unwrap();
+                assert_eq!(off.fraction.to_bits(), fraction.to_bits());
+                assert_eq!(
+                    off.coarse_density_residual.to_bits(),
+                    requested.coarse_density_residual.to_bits()
+                );
+                let before = coarse_problem(&fine, &species, &off).unwrap();
+                fine.set_run_config(
+                    RunConfig::from_pairs(&[("ladder_fraction_rule", "grid")]).unwrap(),
+                );
+                let selected = fraction_options(&fine, &requested).unwrap();
+                let after = coarse_problem(&fine, &species, &selected).unwrap();
+                assert!(selected.fraction >= fraction && selected.fraction < 1.);
+                assert_eq!(before.grid.dims(), after.grid.dims());
+                assert!(
+                    before.states[0].basis.vectors().len() <= after.states[0].basis.vectors().len()
+                );
+                let twice = fraction_options(&fine, &selected).unwrap();
+                assert_eq!(twice.fraction.to_bits(), selected.fraction.to_bits());
+                fine.set_run_config(
+                    RunConfig::from_pairs(&[("ladder_stop_rule", "modes")]).unwrap(),
+                );
+                let normalized = fraction_options(&fine, &requested).unwrap();
+                assert_eq!(normalized.fraction.to_bits(), fraction.to_bits());
+                assert!(normalized.coarse_density_residual <= requested.coarse_density_residual);
+                let nc = before.states[0]
+                    .basis
+                    .density_basis(&cell)
+                    .unwrap()
+                    .vectors()
+                    .len()
+                    - 1;
+                let half =
+                    coarse_problem(&fine, &species, &CutoffLadderOptions::baseline()).unwrap();
+                let nr = half.states[0]
+                    .basis
+                    .density_basis(&cell)
+                    .unwrap()
+                    .vectors()
+                    .len()
+                    - 1;
+                if fraction <= 0.5 {
+                    let residual_budget = normalized.coarse_density_residual / (nc as f64).sqrt();
+                    let reference_budget = requested.coarse_density_residual / (nr as f64).sqrt();
+                    assert!((residual_budget - reference_budget).abs() < 1e-18);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fraction_watch_is_bit_identical_and_forecast_is_diagnostic() {
+        let fixture = Fixture {
+            cell: Cell::from_user_rows_bohr([[5., 0., 0.], [0.5, 4., 0.], [0.2, 0.4, 6.]]).unwrap(),
+            atoms: vec![
+                Atom::new("Xx", [0.13, 0.21, 0.32]),
+                Atom::new("Yy", [0.6, 0.7, 0.8]),
+            ],
+            species: vec![
+                ("Xx".into(), handoff_fixtures::potential(2., 1., true, 81)),
+                ("Yy".into(), handoff_fixtures::potential(2., 1.3, false, 81)),
+            ],
+            options: ScfOptions {
+                cutoff_hartree: 4.,
+                bands: Some(4),
+                ..ScfOptions::default()
+            },
+        };
+        let ladder = CutoffLadderOptions {
+            fraction: 0.4,
+            standard: true,
+            ..CutoffLadderOptions::baseline()
+        };
+        let run = |config: RunConfig| {
+            let _scope = config.enter();
+            run_ladder(
+                fixture.problem(fixture.options.clone()),
+                &fixture.refs(),
+                &ladder,
+                true,
+            )
+            .unwrap()
+        };
+        let off = run(RunConfig::from_pairs(&[]).unwrap());
+        let config = RunConfig::from_pairs(&[("ladder_watch", "on")]).unwrap();
+        let on = run(config);
+        assert!(off.outcome.converged && on.outcome.converged);
+        assert_eq!(
+            off.outcome.result.total_hartree().to_bits(),
+            on.outcome.result.total_hartree().to_bits()
+        );
+        assert_eq!(off.outcome.result.density, on.outcome.result.density);
+        assert_eq!(
+            off.outcome.result.k_points[0].solution.eigenvectors,
+            on.outcome.result.k_points[0].solution.eigenvectors
+        );
+        assert_eq!(off.report.coarse_h_vectors, on.report.coarse_h_vectors);
+        assert_eq!(off.report.fine_h_vectors, on.report.fine_h_vectors);
+        assert!(
+            config
+                .path_note(dft_numerics::switches::Id::LADDER_WATCH)
+                .is_some()
+        );
+        let mut h = on.outcome.result.history[..3].to_vec();
+        for (i, r) in h.iter_mut().enumerate() {
+            r.standard_error_ha = Some(0.125 * 0.5_f64.powi(i as i32));
+        }
+        let f = fine_forecast(&h, 0.0078125).unwrap();
+        assert_eq!(f.predicted_maps, 5);
+        assert_eq!(f.first_excess, None);
+        h[2].standard_error_ha = Some(0.125);
+        assert_eq!(fine_forecast(&h, 0.0078125).unwrap().first_excess, Some(3));
+        h[1].standard_error_ha = Some(0.25);
+        assert!(fine_forecast(&h, 0.0078125).is_none());
+    }
+
     // Offline coarse-only schedule experiment. Its factor=1 control must
     // reproduce coarse_stage bit for bit on every fixture before factor=4 is
     // measured. No session policy or production tolerance is modified.
@@ -1904,6 +2184,195 @@ mod handoff_experiment {
         file.flush().unwrap();
     }
 
+    // Offline diagnostics only. No additional H work enters production or counters.
+    fn save_history(path: &Path, history: &[IterationRecord], reference: f64) {
+        let optional = |v: Option<f64>| {
+            v.filter(|x| x.is_finite())
+                .map_or("null".into(), |x| format!("{x:?}"))
+        };
+        let rows: Vec<_> = history.iter().map(|r| {
+            let pulay = r.pulay.as_ref().map_or("null".into(), |p| format!(
+                "{{\"differences\":{},\"kept\":{},\"gram_condition\":{},\"coefficients\":{:?},\"residual_norm\":{:?},\"predicted_ratio\":{:?},\"step_norm\":{:?},\"coulomb_predicted_ratio\":{},\"coulomb_refit\":{}}}",
+                p.differences, p.kept, optional(Some(p.gram_condition)), p.coefficients,
+                p.residual_norm, p.predicted_ratio, p.step_norm, optional(p.coulomb_predicted_ratio), p.coulomb_refit));
+            format!("{{\"map\":{},\"standard_error_ha\":{},\"eigen_tolerance_ha\":{:?},\"h\":{},\"davidson\":{},\"density_residual\":{:?},\"reset\":{},\"resets\":{},\"redo\":{},\"energy_error_ha\":{:?},\"pulay\":{}}}",
+                r.iteration, optional(r.standard_error_ha), r.requested_eigen_tolerance,
+                r.operator_applications, r.davidson_iterations, r.density_residual,
+                r.mixer_reset, r.mixing_resets, r.standard_redo, r.energy.total_hartree()-reference, pulay)
+        }).collect();
+        std::fs::write(path, format!("[{}]\n", rows.join(","))).unwrap();
+    }
+
+    fn quality(
+        probe: &mut ScfProblem,
+        coarse: &PlaneWaveBasis,
+        n: &Array3<f64>,
+        x: &ComplexMatrix,
+        hx: &ComplexMatrix,
+        reference: &ScfResult,
+    ) -> BTreeMap<String, String> {
+        let mut row = BTreeMap::new();
+        let volume = probe.cell.volume_bohr3();
+        let electrons = probe.electrons;
+        let dims = probe.grid.dims();
+        let mut put = |k: &str, v: f64| {
+            assert!(v.is_finite(), "{k}");
+            row.insert(k.into(), format!("{v:?}"));
+        };
+        put(
+            "handoff_density_error",
+            density_distance(n, &reference.density, volume, electrons),
+        );
+        let mut delta = Array3::<Complex64>::zeros(dims);
+        probe
+            .fft
+            .to_reciprocal(
+                &(n - &reference.density).mapv(|v| Complex64::new(v, 0.)),
+                &mut delta,
+            )
+            .unwrap();
+        let coarse_density = coarse.density_basis(&probe.cell).unwrap();
+        let low_norm = |b: &PlaneWaveBasis| {
+            b.vectors()
+                .iter()
+                .map(|g| {
+                    let ijk = FftGridSpec::map_miller(g.miller, dims).unwrap();
+                    delta[ijk].norm_sqr()
+                })
+                .sum::<f64>()
+        };
+        let total = delta.iter().map(|z| z.norm_sqr()).sum::<f64>();
+        let low = low_norm(coarse);
+        let represented = low_norm(&coarse_density);
+        put("density_low_pw_error", (volume * low).sqrt() / electrons);
+        put(
+            "density_high_pw_error",
+            (volume * (total - low).max(0.)).sqrt() / electrons,
+        );
+        put(
+            "density_outside_coarse_density_error",
+            (volume * (total - represented).max(0.)).sqrt() / electrons,
+        );
+        let (h, xc, _) = probe.input_fields(n).unwrap();
+        let (hr, xcr, _) = probe.input_fields(&reference.density).unwrap();
+        let rms = |v: Vec<f64>| (v.iter().map(|x| x * x).sum::<f64>() / v.len() as f64).sqrt();
+        put(
+            "handoff_hartree_rms_ha",
+            rms(h
+                .potential
+                .iter()
+                .zip(&hr.potential)
+                .map(|(a, b)| a.re - b.re)
+                .collect()),
+        );
+        put(
+            "handoff_xc_rms_ha",
+            rms(xc
+                .potential
+                .iter()
+                .zip(&xcr.potential)
+                .map(|(a, b)| a - b)
+                .collect()),
+        );
+        let mut high = delta.clone();
+        for g in coarse.vectors() {
+            high[FftGridSpec::map_miller(g.miller, dims).unwrap()] = Complex64::default();
+        }
+        let mut high_r = high.clone();
+        probe.fft.to_real(&high, &mut high_r).unwrap();
+        let low_n = n - &high_r.mapv(|z| z.re);
+        // Evaluate the actual nonlinear response of the omitted high-PW part;
+        // positive densities in the fixtures are checked, never clipped here.
+        if low_n.iter().all(|v| *v >= 0.) {
+            let (hl, xl, _) = probe.input_fields(&low_n).unwrap();
+            put(
+                "high_pw_hartree_response_rms_ha",
+                rms(h
+                    .potential
+                    .iter()
+                    .zip(&hl.potential)
+                    .map(|(a, b)| a.re - b.re)
+                    .collect()),
+            );
+            put(
+                "high_pw_xc_response_rms_ha",
+                rms(xc
+                    .potential
+                    .iter()
+                    .zip(&xl.potential)
+                    .map(|(a, b)| a - b)
+                    .collect()),
+            );
+        }
+        let orbitals: Vec<_> = (0..x.cols()).map(|j| x.column(j).to_vec()).collect();
+        let occupations = probe.occupations[..x.cols()].to_vec();
+        let nx = dft_physics::density::from_orbitals(
+            &orbitals,
+            &occupations,
+            &probe.grid,
+            volume,
+            &mut probe.fft,
+        )
+        .unwrap();
+        let (ho, xo, _) = probe.input_fields(&nx).unwrap();
+        let band: f64 = occupations
+            .iter()
+            .enumerate()
+            .map(|(j, f)| {
+                f * x
+                    .column(j)
+                    .iter()
+                    .zip(hx.column(j))
+                    .map(|(a, b)| (a.conj() * b).re)
+                    .sum::<f64>()
+            })
+            .sum();
+        let dc: f64 = nx
+            .iter()
+            .zip(&h.potential)
+            .zip(&xc.potential)
+            .map(|((n, h), x)| n * (h.re + x))
+            .sum::<f64>()
+            * volume
+            / nx.len() as f64;
+        put(
+            "handoff_orbital_energy_error_ha",
+            band - dc + ho.energy.0 + xo.energy.0 + reference.energy.ewald
+                - reference.total_hartree(),
+        );
+        let xr = &reference.k_points[0].solution.eigenvectors;
+        let bands = x.cols();
+        let mut overlap = RealMatrix::zeros(bands, bands).unwrap();
+        for j in 0..bands {
+            for i in 0..bands {
+                let z: Complex64 = x
+                    .column(i)
+                    .iter()
+                    .zip(xr.column(j))
+                    .map(|(a, b)| a.conj() * b)
+                    .sum();
+                assert!(z.im.abs() < 1e-10, "Gamma overlap must be real");
+                overlap.as_mut_slice()[i + j * bands] = z.re;
+            }
+        }
+        let mut gram = RealMatrix::zeros(bands, bands).unwrap();
+        for j in 0..bands {
+            for i in 0..bands {
+                gram.as_mut_slice()[i + j * bands] = (0..bands)
+                    .map(|k| overlap.as_slice()[k + i * bands] * overlap.as_slice()[k + j * bands])
+                    .sum();
+            }
+        }
+        let (values, _) = dft_numerics::real::symmetric_eigh(&gram).unwrap();
+        let angles: Vec<_> = values
+            .iter()
+            .map(|v| v.clamp(0., 1.).sqrt().acos())
+            .collect();
+        put("principal_angle_max_rad", angles[0]);
+        row.insert("principal_angles_rad".into(), format!("{angles:?}"));
+        row
+    }
+
     /// Run through scripts/ladder_handoff.py. Every job has one geometry and
     /// one process, with a strict reference, candidates, and optional snapshots.
     #[test]
@@ -1914,7 +2383,9 @@ mod handoff_experiment {
         let root = std::env::var("HANDOFF_OUTPUT").expect("HANDOFF_OUTPUT");
         let root = Path::new(&root);
         std::fs::create_dir_all(root).unwrap();
+        let trace = std::env::var("HANDOFF_TRACE").as_deref() == Ok("on");
         let run = RunConfig::from_pairs(&[
+            ("mix_coulomb_guard", if trace { "trace" } else { "off" }),
             ("phase_profile", "on"),
             ("stage_timers", "on"),
             ("davidson_stages", "on"),
@@ -1934,17 +2405,46 @@ mod handoff_experiment {
         assert!(reference.converged, "strict reference did not converge");
         let e_ref = reference.result.total_hartree();
         let arms = std::env::var("HANDOFF_ARMS").unwrap_or_else(|_| "0.5:0.0001:default".into());
+        // Factorial mechanism ablation: use the previous arm's *unmodified*
+        // coarse-next tolerance on this arm's state, without redoing any SCF.
+        let mut previous_seed = None;
         for (index, arm) in arms.split(',').enumerate() {
             let parts: Vec<_> = arm.split(':').collect();
             let fraction: f64 = parts[0].parse().unwrap();
             let stop: f64 = parts[1].parse().unwrap();
             let mode = parts[2];
-            let ladder = CutoffLadderOptions {
+            let run = RunConfig::from_pairs(&[
+                ("phase_profile", "on"),
+                ("stage_timers", "on"),
+                ("davidson_stages", "on"),
+                ("mix_coulomb_guard", if trace { "trace" } else { "off" }),
+                (
+                    "ladder_fraction_rule",
+                    if ["grid", "grid-modes"].contains(&mode) {
+                        "grid"
+                    } else {
+                        "off"
+                    },
+                ),
+                (
+                    "ladder_stop_rule",
+                    if ["modes", "grid-modes"].contains(&mode) {
+                        "modes"
+                    } else {
+                        "off"
+                    },
+                ),
+                ("ladder_watch", if mode == "watch" { "on" } else { "off" }),
+            ])
+            .unwrap();
+            let _arm_scope = run.enter();
+            let requested = CutoffLadderOptions {
                 fraction,
                 coarse_density_residual: stop,
                 standard: true,
                 ..CutoffLadderOptions::from_run(run)
             };
+            let ladder = requested.clone();
             let dir = root.join(format!("arm-{index}"));
             std::fs::create_dir_all(&dir).unwrap();
             let capture = std::env::var("HANDOFF_CAPTURE").as_deref() == Ok("on");
@@ -1991,6 +2491,8 @@ mod handoff_experiment {
             let fine = fixture.problem(fixture.options.clone());
             assert!(ineligibility(&fine, &ladder).is_none());
             let fine_grid = fine.grid.dims();
+            let ladder = fraction_options(&fine, &requested).unwrap();
+            let stop = ladder.coarse_density_residual;
             let mut coarse = coarse_problem(&fine, &fixture.refs(), &ladder).unwrap();
             if mode == "minimal-grid" {
                 let mut options = coarse.options.clone();
@@ -2004,7 +2506,21 @@ mod handoff_experiment {
                 options.grid_override = Some(dims);
                 coarse = fixture.problem(options);
             } else {
-                assert!(mode == "default" || mode == "loose4");
+                assert!(
+                    [
+                        "default",
+                        "loose4",
+                        "first-cap",
+                        "first-coarse",
+                        "first-tight",
+                        "first-previous",
+                        "grid",
+                        "modes",
+                        "grid-modes",
+                        "watch"
+                    ]
+                    .contains(&mode)
+                );
             }
             let coarse_grid = coarse.grid.dims();
             let mut report = CutoffLadderReport {
@@ -2032,7 +2548,14 @@ mod handoff_experiment {
             let transfer = Instant::now();
             let state = hand_off(&fine, &c.basis, &c.density, &c.orbitals).unwrap();
             let transfer_s = transfer.elapsed().as_secs_f64();
-            report.standard_seed_ha = c.standard_next;
+            report.standard_seed_ha = match mode {
+                "first-cap" => None,
+                "first-coarse" => c.last_tolerance,
+                "first-tight" => Some(StandardProfile::FLOOR_HA),
+                "first-previous" => Some(previous_seed.expect("previous coarse seed required")),
+                _ => c.standard_next,
+            };
+            previous_seed = c.standard_next;
             let outcome = finish_from(fine, &state, None, true, &mut report, None).unwrap();
             let wall_s = wall.elapsed().as_secs_f64();
             let end = work_timers::snapshot();
@@ -2142,9 +2665,21 @@ mod handoff_experiment {
                     .fold(0., f64::max);
                 assert!(error < 1e-11, "real/complex probe mismatch {error}");
             }
+            let mut quality_row = quality(&mut probe, &c.basis, &n, &x, &hx, &reference.result);
+            save_history(
+                &dir.join("fine-history.json"),
+                &outcome.result.history,
+                e_ref,
+            );
+            save_history(
+                &dir.join("coarse-history.json"),
+                &report.coarse_history,
+                e_ref,
+            );
             let history = &outcome.result.history;
             let verify = outcome.result.verification.as_ref().unwrap();
             let mut row = BTreeMap::<String, String>::new();
+            row.append(&mut quality_row);
             macro_rules! put {
                 ($k:expr,$v:expr) => {
                     row.insert($k.into(), format!("{:?}", $v));
@@ -2153,6 +2688,16 @@ mod handoff_experiment {
             put!("arm", arm);
             put!("capture", capture);
             put!("fraction", fraction);
+            put!("effective_fraction", ladder.fraction);
+            for id in [
+                dft_numerics::switches::Id::LADDER_FRACTION_RULE,
+                dft_numerics::switches::Id::LADDER_STOP_RULE,
+                dft_numerics::switches::Id::LADDER_WATCH,
+            ] {
+                if let Some(note) = run.path_note(id) {
+                    put!(format!("path_{id:?}"), note.path);
+                }
+            }
             put!("stop", stop);
             put!("coarse_maps", report.coarse_iterations);
             put!("fine_maps", history.len());
@@ -2245,11 +2790,11 @@ mod handoff_experiment {
                 );
             }
             // One exact off-path oracle per job, including delivered density.
-            if index == 0 && mode == "default" {
+            if index == 0 || ["grid", "modes", "grid-modes", "watch"].contains(&mode) {
                 let ordinary = run_ladder(
                     fixture.problem(fixture.options.clone()),
                     &fixture.refs(),
-                    &ladder,
+                    &requested,
                     true,
                 )
                 .unwrap();

@@ -2213,3 +2213,72 @@ all trace rows, science and density bytes are identical to the corresponding
 baseline arm. Scratch `identity-summary.json` SHA-256
 `8ad80c4b33b825993f131d1cba60548ca0a789942622df380aaaea11632a102c`.
 | G-LADDER-MINGRID-CLOSED | 2026-11-19 | Codex implemented BAANDI_LADDER_COARSE_GRID=default|min (minimum valid smooth coarse FFT grid) and measured 7 systems x 3 seeds plus simulated ranks 1-7: the existing default already selects the smallest valid 2/3/5-smooth grid, so `min` is bit-identical to default (42 rank/standard/strict conditions, 2,430 captured files identical, all grids/maps/H counts equal, W ratio 1.0, max strict-reference difference 8.5e-10 Ha < 5e-9). The earlier F-LADDER-HANDOFF offline "minimum valid grid" gain used non-smooth sizes that are slower in wall time. | CLOSED, not merged | No code merged (the switch would be a no-op). Coarse-stage cost needs a different lever. Branch task/G-LADDER-MINGRID kept in ../rust-dft-wt for reference. |
+
+## F-LADDER-FRACTION — closed negative rule study (2026-11-19)
+
+- **Scientific result: NO-GO for the tested general rules; defaults unchanged.**
+  Mac pure-Rust one-core release, seven systems (si8/16/32, si-skew, MgO8,
+  synthetic skew and slab), seeds 601–603. All **126/126** matrix arms
+  converged and passed unchanged verification. No new QE run or dev08 timing.
+- Mechanism: 32 fraction-screen arms, eight systems including si64, seed 601,
+  fractions 0.5/0.45/0.4/0.35; **288 fine-map records** include standard error,
+  actual eigen tolerance, H, Davidson work, density residual and Pulay records.
+  Handoff diagnostics include low/high-G density error, Hartree/XC response,
+  variational orbital energy error and occupied-subspace principal angles.
+  Si32/0.4 crosses the 1e-4 residual stop after six coarse maps (9.94947e-5),
+  versus seven at 0.5/0.45 (~2.6e-5). Auto first tolerance loosens about 27x
+  (9.59e-8 to 2.61e-6 Ha), and fine maps rise 10 to 13. Si64 takes six
+  coarse maps at every fraction, keeps its seed near 4e-6 Ha, and fine maps
+  fall 13 to 12 at 0.4 despite comparable representation-error growth.
+- Causal two-by-two si32/601 ablation: coarse state 6/7 maps and tolerance
+  seed from state 6/7 yield fine maps **13/11/11/10** (state6/seed6,
+  state6/seed7, state7/seed6, state7/seed7); fine+verification H
+  **2233/2471/1966/2017**. Tightening the seed alone reduces maps but can
+  increase work. The Ritz-floor ablation takes ten maps but 5206 fine H.
+  Shared first-Pulay bounce is not a loss classifier; history transfer was
+  not changed or repeated. High-G omission is real but cannot alone explain
+  the opposite si32/si64 map-count changes.
+- Independent default-off run-config switches:
+  `BAANDI_LADDER_FRACTION_RULE=grid` fills the requested fraction's FFT
+  plateau by the first excluded density Miller vector (no fitted/material
+  constants); `BAANDI_LADDER_STOP_RULE=modes` scales the requested residual
+  by sqrt(nonzero coarse density modes / half-cutoff modes), capped at one
+  (Parseval per-mode budget, explicitly not a discretization-error bound);
+  `BAANDI_LADDER_WATCH=on` records early error above the first-two-map
+  contraction forecast after completion and never discards or repeats work.
+- Against 0.5, paired median **H-eq** wins: plain 0.4 **4/7**, grid **5/7**,
+  modes **4/7**, combined **5/7**. Systems with at least one fine-H or
+  fine-map increase: **5/7, 5/7, 5/7, 6/7**, respectively. Raw unweighted
+  total-H wins: **2/7, 2/7, 1/7, 2/7**. No rule meets the generality gate.
+  Grid H-eq ratios by system: si8 0.908663, si16 0.999826, si32 0.980393,
+  si-skew 0.873109, MgO8 1.046156, syn-skew2 0.891416, syn-slab 1.123627.
+  Si32 seed 603 still takes twelve fine maps versus eleven at 0.5.
+- Supplemental si64 seed 601: baseline H-eq **5474.453125**; grid
+  **4560.699219** (-16.6912%), modes **4552.455078** (-16.8418%), each
+  twelve versus thirteen fine maps. The large-system win survives in this
+  geometry, but does not remove the multi-system counterexamples. H-eq is
+  grid-volume weighted; extra basis setup/algebra need actual dev08 wall.
+- Worst |E-Estrict| **4.310998447110137e-9 Ha**, syn-slab/603 grid and
+  combined, below 5e-9 with only **6.89001552889863e-10 Ha (13.78%)** margin.
+  Baseline worst 8.463689749049763e-10 Ha. No accuracy or verification
+  criterion was changed; the narrow margin supports no default adoption.
+- Identity: 21 exact baseline offline/production controls and 84 candidate
+  production-driver controls; 21 watch/off numerical/history/handoff-array
+  pairs; 14 trace/off pairs; four pre-rule si32 fraction histories/array
+  comparisons. New unit tests cover grid preservation/idempotence/Parseval
+  budgets and exact watch-off delivered density/orbitals. The diagnostic
+  forecast flags 11/21 lower-fraction runs and is not predictive enough to
+  select a corrective policy.
+- Required check exit **1**: build/fmt/clippy pass, **468 passed, 3 failed,
+  134 ignored**, 51 binaries. The three existing CLI cache tests reject
+  the required in-repository TMPDIR; isolated bin-test rerun exits 101 with
+  the same reason. No new test failure. Python analysis validates all matrix
+  and mechanism records; scripts and complete per-geometry tables in
+  [ladder-fraction.md](../design/ladder-fraction.md). Raw evidence under
+  `target/scratch/fraction-*` must be preserved before cleanup. No timings
+  accepted from the loaded Mac, no remote changes, no default changes.
+- **Lesson:** coarse-stop crossing and its tolerance seed interact. Neither
+  geometric basis size nor a residual budget alone predicts nonlinear Pulay
+  recovery; removing fine maps is insufficient when it increases fine H.
+  Dev08 crossed-pair commands are documented for characterization only;
+  the master decides further work and adoption.

@@ -908,6 +908,10 @@ pub struct CutoffLadderReport {
     /// True when the full-cutoff session started from the prolonged state.
     pub used: bool,
     pub fallback_reason: Option<String>,
+    /// Present only for an opt-in plan-time basis rejection. CLI consumers
+    /// also receive the stable switch path `skipped_coarse_basis` and the
+    /// numeric details in the existing fallback_reason field.
+    pub coarse_basis_rejection: Option<CoarseBasisRejection>,
     pub fraction: f64,
     pub coarse_cutoff_hartree: f64,
     pub coarse_grid: [usize; 3],
@@ -1228,6 +1232,60 @@ fn fine_forecast(history: &[IterationRecord], threshold: f64) -> Option<FineFore
     })
 }
 
+/// A plan-time rejection, distinct from a numerical failure in a coarse solve.
+/// The solver clips the requested subspace to the PW dimension: it does not
+/// require `max(48, 6 * bands)` plane waves. Equality (bands == PW) is valid.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CoarseBasisRejection {
+    pub plane_waves: usize,
+    pub bands: usize,
+    pub block_size: usize,
+    pub requested_subspace: usize,
+    pub effective_subspace: usize,
+    pub capacity_per_band: usize,
+}
+impl CoarseBasisRejection {
+    fn reason(&self) -> String {
+        format!(
+            "coarse_basis_incompatible: plane_waves={} bands={} block_size={} requested_subspace={} effective_subspace={} capacity_per_band={}",
+            self.plane_waves,
+            self.bands,
+            self.block_size,
+            self.requested_subspace,
+            self.effective_subspace,
+            self.capacity_per_band
+        )
+    }
+}
+
+fn coarse_basis_rejection(
+    fine: &ScfProblem,
+    ladder: &CutoffLadderOptions,
+) -> Result<Option<CoarseBasisRejection>, ScfError> {
+    let mut options = fine.options.clone();
+    options.cutoff_hartree *= ladder.fraction;
+    let plane_waves = options.basis(&fine.cell, [0.; 3], 1.)?.vectors().len();
+    // Same electrons, occupations and band options at both levels.
+    let bands = fine.occupations.len();
+    let requested_subspace = options
+        .davidson_subspace
+        .max(options.davidson_capacity_per_band.saturating_mul(bands));
+    Ok((!bands_fit_subspace(
+        options.davidson_subspace,
+        options.davidson_capacity_per_band,
+        bands,
+        plane_waves,
+    ))
+    .then_some(CoarseBasisRejection {
+        plane_waves,
+        bands,
+        block_size: bands,
+        requested_subspace,
+        effective_subspace: requested_subspace.min(plane_waves),
+        capacity_per_band: options.davidson_capacity_per_band,
+    }))
+}
+
 fn coarse_problem(
     fine: &ScfProblem,
     potentials: &[SpeciesPotential<'_>],
@@ -1488,6 +1546,25 @@ pub fn run_ladder(
         report.fallback_reason = Some(reason);
         let outcome = direct_min::finish(fine, None, retain_last)?;
         return Ok(LadderOutcome { outcome, report });
+    }
+    let run = fine.run_config();
+    let check = dft_numerics::switches::Id::LADDER_BASIS_CHECK;
+    if run.on(check) {
+        match coarse_basis_rejection(&fine, ladder) {
+            Ok(Some(rejection)) => {
+                let reason = rejection.reason();
+                run.note_path(check, "skipped_coarse_basis", Some(&reason));
+                report.coarse_plane_waves = rejection.plane_waves;
+                report.coarse_basis_rejection = Some(rejection);
+                report.fallback_reason = Some(reason);
+                let outcome = direct_min::finish(fine, None, retain_last)?;
+                return Ok(LadderOutcome { outcome, report });
+            }
+            Ok(None) => run.note_path(check, "compatible_coarse_basis", None),
+            // Preserve the established numerical-error fallback for failures
+            // other than the dimensional compatibility this plan checks.
+            Err(_) => run.note_path(check, "basis_check_unavailable", None),
+        }
     }
     let requested = dft_numerics::switches::on(dft_numerics::switches::Id::M2_OWNED_HANDOFF);
     let setup = Instant::now();
@@ -1750,6 +1827,120 @@ mod handoff_experiment {
     use dft_numerics::{real::RealMatrix, switches::RunConfig, work_timers};
     use dft_physics::real_gamma::RealHamiltonian;
     use std::{collections::BTreeMap, path::Path};
+
+    #[test]
+    fn basis_plan_matches_constructor_at_dimension_boundaries() {
+        let potential = handoff_fixtures::potential(2., 1., true, 81);
+        let species = [SpeciesPotential {
+            label: "Xx",
+            potential: &potential,
+        }];
+        let cell = Cell::from_user_rows_bohr([[4., 0., 0.], [0., 4., 0.], [0., 0., 4.]]).unwrap();
+        let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+        let run = RunConfig::from_pairs(&[]).unwrap();
+        let _scope = run.enter();
+        let ladder = CutoffLadderOptions {
+            standard: true,
+            ..CutoffLadderOptions::baseline()
+        };
+        // The first two reject bands > PW. The others must NOT require 48 PW:
+        // equality is a legal full-space solve; seven PW can also hold six bands.
+        for (cutoff, bands, npw, reject) in [
+            (1.5, 6, 1, true),
+            (4., 8, 7, true),
+            (4., 7, 7, false),
+            (4., 6, 7, false),
+        ] {
+            let fine = ScfProblem::new(
+                &cell,
+                &atoms,
+                &species,
+                ScfOptions {
+                    cutoff_hartree: cutoff,
+                    bands: Some(bands),
+                    ..ScfOptions::default()
+                },
+            )
+            .unwrap();
+            let decision = coarse_basis_rejection(&fine, &ladder).unwrap();
+            assert_eq!(decision.is_some(), reject);
+            let coarse = coarse_problem(&fine, &species, &ladder);
+            assert_eq!(coarse.is_err(), reject);
+            if let Some(r) = decision {
+                assert_eq!((r.plane_waves, r.bands, r.block_size), (npw, bands, bands));
+                assert_eq!((r.requested_subspace, r.effective_subspace), (48, npw));
+            } else {
+                assert_eq!(coarse.unwrap().states[0].basis.vectors().len(), npw);
+            }
+        }
+    }
+
+    #[test]
+    fn planned_basis_skip_preserves_full_cutoff_result() {
+        let potential = handoff_fixtures::potential(2., 1., true, 81);
+        let species = [SpeciesPotential {
+            label: "Xx",
+            potential: &potential,
+        }];
+        let cell = Cell::from_user_rows_bohr([[4., 0., 0.], [0., 4., 0.], [0., 0., 4.]]).unwrap();
+        let atoms = [Atom::new("Xx", [0.13, 0.21, 0.32])];
+        for strict in [false, true] {
+            let options = ScfOptions {
+                cutoff_hartree: 1.5,
+                bands: Some(6),
+                ..if strict {
+                    ScfOptions::strict_reference()
+                } else {
+                    ScfOptions::default()
+                }
+            };
+            let ladder = CutoffLadderOptions {
+                standard: true,
+                ..CutoffLadderOptions::baseline()
+            };
+            let run = RunConfig::from_pairs(&[("ladder_basis_check", "on")]).unwrap();
+            let _scope = run.enter();
+            let problem = || ScfProblem::new(&cell, &atoms, &species, options.clone()).unwrap();
+            let planned = run_ladder(problem(), &species, &ladder, true).unwrap();
+            let direct = direct_min::finish(problem(), None, true).unwrap();
+            assert!(planned.outcome.converged && direct.converged);
+            assert!(!planned.report.used);
+            assert_eq!(planned.report.coarse_iterations, 0);
+            assert_eq!(planned.report.coarse_h_vectors, 0);
+            assert_eq!(planned.report.coarse_start_h_vectors, 0);
+            assert_eq!(planned.report.coarse_plane_waves, 1);
+            assert_eq!(
+                planned
+                    .report
+                    .coarse_basis_rejection
+                    .as_ref()
+                    .unwrap()
+                    .bands,
+                6
+            );
+            assert_eq!(
+                run.path_note(dft_numerics::switches::Id::LADDER_BASIS_CHECK)
+                    .unwrap()
+                    .path,
+                "skipped_coarse_basis"
+            );
+            let a = planned.outcome.result;
+            let b = direct.result;
+            assert_eq!(a.total_hartree().to_bits(), b.total_hartree().to_bits());
+            assert_eq!(a.density.mapv(f64::to_bits), b.density.mapv(f64::to_bits));
+            assert_eq!(a.eigenvalues, b.eigenvalues);
+            assert_eq!(
+                a.history
+                    .iter()
+                    .map(|h| h.operator_applications)
+                    .collect::<Vec<_>>(),
+                b.history
+                    .iter()
+                    .map(|h| h.operator_applications)
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
 
     struct Fixture {
         cell: Cell,

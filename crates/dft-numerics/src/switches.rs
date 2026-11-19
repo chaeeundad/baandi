@@ -204,6 +204,8 @@ table! {
         "off, modes", "experimental coarse residual stop: preserve the half-cutoff RMS budget per nonzero density Fourier mode (Parseval); never loosen the requested residual";
     LADDER_WATCH: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "diagnose early fine error above the contraction forecast from maps 1 and 2; record a path note after completion, never redo or discard work";
+    LADDER_BASIS_CHECK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "plan-time coarse basis/band/subspace check: skip an incompatible cutoff ladder before constructing the coarse problem, preserving the ordinary full-cutoff result";
     LADDER_FIRST_TOL: Kind::Choice { allowed: &["auto", "cap", "coarse", "next"], default: "auto" }, "auto",
         "auto, cap, coarse, next", "first fine eigen tolerance after the ladder hand-off: auto (standard per LADDER_STANDARD_SEED, strict cold 1e-2), cap (both cold), coarse (the last coarse step's requested tolerance), next (the coarse schedule's next tolerance: standard ratchet, strict factor x last coarse residual)";
     STANDARD_STOP: Kind::Choice { allowed: &["plain", "confirm"], default: "plain" }, "plain",

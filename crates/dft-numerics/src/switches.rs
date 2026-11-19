@@ -435,6 +435,8 @@ table! {
         "INIT-EWALD-FAST: balanced Ewald scheme (dft-physics ewald::Scheme::Balanced): splitting parameter from the real/reciprocal cost balance for the cell volume and ion count, cutoffs from rigorous tail bounds (truncation <= min(tolerance (sum |Z|)^2 / Omega^(1/3), tolerance * N) Ha), ion pairs i <= j and the reciprocal half space with per-ion phase tables; energy, forces and stress share the parameters; rounding class (different truncation and summation, error vs a tight reference far below 1e-12 Ha/atom); off = reference scheme (eta sqrt(pi)/Omega^(1/3), bit-identical to the previous evaluator)";
     IONIC_FAST: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "INIT-IONIC-FAST: the structure factor of the local ionic potential sum_I exp(-i G.tau_I) from per-ion, per-axis phase tables exp(-i m_k b_k.tau_I) (two complex products per ion and G) instead of one sin/cos pair per ion and G; falls back to the direct phase for any G whose Cartesian vector is not the Miller combination of the unit-Miller vectors; rounding class (phase rounding, about 1e-13 relative)";
+    PHASE_VALIDATE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "G-PHASE-VALIDATE: owned projector finite-dot validation uses a sufficient numerical range proof (finite momentum and position components with maxima <= 2^500); otherwise retains the original pair loop and errors; coefficients and lazy materialization unchanged; off until dev08 A/B";
     IMPORT_CHECK: Kind::Choice { allowed: &["split", "serial"], default: "split" }, "split", "split, serial",
         "LADDER-IMPORT-SPLIT: orthonormality check of an imported warm orbital block (cutoff-ladder and direct-minimization hand-off, `initialize_electronic`): split computes the same per-entry overlaps (each the sequential row sum, bit-identical) eight columns in lockstep and, with a registered communicator, only for this rank's columns j (j mod P), with one 1-double tree sum of the failure flags; serial is the former replicated scalar loop on every rank; same verdict, results bit-identical";
     M2_LAZY_RESULT: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -674,8 +676,20 @@ pub enum RunCounter {
     StatesReplicatedBytes = 9,
     /// Atom-independent reconstruction factor bytes.
     StatesRecipeBytes = 10,
+    /// Owned constructors reaching phase validation setup (per rank/run).
+    PhaseValidateConstructors = 11,
+    /// Species validation calls, excluding factor/norm checks.
+    PhaseValidateCalls = 12,
+    /// Actual finite-dot pair checks, including the failing pair.
+    PhaseValidatePairs = 13,
+    /// Species accepted by the sufficient range proof.
+    PhaseValidateFast = 14,
+    /// Species taking the original loop after an enabled proof declines.
+    PhaseValidateFallbacks = 15,
+    /// Exclusive validation nanoseconds, only with PHASE_PROFILE on.
+    PhaseValidateNanos = 16,
 }
-pub const RUN_COUNTERS: usize = 11;
+pub const RUN_COUNTERS: usize = 17;
 pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
     "stop_kept",
     "stop_fft",
@@ -688,6 +702,12 @@ pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
     "owned.states_table_bytes",
     "owned.states_replicated_bytes",
     "owned.states_recipe_bytes",
+    "phase_validate.constructors",
+    "phase_validate.calls",
+    "phase_validate.pair_checks",
+    "phase_validate.fast_accepts",
+    "phase_validate.fallbacks",
+    "phase_validate.nanoseconds",
 ];
 
 /// The path a consulted switch actually took (recorded by the code that acted

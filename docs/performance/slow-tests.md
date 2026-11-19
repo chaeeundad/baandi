@@ -18,11 +18,46 @@ algorithm, switch default or tolerance changes.
 | CLI `reuse_psi` SCF iterations | Exact on/off equality | Absolute count difference <= 3, existing 5e-9 Ha standard energy gate; reuse work identities stay exact |
 | `algebra_stream` rounding-switch iteration bound | Original 10 percent bound | Existing 1e-11 Ha root agreement, strict residual certificates and convergence protect the trajectory; original H-column bound and exact thread identity remain on all targets |
 | Distributed Gram, one rank versus serial | Original exact bits on Rust | Exact on Rust on every architecture; MKL uses the existing `8 * n * EPSILON * scale` rounding bound (different GEMM entry points). Rank-to-rank bits and repeatability stay exact |
-| Selected-root versus full-rotation residual | Original `1e-10 * max(ra, 1e-6)` bound | `1e-12 * max(1, abs(ra), abs(rb))` Ha: relative to a unit-Ha floor because residuals subtract operator-scale terms. Independent true-residual check and exact same-platform work counts unchanged |
+| Selected-root versus full-rotation residual | Original `1e-10 * max(ra, 1e-6)` bound | Singletons: `1e-12 * max(1, abs(ra), abs(rb))` Ha. Degenerate clusters: compare sums of squared residuals with `1e-12 * max(1, sa, sb)` Ha^2. Independent true-residual checks run first for both paths; exact same-platform work counts unchanged |
 
 The selected-root rule explicitly uses a unit-scale floor, **not** pure relative
 error of 1e-12 against the residual itself: the relayed values near 3.82567544e-7
 Ha differ by about 2e-16 Ha, exceeding a pure-relative limit of about 3.8e-19 Ha.
+
+Follow-up to the relayed dev08 gate on `7a8ffe2`: degenerate4 (capacity 6,
+P=2) band 0 residuals 1.2975194831590202e-6 versus 1.297505624667171e-6 Ha
+expose basis dependence inside a degenerate eigenspace. Its residual block's
+squared Frobenius norm is invariant under orthogonal changes of cluster basis.
+Clusters join adjacent Ritz values with gaps strictly below
+`1e-8 * max(1 Ha, max(abs(eigenvalues)))`, using a common scale for both paths
+and requiring identical partitions. This accommodates numerical splitting
+above root-rounding noise, while remaining far below distinct constructed
+spectral gaps (at least 0.05 Ha). The original aarch64 per-band assertions remain;
+the cluster invariant is additionally exercised there. Every run prints its
+half-open, zero-based cluster ranges. A trailing incomplete cluster is treated
+only as the returned subset: a singleton retains the per-band check, and no
+invariance of an omitted full eigenspace is claimed.
+
+Detected on the Mac at both capacities 3/6 and simulated P=2/3:
+
+| Fixture | Zero-based half-open cluster ranges | Gap tolerance (Ha) |
+| --- | --- | --- |
+| scattered | Nine singletons, `[0..1, ..., 8..9]` | 1.09213682216e-8 |
+| clustered | Seven singletons, `[0..1, ..., 6..7]` | 1e-8 |
+| degenerate4 | `[0..4, 4..8]` | 1e-8 |
+| degenerate3-split | `[0..3, 3..6, 6..7]` | 1e-8 |
+
+The follow-up's direct `cargo test -p dft-solvers --test
+distributed_selected_roots -- --nocapture` passed (4 passed, 1 existing ignored),
+and `cargo clippy -p dft-solvers --all-targets -- -D warnings` exited 0.
+The requested `scripts/check.sh fast dft-solvers` with `TMPDIR_990` and `TMPDIR`
+set to `/Volumes/990-2TB/Develop/rust-dft-scratch/tmp` exited 1 before any gate
+could execute: sandbox denied `mktemp` in that directory. Direct Cargo checks
+use those same environment settings; no alternative scratch path was selected.
+The full `cargo test -p dft-solvers` passed all 140 unit/integration tests
+(25 existing ignored), then exited 1 because rustdoc could not create its
+temporary directory under that same restricted scratch path. `cargo fmt
+--check -p dft-solvers` and `git diff --check` exited 0.
 
 The MKL `[6,6,6]` plan failure was a stale test assumption, not unsupported
 lanes or a constructor bug: `PAIR_FFT` defaults to `pruned` when `MKL_BACKEND`
@@ -30,7 +65,8 @@ is true, and `MklPairPlan::new` dispatches only on that choice, not the shape.
 The test now checks the default and explicit `grid`/`pruned` choices in scoped,
 environment-independent configurations. Existing lane comparisons (four shapes,
 local application and density at relative 1e-14, repeatability) are unchanged.
-Local validation: `TMPDIR_990=/private/tmp/baandi-platform-tests CHECK_NICE=0
+Original validation, before the cluster follow-up:
+`TMPDIR_990=/private/tmp/baandi-platform-tests CHECK_NICE=0
 scripts/check.sh fast dft-engine dft-cli dft-solvers dft-numerics` exited 0:
 64 binaries, 583 passed, 0 failed, 157 existing ignored; all four gates passed.
 MKL-feature test code also passed `cargo clippy -p dft-numerics -p dft-solvers

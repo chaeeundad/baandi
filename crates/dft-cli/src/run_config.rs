@@ -197,3 +197,215 @@ mod tests {
         }
     }
 }
+
+/// CLI lifecycle clocks (F-LAUNCH-IO). No numerical clocks or collectives are
+/// added. Each rank appends its own record AFTER MPI_Finalize to its existing
+/// results file; this avoids another gather/barrier or a second serialization
+/// of the large scientific result. Library callers do not own process lifetime.
+pub mod launch {
+    use serde_json::{Value, json};
+    use std::{
+        cell::RefCell,
+        collections::BTreeMap,
+        fs::OpenOptions,
+        io::{self, Read, Seek, SeekFrom, Write},
+        path::{Path, PathBuf},
+        time::Instant,
+    };
+
+    struct Launch {
+        start: Instant,
+        seconds: BTreeMap<&'static str, f64>,
+        milestones: BTreeMap<&'static str, f64>,
+        covered: Option<f64>,
+        prepare_reused: Option<bool>,
+        output: Option<PathBuf>,
+    }
+    thread_local! {
+        static STATE: RefCell<Option<Launch>> = const { RefCell::new(None) };
+    }
+
+    /// Installed only by main, after resolving input and environment switches.
+    /// The four bootstrap stamps are unavoidable even with profiling off: an
+    /// input [profile] table is not available at process entry. Thereafter off
+    /// means no clock reads, allocation, file writes or collective calls.
+    pub fn begin(start: Instant, mpi_ready: Instant, args_ready: Instant, config_ready: Instant) {
+        if !dft_engine::profile::enabled() {
+            return;
+        }
+        STATE.with(|s| {
+            *s.borrow_mut() = Some(Launch {
+                start,
+                seconds: BTreeMap::from([
+                    ("mpi_init", (mpi_ready - start).as_secs_f64()),
+                    ("arguments", (args_ready - mpi_ready).as_secs_f64()),
+                    ("switch_input", (config_ready - args_ready).as_secs_f64()),
+                ]),
+                milestones: BTreeMap::new(),
+                covered: None,
+                prepare_reused: None,
+                output: None,
+            })
+        });
+    }
+    pub(crate) fn clock() -> Option<Instant> {
+        STATE.with(|s| s.borrow().as_ref().map(|_| Instant::now()))
+    }
+    pub(crate) fn elapsed(key: &'static str, clock: Option<Instant>) {
+        if let Some(clock) = clock {
+            let seconds = clock.elapsed().as_secs_f64();
+            STATE.with(|s| {
+                if let Some(s) = s.borrow_mut().as_mut() {
+                    *s.seconds.entry(key).or_default() += seconds;
+                }
+            });
+        }
+    }
+    pub fn mark(key: &'static str) {
+        STATE.with(|s| {
+            if let Some(s) = s.borrow_mut().as_mut() {
+                s.milestones.insert(key, s.start.elapsed().as_secs_f64());
+            }
+        });
+    }
+    pub(crate) fn since(key: &'static str, milestone: &'static str) {
+        STATE.with(|s| {
+            if let Some(s) = s.borrow_mut().as_mut()
+                && let Some(t) = s.milestones.get(milestone)
+            {
+                s.seconds.insert(key, s.start.elapsed().as_secs_f64() - t);
+            }
+        });
+    }
+    pub(crate) fn covered(seconds: f64) {
+        STATE.with(|s| {
+            if let Some(s) = s.borrow_mut().as_mut() {
+                s.covered = Some(seconds);
+            }
+        });
+    }
+    pub(crate) fn output(path: &Path) {
+        STATE.with(|s| {
+            if let Some(s) = s.borrow_mut().as_mut() {
+                s.output = Some(path.to_owned());
+            }
+        });
+    }
+    pub(crate) fn prepared(reused: bool) {
+        STATE.with(|s| {
+            if let Some(s) = s.borrow_mut().as_mut() {
+                s.prepare_reused = Some(reused);
+            }
+        });
+    }
+    /// Time an operation from the binary without exposing the private clock.
+    pub fn timed<T>(key: &'static str, f: impl FnOnce() -> T) -> T {
+        let start = clock();
+        let result = f();
+        elapsed(key, start);
+        result
+    }
+    fn record(s: &Launch) -> Value {
+        let wall = s.start.elapsed().as_secs_f64();
+        let entry = s.milestones.get("run_entry").copied();
+        let finish = s.milestones.get("profile_finish").copied();
+        json!({"schema":"launch-1", "rank":crate::parallel::rank(), "ranks":crate::parallel::size(),
+            "mpi_backend":if cfg!(feature="mpi") { "mpi" } else { "single_rank_stub" },
+            "prepare_reused":s.prepare_reused,
+            "seconds":s.seconds, "milestones_s":s.milestones,
+            "main_wall_s":wall, "covered_s":s.covered,
+            "outside_covered_s":s.covered.map(|covered| wall-covered),
+            "closure": {"before_init_s":entry, "after_profile_s":finish.map(|t| wall-t),
+                "within_profile_residual_s":entry.zip(finish).zip(s.covered).map(|((a,b),c)| b-a-c)},
+            "note":"Local monotonic seconds from main entry; no cross-rank clock subtraction. init.cli already includes input/preflight/UPF; engine_construction and materialize are also inside covered_s. Detail timers are nested, not additive. preflight includes Config::prepare, its UPF parse and per-k basis checks; prepare_reuse only takes that prepared value. Binary SHA is inside run_block. Each rank retains its existing output files; read rank*/results.json for other ranks. main_wall_s ends before this small launch append; external wall minus main_wall_s includes pre-main launcher/loader, final append and post-main runtime/OS teardown. No fsync or new barrier. MPI finalize time includes waiting for slower ranks."})
+    }
+    fn append(path: &Path, launch: &Value) -> io::Result<()> {
+        // Preserve every original byte except the final top-level brace. The
+        // file was emitted by serde_json::to_vec_pretty and has no newline.
+        let mut file = OpenOptions::new().read(true).write(true).open(path)?;
+        file.seek(SeekFrom::End(-1))?;
+        let mut last = [0];
+        file.read_exact(&mut last)?;
+        if last != *b"}" {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "results.json must end with an object",
+            ));
+        }
+        let mut bytes = b",\n  \"launch\": ".to_vec();
+        serde_json::to_writer_pretty(&mut bytes, launch)?;
+        bytes.extend_from_slice(b"\n}");
+        file.seek(SeekFrom::End(-1))?;
+        file.write_all(&bytes)?;
+        file.flush()
+    }
+    /// Called after dropping the engine communicator and the MPI universe.
+    /// A missing output (unsupported driver or early failure) adds no file.
+    pub fn finish() -> io::Result<()> {
+        STATE.with(|s| {
+            if let Some(s) = s.borrow_mut().take()
+                && let Some(path) = &s.output {
+                let record = record(&s);
+                append(path, &record)?;
+                eprintln!("launch rank {}: main {:.6} s; outside covered {:.6} s (local; see results.json)",
+                    crate::parallel::rank(), record["main_wall_s"].as_f64().unwrap(), record["outside_covered_s"].as_f64().unwrap_or(0.));
+            }
+            Ok(())
+        })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        #[test]
+        fn append_preserves_science_and_bytes_and_rejects_truncation() {
+            let path = std::env::temp_dir().join(format!("launch-{}.json", std::process::id()));
+            let science = json!({"density":"abc", "run":{"completed":true}, "total_energy":{"ha":-1.234567890123456}});
+            let before = serde_json::to_vec_pretty(&science).unwrap();
+            std::fs::write(&path, &before).unwrap();
+            let profile = json!({"schema":"launch-1", "seconds":{"mpi_finalize":0.25}});
+            append(&path, &profile).unwrap();
+            let after = std::fs::read(&path).unwrap();
+            assert_eq!(&after[..before.len() - 1], &before[..before.len() - 1]);
+            let mut parsed: Value = serde_json::from_slice(&after).unwrap();
+            assert_eq!(
+                parsed.as_object_mut().unwrap().remove("launch"),
+                Some(profile)
+            );
+            assert_eq!(parsed, science);
+            std::fs::write(&path, b"{\"truncated\":").unwrap();
+            assert!(append(&path, &json!({})).is_err());
+            std::fs::remove_file(path).unwrap();
+        }
+        #[test]
+        fn inactive_has_no_clock_or_output() {
+            assert!(clock().is_none());
+            mark("unused");
+            output(Path::new("/not/an/output"));
+            finish().unwrap();
+            assert!(clock().is_none());
+        }
+        #[test]
+        fn closure_uses_this_ranks_covered_wall_and_clears_state() {
+            let start = Instant::now() - std::time::Duration::from_secs(1);
+            let state = Launch {
+                start,
+                seconds: BTreeMap::new(),
+                milestones: BTreeMap::from([("run_entry", 0.1), ("profile_finish", 0.8)]),
+                covered: Some(0.6),
+                prepare_reused: Some(true),
+                output: None,
+            };
+            let r = record(&state);
+            let closure = &r["closure"];
+            let sum = closure["before_init_s"].as_f64().unwrap()
+                + closure["after_profile_s"].as_f64().unwrap()
+                + closure["within_profile_residual_s"].as_f64().unwrap();
+            assert!((sum - r["outside_covered_s"].as_f64().unwrap()).abs() < 1e-14);
+            STATE.with(|s| *s.borrow_mut() = Some(state));
+            assert!(clock().is_some());
+            finish().unwrap();
+            assert!(clock().is_none());
+        }
+    }
+}

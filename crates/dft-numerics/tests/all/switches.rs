@@ -267,5 +267,8 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::INIT_OWNED_STATES), Value::Choice("on")); // on since 2026-11-19 (dev08 si64 -11.4 %)
     assert_eq!(value(Id::M2_OWNED_HANDOFF), Value::Choice("off"));
     assert_eq!(value(Id::VERIFY_SCHEDULE), Value::Choice("on")); // on since 2026-11-19 (dev08 1-core si64 -6.8 %)
-    assert_eq!(TABLE.len(), 112);
+    assert_eq!(value(Id::LADDER_FRACTION_RULE), Value::Choice("off"));
+    assert_eq!(value(Id::LADDER_STOP_RULE), Value::Choice("off"));
+    assert_eq!(value(Id::LADDER_WATCH), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 115);
 }

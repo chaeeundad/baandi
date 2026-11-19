@@ -30,6 +30,7 @@ use dft_geometry::{
     Atom, Cell,
     kpoints::{self, KPoint},
 };
+use dft_mpi::Collective;
 use dft_physics::{
     data::*,
     ewald::{self, EwaldOptions, Ion},
@@ -1502,13 +1503,19 @@ impl ScfProblem {
                 [0; 3]
             },
         );
-        let mut ionic = Array3::zeros(grid.dims());
-        fft.to_real(&ionic_g, &mut ionic)?;
-        let scale = ionic.iter().map(|z| z.re.abs()).fold(1.0, f64::max);
-        if ionic.iter().any(|z| z.im.abs() > 1e-12 * scale) {
-            return Err(ScfError::Numerical("ionic imaginary potential".into()));
-        }
-        let ionic_real = ionic.mapv(|z| z.re);
+        let ionic_real = if let Some(comm) =
+            crate::m2::active().filter(|_| run.on(dft_numerics::switches::Id::INIT_OWNED_STATES))
+        {
+            crate::m2::initial_ionic_real(&comm, &mut fft, &ionic_g)?
+        } else {
+            let mut ionic = Array3::zeros(grid.dims());
+            fft.to_real(&ionic_g, &mut ionic)?;
+            let scale = ionic.iter().map(|z| z.re.abs()).fold(1.0, f64::max);
+            if ionic.iter().any(|z| z.im.abs() > 1e-12 * scale) {
+                return Err(ScfError::Numerical("ionic imaginary potential".into()));
+            }
+            ionic.mapv(|z| z.re)
+        };
         crate::profile::init_part(crate::profile::InitPart::Densities, part);
         let part = crate::profile::clock();
         let pool =
@@ -1518,6 +1525,15 @@ impl ScfProblem {
         // its own Hamiltonian scratch slot (no modulo-slot collisions).
         let inner = options.threads.max(1);
         let mut construction_points = points.to_vec();
+        // Capture MPI identity on the caller before entering pool workers;
+        // the communicator registry itself is thread-local.
+        let owned_layout = crate::m2::active()
+            .filter(|_| {
+                run.on(dft_numerics::switches::Id::INIT_OWNED_STATES)
+                    && gamma_real_exclusion.is_none()
+                    && options.gamma_real != crate::GammaReal::Off
+            })
+            .map(|comm| (comm.rank(), comm.size()));
         let states = ordered_solves(
             &mut construction_points,
             options.threads,
@@ -1546,16 +1562,33 @@ impl ScfProblem {
                 // INIT-REUSE: the k grid is the Hamiltonian's grid (same basis,
                 // same density sphere vectors, same dims); passing it avoids
                 // building the density sphere again per k state.
-                let hamiltonian = Hamiltonian::new_with_grid(
-                    &basis,
-                    k_grid.clone(),
-                    ionic_real.clone(),
+                let nonlocal = if let Some((rank, ranks)) =
+                    owned_layout.filter(|_| point.fractional == [0.; 3])
+                {
+                    let indices = dft_physics::distributed_real_gamma::owned_projector_indices(
+                        &basis, &k_grid, rank, ranks,
+                    )
+                    .map_err(|e| ScfError::Numerical(e.to_string()))?;
+                    NonlocalOperator::new_owned_with_rule(
+                        &basis,
+                        cell.volume_bohr3(),
+                        &species,
+                        options.radial_even_rule,
+                        &indices,
+                    )?
+                } else {
                     NonlocalOperator::new_with_rule(
                         &basis,
                         cell.volume_bohr3(),
                         &species,
                         options.radial_even_rule,
-                    )?,
+                    )?
+                };
+                let hamiltonian = Hamiltonian::new_with_grid(
+                    &basis,
+                    k_grid.clone(),
+                    ionic_real.clone(),
+                    nonlocal,
                 )?
                 .with_band_pool(inner, pool.clone())?;
                 let band_density =
@@ -2984,8 +3017,38 @@ impl ScfProblem {
             )?;
             crate::profile::atomic_part(crate::profile::AtomicPart::Span, part);
             let part = crate::profile::clock();
-            // ATOMIC-REAL: H Q on the real Gamma path when eligible.
-            let hq = if crate::gamma_real::atomic_real() {
+            // Owned init prepares the small D B^H Q once. The existing split
+            // Ritz still applies H and forms Gram columns on their owners.
+            let atomic_weights = if state.hamiltonian.nonlocal().has_owned_rows() {
+                match crate::m2::active() {
+                    Some(comm) => {
+                        let weights = crate::m2::owned_atomic_weights(
+                            &comm,
+                            &state.hamiltonian,
+                            span.vectors(),
+                        )?;
+                        Some(if let Some(split) = split.as_ref() {
+                            let counts = dft_mpi::block_counts(weights.cols(), split.size());
+                            let starts = dft_mpi::block_displacements(&counts);
+                            let lo = starts[split.rank()] * weights.rows();
+                            let len = counts[split.rank()] * weights.rows();
+                            ComplexMatrix::new(
+                                weights.rows(),
+                                counts[split.rank()],
+                                weights.as_slice()[lo..lo + len].to_vec(),
+                            )
+                            .map_err(dft_solvers::SolverError::from)?
+                        } else {
+                            weights
+                        })
+                    }
+                    None => None,
+                }
+            } else {
+                None
+            };
+            // ATOMIC-REAL remains the unchanged serial alternative.
+            let hq = if atomic_weights.is_none() && crate::gamma_real::atomic_real() {
                 crate::gamma_real::atomic_apply_real(
                     &state.hamiltonian,
                     &state.basis,
@@ -3001,14 +3064,20 @@ impl ScfProblem {
             };
             crate::profile::atomic_part(crate::profile::AtomicPart::Hq, part);
             let part = crate::profile::clock();
-            let (guess, report) = atomic_start::ritz(
-                &span,
-                &state.hamiltonian,
-                self.occupations.len(),
-                state.point.fractional == [0.; 3],
-                hq,
-                split.as_ref(),
-            )?;
+            let ritz = || {
+                atomic_start::ritz(
+                    &span,
+                    &state.hamiltonian,
+                    self.occupations.len(),
+                    state.point.fractional == [0.; 3],
+                    hq,
+                    split.as_ref(),
+                )
+            };
+            let (guess, report) = match atomic_weights {
+                Some(weights) => state.hamiltonian.with_atomic_weights(weights, ritz)?,
+                None => ritz(),
+            }?;
             crate::profile::atomic_part(crate::profile::AtomicPart::Ritz, part);
             self.atomic_start.atomic_orbitals += report.atomic_orbitals;
             self.atomic_start.initial_h_applications += report.initial_h_applications;

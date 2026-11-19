@@ -451,6 +451,7 @@ pub fn stats() -> dft_physics::distributed_real_gamma::M2Counters {
                     .zip(&STAGE_CALLS)
                     .map(|(n, c)| (*n, c.load(Ordering::Relaxed))),
             )
+            .chain(dft_physics::hamiltonian::owned_state_stats())
             .collect(),
         STAGE_NAMES
             .iter()
@@ -458,4 +459,134 @@ pub fn stats() -> dft_physics::distributed_real_gamma::M2Counters {
             .map(|(n, c)| (*n, c.load(Ordering::Relaxed) as f64 * 1e-9))
             .collect(),
     )
+}
+
+/// Atomic H Q without a replicated atom-by-G projector table. The overlap
+/// P = B^H Q is computed in globally numbered 1024-row tiles. Eight tile slots
+/// are reduced at once: each slot has exactly one contributing rank, then all
+/// ranks fold the slots in ascending order. Rank count changes scheduling, not
+/// the association of P. D P and the back product give B D P (hence Q^H B D P
+/// in the existing column-split Ritz routine). Only these small weights are
+/// returned; no full H Q is gathered or replicated Gram product introduced.
+/// This setup-only path allocates; ordinary Hamiltonian applications do not.
+#[doc(hidden)]
+pub fn owned_atomic_weights<K: Collective>(
+    comm: &K,
+    h: &dft_physics::hamiltonian::Hamiltonian,
+    q: &dft_numerics::linalg::ComplexMatrix,
+) -> Result<dft_numerics::linalg::ComplexMatrix, ScfError> {
+    use dft_numerics::linalg::{ComplexMatrix, complex_gemm_slices_into};
+    use dft_physics::data::Complex64 as C;
+    const ROWS: usize = 1024;
+    const SLOTS: usize = 8;
+    let err = |e: String| ScfError::Numerical(format!("owned atomic image: {e}"));
+    let (n, bands) = (q.rows(), q.cols());
+    let nl = h.nonlocal();
+    let p = nl.projector_count();
+    let tiles = n.div_ceil(ROWS);
+    let len = p * bands;
+    let mut projections = vec![C::default(); len];
+    // Last element carries a failure flag, so a local numerical failure cannot
+    // strand peers in a later collective.
+    let mut local = vec![0.; SLOTS * len * 2 + 1];
+    let mut all = vec![0.; local.len()];
+    if p != 0 {
+        for first in (0..tiles).step_by(SLOTS) {
+            local.fill(0.);
+            for slot in 0..SLOTS.min(tiles - first) {
+                let tile = first + slot;
+                if tile % comm.size() != comm.rank() {
+                    continue;
+                }
+                let lo = tile * ROWS;
+                let hi = (lo + ROWS).min(n);
+                let rows: Vec<_> = (lo..hi).collect();
+                let result = (|| -> Result<Vec<C>, ScfError> {
+                    let beta = nl.projector_rows(&rows)?;
+                    let mut x = Vec::with_capacity(rows.len() * bands);
+                    for b in 0..bands {
+                        x.extend_from_slice(&q.column(b)[lo..hi]);
+                    }
+                    let mut product = vec![C::default(); len];
+                    complex_gemm_slices_into(&beta, rows.len(), p, true, &x, bands, &mut product)
+                        .map_err(|e| err(e.to_string()))?;
+                    Ok(product)
+                })();
+                match result {
+                    Ok(product) => {
+                        for (dst, z) in local[slot * len * 2..(slot + 1) * len * 2]
+                            .as_chunks_mut::<2>()
+                            .0
+                            .iter_mut()
+                            .zip(product)
+                        {
+                            dst.copy_from_slice(&[z.re, z.im]);
+                        }
+                    }
+                    Err(_) => *local.last_mut().unwrap() = 1.,
+                }
+            }
+            // Omit unused slots in the final batch. Slot count depends only
+            // on the global shape, never on rank count. Keep the failure flag
+            // immediately after the used slots.
+            let used = SLOTS.min(tiles - first) * len * 2;
+            local[used] = *local.last().unwrap();
+            comm.tree_sum_f64(&local[..=used], &mut all[..=used])
+                .map_err(|e| err(e.to_string()))?;
+            if all[used] != 0. {
+                return Err(err("projector tile failed".into()));
+            }
+            for slot in 0..SLOTS.min(tiles - first) {
+                for (p, z) in projections.iter_mut().zip(
+                    all[slot * len * 2..(slot + 1) * len * 2]
+                        .as_chunks::<2>()
+                        .0
+                        .iter(),
+                ) {
+                    *p += C::new(z[0], z[1]);
+                }
+            }
+        }
+    }
+    let mut weights = vec![C::default(); len];
+    nl.couple_projections(&projections, &mut weights)?;
+    ComplexMatrix::new(p, bands, weights).map_err(|e| err(e.to_string()))
+}
+
+/// The initial ionic field is immutable and identical on all ranks. With owned
+/// init enabled, only rank zero transforms it; peers receive the same real
+/// values and avoid a full complex grid allocation and inverse FFT. FFT plans
+/// remain per rank because later field evaluations mutate their workspaces.
+pub(crate) fn initial_ionic_real<K: Collective>(
+    comm: &K,
+    fft: &mut dft_physics::data::FftPlan3d,
+    coefficients: &Array3<dft_physics::data::Complex64>,
+) -> Result<Array3<f64>, ScfError> {
+    use dft_physics::data::Fft3d;
+    let mut out = Array3::zeros(coefficients.raw_dim());
+    let mut failure = [0.];
+    if comm.rank() == 0 {
+        let mut complex = Array3::zeros(coefficients.raw_dim());
+        match fft.to_real(coefficients, &mut complex) {
+            Err(_) => failure[0] = 1.,
+            Ok(()) => {
+                let scale = complex.iter().map(|z| z.re.abs()).fold(1.0, f64::max);
+                if complex.iter().any(|z| z.im.abs() > 1e-12 * scale) {
+                    failure[0] = 1.;
+                } else {
+                    for (r, z) in out.iter_mut().zip(&complex) {
+                        *r = z.re;
+                    }
+                }
+            }
+        }
+    }
+    comm.bcast_f64(&mut failure, 0)
+        .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    if failure[0] != 0. {
+        return Err(ScfError::Numerical("initial ionic transform failed".into()));
+    }
+    comm.bcast_f64(out.as_slice_mut().unwrap(), 0)
+        .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    Ok(out)
 }

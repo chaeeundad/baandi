@@ -1608,3 +1608,307 @@ table bytes. Require no full build on the default production path in arm B.
 These dev08 commands were not executed here. The master must use matched
 10-step inputs; the local screen runs converged production SCF with the ladder
 and therefore is not a reproduction of the fixed-step dev08 timing protocol.
+
+## Distributed cutoff handoff pricing (G-HANDOFF-OWNED, 2026-11-19)
+
+Initial pricing status: **implemented; prototype initially blocked on ownership**.
+The orchestrator subsequently approved the narrow Gamma/session interface extension;
+the completed default-off prototype and its measurements are recorded below.
+Base `999f5fcb695e7b1bef8ad58d0963e604e5f526cc`, uncommitted worktree.
+This implements the price-first part of plan-2026-11-19 section 5. It does not
+repeat LADDER-IMPORT-SPLIT or LAZY-ASSEMBLE-FUSED and does not change the default
+handoff or an SCF numerical rule.
+
+`BAANDI_PHASE_PROFILE=on` exports `handoff.*` through the existing engine M2
+counter/stage report (CLI `parallel.m2`, simulated harness `m2_counters` and
+`stages.m2.handoff.*`). Off: no new clock reads, counter updates, snapshots or
+allocations; only the disabled checks remain. The nine exclusive stage entries
+are materialize (orbital gather, unpack and returned clone), orbital_copy,
+density_copy (FFT prolongation and charge/positivity check), encode (electronic
+state), setup (fine session construction/initialization and seeding), import
+(density checks and coefficient decoding), check (the unchanged distributed
+norm/overlap check), export_density (owned input gather), export_copy (remaining
+coarse-state copies). Nested spans subtract child time. The additional
+`materialize_collective` entry is **inside** materialize: never add it again.
+Coarse SCF maps, coarse session setup, final delivery and atomic truncation
+comparison are excluded. Fine session setup uses the same path even without a
+tolerance seed; checkpoint and direct-min imports retain their entry point.
+
+`cutoff_ladder::handoff_profile()` exposes rank-local cumulative times/counts.
+M2 exports process sums, which the simulated harness divides by P: the following
+are **rank means**, not a maximum/critical-path measurement. Counts are exact.
+The gather-byte counter is the orbital allgatherv's delivered buffers
+`8 * (P + Nc + Nc * bands)` per materialization and rank; it is not physical
+wire traffic, does not include density/setup gathers, and is zero for cached
+materialization. Collective counts include the entire handoff. Full-matrix bytes
+are `16 * (Nc + Nf) * bands`. The coefficient-only live-payload upper bound is
+`max(40*Nc*bands, 16*Nc*bands + 32*Nf*bands)` bytes per rank; it excludes density,
+index metadata, allocator overhead, operators and solver workspaces and is
+**not a measured RSS peak**. The first term deliberately bounds unpack plus
+clone conservatively. A terminal coarse result already materialized by its last
+map has zero handoff materializations; no map cost is relabelled as handoff.
+
+Mac observations (O), pure release, 8 simulated ranks, production standard,
+verification on, ladder on, seed 601 / fractional displacement 1e-3, **one A/B
+pair per cell**. A = phase profile off, B = on. Shared-host load varied; wall
+changes between A and B are not speedup claims. Source fixture and all remaining
+controls are the existing `m2_entry_cost` production harness. UPF SHA-256
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+Measured executable SHA-256
+`36d83663a0af93f18753b1a8abcb85fbd3470e294e20241baa9b97f9e54d7f29`.
+
+| Observation / count, per rank | Si32 P=8 | Si64 P=8 |
+| --- | ---: | ---: |
+| Profile-on whole-run wall (s) | 1.742104 | 7.882185 |
+| Exclusive handoff rank mean (s) | 0.032431 | 0.107617 |
+| Rank-mean handoff / whole-run wall | 1.8616% | 1.3653% |
+| Materialize incl. returned clone (s) | 0.001966 | 0.009546 |
+| Collective time inside materialize (s; not additive) | 0.000357 | 0.001650 |
+| Orbital copy (s) | 0.002002 | 0.006551 |
+| Density prolong/check (s) | 0.003572 | 0.008731 |
+| Encode (s) | 0.001313 | 0.006452 |
+| Fine setup excluding import (s) | 0.016498 | 0.036032 |
+| Import excluding overlap check (s) | 0.002960 | 0.010684 |
+| Norm/overlap check (s) | 0.003881 | 0.028825 |
+| Export density / remaining copy (s) | 0.000175 / 0.000064 | 0.000665 / 0.000131 |
+| Orbital materializations | 1 | 1 |
+| Orbital gather delivered bytes | 2,312,392 | 8,947,240 |
+| Handoff allgatherv / tree_sum calls | 9 / 1 | 9 / 1 |
+| Handoff alltoall / bcast / barrier calls | 0 / 0 / 0 | 0 / 0 / 0 |
+| Full matrix payload bytes | 17,479,808 | 68,175,360 |
+| Coefficient live-payload upper bound bytes | 30,401,984 | 118,590,912 |
+| Fine SCF / Davidson / H columns, both arms | 11 / 67 / 1888 | 10 / 51 / 3165 |
+| Energy (Ha), both arms | -126.703285939970 | -253.378117630305 |
+| Profile-on/off energy difference (Ha) | 0, identical bits | 0, identical bits |
+| Profile-on/off density FNV | identical | identical |
+
+**Go condition holds through the avoidable gather**, despite both observed
+rank-mean fractions being below 2%. The ceiling is the measured exclusive
+handoff, never the historical 1.2007 s coarse stage. Even that ceiling includes
+necessary fine preparation and density interpolation that an orbital permutation
+alone will not remove. Real MPI latency and critical-path pricing remain dev08
+work for the master session.
+
+Reproduction (scratch only on the worktree volume; no UPF copied/committed):
+
+```sh
+mkdir -p target/scratch
+export PATH=/opt/homebrew/opt/rustup/bin:$PATH
+export TMPDIR_990="$PWD/target/scratch" TMPDIR="$PWD/target/scratch"
+cargo test --offline --release -p dft-engine --test m2_entry_cost --no-run
+python3 -I scripts/fast_screen_mpi.py --binary target/release/deps/m2_entry_cost-27ed8b949e92fddf --upf ../pseudo/Si.pz-vbc.UPF --case si32 --ranks 8 --pairs 1 --a BAANDI_PHASE_PROFILE=off --b BAANDI_PHASE_PROFILE=on --json-out target/scratch/price-si32.json
+python3 -I scripts/fast_screen_mpi.py --binary target/release/deps/m2_entry_cost-27ed8b949e92fddf --upf ../pseudo/Si.pz-vbc.UPF --case si64 --ranks 8 --pairs 1 --a BAANDI_PHASE_PROFILE=off --b BAANDI_PHASE_PROFILE=on --json-out target/scratch/price-si64.json
+# Equivalent direct harness controls (production/ladder are also script defaults):
+DFT_SI_UPF="$PWD/../pseudo/Si.pz-vbc.UPF" M2_PROFILE_SERIAL=off M2_PROFILE_CASE=si64 M2_PROFILE_RANKS=8 M2_PROFILE_MODE=production M2_PROFILE_LADDER=on BAANDI_PHASE_PROFILE=on cargo test --offline --release -p dft-engine --test m2_entry_cost -- --ignored --nocapture
+```
+
+Master-session dev08 command (not executed here; use the current approved Si64
+production input, matching PP/grid/bands/start/threshold and one thread/rank):
+
+```sh
+env MKL_NUM_THREADS=1 BAANDI_PHASE_PROFILE=on \
+  mpirun -np 8 --map-by core --bind-to core \
+  target/release/dft-cli run ~/fastbench/si64.toml \
+  --output-dir ~/fastbench/G-HANDOFF-OWNED-si64-p8-profile
+```
+
+Record external monotonic wall, input/binary/UPF hashes, actual starts,
+verification work, per-rank closure, and the new exclusive handoff fields.
+Current CLI M2 fields are rank-local (root exports its rank), not a cross-rank
+maximum; preserve that qualification and use the per-rank accessor if collecting
+all ranks. Do not sum unrelated rank maxima. No QE run/comparison was performed.
+
+Initial implementation boundary (resolved by the subsequent scope approval): `LazyOrbitals` and its private `LazyInner` live in
+`crates/dft-engine/src/gamma_real.rs`, outside this ticket's OWNED_FILES. There is
+no local-row accessor or constructor, only full materialization. The fine solve
+also consumes its private matching/round-trip interface there. A direct route
+requires a minimal, reviewed extension in that file to export/construct owned
+ORC storage and match the fine layout. Accessing private storage from the owned
+files or disguising a gather as a transfer is not a valid prototype. Scope
+extension was requested; pending it, no `BAANDI_M2_OWNED_HANDOFF` switch or partial
+transfer is installed. The full-matrix route stays unchanged. Follow-up must
+preserve sqrt(2)*(x/sqrt(2)) on nonzero ORC rows, G=0 and signed-zero conventions,
+conjugate pairing, agreed validation failures before redistribution, import
+checks, unsupported-consumer fallback and checkpoint behavior.
+
+Asynchronous coarse/fine preparation and fork/join are **not implemented**;
+section 5's last paragraph needs its own eight-physical-core economic screen.
+
+Validation at the final source (scratch `target/scratch`, uncommitted):
+
+- `cargo test --offline --release -p dft-engine --test owned_handoff -- --include-ignored --nocapture`: exit 0, 2 tests passed (0.19 s). Profile off/on agree in every energy, density, eigenvalue and delivered complex-orbital bit, history H counts and across ranks; ranks 1 through 7, cubic/skewed cells, even/odd fine grids, active and terminal coarse boundaries. Profile off produces zero new metrics. Active lazy boundaries record one gather; the terminal retained audit already materializes in its map, so its handoff records zero. Initial test expectation incorrectly required one gather at that terminal boundary; it was corrected to match that existing consumer behavior, not by changing the engine.
+- `TMPDIR_990="$PWD/target/scratch" CHECK_SCCACHE=0 scripts/check.sh fast dft-engine dft-numerics dft-cli`: exit 1; build, fmt and clippy passed; 453 passed, 3 failed, 134 ignored in 50 test binaries. All three failures are existing CLI pseudopotential-cache tests: `pseudo::cache_resolution_and_no_network_side_effects`, `pseudo::cached_fetch_checks_hash_and_provenance`, and unit `pseudo::tests::fetch_boundary_verifies_before_publication_and_never_overwrites`. They put their cache in `std::env::temp_dir()`, which the required scratch path places inside the repository; the production cache policy then rejects with `pseudopotential cache must be outside repositories`. No scratch relocation, test bypass, production-policy relaxation or unowned test edit was made. Reproduced the unit separately: `TMPDIR="$PWD/target/scratch" cargo test --offline -p dft-cli --bin dft-cli`, exit 101, same rejection.
+- `TMPDIR_990="$PWD/target/scratch" CHECK_SCCACHE=0 scripts/check.sh fast dft-engine dft-numerics`: exit 0, all four gates pass, 322 passed / 0 failed / 94 ignored across 37 binaries, 42 s wall. Both check invocations printed a sandbox `ps` permission error in their informational load probe; this did not prevent the gates from running.
+- Both `fast_screen_mpi.py` commands above: exit 0; exact energy bits, density FNV and SCF/Davidson/H work agree between profile off/on. Timing differences between those arms are observations only.
+- `python3 -I scripts/tests/test_readme_figures.py`: exit 1, 8 passed / 1 failed. Unchanged `test_structural_scope_and_sources` still requires the old phrase `standard profile is unsupported`, absent from current generated structural text. README/source evidence/scripts were not edited; no new physical validation result or speedup is claimed. README generation and dashboard/session JSON updates are outside this ticket's ownership.
+- `git diff --check`: exit 0. No commit, remote command, QE run, async fork/join, default flip or new dependency.
+
+Final direct `m2_entry_cost` production+ladder Si64 P=8 run: exit 0, wall 12.201468 s, rank-mean exclusive handoff 0.124560 s (1.0209%); the same 1 orbital materialization, 8,947,240 gathered orbital bytes/rank and 9 allgatherv + 1 tree_sum calls/rank. This run overlapped other local verification work and is not a timing comparison with the earlier A/B pair. The first direct invocation used a relative UPF path and failed before SCF (exit 101); Cargo runs the test from the crate directory, so the documented direct command now uses an absolute UPF path.
+
+### G-HANDOFF-OWNED prototype after approved scope extension
+
+Status: **CANDIDATE, implemented, default OFF; dev08 measurement pending**.
+The orchestrator approved narrow `gamma_real.rs` interfaces and session plumbing.
+`BAANDI_M2_OWNED_HANDOFF=on` retains the coarse lazy handle, gathers only its
+integer row ownership metadata, computes one coarse/fine Miller permutation,
+and moves ORC row payload directly to the owning fine ranks. New fine rows are
+zero-filled locally. `off` is the full-matrix oracle and remains the default.
+The registry has 111 switches. No `scf.rs` change was needed.
+
+Implementation and validation contracts:
+
+- All transfer/import policy lives in `cutoff_ladder.rs`. Gamma-real supplies a
+  read-only local matrix/row/half-sphere/communicator view and a constructor for
+  the existing lazy handle. It does not expose or modify the Hamiltonian or its
+  potential. The existing first-solve row-layout match and potential identity
+  checks remain in place.
+- Coarse/fine representative and conjugate Miller indices, the zero mode, shape,
+  finite values, source ownership coverage/uniqueness and layout identities are
+  checked before the coefficient exchange. Local failures are reduced to the
+  same error before ranks can enter differently shaped collectives. Eligibility
+  and lazy-handle availability must agree too; partial availability rejects.
+- Source storage can be in any local order and ownership can change between
+  cutoffs. One plan enumerates each source/destination edge in global coarse ORC
+  order. One all-to-all exchanges the packed row payload. The current Collective
+  API has **fixed-size all-to-all only**, so messages are padded to the largest
+  edge. Only populated coarse rows are logical payload; fine zero rows are never
+  sent. The reported sent bytes include **all padding and self messages**, not a
+  claim of sparse alltoallv or physical network wire traffic. An alltoallv adapter
+  would require a separate transport change and measurement.
+- Raw ORC values are copied without arithmetic. The existing warm-start
+  `sqrt(2) * (x / sqrt(2))` convention is applied once, exactly as in the full
+  complex oracle; G=0 is not scaled. The lazy materializer remembers newly added
+  pairs so they return `(+0,+0)` complex zeros, matching `prolong_orbitals`, not
+  the `-0` mirror imaginary value that generic Hermitian unpack would introduce.
+- The density interpolation, charge/positivity/occupation checks and owned
+  density installation are unchanged. Norm/orthogonality admission is still
+  **1e-8**. It sums complex-unpack-equivalent local products with a deterministic
+  tree. A conservative `64 * eps * N * max(1, sqrt(norm_i*norm_j))` rounding
+  envelope detects proximity to the threshold; ambiguous cases materialize and
+  use the original sequential-complex-row/split-column oracle. The envelope is
+  only a fallback criterion, never a relaxed acceptance tolerance. The Gram
+  reduction is rounding-class; the accepted fine start and delivered results
+  tested here are bit-identical.
+- A single rank, strict SCF, disabled lazy/distributed operator, declared
+  checkpoint/runtime consumer, snapshot capture, or an already materialized
+  terminal coarse block uses the existing full route. Exact checkpoint code and
+  formats are unchanged. Full materialization of the transferred block is also
+  bit-identical to the complex injection oracle (including signed zeros).
+- Profile-off does not update the new metrics. Profile-on adds exclusive
+  `handoff.transfer` (plan, metadata, exchange and eligibility check) to the
+  previous nine parts. `materialize_collective` remains a **nonadditive subset**.
+  The actual lazy materializer now records gathered-byte dimensions at its call
+  site, so an ambiguous import fallback is counted correctly too.
+  `owned_transfers`, `sent_bytes_with_padding`, `populated_payload_bytes` and
+  `check_fallbacks` are counters. `owned_peak_bytes_sum` is the process sum of
+  rank-local high-water **coefficient/message/Gram buffer payloads**; the harness
+  divides by P. It excludes layout metadata, allocator overhead, density and
+  solver/operator storage and is not process RSS. Use the per-rank
+  `handoff_profile()` accessor for individual rank values. No cross-rank maximum
+  is fabricated from the process-average harness or root-only CLI report.
+
+Final-code validation:
+
+- Release `owned_handoff` integration tests: 4 passed. Ranks 1..7, cubic/skewed,
+  odd/even fine grids, active and terminal boundaries, production fine SCF to
+  convergence with its certificate, exact energy/density/eigenvalue/orbital bits
+  and H counts against the off route. Explicit fallback tests cover a declared
+  checkpoint consumer, lazy off and strict SCF. A consumer declaration on only
+  one rank yields the same error on every rank before the coarse solve.
+- Release library `owned_handoff_tests`: 3 passed. Pure permutation/materialized
+  complex bits and packed warm-start bits on ranks 2..7 and both grid parities,
+  reversed rows and unrelated source/fine ownership, G=0, conjugate partners,
+  signed zero and subnormal values; rank-local duplicate rows, NaN and mismatched
+  fine layout all agree on an error; defects below, at and above 1e-8 match the
+  original import verdict. Rank 1 takes the integration-tested full fallback.
+- Final `TMPDIR_990="$PWD/target/scratch" CHECK_SCCACHE=0 scripts/check.sh fast dft-engine dft-numerics dft-cli`: exit 1, build/fmt/clippy pass, **458 passed / 3 failed / 134 ignored** in 50 binaries, 20 s. The same three known CLI cache-policy failures described above are the only failures; the orchestrator confirmed they are unrelated and pass on dev08. The informational `ps` load probe remains sandbox-denied. No tests were skipped or altered to hide these failures.
+- The initial low-level fault test accidentally assigned no rows to rank 0 for
+  P=3, so no fault was injected. Its ownership fixture was corrected to guarantee
+  a rank-0 row; all error-agreement tests then pass. No production behavior or
+  tolerance was changed to satisfy that test.
+
+No asynchronous fork/join was implemented. It still needs its own economic
+screen on the same eight physical cores. Nothing here changes the ladder,
+convergence rules, solver defaults or the performance acceptance authority.
+
+Final Mac screen (O), pure release, 8 simulated ranks, **three alternating pairs
+per cell**, both arms phase-profile on; A=OWNED_HANDOFF off, B=on. Same production
+standard/verification/ladder controls, UPF and seed as the pricing screen above.
+Binary SHA-256 `2cc600c80069aacd71d86bd391df3f96058de8ea55fdace7aa51dd060047a416`.
+Raw records remain in `target/scratch/owned-{si32,si64}-final.json` (uncommitted
+scratch); commands below reproduce them. Times below are medians of rank-mean
+exclusive handoff sums, **not sums of independently median-selected parts**.
+
+| Metric (per rank unless stated) | Si32 A -> B | Si64 A -> B |
+| --- | ---: | ---: |
+| Exclusive handoff (s) | 0.060205 -> 0.034637 | 0.155803 -> 0.106210 |
+| Whole-run wall median (s; observation only) | 2.028417 -> 2.022573 | 7.304849 -> 7.245540 |
+| Orbital materializations | 1 -> 0 | 1 -> 0 |
+| Orbital gather delivered bytes | 2312392 -> 0 | 8947240 -> 0 |
+| Whole-run allgatherv delivered bytes | 33528112 -> 31249616 | 109060088 -> 100180504 |
+| Whole-run allgatherv calls | 252 -> 252 | 199 -> 199 |
+| Handoff allgatherv / tree_sum / alltoall calls | 9 / 1 / 0 -> 9 / 13 / 1 | 9 / 1 / 0 -> 9 / 13 / 1 |
+| All-to-all sent bytes, including padding | 0 -> 940032 | 0 -> 2433024 |
+| Populated row payload bytes | 0 -> 284852 | 0 -> 1109988 |
+| Full-route coefficient payload peak bound / owned-route tracked buffer peak | 30401984 -> 2972552 | 118590912 -> 9127008 |
+| Ambiguous overlap-check fallbacks | 0 -> 0 | 0 -> 0 |
+
+The observed exclusive savings are **25.568 ms (Si32)** and **49.593 ms (Si64)**.
+Both are below the original price-first budgets of 32.431 / 107.617 ms. The
+original approximately 1.4–1.9% handoff ceiling remains the planning constraint;
+**none of the historical 1.2007 s coarse stage is credited**. The new off-arm
+handoff samples vary (Si32 31.971–61.009 ms; Si64 125.192–195.494 ms), so these
+Mac medians are not stable production estimates. Whole-wall within-arm spreads
+are 0.485851 / 0.646316 s, much larger than the A/B median wall differences
+(0.005844 / 0.059309 s). No whole-run speedup or default adoption is claimed.
+The distributed check still costs work, and agreement adds reductions; the first
+fine solve also performs its existing lazy layout check. Only the explicitly
+measured handoff difference is reported as a handoff observation.
+
+All six runs per cell have identical energy bits, density FNV and SCF/Davidson/H
+counts: Si32 11/67/1888, Si64 10/51/3165. Energy difference is **0 Ha**. The final
+off-arm Si32/Si64 fingerprints also match the earlier price-first off-arm records,
+so the unchanged default has an independently saved pre-prototype oracle. The
+full-state synthetic tests additionally compare eigenvalues and all delivered
+complex coefficient bits. No QE execution or cross-model comparison is involved.
+
+Final reproduction (both screen commands exit 0):
+
+```sh
+export PATH=/opt/homebrew/opt/rustup/bin:$PATH
+export TMPDIR_990="$PWD/target/scratch" TMPDIR="$PWD/target/scratch"
+cargo test --offline --release -p dft-engine --test m2_entry_cost --test owned_handoff --no-run
+python3 -I scripts/fast_screen_mpi.py --binary target/release/deps/m2_entry_cost-27ed8b949e92fddf --upf ../pseudo/Si.pz-vbc.UPF --case si64 --ranks 8 --pairs 3 --a BAANDI_PHASE_PROFILE=on,BAANDI_M2_OWNED_HANDOFF=off --b BAANDI_PHASE_PROFILE=on,BAANDI_M2_OWNED_HANDOFF=on --json-out target/scratch/owned-si64-final.json
+python3 -I scripts/fast_screen_mpi.py --binary target/release/deps/m2_entry_cost-27ed8b949e92fddf --upf ../pseudo/Si.pz-vbc.UPF --case si32 --ranks 8 --pairs 3 --a BAANDI_PHASE_PROFILE=on,BAANDI_M2_OWNED_HANDOFF=off --b BAANDI_PHASE_PROFILE=on,BAANDI_M2_OWNED_HANDOFF=on --expect m2.handoff.materializations:down --expect collectives.allgatherv.bytes:down --json-out target/scratch/owned-si32-final.json
+cargo test --offline --release -p dft-engine --test owned_handoff -- --include-ignored --nocapture
+cargo test --offline --release -p dft-engine --lib owned_handoff_tests -- --nocapture
+```
+
+Master-session dev08 follow-up (commands **not executed here**): use the approved
+MPI+MKL environment and the same current production inputs; first price Si64 P=8,
+then repeat Si32 P=8. Keep all starts, PP/grid/bands/threshold, binding and thread
+counts identical. Preserve input/UPF/binary hashes, verification verdict/work,
+energy bits and density hashes, external monotonic wall and the raw results.
+Use the normal load gate before **each** launch. The following is a single-arm
+command template; execute off/on then on/off then off/on as three pairs in unique
+output directories. No remote installation or input changes are requested.
+
+```sh
+cargo build --offline --release -p dft-cli --features mpi,mkl
+sha256sum target/release/dft-cli ~/fastbench/si64.toml ~/fastbench/si32.toml
+env MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 BAANDI_PHASE_PROFILE=on BAANDI_M2_OWNED_HANDOFF=off \
+  mpirun -np 8 --map-by core --bind-to core target/release/dft-cli run ~/fastbench/si64.toml \
+  --output-dir ~/fastbench/G-HANDOFF-OWNED-si64-p8-off-1
+env MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 BAANDI_PHASE_PROFILE=on BAANDI_M2_OWNED_HANDOFF=on \
+  mpirun -np 8 --map-by core --bind-to core target/release/dft-cli run ~/fastbench/si64.toml \
+  --output-dir ~/fastbench/G-HANDOFF-OWNED-si64-p8-on-1
+```
+
+Read `parallel.m2.counters["handoff.*"]` and the named entries of
+`parallel.m2.stages`. Sum exactly `materialize`, `orbital_copy`, `density_copy`,
+`encode`, `setup`, `import`, `check`, `export_density`, `export_copy`, `transfer`;
+do not add `materialize_collective`. Root CLI exports root-local handoff values;
+retain this qualification or collect the public per-rank snapshots in the master
+harness. Report bytes including padding and the additional reduction latency.
+Then repeat the paired launches with `BAANDI_PHASE_PROFILE=off` for uninstrumented
+launch-to-exit acceptance. A local timing benefit does not flip the default.

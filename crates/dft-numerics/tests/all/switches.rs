@@ -265,5 +265,6 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::M2_LOCAL_FIELDS), Value::Choice("on"));
     assert_eq!(value(Id::M2_LOCAL_DENSITY), Value::Choice("on"));
     assert_eq!(value(Id::INIT_OWNED_STATES), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 110);
+    assert_eq!(value(Id::M2_OWNED_HANDOFF), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 111);
 }

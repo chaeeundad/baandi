@@ -440,6 +440,7 @@ pub(crate) fn count(c: Count) {
 /// with one `calls.<stage>` entry per stage; seconds 0 with
 /// `BAANDI_STAGE_TIMERS=off`).
 pub fn stats() -> dft_physics::distributed_real_gamma::M2Counters {
+    let (handoff_counts, handoff_stages) = crate::cutoff_ladder::handoff_stats();
     (
         COUNT_NAMES
             .iter()
@@ -452,11 +453,13 @@ pub fn stats() -> dft_physics::distributed_real_gamma::M2Counters {
                     .map(|(n, c)| (*n, c.load(Ordering::Relaxed))),
             )
             .chain(dft_physics::hamiltonian::owned_state_stats())
+            .chain(handoff_counts)
             .collect(),
         STAGE_NAMES
             .iter()
             .zip(&STAGE_NANOS)
             .map(|(n, c)| (*n, c.load(Ordering::Relaxed) as f64 * 1e-9))
+            .chain(handoff_stages)
             .collect(),
     )
 }

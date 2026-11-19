@@ -1,7 +1,7 @@
 #[path = "finite_run.rs"]
 mod finite_run;
 // File/console boundary for the sequential engine. No I/O occurs in SCF kernels.
-use crate::{config::Config, grid_report};
+use crate::{config::Config, grid_report, run_config::launch};
 #[path = "spin_run.rs"]
 mod spin_run;
 #[path = "volumetric_out.rs"]
@@ -542,18 +542,37 @@ pub(crate) fn note_switch_paths(rc: dft_numerics::switches::RunConfig) {
     }
 }
 
+/// Hash with bounded scratch rather than allocating/copying the entire binary.
+/// Read errors retain the previous caller's `None` identity behavior.
+fn binary_sha256(path: &Path) -> io::Result<String> {
+    use io::Read;
+    let mut file = fs::File::open(path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let size = match file.read(&mut buffer) {
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            other => other?,
+        };
+        if size == 0 {
+            break;
+        }
+        digest.update(&buffer[..size]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
+}
+
 /// SHA-256 of the running executable (computed once, after the timed run).
 pub(crate) fn binary_identity() -> Value {
     type Identity = (Option<String>, Option<String>);
     static ID: std::sync::OnceLock<Identity> = std::sync::OnceLock::new();
+    let hash_clock = launch::clock();
     let (path, sha) = ID.get_or_init(|| {
         let path = std::env::current_exe().ok();
-        let sha = path
-            .as_ref()
-            .and_then(|p| fs::read(p).ok())
-            .map(|b| sha256(&b));
+        let sha = path.as_ref().and_then(|p| binary_sha256(p).ok());
         (path.map(|p| p.display().to_string()), sha)
     });
+    launch::elapsed("binary_sha256", hash_clock);
     json!({"path":path,"sha256":sha})
 }
 
@@ -780,14 +799,30 @@ pub fn execute_mode(
     output_override: Option<&Path>,
     mode: &crate::telemetry::RunMode,
 ) -> Result<RunReport, RunError> {
+    let report = execute_mode_inner(input, output_override, mode);
+    launch::since("run_teardown", "outputs_complete");
+    launch::mark("run_return");
+    report
+}
+
+fn execute_mode_inner(
+    input: &Path,
+    output_override: Option<&Path>,
+    mode: &crate::telemetry::RunMode,
+) -> Result<RunReport, RunError> {
     mode.validate()?;
     let start = Instant::now();
+    launch::mark("run_entry");
+    let input_clock = launch::clock();
     let bytes = fs::read(input).map_err(|e| error(5, format!("{}: {e}", input.display())))?;
     let text = std::str::from_utf8(&bytes).map_err(|e| error(1, e))?;
     let config = Config::parse(text).map_err(|e| error(1, e))?;
+    launch::elapsed("input_read_parse", input_clock);
+    let config_clock = launch::clock();
     // RUN-CONFIG: this run's switch configuration (the process object in the
     // CLI binary; a thread scope for in-process callers with other values).
     let (run_config, _run_scope) = crate::run_config::for_run(&config).map_err(|e| error(1, e))?;
+    launch::elapsed("run_config", config_clock);
     if (config.collinear()
         || config
             .finite_temperature()
@@ -806,7 +841,10 @@ pub fn execute_mode(
             "symmetry.execution: checkpoint identity does not carry symmetry yet; use Classic execution",
         ));
     }
+    let preflight_clock = launch::clock();
     let mut preflight = crate::config::preflight::check(&config, input).map_err(|e| error(1, e))?;
+    launch::elapsed("preflight_including_prepare_and_upf", preflight_clock);
+    let prepare_clock = launch::clock();
     if mode.events.as_deref() == Some("-") {
         eprintln!("{}", preflight.summary);
         for warning in &preflight.warnings {
@@ -820,10 +858,12 @@ pub fn execute_mode(
     }
     // INIT-CLI: reuse the preflight's `Config::prepare` result (built from the
     // same configuration) instead of building the bases and the grid again.
+    launch::prepared(preflight.prepared.is_some());
     let prepared = match preflight.prepared.take() {
         Some(prepared) => prepared,
         None => config.prepare().map_err(|e| error(1, e))?,
     };
+    launch::elapsed("prepare_reuse_and_preflight_print", prepare_clock);
     // ADR 0043 ONEPATH-4: the observe/agent runtime modes run the same single
     // standard path with the verification as a classic run (checkpoint v1
     // carries the verification option and its attempts).
@@ -832,6 +872,7 @@ pub fn execute_mode(
     let mut potentials = Vec::new();
     let mut species = Vec::new();
     let mut inputs = vec![fs::canonicalize(input)?];
+    let upf_clock = launch::clock();
     for (name, path) in &config.pseudopotentials {
         let path = input.parent().unwrap_or(Path::new(".")).join(path);
         let data = fs::read(&path).map_err(|e| error(5, format!("{}: {e}", path.display())))?;
@@ -860,6 +901,7 @@ pub fn execute_mode(
         inputs.push(path);
         potentials.push((name.clone(), p));
     }
+    launch::elapsed("upf_read_parse_hash", upf_clock);
     let xc_message = format!(
         "XC: {}; allow_functional_override={}; override_applied={}",
         opts.functional.name(),
@@ -974,6 +1016,8 @@ pub fn execute_mode(
     if dft_engine::profile::enabled() {
         dft_engine::profile::init_part(dft_engine::profile::InitPart::Cli, Some(start));
     }
+    launch::mark("engine_constructor_entry");
+    let constructor_clock = launch::clock();
     let mut problem = if config.basis.legacy_gamma() {
         ScfProblem::new(&prepared.cell, &atoms, &refs, opts.clone())
     } else {
@@ -1002,6 +1046,8 @@ pub fn execute_mode(
         problem.set_density_floor(floor).map_err(engine_error)?;
     }
     let electrons = problem.electron_count();
+    launch::elapsed("engine_construction", constructor_clock);
+    launch::mark("engine_ready");
     let setup = start.elapsed().as_secs_f64();
     // BREAKTHROUGH-0-INSTRUMENT: problem construction is the `init` bucket.
     dft_engine::profile::add_init(setup);
@@ -1579,9 +1625,16 @@ pub fn execute_mode(
         "FFT/H psi included in enclosing phases; not separately measured."
     )
     .unwrap();
-    volumetric_out::write_outputs(&config, &prepared, &refs, &r, &out).map_err(|e| error(5, e))?;
-    fs::write(out.join("density.bin"), density_bytes)?;
-    write_json(&out.join("density.json"), &density_meta)?;
+    launch::timed("volumetric_write", || {
+        volumetric_out::write_outputs(&config, &prepared, &refs, &r, &out)
+    })
+    .map_err(|e| error(5, e))?;
+    launch::timed("density_bin_write", || {
+        fs::write(out.join("density.bin"), density_bytes)
+    })?;
+    launch::timed("density_json_write", || {
+        write_json(&out.join("density.json"), &density_meta)
+    })?;
     if let Some(force) = requested_forces(
         &config,
         &prepared.cell,
@@ -1638,15 +1691,29 @@ pub fn execute_mode(
     }
     // BREAKTHROUGH-0-INSTRUMENT: exclusive phase profile (BAANDI_PHASE_PROFILE=on)
     // and first-block diagnostic (BAANDI_FIRST_BLOCK=on); both absent otherwise.
+    if launch::clock().is_some() {
+        launch::elapsed("materialize_including_outputs", Some(io_clock));
+    }
     dft_engine::profile::add_io(io_clock.elapsed().as_secs_f64());
+    launch::mark("profile_finish");
     if let Some(mut mine) = dft_engine::profile::finish_rank(crate::parallel::rank()) {
         // RUN-REPORT: this rank's own external wall closes its exclusive tree.
         mine.wall = start.elapsed().as_secs_f64();
+        let gather_clock = launch::clock();
         let ranks = match dft_engine::parallel::SharedComm::active() {
             Some(comm) => dft_engine::profile::gather(&comm, &mine).map_err(|e| error(5, e))?,
             None => vec![mine],
         };
+        launch::elapsed("profile_gather", gather_clock);
+        let report_clock = launch::clock();
         let report = dft_engine::profile::Report::from_ranks(&ranks);
+        if let Some(local) = report
+            .per_rank
+            .iter()
+            .find(|r| r.rank == crate::parallel::rank())
+        {
+            launch::covered(local.covered);
+        }
         let table = report.table(Some(total));
         console.push_str(&table);
         let phases = profile_json(&report, total);
@@ -1654,14 +1721,18 @@ pub fn execute_mode(
             result["parallel"]["phases"] = phases.clone();
         }
         result["phase_profile"] = phases;
+        launch::elapsed("profile_report", report_clock);
     }
     let first_block = dft_engine::first_block::take_records();
     if !first_block.is_empty() {
         console.push_str(&dft_engine::first_block::table(&first_block));
         result["convergence"]["work"]["first_block"] = first_block_json(&first_block);
     }
+    let manifest_clock = launch::clock();
     note_switch_paths(run_config);
     result["scf"]["switches"] = switches_json();
+    launch::elapsed("switch_manifest", manifest_clock);
+    let run_block_clock = launch::clock();
     result["run"] = run_block(
         run_config,
         if outcome.converged {
@@ -1670,7 +1741,14 @@ pub fn execute_mode(
             "not_converged"
         },
     );
-    write_json(&out.join("results.json"), &result)?;
+    launch::elapsed("run_block", run_block_clock);
+    let result_path = out.join("results.json");
+    let serialize_clock = launch::clock();
+    let data = serde_json::to_vec_pretty(&result).map_err(|e| error(5, e))?;
+    launch::elapsed("results_serialize", serialize_clock);
+    launch::timed("results_write", || fs::write(&result_path, data))?;
+    launch::output(&result_path);
+    launch::mark("outputs_complete");
     Ok(RunReport {
         console,
         converged: outcome.converged,
@@ -2187,6 +2265,17 @@ fn algebra_stream_json() -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn streamed_binary_hash_matches_whole_file_at_chunk_boundaries() {
+        let path = std::env::temp_dir().join(format!("binary-hash-{}", std::process::id()));
+        for size in [0, 1, 65_535, 65_536, 65_537, 131_081] {
+            let bytes: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+            fs::write(&path, &bytes).unwrap();
+            assert_eq!(binary_sha256(&path).unwrap(), sha256(&bytes));
+        }
+        fs::remove_file(&path).unwrap();
+        assert!(binary_sha256(&path).is_err());
+    }
     /// M2-STAGE-TIMERS: the davidson_stages rank merge takes the maximum and
     /// the minimum of every number over ranks and keeps integers integral.
     #[test]

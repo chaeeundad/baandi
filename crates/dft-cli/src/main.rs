@@ -278,6 +278,8 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 fn main() -> ExitCode {
+    use dft_cli::run_config::launch;
+    let main_entry = std::time::Instant::now();
     // MPI lives for the whole process; without feature `mpi` this is a one-rank stand-in.
     let universe = match dft_mpi::Universe::init() {
         Ok(u) => u,
@@ -286,8 +288,10 @@ fn main() -> ExitCode {
             return ExitCode::from(5);
         }
     };
+    let mpi_ready = std::time::Instant::now();
     let world = universe.world();
     let cli = Cli::parse();
+    let args_ready = std::time::Instant::now();
     // RUN-CONFIG: resolve the input file's [performance]/[profile] tables with
     // the environment (environment > input > default) and install them as the
     // process configuration before the first switch is read.
@@ -295,6 +299,7 @@ fn main() -> ExitCode {
         eprintln!("error: {e}");
         return ExitCode::from(1);
     }
+    launch::begin(main_entry, mpi_ready, args_ready, std::time::Instant::now());
     match dft_numerics::switches::choice(dft_numerics::switches::Id::MPI_TREE) {
         "rd" => dft_mpi::set_tree_sum(dft_mpi::TreeSum::RecursiveDoubling),
         "rhd" => dft_mpi::set_tree_sum(dft_mpi::TreeSum::HalvingDoubling),
@@ -304,15 +309,16 @@ fn main() -> ExitCode {
     if world.size() > 1 {
         // Every rank must resolve the same switch values before any optional
         // collective; a mismatch is the same error on every rank.
-        if let Err(e) =
+        if let Err(e) = launch::timed("switch_agreement", || {
             dft_cli::run_config::agree(&world, dft_numerics::switches::RunConfig::current())
-        {
+        }) {
             eprintln!("error: {e}");
             return ExitCode::from(1);
         }
         dft_engine::parallel::set_communicator(Some(std::sync::Arc::new(world)));
     }
     let code = real_main(cli);
+    launch::mark("main_dispatch_return");
     if dft_numerics::switches::present(dft_numerics::switches::Id::DGEMM_TIMERS) {
         for (site, calls, nanos, flops) in dft_numerics::dgemm_site_report() {
             eprintln!(
@@ -321,6 +327,18 @@ fn main() -> ExitCode {
                 flops as f64 * 1e-9
             );
         }
+    }
+    // Complete all engine work and console output before MPI_Finalize. Retain
+    // ordinary Rust destruction; no process::exit bypass of MPI or I/O drops.
+    launch::timed("communicator_drop", || {
+        dft_engine::parallel::set_communicator(None)
+    });
+    // The feature-off Universe is a zero-sized stand-in without a Drop impl.
+    #[allow(clippy::drop_non_drop)]
+    launch::timed("mpi_finalize", || drop(universe));
+    if let Err(e) = launch::finish() {
+        eprintln!("error: launch profile output: {e}");
+        return ExitCode::from(5);
     }
     code
 }
@@ -401,15 +419,17 @@ fn real_main(cli: Cli) -> ExitCode {
         return match dft_cli::run::execute_mode(input, output_dir.as_deref(), &mode) {
             Ok(report) => {
                 use std::io::Write;
-                let console_result = if mode.events.as_deref() == Some("-") {
-                    std::io::stderr()
-                        .lock()
-                        .write_all(report.console.as_bytes())
-                } else {
-                    std::io::stdout()
-                        .lock()
-                        .write_all(report.console.as_bytes())
-                };
+                let console_result = dft_cli::run_config::launch::timed("console_write", || {
+                    if mode.events.as_deref() == Some("-") {
+                        std::io::stderr()
+                            .lock()
+                            .write_all(report.console.as_bytes())
+                    } else {
+                        std::io::stdout()
+                            .lock()
+                            .write_all(report.console.as_bytes())
+                    }
+                });
                 if let Err(e) = console_result {
                     eprintln!("error: console I/O: {e}");
                     return ExitCode::from(5);

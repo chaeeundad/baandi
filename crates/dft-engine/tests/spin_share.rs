@@ -64,8 +64,21 @@ fn fixture(threads: usize) -> CollinearProblem {
 }
 
 // Recorded BEFORE engine edits on b1c95a61282e66e741e98d1ef0199545faf1cae2,
-// pure Rust, default switches, synthetic skewed cell, standard+verification.
+// aarch64 pure Rust, default switches, synthetic skewed cell, standard+verification.
 const BASELINE_ENERGY_BITS: u64 = 13829793526668695510;
+
+fn assert_baseline_energy(energy: f64) {
+    #[cfg(target_arch = "aarch64")]
+    assert_eq!(energy.to_bits(), BASELINE_ENERGY_BITS);
+    // Cross-platform FFT/GEMM rounding can change the recorded bits. This toy
+    // must still agree with the baseline within 1e-12 Ha (absolute energy error).
+    #[cfg(not(target_arch = "aarch64"))]
+    assert!(
+        (energy - f64::from_bits(BASELINE_ENERGY_BITS)).abs() <= 1e-12,
+        "energy {energy:.17} Ha vs baseline {:.17} Ha",
+        f64::from_bits(BASELINE_ENERGY_BITS)
+    );
+}
 
 #[test]
 fn off_preserves_main_bits() {
@@ -80,7 +93,7 @@ fn off_preserves_main_bits() {
     p.force_spin_share(false);
     let r = p.run().unwrap();
     assert!(r.converged);
-    assert_eq!(r.energy.total_hartree().to_bits(), BASELINE_ENERGY_BITS);
+    assert_baseline_energy(r.energy.total_hartree());
     assert_eq!(r.spin_share.shared_maps, 0);
     assert!(r.spin_share.fallback_counts[0] > 0);
 }
@@ -215,7 +228,7 @@ fn environment_switch_is_used_without_override() {
     const CHILD: &str = "SPIN_SHARE_TEST_CHILD";
     if let Ok(mode) = std::env::var(CHILD) {
         let r = fixture(1).run().unwrap();
-        assert_eq!(r.energy.total_hartree().to_bits(), BASELINE_ENERGY_BITS);
+        assert_baseline_energy(r.energy.total_hartree());
         assert_eq!(r.spin_share.shared_maps > 0, mode == "on");
         return;
     }

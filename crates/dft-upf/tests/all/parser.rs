@@ -285,8 +285,11 @@ fn unsupported_relativistic_values_are_named() {
 
 #[test]
 fn inspect_wrapped_nonrelativistic_synthetic_file() {
-    // This test lives in dft-upf to respect ticket ownership. Cargo builds the
-    // CLI explicitly because CARGO_BIN_EXE is only set for a package's own bins.
+    // This test lives in dft-upf to respect ticket ownership. CARGO_BIN_EXE is only
+    // set for a package's own bins, so the CLI comes from DFT_CLI_BIN (an already
+    // built dft-cli; scripts/check.sh sets it to the binary of its build gate) or,
+    // when unset, from `cargo run -p dft-cli` (a second build of the CLI; under the
+    // gate that nested build cost 1 to 3 minutes after every merge).
     let path = std::env::temp_dir().join(format!("dft-upf-wrapped-{}.xml", std::process::id()));
     let text = common::fixture_with_options(
         601,
@@ -298,16 +301,16 @@ fn inspect_wrapped_nonrelativistic_synthetic_file() {
         },
     );
     std::fs::write(&path, text).unwrap();
-    let result = std::process::Command::new(env!("CARGO"))
-        .args([
-            "run",
-            "--offline",
-            "--quiet",
-            "-p",
-            "dft-cli",
-            "--",
-            "inspect-upf",
-        ])
+    let mut command = match std::env::var_os("DFT_CLI_BIN") {
+        Some(bin) => std::process::Command::new(bin),
+        None => {
+            let mut c = std::process::Command::new(env!("CARGO"));
+            c.args(["run", "--offline", "--quiet", "-p", "dft-cli", "--"]);
+            c
+        }
+    };
+    let result = command
+        .arg("inspect-upf")
         .arg(&path)
         .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
         .output()

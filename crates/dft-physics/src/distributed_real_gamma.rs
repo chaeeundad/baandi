@@ -159,6 +159,29 @@ pub struct DistributedRealHamiltonian {
     pool: Arc<WorkerPool>,
 }
 
+/// Full-sphere representative indices required by one rank's ORC rows.
+/// Sorted for the sparse complex table, independent of the ORC packing order.
+pub fn owned_projector_indices(
+    basis: &PlaneWaveBasis,
+    grid: &dft_basis::FftGridSpec,
+    rank: usize,
+    ranks: usize,
+) -> Result<Vec<usize>, DistributedRealError> {
+    if ranks == 0 || rank >= ranks {
+        return Err(DistributedRealError::Shape);
+    }
+    let half = HalfSphere::new(basis, grid)?;
+    let owners = position_owners(grid.dims(), grid.g_to_fft(), ranks)?;
+    let mut indices: Vec<_> = half
+        .plus()
+        .iter()
+        .map(|&g| g as usize)
+        .filter(|&g| owners[g] == rank)
+        .collect();
+    indices.sort_unstable();
+    Ok(indices)
+}
+
 impl DistributedRealHamiltonian {
     /// Snapshot of the complex Gamma H for rank `rank` of `ranks`.
     pub fn new(
@@ -280,27 +303,44 @@ impl DistributedRealHamiltonian {
 
         // Projector rows of the local rows only (ISSUE-20: packed directly,
         // validated over all representatives as `pack_projector`).
-        let count: usize = source
-            .nonlocal()
-            .atoms()
-            .iter()
-            .map(|a| a.columns().len())
-            .sum();
+        let nl = source.nonlocal();
+        let count = nl.projector_count();
         let mut projectors = RealMatrix::zeros(n_loc, count)?;
         let mut coupling = Vec::new();
         let mut start = 0;
-        for atom in source.nonlocal().atoms() {
-            for (j, beta) in atom.columns().iter().enumerate() {
+        for atom in nl.atoms() {
+            let nc = atom.channel_count();
+            for j in 0..nc {
                 let col =
                     &mut projectors.as_mut_slice()[(start + j) * n_loc..(start + j + 1) * n_loc];
-                pack_projector_rows(&half, beta, &rows, col)?;
+                if nl.has_owned_rows() {
+                    for (out, &r) in col.iter_mut().zip(&rows) {
+                        let g = if r == 0 {
+                            0
+                        } else {
+                            half.plus()[r.div_ceil(2)] as usize
+                        };
+                        let z = nl
+                            .owned_value(start + j, g)
+                            .ok_or(DistributedRealError::Shape)?;
+                        *out = if r == 0 {
+                            z.re
+                        } else if r % 2 == 1 {
+                            SQRT_2 * z.re
+                        } else {
+                            SQRT_2 * z.im
+                        };
+                    }
+                } else {
+                    pack_projector_rows(&half, atom.columns().column(j), &rows, col)?;
+                }
             }
             coupling.push(Coupling {
                 start,
-                count: atom.columns().len(),
+                count: nc,
                 values: atom.coupling_hartree().to_vec(),
             });
-            start += atom.columns().len();
+            start += nc;
         }
         let pairs = capacity.div_ceil(2);
         let local_len = fft.local_len();

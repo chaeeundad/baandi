@@ -167,6 +167,8 @@ macro_rules! table {
 
 table! {
     // Engine (dft-engine).
+    INIT_OWNED_STATES: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "owned Gamma projector rows and fixed-chunk atomic-start projections (rounding class)";
     CERT_SCREEN: Kind::Choice { allowed: &["on", "off", "trace"], default: "on" }, "on", "on, off, trace",
         "certificate screen (trace prints the estimates)";
     POTENTIAL_REUSE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -652,8 +654,16 @@ pub enum RunCounter {
     SessionSteps = 5,
     /// Fixed-point verification maps (passed or failed).
     Verifications = 6,
+    /// Lazy complex projector table constructions.
+    StatesFullBuilds = 7,
+    /// Owned complex projector bytes constructed over this run.
+    StatesTableBytes = 8,
+    /// Equivalent replicated complex table bytes.
+    StatesReplicatedBytes = 9,
+    /// Atom-independent reconstruction factor bytes.
+    StatesRecipeBytes = 10,
 }
-pub const RUN_COUNTERS: usize = 7;
+pub const RUN_COUNTERS: usize = 11;
 pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
     "stop_kept",
     "stop_fft",
@@ -662,6 +672,10 @@ pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
     "problems",
     "session_steps",
     "verifications",
+    "owned.states_full_builds",
+    "owned.states_table_bytes",
+    "owned.states_replicated_bytes",
+    "owned.states_recipe_bytes",
 ];
 
 /// The path a consulted switch actually took (recorded by the code that acted

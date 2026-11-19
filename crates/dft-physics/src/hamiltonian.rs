@@ -13,7 +13,7 @@ use dft_upf::{Pseudopotential, radial::real_spherical_harmonic};
 use ndarray::Array3;
 use num_complex::Complex64;
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -297,6 +297,92 @@ pub fn ionic_local_rows(
 /// A single atom's projector columns, ordered by radial index then m=-l..l.
 /// D is expanded only over channels with equal l and m.
 ///
+// Process totals support the existing M2 profile harness (simulated ranks add
+// up). RunConfig retains separate per-run totals for concurrent API runs.
+static STATE_COUNTS: [std::sync::atomic::AtomicUsize; 4] =
+    [const { std::sync::atomic::AtomicUsize::new(0) }; 4];
+fn state_count(run: dft_numerics::switches::RunConfig, index: usize, value: usize) {
+    use dft_numerics::switches::RunCounter;
+    const IDS: [RunCounter; 4] = [
+        RunCounter::StatesFullBuilds,
+        RunCounter::StatesTableBytes,
+        RunCounter::StatesReplicatedBytes,
+        RunCounter::StatesRecipeBytes,
+    ];
+    STATE_COUNTS[index].fetch_add(value, std::sync::atomic::Ordering::Relaxed);
+    run.count(IDS[index], value as u64);
+}
+/// Construction totals; byte counters accumulate over all operator generations,
+/// not peak RSS. Full-build count excludes the ordinary eager constructor.
+pub fn owned_state_stats() -> [(&'static str, usize); 4] {
+    const NAMES: [&str; 4] = [
+        "owned.states_full_builds",
+        "owned.states_table_bytes",
+        "owned.states_replicated_bytes",
+        "owned.states_recipe_bytes",
+    ];
+    std::array::from_fn(|i| {
+        (
+            NAMES[i],
+            STATE_COUNTS[i].load(std::sync::atomic::Ordering::Relaxed),
+        )
+    })
+}
+
+/// Atom-independent radial/angular factors, shared by atoms of one species.
+/// Retaining these costs N_G times species channels, not atom channels.
+struct ProjectorRecipeAtom {
+    factors: Arc<Vec<Vec<Complex64>>>,
+    position: [f64; 3],
+}
+struct ProjectorRecipe {
+    momenta: Vec<GVector>,
+    atoms: Vec<ProjectorRecipeAtom>,
+}
+impl ProjectorRecipe {
+    fn rows(&self, indices: &[usize]) -> Vec<Complex64> {
+        let channels: usize = self.atoms.iter().map(|a| a.factors.len()).sum();
+        let mut out = Vec::with_capacity(indices.len() * channels);
+        for atom in &self.atoms {
+            let phases: Vec<_> = indices
+                .iter()
+                .map(|&i| {
+                    // Bounds and finite phase arguments were checked at construction.
+                    phase(self.momenta[i].cartesian, atom.position)
+                        .expect("validated projector phase")
+                })
+                .collect();
+            for col in atom.factors.iter() {
+                out.extend(indices.iter().zip(&phases).map(|(&i, p)| col[i] * p));
+            }
+        }
+        out
+    }
+}
+/// Full storage is shared and materialized at most once, even across atom views.
+struct ProjectorTable {
+    full: OnceLock<Vec<Complex64>>,
+    recipe: Option<ProjectorRecipe>,
+    owned_indices: Vec<usize>,
+    owned: Vec<Complex64>,
+    run: dft_numerics::switches::RunConfig,
+}
+impl std::ops::Deref for ProjectorTable {
+    type Target = [Complex64];
+    fn deref(&self) -> &Self::Target {
+        self.full.get_or_init(|| {
+            let recipe = self
+                .recipe
+                .as_ref()
+                .expect("eager projector table initialized");
+            let full = recipe.rows(&(0..recipe.momenta.len()).collect::<Vec<_>>());
+            state_count(self.run, 0, 1);
+            state_count(self.run, 1, full.len() * size_of::<Complex64>());
+            full
+        })
+    }
+}
+
 /// INIT-PACKED: the columns of all atoms of one operator live in a single
 /// column-major table (`rows` x total channels, channels in atom order), the
 /// matrix the P48C block path multiplies. An atom holds a shared handle to
@@ -304,13 +390,17 @@ pub fn ionic_local_rows(
 /// instead of a second packed copy (same values, same bits).
 #[derive(Clone)]
 pub struct AtomProjectors {
-    table: Arc<Vec<Complex64>>,
+    table: Arc<ProjectorTable>,
     rows: usize,
     start: usize,
     count: usize,
     coupling: Vec<f64>,
 }
 impl AtomProjectors {
+    /// Number of channels, without materializing columns.
+    pub fn channel_count(&self) -> usize {
+        self.count
+    }
     /// This atom's projector columns (each `rows` long, the basis length).
     pub fn columns(&self) -> ProjectorColumns<'_> {
         ProjectorColumns {
@@ -438,7 +528,7 @@ pub fn nonlocal_block_gate(basis_len: usize, projectors: usize) -> bool {
 /// per-band path (column views) and the P48C block path (the whole matrix).
 pub struct NonlocalOperator {
     basis: Vec<GVector>,
-    table: Arc<Vec<Complex64>>,
+    table: Arc<ProjectorTable>,
     rows: usize,
     atoms: Vec<AtomProjectors>,
     max_channels: usize,
@@ -457,7 +547,17 @@ impl NonlocalOperator {
         atoms: Vec<(usize, Vec<f64>)>,
         max_channels: usize,
     ) -> Self {
-        let table = Arc::new(table);
+        let run = dft_numerics::switches::RunConfig::current();
+        let bytes = table.len() * size_of::<Complex64>();
+        state_count(run, 1, bytes);
+        state_count(run, 2, bytes);
+        let table = Arc::new(ProjectorTable {
+            full: OnceLock::from(table),
+            recipe: None,
+            owned_indices: Vec::new(),
+            owned: Vec::new(),
+            run: dft_numerics::switches::RunConfig::current(),
+        });
         let mut start = 0;
         let atoms = atoms
             .into_iter()
@@ -544,7 +644,7 @@ impl NonlocalOperator {
     /// not an additional copy.
     pub fn block_bytes(&self) -> usize {
         if self.block {
-            self.table.len() * size_of::<Complex64>()
+            self.rows * self.projector_count() * size_of::<Complex64>()
         } else {
             0
         }
@@ -728,6 +828,67 @@ impl NonlocalOperator {
             max_channels,
         ))
     }
+    /// Whether this operator was constructed with owned rows.
+    pub fn has_owned_rows(&self) -> bool {
+        self.table.recipe.is_some()
+    }
+    /// Retained complex table bytes, excluding the reconstruction factors.
+    pub fn table_bytes(&self) -> usize {
+        (self.table.owned.len() + self.table.full.get().map_or(0, Vec::len))
+            * size_of::<Complex64>()
+    }
+    /// Full columns have been materialized (diagnostic, does not trigger a build).
+    pub fn full_table_built(&self) -> bool {
+        self.table.full.get().is_some()
+    }
+    /// Owned representative value; no access to the lazy full storage.
+    pub fn owned_value(&self, column: usize, row: usize) -> Option<Complex64> {
+        let local = self.table.owned_indices.binary_search(&row).ok()?;
+        self.table
+            .owned
+            .get(column * self.table.owned_indices.len() + local)
+            .copied()
+    }
+    /// Reconstruct a temporary row tile, column-major. Used only at atomic start.
+    pub fn projector_rows(&self, indices: &[usize]) -> Result<Vec<Complex64>, HamiltonianError> {
+        if indices.iter().any(|&i| i >= self.rows) {
+            return Err(HamiltonianError::Shape);
+        }
+        Ok(if let Some(recipe) = &self.table.recipe {
+            recipe.rows(indices)
+        } else {
+            let mut out = Vec::with_capacity(indices.len() * self.projector_count());
+            for col in self.table.chunks_exact(self.rows) {
+                out.extend(indices.iter().map(|&i| col[i]));
+            }
+            out
+        })
+    }
+    /// Apply atom-local D to projector overlaps without reading any column.
+    pub fn couple_projections(
+        &self,
+        x: &[Complex64],
+        y: &mut [Complex64],
+    ) -> Result<(), HamiltonianError> {
+        let p = self.projector_count();
+        if x.len() != y.len() || (p == 0 && !x.is_empty()) || (p != 0 && !x.len().is_multiple_of(p))
+        {
+            return Err(HamiltonianError::Shape);
+        }
+        if p == 0 {
+            return Ok(());
+        }
+        for (x, y) in x.chunks_exact(p).zip(y.chunks_exact_mut(p)) {
+            for atom in &self.atoms {
+                for i in 0..atom.count {
+                    y[atom.start + i] = (0..atom.count)
+                        .map(|j| atom.coupling[i * atom.count + j] * x[atom.start + j])
+                        .sum();
+                }
+            }
+        }
+        Ok(())
+    }
     pub fn atoms(&self) -> &[AtomProjectors] {
         &self.atoms
     }
@@ -902,6 +1063,7 @@ pub struct Hamiltonian {
     identity: Arc<()>,
     data: HamiltonianData,
     scratch: RefCell<Vec<Worker>>,
+    atomic_weights: RefCell<Option<ComplexMatrix>>,
     pool: Arc<WorkerPool>,
 }
 struct HamiltonianData {
@@ -987,6 +1149,7 @@ impl Hamiltonian {
                 nonlocal,
             },
             scratch,
+            atomic_weights: RefCell::new(None),
             pool: WorkerPool::new(1).map_err(|_| HamiltonianError::Busy)?,
         })
     }
@@ -1162,6 +1325,9 @@ impl LinearOperator for Hamiltonian {
             .map_err(application)
     }
     fn apply_block(&self, x: &ComplexMatrix, y: &mut ComplexMatrix) -> Result<(), SolverError> {
+        if let Some(weights) = self.atomic_weights.borrow().as_ref() {
+            return self.apply_atomic_weights(x, y, weights);
+        }
         if x.rows() != self.dimension() || y.rows() != x.rows() || y.cols() != x.cols() {
             return Err(application(HamiltonianError::Shape));
         }
@@ -1185,6 +1351,96 @@ impl LinearOperator for Hamiltonian {
 }
 
 impl Hamiltonian {
+    /// Scope an atomic-start application with precomputed D B^H X. The callback
+    /// must call `apply_block` only with that X block. Ordinary applications
+    /// after the callback (including error/unwind) use the normal table again.
+    /// This setup-only bridge preserves the existing split Ritz implementation.
+    pub fn with_atomic_weights<T>(
+        &self,
+        weights: ComplexMatrix,
+        f: impl FnOnce() -> T,
+    ) -> Result<T, SolverError> {
+        if weights.rows() != self.nonlocal().projector_count() {
+            return Err(application(HamiltonianError::Shape));
+        }
+        let mut slot = self
+            .atomic_weights
+            .try_borrow_mut()
+            .map_err(|_| application(HamiltonianError::Busy))?;
+        if slot.is_some() {
+            return Err(application(HamiltonianError::Busy));
+        }
+        *slot = Some(weights);
+        drop(slot);
+        struct Reset<'a>(&'a RefCell<Option<ComplexMatrix>>);
+        impl Drop for Reset<'_> {
+            fn drop(&mut self) {
+                *self.0.borrow_mut() = None;
+            }
+        }
+        let _reset = Reset(&self.atomic_weights);
+        Ok(f())
+    }
+    fn apply_atomic_weights(
+        &self,
+        x: &ComplexMatrix,
+        y: &mut ComplexMatrix,
+        weights: &ComplexMatrix,
+    ) -> Result<(), SolverError> {
+        if weights.cols() != x.cols() {
+            return Err(application(HamiltonianError::Shape));
+        }
+        self.apply_local_block(x, y)?;
+        let p = self.nonlocal().projector_count();
+        if p == 0 {
+            return Ok(());
+        }
+        // Bounded reconstruction scratch; no full atom-by-G table. Every rank
+        // back-applies its own column block, then split_gram forms its columns
+        // of Q^H H Q without gathering a full H Q.
+        const ROWS: usize = 256;
+        for first in (0..x.rows()).step_by(ROWS) {
+            let end = (first + ROWS).min(x.rows());
+            let indices: Vec<_> = (first..end).collect();
+            let beta = self
+                .nonlocal()
+                .projector_rows(&indices)
+                .map_err(application)?;
+            let mut image = vec![Complex64::default(); indices.len() * x.cols()];
+            dft_numerics::linalg::complex_gemm_slices_into(
+                &beta,
+                indices.len(),
+                p,
+                false,
+                weights.as_slice(),
+                x.cols(),
+                &mut image,
+            )?;
+            for b in 0..x.cols() {
+                for i in 0..indices.len() {
+                    y[(first + i, b)] += image[b * indices.len() + i];
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Kinetic and local image only, for the row-distributed atomic nonlocal product.
+    pub fn apply_local_block(
+        &self,
+        x: &ComplexMatrix,
+        y: &mut ComplexMatrix,
+    ) -> Result<(), SolverError> {
+        if x.rows() != self.dimension() || y.rows() != x.rows() || y.cols() != x.cols() {
+            return Err(application(HamiltonianError::Shape));
+        }
+        let mut scratch = self
+            .scratch
+            .try_borrow_mut()
+            .map_err(|_| application(HamiltonianError::Busy))?;
+        self.local_phase(&mut scratch, x, y, false)
+    }
+
     /// Kinetic + local (and, with `nonlocal`, the per-band nonlocal) term of
     /// every column, distributed over the worker slots exactly as before P48C.
     fn local_phase(
@@ -1980,7 +2236,33 @@ impl NonlocalOperator {
         species: &[Species<'_>],
         rule: dft_upf::radial::RadialEvenRule,
     ) -> Result<Self, HamiltonianError> {
-        if rule == dft_upf::radial::RadialEvenRule::Simpson3_8 {
+        Self::new_selected(basis, volume_bohr3, species, rule, None)
+    }
+    /// Build only selected full-sphere rows; full columns remain available lazily.
+    /// `indices` must be sorted and unique. The engine selects the owned Gamma
+    /// representatives; arbitrary rows are supported for construction tests.
+    pub fn new_owned_with_rule(
+        basis: &PlaneWaveBasis,
+        volume_bohr3: f64,
+        species: &[Species<'_>],
+        rule: dft_upf::radial::RadialEvenRule,
+        indices: &[usize],
+    ) -> Result<Self, HamiltonianError> {
+        if indices.windows(2).any(|p| p[0] >= p[1])
+            || indices.last().is_some_and(|&i| i >= basis.momenta().len())
+        {
+            return Err(HamiltonianError::Shape);
+        }
+        Self::new_selected(basis, volume_bohr3, species, rule, Some(indices))
+    }
+    fn new_selected(
+        basis: &PlaneWaveBasis,
+        volume_bohr3: f64,
+        species: &[Species<'_>],
+        rule: dft_upf::radial::RadialEvenRule,
+        selected: Option<&[usize]>,
+    ) -> Result<Self, HamiltonianError> {
+        if selected.is_none() && rule == dft_upf::radial::RadialEvenRule::Simpson3_8 {
             return Self::new(basis, volume_bohr3, species);
         }
 
@@ -1999,7 +2281,13 @@ impl NonlocalOperator {
                         .sum::<usize>()
             })
             .sum();
-        let mut packed = Vec::with_capacity(channels_total * basis.momenta().len());
+        let mut packed = Vec::with_capacity(if selected.is_none() {
+            channels_total * basis.momenta().len()
+        } else {
+            0
+        });
+        let mut recipe_atoms = Vec::new();
+        let mut recipe_bytes = 0;
         for s in species {
             let pp = s.potential;
             let np = pp.projectors().len();
@@ -2065,6 +2353,34 @@ impl NonlocalOperator {
                     }
                 }
             }
+            if selected.is_some() {
+                // Check all immutable factors and phase arguments once, before
+                // any rank enters a collective. No transcendental per-atom work
+                // is needed for rows belonging to other ranks.
+                if !table
+                    .iter()
+                    .flatten()
+                    .all(|z| finite(z) && z.norm().is_finite() && (2.0 * z.norm()).is_finite())
+                {
+                    return Err(HamiltonianError::NonFinite);
+                }
+                recipe_bytes += nc * basis.momenta().len() * size_of::<Complex64>();
+                let factors = Arc::new(table);
+                for &r in s.positions_bohr {
+                    for g in basis.momenta() {
+                        let argument: f64 = g.cartesian.iter().zip(r).map(|(a, b)| a * b).sum();
+                        if !argument.is_finite() || r.iter().any(|v| !v.is_finite()) {
+                            return Err(HamiltonianError::NonFinite);
+                        }
+                    }
+                    recipe_atoms.push(ProjectorRecipeAtom {
+                        factors: factors.clone(),
+                        position: r,
+                    });
+                    atoms.push((nc, coupling.clone()));
+                }
+                continue;
+            }
             for &r in s.positions_bohr {
                 let phases = basis
                     .momenta()
@@ -2082,6 +2398,55 @@ impl NonlocalOperator {
                 }
                 atoms.push((nc, coupling.clone()));
             }
+        }
+        if let Some(indices) = selected {
+            let recipe = ProjectorRecipe {
+                momenta: basis.momenta().to_vec(),
+                atoms: recipe_atoms,
+            };
+            let owned = recipe.rows(indices);
+            let run = dft_numerics::switches::RunConfig::current();
+            state_count(run, 1, owned.len() * size_of::<Complex64>());
+            state_count(
+                run,
+                2,
+                channels_total * basis.momenta().len() * size_of::<Complex64>(),
+            );
+            state_count(run, 3, recipe_bytes);
+            let table = Arc::new(ProjectorTable {
+                full: OnceLock::new(),
+                recipe: Some(recipe),
+                owned_indices: indices.to_vec(),
+                owned,
+                run,
+            });
+            let mut start = 0;
+            let atoms = atoms
+                .into_iter()
+                .map(|(count, coupling)| {
+                    let atom = AtomProjectors {
+                        table: table.clone(),
+                        rows: basis.momenta().len(),
+                        start,
+                        count,
+                        coupling,
+                    };
+                    start += count;
+                    atom
+                })
+                .collect();
+            let mut op = Self {
+                basis: basis.momenta().to_vec(),
+                table,
+                rows: basis.momenta().len(),
+                atoms,
+                max_channels,
+                block: false,
+            };
+            op.set_block_mode(dft_numerics::switches::choice(
+                dft_numerics::switches::Id::NONLOCAL_BLOCK,
+            ));
+            return Ok(op);
         }
         Ok(Self::assemble(
             basis.momenta().to_vec(),

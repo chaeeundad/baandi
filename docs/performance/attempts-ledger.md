@@ -1336,3 +1336,275 @@ hashing on the Mac; no inference about dev08 MPI startup/finalize is made.
   long experiment is ignored by normal gates. **Lesson:** an almost constant
   high-G discretization floor does not select a cheaper handoff reliably;
   reduced coarse work must earn back its fine recovery and probe costs.
+
+## F-INIT-STATES: owned projector initialization (2026-11-19)
+
+| Attempt | Mechanism | Status | Evidence and limits |
+| --- | --- | --- | --- |
+| F-INIT-STATES | `BAANDI_INIT_OWNED_STATES=on` (default off): owned Gamma complex projector representatives, lazy full table, fixed-chunk atomic overlaps; root-only initial ionic FFT | Implemented; aggregate gate blocked by cache-policy tests; dev08 adoption pending | Base `7243075d009e51eed0e8b59786f915ef0048dcb1`. Tests and local observations below; no solver changes. |
+
+The ticket explicitly authorizes revisiting INIT-NONLOCAL-TABLE / INIT-PACKED
+as a rounding-class change (cap 1e-12 Ha), retaining the replicated default.
+This changes the premise of the earlier deferral. The local class and count
+checks are recorded below; default adoption still requires dev08 evidence.
+
+### Full complex table consumers at this revision
+
+* `hamiltonian.rs`: `NonlocalOperator::new_with_rule` creates every full-sphere
+  column, shared through one `Arc<Vec<Complex64>>` by the operator and atom
+  views. Scalar `add` / `apply` / `apply_into`, `expectation_values`, and the
+  block-panel application all read it. `Hamiltonian` complex applications
+  therefore require it, including complex Davidson and fallback paths.
+* `distributed_real_gamma.rs`: `DistributedRealHamiltonian::new` calls
+  `source.nonlocal().atoms()` and `pack_projector_rows` for each column. Its
+  retained real table is already owned-row only, but the packing validation
+  reads the full complex column. Replacing just construction without replacing
+  that validation would still materialize the table on every rank.
+* `real_gamma.rs`: `RealNonlocal::new` reads every column for the serial real
+  operator. `gamma_real.rs` can construct that operator lazily for the M1 or
+  serial fallback; the lazy full complex table must remain available there.
+* `scf.rs::atomic_guesses` calls `atomic_start::ritz`; `split_gram` distributes
+  **columns**, applies complex H over **all G rows**, then gathers the small
+  Gram matrix. The unsplit branch also applies complex H. Supplying `hq` to
+  the existing Ritz API avoids both complex applications, but still computes
+  the Gram from that image. `gamma_real::atomic_apply_real` explicitly declines
+  an active communicator, so enabling ATOMIC_REAL alone cannot fix MPI init.
+  `atomic_start.rs` is outside this ticket's owned files; this implementation
+  uses the existing interface through scoped projector weights.
+* `scf.rs::explicit_nonlocal_energy` and `energy.rs`'s scalar/projector
+  expectation audits require full columns. The M2 ordinary audit can instead
+  use `m2_nonlocal_energy` / `nonlocal_band_energies`, or the band-sum identity;
+  passing a `&NonlocalOperator` into an audit must not itself trigger a build.
+* `scf.rs::operator_fingerprint` traverses all columns for snapshot capture
+  and replay. It is an explicit full-table consumer outside plain SCF.
+  Orbital materialization itself is a gather/unpack; subsequent explicit
+  audits or fingerprints are what require the complex projector data.
+* The certificate pre-screen reads the complex **local potential**, densities
+  and delta-V integrals, not projector columns directly. A resulting real M2
+  solve can remain owned; a complex fallback or explicit final energy audit
+  cannot. Potential materialization and projector materialization need
+  separate counters and eligibility decisions.
+* Post-SCF forces construct a separate `NonlocalOperator::new` in engine
+  `forces.rs`; physics `forces::nonlocal` consumes full columns. Physics
+  `stress::nonlocal` likewise constructs its own operator and contracts full
+  columns with strain derivatives. Keep these constructors eager by default;
+  their correctness must not depend on SCF's owned representation.
+* Collinear workspaces call `scratch_len` and `apply_into` on their operators.
+  Non-Gamma, spin, incompatible real starts and other excluded configurations
+  must retain the ordinary constructor or an explicit lazy full fallback.
+
+### Implementation and arithmetic
+
+`NonlocalOperator` retains only each rank's positive Gamma representatives,
+selected with the same `position_owners` rule as the distributed operator.
+Species radial/angular factors (full G rows, shared across that species' atoms)
+and positions form an owned reconstruction recipe. This is O(N_G times species
+channels), not the replicated O(N_G times atom channels) table. Full phase
+arguments and factors are checked at construction; the distributed operator
+packs directly from the owned representatives, without calling `columns()`.
+A shared `OnceLock` materializes full complex columns only for a consumer that
+reads them. Both radial quadrature rules reproduce the eager columns bitwise.
+
+At atomic start, P = B^H Q is formed in globally numbered 1024-G tiles. Batches
+of eight tile slots use one tree reduction; each slot has one contributing
+rank, then every rank adds the slots in fixed global order. Thus the projection
+association is independent of rank count (unlike a sum of rank-local partial
+sums). D P is small and replicated. A scoped Hamiltonian cache supplies each
+rank's column subset of these weights to the existing `split_gram`: local and
+kinetic FFTs and Q^H H Q stay column-split, and B D P reconstructs only a
+bounded row tile at a time. The usual small Gram gather, Hermitian cleanup,
+eigendecomposition and rotation remain unchanged. The cache clears on success,
+error and unwind; subsequent complex applications lazily build the full table.
+This computes the nonlocal reduced term P^H D P without gathering a full H Q
+or adding a replicated full Gram product. An initial H-Q-gather implementation
+was replaced during review before retained performance observations.
+
+Counters are exposed as `owned.states_full_builds`, `owned.states_table_bytes`,
+`owned.states_replicated_bytes`, and `owned.states_recipe_bytes` in run counters
+and the existing M2 counters (`m2.owned.*` in fast_screen JSON). Full-build counts
+exclude eager construction. Byte counters accumulate allocations across operator
+generations (including the coarse ladder); they are **not peak RSS**. Full
+fallback storage increments table bytes. They exclude the distributed real
+table, temporary atomic tiles/weights and basis metadata. A zero full-build
+counter in both A and B alone is not evidence: tests also assert sparse retained
+bytes, execute the owned path and force a counted full fallback.
+
+### Other init replication (source inspection, no new timing)
+
+| Bucket | Per-rank work | Remaining constraint |
+| --- | --- | --- |
+| `cli` | Input/UPF reading, preflight and prepared bases/grid | INIT-CLI already removed the second prepare call. Production CLI edits are outside this ticket (CLI test ownership is switch-count only). |
+| `basis` | Gamma basis, density basis, two FFT grid specifications | The engine already reuses Gamma and the density sphere under INIT-REUSE. Immutable sharing inside a process could help simulated ranks, but is not shared memory across MPI processes. Basis enumeration changes are outside ownership. |
+| `densities` | FFT plan, optional core and atomic-superposition density, ionic inverse FFT and real extraction | With the switch on, rank 0 alone performs the initial ionic inverse FFT and broadcasts its real values. Other ranks avoid the complex output grid allocation and transform; failure is broadcast before the field. Tests compare the field bits. Mutable plans remain per rank. |
+| `rest` | Validation, worker FFT plans, occupations, Coulomb metric and force-model identity | Coulomb metric already reuses the density sphere. Removing validation or sharing mutable FFT workspaces is not an equivalent optimization. No additional removal was implemented or measured. |
+
+### Environment and verification
+
+The first preflight could not write the external scratch directory (exit 1).
+The user's correction resolved that restriction: all subsequent builds, tests
+and experiment outputs use `TMPDIR_990="$PWD/target/scratch"` and
+`TMPDIR="$TMPDIR_990"`, with `/opt/homebrew/opt/rustup/bin` prepended to PATH.
+No `/tmp` fallback or wider permission was used. The local registry has no
+F-INIT-STATES entry; registry/dashboard/README changes are outside the ticket's
+explicit owned list. Changes are uncommitted for master review.
+
+Required gate (executed; outcome below):
+
+```sh
+scripts/check.sh fast dft-physics dft-engine dft-numerics dft-cli
+```
+
+### Verification results (C)
+
+`cargo test --release -p dft-engine --test init_owned_states -- --nocapture`
+returned **0**: **6 passed**, 0 failed/ignored, 0.33 s test execution. Evidence
+log: `target/scratch/test-acceptance.log` (scratch, not committed).
+
+* Cubic and skewed cells, simulated ranks 1..7: fixed-chunk D P weights are
+  bit-identical across rank counts for the same Q; maximum H Q entry difference
+  **2.7755575615628914e-17 Ha** against the full-table complex operator. The
+  fixture crosses the 1024-G tile boundary at appreciable projector values.
+* Initial atomic Ritz vectors are independently evaluated with a full-table
+  Hamiltonian at the uniform input density (zero Hartree G=0, constant PZ XC,
+  no NLCC). Maximum energy difference **9.7699626167013776e-15 Ha** across
+  cubic/skewed cells and ranks 1..7; no tolerance relaxed.
+* Complete production SCFs over the same shapes/ranks: maximum energy
+  difference **6.2172489379008766e-15 Ha**, **12 SCF steps in both arms**,
+  identical atomic H-application counts, passed fixed-point verification.
+  Default owned fields/density are enabled. M1 fallback is separately forced
+  with gathered fields: full table lazily built exactly once per rank, versus
+  zero on the ordinary owned M2 path.
+* One versus two intra-rank threads: matching energy bits, density and step
+  count, sparse construction in both cases. MPI identity is captured before
+  pool dispatch, not read from a worker's thread-local communicator registry.
+* Both radial rules (even mesh), coupled s channels, p channels, multiple
+  species and a species with no projectors: sparse values and lazily rebuilt
+  columns match the eager columns bitwise. Repeated complex apply constructs
+  once; an injected callback error clears the atomic-weights scope.
+* Initial ionic-potential arrays match bitwise with root-only transformation.
+  At seven ranks the cubic fixture retains **24,000..24,720 bytes/rank** of
+  complex representatives versus **340,560 bytes/rank** for the full table;
+  the skewed fixture **26,400..27,360** versus **374,640 bytes/rank**. These
+  exclude species reconstruction factors and the distributed real table.
+
+Final required `scripts/check.sh fast dft-physics dft-engine dft-numerics dft-cli`
+returned **1**: **build PASS, fmt PASS, clippy PASS**; **537 tests passed,
+3 failed, 149 ignored**, 54 test binaries, 12 s gate wall. The failures are all
+unchanged CLI cache-policy tests:
+
+* `pseudo::cache_resolution_and_no_network_side_effects`
+* `pseudo::cached_fetch_checks_hash_and_provenance`
+* `pseudo::tests::fetch_boundary_verifies_before_publication_and_never_overwrites`
+
+They create their cache under `std::env::temp_dir()`. With the required
+worktree-local TMPDIR, `dft-cli/src/pseudo.rs::outside_repository` correctly
+rejects that location (`pseudopotential cache must be outside repositories`).
+Those files are not owned by this ticket. No guard was weakened, test skipped,
+or outside-worktree scratch used to conceal the failures. Gate log:
+`target/scratch/gates-acceptance.log`. Its optional `ps` load diagnostic also
+hits sandbox `Operation not permitted`; the script continues through all gates.
+The first compile attempts exposed ordinary type/import errors (corrected);
+the first gate additionally caught constant-size chunk Clippy warnings (fixed).
+
+### Mac observation and retained design (O, not adoption)
+
+Both final screens returned **0** using the existing `fast_screen_mpi.py`,
+production mode, ladder on, 8 simulated ranks, 3 alternating pairs, phase
+profile on, delivered orbitals off. These are converged runs, not fixed ten-step
+runs. A separate JSON check (exit 0) enforces the ticket's **1e-12 Ha** cap
+(the harness's standard-class cap is looser), matching SCF/Davidson/H counts,
+repeatability within each arm, sparse byte counts and zero B full builds.
+
+| Cell | A/B SCF, Davidson, H columns | Maximum abs dE (Ha) | Complex table bytes/rank A -> B | Additional B recipe bytes/rank |
+| --- | --- | --- | --- | --- |
+| si32 | 11, 67, 1888 (identical) | 2.842170943040401e-14 | 32,903,168 -> 2,056,704 | 1,028,224 |
+| si64 | 10, 51, 3165 (identical) | 2.842170943040401e-14 | 132,218,880 -> 8,264,192 | 2,065,920 |
+
+Bytes are construction totals across the fine and coarse operators, averaged
+across ranks by the simulated-rank harness. B has zero lazy full builds on all
+six retained runs. Density hashes differ A/B (rounding class), but repeat
+identically within each arm. Neither an RSS claim nor a bit-identical A/B
+trajectory claim is made.
+
+Bucket medians, seconds (max-over-ranks within each run):
+
+| Bucket | si32 A | si32 B | si64 A | si64 B |
+| --- | ---: | ---: | ---: | ---: |
+| init total | 0.110691 | 0.121854 | 0.972810 | 0.463038 |
+| states | 0.023665 | 0.017899 | 0.092870 | 0.035792 |
+| atomic start | 0.060914 | 0.077682 | 0.795783 | 0.378280 |
+| densities | 0.005392 | 0.004369 | 0.013599 | 0.007474 |
+| rest | 0.002642 | 0.002815 | 0.007860 | 0.005093 |
+| basis | 0.013194 | 0.014511 | 0.036464 | 0.030530 |
+| cli | unavailable | unavailable | unavailable | unavailable |
+
+**No speedup established.** The harness bypasses the CLI (`init.cli` is zero,
+not a measured zero cost). si32 total-wall samples A = 2.175988 / 2.128672 /
+2.297577 s, B = 2.231019 / 2.143808 / 2.332140 s, load 3.70..5.45. si64 samples
+A = 7.610771 / 18.702073 / 18.766105 s, B = 7.329880 / 13.016739 / 16.623432 s,
+load 4.48..17.81: strongly nonstationary, so the si64 median directions cannot
+be attributed causally to the change. No builds from this session overlapped
+these retained runs. The switch stays OFF; dev08 decides adoption.
+
+The first 256-G/eight-slot variant reduced storage but increased atomic-start
+cost: si32 `atomic.hq` 0.066642 s, si64 0.466868 s (Mac observations). Retained
+1024-G fixed tiles and omission of unused final slots reduce the **additional**
+projection tree payload: si32 **6,291,480 -> 1,310,728 bytes/rank**, si64
+**41,943,080 -> 9,437,200 bytes/rank** (including failure-flag payloads; global
+shape, not material or rank count, sets the arithmetic). Final `atomic.hq`
+medians are 0.018392 s and 0.100040 s, respectively, with the load caveat above.
+Back application still reconstructs tiles on each rank for its band subset;
+there is a memory/compute tradeoff and this is not proven to improve init wall.
+The initial exploratory si32 screen overlapped a diagnostic rebuild at the end
+and is excluded; the retained screens use `--binary` after builds finish.
+
+Binary SHA-256: `c8a1af409695d53d8b88020eaf31c51c23a6c90d2d037fd6957e7c5048da1469`.
+External Si UPF SHA-256:
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+Raw scratch records (not committed):
+`target/scratch/si32-1024.json` SHA-256
+`32154f37fddc7fd22e0e6ea43413af57daf363426e2b269bfa6988e439945ee0`;
+`target/scratch/si64-1024.json` SHA-256
+`c16b3dd6b08d811d39fbe19c6d0c36164efc581780aeabb40d8d0f85df446573`.
+`target/scratch/acceptance-summary.json` holds the explicit post-check summary.
+No QE calculation was run or claimed.
+
+Mac observation recipe (external UPF, simulated ranks, observation only):
+
+```sh
+BAANDI_PHASE_PROFILE=on M2_PROFILE_ORBITALS=off \
+python3 -I scripts/fast_screen_mpi.py --binary "$SCREEN_BINARY" --upf "$DFT_SI_UPF" \
+  --case si64 --ranks 8 --pairs 3 --mode production \
+  --a BAANDI_INIT_OWNED_STATES=off --b BAANDI_INIT_OWNED_STATES=on \
+  --json-out "$TMPDIR_990/si64-owned-states.json"
+```
+
+Dev08 confirmation is for the master session after implementation and review;
+the following is a command template, not an executed benchmark. Set `BIN` to
+the reviewed release MPI binary, `INPUTS` to matching si32/si64 inputs with
+`scf.max_iterations = 10`, and `OUT` to a fresh result directory. Preserve the
+6c31696-default configuration, identical input/UPF/FFT/bands/start/thresholds,
+one thread per rank, and record binary/input/UPF hashes and command exits.
+
+```sh
+for cell in si32 si64; do
+  for pair in 1 2 3; do
+    for arm in off on; do
+      env OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 BAANDI_PHASE_PROFILE=on \
+        BAANDI_INIT_OWNED_STATES="$arm" \
+        mpirun -np 8 --map-by core --bind-to core \
+        "$BIN" run "$INPUTS/$cell-10step.toml" \
+        --output-dir "$OUT/$cell-$pair-$arm"
+    done
+  done
+done
+```
+
+Report max/min-over-ranks and three-pair medians/spread for total `init`,
+`init.states`, atomic-start total and parts, `init.rest`, `init.cli`,
+`init.basis` (also `init.densities` to detect shifted work); energy differences
+in Ha, SCF/Davidson/H counts, certificate status, full-build counts and per-rank
+table bytes. Require no full build on the default production path in arm B.
+These dev08 commands were not executed here. The master must use matched
+10-step inputs; the local screen runs converged production SCF with the ladder
+and therefore is not a reproduction of the fixed-step dev08 timing protocol.

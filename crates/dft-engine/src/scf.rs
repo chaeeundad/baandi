@@ -1569,6 +1569,9 @@ impl ScfProblem {
                         &basis, &k_grid, rank, ranks,
                     )
                     .map_err(|e| ScfError::Numerical(e.to_string()))?;
+                    // PHASE_VALIDATE instruments only this owned constructor;
+                    // the serial/eager branch below performs no such scan.
+                    // Validation stays before phase materialization/collectives.
                     NonlocalOperator::new_owned_with_rule(
                         &basis,
                         cell.volume_bohr3(),

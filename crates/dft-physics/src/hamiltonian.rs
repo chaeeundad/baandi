@@ -329,6 +329,109 @@ pub fn owned_state_stats() -> [(&'static str, usize); 4] {
     })
 }
 
+// Setup-only instrumentation. RunConfig is rank-local in real MPI; simulated
+// ranks must enter distinct run scopes. No clock/atomic operation in the pair
+// loop, and no clock at all unless PHASE_PROFILE is on.
+struct PhaseValidation {
+    run: dft_numerics::switches::RunConfig,
+    timed: bool,
+    fast: bool,
+    safe_momenta: Option<bool>,
+    accepts: u64,
+    fallbacks: u64,
+    calls: u64,
+    pairs: u64,
+    nanos: u64,
+}
+impl PhaseValidation {
+    fn new() -> Self {
+        let run = dft_numerics::switches::RunConfig::current();
+        Self {
+            run,
+            timed: run.on(dft_numerics::switches::Id::PHASE_PROFILE),
+            fast: run.on(dft_numerics::switches::Id::PHASE_VALIDATE),
+            safe_momenta: None,
+            accepts: 0,
+            fallbacks: 0,
+            calls: 0,
+            pairs: 0,
+            nanos: 0,
+        }
+    }
+    fn validate(
+        &mut self,
+        momenta: &[GVector],
+        positions: &[[f64; 3]],
+    ) -> Result<(), HamiltonianError> {
+        let start = self.timed.then(std::time::Instant::now);
+        self.calls += 1;
+        let result = self.validate_inner(momenta, positions);
+        if let Some(start) = start {
+            self.nanos += start.elapsed().as_nanos() as u64;
+        }
+        result
+    }
+    fn validate_inner(
+        &mut self,
+        momenta: &[GVector],
+        positions: &[[f64; 3]],
+    ) -> Result<(), HamiltonianError> {
+        if self.fast {
+            // The basis is immutable across species in this constructor. Scan
+            // it once; scan each species' positions once. This only proves
+            // success, never rejects: the original loop owns every error.
+            let safe_g = *self.safe_momenta.get_or_insert_with(|| {
+                phase_components_bounded(momenta.iter().flat_map(|g| g.cartesian))
+            });
+            let safe_r = phase_components_bounded(positions.iter().flatten().copied());
+            if safe_g && safe_r {
+                self.accepts += 1;
+                return Ok(());
+            }
+            self.fallbacks += 1;
+        }
+        for (atom, &r) in positions.iter().enumerate() {
+            for (row, g) in momenta.iter().enumerate() {
+                let argument: f64 = g.cartesian.iter().zip(r).map(|(a, b)| a * b).sum();
+                if !argument.is_finite() || r.iter().any(|v| !v.is_finite()) {
+                    self.pairs += (atom * momenta.len() + row + 1) as u64;
+                    return Err(HamiltonianError::NonFinite);
+                }
+            }
+        }
+        self.pairs += (positions.len() * momenta.len()) as u64;
+        Ok(())
+    }
+}
+// 2^500 is exactly represented. Each product is <= 2^1000, and
+// |a*b + c*d + e*f| <= 3*2^1000 < 2^1002, safely below binary64 overflow,
+// including intermediate rounded sums. No phase arithmetic is changed.
+fn phase_components_bounded(components: impl Iterator<Item = f64>) -> bool {
+    const LIMIT: f64 = f64::from_bits(1523_u64 << 52);
+    let mut finite = true;
+    let mut max_abs = 0.0_f64;
+    for x in components {
+        finite &= x.is_finite();
+        max_abs = max_abs.max(x.abs());
+    }
+    finite && max_abs <= LIMIT
+}
+impl Drop for PhaseValidation {
+    fn drop(&mut self) {
+        use dft_numerics::switches::RunCounter as C;
+        for (id, n) in [
+            (C::PhaseValidateConstructors, 1),
+            (C::PhaseValidateCalls, self.calls),
+            (C::PhaseValidatePairs, self.pairs),
+            (C::PhaseValidateFast, self.accepts),
+            (C::PhaseValidateFallbacks, self.fallbacks),
+            (C::PhaseValidateNanos, self.nanos),
+        ] {
+            self.run.count(id, n);
+        }
+    }
+}
+
 /// Atom-independent radial/angular factors, shared by atoms of one species.
 /// Retaining these costs N_G times species channels, not atom channels.
 struct ProjectorRecipeAtom {
@@ -2286,6 +2389,7 @@ impl NonlocalOperator {
         } else {
             0
         });
+        let mut validation = selected.map(|_| PhaseValidation::new());
         let mut recipe_atoms = Vec::new();
         let mut recipe_bytes = 0;
         for s in species {
@@ -2366,13 +2470,11 @@ impl NonlocalOperator {
                 }
                 recipe_bytes += nc * basis.momenta().len() * size_of::<Complex64>();
                 let factors = Arc::new(table);
+                validation
+                    .as_mut()
+                    .expect("owned validation")
+                    .validate(basis.momenta(), s.positions_bohr)?;
                 for &r in s.positions_bohr {
-                    for g in basis.momenta() {
-                        let argument: f64 = g.cartesian.iter().zip(r).map(|(a, b)| a * b).sum();
-                        if !argument.is_finite() || r.iter().any(|v| !v.is_finite()) {
-                            return Err(HamiltonianError::NonFinite);
-                        }
-                    }
                     recipe_atoms.push(ProjectorRecipeAtom {
                         factors: factors.clone(),
                         position: r,
@@ -2773,6 +2875,383 @@ mod block_tests {
                     times[0] / times[1],
                     flops / times[1] / 1e3,
                     flops / times[0] / 1e3
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod phase_validation_tests {
+    use super::*;
+    use dft_numerics::switches::{RunConfig, RunCounter as C};
+    use dft_units::Hartree;
+    use dft_upf::radial::RadialEvenRule;
+
+    fn pseudo(ls: &[usize], n: usize) -> dft_upf::Pseudopotential {
+        pseudo_scaled(ls, n, 1.0)
+    }
+    fn pseudo_scaled(ls: &[usize], n: usize, scale: f64) -> dft_upf::Pseudopotential {
+        let a = |f: &dyn Fn(f64) -> f64| {
+            (0..n)
+                .map(|i| format!("{:.17e}", f(i as f64 * 0.15)))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let mut beta = String::new();
+        for (j, &l) in ls.iter().enumerate() {
+            let i = j + 1;
+            beta.push_str(&format!("<PP_BETA.{i} index=\"{i}\" angular_momentum=\"{l}\" cutoff_radius=\"12\" cutoff_radius_index=\"{n}\">{}</PP_BETA.{i}>",a(&|r| scale*r.powi(l as i32+1)*(-r*r/(1.+j as f64*0.1)).exp())));
+        }
+        let dij = (0..ls.len())
+            .flat_map(|i| {
+                (0..ls.len()).map(move |j| {
+                    if i == j {
+                        1. + i as f64 * 0.1
+                    } else if ls[i] == ls[j] {
+                        0.2
+                    } else {
+                        0.
+                    }
+                })
+            })
+            .map(|v| v.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        dft_upf::parse_upf(&format!(r#"<UPF version="2.0.1"><PP_INFO>Synthetic R3 fixture</PP_INFO>
+<PP_HEADER generated="synthetic" author="tests" date="2026" comment="synthetic" element="Xx" pseudo_type="NC" relativistic="scalar" is_ultrasoft="F" is_paw="F" is_coulomb="F" has_so="F" has_wfc="F" has_gipaw="F" core_correction="F" functional="SLA PZ" z_valence="4" total_psenergy="0" wfc_cutoff="0" rho_cutoff="0" l_max="3" l_max_rho="0" l_local="-1" mesh_size="{n}" number_of_wfc="0" number_of_proj="{}"/>
+<PP_MESH dx="0.15" mesh="{n}" xmin="0" rmax="12" zmesh="1"><PP_R>{}</PP_R><PP_RAB>{}</PP_RAB></PP_MESH><PP_LOCAL>{}</PP_LOCAL><PP_NONLOCAL>{beta}<PP_DIJ>{dij}</PP_DIJ></PP_NONLOCAL><PP_RHOATOM>{}</PP_RHOATOM></UPF>"#,ls.len(),a(&|r|r),a(&|_|0.15),a(&|r| -2.0 / (1.0 + r)),a(&|_|0.)).replace("<PP_NONLOCAL><PP_DIJ></PP_DIJ></PP_NONLOCAL>", "<PP_NONLOCAL/>")).unwrap()
+    }
+
+    fn config(fast: bool, timed: bool) -> RunConfig {
+        RunConfig::from_pairs(&[
+            ("phase_validate", if fast { "on" } else { "off" }),
+            ("phase_profile", if timed { "on" } else { "off" }),
+        ])
+        .unwrap()
+    }
+    fn bits(v: &[Complex64]) -> Vec<(u64, u64)> {
+        v.iter().map(|z| (z.re.to_bits(), z.im.to_bits())).collect()
+    }
+    // Independent copy of the pre-change loop, including its empty-set and
+    // intermediate-overflow behavior (mathematical cancellation is insufficient).
+    fn original(g: &[GVector], positions: &[[f64; 3]]) -> Result<(), HamiltonianError> {
+        for &r in positions {
+            for g in g {
+                let argument: f64 = g.cartesian.iter().zip(r).map(|(a, b)| a * b).sum();
+                if !argument.is_finite() || r.iter().any(|v| !v.is_finite()) {
+                    return Err(HamiltonianError::NonFinite);
+                }
+            }
+        }
+        Ok(())
+    }
+    #[test]
+    fn phase_validation_range_and_original_errors() {
+        let bound = 2.0_f64.powi(500);
+        let above = f64::from_bits(bound.to_bits() + 1);
+        let mut cases = vec![
+            ([0., -0., 0.], [-0., 0., -0.], true, true),
+            ([bound; 3], [bound; 3], true, true),
+            ([above, 0., 0.], [1., 0., 0.], true, false),
+            ([1., 0., 0.], [above, 0., 0.], true, false),
+            ([1e-200; 3], [1e200; 3], true, false),
+            ([1e200; 3], [1e-200; 3], true, false),
+            ([1., -1., 0.], [f64::MAX; 3], true, false),
+            ([f64::MAX, -f64::MAX, 0.], [1.; 3], true, false),
+            ([f64::MAX; 3], [0.; 3], true, false),
+            ([2., -2., 0.], [f64::MAX; 3], false, false),
+            ([f64::MAX; 3], [1.; 3], false, false),
+            ([bound, -bound, bound], [bound; 3], true, true),
+        ];
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for axis in 0..3 {
+                let mut v = [1.; 3];
+                v[axis] = value;
+                cases.push((v, [1.; 3], false, false));
+                cases.push(([1.; 3], v, false, false));
+            }
+        }
+        for (g, r, valid, accepted) in cases {
+            let momenta = vec![GVector {
+                miller: [0; 3],
+                cartesian: g,
+                norm_squared: 0.,
+            }];
+            assert_eq!(original(&momenta, &[r]).is_ok(), valid);
+            for fast in [false, true] {
+                let run = config(fast, false);
+                let _scope = run.enter();
+                let mut validation = PhaseValidation::new();
+                let result = validation.validate(&momenta, &[r]);
+                assert_eq!(
+                    result.as_ref().err().map(ToString::to_string),
+                    original(&momenta, &[r])
+                        .as_ref()
+                        .err()
+                        .map(ToString::to_string)
+                );
+                assert_eq!(validation.accepts, u64::from(fast && accepted));
+                assert_eq!(validation.fallbacks, u64::from(fast && !accepted));
+                assert_eq!(validation.pairs, u64::from(!fast || !accepted));
+                if valid {
+                    let recipe = ProjectorRecipe {
+                        momenta: momenta.clone(),
+                        atoms: vec![ProjectorRecipeAtom {
+                            factors: Arc::new(vec![vec![Complex64::new(0.3, -0.2)]]),
+                            position: r,
+                        }],
+                    };
+                    let expected = Complex64::new(0.3, -0.2) * phase(g, r).unwrap();
+                    assert_eq!(bits(&recipe.rows(&[0])), bits(&[expected]));
+                }
+                drop(validation);
+                assert_eq!(run.counters()[C::PhaseValidateNanos as usize], 0);
+            }
+        }
+        // Preserve the old vacuous acceptance, even for invalid unused data.
+        let run = config(true, false);
+        let _scope = run.enter();
+        assert!(
+            PhaseValidation::new()
+                .validate(&[], &[[f64::NAN; 3]])
+                .is_ok()
+        );
+        let g = [GVector {
+            miller: [0; 3],
+            cartesian: [f64::NAN; 3],
+            norm_squared: 0.,
+        }];
+        assert!(PhaseValidation::new().validate(&g, &[]).is_ok());
+        // A failure counts the actual prefix, including the offending pair.
+        let g = [GVector {
+            miller: [0; 3],
+            cartesian: [1.; 3],
+            norm_squared: 3.,
+        }];
+        let mut v = PhaseValidation::new();
+        assert!(v.validate(&g, &[[0.; 3], [f64::NAN; 3]]).is_err());
+        assert_eq!(v.pairs, 2);
+    }
+
+    #[test]
+    fn phase_validation_constructor_bits_errors_and_lazy_table() {
+        let pp = pseudo(&[0, 1, 1], 41);
+        let qq = pseudo(&[0, 2], 41);
+        let local = pseudo(&[], 41);
+        let mut compared = 0;
+        for rows in [
+            [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],
+            [[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]],
+            [[4., 0., 0.], [0., 5., 0.], [0., 0., 14.]],
+            [[7., 0., 0.], [0., 8., 0.], [0.3, 0., 18.]],
+        ] {
+            let cell = Cell::from_user_rows_bohr(rows).unwrap();
+            for k in [[0.; 3], [0.25, -0.125, 0.375]] {
+                let basis = PlaneWaveBasis::at_k(&cell, Hartree(0.6), k).unwrap();
+                for rule in [
+                    RadialEvenRule::Simpson3_8,
+                    RadialEvenRule::SimpsonQuadraticEnd,
+                ] {
+                    for special in [
+                        [-0., 0., -0.],
+                        [1e160, -1e160, 1e160],
+                        [f64::NAN, 0., 0.],
+                        [f64::INFINITY, 0., 0.],
+                        [f64::MAX; 3],
+                    ] {
+                        let positions = [[0.1, 0.2, 0.3], special];
+                        let species = [
+                            Species {
+                                potential: &pp,
+                                positions_bohr: &positions,
+                            },
+                            Species {
+                                potential: &qq,
+                                positions_bohr: &[[0.2, 0.4, 0.7]],
+                            },
+                            Species {
+                                potential: &local,
+                                positions_bohr: &[[-0., 0., -0.]],
+                            },
+                        ];
+                        // Empty and sparse selections must still validate all rows.
+                        for indices in [vec![], (0..basis.momenta().len()).step_by(3).collect()] {
+                            let build = |fast| {
+                                let run = config(fast, false);
+                                let _scope = run.enter();
+                                (
+                                    NonlocalOperator::new_owned_with_rule(
+                                        &basis,
+                                        cell.volume_bohr3(),
+                                        &species,
+                                        rule,
+                                        &indices,
+                                    ),
+                                    run,
+                                )
+                            };
+                            let (a, ra) = build(false);
+                            let (b, rb) = build(true);
+                            match (a, b) {
+                                (Ok(a), Ok(b)) => {
+                                    assert!(
+                                        a.table.full.get().is_none()
+                                            && b.table.full.get().is_none()
+                                    );
+                                    assert_eq!(bits(&a.table.owned), bits(&b.table.owned));
+                                    assert_eq!(
+                                        a.atoms.iter().map(|a| &a.coupling).collect::<Vec<_>>(),
+                                        b.atoms.iter().map(|a| &a.coupling).collect::<Vec<_>>()
+                                    );
+                                    assert_eq!(ra.counters()[C::StatesFullBuilds as usize], 0);
+                                    assert_eq!(rb.counters()[C::StatesFullBuilds as usize], 0);
+                                    let full_a: &[Complex64] = &a.table;
+                                    let full_b: &[Complex64] = &b.table;
+                                    assert_eq!(bits(full_a), bits(full_b));
+                                    compared += full_a.len();
+                                    assert_eq!(ra.counters()[C::StatesFullBuilds as usize], 1);
+                                    assert_eq!(rb.counters()[C::StatesFullBuilds as usize], 1);
+                                    assert_eq!(bits(&b.table), bits(full_b));
+                                    assert_eq!(rb.counters()[C::StatesFullBuilds as usize], 1);
+                                }
+                                (Err(a), Err(b)) => assert_eq!(a.to_string(), b.to_string()),
+                                _ => panic!("different validation verdicts"),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        println!("phase validation: {compared} complex coefficients bit-identical");
+    }
+
+    #[test]
+    fn phase_validation_preserves_prior_constructor_errors() {
+        let pp = pseudo_scaled(&[0], 41, 1e155);
+        let cell = Cell::from_user_rows_bohr([[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]]).unwrap();
+        let basis = PlaneWaveBasis::new(&cell, Hartree(0.6)).unwrap();
+        let species = [Species {
+            potential: &pp,
+            positions_bohr: &[[f64::NAN, 0., 0.]],
+        }];
+        for fast in [false, true] {
+            let run = config(fast, false);
+            let _scope = run.enter();
+            // Shape precedes volume; volume precedes factors and positions.
+            let build = |vol, indices: &[usize]| {
+                NonlocalOperator::new_owned_with_rule(
+                    &basis,
+                    vol,
+                    &species,
+                    RadialEvenRule::Simpson3_8,
+                    indices,
+                )
+            };
+            assert!(matches!(
+                build(0., &[basis.momenta().len()]),
+                Err(HamiltonianError::Shape)
+            ));
+            assert!(matches!(build(0., &[]), Err(HamiltonianError::Volume)));
+            // Overflowing factors must still be rejected, even with no
+            // selected rows. This happens before phase validation.
+            assert!(matches!(
+                build(1e-310, &[]),
+                Err(HamiltonianError::NonFinite)
+            ));
+            assert_eq!(run.counters()[C::PhaseValidateCalls as usize], 0);
+        }
+    }
+
+    #[test]
+    #[ignore = "DFT_SI_UPF=/external/Si.upf cargo test --release -p dft-physics --lib phase_validation_si64 -- --ignored --nocapture --test-threads=1"]
+    fn phase_validation_si64() {
+        let path = std::env::var("DFT_SI_UPF").expect("external Si UPF required");
+        let pp = dft_upf::parse_upf(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let a = 20.522425713435865;
+        let cell = Cell::from_user_rows_bohr([[a, 0., 0.], [0., a, 0.], [0., 0., a]]).unwrap();
+        let base = [
+            [0., 0., 0.],
+            [0., 0.5, 0.5],
+            [0.5, 0., 0.5],
+            [0.5, 0.5, 0.],
+            [0.25, 0.25, 0.25],
+            [0.25, 0.75, 0.75],
+            [0.75, 0.25, 0.75],
+            [0.75, 0.75, 0.25],
+        ];
+        let mut positions = Vec::new();
+        for x in 0..2 {
+            for y in 0..2 {
+                for z in 0..2 {
+                    for p in base {
+                        positions.push(cell.fractional_to_cartesian_bohr([
+                            (p[0] + x as f64) / 2.,
+                            (p[1] + y as f64) / 2.,
+                            (p[2] + z as f64) / 2.,
+                        ]));
+                    }
+                }
+            }
+        }
+        let species = [Species {
+            potential: &pp,
+            positions_bohr: &positions,
+        }];
+        let bases: Vec<_> = [15., 7.5]
+            .into_iter()
+            .map(|e| PlaneWaveBasis::new(&cell, Hartree(e)).unwrap())
+            .collect();
+        assert_eq!(
+            bases.iter().map(|b| b.momenta().len()).collect::<Vec<_>>(),
+            [23871, 8409]
+        );
+        let mode = std::env::var("PHASE_VALIDATE_BENCH").unwrap_or_else(|_| "off".into());
+        // Full-owned selection for the constructor-only one-thread experiment.
+        // Index creation, file parsing and bases are outside constructor wall.
+        let indices: Vec<Vec<_>> = bases
+            .iter()
+            .map(|b| (0..b.momenta().len()).collect())
+            .collect();
+        let modes = if mode == "cross" {
+            vec!["off", "off", "on", "on", "off"]
+        } else {
+            vec![mode.as_str()]
+        };
+        let runs: Vec<_> = modes
+            .iter()
+            .map(|m| {
+                RunConfig::from_pairs(&[("phase_validate", m), ("phase_profile", "on")]).unwrap()
+            })
+            .collect();
+        for sample in 0..13 {
+            for (arm, (&mode, &run)) in modes.iter().zip(&runs).enumerate() {
+                let _scope = run.enter();
+                let before = run.counters();
+                let start = std::time::Instant::now();
+                for (basis, indices) in bases.iter().zip(&indices) {
+                    let op = NonlocalOperator::new_owned_with_rule(
+                        basis,
+                        cell.volume_bohr3(),
+                        &species,
+                        RadialEvenRule::Simpson3_8,
+                        indices,
+                    )
+                    .unwrap();
+                    assert!(op.table.full.get().is_none());
+                    std::hint::black_box(op);
+                }
+                let wall = start.elapsed().as_secs_f64();
+                let after = run.counters();
+                let delta = |c: C| after[c as usize] - before[c as usize];
+                println!(
+                    "PHASE_VALIDATE sample={sample} arm={arm} mode={mode} constructors={} calls={} pairs={} fast={} fallback={} seconds={:.9} constructor_seconds={wall:.9}",
+                    delta(C::PhaseValidateConstructors),
+                    delta(C::PhaseValidateCalls),
+                    delta(C::PhaseValidatePairs),
+                    delta(C::PhaseValidateFast),
+                    delta(C::PhaseValidateFallbacks),
+                    delta(C::PhaseValidateNanos) as f64 * 1e-9
                 );
             }
         }

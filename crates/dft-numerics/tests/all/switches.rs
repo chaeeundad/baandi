@@ -271,5 +271,6 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::LADDER_STOP_RULE), Value::Choice("off"));
     assert_eq!(value(Id::LADDER_WATCH), Value::Choice("off"));
     assert_eq!(value(Id::LADDER_BASIS_CHECK), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 116);
+    assert_eq!(value(Id::PHASE_VALIDATE), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 117);
 }

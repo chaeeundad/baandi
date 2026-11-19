@@ -31,6 +31,13 @@ export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 here="$(cd "$(dirname "$0")" && pwd)"
 scratch="${TMPDIR_990:-/Volumes/990-2TB/Develop/rust-dft-scratch/tmp}"
 if [[ -d "$(dirname "$scratch")" ]] && mkdir -p "$scratch" 2>/dev/null; then export TMPDIR="$scratch"; fi
+# sccache (user-approved 2026-11-19): shared compile cache on the 990-2TB volume, safe across worktrees
+# because it keys on the full compiler input. CHECK_SCCACHE=0 disables. sccache cannot cache incremental
+# crates, so incremental is switched off for gate builds when it is used.
+if [[ "${CHECK_SCCACHE:-1}" != "0" ]] && command -v sccache >/dev/null 2>&1; then
+  export SCCACHE_DIR="${SCCACHE_DIR:-/Volumes/990-2TB/Develop/rust-dft-cache/sccache}"
+  mkdir -p "$SCCACHE_DIR" 2>/dev/null && export RUSTC_WRAPPER=sccache CARGO_INCREMENTAL=0
+fi
 
 tier=full; pkg=(--workspace); fmt_pkg=()
 case "${1:-}" in

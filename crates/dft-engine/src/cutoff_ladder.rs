@@ -2386,10 +2386,10 @@ mod handoff_experiment {
                 "{{\"differences\":{},\"kept\":{},\"gram_condition\":{},\"coefficients\":{:?},\"residual_norm\":{:?},\"predicted_ratio\":{:?},\"step_norm\":{:?},\"coulomb_predicted_ratio\":{},\"coulomb_refit\":{}}}",
                 p.differences, p.kept, optional(Some(p.gram_condition)), p.coefficients,
                 p.residual_norm, p.predicted_ratio, p.step_norm, optional(p.coulomb_predicted_ratio), p.coulomb_refit));
-            format!("{{\"map\":{},\"standard_error_ha\":{},\"eigen_tolerance_ha\":{:?},\"h\":{},\"davidson\":{},\"density_residual\":{:?},\"reset\":{},\"resets\":{},\"redo\":{},\"energy_error_ha\":{:?},\"pulay\":{}}}",
+            format!("{{\"map\":{},\"standard_error_ha\":{},\"eigen_tolerance_ha\":{:?},\"h\":{},\"davidson\":{},\"density_residual\":{:?},\"reset\":{},\"resets\":{},\"redo\":{},\"energy_error_ha\":{:?},\"charge_relative_error\":{:?},\"input_charge_relative_error\":{:?},\"pulay\":{}}}",
                 r.iteration, optional(r.standard_error_ha), r.requested_eigen_tolerance,
                 r.operator_applications, r.davidson_iterations, r.density_residual,
-                r.mixer_reset, r.mixing_resets, r.standard_redo, r.energy.total_hartree()-reference, pulay)
+                r.mixer_reset, r.mixing_resets, r.standard_redo, r.energy.total_hartree()-reference, r.charge_error, r.input_charge_error, pulay)
         }).collect();
         std::fs::write(path, format!("[{}]\n", rows.join(","))).unwrap();
     }
@@ -2684,10 +2684,17 @@ mod handoff_experiment {
             let fine_grid = fine.grid.dims();
             let ladder = fraction_options(&fine, &requested).unwrap();
             let stop = ladder.coarse_density_residual;
-            let mut coarse = coarse_problem(&fine, &fixture.refs(), &ladder).unwrap();
-            if mode == "minimal-grid" {
-                let mut options = coarse.options.clone();
-                let density_basis = coarse.states[0].basis.density_basis(&fixture.cell).unwrap();
+            let coarse = if mode == "minimal-grid" {
+                // Plan the grid without constructing (and charging) a discarded
+                // coarse Hamiltonian/atomic start. Exactly one constructor per arm.
+                let mut options = fine.options.clone();
+                options.cutoff_hartree *= ladder.fraction;
+                options.verification = Verification::Off;
+                let density_basis = PlaneWaveBasis::new(
+                    &fixture.cell,
+                    dft_units::Hartree(4. * options.cutoff_hartree),
+                )
+                .unwrap();
                 let mut dims = [1; 3];
                 for g in density_basis.vectors() {
                     for (i, d) in dims.iter_mut().enumerate() {
@@ -2695,7 +2702,7 @@ mod handoff_experiment {
                     }
                 }
                 options.grid_override = Some(dims);
-                coarse = fixture.problem(options);
+                fixture.problem(options)
             } else {
                 assert!(
                     [
@@ -2705,6 +2712,7 @@ mod handoff_experiment {
                         "first-coarse",
                         "first-tight",
                         "first-previous",
+                        "first-seed",
                         "grid",
                         "modes",
                         "grid-modes",
@@ -2712,7 +2720,8 @@ mod handoff_experiment {
                     ]
                     .contains(&mode)
                 );
-            }
+                coarse_problem(&fine, &fixture.refs(), &ladder).unwrap()
+            };
             let coarse_grid = coarse.grid.dims();
             let mut report = CutoffLadderReport {
                 standard: true,
@@ -2744,6 +2753,7 @@ mod handoff_experiment {
                 "first-coarse" => c.last_tolerance,
                 "first-tight" => Some(StandardProfile::FLOOR_HA),
                 "first-previous" => Some(previous_seed.expect("previous coarse seed required")),
+                "first-seed" => Some(parts[3].parse::<f64>().expect("explicit seed in Ha")),
                 _ => c.standard_next,
             };
             previous_seed = c.standard_next;
@@ -2981,7 +2991,9 @@ mod handoff_experiment {
                 );
             }
             // One exact off-path oracle per job, including delivered density.
-            if index == 0 || ["grid", "modes", "grid-modes", "watch"].contains(&mode) {
+            if (index == 0 && mode == "default")
+                || ["grid", "modes", "grid-modes", "watch"].contains(&mode)
+            {
                 let ordinary = run_ladder(
                     fixture.problem(fixture.options.clone()),
                     &fixture.refs(),
@@ -3007,6 +3019,363 @@ mod handoff_experiment {
             );
             std::fs::write(dir.join("measurement.json"), format!("{json}\n")).unwrap();
             println!("HANDOFF {json}");
+        }
+    }
+
+    fn write_row(path: &Path, row: &BTreeMap<String, String>) {
+        let fields = row
+            .iter()
+            .map(|(k, v)| format!("{k:?}:{v}"))
+            .collect::<Vec<_>>();
+        std::fs::write(path, format!("{{{}}}\n", fields.join(","))).unwrap();
+    }
+
+    fn result_bits(dir: &Path, result: &ScfResult, reference: f64) {
+        std::fs::create_dir_all(dir).unwrap();
+        save_f64(&dir.join("density.bin"), result.density.iter().copied());
+        save_f64(
+            &dir.join("orbitals.bin"),
+            result.k_points[0]
+                .solution
+                .eigenvectors
+                .as_slice()
+                .iter()
+                .flat_map(|z| [z.re, z.im]),
+        );
+        save_f64(
+            &dir.join("energy-eigenvalues.bin"),
+            std::iter::once(result.total_hartree()).chain(result.eigenvalues.iter().copied()),
+        );
+        save_history(&dir.join("history.json"), &result.history, reference);
+    }
+
+    // Same initialization and setter as finish_from; observation occurs only at
+    // completed map boundaries, never inside numerical kernels. No production hook.
+    fn finish_observed(
+        fine: ScfProblem,
+        state: &ElectronicState,
+        seed: f64,
+    ) -> (ScfOutcome, Vec<[u64; 4]>, Vec<f64>) {
+        let mut session = ScfSession::new(
+            fine,
+            CompletionMode::RetainLast,
+            crate::events::ExecutionConfig::default(),
+        )
+        .unwrap();
+        session.initialize_ladder_electronic(state).unwrap();
+        session.seed_standard_tolerance(seed).unwrap();
+        let mut calls = Vec::new();
+        let mut walls = Vec::new();
+        loop {
+            let before = work_timers::snapshot();
+            let start = Instant::now();
+            let status = session.step().unwrap().status;
+            walls.push(start.elapsed().as_secs_f64());
+            let after = work_timers::snapshot();
+            calls.push([
+                after[0].apply_calls - before[0].apply_calls,
+                after[0].apply_columns - before[0].apply_columns,
+                after[2].apply_calls - before[2].apply_calls,
+                after[2].apply_columns - before[2].apply_columns,
+            ]);
+            if status != StepStatus::Ready {
+                break;
+            }
+        }
+        (session.into_result().unwrap(), calls, walls)
+    }
+
+    struct CapturedStart {
+        state: ElectronicState,
+        seed: f64,
+        report: CutoffLadderReport,
+        construction_s: f64,
+        calls: u64,
+        columns: u64,
+    }
+
+    /// Literal counterfactual seeds are test data only. Reuse the exact captured
+    /// input density AND orbitals; no repeat SCF is used to reconstruct a start.
+    /// Release: scripts/ladder_2x2_run.py --binary <dft_engine lib test executable>.
+    #[test]
+    #[ignore = "offline full-SCF 2x2 experiment; release only, scripts/ladder_2x2_run.py"]
+    fn measure_2x2() {
+        let input = std::env::var("HANDOFF_INPUT").expect("HANDOFF_INPUT");
+        let fixture = Fixture::load(Path::new(&input));
+        let output = std::env::var("HANDOFF_OUTPUT").expect("HANDOFF_OUTPUT");
+        let root = Path::new(&output);
+        let pairs: usize = std::env::var("HANDOFF_PAIRS")
+            .unwrap_or_else(|_| "1".into())
+            .parse()
+            .unwrap();
+        assert!(pairs > 0);
+        let run = RunConfig::from_pairs(&[
+            ("phase_profile", "on"),
+            ("stage_timers", "on"),
+            ("davidson_stages", "on"),
+        ])
+        .unwrap();
+        let _scope = run.enter();
+        crate::snapshot::force_dir(Some(None));
+        work_timers::set_enabled(true);
+        let mut strict = fixture.options.clone();
+        strict.standard = None;
+        strict.verification = Verification::Off;
+        strict.mixing = ScfOptions::strict_reference().mixing;
+        strict.energy_tolerance = 1e-11;
+        strict.density_tolerance = 1e-9;
+        strict.eigen_tolerance = 1e-10;
+        let reference = fixture.problem(strict).run_outcome().unwrap();
+        assert!(reference.converged);
+        let e_ref = reference.result.total_hartree();
+        result_bits(&root.join("reference"), &reference.result, e_ref);
+        let fractions = [0.5, 0.4, 0.45];
+        let common_basis = PlaneWaveBasis::new(
+            &fixture.cell,
+            dft_units::Hartree(0.4 * fixture.options.cutoff_hartree),
+        )
+        .unwrap();
+        let mut starts = Vec::new();
+        for (i, &fraction) in fractions.iter().enumerate() {
+            let dir = root.join(format!("state-{i}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            // Full fine construction is measured separately on EVERY continuation.
+            let fine = fixture.problem(fixture.options.clone());
+            let ladder = CutoffLadderOptions {
+                fraction,
+                standard: true,
+                ..CutoffLadderOptions::baseline()
+            };
+            let before = work_timers::snapshot();
+            let clock = Instant::now();
+            let coarse = coarse_problem(&fine, &fixture.refs(), &ladder).unwrap();
+            let coarse_grid = coarse.grid.dims();
+            let mut report = CutoffLadderReport::default();
+            let c = coarse_stage(
+                coarse,
+                &ladder,
+                ladder.coarse_density_residual,
+                &mut report,
+                None,
+            )
+            .unwrap();
+            let state = hand_off(&fine, &c.basis, &c.density, &c.orbitals).unwrap();
+            let construction_s = clock.elapsed().as_secs_f64();
+            let after = work_timers::snapshot();
+            let seed = c.standard_next.unwrap();
+            save_f64(&dir.join("density.bin"), state.density.iter().copied());
+            save_f64(
+                &dir.join("orbitals.bin"),
+                state.orbitals[0].coefficients.iter().copied(),
+            );
+            save_history(
+                &dir.join("coarse-history.json"),
+                &report.coarse_history,
+                e_ref,
+            );
+            // Diagnostics have a separate Hamiltonian and occur AFTER timing/work capture.
+            let mut probe = fixture.problem(fixture.options.clone());
+            let n = Array3::from_shape_vec(state.grid, state.density.clone()).unwrap();
+            let (_, _, potential) = probe.input_fields(&n).unwrap();
+            probe.states[0]
+                .hamiltonian
+                .set_local_potential(potential)
+                .unwrap();
+            let full = prolong_orbitals(&c.basis, &probe.states[0].basis, &c.orbitals).unwrap();
+            let occupied = probe.occupations.iter().filter(|&&f| f > 0.).count();
+            let mut x = ComplexMatrix::zeros(full.rows(), occupied).unwrap();
+            for j in 0..occupied {
+                x.column_mut(j).copy_from_slice(full.column(j));
+            }
+            let mut hx = x.clone();
+            {
+                use dft_solvers::LinearOperator;
+                probe.states[0]
+                    .hamiltonian
+                    .apply_block(&x, &mut hx)
+                    .unwrap();
+            }
+            // All states use the SAME low-G domain, the 0.40 PW sphere.
+            let mut row = quality(&mut probe, &common_basis, &n, &x, &hx, &reference.result);
+            macro_rules! put {
+                ($k:expr, $v:expr) => {
+                    row.insert($k.into(), format!("{:?}", $v));
+                };
+            }
+            put!("fraction", fraction);
+            put!("seed_ha", seed);
+            put!("construction_s", construction_s);
+            put!("coarse_grid", coarse_grid);
+            put!("fine_grid", state.grid);
+            put!("coarse_plane_waves", c.basis.vectors().len());
+            put!("fine_plane_waves", full.rows());
+            put!("electrons", fine.electrons);
+            put!(
+                "charge_electrons",
+                n.sum() * fixture.cell.volume_bohr3() / n.len() as f64
+            );
+            put!("coarse_maps", report.coarse_iterations);
+            put!(
+                "coarse_h",
+                report.coarse_h_vectors + report.coarse_start_h_vectors
+            );
+            put!(
+                "coarse_block_calls",
+                after[1].apply_calls - before[1].apply_calls
+            );
+            put!("common_low_g_plane_waves", common_basis.vectors().len());
+            write_row(&dir.join("state.json"), &row);
+            // Unsplit natural production control, including all setup and verification.
+            let clock = Instant::now();
+            let natural = run_ladder(
+                fixture.problem(fixture.options.clone()),
+                &fixture.refs(),
+                &ladder,
+                true,
+            )
+            .unwrap();
+            let natural_s = clock.elapsed().as_secs_f64();
+            assert!(natural.outcome.converged);
+            assert_eq!(
+                natural.report.standard_seed_ha.unwrap().to_bits(),
+                seed.to_bits()
+            );
+            result_bits(
+                &root.join(format!("natural-{i}")),
+                &natural.outcome.result,
+                e_ref,
+            );
+            row.clear();
+            put!("wall_s", natural_s);
+            put!("energy_ha", natural.outcome.result.total_hartree());
+            put!("reference_ha", e_ref);
+            put!(
+                "error_ha",
+                (natural.outcome.result.total_hartree() - e_ref).abs()
+            );
+            write_row(&root.join(format!("natural-{i}/measurement.json")), &row);
+            starts.push(CapturedStart {
+                state,
+                seed,
+                report,
+                construction_s,
+                calls: after[1].apply_calls - before[1].apply_calls,
+                columns: after[1].apply_columns - before[1].apply_columns,
+            });
+        }
+        // Observed values, never assumed which fraction yields the tighter seed.
+        // Labels encode state and seed source rather than a potentially wrong tight/loose label.
+        for pair in 0..pairs {
+            let mut arms = [(0, 0), (0, 0), (0, 1), (1, 1), (1, 0), (2, 2)];
+            if pair % 2 == 1 {
+                arms.reverse();
+            }
+            for (order, &(state_id, seed_id)) in arms.iter().enumerate() {
+                let dir = root.join(format!("pair-{pair}-arm-{order}"));
+                std::fs::create_dir_all(&dir).unwrap();
+                let start = &starts[state_id];
+                let seed = starts[seed_id].seed;
+                let clock = Instant::now();
+                let fine = fixture.problem(fixture.options.clone());
+                let fine_setup_s = clock.elapsed().as_secs_f64();
+                let clock = Instant::now();
+                let (outcome, calls, map_wall_s) = finish_observed(fine, &start.state, seed);
+                let fine_s = clock.elapsed().as_secs_f64();
+                assert!(outcome.converged);
+                let result = &outcome.result;
+                let verify = result.verification.as_ref().unwrap();
+                assert!(verify.passed());
+                result_bits(&dir, result, e_ref);
+                let diagonal = state_id == seed_id;
+                if diagonal {
+                    for name in [
+                        "density.bin",
+                        "orbitals.bin",
+                        "energy-eigenvalues.bin",
+                        "history.json",
+                    ] {
+                        assert_eq!(
+                            std::fs::read(dir.join(name)).unwrap(),
+                            std::fs::read(root.join(format!("natural-{state_id}")).join(name))
+                                .unwrap(),
+                            "split diagonal differs from natural: {name}"
+                        );
+                    }
+                }
+                let mut row = BTreeMap::new();
+                macro_rules! put {
+                    ($k:expr, $v:expr) => {
+                        row.insert($k.into(), format!("{:?}", $v));
+                    };
+                }
+                put!("pair", pair);
+                put!("order", order);
+                put!("state_id", state_id);
+                put!("seed_id", seed_id);
+                put!("fraction", fractions[state_id]);
+                put!("seed_ha", seed);
+                put!("diagonal_bits_equal", diagonal);
+                put!("fine_setup_s", fine_setup_s);
+                put!("state_construction_s", start.construction_s);
+                put!("fine_s", fine_s);
+                put!("full_price_s", fine_setup_s + start.construction_s + fine_s);
+                put!("map_wall_s", map_wall_s);
+                put!("map_calls_h_verify_calls_h", calls);
+                put!("coarse_maps", start.report.coarse_iterations);
+                put!("coarse_h", start.columns);
+                put!("coarse_calls", start.calls);
+                put!("fine_maps", result.history.len());
+                put!(
+                    "fine_h",
+                    result
+                        .history
+                        .iter()
+                        .map(|r| r.operator_applications)
+                        .sum::<usize>()
+                );
+                put!(
+                    "verification_h",
+                    verify
+                        .attempts
+                        .iter()
+                        .map(|v| v.operator_applications)
+                        .sum::<usize>()
+                );
+                put!("verification_s", verify.wall().as_secs_f64());
+                put!(
+                    "verification_maps",
+                    verify
+                        .attempts
+                        .iter()
+                        .map(|v| v.iteration)
+                        .collect::<Vec<_>>()
+                );
+                put!(
+                    "verification_passed",
+                    verify.attempts.iter().map(|v| v.passed).collect::<Vec<_>>()
+                );
+                put!(
+                    "verification_coulomb_error_ha",
+                    verify
+                        .attempts
+                        .iter()
+                        .map(|v| v.coulomb_error_ha)
+                        .collect::<Vec<_>>()
+                );
+                put!(
+                    "rejected_attempts",
+                    verify.attempts.iter().filter(|v| !v.passed).count()
+                );
+                put!("energy_ha", result.total_hartree());
+                put!("reference_ha", e_ref);
+                put!("error_ha", (result.total_hartree() - e_ref).abs());
+                put!(
+                    "electrons",
+                    fixture.cell.volume_bohr3() * result.density.sum()
+                        / result.density.len() as f64
+                );
+                write_row(&dir.join("measurement.json"), &row);
+            }
         }
     }
 }

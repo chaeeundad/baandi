@@ -1,5 +1,7 @@
 {
-  "scope": "analytic fixture model; no measured hardware floor or speed claim",
+  "scope": "analytic fixture model priced with relayed dev08 STREAM; not measured optimization speed",
+  "dev08_one_core_stream_gb_s": 12.97,
+  "fusion_stream_priced_expected_seconds": 0.8840538596761758,
   "grid_points": 373248,
   "occupied_bands": 128,
   "paired_inverse_ffts_per_map": 64,

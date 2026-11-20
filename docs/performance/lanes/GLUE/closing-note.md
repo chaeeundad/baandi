@@ -1,3 +1,9 @@
+> **Historical / superseded:** do not close GLUE. The 2026-11-20 orchestrator
+> follow-up supplied measured one-core STREAM bandwidth and authorized the
+> serial density fusion implementation. See [dev08-request.md](dev08-request.md)
+> and [fusion-validation.md](fusion-validation.md). The text below records
+> the earlier decision before that new evidence, not the current recommendation.
+
 # LANE-GLUE Phase 2 closing recommendation
 
 **Recommend closing this lane for the current work order.** No candidate has

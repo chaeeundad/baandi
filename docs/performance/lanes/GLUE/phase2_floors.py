@@ -20,7 +20,9 @@ def calculate():
     # per band/point. Direct accumulation reads/writes rho (16) instead.
     saved_bytes = 16*occupied*n*maps
     return {
-        'scope': 'analytic fixture model; no measured hardware floor or speed claim',
+        'scope': 'analytic fixture model priced with relayed dev08 STREAM; not measured optimization speed',
+        'dev08_one_core_stream_gb_s': 12.97,
+        'fusion_stream_priced_expected_seconds': saved_bytes / 12.97e9,
         'grid_points': n, 'occupied_bands': occupied, 'paired_inverse_ffts_per_map': pairs,
         'assumed_density_maps': maps, 'paired_inverse_ffts_15_maps': pairs*maps,
         'dense_complex_fft_flops_per_pair_estimate': dense_flops,

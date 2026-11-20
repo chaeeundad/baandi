@@ -1,3 +1,12 @@
+> **Reopened, 2026-11-20:** the orchestrator supplied one-core STREAM
+> 12.97 GB/s and explicitly requested serial fusion. The historical closing
+> decision below is superseded by [dev08-request.md](dev08-request.md).
+> The conservative 11.466 GB model now predicts 0.884 s, above the design
+> screen. This is a testable bandwidth hypothesis, not adoption evidence.
+> DGEMM 64–108 GFLOP/s does not establish FFT throughput. No MPI lever or
+> acceptance rule changed. Implementation preserves ascending band additions
+> and is default-off, standard/unregistered-process/one-core only.
+
 # LANE-GLUE Phase 2 diagnosis
 
 Decision: **recommend closing this lane under the requested minimum gain and
@@ -138,16 +147,18 @@ all that time to the dense FFT proxy would give 5.261 GFLOP/s; this is a
 normalization, not measured FFT throughput. To reach 0.8 s requires removing
 12.692% of serial density. Serial fusion's 11.466 GB traffic model reaches
 0.8 s only at an effective removed-pass throughput of 14.333 GB/s or lower,
-assuming the reduction translates entirely to critical-path savings. Neither
-that effective throughput nor the serial contribution/fold timer is in the
-relay. Therefore it is not defensible to predict >=0.8 s from these bytes.
+assuming the reduction translates entirely to critical-path savings. The new
+relay supplies one-core STREAM 12.97 GB/s, pricing the conservative saving at
+0.884054 s. This qualifies the candidate for implementation; removed-pass
+throughput and actual wall gain remain to be measured by crossed A/B.
 For MPI8 the density target requires 27.281% of density, and this split-array
 traffic has already been removed by the adopted fused path.
 
 A roofline time lower-bound model is `max(F/R_peak, Q/B_peak)` for each
 non-overlapping kernel, with actual backend work F and relevant traffic Q.
-No measured/qualified FFT throughput, memory bandwidth, cache traffic or
-GLUE subspan distribution was returned. **The numerical excess above a
+No measured/qualified FFT throughput, cache traffic or detailed GLUE subspan
+distribution was returned. STREAM bandwidth is now available, but is not a
+measurement of this kernel's removed DRAM traffic. **The numerical excess above a
 hardware time floor is undetermined**, not 6.30 s minus an invented FFT time.
 The large serial share is consistent with 64 transforms/map plus band-grid
 traffic while most non-density glue is O(N), and with fast vendor solver
@@ -237,7 +248,7 @@ also removing required physics. No load-balancing change is selected.
 | --- | --- | --- |
 | Share audit output FFT/XC with verification input potential | optimistic uniform-map estimate (not a measured bound), two potentials out of 15: 0.01635 s MPI8 / 0.10332 s serial; actual saving smaller because inverse Hartree remains | below threshold; mixed ordinary inputs defeat general reuse |
 | Skip verification density build using prior density/kept psi | nominal two-map serial ceiling 0.84043 s, barely above target | invalid: verification solves new orbitals; reusing prior output would suppress the fixed-point residual being tested |
-| Serial direct density accumulation instead of per-band arrays | 11.466 GB modeled removed traffic/15 maps; >=0.8 s needs <=14.333 GB/s effective removed-pass rate | promising but unqualified by relay; MPI already fused; requires band_density/FFT ownership beyond this lane |
+| Serial direct density accumulation instead of per-band arrays | 11.466 GB modeled removed traffic/15 maps; >=0.8 s needs <=14.333 GB/s effective removed-pass rate | chosen after new STREAM relay: expected 0.884 s; explicitly authorized serial band_density/FFT scope; default-off implementation, MPI already fused |
 | Defer explicit energy audit except final/verification | whole-phase ceiling 0.2865 s MPI8 / 0.9897 s serial; needs 70%/81% removal, no demonstrated dispensable subspan that large | no qualified expectation; ENERGY_IDENTITY previously lost; current history/verification contracts must remain truthful |
 | Reduce pointwise XC imbalance | proxy spread 0.05831 s if stated asymmetry is spread/max | below MPI target, cause not established, no serial imbalance to remove |
 
@@ -249,15 +260,19 @@ current ADR 0043 contract. No parameter tuning or guard experiment is reopened.
 
 ## Result and limits
 
-No candidate clears the requested **expected-gain** screen with the available
-evidence and owned code, so take the user's closing-note branch. Do not
-implement a speculative switch or submit empty A/B arms. This does not revoke
-the standing rule to adopt any measured improvement: it is this task's explicit
-candidate-selection threshold, not a global 0.2/0.8 s adoption rule.
+The STREAM follow-up supersedes the initial closing recommendation. Implemented
+`SERIAL_DENSITY_FUSED` as a conservative ordered sink, preserving FFT plans,
+Gamma pairing, each band's arithmetic, kept psi and band addition order.
+Strict reference and registered/compiled MPI execution remain on the original
+path; only a standard one-core unregistered process can enter the new sink.
+A small MPI-backend compile-time constant prevents the MPI rank-one CLI (which
+does not register its communicator) from accidentally entering this lane.
+No numerical allocation or logging was introduced inside transform loops.
 
-[phase2-floors.json](phase2-floors.json) is regenerated by
-`python3 -I docs/performance/lanes/GLUE/phase2_floors.py`; it contains analytic
-work/break-even values only. [closing-note.md](closing-note.md) states the
-reopening evidence. No new Mac equivalence comparison is applicable because
-no executable source or switch changed; Phase 0 identity evidence is not
-presented as validation of an unimplemented optimization.
+The 0.8 s design screen is not an adoption minimum. Any resolved positive
+same-model gain counts after correctness, with A/A first and |mean|/SE>=3.
+See [dev08-request.md](dev08-request.md) for commands and withdrawal criteria,
+and [fusion-validation.md](fusion-validation.md) for actual Mac bit/counter
+evidence. The prior [closing-note.md](closing-note.md) remains historical.
+[phase2-floors.json](phase2-floors.json) includes the STREAM-priced analytic
+expectation, not an observed performance result. No Mac timings support it.

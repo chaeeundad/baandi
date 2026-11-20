@@ -1,0 +1,91 @@
+{
+  "task_id": "LANE-GLUE",
+  "status": "DONE",
+  "changed_files": [
+    "crates/dft-cli/tests/all/run.rs",
+    "crates/dft-engine/src/band_density.rs",
+    "crates/dft-engine/src/parallel.rs",
+    "crates/dft-engine/src/scf.rs",
+    "crates/dft-mpi/src/lib.rs",
+    "crates/dft-numerics/src/fused.rs",
+    "crates/dft-numerics/src/fused_pair.rs",
+    "crates/dft-numerics/src/switches.rs",
+    "crates/dft-numerics/tests/all/switches.rs",
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/lanes/GLUE/closing-note.md",
+    "docs/performance/lanes/GLUE/dev08-request.md",
+    "docs/performance/lanes/GLUE/diagnosis.md",
+    "docs/performance/lanes/GLUE/fusion-mac-equivalence.json",
+    "docs/performance/lanes/GLUE/fusion-mac-shapes.json",
+    "docs/performance/lanes/GLUE/fusion-mac-strict.json",
+    "docs/performance/lanes/GLUE/fusion-mac-t3.json",
+    "docs/performance/lanes/GLUE/fusion-report.json",
+    "docs/performance/lanes/GLUE/fusion-validation.md",
+    "docs/performance/lanes/GLUE/fusion_stats.py",
+    "docs/performance/lanes/GLUE/fusion_verify.py",
+    "docs/performance/lanes/GLUE/phase2-floors.json",
+    "docs/performance/lanes/GLUE/phase2_floors.py",
+    "docs/performance/lanes/GLUE/test_fusion_tools.py"
+  ],
+  "design_choices": [
+    "Default-off SERIAL_DENSITY_FUSED; standard one-core, non-MPI build with no registered communicator only.",
+    "Preserve per-band rounding, ascending additions, FFTs and kept psi; retain fallback storage and strict certificate grids.",
+    "Conservative logical byte counters gated by GLUE_PROFILE plus PHASE_PROFILE; no Mac profiling.",
+    "New STREAM premise supersedes closing recommendation. Any resolved gain counts; dev08 A/A then six crossed A/B pairs per case.",
+    "No substantiated acceptance-preserving >0.2 s MPI8 XC/energy lever; no energy or stopping changes."
+  ],
+  "commands": [
+    {
+      "command": "cargo build --release -p dft-cli",
+      "exit_code": 0
+    },
+    {
+      "command": "fusion_verify.py: standard baseline/OFF/ON, four fixtures; strict skew; thread-3 fallback; elongated/slab stress (see evidence command arrays)",
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR_990=\"$PWD/target/scratch\" CHECK_SCCACHE=0 scripts/check.sh fast dft-mpi dft-numerics dft-engine dft-cli dft-physics dft-solvers",
+      "exit_code": 1
+    },
+    {
+      "command": "BAANDI_SERIAL_DENSITY_FUSED=on cargo test -p dft-engine --test m2_owned",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/GLUE/test_fusion_tools.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/GLUE/test_parser.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/GLUE/phase2_floors.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 1
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "Maximum energy difference = 0 Ha; scientific bits/density hashes match across 23 recorded arms.",
+    "Si32 logical bytes: 5249359872 -> 2624679936; savings 2624679936 bytes = 16 * 164042496 paired band-points.",
+    "Si64 15-map model: 11466178560 bytes / 12.97 GB/s = 0.8840538596761758 s expected, not measured.",
+    "Final fast gate: build/fmt/clippy pass; 728 tests passed, 3 known failures, 179 ignored; 74 binaries.",
+    "M2 switch-on simulated tests: 3 passed. Statistics/model tests: 3 passed. Parser tests: 3 passed."
+  ],
+  "reference_comparison": "Mac pre-edit binary versus candidate OFF/ON is bit-identical; no new QE run. Relayed e947a35 MPI8 density/energy/potential are contextual only; no cross-model speed ratio.",
+  "limitations": [
+    "Dev08 MKL/real MPI correctness, structural counters and A/B wall still pending. Default remains off.",
+    "Known Mac in-repo TMPDIR pseudo-cache failures (3); sandbox ps probe unavailable. README structural wording test remains pre-existing 1 failure out of 9.",
+    "Elongated/slab fixtures remain nonconverged in every arm; equivalence only.",
+    "Logical traffic is a conservative model, not measured DRAM traffic. No resident-memory reduction claim."
+  ],
+  "open_questions": [],
+  "commit": "Uncommitted as requested; stop after relay request."
+}

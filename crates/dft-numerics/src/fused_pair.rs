@@ -50,6 +50,18 @@ pub trait SplitPairDensity: FusedOperator {
     ) -> Result<(), FftError>;
 }
 
+/// Serial density sink preserving split-grid arithmetic and ascending band sums.
+pub trait OrderedPairDensity: FusedOperator {
+    fn accumulate_density_pair_ordered(
+        &mut self,
+        phi: &[C],
+        weights: [f64; 2],
+        volume: f64,
+        density: &mut [f64],
+        keep: Option<&mut [C]>,
+    ) -> Result<(), FftError>;
+}
+
 /// REUSE-PSI: the second half of `FusedOperator::apply_local` on a kept grid.
 /// `out = P F (grid * potential)` with the plan's forward normalization (1/N)
 /// and the input sphere order, so `forward_product(F^-1 c, v)` equals
@@ -600,6 +612,77 @@ fn local_pieces<P: FusedOperator + Send>(
 mod tests {
     use super::*;
     use crate::fused::OrderedFusedPlan;
+
+    #[test]
+    fn ordered_sink_matches_split_on_both_backends() {
+        use crate::FftPlan3d;
+        use crate::fused::GridFusedPlan;
+        fn check<P: SplitPairDensity + OrderedPairDensity>(mut p: P, count: usize) {
+            let n = p.shape().iter().product();
+            let phi: Vec<_> = (0..count)
+                .map(|i| C::new((i as f64).cos(), (i as f64).sin()))
+                .collect();
+            let mut a = vec![0.; n];
+            let mut b = a.clone();
+            let mut keep_a = vec![C::default(); n];
+            let mut keep_b = keep_a.clone();
+            for weights in [[2., 0.5], [0., 1.], [-0., 0.], [1.3, -0.7]] {
+                a.fill(0.);
+                b.fill(0.);
+                p.accumulate_density_pair_split_keep(
+                    &phi,
+                    weights,
+                    17.,
+                    &mut a,
+                    &mut b,
+                    &mut keep_a,
+                )
+                .unwrap();
+                let mut expected: Vec<_> = (0..n).map(|i| (i as f64).sin()).collect();
+                let mut actual = expected.clone();
+                for ((n, a), b) in expected.iter_mut().zip(&a).zip(&b) {
+                    *n += a;
+                    *n += b;
+                }
+                p.accumulate_density_pair_ordered(
+                    &phi,
+                    weights,
+                    17.,
+                    &mut actual,
+                    Some(&mut keep_b),
+                )
+                .unwrap();
+                assert_eq!(
+                    expected.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                    actual.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
+                );
+                assert_eq!(keep_a, keep_b);
+                let mut no_keep: Vec<_> = (0..n).map(|i| (i as f64).sin()).collect();
+                p.accumulate_density_pair_ordered(&phi, weights, 17., &mut no_keep, None)
+                    .unwrap();
+                assert_eq!(actual, no_keep);
+            }
+            assert!(
+                p.accumulate_density_pair_ordered(&phi, [1.; 2], 0., &mut a, None)
+                    .is_err()
+            );
+            assert!(
+                p.accumulate_density_pair_ordered(&phi, [1.; 2], 1., &mut a, Some(&mut []))
+                    .is_err()
+            );
+        }
+        for shape in [[5, 3, 4], [2, 7, 3], [1, 1, 9]] {
+            let indices = [[0, 0, 0], [0, 0, 1], [0, 0, shape[2] - 1]];
+            check(
+                OrderedFusedPlan::new(shape, &indices).unwrap(),
+                indices.len(),
+            );
+            check(
+                GridFusedPlan::from_fft(FftPlan3d::new(shape).unwrap(), &indices).unwrap(),
+                indices.len(),
+            );
+        }
+    }
 
     #[test]
     fn reusable_pair_storage() {

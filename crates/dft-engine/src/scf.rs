@@ -3842,6 +3842,10 @@ impl ScfProblem {
         let occupations = &self.occupations;
         let finite = finite.as_deref();
         let volume = self.cell.volume_bohr3();
+        let allow_density_fusion = crate::band_density::fusion_allowed(
+            self.options.standard.is_some(),
+            self.options.threads,
+        );
         let mut orbitals = ordered_solves(
             &mut self.states,
             self.options.threads,
@@ -3875,13 +3879,14 @@ impl ScfProblem {
                         } else {
                             None
                         };
-                    state.band_density.compute_keep(
+                    state.band_density.compute_keep_for_map(
                         &orbitals,
                         weights,
                         &state.grid,
                         volume,
                         real,
                         keep,
+                        allow_density_fusion,
                     )?;
                 }
                 Ok(orbitals)

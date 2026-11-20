@@ -1,0 +1,115 @@
+{
+  "purpose": "Mac correctness only; no speed evidence",
+  "binary_sha256": "6498893ab3734569b42403ac1286bbffa827501e8f26d49d9144730fffdd928f",
+  "baseline_sha256": "6ca4aeacffc2efe750dd5c59e1d20fc8061559e9a69d515e7c0e423b9e7c5221",
+  "records": [
+    {
+      "input": "target/scratch/si-skew.toml",
+      "input_sha256": "6949a0e2e87c4b754d519b3d7ca22858f4e7cc44a3e5ad5d89f700e6f8b96fe0",
+      "arm": "baseline",
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/scratch/dft-cli-fusion-baseline",
+        "run",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/scratch/si-skew.toml",
+        "--output-dir",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/scratch/fusion-final-strict/si-skew/baseline"
+      ],
+      "exit_code": 0,
+      "energy_ha": -7.250604620384125,
+      "delta_energy_ha": 0.0,
+      "density_sha256": "369c8fd86748643c0088bc3a5ea2fc7f12d824831ff3ac2e5fcc530e374af4a6",
+      "scientific_bits_equal": true,
+      "converged": true,
+      "verified": null,
+      "counters": {},
+      "species": [
+        {
+          "functional": " SLA  PZ   NOGX NOGC",
+          "n_projectors": 2,
+          "name": "Si",
+          "path": "/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+          "sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+          "z_valence": 4.0
+        }
+      ],
+      "work_bits_sha256": "e4fdc86506377bd1e1ebd0692025c24cc463db3086dbc3ec108e4c59c99f7dc0"
+    },
+    {
+      "input": "target/scratch/si-skew.toml",
+      "input_sha256": "6949a0e2e87c4b754d519b3d7ca22858f4e7cc44a3e5ad5d89f700e6f8b96fe0",
+      "arm": "off",
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/release/dft-cli",
+        "run",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/scratch/si-skew.toml",
+        "--output-dir",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/scratch/fusion-final-strict/si-skew/off"
+      ],
+      "exit_code": 0,
+      "energy_ha": -7.250604620384125,
+      "delta_energy_ha": 0.0,
+      "density_sha256": "369c8fd86748643c0088bc3a5ea2fc7f12d824831ff3ac2e5fcc530e374af4a6",
+      "scientific_bits_equal": true,
+      "converged": true,
+      "verified": null,
+      "counters": {
+        "eligible_calls": 0,
+        "fused_calls": 0,
+        "logical_bytes": 0,
+        "paired_band_points": 0,
+        "saved_bytes": 0
+      },
+      "species": [
+        {
+          "functional": " SLA  PZ   NOGX NOGC",
+          "n_projectors": 2,
+          "name": "Si",
+          "path": "/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+          "sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+          "z_valence": 4.0
+        }
+      ],
+      "work_bits_sha256": "e4fdc86506377bd1e1ebd0692025c24cc463db3086dbc3ec108e4c59c99f7dc0"
+    },
+    {
+      "input": "target/scratch/si-skew.toml",
+      "input_sha256": "6949a0e2e87c4b754d519b3d7ca22858f4e7cc44a3e5ad5d89f700e6f8b96fe0",
+      "arm": "on",
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/release/dft-cli",
+        "run",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/scratch/si-skew.toml",
+        "--output-dir",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/scratch/fusion-final-strict/si-skew/on"
+      ],
+      "exit_code": 0,
+      "energy_ha": -7.250604620384125,
+      "delta_energy_ha": 0.0,
+      "density_sha256": "369c8fd86748643c0088bc3a5ea2fc7f12d824831ff3ac2e5fcc530e374af4a6",
+      "scientific_bits_equal": true,
+      "converged": true,
+      "verified": null,
+      "counters": {
+        "eligible_calls": 0,
+        "fused_calls": 0,
+        "logical_bytes": 0,
+        "paired_band_points": 0,
+        "saved_bytes": 0
+      },
+      "species": [
+        {
+          "functional": " SLA  PZ   NOGX NOGC",
+          "n_projectors": 2,
+          "name": "Si",
+          "path": "/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+          "sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+          "z_valence": 4.0
+        }
+      ],
+      "work_bits_sha256": "e4fdc86506377bd1e1ebd0692025c24cc463db3086dbc3ec108e4c59c99f7dc0"
+    }
+  ],
+  "inputs": {
+    "target/scratch/si-skew.toml": "[system]\nname = \"si-skew\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[0.7, 5.130606428358966, 5.130606428358966], [5.130606428358966, 0, 5.130606428358966], [5.130606428358966, 5.130606428358966, 0.3]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.9993853393746224, 0.0001344802162949125, 0.00046862603778399944]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.24921803791026303, 0.2504588011261536, 0.24999624530979694]\n[pseudopotentials]\nSi = \"/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n[basis]\necutwfc_ry = 30\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 601\nthreads = 1\nmax_iterations = 100\n"
+  }
+}

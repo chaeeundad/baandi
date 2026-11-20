@@ -1,0 +1,84 @@
+{
+  "purpose": "Mac correctness only; no speed evidence",
+  "binary_sha256": "6498893ab3734569b42403ac1286bbffa827501e8f26d49d9144730fffdd928f",
+  "baseline_sha256": null,
+  "records": [
+    {
+      "input": "target/scratch/si8-t3.toml",
+      "input_sha256": "ce03a2585543124daa178cc11e9c2c89711097c9ed9b7371ddeca43788d30e0d",
+      "arm": "off",
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/release/dft-cli",
+        "run",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/scratch/si8-t3.toml",
+        "--output-dir",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/scratch/fusion-final-t3/si8-t3/off"
+      ],
+      "exit_code": 0,
+      "energy_ha": -31.32177656320248,
+      "delta_energy_ha": 0.0,
+      "density_sha256": "064590998686925703a43cf47cae6985df8c66ee369ff87e1da7f80fa9b41791",
+      "scientific_bits_equal": true,
+      "converged": true,
+      "verified": true,
+      "counters": {
+        "eligible_calls": 0,
+        "fused_calls": 0,
+        "logical_bytes": 0,
+        "paired_band_points": 0,
+        "saved_bytes": 0
+      },
+      "species": [
+        {
+          "functional": " SLA  PZ   NOGX NOGC",
+          "n_projectors": 2,
+          "name": "Si",
+          "path": "/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+          "sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+          "z_valence": 4.0
+        }
+      ],
+      "work_bits_sha256": "1797e1e5c536ceaa543c641d1ad5b24506241eab0d5882f20fd8ceca8dbf7016"
+    },
+    {
+      "input": "target/scratch/si8-t3.toml",
+      "input_sha256": "ce03a2585543124daa178cc11e9c2c89711097c9ed9b7371ddeca43788d30e0d",
+      "arm": "on",
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/release/dft-cli",
+        "run",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/scratch/si8-t3.toml",
+        "--output-dir",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/LANE-GLUE/target/scratch/fusion-final-t3/si8-t3/on"
+      ],
+      "exit_code": 0,
+      "energy_ha": -31.32177656320248,
+      "delta_energy_ha": 0.0,
+      "density_sha256": "064590998686925703a43cf47cae6985df8c66ee369ff87e1da7f80fa9b41791",
+      "scientific_bits_equal": true,
+      "converged": true,
+      "verified": true,
+      "counters": {
+        "eligible_calls": 0,
+        "fused_calls": 0,
+        "logical_bytes": 0,
+        "paired_band_points": 0,
+        "saved_bytes": 0
+      },
+      "species": [
+        {
+          "functional": " SLA  PZ   NOGX NOGC",
+          "n_projectors": 2,
+          "name": "Si",
+          "path": "/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+          "sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+          "z_valence": 4.0
+        }
+      ],
+      "work_bits_sha256": "1797e1e5c536ceaa543c641d1ad5b24506241eab0d5882f20fd8ceca8dbf7016"
+    }
+  ],
+  "inputs": {
+    "target/scratch/si8-t3.toml": "[system]\nname = \"si8-gamma\"\nlattice_unit = \"bohr\"\nlattice_vectors = [[10.261212856717933, 0, 0], [0, 10.261212856717933, 0], [0, 0, 10.261212856717933]]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.9993853393746224, 0.0001344802162949125, 0.00046862603778399944]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.9992180379102631, 0.5004588011261536, 0.4999962453097969]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.5007325949377526, 0.0006588038342595904, 0.4997161566236671]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.500331325391825, 0.5001887222180436, 4.598159117488298e-05]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.2503346060018478, 0.2503750154556407, 0.24948138274959505]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.24964695091293257, 0.7501127447526272, 0.749781378085708]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.7504206763600849, 0.2494471519263607, 0.7494791188205301]\n[[system.atoms]]\nspecies = \"Si\"\nfractional = [0.749889555478912, 0.7490923833546048, 0.2504477912394568]\n[pseudopotentials]\nSi = \"/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF\"\n[basis]\necutwfc_ry = 30\nkpoints = [[0.0, 0.0, 0.0]]\n[xc]\nfunctional = \"lda-pz\"\n[scf]\nseed = 601\nthreads = 3\nmax_iterations = 100\n"
+  }
+}

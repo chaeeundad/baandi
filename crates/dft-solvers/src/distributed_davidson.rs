@@ -426,6 +426,7 @@ impl<C: Collective> Collective for Counted<'_, C> {
         REDUCTION_CALLS[s][bucket(local.len())].fetch_add(1, Ordering::Relaxed);
         REDUCTION_PAYLOAD[s].fetch_add(local.len() as u64, Ordering::Relaxed);
         self.probe()?;
+        dft_numerics::stage_clock::arrival::site(401 + s);
         self.inner.tree_sum_f64(local, out)
     }
     fn bcast_f64(&self, data: &mut [f64], root: usize) -> Result<(), dft_mpi::MpiError> {

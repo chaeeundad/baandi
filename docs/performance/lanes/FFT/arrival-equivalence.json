@@ -1,0 +1,75 @@
+{
+  "task_id": "LANE-FFT",
+  "purpose": "Mac correctness only; no performance conclusion",
+  "serial_energy_ha": -31.321776563202498,
+  "serial_verified": true,
+  "serial_delta_ha": 0,
+  "serial_density_sha256": "43f2a33d8b0d0a5a90129076353d8e4ad26b2305695c3d834c13b7598fb7342b",
+  "simulated_mpi": [
+    {
+      "ranks": 2,
+      "energy_bits": "0xc03f52607f2b3e5a",
+      "density_fnv": "0x0f7a928b3747bc05",
+      "scf": 11,
+      "davidson": 52,
+      "h_columns": 437,
+      "energy_ha": -31.321784923608313
+    },
+    {
+      "ranks": 3,
+      "energy_bits": "0xc03f52607f2b3e59",
+      "density_fnv": "0x43904f10b1bc6dc2",
+      "scf": 11,
+      "davidson": 52,
+      "h_columns": 437,
+      "energy_ha": -31.32178492360831
+    },
+    {
+      "ranks": 8,
+      "energy_bits": "0xc03f52607f2b735c",
+      "density_fnv": "0xfb8874f1153d0bbe",
+      "scf": 10,
+      "davidson": 50,
+      "h_columns": 404,
+      "energy_ha": -31.321784923656523
+    }
+  ],
+  "simulated_mpi_off_count_timed_energy_delta_ha": 0,
+  "mpi_density_evidence": "FNV from existing SCF harness; raw density bytes checked on serial CLI",
+  "warm_eigen_fnv": "0xfdff2330905ef17e",
+  "warm_eigenvalues_residuals_work_equal": true,
+  "all_trace_signatures_equal": true,
+  "trace_ranks": 3,
+  "events_per_rank": [
+    408,
+    408,
+    408
+  ],
+  "fine_parser_rows": 408,
+  "clock_error_ns": 1001,
+  "collective_kinds": {
+    "allgatherv": 27,
+    "alltoall": 130,
+    "tree_sum": 251
+  },
+  "sites": {
+    "unattributed": 40,
+    "fft.forward_alltoall": 65,
+    "fft.inverse_alltoall": 65,
+    "solver.reduce.setup": 6,
+    "solver.reduce.apply": 52,
+    "solver.reduce.reduced_gram": 55,
+    "solver.reduce.lean_border": 54,
+    "solver.reduce.ortho_normalize": 8,
+    "solver.reduce.panel_norm": 6,
+    "solver.reduce.panel_dot": 44,
+    "solver.reduce.residual_norms": 5,
+    "nonlocal.reduce": 5,
+    "solver.reduce.restart_defect": 3
+  },
+  "raw_json_sha256": {
+    "off": "18fea5968cab8cfd8f95234abf6986d117f8e6694bbd7735401519f96a5b9de9",
+    "counts": "1c74321327626b21930c66d64d37980078cacb6db98df384a089ef506867039a",
+    "timed": "93cc695be07b4a954c5672c93527b7bacd3815405feae13e4148f55dd0818690"
+  }
+}

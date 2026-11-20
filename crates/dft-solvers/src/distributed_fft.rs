@@ -429,6 +429,9 @@ impl DistributedPairFft {
                 .finish(mark, 2, self.sticks.len(), 32 * self.sticks.len(), None);
         }
         let mark = self.profile.start();
+        if self.block > 0 {
+            dft_numerics::stage_clock::arrival::site(104);
+        }
         let result = self.all_to_all(comm, np);
         if self.block > 0 {
             self.profile.finish(
@@ -559,6 +562,9 @@ impl DistributedPairFft {
             return Err(FftError::IncompatibleArray.into());
         }
         let mark = self.profile.start();
+        if self.block > 0 {
+            dft_numerics::stage_clock::arrival::site(114);
+        }
         self.all_to_all(comm, np)?;
         if self.block > 0 {
             self.profile.finish(

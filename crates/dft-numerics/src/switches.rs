@@ -420,6 +420,8 @@ table! {
     SPIN_SHARE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "share exactly degenerate fixed-sector standard spin solves (bit-identical effective potentials and occupations; default on since 2026-11-17: dev08 si8 -18.1 %, si16 -23.8 %; mpi, strict and unequal-sector fallbacks verified clean)";
     // CLI (dft-cli).
+    BINARY_HASH_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "LANE-LAUNCHIO: cache executable SHA-256 in a metadata-keyed sibling sidecar on Unix; preserves provenance, falls back to fresh hashing; trusted build directories only";
     CUTOFF_LADDER: Kind::Override { valid: cutoff_ladder_valid }, "config", "off, on, fraction in (0, 1)",
         "overrides scf.cutoff_ladder / fraction of the input file";
     RELAX_EXTRAPOLATION: Kind::Override { valid: relax_extrapolation_valid }, "config",

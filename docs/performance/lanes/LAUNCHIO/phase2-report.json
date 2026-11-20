@@ -1,0 +1,76 @@
+{
+  "task_id": "LANE-LAUNCHIO",
+  "status": "DONE",
+  "changed_files": [
+    "crates/dft-cli/src/run.rs",
+    "crates/dft-cli/tests/all/run.rs",
+    "crates/dft-numerics/src/switches.rs",
+    "crates/dft-numerics/tests/all/switches.rs",
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/lanes/LAUNCHIO/phase-status.json",
+    "docs/performance/lanes/LAUNCHIO/diagnosis.md",
+    "docs/performance/lanes/LAUNCHIO/dev08-request.md",
+    "docs/performance/lanes/LAUNCHIO/phase2-validation.md",
+    "docs/performance/lanes/LAUNCHIO/phase2-equivalence.json",
+    "docs/performance/lanes/LAUNCHIO/phase2_job.py",
+    "docs/performance/lanes/LAUNCHIO/verify_phase2.py",
+    "docs/performance/lanes/LAUNCHIO/phase2-report.json"
+  ],
+  "design_choices": [
+    "Phase 2 complete; lifecycle DEV08_AB_REQUEST, default-off BAANDI_BINARY_HASH_CACHE.",
+    "Reuse an exact digest only after Unix metadata-key validation of a bounded trusted sidecar; misses and publication failures compute the full SHA-256. No numerical or density-writer changes.",
+    "The relayed density write span contains replicated per-rank file writes, not an MPI gather; alternate output-publication candidate deferred.",
+    "Trusted coherent build directory required; independent master pre/post hashes remain mandatory. No performance acceptance from Mac checks."
+  ],
+  "commands": [
+    {
+      "command": "TMPDIR=$PWD/target/scratch cargo build --offline --release -p dft-cli",
+      "exit_code": 0
+    },
+    {
+      "command": "CHECK_SCCACHE=0 TMPDIR_990=$PWD/target/scratch CHECK_NICE=0 scripts/check.sh fast dft-cli dft-numerics",
+      "exit_code": 1
+    },
+    {
+      "command": "TMPDIR=$PWD/target/scratch cargo test --offline -p dft-cli --lib binary_hash_cache::tests -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/LAUNCHIO/verify_phase2.py --baseline target/scratch/lane-launchio-p2/baseline-dft-cli --candidate target/release/dft-cli --upf ../pseudo/Si.pz-vbc.UPF --output target/scratch/lane-launchio-p2/identity-byte-final",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/lane_launchio_parse.py target/scratch/lane-launchio-p2/profile-cold target/scratch/lane-launchio-p2/profile-warm --output target/scratch/lane-launchio-p2/parser-smoke.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py ReadmeIsCurrent.test_readme_validation_block_matches_the_evidence ReadmeIsCurrent.test_figures_match_the_evidence_and_all_runs_pass",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo fmt --check -p dft-cli -p dft-numerics",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "32 CLI executions over 4 cases: delta energy 0 Ha; density files byte-identical and full normalized results JSON identical.",
+    "8 warm/input cache hits: 0 executable payload bytes hashed; all reported digests independently verified.",
+    "5 cache unit tests passed, including 8 concurrent writers.",
+    "Fast gate: build/fmt/clippy PASS; 222 passed, 3 known repository-local TMPDIR cache failures, 62 ignored.",
+    "Relayed e947a35 binary hash cost 0.09387\u20130.10474 s; expected warm saving 0.05\u20130.10 s is an estimate, not a measurement."
+  ],
+  "reference_comparison": "Base 0413485 release versus final candidate unset/off/cold/warm/malformed/input-on/publication-failure modes; no QE or dev08 execution by this implementer.",
+  "limitations": [
+    "Aggregate fast gate exits 1 for the pre-announced pseudopotential cache tests; ps load telemetry is sandbox-denied. No tests or policy weakened.",
+    "Real MPI/MKL and warm/cold external-wall effects await the master relay; the switch remains off.",
+    "Metadata cache is not authenticated against malicious same-UID writers or incoherent storage; fresh hashing remains available with off.",
+    "Raw dev08 byte sizes/bandwidth were not in the relay; diagnosis states exact workload formulas and requests the missing size/resource evidence instead of inventing rates.",
+    "README evidence remains current; session/dashboard updates are outside ticket ownership."
+  ],
+  "open_questions": [],
+  "commit": "Uncommitted; stop pending master dev08 A/B."
+}

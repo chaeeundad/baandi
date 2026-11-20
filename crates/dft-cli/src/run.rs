@@ -562,8 +562,358 @@ fn binary_sha256(path: &Path) -> io::Result<String> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
-/// SHA-256 of the running executable (computed once, after the timed run).
+/// Optional cache of a content digest, never an alternative provenance value.
+/// Unix metadata is a coherence key, not authentication. The executable and its
+/// sibling sidecar must live in a trusted build directory; the measurement
+/// master independently hashes the executable before and after each job.
+#[cfg(unix)]
+mod binary_hash_cache {
+    use super::*;
+    use io::{Read, Write};
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    const SCHEMA: &str = "baandi-binary-sha256-1";
+    const MAX_RECORD: u64 = 4096;
+
+    #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Stamp {
+        device: u64,
+        inode: u64,
+        bytes: u64,
+        modified_s: i64,
+        modified_ns: i64,
+        changed_s: i64,
+        changed_ns: i64,
+        owner: u32,
+        mode: u32,
+    }
+    impl Stamp {
+        fn of(m: &fs::Metadata) -> Self {
+            Self {
+                device: m.dev(),
+                inode: m.ino(),
+                bytes: m.len(),
+                modified_s: m.mtime(),
+                modified_ns: m.mtime_nsec(),
+                changed_s: m.ctime(),
+                changed_ns: m.ctime_nsec(),
+                owner: m.uid(),
+                mode: m.mode(),
+            }
+        }
+    }
+    #[derive(serde::Serialize, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Record {
+        schema: String,
+        stamp: Stamp,
+        sha256: String,
+        checksum: String,
+    }
+    fn checksum(stamp: &Stamp, digest: &str) -> String {
+        // Detect accidental edits to even a syntactically valid digest; this is
+        // deliberately not claimed to authenticate a malicious sidecar writer.
+        sha256(&serde_json::to_vec(&(stamp, digest)).expect("integer/string record"))
+    }
+    pub(super) fn sidecar(path: &Path) -> PathBuf {
+        let mut name = path.as_os_str().to_owned();
+        name.push(".baandi-sha256.json");
+        PathBuf::from(name)
+    }
+    fn trusted_record(m: &fs::Metadata, owner: u32) -> bool {
+        m.is_file() && m.uid() == owner && m.mode() & 0o022 == 0
+    }
+    fn read_record(path: &Path, stamp: &Stamp) -> Option<String> {
+        let link = fs::symlink_metadata(path).ok()?;
+        if !trusted_record(&link, stamp.owner) || link.len() > MAX_RECORD {
+            return None;
+        }
+        let file = fs::File::open(path).ok()?;
+        let meta = file.metadata().ok()?;
+        if Stamp::of(&link) != Stamp::of(&meta) {
+            return None;
+        }
+        let mut bytes = Vec::new();
+        file.take(MAX_RECORD + 1).read_to_end(&mut bytes).ok()?;
+        if bytes.len() as u64 > MAX_RECORD {
+            return None;
+        }
+        let record: Record = serde_json::from_slice(&bytes).ok()?;
+        if record.schema != SCHEMA
+            || record.stamp != *stamp
+            || record.sha256.len() != 64
+            || !record
+                .sha256
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || record.checksum != checksum(&record.stamp, &record.sha256)
+        {
+            return None;
+        }
+        Some(record.sha256)
+    }
+    fn publish(path: &Path, record: &Record) -> io::Result<()> {
+        // Never follow or replace a symlink, directory or foreign/writable file.
+        match fs::symlink_metadata(path) {
+            Ok(m) if !trusted_record(&m, record.stamp.owner) => {
+                return Err(io::Error::other("untrusted hash sidecar"));
+            }
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let mut name = path.as_os_str().to_owned();
+        name.push(format!(
+            ".tmp.{}.{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        let temporary = PathBuf::from(name);
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        let result = (|| {
+            let bytes = serde_json::to_vec(record)?;
+            file.write_all(&bytes)?;
+            drop(file);
+            fs::rename(&temporary, path)
+        })();
+        if result.is_err() {
+            // Only the temporary we successfully created is eligible for cleanup.
+            let _ = fs::remove_file(&temporary);
+        }
+        result
+    }
+    pub(super) struct Outcome {
+        pub digest: String,
+        pub status: &'static str,
+        pub hashed_bytes: u64,
+        pub published: bool,
+    }
+    fn stable(file: &fs::File, path: &Path, stamp: &Stamp) -> io::Result<bool> {
+        Ok(Stamp::of(&file.metadata()?) == *stamp && Stamp::of(&fs::metadata(path)?) == *stamp)
+    }
+    pub(super) fn digest(path: &Path) -> io::Result<Outcome> {
+        let mut file = fs::File::open(path)?;
+        let meta = file.metadata()?;
+        if !meta.is_file() {
+            return Err(io::Error::other("executable is not a regular file"));
+        }
+        let stamp = Stamp::of(&meta);
+        let cache = sidecar(path);
+        if let Some(digest) = read_record(&cache, &stamp)
+            && stable(&file, path, &stamp)?
+        {
+            return Ok(Outcome {
+                digest,
+                status: "hit",
+                hashed_bytes: 0,
+                published: false,
+            });
+        }
+        let mut hash = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        let mut hashed_bytes = 0;
+        loop {
+            let n = match file.read(&mut buffer) {
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                other => other?,
+            };
+            if n == 0 {
+                break;
+            }
+            hash.update(&buffer[..n]);
+            hashed_bytes += n as u64;
+        }
+        if hashed_bytes != stamp.bytes || !stable(&file, path, &stamp)? {
+            return Err(io::Error::other("executable changed while hashing"));
+        }
+        let digest = format!("{:x}", hash.finalize());
+        let record = Record {
+            schema: SCHEMA.into(),
+            checksum: checksum(&stamp, &digest),
+            stamp,
+            sha256: digest.clone(),
+        };
+        let published = publish(&cache, &record).is_ok();
+        Ok(Outcome {
+            digest,
+            status: "miss",
+            hashed_bytes,
+            published,
+        })
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::os::unix::fs::PermissionsExt;
+
+        struct Fixture(PathBuf);
+        impl Fixture {
+            fn new(label: &str) -> Self {
+                static NEXT: AtomicU64 = AtomicU64::new(0);
+                let dir = std::env::temp_dir().join(format!(
+                    "hash-cache-{label}-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
+                fs::create_dir(&dir).unwrap();
+                Self(dir)
+            }
+            fn binary(&self) -> PathBuf {
+                self.0.join("binary")
+            }
+        }
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                fs::remove_dir_all(&self.0).unwrap();
+            }
+        }
+        #[test]
+        fn cold_hit_and_same_length_rewrite_with_restored_mtime() {
+            let f = Fixture::new("rewrite");
+            let path = f.binary();
+            fs::write(&path, b"original").unwrap();
+            let modified = fs::metadata(&path).unwrap().modified().unwrap();
+            let cold = digest(&path).unwrap();
+            assert_eq!(cold.digest, sha256(b"original"));
+            assert_eq!(cold.hashed_bytes, 8);
+            assert_eq!(cold.status, "miss");
+            assert!(cold.published);
+            let hit = digest(&path).unwrap();
+            assert_eq!(hit.digest, cold.digest);
+            assert_eq!((hit.status, hit.hashed_bytes), ("hit", 0));
+            fs::write(&path, b"replaced").unwrap();
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_times(fs::FileTimes::new().set_modified(modified))
+                .unwrap();
+            let changed = digest(&path).unwrap();
+            assert_eq!(changed.status, "miss");
+            assert_eq!(changed.digest, sha256(b"replaced"));
+        }
+        #[test]
+        fn replaced_inode_size_and_mode_invalidate() {
+            let f = Fixture::new("identity");
+            let path = f.binary();
+            fs::write(&path, b"original").unwrap();
+            digest(&path).unwrap();
+            let replacement = f.0.join("replacement");
+            fs::write(&replacement, b"replaced").unwrap();
+            fs::rename(&replacement, &path).unwrap();
+            assert_eq!(digest(&path).unwrap().status, "miss");
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+            assert_eq!(digest(&path).unwrap().status, "miss");
+            fs::write(&path, b"different length").unwrap();
+            let out = digest(&path).unwrap();
+            assert_eq!(out.status, "miss");
+            assert_eq!(out.digest, sha256(b"different length"));
+        }
+        #[test]
+        fn corrupt_oversized_and_writable_records_fall_back() {
+            let f = Fixture::new("corrupt");
+            let path = f.binary();
+            fs::write(&path, b"payload").unwrap();
+            digest(&path).unwrap();
+            let cache = sidecar(&path);
+            let original = fs::read(&cache).unwrap();
+            let mut bad: Value = serde_json::from_slice(&original).unwrap();
+            bad["sha256"] = json!("0".repeat(64)); // syntax valid, checksum invalid
+            for bytes in [
+                b"{".to_vec(),
+                vec![b'x'; 4097],
+                serde_json::to_vec(&bad).unwrap(),
+            ] {
+                fs::write(&cache, bytes).unwrap();
+                let out = digest(&path).unwrap();
+                assert_eq!(out.status, "miss");
+                assert_eq!(out.digest, sha256(b"payload"));
+                assert!(out.published);
+            }
+            fs::set_permissions(&cache, fs::Permissions::from_mode(0o666)).unwrap();
+            let out = digest(&path).unwrap();
+            assert_eq!(out.status, "miss");
+            assert!(!out.published);
+            assert_eq!(out.digest, sha256(b"payload"));
+        }
+        #[test]
+        fn symlink_and_directory_sidecars_are_not_changed() {
+            let f = Fixture::new("fallback");
+            let path = f.binary();
+            fs::write(&path, b"payload").unwrap();
+            let target = f.0.join("unrelated");
+            fs::write(&target, b"leave this alone").unwrap();
+            let cache = sidecar(&path);
+            std::os::unix::fs::symlink(&target, &cache).unwrap();
+            let out = digest(&path).unwrap();
+            assert_eq!(out.digest, sha256(b"payload"));
+            assert!(!out.published);
+            assert!(
+                fs::symlink_metadata(&cache)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            );
+            assert_eq!(fs::read(&target).unwrap(), b"leave this alone");
+            fs::remove_file(&cache).unwrap();
+            fs::create_dir(&cache).unwrap();
+            assert!(!digest(&path).unwrap().published);
+            assert!(cache.is_dir());
+            fs::remove_file(path).unwrap();
+            assert!(digest(&f.binary()).is_err());
+        }
+        #[test]
+        fn concurrent_cold_writers_publish_one_complete_record() {
+            let f = Fixture::new("concurrent");
+            let path = f.binary();
+            let payload = vec![17; 131_081];
+            fs::write(&path, &payload).unwrap();
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+            let threads: Vec<_> = (0..8)
+                .map(|_| {
+                    let (path, barrier) = (path.clone(), barrier.clone());
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        digest(&path).unwrap().digest
+                    })
+                })
+                .collect();
+            for t in threads {
+                assert_eq!(t.join().unwrap(), sha256(&payload));
+            }
+            assert_eq!(digest(&path).unwrap().status, "hit");
+            assert_eq!(fs::read_dir(&f.0).unwrap().count(), 2);
+        }
+    }
+}
+
+/// SHA-256 of the running executable (fresh by default, cached only on request).
 pub(crate) fn binary_identity() -> Value {
+    // Do not use the process OnceLock for the opt-in path: library callers may
+    // change scopes, and every cached use must revalidate the file metadata.
+    if dft_numerics::switches::on(dft_numerics::switches::Id::BINARY_HASH_CACHE) {
+        #[cfg(unix)]
+        {
+            let hash_clock = launch::clock();
+            let path = std::env::current_exe().ok();
+            let result = path
+                .as_ref()
+                .and_then(|p| binary_hash_cache::digest(p).ok());
+            launch::elapsed("binary_sha256", hash_clock);
+            return json!({"path":path.map(|p| p.display().to_string()),
+                "sha256":result.as_ref().map(|r| &r.digest),
+                "hash_cache":{"status":result.as_ref().map_or("unavailable", |r| r.status),
+                    "hashed_bytes":result.as_ref().map(|r| r.hashed_bytes),
+                    "published":result.as_ref().is_some_and(|r| r.published)}});
+        }
+        // Non-Unix platforms retain the original fresh digest, not an unchecked cache.
+    }
     type Identity = (Option<String>, Option<String>);
     static ID: std::sync::OnceLock<Identity> = std::sync::OnceLock::new();
     let hash_clock = launch::clock();

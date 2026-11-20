@@ -2923,3 +2923,46 @@ Evidence: [fusion-validation.md](lanes/GLUE/fusion-validation.md),
 [fusion-mac-equivalence.json](lanes/GLUE/fusion-mac-equivalence.json),
 [dev08-request.md](lanes/GLUE/dev08-request.md). A/A first, crossed six A/B pairs
 per case, |mean|/SE>=3; any resolved gain counts, 0.8 s is not an adoption floor.
+## 2026-11-20 — LANE-VERIFY reopened: first-attempt contraction scheduling
+
+**Experimental, default unchanged; no adoption recommendation.** The
+orchestrator now permits timing changes while preserving ADR 0043 judgment.
+Source correction: the adopted scheduler predicts only retries, not the first
+attempt. Its np8 prediction count of one is not an initial false-pass forecast.
+Relayed Si64 one-core median verification **4.8284 s / 41.5704 s (11.62%)**;
+MPI8 **1.0475 s / 8.5466 s (12.26%)**. No Mac profiling.
+
+Added opt-in `VERIFY_SCHEDULE=first` and `first-trace` values (registry count
+unchanged, default `on`). The first uses a threshold-relative geometric residual
+amplitude tail, the slower Coulomb/L2-squared contraction, and a two-map bound
+from the first crossing; it never marks a skip as a pass. First-trace preserves
+baseline numerical decisions; both retain adopted retry scheduling. No fitted
+material constants or certificate/tolerance changes.
+
+Final 8 systems x 3 seeds x 2 accuracy classes: **48/48** certified and within
+class; precursor default/parent **48** and strict-path **24** identities;
+final trace/parent **48** scientific/density identities plus **4** fresh direct
+default/strict identities. Only the opt-in predictor changed between variants. First baseline failures **29**, predicted failure
+skips **28**, wrong skips **16**. Actual attempts **81->51**, maps **419->444**,
+total H **48,676->47,588**, failed-attempt H **1,814->255**, failed Davidson
+iterations **151->16**. These sums are work counts, not wall savings. Maximum
+energy error against internal strict references: standard **1.4630785472036223e-10
+Ha**, tighter class **3.5704772471945034e-12 Ha**.
+
+**Negative target evidence:** supplemental Si64 seed 601 retained two attempts.
+The lag-only precursor moved failure from map 11 to 12 (total H 6,644->6,622).
+The final tail model waits to map 13, which still fails, then passes at map 14:
+maps **13->14**, total H **6,644->6,661**, final strict-reference error
+**2.3021584638627246e-12 Ha**. Omitting the failed HALF product changes the
+subsequent state; the baseline's later maps cannot simply be assumed identical.
+Neither model establishes removal of the relayed failed-attempt cost. Retain
+negative evidence and the switch for orchestrator review, not a default flip.
+
+Release scheduler tests: **6 passed**, including simulated 2/3-rank identity.
+Final fast gate exit **1**: build/fmt/clippy pass, **473 passed / 3 known CLI
+in-repository TMPDIR failures / 137 ignored**. Initial test-type/clippy and
+strict-JSON assumptions were fixed; final checks include the fixes.
+[Design and historical features](lanes/VERIFY/first-schedule.md),
+[final validation](lanes/VERIFY/first-schedule-validation.md),
+[conditional dev08 A/A and A/B request](lanes/VERIFY/dev08-request.md).
+Changes uncommitted; no remote run or speed claim.

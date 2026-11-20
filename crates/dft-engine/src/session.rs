@@ -1025,7 +1025,7 @@ impl ScfSession {
                 timings: PhaseTimings::default(),
             });
             false
-        } else if converged && standard.is_some() {
+        } else if converged && let Some(profile) = standard {
             // Standard convergence is explicitly uncertified. An independently
             // requested spectral audit remains a separate, charged operation.
             let mut passed = true;
@@ -1042,8 +1042,10 @@ impl ScfSession {
             }
             if passed && self.problem.options.verification == Verification::FixedPoint {
                 // No scheduling branch, call or bookkeeping on ordinary maps.
-                // The predictor itself is called only after a real failure.
-                let defer = self.verification.attempts.last().is_some_and(|a| !a.passed)
+                // The default predictor runs only after a real failure; the opt-in
+                // first-attempt model also runs at eligible initial boundaries.
+                let defer = (self.verification.attempts.last().is_some_and(|a| !a.passed)
+                    || matches!(self.problem.sw.verify_schedule, "first" | "first-trace"))
                     && self.problem.sw.verify_schedule != "off"
                     && {
                         let profiling = self.problem.sw.verify_profile && crate::profile::enabled();
@@ -1053,13 +1055,24 @@ impl ScfSession {
                                 .run
                                 .on(dft_numerics::switches::Id::STAGE_TIMERS))
                         .then(Instant::now);
-                        let deferred = schedule_attempt(
-                            history,
-                            &mut self.verification,
-                            self.problem.sw.verify_schedule,
-                            self.problem.options.max_iterations,
-                            self.spectral_report.is_none(),
-                        );
+                        let deferred = if self.verification.attempts.is_empty() {
+                            schedule_first_attempt(
+                                history,
+                                &mut self.verification,
+                                self.problem.sw.verify_schedule,
+                                self.problem.options.max_iterations,
+                                self.spectral_report.is_none(),
+                                profile.threshold_ha,
+                            )
+                        } else {
+                            schedule_attempt(
+                                history,
+                                &mut self.verification,
+                                self.problem.sw.verify_schedule,
+                                self.problem.options.max_iterations,
+                                self.spectral_report.is_none(),
+                            )
+                        };
                         if profiling {
                             crate::profile::verification::schedule(
                                 iteration,
@@ -2564,7 +2577,118 @@ pub(crate) fn schedule_attempt(
         VerificationPrediction::default()
     };
     let would_wait = prediction.extra_maps > 0 && iteration < max_iterations;
-    let wait = mode == "on" && would_wait;
+    let wait = matches!(mode, "on" | "first" | "first-trace") && would_wait;
+    schedule.records.push(VerificationScheduleEntry {
+        iteration,
+        predicted_additional_maps: prediction.extra_maps,
+        action: if wait { "wait" } else { "attempt" },
+        would_wait,
+        coulomb_error_ha: None,
+        ratio_to_previous_attempt: None,
+        passed: None,
+    });
+    wait
+}
+
+/// A geometric-tail envelope for the first verification. Pulay contraction is
+/// not the unmixed Kohn-Sham response: this is a scheduling heuristic, never
+/// a bound or a certificate. Start at the last above-threshold Coulomb error,
+/// then contract by the slower of Coulomb and squared L2 residual ratios.
+/// The first threshold crossing anchors a maximum two-map delay, reconstructed
+/// from scientific history so checkpoint continuation needs no hidden state.
+pub(crate) fn first_verification_prediction(
+    history: &[IterationRecord],
+    threshold: f64,
+) -> VerificationPrediction {
+    let fallback = VerificationPrediction::default();
+    if !threshold.is_finite() || threshold <= 0.0 || history.len() < 2 {
+        return fallback;
+    }
+    let below = |r: &IterationRecord| {
+        r.standard_error_ha
+            .is_some_and(|e| e.is_finite() && e > 0.0 && e < threshold)
+    };
+    if !below(history.last().unwrap()) {
+        return fallback;
+    }
+    let Some(anchor) = history.iter().position(below).filter(|&i| i > 0) else {
+        return fallback;
+    };
+    let elapsed = history
+        .last()
+        .unwrap()
+        .iteration
+        .saturating_sub(history[anchor].iteration);
+    if elapsed >= 2
+        || history[anchor - 1..]
+            .iter()
+            .any(|r| r.mixer_reset || r.mixing_raw_recovery)
+    {
+        return fallback;
+    }
+    let previous = &history[anchor - 1];
+    let current = &history[anchor];
+    // No evidence of accelerated mixing: do not apply the lag hypothesis.
+    if previous.mixing_history_used.unwrap_or(0) < 2 {
+        return fallback;
+    }
+    let Some(old) = previous
+        .standard_error_ha
+        .filter(|e| e.is_finite() && *e > 0.0)
+    else {
+        return fallback;
+    };
+    let now = current.standard_error_ha.unwrap();
+    if !previous.density_residual.is_finite()
+        || previous.density_residual <= 0.0
+        || !current.density_residual.is_finite()
+        || current.density_residual <= 0.0
+    {
+        return fallback;
+    }
+    let q = (now / old).max((current.density_residual / previous.density_residual).powi(2));
+    if !q.is_finite() || q <= 0.0 || q >= 1.0 {
+        return fallback;
+    }
+    let remaining = 2 - elapsed;
+    // Sum a geometric envelope of residual amplitudes before squaring:
+    // (sqrt(old) * sum sqrt(q)^k)^2 = old / (1 - sqrt(q))^2.
+    // This tail surrogate is still not a bound on the unmixed response.
+    let estimate = old / (1.0 - q.sqrt()).powi(2) * q.powi(elapsed as i32);
+    if !estimate.is_finite() {
+        return fallback;
+    }
+    VerificationPrediction {
+        extra_maps: (0..=remaining)
+            .find(|&n| estimate * q.powi(n as i32) < threshold)
+            .unwrap_or(remaining),
+    }
+}
+
+#[cold]
+pub(crate) fn schedule_first_attempt(
+    history: &[IterationRecord],
+    report: &mut VerificationReport,
+    mode: &'static str,
+    max_iterations: usize,
+    eligible: bool,
+    threshold: f64,
+) -> bool {
+    use super::convergence::{VerificationSchedule, VerificationScheduleEntry};
+    let iteration = history.last().expect("attempt history").iteration;
+    let prediction = if eligible {
+        first_verification_prediction(history, threshold)
+    } else {
+        VerificationPrediction::default()
+    };
+    let would_wait = prediction.extra_maps > 0 && iteration < max_iterations;
+    let wait = mode == "first" && would_wait;
+    let schedule = report.schedule.get_or_insert_with(|| VerificationSchedule {
+        mode,
+        prediction_evaluations: 0,
+        records: Vec::with_capacity(max_iterations),
+    });
+    schedule.prediction_evaluations += usize::from(eligible);
     schedule.records.push(VerificationScheduleEntry {
         iteration,
         predicted_additional_maps: prediction.extra_maps,

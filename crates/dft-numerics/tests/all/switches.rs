@@ -348,3 +348,15 @@ fn glue_profile_requires_both_switches_and_scopes_its_counters() {
     assert_eq!(cfg.counters()[C::GlueDistPoints as usize], 37);
     assert_eq!(cfg.counters()[C::GlueDistMixNanos as usize], 0);
 }
+
+#[test]
+fn first_verification_schedule_is_opt_in() {
+    let switch = switches::switch(Id::VERIFY_SCHEDULE);
+    assert_eq!(switches::resolve(switch, None).0, Value::Choice("on"));
+    for mode in ["first", "first-trace"] {
+        assert_eq!(
+            switches::resolve(switch, Some(std::ffi::OsStr::new(mode))).0,
+            Value::Choice(mode)
+        );
+    }
+}

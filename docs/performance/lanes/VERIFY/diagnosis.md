@@ -1,3 +1,7 @@
+> Reopened by the orchestrator: attempt timing is now allowed. The closure
+> below is historical and superseded for this scope by [first-schedule.md](first-schedule.md).
+> Judgment and certificate thresholds remain unchanged.
+
 # LANE-VERIFY Phase 2 diagnosis — no qualifying implementation
 
 Decision: **close this Phase 2 attempt without a new optimization switch**.

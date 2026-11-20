@@ -29,3 +29,25 @@ BAANDI numbers come from the bad02ee instrumented profiles (phase_profile exclus
 | density/fields/mixing | not extracted | 0.40 | ? | needs the exclusive leaves |
 | delivery/launcher/between/verification | ~1.8 (0.98 + 0.54 + 0.29, earlier budget) | ~0.1 | ~ +1.7 | earlier-budget numbers, re-measure |
 Sum of the explicit rows is about 3.5 s; about 2.6 s of the 6.1 s gap is not yet assigned (density/potential/mixing, ordering of overlaps). Largest candidate: subspace algebra (+2.3 s, non-GEMM-shape levers only after UPPER_BORDER and ROTATE_COLUMNS losses). Needed for the final page: (1) BAANDI exclusive leaf table of one uninstrumented-equivalent PHASE_PROFILE run for A (all leaves, per rank max, plus counts), split by bucket coarse/fine/verify; (2) QE columns per h_psi call and Davidson iteration/"avg # of iterations" per c_bands call (pw.x verbosity high output of D); (3) FFT counts and sizes per H block on both sides.
+
+## One-page attribution (experiment 2, orchestrator, 2026-11-20)
+Data: BAANDI A (279278d) instrumented PHASE_PROFILE run (same result: E -253.37816772116847 Ha, SCF 11, H 3504, verified); bucket wall sum 9.9221 s (instrumented, use as proportions only) versus uninstrumented external 10.7583 s; QE D pw.x table (same window). Structure of the profile keys: dotless keys are the top-level split, dotted keys are sub-levels, `solve.solver_total` is a second inclusive span (not a sibling). Everything below is rank-max, critical path, seconds.
+Walls: A 10.7583, D 4.6433, A-D = 6.1150 (D-R 0.085, RMM not the lever).
+Reconciliation: A-D = (in-process 9.92 - QE PWSCF 4.52 = 5.40) + (outside process: launch, MPI init/exit, output/teardown, A 0.84 vs D 0.12 = 0.72, by difference) = 6.12. The component rows below sum to 5.41 in-process.
+
+| Responsibility (whole run, all BAANDI stages) | BAANDI | QE D | A-D | evidence / caveat |
+|---|---:|---:|---:|---|
+| Subspace algebra (solver_total - apply vs c_bands - h_psi) | 3.566 | 1.66 | **+1.91** | reduced_gram 1.002, reduced_eigen 0.988 (183 calls), rotate 0.963, kept_update 0.573 = 3.526 (98.9 %) |
+| H application (solve.apply vs h_psi) | 2.782 | 1.91 | **+0.87** | BAANDI 6025 H columns, 0.69 fwd + 0.71 inv FFT pairs per column (Gamma pairing); nonlocal 0.725 s (26 %), FFT + local 2.057 s (74 %); QE 71 h_psi calls, 5410 fftw calls, active bands per call NOT printed (denominator missing) |
+| Solve work outside the solver envelope (solve - solver_total) | 0.775 | included in c_bands | **+0.77** | start 0.170, setup 0.122, return 0.051, finish 0.040, restart 0.025, real_state 0.014, entry 0.009 (+ unlisted rest) |
+| Start (atomic_start vs init_run) | 0.599 | 0.19 | **+0.41** | atomic_start internals overlap (sum 1.86x), do not split |
+| Density (vs sum_band) | 0.746 | 0.34 | +0.41 | |
+| Energy + potential + mixing (vs v_of_rho + mix_rho + rest) | 0.457 | ~0.11 | +0.35 | energy audit 0.291 |
+| io/materialize | 0.296 | ~0 | +0.30 | |
+| Other init + between + unassigned (session_setup 0.235, ladder_handoff 0.123, ...) | 0.702 | 0.31 | +0.39 | |
+| Outside the process (launch, exit, output) | 0.84 | 0.12 | +0.72 | by difference, includes instrumentation difference |
+
+Stage view (BAANDI buckets vs QE; do not mix with the table above): coarse 1.454 s and verification 1.058 s (pass 0.527 + fail 0.531) have no QE counterpart (BAANDI ladder strategy and the required certificate): 2.51 s = 41 % of A-D, offset by the measured ladder gain (ladder off was +17 % slower). Fine maps 5.767 s versus QE electrons 4.02 s = +1.75 s with the SAME Davidson iteration total (fine 58 vs QE 58.0 for D, 57.7 for R); per iteration 99 ms versus 69 ms (1.4x). BAANDI iterations: coarse 32, fine 58, verify 11 (total 101). QE ethr starts at 1e-2 and tightens to 2.5e-11 with very few iterations in the first four SCF steps (avg # it 1-3) and the cost in steps 5-6 (16, 17 iterations).
+
+Largest three contributions to A-D: (1) subspace algebra +1.91 s (31 %), (2) H application +0.87 s (14 %), (3) solve work outside the solver envelope +0.77 s (13 %); then outside-process +0.72 s and start +0.41 s. Unexplained remainder: 0.0 s by construction, but the QE-side column counts per h_psi are missing, so the apply-versus-algebra split is not an equal-scope per-column comparison. The 0.72 s outside-process row and the 0.39 s row are by-difference numbers.
+Consequences for lanes: DAVIDSON (algebra +1.91, envelope +0.77; GEMM-shape changes are closed after two losses; reduced_eigen at np8, reductions, non-GEMM passes, solve setup/start/return/finish), FFT (apply +0.87; permutation passes and padded all-to-all), INIT (start +0.41, other init +0.39), LAUNCHIO (+0.72 outside process, +0.30 io). Verification and the ladder are required structure; their cost (1.06 s verification) is a separate lever (VERIFY lane).

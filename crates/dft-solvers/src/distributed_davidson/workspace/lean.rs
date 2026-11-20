@@ -315,32 +315,25 @@ fn border<C: Collective>(
     fit(partial, m, cols)?;
     partial.as_mut_slice().fill(0.0);
     if nl > 0 && m > 0 {
-        let v = &basis.as_slice()[..nl * m];
         if ks > 0 {
-            gemm.multiply_slices_into(
+            crate::real_davidson::upper_border_product(
+                gemm,
                 GemmSite::Other,
-                v,
-                nl,
+                basis,
+                basis,
+                s_from,
                 m,
-                nl,
-                RealOp::Transpose,
-                &basis.as_slice()[s_from * nl..m * nl],
-                ks,
-                nl,
                 partial.as_mut().subcols_mut(0, ks),
             )?;
         }
         if let Some(h) = h_from.filter(|_| kh > 0) {
-            gemm.multiply_slices_into(
+            crate::real_davidson::upper_border_product(
+                gemm,
                 GemmSite::Other,
-                v,
-                nl,
+                basis,
+                products,
+                h,
                 m,
-                nl,
-                RealOp::Transpose,
-                &products.as_slice()[h * nl..m * nl],
-                kh,
-                nl,
                 partial.as_mut().subcols_mut(ks, kh),
             )?;
         }
@@ -1198,6 +1191,77 @@ pub(super) fn run<C: Collective>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn upper_border_reduction_keeps_entries_norms_and_rank_independence() {
+        let (n, m) = (257, 137);
+        let mut reference: Option<Vec<f64>> = None;
+        for ranks in [1, 2, 3, 4, 8] {
+            for on in [false, true] {
+                let results = dft_mpi::simulate(ranks, |comm| {
+                    let config = dft_numerics::switches::RunConfig::from_pairs(&[(
+                        "davidson_upper_border",
+                        if on { "on" } else { "off" },
+                    )])
+                    .unwrap();
+                    let _scope = config.enter();
+                    let rows: Vec<_> = (0..n).filter(|i| i % ranks == comm.rank()).collect();
+                    let nl = rows.len();
+                    let mut v = RealMatrix::zeros(nl, m).unwrap();
+                    let mut hv = v.clone();
+                    for j in 0..m {
+                        for (l, &r) in rows.iter().enumerate() {
+                            v[(l, j)] = ((r * 137 + j * 19 + 1) as f64).sin() / 16.;
+                            hv[(l, j)] = v[(l, j)] * (1. + r as f64 / n as f64);
+                        }
+                    }
+                    let mut gemm = RealGemmWorkspace::with_pool(
+                        nl,
+                        m,
+                        dft_numerics::pool::WorkerPool::new(1).unwrap(),
+                    )
+                    .unwrap();
+                    let mut s = RealMatrix::zeros(m, m).unwrap();
+                    let mut held = vec![0.; m * m];
+                    let mut partial = RealMatrix::zeros(m, 2 * m + 1).unwrap();
+                    let mut sum = partial.clone();
+                    let mut norms = Vec::with_capacity(3);
+                    border(
+                        comm,
+                        &mut gemm,
+                        &v,
+                        &hv,
+                        17,
+                        Some(65),
+                        &[1., 2., 3.],
+                        &mut partial,
+                        &mut sum,
+                        &mut s,
+                        &mut held,
+                        m,
+                        &mut norms,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        norms,
+                        vec![ranks as f64, 2. * ranks as f64, 3. * ranks as f64]
+                    );
+                    let mut values = s.as_slice().to_vec();
+                    values.extend(held);
+                    values
+                });
+                for values in results {
+                    if let Some(reference) = &reference {
+                        for (a, b) in reference.iter().zip(&values) {
+                            assert!((a - b).abs() < 1e-12);
+                        }
+                    } else {
+                        reference = Some(values);
+                    }
+                }
+            }
+        }
+    }
+
     thread_local! {
         static FORCE: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
     }

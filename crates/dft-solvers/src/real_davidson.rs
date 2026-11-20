@@ -1673,6 +1673,56 @@ fn reduced_matrix(
     reduced_matrix_into(v, hv, prefix, ws, &mut out, false)?;
     Ok(out)
 }
+/// Rectangular upper-border tiles. Only rows <= the global column are consumed
+/// by the caller; lower entries are deliberately unspecified. The 64-column
+/// tiles are shape-only (independent of material, pool size and rank count).
+/// Keep the original reduction axis intact: no partial-dot regrouping.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn upper_border_product(
+    ws: &mut RealGemmWorkspace,
+    site: dft_numerics::GemmSite,
+    basis: &RealMatrix,
+    products: &RealMatrix,
+    from: usize,
+    to: usize,
+    mut out: dft_numerics::real::RealMatrixMut<'_>,
+) -> Result<(), LinalgError> {
+    let n = basis.rows();
+    let _lane = lane_profile::span(lane_profile::Op::BorderProduct, n, to, to - from, from);
+    if !dft_numerics::switches::on(dft_numerics::switches::Id::DAVIDSON_UPPER_BORDER) {
+        return ws.multiply_slices_into(
+            site,
+            basis.as_slice(),
+            n,
+            to,
+            n,
+            RealOp::Transpose,
+            &products.as_slice()[from * n..],
+            to - from,
+            n,
+            out,
+        );
+    }
+    for first in (from..to).step_by(64) {
+        let end = (first + 64).min(to);
+        let width = end - first;
+        let _lane = lane_profile::span(lane_profile::Op::UpperBorderTile, n, end, width, from);
+        ws.multiply_slices_into(
+            site,
+            basis.as_slice(),
+            n,
+            end,
+            n,
+            RealOp::Transpose,
+            &products.as_slice()[first * n..],
+            width,
+            n,
+            out.as_mut().submatrix_mut(0, first - from, end, width),
+        )?;
+    }
+    Ok(())
+}
+
 fn reduced_matrix_into(
     v: &RealMatrix,
     hv: &RealMatrix,
@@ -1715,16 +1765,13 @@ fn reduced_matrix_into(
             out.as_mut().subcols_mut(prefix, m - prefix),
         )?;
     } else {
-        ws.multiply_slices_into(
+        upper_border_product(
+            ws,
             dft_numerics::GemmSite::Reduced,
-            v.as_slice(),
-            rows,
-            v.cols(),
-            rows,
-            RealOp::Transpose,
-            &hv.as_slice()[prefix * rows..],
-            m - prefix,
-            rows,
+            v,
+            hv,
+            prefix,
+            m,
             out.as_mut().subcols_mut(prefix, m - prefix),
         )?;
     }
@@ -2608,6 +2655,64 @@ impl Random {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn upper_border_tiles_preserve_retained_entries_and_pool_independence() {
+        // A non-multiple of the 256-row reduction panel, two full column
+        // tiles and a tail; asymmetric V^T HV so accidentally mirroring the
+        // lower triangle instead of retaining the upper cannot pass.
+        let config =
+            dft_numerics::switches::RunConfig::from_pairs(&[("davidson_upper_border", "on")])
+                .unwrap();
+        let _scope = config.enter();
+        let (n, m) = (257, 137);
+        let v = Random(17).block(n, m).unwrap();
+        let hv = Random(91).block(n, m).unwrap();
+        let mut previous: Option<Vec<u64>> = None;
+        for threads in [1, 3] {
+            let mut ws =
+                RealGemmWorkspace::with_pool(n, m, WorkerPool::new(threads).unwrap()).unwrap();
+            let mut full = RealMatrix::zeros(m, m).unwrap();
+            ws.multiply_slices_into(
+                dft_numerics::GemmSite::Reduced,
+                v.as_slice(),
+                n,
+                m,
+                n,
+                RealOp::Transpose,
+                hv.as_slice(),
+                m,
+                n,
+                full.as_mut(),
+            )
+            .unwrap();
+            let mut retained = Vec::new();
+            for from in [0, 17, 64, 136, 137] {
+                let mut tiled = RealMatrix::zeros(m, m - from).unwrap();
+                upper_border_product(
+                    &mut ws,
+                    dft_numerics::GemmSite::Reduced,
+                    &v,
+                    &hv,
+                    from,
+                    m,
+                    tiled.as_mut(),
+                )
+                .unwrap();
+                for j in from..m {
+                    for i in 0..=j {
+                        let value = tiled[(i, j - from)];
+                        assert!((value - full[(i, j)]).abs() < 1e-12);
+                        retained.push(value.to_bits());
+                    }
+                }
+            }
+            if let Some(previous) = &previous {
+                assert_eq!(previous, &retained);
+            }
+            previous = Some(retained);
+        }
+    }
+
     /// ORTHO-DGKS: skipping the second pass keeps the block orthonormal and
     /// orthogonal to the basis to rounding; a block that loses most of its norm
     /// still gets the second pass. Classic and blocked MGS.
@@ -3060,7 +3165,7 @@ pub mod lane_profile {
         "detail",
         "tolerance_ha",
     ];
-    pub const OPERATIONS: [&str; 15] = [
+    pub const OPERATIONS: [&str; 17] = [
         "solve",
         "overlap_border",
         "factor_extension",
@@ -3076,6 +3181,8 @@ pub mod lane_profile {
         "bordered_update",
         "reduced_eigen_step",
         "restart",
+        "upper_border_tile",
+        "upper_border_product",
     ];
     pub const STAGES: [&str; 4] = ["unknown", "coarse", "fine", "verification"];
     pub const KINDS: [&str; 5] = ["unknown", "ordinary", "redo", "verification", "cold"];
@@ -3109,6 +3216,8 @@ pub mod lane_profile {
         Bordered,
         EigenStep,
         Restart,
+        UpperBorderTile,
+        BorderProduct,
     }
     struct State {
         records: Vec<[f64; 13]>,

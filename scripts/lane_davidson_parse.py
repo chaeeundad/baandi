@@ -18,7 +18,7 @@ def floor_inputs(op, n, m, k, detail):
     """Lower-bound array accesses, NOT measured memory-controller traffic."""
     flops = None
     array_bytes = None
-    if op in ('overlap_border', 'reduced_gram'):
+    if op in ('overlap_border', 'reduced_gram', 'upper_border_tile', 'upper_border_product'):
         flops = 2 * n * m * k
         array_bytes = 8 * (n * m + m * k) if k else 0
     elif op == 'reduced_transform':

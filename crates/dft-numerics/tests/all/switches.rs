@@ -131,6 +131,7 @@ fn legacy_defaults_are_unchanged() {
         Id::M2_B5,
         Id::LEAN_PROJ_CACHE,
         Id::DAVIDSON_PROFILE,
+        Id::DAVIDSON_UPPER_BORDER,
         Id::PACK_FIXED,
     ] {
         assert!(!on(id), "{id:?} must default off");
@@ -277,5 +278,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::LADDER_WATCH), Value::Choice("off"));
     assert_eq!(value(Id::LADDER_BASIS_CHECK), Value::Choice("off"));
     assert_eq!(value(Id::PHASE_VALIDATE), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 118);
+    assert_eq!(TABLE.len(), 119);
 }

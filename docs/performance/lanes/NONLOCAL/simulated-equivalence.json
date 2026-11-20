@@ -1,0 +1,52 @@
+{
+  "purpose": "simulated-rank correctness, no performance analysis",
+  "ranks": 2,
+  "fields_equal": [
+    "energy_bits",
+    "density_fnv",
+    "scf",
+    "davidson",
+    "h_columns"
+  ],
+  "values": {
+    "energy_bits": "0xc03f52607f2b3e5a",
+    "density_fnv": "0x0f7a928b3747bc05",
+    "scf": 11,
+    "davidson": 52,
+    "h_columns": 437
+  },
+  "nonlocal_counts": {
+    "coarse": {
+      "nonlocal.projection.calls": 20.0,
+      "nonlocal.reduce.calls": 20.0,
+      "nonlocal.coupling.calls": 15.0,
+      "nonlocal.back.calls": 15.0,
+      "nonlocal.add.calls": 15.0,
+      "nonlocal.audit.calls": 5.0
+    },
+    "fine": {
+      "nonlocal.projection.calls": 53.0,
+      "nonlocal.reduce.calls": 53.0,
+      "nonlocal.coupling.calls": 42.0,
+      "nonlocal.back.calls": 42.0,
+      "nonlocal.add.calls": 42.0,
+      "nonlocal.audit.calls": 11.0
+    },
+    "verify_pass": {
+      "nonlocal.projection.calls": 7.0,
+      "nonlocal.reduce.calls": 7.0,
+      "nonlocal.coupling.calls": 6.0,
+      "nonlocal.back.calls": 6.0,
+      "nonlocal.add.calls": 6.0,
+      "nonlocal.audit.calls": 1.0
+    },
+    "verify_fail": {
+      "nonlocal.projection.calls": 7.0,
+      "nonlocal.reduce.calls": 7.0,
+      "nonlocal.coupling.calls": 6.0,
+      "nonlocal.back.calls": 6.0,
+      "nonlocal.add.calls": 6.0,
+      "nonlocal.audit.calls": 1.0
+    }
+  }
+}

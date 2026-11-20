@@ -1,0 +1,95 @@
+{
+  "purpose": "correctness only; no Mac performance conclusion",
+  "binary_sha256": "405a327ce25e5fea0614c67e32c0670b08b580b3bd4be047ce3d5d54d67cab45",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "max_energy_difference_ha": 0,
+  "runs": [
+    {
+      "case": "si8",
+      "mode": "off",
+      "exit_code": 0,
+      "energy_ha": -31.321776563202498,
+      "density_sha256": "43f2a33d8b0d0a5a90129076353d8e4ad26b2305695c3d834c13b7598fb7342b",
+      "iterations": 11,
+      "verified": true,
+      "scientific_sha256": "bb61ac84599f2b49a2652f6b663ce81c0dd43947ffff699f774f13de647a9c8d",
+      "results_path": "target/scratch/phase0-final-cli-v2/si8-off/results.json",
+      "input_sha256": "9d3da02b83fef46d13ad19e12d31b06857b4ba8988b234a82e3d1ef4a11305ed"
+    },
+    {
+      "case": "si8",
+      "mode": "counts",
+      "exit_code": 0,
+      "energy_ha": -31.321776563202498,
+      "density_sha256": "43f2a33d8b0d0a5a90129076353d8e4ad26b2305695c3d834c13b7598fb7342b",
+      "iterations": 11,
+      "verified": true,
+      "scientific_sha256": "bb61ac84599f2b49a2652f6b663ce81c0dd43947ffff699f774f13de647a9c8d",
+      "results_path": "target/scratch/phase0-final-cli-v2/si8-counts/results.json",
+      "input_sha256": "9d3da02b83fef46d13ad19e12d31b06857b4ba8988b234a82e3d1ef4a11305ed"
+    },
+    {
+      "case": "si8",
+      "mode": "timed",
+      "exit_code": 0,
+      "energy_ha": -31.321776563202498,
+      "density_sha256": "43f2a33d8b0d0a5a90129076353d8e4ad26b2305695c3d834c13b7598fb7342b",
+      "iterations": 11,
+      "verified": true,
+      "scientific_sha256": "bb61ac84599f2b49a2652f6b663ce81c0dd43947ffff699f774f13de647a9c8d",
+      "results_path": "target/scratch/phase0-final-cli-v2/si8-timed/results.json",
+      "input_sha256": "9d3da02b83fef46d13ad19e12d31b06857b4ba8988b234a82e3d1ef4a11305ed"
+    },
+    {
+      "case": "si32",
+      "mode": "off",
+      "exit_code": 0,
+      "energy_ha": -126.70343204998852,
+      "density_sha256": "c264a0847e443677357373e8ee5557784ead8bb15dcf0ad77ac6d2da2cda2371",
+      "iterations": 10,
+      "verified": true,
+      "scientific_sha256": "960e58d817be8663ecdf4b903229a1568bdf84a118ce03ec3ae79515820fb8c4",
+      "results_path": "target/scratch/phase0-final-cli-v2/si32-off/results.json",
+      "input_sha256": "a34cba3f80788eb18acd238db099e4c47808dddf6f304a136d1bb77a8bfd2e2d"
+    },
+    {
+      "case": "si32",
+      "mode": "counts",
+      "exit_code": 0,
+      "energy_ha": -126.70343204998852,
+      "density_sha256": "c264a0847e443677357373e8ee5557784ead8bb15dcf0ad77ac6d2da2cda2371",
+      "iterations": 10,
+      "verified": true,
+      "scientific_sha256": "960e58d817be8663ecdf4b903229a1568bdf84a118ce03ec3ae79515820fb8c4",
+      "results_path": "target/scratch/phase0-final-cli-v2/si32-counts/results.json",
+      "input_sha256": "a34cba3f80788eb18acd238db099e4c47808dddf6f304a136d1bb77a8bfd2e2d"
+    },
+    {
+      "case": "si32",
+      "mode": "timed",
+      "exit_code": 0,
+      "energy_ha": -126.70343204998852,
+      "density_sha256": "c264a0847e443677357373e8ee5557784ead8bb15dcf0ad77ac6d2da2cda2371",
+      "iterations": 10,
+      "verified": true,
+      "scientific_sha256": "960e58d817be8663ecdf4b903229a1568bdf84a118ce03ec3ae79515820fb8c4",
+      "results_path": "target/scratch/phase0-final-cli-v2/si32-timed/results.json",
+      "input_sha256": "a34cba3f80788eb18acd238db099e4c47808dddf6f304a136d1bb77a8bfd2e2d"
+    }
+  ],
+  "checks": [
+    "scientific f64 bits",
+    "density bytes",
+    "history and work",
+    "verification attempts",
+    "count-only clocks zero",
+    "timed counters equal count-only",
+    "parser on actual CLI files"
+  ],
+  "base_commit": "db25e70176bd5d111dab6fe1dc2a110766fcb005",
+  "source_sha256": {
+    "crates/dft-physics/src/distributed_real_gamma.rs": "6c9f07d7e5b4502c36bf8aac79faa0587d382ab5b8cc50a425991eb4d535438e",
+    "crates/dft-physics/src/real_gamma.rs": "0a3b3755953e57b79bead94bfe37be509d16f06fb455b831de126e697e5bf9b2",
+    "crates/dft-engine/src/profile.rs": "73915b9388b09d7dc6fcababd4c6cea08d8d578717f2a46a83af70989ce1964d"
+  }
+}

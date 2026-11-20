@@ -1,0 +1,85 @@
+{
+  "task_id": "LANE-NONLOCAL",
+  "status": "PROFILE_REQUEST",
+  "changed_files": [
+    "crates/dft-engine/src/profile.rs",
+    "crates/dft-physics/src/distributed_real_gamma.rs",
+    "crates/dft-physics/src/real_gamma.rs",
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/lanes/NONLOCAL/equivalence.json",
+    "docs/performance/lanes/NONLOCAL/mac-counts-results.json",
+    "docs/performance/lanes/NONLOCAL/profile-request.md",
+    "docs/performance/lanes/NONLOCAL/profile.sh",
+    "docs/performance/lanes/NONLOCAL/report.json",
+    "docs/performance/lanes/NONLOCAL/simulated-equivalence.json",
+    "docs/performance/lanes/NONLOCAL/test_parser.py",
+    "docs/performance/lanes/NONLOCAL/verify_cli.py",
+    "scripts/lane_nonlocal_parse.py"
+  ],
+  "design_choices": [
+    "Phase 0 complete: instrumentation only; no numerical algorithm, threshold, dispatch, default or optimization switch change.",
+    "Real-Gamma projection, rank reduction, coupling, back product, image addition and scalar energy audit are timed/counted under PHASE_PROFILE. STAGE_TIMERS=off preserves counts with zero lane clocks. Disabled spans have no clocks, TLS/counter arithmetic, allocation, locks or I/O; only the enable branch remains.",
+    "Thread-local snapshots feed an isolated NonlocalMark section in engine profile.rs. Existing CLI serialization exports additive nonlocal.* fields per phase bucket and rank extrema. No CLI production serializer or stage_clock edit.",
+    "FLOP and logical-byte inputs plus projection-width bins are diagnostic work models, not measured memory traffic. Empty products are omitted. Scalar audit FLOPs reflect the existing serial sparse-zero skip versus distributed dense contraction.",
+    "The parser distinguishes zero-call stages as unusable, provides bounded per-call/per-map bucket averages, and omits timing fields entirely in Mac mode.",
+    "Orchestrator approved real_gamma.rs and profile.rs for wiring. Stop now; Phase 2 requires returned dev08 data."
+  ],
+  "commands": [
+    {
+      "command": "TMPDIR=\"$PWD/target/scratch\" cargo build --release -p dft-cli",
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=\"$PWD/target/scratch\" python3 -I docs/performance/lanes/NONLOCAL/verify_cli.py --binary target/release/dft-cli --upf /Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --out target/scratch/phase0-final-cli-v2",
+      "exit_code": 0
+    },
+    {
+      "command": "CHECK_SCCACHE=0 TMPDIR_990=\"$PWD/target/scratch\" scripts/check.sh fast dft-physics dft-engine dft-cli",
+      "exit_code": 1
+    },
+    {
+      "command": "DFT_SI_UPF=/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF M2_PROFILE_SERIAL=off M2_PROFILE_RANKS=2 M2_PROFILE_CASE=si8 M2_PROFILE_MODE=production M2_PROFILE_LADDER=on BAANDI_PHASE_PROFILE=on BAANDI_STAGE_TIMERS=off cargo test --release -p dft-engine --test m2_entry_cost -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_SI_UPF=/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF M2_PROFILE_SERIAL=off M2_PROFILE_RANKS=2 M2_PROFILE_CASE=si8 M2_PROFILE_MODE=production M2_PROFILE_LADDER=on BAANDI_PHASE_PROFILE=off BAANDI_STAGE_TIMERS=off cargo test --release -p dft-engine --test m2_entry_cost -- --ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=\"$PWD/target/scratch\" python3 -I docs/performance/lanes/NONLOCAL/test_parser.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/lane_nonlocal_parse.py --machine mac --format json docs/performance/lanes/NONLOCAL/mac-counts-results.json",
+      "exit_code": 0
+    },
+    {
+      "command": "bash -n docs/performance/lanes/NONLOCAL/profile.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "6/6 actual CLI runs converge and verify: Si8 and Si32, off/counts-only/timed. Four off/on pairs have bit-identical scientific f64 values, eigenvalues, occupations, history, work, verification attempts and density bytes; max |dE| = 0 Ha.",
+    "Si8 energy -31.321776563202498 Ha, 11 fine iterations; Si32 energy -126.70343204998852 Ha, 10 fine iterations. Complete density and scientific SHA-256 values in equivalence.json.",
+    "Four actual-file parser validations; 48 bucket/stage rows each. Five parser tests pass, including the retained unmodified Mac CLI JSON fixture.",
+    "Counts-only lane seconds are 0 s; timed/counts-only counters agree. No Mac timing is used to support a performance conclusion.",
+    "Two simulated ranks: identical energy bits, density FNV and SCF/Davidson/H work off/on; coarse/fine/verification projection and rank-reduction counters populated.",
+    "Final fast gate: 480 passed, 3 failed, 131 ignored. Build/fmt/clippy pass; three known CLI cache restrictions under in-repository TMPDIR cause exit 1.",
+    "Earlier independent synthetic checks: 45 operator/energy pairs bit-identical (0 Ha difference), 11 distributed integration tests passed."
+  ],
+  "reference_comparison": "Same-binary instrumentation off/counts-only/timed comparisons only. No new QE run/reference or dev08 profile. Exact JSON paths and separate same-model dev08 jobs are in profile-request.md.",
+  "limitations": [
+    "Real MPI/MKL execution and performance profiling remain for dev08; simulated ranks are correctness evidence only.",
+    "The collection is qualified for one worker per rank and one core. Multiworker/HAPPLY_OVERLAP pool-thread attribution is not implemented.",
+    "Rank extrema and bounded bucket averages are not individual-call, individual-map or rank-ID traces. Do not divide maxima from different ranks as if they were one rank.",
+    "This real-Gamma application profile excludes complex k-point kernels, projector construction and the copy of externally cached projections. Child timer sums are not a complete H-apply wall budget.",
+    "The required fast gate remains nonzero due to three known CLI pseudopotential cache tests rejecting in-repository TMPDIR. No tolerance, cache rule or path restriction was relaxed. Sandbox also denies optional ps/nice diagnostics.",
+    "Dashboard/session updates remain the orchestrator responsibility; source and artifacts are uncommitted."
+  ],
+  "open_questions": [],
+  "commit": "Uncommitted as requested."
+}

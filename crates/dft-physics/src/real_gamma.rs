@@ -1,5 +1,8 @@
 //! Isolated real Gamma Hamiltonian. Derived from real-gamma-design sections 4–7;
 //! no engine caller or change to the complex traversal (ledger A43).
+use crate::distributed_real_gamma::lane_profile::{
+    Profile as NonlocalProfile, Stage as NonlocalStage,
+};
 use crate::hamiltonian::{Hamiltonian, NonlocalOperator};
 use dft_basis::{HalfSphere, PlaneWaveBasis};
 use dft_numerics::fused_fold::FoldedRealPlan;
@@ -164,6 +167,7 @@ pub struct RealNonlocal {
     /// MKL builds, default ON since the user's adopt-what-improves rule (2026-11-10; dev08 NONLOCAL-DGEMM-AB: all 40 seed pairs faster, -6.4/-4.2 percent at T=1, -2.0/-1.5 percent at T=8); `BAANDI_MKL_NONLOCAL=off` restores the Rust kernel: both
     /// projector products go through dgemm panels with the panel grouping fixed.
     dgemm_products: bool,
+    lane: NonlocalProfile,
 }
 impl RealNonlocal {
     /// Copy the public complex columns and each atom's row-major D block.
@@ -194,6 +198,13 @@ impl RealNonlocal {
             });
             start += count;
         }
+        let lane = NonlocalProfile::new(coupling.iter().map(|c| c.count)).with_sparse_audit(|| {
+            coupling
+                .iter()
+                .flat_map(|c| &c.values)
+                .filter(|&&v| v != 0.)
+                .count()
+        });
         Ok(Self {
             projectors,
             coupling,
@@ -203,6 +214,7 @@ impl RealNonlocal {
             gemm: RealGemmWorkspace::with_pool(n, count.max(capacity), pool)?,
             capacity,
             dgemm_products: dft_numerics::switches::on(dft_numerics::switches::Id::MKL_NONLOCAL),
+            lane,
         })
     }
     /// Add the nonlocal image to caller-owned output; no allocation on application.
@@ -232,6 +244,7 @@ impl RealNonlocal {
         }
         let count = self.projectors.cols();
         let clock = timers::start();
+        let lane = self.lane.start(NonlocalStage::Projection, n, count, m);
         if self.dgemm_products {
             self.gemm.multiply_slices_wide_into(
                 dft_numerics::GemmSite::Other,
@@ -253,6 +266,7 @@ impl RealNonlocal {
                 self.projections.as_mut().subcols_mut(0, m),
             )?;
         }
+        drop(lane);
         timers::stop(clock, Slot::NonlocalProjectionNs);
         let clock = timers::start();
         let result = self.add_from_projections(y, m);
@@ -322,6 +336,7 @@ impl RealNonlocal {
             return Err(RealGammaError::Shape);
         }
         let count = self.projectors.cols();
+        let lane = self.lane.start(NonlocalStage::Projection, n, count, m);
         if self.dgemm_products {
             self.gemm.multiply_slices_wide_into(
                 dft_numerics::GemmSite::Other,
@@ -343,6 +358,8 @@ impl RealNonlocal {
                 self.projections.as_mut().subcols_mut(0, m),
             )?;
         }
+        drop(lane);
+        let _lane = self.lane.start(NonlocalStage::Audit, n, count, m);
         coupled_energies(
             &self.coupling,
             &self.projections.as_slice()[..count * m],
@@ -366,6 +383,12 @@ impl RealNonlocal {
         if projections.len() != count * out.len() {
             return Err(RealGammaError::Shape);
         }
+        let _lane = self.lane.start(
+            NonlocalStage::Audit,
+            self.projectors.rows(),
+            count,
+            out.len(),
+        );
         coupled_energies(&self.coupling, projections, count, out)
     }
 
@@ -385,6 +408,7 @@ impl RealNonlocal {
         }
         let count = self.projectors.cols();
         let clock = timers::start();
+        let lane = self.lane.start(NonlocalStage::Projection, n, count, m);
         if self.dgemm_products {
             self.gemm.multiply_slices_wide_into(
                 dft_numerics::GemmSite::Other,
@@ -406,6 +430,7 @@ impl RealNonlocal {
                 self.projections.as_mut().subcols_mut(0, m),
             )?;
         }
+        drop(lane);
         timers::stop(clock, Slot::NonlocalProjectionNs);
         let clock = timers::start();
         let result = self.image_from_projections(m);
@@ -436,6 +461,12 @@ impl RealNonlocal {
 
     /// Y += image (first `Y.cols()` columns), then the output scan.
     fn add_image(&self, y: &mut RealMatrix) -> Result<(), RealGammaError> {
+        let _lane = self.lane.start(
+            NonlocalStage::Add,
+            self.projectors.rows(),
+            self.projectors.cols(),
+            y.cols(),
+        );
         for (y, v) in y.as_mut_slice().iter_mut().zip(self.image.as_slice()) {
             *y += v;
         }
@@ -449,6 +480,7 @@ impl RealNonlocal {
     fn image_from_projections(&mut self, m: usize) -> Result<(), RealGammaError> {
         let n = self.projectors.rows();
         let count = self.projectors.cols();
+        let lane = self.lane.start(NonlocalStage::Coupling, n, count, m);
         for atom in &self.coupling {
             for band in 0..m {
                 for j in 0..atom.count {
@@ -461,6 +493,8 @@ impl RealNonlocal {
                 }
             }
         }
+        drop(lane);
+        let _lane = self.lane.start(NonlocalStage::Back, n, count, m);
         if self.dgemm_products {
             self.gemm.multiply_slices_wide_into(
                 dft_numerics::GemmSite::Other,

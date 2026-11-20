@@ -170,6 +170,12 @@ pub const SEC_LABELS: [&str; NSEC] = [
     "atomic.eigh",
     "atomic.rotate",
     "between.ladder_truncation",
+    "nonlocal.projection",
+    "nonlocal.reduce",
+    "nonlocal.coupling",
+    "nonlocal.back",
+    "nonlocal.add",
+    "nonlocal.audit",
 ];
 const S_WALL: usize = 0;
 const S_POTENTIAL: usize = 1;
@@ -212,7 +218,8 @@ const BETWEEN_PARTS: usize = 4;
 const S_SOLVE_REAL_STATE: usize = 58;
 const S_ATOMIC_DETAIL: usize = 59;
 const S_BETWEEN_TRUNCATION: usize = 66;
-pub const NSEC: usize = 67;
+const S_NONLOCAL: usize = 67;
+pub const NSEC: usize = 73;
 
 /// Parts of problem construction (`init` bucket; seconds only, the bucket wall
 /// is the caller's construction clock).
@@ -304,7 +311,7 @@ impl BetweenPart {
 }
 
 // Count slots.
-pub const COUNT_LABELS: [&str; 20] = [
+pub const COUNT_LABELS: [&str; NCOUNT] = [
     "maps",
     "davidson_iterations",
     "h_columns",
@@ -325,6 +332,32 @@ pub const COUNT_LABELS: [&str; 20] = [
     "solve.reduced_eigen.calls",
     "solve.restart.calls",
     "solve.orthonormalize.calls",
+    "nonlocal.projection.calls",
+    "nonlocal.reduce.calls",
+    "nonlocal.coupling.calls",
+    "nonlocal.back.calls",
+    "nonlocal.add.calls",
+    "nonlocal.audit.calls",
+    "nonlocal.projection.flops",
+    "nonlocal.reduce.flops",
+    "nonlocal.coupling.flops",
+    "nonlocal.back.flops",
+    "nonlocal.add.flops",
+    "nonlocal.audit.flops",
+    "nonlocal.projection.bytes",
+    "nonlocal.reduce.bytes",
+    "nonlocal.coupling.bytes",
+    "nonlocal.back.bytes",
+    "nonlocal.add.bytes",
+    "nonlocal.audit.bytes",
+    "nonlocal.rows_sum",
+    "nonlocal.projectors_sum",
+    "nonlocal.bands_sum",
+    "nonlocal.width1",
+    "nonlocal.width2",
+    "nonlocal.width3_8",
+    "nonlocal.width9_32",
+    "nonlocal.width33_plus",
 ];
 const C_MAPS: usize = 0;
 const C_ITER: usize = 1;
@@ -342,7 +375,8 @@ const C_APPLY_CALLS: usize = 16;
 const C_EIGEN_CALLS: usize = 17;
 const C_RESTART_CALLS: usize = 18;
 const C_ORTHO_CALLS: usize = 19;
-pub const NCOUNT: usize = 20;
+const C_NONLOCAL: usize = 20;
+pub const NCOUNT: usize = 46;
 
 /// Accumulated seconds and counts of one bucket.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -449,6 +483,30 @@ pub struct RankProfile {
     pub wall: f64,
 }
 
+// LANE-NONLOCAL instrumentation wiring. Kept separate from the shared solver
+// snapshot slots so other lanes can append their own fields independently.
+struct NonlocalMark(dft_physics::distributed_real_gamma::lane_profile::Snapshot);
+impl NonlocalMark {
+    fn new() -> Self {
+        Self(dft_physics::distributed_real_gamma::lane_profile::snapshot())
+    }
+    fn flush_into(&mut self, target: &mut Accum) {
+        use dft_physics::distributed_real_gamma::lane_profile::{self, SHAPES, STAGES};
+        let now = lane_profile::snapshot();
+        let delta = now.since(self.0);
+        self.0 = now;
+        for i in 0..STAGES {
+            target.seconds[S_NONLOCAL + i] += delta.nanos[i] as f64 * 1e-9;
+            target.counts[C_NONLOCAL + i] += delta.calls[i];
+            target.counts[C_NONLOCAL + STAGES + i] += delta.flops[i];
+            target.counts[C_NONLOCAL + 2 * STAGES + i] += delta.bytes[i];
+        }
+        for i in 0..SHAPES {
+            target.counts[C_NONLOCAL + 3 * STAGES + i] += delta.shapes[i];
+        }
+    }
+}
+
 struct State {
     top: Top,
     buckets: [Accum; BUCKETS],
@@ -457,6 +515,7 @@ struct State {
     /// Pending map's atomic-start seconds (excluded from its potential).
     pending_atomic: f64,
     mark: Snapshot,
+    nonlocal_mark: NonlocalMark,
 }
 impl State {
     fn new() -> Self {
@@ -466,6 +525,7 @@ impl State {
             pending: None,
             pending_atomic: 0.0,
             mark: local::snapshot(),
+            nonlocal_mark: NonlocalMark::new(),
         }
     }
     fn ordinary_bucket(&self) -> Bucket {
@@ -482,7 +542,9 @@ impl State {
         let now = local::snapshot();
         let d = now.since(&self.mark);
         self.mark = now;
-        let lazy = self.buckets[bucket as usize].add_delta(&d);
+        let target = &mut self.buckets[bucket as usize];
+        self.nonlocal_mark.flush_into(target);
+        let lazy = target.add_delta(&d);
         let m = &mut self.buckets[Bucket::Materialize as usize];
         m.seconds[S_M2_LAZY_MATERIALIZE] += lazy;
         m.seconds[S_IO] += lazy;

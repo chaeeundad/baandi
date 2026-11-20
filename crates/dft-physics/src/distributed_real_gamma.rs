@@ -155,6 +155,7 @@ pub struct DistributedRealHamiltonian {
     gemm: RealGemmWorkspace,
     /// `BAANDI_M2_DGEMM=on`: projector products through the per-panel dgemm route.
     dgemm: bool,
+    lane: lane_profile::Profile,
     source_identity: Arc<()>,
     pool: Arc<WorkerPool>,
 }
@@ -370,6 +371,7 @@ impl DistributedRealHamiltonian {
             image: RealMatrix::zeros(n_loc, capacity)?,
             gemm: RealGemmWorkspace::with_pool(n_loc, count.max(capacity), pool.clone())?,
             dgemm: dft_numerics::switches::on(dft_numerics::switches::Id::M2_DGEMM),
+            lane: lane_profile::Profile::new(coupling.iter().map(|c| c.count)),
             source_identity: source.operator_identity(),
             pool,
             projectors,
@@ -828,6 +830,12 @@ impl DistributedRealHamiltonian {
             return Ok(());
         }
         self.projections_reduced(comm, x)?;
+        let lane = self.lane.start(
+            lane_profile::Stage::Audit,
+            self.rows.len(),
+            self.count,
+            x.cols(),
+        );
         for (band, o) in out.iter_mut().enumerate() {
             let mut sum = 0.;
             for atom in &self.coupling {
@@ -842,6 +850,7 @@ impl DistributedRealHamiltonian {
             }
             *o = sum;
         }
+        drop(lane);
         stage_add(Stage::NonlocalEnergy, start);
         bump(Count::NonlocalEnergies, 1);
         Ok(())
@@ -855,6 +864,9 @@ impl DistributedRealHamiltonian {
     ) -> Result<(), DistributedRealError> {
         let (count, m) = (self.count, x.cols());
         let n_loc = self.rows.len();
+        let span = self
+            .lane
+            .start(lane_profile::Stage::Projection, n_loc, count, m);
         if n_loc > 0 && self.dgemm {
             self.gemm.multiply_slices_wide_into(
                 GemmSite::Other,
@@ -878,6 +890,10 @@ impl DistributedRealHamiltonian {
         } else {
             self.projections.as_mut_slice()[..count * m].fill(0.);
         }
+        drop(span);
+        let _span = self
+            .lane
+            .start(lane_profile::Stage::Reduce, n_loc, count, m);
         comm.tree_sum_f64(
             &self.projections.as_slice()[..count * m],
             &mut self.reduced.as_mut_slice()[..count * m],
@@ -1006,6 +1022,9 @@ impl DistributedRealHamiltonian {
         if count > 0 {
             self.projections_reduced(comm, x)?;
             parts.lap(dft_numerics::work_timers::DistPart::Projection);
+            let span = self
+                .lane
+                .start(lane_profile::Stage::Coupling, n_loc, count, m);
             for atom in &self.coupling {
                 for band in 0..m {
                     for j in 0..atom.count {
@@ -1018,6 +1037,8 @@ impl DistributedRealHamiltonian {
                     }
                 }
             }
+            drop(span);
+            let span = self.lane.start(lane_profile::Stage::Back, n_loc, count, m);
             if n_loc > 0 && self.dgemm {
                 self.gemm.multiply_slices_wide_into(
                     GemmSite::Other,
@@ -1031,6 +1052,8 @@ impl DistributedRealHamiltonian {
                     count,
                     self.image.as_mut().subcols_mut(0, m),
                 )?;
+                drop(span);
+                let _span = self.lane.start(lane_profile::Stage::Add, n_loc, count, m);
                 for (y, v) in y.as_mut_slice().iter_mut().zip(self.image.as_slice()) {
                     *y += v;
                 }
@@ -1041,6 +1064,8 @@ impl DistributedRealHamiltonian {
                     self.weights.as_ref().subcols(0, m),
                     self.image.as_mut().subcols_mut(0, m),
                 )?;
+                drop(span);
+                let _span = self.lane.start(lane_profile::Stage::Add, n_loc, count, m);
                 for (y, v) in y.as_mut_slice().iter_mut().zip(self.image.as_slice()) {
                     *y += v;
                 }
@@ -1371,5 +1396,323 @@ impl dft_solvers::distributed_davidson::DistributedRealOperator for DistributedR
     ) -> Result<(), dft_solvers::SolverError> {
         DistributedRealHamiltonian::apply_block(self, comm, x_local, y_local)
             .map_err(|e| dft_solvers::SolverError::Application(e.to_string()))
+    }
+}
+
+/// NONLOCAL Phase 0: allocation-free, thread-local diagnostic counters. They are
+/// read by the engine at phase boundaries; no numerical decision reads them.
+pub mod lane_profile {
+    use std::cell::Cell;
+    use std::time::Instant;
+
+    pub const STAGES: usize = 6;
+    pub const SHAPES: usize = 8;
+    #[derive(Clone, Copy)]
+    pub enum Stage {
+        Projection,
+        Reduce,
+        Coupling,
+        Back,
+        Add,
+        Audit,
+    }
+
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct Snapshot {
+        pub nanos: [u64; STAGES],
+        pub calls: [u64; STAGES],
+        pub flops: [u64; STAGES],
+        pub bytes: [u64; STAGES],
+        /// Sum of rows, projector columns, bands; calls at widths 1, 2, 3..8,
+        /// 9..32, 33+. Only projection calls contribute (not back products).
+        pub shapes: [u64; SHAPES],
+    }
+    thread_local! {
+        static DATA: Cell<Snapshot> = const { Cell::new(Snapshot {
+            nanos: [0; STAGES], calls: [0; STAGES], flops: [0; STAGES],
+            bytes: [0; STAGES], shapes: [0; SHAPES],
+        }) };
+    }
+    pub fn snapshot() -> Snapshot {
+        DATA.with(Cell::get)
+    }
+    impl Snapshot {
+        pub fn since(self, earlier: Self) -> Self {
+            let mut out = self;
+            for i in 0..STAGES {
+                out.nanos[i] -= earlier.nanos[i];
+                out.calls[i] -= earlier.calls[i];
+                out.flops[i] -= earlier.flops[i];
+                out.bytes[i] -= earlier.bytes[i];
+            }
+            for i in 0..SHAPES {
+                out.shapes[i] -= earlier.shapes[i];
+            }
+            out
+        }
+    }
+
+    /// Cached at operator construction; OFF performs no clock, TLS access,
+    /// counter arithmetic, allocation, lock or I/O. Only the enable branch remains.
+    #[derive(Clone, Copy)]
+    pub(crate) struct Profile {
+        enabled: bool,
+        coupling_entries: u64,
+        audit_nonzero: Option<u64>,
+    }
+    impl Profile {
+        pub(crate) fn new(counts: impl Iterator<Item = usize>) -> Self {
+            let enabled = dft_numerics::switches::on(dft_numerics::switches::Id::PHASE_PROFILE);
+            Self {
+                enabled,
+                audit_nonzero: None,
+                coupling_entries: if enabled {
+                    counts.map(|c| (c as u64) * (c as u64)).sum()
+                } else {
+                    0
+                },
+            }
+        }
+        /// Serial audit skips exactly-zero coupling entries; count them once,
+        /// only when instrumentation is enabled, without changing the audit.
+        pub(crate) fn with_sparse_audit(mut self, nonzero: impl FnOnce() -> usize) -> Self {
+            if self.enabled {
+                self.audit_nonzero = Some(nonzero() as u64);
+            }
+            self
+        }
+        pub(crate) fn start(
+            self,
+            stage: Stage,
+            rows: usize,
+            projectors: usize,
+            bands: usize,
+        ) -> Span {
+            if !self.enabled
+                || projectors == 0
+                || bands == 0
+                || (rows == 0 && matches!(stage, Stage::Projection | Stage::Back | Stage::Add))
+            {
+                return Span(None);
+            }
+            let (r, p, b) = (rows as u64, projectors as u64, bands as u64);
+            let (flops, bytes) = match stage {
+                Stage::Projection | Stage::Back => (2 * r * p * b, 8 * (r * p + r * b + p * b)),
+                Stage::Reduce => (0, 8 * p * b), // payload, not network traffic
+                Stage::Coupling => (
+                    2 * self.coupling_entries * b,
+                    8 * (self.coupling_entries + 2 * p * b),
+                ),
+                Stage::Add => (r * b, 24 * r * b),
+                Stage::Audit => (
+                    self.audit_nonzero
+                        .map_or(2 * self.coupling_entries + 2 * p, |nz| 3 * nz)
+                        * b,
+                    8 * (self.coupling_entries + p * b + b),
+                ),
+            };
+            Span(Some(Active {
+                stage,
+                rows: r,
+                projectors: p,
+                bands: b,
+                flops,
+                bytes,
+                clock: dft_numerics::stage_clock::start(),
+            }))
+        }
+    }
+    struct Active {
+        stage: Stage,
+        rows: u64,
+        projectors: u64,
+        bands: u64,
+        flops: u64,
+        bytes: u64,
+        clock: Option<Instant>,
+    }
+    pub(crate) struct Span(Option<Active>);
+    impl Drop for Span {
+        fn drop(&mut self) {
+            let Some(a) = self.0.take() else {
+                return;
+            };
+            let nanos = dft_numerics::stage_clock::elapsed_ns(a.clock);
+            DATA.with(|data| {
+                let mut s = data.get();
+                let i = a.stage as usize;
+                s.calls[i] += 1;
+                s.nanos[i] += nanos;
+                s.flops[i] += a.flops;
+                s.bytes[i] += a.bytes;
+                if matches!(a.stage, Stage::Projection) {
+                    s.shapes[0] += a.rows;
+                    s.shapes[1] += a.projectors;
+                    s.shapes[2] += a.bands;
+                    let bin = match a.bands {
+                        1 => 3,
+                        2 => 4,
+                        3..=8 => 5,
+                        9..=32 => 6,
+                        _ => 7,
+                    };
+                    if a.bands > 0 {
+                        s.shapes[bin] += 1;
+                    }
+                }
+                data.set(s);
+            });
+        }
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        #[test]
+        fn nonlocal_profile_disabled_is_inert() {
+            let before = snapshot();
+            let p = Profile {
+                enabled: false,
+                coupling_entries: u64::MAX,
+                audit_nonzero: None,
+            };
+            drop(p.start(Stage::Projection, usize::MAX, usize::MAX, usize::MAX));
+            assert_eq!(snapshot(), before);
+        }
+        #[test]
+        fn nonlocal_profile_empty_products_do_not_report_traffic() {
+            let before = snapshot();
+            let p = Profile {
+                enabled: true,
+                coupling_entries: 0,
+                audit_nonzero: None,
+            };
+            drop(p.start(Stage::Projection, 7, 0, 2));
+            drop(p.start(Stage::Projection, 7, 3, 0));
+            drop(p.start(Stage::Back, 0, 3, 2));
+            assert_eq!(snapshot(), before);
+        }
+        #[test]
+        fn nonlocal_profile_count_only_and_delta() {
+            let before = snapshot();
+            drop(Span(Some(Active {
+                stage: Stage::Projection,
+                rows: 7,
+                projectors: 3,
+                bands: 2,
+                flops: 84,
+                bytes: 328,
+                clock: None,
+            })));
+            let d = snapshot().since(before);
+            assert_eq!(d.calls, [1, 0, 0, 0, 0, 0]);
+            assert_eq!(d.nanos, [0; STAGES]);
+            assert_eq!(d.flops[0], 84);
+            assert_eq!(d.bytes[0], 328);
+            assert_eq!(d.shapes, [7, 3, 2, 0, 1, 0, 0, 0]);
+        }
+    }
+}
+
+#[cfg(test)]
+mod lane_identity_tests {
+    use super::*;
+    use crate::hamiltonian::NonlocalOperator;
+    use dft_geometry::Cell;
+    use dft_numerics::switches::RunConfig;
+    use dft_units::Hartree;
+
+    #[test]
+    fn nonlocal_profile_preserves_operator_and_energy_bits() {
+        let mut comparisons = 0;
+        for lattice in [
+            [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],
+            [[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]],
+            [[4., 0., 0.], [0., 5., 0.], [0., 0., 14.]],
+        ] {
+            let cell = Cell::from_user_rows_bohr(lattice).unwrap();
+            let basis = PlaneWaveBasis::new(&cell, Hartree(1.2)).unwrap();
+            let grid =
+                dft_basis::FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None)
+                    .unwrap();
+            for channels in [0, 1, 7] {
+                let columns = (0..channels)
+                    .map(|j| {
+                        basis
+                            .momenta()
+                            .iter()
+                            .map(|g| {
+                                C::from_polar(
+                                    0.1 / (1. + g.norm_squared),
+                                    g.cartesian[0] * (j + 1) as f64 * 0.13
+                                        + g.cartesian[1] * 0.2
+                                        + g.cartesian[2] * 0.3,
+                                )
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let coupling = (0..channels * channels)
+                    .map(|i| {
+                        if i / channels == i % channels {
+                            0.7
+                        } else {
+                            -0.03
+                        }
+                    })
+                    .collect();
+                let nl = NonlocalOperator::from_columns(
+                    basis.momenta().to_vec(),
+                    vec![(columns, coupling)],
+                    channels,
+                );
+                let source =
+                    Hamiltonian::new(&cell, &basis, ndarray::Array3::zeros(grid.dims()), nl)
+                        .unwrap();
+                let mut op = DistributedRealHamiltonian::new(
+                    &source,
+                    &basis,
+                    17,
+                    0,
+                    1,
+                    WorkerPool::new(1).unwrap(),
+                )
+                .unwrap();
+                let comm = dft_mpi::Universe::init().unwrap().world();
+                for m in [0, 1, 2, 3, 17] {
+                    let n = op.rows.len();
+                    let x = RealMatrix::new(
+                        n,
+                        m,
+                        (0..n * m)
+                            .map(|i| ((i * 17 % 113) as f64 - 56.) / 113.)
+                            .collect(),
+                    )
+                    .unwrap();
+                    let mut images = Vec::new();
+                    let mut energies = Vec::new();
+                    for mode in ["off", "on"] {
+                        let cfg = RunConfig::from_pairs(&[("phase_profile", mode)]).unwrap();
+                        let _guard = cfg.enter();
+                        op.lane = lane_profile::Profile::new(op.coupling.iter().map(|c| c.count));
+                        let mut image = RealMatrix::zeros(n, m).unwrap();
+                        let mut energy = vec![0.; m];
+                        op.apply_block(&comm, &x, &mut image).unwrap();
+                        op.nonlocal_band_energies(&comm, &x, &mut energy).unwrap();
+                        images.push(
+                            image
+                                .as_slice()
+                                .iter()
+                                .map(|v| v.to_bits())
+                                .collect::<Vec<_>>(),
+                        );
+                        energies.push(energy.iter().map(|v| v.to_bits()).collect::<Vec<_>>());
+                    }
+                    assert_eq!(images[0], images[1]);
+                    assert_eq!(energies[0], energies[1]);
+                    comparisons += 1;
+                }
+            }
+        }
+        println!("NONLOCAL_PROFILE {comparisons} operator/energy pairs bit-identical");
     }
 }

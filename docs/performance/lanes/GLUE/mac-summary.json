@@ -1,0 +1,102 @@
+{
+  "purpose": "Correctness only; no Mac timing evidence",
+  "cases": [
+    {
+      "case": "si-skew",
+      "energy_ha": -7.2506046203814964,
+      "converged": true,
+      "verified": true,
+      "work": {
+        "certificate_solves": 3,
+        "davidson_steps": 29,
+        "first_iteration_redos": 0,
+        "h_vectors": 121
+      },
+      "bands": 8,
+      "density_sha256": "cf8f9af96189e4cdfedd67668af861a6e1ce92cc3ce7d1f5e5414ed15fd710fb",
+      "comparisons": 4,
+      "max_energy_delta_ha": 0.0,
+      "solver_work_and_occupations_identical": true
+    },
+    {
+      "case": "si8",
+      "energy_ha": -31.32177656320248,
+      "converged": true,
+      "verified": true,
+      "work": {
+        "certificate_solves": 2,
+        "davidson_steps": 47,
+        "first_iteration_redos": 0,
+        "h_vectors": 430
+      },
+      "bands": 20,
+      "density_sha256": "064590998686925703a43cf47cae6985df8c66ee369ff87e1da7f80fa9b41791",
+      "comparisons": 4,
+      "max_energy_delta_ha": 0.0,
+      "solver_work_and_occupations_identical": true
+    },
+    {
+      "case": "si-slab",
+      "energy_ha": -15.222453803896748,
+      "converged": false,
+      "verified": false,
+      "work": {
+        "certificate_solves": 0,
+        "davidson_steps": 285,
+        "first_iteration_redos": 0,
+        "h_vectors": 1699
+      },
+      "bands": 12,
+      "density_sha256": "a87ba08c6d3f72c227296e5c06f2ba648866f4833d43056fb592ea336c797cd5",
+      "comparisons": 4,
+      "max_energy_delta_ha": 0.0,
+      "solver_work_and_occupations_identical": true
+    },
+    {
+      "case": "si-elongated",
+      "energy_ha": -14.48485038813729,
+      "converged": false,
+      "verified": false,
+      "work": {
+        "certificate_solves": 0,
+        "davidson_steps": 324,
+        "first_iteration_redos": 0,
+        "h_vectors": 1691
+      },
+      "bands": 12,
+      "density_sha256": "4288377de8045a451c4939f7128169430b0849635ae7bd4e5a046dc4bb8d73cf",
+      "comparisons": 4,
+      "max_energy_delta_ha": 0.0,
+      "solver_work_and_occupations_identical": true
+    },
+    {
+      "case": "si32",
+      "energy_ha": -126.70343204998849,
+      "converged": true,
+      "verified": true,
+      "work": {
+        "certificate_solves": 1,
+        "davidson_steps": 48,
+        "first_iteration_redos": 0,
+        "h_vectors": 1717
+      },
+      "bands": 68,
+      "density_sha256": "25acbc89261520e1a7543c845e60594416691edf2f4d11422658ead9d71a6cf1",
+      "comparisons": 4,
+      "max_energy_delta_ha": 0.0,
+      "solver_work_and_occupations_identical": true
+    },
+    {
+      "case": "syn-s2",
+      "energy_ha": 0.6354522013776593,
+      "converged": true,
+      "verified": true,
+      "density_sha256": "8296094b23c697983071f2808a8d0845116158009ce53c9498d15ec710bbccd3",
+      "comparisons": 4,
+      "max_energy_delta_ha": 0.0,
+      "solver_work_and_occupations_identical": true
+    }
+  ],
+  "runs": 30,
+  "comparisons_against_baseline": 24
+}

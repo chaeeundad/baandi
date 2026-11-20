@@ -40,6 +40,7 @@
 //! gathered sums and every rank returns the same error afterwards.
 use crate::ScfError;
 use dft_mpi::Collective;
+use dft_numerics::switches::{GlueProfile, RunCounter as Gc};
 use dft_physics::data::Array3;
 use dft_physics::data::Complex64 as C;
 use dft_physics::{PhysicsError, xc};
@@ -530,6 +531,7 @@ pub(crate) enum Field<'a> {
 }
 
 pub(crate) struct GridPlan {
+    glue_profile: Option<GlueProfile>,
     fft: DistributedPairFft,
     ranks: usize,
     dims: [usize; 3],
@@ -728,6 +730,7 @@ impl GridPlan {
         let points = planes * rows * nz;
         bump(C_PLANS);
         Ok(Self {
+            glue_profile: GlueProfile::current(),
             ranks,
             dims,
             nz,
@@ -895,6 +898,13 @@ impl GridPlan {
         n: Field<'_>,
         flags: &mut [f64; FLAGS],
     ) -> Result<(), ScfError> {
+        let _glue = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueGridForwardCalls, Gc::GlueGridForwardNanos));
+        if let Some(p) = self.glue_profile {
+            p.count(Gc::GlueGridPoints, self.points());
+            p.count(Gc::GlueGridCoefficients, self.coef.len());
+        }
         let err = |e: dft_solvers::distributed_fft::DistFftError| {
             ScfError::Numerical(format!("M2 grid transform: {e}"))
         };
@@ -929,6 +939,9 @@ impl GridPlan {
     /// (ascending first-axis order inside a stick: local coefficients are in
     /// ascending row-major position).
     fn stick_energy(&mut self, coef: &[C]) {
+        let _glue = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueGridHartreeCalls, Gc::GlueGridHartreeNanos));
         self.stick_vals.clear();
         self.stick_vals.resize(self.local_sticks, 0.0);
         for ((z, &k), &s) in coef.iter().zip(&self.kernel).zip(&self.stick_of) {
@@ -947,6 +960,9 @@ impl GridPlan {
         per_plane: usize,
         flags: &[f64; FLAGS],
     ) -> Result<(), ScfError> {
+        let _glue = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueGridPackCalls, Gc::GlueGridPackNanos));
         let plane_points = self.rows * self.nz;
         let with_prefix = prefix.is_some();
         self.send.clear();
@@ -970,6 +986,14 @@ impl GridPlan {
             .collect();
         debug_assert_eq!(self.send.len(), counts[comm_rank(comm)]);
         self.recv.resize(counts.iter().sum(), 0.0);
+        drop(_glue);
+        if let Some(p) = self.glue_profile {
+            p.count(Gc::GlueGridSendValues, self.send.len());
+            p.count(Gc::GlueGridRecvValues, self.recv.len());
+        }
+        let _glue = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueGridGatherCalls, Gc::GlueGridGatherNanos));
         comm.allgatherv_f64(&self.send, &counts, &mut self.recv)
             .map_err(|e| ScfError::Numerical(format!("M2 grid gather: {e}")))
     }
@@ -983,6 +1007,9 @@ impl GridPlan {
         per_plane: usize,
         plane_sums: &mut [f64],
     ) -> (f64, [f64; FLAGS]) {
+        let _glue = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueGridReduceCalls, Gc::GlueGridReduceNanos));
         let plane_points = self.rows * self.nz;
         let mut offset = 0;
         let mut stick_base = Vec::with_capacity(self.ranks);
@@ -1035,6 +1062,12 @@ impl GridPlan {
         at: usize,
         flags: &mut [f64; FLAGS],
     ) {
+        let _glue = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueGridXcCalls, Gc::GlueGridXcNanos));
+        if let Some(p) = self.glue_profile {
+            p.count(Gc::GlueGridXcPoints, self.points());
+        }
         let (rows, nz) = (self.rows, self.nz);
         let mut block = Vec::new();
         for i in 0..self.planes {
@@ -1113,6 +1146,9 @@ impl GridPlan {
         ionic: &[f64],
         effective: Option<&mut [f64]>,
     ) -> Result<(f64, f64, f64), ScfError> {
+        let _glue = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueGridPotentialCalls, Gc::GlueGridPotentialNanos));
         let start = dft_numerics::stage_clock::start();
         let (mut vh, mut vxc) = match self.fields.take() {
             Some(f) => (f.vh, f.vxc),
@@ -1132,6 +1168,9 @@ impl GridPlan {
         let err = |e: dft_solvers::distributed_fft::DistFftError| {
             ScfError::Numerical(format!("M2 grid transform: {e}"))
         };
+        let glue_span = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueGridInverseCalls, Gc::GlueGridInverseNanos));
         let work = std::mem::take(&mut self.work);
         let begun = self.fft.begin_to_real(comm, &work);
         self.work = work;
@@ -1147,12 +1186,16 @@ impl GridPlan {
                 *o = z.re;
             }
         }
+        drop(glue_span);
         let mut vals = std::mem::take(&mut self.plane_vals);
         vals.clear();
         vals.resize(self.planes * POT_PLANE, 0.0);
         self.xc_planes(n, Some(&mut vxc), &mut vals, POT_PLANE, 0, &mut flags);
         self.plane_vals = vals;
         // ionic + (V_H + V_xc), the replicated path's expression per point.
+        let glue_span = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueGridAssembleCalls, Gc::GlueGridAssembleNanos));
         let mut eff = std::mem::take(&mut self.effective_planes);
         for i in 0..self.planes {
             for y in 0..rows {
@@ -1163,6 +1206,7 @@ impl GridPlan {
                 }
             }
         }
+        drop(glue_span);
         let with_prefix = effective.is_some();
         let gather_clock = dft_numerics::stage_clock::start();
         let gathered = self.gather(comm, with_prefix.then_some(&eff[..]), POT_PLANE, &flags);
@@ -1250,6 +1294,9 @@ impl GridPlan {
         out: Field<'_>,
         ionic: &[f64],
     ) -> Result<AuditTerms, ScfError> {
+        let _glue = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueGridAuditCalls, Gc::GlueGridAuditNanos));
         let start = dft_numerics::stage_clock::start();
         let fields = self
             .fields
@@ -1267,6 +1314,9 @@ impl GridPlan {
         let mut vals = std::mem::take(&mut self.plane_vals);
         vals.clear();
         vals.resize(self.planes * AUDIT_PLANE, 0.0);
+        let glue_span = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueGridAuditLocalCalls, Gc::GlueGridAuditLocalNanos));
         let fields = self.fields.as_ref().expect("checked above");
         for i in 0..self.planes {
             let (mut charge, mut dc, mut lh, mut lx, mut local) = (0.0, 0.0, 0.0, 0.0, 0.0);
@@ -1287,6 +1337,7 @@ impl GridPlan {
             vals[i * AUDIT_PLANE..i * AUDIT_PLANE + 5]
                 .copy_from_slice(&[charge, dc, lh, lx, local]);
         }
+        drop(glue_span);
         self.xc_planes(out, None, &mut vals, AUDIT_PLANE, 5, &mut flags);
         self.plane_vals = vals;
         let gathered = self.gather(comm, None, AUDIT_PLANE, &flags);
@@ -1515,6 +1566,15 @@ mod tests {
     /// sums) against the distributed stages on `ranks` simulated ranks; returns
     /// the bits of rank 0 after checking that every rank holds the same bits.
     fn run(cell: &Cell, dims: [usize; 3], ranks: usize, lda: Lda) -> Bits {
+        run_profiled(cell, dims, ranks, lda, None)
+    }
+    fn run_profiled(
+        cell: &Cell,
+        dims: [usize; 3],
+        ranks: usize,
+        lda: Lda,
+        config: Option<dft_numerics::switches::RunConfig>,
+    ) -> Bits {
         let volume = cell.volume_bohr3();
         let n_in = field(dims, 11, 0.02);
         let n_out = field(dims, 23, 0.02);
@@ -1566,6 +1626,7 @@ mod tests {
                 .map(|(w, (a, b))| w * (b - a).norm_sqr())
                 .sum::<f64>();
         let runs: Vec<RankOut> = simulate(ranks, |comm: &SimRank| {
+            let _scope = config.map(|c| c.enter());
             let mut plan = GridPlan::new(
                 comm,
                 dims,
@@ -1682,6 +1743,55 @@ mod tests {
                     run(cell, dims, ranks, lda) == reference,
                     "{dims:?} P={ranks}"
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn glue_profile_grid_preserves_bits_and_counts_owned_work() {
+        use dft_numerics::switches::RunConfig;
+        for (rows, dims, lda) in [
+            (
+                [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],
+                [6, 6, 6],
+                Lda::Pz,
+            ),
+            (
+                [[6., 0., 0.], [1., 5., 0.], [0.4, 0.7, 9.]],
+                [5, 6, 8],
+                Lda::Pw,
+            ),
+            (
+                [[5., 0., 0.], [0., 5., 0.], [0., 0., 18.]],
+                [4, 4, 9],
+                Lda::Pz,
+            ),
+        ] {
+            let cell = Cell::from_user_rows_bohr(rows).unwrap();
+            for ranks in [1, 3, 8] {
+                let off = RunConfig::from_pairs(&[]).unwrap();
+                let reference = run_profiled(&cell, dims, ranks, lda, Some(off));
+                for clocks in ["off", "on"] {
+                    let cfg = RunConfig::from_pairs(&[
+                        ("glue_profile", "on"),
+                        ("phase_profile", "on"),
+                        ("stage_timers", clocks),
+                    ])
+                    .unwrap();
+                    assert_eq!(reference, run_profiled(&cell, dims, ranks, lda, Some(cfg)));
+                    let c = cfg.counters();
+                    assert_eq!(c[Gc::GlueGridPotentialCalls as usize], 2 * ranks as u64);
+                    assert_eq!(c[Gc::GlueGridAuditCalls as usize], 2 * ranks as u64);
+                    assert_eq!(
+                        c[Gc::GlueGridXcPoints as usize],
+                        4 * dims.iter().product::<usize>() as u64
+                    );
+                    assert_eq!(c[Gc::GlueGridGatherCalls as usize], 5 * ranks as u64);
+                    if clocks == "off" {
+                        assert_eq!(c[Gc::GlueGridPotentialNanos as usize], 0);
+                    }
+                }
+                assert_eq!(off.counters()[Gc::GlueGridPotentialCalls as usize], 0);
             }
         }
     }

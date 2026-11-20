@@ -2691,3 +2691,24 @@ change. Representative264-order132-column payload280896->209616 B
 (-25.37%); exact trajectory saving is returned by packed-counter.py. Both
 rejected switches remain OFF. Serial path unchanged. No performance adoption
 or Mac performance claim; see packed-validation.md and dev08-request.md.
+
+## LANE-GLUE Phase 0 (2026-11-20): PROFILE_REQUEST
+
+Instrumentation only, no optimization/default change or Mac performance claim.
+`GLUE_PROFILE=on` plus `PHASE_PROFILE=on` enables 23 grid/Pulay spans and 14
+work/size counters, rank-local in `run.counters`; clocks obey STAGE_TIMERS.
+Existing fine-map/phase/FFT data supplies density and coarse/verification
+envelopes. Counters are cumulative, subspans inclusive, not individual traces.
+Mac correctness: 30 runs over six inputs (8..68 bands plus synthetic coupled
+s projectors), 24 comparisons with pristine baseline, max abs(dE) **0 Ha**,
+density bytes/scientific history/solver work identical. Four inputs converge
+and verify; elongated/slab preserve the baseline's iteration exhaustion.
+Simulated grid ranks 1/3/8 and seeded/sliding/reset plane Pulay ranks 1..7
+preserve bits with instrumentation off/counts/timed. Final named fast gate:
+627 passed / 3 known in-repo TMPDIR cache failures / 161 ignored;
+build/fmt/clippy PASS. Parser contracts and five real Mac-file smoke cases
+pass. README checker retains its unrelated stale-phrase failure (8/9 pass).
+No speedup or largest-term diagnosis inferred; request si64/si32/si16 MPI8
+and si32/si64 one-core profiles through master, then stop. Evidence and
+limitations: [phase0-report.md](lanes/GLUE/phase0-report.md);
+exact jobs/counter gates: [profile-request.md](lanes/GLUE/profile-request.md).

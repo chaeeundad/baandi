@@ -435,6 +435,8 @@ table! {
     // Measurement infrastructure (ticket BREAKTHROUGH-0-INSTRUMENT); all default off, results unchanged.
     FFT_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "LANE-FFT Phase 0: detailed FFT stages and logical traffic under PHASE_PROFILE; clocks follow STAGE_TIMERS; no numerical change";
+    GLUE_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "LANE-GLUE Phase 0: rank-local grid and mixer spans/work; requires PHASE_PROFILE; clocks follow STAGE_TIMERS; no numerical change";
     PHASE_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "exclusive nested phase profile per rank (init / coarse SCF / fine ordinary SCF / verification pass and fail / materialization; map phases and solve stages inside; maximum over ranks and imbalance); clocks follow BAANDI_STAGE_TIMERS (off: counts only); printed by dft-cli (results.json phase_profile, parallel.phases), m2_entry_cost and davidson_bench";
     M2_LIGHT_STATE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -501,9 +503,9 @@ impl Table {
 pub fn table_of(id: Id) -> Table {
     use Id::*;
     match id {
-        FFT_PROFILE | PHASE_PROFILE | INIT_PROFILE | STAGE_TIMERS | DAVIDSON_STAGES
-        | DAVIDSON_PROFILE | SNAPSHOT_DIR | PHASE_WAIT | FIRST_BLOCK | DGEMM_TIMERS
-        | VERIFY_PROFILE => Table::Profile,
+        GLUE_PROFILE | FFT_PROFILE | PHASE_PROFILE | INIT_PROFILE | STAGE_TIMERS
+        | DAVIDSON_STAGES | DAVIDSON_PROFILE | SNAPSHOT_DIR | PHASE_WAIT | FIRST_BLOCK
+        | DGEMM_TIMERS | VERIFY_PROFILE => Table::Profile,
         // Overrides of input-file values (`scf.cutoff_ladder`, the relaxation
         // extrapolation) and the pseudopotential cache location.
         CUTOFF_LADDER | RELAX_EXTRAPOLATION | PSEUDO_DIR => Table::EnvOnly,
@@ -889,8 +891,128 @@ pub enum RunCounter {
     InitAtomicGridZ = 106,
     /// Sum of requested bands over atomic span calls.
     InitAtomicBands = 107,
+    /// GLUE diagnostic: grid.potential.calls; local to this run/rank.
+    GlueGridPotentialCalls = 108,
+    /// GLUE diagnostic: grid.potential.ns; local to this run/rank.
+    GlueGridPotentialNanos = 109,
+    /// GLUE diagnostic: grid.audit.calls; local to this run/rank.
+    GlueGridAuditCalls = 110,
+    /// GLUE diagnostic: grid.audit.ns; local to this run/rank.
+    GlueGridAuditNanos = 111,
+    /// GLUE diagnostic: grid.forward.calls; local to this run/rank.
+    GlueGridForwardCalls = 112,
+    /// GLUE diagnostic: grid.forward.ns; local to this run/rank.
+    GlueGridForwardNanos = 113,
+    /// GLUE diagnostic: grid.hartree.calls; local to this run/rank.
+    GlueGridHartreeCalls = 114,
+    /// GLUE diagnostic: grid.hartree.ns; local to this run/rank.
+    GlueGridHartreeNanos = 115,
+    /// GLUE diagnostic: grid.inverse.calls; local to this run/rank.
+    GlueGridInverseCalls = 116,
+    /// GLUE diagnostic: grid.inverse.ns; local to this run/rank.
+    GlueGridInverseNanos = 117,
+    /// GLUE diagnostic: grid.xc.calls; local to this run/rank.
+    GlueGridXcCalls = 118,
+    /// GLUE diagnostic: grid.xc.ns; local to this run/rank.
+    GlueGridXcNanos = 119,
+    /// GLUE diagnostic: grid.assemble.calls; local to this run/rank.
+    GlueGridAssembleCalls = 120,
+    /// GLUE diagnostic: grid.assemble.ns; local to this run/rank.
+    GlueGridAssembleNanos = 121,
+    /// GLUE diagnostic: grid.pack.calls; local to this run/rank.
+    GlueGridPackCalls = 122,
+    /// GLUE diagnostic: grid.pack.ns; local to this run/rank.
+    GlueGridPackNanos = 123,
+    /// GLUE diagnostic: grid.gather.calls; local to this run/rank.
+    GlueGridGatherCalls = 124,
+    /// GLUE diagnostic: grid.gather.ns; local to this run/rank.
+    GlueGridGatherNanos = 125,
+    /// GLUE diagnostic: grid.reduce.calls; local to this run/rank.
+    GlueGridReduceCalls = 126,
+    /// GLUE diagnostic: grid.reduce.ns; local to this run/rank.
+    GlueGridReduceNanos = 127,
+    /// GLUE diagnostic: grid.audit_local.calls; local to this run/rank.
+    GlueGridAuditLocalCalls = 128,
+    /// GLUE diagnostic: grid.audit_local.ns; local to this run/rank.
+    GlueGridAuditLocalNanos = 129,
+    /// GLUE diagnostic: dist.mix.calls; local to this run/rank.
+    GlueDistMixCalls = 130,
+    /// GLUE diagnostic: dist.mix.ns; local to this run/rank.
+    GlueDistMixNanos = 131,
+    /// GLUE diagnostic: dist.prepare.calls; local to this run/rank.
+    GlueDistPrepareCalls = 132,
+    /// GLUE diagnostic: dist.prepare.ns; local to this run/rank.
+    GlueDistPrepareNanos = 133,
+    /// GLUE diagnostic: dist.partial.calls; local to this run/rank.
+    GlueDistLocalCalls = 134,
+    /// GLUE diagnostic: dist.partial.ns; local to this run/rank.
+    GlueDistLocalNanos = 135,
+    /// GLUE diagnostic: dist.gather.calls; local to this run/rank.
+    GlueDistGatherCalls = 136,
+    /// GLUE diagnostic: dist.gather.ns; local to this run/rank.
+    GlueDistGatherNanos = 137,
+    /// GLUE diagnostic: dist.reduce.calls; local to this run/rank.
+    GlueDistReduceCalls = 138,
+    /// GLUE diagnostic: dist.reduce.ns; local to this run/rank.
+    GlueDistReduceNanos = 139,
+    /// GLUE diagnostic: dist.solve.calls; local to this run/rank.
+    GlueDistSolveCalls = 140,
+    /// GLUE diagnostic: dist.solve.ns; local to this run/rank.
+    GlueDistSolveNanos = 141,
+    /// GLUE diagnostic: dist.update.calls; local to this run/rank.
+    GlueDistUpdateCalls = 142,
+    /// GLUE diagnostic: dist.update.ns; local to this run/rank.
+    GlueDistUpdateNanos = 143,
+    /// GLUE diagnostic: dist.charge.calls; local to this run/rank.
+    GlueDistChargeCalls = 144,
+    /// GLUE diagnostic: dist.charge.ns; local to this run/rank.
+    GlueDistChargeNanos = 145,
+    /// GLUE diagnostic: serial.mix.calls; local to this run/rank.
+    GlueSerialMixCalls = 146,
+    /// GLUE diagnostic: serial.mix.ns; local to this run/rank.
+    GlueSerialMixNanos = 147,
+    /// GLUE diagnostic: serial.fit.calls; local to this run/rank.
+    GlueSerialFitCalls = 148,
+    /// GLUE diagnostic: serial.fit.ns; local to this run/rank.
+    GlueSerialFitNanos = 149,
+    /// GLUE diagnostic: serial.charge.calls; local to this run/rank.
+    GlueSerialChargeCalls = 150,
+    /// GLUE diagnostic: serial.charge.ns; local to this run/rank.
+    GlueSerialChargeNanos = 151,
+    /// GLUE diagnostic: serial.norms.calls; local to this run/rank.
+    GlueSerialNormsCalls = 152,
+    /// GLUE diagnostic: serial.norms.ns; local to this run/rank.
+    GlueSerialNormsNanos = 153,
+    /// GLUE diagnostic: grid.local_points; local to this run/rank.
+    GlueGridPoints = 154,
+    /// GLUE diagnostic: grid.local_coefficients; local to this run/rank.
+    GlueGridCoefficients = 155,
+    /// GLUE diagnostic: grid.xc_points; local to this run/rank.
+    GlueGridXcPoints = 156,
+    /// GLUE diagnostic: grid.send_values; local to this run/rank.
+    GlueGridSendValues = 157,
+    /// GLUE diagnostic: grid.recv_values; local to this run/rank.
+    GlueGridRecvValues = 158,
+    /// GLUE diagnostic: dist.local_points; local to this run/rank.
+    GlueDistPoints = 159,
+    /// GLUE diagnostic: dist.history; local to this run/rank.
+    GlueDistHistory = 160,
+    /// GLUE diagnostic: dist.dot_elements; local to this run/rank.
+    GlueDistDotElements = 161,
+    /// GLUE diagnostic: dist.send_values; local to this run/rank.
+    GlueDistSendValues = 162,
+    /// GLUE diagnostic: dist.recv_values; local to this run/rank.
+    GlueDistRecvValues = 163,
+    /// GLUE diagnostic: dist.update_elements; local to this run/rank.
+    GlueDistUpdateElements = 164,
+    /// GLUE diagnostic: serial.points; local to this run/rank.
+    GlueSerialPoints = 165,
+    /// GLUE diagnostic: serial.history; local to this run/rank.
+    GlueSerialHistory = 166,
+    /// GLUE diagnostic: serial.update_elements; local to this run/rank.
+    GlueSerialUpdateElements = 167,
 }
-pub const RUN_COUNTERS: usize = 108;
+pub const RUN_COUNTERS: usize = 168;
 pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
     "stop_kept",
     "stop_fft",
@@ -1000,7 +1122,97 @@ pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
     "init_lane.atomic.grid_y",
     "init_lane.atomic.grid_z",
     "init_lane.atomic.bands",
+    "glue_lane.grid.potential.calls",
+    "glue_lane.grid.potential.ns",
+    "glue_lane.grid.audit.calls",
+    "glue_lane.grid.audit.ns",
+    "glue_lane.grid.forward.calls",
+    "glue_lane.grid.forward.ns",
+    "glue_lane.grid.hartree.calls",
+    "glue_lane.grid.hartree.ns",
+    "glue_lane.grid.inverse.calls",
+    "glue_lane.grid.inverse.ns",
+    "glue_lane.grid.xc.calls",
+    "glue_lane.grid.xc.ns",
+    "glue_lane.grid.assemble.calls",
+    "glue_lane.grid.assemble.ns",
+    "glue_lane.grid.pack.calls",
+    "glue_lane.grid.pack.ns",
+    "glue_lane.grid.gather.calls",
+    "glue_lane.grid.gather.ns",
+    "glue_lane.grid.reduce.calls",
+    "glue_lane.grid.reduce.ns",
+    "glue_lane.grid.audit_local.calls",
+    "glue_lane.grid.audit_local.ns",
+    "glue_lane.dist.mix.calls",
+    "glue_lane.dist.mix.ns",
+    "glue_lane.dist.prepare.calls",
+    "glue_lane.dist.prepare.ns",
+    "glue_lane.dist.partial.calls",
+    "glue_lane.dist.partial.ns",
+    "glue_lane.dist.gather.calls",
+    "glue_lane.dist.gather.ns",
+    "glue_lane.dist.reduce.calls",
+    "glue_lane.dist.reduce.ns",
+    "glue_lane.dist.solve.calls",
+    "glue_lane.dist.solve.ns",
+    "glue_lane.dist.update.calls",
+    "glue_lane.dist.update.ns",
+    "glue_lane.dist.charge.calls",
+    "glue_lane.dist.charge.ns",
+    "glue_lane.serial.mix.calls",
+    "glue_lane.serial.mix.ns",
+    "glue_lane.serial.fit.calls",
+    "glue_lane.serial.fit.ns",
+    "glue_lane.serial.charge.calls",
+    "glue_lane.serial.charge.ns",
+    "glue_lane.serial.norms.calls",
+    "glue_lane.serial.norms.ns",
+    "glue_lane.grid.local_points",
+    "glue_lane.grid.local_coefficients",
+    "glue_lane.grid.xc_points",
+    "glue_lane.grid.send_values",
+    "glue_lane.grid.recv_values",
+    "glue_lane.dist.local_points",
+    "glue_lane.dist.history",
+    "glue_lane.dist.dot_elements",
+    "glue_lane.dist.send_values",
+    "glue_lane.dist.recv_values",
+    "glue_lane.dist.update_elements",
+    "glue_lane.serial.points",
+    "glue_lane.serial.history",
+    "glue_lane.serial.update_elements",
 ];
+
+/// Lane GLUE diagnostics, cached at plan/mixer construction. Disabled hooks
+/// perform only an Option check: no clocks, counters, allocation or collectives.
+/// Nested spans are inclusive; their values are never read by numerical code.
+#[derive(Clone, Copy, Debug)]
+pub struct GlueProfile {
+    run: RunConfig,
+    timed: bool,
+}
+impl GlueProfile {
+    pub fn current() -> Option<Self> {
+        let run = RunConfig::current();
+        (run.on(Id::GLUE_PROFILE) && run.on(Id::PHASE_PROFILE)).then(|| Self {
+            run,
+            timed: run.on(Id::STAGE_TIMERS),
+        })
+    }
+    pub fn count(self, counter: RunCounter, value: usize) {
+        self.run.count(counter, value as u64);
+    }
+    /// Entered calls include failures; RAII closes their clocks on every exit.
+    pub fn span(self, calls: RunCounter, nanos: RunCounter) -> InitSpan {
+        self.run.count(calls, 1);
+        InitSpan {
+            run: self.run,
+            nanos,
+            start: self.timed.then(std::time::Instant::now),
+        }
+    }
+}
 
 /// Initialization-only diagnostics. The disabled path performs no clocks,
 /// counter updates, allocations or size traversals. Callers keep this token

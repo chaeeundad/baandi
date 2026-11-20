@@ -28,6 +28,7 @@
 //! Every collective is entered by every rank (replicated control flow).
 use dft_mpi::Collective;
 use dft_numerics::linalg::{ComplexMatrix, hermitian_eigh};
+use dft_numerics::switches::{GlueProfile, RunCounter as Gc};
 use dft_solvers::SolverError;
 use dft_solvers::kerker::MixerHistory;
 use dft_solvers::mixing::{DensityMixer, PulayStepDiagnostics};
@@ -63,6 +64,7 @@ struct Diff {
 }
 
 pub(crate) struct DistributedPulay<K: Collective> {
+    glue_profile: Option<GlueProfile>,
     comm: K,
     beta: f64,
     capacity: usize,
@@ -299,6 +301,7 @@ impl<K: Collective> DistributedPulay<K> {
         let hi = (start(rank + 1) * CHUNK).min(size);
         COUNTS[2].fetch_add(1, Ordering::Relaxed);
         Ok(Self {
+            glue_profile: GlueProfile::current(),
             comm,
             beta,
             capacity: history,
@@ -363,6 +366,9 @@ impl<K: Collective> DistributedPulay<K> {
         k: usize,
         mut fill: impl FnMut(usize, &mut [f64]),
     ) -> Result<Vec<f64>, SolverError> {
+        let glue_span = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueDistLocalCalls, Gc::GlueDistLocalNanos));
         let local = self.local_chunks();
         self.partial.clear();
         self.partial.resize(local * k, 0.0);
@@ -371,9 +377,21 @@ impl<K: Collective> DistributedPulay<K> {
         }
         let counts: Vec<usize> = self.chunk_counts.iter().map(|c| c * k).collect();
         self.gathered.resize(counts.iter().sum(), 0.0);
+        drop(glue_span);
+        if let Some(p) = self.glue_profile {
+            p.count(Gc::GlueDistSendValues, self.partial.len());
+            p.count(Gc::GlueDistRecvValues, self.gathered.len());
+        }
+        let glue_span = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueDistGatherCalls, Gc::GlueDistGatherNanos));
         self.comm
             .allgatherv_f64(&self.partial, &counts, &mut self.gathered)
             .map_err(|e| SolverError::Application(e.to_string()))?;
+        drop(glue_span);
+        let _glue = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueDistReduceCalls, Gc::GlueDistReduceNanos));
         // Rank blocks are ascending chunk ranges: the buffer is in chunk order.
         let mut out = vec![0.0; k];
         for chunk in self.gathered.chunks_exact(k) {
@@ -423,6 +441,9 @@ impl<K: Collective> DistributedPulay<K> {
         x: &[f64],
         r: &[f64],
     ) -> Result<(f64, f64), SolverError> {
+        let _glue = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueDistChargeCalls, Gc::GlueDistChargeNanos));
         let chunk = self.chunk;
         let mut norms = (0.0, 0.0);
         for pass in 0..2 {
@@ -548,6 +569,12 @@ impl<K: Collective> DistributedPulay<K> {
         mean: f64,
         r_planes: Option<Vec<f64>>,
     ) -> Result<Vec<f64>, SolverError> {
+        let _glue = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueDistMixCalls, Gc::GlueDistMixNanos));
+        let glue_span = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueDistPrepareCalls, Gc::GlueDistPrepareNanos));
         if x.len() != self.block_len()
             || output.len() != x.len()
             || !mean.is_finite()
@@ -581,6 +608,12 @@ impl<K: Collective> DistributedPulay<K> {
         }
         let mut next: Vec<f64> = x.iter().zip(&r).map(|(a, r)| a + beta * r).collect();
         let m = self.diffs.len();
+        drop(glue_span);
+        if let Some(p) = self.glue_profile {
+            p.count(Gc::GlueDistPoints, x.len());
+            p.count(Gc::GlueDistHistory, m);
+            p.count(Gc::GlueDistUpdateElements, m * x.len());
+        }
         let mut fit: Option<Fit> = None;
         if m > 0 {
             // Missing Gram entries (new rows) and the right-hand side in one
@@ -590,6 +623,9 @@ impl<K: Collective> DistributedPulay<K> {
                 .filter(|&(i, j)| self.gram[i][j].is_nan())
                 .collect();
             let k = missing.len() + m;
+            if let Some(p) = self.glue_profile {
+                p.count(Gc::GlueDistDotElements, k * r.len());
+            }
             let diffs = std::mem::take(&mut self.diffs);
             let sums = self.chunk_sums(k, |c, out| {
                 let a = c * chunk;
@@ -618,12 +654,20 @@ impl<K: Collective> DistributedPulay<K> {
                 self.gram[j][i] = v;
             }
             let rhs = &sums[missing.len()..];
+            let glue_span = self
+                .glue_profile
+                .map(|p| p.span(Gc::GlueDistSolveCalls, Gc::GlueDistSolveNanos));
             let (values, largest, gamma) = spectral_solve(|i, j| self.gram[i][j], rhs)?;
+            drop(glue_span);
+            let glue_span = self
+                .glue_profile
+                .map(|p| p.span(Gc::GlueDistUpdateCalls, Gc::GlueDistUpdateNanos));
             for (d, g) in self.diffs.iter().zip(&gamma) {
                 for (i, n) in next.iter_mut().enumerate() {
                     *n -= g * (d.dx[i] + beta * d.dr[i]);
                 }
             }
+            drop(glue_span);
             fit = Some(Fit {
                 gamma_rhs: gamma.iter().zip(rhs).map(|(g, b)| g * b).sum(),
                 values,
@@ -818,6 +862,15 @@ mod tests {
     /// and have the same bits for every rank count.
     #[test]
     fn plane_mode_matches_the_replicated_mixer_for_every_rank_count() {
+        plane_profile_trajectory("off");
+    }
+    #[test]
+    fn glue_profile_plane_mixer_preserves_trajectory_bits() {
+        let reference = plane_profile_trajectory("off");
+        assert_eq!(reference, plane_profile_trajectory("counts"));
+        assert_eq!(reference, plane_profile_trajectory("timed"));
+    }
+    fn plane_profile_trajectory(mode: &str) -> Vec<Vec<u64>> {
         let (plane, planes) = (517, 9);
         let size = plane * planes;
         let model = Model::new(size, 3);
@@ -843,7 +896,14 @@ mod tests {
                     st(r + 1) - st(r)
                 })
                 .collect();
+            let cfg = dft_numerics::switches::RunConfig::from_pairs(&[
+                ("glue_profile", if mode == "off" { "off" } else { "on" }),
+                ("phase_profile", "on"),
+                ("stage_timers", if mode == "timed" { "on" } else { "off" }),
+            ])
+            .unwrap();
             let runs = simulate(ranks, |comm: &SimRank| {
+                let _scope = cfg.enter();
                 let rank = dft_mpi::Collective::rank(comm);
                 let lo = counts[..rank].iter().sum::<usize>() * plane;
                 let hi = lo + counts[rank] * plane;
@@ -873,6 +933,14 @@ mod tests {
                 }
                 out
             });
+            let c = cfg.counters();
+            assert_eq!(
+                c[Gc::GlueDistMixCalls as usize],
+                if mode == "off" { 0 } else { 10 * ranks as u64 }
+            );
+            if mode != "timed" {
+                assert_eq!(c[Gc::GlueDistMixNanos as usize], 0);
+            }
             for run in &runs {
                 for (a, b) in run.iter().zip(&reference) {
                     let worst = a
@@ -892,6 +960,7 @@ mod tests {
                 Some(f) => assert!(&bits == f, "P={ranks}: rank-count dependent bits"),
             }
         }
+        first.unwrap()
     }
 
     #[test]

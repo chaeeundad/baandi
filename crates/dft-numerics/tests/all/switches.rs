@@ -292,7 +292,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::DAVIDSON_ROTATE_COLUMNS), Value::Choice("off"));
     assert_eq!(value(Id::FFT_KEPT_FUSE), Value::Choice("off"));
     assert_eq!(value(Id::DAVIDSON_PACKED_REDUCE), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 126);
+    assert_eq!(TABLE.len(), 127);
 }
 
 #[test]
@@ -315,4 +315,34 @@ fn init_profile_off_count_only_and_scoped() {
     assert_eq!(counts.counters()[C::InitProjectorsNanos as usize], 0);
     assert_eq!(off.counters(), before);
     assert!(InitProfile::current().is_none());
+}
+
+#[test]
+fn glue_profile_requires_both_switches_and_scopes_its_counters() {
+    use dft_numerics::switches::{GlueProfile, RunConfig, RunCounter as C};
+    for pairs in [
+        vec![],
+        vec![("glue_profile", "on")],
+        vec![("phase_profile", "on")],
+    ] {
+        let config = RunConfig::from_pairs(&pairs).unwrap();
+        let _scope = config.enter();
+        assert!(GlueProfile::current().is_none());
+        assert_eq!(config.counters()[C::GlueDistMixCalls as usize], 0);
+    }
+    let cfg = RunConfig::from_pairs(&[
+        ("glue_profile", "on"),
+        ("phase_profile", "on"),
+        ("stage_timers", "off"),
+    ])
+    .unwrap();
+    {
+        let _scope = cfg.enter();
+        let p = GlueProfile::current().unwrap();
+        let _span = p.span(C::GlueDistMixCalls, C::GlueDistMixNanos);
+        p.count(C::GlueDistPoints, 37);
+    }
+    assert_eq!(cfg.counters()[C::GlueDistMixCalls as usize], 1);
+    assert_eq!(cfg.counters()[C::GlueDistPoints as usize], 37);
+    assert_eq!(cfg.counters()[C::GlueDistMixNanos as usize], 0);
 }

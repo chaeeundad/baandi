@@ -1,6 +1,7 @@
 //! Charge-conserving mixing of real-space electron number densities.
 use crate::SolverError;
 use dft_numerics::linalg::{ComplexMatrix, hermitian_eigh};
+use dft_numerics::switches::{GlueProfile, RunCounter as Gc};
 
 /// Input and output are samples on the same uniform grid, in electrons/Bohr^3.
 /// R = output - input. `mean` is the prescribed N_e / volume, not a fitted charge.
@@ -60,6 +61,7 @@ impl DensityMixer for LinearMixer {
 /// Eigenvalues <= 1e-12 * largest are discarded (spectral regularization).
 #[derive(Debug)]
 pub struct PulayMixer {
+    glue_profile: Option<GlueProfile>,
     pub beta: f64,
     capacity: usize,
     metric: Option<Box<dyn ResidualMetric>>,
@@ -177,6 +179,7 @@ pub trait ResidualMetric: std::fmt::Debug {
 impl Clone for PulayMixer {
     fn clone(&self) -> Self {
         Self {
+            glue_profile: self.glue_profile,
             beta: self.beta,
             capacity: self.capacity,
             pairs: self.pairs.clone(),
@@ -199,6 +202,7 @@ impl PulayMixer {
             ));
         }
         Ok(Self {
+            glue_profile: GlueProfile::current(),
             beta,
             capacity: history,
             metric: None,
@@ -577,6 +581,12 @@ impl DensityMixer for PulayMixer {
         }
     }
     fn mix(&mut self, input: &[f64], output: &[f64], mean: f64) -> Result<Vec<f64>, SolverError> {
+        let _glue = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueSerialMixCalls, Gc::GlueSerialMixNanos));
+        if let Some(p) = self.glue_profile {
+            p.count(Gc::GlueSerialPoints, input.len());
+        }
         validate(input, output, mean, self.beta)?;
         if self.mean != Some(mean)
             || self.pairs.first().is_some_and(|p| p.0.len() != input.len())
@@ -619,7 +629,14 @@ impl DensityMixer for PulayMixer {
         if m > 0 {
             bump(&MIX_CALLS, 1);
         }
+        if let Some(p) = self.glue_profile {
+            p.count(Gc::GlueSerialHistory, m);
+            p.count(Gc::GlueSerialUpdateElements, m * input.len());
+        }
         let mut fit = None;
+        let glue_span = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueSerialFitCalls, Gc::GlueSerialFitNanos));
         if m > 0 && self.incremental.is_some() {
             fit = Some(self.incremental_update(&r, &mut next, m)?);
         } else if m > 0 {
@@ -709,6 +726,7 @@ impl DensityMixer for PulayMixer {
             );
             fit = Some(FitSummary::new(&values, largest, gamma, &rhs, rr_fit));
         }
+        drop(glue_span);
         let mut coulomb = (None, false);
         if self.guard.is_some()
             && self.metric.is_none()
@@ -717,6 +735,9 @@ impl DensityMixer for PulayMixer {
             let (ratio, refit) = self.coulomb_guard(input, &r, &mut next, f)?;
             coulomb = (Some(ratio), refit);
         }
+        let glue_span = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueSerialNormsCalls, Gc::GlueSerialNormsNanos));
         let residual_norm = r.iter().map(|v| v * v).sum::<f64>().sqrt();
         let step_norm = next
             .iter()
@@ -756,6 +777,10 @@ impl DensityMixer for PulayMixer {
                 coulomb_refit: false,
             },
         });
+        drop(glue_span);
+        let _glue = self
+            .glue_profile
+            .map(|p| p.span(Gc::GlueSerialChargeCalls, Gc::GlueSerialChargeNanos));
         charge(next, mean)
     }
 }

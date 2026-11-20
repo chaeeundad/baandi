@@ -2584,3 +2584,60 @@ Evidence: `lanes/DAVIDSON/{phase2-correctness.json,phase2-validation.md,dev08-re
 
 ### LANE-INIT-ATOMIC-LOCAL-BLOCK-DEFAULT-ON (2026-11-19/20, dev08 via master; ledger by orchestrator)
 BAANDI_ATOMIC_LOCAL_BLOCK (guarded CholQR2 for the single-process atomic start; no effect with MPI ranks) default flipped on. dev08 crossed pairs, one core, 3 pairs, A/A floor first: si64 -1.98 % (|mean|/SE 17.99, floor 0.00707 s; gain in ladder_coarse 7.416 -> 6.584 s), si32 -1.09 % (14.91, 0.088 s vs 3x floor 0.0348 s); si16, si8, si-skew neutral (|mean|/SE 1.42/0.49/0.62, all negative sign); no resolved loss; |dE| <= 2.8e-14 Ha (si64 bit identical); SCF/H/verified identical in every pair. Counters moved as pre-registered (mgs.calls 1 -> 0, local_accepted 0 -> 1, fallbacks 0). Mac fast gate: 572 passed, 0 failed. Lesson: atomic start was 63-86 % of the init bucket (init 6-15 % of wall); init profile problem span covers only 12-45 % of init.
+## LANE-DAVIDSON Phase 2 follow-up — corrected models / ROTATE_COLUMNS
+
+User-relayed dev08 source2733278 on-1 counts and rates resolve the earlier
+missing-data screen prerequisite. Withdraw the earlier 104.1% split: flat
+phase-profile keys contained a non-leaf duplicate; corrected closures are
+98.5–100.9%. Serial lane envelope27.242s and phase parent32.7484s are separate
+sources. MPI1464 Gram calls/6.996s and808 rotations/6.715s aggregate eight
+ranks (mean-rank0.8745/0.8394s), not wall. Serial rotation5.877s includes
+residual0.504s. Detailed numbers/models: `lanes/DAVIDSON/diagnosis.md` and
+`dev08-relay-model.json`.
+
+Important arithmetic corrections: 23871x132x132 rotation is TWO GEMMs,
+1.6637GFLOP ->26.01ms at63.96GFLOP/s, not13ms; mean53.92ms/model=2.073.
+264-cubed GEMM at95.4GFLOP/s is0.386ms, not0.04ms; 9m^3 EVD model1.736ms,
+MPI mean6.975ms/model=4.018. Dominant shapes and all-call means are not a
+joint distribution, so these are screening models, not exact removable gaps.
+REL-SLICES, bounded-subspace, restart-keep, PR-CG and async alltoall stay closed.
+
+UPPER_BORDER is retained unchanged, A/B already queued. New default-OFF
+DAVIDSON_ROTATE_COLUMNS routes serial non-fused Ritz pairs through the existing
+32-column GEMM adapter: same FLOP/X/HX/residuals, whole-row direct output on
+MKL, no new allocation buffer/FFI. At representative rows23871, outputs132:
+internal-call model188 ->10 and scratch write/read model100.831MB ->0 per
+pair. Hypothesis: save10–25% of serial non-residual rotation (0.54–1.34s,
+about1.2–3.0% of prior Si64 wall); MPI distributed effect zero. These are
+conditional estimates, not Mac or dev08 candidate performance results.
+
+Mac correctness: Si8/Si32/Si64 saved-base/OFF/ON, skew OFF/ON and Si8 strict
+OFF/ON science/density bit-identical, abs(dE)=0Ha. Si32 workers1/3 identical.
+Slab both exit3 after100 steps with identical science, not a converged pass.
+13 ON solver oracle tests and new scalar-reference/tail/nonfinite/pool test
+pass. Fast gate616 passed/3 known TMPDIR cache failures/160 ignored,
+build/fmt/clippy PASS. No Mac timing conclusion. Separate dev08 request keeps
+UPPER_BORDER off, requires route/call/copy counter movement with unchanged
+FLOP/work, A/A floor then crossed pairs, abs(mean)/SE>=3. Defaults unchanged,
+no adoption. Evidence: `lanes/DAVIDSON/rotation-{correctness.json,validation.md}`.
+
+## DAVIDSON-UPPER-BORDER-REJECTED — orchestrator decision (2026-11-20)
+
+| Attempt | dev08 evidence | Decision / lesson |
+|---|---|---|
+| DAVIDSON-UPPER-BORDER-REJECTED | Si64 MPI8, Stage 0, timed metric `DAVBENCH kinds[0].solve_ms_median`; A/A first, three crossed pairs. A/A mean -0.000216 s, floor 0.0029167 s, abs(mean)/SE 0.14. A/B differences +0.005178 / +0.003617 / +0.008241 s, mean +0.005679 s, abs(mean)/SE 4.18, about +0.57%, 3/3 slower. Separate OFF/ON counter pair: predicted/executed tile FLOP equal on 8/8 ranks; saving 3.494e9–3.499e9 FLOP/rank; 183 products both arms, tiles 0 -> 405/rank; all-rank traced FLOP 170.792e9 -> 142.821e9 (-16.38%). Reported gemm_dispatch GFLOP 69.247 -> 65.751; calls 1746 -> 1968 (+12.7%). E=-253.37816772116847 Ha both arms, abs(dE)=0 Ha, science bit-identical, SCF 11, H 3504, verified. | **REJECTED: resolved slowdown.** Default remains OFF; implementation retained, no resubmission of narrower upper tiles. Relayed DGEMM rates 23871x264x132=77.14 versus 23871x132x132=63.96 GFLOP/s (-17%) explain why smaller products can lose efficiency despite fewer FLOPs; additional calls compound the loss. Eliminate copies/calls while retaining product dimensions/work instead of assuming every removed FLOP saves time. |
+
+Source: user/orchestrator relay; timed candidate commit was not supplied in
+the decision (do not invent one). These counter-pair and timed-screen records
+have different scopes and are not added. The previous “queued” status is
+superseded by this decision. No Mac timing used.
+
+Alternative selected: already implemented, uncommitted default-off
+DAVIDSON_ROTATE_COLUMNS. Retain both PW rows and full inner basis dimension;
+partition independent output columns using the existing adapter. It removes
+no arithmetic and instead reduces row-scratch calls/copies (188 -> 10 modeled
+MKL calls at the serial representative shape). It is not another upper-border
+arithmetic-pruning variant. Reuse the unchanged implementation's Mac evidence
+in `lanes/DAVIDSON/rotation-correctness.json`; only documentation and the
+per-map EVD parser are refined in this rejection-response turn. Independent
+serial A/B request is now active; UPPER_BORDER stays OFF in every arm.

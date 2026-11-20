@@ -132,6 +132,7 @@ fn legacy_defaults_are_unchanged() {
         Id::LEAN_PROJ_CACHE,
         Id::DAVIDSON_PROFILE,
         Id::DAVIDSON_UPPER_BORDER,
+        Id::DAVIDSON_ROTATE_COLUMNS,
         Id::PACK_FIXED,
     ] {
         assert!(!on(id), "{id:?} must default off");
@@ -287,7 +288,8 @@ fn legacy_defaults_are_unchanged() {
     );
     assert_eq!(value(Id::ATOMIC_LOCAL_BLOCK), Value::Choice("on"));
     assert_eq!(value(Id::DAVIDSON_UPPER_BORDER), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 123);
+    assert_eq!(value(Id::DAVIDSON_ROTATE_COLUMNS), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 124);
 }
 
 #[test]

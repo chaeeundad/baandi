@@ -1876,6 +1876,54 @@ fn residual_into(
     });
     finite(norms)
 }
+/// Serial pair route experiment: reuse the existing fixed 32-column product
+/// adapter. On MKL it writes complete output columns directly, replacing the
+/// default 256-row scratch tiles and scatter copies. Both products and their
+/// inner reduction dimensions are retained. Fused residual paths take priority.
+#[allow(clippy::too_many_arguments)]
+fn rotation_pair(
+    gemm: &mut RealGemmWorkspace,
+    basis: &RealMatrix,
+    products: &RealMatrix,
+    c: &[f64],
+    k: usize,
+    vectors: &mut RealMatrix,
+    rotated_products: &mut RealMatrix,
+) -> Result<(), LinalgError> {
+    let (n, m) = (basis.rows(), basis.cols());
+    let columns = dft_numerics::switches::on(dft_numerics::switches::Id::DAVIDSON_ROTATE_COLUMNS);
+    let _lane = lane_profile::span(
+        lane_profile::Op::RotationPair,
+        n,
+        m,
+        k,
+        usize::from(columns),
+    );
+    if columns {
+        gemm.multiply_column_groups(basis.as_slice(), n, m, n, c, k, m, vectors.as_mut_slice())?;
+        gemm.multiply_column_groups(
+            products.as_slice(),
+            n,
+            m,
+            n,
+            c,
+            k,
+            m,
+            rotated_products.as_mut_slice(),
+        )
+    } else {
+        gemm.rotate_pair_slices(
+            basis.as_slice(),
+            products.as_slice(),
+            m,
+            c,
+            k,
+            vectors.as_mut_slice(),
+            rotated_products.as_mut_slice(),
+        )
+    }
+}
+
 /// Ritz vectors X = V C and residuals R = H V C - X diag(values) with their
 /// norms. RITZ-FUSED (`fused`): one pass over V and HV without storing H X
 /// (bit-identical; returns false, H X not formed). Otherwise, or when the
@@ -1929,15 +1977,7 @@ fn ritz_and_residuals(
         timers.stop(t, Stage::Residual);
         return Ok(false);
     }
-    gemm.rotate_pair_slices(
-        basis.as_slice(),
-        products.as_slice(),
-        m,
-        c,
-        k,
-        vectors.as_mut_slice(),
-        rotated_products.as_mut_slice(),
-    )?;
+    rotation_pair(gemm, basis, products, c, k, vectors, rotated_products)?;
     timers.stop(t, Stage::Rotate);
     let t = timers.start();
     residual_into(
@@ -2656,6 +2696,70 @@ impl Random {
 mod tests {
     use super::*;
     #[test]
+    fn column_rotation_matches_pair_and_scalar_oracle() {
+        for n in [1, 257, 513] {
+            let (m, k) = (37, 65); // both 32-column groups and the tail
+            let v = Random(17).block(n, m).unwrap();
+            let hv = Random(91).block(n, m).unwrap();
+            let c = Random(33).block(m, k).unwrap();
+            let mut previous = None;
+            for threads in [1, 3] {
+                let mut ws =
+                    RealGemmWorkspace::with_pool(n, k, WorkerPool::new(threads).unwrap()).unwrap();
+                let mut reference = RealMatrix::zeros(n, k).unwrap();
+                let mut reference_h = reference.clone();
+                ws.rotate_pair_slices(
+                    v.as_slice(),
+                    hv.as_slice(),
+                    m,
+                    c.as_slice(),
+                    k,
+                    reference.as_mut_slice(),
+                    reference_h.as_mut_slice(),
+                )
+                .unwrap();
+                let config = dft_numerics::switches::RunConfig::from_pairs(&[(
+                    "davidson_rotate_columns",
+                    "on",
+                )])
+                .unwrap();
+                let _scope = config.enter();
+                let mut x = RealMatrix::zeros(n, k).unwrap();
+                let mut hx = x.clone();
+                rotation_pair(&mut ws, &v, &hv, c.as_slice(), k, &mut x, &mut hx).unwrap();
+                for (a, b) in x
+                    .as_slice()
+                    .iter()
+                    .chain(hx.as_slice())
+                    .zip(reference.as_slice().iter().chain(reference_h.as_slice()))
+                {
+                    assert!((a - b).abs() < 1e-12);
+                }
+                // Independent scalar dot oracle for two arbitrary outputs.
+                for (r, j) in [(0, 0), (n - 1, k - 1)] {
+                    let exact: f64 = (0..m).map(|l| v[(r, l)] * c[(l, j)]).sum();
+                    assert!((x[(r, j)] - exact).abs() < 1e-12);
+                }
+                let bits: Vec<_> = x
+                    .as_slice()
+                    .iter()
+                    .chain(hx.as_slice())
+                    .map(|v| v.to_bits())
+                    .collect();
+                if let Some(previous) = &previous {
+                    assert_eq!(&bits, previous);
+                }
+                previous = Some(bits);
+                let mut bad = v.clone();
+                bad[(0, 0)] = f64::NAN;
+                assert!(
+                    rotation_pair(&mut ws, &bad, &hv, c.as_slice(), k, &mut x, &mut hx).is_err()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn upper_border_tiles_preserve_retained_entries_and_pool_independence() {
         // A non-multiple of the 256-row reduction panel, two full column
         // tiles and a tail; asymmetric V^T HV so accidentally mirroring the
@@ -3165,7 +3269,7 @@ pub mod lane_profile {
         "detail",
         "tolerance_ha",
     ];
-    pub const OPERATIONS: [&str; 17] = [
+    pub const OPERATIONS: [&str; 18] = [
         "solve",
         "overlap_border",
         "factor_extension",
@@ -3183,6 +3287,7 @@ pub mod lane_profile {
         "restart",
         "upper_border_tile",
         "upper_border_product",
+        "rotation_pair",
     ];
     pub const STAGES: [&str; 4] = ["unknown", "coarse", "fine", "verification"];
     pub const KINDS: [&str; 5] = ["unknown", "ordinary", "redo", "verification", "cold"];
@@ -3218,6 +3323,7 @@ pub mod lane_profile {
         Restart,
         UpperBorderTile,
         BorderProduct,
+        RotationPair,
     }
     struct State {
         records: Vec<[f64; 13]>,

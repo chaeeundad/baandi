@@ -1,0 +1,161 @@
+{
+  "task_id": "LANE-DAVIDSON",
+  "source_base": "2bde16a",
+  "candidate": "DAVIDSON_ROTATE_COLUMNS",
+  "default": "off",
+  "mac_role": "correctness and schema only; no performance conclusions",
+  "binary_sha256": "0d70e9ea8e5ced265477e1852f04071d7f7b80080e4d2cd57aee6fd1f83bbcb7",
+  "baseline_binary_sha256": "a51b29ade5e1bb5c57c8d54e50b0502708558e97d4cf6bbab00d5817a5652a7c",
+  "cases": [
+    {
+      "case": "si8",
+      "energy_ha": -31.321776563202498,
+      "abs_delta_energy_ha": 0,
+      "science_bits_identical": true,
+      "density_sha256": "43f2a33d8b0d0a5a90129076353d8e4ad26b2305695c3d834c13b7598fb7342b",
+      "converged": true,
+      "verified": true,
+      "history_rows": 11,
+      "exit_codes": [
+        0,
+        0
+      ],
+      "raw_dirs": [
+        "target/scratch/phase2-rotation/science/si8/off",
+        "target/scratch/phase2-rotation/science/si8/on"
+      ]
+    },
+    {
+      "case": "si32",
+      "energy_ha": -126.70343204998852,
+      "abs_delta_energy_ha": 0,
+      "science_bits_identical": true,
+      "density_sha256": "c264a0847e443677357373e8ee5557784ead8bb15dcf0ad77ac6d2da2cda2371",
+      "converged": true,
+      "verified": true,
+      "history_rows": 10,
+      "exit_codes": [
+        0,
+        0
+      ],
+      "raw_dirs": [
+        "target/scratch/phase2-rotation/science/si32/off",
+        "target/scratch/phase2-rotation/science/si32/on"
+      ]
+    },
+    {
+      "case": "si64",
+      "energy_ha": -253.3781677212163,
+      "abs_delta_energy_ha": 0,
+      "science_bits_identical": true,
+      "density_sha256": "9a2fc1a3c048c734879612739928f35ad5d39b5c2d246dea64bb5b655ddf37cc",
+      "converged": true,
+      "verified": true,
+      "history_rows": 13,
+      "exit_codes": [
+        0,
+        0
+      ],
+      "raw_dirs": [
+        "target/scratch/phase2-rotation/science/si64/off",
+        "target/scratch/phase2-rotation/science/si64/on"
+      ]
+    },
+    {
+      "case": "si-skew",
+      "energy_ha": -7.250604620381497,
+      "abs_delta_energy_ha": 0,
+      "science_bits_identical": true,
+      "density_sha256": "f5ca6ce9d629e099932a1dabd0e7256f22a9f15744221252f81109b3db9fc3fe",
+      "converged": true,
+      "verified": true,
+      "history_rows": 8,
+      "exit_codes": [
+        0,
+        0
+      ],
+      "raw_dirs": [
+        "target/scratch/phase2-rotation/science/si-skew/off",
+        "target/scratch/phase2-rotation/science/si-skew/on"
+      ]
+    },
+    {
+      "case": "si-slab",
+      "energy_ha": -15.232236865316718,
+      "abs_delta_energy_ha": 0,
+      "science_bits_identical": true,
+      "density_sha256": "e9f8ad996dc9bb56c5a0acd324589de006f4aba62d0b39b10b32496f5eff85d1",
+      "converged": false,
+      "verified": false,
+      "history_rows": 100,
+      "exit_codes": [
+        3,
+        3
+      ],
+      "raw_dirs": [
+        "target/scratch/phase2-rotation/science/si-slab/off",
+        "target/scratch/phase2-rotation/science/si-slab/on"
+      ]
+    },
+    {
+      "case": "si8-strict",
+      "energy_ha": -31.32177656328941,
+      "abs_delta_energy_ha": 0,
+      "science_bits_identical": true,
+      "density_sha256": "ced59f2f76bd4248a1e5a458be750ae515cdcafc438e5e467cf238e9df38e970",
+      "converged": true,
+      "verified": null,
+      "history_rows": 10,
+      "exit_codes": [
+        0,
+        0
+      ],
+      "raw_dirs": [
+        "target/scratch/phase2-rotation/science/si8-strict/off",
+        "target/scratch/phase2-rotation/science/si8-strict/on"
+      ]
+    }
+  ],
+  "base_off_on_identity_cases": [
+    "si8",
+    "si32",
+    "si64"
+  ],
+  "worker_independence": "Si32 ON workers 1 and 3: all scientific bits and density bytes identical",
+  "solver_tests": "13 release tests ON passed, including dense oracles, clustered/skew/multi-projector cases and simulated ranks 1..4; new rotation unit test workers1/3 passed",
+  "trace_counter_schema_only": [
+    {
+      "pairs": 87,
+      "column_pairs": 0,
+      "flop": 23845356496,
+      "row_calls_model": 6138,
+      "group_calls_model": 382,
+      "chosen_calls_model": 6138,
+      "extra_copy_bytes_model": 1178558720
+    },
+    {
+      "pairs": 87,
+      "column_pairs": 87,
+      "flop": 23845356496,
+      "row_calls_model": 6138,
+      "group_calls_model": 382,
+      "chosen_calls_model": 382,
+      "extra_copy_bytes_model": 0
+    }
+  ],
+  "gate": {
+    "exit_code": 1,
+    "passed": 616,
+    "failed": 3,
+    "ignored": 160,
+    "build": "PASS",
+    "fmt": "PASS",
+    "clippy": "PASS",
+    "failures": "Known three CLI pseudo-cache tests reject repository-local TMPDIR"
+  },
+  "limitations": [
+    "Slab non-convergence is identical in both arms, not a converged generality pass.",
+    "Real MKL route rounding and performance require dev08.",
+    "Dominant-shape models against all-call means do not determine exact accumulated roofline headroom."
+  ]
+}

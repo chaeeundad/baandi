@@ -1,0 +1,110 @@
+{
+  "provenance": "User-relayed dev08 source 2733278, on-1 instrumented; derived arithmetic, no local timing",
+  "limitations": [
+    "Dominant shapes paired with all-shape means; not joint shape/time measurements.",
+    "DGEMM rates are empirical reference rates, not hardware ceilings; 98.03 GFLOP/s is a nearby 2982-row proxy.",
+    "STREAM single-core rate is not an eight-core measured bandwidth.",
+    "9m^3 is a leading-work class, not exact dsyevd arithmetic."
+  ],
+  "gemm_models": [
+    {
+      "operation": "serial_rotate",
+      "n": 23871,
+      "m": 132,
+      "k": 132,
+      "flop": 1663713216,
+      "minimum_array_bytes": 100970496,
+      "reference_rate_gflops": 63.96,
+      "compute_model_ms": 26.01177636022514,
+      "stream_model_ms": 7.784926445643793,
+      "relayed_all_shape_mean_ms": 53.9185,
+      "mean_over_compute_model": 2.07284959140458
+    },
+    {
+      "operation": "serial_H_gram",
+      "n": 23871,
+      "m": 132,
+      "k": 132,
+      "flop": 831856608,
+      "minimum_array_bytes": 50554944,
+      "reference_rate_gflops": 63.96,
+      "compute_model_ms": 13.00588818011257,
+      "stream_model_ms": 3.8978368542791055,
+      "relayed_all_shape_mean_ms": 20.0156,
+      "mean_over_compute_model": 1.5389644846098283
+    },
+    {
+      "operation": "serial_S_gram",
+      "n": 23871,
+      "m": 132,
+      "k": 132,
+      "flop": 831856608,
+      "minimum_array_bytes": 25347168,
+      "reference_rate_gflops": 63.96,
+      "compute_model_ms": 13.00588818011257,
+      "stream_model_ms": 1.9542920585967618,
+      "relayed_all_shape_mean_ms": 19.4737,
+      "mean_over_compute_model": 1.497298741179201
+    },
+    {
+      "operation": "mpi8_rotate",
+      "n": 2986,
+      "m": 132,
+      "k": 132,
+      "flop": 208112256,
+      "minimum_array_bytes": 12752256,
+      "reference_rate_gflops": 98.03,
+      "compute_model_ms": 2.122944567989391,
+      "stream_model_ms": 0.9832117193523516,
+      "relayed_all_shape_mean_ms": 8.3104,
+      "mean_over_compute_model": 3.9145628789877707
+    },
+    {
+      "operation": "mpi8_gram_H_byte_endpoint",
+      "n": 2986,
+      "m": 264,
+      "k": 132,
+      "flop": 208112256,
+      "minimum_array_bytes": 9738432,
+      "reference_rate_gflops": 98.03,
+      "compute_model_ms": 2.122944567989391,
+      "stream_model_ms": 0.7508428681572861,
+      "relayed_all_shape_mean_ms": 4.7788,
+      "mean_over_compute_model": 2.251024389452585
+    }
+  ],
+  "evd_models": [
+    {
+      "order": 132,
+      "reference_rate_gflops": 95.4,
+      "gemm_2m3_ms": 0.048217358490566034,
+      "evd_9m3_model_ms": 0.21697811320754717,
+      "compulsory_array_bytes": 278784,
+      "compulsory_stream_model_ms": 0.021494525828835775
+    },
+    {
+      "order": 264,
+      "reference_rate_gflops": 95.4,
+      "gemm_2m3_ms": 0.3857388679245283,
+      "evd_9m3_model_ms": 1.7358249056603774,
+      "compulsory_array_bytes": 1115136,
+      "compulsory_stream_model_ms": 0.0859781033153431
+    },
+    {
+      "order": 396,
+      "reference_rate_gflops": 94.24,
+      "gemm_2m3_ms": 1.31789337860781,
+      "evd_9m3_model_ms": 5.930520203735145,
+      "compulsory_array_bytes": 2509056,
+      "compulsory_stream_model_ms": 0.19345073245952196
+    }
+  ],
+  "mpi_tree_sum": {
+    "all_rank_calls": 2576,
+    "calls_per_rank": 322,
+    "all_rank_seconds": 2.325,
+    "mean_rank_seconds": 0.290625,
+    "known_payload_bytes_all_ranks": 139459584,
+    "known_payload_bytes_per_rank": 17432448.0
+  }
+}

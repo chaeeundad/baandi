@@ -2006,7 +2006,6 @@ fn stress_table(s: &dft_engine::stress::StressResult) -> String {
     text
 }
 
-<<<<<<< HEAD
 /// LANE-FFT Phase 0: same-rank records; never sum independent rank maxima.
 fn fft_lane_json(report: &dft_engine::profile::Report) -> serde_json::Value {
     use dft_numerics::real::fft_profile::NAMES;
@@ -2029,9 +2028,6 @@ fn fft_lane_json(report: &dft_engine::profile::Report) -> serde_json::Value {
     })
 }
 
-/// Exclusive phase profile (`BAANDI_PHASE_PROFILE=on`): per bucket the maximum
-/// and minimum over ranks of every entry (seconds, then counts).
-=======
 /// LANE-VERIFY per-call/per-rank records, serialized only after the run.
 fn verification_lane_json(
     records: &[dft_engine::profile::verification::Record],
@@ -2053,7 +2049,6 @@ fn verification_lane_json(
 }
 
 /// Exclusive phase profile: per-bucket maximum and minimum over ranks.
->>>>>>> task/LANE-VERIFY
 pub fn profile_json(report: &dft_engine::profile::Report, run_wall: f64) -> serde_json::Value {
     let covered = report.covered_wall();
     let closure = report.closure();

@@ -491,8 +491,9 @@ impl Table {
 pub fn table_of(id: Id) -> Table {
     use Id::*;
     match id {
-        FFT_PROFILE | PHASE_PROFILE | INIT_PROFILE | STAGE_TIMERS | DAVIDSON_STAGES | DAVIDSON_PROFILE | SNAPSHOT_DIR
-        | PHASE_WAIT | FIRST_BLOCK | DGEMM_TIMERS | VERIFY_PROFILE => Table::Profile,
+        FFT_PROFILE | PHASE_PROFILE | INIT_PROFILE | STAGE_TIMERS | DAVIDSON_STAGES
+        | DAVIDSON_PROFILE | SNAPSHOT_DIR | PHASE_WAIT | FIRST_BLOCK | DGEMM_TIMERS
+        | VERIFY_PROFILE => Table::Profile,
         // Overrides of input-file values (`scf.cutoff_ladder`, the relaxation
         // extrapolation) and the pseudopotential cache location.
         CUTOFF_LADDER | RELAX_EXTRAPOLATION | PSEUDO_DIR => Table::EnvOnly,

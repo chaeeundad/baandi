@@ -1258,6 +1258,13 @@ impl ScfProblem {
         // thread's configuration (scope or process) once.
         let run = dft_numerics::switches::RunConfig::current();
         run.count(dft_numerics::switches::RunCounter::Problems, 1);
+        use dft_numerics::switches::{InitProfile, RunCounter as IC};
+        let init_profile = InitProfile::current();
+        let _init_total = init_profile.map(|p| p.span(IC::InitProblemCalls, IC::InitProblemNanos));
+        if let Some(p) = init_profile {
+            p.count(IC::InitAtoms, atoms.len());
+            p.count(IC::InitKpoints, points.len());
+        }
         if options.pw92_prefactor == crate::Pw92Prefactor::Original
             && (options.functional != Functional::Pbe || channel.is_some())
         {
@@ -1456,6 +1463,12 @@ impl ScfProblem {
         let density_basis = options.basis(cell, [0.; 3], 4.0)?;
         let grid = FftGridSpec::new(&gamma, &density_basis, options.grid_override)?;
         let dg = FftGridSpec::new(&density_basis, &density_basis, Some(grid.dims()))?;
+        if let Some(p) = init_profile {
+            p.count(IC::InitBands, bands);
+            p.count(IC::InitGridPoints, grid.dims().iter().product());
+            p.count(IC::InitWaveRows, gamma.vectors().len());
+            p.count(IC::InitDensityRows, density_basis.vectors().len());
+        }
         crate::profile::init_part(crate::profile::InitPart::Basis, part);
         let part = crate::profile::clock();
         let species: Vec<_> = potentials
@@ -1476,6 +1489,7 @@ impl ScfProblem {
         crate::profile::init_part(crate::profile::InitPart::IonicLocal, part);
         let part = crate::profile::clock();
         let mut fft = FftPlan3d::new(grid.dims())?;
+        let span = init_profile.map(|p| p.span(IC::InitCoreDensityCalls, IC::InitCoreDensityNanos));
         let core_density = dft_physics::data::core_density_with_rule(
             &density_basis,
             &dg,
@@ -1484,6 +1498,9 @@ impl ScfProblem {
             &mut fft,
             options.radial_even_rule,
         )?;
+        drop(span);
+        let span =
+            init_profile.map(|p| p.span(IC::InitStartDensityCalls, IC::InitStartDensityNanos));
         let start_density = if options.start_density == StartDensity::Atomic {
             start_density::atomic_superposition(
                 cell,
@@ -1496,6 +1513,7 @@ impl ScfProblem {
         } else {
             None
         };
+        drop(span);
         let xc_density = Array3::zeros(
             if core_density.is_some() || options.pw92_prefactor == crate::Pw92Prefactor::Original {
                 grid.dims()
@@ -1503,6 +1521,7 @@ impl ScfProblem {
                 [0; 3]
             },
         );
+        let span = init_profile.map(|p| p.span(IC::InitIonicFftCalls, IC::InitIonicFftNanos));
         let ionic_real = if let Some(comm) =
             crate::m2::active().filter(|_| run.on(dft_numerics::switches::Id::INIT_OWNED_STATES))
         {
@@ -1516,6 +1535,7 @@ impl ScfProblem {
             }
             ionic.mapv(|z| z.re)
         };
+        drop(span);
         crate::profile::init_part(crate::profile::InitPart::Densities, part);
         let part = crate::profile::clock();
         let pool =
@@ -1558,7 +1578,10 @@ impl ScfProblem {
                         "bands/subspace incompatible with k basis",
                     ));
                 }
+                let span =
+                    init_profile.map(|p| p.span(IC::InitStateGridCalls, IC::InitStateGridNanos));
                 let k_grid = FftGridSpec::new(&basis, &density_basis, Some(grid.dims()))?;
+                drop(span);
                 // INIT-REUSE: the k grid is the Hamiltonian's grid (same basis,
                 // same density sphere vectors, same dims); passing it avoids
                 // building the density sphere again per k state.
@@ -1587,6 +1610,8 @@ impl ScfProblem {
                         options.radial_even_rule,
                     )?
                 };
+                let span = init_profile
+                    .map(|p| p.span(IC::InitHamiltonianCalls, IC::InitHamiltonianNanos));
                 let hamiltonian = Hamiltonian::new_with_grid(
                     &basis,
                     k_grid.clone(),
@@ -1594,8 +1619,12 @@ impl ScfProblem {
                     nonlocal,
                 )?
                 .with_band_pool(inner, pool.clone())?;
+                drop(span);
+                let span = init_profile
+                    .map(|p| p.span(IC::InitBandDensityCalls, IC::InitBandDensityNanos));
                 let band_density =
                     crate::band_density::BandDensity::new(&k_grid, bands, inner, pool.clone())?;
+                drop(span);
                 Ok(KState {
                     real_solve: None,
                     gamma_real: gamma_real.clone(),
@@ -1645,9 +1674,11 @@ impl ScfProblem {
         };
         crate::profile::init_part(crate::profile::InitPart::AtomicPrepare, part);
         let part = crate::profile::clock();
+        let span = init_profile.map(|p| p.span(IC::InitWorkerFftsCalls, IC::InitWorkerFftsNanos));
         let worker_ffts = (0..options.threads.max(1).min(states.len()))
             .map(|_| FftPlan3d::new(grid.dims()))
             .collect::<Result<Vec<_>, _>>()?;
+        drop(span);
         crate::profile::init_part(crate::profile::InitPart::Rest, part);
         let part = crate::profile::clock();
         let ewald = ewald_energy(cell, &ions, run)?;

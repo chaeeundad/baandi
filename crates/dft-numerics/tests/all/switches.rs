@@ -272,5 +272,28 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::LADDER_WATCH), Value::Choice("off"));
     assert_eq!(value(Id::LADDER_BASIS_CHECK), Value::Choice("off"));
     assert_eq!(value(Id::PHASE_VALIDATE), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 117);
+    assert_eq!(value(Id::INIT_PROFILE), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 118);
+}
+
+#[test]
+fn init_profile_off_count_only_and_scoped() {
+    use dft_numerics::switches::{InitProfile, RunConfig, RunCounter as C};
+    let off = RunConfig::from_pairs(&[]).unwrap();
+    let _scope = off.enter();
+    let before = off.counters();
+    assert!(InitProfile::current().is_none());
+    assert_eq!(off.counters(), before);
+    let counts = RunConfig::from_pairs(&[("init_profile", "on"), ("stage_timers", "off")]).unwrap();
+    {
+        let _scope = counts.enter();
+        let p = InitProfile::current().unwrap();
+        let _span = p.span(C::InitProjectorsCalls, C::InitProjectorsNanos);
+        p.count(C::InitFactorRows, 37);
+    }
+    assert_eq!(counts.counters()[C::InitProjectorsCalls as usize], 1);
+    assert_eq!(counts.counters()[C::InitFactorRows as usize], 37);
+    assert_eq!(counts.counters()[C::InitProjectorsNanos as usize], 0);
+    assert_eq!(off.counters(), before);
+    assert!(InitProfile::current().is_none());
 }

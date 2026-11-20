@@ -2369,3 +2369,42 @@ harness checks exit 0. README check separately has its existing stale-phrase
 failure (8 pass / 1 fail). Source, logs, exact failures and final build hashes
 are in the design note. The overall required gate remains red. All edits stay
 inside OWNED_FILES, and changes remain uncommitted.
+
+## LANE-INIT Phase 0 — profile request (2026-11-20)
+
+User's revised phased workflow supersedes the earlier Mac-diagnose/implement
+charter for this task. **PROFILE_REQUEST**, instrumentation only; no candidate
+optimization, default change, adoption decision or speed claim.
+
+- Read startup code, INIT-CLI/INIT-PACKED/F-INIT-STATES/G-PHASE-VALIDATE records
+  and the backlog. Added default-off `BAANDI_INIT_PROFILE`: 20 nested call/timer
+  pairs and 23 work/shape counters, local to the run/rank. `STAGE_TIMERS=off`
+  retains counts without clocks. No per-G/atom timer, I/O or collective.
+- Mac correctness only: Si8 and Si32, baseline / new-off / counts / timed,
+  eight converged and verified runs; all energy components, scientific
+  iteration histories, eigenvalues, verification and density bytes identical;
+  maximum |delta E| = **0 Ha**. Off records zero in all new counters; counts
+  records zero nanoseconds; timed and counts record identical work.
+- Synthetic projector validation: **448** eager/owned constructor comparisons,
+  cubic/skew/slab/elongated, Gamma/shifted k, both radial rules, s/p/d/f and
+  repeated p projectors, selected-row partitions of size 1/2/4; coefficient
+  bits, lazy state and counters checked. These are row partitions, not real
+  MPI runs. No Mac timings support a performance conclusion.
+- Parser checks missing/malformed records, nanosecond units, rank identity,
+  payload floors, and missing-time semantics; parses actual Mac-generated
+  results for all three switch modes. Existing global phase min/max remain
+  separate from new rank-local times.
+- Detailed verification, commands, limitations and pending dev08 jobs:
+  [Phase 0 report](lanes/INIT/phase0-report.md),
+  [profile request](lanes/INIT/profile-request.md).
+  Remote measurement and any Phase 2 design are the orchestrator's next step.
+
+Phase 0 gate result: `TMPDIR_990="$PWD/target/scratch" CHECK_SCCACHE=0
+scripts/check.sh fast dft-numerics dft-physics dft-engine dft-cli` exit **1**;
+build/fmt/clippy PASS; 561 passed, 3 known CLI in-repo TMPDIR cache-policy
+failures, 153 ignored. The `ps`/`nice` sandbox diagnostics did not prevent
+the actual test binaries from running. README script exit 1: 8 tests pass,
+existing stale structural-scope phrase test fails. No new scientific result
+or README claim is added. Instrumented release build, eight-run identity
+runner, owned/eager constructor test, switch contract test and parser tests
+all exit 0. Changes remain uncommitted; stop at PROFILE_REQUEST.

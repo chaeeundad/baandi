@@ -195,6 +195,7 @@ pub struct DistributedPairFft {
     /// on MKL builds). Lane buffers: local sticks, middle batch, plane slab.
     lanes: BackendLanes,
     profile: dft_numerics::real::fft_profile::Probe,
+    kept_fuse: bool,
 }
 
 impl DistributedPairFft {
@@ -292,6 +293,7 @@ impl DistributedPairFft {
             recv: vec![0.; 2 * block * ranks],
             lanes,
             profile: dft_numerics::real::fft_profile::Probe::new(n),
+            kept_fuse: dft_numerics::switches::on(dft_numerics::switches::Id::FFT_KEPT_FUSE),
         })
     }
 
@@ -703,11 +705,31 @@ impl DistributedPairFft {
         let line = self.n[1] * self.n[2];
         for t in 0..kept {
             for i in 0..self.plane_count() {
-                let mark = self.profile.start();
-                self.slab
-                    .copy_from_slice(&planes[t * pp + i * line..t * pp + (i + 1) * line]);
-                self.profile.finish(mark, 17, line, 32 * line, None);
-                self.multiply_slab(potential, i);
+                let source = &planes[t * pp + i * line..t * pp + (i + 1) * line];
+                if self.kept_fuse {
+                    // Same scalar operations as copy then multiply_slab. Read the
+                    // immutable kept plane directly, avoiding a slab read/write pass.
+                    let mark = self.profile.start();
+                    let nz = self.n[2];
+                    for y in 0..self.n[1] {
+                        let start = self.grid_start(i, y);
+                        for ((dst, &src), &v) in self.slab[y * nz..(y + 1) * nz]
+                            .iter_mut()
+                            .zip(&source[y * nz..(y + 1) * nz])
+                            .zip(&potential[start..start + nz])
+                        {
+                            let mut value = src;
+                            value *= v;
+                            *dst = value;
+                        }
+                    }
+                    self.profile.finish(mark, 8, line, 40 * line, None);
+                } else {
+                    let mark = self.profile.start();
+                    self.slab.copy_from_slice(source);
+                    self.profile.finish(mark, 17, line, 32 * line, None);
+                    self.multiply_slab(potential, i);
+                }
                 self.to_reciprocal_plane_in(t, np, i)?;
             }
         }
@@ -774,6 +796,115 @@ mod tests {
     use dft_numerics::fused::FusedOperator;
     use dft_numerics::{Fft3d, FftPlan3d, PairFusedPlan};
     use ndarray::Array3;
+
+    #[test]
+    fn kept_fusion_bits_counters_and_rank_independence() {
+        use dft_numerics::real::fft_profile;
+        use dft_numerics::switches::RunConfig;
+        let mut fixtures = cases();
+        // First axis y, ranks with no planes/sticks, and empty reciprocal support.
+        fixtures.push(([3, 5, 7], vec![[0, 0, 0], [0, 1, 0], [0, 2, 0], [0, 3, 0]]));
+        fixtures.push(([1, 2, 3], vec![]));
+        for (shape, idx) in fixtures {
+            let potential: Vec<_> = (0..shape.iter().product())
+                .map(|i| if i % 5 == 0 { -0.0 } else { (i as f64).cos() })
+                .collect();
+            for np in [1, 3, 8] {
+                let input = random_c(idx.len() * np, 509);
+                let mut rank_one = Vec::new();
+                for ranks in [1, 2, 3, 8] {
+                    let results = simulate(ranks, |comm| {
+                        let cfg = RunConfig::from_pairs(&[
+                            ("fft_kept_fuse", "off"),
+                            ("fft_profile", "on"),
+                            ("phase_profile", "on"),
+                            ("stage_timers", "off"),
+                        ])
+                        .unwrap();
+                        let _scope = cfg.enter();
+                        let mut p =
+                            DistributedPairFft::new(shape, &idx, comm.rank(), ranks).unwrap();
+                        let local: Vec<_> = (0..np)
+                            .flat_map(|t| {
+                                p.local_positions()
+                                    .iter()
+                                    .map(|&g| input[t * idx.len() + g])
+                                    .collect::<Vec<_>>()
+                            })
+                            .collect();
+                        let mut plain = local.clone();
+                        p.apply_local_batch(comm, &mut plain, &potential, np)
+                            .unwrap();
+                        p.begin_to_real_batch(comm, &local, np).unwrap();
+                        let pp = p.plane_points();
+                        let line = p.rows() * shape[2];
+                        let mut planes = vec![C::default(); np * pp];
+                        for t in 0..np {
+                            for i in 0..p.plane_count() {
+                                p.to_real_plane_in(t, np, i).unwrap();
+                                planes[t * pp + i * line..t * pp + (i + 1) * line]
+                                    .copy_from_slice(p.plane());
+                            }
+                        }
+                        let bits = |xs: &[C]| {
+                            xs.iter()
+                                .map(|v| (v.re.to_bits(), v.im.to_bits()))
+                                .collect::<Vec<_>>()
+                        };
+                        let plane_bits = bits(&planes);
+                        for kept in [0, 1, np] {
+                            let mut off_counts = fft_profile::Snapshot::default();
+                            for enabled in [false, true] {
+                                p.kept_fuse = enabled;
+                                let pointers = (p.slab.as_ptr(), p.send.as_ptr(), p.recv.as_ptr());
+                                let mut out = local.clone();
+                                let before = fft_profile::snapshot();
+                                p.apply_local_batch_kept(
+                                    comm, &mut out, &potential, np, kept, &planes,
+                                )
+                                .unwrap();
+                                let counts = fft_profile::snapshot().since(before);
+                                assert_eq!(bits(&out), bits(&plain));
+                                assert_eq!(bits(&planes), plane_bits);
+                                assert_eq!(
+                                    pointers,
+                                    (p.slab.as_ptr(), p.send.as_ptr(), p.recv.as_ptr())
+                                );
+                                if enabled {
+                                    assert_eq!(counts.0[17], [0; 5]);
+                                    for stage in 0..17 {
+                                        assert_eq!(counts.0[stage], off_counts.0[stage]);
+                                    }
+                                } else {
+                                    assert_eq!(counts.0[17][1], (kept * p.plane_count()) as u64);
+                                    assert_eq!(counts.0[17][3], (32 * kept * pp) as u64);
+                                    off_counts = counts;
+                                }
+                            }
+                        }
+                        (p.local_positions.clone(), plain)
+                    });
+                    let mut global = vec![C::default(); input.len()];
+                    for (positions, values) in results {
+                        for t in 0..np {
+                            for (l, &g) in positions.iter().enumerate() {
+                                global[t * idx.len() + g] = values[t * positions.len() + l];
+                            }
+                        }
+                    }
+                    let bits: Vec<_> = global
+                        .iter()
+                        .map(|v| (v.re.to_bits(), v.im.to_bits()))
+                        .collect();
+                    if ranks == 1 {
+                        rank_one = bits;
+                    } else {
+                        assert_eq!(bits, rank_one);
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn lane_fft_instrumentation_preserves_bits_and_counts() {

@@ -2476,3 +2476,42 @@ case/model jobs, six retained profile/control cycles, schemas and parser paths:
 identity and real exit codes: [validation](lanes/VERIFY/validation.md) and
 [correctness record](lanes/VERIFY/correctness.json). Await the orchestrator's
 dev08 profile before Phase 2. Changes remain uncommitted.
+## LANE-NONLOCAL Phase 0 — PROFILE_REQUEST (2026-11-20)
+
+Instrumentation only, no optimization/default change. The user's revised
+instruction moved all profiling and performance conclusions to dev08; the
+previous in-session candidate and probe source were removed. The orchestrator
+subsequently approved instrumentation wiring in `real_gamma.rs` and engine
+`profile.rs`. Six real-Gamma nonlocal child stages (projection, rank reduction,
+coupling, back product, addition, audit) now reach the actual CLI phase JSON,
+with per-bucket rank extrema, logical FLOP/byte inputs and width counts.
+`NonlocalMark` is isolated from shared solver snapshot slots. OFF has no clock,
+TLS/counter arithmetic, allocation, lock or I/O; only the enable branch remains.
+
+Mac correctness only: Si8 and Si32, seed 601, fractional displacement 0.001,
+one worker, off/counts-only/timed: **6/6** CLI runs converge and verify, **4/4**
+off/on pairs have identical scientific f64 bits, density bytes, eigenvalues,
+occupations, history, work and verification attempts; **|dE| = 0 Ha**.
+Counts-only lane clocks are zero, timed and count-only work counts match.
+Four actual CLI JSON files parse successfully. An unmodified counts-only CLI
+result is retained as a regression fixture; **5/5** parser tests pass.
+Simulated Si8 at two ranks additionally has identical energy bits, density FNV,
+SCF/Davidson/H work off/on, with nonzero projection/reduction counts in coarse,
+fine and verification buckets. This is not real MPI timing. Earlier synthetic
+coverage: 45 operator/energy pairs bit-identical over cubic/skewed/slab shapes,
+0/1/7 projector channels and 0/1/2/3/17 bands; 11 rank integration tests pass.
+
+Required final `scripts/check.sh fast dft-physics dft-engine dft-cli`: **exit 1**,
+build/fmt/clippy PASS, **480 passed / 3 failed / 131 ignored**. The failures are
+the known CLI cache tests rejecting the in-repository TMPDIR. Optional `ps`
+load reporting and `nice` also encounter sandbox restrictions; no numerical
+failure is observed. The earlier physics-only gate exited 0 (92/0/18).
+No Mac timing supports a performance conclusion, no QE/dev08 run, no adoption.
+
+Exact dev08 commands, field semantics, limits and correctness reproducers:
+[profile-request.md](lanes/NONLOCAL/profile-request.md). Evidence:
+[equivalence.json](lanes/NONLOCAL/equivalence.json),
+[simulated-equivalence.json](lanes/NONLOCAL/simulated-equivalence.json),
+[report.json](lanes/NONLOCAL/report.json). Collection is qualified for one
+worker per rank / one core; averages are per-bucket bounds, not event traces.
+Stop at PROFILE_REQUEST until the master relays the dev08 profile.

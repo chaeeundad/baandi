@@ -439,7 +439,7 @@ table! {
         "bounded per-rank collective arrivals in maps; requires PHASE_PROFILE, clocks follow STAGE_TIMERS";
     FFT_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "LANE-FFT Phase 0: detailed FFT stages and logical traffic under PHASE_PROFILE; clocks follow STAGE_TIMERS; no numerical change";
-    SERIAL_DENSITY_FUSED: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    SERIAL_DENSITY_FUSED: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "LANE-GLUE: serial one-core standard Gamma density sink; preserves band addition order, no MPI dispatch";
     GLUE_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "LANE-GLUE Phase 0: rank-local grid and mixer spans/work; requires PHASE_PROFILE; clocks follow STAGE_TIMERS; no numerical change";

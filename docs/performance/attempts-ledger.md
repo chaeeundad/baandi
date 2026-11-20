@@ -2581,3 +2581,6 @@ Status: implemented for dev08 screening, default OFF, floor diagnosis awaiting
 raw data. Request pre-registers exact tile FLOP reduction, A/A floor then
 crossed pairs, abs(mean)/SE >=3; all five requested points in separate jobs.
 Evidence: `lanes/DAVIDSON/{phase2-correctness.json,phase2-validation.md,dev08-request.md}`.
+
+### LANE-INIT-ATOMIC-LOCAL-BLOCK-DEFAULT-ON (2026-11-19/20, dev08 via master; ledger by orchestrator)
+BAANDI_ATOMIC_LOCAL_BLOCK (guarded CholQR2 for the single-process atomic start; no effect with MPI ranks) default flipped on. dev08 crossed pairs, one core, 3 pairs, A/A floor first: si64 -1.98 % (|mean|/SE 17.99, floor 0.00707 s; gain in ladder_coarse 7.416 -> 6.584 s), si32 -1.09 % (14.91, 0.088 s vs 3x floor 0.0348 s); si16, si8, si-skew neutral (|mean|/SE 1.42/0.49/0.62, all negative sign); no resolved loss; |dE| <= 2.8e-14 Ha (si64 bit identical); SCF/H/verified identical in every pair. Counters moved as pre-registered (mgs.calls 1 -> 0, local_accepted 0 -> 1, fallbacks 0). Mac fast gate: 572 passed, 0 failed. Lesson: atomic start was 63-86 % of the init bucket (init 6-15 % of wall); init profile problem span covers only 12-45 % of init.

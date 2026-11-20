@@ -218,7 +218,7 @@ table! {
         "block-parallel band sum of the density, zero-occupation bands skipped";
     NL_ENERGY_REAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "audit nonlocal energies from one real projector product on the real Gamma path";
-    ATOMIC_LOCAL_BLOCK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    ATOMIC_LOCAL_BLOCK: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "LANE-INIT: guarded CholQR2 on the atomic starting span when no multi-rank communicator is active; reuses adopted atomic block algebra, falls back to original MGS, leaves MPI and Davidson corrections unchanged; rounding class, default off pending dev08";
     ATOMIC_REAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "atomic-start Ritz step through the real Gamma Hamiltonian";

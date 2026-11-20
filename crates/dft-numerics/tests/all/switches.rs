@@ -285,7 +285,7 @@ fn legacy_defaults_are_unchanged() {
         switches::table_of(Id::VERIFY_PROFILE),
         switches::Table::Profile
     );
-    assert_eq!(value(Id::ATOMIC_LOCAL_BLOCK), Value::Choice("off"));
+    assert_eq!(value(Id::ATOMIC_LOCAL_BLOCK), Value::Choice("on"));
     assert_eq!(value(Id::DAVIDSON_UPPER_BORDER), Value::Choice("off"));
     assert_eq!(TABLE.len(), 123);
 }

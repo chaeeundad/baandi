@@ -1,4 +1,12 @@
-# Active request: PACKED_REDUCE (GEMM shapes unchanged)
+# Closed requests — no new dev08 job
+
+PACKED_REDUCE (61822bc, Si64MPI8) passed the payload mechanism gate but was
+NEUTRAL: A/B mean -0.000172s, abs(mean)/SE0.05,0.04x A/A floor. Not adopted,
+not a loss; default OFF. UPPER_BORDER and ROTATE_COLUMNS remain rejected/OFF.
+Recommend closing the lane; see diagnosis.md, "Closing assessment". All
+commands below are archived reproductions, **not active requests**.
+
+# Archived PACKED_REDUCE request (GEMM shapes unchanged)
 
 UPPER_BORDER and ROTATE_COLUMNS are **REJECTED**; keep both OFF. Their
 requests below are archived, including headings formerly labelled active.

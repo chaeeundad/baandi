@@ -2,11 +2,13 @@
   "task_id": "LANE-DAVIDSON",
   "phase": 2,
   "status": "DONE",
-  "rejected_candidates": [
-    "DAVIDSON_UPPER_BORDER: +0.57% MPI8 loss",
-    "DAVIDSON_ROTATE_COLUMNS: +6.10% si64 / +4.19% si32 one-core loss"
-  ],
-  "implementation": "Default-off DAVIDSON_PACKED_REDUCE; unchanged GEMM shapes and arithmetic, fewer communicated entries",
-  "next": "Orchestrator runs packed-job.sh on dev08; both rejected switches off",
+  "recommendation": "Close lane under current evidence and constraints",
+  "closed_candidates": {
+    "DAVIDSON_UPPER_BORDER": "resolved +0.57% Si64 MPI8 loss",
+    "DAVIDSON_ROTATE_COLUMNS": "resolved +6.10% Si64 / +4.19% Si32 one-core losses",
+    "DAVIDSON_PACKED_REDUCE": "neutral; source61822bc, mechanism exact, A/B -0.000172s, abs(mean)/SE0.05"
+  },
+  "defaults": "All three experimental switches remain off",
+  "next": "No new dev08 job; stop",
   "performance_evidence_from_mac": false
 }

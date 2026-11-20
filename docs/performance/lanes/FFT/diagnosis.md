@@ -1,6 +1,7 @@
 # LANE-FFT Phase 2 diagnosis
 
-Status: candidate selected for dev08 A/B, not adopted. Source profile relayed by
+Status: FFT_KEPT_FUSE closed NEUTRAL after the extended dev08 A/B; default OFF.
+The candidate estimates below are historical hypotheses, not achieved gains. Source profile relayed by
 the orchestrator on 2026-11-20: bad02ee, si64 MPI8, CPUs 0–7 socket 0,
 72^3 grid, 23871 plane waves, 132 bands. Binary hash/raw results not yet supplied.
 This note uses only that dev08 relay and source inspection; no Mac performance
@@ -254,3 +255,23 @@ M2d batches already reduce transpose call counts. Async remains deferred:
 although the new group's share is larger than historical screens, wait/transfer
 and overlap opportunity are not established. No physical constants, FFT size,
 material, rank-count or band-count special case is introduced.
+
+
+## Closure and next diagnostic
+
+The extended si32 MPI8 fusion A/B has +0.8744% mean, SE 0.5753%,
+|mean|/SE 1.52 and overlapping A/A intervals: no resolved gain despite exact
+copy elimination. See FFT-KEPT-FUSE-NEUTRAL in the ledger. No further fusion
+measurement is requested. Independent NONLOCAL reduce skew (66.6%, zero
+flops) and a neutral 28.1% payload reduction make **arrival-skew attribution**
+the next diagnostic priority. The earlier byte-removal priority above was a
+profile-derived hypothesis; it is not acceptance evidence and does not
+justify another volume-only change. Aggregate operation durations cannot
+identify the last arriving rank or its preceding computation.
+
+A 0.3 s saving would require removing about 42% of the measured 0.7184 s
+permutation group on the critical path. No particular removable pass has that
+measured budget; small memcpy/zeroing counters alone do not establish it.
+No optional optimization is implemented. The next request separates arrival
+skew, exposed collective residence, preceding compute and previous collective
+release skew, and leaves candidate selection until those data return.

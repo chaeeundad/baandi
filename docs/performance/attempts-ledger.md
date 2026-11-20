@@ -2794,3 +2794,27 @@ Detailed assumptions, ledger/default reconciliation and reopening conditions:
 [diagnose.md](lanes/NONLOCAL/diagnose.md),
 [closing-note.md](lanes/NONLOCAL/closing-note.md). Raw dev08 files/hashes were
 not attached; the relay was not independently reproduced locally.
+
+## FFT-KEPT-FUSE-NEUTRAL (orchestrator relay, 2026-11-20)
+
+CLOSED NEUTRAL; FFT_KEPT_FUSE stays default off. Extended si32 MPI8 crossed
+run, socket 0 cores 0–7: A/A 6 pairs, A/B 8 pairs, first pair discarded as
+reported; 32 runs identical in eigen_fnv, h_columns and iterations. Relayed
+A/A paired mean +0.003227, SE 0.004108; A/B +0.008744, SE 0.005753,
+|mean|/SE 1.52, 2.13 times floor, intervals overlap; 5/8 A/B pairs slower.
+Counter gate exact: kept_copy 25344 -> 0 calls, 2102132736 -> 0 bytes,
+multiply unchanged. No resolved wall gain; estimated 96 pairs to resolve
+-0.5% is not worth pursuing. Do not repeat the fusion or infer speedup from
+its removed traffic. Pair counts/discard convention are retained as relayed;
+raw samples/binary hash were not supplied here.
+
+Independent NONLOCAL bad02ee si64 MPI8 relay: lane 0.7825 s, 8.09% of wall;
+reduce (zero flops) max/min 0.1178/0.0394 s, 66.6% spread, versus compute
+15–19%. PACKED_REDUCE removes 28.1% payload without wall change. Together
+with FFT evidence this prioritizes arrival-skew attribution, not another
+volume-only change. It does not prove all collective volume irrelevant at all
+sizes, or identify the last rank from aggregate durations. Follow-up:
+[wait/arrival diagnostic design](lanes/FFT/wait-diagnostic.md) and
+[profile request](lanes/FFT/wait-profile-request.md). No new optimization:
+0.3 s si64 MPI8 saving from a specific permutation-pass removal is not supported
+by current counters (it would require about 42% of the 0.7184 s group).

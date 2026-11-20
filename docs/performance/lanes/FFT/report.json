@@ -2,56 +2,28 @@
   "task_id": "LANE-FFT",
   "status": "DONE",
   "changed_files": [
-    "crates/dft-cli/tests/all/run.rs",
-    "crates/dft-numerics/src/switches.rs",
-    "crates/dft-numerics/tests/all/switches.rs",
-    "crates/dft-solvers/src/distributed_fft.rs",
     "docs/performance/attempts-ledger.md",
-    "docs/performance/lanes/FFT/dev08-pairs.sh",
     "docs/performance/lanes/FFT/dev08-request.md",
     "docs/performance/lanes/FFT/diagnosis.md",
-    "docs/performance/lanes/FFT/phase2-equivalence.json",
-    "docs/performance/lanes/FFT/phase2-validation.md",
-    "docs/performance/lanes/FFT/phase2_verify.py",
-    "docs/performance/lanes/FFT/report.json"
+    "docs/performance/lanes/FFT/report.json",
+    "docs/performance/lanes/FFT/test_wait_parse.py",
+    "docs/performance/lanes/FFT/wait-diagnostic.md",
+    "docs/performance/lanes/FFT/wait-profile-request.md",
+    "docs/performance/lanes/FFT/wait_parse.py"
   ],
   "design_choices": [
-    "Phase 2 complete for review; default-off FFT_KEPT_FUSE fuses only M2 kept-copy and multiply. No optimization adoption or Mac timing conclusion.",
-    "Diagnosis separates rank-zero and stage-maximum relayed quantities; supplies exact traffic formulas, conditional floors and limits on wait attribution.",
-    "Alternatives: middle-pack locality, sparse zeroing/useful-volume exchange deferred. Generic MKL FFT and asynchronous alltoall remain deferred.",
-    "dev08-request.md and dev08-pairs.sh specify A/A floor, crossed pairs, counter movement, |mean|/SE >= 3 and si32-first staged expansion to si64/si32/si16 MPI8."
+    "Recorded FFT-KEPT-FUSE-NEUTRAL; default remains off; archived prior A/B request.",
+    "Designed per-collective arrival tracing with clock uncertainty, exclusive preceding stages and inherited-release decomposition.",
+    "Delivered proposed arrival-skew-1 offline parser and si64/si32 MPI8 request; full trace producer is not implemented.",
+    "No optional permutation optimization: current evidence does not support a specific 0.3 s critical-path saving."
   ],
   "commands": [
     {
-      "command": "cargo test --offline --release -p dft-solvers --lib kept_fusion_bits_counters_and_rank_independence -- --nocapture",
+      "command": "python3 -I docs/performance/lanes/FFT/test_wait_parse.py",
       "exit_code": 0
     },
     {
-      "command": "BAANDI_FFT_KEPT_FUSE=on BAANDI_STAGE_TIMERS=off cargo test --offline --release -p dft-physics --test distributed_real_gamma",
-      "exit_code": 0
-    },
-    {
-      "command": "BAANDI_FFT_KEPT_FUSE=on BAANDI_STAGE_TIMERS=off cargo test --offline --release -p dft-engine --test distributed_scf m2c_stick_row_scf_matches_threads_only -- --nocapture",
-      "exit_code": 0
-    },
-    {
-      "command": "cargo test --offline --release -p dft-engine --test m2_entry_cost --no-run --message-format=json",
-      "exit_code": 0
-    },
-    {
-      "command": "cargo build --offline --release -p dft-cli --bin dft-cli --example davidson_bench",
-      "exit_code": 0
-    },
-    {
-      "command": "python3 -I docs/performance/lanes/FFT/phase2_verify.py target/scratch --upf /Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
-      "exit_code": 0
-    },
-    {
-      "command": "CHECK_SCCACHE=0 TMPDIR_990=\"$PWD/target/scratch\" scripts/check.sh fast dft-numerics dft-solvers dft-cli",
-      "exit_code": 1
-    },
-    {
-      "command": "bash -n docs/performance/lanes/FFT/dev08-pairs.sh",
+      "command": "bash -n on wait-profile-request.md shell blocks (syntax only)",
       "exit_code": 0
     },
     {
@@ -60,19 +32,18 @@
     }
   ],
   "numerical_outputs": [
-    "Kernel OFF/ON bit-identical on five fixtures, ranks 1/2/3/8, pair counts 1/3/8; assembled output bits rank independent.",
-    "Real Si8 simulated MPI2/3/8 OFF/ON energy delta 0 Ha; density FNV and work counts identical. Cross-rank energy spread 4.82138773350016e-11 Ha.",
-    "Actual MPI3 warm-harness JSON: fine kept_copy 288 -> 0 calls and 11943936 -> 0 bytes on each rank; other stage counters identical.",
-    "Serial CLI control verified, scientific fields/history/density bits identical; energy -31.321776563202498 Ha.",
-    "Fast gate 358 passed, 3 known TMPDIR cache failures, 87 ignored; build/fmt/clippy passed."
+    "Relayed A/B mean +0.008744, SE 0.005753, |mean|/SE 1.52; unresolved, intervals overlap.",
+    "Exact counter gate: kept_copy 25344 -> 0 calls, 2102132736 -> 0 bytes; multiply unchanged.",
+    "Three synthetic parser contract tests passed; no actual production arrival trace parsed."
   ],
-  "reference_comparison": "No QE run or dev08 A/B executed. All speed predictions are conditional on the relayed bad02ee si64 MPI8 profile, not measured gains. Mac used only for compilation and correctness.",
+  "reference_comparison": "dev08 results are relayed, not executed here. No Mac profiling, performance claims or new numerical implementation.",
   "limitations": [
-    "Raw dev08 profile aggregation/rates need reconciliation; exact padding and wait/transfer split cannot be recovered from rounded rank summaries.",
-    "Real MPI/MKL, complete distributed SCF density/history/verification identity and speed evidence remain dev08 gates.",
-    "M2SCREEN provides density FNV, not full density files; serial CLI provides byte identity. Cross-rank SCF trajectory is not bit-identical, consistent with ADR 0041.",
-    "Three known Mac in-repository TMPDIR CLI cache tests fail; no full/push gate claimed."
+    "Existing PHASE_WAIT inserts barriers and aggregates solver wait; it does not give every fine-map collective arrival or last-rank attribution.",
+    "Full tracing requires instrumentation-only scope extension for engine parallel.rs and solver distributed_davidson.rs, producer implementation and actual CLI equivalence validation. Future request commands are explicitly blocked until those gates pass.",
+    "Arrival exposure is not exact idle wait; MPI progress can overlap arrival skew. Clock uncertainty and possible early rank completion are preserved."
   ],
-  "open_questions": [],
-  "commit": "Uncommitted as requested; stop after dev08 request."
+  "open_questions": [
+    "Instrumentation scope clarification sent to orchestrator; design-only deliverable is complete, full trace producer remains pending."
+  ],
+  "commit": "Uncommitted as requested."
 }

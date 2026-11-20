@@ -218,6 +218,8 @@ table! {
         "block-parallel band sum of the density, zero-occupation bands skipped";
     NL_ENERGY_REAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "audit nonlocal energies from one real projector product on the real Gamma path";
+    ATOMIC_LOCAL_BLOCK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "LANE-INIT: guarded CholQR2 on the atomic starting span when no multi-rank communicator is active; reuses adopted atomic block algebra, falls back to original MGS, leaves MPI and Davidson corrections unchanged; rounding class, default off pending dev08";
     ATOMIC_REAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "atomic-start Ritz step through the real Gamma Hamiltonian";
     MPI_M2: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -823,8 +825,64 @@ pub enum RunCounter {
     InitWaveRows = 78,
     /// INIT lane: problem.density_rows; cumulative per rank/run, only with INIT_PROFILE.
     InitDensityRows = 79,
+    /// INIT Phase 2: atomic.span.calls, local to the rank/run.
+    InitAtomicSpanCalls = 80,
+    /// INIT Phase 2: atomic.span.ns, local to the rank/run.
+    InitAtomicSpanNanos = 81,
+    /// INIT Phase 2: atomic.mgs.calls, local to the rank/run.
+    InitAtomicMgsCalls = 82,
+    /// INIT Phase 2: atomic.mgs.ns, local to the rank/run.
+    InitAtomicMgsNanos = 83,
+    /// INIT Phase 2: atomic.block_fill.calls, local to the rank/run.
+    InitAtomicBlockFillCalls = 84,
+    /// INIT Phase 2: atomic.block_fill.ns, local to the rank/run.
+    InitAtomicBlockFillNanos = 85,
+    /// INIT Phase 2: atomic.block_gram.calls, local to the rank/run.
+    InitAtomicBlockGramCalls = 86,
+    /// INIT Phase 2: atomic.block_gram.ns, local to the rank/run.
+    InitAtomicBlockGramNanos = 87,
+    /// INIT Phase 2: atomic.block_factor.calls, local to the rank/run.
+    InitAtomicBlockFactorCalls = 88,
+    /// INIT Phase 2: atomic.block_factor.ns, local to the rank/run.
+    InitAtomicBlockFactorNanos = 89,
+    /// INIT Phase 2: atomic.block_update.calls, local to the rank/run.
+    InitAtomicBlockUpdateCalls = 90,
+    /// INIT Phase 2: atomic.block_update.ns, local to the rank/run.
+    InitAtomicBlockUpdateNanos = 91,
+    /// INIT Phase 2: atomic.block_gather.calls, local to the rank/run.
+    InitAtomicBlockGatherCalls = 92,
+    /// INIT Phase 2: atomic.block_gather.ns, local to the rank/run.
+    InitAtomicBlockGatherNanos = 93,
+    /// INIT Phase 2: atomic.rows, local to the rank/run.
+    InitAtomicRows = 94,
+    /// INIT Phase 2: atomic.columns, local to the rank/run.
+    InitAtomicColumns = 95,
+    /// INIT Phase 2: atomic.input_bytes, local to the rank/run.
+    InitAtomicInputBytes = 96,
+    /// INIT Phase 2: atomic.mgs_projection_macs_upper_bound, local to the rank/run.
+    InitAtomicMgsMacs = 97,
+    /// INIT Phase 2: atomic.local_attempts, local to the rank/run.
+    InitAtomicLocalAttempts = 98,
+    /// INIT Phase 2: atomic.local_accepted, local to the rank/run.
+    InitAtomicLocalAccepted = 99,
+    /// INIT Phase 2: atomic.local_fallbacks, local to the rank/run.
+    InitAtomicLocalFallbacks = 100,
+    /// INIT Phase 2: atomic.block_gram_flops, local to the rank/run.
+    InitAtomicBlockGramFlops = 101,
+    /// INIT Phase 2: atomic.block_update_flops, local to the rank/run.
+    InitAtomicBlockUpdateFlops = 102,
+    /// Sum of FFT grid points over atomic span calls.
+    InitAtomicGridPoints = 103,
+    /// Sum of first FFT dimensions over atomic span calls.
+    InitAtomicGridX = 104,
+    /// Sum of second FFT dimensions over atomic span calls.
+    InitAtomicGridY = 105,
+    /// Sum of third FFT dimensions over atomic span calls.
+    InitAtomicGridZ = 106,
+    /// Sum of requested bands over atomic span calls.
+    InitAtomicBands = 107,
 }
-pub const RUN_COUNTERS: usize = 80;
+pub const RUN_COUNTERS: usize = 108;
 pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
     "stop_kept",
     "stop_fft",
@@ -906,6 +964,34 @@ pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
     "init_lane.problem.grid_points",
     "init_lane.problem.wave_rows",
     "init_lane.problem.density_rows",
+    "init_lane.atomic.span.calls",
+    "init_lane.atomic.span.ns",
+    "init_lane.atomic.mgs.calls",
+    "init_lane.atomic.mgs.ns",
+    "init_lane.atomic.block_fill.calls",
+    "init_lane.atomic.block_fill.ns",
+    "init_lane.atomic.block_gram.calls",
+    "init_lane.atomic.block_gram.ns",
+    "init_lane.atomic.block_factor.calls",
+    "init_lane.atomic.block_factor.ns",
+    "init_lane.atomic.block_update.calls",
+    "init_lane.atomic.block_update.ns",
+    "init_lane.atomic.block_gather.calls",
+    "init_lane.atomic.block_gather.ns",
+    "init_lane.atomic.rows",
+    "init_lane.atomic.columns",
+    "init_lane.atomic.input_bytes",
+    "init_lane.atomic.mgs_projection_macs_upper_bound",
+    "init_lane.atomic.local_attempts",
+    "init_lane.atomic.local_accepted",
+    "init_lane.atomic.local_fallbacks",
+    "init_lane.atomic.block_gram_flops",
+    "init_lane.atomic.block_update_flops",
+    "init_lane.atomic.grid_points",
+    "init_lane.atomic.grid_x",
+    "init_lane.atomic.grid_y",
+    "init_lane.atomic.grid_z",
+    "init_lane.atomic.bands",
 ];
 
 /// Initialization-only diagnostics. The disabled path performs no clocks,

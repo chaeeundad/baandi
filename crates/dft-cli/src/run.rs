@@ -814,15 +814,19 @@ fn execute_mode_inner(
     let start = Instant::now();
     launch::mark("run_entry");
     let input_clock = launch::clock();
-    let bytes = fs::read(input).map_err(|e| error(5, format!("{}: {e}", input.display())))?;
+    let bytes = launch::timed("input_read", || fs::read(input))
+        .map_err(|e| error(5, format!("{}: {e}", input.display())))?;
     let text = std::str::from_utf8(&bytes).map_err(|e| error(1, e))?;
-    let config = Config::parse(text).map_err(|e| error(1, e))?;
+    let config = launch::timed("input_parse", || Config::parse(text)).map_err(|e| error(1, e))?;
     launch::elapsed("input_read_parse", input_clock);
     let config_clock = launch::clock();
     // RUN-CONFIG: this run's switch configuration (the process object in the
     // CLI binary; a thread scope for in-process callers with other values).
     let (run_config, _run_scope) = crate::run_config::for_run(&config).map_err(|e| error(1, e))?;
     launch::elapsed("run_config", config_clock);
+    // Phase 0 only: no storage or additional clock reads when profiling is off.
+    // Keep rank-local file records; do not add collectives to measure redundant I/O.
+    let mut upf_records = dft_engine::profile::enabled().then(Vec::new);
     dft_engine::profile::davidson_lane::reset();
     if (config.collinear()
         || config
@@ -876,9 +880,13 @@ fn execute_mode_inner(
     let upf_clock = launch::clock();
     for (name, path) in &config.pseudopotentials {
         let path = input.parent().unwrap_or(Path::new(".")).join(path);
+        let read_clock = upf_records.as_ref().map(|_| Instant::now());
         let data = fs::read(&path).map_err(|e| error(5, format!("{}: {e}", path.display())))?;
+        let read_s = read_clock.map(|t| t.elapsed().as_secs_f64());
+        let parse_clock = upf_records.as_ref().map(|_| Instant::now());
         let p = parse_upf(std::str::from_utf8(&data).map_err(|e| error(2, e))?)
             .map_err(|e| error(2, format!("{}: {e}", path.display())))?;
+        let parse_s = parse_clock.map(|t| t.elapsed().as_secs_f64());
         if !opts.functional.matches_upf(p.functional()) && !opts.allow_functional_override {
             if opts.functional == dft_engine::Functional::LdaPz {
                 return Err(error(
@@ -898,7 +906,16 @@ fn execute_mode_inner(
             ));
         }
         let path = fs::canonicalize(path)?;
-        species.push(json!({"name":name,"path":path,"sha256":sha256(&data),"z_valence":p.z_valence(),"functional":p.functional(),"n_projectors":p.projectors().len()}));
+        let hash_clock = upf_records.as_ref().map(|_| Instant::now());
+        let digest = sha256(&data);
+        let hash_s = hash_clock.map(|t| t.elapsed().as_secs_f64());
+        if let Some(records) = &mut upf_records {
+            records.push(
+                json!({"species":name,"bytes":data.len(),"projectors":p.projectors().len(),
+                "read_s":read_s,"parse_s":parse_s,"hash_s":hash_s}),
+            );
+        }
+        species.push(json!({"name":name,"path":path,"sha256":digest,"z_valence":p.z_valence(),"functional":p.functional(),"n_projectors":p.projectors().len()}));
         inputs.push(path);
         potentials.push((name.clone(), p));
     }
@@ -1073,6 +1090,8 @@ fn execute_mode_inner(
     }
     let _restore_delivery = RestoreDelivery;
     dft_engine::gamma_real::set_delivered_orbitals(orbitals_needed);
+    let scf_clock = launch::clock();
+    launch::mark("scf_entry");
     let outcome = if mode.observe || mode.agent {
         crate::telemetry::drive(problem, mode, &out)?
     } else {
@@ -1133,6 +1152,8 @@ fn execute_mode_inner(
             }
         }
     };
+    launch::elapsed("scf_driver", scf_clock);
+    launch::mark("scf_return");
     let r = outcome.result;
     // RUN-CONFIG: what the computation consulted (result writers below read
     // more switches for their report blocks; those reads do not count).
@@ -1144,12 +1165,16 @@ fn execute_mode_inner(
     let npw = prepared.wavefunctions.vectors().len();
     let volume = prepared.cell.volume_bohr3();
     let cell = prepared.cell.lattice_columns_bohr();
-    let density_bytes: Vec<u8> = r.density.iter().flat_map(|x| x.to_le_bytes()).collect();
+    let density_bytes: Vec<u8> = launch::timed("density_encode", || {
+        r.density.iter().flat_map(|x| x.to_le_bytes()).collect()
+    });
     let integral = r.density.iter().sum::<f64>() * volume / ngrid as f64;
     let density_meta = json!({"schema_version":1,"fft_grid":prepared.grid.dims(),"lattice_columns_bohr":cell,"volume_bohr3":volume,
         "units":"electrons per Bohr^3","ordering":"C: (i*n2+j)*n3+k; k fastest","endianness":"little","dtype":"f64",
-        "normalization":{"expected_electrons":electrons,"integral_electrons":integral},"sha256":sha256(&density_bytes)});
-    let history: Vec<_> = r.history.iter().map(history_json).collect();
+        "normalization":{"expected_electrons":electrons,"integral_electrons":integral},"sha256":launch::timed("density_sha256", || sha256(&density_bytes))});
+    let history: Vec<_> = launch::timed("history_json", || {
+        r.history.iter().map(history_json).collect()
+    });
     let last = history.last().cloned();
     let mut phases = PhaseTimings::default();
     for h in &r.history {
@@ -1698,6 +1723,10 @@ fn execute_mode_inner(
     dft_engine::profile::add_io(io_clock.elapsed().as_secs_f64());
     launch::mark("profile_finish");
     if let Some(mut mine) = dft_engine::profile::finish_rank(crate::parallel::rank()) {
+        result["launchio"] = launchio_json(&mine, upf_records.take().unwrap_or_default());
+        result["launchio"]["sizes"] = json!({"input_bytes":bytes.len(),
+            "density_bytes":ngrid * 8,"grid_points":ngrid,"plane_waves":npw,
+            "bands":bands,"history_entries":r.history.len(),"atoms":atoms.len()});
         // RUN-REPORT: this rank's own external wall closes its exclusive tree.
         mine.wall = start.elapsed().as_secs_f64();
         let gather_clock = launch::clock();
@@ -2046,6 +2075,35 @@ fn verification_lane_json(
         })).collect::<Vec<_>>(),
         "note": "seconds are exclusive consecutive intervals on one rank; map_seconds are nested in seconds.map; never sum rank maxima; status -1 is an incomplete/error attempt whose restore interval includes its unclosed tail; sizes are payload/floor inputs, not measured memory traffic; post-run gathering is outside these intervals"
     })
+}
+
+/// Rank-local I/O payload sizes and existing between-map clocks (Phase 0).
+fn launchio_json(mine: &dft_engine::profile::RankProfile, upf_records: Vec<Value>) -> Value {
+    use dft_engine::profile::{BUCKET_LABELS, COUNT_LABELS, SEC_LABELS};
+    // Export the existing local counters before the gather, rather than trying
+    // to reconstruct a rank's closure from maxima belonging to different ranks.
+    let buckets: Vec<_> = mine
+        .buckets
+        .iter()
+        .zip(BUCKET_LABELS)
+        .map(|(b, label)| {
+            let seconds: serde_json::Map<_, _> = SEC_LABELS
+                .iter()
+                .zip(b.seconds)
+                .filter(|(key, _)| **key == "wall" || key.starts_with("between.") || **key == "io")
+                .map(|(key, value)| (key.to_string(), json!(value)))
+                .collect();
+            let counts: serde_json::Map<_, _> = COUNT_LABELS
+                .iter()
+                .zip(b.counts)
+                .filter(|(key, _)| **key == "maps")
+                .map(|(key, value)| (key.to_string(), json!(value)))
+                .collect();
+            json!({"bucket":label,"seconds":seconds,"counts":counts})
+        })
+        .collect();
+    json!({"schema":"launchio-1","rank":mine.rank,"upf_records":upf_records,"buckets":buckets,
+        "note":"Rank-local Phase 0 counters. UPF records cover run's second parse only; preflight's first parse remains inside launch.seconds.preflight_including_prepare_and_upf. Byte sizes are payloads, not allocator traffic or physical disk reads. Bucket walls are exclusive; io and between.* are subsets. Map counts normalize bucket totals, not individual map latency. Full lifecycle clocks including JSON write and MPI finalize are in launch. No new collectives."})
 }
 
 /// Exclusive phase profile: per-bucket maximum and minimum over ranks.

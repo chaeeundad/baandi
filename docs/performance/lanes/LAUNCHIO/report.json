@@ -1,0 +1,71 @@
+{
+  "task_id": "LANE-LAUNCHIO",
+  "status": "DONE",
+  "changed_files": [
+    "crates/dft-cli/src/run.rs",
+    "scripts/lane_launchio_parse.py",
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/lanes/LAUNCHIO/profile-request.md",
+    "docs/performance/lanes/LAUNCHIO/profile_dev08.py",
+    "docs/performance/lanes/LAUNCHIO/verify_cli.py",
+    "docs/performance/lanes/LAUNCHIO/test_parser.py",
+    "docs/performance/lanes/LAUNCHIO/equivalence.json",
+    "docs/performance/lanes/LAUNCHIO/validation.md",
+    "docs/performance/lanes/LAUNCHIO/phase-status.json",
+    "docs/performance/lanes/LAUNCHIO/report.json"
+  ],
+  "design_choices": [
+    "Lifecycle status PROFILE_REQUEST (phase-status.json); Phase 0 deliverables only.",
+    "Reuse default-off PHASE_PROFILE and existing lifecycle timers; add rank-local I/O sizes and subspans without new collectives or numerical changes.",
+    "Defer all diagnosis-driven candidate design and optimization until the master relays dev08 profiles."
+  ],
+  "commands": [
+    {
+      "command": "TMPDIR=$PWD/target/scratch cargo build --offline --release -p dft-cli",
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR_990=$PWD/target/scratch CHECK_NICE=0 scripts/check.sh fast dft-cli",
+      "exit_code": 1
+    },
+    {
+      "command": "CHECK_SCCACHE=0 TMPDIR_990=$PWD/target/scratch CHECK_NICE=0 scripts/check.sh fast dft-cli",
+      "exit_code": 1
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/LAUNCHIO/verify_cli.py --baseline target/scratch/lane-launchio/baseline-dft-cli --candidate target/release/dft-cli --upf ../pseudo/Si.pz-vbc.UPF --output target/scratch/lane-launchio/equivalence-complete",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/LAUNCHIO/test_parser.py target/scratch/lane-launchio/equivalence-complete/gamma-on",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py ReadmeIsCurrent.test_readme_validation_block_matches_the_evidence ReadmeIsCurrent.test_figures_match_the_evidence_and_all_runs_pass",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo fmt --check -p dft-cli",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "20 executions over 4 inputs: energy delta 0 Ha; density, metadata and scientific history bit-identical.",
+    "8 CLI parser smoke checks; 5 parser tests passed.",
+    "Fast gate: build/fmt/clippy PASS; 132 tests passed, 3 known repository-TMPDIR cache failures, 40 ignored."
+  ],
+  "reference_comparison": "Unmodified HEAD release executable versus candidate default/off/environment-on/input-on, pure Rust T=1; no QE or dev08 execution and no Mac performance inference.",
+  "limitations": [
+    "Full fast gate exits 1 for the known cache tests. Initial sccache and ps telemetry are sandbox-denied; sccache disabled for the completed gate.",
+    "A preliminary 20%-elongated case failed convergence in the base binary (exit 3); final anisotropic case is 3%.",
+    "Real MPI/MKL, resource sidecars and Linux launcher execution require the master dev08 relay. Existing preflight internals, allocator counts and per-map glue call counts remain outside instrumentation.",
+    "No session/dashboard or README evidence changes outside ownership; existing README generated evidence remains current.",
+    "Report schema has no PROFILE_REQUEST enum; DONE denotes Phase 0 completion only. Lifecycle status is recorded separately."
+  ],
+  "open_questions": [],
+  "commit": "Uncommitted; master review and commit required."
+}

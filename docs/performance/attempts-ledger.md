@@ -2409,3 +2409,27 @@ Exact dev08 commands, field semantics, limits and correctness reproducers:
 [report.json](lanes/NONLOCAL/report.json). Collection is qualified for one
 worker per rank / one core; averages are per-bucket bounds, not event traces.
 Stop at PROFILE_REQUEST until the master relays the dev08 profile.
+
+## LANE-NONLOCAL Phase 2 — recommend closing (2026-11-20)
+
+Analysis only, no implementation or default change. Relayed by the user:
+dev08 `bad02ee`, Si64 np8 lane 0.7825 s / wall 9.6702 s (8.09%); repeats
+0.7825/0.8125/0.7486 s, spread 8.5%, timed/counts 24 work keys identical.
+Projection 10.43 GFLOP / 0.3054 s = 34.15 GFLOP/s; back 7.48 GFLOP /
+0.2681 s = 27.90 GFLOP/s. At supplied 64–108 GFLOP/s reference, combined
+theoretical headroom is 0.294–0.408 s, not a measured removable overhead.
+Logical bytes/STREAM (12.97 GB/s) gives 0.0524/0.0413 s reference times.
+Existing real-Gamma 256-panel DGEMMs have no per-call complex conversion.
+
+Assessed same-shape direct-output/add fusion (about 0.050 s optimistic
+bandwidth-scale estimate at modeled P=256), coupling elimination (entire
+stage only 0.0474 s), and persistent packing (unattributed, no supported
+>=0.15 s expectation). Reduction is 0.1178 s with 66.6% asymmetry; the user's
+PACKED_REDUCE relay reports no wall gain despite 28% less payload. Do not
+repeat A43/A58b traversal, tile narrowing or column groups. No candidate
+meets this round's evidence-based expected >=0.15 s screen. Recommend closing,
+not claiming optimality. No Mac timing, numerical code edit or new dev08 job.
+Detailed assumptions, ledger/default reconciliation and reopening conditions:
+[diagnose.md](lanes/NONLOCAL/diagnose.md),
+[closing-note.md](lanes/NONLOCAL/closing-note.md). Raw dev08 files/hashes were
+not attached; the relay was not independently reproduced locally.

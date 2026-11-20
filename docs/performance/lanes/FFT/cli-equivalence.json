@@ -1,0 +1,68 @@
+{
+  "task_id": "LANE-FFT",
+  "phase": 0,
+  "purpose": "Mac correctness only; no performance conclusion",
+  "max_energy_difference_ha": 0.0,
+  "energy_ha": -31.321776563202498,
+  "verified": true,
+  "scf_iterations": 11,
+  "density_sha256": "43f2a33d8b0d0a5a90129076353d8e4ad26b2305695c3d834c13b7598fb7342b",
+  "scientific_fields_bit_identical": [
+    "total_energy",
+    "energies",
+    "eigenvalues",
+    "occupations",
+    "band_accuracy",
+    "certified",
+    "verified",
+    "verification",
+    "basis",
+    "cell",
+    "atoms",
+    "bands",
+    "electrons",
+    "cutoff",
+    "input_sha256",
+    "convergence.history"
+  ],
+  "parsed_rows_per_enabled_file": 144,
+  "count_only_equals_timed_counters": true,
+  "timed_clock_populated": true,
+  "work_counts": {
+    "certificate_davidson_iterations": 14,
+    "certificate_h_vectors": 101,
+    "certificate_solves": 2,
+    "davidson_iterations_recorded": 47,
+    "h_vectors_recorded": 430,
+    "second_vector_columns": 0
+  },
+  "results_sha256": {
+    "off": "9d31f9640b4fb963558496cf642892d92db6f13b7a3b26a17c39dab368dca99f",
+    "timed": "01c1efb2c27d2ae7d6d1f360381b7535c7b138b0bd31ad66590995387cab4c3d",
+    "counts": "295d8e2ba647ea09b869e540f09e9dc7175edc8c96f1f7c947c9a00410566338"
+  },
+  "calls_by_bucket": {
+    "between": 0,
+    "coarse": 30170,
+    "fine": 93936,
+    "fine_redo": 0,
+    "init": 0,
+    "materialize": 0,
+    "verify_fail": 10640,
+    "verify_pass": 11296
+  },
+  "binary_sha256": "16aa403b77bc92758be7bbbd06f127630a825f793c6e80dd4220f7bf9a75d8a2",
+  "input_sha256": "9d3da02b83fef46d13ad19e12d31b06857b4ba8988b234a82e3d1ef4a11305ed",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "source_base": "db25e70176bd5d111dab6fe1dc2a110766fcb005",
+  "source_note": "Uncommitted instrumentation changes; hashes below identify compiled numerical/wiring sources.",
+  "source_sha256": {
+    "crates/dft-numerics/src/real.rs": "139831b7ffffe564853d20215ccd5c051fdab268bcf3eb154ab3f6027fa25ec5",
+    "crates/dft-numerics/src/fused_pair_plan.rs": "641f4bf878a0ddc3c7102bda253c7d1f3b69ecde70526ba17d34135115a13f08",
+    "crates/dft-numerics/src/stage_clock.rs": "df883163c892fee8ef2fdc812145f1e44dd75d3f2167d187918be5b9cce950c5",
+    "crates/dft-numerics/src/switches.rs": "998d0f209fb9c350647f46a1b500e1778d042791fe9008525d361654ed31096b",
+    "crates/dft-solvers/src/distributed_fft.rs": "7594212f9604919a6728c0be0ec7f62e28ad7e6b9c5b21b98d07499faed50493",
+    "crates/dft-engine/src/profile.rs": "b574598a23c4f59385b2bdd448e9a05576d0a2aba28694b3d77db3ff6a39da8e",
+    "crates/dft-cli/src/run.rs": "c6d4693d35da733716b4fba12ad2a90666f381cefc17060e3573a449b82096e9"
+  }
+}

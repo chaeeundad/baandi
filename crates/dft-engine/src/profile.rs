@@ -351,17 +351,21 @@ pub const NCOUNT: usize = 20;
 pub struct Accum {
     pub seconds: [f64; NSEC],
     pub counts: [u64; NCOUNT],
+    /// LANE-FFT: separate optional lane accounting; not part of wall closure.
+    pub fft: dft_numerics::real::fft_profile::Snapshot,
 }
 impl Default for Accum {
     fn default() -> Self {
         Self {
             seconds: [0.0; NSEC],
             counts: [0; NCOUNT],
+            fft: dft_numerics::real::fft_profile::Snapshot::default(),
         }
     }
 }
 impl Accum {
     fn add(&mut self, other: &Accum) {
+        self.fft.add(other.fft);
         for (a, b) in self.seconds.iter_mut().zip(&other.seconds) {
             *a += b;
         }
@@ -373,6 +377,7 @@ impl Accum {
     /// stages, operator counts. Lazy materializations are returned separately
     /// (they belong to the `materialize` bucket wherever they happen).
     fn add_delta(&mut self, d: &Snapshot) -> f64 {
+        self.fft.add(d.fft);
         let ns = |i: usize| d.nanos[i] as f64 * 1e-9;
         // Distributed solver stages (STAGES order: reduced_gram, reduced_eigen,
         // rotate, residual, orthonormalize, apply_total, apply_operator,
@@ -776,13 +781,23 @@ pub fn gather<C: Collective + ?Sized>(
     comm: &C,
     mine: &RankProfile,
 ) -> Result<Vec<RankProfile>, String> {
-    let per = 2 + BUCKETS * (NSEC + NCOUNT);
+    let fft_words = if fft_lane_enabled() {
+        FFT_WIRE_WORDS
+    } else {
+        0
+    };
+    let per = 2 + BUCKETS * (NSEC + NCOUNT + fft_words);
     let mut local = Vec::with_capacity(per);
     local.push(mine.rank as f64);
     local.push(mine.wall);
     for b in &mine.buckets {
         local.extend_from_slice(&b.seconds);
         local.extend(b.counts.iter().map(|&c| c as f64));
+        if fft_words != 0 {
+            for &v in b.fft.0.iter().flatten() {
+                local.extend([u64::from(v as u32) as f64, (v >> 32) as f64]);
+            }
+        }
     }
     let ranks = comm.size();
     let mut all = vec![0.0; per * ranks];
@@ -804,6 +819,12 @@ pub fn gather<C: Collective + ?Sized>(
                     *k = *v as u64;
                 }
                 at += NCOUNT;
+                if fft_words != 0 {
+                    for v in b.fft.0.iter_mut().flatten() {
+                        *v = c[at] as u64 | ((c[at + 1] as u64) << 32);
+                        at += 2;
+                    }
+                }
             }
             p
         })
@@ -847,6 +868,19 @@ fn derive_other(a: &mut Accum) {
     a.seconds[S_OTHER_ENGINE] = other - in_solver;
 }
 
+// LANE-FFT Phase 0: independent section to avoid changes to shared slot lists.
+const FFT_WIRE_WORDS: usize =
+    2 * dft_numerics::real::fft_profile::STAGES * dft_numerics::real::fft_profile::METRICS;
+fn fft_lane_enabled() -> bool {
+    dft_numerics::switches::RunConfig::current().on(dft_numerics::switches::Id::FFT_PROFILE)
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct FftRankProfile {
+    pub rank: usize,
+    pub maps: [u64; BUCKETS],
+    pub buckets: [dft_numerics::real::fft_profile::Snapshot; BUCKETS],
+}
+
 /// One report entry: (label, maximum over ranks, minimum over ranks).
 pub type Entry = (&'static str, f64, f64);
 
@@ -858,6 +892,7 @@ pub struct Report {
     pub min: [Accum; BUCKETS],
     /// RUN-REPORT: each rank's exclusive tree closed on that rank alone.
     pub per_rank: Vec<RankClosure>,
+    pub fft_ranks: Vec<FftRankProfile>,
 }
 
 /// One rank's closed exclusive tree: the sum of its own bucket walls
@@ -935,6 +970,18 @@ impl Report {
             max,
             min,
             per_rank,
+            fft_ranks: if fft_lane_enabled() {
+                profiles
+                    .iter()
+                    .map(|p| FftRankProfile {
+                        rank: p.rank,
+                        maps: std::array::from_fn(|b| p.buckets[b].counts[C_MAPS]),
+                        buckets: std::array::from_fn(|b| p.buckets[b].fft),
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            },
         }
     }
     /// Sum of the bucket walls (maximum over ranks per bucket). Legacy figure:
@@ -1282,6 +1329,42 @@ mod closure_tests {
             let c = Report::from_ranks(&all).closure().unwrap();
             assert_eq!(c.critical_rank, 2);
             assert_eq!(c.residual_min, Some(0.5));
+        }
+    }
+}
+
+// LANE-FFT wire-format regression: real MPI uses the same final allgatherv.
+#[cfg(test)]
+mod fft_lane_tests {
+    use super::*;
+    #[test]
+    fn lane_fft_gather_keeps_rank_buckets_and_u64_bits() {
+        for enabled in [false, true] {
+            dft_mpi::simulate(3, |comm| {
+                let cfg = dft_numerics::switches::RunConfig::from_pairs(&[
+                    ("fft_profile", if enabled { "on" } else { "off" }),
+                    ("phase_profile", "on"),
+                ])
+                .unwrap();
+                let _scope = cfg.enter();
+                let mut mine = RankProfile {
+                    rank: comm.rank(),
+                    buckets: [Accum::default(); BUCKETS],
+                    wall: 0.,
+                };
+                mine.buckets[2].counts[C_MAPS] = 11 + comm.rank() as u64;
+                if enabled {
+                    mine.buckets[2].fft.0[8] = [1, 2, 3, (1_u64 << 60) + comm.rank() as u64, 5];
+                }
+                let all = gather(comm, &mine).unwrap();
+                assert_eq!(all[comm.rank()], mine);
+                let report = Report::from_ranks(&all);
+                assert_eq!(report.fft_ranks.len(), if enabled { 3 } else { 0 });
+                for r in &report.fft_ranks {
+                    assert_eq!(r.maps[2], 11 + r.rank as u64);
+                    assert_eq!(r.buckets[2].0[8][3], (1_u64 << 60) + r.rank as u64);
+                }
+            });
         }
     }
 }

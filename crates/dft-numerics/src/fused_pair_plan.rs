@@ -210,6 +210,7 @@ pub struct PairFusedPlan<L: PairLanes = RustLanes> {
     middle: Vec<C>,
     slab: Vec<C>,
     lanes: L,
+    profile: crate::real::fft_profile::Probe,
 }
 impl PairFusedPlan<RustLanes> {
     pub fn new(shape: [usize; 3], indices: &[[usize; 3]]) -> Result<Self, FftError> {
@@ -266,6 +267,7 @@ impl<L: PairLanes> PairFusedPlan<L> {
             planes,
             occupied,
             lanes,
+            profile: crate::real::fft_profile::Probe::new(n),
         })
     }
     fn validate(&self, c: &[C], grid: usize) -> Result<(), FftError> {
@@ -276,31 +278,65 @@ impl<L: PairLanes> PairFusedPlan<L> {
         }
     }
     fn inverse_sticks(&mut self, c: &[C]) -> Result<(), FftError> {
+        let mark = self.profile.start();
         self.sticks.fill(C::default());
         for (&i, &v) in self.scatter.iter().zip(c) {
             self.sticks[i] = v;
         }
+        self.profile.finish(
+            mark,
+            0,
+            self.scatter.len(),
+            16 * self.sticks.len() + 32 * self.scatter.len(),
+            None,
+        );
         if !self.sticks.is_empty() {
+            let mark = self.profile.start();
             self.lanes.run(0, true, &mut self.sticks)?;
+            self.profile
+                .finish(mark, 1, self.sticks.len(), 32 * self.sticks.len(), Some(0));
         }
         Ok(())
     }
     fn inverse_slab(&mut self, x: usize) -> Result<(), FftError> {
         let [nx, ny, nz] = self.n;
+        let mark = self.profile.start();
         self.middle.fill(C::default());
         for &(i, slot) in &self.occupied {
             self.middle[i] = self.sticks[slot * nx + x];
         }
+        self.profile.finish(
+            mark,
+            4,
+            self.occupied.len(),
+            16 * self.middle.len() + 32 * self.occupied.len(),
+            None,
+        );
         if !self.middle.is_empty() {
+            let mark = self.profile.start();
             self.lanes.run(1, true, &mut self.middle)?;
+            self.profile
+                .finish(mark, 5, self.middle.len(), 32 * self.middle.len(), Some(1));
         }
+        let mark = self.profile.start();
         self.slab.fill(C::default());
         for (k, &z) in self.planes.iter().enumerate() {
             for y in 0..ny {
                 self.slab[y * nz + z] = self.middle[k * ny + y];
             }
         }
-        self.lanes.run(2, true, &mut self.slab)
+        self.profile.finish(
+            mark,
+            6,
+            self.middle.len(),
+            16 * self.slab.len() + 32 * self.middle.len(),
+            None,
+        );
+        let mark = self.profile.start();
+        let result = self.lanes.run(2, true, &mut self.slab);
+        self.profile
+            .finish(mark, 7, self.slab.len(), 32 * self.slab.len(), Some(2));
+        result
     }
     fn grid_start(&self, x: usize, y: usize) -> usize {
         if self.first == 0 {
@@ -311,18 +347,35 @@ impl<L: PairLanes> PairFusedPlan<L> {
     }
     fn forward_slab(&mut self, x: usize) -> Result<(), FftError> {
         let [nx, ny, nz] = self.n;
+        let mark = self.profile.start();
         self.lanes.run(2, false, &mut self.slab)?;
+        self.profile
+            .finish(mark, 9, self.slab.len(), 32 * self.slab.len(), Some(2));
+        let mark = self.profile.start();
         for (k, &z) in self.planes.iter().enumerate() {
             for y in 0..ny {
                 self.middle[k * ny + y] = self.slab[y * nz + z];
             }
         }
+        self.profile
+            .finish(mark, 10, self.middle.len(), 32 * self.middle.len(), None);
         if !self.middle.is_empty() {
+            let mark = self.profile.start();
             self.lanes.run(1, false, &mut self.middle)?;
+            self.profile
+                .finish(mark, 11, self.middle.len(), 32 * self.middle.len(), Some(1));
         }
+        let mark = self.profile.start();
         for &(i, slot) in &self.occupied {
             self.sticks[slot * nx + x] = self.middle[i];
         }
+        self.profile.finish(
+            mark,
+            12,
+            self.occupied.len(),
+            32 * self.occupied.len(),
+            None,
+        );
         Ok(())
     }
     /// The single body of `apply_local`; `NoLaps` makes the laps vanish. Laps
@@ -335,6 +388,7 @@ impl<L: PairLanes> PairFusedPlan<L> {
         laps: &mut K,
     ) -> Result<(), FftError> {
         use crate::work_timers::Phase;
+        let _profile_scope = self.profile.apply_scope();
         self.validate(c, potential.len())?;
         if out.len() != c.len() {
             return Err(FftError::IncompatibleArray);
@@ -344,6 +398,7 @@ impl<L: PairLanes> PairFusedPlan<L> {
         for x in 0..self.n[0] {
             self.inverse_slab(x)?;
             laps.lap(Phase::Inverse);
+            let mark = self.profile.start();
             for y in 0..self.n[1] {
                 let start = self.grid_start(x, y);
                 for (a, &v) in self.slab[y * self.n[2]..(y + 1) * self.n[2]]
@@ -353,16 +408,24 @@ impl<L: PairLanes> PairFusedPlan<L> {
                     *a *= v;
                 }
             }
+            self.profile
+                .finish(mark, 8, self.slab.len(), 40 * self.slab.len(), None);
             laps.lap(Phase::Potential);
             self.forward_slab(x)?;
             laps.lap(Phase::Forward);
         }
         if !self.sticks.is_empty() {
+            let mark = self.profile.start();
             self.lanes.run(0, false, &mut self.sticks)?;
+            self.profile
+                .finish(mark, 15, self.sticks.len(), 32 * self.sticks.len(), Some(0));
         }
+        let mark = self.profile.start();
         for (o, &i) in out.iter_mut().zip(&self.scatter) {
             *o = self.sticks[i] / self.size as f64;
         }
+        self.profile
+            .finish(mark, 16, self.scatter.len(), 32 * self.scatter.len(), None);
         laps.lap(Phase::Forward);
         Ok(())
     }
@@ -420,6 +483,7 @@ impl<L: PairLanes> crate::fused_pair::ForwardProduct for PairFusedPlan<L> {
         potential: &[f64],
         out: &mut [C],
     ) -> Result<(), FftError> {
+        let _profile_scope = self.profile.apply_scope();
         if out.len() != self.scatter.len()
             || grid.len() != self.size
             || potential.len() != self.size
@@ -428,6 +492,7 @@ impl<L: PairLanes> crate::fused_pair::ForwardProduct for PairFusedPlan<L> {
         }
         let nz = self.n[2];
         for x in 0..self.n[0] {
+            let mark = self.profile.start();
             for y in 0..self.n[1] {
                 let start = self.grid_start(x, y);
                 for ((a, &g), &v) in self.slab[y * nz..(y + 1) * nz]
@@ -438,14 +503,22 @@ impl<L: PairLanes> crate::fused_pair::ForwardProduct for PairFusedPlan<L> {
                     *a = g * v;
                 }
             }
+            self.profile
+                .finish(mark, 8, self.slab.len(), 40 * self.slab.len(), None);
             self.forward_slab(x)?;
         }
         if !self.sticks.is_empty() {
+            let mark = self.profile.start();
             self.lanes.run(0, false, &mut self.sticks)?;
+            self.profile
+                .finish(mark, 15, self.sticks.len(), 32 * self.sticks.len(), Some(0));
         }
+        let mark = self.profile.start();
         for (o, &i) in out.iter_mut().zip(&self.scatter) {
             *o = self.sticks[i] / self.size as f64;
         }
+        self.profile
+            .finish(mark, 16, self.scatter.len(), 32 * self.scatter.len(), None);
         Ok(())
     }
 }
@@ -495,6 +568,60 @@ impl<L: PairLanes> PairDensityOperator for PairFusedPlan<L> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lane_fft_serial_bits_and_density_exclusion() {
+        use crate::fused_pair::ForwardProduct;
+        use crate::real::fft_profile;
+        use crate::switches::RunConfig;
+        for shape in [[4, 4, 4], [3, 5, 7], [2, 3, 12]] {
+            let indices = vec![[0, 0, 0], [1, 0, 0], [0, 1, 1]];
+            let c = vec![C::new(0.3, -0.2); indices.len()];
+            let total = shape.iter().product();
+            let v: Vec<_> = (0..total).map(|i| (i as f64).cos()).collect();
+            let grid = vec![C::new(-0.2, 0.7); total];
+            let mut reference = Vec::new();
+            for arm in ["off", "on"] {
+                let cfg = RunConfig::from_pairs(&[
+                    ("fft_profile", arm),
+                    ("phase_profile", "on"),
+                    ("stage_timers", "off"),
+                ])
+                .unwrap();
+                let _scope = cfg.enter();
+                let mut plan = PairFusedPlan::new(shape, &indices).unwrap();
+                let before = fft_profile::snapshot();
+                let mut out = c.clone();
+                plan.apply_local(&c, &v, &mut out).unwrap();
+                let mut kept = c.clone();
+                plan.forward_product(&grid, &v, &mut kept).unwrap();
+                let delta = fft_profile::snapshot().since(before);
+                let bits: Vec<_> = out
+                    .iter()
+                    .chain(&kept)
+                    .map(|z| (z.re.to_bits(), z.im.to_bits()))
+                    .collect();
+                if arm == "off" {
+                    reference = bits;
+                    assert_eq!(delta, fft_profile::Snapshot::default());
+                } else {
+                    assert_eq!(bits, reference);
+                    assert_eq!(delta.0[8][2], 2 * total as u64);
+                    assert_eq!(delta.0[8][3], 80 * total as u64);
+                    assert!(delta.0.iter().all(|v| v[0] == 0));
+                }
+                let before = fft_profile::snapshot();
+                let mut density = vec![0.; total];
+                plan.accumulate_density(&c, 1., 10., &mut density).unwrap();
+                assert_eq!(
+                    fft_profile::snapshot(),
+                    before,
+                    "density is outside the apply scope"
+                );
+            }
+        }
+    }
+
     #[test]
     fn retained_storage() {
         let mut p =

@@ -423,6 +423,8 @@ table! {
     PSEUDO_DIR: Kind::Path, "platform cache", "absolute path",
         "pseudopotential cache directory";
     // Measurement infrastructure (ticket BREAKTHROUGH-0-INSTRUMENT); all default off, results unchanged.
+    FFT_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "LANE-FFT Phase 0: detailed FFT stages and logical traffic under PHASE_PROFILE; clocks follow STAGE_TIMERS; no numerical change";
     PHASE_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "exclusive nested phase profile per rank (init / coarse SCF / fine ordinary SCF / verification pass and fail / materialization; map phases and solve stages inside; maximum over ranks and imbalance); clocks follow BAANDI_STAGE_TIMERS (off: counts only); printed by dft-cli (results.json phase_profile, parallel.phases), m2_entry_cost and davidson_bench";
     M2_LIGHT_STATE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
@@ -487,7 +489,7 @@ impl Table {
 pub fn table_of(id: Id) -> Table {
     use Id::*;
     match id {
-        PHASE_PROFILE | INIT_PROFILE | STAGE_TIMERS | DAVIDSON_STAGES | DAVIDSON_PROFILE | SNAPSHOT_DIR
+        FFT_PROFILE | PHASE_PROFILE | INIT_PROFILE | STAGE_TIMERS | DAVIDSON_STAGES | DAVIDSON_PROFILE | SNAPSHOT_DIR
         | PHASE_WAIT | FIRST_BLOCK | DGEMM_TIMERS => Table::Profile,
         // Overrides of input-file values (`scf.cutoff_ladder`, the relaxation
         // extrapolation) and the pseudopotential cache location.

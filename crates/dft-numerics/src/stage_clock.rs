@@ -120,12 +120,14 @@ pub mod local {
     pub struct Snapshot {
         pub nanos: [u64; SLOTS],
         pub calls: [u64; SLOTS],
+        pub fft: crate::real::fft_profile::Snapshot,
     }
     impl Default for Snapshot {
         fn default() -> Self {
             Self {
                 nanos: [0; SLOTS],
                 calls: [0; SLOTS],
+                fft: crate::real::fft_profile::Snapshot::default(),
             }
         }
     }
@@ -137,12 +139,16 @@ pub mod local {
                 out.nanos[i] = self.nanos[i].wrapping_sub(earlier.nanos[i]);
                 out.calls[i] = self.calls[i].wrapping_sub(earlier.calls[i]);
             }
+            out.fft = self.fft.since(earlier.fft);
             out
         }
     }
     /// The calling thread's cumulative counters.
     pub fn snapshot() -> Snapshot {
         let mut out = Snapshot::default();
+        if crate::switches::RunConfig::current().on(crate::switches::Id::FFT_PROFILE) {
+            out.fft = crate::real::fft_profile::snapshot();
+        }
         NANOS.with(|n| {
             for (o, c) in out.nanos.iter_mut().zip(n.iter()) {
                 *o = c.get();

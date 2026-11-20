@@ -194,6 +194,7 @@ pub struct DistributedPairFft {
     /// 1D kernels: rustfft (default) or MKL DFTI batch lanes (`BAANDI_M2_FFT=mkl`
     /// on MKL builds). Lane buffers: local sticks, middle batch, plane slab.
     lanes: BackendLanes,
+    profile: dft_numerics::real::fft_profile::Probe,
 }
 
 impl DistributedPairFft {
@@ -290,6 +291,7 @@ impl DistributedPairFft {
             send: vec![0.; 2 * block * ranks],
             recv: vec![0.; 2 * block * ranks],
             lanes,
+            profile: dft_numerics::real::fft_profile::Probe::new(n),
         })
     }
 
@@ -390,13 +392,25 @@ impl DistributedPairFft {
         self.reserve_batch(np);
         let (nx, mp) = (self.n[0], self.max_planes);
         for t in 0..np {
+            let mark = self.profile.start();
             self.sticks.fill(C::default());
             for (&i, &v) in self.scatter.iter().zip(&c[t * ll..(t + 1) * ll]) {
                 self.sticks[i] = v;
             }
+            self.profile.finish(
+                mark,
+                0,
+                self.scatter.len(),
+                16 * self.sticks.len() + 32 * self.scatter.len(),
+                None,
+            );
             if !self.sticks.is_empty() {
+                let mark = self.profile.start();
                 self.lanes.run(0, true, &mut self.sticks)?;
+                self.profile
+                    .finish(mark, 1, self.sticks.len(), 32 * self.sticks.len(), Some(0));
             }
+            let mark = self.profile.start();
             for q in 0..self.ranks {
                 let (x0, x1) = (self.plane_starts[q], self.plane_starts[q + 1]);
                 let qb = self.base(q, t, np);
@@ -409,8 +423,21 @@ impl DistributedPairFft {
                     }
                 }
             }
+            self.profile
+                .finish(mark, 2, self.sticks.len(), 32 * self.sticks.len(), None);
         }
-        self.all_to_all(comm, np)
+        let mark = self.profile.start();
+        let result = self.all_to_all(comm, np);
+        if self.block > 0 {
+            self.profile.finish(
+                mark,
+                3,
+                self.block * self.ranks * np,
+                16 * self.block * self.ranks * np,
+                None,
+            );
+        }
+        result
     }
 
     /// Step 2 of G->r for owned plane i: 2D transform; result in `plane()`.
@@ -421,21 +448,43 @@ impl DistributedPairFft {
     /// Step 2 of G->r for vector t of a batch of `np`, owned plane i.
     pub fn to_real_plane_in(&mut self, t: usize, np: usize, i: usize) -> Result<(), DistFftError> {
         let [_, ny, nz] = self.n;
+        let mark = self.profile.start();
         self.middle.fill(C::default());
         for &(m, owner, off) in &self.occupied {
             let k = 2 * ((owner * np + t) * self.block + off + i);
             self.middle[m] = C::new(self.recv[k], self.recv[k + 1]);
         }
+        self.profile.finish(
+            mark,
+            4,
+            self.occupied.len(),
+            16 * self.middle.len() + 32 * self.occupied.len(),
+            None,
+        );
         if !self.middle.is_empty() {
+            let mark = self.profile.start();
             self.lanes.run(1, true, &mut self.middle)?;
+            self.profile
+                .finish(mark, 5, self.middle.len(), 32 * self.middle.len(), Some(1));
         }
+        let mark = self.profile.start();
         self.slab.fill(C::default());
         for (k, &z) in self.planes.iter().enumerate() {
             for y in 0..ny {
                 self.slab[y * nz + z] = self.middle[k * ny + y];
             }
         }
+        self.profile.finish(
+            mark,
+            6,
+            self.middle.len(),
+            16 * self.slab.len() + 32 * self.middle.len(),
+            None,
+        );
+        let mark = self.profile.start();
         self.lanes.run(2, true, &mut self.slab)?;
+        self.profile
+            .finish(mark, 7, self.slab.len(), 32 * self.slab.len(), Some(2));
         Ok(())
     }
 
@@ -452,20 +501,37 @@ impl DistributedPairFft {
         i: usize,
     ) -> Result<(), DistFftError> {
         let [_, ny, nz] = self.n;
+        let mark = self.profile.start();
         self.lanes.run(2, false, &mut self.slab)?;
+        self.profile
+            .finish(mark, 9, self.slab.len(), 32 * self.slab.len(), Some(2));
+        let mark = self.profile.start();
         for (k, &z) in self.planes.iter().enumerate() {
             for y in 0..ny {
                 self.middle[k * ny + y] = self.slab[y * nz + z];
             }
         }
+        self.profile
+            .finish(mark, 10, self.middle.len(), 32 * self.middle.len(), None);
         if !self.middle.is_empty() {
+            let mark = self.profile.start();
             self.lanes.run(1, false, &mut self.middle)?;
+            self.profile
+                .finish(mark, 11, self.middle.len(), 32 * self.middle.len(), Some(1));
         }
+        let mark = self.profile.start();
         for &(m, owner, off) in &self.occupied {
             let k = 2 * ((owner * np + t) * self.block + off + i);
             self.send[k] = self.middle[m].re;
             self.send[k + 1] = self.middle[m].im;
         }
+        self.profile.finish(
+            mark,
+            12,
+            self.occupied.len(),
+            32 * self.occupied.len(),
+            None,
+        );
         Ok(())
     }
 
@@ -490,9 +556,20 @@ impl DistributedPairFft {
         if out.len() != ll * np || self.send.len() < 2 * self.block * self.ranks * np {
             return Err(FftError::IncompatibleArray.into());
         }
+        let mark = self.profile.start();
         self.all_to_all(comm, np)?;
+        if self.block > 0 {
+            self.profile.finish(
+                mark,
+                13,
+                self.block * self.ranks * np,
+                16 * self.block * self.ranks * np,
+                None,
+            );
+        }
         let (nx, mp) = (self.n[0], self.max_planes);
         for t in 0..np {
+            let mark = self.profile.start();
             for q in 0..self.ranks {
                 let x0 = self.plane_starts[q];
                 let qb = self.base(q, t, np);
@@ -504,12 +581,20 @@ impl DistributedPairFft {
                     }
                 }
             }
+            self.profile
+                .finish(mark, 14, self.sticks.len(), 32 * self.sticks.len(), None);
             if !self.sticks.is_empty() {
+                let mark = self.profile.start();
                 self.lanes.run(0, false, &mut self.sticks)?;
+                self.profile
+                    .finish(mark, 15, self.sticks.len(), 32 * self.sticks.len(), Some(0));
             }
+            let mark = self.profile.start();
             for (o, &i) in out[t * ll..(t + 1) * ll].iter_mut().zip(&self.scatter) {
                 *o = self.sticks[i] / self.total as f64;
             }
+            self.profile
+                .finish(mark, 16, self.scatter.len(), 32 * self.scatter.len(), None);
         }
         Ok(())
     }
@@ -523,6 +608,7 @@ impl DistributedPairFft {
         potential: &[f64],
         out: &mut [C],
     ) -> Result<(), DistFftError> {
+        let _profile_scope = self.profile.apply_scope();
         if potential.len() != self.total {
             return Err(FftError::IncompatibleArray.into());
         }
@@ -541,6 +627,7 @@ impl DistributedPairFft {
         potential: &[f64],
         np: usize,
     ) -> Result<(), DistFftError> {
+        let _profile_scope = self.profile.apply_scope();
         if potential.len() != self.total {
             return Err(FftError::IncompatibleArray.into());
         }
@@ -562,6 +649,7 @@ impl DistributedPairFft {
 
     /// Multiply the current slab (owned plane i) by `potential` (full row-major grid).
     fn multiply_slab(&mut self, potential: &[f64], i: usize) {
+        let mark = self.profile.start();
         let (ny, nz) = (self.n[1], self.n[2]);
         for y in 0..ny {
             let start = self.grid_start(i, y);
@@ -572,6 +660,8 @@ impl DistributedPairFft {
                 *a *= v;
             }
         }
+        self.profile
+            .finish(mark, 8, self.slab.len(), 40 * self.slab.len(), None);
     }
 
     /// MPI-KEPT-START: `apply_local_batch` for `np` vectors of which the first
@@ -594,6 +684,7 @@ impl DistributedPairFft {
         kept: usize,
         planes: &[C],
     ) -> Result<(), DistFftError> {
+        let _profile_scope = self.profile.apply_scope();
         let ll = self.scatter.len();
         let pp = self.plane_points();
         if potential.len() != self.total
@@ -612,8 +703,10 @@ impl DistributedPairFft {
         let line = self.n[1] * self.n[2];
         for t in 0..kept {
             for i in 0..self.plane_count() {
+                let mark = self.profile.start();
                 self.slab
                     .copy_from_slice(&planes[t * pp + i * line..t * pp + (i + 1) * line]);
+                self.profile.finish(mark, 17, line, 32 * line, None);
                 self.multiply_slab(potential, i);
                 self.to_reciprocal_plane_in(t, np, i)?;
             }
@@ -681,6 +774,60 @@ mod tests {
     use dft_numerics::fused::FusedOperator;
     use dft_numerics::{Fft3d, FftPlan3d, PairFusedPlan};
     use ndarray::Array3;
+
+    #[test]
+    fn lane_fft_instrumentation_preserves_bits_and_counts() {
+        use dft_numerics::real::fft_profile;
+        use dft_numerics::switches::RunConfig;
+        let mut fixtures = cases();
+        fixtures.push(([2, 3, 4], vec![]));
+        for (shape, idx) in fixtures {
+            let pot: Vec<_> = (0..shape.iter().product())
+                .map(|i| (i as f64).cos())
+                .collect();
+            for ranks in [1, 2, 3, 8] {
+                simulate(ranks, |comm| {
+                    let mut reference = Vec::new();
+                    for (arm, timers) in [("off", "off"), ("on", "off"), ("on", "on")] {
+                        let cfg = RunConfig::from_pairs(&[
+                            ("fft_profile", arm),
+                            ("phase_profile", "on"),
+                            ("stage_timers", timers),
+                        ])
+                        .unwrap();
+                        let _scope = cfg.enter();
+                        let mut p =
+                            DistributedPairFft::new(shape, &idx, comm.rank(), ranks).unwrap();
+                        let np = 3;
+                        let mut data = random_c(p.local_len() * np, 103);
+                        let before = fft_profile::snapshot();
+                        p.apply_local_batch(comm, &mut data, &pot, np).unwrap();
+                        let delta = fft_profile::snapshot().since(before);
+                        if arm == "off" {
+                            assert_eq!(delta, fft_profile::Snapshot::default());
+                            reference = data;
+                        } else {
+                            for (a, b) in data.iter().zip(&reference) {
+                                assert_eq!(
+                                    (a.re.to_bits(), a.im.to_bits()),
+                                    (b.re.to_bits(), b.im.to_bits())
+                                );
+                            }
+                            assert_eq!(delta.0[0][1], np as u64);
+                            assert_eq!(delta.0[3][1], u64::from(p.block > 0));
+                            assert_eq!(delta.0[13][1], u64::from(p.block > 0));
+                            assert_eq!(delta.0[8][1], (np * p.plane_count()) as u64);
+                            assert_eq!(delta.0[8][2], (np * p.plane_points()) as u64);
+                            assert_eq!(delta.0[8][3], (40 * np * p.plane_points()) as u64);
+                            if timers == "off" {
+                                assert!(delta.0.iter().all(|row| row[0] == 0));
+                            }
+                        }
+                    }
+                });
+            }
+        }
+    }
 
     fn lcg(s: &mut u64) -> f64 {
         *s = s

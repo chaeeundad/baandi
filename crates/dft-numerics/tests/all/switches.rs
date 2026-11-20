@@ -279,3 +279,15 @@ fn legacy_defaults_are_unchanged() {
     );
     assert_eq!(TABLE.len(), 118);
 }
+
+#[test]
+fn first_verification_schedule_is_opt_in() {
+    let switch = switches::switch(Id::VERIFY_SCHEDULE);
+    assert_eq!(switches::resolve(switch, None).0, Value::Choice("on"));
+    for mode in ["first", "first-trace"] {
+        assert_eq!(
+            switches::resolve(switch, Some(std::ffi::OsStr::new(mode))).0,
+            Value::Choice(mode)
+        );
+    }
+}

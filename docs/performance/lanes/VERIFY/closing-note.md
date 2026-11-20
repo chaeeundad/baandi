@@ -1,3 +1,7 @@
+> Reopened by the orchestrator: attempt timing is now allowed. The closure
+> below is historical and superseded for this scope by [first-schedule.md](first-schedule.md).
+> Judgment and certificate thresholds remain unchanged.
+
 # LANE-VERIFY Phase 2 closing note
 
 Status: **CLOSED — no qualifying new lever established**, 2026-11-20.

@@ -859,3 +859,125 @@ fn verification_lane_profile_identity() {
     }
     crate::profile::force(None);
 }
+
+/// First-attempt scheduling never certifies, is bounded by two ordinary maps,
+/// and reconstructs its anchor from history rather than mutable journal state.
+#[test]
+fn verification_schedule_first_contraction_boundaries() {
+    use super::session::first_verification_prediction as predict;
+    let pp = super::pool_fixture::potential(2.0, 1.0, true, 401);
+    let r = problem(&pp, Some(5e-9), Verification::FixedPoint)
+        .unwrap()
+        .run()
+        .unwrap();
+    let mut h = vec![r.history[0].clone(); 4];
+    for (i, row) in h.iter_mut().enumerate() {
+        row.iteration = i + 1;
+        row.standard_error_ha = Some([8e-9, 2e-9, 1e-9, 0.5e-9][i]);
+        row.density_residual = [4.0, 3.0, 2.0, 1.0][i];
+        row.mixer_reset = false;
+        row.mixing_raw_recovery = false;
+        row.mixing_history_used = Some(3);
+    }
+    // The geometric tail at q=.5625 exceeds the budget for two maps.
+    assert_eq!(predict(&h[..2], 5e-9).extra_maps, 2);
+    h[1].standard_error_ha = Some(0.8e-9);
+    h[1].density_residual = 1.0;
+    assert_eq!(predict(&h[..2], 5e-9).extra_maps, 1);
+    h[1].density_residual = 3.8; // q=.9025: capped at two maps.
+    assert_eq!(predict(&h[..2], 5e-9).extra_maps, 2);
+    assert_eq!(predict(&h[..3], 5e-9).extra_maps, 1);
+    assert_eq!(predict(&h, 5e-9).extra_maps, 0);
+    let mut report = VerificationReport::default();
+    assert!(super::session::schedule_first_attempt(
+        &h[..2],
+        &mut report,
+        "first",
+        10,
+        true,
+        5e-9
+    ));
+    assert!(!report.passed());
+    assert!(report.attempts.is_empty());
+    assert_eq!(report.schedule.as_ref().unwrap().records[0].passed, None);
+    assert!(!super::session::schedule_first_attempt(
+        &h[..2],
+        &mut report,
+        "first",
+        2,
+        true,
+        5e-9
+    ));
+    assert!(!super::session::schedule_first_attempt(
+        &h[..2],
+        &mut report,
+        "first-trace",
+        10,
+        true,
+        5e-9
+    ));
+    assert!(!super::session::schedule_first_attempt(
+        &h[..2],
+        &mut report,
+        "first",
+        10,
+        false,
+        5e-9
+    ));
+    h[1].mixer_reset = true;
+    assert_eq!(predict(&h[..2], 5e-9).extra_maps, 0);
+    h[1].mixer_reset = false;
+    h[0].mixing_history_used = None;
+    assert_eq!(predict(&h[..2], 5e-9).extra_maps, 0);
+    h[0].mixing_history_used = Some(3);
+    h[1].density_residual = f64::NAN;
+    assert_eq!(predict(&h[..2], 5e-9).extra_maps, 0);
+    assert_eq!(predict(&[], 5e-9).extra_maps, 0);
+    assert_eq!(predict(&h, f64::NAN).extra_maps, 0);
+    // A later rebound/re-crossing cannot restart the two-map horizon.
+    h[1].density_residual = 3.8;
+    h[2].standard_error_ha = Some(9e-9);
+    assert_eq!(predict(&h, 5e-9).extra_maps, 0);
+}
+
+/// Real M2 arithmetic on simulated ranks, not an MPI performance measurement.
+/// cargo test --release -p dft-engine --lib verification_schedule_first_ranks -- --ignored --test-threads=1
+#[test]
+#[ignore = "release-only distributed certificate/rank consistency"]
+fn verification_schedule_first_ranks() {
+    let run = || {
+        let pp = super::pool_fixture::potential(2.0, 1.0, true, 401);
+        let mut p = problem(&pp, Some(1e-10), Verification::FixedPoint).unwrap();
+        p.sw.verify_schedule = "first";
+        let r = p.run().unwrap();
+        let report = r.verification.as_ref().unwrap();
+        assert!(report.passed());
+        assert!(report.attempts.last().unwrap().coulomb_error_ha < 1e-10);
+        (
+            r.total_hartree(),
+            r.density.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            report
+                .attempts
+                .iter()
+                .map(|a| (a.iteration, a.passed, a.coulomb_error_ha.to_bits()))
+                .collect::<Vec<_>>(),
+        )
+    };
+    let serial = run();
+    for ranks in [2, 3] {
+        let results = dft_mpi::simulate(ranks, |comm: &dft_mpi::SimRank| {
+            crate::parallel::set_m2_override(Some(true));
+            let shared: std::sync::Arc<dyn dft_mpi::Collective + Send + Sync> =
+                std::sync::Arc::new(comm.clone());
+            crate::parallel::set_communicator(Some(shared));
+            let r = run();
+            crate::parallel::set_communicator(None);
+            crate::parallel::set_m2_override(None);
+            r
+        });
+        for r in &results {
+            assert_eq!(r, &results[0]);
+            assert!((r.0 - serial.0).abs() <= 1e-10);
+        }
+    }
+}

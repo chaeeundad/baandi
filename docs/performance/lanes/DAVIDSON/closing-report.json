@@ -1,0 +1,42 @@
+{
+  "task_id": "LANE-DAVIDSON",
+  "status": "DONE",
+  "changed_files": [
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/lanes/DAVIDSON/diagnosis.md",
+    "docs/performance/lanes/DAVIDSON/dev08-request.md",
+    "docs/performance/lanes/DAVIDSON/phase-status.json",
+    "docs/performance/lanes/DAVIDSON/closing-report.json"
+  ],
+  "design_choices": [
+    "Record DAVIDSON-PACKED-REDUCE-NEUTRAL; no resolved gain or loss, no adoption.",
+    "Recommend closing the current lane: no evidence-supported >=about0.3s candidate within unchanged GEMM shapes and non-volume constraints.",
+    "Reviewed cached reduced solves, existing dsyevd workspace reuse, rejected selective drivers, fixed-cost scopes and delta-potential application inside kept_update.",
+    "Retain all three experimental switches default off; archive active dev08 request; numerical code unchanged."
+  ],
+  "commands": [
+    {
+      "command": "CHECK_SCCACHE=0 TMPDIR_990=\"$PWD/target/scratch\" scripts/check.sh fast dft-solvers",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "Relayed dev08 61822bc: 183 calls unchanged, payload282797568->203221312 B, saving79576256 B (-28.1%), exact mechanism on8/8 ranks.",
+    "A/A mean -0.004163s, floor0.004163s, abs(mean)/SE1.60; A/B mean -0.000172s, abs(mean)/SE0.05,0.04x floor: NEUTRAL.",
+    "Saving0.3s requires30.4% of0.988s EVD,31.2% of0.963s rotate,52.4% of0.573s kept_update.",
+    "Listed outside components sum0.431s; no unsupported interpretation of difference from0.77s cross-code gap.",
+    "Fast gate:147 passed,0 failed,25 ignored; build/test/fmt/clippy PASS."
+  ],
+  "reference_comparison": "Latest BAANDI/QE attribution is orchestrator-relayed Si64 MPI8 only. Component totals, gaps, fine/whole-SCF iteration counts and older profile scopes are not conflated. No new performance measurement.",
+  "limitations": [
+    "No latest joint per-map EVD order histogram supplied;183 calls cannot establish repeated identical solves.",
+    "DGEMM roof is not a measured syevd floor; current evidence cannot establish a cheaper exact30.4% EVD improvement.",
+    "Closure is limited to current evidence and constraints, not proof of universal optimality; no Mac timing used."
+  ],
+  "open_questions": [],
+  "commit": "Uncommitted; no new dev08 job. Stop."
+}

@@ -1,8 +1,9 @@
-# Phase 2 follow-up: fixed GEMM shapes, packed MPI border payloads
+# Davidson lane closing assessment
 
-Current decision: UPPER_BORDER and ROTATE_COLUMNS rejected; both remain OFF.
-The latest reassessment at the end selects PACKED_REDUCE. Earlier candidate
-forecasts below are historical and superseded by the two dev08 decisions.
+Current decision: recommend closing this lane. UPPER_BORDER and ROTATE_COLUMNS
+lost; PACKED_REDUCE was neutral on dev08 (61822bc). All three switches remain
+default OFF. The final "Closing assessment" supersedes earlier forecasts;
+no new candidate meets the requested evidence-supported ~0.3s opportunity.
 
 ## Evidence, units and attribution
 
@@ -372,3 +373,120 @@ The new `border_payload` span records n=order,m=S width,k=H width,detail=norm
 count. It encloses pack/reduce/unpack and nests one `tree_sum` with actual sent
 doubles. Profiles remain bounded and disabled without clocks/allocations;
 existing exclusive and inclusive timing scopes must still not be added.
+
+## Closing assessment after PACKED_REDUCE: recommend closing this lane
+
+Source: latest orchestrator relay, PACKED_REDUCE source61822bc, Si64MPI8.
+Mechanism passed on8/8 ranks:183 calls unchanged,282797568->203221312 B,
+exact prediction, saving79576256 B (28.1%, scope as relayed). A/A mean
+-0.004163s, floor0.004163s,abs(mean)/SE1.60; A/B mean-0.000172s,
+abs(mean)/SE0.05,0.04x floor. **Neutral, not a loss and not adopted.**
+This closes the third tested candidate. Volume reduction is not a demonstrated
+bottleneck lever here; it does not prove that collective latency is free.
+
+### Scope and the 0.3-second decision threshold
+
+The new attribution reports +1.91s BAANDI-minus-QE subspace algebra and
++0.77s outside-envelope work. Component seconds are BAANDI time, not individually
+measured QE differences; do not add them to the gaps. Both comparisons are
+Si64MPI8. Fine BAANDI and whole-SCF QE each have58 Davidson iterations,
+with99ms versus69ms/iteration relayed. The nominal58*30ms=1.74s difference
+is not an independent closure check: coarse/verification and timer boundaries
+differ. No rationale for a tolerance relaxation follows from equal counts.
+
+| Region | Latest BAANDI seconds | Fraction needed to save0.3s | Evidence-based decision |
+|---|---:|---:|---|
+| reduced_eigen |0.988|30.4%|No demonstrated eligible cheaper exact driver/update|
+| reduced_gram |1.002|29.9%|Shape pruning lost; payload reduction neutral|
+| rotate |0.963|31.2%|Panel shape already best in the relayed sweep; no non-GEMM budget this large established|
+| kept_update |0.573|52.4%|Includes necessary delta-potential application, not just copying|
+| listed outside components |0.431|69.6%|No single listed component reaches0.3s; not all removable overhead|
+
+Outside components sum0.170(start)+0.122(setup)+0.051(return)+0.040(finish)
++0.025(restart)+0.014(real_state)+0.009(entry)=0.431s. Difference from the
+reported0.77s gap is0.339s, but subtracting a component subtotal from a
+cross-code gap does not identify an unattributed0.339s optimization target.
+Even eliminating return+finish+restart+real_state+entry entirely yields only
+0.139s. Removing both start and setup entirely yields0.292s, still below0.3s;
+those spans include required start construction/Gram/factor work, so zero is
+not a realistic floor. A combined change is theoretically possible; the data
+do not demonstrate that most of both groups is redundant allocation/copying.
+Existing solver and eigensolver buffers are reused; no measured allocator
+span establishes such a removable budget. Gram-start/kept-start paths already
+reuse accepted starts and factors, with correctness-dependent pivot fallbacks.
+
+### Reduced eigenproblem: apparent floor gap is not an implementation plan
+
+The latest0.988s/183 calls=5.399ms/call. At representative order264,
+9*m^3=0.165598GFLOP; dividing by measured264^3 DGEMM95.4GFLOP/s gives
+1.736ms. The ratio is3.11, and a uniform-order idealized total is0.318s,
+leaving an apparent0.670s. This is **not a measured LAPACK floor or an expected
+saving**: dsyevd includes lower-intensity tridiagonalization/backtransform,
+and a dominant order is not the joint order distribution. To save0.3s at
+unchanged counts requires average3.760ms/call instead of5.399ms, a30.4% cut.
+
+Code facts checked in this review:
+
+* `workspace/lean.rs` constructs the updated transformed reduced matrix once
+  per step and calls `solve_reduced` once. Prior H/S borders and transforms
+  are cached; they are not recomputed wholesale at each append. Previous
+  Ritz vectors do not diagonalize the newly bordered matrix. Reusing their
+  eigenvalues/eigenvectors without solving the new problem is not exact.
+* `dft-mkl/src/adapter.rs::SymmetricEigen` queries and allocates LAPACK work
+  buffers once for capacity, not once per call. No workspace-query/allocation
+  removal opportunity is identified inside the183 EVD calls.
+* dsyevd is an all-pairs driver; only-needed-roots selection means switching
+  to a range driver, not passing fewer roots to dsyevd. The MKL-EVD ledger
+  measured selective dsyevr slower at the relevant orders; crossover order/b
+  about9–10 exceeds the then-used maximum6. No new driver evidence reverses it.
+* REL-SLICES-CLOSED: mrrr was0.43–0.53x time but failed orthogonality in3/4
+  cells (1.7e-13/6.9e-13/2.7e-13); stein met orthogonality but cost1.42–1.64x.
+  B5 already supplies the one-column bordered alternative where applicable.
+  Block-border exact updates need new evidence and cluster-safe numerics;
+  the present totals do not predict a30.4% gain from such a new algorithm.
+
+The earlier trace had101 full EVDs/rank on MPI, not the latest183 calls;
+these scopes must not be substituted. Both nested eigen_step/eigen rows
+refer to one solve, not duplicate work. Exact latest counts/order-cubed totals
+per map were not supplied; the existing `eigen_map_work` parser can extract
+them if later reopening is justified. Do not divide183 by58 or call it3.16
+redundant eigensolves per fine iteration. No new per-map evidence demonstrates
+avoidable repeated solves of an identical matrix.
+
+### Kept update and rotation: separate H work from algebra glue
+
+`gamma_real.rs::prepare_m2_kept_start` validates the cached state, forms the
+potential difference, agrees whether it changed (one scalar reduction on the
+owned path), calls `apply_local_change` and adds its image to cached H X.
+Thus0.573s is not an allocation/copy timer. Skipping the update changes H X;
+turning off reuse incurs replacement H applications. Its FFT/local-potential
+kernel belongs with H-application lanes. Optimizing its small temporary plane
+buffers is conceivable but has no demonstrated0.3s budget here.
+
+For scale only, at local rows2986 and132 bands one full read+write stream is
+6.306MB. At the supplied one-core STREAM12.97GB/s that is0.486ms;183 such
+passes model0.089s. A0.3s bandwidth-only saving corresponds to3.891GB, about
+617 such passes. This is not a measured MPI memory rate or strict upper
+bound, but it shows why identifying several truly removable full-array
+passes is necessary. The actual rotation-pair count differs from183 reduced
+calls; the model is not a trajectory-weighted floor. No such redundant pass
+budget was found. The previous copy-removal experiment already lost badly
+because it changed GEMM shapes; its removed bytes cannot be counted as a
+second available saving while retaining that rejected layout.
+
+### Decision and reopening criteria
+
+**Recommend closing LANE-DAVIDSON under the current scope/evidence.** Leave
+all three switches default OFF. No new candidate has an evidence-supported
+expected saving of at least about0.3s at Si64MPI8 while preserving GEMM
+shapes and avoiding a volume-only premise. This is not proof of a universal
+performance limit and does not claim that the QE algebra gap is solved.
+
+Reopen only with new same-scope dev08 evidence: an exact-driver benchmark
+meeting accuracy and the required net30.4% EVD reduction at observed orders;
+per-map duplicate unchanged-matrix work; or exclusive allocator/copy/norm
+measurements exposing at least0.3s of safely removable work. These are future
+triggers, not a new queued profiling job. Hand the identified delta-potential
+H-application portion of kept_update to its existing owner if useful. No
+Mac profiling/timing, new numerical change, default adoption, or new A/B
+request is made in this closing review.

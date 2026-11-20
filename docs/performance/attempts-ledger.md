@@ -2507,3 +2507,34 @@ change. Representative264-order132-column payload280896->209616 B
 (-25.37%); exact trajectory saving is returned by packed-counter.py. Both
 rejected switches remain OFF. Serial path unchanged. No performance adoption
 or Mac performance claim; see packed-validation.md and dev08-request.md.
+
+## DAVIDSON-PACKED-REDUCE-NEUTRAL — orchestrator decision
+
+| Attempt | Relayed dev08 evidence | Decision / lesson |
+|---|---|---|
+| DAVIDSON-PACKED-REDUCE-NEUTRAL | Si64 MPI8, source61822bc. Mechanism exact on8/8 ranks: calls183 unchanged; sent_bytes282797568 ->203221312, equal to ON prediction; saving79576256 B (-28.1%). A/A mean -0.004163 s, floor0.004163 s, abs(mean)/SE1.60. A/B mean -0.000172 s, abs(mean)/SE0.05,0.04x floor. Byte totals retain the relay's scope; do not multiply them by8. | **NEUTRAL, not adopted; not a resolved loss.** Default OFF retained. A substantial payload reduction produced no resolved gain on this machine; no further volume-only candidate without new evidence. |
+
+## DAVIDSON-LANE-CLOSE — recommendation after three closed candidates
+
+UPPER_BORDER: resolved+0.57% Si64MPI8 loss. ROTATE_COLUMNS: resolved+6.10%
+Si64/+4.19%Si32 serial losses. PACKED_REDUCE: neutral despite28.1% fewer
+communicated bytes. All switches stay default OFF, no numerical code changed
+in this closing review. Recommend closing the current lane, not declaring the
+algebra gap solved or the implementation universally optimal.
+
+Latest relayed Si64MPI8 attribution: subspace algebra gap to same-model QE
++1.91s; BAANDI reduced_gram1.002s, reduced_eigen0.988s, rotate0.963s,
+kept_update0.573s. These are BAANDI component times, not four independent
+QE differences. Fine iterations58 versus QE whole-SCF58; relayed cost99ms
+versus69ms/iteration, with unequal coarse/verification scopes explicitly
+retained. Outside-envelope gap+0.77s; listed BAANDI components total0.431s,
+not0.77s. No unsupported assignment of the0.339s numerical difference.
+
+A0.3s candidate needs30.4% of EVD,31.2% of rotation,52.4% of kept_update,
+or69.6% of the listed outside components. Existing dsyevd scratch is reused;
+selective dsyevr was slower at these orders (MKL-EVD); REL-SLICES failed its
+speed/orthogonality gate. No duplicate unchanged reduced problem is identified.
+Kept_update includes delta-potential H application, not just copy overhead.
+The code and measured copy/shape experiments do not establish an eligible
+non-GEMM saving of0.3s. Full reasoning and reopening criteria: diagnosis.md,
+"Closing assessment". No new switch, no new dev08 queue, no Mac timings.

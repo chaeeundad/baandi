@@ -1,6 +1,8 @@
 # LANE-FFT Phase 2: kept copy/multiply fusion A/B
 
-Status: ready for orchestrator review; default OFF, not adopted. See
+Status: CLOSED NEUTRAL (FFT-KEPT-FUSE-NEUTRAL). Historical pre-registration
+below is retained unchanged for audit; do not queue further fusion A/B runs.
+The switch remains default OFF. Follow-up: [arrival diagnostic](wait-profile-request.md). See
 [diagnosis](diagnosis.md) for relayed bad02ee profile, limitations, floors and
 alternatives. Candidate source base 10c067e plus the uncommitted patch; record
 actual merged commit and binary hashes before running. No Mac timing evidence.

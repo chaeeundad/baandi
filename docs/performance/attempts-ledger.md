@@ -3022,3 +3022,6 @@ unproved; raw matched interval/stage data and queued si32 are missing. Mean rank
 exposure is not a critical-path wall bound. See [closing note](lanes/FFT/arrival-closing-note.md)
 and reproducible [ownership audit](lanes/FFT/ownership_audit.py). No Mac profiling,
 no runtime changes; FFT_KEPT_FUSE remains OFF/NEUTRAL.
+
+### LAUNCHIO-BINARY-HASH-CACHE-DEFAULT-ON (2026-11-20, dev08 via master; ledger by orchestrator)
+BAANDI_BINARY_HASH_CACHE (cache of the executable SHA-256 in a sidecar keyed by size/mtime/inode; run.binary.sha256 is still produced; invalidated when the file changes; hit reads 0 bytes) default flipped on. dev08 crossed pairs, A/A floor first: si16 np8 -0.104577 s (|mean|/SE 19.05, 12/12 pairs positive, -10.68 % of 0.9788 s median A), si32 np8 -0.095911 s (20.24, 12/12, -4.15 %); si64 np8 and one core pending at adoption time (the gain is a fixed 0.1 s, cannot lose). Mechanism gate: hit x16 with hashed_bytes 0 and one miss that fills the cache (22,106,160 B), sha256 identical in every arm; energy difference 0, density bytes identical. Predicted 0.1045 s (LAUNCHIO phase 0 binary_sha256) matched. Mac fast gate 492 passed, 0 failed. Side effect to remember: a small cache file is written next to the executable when that directory is writable (no write otherwise; a failed write is only a miss).

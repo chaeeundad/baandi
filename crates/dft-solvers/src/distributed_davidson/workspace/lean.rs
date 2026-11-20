@@ -256,6 +256,8 @@ fn residual_local(
     out: &mut RealMatrix,
     partial: &mut [f64],
 ) -> Result<(), SolverError> {
+    let _lane = lane_profile::span(lane_profile::Op::Residual, v.rows(), 0, lambdas.len(), 0);
+
     let (nl, cols) = (v.rows(), lambdas.len());
     fit(out, nl, cols)?;
     for (j, &lambda) in lambdas.iter().enumerate() {
@@ -308,6 +310,7 @@ fn border<C: Collective>(
     let (nl, m) = (basis.rows(), basis.cols());
     let ks = m - s_from;
     let kh = h_from.map_or(0, |h| m - h);
+    let _lane = lane_profile::span(lane_profile::Op::ReducedGram, nl, m, ks + kh, 1);
     let cols = ks + kh + 1;
     fit(partial, m, cols)?;
     partial.as_mut_slice().fill(0.0);
@@ -842,6 +845,8 @@ pub(super) fn run<C: Collective>(
         // a contraction replaces the basis by X below.
         let mut ritz_base = true;
         if contracted {
+            let _lane_restart =
+                lane_profile::span(lane_profile::Op::Restart, basis.rows(), m, bands, 1);
             // Contraction restart: the basis becomes X (S-orthonormal Ritz
             // vectors), factored afresh in the border below (`restart` stage:
             // the copies; the rotation above is `rotate`).

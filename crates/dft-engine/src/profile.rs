@@ -37,6 +37,8 @@ use dft_mpi::Collective;
 use dft_numerics::stage_clock::local::{
     self, COLLECTIVE, DIST_STAGE, M2_STAGE, OP_COUNT, SERIAL_STAGE, Snapshot,
 };
+/// Davidson lane diagnostic transport; serialization remains in the CLI.
+pub use dft_solvers::real_davidson::lane_profile as davidson_lane;
 use std::cell::{Cell, RefCell};
 use std::sync::{Mutex, OnceLock};
 
@@ -613,6 +615,10 @@ pub fn map_commit(kind: MapKind) {
 }
 /// The eigensolve of the pending map begins (the thread's counters are marked).
 pub(crate) fn solve_begin() {
+    if dft_solvers::real_davidson::lane_profile::requested() {
+        let c = context();
+        dft_solvers::real_davidson::lane_profile::map(c.stage, c.kind, c.iteration);
+    }
     if enabled() {
         SOLVE_MARK.with(|m| m.set(Some(local::snapshot())));
     }

@@ -130,10 +130,15 @@ fn legacy_defaults_are_unchanged() {
         Id::REFERENCE_STRICT,
         Id::M2_B5,
         Id::LEAN_PROJ_CACHE,
+        Id::DAVIDSON_PROFILE,
         Id::PACK_FIXED,
     ] {
         assert!(!on(id), "{id:?} must default off");
     }
+    assert_eq!(
+        switches::table_of(Id::DAVIDSON_PROFILE),
+        switches::Table::Profile
+    );
     assert_eq!(switches::choice(Id::LEAN_BORDER), "separate");
     assert!(on(Id::SPIN_SHARE), "SPIN_SHARE defaults on");
     assert!(on(Id::M2_DGEMM) && on(Id::M2_LEAN) && on(Id::REUSE_PSI) && on(Id::M2_SELECTED_ROOTS));
@@ -272,5 +277,5 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::LADDER_WATCH), Value::Choice("off"));
     assert_eq!(value(Id::LADDER_BASIS_CHECK), Value::Choice("off"));
     assert_eq!(value(Id::PHASE_VALIDATE), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 117);
+    assert_eq!(TABLE.len(), 118);
 }

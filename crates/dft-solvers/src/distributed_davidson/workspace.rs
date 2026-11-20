@@ -399,6 +399,8 @@ fn residual_cols<C: Collective>(
     norms: &mut Vec<f64>,
     partial: &mut Vec<f64>,
 ) -> Result<(), SolverError> {
+    let _lane = lane_profile::span(lane_profile::Op::Residual, v.rows(), 0, lambdas.len(), 0);
+
     let (nl, cols) = (v.rows(), lambdas.len());
     fit(out, nl, cols)?;
     let src = |slot: usize| map.map_or(slot, |m| m[slot]);
@@ -533,6 +535,14 @@ fn ortho_into<C: Collective>(
     o: &mut OrthoScratch,
     out: &mut RealMatrix,
 ) -> Result<(), SolverError> {
+    let _lane_ortho = lane_profile::span(
+        lane_profile::Op::Ortho,
+        block.rows(),
+        against.map_or(0, |q| q.cols()),
+        block.cols(),
+        1,
+    );
+
     if !tuning.serial_ortho {
         let r = orthonormalize(comm, gemm, against, block, tuning.wide_gemm)?;
         fit(out, r.rows(), r.cols())?;
@@ -601,6 +611,14 @@ fn rotate_ritz(
     rotated: &mut RealMatrix,
     wide: bool,
 ) -> Result<(), SolverError> {
+    let _lane = lane_profile::span(
+        lane_profile::Op::RotateResidual,
+        basis.rows(),
+        basis.cols(),
+        cols,
+        1,
+    );
+
     let (nl, m) = (basis.rows(), basis.cols());
     fit(vectors, nl, cols)?;
     fit(rotated, nl, cols)?;

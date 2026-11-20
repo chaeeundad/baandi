@@ -15,6 +15,30 @@ def load(name):
 
 
 class Tools(unittest.TestCase):
+    def test_packed_payload_and_reject_bad_trace(self):
+        counter = load('packed-counter')
+        trace = dict(fields=['call', 'operation', 'n', 'm', 'k', 'detail'],
+                     operations=['border_payload', 'tree_sum'],
+                     per_rank=[dict(rank=0, dropped=0, records=[
+                         [1, 0, 264, 132, 0, 0], [2, 1, 35112, 8, 0, 10]])])
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'results.json'
+            def write():
+                path.write_text(json.dumps(dict(run=dict(completed=True), davidson_profile=trace)))
+            write()
+            a = counter.counters(path)['ranks'][0]
+            self.assertEqual(a['rectangle_bytes'], 280896)
+            self.assertEqual(a['predicted_packed_bytes'], 209616)
+            trace['per_rank'][0]['records'][1][2] = 26202
+            write()
+            b = counter.counters(path)['ranks'][0]
+            self.assertEqual(b['sent_bytes'], b['predicted_packed_bytes'])
+            self.assertEqual(b['saved_bytes'], 71280)
+            trace['per_rank'][0]['records'][1][2] = 1
+            write()
+            with self.assertRaises(ValueError):
+                counter.counters(path)
+
     def test_border_prediction_and_overflow(self):
         counter = load('border-counter')
         fields = ['operation', 'n', 'm', 'k', 'detail']

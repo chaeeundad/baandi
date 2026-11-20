@@ -1,0 +1,60 @@
+[
+  {
+    "path": "target/scratch/packed-0-np3-false.json",
+    "ranks": [
+      {
+        "rank": 0,
+        "calls": 116,
+        "rectangle_bytes": 65520,
+        "predicted_packed_bytes": 43840,
+        "sent_bytes": 65520,
+        "saved_bytes": 0
+      },
+      {
+        "rank": 1,
+        "calls": 116,
+        "rectangle_bytes": 65520,
+        "predicted_packed_bytes": 43840,
+        "sent_bytes": 65520,
+        "saved_bytes": 0
+      },
+      {
+        "rank": 2,
+        "calls": 116,
+        "rectangle_bytes": 65520,
+        "predicted_packed_bytes": 43840,
+        "sent_bytes": 65520,
+        "saved_bytes": 0
+      }
+    ]
+  },
+  {
+    "path": "target/scratch/packed-0-np3-true.json",
+    "ranks": [
+      {
+        "rank": 0,
+        "calls": 116,
+        "rectangle_bytes": 65520,
+        "predicted_packed_bytes": 43840,
+        "sent_bytes": 43840,
+        "saved_bytes": 21680
+      },
+      {
+        "rank": 1,
+        "calls": 116,
+        "rectangle_bytes": 65520,
+        "predicted_packed_bytes": 43840,
+        "sent_bytes": 43840,
+        "saved_bytes": 21680
+      },
+      {
+        "rank": 2,
+        "calls": 116,
+        "rectangle_bytes": 65520,
+        "predicted_packed_bytes": 43840,
+        "sent_bytes": 43840,
+        "saved_bytes": 21680
+      }
+    ]
+  }
+]

@@ -1,17 +1,98 @@
-# Active request: ROTATE_COLUMNS after UPPER_BORDER rejection
+# Active request: PACKED_REDUCE (GEMM shapes unchanged)
 
-**UPPER_BORDER is REJECTED by the orchestrator**, resolved +0.57% dev08
-slowdown despite exact FLOP savings and bit-identical science. Keep its switch
-OFF. The old protocol below is archived for reproducibility: **do not queue
-its Stage 0/1/expansion commands again**. Numbers are in
-`upper-border-rejection.json` and ledger DAVIDSON-UPPER-BORDER-REJECTED.
+UPPER_BORDER and ROTATE_COLUMNS are **REJECTED**; keep both OFF. Their
+requests below are archived, including headings formerly labelled active.
+Do not queue them again. Active commands are exclusively in this section.
+No Mac timing is performance evidence.
 
-The active alternative is the already implemented, Mac-validated, default-off
-**DAVIDSON_ROTATE_COLUMNS**, under “Active alternative” below. No further
-numerical code change is needed after the rejection. It keeps all product
-entries and the full inner dimension, changes independent output-column
-layout, and reduces calls/copies rather than arithmetic. All active jobs use
-rotation-job.sh with UPPER_BORDER forced OFF. No Mac timing evidence.
+## Mechanism and pre-registered gates
+
+`BAANDI_DAVIDSON_PACKED_REDUCE=on` compacts consumed entries after the same
+full GEMMs in distributed lean border reductions. No serial implementation
+changes. No collective is merged or delayed past the pivot test. All buffers
+already exist. The lower triangle and padded residual-norm tail are omitted.
+
+On separate diagnostic A/B runs, parse:
+
+```sh
+python3 -I docs/performance/lanes/DAVIDSON/packed-counter.py \
+  "$OUT/packed-si64-np8-profile/ab-1-a/results.json" \
+  "$OUT/packed-si64-np8-profile/ab-1-b/results.json" > "$OUT/packed-si64-counter.json"
+python3 -I scripts/lane_davidson_parse.py \
+  "$OUT/packed-si64-np8-profile/ab-1-a/results.json" \
+  "$OUT/packed-si64-np8-profile/ab-1-b/results.json" \
+  --json-out "$OUT/packed-si64-tables.json" > "$OUT/packed-si64-tables.md"
+```
+
+Mandatory mechanism: for **every rank**, counter output `[0].ranks[*].sent_bytes`
+(OFF) equals `rectangle_bytes`; `[1].ranks[*].sent_bytes` (ON) equals
+`predicted_packed_bytes`, with positive `saved_bytes`. Calls and predicted
+shape totals must match between arms. Prediction per border is
+`8*(sum(j+1,j=m-ks..m-1)+sum(j+1,j=m-kh..m-1)+norm_count)`; OFF is
+`8*m*(ks+kh+1)`. Raw `border_payload` records carry n=m,m=ks,k=kh,detail=norms;
+the next nested `tree_sum` has n=actual doubles, detail=reduction site.
+Check `parallel.reductions` (lean_border/reduced_gram) against those totals.
+All other reduction sites must be unchanged; **call count is unchanged**.
+Trace dropped=0, run.completed=true. On one-core CLI the path is inactive;
+absence of border_payload is expected there, and packed-counter intentionally
+rejects inactive evidence. Do not claim a serial mechanism or gain.
+
+Keep exactly equal: GEMM route/call/shape/FLOP counters (including rotate),
+full EVD counts/order histograms per map, H applications, restart/fallback
+counts, tolerances, SCF history and verification. Target bit identity of
+energy/density/scientific history at fixed ranks. Any observed rounding must
+be explained by real MPI backend behavior; gate abs(dE)<=1e-11 Ha and
+thread/rank independence, standard5e-9/strict1e-10 Ha. A trajectory change
+withdraws this communication-only candidate pending investigation.
+
+## Exact execution, each command a separate bounded job
+
+Build once on dev08, source and binaries hashed. Set approved absolute UPF
+and OUT paths in the orchestrator job environment. CPU0 for one core; CPUs0–7
+socket0 for MPI8. Sequential MKL, one thread per rank. Set BIN/BENCH to the
+matching build for each model. Use the same binary for both arms.
+
+```sh
+MKLROOT=/opt/intel/oneapi/mkl/2026.1 CARGO_TARGET_DIR=target/packed-mpi cargo build --release -p dft-cli --features mpi,mkl --bin dft-cli --example davidson_bench
+MKLROOT=/opt/intel/oneapi/mkl/2026.1 CARGO_TARGET_DIR=target/packed-serial cargo build --release -p dft-cli --features mkl --bin dft-cli --example davidson_bench
+export BIN="$PWD/target/packed-mpi/release/dft-cli"
+export BENCH="$PWD/target/packed-mpi/release/examples/davidson_bench"
+timeout 590s bash docs/performance/lanes/DAVIDSON/packed-job.sh si64 8 profile
+timeout 590s bash docs/performance/lanes/DAVIDSON/packed-job.sh si64 8 solve
+timeout 590s bash docs/performance/lanes/DAVIDSON/packed-job.sh si64 8 screen
+# Expand only after the si64 mechanism passes and screens are promising:
+timeout 590s bash docs/performance/lanes/DAVIDSON/packed-job.sh si32 8 profile
+timeout 590s bash docs/performance/lanes/DAVIDSON/packed-job.sh si32 8 screen
+timeout 590s bash docs/performance/lanes/DAVIDSON/packed-job.sh si16 8 profile
+timeout 590s bash docs/performance/lanes/DAVIDSON/packed-job.sh si16 8 screen
+timeout 590s bash docs/performance/lanes/DAVIDSON/packed-job.sh si64 8 full
+timeout 590s bash docs/performance/lanes/DAVIDSON/packed-job.sh si32 8 full
+timeout 590s bash docs/performance/lanes/DAVIDSON/packed-job.sh si16 8 full
+# Serial negative controls; no claimed serial opportunity:
+export BIN="$PWD/target/packed-serial/release/dft-cli"
+export BENCH="$PWD/target/packed-serial/release/examples/davidson_bench"
+timeout 590s bash docs/performance/lanes/DAVIDSON/packed-job.sh si32 1 screen
+timeout 590s bash docs/performance/lanes/DAVIDSON/packed-job.sh si64 1 screen
+```
+
+Runner: three A/A pairs first, then three crossed A/B pairs, alternating order;
+profile is one untimed-evidence pair with instrumentation enabled. Timed jobs
+turn all lane/stage diagnostics off. Same seed601/displacement0.001Bohr,
+standard stopping, verification included in full runs; screen max10 steps,
+expected non-convergence exit3 only. Preserve hashes, exit codes, stdout/stderr,
+results.json and external seconds. Returned profile times are inclusive.
+
+Primary counter must move as above. Primary performance gate: full external
+wall paired mean ON-OFF negative with abs(mean)/SE>=3 and larger than A/A
+noise floor; screen and solve metrics are triage, never adoption. Also return
+border_payload and tree_sum per-map/per-rank times (do not sum parent+child),
+rank min/max, EVD work table, physical identity and absolute energies.
+Use `paired-summary.py JOBDIR screen|solve|full` for paired statistics; do not mix parallel models. Reject resolved slowdown or numerical
+failure; unresolved evidence needs more independent crossed pairs through the
+orchestrator, not selective deletion. No fixed percentage minimum gain.
+Actual MPI must check binomial/doubling/halving modes if deployed: payload
+threshold crossings can change message routes even though elementwise tree
+association is designed to agree. No thread-parallel optimization is proposed.
 
 ## Archived UPPER_BORDER request — closed, do not execute
 
@@ -177,7 +258,7 @@ Return inputs/hashes, raw stdout/stderr/exit codes, all results.json and
 science/density comparisons, A/A and A/B summaries, counters, load/placement,
 and profile tables. Stop here; master decides the next phase.
 
-## Active alternative: serial ROTATE_COLUMNS (independent request)
+## Archived ROTATE_COLUMNS alternative: serial ROTATE_COLUMNS (independent request)
 
 New default-off `BAANDI_DAVIDSON_ROTATE_COLUMNS` applies only to serial real
 Ritz rotation pairs, standard and strict. It reuses the existing fixed

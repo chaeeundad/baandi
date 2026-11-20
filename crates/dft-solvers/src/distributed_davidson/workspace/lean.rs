@@ -346,28 +346,79 @@ fn border<C: Collective>(
     } else {
         Site::ReducedGram
     });
-    comm.tree_sum_f64(partial.as_slice(), sum.as_mut_slice())
-        .map_err(comm_error)?;
-    for j in s_from..m {
-        for i in 0..=j {
-            let v = sum[(i, j - s_from)];
-            s[(i, j)] = v;
-            s[(j, i)] = v;
-        }
-    }
-    if let Some(h) = h_from {
-        for c in h..m {
-            for r in 0..=c {
-                let v = sum[(r, ks + c - h)];
-                held[r + c * ld] = v;
-                held[c + r * ld] = v;
+    let _payload = lane_profile::span(lane_profile::Op::BorderPayload, m, ks, kh, pending.len());
+    if dft_numerics::switches::on(dft_numerics::switches::Id::DAVIDSON_PACKED_REDUCE) {
+        // Keep every GEMM unchanged. Discard only entries the unpack below
+        // never reads. Forward compaction cannot overwrite a later column.
+        let sent = pack_border(partial.as_mut_slice(), m, s_from, h_from, pending.len());
+        comm.tree_sum_f64(&partial.as_slice()[..sent], &mut sum.as_mut_slice()[..sent])
+            .map_err(comm_error)?;
+        let values = sum.as_slice();
+        let mut cursor = 0;
+        for j in s_from..m {
+            for i in 0..=j {
+                let v = values[cursor];
+                cursor += 1;
+                s[(i, j)] = v;
+                s[(j, i)] = v;
             }
         }
+        if let Some(h) = h_from {
+            for c in h..m {
+                for r in 0..=c {
+                    let v = values[cursor];
+                    cursor += 1;
+                    held[r + c * ld] = v;
+                    held[c + r * ld] = v;
+                }
+            }
+        }
+        norms_out.clear();
+        norms_out.extend_from_slice(&values[cursor..sent]);
+    } else {
+        comm.tree_sum_f64(partial.as_slice(), sum.as_mut_slice())
+            .map_err(comm_error)?;
+        for j in s_from..m {
+            for i in 0..=j {
+                let v = sum[(i, j - s_from)];
+                s[(i, j)] = v;
+                s[(j, i)] = v;
+            }
+        }
+        if let Some(h) = h_from {
+            for c in h..m {
+                for r in 0..=c {
+                    let v = sum[(r, ks + c - h)];
+                    held[r + c * ld] = v;
+                    held[c + r * ld] = v;
+                }
+            }
+        }
+        norms_out.clear();
+        norms_out.extend((0..pending.len()).map(|slot| sum[(slot, ks + kh)]));
     }
-    norms_out.clear();
-    norms_out.extend((0..pending.len()).map(|slot| sum[(slot, ks + kh)]));
     count(2, 1);
     Ok(())
+}
+
+/// Compact the consumed upper triangles and the unpadded norm tail in place.
+/// Source columns stay in GEMM order; no arithmetic or rank order changes.
+fn pack_border(
+    values: &mut [f64],
+    m: usize,
+    s_from: usize,
+    h_from: Option<usize>,
+    norms: usize,
+) -> usize {
+    let mut cursor = 0;
+    let mut source = 0;
+    for j in (s_from..m).chain(h_from.unwrap_or(m)..m) {
+        values.copy_within(source..source + j + 1, cursor);
+        cursor += j + 1;
+        source += m;
+    }
+    values.copy_within(source..source + norms, cursor);
+    cursor + norms
 }
 
 /// Rebuild of a fresh basis that failed the pivot test (expected never):
@@ -1256,6 +1307,106 @@ mod tests {
                         }
                     } else {
                         reference = Some(values);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn packed_border_reduction_preserves_bits_at_each_rank_count() {
+        let (n, m) = (257, 137);
+        for ranks in [1, 2, 3, 4, 8] {
+            let mut reference: Option<Vec<f64>> = None;
+            for (on, threads) in [(false, 1), (true, 1), (false, 3), (true, 3)] {
+                let results = dft_mpi::simulate(ranks, |comm| {
+                    let config = dft_numerics::switches::RunConfig::from_pairs(&[(
+                        "davidson_packed_reduce",
+                        if on { "on" } else { "off" },
+                    )])
+                    .unwrap();
+                    let _scope = config.enter();
+                    let rows: Vec<_> = (0..n).filter(|i| i % ranks == comm.rank()).collect();
+                    let nl = rows.len();
+                    let mut v = RealMatrix::zeros(nl, m).unwrap();
+                    let mut hv = v.clone();
+                    for j in 0..m {
+                        for (l, &r) in rows.iter().enumerate() {
+                            v[(l, j)] = ((r * 137 + j * 19 + 1) as f64).sin() / 16.;
+                            hv[(l, j)] = v[(l, j)] * (1. + r as f64 / n as f64);
+                        }
+                    }
+                    let mut gemm = RealGemmWorkspace::with_pool(
+                        nl,
+                        m,
+                        dft_numerics::pool::WorkerPool::new(threads).unwrap(),
+                    )
+                    .unwrap();
+                    let mut s = RealMatrix::zeros(m, m).unwrap();
+                    let mut held = vec![0.; m * m];
+                    let mut partial = RealMatrix::zeros(m, 2 * m + 1).unwrap();
+                    let mut sum = partial.clone();
+                    let mut norms = Vec::with_capacity(3);
+                    border(
+                        comm,
+                        &mut gemm,
+                        &v,
+                        &hv,
+                        17,
+                        Some(65),
+                        &[1., 2., 3.],
+                        &mut partial,
+                        &mut sum,
+                        &mut s,
+                        &mut held,
+                        m,
+                        &mut norms,
+                    )
+                    .unwrap();
+                    assert_eq!(
+                        norms,
+                        vec![ranks as f64, 2. * ranks as f64, 3. * ranks as f64]
+                    );
+                    let mut values = s.as_slice().to_vec();
+                    values.extend(held);
+                    values
+                });
+                for values in results {
+                    if let Some(reference) = &reference {
+                        for (a, b) in reference.iter().zip(&values) {
+                            assert_eq!(a.to_bits(), b.to_bits());
+                        }
+                    } else {
+                        reference = Some(values);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn packed_border_matches_independent_selection() {
+        for m in [0, 1, 2, 17, 132, 264] {
+            for s_from in [0, m / 2, m] {
+                for h_from in [None, Some(0), Some(m / 2), Some(m)] {
+                    for norms in [0, m] {
+                        let cols = m - s_from + h_from.map_or(0, |h| m - h);
+                        let mut values: Vec<f64> = (0..m * (cols + 1))
+                            .map(|i| f64::from_bits(i as u64))
+                            .collect();
+                        let mut expected = Vec::new();
+                        for (slot, j) in (s_from..m).chain(h_from.unwrap_or(m)..m).enumerate() {
+                            expected.extend_from_slice(&values[slot * m..slot * m + j + 1]);
+                        }
+                        expected.extend_from_slice(&values[cols * m..cols * m + norms]);
+                        let sent = pack_border(&mut values, m, s_from, h_from, norms);
+                        assert_eq!(sent, expected.len());
+                        assert!(
+                            values[..sent]
+                                .iter()
+                                .zip(expected)
+                                .all(|(a, b)| a.to_bits() == b.to_bits())
+                        );
                     }
                 }
             }

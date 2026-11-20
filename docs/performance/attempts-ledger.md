@@ -2369,3 +2369,22 @@ harness checks exit 0. README check separately has its existing stale-phrase
 failure (8 pass / 1 fail). Source, logs, exact failures and final build hashes
 are in the design note. The overall required gate remains red. All edits stay
 inside OWNED_FILES, and changes remain uncommitted.
+
+## LANE-FFT Phase 0 (2026-11-20; revised user instruction)
+
+PROFILE_REQUEST: instrumentation only, no optimization or performance conclusion.
+The superseded optimization and Mac timing interpretation were removed. Added
+construction-cached, default-off FFT_PROFILE under PHASE_PROFILE: 18 separate
+local-potential stages, calls/points/logical bytes/conventional FFT work,
+count-only support, no clocks/TLS writes at disabled kernel sites. Serial and
+M2 plans keep numerical operations unchanged; shared phase/JSON wiring was
+explicitly approved. Per-rank bucket records use a separate struct, and u64
+metrics use exact limb encoding through the existing profile gather.
+Mac correctness: Si8 OFF/timed/count-only energy difference 0 Ha, eigenvalues,
+occupations, scientific histories and density bytes identical; all verified,
+11 SCF iterations. 144 parser rows per enabled actual CLI file; integer
+counters equal. Rank-1/2/3/8 synthetic M2 identity, serial apply/kept/density
+exclusion and 3-rank wire-format tests pass. No Mac timing supports a speed
+claim. [Profile request](lanes/FFT/profile-request.md),
+[equivalence evidence](lanes/FFT/cli-equivalence.json),
+[validation](lanes/FFT/validation.md). dev08 supplies the profile before Phase 2.

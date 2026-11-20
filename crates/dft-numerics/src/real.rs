@@ -2087,6 +2087,138 @@ fn sign_convention(vectors: &mut RealMatrix, flip: &mut [bool]) -> Result<(), Li
     Ok(())
 }
 
+/// LANE-FFT Phase 0: optional, thread-local FFT accounting shared by serial
+/// and distributed adapters. Numerical kernels never consume these values.
+pub mod fft_profile {
+    use crate::switches::{Id, RunConfig};
+    use std::cell::Cell;
+    use std::time::Instant;
+
+    pub const STAGES: usize = 18;
+    pub const METRICS: usize = 5;
+    pub const NAMES: [&str; STAGES] = [
+        "scatter",
+        "inverse_fft0",
+        "transpose_pack",
+        "inverse_alltoall",
+        "middle_unpack",
+        "inverse_fft1",
+        "slab_scatter",
+        "inverse_fft2",
+        "multiply",
+        "forward_fft2",
+        "slab_gather",
+        "forward_fft1",
+        "middle_pack",
+        "forward_alltoall",
+        "transpose_unpack",
+        "forward_fft0",
+        "gather_scale",
+        "kept_copy",
+    ];
+    /// Per stage: nanoseconds, calls, complex points, logical bytes, estimated
+    /// FFT real flops (5 * points * log2(length), rounded per call; length factors cached at plan creation).
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct Snapshot(pub [[u64; METRICS]; STAGES]);
+    impl Default for Snapshot {
+        fn default() -> Self {
+            Self([[0; METRICS]; STAGES])
+        }
+    }
+    impl Snapshot {
+        pub fn since(self, earlier: Self) -> Self {
+            let mut out = Self::default();
+            for (i, row) in out.0.iter_mut().enumerate() {
+                for (j, value) in row.iter_mut().enumerate() {
+                    *value = self.0[i][j].wrapping_sub(earlier.0[i][j]);
+                }
+            }
+            out
+        }
+        pub fn add(&mut self, other: Self) {
+            for (a, b) in self.0.iter_mut().flatten().zip(other.0.iter().flatten()) {
+                *a = a.wrapping_add(*b);
+            }
+        }
+    }
+    thread_local! { static COUNTS: [[Cell<u64>; METRICS]; STAGES] = const { [const { [const { Cell::new(0) }; METRICS] }; STAGES] }; }
+    pub fn snapshot() -> Snapshot {
+        COUNTS.with(|c| {
+            Snapshot(std::array::from_fn(|i| {
+                std::array::from_fn(|j| c[i][j].get())
+            }))
+        })
+    }
+
+    /// Cached at plan construction. Disabled: no clocks, TLS, atomic counters,
+    /// allocation or output at an instrumented site, only the cached branch.
+    pub struct Probe {
+        enabled: bool,
+        clocks: bool,
+        work_per_point: [f64; 3],
+    }
+    pub struct Mark(Option<Instant>);
+    thread_local! { static APPLY: Cell<bool> = const { Cell::new(false) }; }
+    pub struct ApplyScope(Option<bool>);
+    impl Drop for ApplyScope {
+        fn drop(&mut self) {
+            if let Some(previous) = self.0 {
+                APPLY.with(|v| v.set(previous));
+            }
+        }
+    }
+    impl Probe {
+        pub fn new(n: [usize; 3]) -> Self {
+            let cfg = RunConfig::current();
+            let enabled = cfg.on(Id::FFT_PROFILE) && cfg.on(Id::PHASE_PROFILE);
+            Self {
+                enabled,
+                clocks: enabled && cfg.on(Id::STAGE_TIMERS),
+                work_per_point: if enabled {
+                    n.map(|v| 5. * (v as f64).log2())
+                } else {
+                    [0.; 3]
+                },
+            }
+        }
+        /// Limit lane records to local-potential applications, excluding
+        /// density/Hartree FFTs that reuse the same plan.
+        pub fn apply_scope(&self) -> ApplyScope {
+            ApplyScope(self.enabled.then(|| APPLY.with(|v| v.replace(true))))
+        }
+        #[inline]
+        pub fn start(&self) -> Option<Mark> {
+            (self.enabled && APPLY.with(Cell::get)).then(|| Mark(self.clocks.then(Instant::now)))
+        }
+        #[inline]
+        pub fn finish(
+            &self,
+            mark: Option<Mark>,
+            stage: usize,
+            points: usize,
+            bytes: usize,
+            axis: Option<usize>,
+        ) {
+            if let Some(Mark(start)) = mark {
+                let values = [
+                    start.map_or(0, |s| s.elapsed().as_nanos() as u64),
+                    1,
+                    points as u64,
+                    bytes as u64,
+                    axis.map_or(0, |a| {
+                        (points as f64 * self.work_per_point[a]).round() as u64
+                    }),
+                ];
+                COUNTS.with(|c| {
+                    for (v, add) in c[stage].iter().zip(values) {
+                        v.set(v.get().wrapping_add(add));
+                    }
+                });
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

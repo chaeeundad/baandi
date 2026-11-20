@@ -1979,6 +1979,28 @@ fn stress_table(s: &dft_engine::stress::StressResult) -> String {
     text
 }
 
+/// LANE-FFT Phase 0: same-rank records; never sum independent rank maxima.
+fn fft_lane_json(report: &dft_engine::profile::Report) -> serde_json::Value {
+    use dft_numerics::real::fft_profile::NAMES;
+    json!({
+        "schema": "lane-fft-1",
+        "enabled": dft_numerics::switches::on(dft_numerics::switches::Id::FFT_PROFILE),
+        "stage_timers": if dft_numerics::stage_clock::on() { "on" } else { "off" },
+        "per_rank": report.fft_ranks.iter().map(|r| json!({
+            "rank": r.rank,
+            "buckets": r.buckets.iter().enumerate().map(|(b, bucket)| json!({
+                "bucket": dft_engine::profile::BUCKET_LABELS[b],
+                "maps": r.maps[b],
+                "stages": NAMES.iter().zip(&bucket.0).map(|(name, v)| json!({
+                    "stage": name, "seconds": v[0] as f64 * 1e-9,
+                    "calls": v[1], "points": v[2], "logical_bytes": v[3],
+                    "fft_flops_estimate": v[4],
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+    })
+}
+
 /// Exclusive phase profile (`BAANDI_PHASE_PROFILE=on`): per bucket the maximum
 /// and minimum over ranks of every entry (seconds, then counts).
 pub fn profile_json(report: &dft_engine::profile::Report, run_wall: f64) -> serde_json::Value {
@@ -1986,6 +2008,7 @@ pub fn profile_json(report: &dft_engine::profile::Report, run_wall: f64) -> serd
     let closure = report.closure();
     json!({
         "schema": "phase-profile-2",
+        "fft_lane": fft_lane_json(report),
         "per_rank": report.per_rank.iter().map(|r| json!({
             "rank": r.rank, "wall_s": r.wall, "covered_s": r.covered, "residual_s": r.residual,
         })).collect::<Vec<_>>(),

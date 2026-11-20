@@ -11,3 +11,21 @@ Match by responsibility (SCF driver/start; one H block; subspace solve; density/
 Return one page: three walls, the two signed differences, the largest three contributions to A - D in seconds with routine, counts, cost per normalized unit, evidence and unexplained remainder.
 
 Do not choose another optimization lane for si64 MPI8 until experiment 1 returns.
+
+## Experiment 1 result (dev08, relayed 2026-11-20; BAANDI 279278d, QE 7.6 orig-mpi-dfti, six permutations, same window, interpretation: three arms crossed inside one job, A/A floors as separate per-arm jobs)
+Walls (uninstrumented external): A 10.7583 s (se 0.0263), D 4.6433 s (0.0080), R 4.5583 s (0.0091). A-D = +6.1150 s (se 0.0250), D-R = +0.0850 s (se 0.0131, |mean|/se 6.49), A-R = +6.2000 s; identity residual 0. A/A floors A 0.0025, D 0.0036, R 0.0058 s. d6be1d0 scoreboard gap 6.2503 s reproduced (6.2000 today). Manifest: BAANDI sha256 fdf7344d..., pw.x 07c7cd79..., UPF e8d93375..., 64-atom fractional coordinates max difference 0, cell 20.522425713435865 bohr, QE diago_full_acc .false., ecutwfc 30 Ry, ecutrho 120 Ry, 72^3 grid, binding cores 0-7 socket 0.
+Conclusion: D - R is 1.4 % of the gap. RMM is not the lever; a RMM port is deprioritized per the identity rule. 98.6 % of the gap is A - D (QE's plain Davidson against BAANDI).
+pw.x timing table (last round, calls): D: init_run 0.19 (1), electrons 4.02 (1), c_bands 3.57 (12), sum_band 0.34 (12), v_of_rho 0.03, mix_rho 0.03, h_psi 1.91 (71), calbec 0.20, fftw 1.33 (5410), PWSCF wall 4.52. R: c_bands 3.46 (13), h_psi 2.11 (75), PWSCF 4.45.
+Energy: BAANDI -253.37816772116847 Ha vs QE -506.75649838 Ry: difference 8.147e-5 Ha = 1.273e-6 Ha per atom, the known OFFSET-G0 constant (ledger row OFFSET-G0; XC PW92 constant difference note docs/research/qe-study/qe-pseudo-treatment-differences.md). Not new, not a convergence issue.
+Certificate: production default runs the fixed-point verification (verified true, single_path applied); `certified false` refers to the strict reference class, not the verification. No rerun.
+
+## Preliminary attribution of A - D by responsibility (orchestrator draft, NOT equal-scope; counts missing where marked)
+BAANDI numbers come from the bad02ee instrumented profiles (phase_profile exclusive leaves, same cell/ranks): init bucket 0.84 s; solve.apply 2.485 s (h_columns 6025); solve.solver_total 6.438 s (all stages together). QE numbers come from the table above.
+| Responsibility | BAANDI (s) | QE D (s) | difference | caveat |
+|---|---|---|---|---|
+| start/init | 0.84 | 0.19 | +0.65 | same scope (before first SCF) |
+| H application (apply vs h_psi) | 2.49 | 1.91 | +0.58 | BAANDI 6025 H columns; QE columns per call unknown (<= 71 x 132 = 9372 upper bound) |
+| subspace algebra (solver_total - apply vs c_bands - h_psi) | 3.95 | 1.66 | +2.29 | BAANDI solver_total covers coarse + fine + verification solves, QE one SCF |
+| density/fields/mixing | not extracted | 0.40 | ? | needs the exclusive leaves |
+| delivery/launcher/between/verification | ~1.8 (0.98 + 0.54 + 0.29, earlier budget) | ~0.1 | ~ +1.7 | earlier-budget numbers, re-measure |
+Sum of the explicit rows is about 3.5 s; about 2.6 s of the 6.1 s gap is not yet assigned (density/potential/mixing, ordering of overlaps). Largest candidate: subspace algebra (+2.3 s, non-GEMM-shape levers only after UPPER_BORDER and ROTATE_COLUMNS losses). Needed for the final page: (1) BAANDI exclusive leaf table of one uninstrumented-equivalent PHASE_PROFILE run for A (all leaves, per rank max, plus counts), split by bucket coarse/fine/verify; (2) QE columns per h_psi call and Davidson iteration/"avg # of iterations" per c_bands call (pw.x verbosity high output of D); (3) FFT counts and sizes per H block on both sides.

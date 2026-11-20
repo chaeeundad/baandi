@@ -2408,3 +2408,26 @@ existing stale structural-scope phrase test fails. No new scientific result
 or README claim is added. Instrumented release build, eight-run identity
 runner, owned/eager constructor test, switch contract test and parser tests
 all exit 0. Changes remain uncommitted; stop at PROFILE_REQUEST.
+## LANE-DAVIDSON Phase 0 — requested 2026-11-20
+
+Phase outcome: **PROFILE_REQUEST**, not an optimization candidate. The revised
+user instruction supersedes the earlier diagnose/optimize lane run. Exploratory
+triangular-product code was removed; no change to arithmetic, tolerance,
+subspace size, root selection, restarts or defaults is retained. No Mac timing
+supports a performance conclusion.
+
+Default-off `BAANDI_DAVIDSON_PROFILE` records bounded per-call real-Davidson
+shapes, requested solve tolerance, inclusive durations, map/solve IDs and
+rank-local tree-sum payload/site records. It distinguishes lean factor extension,
+reduced transformation, coefficients, return Gram, full EVD, B5 attempt and
+whole reduced-eigen step. Buffers are prepared outside the numerical loop;
+overflow is explicit and makes the parser reject the profile. OFF has no clock
+reads, trace storage or extra collectives (a flag branch remains). The CLI
+collects traces only after SCF; JSON stays outside the solver.
+
+Mac role: compilation, scientific bit-identity and parser transport checks only.
+Evidence and final gate outcomes: `lanes/DAVIDSON/correctness.json` and
+`lanes/DAVIDSON/validation.md`. Dev08 protocol and exact one-job-per-point
+commands: `lanes/DAVIDSON/profile-request.md`. Parser:
+`scripts/lane_davidson_parse.py`. No adoption recommendation; await dev08 data
+before Phase 2. REL-SLICES, Advance and restart-keep remain closed/rejected.

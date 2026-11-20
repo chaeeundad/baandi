@@ -638,6 +638,7 @@ impl RealDavidson {
             ));
         }
         let n = op.dimension();
+        let _lane_solve = lane_profile::solve(n, self.bands, capacity_per_band, self.tolerance);
         crate::validate_bands(n, self.bands)?;
         if diagonal.len() != n {
             return Err(LinalgError::Dimension.into());
@@ -841,9 +842,12 @@ impl RealDavidson {
             reduced_width = m;
             coefficients.reshape_within_storage(m, m)?;
             let t = timers.start();
+            let lane_eigen_step = lane_profile::span(lane_profile::Op::EigenStep, m, prefix, m, 0);
             // B5: one appended column on an unbroken base -> bordered update.
             let bordered = match b5.as_mut() {
                 Some(b) if prefix + 1 == m && b.order == prefix && b.streak < MAX_STREAK => {
+                    let _bordered_lane =
+                        lane_profile::span(lane_profile::Op::Bordered, m, prefix, m, 0);
                     let done = b.update(
                         gemm,
                         reduced,
@@ -859,6 +863,7 @@ impl RealDavidson {
                 _ => false,
             };
             if !bordered {
+                let _lane = lane_profile::span(lane_profile::Op::Eigen, m, m, m, 0);
                 eigensolver.solve_into(reduced, &mut values[..m], coefficients)?;
                 eigen_full_add(m);
             }
@@ -872,6 +877,7 @@ impl RealDavidson {
                 }
                 b.store(&values[..m], coefficients);
             }
+            drop(lane_eigen_step);
             timers.stop(t, Stage::Eigen);
             // B1: plan a narrow iteration (never at the iteration limit).
             let mut narrow = false;
@@ -1675,6 +1681,14 @@ fn reduced_matrix_into(
     out: &mut RealMatrix,
     narrow: bool,
 ) -> Result<(), LinalgError> {
+    let _lane = lane_profile::span(
+        lane_profile::Op::ReducedGram,
+        v.rows(),
+        v.cols(),
+        v.cols().saturating_sub(prefix),
+        0,
+    );
+
     let m = v.cols();
     out.reshape_within_storage(m, m)?;
     // Expand the contiguous leading dimension in place, last column first.
@@ -1801,6 +1815,8 @@ fn residual_into(
     norms: &mut [f64],
     pool: &WorkerPool,
 ) -> Result<(), LinalgError> {
+    let _lane = lane_profile::span(lane_profile::Op::Residual, v.rows(), 0, values.len(), 0);
+
     pool.install(|| {
         residual_columns(
             r.as_mut_slice(),
@@ -1834,6 +1850,14 @@ fn ritz_and_residuals(
     pool: &WorkerPool,
     timers: Timers,
 ) -> Result<bool, SolverError> {
+    let _lane = lane_profile::span(
+        lane_profile::Op::RotateResidual,
+        basis.rows(),
+        basis.cols(),
+        values.len(),
+        0,
+    );
+
     let m = basis.cols();
     let k = values.len();
     // V C and (H V) C.
@@ -1883,6 +1907,8 @@ fn ritz_and_residuals(
 /// Column norms of a residual block, the same per-column `norm` and the same
 /// fixed four-column pieces as `residual_columns`.
 fn residual_norms(r: &RealMatrix, norms: &mut [f64], pool: &WorkerPool) -> Result<(), LinalgError> {
+    let _lane = lane_profile::span(lane_profile::Op::Residual, r.rows(), 0, norms.len(), 1);
+
     fn pieces(r: &[f64], norms: &mut [f64], n: usize) {
         if norms.len() > 4 {
             let split = (norms.len().div_ceil(4) / 2) * 4;
@@ -2056,6 +2082,14 @@ impl Projection {
         ws: &mut RealGemmWorkspace,
         out: &mut RealMatrix,
     ) -> Result<(), LinalgError> {
+        let _lane = lane_profile::span(
+            lane_profile::Op::Ortho,
+            x.rows(),
+            against.map_or(0, |q| q.cols()),
+            x.cols(),
+            0,
+        );
+
         finite(x.as_slice())?;
         let n = x.rows();
         let mut count = x.cols();
@@ -3001,5 +3035,336 @@ mod tests {
         assert_eq!(precondition(1., 0.01, 0.).unwrap(), -10.);
         assert_eq!(precondition(1., 0., 2.).unwrap(), 0.5);
         assert!(precondition(1., f64::MAX, -f64::MAX).is_err());
+    }
+}
+
+/// Default-off, bounded Davidson call trace. Numerical code never reads it.
+/// The CLI owns serialization; collection after the solve is outside its clocks.
+pub mod lane_profile {
+    use std::cell::{Cell, RefCell};
+    use std::time::Instant;
+
+    pub const CAPACITY: usize = 65_536;
+    pub const FIELDS: [&str; 13] = [
+        "call",
+        "map",
+        "solve",
+        "stage",
+        "kind",
+        "iteration",
+        "operation",
+        "n",
+        "m",
+        "k",
+        "seconds",
+        "detail",
+        "tolerance_ha",
+    ];
+    pub const OPERATIONS: [&str; 15] = [
+        "solve",
+        "overlap_border",
+        "factor_extension",
+        "reduced_transform",
+        "ritz_coefficients",
+        "return_gram",
+        "reduced_eigen",
+        "reduced_gram",
+        "rotate_residual",
+        "residual",
+        "orthogonalize",
+        "tree_sum",
+        "bordered_update",
+        "reduced_eigen_step",
+        "restart",
+    ];
+    pub const STAGES: [&str; 4] = ["unknown", "coarse", "fine", "verification"];
+    pub const KINDS: [&str; 5] = ["unknown", "ordinary", "redo", "verification", "cold"];
+    pub const REDUCTION_SITES: [&str; 11] = [
+        "reduced_gram",
+        "residual_norms",
+        "ortho_normalize",
+        "ortho_projection",
+        "panel_cross",
+        "panel_dot",
+        "panel_norm",
+        "restart_defect",
+        "apply",
+        "setup",
+        "lean_border",
+    ];
+    #[derive(Clone, Copy)]
+    pub enum Op {
+        Solve,
+        Overlap,
+        Factor,
+        Transform,
+        Coefficients,
+        ReturnGram,
+        Eigen,
+        ReducedGram,
+        RotateResidual,
+        Residual,
+        Ortho,
+        TreeSum,
+        Bordered,
+        EigenStep,
+        Restart,
+    }
+    struct State {
+        records: Vec<[f64; 13]>,
+        dropped: usize,
+        call: usize,
+        map: usize,
+        solve: usize,
+        context: [usize; 3],
+    }
+    impl State {
+        fn new() -> Self {
+            Self {
+                records: Vec::with_capacity(CAPACITY),
+                dropped: 0,
+                call: 0,
+                map: 0,
+                solve: 0,
+                context: [0; 3],
+            }
+        }
+    }
+    thread_local! {
+        static ACTIVE: Cell<bool> = const { Cell::new(false) };
+        static STATE: RefCell<Option<State>> = const { RefCell::new(None) };
+    }
+    pub fn requested() -> bool {
+        dft_numerics::switches::on(dft_numerics::switches::Id::DAVIDSON_PROFILE)
+    }
+    /// Run boundary only. Disabled runs retain no trace allocation or clocks.
+    pub fn reset() {
+        ACTIVE.with(|a| a.set(false));
+        STATE.with(|s| *s.borrow_mut() = None);
+    }
+    fn activate() -> bool {
+        let on = requested();
+        ACTIVE.with(|a| a.set(on));
+        if on {
+            STATE.with(|s| {
+                if s.borrow().is_none() {
+                    *s.borrow_mut() = Some(State::new());
+                }
+            });
+        }
+        on
+    }
+    /// Called at the engine solve-phase boundary, before numerical loops.
+    pub fn map(stage: &str, kind: &str, iteration: usize) {
+        if !activate() {
+            return;
+        }
+        let stage = match stage {
+            "coarse" => 1,
+            "fine" => 2,
+            "verification" | "verify" => 3,
+            _ => 0,
+        };
+        let kind = match kind {
+            "ordinary" => 1,
+            "cold" => 4,
+            "redo" | "fine_redo" => 2,
+            "verification" | "verify_pass" | "verify_fail" | "verify" => 3,
+            _ => 0,
+        };
+        STATE.with(|s| {
+            let mut s = s.borrow_mut();
+            let s = s.as_mut().expect("active trace");
+            s.map += 1;
+            s.context = [stage, kind, iteration];
+        });
+    }
+    /// Also enables direct solver tests that have no engine map context (map 0).
+    pub fn solve(n: usize, bands: usize, capacity_per_band: usize, tolerance_ha: f64) -> Span {
+        if activate() {
+            STATE.with(|s| s.borrow_mut().as_mut().expect("active trace").solve += 1);
+        }
+        let mut span = span(Op::Solve, n, bands, capacity_per_band, 0);
+        if let Some((_, row)) = span.0.as_mut() {
+            row[12] = tolerance_ha;
+        }
+        span
+    }
+    pub struct Span(Option<(Instant, [f64; 13])>);
+    /// Disabled cost: a thread-local Boolean branch; no clock, allocation,
+    /// lock, atomic counter or trace record.
+    #[inline]
+    pub fn span(op: Op, n: usize, m: usize, k: usize, detail: usize) -> Span {
+        if !ACTIVE.with(Cell::get) {
+            return Span(None);
+        }
+        let row = STATE.with(|s| {
+            let mut s = s.borrow_mut();
+            let s = s.as_mut().expect("active trace");
+            s.call += 1;
+            [
+                s.call as f64,
+                s.map as f64,
+                s.solve as f64,
+                s.context[0] as f64,
+                s.context[1] as f64,
+                s.context[2] as f64,
+                op as usize as f64,
+                n as f64,
+                m as f64,
+                k as f64,
+                0.0,
+                detail as f64,
+                0.0,
+            ]
+        });
+        Span(Some((Instant::now(), row)))
+    }
+    impl Drop for Span {
+        fn drop(&mut self) {
+            if let Some((start, mut row)) = self.0.take() {
+                row[10] = start.elapsed().as_secs_f64();
+                STATE.with(|s| {
+                    let mut s = s.borrow_mut();
+                    if let Some(s) = s.as_mut() {
+                        if s.records.len() < CAPACITY {
+                            s.records.push(row);
+                        } else {
+                            s.dropped += 1;
+                        }
+                    }
+                });
+            }
+        }
+    }
+    #[derive(Debug)]
+    pub struct RankTrace {
+        pub rank: usize,
+        pub dropped: usize,
+        pub records: Vec<[f64; 13]>,
+    }
+    pub fn take(rank: usize) -> RankTrace {
+        ACTIVE.with(|a| a.set(false));
+        STATE.with(|s| match s.borrow_mut().take() {
+            Some(mut s) => {
+                s.records.sort_by(|a, b| a[0].total_cmp(&b[0]));
+                RankTrace {
+                    rank,
+                    dropped: s.dropped,
+                    records: s.records,
+                }
+            }
+            None => RankTrace {
+                rank,
+                dropped: 0,
+                records: Vec::new(),
+            },
+        })
+    }
+    /// Two output-boundary gathers: lengths then exact integer fields/times.
+    /// No collectives are inserted in the measured eigensolver.
+    pub fn gather<C: dft_mpi::Collective>(
+        comm: &C,
+        mine: RankTrace,
+    ) -> Result<Vec<RankTrace>, dft_mpi::MpiError> {
+        let local: Vec<f64> = std::iter::once(mine.dropped as f64)
+            .chain(mine.records.iter().flatten().copied())
+            .collect();
+        let mut sizes = vec![0.0; comm.size()];
+        comm.allgatherv_f64(&[local.len() as f64], &vec![1; comm.size()], &mut sizes)?;
+        let counts: Vec<usize> = sizes.iter().map(|&n| n as usize).collect();
+        let mut all = vec![0.0; counts.iter().sum()];
+        comm.allgatherv_f64(&local, &counts, &mut all)?;
+        let mut offset = 0;
+        Ok(counts
+            .iter()
+            .enumerate()
+            .map(|(rank, &len)| {
+                let block = &all[offset..offset + len];
+                offset += len;
+                RankTrace {
+                    rank,
+                    dropped: block[0] as usize,
+                    records: block[1..].as_chunks::<13>().0.to_vec(),
+                }
+            })
+            .collect())
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use dft_numerics::switches::RunConfig;
+        #[test]
+        fn trace_gather_preserves_rank_records_and_empty_ranks() {
+            use dft_mpi::Collective;
+            let reports = dft_mpi::simulate(3, |comm| {
+                let records = (0..comm.rank())
+                    .map(|i| {
+                        let mut row = [0.0; 13];
+                        row[0] = (i + 1) as f64;
+                        row[7] = comm.rank() as f64;
+                        row[10] = 0.125;
+                        row
+                    })
+                    .collect();
+                gather(
+                    comm,
+                    RankTrace {
+                        rank: comm.rank(),
+                        dropped: 0,
+                        records,
+                    },
+                )
+                .unwrap()
+            });
+            for report in reports {
+                for (rank, entry) in report.iter().enumerate() {
+                    assert_eq!(entry.rank, rank);
+                    assert_eq!(entry.records.len(), rank);
+                    assert_eq!(entry.dropped, 0);
+                    for row in &entry.records {
+                        assert_eq!(row[7], rank as f64);
+                        assert_eq!(row[10], 0.125);
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn trace_is_opt_in_bounded_and_contextual() {
+            reset();
+            let off = RunConfig::from_pairs(&[("davidson_profile", "off")]).unwrap();
+            let on = RunConfig::from_pairs(&[("davidson_profile", "on")]).unwrap();
+            {
+                let _scope = off.enter();
+                map("fine", "ordinary", 4);
+                drop(solve(100, 8, 6, 1e-8));
+                assert!(STATE.with(|s| s.borrow().is_none()));
+            }
+            {
+                let _scope = on.enter();
+                map("coarse", "ordinary", 2);
+                let solve = solve(100, 8, 6, 1e-8);
+                drop(span(Op::Factor, 32, 8, 24, 0));
+                drop(solve);
+                let trace = take(3);
+                assert_eq!(trace.rank, 3);
+                assert_eq!(trace.dropped, 0);
+                assert_eq!(trace.records.len(), 2);
+                assert_eq!(&trace.records[0][1..6], &[1., 1., 1., 1., 2.]);
+                assert_eq!(trace.records[0][6], Op::Solve as usize as f64);
+                map("fine", "ordinary", 1);
+                STATE.with(|s| {
+                    s.borrow_mut()
+                        .as_mut()
+                        .unwrap()
+                        .records
+                        .resize(CAPACITY, [0.; 13])
+                });
+                drop(span(Op::Eigen, 10, 10, 10, 0));
+                assert_eq!(take(0).dropped, 1);
+            }
+            reset();
+        }
     }
 }

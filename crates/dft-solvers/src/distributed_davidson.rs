@@ -5,6 +5,7 @@
 //! column pairs owned by one rank after gathering the correction block. With one
 //! rank the caller should use the threads-only `RealDavidson` (bit-identical by
 //! construction); this solver is used for two or more ranks.
+use crate::real_davidson::lane_profile;
 use crate::{
     BandTolerances, RealLinearOperator, SolverError,
     bordered::{Bordered, MAX_STREAK},
@@ -415,6 +416,13 @@ impl<C: Collective> Collective for Counted<'_, C> {
     }
     fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
         let s = SITE.with(|c| c.get());
+        let _lane = lane_profile::span(
+            lane_profile::Op::TreeSum,
+            local.len(),
+            self.inner.size(),
+            0,
+            s,
+        );
         REDUCTION_CALLS[s][bucket(local.len())].fetch_add(1, Ordering::Relaxed);
         REDUCTION_PAYLOAD[s].fetch_add(local.len() as u64, Ordering::Relaxed);
         self.probe()?;
@@ -1224,23 +1232,37 @@ fn solve_reduced(
     values: &mut [f64],
     coefficients: &mut RealMatrix,
 ) -> Result<(), SolverError> {
+    let _lane = lane_profile::span(
+        lane_profile::Op::EigenStep,
+        reduced.rows(),
+        prefix,
+        reduced.rows(),
+        usize::from(b5.is_some()),
+    );
+
     let m = reduced.rows();
     let Some((b, ws)) = b5 else {
-        eig.solve_into(reduced, values, coefficients)?;
+        {
+            let _full = lane_profile::span(lane_profile::Op::Eigen, m, m, m, 0);
+            eig.solve_into(reduced, values, coefficients)?;
+        }
         return Ok(());
     };
     if prefix == 0 {
         b.invalidate();
     }
-    let bordered = prefix + 1 == m
-        && b.order == prefix
-        && b.streak < MAX_STREAK
-        && b.update(ws, reduced, values, coefficients, None)?;
+    let bordered = prefix + 1 == m && b.order == prefix && b.streak < MAX_STREAK && {
+        let _bordered = lane_profile::span(lane_profile::Op::Bordered, m, prefix, m, 0);
+        b.update(ws, reduced, values, coefficients, None)?
+    };
     if bordered {
         b.streak += 1;
         SOLVE_COUNTS[2].fetch_add(1, Ordering::Relaxed);
     } else {
-        eig.solve_into(reduced, values, coefficients)?;
+        {
+            let _full = lane_profile::span(lane_profile::Op::Eigen, m, m, m, 0);
+            eig.solve_into(reduced, values, coefficients)?;
+        }
         b.streak = 0;
     }
     b.store(values, coefficients);
@@ -1519,6 +1541,8 @@ impl crate::RealDavidson {
         site(Site::Setup);
         let n = op.global_len();
         let mine: &[usize] = op.local_rows();
+        let _lane_solve =
+            lane_profile::solve(mine.len(), self.bands, capacity_per_band, self.tolerance);
         let invalid = diagonal_local.len() != mine.len()
             || mine.iter().any(|&r| r >= n)
             || matches!(initial, Some(DistributedStart::Local(x)) if x.rows() != mine.len());

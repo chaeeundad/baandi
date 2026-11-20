@@ -1,0 +1,42 @@
+{
+  "mac_role": "correctness and parser schema only; no timing analysis",
+  "source_base": "db25e70176bd5d111dab6fe1dc2a110766fcb005",
+  "cases": [
+    {
+      "status": "PASS",
+      "directories": [
+        "target/scratch/profile-final/si8/pristine",
+        "target/scratch/profile-final/si8/off",
+        "target/scratch/profile-final/si8/on"
+      ],
+      "energy_ha": -31.321776563202498,
+      "absolute_energy_difference_ha": 0,
+      "density_sha256": "43f2a33d8b0d0a5a90129076353d8e4ad26b2305695c3d834c13b7598fb7342b",
+      "scientific_history_and_verification_bit_identical": true,
+      "case": "si8",
+      "trace_calls": 773,
+      "maps": 18,
+      "dropped": 0,
+      "binary_sha256": "8fd32f7c401595030a86c2062dc409e6ae946997ba07056bf8e7d9477db6d43c",
+      "parser_exit_code": 0
+    },
+    {
+      "status": "PASS",
+      "directories": [
+        "target/scratch/profile-final/si32/pristine",
+        "target/scratch/profile-final/si32/off",
+        "target/scratch/profile-final/si32/on"
+      ],
+      "energy_ha": -126.70343204998852,
+      "absolute_energy_difference_ha": 0,
+      "density_sha256": "c264a0847e443677357373e8ee5557784ead8bb15dcf0ad77ac6d2da2cda2371",
+      "scientific_history_and_verification_bit_identical": true,
+      "case": "si32",
+      "trace_calls": 821,
+      "maps": 18,
+      "dropped": 0,
+      "binary_sha256": "8fd32f7c401595030a86c2062dc409e6ae946997ba07056bf8e7d9477db6d43c",
+      "parser_exit_code": 0
+    }
+  ]
+}

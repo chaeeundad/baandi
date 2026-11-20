@@ -823,6 +823,7 @@ fn execute_mode_inner(
     // CLI binary; a thread scope for in-process callers with other values).
     let (run_config, _run_scope) = crate::run_config::for_run(&config).map_err(|e| error(1, e))?;
     launch::elapsed("run_config", config_clock);
+    dft_engine::profile::davidson_lane::reset();
     if (config.collinear()
         || config
             .finite_temperature()
@@ -1722,6 +1723,23 @@ fn execute_mode_inner(
         }
         result["phase_profile"] = phases;
         launch::elapsed("profile_report", report_clock);
+    }
+    if dft_engine::profile::davidson_lane::requested() {
+        use dft_engine::profile::davidson_lane as lane;
+        let mine = lane::take(crate::parallel::rank());
+        let ranks = match dft_engine::parallel::SharedComm::active() {
+            Some(comm) => lane::gather(&comm, mine).map_err(|e| error(5, e))?,
+            None => vec![mine],
+        };
+        result["davidson_profile"] = json!({
+            "schema": "davidson-profile-1", "capacity_per_rank": lane::CAPACITY,
+            "fields": lane::FIELDS, "operations": lane::OPERATIONS,
+            "stages": lane::STAGES, "kinds": lane::KINDS,
+            "reduction_sites": lane::REDUCTION_SITES,
+            "timing": "inclusive; nested rows must not be summed as exclusive wall time",
+            "per_rank": ranks.iter().map(|r| json!({"rank":r.rank,
+                "dropped":r.dropped,"records":r.records})).collect::<Vec<_>>()
+        });
     }
     let first_block = dft_engine::first_block::take_records();
     if !first_block.is_empty() {

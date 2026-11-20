@@ -486,6 +486,14 @@ fn overlap_border(
     to: usize,
     s: &mut RealMatrix,
 ) -> Result<(), SolverError> {
+    let _lane = lane_profile::span(
+        lane_profile::Op::Overlap,
+        basis.rows(),
+        to,
+        to.saturating_sub(from),
+        0,
+    );
+
     if to <= from {
         return Ok(());
     }
@@ -616,6 +624,14 @@ pub(crate) fn extend_factor(
     from: usize,
     to: usize,
 ) -> Result<(bool, f64), SolverError> {
+    let _lane = lane_profile::span(
+        lane_profile::Op::Factor,
+        to,
+        from,
+        to.saturating_sub(from),
+        0,
+    );
+
     let cap = lean.cap;
     let mut min_ratio = f64::INFINITY;
     let mut p0 = from;
@@ -777,6 +793,14 @@ pub(crate) fn reduced_border(
     prefix: usize,
     m: usize,
 ) -> Result<(), SolverError> {
+    let _lane = lane_profile::span(
+        lane_profile::Op::Transform,
+        m,
+        prefix,
+        m.saturating_sub(prefix),
+        0,
+    );
+
     let cap = lean.cap;
     let a = &mut lean.a;
     a.reshape_within_storage(m, m)?;
@@ -842,6 +866,8 @@ pub(crate) fn ritz_coefficients(
     k: usize,
     cols: Option<&[usize]>,
 ) -> Result<(), SolverError> {
+    let _lane = lane_profile::span(lane_profile::Op::Coefficients, m, m, k, 0);
+
     let cap = lean.cap;
     let b = match cols {
         Some(cols) => {
@@ -936,6 +962,14 @@ pub(crate) fn return_gram_columns(
     to: usize,
     pool: &WorkerPool,
 ) -> Result<(f64, f64), SolverError> {
+    let _lane = lane_profile::span(
+        lane_profile::Op::ReturnGram,
+        m,
+        bands,
+        to.saturating_sub(from),
+        from,
+    );
+
     lean.p.reshape_within_storage(m, bands)?;
     lean.z.reshape_within_storage(m, bands)?;
     let cap = lean.cap;
@@ -1596,8 +1630,11 @@ pub(super) fn solve_with_intent(
         let old_prefix = prefix;
         prefix = m;
         coefficients.reshape_within_storage(m, m)?;
+        let lane_eigen_step = lane_profile::span(lane_profile::Op::EigenStep, m, old_prefix, m, 0);
         let bordered = match b5.as_mut() {
             Some(b) if old_prefix + 1 == m && b.order == old_prefix && b.streak < MAX_STREAK => {
+                let _bordered_lane =
+                    lane_profile::span(lane_profile::Op::Bordered, m, old_prefix, m, 0);
                 let done = b.update(
                     gemm,
                     &lean.a,
@@ -1613,6 +1650,7 @@ pub(super) fn solve_with_intent(
             _ => false,
         };
         if !bordered {
+            let _lane = lane_profile::span(lane_profile::Op::Eigen, m, m, m, 0);
             eigensolver.solve_into(&lean.a, &mut values[..m], coefficients)?;
             eigen_full_add(m);
         }
@@ -1626,6 +1664,7 @@ pub(super) fn solve_with_intent(
             }
             b.store(&values[..m], coefficients);
         }
+        drop(lane_eigen_step);
         timers.stop(t, Stage::Eigen);
         for (j, flag) in converged.iter_mut().enumerate() {
             *flag = iteration > 1 && (values[j] - previous[j]).abs() < threshold(j);
@@ -1844,6 +1883,7 @@ pub(super) fn solve_with_intent(
         )?;
         timers.stop(t, Stage::Precondition);
         if contracted {
+            let _lane_restart = lane_profile::span(lane_profile::Op::Restart, n, m, bands, 0);
             // Contraction restart: X and H X of all bands (QE's last).
             restarts += 1;
             contractions += 1;

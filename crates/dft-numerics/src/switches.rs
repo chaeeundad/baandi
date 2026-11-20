@@ -368,6 +368,8 @@ table! {
     LEAN_PROJ_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "C3a: the lean real Gamma Davidson keeps P^T V (projector products) beside its basis (copied after each H apply, rotated at contraction and return) and the audit's nonlocal energy reads P^T X = (P^T V) C instead of a fresh n x n_proj x bands product; falls back to the direct product whenever the cache is incomplete; rounding class";
     // Per-core kernels (ticket PERCORE-KERNELS, docs/performance/percore-kernels-2026-11-17.md); default off.
+    DAVIDSON_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "Bounded per-call Davidson lane trace with shapes and rank/map labels; diagnostic only.";
     LEAN_BORDER: Kind::Choice { allowed: &["separate", "fused"], default: "separate" }, "separate",
         "separate, fused",
         "PERCORE-KERNELS: borders of the lean real Gamma Davidson: separate (overlap border V^T E before the H apply, reduced border V^T (H E) in the next iteration, two transposed products) or fused (H applied to the unit corrections first, then one transposed product V^T [E | H E] of twice the width forms both borders, so the basis is streamed once; the pivot test follows it and a failing append discards the images, takes the separate fallback and ends fusing for the rest of that solve; only blocks with 4 k <= m (basis width m) fuse, wider blocks such as the first append of every solve keep the separate products; bit-identical on the aarch64 pure kernel, rounding class on MKL and x86)";
@@ -485,7 +487,7 @@ impl Table {
 pub fn table_of(id: Id) -> Table {
     use Id::*;
     match id {
-        PHASE_PROFILE | INIT_PROFILE | STAGE_TIMERS | DAVIDSON_STAGES | SNAPSHOT_DIR
+        PHASE_PROFILE | INIT_PROFILE | STAGE_TIMERS | DAVIDSON_STAGES | DAVIDSON_PROFILE | SNAPSHOT_DIR
         | PHASE_WAIT | FIRST_BLOCK | DGEMM_TIMERS => Table::Profile,
         // Overrides of input-file values (`scf.cutoff_ladder`, the relaxation
         // extrapolation) and the pseudopotential cache location.

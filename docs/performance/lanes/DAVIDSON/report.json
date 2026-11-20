@@ -1,0 +1,82 @@
+{
+  "task_id": "LANE-DAVIDSON",
+  "status": "DONE",
+  "changed_files": [
+    "crates/dft-cli/src/run.rs",
+    "crates/dft-cli/tests/all/run.rs",
+    "crates/dft-engine/src/profile.rs",
+    "crates/dft-engine/tests/davidson_profile.rs",
+    "crates/dft-numerics/src/switches.rs",
+    "crates/dft-numerics/tests/all/switches.rs",
+    "crates/dft-solvers/src/distributed_davidson.rs",
+    "crates/dft-solvers/src/distributed_davidson/workspace.rs",
+    "crates/dft-solvers/src/distributed_davidson/workspace/lean.rs",
+    "crates/dft-solvers/src/lean_davidson.rs",
+    "crates/dft-solvers/src/real_davidson.rs",
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/lanes/DAVIDSON/correctness.json",
+    "docs/performance/lanes/DAVIDSON/phase-status.json",
+    "docs/performance/lanes/DAVIDSON/profile-job.sh",
+    "docs/performance/lanes/DAVIDSON/profile-request.md",
+    "docs/performance/lanes/DAVIDSON/report.json",
+    "docs/performance/lanes/DAVIDSON/validation.md",
+    "docs/performance/lanes/DAVIDSON/verify_identity.py",
+    "scripts/lane_davidson_parse.py",
+    "scripts/tests/test_lane_davidson_parse.py"
+  ],
+  "design_choices": [
+    "Phase 0 outcome: PROFILE_REQUEST (phase-status.json). Stop before Phase 2.",
+    "Default-off DAVIDSON_PROFILE records bounded rank/map/solve/call traces, sizes and requested eigen tolerance. No numerical algorithm or default changes.",
+    "Minimal engine/CLI transport wiring and parser added as required by the revised instruction. No timing analysis or performance conclusion from Mac."
+  ],
+  "commands": [
+    {
+      "command": "cargo build --release -p dft-cli",
+      "exit_code": 0
+    },
+    {
+      "command": "CHECK_SCCACHE=0 TMPDIR_990=\"$PWD/target/scratch\" scripts/check.sh fast dft-solvers dft-numerics dft-engine dft-cli",
+      "exit_code": 1
+    },
+    {
+      "command": "cargo test --release -p dft-engine --test davidson_profile",
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=\"$PWD/target/scratch\" python3 -I scripts/tests/test_lane_davidson_parse.py",
+      "exit_code": 0
+    },
+    {
+      "command": "verify_identity.py: pristine/OFF/ON for Si8 and Si32 (paths in correctness.json)",
+      "exit_code": 0
+    },
+    {
+      "command": "lane_davidson_parse.py: final Si8 and Si32 ON results.json",
+      "exit_code": 0
+    },
+    {
+      "command": "bash -n docs/performance/lanes/DAVIDSON/profile-job.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "Si8 total energy -31.321776563202498 Ha; Si32 -126.70343204998852 Ha. Pristine/OFF/ON deltas 0 Ha; density bytes, scientific history and verification bit-identical.",
+    "773 / 821 trace calls, 18 maps each, 0 dropped records.",
+    "Simulated MPI3 standard/strict ON/OFF energy and density bits identical.",
+    "Final fast gate: 613 passed, 3 known TMPDIR-cache failures, 160 ignored; build/fmt/clippy passed."
+  ],
+  "reference_comparison": "Same-input pristine and final binaries; no QE comparison or dev08 run. See correctness.json and validation.md.",
+  "limitations": [
+    "Known three CLI cache tests reject repository-local TMPDIR; fast gate exit remains 1.",
+    "Real MPI/MKL profiling is deferred to dev08. Timers are inclusive; overlapping operation times must not be added as exclusive wall.",
+    "Detailed trace covers real Gamma/workspace paths; complex and legacy allocating distributed paths are not fully instrumented."
+  ],
+  "open_questions": [
+    "Orchestrator to return the requested dev08 profiles before Phase 2."
+  ],
+  "commit": "Uncommitted as requested."
+}

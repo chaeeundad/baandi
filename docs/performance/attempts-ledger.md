@@ -2865,3 +2865,25 @@ Phase 2 Mac checks: `scripts/check.sh fast` (CHECK_BASE=HEAD, sccache off,
 in-repository scratch) exit **1**: build/fmt/clippy pass; **617 passed /
 3 known CLI cache TMPDIR failures / 157 ignored**. `git diff --check` exit **0**.
 Documentation only; no new numerical equivalence or performance claim.
+
+## LANE-GLUE Phase 2 — recommend closing (2026-11-20)
+
+Analysis only, from user-relayed dev08 `e947a35` (instrumented, socket 0).
+Si64 GLUE 1.1690 s MPI8 / 8.2797 s one core; density 0.7331 / 6.3032 s.
+No candidate substantiates the task's >=0.2 s MPI8 or >=0.8 s serial expected
+saving. Pair FFTs and MPI fused/owned density already adopted; no rank-wide
+density sum remains on the eligible owned path. Serial MKL density still uses
+a full-grid adapter and split contribution arrays: fixture model (72^3,
+128 occupied bands, 15 maps) has 960 paired inverse transforms, 0.420213 s/map
+normalization; direct accumulation could remove 11.466 GB logical traffic,
+but >=0.8 s requires <=14.333 GB/s effective removed-pass throughput, absent
+from the relay. This is a break-even condition, not a gain prediction.
+`m2.xc` includes potential/audit FFTs and collectives; 37.4% asymmetry cannot
+be attributed to pointwise XC without the pure-XC counters. ENERGY_IDENTITY
+previously lost; dropping fresh verification density would invalidate the
+residual. Five candidates and their limits are recorded in
+[diagnosis.md](lanes/GLUE/diagnosis.md); [closing-note.md](lanes/GLUE/closing-note.md)
+records reopening evidence. No switch, optimization, A/B job, default or Rust
+source change. No Mac profiling. Named engine gate exit 0: build/test/fmt/clippy
+PASS, 260 passed, 0 failed, 74 ignored. Changes uncommitted; stop here.
+The task's screening threshold does not supersede the standing adoption rule.

@@ -2457,3 +2457,18 @@ buffer/transport/all-five-operation unit tests pass. Final fast gate: 705 pass,
 3 known TMPDIR cache failures, 178 ignored; build/fmt/clippy pass. No Mac speed
 claim, no optimization. See [request](lanes/FFT/wait-profile-request.md),
 [validation](lanes/FFT/arrival-validation.md), [evidence](lanes/FFT/arrival-equivalence.json).
+
+## FFT-ARRIVAL-OWNERSHIP-CLOSED (2026-11-20)
+
+Recommendation: close FFT optimization on available evidence; no new switch or
+ownership change. Relayed 45340f6 si64 MPI8 trace: 776 matched events/rank,
+684 ns clock error, rank-summed exposure 2.7990 s (0.349875 s/rank), median/p90
+arrival skew 504.3/2409.6 us. Rank 3 last 220 times but reconstructed default
+mirror ownership is identical to ranks 2/4: 126 sticks, 2986 ORC rows, nine
+transpose planes. Across ranks rows differ by four, sticks by two. No supported
+0.15 s balancing gain. solver.append is a last-completed-stage label and can
+precede untimed local border work, not causal attribution. Jitter/NUMA remains
+unproved; raw matched interval/stage data and queued si32 are missing. Mean rank
+exposure is not a critical-path wall bound. See [closing note](lanes/FFT/arrival-closing-note.md)
+and reproducible [ownership audit](lanes/FFT/ownership_audit.py). No Mac profiling,
+no runtime changes; FFT_KEPT_FUSE remains OFF/NEUTRAL.

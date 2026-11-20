@@ -1,0 +1,64 @@
+{
+  "assumption": "cubic Gamma sphere |integer G|^2 <= 320; mirror sticks",
+  "plane_waves": 23871,
+  "sticks": 1005,
+  "active_z_planes": 35,
+  "ranks": [
+    {
+      "rank": 0,
+      "sticks": 125,
+      "coefficients": 2983,
+      "orc_rows": 2983,
+      "transpose_planes": 9
+    },
+    {
+      "rank": 1,
+      "sticks": 124,
+      "coefficients": 2984,
+      "orc_rows": 2984,
+      "transpose_planes": 9
+    },
+    {
+      "rank": 2,
+      "sticks": 126,
+      "coefficients": 2986,
+      "orc_rows": 2986,
+      "transpose_planes": 9
+    },
+    {
+      "rank": 3,
+      "sticks": 126,
+      "coefficients": 2986,
+      "orc_rows": 2986,
+      "transpose_planes": 9
+    },
+    {
+      "rank": 4,
+      "sticks": 126,
+      "coefficients": 2986,
+      "orc_rows": 2986,
+      "transpose_planes": 9
+    },
+    {
+      "rank": 5,
+      "sticks": 126,
+      "coefficients": 2982,
+      "orc_rows": 2982,
+      "transpose_planes": 9
+    },
+    {
+      "rank": 6,
+      "sticks": 126,
+      "coefficients": 2982,
+      "orc_rows": 2982,
+      "transpose_planes": 9
+    },
+    {
+      "rank": 7,
+      "sticks": 126,
+      "coefficients": 2982,
+      "orc_rows": 2982,
+      "transpose_planes": 9
+    }
+  ]
+}

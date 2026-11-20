@@ -85,7 +85,7 @@ env MKL_NUM_THREADS=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   BAANDI_COLLECTIVE_TRACE=off BAANDI_PHASE_PROFILE=on BAANDI_FFT_PROFILE=on \
   BAANDI_PHASE_WAIT=off BAANDI_STAGE_TIMERS=off BAANDI_DAVIDSON_STAGES=on \
   BAANDI_FFT_KEPT_FUSE=off \
-  mpirun --host localhost -np 8 --map-by ppr:8:socket --bind-to core --report-bindings \
+  mpirun --host localhost:8 -np 8 --map-by ppr:8:socket --bind-to core --report-bindings \
   "$FFT_BIN" run "$WAIT_WORK/input.toml" --output-dir "$WAIT_WORK/off" \
   > "$WAIT_WORK/off.log" 2>&1
 for REP in 1 2 3; do
@@ -94,7 +94,7 @@ for REP in 1 2 3; do
       BAANDI_COLLECTIVE_TRACE=on BAANDI_PHASE_PROFILE=on BAANDI_FFT_PROFILE=on \
       BAANDI_PHASE_WAIT=off BAANDI_STAGE_TIMERS="$TIMER" BAANDI_DAVIDSON_STAGES=on \
       BAANDI_FFT_KEPT_FUSE=off \
-      mpirun --host localhost -np 8 --map-by ppr:8:socket --bind-to core --report-bindings \
+      mpirun --host localhost:8 -np 8 --map-by ppr:8:socket --bind-to core --report-bindings \
       "$FFT_BIN" run "$WAIT_WORK/input.toml" --output-dir "$WAIT_WORK/$REP-$TIMER" \
       > "$WAIT_WORK/$REP-$TIMER.log" 2>&1
     python3 -I docs/performance/lanes/FFT/wait_parse.py \

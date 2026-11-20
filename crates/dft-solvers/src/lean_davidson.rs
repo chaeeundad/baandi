@@ -499,16 +499,13 @@ fn overlap_border(
     }
     let n = basis.rows();
     flops_add(FlopSite::Overlap, to, n, to - from);
-    gemm.multiply_slices_into(
+    upper_border_product(
+        gemm,
         GemmSite::Gram,
-        basis.as_slice(),
-        n,
+        basis,
+        basis,
+        from,
         to,
-        n,
-        RealOp::Transpose,
-        &basis.as_slice()[from * n..],
-        to - from,
-        n,
         s.as_mut().submatrix_mut(0, from, to, to - from),
     )?;
     // The computed upper entries define the symmetric matrix.

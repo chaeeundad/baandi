@@ -131,6 +131,7 @@ fn legacy_defaults_are_unchanged() {
         Id::M2_B5,
         Id::LEAN_PROJ_CACHE,
         Id::DAVIDSON_PROFILE,
+        Id::DAVIDSON_UPPER_BORDER,
         Id::PACK_FIXED,
     ] {
         assert!(!on(id), "{id:?} must default off");
@@ -285,7 +286,8 @@ fn legacy_defaults_are_unchanged() {
         switches::Table::Profile
     );
     assert_eq!(value(Id::ATOMIC_LOCAL_BLOCK), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 122);
+    assert_eq!(value(Id::DAVIDSON_UPPER_BORDER), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 123);
 }
 
 #[test]

@@ -1,0 +1,78 @@
+{
+  "task_id": "LANE-DAVIDSON",
+  "status": "BLOCKED",
+  "changed_files": [
+    "crates/dft-cli/tests/all/run.rs",
+    "crates/dft-numerics/src/switches.rs",
+    "crates/dft-numerics/tests/all/switches.rs",
+    "crates/dft-solvers/src/distributed_davidson/workspace/lean.rs",
+    "crates/dft-solvers/src/lean_davidson.rs",
+    "crates/dft-solvers/src/real_davidson.rs",
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/lanes/DAVIDSON/border-counter.py",
+    "docs/performance/lanes/DAVIDSON/dev08-request.md",
+    "docs/performance/lanes/DAVIDSON/diagnosis.md",
+    "docs/performance/lanes/DAVIDSON/paired-summary.py",
+    "docs/performance/lanes/DAVIDSON/phase-status.json",
+    "docs/performance/lanes/DAVIDSON/phase2-correctness.json",
+    "docs/performance/lanes/DAVIDSON/phase2-job.sh",
+    "docs/performance/lanes/DAVIDSON/phase2-report.json",
+    "docs/performance/lanes/DAVIDSON/phase2-validation.md",
+    "docs/performance/lanes/DAVIDSON/test_tools.py",
+    "scripts/lane_davidson_parse.py"
+  ],
+  "design_choices": [
+    "Default-off DAVIDSON_UPPER_BORDER: upper-border GEMM tiles; original default arithmetic retained.",
+    "Two candidates documented; no rejected reduced-EVD/restart/bounded-subspace/PR-CG strategy reopened.",
+    "dev08 request has separate fixed-H screen, crossed A/A and A/B, five case/model points, exact FLOP counter and abs(mean)/SE >=3.",
+    "Numeric floor/gap diagnosis awaits missing raw dev08 records and hardware ceilings; no invented floor or Mac performance claim."
+  ],
+  "commands": [
+    {
+      "command": "cargo build --release -p dft-cli",
+      "exit_code": 0
+    },
+    {
+      "command": "BAANDI_DAVIDSON_UPPER_BORDER=on cargo test --release -p dft-solvers --test lean_davidson --test distributed_lean_algebra",
+      "exit_code": 0
+    },
+    {
+      "command": "CHECK_SCCACHE=0 TMPDIR_990=\"$PWD/target/scratch\" scripts/check.sh fast dft-solvers dft-numerics dft-engine dft-cli",
+      "exit_code": 1
+    },
+    {
+      "command": "python3 -I scripts/tests/test_lane_davidson_parse.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/DAVIDSON/test_tools.py",
+      "exit_code": 0
+    },
+    {
+      "command": "bash -n docs/performance/lanes/DAVIDSON/phase2-job.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "Mac science/density bit identity: Si8, Si32, skew, Si8 strict; abs(dE)=0 Ha. Si32 workers 1/3 identical.",
+    "Active border rank test: simulated ranks 1/2/3/4/8, entries within 1e-12. 13 ON solver oracle tests pass.",
+    "Fast gate: 615 passed, 3 known TMPDIR-cache failures, 160 ignored; build/fmt/clippy PASS.",
+    "Mac schema-only counter: 174 parent products, 22,772,337,784 -> 22,390,885,752 FLOP exactly as predicted; not dev08 performance evidence."
+  ],
+  "reference_comparison": "Prior Phase 0 release binary / final OFF / final ON scientific identity on Si8/Si32. Independent dense solver tests. No new QE comparison or dev08 candidate run.",
+  "limitations": [
+    "Raw dev08 n/m/k/count/payload records and rate ceilings missing; required numeric floor/gap table incomplete.",
+    "Relayed exclusive percentages sum to 104.1%; aggregation needs clarification.",
+    "Slab fails to converge in both arms after 100 iterations, with identical science; no slab convergence pass.",
+    "Real MPI/MKL rounding and larger-band full-SCF rank independence remain dev08 gates.",
+    "Three CLI pseudo-cache tests reject repository-local TMPDIR."
+  ],
+  "open_questions": [
+    "Provide local results.json/tables.json paths for the 2733278 profile and available throughput/bandwidth ceilings."
+  ],
+  "commit": "Uncommitted as requested."
+}

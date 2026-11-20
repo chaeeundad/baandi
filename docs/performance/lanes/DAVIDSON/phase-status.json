@@ -1,8 +1,9 @@
 {
   "task_id": "LANE-DAVIDSON",
-  "phase": 0,
-  "status": "PROFILE_REQUEST",
-  "optimization_implemented": false,
-  "next_phase_requires": "orchestrator-returned dev08 profile",
+  "phase": 2,
+  "status": "BLOCKED",
+  "implementation": "default-off upper-border candidate ready",
+  "blocker": "Original dev08 per-call shapes/counts/payloads and rate ceilings absent; numeric floor/gap diagnosis incomplete",
+  "next": "Orchestrator supplies raw profile and runs pre-registered dev08 A/B; no default adoption",
   "performance_evidence_from_mac": false
 }

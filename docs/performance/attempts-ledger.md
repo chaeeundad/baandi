@@ -2551,3 +2551,33 @@ Stop at PROFILE_REQUEST until the master relays the dev08 profile.
   measured floor, correctness and later generality gates. See
   [diagnosis](lanes/INIT/diagnosis.md) and
   [dev08 request](lanes/INIT/dev08-request.md). Leave uncommitted and stop.
+
+## LANE-DAVIDSON Phase 2 — upper-border GEMM tiles (2026-11-20)
+
+Default-off `BAANDI_DAVIDSON_UPPER_BORDER`: compute upper-border rectangles in
+64-column tiles and omit entries discarded by symmetric cleanup. Serial
+real overlap/reduced and MPI lean S/H borders; no H, EVD, tolerance, capacity,
+restart, collective count/payload change. Candidate 2 (deferred): omit zeros
+in triangular reduced-coordinate products. REL-SLICES, Advance, restart-keep,
+async alltoall and PR-CG remain rejected/closed.
+
+Dev08 source 2733278 relay: Si64 MPI8 solve envelope 6.4323/9.7715 s,
+reduced Gram 14.4%, rotation 13.8%, eigen 11.0% (inclusive); one-core
+27.2416/45.5618 s, rotation 21.6%, reduced Gram 8.0%, overlap 7.8%.
+No inclusive rows added. Numeric floor/gap diagnosis is **incomplete**:
+raw block/count/payload traces and rate ceilings were not relayed; requested
+from the orchestrator. The quoted exclusive shares total 104.1%, needing
+aggregation clarification. Conditional Amdahl scenarios, not measured gains,
+are in `lanes/DAVIDSON/diagnosis.md`.
+
+Mac correctness only: Si8/Si32 base/OFF/ON and skew/Si8 strict OFF/ON science
+and density bytes identical, abs(dE)=0 Ha; Si32 workers 1/3 identical.
+Slab both exit 3 after 100 iterations with identical science (not a converged
+generality pass). Direct m=137 border test across simulated ranks 1/2/3/4/8
+agrees within 1e-12; 13 ON solver oracle tests pass. Final fast gate:
+615 passed, 3 known TMPDIR-cache failures, 160 ignored; build/fmt/clippy PASS.
+Counter/parser schema tested on Mac output; **no Mac performance conclusion**.
+Status: implemented for dev08 screening, default OFF, floor diagnosis awaiting
+raw data. Request pre-registers exact tile FLOP reduction, A/A floor then
+crossed pairs, abs(mean)/SE >=3; all five requested points in separate jobs.
+Evidence: `lanes/DAVIDSON/{phase2-correctness.json,phase2-validation.md,dev08-request.md}`.

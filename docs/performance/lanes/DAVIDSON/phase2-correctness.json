@@ -1,0 +1,145 @@
+{
+  "task_id": "LANE-DAVIDSON",
+  "phase": 2,
+  "source_base": "45670dd633af6573b68578fd2e3d5700b982c889",
+  "mac_role": "correctness and trace schema only; no timing analysis",
+  "binary_sha256": "a51b29ade5e1bb5c57c8d54e50b0502708558e97d4cf6bbab00d5817a5652a7c",
+  "cases": [
+    {
+      "case": "si8",
+      "energy_ha": -31.321776563202498,
+      "abs_delta_energy_ha": 0.0,
+      "converged": true,
+      "verified": true,
+      "history_rows": 11,
+      "science_bits_identical": true,
+      "density_sha256": "43f2a33d8b0d0a5a90129076353d8e4ad26b2305695c3d834c13b7598fb7342b",
+      "raw_dirs": [
+        "target/scratch/phase2/final/si8/off",
+        "target/scratch/phase2/final/si8/on"
+      ],
+      "exit_codes": [
+        0,
+        0
+      ]
+    },
+    {
+      "case": "si32",
+      "energy_ha": -126.70343204998852,
+      "abs_delta_energy_ha": 0.0,
+      "converged": true,
+      "verified": true,
+      "history_rows": 10,
+      "science_bits_identical": true,
+      "density_sha256": "c264a0847e443677357373e8ee5557784ead8bb15dcf0ad77ac6d2da2cda2371",
+      "raw_dirs": [
+        "target/scratch/phase2/final/si32/off",
+        "target/scratch/phase2/final/si32/on"
+      ],
+      "exit_codes": [
+        0,
+        0
+      ]
+    },
+    {
+      "case": "si-skew",
+      "energy_ha": -7.250604620381497,
+      "abs_delta_energy_ha": 0.0,
+      "converged": true,
+      "verified": true,
+      "history_rows": 8,
+      "science_bits_identical": true,
+      "density_sha256": "f5ca6ce9d629e099932a1dabd0e7256f22a9f15744221252f81109b3db9fc3fe",
+      "raw_dirs": [
+        "target/scratch/phase2/final/si-skew/off",
+        "target/scratch/phase2/final/si-skew/on"
+      ],
+      "exit_codes": [
+        0,
+        0
+      ]
+    },
+    {
+      "case": "si-slab",
+      "energy_ha": -15.232236865316718,
+      "abs_delta_energy_ha": 0.0,
+      "converged": false,
+      "verified": false,
+      "history_rows": 100,
+      "science_bits_identical": true,
+      "density_sha256": "e9f8ad996dc9bb56c5a0acd324589de006f4aba62d0b39b10b32496f5eff85d1",
+      "raw_dirs": [
+        "target/scratch/phase2/final/si-slab/off",
+        "target/scratch/phase2/final/si-slab/on"
+      ],
+      "exit_codes": [
+        3,
+        3
+      ]
+    },
+    {
+      "case": "si8-strict",
+      "energy_ha": -31.32177656328941,
+      "abs_delta_energy_ha": 0.0,
+      "converged": true,
+      "verified": null,
+      "history_rows": 10,
+      "science_bits_identical": true,
+      "density_sha256": "ced59f2f76bd4248a1e5a458be750ae515cdcafc438e5e467cf238e9df38e970",
+      "raw_dirs": [
+        "target/scratch/phase2/final/si8-strict/off",
+        "target/scratch/phase2/final/si8-strict/on"
+      ],
+      "exit_codes": [
+        0,
+        0
+      ]
+    }
+  ],
+  "default_identity": "Si8 and Si32 base binary vs OFF vs ON: all scientific outputs and density bytes identical",
+  "worker_independence": "Si32 ON workers 1 and 3: scientific outputs and density bytes identical",
+  "rank_independence": "Active 137-column S/H border, simulated ranks 1/2/3/4/8, entries within 1e-12; existing eigensolver tests ranks 1..4 pass",
+  "trace_counter_schema_validation": [
+    {
+      "path": "target/scratch/phase2/final/trace-off/results.json",
+      "ranks": [
+        {
+          "rank": 0,
+          "products": 174,
+          "tiles": 0,
+          "full_rectangle_flop": 22772337784,
+          "predicted_tiled_flop": 22390885752,
+          "executed_flop": 22772337784
+        }
+      ]
+    },
+    {
+      "path": "target/scratch/phase2/final/trace-on/results.json",
+      "ranks": [
+        {
+          "rank": 0,
+          "products": 174,
+          "tiles": 258,
+          "full_rectangle_flop": 22772337784,
+          "predicted_tiled_flop": 22390885752,
+          "executed_flop": 22390885752
+        }
+      ]
+    }
+  ],
+  "gate": {
+    "exit_code": 1,
+    "passed": 615,
+    "failed": 3,
+    "ignored": 160,
+    "build": "PASS",
+    "fmt": "PASS",
+    "clippy": "PASS",
+    "failure_reason": "known repository-local TMPDIR rejection in three CLI pseudo cache tests"
+  },
+  "limitations": [
+    "Slab failed to converge in 100 iterations in both arms, with identical science; no slab convergence claim.",
+    "Real MPI/MKL candidate not executed locally.",
+    "Exact floor/gap diagnosis awaits original dev08 shape traces and rate ceilings."
+  ]
+}

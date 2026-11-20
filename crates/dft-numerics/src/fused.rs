@@ -1009,3 +1009,66 @@ mod batch_study {
         }
     }
 }
+
+// Keep each band's division and addition from +0, then add bands separately.
+// Grouping the pair before division/addition changes the SCF trajectory.
+fn add_ordered_pair(value: C, weights: [f64; 2], volume: f64, n: &mut f64) {
+    let a = 0.0 + weights[0] * (value.re * value.re) / volume;
+    let b = 0.0 + weights[1] * (value.im * value.im) / volume;
+    *n += a;
+    *n += b;
+}
+impl crate::fused_pair::OrderedPairDensity for OrderedFusedPlan {
+    fn accumulate_density_pair_ordered(
+        &mut self,
+        phi: &[C],
+        weights: [f64; 2],
+        volume: f64,
+        density: &mut [f64],
+        mut keep: Option<&mut [C]>,
+    ) -> Result<(), FftError> {
+        self.validate(phi, density.len())?;
+        crate::fused_pair::validate_density(weights, volume)?;
+        if keep.as_ref().is_some_and(|k| k.len() != density.len()) {
+            return Err(FftError::IncompatibleArray);
+        }
+        self.inverse_xy(phi);
+        let [nx, ny, nz] = self.shape;
+        for xy in 0..nx * ny {
+            self.inverse_z(xy);
+            let range = xy * nz..(xy + 1) * nz;
+            if let Some(k) = keep.as_deref_mut() {
+                k[range.clone()].copy_from_slice(&self.kernels.lane[..nz]);
+            }
+            for (&v, n) in self.kernels.lane[..nz].iter().zip(&mut density[range]) {
+                add_ordered_pair(v, weights, volume, n);
+            }
+        }
+        Ok(())
+    }
+}
+impl<F: crate::Fft3d> crate::fused_pair::OrderedPairDensity for GridFusedPlan<F> {
+    fn accumulate_density_pair_ordered(
+        &mut self,
+        phi: &[C],
+        weights: [f64; 2],
+        volume: f64,
+        density: &mut [f64],
+        keep: Option<&mut [C]>,
+    ) -> Result<(), FftError> {
+        self.validate(phi, density.len())?;
+        crate::fused_pair::validate_density(weights, volume)?;
+        if keep.as_ref().is_some_and(|k| k.len() != density.len()) {
+            return Err(FftError::IncompatibleArray);
+        }
+        self.inverse(phi)?;
+        let real = self.real.as_slice().ok_or(FftError::IncompatibleArray)?;
+        if let Some(k) = keep {
+            k.copy_from_slice(real);
+        }
+        for (&v, n) in real.iter().zip(density) {
+            add_ordered_pair(v, weights, volume, n);
+        }
+        Ok(())
+    }
+}

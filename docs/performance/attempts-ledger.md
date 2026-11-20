@@ -2734,3 +2734,39 @@ records reopening evidence. No switch, optimization, A/B job, default or Rust
 source change. No Mac profiling. Named engine gate exit 0: build/test/fmt/clippy
 PASS, 260 passed, 0 failed, 74 ignored. Changes uncommitted; stop here.
 The task's screening threshold does not supersede the standing adoption rule.
+
+### LANE-GLUE serial density fusion — 2026-11-20, default-off, dev08 request
+
+Supersedes the Phase-2 closing recommendation above. **New premise:** the
+orchestrator relayed one-core STREAM triad 12.97 GB/s (DGEMM 64–108 GFLOP/s)
+and explicitly authorized implementing the serial density/FFT candidate.
+11,466,178,560 conservative logical bytes / 12.97e9 predicts **0.884054 s**
+at Si64 one core, about 2.17% of 40.7 s; this is a hypothesis, not measured gain.
+No rejected GEMM/ENERGY_IDENTITY experiment is retried.
+
+Implemented `BAANDI_SERIAL_DENSITY_FUSED=on` (default off): ordered pair sink
+avoids per-band density-grid traffic, keeps each band addition and FFT/psi
+arithmetic unchanged. Standard, one-core, no registered communicator and
+non-MPI build only; strict/complex/multi-worker/MPI paths unchanged. Arrays
+remain allocated for fallback; no resident-memory claim. Counters under
+GLUE_PROFILE+PHASE_PROFILE charge old 32 versus new 16 bytes/paired band-point.
+Mac final baseline/OFF/ON scientific bits match: 12 converged+verified standard
+runs (Si8, skew, synthetic S2, Si32), strict skew 3 arms, thread fallback 2 arms;
+6 elongated/slab arms retain baseline exhaustion and identical histories.
+All |dE|=0 Ha. Si32 accounted bytes 5,249,359,872 → 2,624,679,936; exact predicted
+saving 2,624,679,936 bytes over actual coarse/fine/verification calls.
+
+Final fast gate: build/fmt/clippy PASS, 728 passed / known 3 Mac TMPDIR
+pseudo-cache failures / 179 ignored, exit 1. Switch-on simulated M2 suite
+3/3 passes, dispatch tests exclude ranks 1/2/3/8. Generic full-grid and pure
+FFT sink tests pass; actual MKL/real MPI remain dev08 validation. README checker
+retains its unrelated structural wording failure (8/9 pass). No Mac timing,
+QE run, default adoption or commit. Energy/XC still have no demonstrated
+acceptance-preserving >0.2 s MPI8 lever; m2.xc is inclusive, energy has no
+matched QE timer. **Lesson:** STREAM changes candidate selection, but logical
+bytes are not measured DRAM bytes; only crossed same-model wall decides adoption.
+
+Evidence: [fusion-validation.md](lanes/GLUE/fusion-validation.md),
+[fusion-mac-equivalence.json](lanes/GLUE/fusion-mac-equivalence.json),
+[dev08-request.md](lanes/GLUE/dev08-request.md). A/A first, crossed six A/B pairs
+per case, |mean|/SE>=3; any resolved gain counts, 0.8 s is not an adoption floor.

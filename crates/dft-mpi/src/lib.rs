@@ -9,6 +9,9 @@
 //! internal reduction tree (determinism contract of ADR 0041).
 use std::fmt;
 
+/// Whether this binary links the real MPI backend (including rank-one runs).
+pub const MPI_ENABLED: bool = cfg!(feature = "mpi");
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MpiError {
     /// An MPI call returned this nonzero error code.

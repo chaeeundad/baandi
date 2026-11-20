@@ -292,7 +292,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::DAVIDSON_ROTATE_COLUMNS), Value::Choice("off"));
     assert_eq!(value(Id::FFT_KEPT_FUSE), Value::Choice("off"));
     assert_eq!(value(Id::DAVIDSON_PACKED_REDUCE), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 127);
+    assert_eq!(TABLE.len(), 128);
 }
 
 #[test]

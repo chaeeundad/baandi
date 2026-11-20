@@ -435,6 +435,8 @@ table! {
     // Measurement infrastructure (ticket BREAKTHROUGH-0-INSTRUMENT); all default off, results unchanged.
     FFT_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "LANE-FFT Phase 0: detailed FFT stages and logical traffic under PHASE_PROFILE; clocks follow STAGE_TIMERS; no numerical change";
+    SERIAL_DENSITY_FUSED: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "LANE-GLUE: serial one-core standard Gamma density sink; preserves band addition order, no MPI dispatch";
     GLUE_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "LANE-GLUE Phase 0: rank-local grid and mixer spans/work; requires PHASE_PROFILE; clocks follow STAGE_TIMERS; no numerical change";
     PHASE_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
@@ -1011,8 +1013,13 @@ pub enum RunCounter {
     GlueSerialHistory = 166,
     /// GLUE diagnostic: serial.update_elements; local to this run/rank.
     GlueSerialUpdateElements = 167,
+    GlueDensityEligibleCalls = 168,
+    GlueDensityFusedCalls = 169,
+    GlueDensityPairedPoints = 170,
+    GlueDensityLogicalBytes = 171,
+    GlueDensitySavedBytes = 172,
 }
-pub const RUN_COUNTERS: usize = 168;
+pub const RUN_COUNTERS: usize = 173;
 pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
     "stop_kept",
     "stop_fft",
@@ -1182,6 +1189,11 @@ pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
     "glue_lane.serial.points",
     "glue_lane.serial.history",
     "glue_lane.serial.update_elements",
+    "glue_lane.density.eligible_calls",
+    "glue_lane.density.fused_calls",
+    "glue_lane.density.paired_band_points",
+    "glue_lane.density.logical_bytes",
+    "glue_lane.density.saved_bytes",
 ];
 
 /// Lane GLUE diagnostics, cached at plan/mixer construction. Disabled hooks

@@ -1,6 +1,8 @@
 //! Reusable intra-k density transforms with an ascending-band reduction.
 use crate::scf::ScfError;
 use dft_basis::FftGridSpec;
+use dft_numerics::fused_pair::OrderedPairDensity;
+use dft_numerics::switches::{GlueProfile, Id, RunCounter};
 use dft_physics::data::*;
 use dft_physics::density::{FusedOperator, FusedPlan, SplitPairDensity};
 use std::sync::Arc;
@@ -25,6 +27,11 @@ fn density_reduce() -> bool {
     // not cached per process; called once per construction / step / audit.
     dft_numerics::switches::on(dft_numerics::switches::Id::DENSITY_REDUCE)
 }
+/// Registered communicators (even rank one), strict maps
+/// and multi-worker execution keep their existing density implementation.
+pub(crate) fn fusion_allowed(standard: bool, threads: usize) -> bool {
+    !dft_mpi::MPI_ENABLED && standard && threads == 1 && !crate::parallel::SharedComm::registered()
+}
 /// Grid points per reduction block (fixed; independent of the thread budget).
 const REDUCE_BLOCK: usize = 4096;
 
@@ -35,6 +42,9 @@ pub(crate) struct BandDensity {
     threads: usize,
     pair: bool,
     reduce: bool,
+    fuse: bool,
+    contributions_valid: bool,
+    profile: Option<GlueProfile>,
 }
 struct Worker {
     first: usize,
@@ -89,6 +99,9 @@ impl BandDensity {
             threads,
             pair,
             reduce,
+            fuse: dft_numerics::switches::on(Id::SERIAL_DENSITY_FUSED),
+            contributions_valid: true,
+            profile: GlueProfile::current(),
         })
     }
     pub(crate) fn compute(
@@ -131,6 +144,57 @@ impl BandDensity {
         hermitian: bool,
         keep: Option<(&mut [Vec<Complex64>], &mut [bool])>,
     ) -> Result<&Array3<f64>, ScfError> {
+        self.compute_keep_for_map(
+            coefficients,
+            occupations,
+            grid,
+            volume,
+            hermitian,
+            keep,
+            false,
+        )
+    }
+    /// Only the standard, one-core, non-MPI caller may discard per-band grids.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn compute_keep_for_map(
+        &mut self,
+        coefficients: &[Vec<Complex64>],
+        occupations: &[f64],
+        grid: &FftGridSpec,
+        volume: f64,
+        hermitian: bool,
+        keep: Option<(&mut [Vec<Complex64>], &mut [bool])>,
+        allow_fusion: bool,
+    ) -> Result<&Array3<f64>, ScfError> {
+        let eligible = allow_fusion
+            && self.threads == 1
+            && self.workers.len() == 1
+            && self.pair
+            && self.reduce
+            && hermitian;
+        let fused = eligible && self.fuse;
+        self.contributions_valid = !fused;
+        if eligible && let Some(p) = self.profile {
+            p.count(RunCounter::GlueDensityEligibleCalls, 1);
+            p.count(RunCounter::GlueDensityFusedCalls, usize::from(fused));
+            let bands = self.workers[0].contributions.len();
+            let paired = occupations[..bands]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .filter(|w| w[0] != 0.0 && w[1] != 0.0)
+                .count()
+                * 2;
+            let live = occupations[..bands].iter().filter(|&&w| w != 0.0).count();
+            let points = self.density.len();
+            let saved = if fused { 16 * paired * points } else { 0 };
+            p.count(RunCounter::GlueDensityPairedPoints, paired * points);
+            p.count(
+                RunCounter::GlueDensityLogicalBytes,
+                32 * live * points - saved,
+            );
+            p.count(RunCounter::GlueDensitySavedBytes, saved);
+        }
         let mode = Mode {
             pair: self.pair && hermitian,
             reduce: self.reduce,
@@ -148,15 +212,38 @@ impl BandDensity {
         };
         let keep = Keep { grids, kept };
         let workers = &mut self.workers;
+        if fused {
+            self.density.fill(0.0);
+        }
         if workers.len() == 1 {
-            transform(workers, coefficients, occupations, grid, volume, mode, keep)?;
+            transform(
+                workers,
+                coefficients,
+                occupations,
+                grid,
+                volume,
+                mode,
+                keep,
+                fused.then(|| self.density.as_slice_mut().expect("standard layout")),
+            )?;
         } else {
             self.pool.install(|| {
-                transform(workers, coefficients, occupations, grid, volume, mode, keep)
+                transform(
+                    workers,
+                    coefficients,
+                    occupations,
+                    grid,
+                    volume,
+                    mode,
+                    keep,
+                    None,
+                )
             })?;
         }
         let density = &mut self.density;
-        if self.reduce {
+        if fused {
+            // The sink already accumulated in ascending band order.
+        } else if self.reduce {
             let live: Vec<&[f64]> = self
                 .workers
                 .iter()
@@ -190,6 +277,10 @@ impl BandDensity {
     /// from the latest `compute`) times `field`, in ascending band order. The
     /// caller applies the grid weight and divides by the occupation. Read-only.
     pub(crate) fn weighted_integrals(&self, field: &[f64], out: &mut [f64]) {
+        assert!(
+            self.contributions_valid,
+            "per-band certificate grids unavailable after serial fusion"
+        );
         let mut band = 0;
         for worker in &self.workers {
             for contribution in &worker.contributions {
@@ -275,6 +366,7 @@ fn record_density(clock: Option<std::time::Instant>, bands: u64) {
         add(Slot::DensityColumns, bands);
     }
 }
+#[allow(clippy::too_many_arguments)]
 fn transform(
     workers: &mut [Worker],
     coefficients: &[Vec<Complex64>],
@@ -283,6 +375,7 @@ fn transform(
     volume: f64,
     mode: Mode,
     keep: Keep<'_>,
+    mut fused: Option<&mut [f64]>,
 ) -> Result<(), ScfError> {
     if workers.len() == 1 {
         let worker = &mut workers[0];
@@ -325,11 +418,25 @@ fn transform(
                 }
                 let (left, right) = worker.contributions.split_at_mut(local + 1);
                 let (da, db) = (&mut left[local], &mut right[0]);
-                da.fill(0.0);
-                db.fill(0.0);
+                if fused.is_none() {
+                    da.fill(0.0);
+                    db.fill(0.0);
+                }
                 let clock = dft_numerics::work_timers::start();
                 let slot = local / 2;
-                if slot < keep.grids.len() {
+                if let Some(out) = fused.as_deref_mut() {
+                    let kept = keep.grids.get_mut(slot).map(Vec::as_mut_slice);
+                    worker.fft.accumulate_density_pair_ordered(
+                        &worker.phi,
+                        [w, occupations[band + 1]],
+                        volume,
+                        out,
+                        kept,
+                    )?;
+                    if slot < keep.kept.len() {
+                        keep.kept[slot] = true;
+                    }
+                } else if slot < keep.grids.len() {
                     worker.fft.accumulate_density_pair_split_keep(
                         &worker.phi,
                         [w, occupations[band + 1]],
@@ -370,6 +477,11 @@ fn transform(
                 .fft
                 .accumulate_density(c, w, volume, contribution.as_slice_mut().unwrap())?;
             record_density(clock.filter(|_| w != 0.0), 1);
+            if let Some(out) = fused.as_deref_mut() {
+                for (n, c) in out.iter_mut().zip(contribution.iter()) {
+                    *n += c;
+                }
+            }
             worker.live[local] = true;
             local += 1;
         }
@@ -392,6 +504,7 @@ fn transform(
                     volume,
                     mode,
                     keep_left,
+                    None,
                 )
             }))
         },
@@ -405,6 +518,7 @@ fn transform(
                     volume,
                     mode,
                     keep_right,
+                    None,
                 )
             }))
         },
@@ -421,6 +535,19 @@ mod tests {
     use super::*;
     use dft_basis::PlaneWaveBasis;
     use dft_geometry::Cell;
+    #[test]
+    fn fusion_dispatch_excludes_strict_threads_and_registered_ranks() {
+        assert!(!fusion_allowed(false, 1));
+        assert!(!fusion_allowed(true, 3));
+        assert_eq!(fusion_allowed(true, 1), !dft_mpi::MPI_ENABLED);
+        for ranks in [1, 2, 3, 8] {
+            dft_mpi::simulate(ranks, |comm: &dft_mpi::SimRank| {
+                crate::parallel::set_communicator(Some(Arc::new(comm.clone())));
+                assert!(!fusion_allowed(true, 1));
+                crate::parallel::set_communicator(None);
+            });
+        }
+    }
     #[test]
     fn ordered_density_and_reused_storage() {
         let cell = Cell::from_user_rows_bohr([[4., 0., 0.], [0., 4., 0.], [0., 0., 4.]]).unwrap();
@@ -563,6 +690,70 @@ mod tests {
             let field: Vec<f64> = (0..expected.len()).map(|i| 1. + (i % 13) as f64).collect();
             plain.weighted_integrals(&field, &mut expected_integrals);
             let scale = expected.iter().fold(0_f64, |a, b| a.max(b.abs()));
+            let mut serial = BandDensity::with_switches(
+                &grid,
+                bands,
+                1,
+                WorkerPool::new(1).unwrap(),
+                true,
+                true,
+            )
+            .unwrap();
+            let mut direct = BandDensity::with_switches(
+                &grid,
+                bands,
+                1,
+                WorkerPool::new(1).unwrap(),
+                true,
+                true,
+            )
+            .unwrap();
+            direct.fuse = true;
+            let mut kept_a =
+                vec![vec![Complex64::default(); grid.dims().iter().product()]; bands / 2];
+            let mut kept_b = kept_a.clone();
+            let mut flags_a = vec![false; bands / 2];
+            let mut flags_b = flags_a.clone();
+            for weights in [&[1.; 9][..], occupations, &[0.; 9][..], occupations] {
+                let a = serial
+                    .compute_keep(
+                        &coefficients,
+                        weights,
+                        &grid,
+                        volume,
+                        true,
+                        Some((&mut kept_a, &mut flags_a)),
+                    )
+                    .unwrap()
+                    .clone();
+                let b = direct
+                    .compute_keep_for_map(
+                        &coefficients,
+                        weights,
+                        &grid,
+                        volume,
+                        true,
+                        Some((&mut kept_b, &mut flags_b)),
+                        true,
+                    )
+                    .unwrap();
+                assert_eq!(
+                    bits(&a),
+                    bits(b),
+                    "direct pair sink must retain every density bit"
+                );
+                assert_eq!(flags_a, flags_b);
+                assert_eq!(kept_a, kept_b);
+                // A subsequent strict map must restore all certificate grids.
+                direct
+                    .compute_with(&coefficients, weights, &grid, volume, true)
+                    .unwrap();
+                let mut ia = vec![0.; bands];
+                let mut ib = ia.clone();
+                serial.weighted_integrals(&field, &mut ia);
+                direct.weighted_integrals(&field, &mut ib);
+                assert_eq!(ia, ib);
+            }
             let mut pair_bits = None;
             for threads in [1, 2, 3, 4, 8] {
                 for (pair, reduce) in [(false, true), (true, false), (true, true)] {

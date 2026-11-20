@@ -1,10 +1,12 @@
 {
   "task_id": "LANE-LAUNCHIO",
-  "phase": 0,
-  "status": "PROFILE_REQUEST",
+  "phase": 2,
+  "status": "DEV08_AB_REQUEST",
   "next_phase_owner": "master session / dev08 relay",
-  "optimization_implemented": false,
+  "optimization_implemented": true,
+  "switch": "BAANDI_BINARY_HASH_CACHE",
+  "default": "off",
   "defaults_changed": false,
   "mac_performance_claim": false,
-  "profile_request": "docs/performance/lanes/LAUNCHIO/profile-request.md"
+  "request": "docs/performance/lanes/LAUNCHIO/dev08-request.md"
 }

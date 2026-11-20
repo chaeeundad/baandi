@@ -721,7 +721,7 @@ fn expressions_preserve_energy_and_record_resolutions() {
     // 108 = 106 + M2_LOCAL_FIELDS + M2_LOCAL_DENSITY (M2-OWNED).
     // 109 = 108 + STOP_PREDICTOR (SCF-TAIL).
     // 111 includes default-off M2_OWNED_HANDOFF.
-    assert_eq!(switches.len(), 126);
+    assert_eq!(switches.len(), 127);
     let ladder = &switches["BAANDI_CUTOFF_LADDER"];
     assert_eq!(
         (&ladder["value"], &ladder["source"]),

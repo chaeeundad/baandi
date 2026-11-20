@@ -2721,3 +2721,45 @@ complete raw output and strict parser checks. See
 `scripts/lane_launchio_parse.py`. This measures attribution/perturbation only;
 optimization design and adoption wait for Phase 2. Lifecycle status
 **PROFILE_REQUEST**; changes uncommitted.
+
+## LANE-LAUNCHIO Phase 2 (2026-11-20): metadata-keyed executable digest cache
+
+**Default OFF; DEV08_AB_REQUEST; no speed/adoption claim.** User-relayed dev08
+profile e947a35, median six instrumented on-runs: fresh binary SHA-256 costs
+0.10446/0.10474/0.10456 s on Si64/32/16 MPI8, 0.09387/0.09424 s on Si64/32 one
+core. Source inspection proves density_bin_write is already-replicated bytes
+written by all ranks (P*D output payload), not a gather inside that timer. The
+terminal density allgatherv happens before CLI serialization. Raw byte sizes and
+bandwidth/resource data were not in the relay; floors are explicit formulas,
+not invented device rates. See `lanes/LAUNCHIO/diagnosis.md` for alternatives.
+
+New premise versus F-LAUNCH-IO's earlier caching deferral: real dev08 fixed-cost
+evidence and user authorization to cache while retaining provenance. Implemented
+`BAANDI_BINARY_HASH_CACHE=on` behind a default-off registry switch. Unix sidecar
+keys device/inode/length/mtime+ns/ctime+ns/owner/mode; validates opened-file/path
+identity and bounded records, checks record corruption, atomically publishes a
+mode-0600 sidecar. All misses/publication failures still produce a fresh digest.
+No omitted provenance, numerical work, output suppression or new collectives.
+Trusted coherent build-directory metadata required; malicious same-UID sidecar
+forgery is outside the contract, and master independent pre/post SHA is mandatory.
+Expected warm saving 0.05–0.10 s is a planning estimate, not measured here.
+
+Mac correctness only, base 0413485: **32 executions across four inputs**, base
+and unset/off/cold/warm/malformed/input-on/unavailable arms, direct density file
+byte identity and entire normalized results JSON identity; **0 Ha** energy delta,
+all converged/verified, every binary digest matches independent Python hashlib.
+Eight warm/input hits report zero hashed executable bytes. Five cache unit tests
+cover invalidation, corruption, unsuitable paths and eight concurrent writers.
+Fast gate **exit 1**: build/fmt/clippy pass, **222 passed / 3 known in-repo TMPDIR
+pseudo-cache failures / 62 ignored**, 19 binaries. No tolerance/test weakening.
+README generated-block/figure freshness passes. Exact commands, failures, hashes
+and exclusions: `lanes/LAUNCHIO/phase2-validation.md` and `phase2-equivalence.json`.
+
+Master request `lanes/LAUNCHIO/dev08-request.md`: Si16/32/64 MPI8, Si64 one-core;
+retain cold cost, six A/A pairs first, twelve crossed warm A/B pairs with phase
+clocks off, then three separate diagnostic pairs. Require warm hits/zero hash
+payload, independent provenance, exact outputs, diagnostic hash-span attribution,
+and positive resolved whole-run gain |mean|/SE >=3 without regressions beyond
+noise. The >=75% hash-span drop is a diagnostic forecast, not an adoption
+percentage gate; any resolved whole-run gain qualifies. Default remains off;
+changes uncommitted until review and dev08 approval.

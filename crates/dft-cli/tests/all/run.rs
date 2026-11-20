@@ -61,6 +61,10 @@ impl Case {
         // tests/all/single_path.rs); the legacy outputs and the independent engine
         // comparisons below are strict.
         cmd.env("BAANDI_REFERENCE_STRICT", "on");
+        // Full-output equality across repeated runs: the executable-digest cache
+        // reports miss on the first run and hit on the next (a field of
+        // `run.binary.hash_cache`), so these comparisons pin it off.
+        cmd.env("BAANDI_BINARY_HASH_CACHE", "off");
         cmd.current_dir(&self.dir).args(["run", "input.toml"]);
         if let Some(dir) = override_dir {
             cmd.arg("--output-dir").arg(dir);
@@ -991,6 +995,7 @@ fn baandi() -> Command {
     // Legacy-output comparison across CLI modes: pin the pre-ladder path (the
     // observe/agent modes do not run the C1 ladder).
     command.env("BAANDI_CUTOFF_LADDER", "off");
+    command.env("BAANDI_BINARY_HASH_CACHE", "off");
     command
 }
 
@@ -1035,6 +1040,7 @@ fn compare_execution_modes(include_agent: bool) {
             // runtime modes run the standard path by default
             // (tests/all/onepath_last_fallbacks.rs); this legacy comparison pins strict.
             .env("BAANDI_REFERENCE_STRICT", "on")
+            .env("BAANDI_BINARY_HASH_CACHE", "off")
             .args(["run", "input.toml", "--output-dir", name])
             .args(flags)
             .output()

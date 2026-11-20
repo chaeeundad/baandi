@@ -2712,3 +2712,32 @@ No speedup or largest-term diagnosis inferred; request si64/si32/si16 MPI8
 and si32/si64 one-core profiles through master, then stop. Evidence and
 limitations: [phase0-report.md](lanes/GLUE/phase0-report.md);
 exact jobs/counter gates: [profile-request.md](lanes/GLUE/profile-request.md).
+## LANE-LAUNCHIO Phase 0 (2026-11-20): PROFILE_REQUEST
+
+Base `61822bca3b470df1212ee47b47c7eb4e786e22e3`; instrumentation only, no candidate
+optimization or default change. Reuses F-LAUNCH-IO's existing PHASE_PROFILE-gated
+lifecycle clocks (including real MPI init/finalize on dev08). Adds input read/parse,
+SCF boundary, density encoding/SHA and history conversion clocks; per-species
+second-pass UPF read/parse/hash seconds and byte/projector sizes; rank-local
+existing between/materialize bucket clocks and map counts. No added collective
+or numerical-loop I/O. Preflight internals, allocation counts and per-map glue
+call counts remain unmeasured. No rejected handoff or hashing idea is repeated.
+
+Mac correctness only: **20 executions**, four cells (Gamma, skew, 3% anisotropic,
+two weighted k points), base plus default/off/environment-on/input-on: **0 Ha**
+energy difference, exact density/metadata and scientific-history bits, all
+converged and verified. Eight parser smoke checks and five parser tests pass.
+Fast CLI gate: **build/fmt/clippy PASS; 132 passed, 3 known in-repo TMPDIR cache
+failures, 40 ignored**, exit **1**. Initial sccache sandbox failure was avoided
+with CHECK_SCCACHE=0; no tolerance/test changes. A 20%-elongated preliminary cell
+failed to converge in the base binary (exit 3), not counted as equivalence.
+No Mac timing is evidence. Exact hashes, commands and limitations:
+`docs/performance/lanes/LAUNCHIO/validation.md`, `equivalence.json`.
+
+Next: master-only dev08 jobs for Si64/32/16 MPI8 and Si32/64 one-core, five crossed
+instrumentation off/on pairs after discarded warmups, rank resource sidecars,
+complete raw output and strict parser checks. See
+`docs/performance/lanes/LAUNCHIO/profile-request.md` and
+`scripts/lane_launchio_parse.py`. This measures attribution/perturbation only;
+optimization design and adoption wait for Phase 2. Lifecycle status
+**PROFILE_REQUEST**; changes uncommitted.

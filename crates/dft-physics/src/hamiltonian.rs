@@ -3,6 +3,7 @@ use dft_basis::{FftGridSpec, GVector, PlaneWaveBasis};
 use dft_geometry::Cell;
 use dft_numerics::pool::WorkerPool;
 use dft_numerics::pool::analysis::{Piece, Span};
+use dft_numerics::switches::{InitProfile, RunCounter as IC};
 use dft_numerics::{
     Fft3d, FftPlan3d,
     fused::{FusedOperator, FusedPlan},
@@ -216,16 +217,20 @@ pub fn ionic_local_rows(
     species: &[Species<'_>],
     rows: std::ops::Range<usize>,
 ) -> Result<Vec<Complex64>, HamiltonianError> {
+    let profile = InitProfile::current();
+    let _total = profile.map(|p| p.span(IC::InitIonicCalls, IC::InitIonicNanos));
     volume(volume_bohr3)?;
     let vectors = density.vectors().get(rows).ok_or(HamiltonianError::Shape)?;
     let mut result = vec![Complex64::default(); vectors.len()];
     let fast = ionic_fast();
     for s in species {
+        let span = profile.map(|p| p.span(IC::InitPhaseTablesCalls, IC::InitPhaseTablesNanos));
         let tables = if fast {
             PhaseTables::new(density.vectors(), s.positions_bohr)
         } else {
             None
         };
+        drop(span);
         let local = s.potential.local_transform(volume_bohr3, None)?;
         // Keep LocalTransform's endpoint and quadrature, but hoist only the
         // G-independent parenthesized expression. In particular, rab must
@@ -287,6 +292,16 @@ pub fn ionic_local_rows(
                 }
             };
             *out += v * species_structure_factor(tables.as_ref(), g, s.positions_bohr)?;
+        }
+        if let Some(p) = profile {
+            p.count(IC::InitIonicRows, vectors.len());
+            p.count(IC::InitIonicShells, cache.len());
+            p.count(IC::InitIonicRadialSamples, cache.len() * n);
+            p.count(
+                IC::InitIonicPhasePairs,
+                vectors.len() * s.positions_bohr.len(),
+            );
+            p.count(IC::InitIonicTableSpecies, usize::from(tables.is_some()));
         }
     }
     if !result.iter().all(finite) {
@@ -824,6 +839,8 @@ impl NonlocalOperator {
         volume_bohr3: f64,
         species: &[Species<'_>],
     ) -> Result<Self, HamiltonianError> {
+        let profile = InitProfile::current();
+        let _total = profile.map(|p| p.span(IC::InitProjectorsCalls, IC::InitProjectorsNanos));
         volume(volume_bohr3)?;
         let mut atoms = Vec::new();
         let mut max_channels = 0;
@@ -863,6 +880,7 @@ impl NonlocalOperator {
                 .collect();
             let nc = channels.len();
             max_channels = max_channels.max(nc);
+            let factor_span = profile.map(|p| p.span(IC::InitFactorsCalls, IC::InitFactorsNanos));
             let mut table = vec![vec![Complex64::default(); basis.momenta().len()]; nc];
             // Exact squared-momentum keys only; no shell rounding or interpolation.
             // Flat preallocated storage avoids allocation on cache misses, including
@@ -897,6 +915,28 @@ impl NonlocalOperator {
                         / volume_bohr3.sqrt();
                 }
             }
+            drop(factor_span);
+            if let Some(p) = profile {
+                p.count(IC::InitFactorRows, ng);
+                p.count(IC::InitFactorShells, radial_cache.len());
+                p.count(IC::InitRadialTransforms, radial_cache.len() * np);
+                p.count(
+                    IC::InitRadialSamples,
+                    radial_cache.len()
+                        * pp.projectors()
+                            .iter()
+                            .map(|v| v.cutoff_index())
+                            .sum::<usize>(),
+                );
+                p.count(IC::InitHarmonics, ng * nc);
+                p.count(IC::InitFactorBytes, ng * nc * size_of::<Complex64>());
+            }
+            let _assembly = profile.map(|p| {
+                p.span(
+                    IC::InitProjectorAssemblyCalls,
+                    IC::InitProjectorAssemblyNanos,
+                )
+            });
             let mut coupling = vec![0.0; nc * nc];
             for (a, &(i, l, m)) in channels.iter().enumerate() {
                 for (b, &(j, ll, mm)) in channels.iter().enumerate() {
@@ -922,6 +962,20 @@ impl NonlocalOperator {
                 }
                 atoms.push((nc, coupling.clone()));
             }
+        }
+        if let Some(p) = profile {
+            p.count(
+                IC::InitProjectorBytes,
+                packed.len() * size_of::<Complex64>(),
+            );
+            p.count(
+                IC::InitProjectorPhasePairs,
+                basis.momenta().len()
+                    * species
+                        .iter()
+                        .map(|s| s.positions_bohr.len())
+                        .sum::<usize>(),
+            );
         }
         Ok(Self::assemble(
             basis.momenta().to_vec(),
@@ -2251,16 +2305,20 @@ pub fn ionic_local_with_conventions_rows(
         return ionic_local_rows(density, volume_bohr3, species, rows);
     }
 
+    let profile = InitProfile::current();
+    let _total = profile.map(|p| p.span(IC::InitIonicCalls, IC::InitIonicNanos));
     volume(volume_bohr3)?;
     let vectors = density.vectors().get(rows).ok_or(HamiltonianError::Shape)?;
     let mut result = vec![Complex64::default(); vectors.len()];
     let fast = ionic_fast();
     for s in species {
+        let span = profile.map(|p| p.span(IC::InitPhaseTablesCalls, IC::InitPhaseTablesNanos));
         let tables = if fast {
             PhaseTables::new(density.vectors(), s.positions_bohr)
         } else {
             None
         };
+        drop(span);
         let local = s
             .potential
             .local_transform_with_conventions(volume_bohr3, local_mesh, rule)?;
@@ -2325,6 +2383,16 @@ pub fn ionic_local_with_conventions_rows(
             };
             *out += v * species_structure_factor(tables.as_ref(), g, s.positions_bohr)?;
         }
+        if let Some(p) = profile {
+            p.count(IC::InitIonicRows, vectors.len());
+            p.count(IC::InitIonicShells, cache.len());
+            p.count(IC::InitIonicRadialSamples, cache.len() * n);
+            p.count(
+                IC::InitIonicPhasePairs,
+                vectors.len() * s.positions_bohr.len(),
+            );
+            p.count(IC::InitIonicTableSpecies, usize::from(tables.is_some()));
+        }
     }
     if !result.iter().all(finite) {
         return Err(HamiltonianError::NonFinite);
@@ -2369,6 +2437,11 @@ impl NonlocalOperator {
             return Self::new(basis, volume_bohr3, species);
         }
 
+        let profile = InitProfile::current();
+        let _total = profile.map(|p| p.span(IC::InitProjectorsCalls, IC::InitProjectorsNanos));
+        if let Some(p) = profile {
+            p.count(IC::InitOwnedConstructors, usize::from(selected.is_some()));
+        }
         volume(volume_bohr3)?;
         let mut atoms = Vec::new();
         let mut max_channels = 0;
@@ -2415,6 +2488,7 @@ impl NonlocalOperator {
                 .collect();
             let nc = channels.len();
             max_channels = max_channels.max(nc);
+            let factor_span = profile.map(|p| p.span(IC::InitFactorsCalls, IC::InitFactorsNanos));
             let mut table = vec![vec![Complex64::default(); basis.momenta().len()]; nc];
             // Exact squared-momentum keys only; no shell rounding or interpolation.
             // Flat preallocated storage avoids allocation on cache misses, including
@@ -2449,6 +2523,28 @@ impl NonlocalOperator {
                         / volume_bohr3.sqrt();
                 }
             }
+            drop(factor_span);
+            if let Some(p) = profile {
+                p.count(IC::InitFactorRows, ng);
+                p.count(IC::InitFactorShells, radial_cache.len());
+                p.count(IC::InitRadialTransforms, radial_cache.len() * np);
+                p.count(
+                    IC::InitRadialSamples,
+                    radial_cache.len()
+                        * pp.projectors()
+                            .iter()
+                            .map(|v| v.cutoff_index())
+                            .sum::<usize>(),
+                );
+                p.count(IC::InitHarmonics, ng * nc);
+                p.count(IC::InitFactorBytes, ng * nc * size_of::<Complex64>());
+            }
+            let _assembly = profile.map(|p| {
+                p.span(
+                    IC::InitProjectorAssemblyCalls,
+                    IC::InitProjectorAssemblyNanos,
+                )
+            });
             let mut coupling = vec![0.0; nc * nc];
             for (a, &(i, l, m)) in channels.iter().enumerate() {
                 for (b, &(j, ll, mm)) in channels.iter().enumerate() {
@@ -2506,7 +2602,17 @@ impl NonlocalOperator {
                 momenta: basis.momenta().to_vec(),
                 atoms: recipe_atoms,
             };
+            let span =
+                profile.map(|p| p.span(IC::InitOwnedRowsBuildCalls, IC::InitOwnedRowsBuildNanos));
             let owned = recipe.rows(indices);
+            drop(span);
+            if let Some(p) = profile {
+                p.count(IC::InitProjectorBytes, owned.len() * size_of::<Complex64>());
+                p.count(
+                    IC::InitProjectorPhasePairs,
+                    indices.len() * recipe.atoms.len(),
+                );
+            }
             let run = dft_numerics::switches::RunConfig::current();
             state_count(run, 1, owned.len() * size_of::<Complex64>());
             state_count(
@@ -2549,6 +2655,20 @@ impl NonlocalOperator {
                 dft_numerics::switches::Id::NONLOCAL_BLOCK,
             ));
             return Ok(op);
+        }
+        if let Some(p) = profile {
+            p.count(
+                IC::InitProjectorBytes,
+                packed.len() * size_of::<Complex64>(),
+            );
+            p.count(
+                IC::InitProjectorPhasePairs,
+                basis.momenta().len()
+                    * species
+                        .iter()
+                        .map(|s| s.positions_bohr.len())
+                        .sum::<usize>(),
+            );
         }
         Ok(Self::assemble(
             basis.momenta().to_vec(),
@@ -2929,6 +3049,109 @@ mod phase_validation_tests {
             ("phase_profile", if timed { "on" } else { "off" }),
         ])
         .unwrap()
+    }
+    #[test]
+    fn init_profile_preserves_owned_and_eager_projectors() {
+        let pp = pseudo_scaled(&[0, 1, 1, 2, 3], 41, 1.);
+        let positions = [[0.2, 0.3, 0.4], [1.2, -0.4, 0.7]];
+        let species = [Species {
+            potential: &pp,
+            positions_bohr: &positions,
+        }];
+        let mut compared = 0;
+        for rows in [
+            [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],
+            [[6., 0., 0.], [1., 5., 0.], [0.3, 0.2, 7.]],
+            [[5., 0., 0.], [0., 5., 0.], [0., 0., 12.]],
+            [[4., 0., 0.], [0., 8., 0.], [0., 0., 5.]],
+        ] {
+            let cell = Cell::from_user_rows_bohr(rows).unwrap();
+            for k in [[0.; 3], [0.13, -0.21, 0.07]] {
+                let basis = PlaneWaveBasis::at_k(&cell, Hartree(0.7), k).unwrap();
+                for rule in [
+                    RadialEvenRule::Simpson3_8,
+                    RadialEvenRule::SimpsonQuadraticEnd,
+                ] {
+                    for ranks in [1, 2, 4] {
+                        for rank in 0..ranks {
+                            let indices: Vec<_> =
+                                (rank..basis.momenta().len()).step_by(ranks).collect();
+                            let build = |enabled, timed, owned| {
+                                let run = RunConfig::from_pairs(&[
+                                    ("init_profile", if enabled { "on" } else { "off" }),
+                                    ("stage_timers", if timed { "on" } else { "off" }),
+                                ])
+                                .unwrap();
+                                let _scope = run.enter();
+                                let op = if owned {
+                                    NonlocalOperator::new_owned_with_rule(
+                                        &basis,
+                                        cell.volume_bohr3(),
+                                        &species,
+                                        rule,
+                                        &indices,
+                                    )
+                                } else {
+                                    NonlocalOperator::new_with_rule(
+                                        &basis,
+                                        cell.volume_bohr3(),
+                                        &species,
+                                        rule,
+                                    )
+                                }
+                                .unwrap();
+                                (op, run)
+                            };
+                            for owned in [false, true] {
+                                let (reference, off) = build(false, false, owned);
+                                for timed in [false, true] {
+                                    let (op, run) = build(true, timed, owned);
+                                    assert_eq!(bits(&reference.table.owned), bits(&op.table.owned));
+                                    assert_eq!(op.full_table_built(), !owned);
+                                    let counters = run.counters();
+                                    assert_eq!(counters[C::InitProjectorsCalls as usize], 1);
+                                    assert_eq!(counters[C::InitFactorsCalls as usize], 1);
+                                    assert_eq!(
+                                        counters[C::InitOwnedConstructors as usize],
+                                        u64::from(owned)
+                                    );
+                                    let rows = if owned {
+                                        indices.len()
+                                    } else {
+                                        basis.momenta().len()
+                                    };
+                                    assert_eq!(
+                                        counters[C::InitProjectorPhasePairs as usize],
+                                        (2 * rows) as u64
+                                    );
+                                    assert_eq!(
+                                        counters[C::InitProjectorBytes as usize],
+                                        (rows * op.projector_count() * 16) as u64
+                                    );
+                                    assert_eq!(
+                                        counters[C::InitProjectorsNanos as usize] > 0,
+                                        timed
+                                    );
+                                    assert_eq!(bits(&reference.table), bits(&op.table));
+                                    // Lazy materialization is outside the constructor instrumentation.
+                                    assert_eq!(
+                                        &run.counters()[C::InitPreflightCalls as usize..],
+                                        &counters[C::InitPreflightCalls as usize..]
+                                    );
+                                    compared += 1;
+                                }
+                                assert!(
+                                    off.counters()[C::InitPreflightCalls as usize..]
+                                        .iter()
+                                        .all(|&n| n == 0)
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        println!("INIT profile: {compared} owned/eager constructor comparisons bit-identical");
     }
     fn bits(v: &[Complex64]) -> Vec<(u64, u64)> {
         v.iter().map(|z| (z.re.to_bits(), z.im.to_bits())).collect()

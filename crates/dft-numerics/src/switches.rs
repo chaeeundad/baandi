@@ -435,6 +435,8 @@ table! {
         "INIT-EWALD-FAST: balanced Ewald scheme (dft-physics ewald::Scheme::Balanced): splitting parameter from the real/reciprocal cost balance for the cell volume and ion count, cutoffs from rigorous tail bounds (truncation <= min(tolerance (sum |Z|)^2 / Omega^(1/3), tolerance * N) Ha), ion pairs i <= j and the reciprocal half space with per-ion phase tables; energy, forces and stress share the parameters; rounding class (different truncation and summation, error vs a tight reference far below 1e-12 Ha/atom); off = reference scheme (eta sqrt(pi)/Omega^(1/3), bit-identical to the previous evaluator)";
     IONIC_FAST: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "INIT-IONIC-FAST: the structure factor of the local ionic potential sum_I exp(-i G.tau_I) from per-ion, per-axis phase tables exp(-i m_k b_k.tau_I) (two complex products per ion and G) instead of one sin/cos pair per ion and G; falls back to the direct phase for any G whose Cartesian vector is not the Miller combination of the unit-Miller vectors; rounding class (phase rounding, about 1e-13 relative)";
+    INIT_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "LANE-INIT phase 0: rank-local startup call/work counters and nested timers; STAGE_TIMERS=off retains counts without clocks; no numerical changes, default off";
     PHASE_VALIDATE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "G-PHASE-VALIDATE: owned projector finite-dot validation uses a sufficient numerical range proof (finite momentum and position components with maxima <= 2^500); otherwise retains the original pair loop and errors; coefficients and lazy materialization unchanged; off until dev08 A/B";
     IMPORT_CHECK: Kind::Choice { allowed: &["split", "serial"], default: "split" }, "split", "split, serial",
@@ -483,8 +485,8 @@ impl Table {
 pub fn table_of(id: Id) -> Table {
     use Id::*;
     match id {
-        PHASE_PROFILE | STAGE_TIMERS | DAVIDSON_STAGES | SNAPSHOT_DIR | PHASE_WAIT
-        | FIRST_BLOCK | DGEMM_TIMERS => Table::Profile,
+        PHASE_PROFILE | INIT_PROFILE | STAGE_TIMERS | DAVIDSON_STAGES | SNAPSHOT_DIR
+        | PHASE_WAIT | FIRST_BLOCK | DGEMM_TIMERS => Table::Profile,
         // Overrides of input-file values (`scf.cutoff_ladder`, the relaxation
         // extrapolation) and the pseudopotential cache location.
         CUTOFF_LADDER | RELAX_EXTRAPOLATION | PSEUDO_DIR => Table::EnvOnly,
@@ -688,8 +690,134 @@ pub enum RunCounter {
     PhaseValidateFallbacks = 15,
     /// Exclusive validation nanoseconds, only with PHASE_PROFILE on.
     PhaseValidateNanos = 16,
+    /// INIT lane: preflight.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitPreflightCalls = 17,
+    /// INIT lane: preflight.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitPreflightNanos = 18,
+    /// INIT lane: structure.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitStructureCalls = 19,
+    /// INIT lane: structure.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitStructureNanos = 20,
+    /// INIT lane: upf.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitUpfCalls = 21,
+    /// INIT lane: upf.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitUpfNanos = 22,
+    /// INIT lane: prepare.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitPrepareCalls = 23,
+    /// INIT lane: prepare.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitPrepareNanos = 24,
+    /// INIT lane: check_basis.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitCheckBasisCalls = 25,
+    /// INIT lane: check_basis.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitCheckBasisNanos = 26,
+    /// INIT lane: check_grid.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitCheckGridCalls = 27,
+    /// INIT lane: check_grid.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitCheckGridNanos = 28,
+    /// INIT lane: projectors.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitProjectorsCalls = 29,
+    /// INIT lane: projectors.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitProjectorsNanos = 30,
+    /// INIT lane: factors.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitFactorsCalls = 31,
+    /// INIT lane: factors.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitFactorsNanos = 32,
+    /// INIT lane: projector_assembly.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitProjectorAssemblyCalls = 33,
+    /// INIT lane: projector_assembly.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitProjectorAssemblyNanos = 34,
+    /// INIT lane: owned_rows_build.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitOwnedRowsBuildCalls = 35,
+    /// INIT lane: owned_rows_build.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitOwnedRowsBuildNanos = 36,
+    /// INIT lane: ionic.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitIonicCalls = 37,
+    /// INIT lane: ionic.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitIonicNanos = 38,
+    /// INIT lane: phase_tables.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitPhaseTablesCalls = 39,
+    /// INIT lane: phase_tables.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitPhaseTablesNanos = 40,
+    /// INIT lane: problem.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitProblemCalls = 41,
+    /// INIT lane: problem.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitProblemNanos = 42,
+    /// INIT lane: state_grid.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitStateGridCalls = 43,
+    /// INIT lane: state_grid.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitStateGridNanos = 44,
+    /// INIT lane: hamiltonian.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitHamiltonianCalls = 45,
+    /// INIT lane: hamiltonian.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitHamiltonianNanos = 46,
+    /// INIT lane: band_density.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitBandDensityCalls = 47,
+    /// INIT lane: band_density.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitBandDensityNanos = 48,
+    /// INIT lane: core_density.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitCoreDensityCalls = 49,
+    /// INIT lane: core_density.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitCoreDensityNanos = 50,
+    /// INIT lane: start_density.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitStartDensityCalls = 51,
+    /// INIT lane: start_density.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitStartDensityNanos = 52,
+    /// INIT lane: ionic_fft.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitIonicFftCalls = 53,
+    /// INIT lane: ionic_fft.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitIonicFftNanos = 54,
+    /// INIT lane: worker_ffts.calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitWorkerFftsCalls = 55,
+    /// INIT lane: worker_ffts.ns; cumulative per rank/run, only with INIT_PROFILE.
+    InitWorkerFftsNanos = 56,
+    /// INIT lane: preflight.wave_rows; cumulative per rank/run, only with INIT_PROFILE.
+    InitPreflightWaveRows = 57,
+    /// INIT lane: preflight.density_rows; cumulative per rank/run, only with INIT_PROFILE.
+    InitPreflightDensityRows = 58,
+    /// INIT lane: preflight.grid_points; cumulative per rank/run, only with INIT_PROFILE.
+    InitPreflightGridPoints = 59,
+    /// INIT lane: factors.rows; cumulative per rank/run, only with INIT_PROFILE.
+    InitFactorRows = 60,
+    /// INIT lane: factors.shells; cumulative per rank/run, only with INIT_PROFILE.
+    InitFactorShells = 61,
+    /// INIT lane: factors.radial_transforms; cumulative per rank/run, only with INIT_PROFILE.
+    InitRadialTransforms = 62,
+    /// INIT lane: factors.radial_samples; cumulative per rank/run, only with INIT_PROFILE.
+    InitRadialSamples = 63,
+    /// INIT lane: factors.harmonics; cumulative per rank/run, only with INIT_PROFILE.
+    InitHarmonics = 64,
+    /// INIT lane: factors.bytes; cumulative per rank/run, only with INIT_PROFILE.
+    InitFactorBytes = 65,
+    /// INIT lane: projectors.phase_pairs; cumulative per rank/run, only with INIT_PROFILE.
+    InitProjectorPhasePairs = 66,
+    /// INIT lane: projectors.materialized_bytes; cumulative per rank/run, only with INIT_PROFILE.
+    InitProjectorBytes = 67,
+    /// INIT lane: projectors.owned_calls; cumulative per rank/run, only with INIT_PROFILE.
+    InitOwnedConstructors = 68,
+    /// INIT lane: ionic.rows; cumulative per rank/run, only with INIT_PROFILE.
+    InitIonicRows = 69,
+    /// INIT lane: ionic.shells; cumulative per rank/run, only with INIT_PROFILE.
+    InitIonicShells = 70,
+    /// INIT lane: ionic.radial_samples; cumulative per rank/run, only with INIT_PROFILE.
+    InitIonicRadialSamples = 71,
+    /// INIT lane: ionic.phase_pairs; cumulative per rank/run, only with INIT_PROFILE.
+    InitIonicPhasePairs = 72,
+    /// INIT lane: ionic.table_species; cumulative per rank/run, only with INIT_PROFILE.
+    InitIonicTableSpecies = 73,
+    /// INIT lane: problem.atoms; cumulative per rank/run, only with INIT_PROFILE.
+    InitAtoms = 74,
+    /// INIT lane: problem.bands; cumulative per rank/run, only with INIT_PROFILE.
+    InitBands = 75,
+    /// INIT lane: problem.kpoints; cumulative per rank/run, only with INIT_PROFILE.
+    InitKpoints = 76,
+    /// INIT lane: problem.grid_points; cumulative per rank/run, only with INIT_PROFILE.
+    InitGridPoints = 77,
+    /// INIT lane: problem.wave_rows; cumulative per rank/run, only with INIT_PROFILE.
+    InitWaveRows = 78,
+    /// INIT lane: problem.density_rows; cumulative per rank/run, only with INIT_PROFILE.
+    InitDensityRows = 79,
 }
-pub const RUN_COUNTERS: usize = 17;
+pub const RUN_COUNTERS: usize = 80;
 pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
     "stop_kept",
     "stop_fft",
@@ -708,7 +836,116 @@ pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
     "phase_validate.fast_accepts",
     "phase_validate.fallbacks",
     "phase_validate.nanoseconds",
+    "init_lane.preflight.calls",
+    "init_lane.preflight.ns",
+    "init_lane.structure.calls",
+    "init_lane.structure.ns",
+    "init_lane.upf.calls",
+    "init_lane.upf.ns",
+    "init_lane.prepare.calls",
+    "init_lane.prepare.ns",
+    "init_lane.check_basis.calls",
+    "init_lane.check_basis.ns",
+    "init_lane.check_grid.calls",
+    "init_lane.check_grid.ns",
+    "init_lane.projectors.calls",
+    "init_lane.projectors.ns",
+    "init_lane.factors.calls",
+    "init_lane.factors.ns",
+    "init_lane.projector_assembly.calls",
+    "init_lane.projector_assembly.ns",
+    "init_lane.owned_rows_build.calls",
+    "init_lane.owned_rows_build.ns",
+    "init_lane.ionic.calls",
+    "init_lane.ionic.ns",
+    "init_lane.phase_tables.calls",
+    "init_lane.phase_tables.ns",
+    "init_lane.problem.calls",
+    "init_lane.problem.ns",
+    "init_lane.state_grid.calls",
+    "init_lane.state_grid.ns",
+    "init_lane.hamiltonian.calls",
+    "init_lane.hamiltonian.ns",
+    "init_lane.band_density.calls",
+    "init_lane.band_density.ns",
+    "init_lane.core_density.calls",
+    "init_lane.core_density.ns",
+    "init_lane.start_density.calls",
+    "init_lane.start_density.ns",
+    "init_lane.ionic_fft.calls",
+    "init_lane.ionic_fft.ns",
+    "init_lane.worker_ffts.calls",
+    "init_lane.worker_ffts.ns",
+    "init_lane.preflight.wave_rows",
+    "init_lane.preflight.density_rows",
+    "init_lane.preflight.grid_points",
+    "init_lane.factors.rows",
+    "init_lane.factors.shells",
+    "init_lane.factors.radial_transforms",
+    "init_lane.factors.radial_samples",
+    "init_lane.factors.harmonics",
+    "init_lane.factors.bytes",
+    "init_lane.projectors.phase_pairs",
+    "init_lane.projectors.materialized_bytes",
+    "init_lane.projectors.owned_calls",
+    "init_lane.ionic.rows",
+    "init_lane.ionic.shells",
+    "init_lane.ionic.radial_samples",
+    "init_lane.ionic.phase_pairs",
+    "init_lane.ionic.table_species",
+    "init_lane.problem.atoms",
+    "init_lane.problem.bands",
+    "init_lane.problem.kpoints",
+    "init_lane.problem.grid_points",
+    "init_lane.problem.wave_rows",
+    "init_lane.problem.density_rows",
 ];
+
+/// Initialization-only diagnostics. The disabled path performs no clocks,
+/// counter updates, allocations or size traversals. Callers keep this token
+/// outside numerical loops; nested spans are inclusive, not additive.
+#[derive(Clone, Copy)]
+pub struct InitProfile {
+    run: RunConfig,
+    timed: bool,
+}
+impl InitProfile {
+    pub fn current() -> Option<Self> {
+        let run = RunConfig::current();
+        run.on(Id::INIT_PROFILE).then(|| Self {
+            run,
+            timed: run.on(Id::STAGE_TIMERS),
+        })
+    }
+    pub fn count(self, counter: RunCounter, value: usize) {
+        self.run.count(counter, value as u64);
+    }
+    /// Count an entered call, including calls that later return an error.
+    pub fn span(self, calls: RunCounter, nanos: RunCounter) -> InitSpan {
+        self.run.count(calls, 1);
+        InitSpan {
+            run: self.run,
+            nanos,
+            start: self.timed.then(std::time::Instant::now),
+        }
+    }
+}
+/// RAII ensures early errors do not leave an open timer. No I/O or collectives.
+pub struct InitSpan {
+    run: RunConfig,
+    nanos: RunCounter,
+    start: Option<std::time::Instant>,
+}
+impl Drop for InitSpan {
+    fn drop(&mut self) {
+        if let Some(start) = self.start {
+            self.run.count(
+                self.nanos,
+                start.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+            );
+        }
+    }
+}
 
 /// The path a consulted switch actually took (recorded by the code that acted
 /// on it, or by the result writer from its counters).

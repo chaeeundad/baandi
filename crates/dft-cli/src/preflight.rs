@@ -1,6 +1,7 @@
 //! Shared CLI preflight. No SCF problem, orbital arrays or density files are opened.
 use super::{Config, ConfigError};
 use dft_basis::{FftGridSpec, PlaneWaveBasis};
+use dft_numerics::switches::{InitProfile, RunCounter as IC};
 use dft_units::Hartree;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -198,7 +199,11 @@ impl Report {
 }
 
 pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
+    let profile = InitProfile::current();
+    let _total = profile.map(|p| p.span(IC::InitPreflightCalls, IC::InitPreflightNanos));
+    let span = profile.map(|p| p.span(IC::InitStructureCalls, IC::InitStructureNanos));
     let (mut findings, metrics) = structure::review(config)?;
+    drop(span);
     config.validate()?;
     if config
         .xc
@@ -300,6 +305,7 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             .canonicalize()
             .map_err(|e| fail("input", e, "use a readable input directory"))?;
         let path = parent.join(path);
+        let span = profile.map(|p| p.span(IC::InitUpfCalls, IC::InitUpfNanos));
         let p = dft_upf::from_file(&path).map_err(|e| {
             fail(
                 &key,
@@ -307,6 +313,7 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
                 "supply a readable supported NC UPF file",
             )
         })?;
+        drop(span);
         let identity = config.species_identity.get(label);
         let element = identity.and_then(|i| i.element.as_deref()).unwrap_or(label);
         if !chemical(element) {
@@ -540,6 +547,7 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             "set nbands > electrons/2 or extra_bands >= 1",
         ));
     }
+    let span = profile.map(|p| p.span(IC::InitPrepareCalls, IC::InitPrepareNanos));
     let prepared = config.prepare().map_err(|e| {
         fail(
             "basis.ecutwfc_ry / basis.fft_grid",
@@ -547,6 +555,17 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
             "use a representable cutoff and a sufficiently large FFT grid",
         )
     })?;
+    drop(span);
+    if let Some(p) = profile {
+        p.count(
+            IC::InitPreflightDensityRows,
+            prepared.density.vectors().len(),
+        );
+        p.count(
+            IC::InitPreflightGridPoints,
+            prepared.grid.dims().iter().product(),
+        );
+    }
     let points = config.resolved_points()?;
     if let Some(symmetry) = config.prepared_symmetry()? {
         let map = symmetry.map();
@@ -560,13 +579,18 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
     }
     let mut counts = Vec::new();
     for point in &points {
+        let span = profile.map(|p| p.span(IC::InitCheckBasisCalls, IC::InitCheckBasisNanos));
         let basis = PlaneWaveBasis::at_k(
             &prepared.cell,
             Hartree(options.cutoff_hartree),
             point.fractional,
         )
         .map_err(|e| fail("basis.ecutwfc_ry", e, "correct the cutoff"))?;
+        drop(span);
         let n = basis.vectors().len();
+        if let Some(p) = profile {
+            p.count(IC::InitPreflightWaveRows, n);
+        }
         if !dft_engine::bands_fit_subspace(
             options.davidson_subspace,
             options.davidson_capacity_per_band,
@@ -584,8 +608,10 @@ pub fn check(config: &Config, input: &Path) -> Result<Report, ConfigError> {
                 "increase cutoff or reduce bands within occupation and subspace limits",
             ));
         }
+        let span = profile.map(|p| p.span(IC::InitCheckGridCalls, IC::InitCheckGridNanos));
         FftGridSpec::new(&basis, &prepared.density, Some(prepared.grid.dims()))
             .map_err(|e| fail("basis.fft_grid", e, "increase FFT dimensions"))?;
+        drop(span);
         counts.push(n);
     }
     let mut composition = BTreeMap::<&str, usize>::new();

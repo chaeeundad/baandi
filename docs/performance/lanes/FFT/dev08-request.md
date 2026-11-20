@@ -6,6 +6,35 @@ alternatives. Candidate source base 10c067e plus the uncommitted patch; record
 actual merged commit and binary hashes before running. No Mac timing evidence.
 No generic MKL FFT switch or async collective is proposed.
 
+## Updated five-point motivation (bad02ee relay)
+
+All five count-only controls agree with timed counters (zero differences).
+Coverage is lane **rank maximum** divided by run wall, resolving the earlier
+si64 denominator question: 2.2649/8.4265 = 26.88%. MPI8 lane coverage for
+si64/si32/si16 is 26.88/26.05/23.58%; lane rank spread is 3.89/0.58/0.86%.
+The visible wait/asymmetry is specific to si64, not a general MPI8 premise.
+The separate one-core profiles cover 24.49% (si64) and 31.44% (si32), with
+no alltoall or kept_copy. See diagnosis.md for complete per-model tables.
+
+Permutation/zeroing consumes about one third of the lane at every point
+(31.1–36.0%). MPI8 middle_pack delivers 6.49–7.63 GB/s per rank, about
+52 GB/s aggregate at the low end, consistent with shared socket bandwidth
+saturation. **Removing passes/bytes is the primary lever**, with padded
+alltoall volume the second lever at larger sizes: forward collective rates
+fall from 4.20 GB/s at si16/si32 to 2.38 GB/s at si64. Existing axes track
+volume over a 57x points/call range at 1.29–2.15 ns/point; these data do not
+justify reopening generic batching, MKL FFT or async alltoall experiments.
+
+The selected kept-copy fusion is a bounded first byte-removal experiment,
+not a solution to the entire permutation group. Its affected lane share is
+5.0% at si64 MPI8 and 3.1% at si32/si16; serial is already fused. Smaller-cell
+A/B therefore matters even if si64 alone shows a resolved gain. Report any
+collective-time movement separately: this patch changes neither collective
+payload nor partitioning, and cannot claim an alltoall-volume reduction.
+
+The pre-registered counter movement, diagnostic sum, identity gates, A/A
+floor, |mean|/SE >= 3 threshold and staged commands below remain unchanged.
+
 ## Pre-registration
 
 Same binary and input, A `BAANDI_FFT_KEPT_FUSE=off`, B `on`, MPI8 with one thread

@@ -4,17 +4,18 @@ Status: candidate selected for dev08 A/B, not adopted. Source profile relayed by
 the orchestrator on 2026-11-20: bad02ee, si64 MPI8, CPUs 0–7 socket 0,
 72^3 grid, 23871 plane waves, 132 bands. Binary hash/raw results not yet supplied.
 This note uses only that dev08 relay and source inspection; no Mac performance
-measurement. Other cells and one-core profiles are queued, not extrapolated as
-measurements. No QE comparison is made.
+measurement. The follow-up relay supplies all five points below, with zero
+count-only/timed differences at every point. No QE comparison is made.
 
 ## Integrity and denominators
 
 Timed/count-only controls compare 1152 stage keys with zero count differences;
 energy -253.37816772116847 Ha, SCF 11, H 3504, verified in all relayed timed runs.
 Rank-0 lane 2.2440 s; rank maximum 2.2649 s (r3), minimum 2.1767 s (r7).
-Run wall 8.4265 s. Their direct quotient is **26.63%**, not the supplied 26.88%;
-the latter may average run-wise ratios. Do not silently reconcile different
-aggregations. Group totals below sum to 2.2440 s. The supplied top-stage
+Run wall 8.4265 s. The corrected coverage definition is **lane rank maximum /
+run wall**: 2.2649/8.4265 = 26.88%. Rank-0 lane/wall is separately 26.63%;
+the discrepancy is resolved, not a run-wise averaging effect. Group totals
+below sum to rank-0 2.2440 s. The supplied top-stage
 forward/inverse alltoall 0.2677/0.1504 s sum to 0.4181 s, not group 0.3477 s:
 these appear to be stage rank maxima, not both rank 0. Raw per-run/rank rows
 are required before subtracting stage times. Rates below are relayed rounded
@@ -36,6 +37,63 @@ fine_redo, materialize and between have no lane maps. Enclosing fine FFT and
 solve.apply counters have different scope/max aggregation: do not add
 pair_unsplit 1.3168, kept_forward 0.3345 or solve.apply 2.4851 to lane time.
 Fine h_columns 6025 and h_delta_columns 2244 are not the same counter as H 3504.
+
+## Five-point scale evidence (relayed bad02ee)
+
+Coverage uses lane maximum, whereas group shares use rank 0. The MPI and
+one-core tables below are separate models; no cross-model speed ratio is
+inferred. All times are instrumented profile times, not candidate A/B results.
+
+| MPI8 case | Run wall s | Lane max s | Coverage | Lane rank spread |
+|---|---:|---:|---:|---:|
+| si64 | 8.4265 | 2.2649 | 26.88% | 3.89% |
+| si32 | 1.9316 | 0.5031 | 26.05% | 0.58% |
+| si16 | 0.6726 | 0.1586 | 23.58% | 0.86% |
+
+| One-core case | Run wall s | Lane s | Coverage |
+|---|---:|---:|---:|
+| si64 | 46.0054 | 11.2682 | 24.49% |
+| si32 | 7.9867 | 2.5113 | 31.44% |
+
+| MPI8 case, rank 0 | Axes % | Permutation/zeroing % | Alltoall % | Multiply % | Kept copy % |
+|---|---:|---:|---:|---:|---:|
+| si64 | 41.9 | 32.0 | 15.5 | 5.6 | 5.0 |
+| si32 | 40.1 | 36.0 | 14.2 | 6.6 | 3.1 |
+| si16 | 44.9 | 33.4 | 12.5 | 6.1 | 3.1 |
+
+| One-core case | Axes % | Permutation/zeroing % | Alltoall % | Multiply % | Kept copy % |
+|---|---:|---:|---:|---:|---:|
+| si64 | 52.0 | 34.1 | 0 | 13.9 | 0 |
+| si32 | 57.3 | 31.1 | 0 | 11.6 | 0 |
+
+**Primary lever: remove permutation passes and bytes.** Permutation/zeroing
+accounts for 31.1–36.0% of the lane at every point. The relay identifies this
+group as bandwidth bound under shared socket pressure: MPI8 middle_pack
+6.49–7.63 GB/s per rank, roughly 52 GB/s aggregate at the low end, consistent
+with socket saturation. The one-core middle_pack observations are
+13.72–14.34 GB/s (STREAM triad reference 12.97 GB/s). These are kernel traffic
+observations, not a mixed-model wall comparison or hardware bandwidth counters.
+Removing traffic is more promising than merely changing traversal order.
+Multiply remains cache resident: MPI8 50.4–53.8 GB/s logical, one-core
+35.9–40.7 GB/s; do not model it with the DRAM STREAM ceiling.
+
+**Second lever at larger sizes: padded alltoall volume.** MPI8 forward rates
+are si64/si32/si16 = 2.38/4.20/4.20 GB/s; inverse = 2.66/2.70/3.06 GB/s.
+These use padded collective bytes already counted by the probe. Larger
+messages are less efficient here; this is not evidence of a fixed-latency-only
+bottleneck. Padding removal still needs the useful-byte counters below.
+
+Rank wait/asymmetry is **scale dependent**: it appears at si64 in the relay,
+not as a general MPI8 bottleneck at si32/si16. Their lane spreads are below
+1%. The si64 conditional wait analysis below must not be generalized to the
+smaller cells or used to promise a general static partitioning gain.
+
+FFT work tracks volume over 1046–60052 points/call (57x), at 1.29–2.15
+ns/point, without evidence of a dominant fixed call cost. For example,
+forward_fft0 is 1664 points/call at 1.51 ns/point for si16 MPI8; the separate
+si64 one-core observation is 60052 points/call at 1.66 ns/point. This supports
+retaining existing batching and plan reuse rather than reopening generic FFT
+batching/MKL switches. It does not assert mathematically zero call overhead.
 
 ## Floors and exact traffic model
 
@@ -63,11 +121,13 @@ multiplies/point; gather scaling counts 2 real divisions/coefficient.
 
 A mathematical roofline lower bound is max(F / sustainable compute throughput,
 B / sustainable bandwidth at the relevant cache/memory level). Neither
-throughput ceiling for these kernels nor socket bandwidth is supplied. The
+throughput ceiling for these kernels nor an independent socket bandwidth
+ceiling is supplied; the follow-up relay estimates saturation from about
+52 GB/s aggregate middle-pack logical traffic. The
 one-core STREAM triad 12.97 GB/s is a **reference**, not a universal memory
 ceiling for eight simultaneous ranks or cache-resident arrays.
 
-FFT estimate is 5 log2(L) real flops per complex point: 22.925 at L=24,
+For the original si64 MPI8 breakdown, FFT estimate is 5 log2(L) real flops per complex point: 22.925 at L=24,
 27.925 at 48, 30.850 at 72. Thus the observed 1.92–2.05 ns/point corresponds
 to roughly 11.2–16.1 estimated GFLOP/s over L=24..72 (15–16 applies to L=72,
 not every length). Logical arithmetic intensity = 5 log2(L)/32 = 0.716–0.964
@@ -80,13 +140,15 @@ reference time 1.13–1.21 s. These ranges are estimates, not recovered counters
 Plan creation is already outside apply; BackendLanes::run uses reusable scratch
 and contiguous lane batches. No per-lane plan creation to eliminate.
 
-Permutation observed rate divided by STREAM reference: middle_pack 0.50,
+For si64 MPI8, permutation observed rate divided by STREAM reference: middle_pack 0.50,
 transpose_pack 0.71, transpose_unpack 0.86, middle_unpack 1.09,
 gather_scale 1.42, slab_gather 1.58, scatter 1.67, slab_scatter 2.46.
 For each returned stage with bytes B, reference time is B/12.97e9; measured /
 reference is 12.97 / observed_GBps. E.g. middle_pack is 2.00x reference,
 transpose_pack 1.40x, transpose_unpack 1.16x. This diagnoses locality/address
-work, not an achievable speedup guarantee. Full group byte counters are
+work and shared socket bandwidth pressure, not an achievable speedup
+guarantee. The five-point evidence favors eliminating bytes over attempting
+to make each MPI rank reach the one-core bandwidth reference. Full group byte counters are
 missing from the relay, so no invented aggregate permutation floor is given.
 
 Multiply: ~6.47 GB / 0.1256 s, ~161.7 million points, ~323 million flops.
@@ -121,7 +183,7 @@ contention, rank arrivals, protocol and synchronization are absent from that
 simple reference. At a hypothetical sustained 10 GB/s it is 0.08657 s plus
 latency; at 20 GB/s 0.04329 s. Neither bandwidth has been measured here.
 
-Model each call on rank r as T_r = W_r + alpha(P,algorithm,message) +
+The following wait discussion concerns **si64 MPI8 only**. Model each call on rank r as T_r = W_r + alpha(P,algorithm,message) +
 B_r/beta(P,message,placement) + local progress/copy costs. The batch widths
 vary, so fitting alpha/beta requires per-call sizes and barrier-controlled
 microbenchmarks; aggregate calls/bytes cannot separate them. Equal payload
@@ -159,6 +221,10 @@ and cannot be subtracted as an exact production-wait measurement.
    based on removing a 0.1123 s pass while allowing the fused multiply to cost
    more when it reads the external kept buffer. Do not claim the entire
    0.1123 s is guaranteed or infer wall gain from a relabeled timer.
+   At si32/si16 MPI8 kept_copy is only 3.1% of the lane, versus 5.0%
+   at si64; expect a smaller affected share, without assigning gains from
+   rank-max totals multiplied by rank-0 fractions. The broader permutation
+   group remains the larger follow-on opportunity.
    Serial PairFusedPlan already writes source*potential into slab: no serial
    optimization or one-core speedup predicted. No FFT/reduction order change.
 2. **Alternative: locality-preserving middle pack traversal**. Precompute
@@ -167,6 +233,9 @@ and cannot be subtracted as an exact production-wait measurement.
    ~6.49 GB/s); 20–40% stage improvement would be ~0.032–0.064 s on that rank,
    perhaps 0.02–0.06 s critical-path saving (~0.2–0.7% wall). This depends on
    cache/tile costs and must be profiled separately; do not sum rank maxima.
+   The five-point socket-saturation evidence weakens this traversal-only
+   estimate: without reducing bytes, that predicted gain may not materialize.
+   Prioritize pass/byte removal over this alternative in follow-on work.
    Larger redesign could fuse middle layouts with MPI buffers, but middle
    FFTs require dense lanes and MPI needs destination-major blocks: pack and
    unpack straddle a collective/FFT and cannot simply be deleted.

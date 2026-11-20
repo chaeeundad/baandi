@@ -452,6 +452,8 @@ pub struct RankProfile {
     /// RUN-REPORT: this rank's own external run wall (seconds), set by the
     /// caller before `gather`; 0 = not reported (no closure residual).
     pub wall: f64,
+    /// LANE-FFT arrival capture, transported separately after SCF.
+    pub arrival: dft_numerics::stage_clock::arrival::Trace,
 }
 
 struct State {
@@ -503,6 +505,7 @@ impl State {
             MapKind::VerifyPass => Bucket::VerifyPass,
             MapKind::VerifyFail => Bucket::VerifyFail,
         };
+        dft_numerics::stage_clock::arrival::map_commit(bucket as usize);
         map.seconds[S_POTENTIAL] = (map.seconds[S_POTENTIAL] - self.pending_atomic).max(0.0);
         self.pending_atomic = 0.0;
         map.seconds[S_WALL] = map.seconds[S_POTENTIAL]
@@ -560,6 +563,9 @@ fn with<R>(f: impl FnOnce(&mut State) -> R) -> Option<R> {
     }
     STATE.with(|s| {
         let mut s = s.borrow_mut();
+        if s.is_none() {
+            dft_numerics::stage_clock::arrival::initialize();
+        }
         let s = s.get_or_insert_with(State::new);
         Some(f(s))
     })
@@ -583,6 +589,9 @@ impl Drop for Guard {
 /// Enter a top-level phase on this thread until the guard is dropped.
 #[must_use]
 pub fn enter(top: Top) -> Guard {
+    if enabled() {
+        dft_numerics::stage_clock::arrival::initialize();
+    }
     let previous = with(|s| {
         let leaving = s.ordinary_bucket();
         s.flush(leaving);
@@ -595,6 +604,7 @@ pub fn enter(top: Top) -> Guard {
 pub(crate) fn map_begin() {
     with(|s| {
         s.commit(MapKind::Ordinary);
+        dft_numerics::stage_clock::arrival::map_begin();
         s.pending = Some(Accum::default());
     });
 }
@@ -756,6 +766,7 @@ pub fn finish_rank(rank: usize) -> Option<RankProfile> {
             rank,
             buckets: s.buckets,
             wall: 0.0,
+            arrival: dft_numerics::stage_clock::arrival::take(),
         };
         *s = State::new();
         p
@@ -804,6 +815,7 @@ pub fn gather<C: Collective + ?Sized>(
                 rank: c[0] as usize,
                 buckets: [Accum::default(); BUCKETS],
                 wall: c[1],
+                arrival: Default::default(),
             };
             let mut at = 2;
             for b in &mut p.buckets {
@@ -823,6 +835,23 @@ pub fn gather<C: Collective + ?Sized>(
             p
         })
         .collect();
+    // Diagnostic transport only after SCF. No application collective is added.
+    if dft_numerics::stage_clock::arrival::enabled() {
+        use dft_numerics::stage_clock::arrival::{decode, encode};
+        let wire = encode(&mine.arrival);
+        let mut lengths = vec![0.; ranks];
+        comm.allgatherv_f64(&[wire.len() as f64], &vec![1; ranks], &mut lengths)
+            .map_err(|e| e.to_string())?;
+        let counts: Vec<_> = lengths.iter().map(|&n| n as usize).collect();
+        let mut data = vec![0.; counts.iter().sum()];
+        comm.allgatherv_f64(&wire, &counts, &mut data)
+            .map_err(|e| e.to_string())?;
+        let mut at = 0;
+        for (p, count) in out.iter_mut().zip(counts) {
+            p.arrival = decode(&data[at..at + count]);
+            at += count;
+        }
+    }
     out.sort_by_key(|p| p.rank);
     Ok(out)
 }
@@ -887,6 +916,7 @@ pub struct Report {
     /// RUN-REPORT: each rank's exclusive tree closed on that rank alone.
     pub per_rank: Vec<RankClosure>,
     pub fft_ranks: Vec<FftRankProfile>,
+    pub arrival_ranks: Vec<(usize, dft_numerics::stage_clock::arrival::Trace)>,
 }
 
 /// One rank's closed exclusive tree: the sum of its own bucket walls
@@ -960,6 +990,11 @@ impl Report {
             })
             .collect();
         Self {
+            arrival_ranks: profiles
+                .iter()
+                .filter(|p| !p.arrival.events.is_empty() || p.arrival.overflow)
+                .map(|p| (p.rank, p.arrival.clone()))
+                .collect(),
             ranks: profiles.len(),
             max,
             min,
@@ -1275,6 +1310,7 @@ mod closure_tests {
             rank,
             buckets,
             wall,
+            arrival: Default::default(),
         }
     }
 
@@ -1345,6 +1381,7 @@ mod fft_lane_tests {
                     rank: comm.rank(),
                     buckets: [Accum::default(); BUCKETS],
                     wall: 0.,
+                    arrival: Default::default(),
                 };
                 mine.buckets[2].counts[C_MAPS] = 11 + comm.rank() as u64;
                 if enabled {

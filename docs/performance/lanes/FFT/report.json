@@ -2,29 +2,60 @@
   "task_id": "LANE-FFT",
   "status": "DONE",
   "changed_files": [
+    "crates/dft-cli/src/run.rs",
+    "crates/dft-cli/tests/all/run.rs",
+    "crates/dft-engine/src/parallel.rs",
+    "crates/dft-engine/src/profile.rs",
+    "crates/dft-numerics/src/real.rs",
+    "crates/dft-numerics/src/stage_clock.rs",
+    "crates/dft-numerics/src/stage_clock/arrival.rs",
+    "crates/dft-numerics/src/switches.rs",
+    "crates/dft-numerics/tests/all/switches.rs",
+    "crates/dft-physics/src/distributed_real_gamma.rs",
+    "crates/dft-solvers/src/distributed_davidson.rs",
+    "crates/dft-solvers/src/distributed_fft.rs",
     "docs/performance/attempts-ledger.md",
-    "docs/performance/lanes/FFT/dev08-request.md",
-    "docs/performance/lanes/FFT/diagnosis.md",
+    "docs/performance/lanes/FFT/arrival-equivalence.json",
+    "docs/performance/lanes/FFT/arrival-provenance.json",
+    "docs/performance/lanes/FFT/arrival-validation.md",
+    "docs/performance/lanes/FFT/mac-arrival-trace.json",
     "docs/performance/lanes/FFT/report.json",
     "docs/performance/lanes/FFT/test_wait_parse.py",
+    "docs/performance/lanes/FFT/verify_arrival.py",
     "docs/performance/lanes/FFT/wait-diagnostic.md",
     "docs/performance/lanes/FFT/wait-profile-request.md",
     "docs/performance/lanes/FFT/wait_parse.py"
   ],
   "design_choices": [
-    "Recorded FFT-KEPT-FUSE-NEUTRAL; default remains off; archived prior A/B request.",
-    "Designed per-collective arrival tracing with clock uncertainty, exclusive preceding stages and inherited-release decomposition.",
-    "Delivered proposed arrival-skew-1 offline parser and si64/si32 MPI8 request; full trace producer is not implemented.",
-    "No optional permutation optimization: current evidence does not support a specific 0.3 s critical-path saving."
+    "PROFILE_REQUEST ready: implemented default-off COLLECTIVE_TRACE with real CLI phase_profile.arrival_trace JSON.",
+    "Preallocated 131072-event buffers; no trace clocks/allocation/extra communication when off; no application collective or arithmetic changes. Two diagnostic gathers only after SCF when enabled.",
+    "Same-host anchored timestamps with uncertainty/drift, semantic sites, last completed stages, work shapes; parser separates arrival exposure from exact idle wait and keeps unresolved rank ties.",
+    "Exact si64/si32 MPI8 OFF/count/timed commands and three count/timed repeats in wait-profile-request.md. FFT_KEPT_FUSE remains default off; no optimization."
   ],
   "commands": [
+    {
+      "command": "cargo build --offline --release -p dft-cli --bin dft-cli --example davidson_bench",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --offline --release -p dft-engine --test m2_entry_cost --no-run --message-format=json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/FFT/verify_arrival.py target/scratch",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/FFT/wait_parse.py docs/performance/lanes/FFT/mac-arrival-trace.json",
+      "exit_code": 0
+    },
     {
       "command": "python3 -I docs/performance/lanes/FFT/test_wait_parse.py",
       "exit_code": 0
     },
     {
-      "command": "bash -n on wait-profile-request.md shell blocks (syntax only)",
-      "exit_code": 0
+      "command": "CHECK_SCCACHE=0 TMPDIR_990=\"$PWD/target/scratch\" scripts/check.sh fast dft-numerics dft-solvers dft-physics dft-engine dft-cli",
+      "exit_code": 1
     },
     {
       "command": "git diff --check",
@@ -32,18 +63,19 @@
     }
   ],
   "numerical_outputs": [
-    "Relayed A/B mean +0.008744, SE 0.005753, |mean|/SE 1.52; unresolved, intervals overlap.",
-    "Exact counter gate: kept_copy 25344 -> 0 calls, 2102132736 -> 0 bytes; multiply unchanged.",
-    "Three synthetic parser contract tests passed; no actual production arrival trace parsed."
+    "Mac OFF/count/timed serial Si8 verified: energy -31.321776563202498 Ha, delta 0 Ha, scientific fields/history and density bytes identical.",
+    "Real-UPF simulated MPI2/3/8 SCF: energy bits, density FNV and work counts identical between all three arms; delta 0 Ha.",
+    "Actual CLI profile serializer, warm Si8 simulated MPI3: 408 events/rank (27 allgatherv, 130 alltoall, 251 tree_sum); zero count/timed signature differences; 408 parsed fine rows.",
+    "Five parser tests passed; final fast gate 705 passed, 3 known TMPDIR cache failures, 178 ignored; build/fmt/clippy passed."
   ],
-  "reference_comparison": "dev08 results are relayed, not executed here. No Mac profiling, performance claims or new numerical implementation.",
+  "reference_comparison": "Mac correctness only; no Mac performance conclusion, remote run, or new optimization acceptance.",
   "limitations": [
-    "Existing PHASE_WAIT inserts barriers and aggregates solver wait; it does not give every fine-map collective arrival or last-rank attribution.",
-    "Full tracing requires instrumentation-only scope extension for engine parallel.rs and solver distributed_davidson.rs, producer implementation and actual CLI equivalence validation. Future request commands are explicitly blocked until those gates pass.",
-    "Arrival exposure is not exact idle wait; MPI progress can overlap arrival skew. Clock uncertainty and possible early rank completion are preserved."
+    "Single host and one thread per rank; no cross-host clock synchronization. Anchor drift/uncertainty reported; clock steps invalidate interpretation.",
+    "Previous-stage durations are inclusive and some sites/stages are unattributed. Arrival exposure is not exact idle wait or a hardware bandwidth measurement.",
+    "MPI SCF density evidence is the existing harness FNV; raw density byte equality checked on serial CLI. Native MPI/MKL and full distributed scientific output identity remain dev08 gates.",
+    "Trace overflow fails closed in parser. Post-SCF diagnostic transport/output overhead is not performance evidence.",
+    "Three known Mac in-repository TMPDIR cache tests fail; no full/push gate claimed."
   ],
-  "open_questions": [
-    "Instrumentation scope clarification sent to orchestrator; design-only deliverable is complete, full trace producer remains pending."
-  ],
-  "commit": "Uncommitted as requested."
+  "open_questions": [],
+  "commit": "Uncommitted as requested; stop after profile request."
 }

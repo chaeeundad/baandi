@@ -61,8 +61,10 @@ pub fn collective_bytes() -> Vec<(&'static str, u64)> {
 }
 
 fn timed<R>(op: usize, values: usize, f: impl FnOnce() -> R) -> R {
+    let arrival = dft_numerics::stage_clock::arrival::begin();
     let start = dft_numerics::stage_clock::start();
     let r = f();
+    dft_numerics::stage_clock::arrival::end(arrival, op, 8 * values);
     CALLS[op].fetch_add(1, Ordering::Relaxed);
     BYTES[op].fetch_add(8 * values as u64, Ordering::Relaxed);
     let ns = dft_numerics::stage_clock::elapsed_ns(start);
@@ -190,5 +192,87 @@ impl Collective for SharedComm {
     }
     fn alltoall_f64(&self, send: &[f64], block: usize, recv: &mut [f64]) -> Result<(), MpiError> {
         timed(3, send.len(), || self.0.alltoall_f64(send, block, recv))
+    }
+}
+
+// Trace regression exercises the same wrapper as every engine collective.
+// No wall-time performance assertion; times only establish causal ordering.
+#[cfg(test)]
+mod arrival_tests {
+    use super::*;
+    use dft_numerics::stage_clock::arrival;
+    use dft_numerics::switches::RunConfig;
+    #[test]
+    fn arrival_trace_preserves_collectives_and_rank_wire_bits() {
+        for (on, clocks) in [("off", "off"), ("on", "off"), ("on", "on")] {
+            let records = dft_mpi::simulate(3, |rank| {
+                let cfg = RunConfig::from_pairs(&[
+                    ("collective_trace", on),
+                    ("phase_profile", "on"),
+                    ("stage_timers", clocks),
+                ])
+                .unwrap();
+                let _scope = cfg.enter();
+                arrival::initialize();
+                set_communicator(Some(Arc::new(rank.clone())));
+                let comm = SharedComm::active().unwrap();
+                arrival::map_begin();
+                arrival::stage(301, 0, 7, 56);
+                let mut gathered = [0.; 3];
+                comm.allgatherv_f64(&[comm.rank() as f64], &[1; 3], &mut gathered)
+                    .unwrap();
+                assert_eq!(gathered, [0., 1., 2.]);
+                let mut sum = [0.];
+                comm.tree_sum_f64(&[comm.rank() as f64 + 1.], &mut sum)
+                    .unwrap();
+                assert_eq!(sum, [6.]);
+                let mut broadcast = [if comm.rank() == 0 { 7. } else { 0. }];
+                comm.bcast_f64(&mut broadcast, 0).unwrap();
+                assert_eq!(broadcast, [7.]);
+                let mut received = [0.; 3];
+                comm.alltoall_f64(&[comm.rank() as f64; 3], 1, &mut received)
+                    .unwrap();
+                assert_eq!(received, gathered);
+                comm.barrier().unwrap();
+                arrival::map_commit(2);
+                let mut trace = arrival::take();
+                if on == "on" {
+                    assert_eq!(trace.events.len(), 5);
+                    assert_eq!(
+                        trace.events.iter().map(|e| e[3]).collect::<Vec<_>>(),
+                        [0, 1, 2, 3, 4]
+                    );
+                    assert_eq!(trace.events[0][7], 301);
+                    assert!(trace.events.iter().all(|e| e[1] == 2));
+                    assert_eq!(trace.timed, clocks == "on");
+                    if clocks == "off" {
+                        assert!(trace.events.iter().all(|e| e[5] == 0 && e[6] == 0));
+                    }
+                    // Lossless limb transport well above f64's exact integer range.
+                    trace.epoch_ns = (1u64 << 60) + comm.rank() as u64;
+                } else {
+                    assert!(trace.events.is_empty());
+                }
+                assert_eq!(arrival::decode(&arrival::encode(&trace)), trace);
+                let mine = crate::profile::RankProfile {
+                    rank: comm.rank(),
+                    buckets: Default::default(),
+                    wall: 0.,
+                    arrival: trace.clone(),
+                };
+                let all = crate::profile::gather(&comm, &mine).unwrap();
+                if on == "on" {
+                    assert_eq!(all[comm.rank()].arrival, trace);
+                    assert_eq!(all[2].arrival.epoch_ns, (1u64 << 60) + 2);
+                }
+                set_communicator(None);
+                trace
+            });
+            assert!(
+                records
+                    .iter()
+                    .all(|r| r.events.len() == if on == "on" { 5 } else { 0 })
+            );
+        }
     }
 }

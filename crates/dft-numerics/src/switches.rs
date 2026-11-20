@@ -423,6 +423,8 @@ table! {
     FFT_KEPT_FUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "LANE-FFT: fuse M2 kept-plane copy with potential multiplication; bit-identical, no separate kept_copy pass";
     // Measurement infrastructure (ticket BREAKTHROUGH-0-INSTRUMENT); all default off, results unchanged.
+    COLLECTIVE_TRACE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "bounded per-rank collective arrivals in maps; requires PHASE_PROFILE, clocks follow STAGE_TIMERS";
     FFT_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "LANE-FFT Phase 0: detailed FFT stages and logical traffic under PHASE_PROFILE; clocks follow STAGE_TIMERS; no numerical change";
     PHASE_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
@@ -487,8 +489,8 @@ impl Table {
 pub fn table_of(id: Id) -> Table {
     use Id::*;
     match id {
-        FFT_PROFILE | PHASE_PROFILE | STAGE_TIMERS | DAVIDSON_STAGES | SNAPSHOT_DIR
-        | PHASE_WAIT | FIRST_BLOCK | DGEMM_TIMERS => Table::Profile,
+        COLLECTIVE_TRACE | FFT_PROFILE | PHASE_PROFILE | STAGE_TIMERS | DAVIDSON_STAGES
+        | SNAPSHOT_DIR | PHASE_WAIT | FIRST_BLOCK | DGEMM_TIMERS => Table::Profile,
         // Overrides of input-file values (`scf.cutoff_ladder`, the relaxation
         // extrapolation) and the pseudopotential cache location.
         CUTOFF_LADDER | RELAX_EXTRAPOLATION | PSEUDO_DIR => Table::EnvOnly,

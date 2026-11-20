@@ -2003,12 +2003,82 @@ fn fft_lane_json(report: &dft_engine::profile::Report) -> serde_json::Value {
 
 /// Exclusive phase profile (`BAANDI_PHASE_PROFILE=on`): per bucket the maximum
 /// and minimum over ranks of every entry (seconds, then counts).
+/// Same-host common epoch, expressed relative to the earliest rank anchor.
+fn arrival_json(report: &dft_engine::profile::Report) -> serde_json::Value {
+    use dft_numerics::stage_clock::arrival::CAPACITY;
+    if report.arrival_ranks.is_empty() {
+        return serde_json::Value::Null;
+    }
+    let epoch = report
+        .arrival_ranks
+        .iter()
+        .map(|(_, t)| t.epoch_ns)
+        .min()
+        .unwrap_or(0);
+    let timed = report.arrival_ranks.first().is_some_and(|(_, t)| t.timed);
+    let solver_names = dft_engine::parallel::stage_calls();
+    let reduction_names = dft_engine::parallel::reduction_stats().1;
+    let stage_name = |id: u64| -> String {
+        match id {
+            0 => "unattributed".into(),
+            1..=16 => format!("solver.{}", solver_names[id as usize - 1].0),
+            101..=118 => format!(
+                "fft.{}",
+                dft_numerics::real::fft_profile::NAMES[id as usize - 101]
+            ),
+            201..=208 => format!(
+                "m2.operator.{}",
+                [
+                    "mirror_exchange",
+                    "pack_unpack_kinetic",
+                    "fft",
+                    "nonlocal",
+                    "density",
+                    "nonlocal_energy",
+                    "gather_planes",
+                    "band_values"
+                ][id as usize - 201]
+            ),
+            301 => "nonlocal.projector_gemm".into(),
+            401..=411 => format!("solver.reduce.{}", reduction_names[id as usize - 401].site),
+            _ => format!("stage_slot.{}", id - 1),
+        }
+    };
+    json!({
+        "schema": "arrival-skew-2", "enabled": !report.arrival_ranks.is_empty(),
+        "mode": if timed { "timed" } else { "counts" }, "rank_count": report.ranks,
+        "capacity_per_rank": CAPACITY,
+        "complete": report.arrival_ranks.len() == report.ranks && report.arrival_ranks.iter().all(|(_, t)| !t.overflow),
+        "clock_domain": "same-host SystemTime anchored Instant",
+        "clock_valid": timed && report.arrival_ranks.iter().all(|(_, t)| t.drift_ns <= 1_000_000),
+        "clock_error_ns": report.arrival_ranks.iter().map(|(_, t)| t.error_ns + t.drift_ns).max().unwrap_or(0),
+        "ranks": report.arrival_ranks.iter().map(|(rank, t)| {
+            let offset = t.epoch_ns.saturating_sub(epoch);
+            json!({"rank": rank, "clock_error_ns": t.error_ns, "clock_drift_ns": t.drift_ns,
+                "events": t.events.iter().map(|e| json!({
+                    "map_id": e[0], "bucket": dft_engine::profile::BUCKET_LABELS[e[1] as usize],
+                    "seq": e[2], "op": (["allgatherv", "tree_sum", "bcast", "alltoall", "barrier"][e[3] as usize]),
+                    "site": if e[17] == 301 { "nonlocal.reduce".to_string() } else { stage_name(e[17]) },
+                    "payload_bytes": e[4], "enter_ns": timed.then_some(offset + e[5]),
+                    "exit_ns": timed.then_some(offset + e[6]), "previous_stage": stage_name(e[7]),
+                    "previous_stage_ns": timed.then_some(e[8]), "previous_stage_points": e[9],
+                    "previous_stage_logical_bytes": e[10],
+                    "previous_stage_end_ns": timed.then_some(offset + e[11]),
+                    "previous_exit_ns": timed.then_some(offset + e[12]), "call_index": e[13],
+                    "previous_stage_shape": [e[14], e[15], e[16]],
+                    "stage_duration_is_exclusive": false
+                })).collect::<Vec<_>>()})
+        }).collect::<Vec<_>>()
+    })
+}
+
 pub fn profile_json(report: &dft_engine::profile::Report, run_wall: f64) -> serde_json::Value {
     let covered = report.covered_wall();
     let closure = report.closure();
     json!({
         "schema": "phase-profile-2",
         "fft_lane": fft_lane_json(report),
+        "arrival_trace": arrival_json(report),
         "per_rank": report.per_rank.iter().map(|r| json!({
             "rank": r.rank, "wall_s": r.wall, "covered_s": r.covered, "residual_s": r.residual,
         })).collect::<Vec<_>>(),

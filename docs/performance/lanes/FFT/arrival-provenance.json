@@ -1,0 +1,24 @@
+{
+  "base": "7986d2e62c5313a1db8bba0b3235bd6f1d1ac4be",
+  "source_at_delivery_sha256": {
+    "crates/dft-cli/src/run.rs": "4a32f666898fc6b2572f1c858a0dd1e27600f6a8a88d3cfb7e4797b0cddf37e4",
+    "crates/dft-cli/tests/all/run.rs": "ea1bc74501adde07b908fc0f8e3634eb7fcd641e45953af5785a2c9f4cdf8743",
+    "crates/dft-engine/src/parallel.rs": "4623b70acc2e9891ae607a53ca2d8e36a403fa32ef79b2657f919d54e44f4ee3",
+    "crates/dft-engine/src/profile.rs": "dec6091624a5b2e88c1d7680ad0178240f856903060527e09997f232200108eb",
+    "crates/dft-numerics/src/real.rs": "d40f591b43555c5e79e04f82fac0f47ac75761c8c39c6046dc192bbe3de04b8c",
+    "crates/dft-numerics/src/stage_clock.rs": "86c0ebc2665f9601fa2565c433662388cfc6d18c3fa93608943795b3c7609652",
+    "crates/dft-numerics/src/switches.rs": "1db347341824fea38ab10024196b3cb4d24bec983d32c812f2a03f70a0535bb1",
+    "crates/dft-numerics/tests/all/switches.rs": "cc4b112703e85c5dc11a474efd360f26c48412bf3243c51d5b346147d69d000e",
+    "crates/dft-physics/src/distributed_real_gamma.rs": "dd0b49e39cc6076a9a9b0bc85fb5c0763932b884802fe642609c2b7ea58d455e",
+    "crates/dft-solvers/src/distributed_davidson.rs": "6c655fac3c0b335ea8e9c6bdac1450af01df3175373ef595258fa7214d764a59",
+    "crates/dft-solvers/src/distributed_fft.rs": "8979b47e79f5c9dee008f36623c2fb2317416e674e30a6e399b1593a20c6a376",
+    "crates/dft-numerics/src/stage_clock/arrival.rs": "698458aaf44eda14744f9b7bf8efaaf84c241bc9da2b6eba6da30eb779c33070"
+  },
+  "binary_sha256": {
+    "target/release/dft-cli": "cd4ba6695cf83de5ab177d6c74dc40f90be3c163c10597f61aac12cc4eaaf65c",
+    "target/release/examples/davidson_bench": "846f5379ea4b24ffab2eaac4cda5a31009042a1f49cc21954c572ea760f5bee0"
+  },
+  "input_sha256": "9d3da02b83fef46d13ad19e12d31b06857b4ba8988b234a82e3d1ef4a11305ed",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "trace_sha256": "25f78f39a9ecbbf99e39e1a10b11367da444830fe50b18e043d9f264f8b69b45"
+}

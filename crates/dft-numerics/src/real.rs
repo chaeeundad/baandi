@@ -2156,6 +2156,7 @@ pub mod fft_profile {
         enabled: bool,
         clocks: bool,
         work_per_point: [f64; 3],
+        shape: [usize; 3],
     }
     pub struct Mark(Option<Instant>);
     thread_local! { static APPLY: Cell<bool> = const { Cell::new(false) }; }
@@ -2174,6 +2175,7 @@ pub mod fft_profile {
             Self {
                 enabled,
                 clocks: enabled && cfg.on(Id::STAGE_TIMERS),
+                shape: n,
                 work_per_point: if enabled {
                     n.map(|v| 5. * (v as f64).log2())
                 } else {
@@ -2209,6 +2211,8 @@ pub mod fft_profile {
                         (points as f64 * self.work_per_point[a]).round() as u64
                     }),
                 ];
+                crate::stage_clock::arrival::stage(101 + stage, values[0], points, bytes);
+                crate::stage_clock::arrival::shape(self.shape[0], self.shape[1], self.shape[2]);
                 COUNTS.with(|c| {
                     for (v, add) in c[stage].iter().zip(values) {
                         v.set(v.get().wrapping_add(add));

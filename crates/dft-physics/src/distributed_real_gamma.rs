@@ -855,6 +855,7 @@ impl DistributedRealHamiltonian {
     ) -> Result<(), DistributedRealError> {
         let (count, m) = (self.count, x.cols());
         let n_loc = self.rows.len();
+        let arrival_start = dft_numerics::stage_clock::arrival::clock();
         if n_loc > 0 && self.dgemm {
             self.gemm.multiply_slices_wide_into(
                 GemmSite::Other,
@@ -878,6 +879,14 @@ impl DistributedRealHamiltonian {
         } else {
             self.projections.as_mut_slice()[..count * m].fill(0.);
         }
+        dft_numerics::stage_clock::arrival::stage(
+            301,
+            dft_numerics::stage_clock::elapsed_ns(arrival_start),
+            n_loc * m,
+            8 * (n_loc * count + n_loc * m + count * m),
+        );
+        dft_numerics::stage_clock::arrival::shape(n_loc, count, m);
+        dft_numerics::stage_clock::arrival::site(301);
         comm.tree_sum_f64(
             &self.projections.as_slice()[..count * m],
             &mut self.reduced.as_mut_slice()[..count * m],
@@ -1271,6 +1280,14 @@ static STAGE_CALLS: [AtomicUsize; 8] = [const { AtomicUsize::new(0) }; 8];
 /// F21: `start` from `dft_numerics::stage_clock::start` (`None` with
 /// `BAANDI_STAGE_TIMERS=off`: the entry is counted, no clock is read).
 fn stage_add(stage: Stage, start: Option<Instant>) {
+    if dft_numerics::stage_clock::arrival::enabled() {
+        dft_numerics::stage_clock::arrival::stage(
+            201 + stage as usize,
+            dft_numerics::stage_clock::elapsed_ns(start),
+            0,
+            0,
+        );
+    }
     STAGE_CALLS[stage as usize].fetch_add(1, Ordering::Relaxed);
     if start.is_some() {
         STAGE_NANOS[stage as usize].fetch_add(

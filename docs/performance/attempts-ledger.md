@@ -2437,3 +2437,23 @@ sizes, or identify the last rank from aggregate durations. Follow-up:
 [profile request](lanes/FFT/wait-profile-request.md). No new optimization:
 0.3 s si64 MPI8 saving from a specific permutation-pass removal is not supported
 by current counters (it would require about 42% of the 0.7184 s group).
+
+## LANE-FFT arrival trace implementation (2026-11-20)
+
+Instrumentation-only scope approved after FFT-KEPT-FUSE-NEUTRAL. Added default-off
+COLLECTIVE_TRACE with PHASE_PROFILE: bounded per-rank map/collective entry/exit,
+previous completed stage/work/shape, FFT/NONLOCAL/solver reduction sites.
+No new application collective or arithmetic change; two diagnostic gathers
+only after SCF. Count-only reads no trace clocks; OFF allocates no trace buffer.
+Same-host clock anchors report uncertainty/drift; parser identifies unresolved
+last-rank ties and separates previous-release skew from local interval skew.
+Exposure is not exact idle wait; parent stage durations remain inclusive.
+
+Mac correctness: OFF/count/timed Si8 simulated MPI2/3/8 energy bits/density FNV/
+work identical (dE 0 Ha); serial CLI scientific fields and density bytes identical,
+verified. Actual CLI profile serializer on warm MPI3: 408 events/rank, zero
+count/timed signature differences, 408 parsed fine rows. Five parser tests and
+buffer/transport/all-five-operation unit tests pass. Final fast gate: 705 pass,
+3 known TMPDIR cache failures, 178 ignored; build/fmt/clippy pass. No Mac speed
+claim, no optimization. See [request](lanes/FFT/wait-profile-request.md),
+[validation](lanes/FFT/arrival-validation.md), [evidence](lanes/FFT/arrival-equivalence.json).

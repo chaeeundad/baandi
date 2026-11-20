@@ -109,6 +109,9 @@ pub mod local {
     /// Add `calls` calls and `nanos` to `slot` on this thread.
     #[inline]
     pub fn add_n(slot: usize, nanos: u64, calls: u64) {
+        if !(COLLECTIVE..COLLECTIVE + 5).contains(&slot) && slot < OP_COUNT {
+            super::arrival::stage(slot + 1, nanos, 0, 0);
+        }
         if ENABLED.load(Relaxed) && slot < SLOTS {
             NANOS.with(|n| n[slot].set(n[slot].get().wrapping_add(nanos)));
             CALLS.with(|c| c[slot].set(c[slot].get().wrapping_add(calls)));
@@ -162,3 +165,6 @@ pub mod local {
         out
     }
 }
+
+/// Default-off collective arrival trace (LANE-FFT).
+pub mod arrival;

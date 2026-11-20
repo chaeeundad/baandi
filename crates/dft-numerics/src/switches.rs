@@ -428,6 +428,8 @@ table! {
         "print per-site dgemm timers at exit (dgemm-timers builds)";
     PSEUDO_DIR: Kind::Path, "platform cache", "absolute path",
         "pseudopotential cache directory";
+    FFT_KEPT_FUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "LANE-FFT: fuse M2 kept-plane copy with potential multiplication; bit-identical, no separate kept_copy pass";
     // Measurement infrastructure (ticket BREAKTHROUGH-0-INSTRUMENT); all default off, results unchanged.
     FFT_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "LANE-FFT Phase 0: detailed FFT stages and logical traffic under PHASE_PROFILE; clocks follow STAGE_TIMERS; no numerical change";

@@ -1,0 +1,74 @@
+{
+  "task_id": "LANE-FFT",
+  "phase": 2,
+  "purpose": "Mac correctness only; no timing evidence",
+  "cli_serial_control": {
+    "energy_ha": -31.321776563202498,
+    "delta_ha": 0,
+    "verified": true,
+    "density_sha256": "43f2a33d8b0d0a5a90129076353d8e4ad26b2305695c3d834c13b7598fb7342b",
+    "scientific_fields_and_history_bit_identical": true,
+    "scope": "serial path unchanged; candidate active only in distributed M2"
+  },
+  "simulated_mpi_scf": [
+    {
+      "ranks": 2,
+      "energy_ha": -31.321784923608313,
+      "energy_bits": "0xc03f52607f2b3e5a",
+      "density_fnv": "0x0f7a928b3747bc05",
+      "scf": 11,
+      "davidson": 52,
+      "h_columns": 437
+    },
+    {
+      "ranks": 3,
+      "energy_ha": -31.32178492360831,
+      "energy_bits": "0xc03f52607f2b3e59",
+      "density_fnv": "0x43904f10b1bc6dc2",
+      "scf": 11,
+      "davidson": 52,
+      "h_columns": 437
+    },
+    {
+      "ranks": 8,
+      "energy_ha": -31.321784923656523,
+      "energy_bits": "0xc03f52607f2b735c",
+      "density_fnv": "0xfb8874f1153d0bbe",
+      "scf": 10,
+      "davidson": 50,
+      "h_columns": 404
+    }
+  ],
+  "simulated_mpi_off_on_delta_ha": 0,
+  "simulated_mpi_rank_energy_spread_ha": 4.82138773350016e-11,
+  "scf_limit": "M2SCREEN exports energy bits, density FNV and counts, not full density/history or verification fields",
+  "fixed_h_real_upf": {
+    "ranks": 3,
+    "kind": "warm",
+    "eigen_fnv": "0xfdff2330905ef17e",
+    "eigenvalues_residuals_and_counters_bit_identical": true,
+    "removed": [
+      {
+        "rank": 0,
+        "fine_removed_logical_bytes": 11943936
+      },
+      {
+        "rank": 1,
+        "fine_removed_logical_bytes": 11943936
+      },
+      {
+        "rank": 2,
+        "fine_removed_logical_bytes": 11943936
+      }
+    ]
+  },
+  "source_sha256": {
+    "crates/dft-solvers/src/distributed_fft.rs": "0f950dd9e676ea623633de336a697bd2c8d06205646c5b1901269f5ef2fcd53f",
+    "crates/dft-numerics/src/switches.rs": "9fcbd908a8f91f683c50c5b5b6c4c443820821760ad48f9bc92384439ef519ec"
+  },
+  "binary_sha256": {
+    "target/release/dft-cli": "884dc7f7be70679e87712842525c567337a4ee18aa4604cb92acf133c5252824",
+    "target/release/examples/davidson_bench": "5de583187ecd76e2deba8f087db992c80ec32a7a054e927236b30a06dc5821a6"
+  },
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217"
+}

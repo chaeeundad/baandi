@@ -289,7 +289,8 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::ATOMIC_LOCAL_BLOCK), Value::Choice("on"));
     assert_eq!(value(Id::DAVIDSON_UPPER_BORDER), Value::Choice("off"));
     assert_eq!(value(Id::DAVIDSON_ROTATE_COLUMNS), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 124);
+    assert_eq!(value(Id::FFT_KEPT_FUSE), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 125);
 }
 
 #[test]

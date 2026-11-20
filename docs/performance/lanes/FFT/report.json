@@ -1,70 +1,58 @@
 {
   "task_id": "LANE-FFT",
-  "status": "PROFILE_REQUEST",
+  "status": "DONE",
   "changed_files": [
-    "crates/dft-cli/src/run.rs",
     "crates/dft-cli/tests/all/run.rs",
-    "crates/dft-engine/src/profile.rs",
-    "crates/dft-numerics/src/fused_pair_plan.rs",
-    "crates/dft-numerics/src/real.rs",
-    "crates/dft-numerics/src/stage_clock.rs",
     "crates/dft-numerics/src/switches.rs",
     "crates/dft-numerics/tests/all/switches.rs",
     "crates/dft-solvers/src/distributed_fft.rs",
     "docs/performance/attempts-ledger.md",
-    "docs/performance/lanes/FFT/cli-equivalence.json",
-    "docs/performance/lanes/FFT/integration-plan.md",
-    "docs/performance/lanes/FFT/mac-counts-results.json",
-    "docs/performance/lanes/FFT/mac-si8.toml",
-    "docs/performance/lanes/FFT/profile-request.md",
-    "docs/performance/lanes/FFT/report.json",
-    "docs/performance/lanes/FFT/test_parser.py",
-    "docs/performance/lanes/FFT/validation.md",
-    "docs/performance/lanes/FFT/verify_cli.py",
-    "scripts/lane_fft_parse.py"
+    "docs/performance/lanes/FFT/dev08-pairs.sh",
+    "docs/performance/lanes/FFT/dev08-request.md",
+    "docs/performance/lanes/FFT/diagnosis.md",
+    "docs/performance/lanes/FFT/phase2-equivalence.json",
+    "docs/performance/lanes/FFT/phase2-validation.md",
+    "docs/performance/lanes/FFT/phase2_verify.py",
+    "docs/performance/lanes/FFT/report.json"
   ],
   "design_choices": [
-    "Phase 0 complete; no optimization or performance conclusion.",
-    "Default-off FFT_PROFILE with PHASE_PROFILE enables 18 local-potential stage counters; STAGE_TIMERS enables clocks. Disabled probes perform cached branches only.",
-    "Separate rank/bucket FFT payload is wired through stage_clock, engine profile and real CLI phase_profile.fft_lane JSON.",
-    "Exact dev08 commands, five requested cells/models, repeats, controls and JSON paths are documented in profile-request.md."
+    "Phase 2 complete for review; default-off FFT_KEPT_FUSE fuses only M2 kept-copy and multiply. No optimization adoption or Mac timing conclusion.",
+    "Diagnosis separates rank-zero and stage-maximum relayed quantities; supplies exact traffic formulas, conditional floors and limits on wait attribution.",
+    "Alternatives: middle-pack locality, sparse zeroing/useful-volume exchange deferred. Generic MKL FFT and asynchronous alltoall remain deferred.",
+    "dev08-request.md and dev08-pairs.sh specify A/A floor, crossed pairs, counter movement, |mean|/SE >= 3 and si32-first staged expansion to si64/si32/si16 MPI8."
   ],
   "commands": [
     {
-      "command": "cargo build --offline --release -p dft-cli",
+      "command": "cargo test --offline --release -p dft-solvers --lib kept_fusion_bits_counters_and_rank_independence -- --nocapture",
       "exit_code": 0
     },
     {
-      "command": "cargo test --offline --release -p dft-numerics -p dft-solvers -p dft-engine --lib lane_fft -- --nocapture",
+      "command": "BAANDI_FFT_KEPT_FUSE=on BAANDI_STAGE_TIMERS=off cargo test --offline --release -p dft-physics --test distributed_real_gamma",
       "exit_code": 0
     },
     {
-      "command": "BAANDI_FFT_PROFILE=on BAANDI_PHASE_PROFILE=on BAANDI_STAGE_TIMERS=off cargo test --offline --release -p dft-physics --test distributed_real_gamma",
+      "command": "BAANDI_FFT_KEPT_FUSE=on BAANDI_STAGE_TIMERS=off cargo test --offline --release -p dft-engine --test distributed_scf m2c_stick_row_scf_matches_threads_only -- --nocapture",
       "exit_code": 0
     },
     {
-      "command": "BAANDI_FFT_PROFILE=on BAANDI_PHASE_PROFILE=on BAANDI_STAGE_TIMERS=off cargo test --offline --release -p dft-engine --test distributed_scf m2c_stick_row_scf_matches_threads_only -- --nocapture",
+      "command": "cargo test --offline --release -p dft-engine --test m2_entry_cost --no-run --message-format=json",
       "exit_code": 0
     },
     {
-      "command": "python3 -I docs/performance/lanes/FFT/verify_cli.py target/scratch/fft-final-off target/scratch/fft-final-timed target/scratch/fft-final-counts",
+      "command": "cargo build --offline --release -p dft-cli --bin dft-cli --example davidson_bench",
       "exit_code": 0
     },
     {
-      "command": "python3 -I scripts/lane_fft_parse.py --json docs/performance/lanes/FFT/mac-counts-results.json",
+      "command": "python3 -I docs/performance/lanes/FFT/phase2_verify.py target/scratch --upf /Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
       "exit_code": 0
     },
     {
-      "command": "TMPDIR=\"$PWD/target/scratch\" python3 -I docs/performance/lanes/FFT/test_parser.py",
-      "exit_code": 0
-    },
-    {
-      "command": "CHECK_SCCACHE=0 TMPDIR_990=\"$PWD/target/scratch\" scripts/check.sh fast dft-numerics dft-solvers dft-engine dft-cli",
+      "command": "CHECK_SCCACHE=0 TMPDIR_990=\"$PWD/target/scratch\" scripts/check.sh fast dft-numerics dft-solvers dft-cli",
       "exit_code": 1
     },
     {
-      "command": "python3 -I scripts/tests/test_readme_figures.py",
-      "exit_code": 1
+      "command": "bash -n docs/performance/lanes/FFT/dev08-pairs.sh",
+      "exit_code": 0
     },
     {
       "command": "git diff --check",
@@ -72,18 +60,19 @@
     }
   ],
   "numerical_outputs": [
-    "Actual CLI OFF/timed/count-only: energy -31.321776563202498 Ha; difference 0 Ha; scientific fields and density bit-identical; 11 SCF iterations; verified true.",
-    "Actual Mac CLI results.json parses to 144 rows; timed and count-only integer counters agree.",
-    "Fast gate: 613 passed, 3 known Mac in-repository TMPDIR cache failures, 160 ignored; build/fmt/clippy passed.",
-    "Three lane unit tests, 11 distributed Hamiltonian tests, one distributed SCF test and three parser tests passed."
+    "Kernel OFF/ON bit-identical on five fixtures, ranks 1/2/3/8, pair counts 1/3/8; assembled output bits rank independent.",
+    "Real Si8 simulated MPI2/3/8 OFF/ON energy delta 0 Ha; density FNV and work counts identical. Cross-rank energy spread 4.82138773350016e-11 Ha.",
+    "Actual MPI3 warm-harness JSON: fine kept_copy 288 -> 0 calls and 11943936 -> 0 bytes on each rank; other stage counters identical.",
+    "Serial CLI control verified, scientific fields/history/density bits identical; energy -31.321776563202498 Ha.",
+    "Fast gate 358 passed, 3 known TMPDIR cache failures, 87 ignored; build/fmt/clippy passed."
   ],
-  "reference_comparison": "Mac correctness only. No QE run, dev08 execution or performance conclusion.",
+  "reference_comparison": "No QE run or dev08 A/B executed. All speed predictions are conditional on the relayed bad02ee si64 MPI8 profile, not measured gains. Mac used only for compilation and correctness.",
   "limitations": [
-    "One thread per rank only; worker TLS aggregation is not implemented.",
-    "Paired/pruned Gamma serial and M2 paths only; fallback zero counts mean unavailable. Per-map values are bucket averages.",
-    "Real MPI/MKL profiling remains for dev08.",
-    "Required fast gate retains three documented TMPDIR cache failures; unchanged README validator has one pre-existing scope-string failure among nine tests."
+    "Raw dev08 profile aggregation/rates need reconciliation; exact padding and wait/transfer split cannot be recovered from rounded rank summaries.",
+    "Real MPI/MKL, complete distributed SCF density/history/verification identity and speed evidence remain dev08 gates.",
+    "M2SCREEN provides density FNV, not full density files; serial CLI provides byte identity. Cross-rank SCF trajectory is not bit-identical, consistent with ADR 0041.",
+    "Three known Mac in-repository TMPDIR CLI cache tests fail; no full/push gate claimed."
   ],
   "open_questions": [],
-  "commit": "Uncommitted as requested."
+  "commit": "Uncommitted as requested; stop after dev08 request."
 }

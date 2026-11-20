@@ -2641,3 +2641,28 @@ arithmetic-pruning variant. Reuse the unchanged implementation's Mac evidence
 in `lanes/DAVIDSON/rotation-correctness.json`; only documentation and the
 per-map EVD parser are refined in this rejection-response turn. Independent
 serial A/B request is now active; UPPER_BORDER stays OFF in every arm.
+
+## LANE-FFT Phase 2: M2 kept-plane copy fusion (2026-11-20)
+
+Implemented default-off `BAANDI_FFT_KEPT_FUSE`, awaiting dev08 A/B, not adopted.
+Relayed bad02ee si64 MPI8 profile: rank-0 lane 2.2440 s, including 0.1123 s
+kept_copy, 0.1256 multiply, 0.7184 permutation/zeroing. This motivates removing
+the kept copy followed immediately by a slab read/multiply/write: 72 -> 40
+logical bytes/kept point, unchanged scalar arithmetic. Conditional prediction
+0.03–0.10 s/run (0.4–1.2% of relayed 8.4265 s wall); **not a measurement**.
+Serial already fuses this operation and is unchanged. Alternative middle-pack
+locality and unresolved padding/wait questions are in
+[diagnosis](lanes/FFT/diagnosis.md); no revival of generic MKL FFT, async
+alltoall, lane threading or many-band 3D FFT. Relayed rank-max versus rank-0
+and wall-ratio inconsistencies are explicitly recorded, not silently combined.
+Mac correctness only: five support/grid fixtures, ranks 1/2/3/8 and pairs
+1/3/8 bit-identical; real Si8 simulated MPI2/3/8 OFF/ON dE 0 Ha, density FNV
+and work identical. Real-UPF warm fixed-H harness actual JSON: each rank's
+fine kept_copy 288 -> 0 calls, 11943936 -> 0 bytes; every other stage's
+counts unchanged. CLI serial control scientific fields/density bits identical.
+Fast gate: 358 pass, 3 known TMPDIR cache failures, 87 ignored; build/fmt/clippy
+pass. See [validation](lanes/FFT/phase2-validation.md),
+[dev08 request](lanes/FFT/dev08-request.md): A/A floor first, three crossed
+A/B pairs, fixed-H si32 then SCF, expansion si64/si32/si16 MPI8; resolved gain
+requires negative paired mean with |mean|/SE >= 3 and floor/interval checks.
+No performance conclusion from the Mac and no default change.

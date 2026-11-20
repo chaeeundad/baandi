@@ -1,0 +1,7 @@
+REVISED INSTRUCTIONS from the user (2026-11-20): profiling must NOT be done on the Mac. The Mac is for compiling, correctness and equivalence only; no Mac timing supports any performance conclusion. Run your lane in PHASES. This run is Phase 0 only:
+1. Read the code and the ledger/backlog for your lane.
+2. Add lane-specific instrumentation (timers/counters active only under PHASE_PROFILE/STAGE_TIMERS or a default-off switch, no cost when off) that lets dev08 profile your lane in detail and independently of other lanes: per call, per map, per rank where relevant, plus the arithmetic/bandwidth floor inputs (sizes, counts).
+3. Write docs/performance/lanes/<LANE>/profile-request.md with exact dev08 commands (cells: si64 np8, si32 np8, si16 np8, and si32/si64 one core as relevant; repeats; counters to return and their JSON paths) and a parser scripts/lane_<lane>_parse.py (lowercase lane name) that turns returned results.json files into the lane tables.
+4. Verify on the Mac that instrumentation leaves results bit-identical and that the parser works on a Mac-generated file.
+5. Leave changes uncommitted, return the report with status PROFILE_REQUEST and stop.
+Do not design or implement optimizations yet; that is Phase 2 after the orchestrator returns the dev08 profile. The phase text is also in docs/performance/lanes/CHARTER.md on main (top section); this message is authoritative if your worktree lacks it. Your previous run was stopped by the orchestrator to apply this change; keep any useful reading you already did.

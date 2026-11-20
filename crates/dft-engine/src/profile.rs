@@ -1333,6 +1333,7 @@ mod closure_tests {
     }
 }
 
+<<<<<<< HEAD
 // LANE-FFT wire-format regression: real MPI uses the same final allgatherv.
 #[cfg(test)]
 mod fft_lane_tests {
@@ -1368,3 +1369,8 @@ mod fft_lane_tests {
         }
     }
 }
+=======
+/// Per-attempt verification lane instrumentation (Phase 0).
+#[path = "verification_profile.rs"]
+pub mod verification;
+>>>>>>> task/LANE-VERIFY

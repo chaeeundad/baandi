@@ -1045,13 +1045,33 @@ impl ScfSession {
                 // The predictor itself is called only after a real failure.
                 let defer = self.verification.attempts.last().is_some_and(|a| !a.passed)
                     && self.problem.sw.verify_schedule != "off"
-                    && schedule_attempt(
-                        history,
-                        &mut self.verification,
-                        self.problem.sw.verify_schedule,
-                        self.problem.options.max_iterations,
-                        self.spectral_report.is_none(),
-                    );
+                    && {
+                        let profiling = self.problem.sw.verify_profile && crate::profile::enabled();
+                        let clock = (profiling
+                            && self
+                                .problem
+                                .run
+                                .on(dft_numerics::switches::Id::STAGE_TIMERS))
+                        .then(Instant::now);
+                        let deferred = schedule_attempt(
+                            history,
+                            &mut self.verification,
+                            self.problem.sw.verify_schedule,
+                            self.problem.options.max_iterations,
+                            self.spectral_report.is_none(),
+                        );
+                        if profiling {
+                            crate::profile::verification::schedule(
+                                iteration,
+                                self.problem.options.cutoff_hartree,
+                                history.len(),
+                                self.verification.attempts.len(),
+                                clock,
+                                deferred,
+                            );
+                        }
+                        deferred
+                    };
                 if defer {
                     passed = false;
                 } else {
@@ -2723,7 +2743,43 @@ fn verify_fixed_point(
 ) -> Result<VerificationOutcome, ScfError> {
     // M2-OWNED: the verification map's input is the delivered (owned) output;
     // the loop's own input is restored afterwards on every path.
+    use crate::profile::verification as vp;
+    let mut trace = if problem.sw.verify_profile && crate::profile::enabled() {
+        let dims = problem.grid.dims();
+        Some(vp::Trace::new(
+            iteration,
+            problem.options.cutoff_hartree,
+            [
+                dims[0] as u64,
+                dims[1] as u64,
+                dims[2] as u64,
+                density.len() as u64,
+                owned.map_or(0, |o| o.values.len()) as u64,
+                points
+                    .iter()
+                    .map(|p| std::mem::size_of_val(p.solution.eigenvectors.as_slice()) as u64)
+                    .sum(),
+                points.len() as u64,
+                points.iter().filter(|p| p.lazy.is_some()).count() as u64,
+                points
+                    .iter()
+                    .map(|p| p.solution.eigenvalues.len() as u64)
+                    .sum(),
+                problem
+                    .states
+                    .iter()
+                    .map(|s| s.basis.vectors().len() as u64)
+                    .sum(),
+                0,
+                0,
+            ],
+            problem.run.on(dft_numerics::switches::Id::STAGE_TIMERS),
+        ))
+    } else {
+        None
+    };
     let saved = owned.map(|o| problem.owned.input.replace(o.clone()));
+    vp::mark(&mut trace, 0);
     let result = verify_fixed_point_inner(
         problem,
         density,
@@ -2732,13 +2788,24 @@ fn verify_fixed_point(
         standard_error_ha,
         iteration,
         stop_map,
+        &mut trace,
     );
     if let Some(s) = saved {
         problem.owned.input = s;
     }
+    vp::mark(&mut trace, 7);
+    if let Some(trace) = trace {
+        trace.finish(
+            result
+                .as_ref()
+                .ok()
+                .map(|(a, _, _, _)| (a.passed, a.operator_applications, a.davidson_iterations)),
+        );
+    }
     result
 }
 
+#[allow(clippy::too_many_arguments)]
 fn verify_fixed_point_inner(
     problem: &mut ScfProblem,
     density: &Array3<f64>,
@@ -2747,7 +2814,9 @@ fn verify_fixed_point_inner(
     standard_error_ha: f64,
     iteration: usize,
     (stop_input, stop_energy_ha): (&Array3<f64>, f64),
+    trace: &mut Option<crate::profile::verification::Trace>,
 ) -> Result<VerificationOutcome, ScfError> {
+    use crate::profile::verification as vp;
     let clock = Instant::now();
     let threshold = problem
         .options
@@ -2756,6 +2825,7 @@ fn verify_fixed_point_inner(
         .threshold_ha;
     let eigen_tolerance = StandardProfile::ratchet(tolerance, standard_error_ha, problem.electrons);
     let (warm, warm_lazy) = split_warm(Some(points));
+    vp::mark(trace, 1);
     crate::profile::set_context(crate::profile::Context {
         stage: "verification",
         kind: "verify",
@@ -2772,10 +2842,20 @@ fn verify_fixed_point_inner(
         // Same flag as an ordinary step (the standard path ignores it).
         eigen_tolerance <= problem.options.eigen_tolerance,
     )?;
+    vp::mark(trace, 2);
+    if let Some(t) = trace.as_mut() {
+        t.map([
+            check.timings.potential.as_secs_f64(),
+            check.timings.diagonalization.as_secs_f64(),
+            check.timings.density.as_secs_f64(),
+            check.timings.energy.as_secs_f64(),
+        ]);
+    }
     let glue_clock = crate::profile::clock();
     let coulomb_error_ha = problem
         .stop_error_step(density, &check.density, check.owned_density.as_ref())?
         .expect("standard Coulomb metric");
+    vp::mark(trace, 3);
     let residual_bound_ha = problem.sw.residual_guard.then(|| {
         StandardProfile::residual_energy_estimate(
             check
@@ -2807,6 +2887,7 @@ fn verify_fixed_point_inner(
     {
         return Err(ScfError::NonFinite);
     }
+    vp::mark(trace, 4);
     let guard_ok = residual_bound_ha.is_none_or(|b| b < threshold);
     #[allow(unused_mut)]
     let mut passed = coulomb_error_ha < threshold && guard_ok;
@@ -2857,6 +2938,7 @@ fn verify_fixed_point_inner(
         problem.check_gap(&check.k_points)?;
     }
     crate::profile::between(crate::profile::BetweenPart::VerifyGlue, glue_clock);
+    vp::mark(trace, 5);
     let residuals = |buffered: bool| -> Vec<Vec<f64>> {
         check
             .k_points
@@ -2921,6 +3003,7 @@ fn verify_fixed_point_inner(
         chemical_potential_change_ha: None,
         moment_change: None,
     };
+    vp::mark(trace, 6);
     Ok((
         attempt,
         record,
@@ -2973,6 +3056,8 @@ pub(crate) struct SessionSwitches {
     pub(crate) stop_predictor: StopPredictor,
     /// F-VERIFY-SCHEDULE: resolved once; no environment reads in the loop.
     pub(crate) verify_schedule: &'static str,
+    /// LANE-VERIFY Phase 0, default-off observation only.
+    pub(crate) verify_profile: bool,
 }
 
 /// SCF-TAIL (`BAANDI_STOP_PREDICTOR=off|trace|on`, default off): the cross
@@ -3031,6 +3116,7 @@ impl SessionSwitches {
             growth_reset: run.number(Id::MIX_GROWTH_RESET),
             eigen_factor: run.number(Id::EIGEN_FACTOR).unwrap_or(0.1),
             verify_schedule: run.choice(Id::VERIFY_SCHEDULE),
+            verify_profile: run.on(Id::VERIFY_PROFILE),
             stop_predictor: match run.choice(Id::STOP_PREDICTOR) {
                 "trace" => StopPredictor::Trace,
                 "on" => StopPredictor::On,

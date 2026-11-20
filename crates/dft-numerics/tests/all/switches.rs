@@ -279,7 +279,12 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::PHASE_VALIDATE), Value::Choice("off"));
     assert_eq!(value(Id::INIT_PROFILE), Value::Choice("off"));
     assert_eq!(value(Id::FFT_PROFILE), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 120);
+    assert_eq!(value(Id::VERIFY_PROFILE), Value::Choice("off"));
+    assert_eq!(
+        switches::table_of(Id::VERIFY_PROFILE),
+        switches::Table::Profile
+    );
+    assert_eq!(TABLE.len(), 121);
 }
 
 #[test]

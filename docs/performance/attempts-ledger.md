@@ -2449,3 +2449,30 @@ exclusion and 3-rank wire-format tests pass. No Mac timing supports a speed
 claim. [Profile request](lanes/FFT/profile-request.md),
 [equivalence evidence](lanes/FFT/cli-equivalence.json),
 [validation](lanes/FFT/validation.md). dev08 supplies the profile before Phase 2.
+## LANE-VERIFY-PHASE0 (2026-11-20): PROFILE_REQUEST
+
+User's revised phase instruction supersedes the optimization charter for this
+run. No optimization/candidate selection retained. Default-off
+`BAANDI_VERIFY_PROFILE` adds per-attempt/per-rank size, work and consecutive
+phase records, plus actual scheduler-call records; PHASE_PROFILE is required,
+STAGE_TIMERS gates every new clock. Post-run adapter gathering only; judgment,
+ratchet, schedule and reuse are unchanged. The parser preserves per-call and
+whole-run critical-rank closure rather than summing unrelated rank maxima.
+
+Mac evidence is **correctness/plumbing only**, never performance: 48 synthetic
+SCFs / 30 mode comparisons (cubic/skew/slab, 3/6 bands, 1/2 k blocks, simulated
+2/3 ranks, forced failed attempts); five real-PP inputs x five arms (20 identity
+comparisons), maximum dE **0 Ha**, density/scientific history identical. Four
+real inputs converge; real slab exhausts identically in every arm, while the
+synthetic slab converges. Parser 5 tests pass and actual Mac JSON parses; final
+release Si8 five-arm smoke passes. Final required gate exit **1**: build/fmt/
+clippy pass, **471 passed / 3 known in-repo TMPDIR cache failures / 136 ignored**.
+Initial build/API, timer-granularity test, driver baseline-convergence assumption
+and clippy failures were fixed and are documented, not omitted.
+
+Status: **PROFILE_REQUEST**, no dev08 execution or speed claim. Exact five
+case/model jobs, six retained profile/control cycles, schemas and parser paths:
+[profile request](lanes/VERIFY/profile-request.md). Scope, hashes, numerical
+identity and real exit codes: [validation](lanes/VERIFY/validation.md) and
+[correctness record](lanes/VERIFY/correctness.json). Await the orchestrator's
+dev08 profile before Phase 2. Changes remain uncommitted.

@@ -1,0 +1,40 @@
+{
+  "task_id": "LANE-NONLOCAL",
+  "status": "DONE",
+  "changed_files": [
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/lanes/NONLOCAL/diagnose.md",
+    "docs/performance/lanes/NONLOCAL/closing-note.md",
+    "docs/performance/lanes/NONLOCAL/phase2-report.json"
+  ],
+  "design_choices": [
+    "Phase 2 disposition: recommend closing the lane for this round. No candidate has evidence supporting expected >=0.15 s Si64 np8 wall saving.",
+    "Assessed same-shape direct output/add fusion, coupling elimination and persistent packing using source-derived panel shapes and relayed dev08 arithmetic/bandwidth inputs.",
+    "No optimization, switch, default, numerical code or instrumentation change. No new dev08 job requested; Phase 0 report/evidence preserved."
+  ],
+  "commands": [
+    {
+      "command": "python3 - (floor, rate and panel-shape arithmetic)",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "Relayed dev08 bad02ee Si64 np8: 0.7825 s lane / 9.6702 s wall = 8.09%; three lane times 0.7825/0.8125/0.7486 s.",
+    "Projection: 34.15 GFLOP/s; back: 27.90 GFLOP/s. Logical STREAM reference times: 0.05240 s and 0.04133 s.",
+    "Combined arithmetic reference headroom: 0.29366\u20130.40767 s at 64\u2013108 GFLOP/s; theoretical, not an expected optimization gain.",
+    "Same-shape direct-output/add estimate about 0.050 s; full coupling stage 0.0474 s. Neither supports the 0.15 s threshold."
+  ],
+  "reference_comparison": "User-relayed dev08 profile only; no independently reproduced dev08 or QE measurements, no Mac timing conclusions.",
+  "limitations": [
+    "Raw dev08 files, binary/input hashes and exact event shapes were not supplied. N=2984, P=256, B=132 is an illustrative source-based model, not a recovered call trace.",
+    "Rank-max aggregates and logical traffic do not identify matched-rank throughput, actual DRAM traffic or removable backend packing time.",
+    "No crates changed in Phase 2; scripts/check.sh and numerical equivalence were not rerun for this documentation-only closure. Phase 0 results remain historical.",
+    "Closure is an evidence/priority decision, not proof of optimality."
+  ],
+  "open_questions": [],
+  "commit": "Uncommitted as requested."
+}

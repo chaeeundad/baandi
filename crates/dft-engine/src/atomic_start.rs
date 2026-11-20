@@ -3,6 +3,7 @@ use super::*;
 use dft_basis::HalfSphere;
 use dft_mpi::Collective;
 use dft_numerics::linalg::{MatrixOp, gemm, hermitian_eigh, orthonormalize};
+use dft_numerics::switches::{InitProfile, RunCounter as IC};
 use dft_solvers::LinearOperator;
 use dft_upf::radial::{projector_transform_with_rule, real_spherical_harmonic};
 
@@ -86,11 +87,24 @@ pub(super) fn span(
     pool: Option<&dft_numerics::pool::WorkerPool>,
     split: Option<&crate::parallel::SharedComm>,
 ) -> Result<AtomicSpan, ScfError> {
+    let profile = InitProfile::current();
+    let _span = profile.map(|p| p.span(IC::InitAtomicSpanCalls, IC::InitAtomicSpanNanos));
     let npw = basis.vectors().len();
     let count = species
         .iter()
         .map(|s| s.positions_bohr.len() * s.orbitals.iter().map(|c| 2 * c.l + 1).sum::<usize>())
         .sum();
+    if let Some(p) = profile {
+        p.count(IC::InitAtomicRows, npw);
+        p.count(IC::InitAtomicColumns, count);
+        p.count(IC::InitAtomicInputBytes, 16 * npw * count);
+        let [x, y, z] = grid.dims();
+        p.count(IC::InitAtomicGridPoints, x * y * z);
+        p.count(IC::InitAtomicGridX, x);
+        p.count(IC::InitAtomicGridY, y);
+        p.count(IC::InitAtomicGridZ, z);
+        p.count(IC::InitAtomicBands, bands);
+    }
     let mut report = AtomicStartReport {
         atomic_orbitals: count,
         ..Default::default()
@@ -160,16 +174,36 @@ pub(super) fn span(
     let part = clock();
     // BAANDI_M2_ATOMIC_BLOCK=on: row-distributed CholQR2 (rounding class);
     // None (any rank could not use it) continues with the split routine below.
-    if let Some(comm) = split.filter(|_| npw > 0 && crate::m2::tuning().atomic_block) {
+    let distributed_block = split.filter(|_| npw > 0 && crate::m2::tuning().atomic_block);
+    // Local arithmetic reuse, not a new MPI mode. A disabled M2 split path
+    // on a multi-rank job must not accidentally enter the local experiment.
+    let local_block = npw > 0
+        && split.is_none()
+        && dft_numerics::switches::on(dft_numerics::switches::Id::ATOMIC_LOCAL_BLOCK)
+        && crate::parallel::SharedComm::active().is_none();
+    if distributed_block.is_some() || local_block {
+        if let Some(p) = profile.filter(|_| local_block) {
+            p.count(IC::InitAtomicLocalAttempts, 1);
+        }
         let gamma = basis.k_fractional() == [0.; 3];
-        if let Some(ortho) = orthonormalize_block(comm, &fill_rows, npw, count, gamma)? {
+        if let Some(ortho) = orthonormalize_block(distributed_block, &fill_rows, npw, count, gamma)?
+        {
+            if let Some(p) = profile.filter(|_| local_block) {
+                p.count(IC::InitAtomicLocalAccepted, 1);
+            }
             atomic_part(AtomicPart::Orthonormalize, part);
             let part = clock();
             let span = finish_span(basis, grid, bands, ortho, npw, report);
             atomic_part(AtomicPart::Finish, part);
             return span;
         }
-        crate::m2::count_atomic_block_fallback();
+        if local_block {
+            if let Some(p) = profile {
+                p.count(IC::InitAtomicLocalFallbacks, 1);
+            }
+        } else {
+            crate::m2::count_atomic_block_fallback();
+        }
     }
     if let Some(comm) = split.filter(|_| npw > 0) {
         let (rank, ranks) = (comm.rank(), comm.size());
@@ -191,6 +225,12 @@ pub(super) fn span(
         atomic_part(AtomicPart::Finish, part);
         return span;
     }
+    if let Some(p) = profile {
+        p.count(
+            IC::InitAtomicMgsMacs,
+            2 * npw * count * count.saturating_sub(1),
+        );
+    }
     let mut raw = ComplexMatrix::zeros(npw, count).map_err(numerical)?;
     let ortho = match pool {
         Some(pool) if npw > 0 => {
@@ -201,8 +241,10 @@ pub(super) fn span(
             })?;
             atomic_part(AtomicPart::Fill, part);
             let part = clock();
+            let mgs = profile.map(|p| p.span(IC::InitAtomicMgsCalls, IC::InitAtomicMgsNanos));
             let ortho =
                 dft_numerics::linalg::orthonormalize_pooled(&raw, None, pool).map_err(numerical)?;
+            drop(mgs);
             atomic_part(AtomicPart::Orthonormalize, part);
             ortho
         }
@@ -212,7 +254,9 @@ pub(super) fn span(
             }
             atomic_part(AtomicPart::Fill, part);
             let part = clock();
+            let mgs = profile.map(|p| p.span(IC::InitAtomicMgsCalls, IC::InitAtomicMgsNanos));
             let ortho = orthonormalize(&raw, None).map_err(numerical)?;
+            drop(mgs);
             atomic_part(AtomicPart::Orthonormalize, part);
             ortho
         }
@@ -523,6 +567,19 @@ impl BlockAlgebra {
     /// A T for this rank's rows (T n x n; its real part only at Gamma).
     fn update(&mut self, a: &ComplexMatrix, t: &[Complex64]) -> Result<ComplexMatrix, ScfError> {
         let (rows, n) = (a.rows(), a.cols());
+        let profile = InitProfile::current();
+        let _span = profile.map(|p| {
+            p.span(
+                IC::InitAtomicBlockUpdateCalls,
+                IC::InitAtomicBlockUpdateNanos,
+            )
+        });
+        if let Some(p) = profile {
+            p.count(
+                IC::InitAtomicBlockUpdateFlops,
+                (if matches!(self, Self::Real(_)) { 4 } else { 8 }) * rows * n * n,
+            );
+        }
         match self {
             Self::Complex => {
                 let t = ComplexMatrix::new(n, n, t.to_vec()).map_err(numerical)?;
@@ -571,12 +628,26 @@ fn interleaved(z: &[Complex64]) -> Vec<f64> {
 /// counts the ranks that flagged a failure (`failed`, or a local product
 /// error). None when any rank failed (the same on every rank).
 fn block_gram(
-    comm: &crate::parallel::SharedComm,
+    comm: Option<&crate::parallel::SharedComm>,
     algebra: &mut BlockAlgebra,
     local: Option<&ComplexMatrix>,
     failed: bool,
     n: usize,
 ) -> Result<Option<Vec<Complex64>>, ScfError> {
+    let profile = InitProfile::current();
+    let _span = profile.map(|p| p.span(IC::InitAtomicBlockGramCalls, IC::InitAtomicBlockGramNanos));
+    if let (Some(p), Some(a)) = (profile, local) {
+        p.count(
+            IC::InitAtomicBlockGramFlops,
+            (if matches!(algebra, BlockAlgebra::Real(_)) {
+                4
+            } else {
+                8
+            }) * a.rows()
+                * n
+                * n,
+        );
+    }
     let len = algebra.gram_len(n);
     let mut send = vec![0.0; len + 1];
     if failed {
@@ -588,8 +659,12 @@ fn block_gram(
         send[len] = 1.0;
     }
     let mut out = vec![0.0; send.len()];
-    comm.tree_sum_f64(&send, &mut out)
-        .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    if let Some(comm) = comm {
+        comm.tree_sum_f64(&send, &mut out)
+            .map_err(|e| ScfError::Numerical(e.to_string()))?;
+    } else {
+        out.copy_from_slice(&send);
+    }
     if out[len] != 0.0 || out.iter().any(|v| !v.is_finite()) {
         return Ok(None);
     }
@@ -610,15 +685,19 @@ type FillRows<'a> = dyn Fn(usize, usize, &mut [Complex64]) -> Result<(), ScfErro
 /// rank alike) asks for the split Gram-Schmidt: a rank failed to fill, data
 /// were nonfinite, or a pivot fell below `BLOCK_PIVOT_GUARD`. Collective.
 fn orthonormalize_block(
-    comm: &crate::parallel::SharedComm,
+    comm: Option<&crate::parallel::SharedComm>,
     fill_rows: &FillRows<'_>,
     m: usize,
     n: usize,
     gamma: bool,
 ) -> Result<Option<dft_numerics::linalg::Orthonormalized>, ScfError> {
-    let counts = dft_mpi::block_counts(m, comm.size());
-    let first: usize = counts[..comm.rank()].iter().sum();
-    let rows = counts[comm.rank()];
+    let profile = InitProfile::current();
+    let fill_span =
+        profile.map(|p| p.span(IC::InitAtomicBlockFillCalls, IC::InitAtomicBlockFillNanos));
+    let rank = comm.map_or(0, Collective::rank);
+    let counts = dft_mpi::block_counts(m, comm.map_or(1, Collective::size));
+    let first: usize = counts[..rank].iter().sum();
+    let rows = counts[rank];
     let mut a = vec![Complex64::default(); rows * n];
     let mut filled = true;
     if rows > 0 {
@@ -630,6 +709,7 @@ fn orthonormalize_block(
         }
     }
     let a = ComplexMatrix::new(rows, n, a).map_err(numerical)?;
+    drop(fill_span);
     let all_finite = |x: &ComplexMatrix| x.as_slice().iter().all(finite);
     let failed = !filled || !all_finite(&a);
     let mut algebra = BlockAlgebra::new(gamma, rows, n)?;
@@ -637,6 +717,12 @@ fn orthonormalize_block(
         return Ok(None);
     };
     // First pass on the column-normalized Gram: Q1 = A D^-1 R1^-1.
+    let factor_span = profile.map(|p| {
+        p.span(
+            IC::InitAtomicBlockFactorCalls,
+            IC::InitAtomicBlockFactorNanos,
+        )
+    });
     let scale: Vec<f64> = (0..n).map(|j| g[j * n + j].re.sqrt()).collect();
     if scale.iter().any(|s| !s.is_finite() || *s == 0.0) {
         return Ok(None);
@@ -656,6 +742,7 @@ fn orthonormalize_block(
             t1[j * n + i] /= scale[i];
         }
     }
+    drop(factor_span);
     let (q1, failed) = if rows > 0 {
         match algebra.update(&a, &t1) {
             Ok(q) => {
@@ -671,10 +758,17 @@ fn orthonormalize_block(
         return Ok(None);
     };
     // Second pass: R2 is the identity to rounding for an accepted first pass.
+    let factor_span = profile.map(|p| {
+        p.span(
+            IC::InitAtomicBlockFactorCalls,
+            IC::InitAtomicBlockFactorNanos,
+        )
+    });
     let Some(r2) = cholesky_upper(&g2, n, 0.5) else {
         return Ok(None);
     };
     let t2 = upper_inverse(&r2, n);
+    drop(factor_span);
     // Q1 is finite on every rank (checked by the reduction) and R2^-1 is
     // finite (pivots >= 0.5), so this GEMM cannot reject its inputs.
     let q = if rows > 0 {
@@ -682,9 +776,20 @@ fn orthonormalize_block(
     } else {
         q1
     };
-    let local: Vec<f64> = q.as_slice().iter().flat_map(|z| [z.re, z.im]).collect();
-    let vectors = gather_rows(comm, &counts, &local, n)?;
-    crate::m2::count(crate::m2::Count::AtomicBlockStarts);
+    let vectors = if let Some(comm) = comm {
+        let _gather = profile.map(|p| {
+            p.span(
+                IC::InitAtomicBlockGatherCalls,
+                IC::InitAtomicBlockGatherNanos,
+            )
+        });
+        let local: Vec<f64> = q.as_slice().iter().flat_map(|z| [z.re, z.im]).collect();
+        let vectors = gather_rows(comm, &counts, &local, n)?;
+        crate::m2::count(crate::m2::Count::AtomicBlockStarts);
+        vectors
+    } else {
+        q
+    };
     Ok(Some(dft_numerics::linalg::Orthonormalized {
         vectors,
         dropped: Vec::new(),
@@ -972,6 +1077,16 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         let run = |block: &ComplexMatrix, ranks: usize, fail_rank: Option<usize>, gamma: bool| {
+            if ranks == 1 {
+                let fill = |j: usize, first: usize, column: &mut [Complex64]| {
+                    if fail_rank == Some(0) {
+                        return Err(ScfError::Numerical("fill".into()));
+                    }
+                    column.copy_from_slice(&block.column(j)[first..first + column.len()]);
+                    Ok(())
+                };
+                return vec![orthonormalize_block(None, &fill, m, n, gamma).unwrap()];
+            }
             simulate(ranks, |comm: &SimRank| {
                 crate::parallel::set_communicator(Some(Arc::new(comm.clone())));
                 let shared = crate::parallel::SharedComm::active().unwrap();
@@ -983,7 +1098,7 @@ mod tests {
                     column.copy_from_slice(&block.column(j)[first..first + column.len()]);
                     Ok(())
                 };
-                let r = orthonormalize_block(&shared, &fill, m, n, gamma).unwrap();
+                let r = orthonormalize_block(Some(&shared), &fill, m, n, gamma).unwrap();
                 crate::parallel::set_communicator(None);
                 r
             })
@@ -991,7 +1106,7 @@ mod tests {
         for (block, gamma) in [(&block, false), (&mirrored, true)] {
             let want = orthonormalize(block, None).unwrap();
             assert!(want.dropped.is_empty());
-            for ranks in 2..=7 {
+            for ranks in 1..=7 {
                 let got = run(block, ranks, None, gamma);
                 let first = got[0].as_ref().expect("block path accepted");
                 for r in &got {
@@ -1025,7 +1140,7 @@ mod tests {
         }
         let mut zero = block.clone();
         zero.column_mut(4).fill(Complex64::default());
-        for ranks in [2, 3, 5] {
+        for ranks in [1, 2, 3, 5] {
             assert!(
                 run(&dependent, ranks, None, false)
                     .iter()
@@ -1033,7 +1148,7 @@ mod tests {
             );
             assert!(run(&zero, ranks, None, false).iter().all(Option::is_none));
             assert!(
-                run(&block, ranks, Some(1), false)
+                run(&block, ranks, Some(ranks - 1), false)
                     .iter()
                     .all(Option::is_none)
             );

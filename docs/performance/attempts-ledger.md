@@ -2408,3 +2408,39 @@ existing stale structural-scope phrase test fails. No new scientific result
 or README claim is added. Instrumented release build, eight-run identity
 runner, owned/eager constructor test, switch contract test and parser tests
 all exit 0. Changes remain uncommitted; stop at PROFILE_REQUEST.
+
+## LANE-INIT Phase 2 — local atomic block (2026-11-20)
+
+- **Implemented, default off, dev08 screen pending.**
+  `BAANDI_ATOMIC_LOCAL_BLOCK=on` reuses the adopted guarded atomic CholQR2
+  locally, with no multi-rank communicator. Two Gram GEMMs, two factor/inverse
+  stages and two update GEMMs replace serial two-pass MGS. Existing guards
+  and MGS fallback, completion, HQ and Ritz remain. MPI arithmetic is unchanged.
+- New premise relative to A52: that rejection concerned Davidson correction
+  panels; this is the fixed atomic input span, already validated/adopted on
+  MPI under INIT-ATOMIC-BLOCK. The returned dev08 profile identifies serial
+  MGS as the remaining target: si64 one-core atomic start 2.19395 s,
+  orthonormalize 1.21804 s of external 42.9552 s. MPI8 start 0.52558 s of
+  9.3551 s is separately reported, not used as a cross-model speed ratio.
+  Inclusive times are not summed. Raw dev08 records were not supplied locally.
+- Hypothesis: one-core si64 net saving 0.5–0.9 s if sequential GEMM sustains
+  20–40 GFLOP/s; not a measurement. Alternative Gamma ORC-native span/HQ/Ritz
+  deferred because it requires a broader representation change. No MPI gain
+  predicted for the chosen switch. New INIT_PROFILE counts distinguish MGS,
+  accepted/fallback local blocks, block Gram/factor/update/gather and floor sizes.
+- Mac correctness (pure backend): full Si8, Si32, skew Si standard and strict
+  SCFs; max cross-arm delta 2.842170943040401e-14 Ha (standard),
+  1.4210854715202004e-14 Ha (strict). Standard vs strict reference max
+  1.0450662557559554e-10 Ha, below 5e-9 Ha. Disabled candidate retains baseline
+  scientific bits, including density/history; strict reference has no separate
+  verification object, while all standard runs passed verification. Synthetic
+  cubic/skew atomic-start SCFs and simulated P=2/3/5/7 pass with the switch on;
+  local algebra tests include complex/Gamma and rank-deficient/fill failures.
+  No Mac performance conclusion. Evidence and final command status are in
+  [phase2-report.md](lanes/INIT/phase2-report.md) and the linked JSON.
+- No default adoption or QE comparison. Required next evidence: positive MGS
+  count -> zero, accepted local blocks with no fallback; same-window dev08 A/A
+  then crossed A/B, negative mean wall difference with |mean|/SE >= 3 and >3x
+  measured floor, correctness and later generality gates. See
+  [diagnosis](lanes/INIT/diagnosis.md) and
+  [dev08 request](lanes/INIT/dev08-request.md). Leave uncommitted and stop.

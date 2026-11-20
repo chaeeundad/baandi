@@ -1,17 +1,30 @@
-# Phase 2 request: upper-border GEMM tiles
+# Active request: ROTATE_COLUMNS after UPPER_BORDER rejection
 
-Candidate `BAANDI_DAVIDSON_UPPER_BORDER=on`, default **off**. No default change
-or adoption claimed. Read diagnosis.md for the relayed profile, candidate
-comparison and missing raw shape/hardware inputs. The original Phase 0
-request and its integrity evidence remain historical. No Mac timing evidence.
+**UPPER_BORDER is REJECTED by the orchestrator**, resolved +0.57% dev08
+slowdown despite exact FLOP savings and bit-identical science. Keep its switch
+OFF. The old protocol below is archived for reproducibility: **do not queue
+its Stage 0/1/expansion commands again**. Numbers are in
+`upper-border-rejection.json` and ledger DAVIDSON-UPPER-BORDER-REJECTED.
+
+The active alternative is the already implemented, Mac-validated, default-off
+**DAVIDSON_ROTATE_COLUMNS**, under “Active alternative” below. No further
+numerical code change is needed after the rejection. It keeps all product
+entries and the full inner dimension, changes independent output-column
+layout, and reduces calls/copies rather than arithmetic. All active jobs use
+rotation-job.sh with UPPER_BORDER forced OFF. No Mac timing evidence.
+
+## Archived UPPER_BORDER request — closed, do not execute
 
 ## Preconditions and counter gate
 
-Return the original 2733278 results.json/tables.json (all five points) before
-claiming a numeric roofline gap. Also return CPU/binding, effective kernel
-rate or bandwidth calibration if available, and clarify why the quoted
-exclusive split totals 104.1%. This does not prevent screening the code's
-concrete work-elimination hypothesis.
+The follow-up relay supplies dominant shapes, counts, payload bins and measured
+machine rates; `diagnosis.md` now contains a corrected representative-shape
+model. The earlier 104.1% split is withdrawn after the parent's duplicate-key
+explanation. Exact trajectory-weighted floors still require joint shape/time
+histograms; these are not a prerequisite for either controlled A/B. The
+UPPER_BORDER commands below remain only as historical reproductions. The independent
+ROTATE_COLUMNS experiment is appended at the end; do not stack the switches
+for their first screens.
 
 On diagnostic A/B CLI runs, `davidson_profile.operations` now also labels:
 
@@ -163,3 +176,142 @@ becomes default from silicon screens alone.
 Return inputs/hashes, raw stdout/stderr/exit codes, all results.json and
 science/density comparisons, A/A and A/B summaries, counters, load/placement,
 and profile tables. Stop here; master decides the next phase.
+
+## Active alternative: serial ROTATE_COLUMNS (independent request)
+
+New default-off `BAANDI_DAVIDSON_ROTATE_COLUMNS` applies only to serial real
+Ritz rotation pairs, standard and strict. It reuses the existing fixed
+32-column GEMM adapter instead of 256-row scratch panels; it keeps X and H X,
+residual checks and all work/stop decisions. The MPI distributed path is not
+changed. The UPPER_BORDER screen is complete and rejected; do not repeat it.
+
+The proposed gain is fewer internal MKL calls and scratch copies, **not fewer
+FLOPs** or a new EVD algorithm. The serial representative-shape pair model is
+26.0 ms, not 13.0 ms. The corrected EVD model is in diagnosis.md. Expectations
+are conditional: one-core Si64 ~0.54–1.34 s (1.2–3.0% of prior external wall)
+if 10–25% of non-residual rotation time is saved; MPI distributed effect zero.
+Do not use those percentages as pass/fail minima or cross-model speed ratios.
+
+### Counter contract
+
+`davidson_profile.operations` adds `rotation_pair`; records have n=PW rows,
+m=basis order, k=rotated columns, detail=0 (row panels) or 1 (column groups).
+It encloses only the two products, inside serial rotate_residual, before
+residual construction. Fused residual routes have no such record and retain
+priority. The new runner explicitly sets RITZ_FUSED=off in both arms, which
+is the current default. UPPER_BORDER=off in both arms.
+
+In the separate diagnostic pair, require:
+
+1. Equal nonzero pair counts, n/m/k sequence, 4nmk FLOP, H columns, EVD order
+   distribution, SCF/Davidson iterations, restarts, verification, density and
+   eigen residual/energy within the rounding gate. The detail flag changes
+   from all 0 to all 1 on eligible calls. An MPI control with zero eligible
+   records is labelled **inactive control**, not a measured improvement.
+2. Existing actual dispatch counters in
+   `convergence.work.gemm_dispatch.rows[*]`: `site=rotate` FLOP must decrease
+   by the traced pair FLOP and `site=other` increase by exactly that amount;
+   total FLOP is unchanged. Sum across routes; confirm `route=mkl` is active
+   on the requested MKL points. A zero or fallback-only route is unusable for
+   the MKL mechanism. The high-level wrapper calls still count two products;
+   they are NOT the internal MKL call count.
+3. The shape-derived internal-call model must fall:
+   sum(2*ceil(n/256)) -> sum(2*ceil(k/32)); at 23871 rows/132 outputs,
+   **188 -> 10** per pair. The extra scratch write/read model falls from
+   sum(32*n*k) bytes to zero (100.831104 MB at that shape). These are exact
+   structural counts on the MKL routes, not measured DRAM bytes. Report them
+   as models and cross-check the actual dispatch movement from item 2.
+
+```sh
+python3 -I docs/performance/lanes/DAVIDSON/rotation-counter.py \
+  "$OUT/rotation-si64-np1-profile/ab-1-a/results.json" \
+  "$OUT/rotation-si64-np1-profile/ab-1-b/results.json" \
+  > "$OUT/rotation-si64-np1-counters.json"
+```
+
+Output paths: `[*].ranks[*].total.{pairs,column_pairs,flop,chosen_calls_model,
+extra_copy_bytes_model}`, with per-map values in `.maps`. All eligible pairs
+must remain represented; dropped=0. Do not sum rotation_pair time with its
+rotate_residual parent. New traces remain readable by lane_davidson_parse.py.
+
+### Exact separate jobs
+
+Use the same approved release build/provenance commands above, rebuilt at the
+follow-up source, without `dgemm-timers` in acceptance binaries. `BIN`, `BENCH`,
+`UPF` and `OUT` have the same meanings. `rotation-job.sh` is a separate runner;
+it isolates the active alternative from the closed UPPER_BORDER experiment.
+
+First fixed-H stage-0 job (one core, not MPI):
+
+```sh
+timeout 590s bash docs/performance/lanes/DAVIDSON/rotation-job.sh si64 1 solve
+python3 -I docs/performance/lanes/DAVIDSON/paired-summary.py \
+  "$OUT/rotation-si64-np1-solve" solve > "$OUT/rotation-si64-np1-summary.json"
+```
+
+After an active counter and no correctness issue, separate diagnostic and
+fixed-ten-step jobs (never concatenate as one queue job):
+
+```sh
+timeout 590s bash docs/performance/lanes/DAVIDSON/rotation-job.sh si64 1 profile
+timeout 590s bash docs/performance/lanes/DAVIDSON/rotation-job.sh si64 1 screen
+```
+
+Conditional expansion, one command per job:
+
+```sh
+timeout 590s bash docs/performance/lanes/DAVIDSON/rotation-job.sh si32 1 screen
+timeout 590s bash docs/performance/lanes/DAVIDSON/rotation-job.sh si64 8 screen
+timeout 590s bash docs/performance/lanes/DAVIDSON/rotation-job.sh si32 8 screen
+timeout 590s bash docs/performance/lanes/DAVIDSON/rotation-job.sh si16 8 screen
+```
+
+MPI rows are control tests, not expected speedups. If a rank-local serial
+solve appears outside the distributed solve, report its context separately
+instead of silently attributing it to distributed algebra. For surviving
+serial points run `full` to include verification/tail; request converged
+skew/slab/synthetic cases and real-MPI rank independence at the master gate.
+
+Same statistics as the UPPER_BORDER protocol: A/A floor first then AB/BA/AB,
+at least 3 complete pairs in one window, mean<0 and abs(mean)/SE>=3. For
+Si64 also effect>3*A/A floor and separated +/-3SE mean intervals. No minimum
+percent gain. Correctness gate |dE|<=1e-11 Ha step by step if work/trajectory
+unchanged; otherwise require full SCF with strict 1e-10 / standard 5e-9 Ha
+and verification before further performance claims. Failure or regression
+beyond noise withdraws this alternative as well; UPPER_BORDER remains rejected.
+
+Risk being tested: full-row, 32-column calls may reread V/HV more often,
+may have poorer skinny-GEMM utilization, and MKL grouping may change rounding.
+Mac validates the general adapter path and fixed-group worker independence,
+but cannot validate MKL speed or rounding. No new threading policy, relaxed
+tolerance, residual omission or cached-H assumption is part of this change.
+
+### Rejection-response additions to the acceptance record
+
+UPPER_BORDER A/B was +0.005679 s, abs(mean)/SE4.18,3/3 positive; the master
+rejected it. Do not override that decision with its correct work counters or
+its small percentage. The next candidate must improve measured solve/wall,
+not merely move a model. Reject ROTATE_COLUMNS if calls/copies move as
+predicted but wall still worsens. No further upper-tile-size sweeps.
+
+Use unambiguous dimensions in returned tables: PW rows N, basis inner M,
+rotated roots K. Default internal products have output256xK with reductionM;
+alternative products have outputNx32 with reductionM. Both compute the full
+NxK result with unchanged4NMK pair FLOP. This is an independent output split
+with fewer calls, not triangular row-prefix pruning. Rate at width32 remains
+a risk; the existing width132 throughput is not its measured rate.
+
+Return `.eigen_map_work` from the updated lane parser for each diagnostic
+file. It contains rank/map/stage/kind/iteration, solve_ids, reduced_steps,
+full_evd_calls, bordered_attempts, full_evd_order_counts and full_evd_sum_m3.
+Require identical per-map EVD workload in A/B; never sum the nested eigen_step
+and eigen times. Existing relay totals imply101 full EVDs/rank over all MPI
+contexts, not101 per fine map. The serial rotation_pair versus residual child
+separation must show whether the benefit came from the intended pair/layout
+span; residual formula/norm checks stay unchanged.
+
+Mac evidence is reused from the unchanged candidate: saved-base/OFF/ON
+Si8/Si32/Si64 and skew/Si8 strict OFF/ON science+density bits identical,
+Si32 workers1/3 identical; 13 solver tests and the scalar/tail/nonfinite/pool
+unit test passed. The updated parser has a synthetic multi-map EVD/B5 test
+and is checked on those existing Mac files without using their times.

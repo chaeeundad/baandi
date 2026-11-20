@@ -34,6 +34,30 @@ class Tools(unittest.TestCase):
             with self.assertRaises(ValueError):
                 counter.counters(path)
 
+    def test_rotation_pair_models_and_inactive_rank(self):
+        rotation = load('rotation-counter')
+        fields = ['operation', 'map', 'n', 'm', 'k', 'detail']
+        trace = dict(fields=fields, operations=['rotation_pair'],
+                     per_rank=[dict(rank=0, dropped=0, records=[[0, 1, 23871, 132, 132, 0]])])
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'results.json'
+            def write():
+                path.write_text(json.dumps(dict(run=dict(completed=True), davidson_profile=trace)))
+            write()
+            a = rotation.counters(path)['ranks'][0]['total']
+            self.assertEqual(a['chosen_calls_model'], 188)
+            self.assertEqual(a['extra_copy_bytes_model'], 100831104)
+            self.assertEqual(a['flop'], 1663713216)
+            trace['per_rank'][0]['records'][0][-1] = 1
+            write()
+            b = rotation.counters(path)['ranks'][0]['total']
+            self.assertEqual(b['chosen_calls_model'], 10)
+            self.assertEqual(b['extra_copy_bytes_model'], 0)
+            self.assertEqual(a['flop'], b['flop'])
+            trace['per_rank'][0]['records'] = []
+            write()
+            self.assertFalse(rotation.counters(path)['ranks'][0]['active'])
+
     def test_crossed_pair_statistics(self):
         summary = load('paired-summary')
         with tempfile.TemporaryDirectory() as temp:

@@ -1,0 +1,9 @@
+{
+  "status": "PASS",
+  "purpose": "Existing Mac trace parser/schema only; no timing used",
+  "eigen_map_rows": 18,
+  "full_evd_calls": 84,
+  "bordered_attempts": 3,
+  "per_map_work_identical": true,
+  "previously_validated_binary_unchanged": true
+}

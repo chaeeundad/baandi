@@ -1,0 +1,91 @@
+{
+  "task_id": "LANE-DAVIDSON",
+  "status": "DONE",
+  "changed_files": [
+    "crates/dft-cli/tests/all/run.rs",
+    "crates/dft-numerics/src/switches.rs",
+    "crates/dft-numerics/tests/all/switches.rs",
+    "crates/dft-solvers/src/real_davidson.rs",
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/lanes/DAVIDSON/dev08-relay-model.json",
+    "docs/performance/lanes/DAVIDSON/dev08-request.md",
+    "docs/performance/lanes/DAVIDSON/diagnosis.md",
+    "docs/performance/lanes/DAVIDSON/phase-status.json",
+    "docs/performance/lanes/DAVIDSON/rejection-response-validation.json",
+    "docs/performance/lanes/DAVIDSON/rotation-correctness.json",
+    "docs/performance/lanes/DAVIDSON/rotation-counter.py",
+    "docs/performance/lanes/DAVIDSON/rotation-job.sh",
+    "docs/performance/lanes/DAVIDSON/rotation-report.json",
+    "docs/performance/lanes/DAVIDSON/rotation-validation.md",
+    "docs/performance/lanes/DAVIDSON/test_tools.py",
+    "docs/performance/lanes/DAVIDSON/upper-border-rejection.json",
+    "scripts/lane_davidson_parse.py",
+    "scripts/tests/test_lane_davidson_parse.py"
+  ],
+  "design_choices": [
+    "Recorded orchestrator decision DAVIDSON-UPPER-BORDER-REJECTED; retained its switch default off and closed historical A/B commands.",
+    "Selected already implemented, uncommitted default-off DAVIDSON_ROTATE_COLUMNS as the independent alternative: retain complete inner dimension and all output entries; reduce calls and scratch copies, not FLOPs. No new upper-tile narrowing.",
+    "Reused unchanged numerical implementation and existing Mac equivalence evidence; binary hash verified unchanged. Extended parser for exact map/solve EVD workload and tested it.",
+    "Extended diagnosis with two-GEMM/copy/finite/residual/norm pass inventory and EVD-frequency interpretation. Active A/B requires counter and real solve/wall improvement, abs(mean)/SE>=3."
+  ],
+  "commands": [
+    {
+      "command": "cargo build --release -p dft-cli",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-solvers --lib column_rotation",
+      "exit_code": 0
+    },
+    {
+      "command": "BAANDI_DAVIDSON_ROTATE_COLUMNS=on cargo test --release -p dft-solvers --test lean_davidson --test distributed_lean_algebra",
+      "exit_code": 0
+    },
+    {
+      "command": "CHECK_SCCACHE=0 TMPDIR_990=\"$PWD/target/scratch\" scripts/check.sh fast dft-solvers dft-numerics dft-engine dft-cli",
+      "exit_code": 1
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/DAVIDSON/test_tools.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_lane_davidson_parse.py",
+      "exit_code": 0
+    },
+    {
+      "command": "bash -n docs/performance/lanes/DAVIDSON/rotation-job.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_lane_davidson_parse.py (updated per-map EVD tests)",
+      "exit_code": 0
+    },
+    {
+      "command": "Existing Mac trace comparison: per-map EVD workload and saved binary SHA256",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "dev08 UPPER_BORDER REJECTED: mean +0.005679 s (~+0.57%), abs(mean)/SE4.18,3/3 losses, despite -16.38% traced FLOP and bit-identical E=-253.37816772116847 Ha.",
+    "Relayed dev08 serial representative rotation pair: 1.6637 GFLOP / 63.96 GFLOP/s =26.012 ms; all-shape mean53.9185 ms, ratio2.073 (not a measured removable gap).",
+    "Order264 EVD 9m^3 model1.7358 ms; MPI all-order mean6.9753 ms/model4.018.",
+    "Structural MKL model at rows23871, roots132:188 ->10 calls/pair, scratch write/read100.831104 MB ->0, unchanged4nmk FLOP.",
+    "Si8/Si32/Si64 saved-base/OFF/ON and skew/Si8 strict OFF/ON: energy/scientific history/verification/density bits identical, abs(dE)=0 Ha. Si32 workers1/3 identical.",
+    "Fast gate:616 passed,3 known TMPDIR-cache failures,160 ignored; build/fmt/clippy PASS.13 ON solver oracle tests pass.",
+    "New parser check:18 Mac map rows,84 full EVDs,3 bordered attempts; per-map work identical OFF/ON. Schema verification only, not dev08 performance data."
+  ],
+  "reference_comparison": "Prior release binary and final OFF/ON science compared on Mac; independent dense/scalar oracles. No candidate speed claim or new QE comparison. LAPACK driver semantics sourced in diagnosis.md.",
+  "limitations": [
+    "Dominant shapes paired with all-call means permit representative models, not exact accumulated roofline gaps or predicted total savings.",
+    "Real MKL/MPI candidate measurements are deferred to dev08.",
+    "Slab exits3 after100 iterations in both arms, with identical science; no converged slab pass.",
+    "Three existing CLI pseudo-cache tests reject repository-local TMPDIR."
+  ],
+  "open_questions": [],
+  "commit": "All alternative and rejection-response changes uncommitted. UPPER_BORDER remains default off and is not resubmitted."
+}

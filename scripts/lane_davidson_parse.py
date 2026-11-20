@@ -27,7 +27,7 @@ def floor_inputs(op, n, m, k, detail):
     elif op == 'ritz_coefficients':
         flops = 2 * n * n * k
         array_bytes = 8 * (n * n + 2 * n * k)
-    elif op == 'rotate_residual':
+    elif op in ('rotate_residual', 'rotation_pair'):
         flops = 4 * n * m * k
         array_bytes = 8 * (2 * n * m + m * k + 2 * n * k)
     elif op == 'residual':
@@ -120,8 +120,28 @@ def parse(path):
                               min_rank_seconds=min(times), max_rank_seconds=max(times),
                               min_rank_calls=min(r['calls'] for r in rows),
                               max_rank_calls=max(r['calls'] for r in rows)))
+    # Count full EVDs by actual map/solve identity, never by rank-summed time
+    # or a guessed number of maps inferred from SCF/collective counts.
+    eigen_groups = collections.defaultdict(list)
+    for c in calls:
+        if c['operation'] in ('solve', 'reduced_eigen_step', 'reduced_eigen', 'bordered_update'):
+            eigen_groups[(c['rank'], c['map'], c['stage'], c['kind'], c['iteration'])].append(c)
+    eigen_map_work = []
+    for key, rows in sorted(eigen_groups.items()):
+        rank, map_id, stage, kind, iteration = key
+        full = [r for r in rows if r['operation'] == 'reduced_eigen']
+        steps = sum(r['operation'] == 'reduced_eigen_step' for r in rows)
+        solves = sorted({r['solve'] for r in rows if r['operation'] == 'solve'})
+        eigen_map_work.append(dict(rank=rank, map=map_id, stage=stage, kind=kind,
+                                   iteration=iteration, solve_ids=solves,
+                                   reduced_steps=steps, full_evd_calls=len(full),
+                                   bordered_attempts=sum(r['operation'] == 'bordered_update' for r in rows),
+                                   full_evd_sum_m3=sum(r['n'] ** 3 for r in full),
+                                   full_evd_order_counts=dict(sorted(collections.Counter(r['n'] for r in full).items())),
+                                   full_evd_per_solve=len(full) / len(solves) if solves else None))
     return dict(source=str(path), binary_sha256=source.get('run', {}).get('binary', {}).get('sha256'),
                 ranks=len(ranks), calls=calls, map_rank_table=tables, map_table=map_table,
+                eigen_map_work=eigen_map_work,
                 existing_lane_counters=source.get('parallel', {}),
                 existing_serial_counters=source.get('convergence', {}).get('work', {}).get('davidson_lean'),
                 phase_profile=source.get('phase_profile'),

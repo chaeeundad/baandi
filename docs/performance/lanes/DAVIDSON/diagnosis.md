@@ -1,146 +1,315 @@
-# Phase 2: Davidson upper-border experiment
+# Phase 2 follow-up: corrected floors and a serial rotation candidate
 
-## Evidence and limits
+## Evidence, units and attribution
 
-Source of measured seconds: the user's dev08 relay, source 2733278, physical
-CPUs 0–7 on socket 0, instrumented runs. All 15 OFF/ON integrity pairs had
-zero energy difference, identical scientific history/verification/density and
-zero dropped records. No Mac timing is used. Working base is 45670dd633af6573b68578fd2e3d5700b982c889.
+Measurements are the user's dev08 relay: source **2733278**, instrumented
+`on-1`, CPUs 0–7 on socket 0 for MPI8. Phase 0 integrity was 15/15 pairs:
+abs(dE)=0, identical science/history/verification/density, no dropped records.
+No Mac timing supports this diagnosis. UPPER_BORDER was rejected by the orchestrator for a resolved dev08 loss;
+its switch is retained default OFF. Follow-up implementation base: 2bde16a.
 
-| Model/cell | External wall s | Solve envelope s | Solve/wall | Rank max/min |
+The earlier 104.1% exclusive split is **withdrawn**, not evidence of an engine
+bug. `phase_profile.buckets[].max` mixes the parent `solve`, children, residual
+keys and `.calls` counts. Removing the specified duplicate/non-leaf gives:
+MPI8 Si64 100.9% (drop solve.solver_total), one-core Si64 99.1% (drop
+solve.other_engine, identical to solve.other), MPI8 Si32 98.9%, one-core Si32
+99.1%, MPI8 Si16 98.5%. Remaining closure error is not assigned to this lane.
+Serial Si64 lane solve-call envelope is 27.242 s; the phase-profile parent is
+32.7484 s. These are different sources/scopes; **do not interchange their
+denominators**, add them or claim their difference is a measured algebra cost.
+
+| Model | Cell | Earlier external s | Earlier lane envelope s | Envelope/wall |
+|---|---|---:|---:|---:|
+| MPI8 | Si64 | 9.7715 | 6.4323 | 65.8% |
+| MPI8 | Si32 | 1.9254 | 1.1224 | 58.3% |
+| MPI8 | Si16 | 0.6625 | 0.2996 | 45.2% |
+| One core | Si64 | 45.5618 | 27.2416 | 59.8% |
+| One core | Si32 | 8.1225 | 4.5788 | 56.4% |
+
+These earlier wall/envelope summaries are budget context, not the on-1
+per-site measurements below. Models are never compared by a speedup ratio.
+Rank max/min was 1.004/1.005/1.002 at Si64/32/16: imbalance is not the lever.
+H application and its operator reductions belong to FFT/NONLOCAL; no candidate
+here changes H, its products, stopping tolerances or the SCF schedule.
+
+## Actual on-1 counts and times
+
+MPI8's 10,176 records aggregate **all eight ranks**; seconds below are CPU/rank
+span sums, not external wall. Dividing by 8 gives a mean rank's accumulated
+span time, NOT a critical-rank maximum. Calls are rank-local invocations;
+808 EVD records mean 101 replicated solves per rank, not 808 sequential solves.
+Every timer is inclusive: eigen is inside eigen_step, tree_sum is inside its
+site, and serial residual is inside rotate_residual. Never sum such rows.
+
+| MPI8 Si64 operation | All-rank calls | All-rank s | Mean-rank s | Mean us/call | Dominant (n,m,k) |
+|---|---:|---:|---:|---:|---|
+| reduced_gram | 1464 | 6.996 | 0.87450 | 4778.8 | 2986,264,132 |
+| rotate_residual | 808 | 6.715 | 0.83938 | 8310.4 | 2986,132,132 |
+| reduced_eigen_step | 808 | 5.637 | 0.70463 | 6975.9 | 132,0,132 |
+| reduced_eigen | 808 | 5.636 | 0.70450 | 6975.3 | 264,264,264 |
+| tree_sum | 2576 | 2.325 | 0.29063 | 902.6 | payloads below |
+| reduced_transform | 808 | 0.962 | 0.12025 | — | — |
+| factor_extension | 896 | 0.886 | 0.11075 | — | — |
+| residual | 808 | 0.837 | 0.10463 | 1035.9 | 2986,0,132 |
+| return_gram | 152 | 0.388 | 0.04850 | 2552.6 | 376,132,16 |
+| ritz_coefficients | 808 | 0.355 | 0.04438 | — | — |
+| restart | 88 | 0.183 | 0.02288 | — | — |
+
+| One-core Si64 operation (1025 records total) | Calls | s | Mean us/call | Dominant (n,m,k) |
+|---|---:|---:|---:|---|
+| rotate_residual | 109 | 5.877 | 53918.5 | 23871,132,132 |
+| reduced_gram | 109 | 2.182 | 20015.6 | 23871,132,132 |
+| overlap_border | 109 | 2.123 | 19473.7 | 23871,132,132 |
+| reduced_eigen_step | 109 | 1.275 | 11700.3 | — |
+| reduced_eigen | 102 | 1.162 | 11388.4 | 132,132,132 |
+| return_gram | 21 | 0.765 | 36419.6 | 403,132,132 |
+| residual | 109 | 0.504 | 4623.2 | — |
+| orthogonalize | 2 | 0.174 | — | — |
+| bordered_update | 7 | 0.086 | — | 480,479,480 |
+| reduced_transform | 109 | 0.133 | — | — |
+| factor_extension | 109 | 0.127 | — | — |
+| ritz_coefficients | 109 | 0.045 | — | — |
+
+Serial overlap is a separate S border; MPI's reduced_gram contains S/H border
+calls. B5 bordered updates occur only on serial in this relay. Do not treat the
+missing MPI overlap row as missing S work.
+
+## Arithmetic and bandwidth models
+
+The new relay supplies dominant shapes and means over ALL calls, not the
+joint shape/time distribution or sum(n*m*k), sum(m^3). Thus the following is
+a **dominant-shape model against the all-call mean**, not an exact per-shape
+measurement, an aggregate FLOP total, or a guaranteed removable gap. This
+limitation remains even though a numeric useful screening model is now possible.
+
+Measured dev08 MKL single-thread DGEMM rates, GFLOP/s: (23871,264,132)=77.14;
+(23871,132,132)=63.96; (2982,264,132)=98.03; 264 cubed=95.40;
+396 cubed=94.24. STREAM triad one core=12.97 GB/s. These sustained rates are
+**empirical reference rates**, not hardware peak ceilings. GEMM transpose,
+packing/layout and eight simultaneously busy cores can alter them. In
+particular 98.03 is a nearby 2982-row proxy, not a measured 2986x132x132 rate.
+
+For two rotations (n x m)(m x k), F=4nmk. For one TN Gram border
+(m x n)(n x k), F=2nmk. MPI combined S/H trace k=ks+kh, so that formula
+already counts both widths; never multiply it by two again. Minimal distinct
+array bytes: rotation 8(2nm+mk+2nk); H border 8(nm+nk+mk); S border
+8(nm+mk). Residual passes, scratch copies, cache misses, packing and collective
+traffic are extra. `max(F/rate, bytes/bandwidth)` is the optimistic comparison
+model. A STREAM model of small cache-resident matrices is not a DRAM lower
+bound; eight-rank aggregate memory bandwidth was NOT measured here.
+
+### One core, Si64
+
+| Operation/model shape | F GFLOP | Minimum MB | Compute model ms | STREAM model ms | Observed mean ms / compute model |
+|---|---:|---:|---:|---:|---:|
+| rotation pair, 23871x132x132 | 1.66371 | 100.9705 | 26.0118 | 7.7849 | 53.9185 / 26.0118 = 2.073 |
+| H Gram, same shape | 0.83186 | 50.5549 | 13.0059 | 3.8978 | 20.0156 / 13.0059 = 1.539 |
+| S Gram, same shape | 0.83186 | 25.3472 | 13.0059 | 1.9543 | 19.4737 / 13.0059 = 1.497 |
+
+Correction to the suggested interpretation: rotation's 0.83186 GFLOP and
+13 ms are **one** GEMM, whereas its timer contains **two** plus residuals.
+So 53.9/13 is not a fourfold inefficiency. Residual accounts for 0.504/109=
+4.624 ms on average, already within rotation; subtracting only that child
+leaves approximately 49.295 ms versus the 26.012 ms pair model (1.895x).
+Even this is not a measured shape-matched gap. If all calls had the dominant
+shape, the pair model would total 2.8353 s versus 5.877 s; that counterfactual
+3.0417 s is NOT a claimed saving. At m=264 the measured 77.14 rate gives a
+43.135 ms pair model, illustrating how larger-order calls can explain much
+of the apparent gap without any kernel defect.
+
+### MPI8, Si64 (each rank separately)
+
+| Operation/model shape | F GFLOP/rank | Minimum MB/rank | Compute model ms | One-core STREAM proxy ms | Observed mean ms / model |
+|---|---:|---:|---:|---:|---:|
+| rotation pair, 2986x132x132 | 0.20811 | 12.7523 | 2.1229 | 0.9832 | 8.3104 / 2.1229 = 3.915 |
+| Gram border, 2986x264x132 | 0.20811 | 6.5852–9.7384 | 2.1229 | 0.5077–0.7508 | 4.7788 / 2.1229 = 2.251 |
+
+The Gram byte range is pure S versus pure H; combined S/H lies between them.
+MPI rotation's timer excludes the separately timed residual. MPI Gram includes
+its reduction and result fill/symmetrization. At m=264 a rotation pair instead
+models 4.2459 ms; no claim that all 808 calls cost the dominant-shape FLOP.
+The all-rank measured spans 6.715/6.996 s cannot be compared to a one-rank
+model, nor treated as external-wall savings. Per-rank model budgets if all
+calls had these shapes: rotation 101*2.1229=0.2144 s; Gram
+183*2.1229=0.3885 s. These are clearly labelled counterfactuals, not exact totals.
+
+### Reduced eigensolve: LAPACK, not a GEMM
+
+The numerical adapter calls MKL `dsyevd` for all eigenpairs. LAPACK's driver
+uses tridiagonalization, divide-and-conquer tridiagonal eigenvectors and a
+back-transform; it is not one cubic GEMM. Its vector-workspace requirement is
+1+6m+2m^2 doubles. See [LAPACK DSYEVD documentation](https://netlib.org/lapack/explore-html/d8/d30/group__heevd_ga25b71a69f9921df0a6050aa5883f54f4.html).
+
+Use the requested **9m^3 leading-work class** as a screening approximation,
+not an exact dsyevd flop count (deflation/spectrum/backend matter). Conventional
+Householder reduction alone has leading work (4/3)m^3 and BLAS2 portions; it
+cannot all run at DGEMM rate. Input+output compulsory bytes alone are 16m^2,
+which excludes repeated scans, work arrays and reductions. Those bytes give
+only a very weak floor. A realistic LAPACK timing floor requires measured
+same-order dsyevd/tridiagonalization stages, not 9m^3 divided by peak BLAS alone.
+
+| Order m | Rate proxy GFLOP/s | One GEMM ms (2m^3) | EVD compute model ms (9m^3) | Compulsory MB / STREAM ms |
 |---|---:|---:|---:|---:|
-| MPI8 Si64 | 9.7715 | 6.4323 | 65.8% | 1.004 |
-| MPI8 Si32 | 1.9254 | 1.1224 | 58.3% | 1.005 |
-| MPI8 Si16 | 0.6625 | 0.2996 | 45.2% | 1.002 |
-| One core Si64 | 45.5618 | 27.2416 | 59.8% | n/a |
-| One core Si32 | 8.1225 | 4.5788 | 56.4% | n/a |
+| 132 | 95.40 (264 proxy) | 0.04822 | 0.21698 | 0.2788 / 0.02150 |
+| 264 | 95.40 | 0.38574 | 1.73582 | 1.1151 / 0.08598 |
+| 396 | 94.24 | 1.31789 | 5.93052 | 2.5091 / 0.19346 |
 
-Different models are separate experiments; these rows are not speedup ratios.
-The MPI8 Si64 envelope agrees with the existing solver_total 6.4384 s to
-0.1%. The serial solver_total is zero/unusable; use the lane envelope.
+Correction: a **264^3 GEMM is 0.386 ms, not 0.04 ms** at the supplied rate;
+0.048 ms corresponds to order 132. MPI average 6.9753 ms / order-264 EVD
+model = **4.018x**, not ~175x. At order 396 that same average/model ratio is
+1.176x. Serial average 11.3884 ms / order-132 proxy = 52.49x, but it is an
+average over 102 different-order EVDs, not the time for the dominant order.
+It cannot establish a 52x kernel gap. The replicated MPI EVD is not divided
+by 8: reducing PW rows does not reduce this order-m work. At the earlier
+Si32/Si16 MPI shares (14.2%/20.4% of solve), even a genuine 25% EVD saving
+would represent only ~2.07%/~2.31% of their respective external wall; this
+is an Amdahl scenario, not grounds to reopen failed sliced-EVD algorithms.
 
-| Inclusive segment, Si64 | MPI8 s | One-core s |
-|---|---:|---:|
-| reduced_gram | 0.9263 | 2.1793 |
-| rotate_residual | 0.8877 | 5.8842 |
-| overlap_border | not separately relayed | 2.1248 |
-| reduced_eigen_step | 0.7076 | 1.2804 |
-| reduced_eigen | 0.7076 | 1.1714 |
-| tree_sum | 0.3666 | n/a |
+### MPI reductions, sizes and latency
 
-Seconds above are derived from the rounded percentages in the relay, not
-additional measurements. Do not add inclusive rows. The relayed exclusive
-split percentages (45.9 apply, 15.2 Gram, 15.0 eigen, 14.6 rotate, 9.5 kept,
-3.9 residual) sum to 104.1%; their aggregation/denominator needs clarification.
-They cannot safely be turned into an additive budget. Treat apply as owned by
-FFT/NONLOCAL, including operator communication; this experiment changes no H
-application. Rank imbalance <=0.5% does not justify a load-balancing change.
+2576 tree sums across all ranks = 322 calls/rank. Site totals / per-rank:
+setup 152/19, apply 672/84, reduced_gram 808/101, lean_border 656/82,
+residual_norms 152/19, restart_defect 136/17. Excluding apply leaves 238
+non-apply calls/rank; the two border sites total 183/rank, exactly matching
+the 1464 Gram calls /8. The two reported payload bins account for:
 
-**Missing input:** the relay contains no actual per-call n/m/k records,
-counts, payloads or hardware throughput/bandwidth measurements. A local path
-to results.json / tables.json was requested. Numerical accumulated FLOP/byte
-floors and measured-time/floor gaps cannot be inferred from percentages.
-Historical strict-path sizes in davidson-algebra-gap-analysis.md are not the
-current standard trajectory; substituting those would fabricate a diagnosis.
-The following exact shape formulas specify what to compute when data arrives.
+* 280,896 B *304 rank calls =85.392384 MB (38 calls/rank);
+* 270,336 B *200 rank calls =54.067200 MB (25 calls/rank);
+* combined 139.459584 MB across ranks, **17.432448 MB/rank**, only 504/2576
+  calls. Other payloads remain unknown; this is a partial total, not total
+  communication. At 12.97 GB/s merely reading this partial payload once is
+  1.344 ms/rank, not a network/collective floor.
 
-## Arithmetic, data movement and communication floors
+Current lean-border payload is 8*m*(ks+kh+1), including the residual-norm
+tail; 280896=8*264*133 is consistent with m=264,k=132. For a power-of-two
+recursive-doubling sum the model is log2(P)*(L+payload/Bnet), plus local sums
+and memory traffic; with P=8 this has three stages. Actual network bandwidth
+and latency are not supplied, so no numerical network-floor claim is made.
+Mean tree_sum span 0.290625 s/rank includes apply and wait/arrival skew;
+it is already inside callers. Packing only retained upper entries is a
+possible later bandwidth experiment, but would not remove these 322 latency
+payments. No packed-reduction experiment is proposed in this response.
 
-Let n be local PW rows (global on serial), m basis order, k output width,
-p=m-k retained prefix. All counts refer to FP64, FLOP = multiply plus add.
-For each rank sum work over calls; use the critical rank, not the sum over
-ranks, for a wall floor. For rate ceilings P FLOP/s and B byte/s, a simple
-optimistic roofline floor is max(F/P,D/B). The gap is measured inclusive
-seconds divided by that floor (or subtract the floor for the headroom in s).
-Rates must be for the relevant memory level and simultaneous-core placement;
-minimum array accesses are not necessarily DRAM traffic. Cache residency can
-invalidate a DRAM interpretation. No rate ceiling was supplied in the relay.
+## Candidate reassessment
 
-* Rotate: two NN GEMMs (n x m)(m x k) -> n x k, F=4nmk.
-  Minimum distinct-array bytes = 8(2nm+mk+2nk), before residual reads/writes.
-  This floor excludes residual formation/norm work inside the serial timer.
-  Serial: gap 5.8842 / floor_rotate_serial. MPI: 0.8877 /
-  floor_rotate_critical_rank. A rank's n is NOT global n/8 by assumption.
-* Gram: TN product (m x n)(n x k) -> m x k, F=2nmk.
-  S=V^T V border has distinct-input union nm, plus mk output doubles.
-  H=V^T HV border needs nm+nk input and mk output doubles. For a combined
-  distributed S/H record, trace k=ks+kh: F=2nm(ks+kh); conservative distinct
-  array floor is 8(nm+m(ks+kh)); accurate H traffic needs kh separately.
-  A fresh S block is SYRK-shaped, n x m -> symmetric m x m; unique arithmetic
-  n*m*(m+1), versus 2*n*m*m for a full GEMM. The H block is symmetric only
-  as a projected self-adjoint operator, not a same-operand SYRK; preserve
-  the existing upper-entry definition rather than assuming bitwise symmetry.
-  Serial reduced/overlap gaps are 2.1793/floor_H and 2.1248/floor_S.
-  MPI combined gap is 0.9263/floor_combined, including reductions.
-* EVD: replicated full order-m dsyevd (unless overridden), not distributed
-  by PW rows. Record call count, order distribution and sum(m^3) per rank;
-  **do not divide by 8**. Dense Householder tridiagonalization alone has the
-  conventional leading work estimate (4/3)m^3; full eigenvectors add work.
-  This is an algorithmic leading-term proxy, not an exact FLOP count or a
-  universal eigenproblem lower bound. At least the input and output m x m
-  arrays must be accessed; the BLAS2 passes require more traffic. Compute
-  and bandwidth lower estimates therefore need an explicit dsyevd model or
-  a same-size dev08 calibration. Gaps 1.1714/floor_EVD_serial and
-  0.7076/floor_EVD_MPI remain unquantified. reduced_eigen_step contains the
-  EVD, B5 attempts/cache and surrounding work; never add the pair.
-* MPI border tree sum: current code sends m*(ks+kh+1) doubles, including a
-  full m-element residual-norm tail even when only part is populated. Each
-  border invocation has one reduction; S and H normally occur on separate
-  iterations of the append/apply sequence. Payload is 8*m*(ks+kh+1) bytes
-  per rank; network bytes depend on tree implementation. Actual calls and
-  payload sum must come from tree_sum records with site reduced_gram or
-  lean_border. Exclude apply site (another lane). A latency/bandwidth model
-  requires measured collective latency L and effective Bnet, e.g. a
-  recursive-doubling bound involving log2(P) stages, not payload/B alone.
-  Tree_sum 0.3666 s includes other sites and must not be added to Gram.
+1. **UPPER_BORDER: REJECTED, default OFF.** The dev08 counter pair removed
+   16.38% of traced FLOP (170.792e9 ->142.821e9 across ranks), with exact
+   per-rank prediction and bit-identical science, yet the crossed solve
+   screen slowed by +0.005679 s (~0.57%), abs(mean)/SE=4.18, all three pairs
+   positive. Calls increased 1746 ->1968 (+12.7%). A/A mean -0.000216 s,
+   floor0.0029167 s, ratio0.14. The orchestrator's decision is final; no
+   repeat with a different narrower tile size. The -17% measured DGEMM
+   efficiency for the smaller comparison shape and increased calls invalidate
+   the old FLOP-proportional gain scenario. See ledger row
+   DAVIDSON-UPPER-BORDER-REJECTED for every supplied number.
+2. **SELECTED ALTERNATIVE: serial ROTATE_COLUMNS, default OFF.** The current MKL pair makes
+   2*ceil(n/256) GEMMs into scratch and copies them to the output. Reuse the
+   numerics layer's existing fixed 32-column `multiply_column_groups` adapter
+   twice: each MKL call writes complete contiguous output columns directly.
+   At n=23871,k=132: **188 -> 10 MKL calls**, same 4nmk FLOP, and remove
+   4nk*8=100.831 MB of scratch write/read traffic per pair (direct output writes
+   remain). This is not the rejected fused-residual kernel:
+   H X is still produced and kept; no residual policy changes. Candidate
+   needs no new FFI, dependency or allocation buffer. Existing fused paths
+   take priority and are deliberately outside this candidate.
+   Conditional serial Si64 target: 10–25% of the non-residual rotation
+   span (5.877-0.504=5.373 s), **0.537–1.343 s** (~1.18–2.95% of earlier
+   wall). This is a hypothesis, not a floor-derived promise. Repeated V/HV
+   reads across five column groups and tall-skinny GEMM efficiency can erase
+   it; only dev08 A/B decides. The supplied rates are for width132, not32.
+   Serial Si32 has the same structural hypothesis but no supplied rotation
+   seconds for a numeric wall estimate. The distributed rotation code is
+   unchanged: expected MPI8 improvement **zero**, used as a control.
+3. **Triangular reduced-coordinate products: defer.** Their current budget
+   is smaller: transform+coefficient spans 0.178 s serial and mean-rank
+   0.164625 s MPI8. A conditional 10–30% reduction yields 0.018–0.053 s
+   serial (0.04–0.12% wall), 0.016–0.049 s MPI (0.17–0.51%). These are
+   separate operation rows, not eigen_step minus eigen (the earlier proxy
+   conflated scopes). No need to implement before the two stronger probes.
 
-The parser already retains the needed shape/count inputs. Its minimum-array
-model is deliberately conservative, not a memory-controller measurement.
+The new serial route has a larger controllable call/data-movement reduction
+than the rejected arithmetic-pruning attempt, without changing the mathematics.
+MPI's EVD row is large, but a corrected LAPACK model does not reveal a new
+safe algorithm. REL-SLICES-CLOSED still applies: sliced MRRR failed the
+orthogonality gate, inverse-iteration slices cost 1.42–1.64x. Advance,
+restart-keep, PR-CG and async alltoall remain rejected; no new premise reopens
+them. No residual checks are omitted and no basis capacity is retuned.
 
-## Candidates and pre-registered hypotheses
+## Next measurement and stopping point
 
-1. **Chosen: upper-border GEMM tiles (default OFF).** Code computes full
-   m x k rectangles then discards rows i>j. Partition new columns into
-   fixed 64-column tiles, each ending at e; compute only e x width output.
-   Actual F=2n sum(e*width); retained mathematical minimum is
-   2n sum(j+1). No inner-axis split, new allocation, MPI collective, changed
-   tolerance, restart rule or H column. Serial overlap and reduced matrix,
-   distributed lean S/H border use this helper. Classic distributed,
-   return Gram and optional fused-border path are unchanged.
-   Example shapes (illustrations, NOT trace observations): fresh m=k=132
-   saves 26.4% of rectangle work; m=396,k=132 saves 8.8%; width<=64 saves
-   zero. Extra calls may reread/repack V. This is deliberately a GEMM-only
-   experiment with existing adapters, not a new SYRK FFI.
-   Conditional dev08 hypothesis if affected time falls by 10–25%: MPI8
-   Si64 0.093–0.232 s (0.95–2.37% wall) from the 0.9263 s envelope; serial
-   Si64 0.430–1.076 s (0.94–2.36% wall) from H+S's 4.3041 s. These are
-   Amdahl scenarios, not measured or trace-weighted predictions; extra
-   dispatch/packing could erase the saving. No positive numeric prediction
-   for Si32/Si16 without their Gram shares. Rotation/EVD savings: zero.
-2. **Deferred: triangular reduced-coordinate products.** T is explicitly
-   lower triangular; T^T Y and T P currently multiply stored zeros. Fixed
-   row/column panels could omit structurally zero regions while retaining
-   library GEMMs. No basis/stopping change. Each such product can approach
-   half its arithmetic (less with blocking), but it affects coefficients
-   and transformed reduced matrix, not full dsyevd. Serial/MPI expected
-   wall gain is 10–30% of those separately measured product times, which
-   were not relayed. Optimistic upper limits if ALL non-EVD eigen_step time
-   were removable: serial 0.1090 s (0.24% wall); MPI rounded step/EVD shares
-   give no resolvable budget. These are not precise bounds on coefficients
-   outside that envelope. Low priority until product trace data arrives.
+Extended DAVIDSON_PROFILE labels each serial rotation pair with shape and
+route, enabling an exact structural MKL-call/scatter-byte model per map.
+The dev08 request isolates ROTATE_COLUMNS with UPPER_BORDER forced OFF, marks
+the old request closed, and pre-registers A/A floor, crossed pairs and
+abs(mean)/SE >=3. For a stronger aggregate roofline claim, return shape-grouped
+count/FLOP/time rather than applying a mode to every call; existing records
+and parser already retain it. Missing joint histograms do not block this
+explicitly labelled model or the candidate screen. No adoption yet.
 
-Why not the largest serial rotation row? Selected-root rotation and fused
-Ritz/residual routes already exist; the new relay does not identify an unused
-width subset or redundant rotation. Removing a residual check without that
-information would change the trajectory. No capacity/tolerance tuning here.
+## Rejection response: account for rotation beyond one GEMM
 
-## Prior decisions respected
+Use unambiguous dimensions: N=PW rows, M=basis columns, K=rotated roots.
+Each rotation is (N x M)(M x K). Default MKL calls are (256 x M)(M x K)
+into scratch (last row panel shorter); the alternative calls are
+(N x M)(M x 32) directly into independent output columns (last group shorter).
+It keeps **both N and the entire inner M**, unlike pruning row prefixes in
+an upper Gram rectangle. In BLAS notation it changes independent output-N
+partitioning, not the reduction-K or the mathematical operation. No product
+entry is discarded; 4NMK FLOP are unchanged. This matches the suggested
+independent-output split, not another attempt to save arithmetic by narrowing
+upper-border tiles. Width32 efficiency is still a risk to be tested, not an
+assumption of a guaranteed gain.
 
-Read ledger REL-FINDING and REL-SLICES-CLOSED: sliced MRRR 0.43–0.53 x EVD
-failed orthogonality (up to 6.9e-13); inverse-iteration slices preserved
-orthogonality but cost 1.42–1.64 x. No new EVD evidence reopens it. Advance
-increased H by 37–38% on two Si16 seeds; restart-keep increased rotations
-and contractions with no consistent SCF win. Async alltoall was only 2–3%
-of solve and rejected; PR-CG/direct-minimization H work lost on larger cells.
-The backlog's fresh-basis symmetric-border opportunity is distinct from
-those rejected algorithm changes. No QE source was read.
+Source-level pass inventory for the normal serial non-fused call:
+
+| Work | Arrays / operations | Representative logical bytes (N=23871, K=132) | Candidate |
+|---|---|---:|---|
+| two GEMMs | X=VC, HX=(HV)C | 4NMK FLOP; two output blocks | unchanged math |
+| row scratch materialization | write scratch, read scratch, write X/HX | extra 32NK =100.831104 MB beyond direct output | remove extra scratch traffic |
+| finite-output check | read X and HX after GEMMs | 16NK =50.415552 MB | retained |
+| residual formation | read X/HX, write R=HX-lambda*X | 24NK =75.623328 MB | retained |
+| residual norm | one R scan, four independent sum-of-squares lanes, fixed final sum/sqrt | 8NK =25.207776 MB | retained |
+| exceptional norm | repeated hypot pass only for nonfinite/tiny accumulated squares | data-dependent, no rate assigned | retained |
+| finite-norm check | read K norms | 8K =1056 B | retained |
+
+Logical bytes are access counts, not measured DRAM traffic. Cache residency
+makes the STREAM conversion only a model. Default pair finite checks are in
+the pair adapter; the column adapter checks each complete output separately,
+covering the same entries. There is no implicit missing third GEMM, H apply
+or fresh Ritz check inside this span. C gathering/transformation happens
+before it. Row-strided input panels may trigger internal MKL packing; that
+cost is not separately measured and is not equated to the scratch-copy model.
+
+Measured residual child is 0.504 s /109 =4.624 ms/call, leaving about49.295 ms
+for pair GEMMs, layout/copies, finite scans and glue from the53.9185 ms mean.
+At representative M=132, the pair compute model is26.012 ms, so the apparent
+non-residual excess is23.283 ms. At M=264, it is only about6.160 ms versus
+43.135 ms. Because the observed mean mixes shapes, neither difference is a
+measured recoverable budget. The model's extra scratch bytes alone correspond
+to7.774 ms at one-core STREAM12.97 GB/s; cache/packing can alter this strongly.
+A fused norm-only alternative would touch at most the already measured0.504 s
+residual row (~1.1% of prior wall even if free), whereas the selected route
+acts on the larger5.373 s pair/glue span. Do not repeat rejected RITZ_FUSED.
+
+## Full EVD frequency per map: no evidence of duplicate full solves
+
+The MPI relay has808 reduced_eigen_step and808 reduced_eigen records across
+8 ranks: **101 full EVDs/rank, one full EVD per reduced step**, not808 EVDs on
+one critical rank. Serial has109 steps,102 full EVDs and7 bordered attempts,
+consistent with B5 replacing seven full solves. Eigen and eigen_step are
+nested, not two separate EVDs. Code invokes solve_reduced once after each
+new reduced problem; it does not solve again for each rotated root or each
+residual norm. Thus the aggregate counts do not expose redundant repeated
+full solves that can simply be deleted.
+
+Do not divide101 by11 fine SCF iterations: profiles include coarse,
+verification and multiple solve contexts. Setup reductions/return-Gram counts
+are also not a reliable count of maps. The original per-map joint records
+were not attached in the summary. The parser now emits `eigen_map_work`,
+keyed by rank/map/stage/kind/SCF iteration, with solve_ids, reduced_steps,
+full_evd_calls, bordered_attempts, full_evd_order_counts, full_evd_sum_m3 and
+full_evd_per_solve. This gives exact per-map frequencies from returned files
+without introducing more numerical instrumentation. Keep these invariant in
+the alternative A/B. Same order on two steps does not establish the same
+matrix or justify reusing eigenvectors. Delaying RR changes the algorithm and
+is not warranted by these counts or the failed sliced-EVD evidence.

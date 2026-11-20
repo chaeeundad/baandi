@@ -1,0 +1,65 @@
+{
+  "task_id": "LANE-DAVIDSON",
+  "candidate": "DAVIDSON_UPPER_BORDER",
+  "status": "REJECTED",
+  "source": "User/orchestrator dev08 relay; candidate commit not supplied",
+  "case": "si64",
+  "ranks": 8,
+  "metric": "DAVBENCH kinds[0].solve_ms_median (differences converted to seconds)",
+  "aa": {
+    "mean_seconds": -0.000216,
+    "floor_seconds": 0.0029167,
+    "abs_mean_over_se": 0.14
+  },
+  "ab": {
+    "differences_seconds": [
+      0.005178,
+      0.003617,
+      0.008241
+    ],
+    "mean_seconds": 0.005679,
+    "abs_mean_over_se": 4.18,
+    "approx_percent_change": 0.57
+  },
+  "counters": {
+    "all_ranks_prediction_matched": true,
+    "ranks": 8,
+    "saved_flop_per_rank_range": [
+      3494000000.0,
+      3499000000.0
+    ],
+    "products_per_rank": [
+      183,
+      183
+    ],
+    "tiles_per_rank": [
+      0,
+      405
+    ],
+    "traced_all_rank_flop": [
+      170792000000.0,
+      142821000000.0
+    ],
+    "reported_dispatch_gflop": [
+      69.247,
+      65.751
+    ],
+    "reported_gemm_calls": [
+      1746,
+      1968
+    ]
+  },
+  "science": {
+    "energy_ha": [
+      -253.37816772116847,
+      -253.37816772116847
+    ],
+    "absolute_energy_difference_ha": 0,
+    "bit_identical": true,
+    "scf_iterations": 11,
+    "h_columns": 3504,
+    "verified": true
+  },
+  "next_candidate": "DAVIDSON_ROTATE_COLUMNS; default off; no arithmetic pruning",
+  "default_changed": false
+}

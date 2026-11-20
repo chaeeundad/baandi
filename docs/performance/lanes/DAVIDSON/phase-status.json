@@ -1,9 +1,10 @@
 {
   "task_id": "LANE-DAVIDSON",
   "phase": 2,
-  "status": "BLOCKED",
-  "implementation": "default-off upper-border candidate ready",
-  "blocker": "Original dev08 per-call shapes/counts/payloads and rate ceilings absent; numeric floor/gap diagnosis incomplete",
-  "next": "Orchestrator supplies raw profile and runs pre-registered dev08 A/B; no default adoption",
+  "status": "DONE",
+  "rejected_candidate": "DAVIDSON_UPPER_BORDER (resolved +0.57% dev08 loss; retained OFF)",
+  "implementation": "Independent default-off serial ROTATE_COLUMNS already implemented and Mac-validated; unchanged in rejection response",
+  "diagnosis": "Pair GEMM/copy/finite/residual/norm accounting and full-EVD-per-map parser added; no repeated upper-tile pruning",
+  "next": "Orchestrator screens ROTATE_COLUMNS independently with UPPER_BORDER off",
   "performance_evidence_from_mac": false
 }

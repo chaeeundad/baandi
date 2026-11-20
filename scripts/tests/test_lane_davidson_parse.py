@@ -38,6 +38,30 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(len(r['map_table']), 3)
         self.assertEqual(r['map_table'][0]['participating_ranks'], [0])
 
+    def test_eigen_counts_use_map_and_solve_ids(self):
+        p = self.sample['davidson_profile']
+        p['operations'] += ['reduced_eigen_step', 'reduced_eigen', 'bordered_update']
+        rows = p['per_rank'][0]['records']
+        rows += [
+            [4, 1, 1, 0, 0, 2, 3, 8, 0, 8, .01, 0, 0],
+            [5, 1, 1, 0, 0, 2, 4, 8, 8, 8, .009, 0, 0],
+            [6, 1, 1, 0, 0, 2, 3, 9, 8, 9, .01, 0, 0],
+            [7, 1, 1, 0, 0, 2, 5, 9, 8, 9, .009, 0, 0],
+            [8, 2, 2, 0, 0, 3, 0, 100, 8, 6, .1, 0, 1e-8],
+            [9, 2, 2, 0, 0, 3, 3, 12, 0, 12, .01, 0, 0],
+            [10, 2, 2, 0, 0, 3, 4, 12, 12, 12, .009, 0, 0],
+        ]
+        a, b = self.parse(self.sample)['eigen_map_work']
+        self.assertEqual(a['solve_ids'], [1])
+        self.assertEqual(a['reduced_steps'], 2)
+        self.assertEqual(a['full_evd_calls'], 1)
+        self.assertEqual(a['bordered_attempts'], 1)
+        self.assertEqual(a['full_evd_sum_m3'], 512)
+        self.assertEqual(b['map'], 2)
+        self.assertEqual(b['solve_ids'], [2])
+        self.assertEqual(b['full_evd_order_counts'], {12: 1})
+        self.assertEqual(b['full_evd_per_solve'], 1)
+
     def test_rejects_incomplete_corrupt_and_truncated_profiles(self):
         mutations = [
             lambda x: x['run'].update(completed=False),

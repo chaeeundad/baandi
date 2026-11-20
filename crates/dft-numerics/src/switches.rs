@@ -443,6 +443,8 @@ table! {
         "LAZY-RESULT: when the caller declared that it reads no delivered orbitals (dft-cli run without forces, stress, ELF or partial-charge output, classic mode), an M2 result keeps its lazy distributed orbital blocks instead of gathering the full N x B block on every rank at delivery; ScfResult::materialize_orbitals gathers them on demand (collective); energy, density, eigenvalues and history unchanged; off = always gather";
     PHASE_WAIT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "wait probe of the phase profile (ticket BREAKTHROUGH-4-OTHER-AND-INIT): a timed barrier before every collective of the distributed solver and at the entry of every M2 solve, so that the time ranks spend waiting for the last rank (load imbalance, arrival skew) is reported apart from the collective's own transfer (`solve.wait`, `solve.entry_wait`, `coll.barrier`); changes the timing (extra barriers), never the arithmetic; diagnostic only, never an acceptance arm";
+    VERIFY_PROFILE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "LANE-VERIFY per-attempt/per-rank size and phase records; requires PHASE_PROFILE, clocks only with STAGE_TIMERS; no numerical changes";
     FIRST_BLOCK: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "first-correction-block residual diagnostic (review E3): before every warm real Gamma solve a small Rayleigh-Ritz on the kept B vectors, the occupied residual block R_o = H X_o - X_o A_o, its singular values and effective ranks, and the unconverged-root counts of the Ritz-change rule against the true residual; read-only (the solve is unchanged; B extra H columns per solve when no kept H X exists)";
     SNAPSHOT_DIR: Kind::Path, "unset", "absolute directory",
@@ -484,7 +486,7 @@ pub fn table_of(id: Id) -> Table {
     use Id::*;
     match id {
         PHASE_PROFILE | STAGE_TIMERS | DAVIDSON_STAGES | SNAPSHOT_DIR | PHASE_WAIT
-        | FIRST_BLOCK | DGEMM_TIMERS => Table::Profile,
+        | FIRST_BLOCK | DGEMM_TIMERS | VERIFY_PROFILE => Table::Profile,
         // Overrides of input-file values (`scf.cutoff_ladder`, the relaxation
         // extrapolation) and the pseudopotential cache location.
         CUTOFF_LADDER | RELAX_EXTRAPOLATION | PSEUDO_DIR => Table::EnvOnly,

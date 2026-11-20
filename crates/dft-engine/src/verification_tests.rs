@@ -698,3 +698,164 @@ fn verification_schedule_wait_is_not_a_pass() {
     assert!(row.would_wait);
     assert_eq!(row.action, "attempt");
 }
+
+/// Phase 0 correctness only: no wall-time values are printed or interpreted.
+/// cargo test --release -p dft-engine --lib verification_lane_profile_identity -- --ignored --test-threads=1
+#[test]
+#[ignore = "release-only instrumentation identity matrix; global profile override requires isolation"]
+fn verification_lane_profile_identity() {
+    use crate::profile::verification as vp;
+    use dft_numerics::switches::RunConfig;
+    let fingerprint = |r: &ScfResult| {
+        let mut bits = vec![r.total_hartree().to_bits()];
+        bits.extend(r.density.iter().map(|x| x.to_bits()));
+        for k in &r.k_points {
+            bits.extend(k.solution.eigenvalues.iter().map(|x| x.to_bits()));
+            bits.extend(k.solution.residuals.iter().map(|x| x.to_bits()));
+            bits.extend(
+                k.solution
+                    .eigenvectors
+                    .as_slice()
+                    .iter()
+                    .flat_map(|z| [z.re.to_bits(), z.im.to_bits()]),
+            );
+        }
+        let mut history = r.history.clone();
+        for h in &mut history {
+            h.timings = PhaseTimings::default();
+            if let Some(c) = &mut h.fixed_point_certificate {
+                c.timings = PhaseTimings::default();
+            }
+        }
+        let mut report = r.verification.clone();
+        for a in &mut report.as_mut().unwrap().attempts {
+            a.wall = std::time::Duration::ZERO;
+        }
+        (bits, format!("{history:?}"), format!("{report:?}"))
+    };
+    let run = |shape: usize, bands: usize, multi: bool, lane: bool, clocks: bool| {
+        assert!(vp::take().is_empty());
+        let config = RunConfig::from_pairs(&[
+            ("verify_profile", if lane { "on" } else { "off" }),
+            ("stage_timers", if clocks { "on" } else { "off" }),
+        ])
+        .unwrap();
+        let _scope = config.enter();
+        let cells = [
+            [[4., 0., 0.], [0., 4., 0.], [0., 0., 4.]],
+            [[4., 0., 0.], [0.3, 4.2, 0.], [0., 0.2, 4.4]],
+            [[4., 0., 0.], [0., 4., 0.], [0., 0., 8.]],
+        ];
+        let pp = super::pool_fixture::potential(2., 1., true, 401);
+        let k = if multi {
+            vec![
+                KPoint {
+                    fractional: [0.; 3],
+                    weight: 0.5,
+                },
+                KPoint {
+                    fractional: [0.25, 0., 0.],
+                    weight: 0.5,
+                },
+            ]
+        } else {
+            vec![KPoint {
+                fractional: [0.; 3],
+                weight: 1.,
+            }]
+        };
+        let mut p = ScfProblem::with_kpoints(
+            &Cell::from_user_rows_bohr(cells[shape]).unwrap(),
+            &[Atom::new("Xx", [0.13, 0.21, 0.32])],
+            &[SpeciesPotential {
+                label: "Xx",
+                potential: &pp,
+            }],
+            ScfOptions {
+                cutoff_hartree: 2.5,
+                bands: Some(bands),
+                ..ScfOptions::default()
+            },
+            &k,
+            OccupationPolicy::Insulator {
+                minimum_gap_hartree: 1e-7,
+            },
+        )
+        .unwrap();
+        p.force_verification_failures = 2;
+        let r = p.run().unwrap();
+        let records = vp::take();
+        if lane && crate::profile::enabled() {
+            let attempts: Vec<_> = records.iter().filter(|r| r.event == 0).collect();
+            let actual = &r.verification.as_ref().unwrap().attempts;
+            assert_eq!(attempts.len(), actual.len());
+            assert_eq!(
+                records.iter().filter(|r| r.event == 1).count(),
+                r.verification
+                    .as_ref()
+                    .unwrap()
+                    .schedule
+                    .as_ref()
+                    .unwrap()
+                    .prediction_evaluations
+            );
+            for (a, b) in attempts.iter().zip(actual) {
+                assert_eq!(a.iteration, b.iteration);
+                assert_eq!(a.status, i8::from(b.passed));
+                assert_eq!(a.h_vectors, b.operator_applications);
+                assert_eq!(a.davidson_iterations, b.davidson_iterations);
+                assert_eq!(a.sizes[6], k.len() as u64);
+                assert_eq!(a.sizes[8], (bands * k.len()) as u64);
+            }
+            for a in &records {
+                assert_eq!(a.timed, clocks);
+                if clocks {
+                    assert!(a.seconds.iter().all(|s| s.is_finite() && *s >= 0.));
+                    // A tiny scheduler call can finish within one clock tick.
+                    if a.event == 0 {
+                        assert!(a.seconds.iter().sum::<f64>() > 0.);
+                    }
+                } else {
+                    assert_eq!(a.seconds, [0.; 9]);
+                    assert_eq!(a.map_seconds, [0.; 4]);
+                }
+            }
+        } else {
+            assert!(records.is_empty());
+        }
+        fingerprint(&r)
+    };
+    crate::profile::force(Some(false));
+    assert_eq!(run(1, 3, false, false, false), run(1, 3, false, true, true));
+    crate::profile::force(Some(true));
+    for shape in 0..3 {
+        for bands in [3, 6] {
+            for multi in [false, true] {
+                let off = run(shape, bands, multi, false, false);
+                assert_eq!(off, run(shape, bands, multi, true, false));
+                assert_eq!(off, run(shape, bands, multi, true, true));
+            }
+        }
+    }
+    for ranks in [2, 3] {
+        let simulate = |lane| {
+            dft_mpi::simulate(ranks, |comm: &dft_mpi::SimRank| {
+                crate::parallel::set_m2_override(Some(true));
+                let shared: std::sync::Arc<dyn dft_mpi::Collective + Send + Sync> =
+                    std::sync::Arc::new(comm.clone());
+                crate::parallel::set_communicator(Some(shared));
+                let result = run(1, 3, false, lane, true);
+                crate::parallel::set_communicator(None);
+                crate::parallel::set_m2_override(None);
+                result
+            })
+        };
+        let off = simulate(false);
+        let on = simulate(true);
+        assert_eq!(off, on);
+        for r in &on {
+            assert_eq!(r, &on[0]);
+        }
+    }
+    crate::profile::force(None);
+}

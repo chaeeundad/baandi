@@ -1,0 +1,146 @@
+{
+  "purpose": "Mac correctness and parser plumbing only; no timing evidence",
+  "cases": [
+    {
+      "case": "si8-gamma",
+      "energy_ha": -31.321776563202498,
+      "density_sha256": "43f2a33d8b0d0a5a90129076353d8e4ad26b2305695c3d834c13b7598fb7342b",
+      "scf_iterations": 11,
+      "verification_attempts": 2,
+      "lane_attempt_records": 2,
+      "lane_schedule_records": 1,
+      "identity_arms": [
+        "parent",
+        "off",
+        "phase-only",
+        "count",
+        "clock"
+      ],
+      "max_energy_difference_ha": 0
+    },
+    {
+      "case": "si32-gamma",
+      "energy_ha": -126.70343204998852,
+      "density_sha256": "c264a0847e443677357373e8ee5557784ead8bb15dcf0ad77ac6d2da2cda2371",
+      "scf_iterations": 10,
+      "verification_attempts": 1,
+      "lane_attempt_records": 1,
+      "lane_schedule_records": 0,
+      "identity_arms": [
+        "parent",
+        "off",
+        "phase-only",
+        "count",
+        "clock"
+      ],
+      "max_energy_difference_ha": 0
+    },
+    {
+      "case": "si-skew",
+      "energy_ha": -7.250604620381497,
+      "density_sha256": "f5ca6ce9d629e099932a1dabd0e7256f22a9f15744221252f81109b3db9fc3fe",
+      "scf_iterations": 8,
+      "verification_attempts": 3,
+      "lane_attempt_records": 3,
+      "lane_schedule_records": 2,
+      "identity_arms": [
+        "parent",
+        "off",
+        "phase-only",
+        "count",
+        "clock"
+      ],
+      "max_energy_difference_ha": 0
+    },
+    {
+      "case": "si-slab",
+      "energy_ha": -15.232236865316718,
+      "density_sha256": "e9f8ad996dc9bb56c5a0acd324589de006f4aba62d0b39b10b32496f5eff85d1",
+      "converged": false,
+      "exit_code": 3,
+      "scf_iterations": 100,
+      "verification_attempts": 0,
+      "lane_attempt_records": 0,
+      "lane_schedule_records": 0,
+      "identity_arms": [
+        "parent",
+        "off",
+        "phase-only",
+        "count",
+        "clock"
+      ],
+      "max_energy_difference_ha": 0
+    },
+    {
+      "case": "si-k222s",
+      "energy_ha": -7.919424866455142,
+      "density_sha256": "1db0358c96450b6385293780cdfb5b6b8b78962fe1126b5c69d31e962e8c29bc",
+      "converged": true,
+      "exit_code": 0,
+      "scf_iterations": 8,
+      "verification_attempts": 1,
+      "lane_attempt_records": 1,
+      "lane_schedule_records": 0,
+      "identity_arms": [
+        "parent",
+        "off",
+        "phase-only",
+        "count",
+        "clock"
+      ],
+      "max_energy_difference_ha": 0
+    }
+  ],
+  "synthetic_identity": {
+    "scf_executions": 48,
+    "mode_comparisons": 30,
+    "shapes": [
+      "cubic",
+      "skew",
+      "slab"
+    ],
+    "bands": [
+      3,
+      6
+    ],
+    "k_blocks": [
+      1,
+      2
+    ],
+    "simulated_ranks": [
+      2,
+      3
+    ],
+    "forced_failed_attempts": 2,
+    "max_energy_difference_ha": 0
+  },
+  "baseline_commit": "db25e70176bd5d111dab6fe1dc2a110766fcb005",
+  "baseline_binary_sha256": "e74a102746f0f3958862e53581305f40849f5b8707d28ae15e6f66de39e43a5b",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "matrix_binary_sha256": "6955f76d2bd81727c2d9699104072eed0c58ce6737ac743cf4c63a8795ca7e44",
+  "final_binary_sha256": "47b0501a4efa48b66eb9fee79ef6635f737e7da2922b80ab38f93f7c1a8bb79d",
+  "final_binary_smoke": {
+    "case": "si8-gamma",
+    "arms": [
+      "parent",
+      "off",
+      "phase-only",
+      "count",
+      "clock"
+    ],
+    "max_energy_difference_ha": 0,
+    "scientific_and_density_identity": true,
+    "exit_code": 0,
+    "note": "Final binary includes clippy-recommended transport chunk API; earlier full matrix binary retained separately."
+  },
+  "fast_gate": {
+    "exit_code": 1,
+    "build": "PASS",
+    "fmt": "PASS",
+    "clippy": "PASS",
+    "passed": 471,
+    "failed": 3,
+    "ignored": 136,
+    "failure_scope": "Existing CLI pseudopotential-cache tests reject in-repository TMPDIR; no new test failure."
+  }
+}

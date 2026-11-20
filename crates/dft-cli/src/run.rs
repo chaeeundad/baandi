@@ -1716,7 +1716,16 @@ fn execute_mode_inner(
         }
         let table = report.table(Some(total));
         console.push_str(&table);
-        let phases = profile_json(&report, total);
+        let mut phases = profile_json(&report, total);
+        if dft_engine::profile::verification::enabled() {
+            let mine = dft_engine::profile::verification::take();
+            let records = match dft_engine::parallel::SharedComm::active() {
+                Some(comm) => dft_engine::profile::verification::gather(&comm, &mine)
+                    .map_err(|e| error(5, e))?,
+                None => mine,
+            };
+            phases["verification_lane"] = verification_lane_json(&records);
+        }
         if crate::parallel::size() > 1 {
             result["parallel"]["phases"] = phases.clone();
         }
@@ -1979,8 +1988,27 @@ fn stress_table(s: &dft_engine::stress::StressResult) -> String {
     text
 }
 
-/// Exclusive phase profile (`BAANDI_PHASE_PROFILE=on`): per bucket the maximum
-/// and minimum over ranks of every entry (seconds, then counts).
+/// LANE-VERIFY per-call/per-rank records, serialized only after the run.
+fn verification_lane_json(
+    records: &[dft_engine::profile::verification::Record],
+) -> serde_json::Value {
+    use dft_engine::profile::verification::{MAP_PARTS, PARTS, SIZES};
+    json!({
+        "schema": "verify-profile-1",
+        "records": records.iter().map(|r| json!({
+            "rank": r.rank, "iteration": r.iteration, "cutoff_ha": r.cutoff_ha,
+            "event": if r.event == 0 { "attempt" } else { "schedule" },
+            "status": r.status, "timed": r.timed,
+            "sizes": SIZES.iter().zip(r.sizes).map(|(k, v)| (k.to_string(), json!(v))).collect::<serde_json::Map<_, _>>(),
+            "seconds": PARTS.iter().zip(r.seconds).map(|(k, v)| (k.to_string(), json!(v))).collect::<serde_json::Map<_, _>>(),
+            "map_seconds": MAP_PARTS.iter().zip(r.map_seconds).map(|(k, v)| (k.to_string(), json!(v))).collect::<serde_json::Map<_, _>>(),
+            "h_vectors": r.h_vectors, "davidson_iterations": r.davidson_iterations,
+        })).collect::<Vec<_>>(),
+        "note": "seconds are exclusive consecutive intervals on one rank; map_seconds are nested in seconds.map; never sum rank maxima; status -1 is an incomplete/error attempt whose restore interval includes its unclosed tail; sizes are payload/floor inputs, not measured memory traffic; post-run gathering is outside these intervals"
+    })
+}
+
+/// Exclusive phase profile: per-bucket maximum and minimum over ranks.
 pub fn profile_json(report: &dft_engine::profile::Report, run_wall: f64) -> serde_json::Value {
     let covered = report.covered_wall();
     let closure = report.closure();

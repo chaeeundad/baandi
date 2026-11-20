@@ -2,9 +2,11 @@
   "task_id": "LANE-DAVIDSON",
   "phase": 2,
   "status": "DONE",
-  "rejected_candidate": "DAVIDSON_UPPER_BORDER (resolved +0.57% dev08 loss; retained OFF)",
-  "implementation": "Independent default-off serial ROTATE_COLUMNS already implemented and Mac-validated; unchanged in rejection response",
-  "diagnosis": "Pair GEMM/copy/finite/residual/norm accounting and full-EVD-per-map parser added; no repeated upper-tile pruning",
-  "next": "Orchestrator screens ROTATE_COLUMNS independently with UPPER_BORDER off",
+  "rejected_candidates": [
+    "DAVIDSON_UPPER_BORDER: +0.57% MPI8 loss",
+    "DAVIDSON_ROTATE_COLUMNS: +6.10% si64 / +4.19% si32 one-core loss"
+  ],
+  "implementation": "Default-off DAVIDSON_PACKED_REDUCE; unchanged GEMM shapes and arithmetic, fewer communicated entries",
+  "next": "Orchestrator runs packed-job.sh on dev08; both rejected switches off",
   "performance_evidence_from_mac": false
 }

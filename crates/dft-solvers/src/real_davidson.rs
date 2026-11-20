@@ -3269,7 +3269,7 @@ pub mod lane_profile {
         "detail",
         "tolerance_ha",
     ];
-    pub const OPERATIONS: [&str; 18] = [
+    pub const OPERATIONS: [&str; 19] = [
         "solve",
         "overlap_border",
         "factor_extension",
@@ -3288,6 +3288,7 @@ pub mod lane_profile {
         "upper_border_tile",
         "upper_border_product",
         "rotation_pair",
+        "border_payload",
     ];
     pub const STAGES: [&str; 4] = ["unknown", "coarse", "fine", "verification"];
     pub const KINDS: [&str; 5] = ["unknown", "ordinary", "redo", "verification", "cold"];
@@ -3324,6 +3325,7 @@ pub mod lane_profile {
         UpperBorderTile,
         BorderProduct,
         RotationPair,
+        BorderPayload,
     }
     struct State {
         records: Vec<[f64; 13]>,

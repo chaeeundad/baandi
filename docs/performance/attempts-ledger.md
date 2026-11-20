@@ -2666,3 +2666,28 @@ pass. See [validation](lanes/FFT/phase2-validation.md),
 A/B pairs, fixed-H si32 then SCF, expansion si64/si32/si16 MPI8; resolved gain
 requires negative paired mean with |mean|/SE >= 3 and floor/interval checks.
 No performance conclusion from the Mac and no default change.
+## DAVIDSON-ROTATE-COLUMNS-REJECTED — orchestrator decision (2026-11-20)
+
+| Attempt | dev08 evidence | Decision / lesson |
+|---|---|---|
+| DAVIDSON-ROTATE-COLUMNS-REJECTED | One core, A/A floor then three crossed pairs, all positive: Si64 +6.10%, abs(mean)/SE=19.20, 4.74x floor; Si32 +4.19%, 30.46, 29x floor. Si64 pairs109 unchanged, FLOP207.00e9 unchanged, column_pairs0->109, chosen_calls_model16954->720, extra_copy_bytes_model5.59e9->0. Dispatch rotate -207.0018 GFLOP, other +207.0018, total580.791 unchanged, MKL. Si32 calls6138->382, copy1.18e9->0. Si32 bit-identical; Si64 abs(dE)=1.705e-13 Ha. | **REJECTED: resolved losses on both cells.** Retain default OFF. Reducing calls/copies changed GEMM efficiency adversely; do not repeat GEMM-shape changes. |
+
+Relayed single-thread MKL core0: default256x132x132=108.52 GFLOP/s,
+82.21 us/call; candidate23871x132x32=53.86 GFLOP/s,3744 us/call.
+Pair model188*82.21us=15.46ms versus10*3744us=37.44ms. Removed
+scratch51.3MB/pair (~4ms at12.97GB/s, relay's copy-volume convention) is
+smaller than22ms shape loss. Height128/256/512/1024/2048/4096/8192/23871
+pairms15.78/15.50/17.46/20.03/40.16/40.01/39.93/25.21; the2048–8192
+L2 cliff is about42.7GFLOP/s. Column widths32/64/132 give40.49/30.69/25.11ms.
+None beats existing256-row15.50ms. Source is orchestrator relay, not Mac.
+This supersedes the previous active ROTATE_COLUMNS request.
+
+## DAVIDSON-PACKED-REDUCE — alternative pending dev08 (2026-11-20)
+
+Default-off DAVIDSON_PACKED_REDUCE compacts only the consumed upper-triangle
+entries and norm tail after unchanged distributed-lean GEMMs. Same collective
+count and per-element rank summation order, no new allocations, no tolerance
+change. Representative264-order132-column payload280896->209616 B
+(-25.37%); exact trajectory saving is returned by packed-counter.py. Both
+rejected switches remain OFF. Serial path unchanged. No performance adoption
+or Mac performance claim; see packed-validation.md and dev08-request.md.

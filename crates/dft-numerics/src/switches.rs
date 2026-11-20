@@ -370,6 +370,8 @@ table! {
     LEAN_PROJ_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "C3a: the lean real Gamma Davidson keeps P^T V (projector products) beside its basis (copied after each H apply, rotated at contraction and return) and the audit's nonlocal energy reads P^T X = (P^T V) C instead of a fresh n x n_proj x bands product; falls back to the direct product whenever the cache is incomplete; rounding class";
     // Per-core kernels (ticket PERCORE-KERNELS, docs/performance/percore-kernels-2026-11-17.md); default off.
+    DAVIDSON_PACKED_REDUCE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "Pack only consumed upper-border entries and residual norms for distributed lean reductions; GEMMs unchanged, default off.";
     DAVIDSON_ROTATE_COLUMNS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "Serial real Davidson Ritz pairs through existing fixed column-group GEMMs; rounding class, default off.";
     DAVIDSON_UPPER_BORDER: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",

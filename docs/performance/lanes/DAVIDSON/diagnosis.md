@@ -1,4 +1,8 @@
-# Phase 2 follow-up: corrected floors and a serial rotation candidate
+# Phase 2 follow-up: fixed GEMM shapes, packed MPI border payloads
+
+Current decision: UPPER_BORDER and ROTATE_COLUMNS rejected; both remain OFF.
+The latest reassessment at the end selects PACKED_REDUCE. Earlier candidate
+forecasts below are historical and superseded by the two dev08 decisions.
 
 ## Evidence, units and attribution
 
@@ -313,3 +317,58 @@ without introducing more numerical instrumentation. Keep these invariant in
 the alternative A/B. Same order on two steps does not establish the same
 matrix or justify reusing eigenvectors. Delaying RR changes the algorithm and
 is not warranted by these counts or the failed sliced-EVD evidence.
+
+## Reassessment after both shape candidates lost (2026-11-20)
+
+The ROTATE_COLUMNS oracle is decisive: Si64 serial +6.10% (19.20 SE),
+Si32 +4.19% (30.46 SE). All six pairs slower. A 256-row pair costs15.50ms,
+whereas every tested row-height or column-width alternative costs more.
+Default row panels deliver108.52 GFLOP/s versus53.86 for tall32-column groups.
+The earlier26.012ms tall-DGEMM floor is therefore not a floor for the actual
+panel implementation. It cannot establish23ms of removable non-GEMM work.
+The removed51.3MB copy-volume model is only~4ms at STREAM, outweighed by
+~22ms GEMM shape loss. Keep both failed switches off and preserve GEMM shapes.
+
+Two remaining candidates were assessed:
+
+1. **Pack distributed border reduction payloads (selected).** Tree sums total
+   2.325s over2576 all-rank calls,0.9026ms/call; rank-average0.290625s, not
+   critical-rank wall. Border sites account for808+656=1464 calls across ranks
+   (183/rank); all sites include672 H-apply reductions belonging to other lanes.
+   Full rectangles contain lower entries never consumed. Packing after full
+   GEMMs preserves their shape, calls, FLOPs, outputs, and all rank addition
+   dependencies. At m264,k132,no pending norms: full(m*(k+1))=35112 doubles;
+   upper rows133..264=26202 doubles;280896->209616B (-25.375%). At fresh m132,
+   k132:140448->70224B (-50%). Multiple S/H borders and the exact norm tail are
+   handled generically; narrow borders need less triangular pruning.
+   In-place compaction adds at most one read/write of the retained payload,
+   ~0.419MB/representative call (~0.0323ms at the supplied one-core12.97GB/s).
+   This is a bandwidth model, not MPI memory bandwidth or measured overhead.
+   Latency is unchanged. A conditional10–25% reduction of affected collective
+   time is plausible only if bandwidth matters. Even25% of *all* tree time
+   is merely0.07266s/rank (~0.74% of prior9.7715s external wall); this is an
+   optimistic scale, not an expected measured whole-run gain. Border-only
+   timing and exact payloads determine the actual opportunity. Serial gain=0.
+2. **Fuse residual formation and four-lane norms (not selected).** Serial
+   residual child is0.504s total (~1.1% of45.56s wall), including formation,
+   norms and validation. Even deleting all of it cannot recover the old
+   apparent rotation gap. Fusion removes one read but risks vectorization
+   and arithmetic-order changes; the residual kernel already uses fixed
+   groups. MPI residual is0.837/8=0.1046s rank-average, with overlapping parent
+   time. A small fraction of those budgets is a hypothesis, not evidence.
+   No measured norm-only span identifies a stronger opportunity than payload.
+
+Full EVD remains one per changed reduced problem (101/rank on MPI; serial102
+full plus7 bordered steps). The9*m^3 proxy at264 and95.4GF/s is1.736ms versus
+6.975ms mean, but GEMM peak is not a LAPACK syevd measurement: tridiagonal
+reduction has a different mix, the mean mixes orders, and replicated ranks
+share cache/frequency resources. REL-SLICES already tested alternative drivers
+and failed the combined speed/orthogonality gate. No identical unchanged
+matrix is solved twice; reusing a factorization of a different reduced matrix
+is not equivalent. There is no new evidence to reopen that lever, change
+restart capacity, or relax tolerance/map work. H application is untouched.
+
+The new `border_payload` span records n=order,m=S width,k=H width,detail=norm
+count. It encloses pack/reduce/unpack and nests one `tree_sum` with actual sent
+doubles. Profiles remain bounded and disabled without clocks/allocations;
+existing exclusive and inclusive timing scopes must still not be added.

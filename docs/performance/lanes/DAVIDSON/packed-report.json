@@ -1,0 +1,85 @@
+{
+  "task_id": "LANE-DAVIDSON",
+  "status": "DONE",
+  "changed_files": [
+    "crates/dft-cli/tests/all/run.rs",
+    "crates/dft-numerics/src/switches.rs",
+    "crates/dft-numerics/tests/all/switches.rs",
+    "crates/dft-solvers/src/distributed_davidson/workspace/lean.rs",
+    "crates/dft-solvers/src/real_davidson.rs",
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/lanes/DAVIDSON/dev08-request.md",
+    "docs/performance/lanes/DAVIDSON/diagnosis.md",
+    "docs/performance/lanes/DAVIDSON/packed-counter-evidence.json",
+    "docs/performance/lanes/DAVIDSON/packed-counter.py",
+    "docs/performance/lanes/DAVIDSON/packed-job.sh",
+    "docs/performance/lanes/DAVIDSON/packed-report.json",
+    "docs/performance/lanes/DAVIDSON/packed-scf-oracle.rs",
+    "docs/performance/lanes/DAVIDSON/packed-validation.md",
+    "docs/performance/lanes/DAVIDSON/phase-status.json",
+    "docs/performance/lanes/DAVIDSON/test_tools.py"
+  ],
+  "design_choices": [
+    "Recorded DAVIDSON-ROTATE-COLUMNS-REJECTED with dev08 counters, losses and shape sweep; retained both rejected switches default off.",
+    "Selected default-off DAVIDSON_PACKED_REDUCE after comparing payload compaction with residual/norm fusion and reviewing closed EVD levers.",
+    "Full GEMM shapes/calls/FLOPs unchanged; compact only upper entries and exact norm tail in existing buffers; same reduction count and rank association.",
+    "Added border_payload diagnostic and shape-derived counter parser; pre-registered dev08 crossed A/A and A/B gates."
+  ],
+  "commands": [
+    {
+      "command": "CHECK_SCCACHE=0 TMPDIR_990=\"$PWD/target/scratch\" scripts/check.sh fast dft-solvers dft-numerics dft-cli",
+      "exit_code": 1
+    },
+    {
+      "command": "CHECK_SCCACHE=0 TMPDIR_990=\"$PWD/target/scratch\" scripts/check.sh fast dft-solvers dft-numerics",
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=\"$PWD/target/scratch\" cargo test --release -p dft-solvers --lib packed_border -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=\"$PWD/target/scratch\" PACKED_ORACLE_OUT=\"$PWD/target/scratch\" cargo test --release -p dft-engine --test lane_packed_oracle -- --nocapture (temporary target from packed-scf-oracle.rs, removed afterward)",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/DAVIDSON/packed-counter.py target/scratch/packed-0-np3-false.json target/scratch/packed-0-np3-true.json",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/lane_davidson_parse.py target/scratch/packed-0-np3-false.json target/scratch/packed-0-np3-true.json --json-out target/scratch/packed-tables.json",
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=\"$PWD/target/scratch\" python3 -I docs/performance/lanes/DAVIDSON/test_tools.py",
+      "exit_code": 0
+    },
+    {
+      "command": "bash -n docs/performance/lanes/DAVIDSON/packed-job.sh",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "Core fast gate: 230 passed, 0 failed, 47 ignored; build/fmt/clippy PASS.",
+    "CLI-inclusive fast gate: 362 passed, 3 known cache/TMPDIR failures, 87 ignored; build/fmt/clippy PASS.",
+    "2 targeted release unit tests pass; rank counts 1/2/3/4/8 and worker counts 1/3 preserve output bits.",
+    "4 full SCF OFF/ON pairs (cubic/skewed, simulated MPI2/3): abs(dE)=0 Ha, density bits and scientific history/verification equal, verified.",
+    "Cubic work=(17 SCF records,62 Davidson iterations,269 H applications,1 verification); skewed=(11,43,197,1), unchanged.",
+    "Mac counter transport, cubic MPI3: 116 reductions/rank unchanged; 65520 -> 43840 B/rank, exactly predicted; dropped=0.",
+    "Representative dev08 shape prediction: 280896 -> 209616 B (-25.376%); not a timing result.",
+    "4 Python tool tests pass."
+  ],
+  "reference_comparison": "Same-binary OFF/ON scientific equivalence only. No QE performance comparison or Mac timing conclusion. Real dev08 MPI/MKL A/B pending.",
+  "limitations": [
+    "CLI cache tests require outside-repository cache paths, conflicting with required in-repository TMPDIR; recorded failures were not bypassed.",
+    "Full SCF Mac oracle uses small synthetic nonlocal cubic/skewed systems; real PP, slab and real MPI/MKL qualification remain dev08 work.",
+    "Payload can cross MPI tree message thresholds; verify actual backend identity and resolved wall gain on dev08.",
+    "Temporary oracle initially compared wall metadata and had a trace-export compile error; corrected final runs passed, detailed in packed-validation.md."
+  ],
+  "open_questions": [],
+  "commit": "Uncommitted; stop for dev08 orchestration."
+}

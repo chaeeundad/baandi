@@ -133,6 +133,7 @@ fn legacy_defaults_are_unchanged() {
         Id::DAVIDSON_PROFILE,
         Id::DAVIDSON_UPPER_BORDER,
         Id::DAVIDSON_ROTATE_COLUMNS,
+        Id::DAVIDSON_PACKED_REDUCE,
         Id::PACK_FIXED,
     ] {
         assert!(!on(id), "{id:?} must default off");
@@ -290,7 +291,8 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::DAVIDSON_UPPER_BORDER), Value::Choice("off"));
     assert_eq!(value(Id::DAVIDSON_ROTATE_COLUMNS), Value::Choice("off"));
     assert_eq!(value(Id::FFT_KEPT_FUSE), Value::Choice("off"));
-    assert_eq!(TABLE.len(), 125);
+    assert_eq!(value(Id::DAVIDSON_PACKED_REDUCE), Value::Choice("off"));
+    assert_eq!(TABLE.len(), 126);
 }
 
 #[test]

@@ -2397,3 +2397,30 @@ case/model jobs, six retained profile/control cycles, schemas and parser paths:
 identity and real exit codes: [validation](lanes/VERIFY/validation.md) and
 [correctness record](lanes/VERIFY/correctness.json). Await the orchestrator's
 dev08 profile before Phase 2. Changes remain uncommitted.
+
+## 2026-11-20 — LANE-VERIFY Phase 2: closed without a qualifying lever
+
+**CLOSED — no implementation.** Six dev08 Si64 MPI8 instrumented runs at
+`bad02ee`, as relayed by the user: median external wall **8.5466 s**, median
+verification sum **1.0475 s (12.26%)**, two attempts and 11 ordinary maps in
+all runs. Attempt 0 fails (6 Davidson iterations, 380 H columns); attempt 1
+passes (5 iterations, 388 H columns). No Mac performance measurements were used.
+
+Default HALF already carries failed verification orbitals into the next map;
+M2_REUSE can update retained H X for a changed potential. Actual cache-hit counts
+were not relayed. The next Hamiltonian still needs a new solve and convergence
+test; the full Davidson search space is not retained. Reimplementing the adopted
+reuse is not a new saving. Energy's reported 0.0499 s and the combined non-solve
+phase envelope of 0.1676 s do not establish a >=0.2 s lever (independent phase
+maxima are not a coherent wall bound). Full search-space recycling is an
+unqualified, separately owned solver hypothesis, not a predicted gain.
+
+The judgment rule and attempt timing are unchanged. No source edits, switch,
+A/B request or adoption claim. One-core profile remains pending; no MPI-to-one-core
+extrapolation. Details and correctness-check scope:
+[diagnosis](lanes/VERIFY/diagnosis.md), [closing note](lanes/VERIFY/closing-note.md).
+
+Phase 2 Mac checks: `scripts/check.sh fast` (CHECK_BASE=HEAD, sccache off,
+in-repository scratch) exit **1**: build/fmt/clippy pass; **617 passed /
+3 known CLI cache TMPDIR failures / 157 ignored**. `git diff --check` exit **0**.
+Documentation only; no new numerical equivalence or performance claim.

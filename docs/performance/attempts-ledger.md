@@ -3008,3 +3008,17 @@ and positive resolved whole-run gain |mean|/SE >=3 without regressions beyond
 noise. The >=75% hash-span drop is a diagnostic forecast, not an adoption
 percentage gate; any resolved whole-run gain qualifies. Default remains off;
 changes uncommitted until review and dev08 approval.
+## FFT-ARRIVAL-OWNERSHIP-CLOSED (2026-11-20)
+
+Recommendation: close FFT optimization on available evidence; no new switch or
+ownership change. Relayed 45340f6 si64 MPI8 trace: 776 matched events/rank,
+684 ns clock error, rank-summed exposure 2.7990 s (0.349875 s/rank), median/p90
+arrival skew 504.3/2409.6 us. Rank 3 last 220 times but reconstructed default
+mirror ownership is identical to ranks 2/4: 126 sticks, 2986 ORC rows, nine
+transpose planes. Across ranks rows differ by four, sticks by two. No supported
+0.15 s balancing gain. solver.append is a last-completed-stage label and can
+precede untimed local border work, not causal attribution. Jitter/NUMA remains
+unproved; raw matched interval/stage data and queued si32 are missing. Mean rank
+exposure is not a critical-path wall bound. See [closing note](lanes/FFT/arrival-closing-note.md)
+and reproducible [ownership audit](lanes/FFT/ownership_audit.py). No Mac profiling,
+no runtime changes; FFT_KEPT_FUSE remains OFF/NEUTRAL.

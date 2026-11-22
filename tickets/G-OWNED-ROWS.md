@@ -1,0 +1,20 @@
+TASK_ID: G-OWNED-ROWS
+GOAL: |
+  GitHub issue #20 remaining work ("remove redundant ownership"; read `gh issue view 20`) and the foundation of issue #24 stage 2 (resident, rank-owned state): the M2 (distributed) state still builds full-length or replicated objects before keeping only its own rows. dev08 attribution at si64 np8 (docs/performance/requests/si64-gap-attribution-2026-11-20.md): "other init + between + unassigned" +0.39 s, solve work outside the solver envelope +0.77 s (setup 0.122, start 0.170, return 0.051, finish 0.040, restart 0.025, real_state 0.014, entry 0.009), io/materialize +0.30 s, atomic_start +0.41 s over QE, session_setup 0.235 s and ladder_handoff 0.123 s in between. Fixed measured fact: per rank peak construction memory and time of replicated work grow with the cell.
+TASK (profile-driven, Mac for correctness, dev08 for timing; no Mac timing claims): (1) Static audit of the M2 path from process start to the first SCF map and between maps (crates/dft-engine/src/gamma_real.rs ~L826 serial RealHamiltonian built for the M2 state; crates/dft-physics/src/distributed_real_gamma.rs ~L262 full ORC kinetic vector and full-length projector temporary before selecting local rows; session setup, ladder handoff, materialize/io): list every object that is replicated or full-length where only owned rows are needed, with size formulas (bytes, per rank, per cell) and the calling frequency (per run, per map, per attempt). Use the dev08 numbers above and the existing INIT/GLUE/LAUNCHIO lane profiles to rank by seconds. (2) Implement the top items behind default-off switches (each independent): (a) construct owned kinetic/projector rows directly with the SAME coefficient mapping and arithmetic (bit-identical), (b) build the serial real operator lazily only when a fallback needs it, (c) separate geometry-only descriptors from density-dependent potential data and FFT-size-specific plans if the audit shows repeated rebuilds across maps (invalidation on cell/position/charge/basis/layout/rank-count change must be tested). Do not combine the ionic-local construction and the atomic-start orthogonalization into the first refactor (they change arithmetic): treat as separate follow-ups only if the audit shows seconds. (3) Mac evidence: bit-identical energies, densities, histories for rank counts 1/2/3/8 (simulated MPI harness) on si8/si16/si32/skew; memory counters showing the removed bytes (model-vs-counter equality like previous lanes); fallback and invalidation tests. (4) docs/performance/lanes/OWNED/audit.md and dev08-request.md (pre-registered counters: allocated bytes and construction calls, A/B commands for si64 np8, si32 np8, si16 np8 and the new si128 np8 fixture (benchmarks/cases/si128-gamma.toml), A/A floor first, crossed pairs, |mean|/SE >= 3, peak RSS). If no item clears an expected gain of about 0.15 s at si64 np8 or a memory reduction that matters for si128+ (state the per-rank bytes), write the closing note and say so.
+OWNED_FILES:
+  - crates/dft-engine/src/gamma_real.rs
+  - crates/dft-physics/src/distributed_real_gamma.rs
+  - crates/dft-engine/src/scf.rs   # M2 setup section only
+  - crates/dft-engine/src/session.rs   # setup/handoff glue only
+  - crates/dft-numerics/src/switches.rs
+  - crates/dft-numerics/tests/all/switches.rs
+  - crates/dft-cli/tests/all/run.rs   # switch count only
+  - docs/performance/lanes/OWNED/
+  - docs/performance/attempts-ledger.md
+READ_ONLY_CONTEXT: AGENTS.md, docs/performance/lanes/CHARTER.md, docs/performance/requests/architecture-redesign-brief-2026-11-23.md, docs/performance/lanes/INIT/, docs/performance/lanes/GLUE/, docs/performance/lanes/LAUNCHIO/
+TEST_COMMANDS:
+  - scripts/check.sh full   # about 40 s warm on the Mac
+ACCEPTANCE_CRITERIA: audit with sizes and seconds; at least the top item implemented default-off and bit-identical on rank counts 1/2/3/8, or a closing note; dev08 request with pre-registered counters; defaults unchanged.
+GIT: leave changes uncommitted.
+RETURN_FORMAT: docs/schemas/report.schema.json

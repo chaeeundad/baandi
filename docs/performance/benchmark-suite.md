@@ -5,6 +5,30 @@ physical model, SCF defaults, tolerances or accepted optimization. See
 [usage and case schema](../../benchmarks/README.md) and
 [the machine-readable baseline](suite-baseline.json).
 
+## Larger Gamma silicon scaling fixtures (G-FIXTURE-SI128, 2026-11-22)
+
+The long-tier catalog now includes `si128-gamma` (2x2x4 conventional cells)
+and `si216-gamma` (3x3x3), extending the existing Si8/16/32/64 sequence.
+Both retain the Si64 potential, 30 Ry cutoff, fractional diamond sites,
+determinism and SCF phase, with a 7200 s per-run timeout. They are opt-in via
+`--include-long`; **run their SCF only on dev08 through the master**.
+The suite's old stored baseline below has not been rerun or extended by these
+preflight-only checks, so it is not a baseline for the new IDs.
+
+| Case | Atoms | Electrons / bands | Full plane waves at 30 Ry | Fine FFT grid | Local validation |
+|---|---:|---|---:|---|---|
+| si128-gamma | 128 | 512 / 260 | 47,851 | 72 x 72 x 144 | Parse, periodic geometry, CLI preflight/grid pass |
+| si216-gamma | 216 | 864 / 436 | 80,797 | 108 x 108 x 108 | Parse, periodic geometry, CLI preflight/grid pass |
+| si512-gamma (documented only) | 512 | 2048 / 1028 | 191,735 | 144 x 144 x 144 | Scratch preflight only; no runnable catalog file |
+
+See [size/memory tables, reproducible generation and dev08 measurement plan](lanes/fixtures-si128.md)
+for lattice edges, density basis counts, per-rank memory estimates, work scaling,
+np8/np16 MPI-vs-MPI QE arms, A/A floor and bounded `final-` jobs. The preserved
+lattice implies a nearest-neighbor distance of **4.443235504 Bohr**, correcting
+the ticket's 4.6 Bohr approximation. Si512 remains gated on measured memory
+headroom on the 64 GB node. No 128+ atom SCF or QE reference was produced here;
+these silicon sizes do not replace the broader generality suite.
+
 ## Design and limits
 
 - The runner and UPF generator use only Python's standard library, including on

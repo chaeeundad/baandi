@@ -3028,3 +3028,32 @@ BAANDI_BINARY_HASH_CACHE (cache of the executable SHA-256 in a sidecar keyed by 
 
 ### GLUE-SERIAL-DENSITY-FUSED-DEFAULT-ON (2026-11-20, dev08 via master; ledger by orchestrator)
 BAANDI_SERIAL_DENSITY_FUSED (standard path, single process, one-core lane: the per-band density accumulation avoids the intermediate density array; band order and FFTs unchanged) default flipped on. dev08 crossed pairs, 6 per cell, A/A floor first, 1 core: si64 -2.0801 s (|mean|/SE 62.44, 6/6 positive, -4.77 % of the same-window A median 43.6417 s), si32 -0.2949 s (119.19, 6/6, -3.73 % of 7.9103 s), si16 -0.085344 s (7.83, 6/6, -3.65 % of 2.3397 s), si-skew -0.001713 s (3.43, 5/6, -1.03 %, resolution edge, A/A ratio 2.78); si8 first attempt aborted by the A/A guard (window suspect), retest queued. No resolved loss. Energies bit identical in every cell (|dE| 0), SCF/H/verified identical. Counters exact: logical bytes halved (si32 5.25 GB -> 2.62 GB, si64 26.8 GB -> 13.4 GB), eligible calls all fused. Prediction for si64 0.884 s, measured 2.080 s (2.35x). The gain applies to the one-core lane only (no effect with MPI ranks). Mac full gate 798 passed, 0 failed. Lesson: the winning lane candidate removed intermediate-array memory traffic; those changing GEMM shapes lost, those reducing communication volume were neutral.
+
+
+## G-FIXTURE-SI128 — larger-cell measurement surface (2026-11-22)
+
+Status: fixtures and dev08 plan added; **no optimization or speed claim**.
+The new premise is scale beyond the existing 64-atom catalog, not a retry of
+any rejected numerical/kernel idea. Added only Si128 (2x2x4) and Si216 (3x3x3),
+30 Ry Gamma, long tier, 7200 s per-run cap, same Si64 field set and potential.
+No code, defaults, tolerances or existing fixtures changed.
+
+Mac engine preflight/grid exits 0: Si128 512 electrons / 260 bands / 47,851 PW /
+72x72x144 FFT; Si216 864 electrons / 436 bands / 80,797 PW / 108^3 FFT.
+Regenerated Si64 coordinates match exactly as a set. Every generated atom has
+four periodic nearest neighbors at 4.443235504 Bohr (the preserved lattice does
+not imply the ticket's 4.6 Bohr). No overlapping/missing atoms.
+Si512 is documented only: 191,735 PW, 144^3 FFT, real orbital/projector blocks
+1.469/2.926 GiB globally; a specified retained-array scenario is 70.455 GiB,
+not measured RSS. No runnable Si512 catalog entry; 64 GB feasibility unverified.
+
+Validation: `scripts/check.sh full` with worktree-local TMPDIR and sccache off
+exit **1**, build/fmt/clippy PASS; 795 tests passed, 3 known cache-policy tests
+failed because scratch is inside the repository, 181 ignored (87 binaries).
+Benchmark suite Python tests: **17 passed**, exit 0. Geometry + four sizes'
+CLI validate/grid: exit 0. Mac performed no 128+ atom SCF; no dev08/QE runs.
+Lesson: basis preflight and block payloads establish workload size, not peak
+memory or time. Measure all-rank RSS and actual convergence before admitting
+Si512 or inferring a scaling law. Full size tables, formula assumptions,
+reproducer and same-model np8/np16 A/A-first requests:
+[fixtures-si128.md](lanes/fixtures-si128.md). Changes left uncommitted.

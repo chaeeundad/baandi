@@ -4862,3 +4862,7 @@ mod bands_fit_tests {
         assert!(bands_fit_subspace(48, 6, 50, 51));
     }
 }
+
+/// Diagnostic fixed-potential maps, opt-in only.
+#[path = "fixed_map.rs"]
+pub mod fixed_map;

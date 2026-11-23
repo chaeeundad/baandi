@@ -3377,3 +3377,51 @@ exits 1 on the existing missing phrase `standard profile is unsupported`.
 No unrelated test, tolerance or scope change was made. Evidence JSON and the
 request table above are refreshed; historical kinetic-only negative experiments
 remain explicitly labelled as historical. No dev08 measurements performed.
+
+## R-SCF-MAP — same-input density diagnostic (2026-11-23)
+
+Diagnostic infrastructure, no optimization/default adoption. Derived from the
+own-words density-mixing / SCF-cycle notes and the existing reference-Davidson
+contract; no QE source consulted. New `refscf-map` teacher-forces QE's input
+at every step, calls existing Hamiltonian/density kernels with legacy Davidson
+(default) or the opt-in reference solver, and retains all mismatch rows before
+exit 4. The reference bridge is isolated from production dispatch. G matching,
+charge, ten shells, mixer metric, printed energy/bands/occupations, analytic
+Hartree and available potential-response checks are recorded. No direct QE
+XC/local potential grid is present; missing comparisons are null.
+
+Mac Si8 one-rank k1..k3, 20 bands, 30/120 Ry, 36^3, printed ethr
+1e-2 / 1.37e-3 / 6.11e-5 Ry. Legacy max density errors:
+1.412541591e-4 / 4.016489166e-5 / 1.180480939e-5 e/bohr^3;
+reference: 1.411562359e-5 / 1.026520345e-5 / 4.814860351e-6 e/bohr^3.
+Mixer distances respectively 1.387939016e-3 / 1.068642280e-4 /
+2.627257499e-5 Ry and 1.966403362e-5 / 1.282576976e-5 /
+5.596930412e-6 Ry. Both first fail at **k=1 rho_out all G** against the
+2.72e-16 e/bohr^3 equality tolerance (4 times the user/dev08-relayed QE rank
+floor upper end, not independently remeasured on Mac). The disagreement is a
+finding, not a relaxed correctness gate or an attribution to mixing.
+
+Input FFT roundtrip <=4.423e-18 e/bohr^3, charge error <=3.553e-14 electrons,
+analytic input Hartree difference <=8.442e-17 Ha. Hartree/XC energies computed
+on QE's output density agree within QE's 5e-9 Ry print rounding; Ewald differs
+by 1.203e-8 Ry. At common ethr=1e-12 Ry the two solvers' occupied eigenvalues
+agree to 1.016e-11 eV. Simulated reference ranks 2/3 retain iteration/H counts
+and differ from serial density by <=2.914e-16 / 2.498e-16 e/bohr^3 in real
+space. QE start orbitals and unrounded thresholds are absent, so loose-map
+mismatch cannot by itself distinguish the potential from inner-solve/start
+error. Neither the smaller reference error nor these Mac numbers select a
+production solver default.
+
+Release map tests exit 0 (4 passed); parser tests exit 0 (2 passed). Full
+`CHECK_SCCACHE=0 TMPDIR_990="$PWD/target/scratch" scripts/check.sh full` exits 1:
+build/fmt/clippy pass; 827 tests pass, 188 ignored, the same 3 repository-local
+pseudo-cache failures remain. README test exits 1 on the pre-existing missing
+phrase `standard profile is unsupported` (8 pass, 1 fail). Default A/B against
+pre-edit HEAD: Gamma/k222s/Si8 energy delta exactly 0 Ha, density hashes identical,
+SCF iterations unchanged 4/8/4, verification enabled. No Mac speed claim.
+
+[Complete stored evidence](../../crates/dft-cli/tests/fixtures/refscf-map-si8.json),
+[reproduction/table/dev08 request](lanes/RSCF/map-dev08-request.md). The request
+covers Si128 np1/np8 and Si8 np1, both solver arms, per-step stdout ethr,
+provenance and attribution follow-ups. Native MPI/MKL and Si128 measurements
+remain with the master/dev08 session. Changes left uncommitted.

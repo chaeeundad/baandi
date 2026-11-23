@@ -1,0 +1,2669 @@
+{
+  "task_id": "R-SCF-MAP",
+  "source_base_commit": "5c3c9db49fbdb754e7f9bfcc76ddb2cebb8e4b0d",
+  "scope": "Mac correctness diagnostics; QE trajectories from dev08. No performance claims.",
+  "qe_provenance": "tests/reference/qe/i25-si8/MANIFEST.txt",
+  "qe_manifest_sha256": "8594d9e038dcab9c9a2f1b47340f93be2fdb4327d9c9a23e12064bdf9c7ef814",
+  "runs": {
+    "legacy": {
+      "command": "target/release/dft-cli refscf-map target/scratch/si8-map.toml --qe tests/reference/qe/i25-si8/si8-np1 --steps 3 --ethr-from-stdout --solver legacy",
+      "exit_code": 4,
+      "stderr": "error: refscf-map first failing term: k=1 rho_out all G",
+      "records": [
+        {
+          "density_atol_e_bohr3": 2.72e-16,
+          "density_start": "QE input at EVERY step; never BAANDI mixed/output density",
+          "electrons": 32.0,
+          "floor_provenance": "user/dev08 relay; QE np8 vs np1 1.7e-17..6.8e-17 e/bohr^3",
+          "g_vectors": 11936,
+          "grid": [
+            36,
+            36,
+            36
+          ],
+          "input_sha256": "c2f5e26dff3c986dddcf1f002549dc0d7d395c00e84985731f4e339fc1c7c7b3",
+          "limits": [
+            "QE wavefunctions are not supplied; loose solves can differ even at the same density and ethr",
+            "stdout ethr is rounded; its printed precision is reported; --ethr accepts an exact value",
+            "diagnostic density transforms and output orbitals are replicated; not a scaling benchmark"
+          ],
+          "orbital_start": "BAANDI atomic at k1, preceding BAANDI orbitals thereafter",
+          "pseudopotentials": [
+            {
+              "path": "/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+              "sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+              "species": "Si"
+            }
+          ],
+          "qe_directory": "tests/reference/qe/i25-si8/si8-np1",
+          "qe_rank_floor_max_e_bohr3": 6.8e-17,
+          "ranks": 1,
+          "schema": "refscf-map-1",
+          "solver": "legacy",
+          "volume_bohr3": 1080.4286448273454
+        },
+        {
+          "all_g": {
+            "count": 11936,
+            "max": 0.00014125415905279838,
+            "relative_max": 0.004769219988801289,
+            "relative_rms": 0.012111523593455483,
+            "rms": 3.7674656549190613e-06,
+            "unit": "e/bohr^3"
+          },
+          "baandi_dr2_ry": 0.4864574068137495,
+          "bands": {
+            "available": true,
+            "baandi_ev": [
+              -6.293789283105145,
+              -2.241080106967098,
+              -2.2347815863820104,
+              -2.2207010757019336,
+              -2.210842059091511,
+              -2.205079752208933,
+              -2.2000889004993134,
+              2.7454113742581554,
+              2.755539745399332,
+              2.7601717374753147,
+              2.760714063229622,
+              2.764868147306639,
+              2.768517288563127,
+              5.457162002032248,
+              5.471983298410159,
+              5.496207433868311,
+              6.597655872791298,
+              6.613559452782661,
+              6.620653873786822,
+              6.655514775948453
+            ],
+            "difference_ev": [
+              -0.0010892831051450003,
+              -0.000380106967098115,
+              0.00011841361798969885,
+              0.00019892429806622758,
+              5.794090848887379e-05,
+              0.00032024779106709644,
+              0.0003110995006867512,
+              -0.001888625741844674,
+              -0.0018602546006678544,
+              -0.0019282625246854757,
+              -0.0018859367703778496,
+              -0.001831852693360947,
+              -0.0018827114368731301,
+              -0.00443799796775135,
+              -0.00441670158984131,
+              -0.004392566131689257,
+              0.05955587279129837,
+              0.05995945278266035,
+              0.059753873786822176,
+              0.04711477594845359
+            ],
+            "qe_ev": [
+              -6.2927,
+              -2.2407,
+              -2.2349,
+              -2.2209,
+              -2.2109,
+              -2.2054,
+              -2.2004,
+              2.7473,
+              2.7574,
+              2.7621,
+              2.7626,
+              2.7667,
+              2.7704,
+              5.4616,
+              5.4764,
+              5.5006,
+              6.5381,
+              6.5536,
+              6.5609,
+              6.6084
+            ],
+            "qe_print_rounding_ev": 5e-05
+          },
+          "density_distance_ha": 0.0006939695080521387,
+          "density_distance_ry": 0.0013879390161042773,
+          "energy": {
+            "available": true,
+            "baandi_band_form_ha": -31.29362123703962,
+            "baandi_direct_orbital_total_ha": -31.2936212370397,
+            "convention": "k-out forced-stop energy: band sum - integral rho_out*(VH+Vxc)[rho_in] + EH[rho_out] + Exc[rho_out] + Ewald; descf=0",
+            "qe_output_density_in_baandi_kernels": {
+              "hartree_minus_qe_printed_ry": -4.063446468194343e-09,
+              "hartree_ry": 5.566146935936554,
+              "xc_minus_qe_printed_ry": -2.2205774996564287e-09,
+              "xc_ry": -19.655853622220576
+            },
+            "status": "diagnostic differences; no energy tolerance inferred from a density floor",
+            "terms": [
+              {
+                "baandi_ry": -62.58724247407924,
+                "difference_ry": 0.016671615920763827,
+                "qe_ry": -62.60391409,
+                "term": "total"
+              },
+              {
+                "baandi_ry": 18.62105419379035,
+                "difference_ry": -0.060256706209649735,
+                "qe_ry": 18.6813109,
+                "term": "one_electron"
+              },
+              {
+                "baandi_ry": 5.701507865148208,
+                "difference_ry": 0.1353609251482073,
+                "qe_ry": 5.56614694,
+                "term": "hartree"
+              },
+              {
+                "baandi_ry": -19.714286245046303,
+                "difference_ry": -0.05843262504630431,
+                "qe_ry": -19.65585362,
+                "term": "xc"
+              },
+              {
+                "baandi_ry": -67.1955182879715,
+                "difference_ry": 1.2028507967443147e-08,
+                "qe_ry": -67.1955183,
+                "term": "ewald"
+              }
+            ]
+          },
+          "ethr_ha": 0.005,
+          "ethr_ry": 0.01,
+          "ethr_source": "stdout (rounded)",
+          "first_failing_term": "rho_out all G",
+          "g0": {
+            "count": 1,
+            "max": 6.938893903907228e-18,
+            "relative_max": 2.3428061678747546e-16,
+            "relative_rms": 2.3428061678747546e-16,
+            "rms": 6.938893903907228e-18,
+            "unit": "e/bohr^3"
+          },
+          "inner_solve": {
+            "certified": false,
+            "converged": [
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true
+            ],
+            "h_columns": 60,
+            "iterations": 3,
+            "residuals_ha": [
+              0.021392030748812237,
+              0.016531147174858606,
+              0.01464121319968112,
+              0.014293553307489182,
+              0.014679907597098444,
+              0.013389500124926654,
+              0.013542696984520129,
+              0.01539653144050404,
+              0.015318275735461687,
+              0.015263308912536556,
+              0.015267203235307626,
+              0.015220545705598889,
+              0.015203671207921945,
+              0.028057780716720514,
+              0.028167372987768686,
+              0.02835440433802426,
+              0.07786362341881364,
+              0.07803255252166497,
+              0.07807923519087588,
+              0.07971761196642736
+            ]
+          },
+          "input_roundtrip": {
+            "count": 11936,
+            "max": 3.214381286806957e-18,
+            "relative_max": 1.0852842555197561e-16,
+            "relative_rms": 3.9649293547311664e-16,
+            "rms": 1.165460139232826e-19,
+            "unit": "e/bohr^3"
+          },
+          "iteration": 1,
+          "lowest_10_nonzero_shells": [
+            {
+              "difference": {
+                "count": 3,
+                "max": 6.1843266746203485e-06,
+                "relative_max": 0.16614256999692426,
+                "relative_rms": 0.20291268984287944,
+                "rms": 4.72923913364391e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 0.3749404907248154
+            },
+            {
+              "difference": {
+                "count": 6,
+                "max": 1.4844569703872204e-06,
+                "relative_max": 0.04003072157726938,
+                "relative_rms": 0.048700738623373666,
+                "rms": 9.583064394451156e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 0.7498809814496308
+            },
+            {
+              "difference": {
+                "count": 4,
+                "max": 7.716753360368632e-05,
+                "relative_max": 0.010465193303924994,
+                "relative_rms": 0.010007481835276123,
+                "rms": 7.366281964392138e-05,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.124821472174446
+            },
+            {
+              "difference": {
+                "count": 3,
+                "max": 2.8227265586198355e-06,
+                "relative_max": 0.13564391529862374,
+                "relative_rms": 0.15165572891941587,
+                "rms": 2.07900823405735e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.4997619628992616
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 2.5390004508226434e-06,
+                "relative_max": 0.136252709911607,
+                "relative_rms": 0.13376028839154927,
+                "rms": 1.540228559589918e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.874702453624077
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 3.5690500320030276e-06,
+                "relative_max": 0.18132746480566295,
+                "relative_rms": 0.26075501223892306,
+                "rms": 2.3849956074710616e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 2.249642944348892
+            },
+            {
+              "difference": {
+                "count": 6,
+                "max": 1.4283062515598083e-05,
+                "relative_max": 0.07502214966819287,
+                "relative_rms": 0.058093926465614815,
+                "rms": 1.0856025910865326e-05,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 2.999523925798523
+            },
+            {
+              "difference": {
+                "count": 15,
+                "max": 5.478825610276685e-06,
+                "relative_max": 0.3864327036931779,
+                "relative_rms": 0.326996370348662,
+                "rms": 2.5214143752589594e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 3.3744644165233386
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 5.3967812770563416e-06,
+                "relative_max": 0.42409783491913183,
+                "relative_rms": 0.46346002433010897,
+                "rms": 2.990752427985452e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 3.749404907248154
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 6.078820636804253e-05,
+                "relative_max": 0.04011875941595029,
+                "relative_rms": 0.03923377806082297,
+                "rms": 5.931355330465794e-05,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 4.124345397972969
+            }
+          ],
+          "occupations": {
+            "available": true,
+            "baandi_e": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "qe_e": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "qe_spin_factor": 2.0
+          },
+          "potential": {
+            "input_hartree_vs_analytic": {
+              "count": 11936,
+              "max": 6.397344083151129e-17,
+              "relative_max": 9.998288480454006e-16,
+              "relative_rms": 1.1165230924003827e-15,
+              "rms": 1.3073539527840821e-18,
+              "unit": "Ha"
+            },
+            "output_density_response": {
+              "hartree": {
+                "count": 46656,
+                "max": 0.011480577853322349,
+                "rms": 0.0027900706874513514,
+                "unit": "Ha"
+              },
+              "local": {
+                "max": 0.0,
+                "reason": "same density-independent ionic potential",
+                "rms": 0.0,
+                "unit": "Ha"
+              },
+              "meaning": "BAANDI V[rho_out_B] minus BAANDI V[rho_out_QE]; not cross-code potentials",
+              "xc": {
+                "count": 46656,
+                "max": 0.006305286026651119,
+                "rms": 0.0015808053613327053,
+                "unit": "Ha"
+              }
+            },
+            "qe_input_local_difference": null,
+            "qe_input_xc_difference": null,
+            "reason": "QE potential grids absent; density-only Hartree formula is independently checkable"
+          },
+          "qe_dr2_ry": 0.43855533196919916,
+          "qe_ethr_rounding_ry": [
+            5e-05
+          ],
+          "qe_printed_ethr_ry": [
+            0.01
+          ],
+          "real_space": {
+            "count": 46656,
+            "max": 0.003140843383409836,
+            "rms": 0.0005820947800735446,
+            "unit": "e/bohr^3"
+          },
+          "solve_thresholds_ry": [
+            0.01
+          ],
+          "total_charge": {
+            "actual_e": 31.999999999999996,
+            "difference_e": -3.552713678800501e-15,
+            "expected_e": 32.0,
+            "input_e": 31.999999999999996
+          }
+        },
+        {
+          "all_g": {
+            "count": 11936,
+            "max": 4.016489166449717e-05,
+            "relative_max": 0.0013561031084596824,
+            "relative_rms": 0.003566175397087824,
+            "rms": 1.0996216999751067e-06,
+            "unit": "e/bohr^3"
+          },
+          "baandi_dr2_ry": 0.020087362754361158,
+          "bands": {
+            "available": true,
+            "baandi_ev": [
+              -5.7460611485376845,
+              -1.595268610697025,
+              -1.5853587421780253,
+              -1.5731126408872513,
+              -1.5639522246344475,
+              -1.5570569529646847,
+              -1.5546321373881669,
+              3.3129700356113623,
+              3.3229869213634116,
+              3.3268086671355386,
+              3.328192247429471,
+              3.332158273688111,
+              3.33684576128413,
+              6.219560348419563,
+              6.234339995759893,
+              6.2584249471985105,
+              6.751707825109614,
+              6.765224884109629,
+              6.771689670627059,
+              6.799004031474522
+            ],
+            "difference_ev": [
+              3.8851462315747654e-05,
+              -6.861069702512879e-05,
+              -5.874217802537274e-05,
+              8.735911274859731e-05,
+              0.00014777536555254933,
+              0.00014304703531520246,
+              0.0001678626118331028,
+              0.0001700356113620849,
+              0.00018692136341158516,
+              0.00010866713553836505,
+              0.00019224742947132611,
+              0.0001582736881111657,
+              0.00014576128412979727,
+              -0.001239651580436707,
+              -0.0012600042401071931,
+              -0.001275052801489096,
+              0.011007825109613734,
+              0.011024884109628985,
+              0.010989670627059134,
+              -0.0009959685254781192
+            ],
+            "qe_ev": [
+              -5.7461,
+              -1.5952,
+              -1.5853,
+              -1.5732,
+              -1.5641,
+              -1.5572,
+              -1.5548,
+              3.3128,
+              3.3228,
+              3.3267,
+              3.328,
+              3.332,
+              3.3367,
+              6.2208,
+              6.2356,
+              6.2597,
+              6.7407,
+              6.7542,
+              6.7607,
+              6.8
+            ],
+            "qe_print_rounding_ev": 5e-05
+          },
+          "density_distance_ha": 5.34321140167378e-05,
+          "density_distance_ry": 0.0001068642280334756,
+          "energy": {
+            "available": true,
+            "baandi_band_form_ha": -31.320810641108654,
+            "baandi_direct_orbital_total_ha": -31.32081064110873,
+            "convention": "k-out forced-stop energy: band sum - integral rho_out*(VH+Vxc)[rho_in] + EH[rho_out] + Exc[rho_out] + Ewald; descf=0",
+            "qe_output_density_in_baandi_kernels": {
+              "hartree_minus_qe_printed_ry": -2.7828850335254174e-09,
+              "hartree_ry": 5.154391037217115,
+              "xc_minus_qe_printed_ry": 4.164427025443729e-09,
+              "xc_ry": -19.509577375835573
+            },
+            "status": "diagnostic differences; no energy tolerance inferred from a density floor",
+            "terms": [
+              {
+                "baandi_ry": -62.64162128221731,
+                "difference_ry": -0.000366652217309138,
+                "qe_ry": -62.64125463,
+                "term": "total"
+              },
+              {
+                "baandi_ry": 18.921648106413972,
+                "difference_ry": 0.012198096413971626,
+                "qe_ry": 18.90945001,
+                "term": "one_electron"
+              },
+              {
+                "baandi_ry": 5.134068983514084,
+                "difference_ry": -0.020322056485916562,
+                "qe_ry": 5.15439104,
+                "term": "hartree"
+              },
+              {
+                "baandi_ry": -19.50182008417387,
+                "difference_ry": 0.007757295826131383,
+                "qe_ry": -19.50957738,
+                "term": "xc"
+              },
+              {
+                "baandi_ry": -67.1955182879715,
+                "difference_ry": 1.2028507967443147e-08,
+                "qe_ry": -67.1955183,
+                "term": "ewald"
+              }
+            ]
+          },
+          "ethr_ha": 0.000685,
+          "ethr_ry": 0.00137,
+          "ethr_source": "stdout (rounded)",
+          "first_failing_term": "rho_out all G",
+          "g0": {
+            "count": 1,
+            "max": 0.0,
+            "relative_max": 0.0,
+            "relative_rms": 0.0,
+            "rms": 0.0,
+            "unit": "e/bohr^3"
+          },
+          "inner_solve": {
+            "certified": false,
+            "converged": [
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true
+            ],
+            "h_columns": 20,
+            "iterations": 2,
+            "residuals_ha": [
+              0.00950460063787507,
+              0.007147628288870405,
+              0.006719341883884929,
+              0.006217388876883467,
+              0.005981288649105485,
+              0.005824007560669825,
+              0.005853954913287412,
+              0.005191481373353699,
+              0.005164196916807233,
+              0.005166632855871332,
+              0.005163584326572397,
+              0.005162939423201329,
+              0.005159270324023945,
+              0.00929494401600172,
+              0.009325631572153758,
+              0.009399533000195028,
+              0.031231208085871924,
+              0.0313650916913195,
+              0.03139808282598179,
+              0.0344889556720396
+            ]
+          },
+          "input_roundtrip": {
+            "count": 11936,
+            "max": 4.422694427346622e-18,
+            "relative_max": 1.493251795819863e-16,
+            "relative_rms": 4.565626943072587e-16,
+            "rms": 1.3919619962814045e-19,
+            "unit": "e/bohr^3"
+          },
+          "iteration": 2,
+          "lowest_10_nonzero_shells": [
+            {
+              "difference": {
+                "count": 3,
+                "max": 8.642510192178469e-06,
+                "relative_max": 0.13961498474507716,
+                "relative_rms": 0.1666082167104538,
+                "rms": 7.1938802494395666e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 0.3749404907248154
+            },
+            {
+              "difference": {
+                "count": 6,
+                "max": 2.634417320789909e-06,
+                "relative_max": 0.0753087134138633,
+                "relative_rms": 0.08837789984830667,
+                "rms": 1.6229069480973831e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 0.7498809814496308
+            },
+            {
+              "difference": {
+                "count": 4,
+                "max": 2.104737453663149e-05,
+                "relative_max": 0.0029656947130018412,
+                "relative_rms": 0.0025793485663298163,
+                "rms": 1.8255385802328426e-05,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.124821472174446
+            },
+            {
+              "difference": {
+                "count": 3,
+                "max": 1.7371341802422677e-06,
+                "relative_max": 0.08454663960111987,
+                "relative_rms": 0.09627334570098028,
+                "rms": 1.3173567070291325e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.4997619628992616
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 1.9049194315038235e-06,
+                "relative_max": 0.10090476099911148,
+                "relative_rms": 0.08677306004808032,
+                "rms": 1.0478504294315356e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.874702453624077
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 9.124401133160737e-07,
+                "relative_max": 0.03575865876317083,
+                "relative_rms": 0.04102333579148315,
+                "rms": 5.743841626910219e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 2.249642944348892
+            },
+            {
+              "difference": {
+                "count": 6,
+                "max": 3.3440144060758552e-06,
+                "relative_max": 0.009687911394309358,
+                "relative_rms": 0.008303255322929656,
+                "rms": 2.8194711117940224e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 2.999523925798523
+            },
+            {
+              "difference": {
+                "count": 15,
+                "max": 2.2516310346593003e-06,
+                "relative_max": 0.10706368775092695,
+                "relative_rms": 0.14287139623643708,
+                "rms": 1.4659388677318063e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 3.3744644165233386
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 1.2386012266351206e-06,
+                "relative_max": 0.06657351964432538,
+                "relative_rms": 0.0814003049790905,
+                "rms": 7.842026017829856e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 3.749404907248154
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 5.721980107185052e-06,
+                "relative_max": 0.0038407477284692166,
+                "relative_rms": 0.003617515490230521,
+                "rms": 5.3743406851321325e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 4.124345397972969
+            }
+          ],
+          "occupations": {
+            "available": true,
+            "baandi_e": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "qe_e": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "qe_spin_factor": 2.0
+          },
+          "potential": {
+            "input_hartree_vs_analytic": {
+              "count": 11936,
+              "max": 8.441528768080324e-17,
+              "relative_max": 1.0982959949375021e-15,
+              "relative_rms": 1.1570536652883587e-15,
+              "rms": 1.6340232759688385e-18,
+              "unit": "Ha"
+            },
+            "output_density_response": {
+              "hartree": {
+                "count": 46656,
+                "max": 0.002669257567566863,
+                "rms": 0.0009131260366427922,
+                "unit": "Ha"
+              },
+              "local": {
+                "max": 0.0,
+                "reason": "same density-independent ionic potential",
+                "rms": 0.0,
+                "unit": "Ha"
+              },
+              "meaning": "BAANDI V[rho_out_B] minus BAANDI V[rho_out_QE]; not cross-code potentials",
+              "xc": {
+                "count": 46656,
+                "max": 0.0029582380870679104,
+                "rms": 0.0008032539994223275,
+                "unit": "Ha"
+              }
+            },
+            "qe_input_local_difference": null,
+            "qe_input_xc_difference": null,
+            "reason": "QE potential grids absent; density-only Hartree formula is independently checkable"
+          },
+          "qe_dr2_ry": 0.019564039711984147,
+          "qe_ethr_rounding_ry": [
+            5e-06
+          ],
+          "qe_printed_ethr_ry": [
+            0.00137
+          ],
+          "real_space": {
+            "count": 46656,
+            "max": 0.000784834464789691,
+            "rms": 0.00016989778016300315,
+            "unit": "e/bohr^3"
+          },
+          "solve_thresholds_ry": [
+            0.00137
+          ],
+          "total_charge": {
+            "actual_e": 31.999999999999986,
+            "difference_e": 0.0,
+            "expected_e": 31.999999999999986,
+            "input_e": 32.0
+          }
+        },
+        {
+          "all_g": {
+            "count": 11936,
+            "max": 1.1804809389158165e-05,
+            "relative_max": 0.00039857044408666485,
+            "relative_rms": 0.0009000274385309065,
+            "rms": 2.7702824647628454e-07,
+            "unit": "e/bohr^3"
+          },
+          "baandi_dr2_ry": 0.0010999424552925845,
+          "bands": {
+            "available": true,
+            "baandi_ev": [
+              -5.643321033044094,
+              -1.474447072733703,
+              -1.4660191607540751,
+              -1.4636691668876143,
+              -1.4518899226097801,
+              -1.4483134181039525,
+              -1.4323906574481668,
+              3.424002938531005,
+              3.426129490916373,
+              3.429631262214484,
+              3.4345327969419928,
+              3.435850445706057,
+              3.4389125665246203,
+              6.358310680238294,
+              6.3715769354691245,
+              6.393322194971827,
+              6.813434926862395,
+              6.820836557487481,
+              6.82630340118842,
+              6.830232109330802
+            ],
+            "difference_ev": [
+              -2.1033044093954345e-05,
+              -4.7072733702968605e-05,
+              -1.916075407515372e-05,
+              -6.916688761426926e-05,
+              1.0077390219853655e-05,
+              -1.341810395261156e-05,
+              9.342551833046997e-06,
+              2.9385310051921465e-06,
+              2.9490916372942877e-05,
+              3.126221448379596e-05,
+              3.2796941992874196e-05,
+              -4.955429394337685e-05,
+              -8.74334753797612e-05,
+              -8.93197617060082e-05,
+              -2.3064530875416267e-05,
+              -7.780502817311685e-05,
+              -0.0007650731376047659,
+              -0.0004634425125189523,
+              -0.0012965988115807292,
+              0.0009321093308019002
+            ],
+            "qe_ev": [
+              -5.6433,
+              -1.4744,
+              -1.466,
+              -1.4636,
+              -1.4519,
+              -1.4483,
+              -1.4324,
+              3.424,
+              3.4261,
+              3.4296,
+              3.4345,
+              3.4359,
+              3.439,
+              6.3584,
+              6.3716,
+              6.3934,
+              6.8142,
+              6.8213,
+              6.8276,
+              6.8293
+            ],
+            "qe_print_rounding_ev": 5e-05
+          },
+          "density_distance_ha": 1.3136287497363924e-05,
+          "density_distance_ry": 2.6272574994727848e-05,
+          "energy": {
+            "available": true,
+            "baandi_band_form_ha": -31.321519209508516,
+            "baandi_direct_orbital_total_ha": -31.32151920950863,
+            "convention": "k-out forced-stop energy: band sum - integral rho_out*(VH+Vxc)[rho_in] + EH[rho_out] + Exc[rho_out] + Ewald; descf=0",
+            "qe_output_density_in_baandi_kernels": {
+              "hartree_minus_qe_printed_ry": 3.173075135975978e-09,
+              "hartree_ry": 5.073982273173075,
+              "xc_minus_qe_printed_ry": 2.762721607041385e-09,
+              "xc_ry": -19.47953007723728
+            },
+            "status": "diagnostic differences; no energy tolerance inferred from a density floor",
+            "terms": [
+              {
+                "baandi_ry": -62.64303841901703,
+                "difference_ry": 0.00012718098297170854,
+                "qe_ry": -62.6431656,
+                "term": "total"
+              },
+              {
+                "baandi_ry": 18.963739081038245,
+                "difference_ry": 0.005838581038243973,
+                "qe_ry": 18.9579005,
+                "term": "one_electron"
+              },
+              {
+                "baandi_ry": 5.064988300116425,
+                "difference_ry": -0.008993969883575481,
+                "qe_ry": 5.07398227,
+                "term": "hartree"
+              },
+              {
+                "baandi_ry": -19.47624751220021,
+                "difference_ry": 0.0032825677997898595,
+                "qe_ry": -19.47953008,
+                "term": "xc"
+              },
+              {
+                "baandi_ry": -67.1955182879715,
+                "difference_ry": 1.2028507967443147e-08,
+                "qe_ry": -67.1955183,
+                "term": "ewald"
+              }
+            ]
+          },
+          "ethr_ha": 3.055e-05,
+          "ethr_ry": 6.11e-05,
+          "ethr_source": "stdout (rounded)",
+          "first_failing_term": "rho_out all G",
+          "g0": {
+            "count": 1,
+            "max": 3.122502256758253e-17,
+            "relative_max": 1.0542627755436393e-15,
+            "relative_rms": 1.0542627755436393e-15,
+            "rms": 3.122502256758253e-17,
+            "unit": "e/bohr^3"
+          },
+          "inner_solve": {
+            "certified": false,
+            "converged": [
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true
+            ],
+            "h_columns": 32,
+            "iterations": 4,
+            "residuals_ha": [
+              0.0008964615179166078,
+              0.002094235891894809,
+              0.00197708813563223,
+              0.0022092066265836765,
+              0.0019771809534000423,
+              0.002317568748273872,
+              0.0009342613027693964,
+              0.0018620420379768523,
+              0.001702522298541941,
+              0.001712075903207462,
+              0.001985407636857281,
+              0.0010473484874505598,
+              0.0009751216425811352,
+              0.0006547253735054215,
+              0.0009659169928011513,
+              0.0006895847721412159,
+              0.0052076734969670945,
+              0.005063144734694834,
+              0.005614299992913217,
+              0.00784735487010159
+            ]
+          },
+          "input_roundtrip": {
+            "count": 11936,
+            "max": 3.576224061345498e-18,
+            "relative_max": 1.2074546613120198e-16,
+            "relative_rms": 4.516147694786802e-16,
+            "rms": 1.3899991600285817e-19,
+            "unit": "e/bohr^3"
+          },
+          "iteration": 3,
+          "lowest_10_nonzero_shells": [
+            {
+              "difference": {
+                "count": 3,
+                "max": 1.1804809389158165e-05,
+                "relative_max": 0.4639798893746499,
+                "relative_rms": 0.47509409227014254,
+                "rms": 8.871702202656087e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 0.3749404907248154
+            },
+            {
+              "difference": {
+                "count": 6,
+                "max": 3.9682752359852135e-06,
+                "relative_max": 0.111319738025438,
+                "relative_rms": 0.1278804064793542,
+                "rms": 2.454806091203134e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 0.7498809814496308
+            },
+            {
+              "difference": {
+                "count": 4,
+                "max": 7.363601320135053e-06,
+                "relative_max": 0.0010460694072360068,
+                "relative_rms": 0.0009038645829440795,
+                "rms": 6.347515738143992e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.124821472174446
+            },
+            {
+              "difference": {
+                "count": 3,
+                "max": 3.220341279167896e-06,
+                "relative_max": 0.16742594045103804,
+                "relative_rms": 0.1919468459970299,
+                "rms": 2.4131010315330436e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.4997619628992616
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 2.239858340781059e-06,
+                "relative_max": 0.09737225306083219,
+                "relative_rms": 0.13082032756872128,
+                "rms": 1.5189047159175417e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.874702453624077
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 5.283660272692471e-06,
+                "relative_max": 0.23593314667668724,
+                "relative_rms": 0.3264657410856089,
+                "rms": 3.096272880066009e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 2.249642944348892
+            },
+            {
+              "difference": {
+                "count": 6,
+                "max": 4.512532899937542e-06,
+                "relative_max": 0.012464253158612326,
+                "relative_rms": 0.010320485254371828,
+                "rms": 3.6812694092222874e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 2.999523925798523
+            },
+            {
+              "difference": {
+                "count": 15,
+                "max": 3.0804198539461456e-06,
+                "relative_max": 0.12790402398630646,
+                "relative_rms": 0.1396146072152198,
+                "rms": 1.4500708912923342e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 3.3744644165233386
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 1.3365192160106413e-06,
+                "relative_max": 0.07774652860001165,
+                "relative_rms": 0.08417839917245462,
+                "rms": 7.475500954610273e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 3.749404907248154
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 1.8754279822586611e-06,
+                "relative_max": 0.00127120359775348,
+                "relative_rms": 0.0007576190639688833,
+                "rms": 1.1150661510814529e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 4.124345397972969
+            }
+          ],
+          "occupations": {
+            "available": true,
+            "baandi_e": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "qe_e": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "qe_spin_factor": 2.0
+          },
+          "potential": {
+            "input_hartree_vs_analytic": {
+              "count": 11936,
+              "max": 8.441528768080324e-17,
+              "relative_max": 1.0696169986040327e-15,
+              "relative_rms": 1.160219420286788e-15,
+              "rms": 1.6847949193406047e-18,
+              "unit": "Ha"
+            },
+            "output_density_response": {
+              "hartree": {
+                "count": 46656,
+                "max": 0.0021520893104963745,
+                "rms": 0.0007801728391438202,
+                "unit": "Ha"
+              },
+              "local": {
+                "max": 0.0,
+                "reason": "same density-independent ionic potential",
+                "rms": 0.0,
+                "unit": "Ha"
+              },
+              "meaning": "BAANDI V[rho_out_B] minus BAANDI V[rho_out_QE]; not cross-code potentials",
+              "xc": {
+                "count": 46656,
+                "max": 0.0008291847647484141,
+                "rms": 0.00014361283791681045,
+                "unit": "Ha"
+              }
+            },
+            "qe_input_local_difference": null,
+            "qe_input_xc_difference": null,
+            "reason": "QE potential grids absent; density-only Hartree formula is independently checkable"
+          },
+          "qe_dr2_ry": 0.0008539880468766092,
+          "qe_ethr_rounding_ry": [
+            5e-08
+          ],
+          "qe_printed_ethr_ry": [
+            6.11e-05
+          ],
+          "real_space": {
+            "count": 46656,
+            "max": 0.00024180057859229942,
+            "rms": 4.280243298202785e-05,
+            "unit": "e/bohr^3"
+          },
+          "solve_thresholds_ry": [
+            6.11e-05
+          ],
+          "total_charge": {
+            "actual_e": 31.99999999999997,
+            "difference_e": -3.552713678800501e-14,
+            "expected_e": 32.00000000000001,
+            "input_e": 31.99999999999999
+          }
+        },
+        {
+          "agreement": false,
+          "first_failing_term": "k=1 rho_out all G",
+          "steps": 3,
+          "summary": "refscf-map"
+        }
+      ]
+    },
+    "reference": {
+      "command": "target/release/dft-cli refscf-map target/scratch/si8-map.toml --qe tests/reference/qe/i25-si8/si8-np1 --steps 3 --ethr-from-stdout --solver reference",
+      "exit_code": 4,
+      "stderr": "error: refscf-map first failing term: k=1 rho_out all G",
+      "records": [
+        {
+          "density_atol_e_bohr3": 2.72e-16,
+          "density_start": "QE input at EVERY step; never BAANDI mixed/output density",
+          "electrons": 32.0,
+          "floor_provenance": "user/dev08 relay; QE np8 vs np1 1.7e-17..6.8e-17 e/bohr^3",
+          "g_vectors": 11936,
+          "grid": [
+            36,
+            36,
+            36
+          ],
+          "input_sha256": "c2f5e26dff3c986dddcf1f002549dc0d7d395c00e84985731f4e339fc1c7c7b3",
+          "limits": [
+            "QE wavefunctions are not supplied; loose solves can differ even at the same density and ethr",
+            "stdout ethr is rounded; its printed precision is reported; --ethr accepts an exact value",
+            "diagnostic density transforms and output orbitals are replicated; not a scaling benchmark"
+          ],
+          "orbital_start": "BAANDI atomic at k1, preceding BAANDI orbitals thereafter",
+          "pseudopotentials": [
+            {
+              "path": "/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF",
+              "sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+              "species": "Si"
+            }
+          ],
+          "qe_directory": "tests/reference/qe/i25-si8/si8-np1",
+          "qe_rank_floor_max_e_bohr3": 6.8e-17,
+          "ranks": 1,
+          "schema": "refscf-map-1",
+          "solver": "reference",
+          "volume_bohr3": 1080.4286448273454
+        },
+        {
+          "all_g": {
+            "count": 11936,
+            "max": 1.41156235899766e-05,
+            "relative_max": 0.00047659137706910386,
+            "relative_rms": 0.0011518142483053434,
+            "rms": 3.5828858259266594e-07,
+            "unit": "e/bohr^3"
+          },
+          "baandi_dr2_ry": 0.4343810694288668,
+          "bands": {
+            "available": true,
+            "baandi_ev": [
+              -6.292068704729074,
+              -2.240163596282122,
+              -2.2343405576091064,
+              -2.220317798393041,
+              -2.2103334815521714,
+              -2.204903194267085,
+              -2.1998278328043006,
+              2.7471121832054095,
+              2.7572265612845666,
+              2.7618340635957486,
+              2.7623829369925295,
+              2.7665190270860487,
+              2.770173866946274,
+              5.463691101242881,
+              5.478480343334398,
+              5.502656439978488,
+              6.53731470817094,
+              6.552931131993246,
+              6.5606745735724505,
+              6.624718526073048
+            ],
+            "difference_ev": [
+              0.0006312952709262021,
+              0.0005364037178781089,
+              0.0005594423908936719,
+              0.0005822016069587654,
+              0.0005665184478287344,
+              0.0004968057329151065,
+              0.0005721671956995245,
+              -0.00018781679459056733,
+              -0.00017343871543351597,
+              -0.0002659364042516543,
+              -0.000217063007470486,
+              -0.00018097291395147153,
+              -0.00022613305372587433,
+              0.0020911012428808107,
+              0.0020803433343976607,
+              0.002056439978487923,
+              -0.0007852918290600641,
+              -0.000668868006754586,
+              -0.00022542642754963538,
+              0.01631852607304829
+            ],
+            "qe_ev": [
+              -6.2927,
+              -2.2407,
+              -2.2349,
+              -2.2209,
+              -2.2109,
+              -2.2054,
+              -2.2004,
+              2.7473,
+              2.7574,
+              2.7621,
+              2.7626,
+              2.7667,
+              2.7704,
+              5.4616,
+              5.4764,
+              5.5006,
+              6.5381,
+              6.5536,
+              6.5609,
+              6.6084
+            ],
+            "qe_print_rounding_ev": 5e-05
+          },
+          "density_distance_ha": 9.832016808258354e-06,
+          "density_distance_ry": 1.966403361651671e-05,
+          "energy": {
+            "available": true,
+            "baandi_band_form_ha": -31.302316005941147,
+            "baandi_direct_orbital_total_ha": -31.30231600594125,
+            "convention": "k-out forced-stop energy: band sum - integral rho_out*(VH+Vxc)[rho_in] + EH[rho_out] + Exc[rho_out] + Ewald; descf=0",
+            "qe_output_density_in_baandi_kernels": {
+              "hartree_minus_qe_printed_ry": -4.063446468194343e-09,
+              "hartree_ry": 5.566146935936554,
+              "xc_minus_qe_printed_ry": -2.2205774996564287e-09,
+              "xc_ry": -19.655853622220576
+            },
+            "status": "diagnostic differences; no energy tolerance inferred from a density floor",
+            "terms": [
+              {
+                "baandi_ry": -62.604632011882295,
+                "difference_ry": -0.0007179218822912503,
+                "qe_ry": -62.60391409,
+                "term": "total"
+              },
+              {
+                "baandi_ry": 18.692074101102516,
+                "difference_ry": 0.010763201102516717,
+                "qe_ry": 18.6813109,
+                "term": "one_electron"
+              },
+              {
+                "baandi_ry": 5.547386009463978,
+                "difference_ry": -0.018760930536021903,
+                "qe_ry": 5.56614694,
+                "term": "hartree"
+              },
+              {
+                "baandi_ry": -19.648573834477293,
+                "difference_ry": 0.00727978552270514,
+                "qe_ry": -19.65585362,
+                "term": "xc"
+              },
+              {
+                "baandi_ry": -67.1955182879715,
+                "difference_ry": 1.2028507967443147e-08,
+                "qe_ry": -67.1955183,
+                "term": "ewald"
+              }
+            ]
+          },
+          "ethr_ha": 0.005,
+          "ethr_ry": 0.01,
+          "ethr_source": "stdout (rounded)",
+          "first_failing_term": "rho_out all G",
+          "g0": {
+            "count": 1,
+            "max": 1.734723475976807e-17,
+            "relative_max": 5.857015419686886e-16,
+            "relative_rms": 5.857015419686885e-16,
+            "rms": 1.734723475976807e-17,
+            "unit": "e/bohr^3"
+          },
+          "inner_solve": {
+            "certified": false,
+            "converged": [
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true
+            ],
+            "h_columns": 64,
+            "iterations": 3,
+            "residuals_ha": [
+              0.016880123312132202,
+              0.01384358465162294,
+              0.01361074643889269,
+              0.013492977475515009,
+              0.013425930007891971,
+              0.013378324829179824,
+              0.013243911137365933,
+              0.01527658213636487,
+              0.015208476131726432,
+              0.015150556297075209,
+              0.01515792834252146,
+              0.01511130222772526,
+              0.015103341489963824,
+              0.027066437710359444,
+              0.02708130828837514,
+              0.027108395904470877,
+              0.029138130179083864,
+              0.02927478218194622,
+              0.029566650233993016,
+              0.039963823434316426
+            ]
+          },
+          "input_roundtrip": {
+            "count": 11936,
+            "max": 3.214381286806957e-18,
+            "relative_max": 1.0852842555197561e-16,
+            "relative_rms": 3.9649293547311664e-16,
+            "rms": 1.165460139232826e-19,
+            "unit": "e/bohr^3"
+          },
+          "iteration": 1,
+          "lowest_10_nonzero_shells": [
+            {
+              "difference": {
+                "count": 3,
+                "max": 1.2398463343596889e-06,
+                "relative_max": 0.03330859885477027,
+                "relative_rms": 0.040450127842364084,
+                "rms": 9.427617745402447e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 0.3749404907248154
+            },
+            {
+              "difference": {
+                "count": 6,
+                "max": 2.1044526849629213e-06,
+                "relative_max": 0.056749883078330655,
+                "relative_rms": 0.06606506229779575,
+                "rms": 1.299992082500671e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 0.7498809814496308
+            },
+            {
+              "difference": {
+                "count": 4,
+                "max": 1.41156235899766e-05,
+                "relative_max": 0.0019143119207776784,
+                "relative_rms": 0.0018127501969654718,
+                "rms": 1.3343245885078954e-05,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.124821472174446
+            },
+            {
+              "difference": {
+                "count": 3,
+                "max": 5.44298490335984e-07,
+                "relative_max": 0.026155837906028826,
+                "relative_rms": 0.03076478169979354,
+                "rms": 4.217462467694425e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.4997619628992616
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 1.5451092497351617e-06,
+                "relative_max": 0.08291661481103516,
+                "relative_rms": 0.09229699358212441,
+                "rms": 1.0627852794645792e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.874702453624077
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 1.1982876357946441e-06,
+                "relative_max": 0.060879633840456644,
+                "relative_rms": 0.08354803942464654,
+                "rms": 7.641721067207052e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 2.249642944348892
+            },
+            {
+              "difference": {
+                "count": 6,
+                "max": 9.274448359572787e-07,
+                "relative_max": 0.004871427623886307,
+                "relative_rms": 0.003022780694939484,
+                "rms": 5.648677502724767e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 2.999523925798523
+            },
+            {
+              "difference": {
+                "count": 15,
+                "max": 1.4431998182382528e-06,
+                "relative_max": 0.10179181587477953,
+                "relative_rms": 0.08758229517295466,
+                "rms": 6.753324443075575e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 3.3744644165233386
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 4.2393093372287174e-07,
+                "relative_max": 0.03331396658809579,
+                "relative_rms": 0.04208458478429026,
+                "rms": 2.715759019481819e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 3.749404907248154
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 1.2287480246234935e-06,
+                "relative_max": 0.0008109442493537666,
+                "relative_rms": 0.0006165429791236152,
+                "rms": 9.320885386099899e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 4.124345397972969
+            }
+          ],
+          "occupations": {
+            "available": true,
+            "baandi_e": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "qe_e": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "qe_spin_factor": 2.0
+          },
+          "potential": {
+            "input_hartree_vs_analytic": {
+              "count": 11936,
+              "max": 6.397344083151129e-17,
+              "relative_max": 9.998288480454006e-16,
+              "relative_rms": 1.1165230924003827e-15,
+              "rms": 1.3073539527840821e-18,
+              "unit": "Ha"
+            },
+            "output_density_response": {
+              "hartree": {
+                "count": 46656,
+                "max": 0.0013596043402808178,
+                "rms": 0.0004397341999594242,
+                "unit": "Ha"
+              },
+              "local": {
+                "max": 0.0,
+                "reason": "same density-independent ionic potential",
+                "rms": 0.0,
+                "unit": "Ha"
+              },
+              "meaning": "BAANDI V[rho_out_B] minus BAANDI V[rho_out_QE]; not cross-code potentials",
+              "xc": {
+                "count": 46656,
+                "max": 0.002486593322002989,
+                "rms": 0.00041352196138842197,
+                "unit": "Ha"
+              }
+            },
+            "qe_input_local_difference": null,
+            "qe_input_xc_difference": null,
+            "reason": "QE potential grids absent; density-only Hartree formula is independently checkable"
+          },
+          "qe_dr2_ry": 0.43855533196919916,
+          "qe_ethr_rounding_ry": [
+            5e-05
+          ],
+          "qe_printed_ethr_ry": [
+            0.01
+          ],
+          "real_space": {
+            "count": 46656,
+            "max": 0.0004257004797865588,
+            "rms": 5.5357615115833085e-05,
+            "unit": "e/bohr^3"
+          },
+          "solve_thresholds_ry": [
+            0.01
+          ],
+          "total_charge": {
+            "actual_e": 31.999999999999986,
+            "difference_e": -1.4210854715202004e-14,
+            "expected_e": 32.0,
+            "input_e": 31.999999999999996
+          }
+        },
+        {
+          "all_g": {
+            "count": 11936,
+            "max": 1.026520345230983e-05,
+            "relative_max": 0.0003465881204642532,
+            "relative_rms": 0.0008957940900082123,
+            "rms": 2.76215976613734e-07,
+            "unit": "e/bohr^3"
+          },
+          "baandi_dr2_ry": 0.019299172067476437,
+          "bands": {
+            "available": true,
+            "baandi_ev": [
+              -5.746023097818816,
+              -1.5950653175844647,
+              -1.585234357601176,
+              -1.5730730285076726,
+              -1.5639381285177865,
+              -1.55707632542254,
+              -1.5546420724783654,
+              3.3127250884352595,
+              3.3227472128088356,
+              3.326567057427896,
+              3.3279528677188,
+              3.3319165884122497,
+              3.33660207115448,
+              6.220540785818722,
+              6.23531500302102,
+              6.259403869216905,
+              6.74031224761955,
+              6.753976423142914,
+              6.7607697391745,
+              6.8128230708426125
+            ],
+            "difference_ev": [
+              7.690218118394654e-05,
+              0.00013468241553526994,
+              6.564239882389522e-05,
+              0.0001269714923273213,
+              0.0001618714822135825,
+              0.00012367457745998678,
+              0.00015792752163457102,
+              -7.491156474070948e-05,
+              -5.2787191164416214e-05,
+              -0.0001329425721041666,
+              -4.713228119967994e-05,
+              -8.341158775015955e-05,
+              -9.792884551984571e-05,
+              -0.0002592141812778337,
+              -0.00028499697897999,
+              -0.00029613078309420615,
+              -0.00038775238045030136,
+              -0.00022357685708573882,
+              6.973917450014966e-05,
+              0.012823070842612694
+            ],
+            "qe_ev": [
+              -5.7461,
+              -1.5952,
+              -1.5853,
+              -1.5732,
+              -1.5641,
+              -1.5572,
+              -1.5548,
+              3.3128,
+              3.3228,
+              3.3267,
+              3.328,
+              3.332,
+              3.3367,
+              6.2208,
+              6.2356,
+              6.2597,
+              6.7407,
+              6.7542,
+              6.7607,
+              6.8
+            ],
+            "qe_print_rounding_ev": 5e-05
+          },
+          "density_distance_ha": 6.412884881123497e-06,
+          "density_distance_ry": 1.2825769762246994e-05,
+          "energy": {
+            "available": true,
+            "baandi_band_form_ha": -31.32077469197963,
+            "baandi_direct_orbital_total_ha": -31.32077469197975,
+            "convention": "k-out forced-stop energy: band sum - integral rho_out*(VH+Vxc)[rho_in] + EH[rho_out] + Exc[rho_out] + Ewald; descf=0",
+            "qe_output_density_in_baandi_kernels": {
+              "hartree_minus_qe_printed_ry": -2.7828850335254174e-09,
+              "hartree_ry": 5.154391037217115,
+              "xc_minus_qe_printed_ry": 4.164427025443729e-09,
+              "xc_ry": -19.509577375835573
+            },
+            "status": "diagnostic differences; no energy tolerance inferred from a density floor",
+            "terms": [
+              {
+                "baandi_ry": -62.64154938395926,
+                "difference_ry": -0.00029475395925970815,
+                "qe_ry": -62.64125463,
+                "term": "total"
+              },
+              {
+                "baandi_ry": 18.918054692823983,
+                "difference_ry": 0.008604682823982301,
+                "qe_ry": 18.90945001,
+                "term": "one_electron"
+              },
+              {
+                "baandi_ry": 5.140135744074067,
+                "difference_ry": -0.014255295925932998,
+                "qe_ry": 5.15439104,
+                "term": "hartree"
+              },
+              {
+                "baandi_ry": -19.50422153288581,
+                "difference_ry": 0.00535584711418835,
+                "qe_ry": -19.50957738,
+                "term": "xc"
+              },
+              {
+                "baandi_ry": -67.1955182879715,
+                "difference_ry": 1.2028507967443147e-08,
+                "qe_ry": -67.1955183,
+                "term": "ewald"
+              }
+            ]
+          },
+          "ethr_ha": 0.000685,
+          "ethr_ry": 0.00137,
+          "ethr_source": "stdout (rounded)",
+          "first_failing_term": "rho_out all G",
+          "g0": {
+            "count": 1,
+            "max": 0.0,
+            "relative_max": 0.0,
+            "relative_rms": 0.0,
+            "rms": 0.0,
+            "unit": "e/bohr^3"
+          },
+          "inner_solve": {
+            "certified": false,
+            "converged": [
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true
+            ],
+            "h_columns": 40,
+            "iterations": 1,
+            "residuals_ha": [
+              0.01298103059931782,
+              0.008748099779701849,
+              0.007801678292239101,
+              0.0066957712843255515,
+              0.006101164619107292,
+              0.005694658558000704,
+              0.005792786809500702,
+              0.0036484515807199986,
+              0.0036384976011393628,
+              0.0036302357350939266,
+              0.0036353060961936165,
+              0.003624829610753047,
+              0.0036188430475954385,
+              0.010274589752763519,
+              0.010287484173365067,
+              0.010324588719847691,
+              0.011621713660135511,
+              0.01181328804358979,
+              0.012076966129088228,
+              0.026511166440696187
+            ]
+          },
+          "input_roundtrip": {
+            "count": 11936,
+            "max": 4.422694427346622e-18,
+            "relative_max": 1.493251795819863e-16,
+            "relative_rms": 4.565626943072587e-16,
+            "rms": 1.3919619962814045e-19,
+            "unit": "e/bohr^3"
+          },
+          "iteration": 2,
+          "lowest_10_nonzero_shells": [
+            {
+              "difference": {
+                "count": 3,
+                "max": 6.717483791298328e-07,
+                "relative_max": 0.010851724512817934,
+                "relative_rms": 0.009527204471173355,
+                "rms": 4.113696757024705e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 0.3749404907248154
+            },
+            {
+              "difference": {
+                "count": 6,
+                "max": 9.496065643052879e-07,
+                "relative_max": 0.027145907386361814,
+                "relative_rms": 0.03335964585872101,
+                "rms": 6.125920749770309e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 0.7498809814496308
+            },
+            {
+              "difference": {
+                "count": 4,
+                "max": 1.026520345230983e-05,
+                "relative_max": 0.0014464255175114023,
+                "relative_rms": 0.0014294286621303462,
+                "rms": 1.011680702822813e-05,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.124821472174446
+            },
+            {
+              "difference": {
+                "count": 3,
+                "max": 4.6342390853078694e-07,
+                "relative_max": 0.02255492674240654,
+                "relative_rms": 0.025284120042884183,
+                "rms": 3.4597535670232814e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.4997619628992616
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 5.19267471356333e-07,
+                "relative_max": 0.02750591926633858,
+                "relative_rms": 0.028370279734146638,
+                "rms": 3.42592617870643e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.874702453624077
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 9.637205148715142e-07,
+                "relative_max": 0.03776834504690413,
+                "relative_rms": 0.03501215083179864,
+                "rms": 4.9021915335587e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 2.249642944348892
+            },
+            {
+              "difference": {
+                "count": 6,
+                "max": 5.614886090883442e-06,
+                "relative_max": 0.016266831518065208,
+                "relative_rms": 0.016254051860719588,
+                "rms": 5.51926056571403e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 2.999523925798523
+            },
+            {
+              "difference": {
+                "count": 15,
+                "max": 6.971018063140778e-07,
+                "relative_max": 0.03314676737572622,
+                "relative_rms": 0.02974060840113482,
+                "rms": 3.0515495021176026e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 3.3744644165233386
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 4.298584527073551e-07,
+                "relative_max": 0.023104441954523228,
+                "relative_rms": 0.02622861926070642,
+                "rms": 2.526839607137196e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 3.749404907248154
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 1.0859708543739316e-06,
+                "relative_max": 0.000728932994171551,
+                "relative_rms": 0.0006643682472966273,
+                "rms": 9.870147926107877e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 4.124345397972969
+            }
+          ],
+          "occupations": {
+            "available": true,
+            "baandi_e": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "qe_e": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "qe_spin_factor": 2.0
+          },
+          "potential": {
+            "input_hartree_vs_analytic": {
+              "count": 11936,
+              "max": 8.441528768080324e-17,
+              "relative_max": 1.0982959949375021e-15,
+              "relative_rms": 1.1570536652883587e-15,
+              "rms": 1.6340232759688385e-18,
+              "unit": "Ha"
+            },
+            "output_density_response": {
+              "hartree": {
+                "count": 46656,
+                "max": 0.0008742701665786501,
+                "rms": 0.00033664080208260566,
+                "unit": "Ha"
+              },
+              "local": {
+                "max": 0.0,
+                "reason": "same density-independent ionic potential",
+                "rms": 0.0,
+                "unit": "Ha"
+              },
+              "meaning": "BAANDI V[rho_out_B] minus BAANDI V[rho_out_QE]; not cross-code potentials",
+              "xc": {
+                "count": 46656,
+                "max": 0.0016597921914697777,
+                "rms": 0.00019164169386514404,
+                "unit": "Ha"
+              }
+            },
+            "qe_input_local_difference": null,
+            "qe_input_xc_difference": null,
+            "reason": "QE potential grids absent; density-only Hartree formula is independently checkable"
+          },
+          "qe_dr2_ry": 0.019564039711984147,
+          "qe_ethr_rounding_ry": [
+            5e-06
+          ],
+          "qe_printed_ethr_ry": [
+            0.00137
+          ],
+          "real_space": {
+            "count": 46656,
+            "max": 0.00016578833267386073,
+            "rms": 4.2676932688113404e-05,
+            "unit": "e/bohr^3"
+          },
+          "solve_thresholds_ry": [
+            0.00137
+          ],
+          "total_charge": {
+            "actual_e": 31.999999999999986,
+            "difference_e": 0.0,
+            "expected_e": 31.999999999999986,
+            "input_e": 32.0
+          }
+        },
+        {
+          "all_g": {
+            "count": 11936,
+            "max": 4.814860350979874e-06,
+            "relative_max": 0.00016256603262631563,
+            "relative_rms": 0.0005043331639986064,
+            "rms": 1.5523363631049192e-07,
+            "unit": "e/bohr^3"
+          },
+          "baandi_dr2_ry": 0.0009474386925779836,
+          "bands": {
+            "available": true,
+            "baandi_ev": [
+              -5.64329877198171,
+              -1.4744335287593104,
+              -1.4660068247007572,
+              -1.4636497789087053,
+              -1.4518774740206553,
+              -1.4483552253335175,
+              -1.4323653604520283,
+              3.4239783118451874,
+              3.426108228400293,
+              3.4296111043410438,
+              3.434512794451702,
+              3.435905715092524,
+              3.4389409381639107,
+              6.35835804172565,
+              6.371617435533117,
+              6.393370160066564,
+              6.814136673100868,
+              6.821191296449335,
+              6.82787412976098,
+              6.829382180845938
+            ],
+            "difference_ev": [
+              1.2280182897228542e-06,
+              -3.352875931050825e-05,
+              -6.8247007571908824e-06,
+              -4.977890870527801e-05,
+              2.25259793447119e-05,
+              -5.5225333517539e-05,
+              3.463954797155999e-05,
+              -2.1688154812515847e-05,
+              8.228400293130989e-06,
+              1.110434104356628e-05,
+              1.2794451702102805e-05,
+              5.715092523672638e-06,
+              -5.9061836089391306e-05,
+              -4.195827435005128e-05,
+              1.7435533116838542e-05,
+              -2.9839933436193178e-05,
+              -6.332689913168821e-05,
+              -0.00010870355066483484,
+              0.00027412976097984654,
+              8.218084593814012e-05
+            ],
+            "qe_ev": [
+              -5.6433,
+              -1.4744,
+              -1.466,
+              -1.4636,
+              -1.4519,
+              -1.4483,
+              -1.4324,
+              3.424,
+              3.4261,
+              3.4296,
+              3.4345,
+              3.4359,
+              3.439,
+              6.3584,
+              6.3716,
+              6.3934,
+              6.8142,
+              6.8213,
+              6.8276,
+              6.8293
+            ],
+            "qe_print_rounding_ev": 5e-05
+          },
+          "density_distance_ha": 2.7984652057778772e-06,
+          "density_distance_ry": 5.5969304115557544e-06,
+          "energy": {
+            "available": true,
+            "baandi_band_form_ha": -31.32156456481873,
+            "baandi_direct_orbital_total_ha": -31.321564564818942,
+            "convention": "k-out forced-stop energy: band sum - integral rho_out*(VH+Vxc)[rho_in] + EH[rho_out] + Exc[rho_out] + Ewald; descf=0",
+            "qe_output_density_in_baandi_kernels": {
+              "hartree_minus_qe_printed_ry": 3.173075135975978e-09,
+              "hartree_ry": 5.073982273173075,
+              "xc_minus_qe_printed_ry": 2.762721607041385e-09,
+              "xc_ry": -19.47953007723728
+            },
+            "status": "diagnostic differences; no energy tolerance inferred from a density floor",
+            "terms": [
+              {
+                "baandi_ry": -62.64312912963746,
+                "difference_ry": 3.64703625450602e-05,
+                "qe_ry": -62.6431656,
+                "term": "total"
+              },
+              {
+                "baandi_ry": 18.961723742521603,
+                "difference_ry": 0.0038232425216015997,
+                "qe_ry": 18.9579005,
+                "term": "one_electron"
+              },
+              {
+                "baandi_ry": 5.068058421711961,
+                "difference_ry": -0.005923848288039046,
+                "qe_ry": 5.07398227,
+                "term": "hartree"
+              },
+              {
+                "baandi_ry": -19.477393005899522,
+                "difference_ry": 0.0021370741004780314,
+                "qe_ry": -19.47953008,
+                "term": "xc"
+              },
+              {
+                "baandi_ry": -67.1955182879715,
+                "difference_ry": 1.2028507967443147e-08,
+                "qe_ry": -67.1955183,
+                "term": "ewald"
+              }
+            ]
+          },
+          "ethr_ha": 3.055e-05,
+          "ethr_ry": 6.11e-05,
+          "ethr_source": "stdout (rounded)",
+          "first_failing_term": "rho_out all G",
+          "g0": {
+            "count": 1,
+            "max": 2.0816681711721685e-17,
+            "relative_max": 7.028418503624262e-16,
+            "relative_rms": 7.028418503624262e-16,
+            "rms": 2.0816681711721685e-17,
+            "unit": "e/bohr^3"
+          },
+          "inner_solve": {
+            "certified": false,
+            "converged": [
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true,
+              true
+            ],
+            "h_columns": 49,
+            "iterations": 4,
+            "residuals_ha": [
+              0.0022495567468785622,
+              0.0023022375271413817,
+              0.0022615072229654897,
+              0.0023388724221649008,
+              0.002233435204510653,
+              0.001320854114774122,
+              0.0015691106874005623,
+              0.0012721673287807809,
+              0.001139432896154997,
+              0.0011562255110050715,
+              0.0014030702113145975,
+              0.001559638583838402,
+              0.0013524877845187942,
+              0.001858522477009774,
+              0.0019013621600323615,
+              0.0018784624918756984,
+              0.007060228111199819,
+              0.006715338505251156,
+              0.007924075765994252,
+              0.004196430266690252
+            ]
+          },
+          "input_roundtrip": {
+            "count": 11936,
+            "max": 3.576224061345498e-18,
+            "relative_max": 1.2074546613120198e-16,
+            "relative_rms": 4.516147694786802e-16,
+            "rms": 1.3899991600285817e-19,
+            "unit": "e/bohr^3"
+          },
+          "iteration": 3,
+          "lowest_10_nonzero_shells": [
+            {
+              "difference": {
+                "count": 3,
+                "max": 4.653027826842242e-06,
+                "relative_max": 0.18288404879609746,
+                "relative_rms": 0.17807655147222445,
+                "rms": 3.325324729652126e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 0.3749404907248154
+            },
+            {
+              "difference": {
+                "count": 6,
+                "max": 1.421354955184162e-06,
+                "relative_max": 0.03987245134043133,
+                "relative_rms": 0.05247221629746566,
+                "rms": 1.0072623299546893e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 0.7498809814496308
+            },
+            {
+              "difference": {
+                "count": 4,
+                "max": 4.814860350979874e-06,
+                "relative_max": 0.0006839965791604389,
+                "relative_rms": 0.0005962261511515282,
+                "rms": 4.187081725893321e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.124821472174446
+            },
+            {
+              "difference": {
+                "count": 3,
+                "max": 1.4934460934978898e-06,
+                "relative_max": 0.07764444667225498,
+                "relative_rms": 0.07562443600359811,
+                "rms": 9.507288519458714e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.4997619628992616
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 1.391248672566115e-06,
+                "relative_max": 0.06048106496253479,
+                "relative_rms": 0.06090102794656789,
+                "rms": 7.070985088588412e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 1.874702453624077
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 2.6436220033814226e-06,
+                "relative_max": 0.11804658620938736,
+                "relative_rms": 0.13758072711932082,
+                "rms": 1.304845870757412e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 2.249642944348892
+            },
+            {
+              "difference": {
+                "count": 6,
+                "max": 3.2299416904064602e-06,
+                "relative_max": 0.008921555102089024,
+                "relative_rms": 0.007295900420084985,
+                "rms": 2.6024139725226178e-06,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 2.999523925798523
+            },
+            {
+              "difference": {
+                "count": 15,
+                "max": 1.6668509769868892e-06,
+                "relative_max": 0.06921035360456312,
+                "relative_rms": 0.08216764472530426,
+                "rms": 8.534129214613086e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 3.3744644165233386
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 7.654152067274768e-07,
+                "relative_max": 0.04452489313123935,
+                "relative_rms": 0.04580981672894443,
+                "rms": 4.068161571784853e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 3.749404907248154
+            },
+            {
+              "difference": {
+                "count": 12,
+                "max": 8.26599497413323e-07,
+                "relative_max": 0.0005602861133316024,
+                "relative_rms": 0.00038454957719024843,
+                "rms": 5.659812923545201e-07,
+                "unit": "e/bohr^3"
+              },
+              "g2_bohr_minus2": 4.124345397972969
+            }
+          ],
+          "occupations": {
+            "available": true,
+            "baandi_e": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "qe_e": [
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              2.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0
+            ],
+            "qe_spin_factor": 2.0
+          },
+          "potential": {
+            "input_hartree_vs_analytic": {
+              "count": 11936,
+              "max": 8.441528768080324e-17,
+              "relative_max": 1.0696169986040327e-15,
+              "relative_rms": 1.160219420286788e-15,
+              "rms": 1.6847949193406047e-18,
+              "unit": "Ha"
+            },
+            "output_density_response": {
+              "hartree": {
+                "count": 46656,
+                "max": 0.001184083992372631,
+                "rms": 0.0003168056439133753,
+                "unit": "Ha"
+              },
+              "local": {
+                "max": 0.0,
+                "reason": "same density-independent ionic potential",
+                "rms": 0.0,
+                "unit": "Ha"
+              },
+              "meaning": "BAANDI V[rho_out_B] minus BAANDI V[rho_out_QE]; not cross-code potentials",
+              "xc": {
+                "count": 46656,
+                "max": 0.0008098879873586484,
+                "rms": 7.970424641185031e-05,
+                "unit": "Ha"
+              }
+            },
+            "qe_input_local_difference": null,
+            "qe_input_xc_difference": null,
+            "reason": "QE potential grids absent; density-only Hartree formula is independently checkable"
+          },
+          "qe_dr2_ry": 0.0008539880468766092,
+          "qe_ethr_rounding_ry": [
+            5e-08
+          ],
+          "qe_printed_ethr_ry": [
+            6.11e-05
+          ],
+          "real_space": {
+            "count": 46656,
+            "max": 0.00014675236739030567,
+            "rms": 2.3984475948754098e-05,
+            "unit": "e/bohr^3"
+          },
+          "solve_thresholds_ry": [
+            6.11e-05
+          ],
+          "total_charge": {
+            "actual_e": 31.999999999999986,
+            "difference_e": -2.1316282072803006e-14,
+            "expected_e": 32.00000000000001,
+            "input_e": 31.99999999999999
+          }
+        },
+        {
+          "agreement": false,
+          "first_failing_term": "k=1 rho_out all G",
+          "steps": 3,
+          "summary": "refscf-map"
+        }
+      ]
+    }
+  },
+  "default_identity": {
+    "before_binary_sha256": "582ede61b582ba29804da361b13f6234701ad31662e08d7d47116730c823e9b6",
+    "after_binary_sha256": "64e00d7af1bf9e09280f6feb96190b431ef37f0cc0c29b9637c73412f315df0e",
+    "cases": [
+      {
+        "case": "gamma",
+        "before_energy_ha": -7.295530468166501,
+        "after_energy_ha": -7.295530468166501,
+        "energy_difference_ha": 0.0,
+        "before_density_sha256": "10d8e9ed81a107c9345f67bcf74f8c53daff815565f4a5d10135b7b1467ba1ee",
+        "after_density_sha256": "10d8e9ed81a107c9345f67bcf74f8c53daff815565f4a5d10135b7b1467ba1ee",
+        "iterations_before": 4,
+        "iterations_after": 4,
+        "effective_profile": "standard",
+        "verification": "fixed_point"
+      },
+      {
+        "case": "k222s",
+        "before_energy_ha": -7.919423412083464,
+        "after_energy_ha": -7.919423412083464,
+        "energy_difference_ha": 0.0,
+        "before_density_sha256": "0d75013c62a0432dcf0a54da8f218bdcb1e89fa98fec00403890e3f6571da4b8",
+        "after_density_sha256": "0d75013c62a0432dcf0a54da8f218bdcb1e89fa98fec00403890e3f6571da4b8",
+        "iterations_before": 8,
+        "iterations_after": 8,
+        "effective_profile": "standard",
+        "verification": "fixed_point"
+      },
+      {
+        "case": "si8",
+        "before_energy_ha": -31.321803600056914,
+        "after_energy_ha": -31.321803600056914,
+        "energy_difference_ha": 0.0,
+        "before_density_sha256": "290a652a10260735f4b5fd965519e4814be91f0a092e8547f3e3ca9b9748a93a",
+        "after_density_sha256": "290a652a10260735f4b5fd965519e4814be91f0a092e8547f3e3ca9b9748a93a",
+        "iterations_before": 4,
+        "iterations_after": 4,
+        "effective_profile": "standard",
+        "verification": "fixed_point"
+      }
+    ]
+  },
+  "tight_internal_comparison": {
+    "threshold_ry": 1e-12,
+    "occupied_band_max_difference_ev": [
+      2.581934666e-12,
+      1.867839217e-12,
+      1.015987294e-11
+    ],
+    "direct_functional_difference_ha": [
+      6.126715846e-08,
+      6.550315845e-10,
+      9.309236049e-09
+    ],
+    "note": "Reference vs legacy on identical QE inputs; fixed-input orbital functional is not stationary. Test limits 1e-8 eV occupied bands, 1e-6 Ha direct functional."
+  },
+  "simulated_reference_rank_comparison": {
+    "step": 1,
+    "threshold_ry": 0.01,
+    "ranks": [
+      2,
+      3
+    ],
+    "max_real_density_difference_e_bohr3": [
+      2.91433544e-16,
+      2.498001805e-16
+    ],
+    "comparison": "against serial reference map; all rank replicas agree, identical Davidson iteration and H-column counts"
+  },
+  "checks": [
+    {
+      "command": "DFT_UPF=/path/Si.pz-vbc.UPF cargo test --release -p dft-cli --test refscf_map -- --include-ignored --nocapture",
+      "exit_code": 0,
+      "result": "4 passed"
+    },
+    {
+      "command": "CHECK_SCCACHE=0 TMPDIR_990=\"$PWD/target/scratch\" scripts/check.sh full",
+      "exit_code": 1,
+      "result": "build/fmt/clippy pass; 827 passed, 3 existing cache failures, 188 ignored; load-report ps forbidden by sandbox"
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 1,
+      "result": "8 passed, 1 existing missing-phrase assertion: standard profile is unsupported"
+    }
+  ]
+}

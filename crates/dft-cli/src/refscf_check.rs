@@ -42,7 +42,7 @@ fn files(dir: &Path, name: &str, depth: usize, out: &mut Vec<PathBuf>) -> Result
     }
     Ok(())
 }
-fn density(dir: &Path) -> Result<QeDensity, RunError> {
+pub(crate) fn density(dir: &Path) -> Result<QeDensity, RunError> {
     let mut found = Vec::new();
     files(dir, "charge-density.dat", 4, &mut found)?;
     found.sort();
@@ -55,7 +55,7 @@ fn density(dir: &Path) -> Result<QeDensity, RunError> {
     }
     QeDensity::decode(&fs::read(&found[0]).map_err(fail)?).map_err(fail)
 }
-fn stdout(dir: &Path, root: &Path, k: usize) -> Result<Option<String>, RunError> {
+pub(crate) fn stdout(dir: &Path, root: &Path, k: usize) -> Result<Option<String>, RunError> {
     for name in [
         "stdout",
         "stdout.txt",
@@ -69,7 +69,10 @@ fn stdout(dir: &Path, root: &Path, k: usize) -> Result<Option<String>, RunError>
             return fs::read_to_string(path).map(Some).map_err(fail);
         }
     }
-    for name in [format!("k{k}-mix.out"), format!("k{k}-mix.stdout")] {
+    let snapshot = dir.file_name().and_then(|s| s.to_str());
+    let fallback = format!("k{k}-mix");
+    let snapshot = snapshot.unwrap_or(&fallback);
+    for name in [format!("{snapshot}.out"), format!("{snapshot}.stdout")] {
         let path = root.join(name);
         if path.is_file() {
             return fs::read_to_string(path).map(Some).map_err(fail);

@@ -3,6 +3,7 @@ mod bands;
 #[path = "dos.rs"]
 mod dos;
 mod refscf_check;
+mod refscf_map;
 use dft_cli::checkpoint_io;
 #[path = "pseudo.rs"]
 mod pseudo;
@@ -21,6 +22,8 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Compare fixed-potential output densities from QE's own input trajectory.
+    RefscfMap(refscf_map::Arguments),
     /// Replay independent Broyden mixing against a QE density trajectory.
     RefscfCheck {
         input: PathBuf,
@@ -146,6 +149,7 @@ enum Command {
 }
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match &cli.command {
+        Command::RefscfMap(args) => return refscf_map::execute(args).map_err(Into::into),
         Command::RefscfCheck {
             input,
             qe,
@@ -280,6 +284,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Run { .. }
         | Command::Relax { .. }
         | Command::RefscfCheck { .. }
+        | Command::RefscfMap(_)
         | Command::Convert { .. } => {
             unreachable!()
         }
@@ -303,6 +308,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Run { .. }
         | Command::Relax { .. }
         | Command::RefscfCheck { .. }
+        | Command::RefscfMap(_)
         | Command::Convert { .. } => {
             unreachable!()
         }
@@ -378,6 +384,7 @@ fn main() -> ExitCode {
 /// The input file of a command that reads one (RUN-CONFIG).
 fn input_of(command: &Command) -> Option<&std::path::Path> {
     match command {
+        Command::RefscfMap(args) => Some(&args.input),
         Command::Relax { input, .. }
         | Command::Checkpoint { input, .. }
         | Command::Restart { input, .. }
@@ -398,6 +405,7 @@ fn input_of(command: &Command) -> Option<&std::path::Path> {
 }
 fn real_main(cli: Cli) -> ExitCode {
     let post = match &cli.command {
+        Command::RefscfMap(args) => Some(refscf_map::execute(args)),
         Command::Relax {
             input,
             output_dir,

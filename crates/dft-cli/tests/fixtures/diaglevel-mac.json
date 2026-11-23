@@ -1,0 +1,1425 @@
+{
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
+  "binary_sha256": "a9aca4bd8ad8e61e96699871784539265ef78d1bdedc50600ddbafe41501f87e",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "scope": "Mac serial correctness and byte observations, not dev08 speed evidence",
+  "cases": {
+    "si8": {
+      "samples": [
+        {
+          "command": [
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/release/dft-cli",
+            "run",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si8.toml",
+            "--output-dir",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si8-0-off"
+          ],
+          "exit_code": 0,
+          "mode": "off",
+          "external_wall_s": 1.9282809579999998,
+          "load_before": [
+            108.107421875,
+            60.09521484375,
+            27.9814453125
+          ],
+          "input_sha256": "f1623d22f78e6157ee6ad64e57ac118ee815ba5a1f37b646b6cfcbe34f2ebf12",
+          "density_sha256": "2d87e6a8a0cab2b7b6e7696e9b75d71d396dc7df3e63a8ac91d82558a5d51bbf",
+          "energy_ha": -31.32180199746883,
+          "steps": 12,
+          "verification": {
+            "attempts": [
+              {
+                "coulomb_error_ha": 3.067234424584117e-08,
+                "davidson_iterations": 7,
+                "density_residual": 6.90182785191111e-05,
+                "eigen_tolerance_ha": 1.3109398639772546e-11,
+                "h_vectors": 74,
+                "iteration": 10,
+                "occupied_eigenvalue_change_ha": 7.113588736118448e-07,
+                "passed": false,
+                "residual_bound_ha": 5.3880912652393965e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 5.211612802116856e-09,
+                "davidson_iterations": 9,
+                "density_residual": 3.1121471851534864e-05,
+                "eigen_tolerance_ha": 2.0867351230903522e-12,
+                "h_vectors": 76,
+                "iteration": 11,
+                "occupied_eigenvalue_change_ha": 5.984209809420382e-07,
+                "passed": false,
+                "residual_bound_ha": 6.34815204993078e-12,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 1.7765026574571315e-09,
+                "davidson_iterations": 7,
+                "density_residual": 1.6870308300380416e-05,
+                "eigen_tolerance_ha": 1.1309052115159078e-12,
+                "h_vectors": 71,
+                "iteration": 12,
+                "occupied_eigenvalue_change_ha": 4.522569470657989e-07,
+                "passed": true,
+                "residual_bound_ha": 4.026960348101163e-12,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              }
+            ],
+            "criterion": "E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
+            "mode": "fixed_point",
+            "note": "delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate",
+            "passed": true
+          },
+          "ritz_f64_payload_bytes": 0,
+          "ritz_json_value_bytes_all_copies": 56,
+          "output_bytes": 593699,
+          "files": {
+            "stdout": 6794,
+            "stderr": 173,
+            "results.json": 212858,
+            "density.bin": 373248,
+            "density.json": 626
+          },
+          "parse_results_exit_code": 0
+        },
+        {
+          "command": [
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/release/dft-cli",
+            "run",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si8.toml",
+            "--output-dir",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si8-1-on"
+          ],
+          "exit_code": 0,
+          "mode": "on",
+          "external_wall_s": 1.7617563330000001,
+          "load_before": [
+            106.7373046875,
+            60.60791015625,
+            28.3505859375
+          ],
+          "input_sha256": "f1623d22f78e6157ee6ad64e57ac118ee815ba5a1f37b646b6cfcbe34f2ebf12",
+          "density_sha256": "2d87e6a8a0cab2b7b6e7696e9b75d71d396dc7df3e63a8ac91d82558a5d51bbf",
+          "energy_ha": -31.32180199746883,
+          "steps": 12,
+          "verification": {
+            "attempts": [
+              {
+                "coulomb_error_ha": 3.067234424584117e-08,
+                "davidson_iterations": 7,
+                "density_residual": 6.90182785191111e-05,
+                "eigen_tolerance_ha": 1.3109398639772546e-11,
+                "h_vectors": 74,
+                "iteration": 10,
+                "occupied_eigenvalue_change_ha": 7.113588736118448e-07,
+                "passed": false,
+                "residual_bound_ha": 5.3880912652393965e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 5.211612802116856e-09,
+                "davidson_iterations": 9,
+                "density_residual": 3.1121471851534864e-05,
+                "eigen_tolerance_ha": 2.0867351230903522e-12,
+                "h_vectors": 76,
+                "iteration": 11,
+                "occupied_eigenvalue_change_ha": 5.984209809420382e-07,
+                "passed": false,
+                "residual_bound_ha": 6.34815204993078e-12,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 1.7765026574571315e-09,
+                "davidson_iterations": 7,
+                "density_residual": 1.6870308300380416e-05,
+                "eigen_tolerance_ha": 1.1309052115159078e-12,
+                "h_vectors": 71,
+                "iteration": 12,
+                "occupied_eigenvalue_change_ha": 4.522569470657989e-07,
+                "passed": true,
+                "residual_bound_ha": 4.026960348101163e-12,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              }
+            ],
+            "criterion": "E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
+            "mode": "fixed_point",
+            "note": "delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate",
+            "passed": true
+          },
+          "ritz_f64_payload_bytes": 9920,
+          "ritz_json_value_bytes_all_copies": 48411,
+          "output_bytes": 694818,
+          "files": {
+            "stdout": 6801,
+            "stderr": 173,
+            "results.json": 313970,
+            "density.bin": 373248,
+            "density.json": 626
+          },
+          "parse_results_exit_code": 0
+        },
+        {
+          "command": [
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/release/dft-cli",
+            "run",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si8.toml",
+            "--output-dir",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si8-2-on"
+          ],
+          "exit_code": 0,
+          "mode": "on",
+          "external_wall_s": 1.3309868330000003,
+          "load_before": [
+            106.7373046875,
+            60.60791015625,
+            28.3505859375
+          ],
+          "input_sha256": "f1623d22f78e6157ee6ad64e57ac118ee815ba5a1f37b646b6cfcbe34f2ebf12",
+          "density_sha256": "2d87e6a8a0cab2b7b6e7696e9b75d71d396dc7df3e63a8ac91d82558a5d51bbf",
+          "energy_ha": -31.32180199746883,
+          "steps": 12,
+          "verification": {
+            "attempts": [
+              {
+                "coulomb_error_ha": 3.067234424584117e-08,
+                "davidson_iterations": 7,
+                "density_residual": 6.90182785191111e-05,
+                "eigen_tolerance_ha": 1.3109398639772546e-11,
+                "h_vectors": 74,
+                "iteration": 10,
+                "occupied_eigenvalue_change_ha": 7.113588736118448e-07,
+                "passed": false,
+                "residual_bound_ha": 5.3880912652393965e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 5.211612802116856e-09,
+                "davidson_iterations": 9,
+                "density_residual": 3.1121471851534864e-05,
+                "eigen_tolerance_ha": 2.0867351230903522e-12,
+                "h_vectors": 76,
+                "iteration": 11,
+                "occupied_eigenvalue_change_ha": 5.984209809420382e-07,
+                "passed": false,
+                "residual_bound_ha": 6.34815204993078e-12,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 1.7765026574571315e-09,
+                "davidson_iterations": 7,
+                "density_residual": 1.6870308300380416e-05,
+                "eigen_tolerance_ha": 1.1309052115159078e-12,
+                "h_vectors": 71,
+                "iteration": 12,
+                "occupied_eigenvalue_change_ha": 4.522569470657989e-07,
+                "passed": true,
+                "residual_bound_ha": 4.026960348101163e-12,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              }
+            ],
+            "criterion": "E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
+            "mode": "fixed_point",
+            "note": "delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate",
+            "passed": true
+          },
+          "ritz_f64_payload_bytes": 9920,
+          "ritz_json_value_bytes_all_copies": 48411,
+          "output_bytes": 694943,
+          "files": {
+            "stdout": 6794,
+            "stderr": 173,
+            "results.json": 314102,
+            "density.bin": 373248,
+            "density.json": 626
+          },
+          "parse_results_exit_code": 0
+        },
+        {
+          "command": [
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/release/dft-cli",
+            "run",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si8.toml",
+            "--output-dir",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si8-3-off"
+          ],
+          "exit_code": 0,
+          "mode": "off",
+          "external_wall_s": 1.7380639999999996,
+          "load_before": [
+            106.7373046875,
+            60.60791015625,
+            28.3505859375
+          ],
+          "input_sha256": "f1623d22f78e6157ee6ad64e57ac118ee815ba5a1f37b646b6cfcbe34f2ebf12",
+          "density_sha256": "2d87e6a8a0cab2b7b6e7696e9b75d71d396dc7df3e63a8ac91d82558a5d51bbf",
+          "energy_ha": -31.32180199746883,
+          "steps": 12,
+          "verification": {
+            "attempts": [
+              {
+                "coulomb_error_ha": 3.067234424584117e-08,
+                "davidson_iterations": 7,
+                "density_residual": 6.90182785191111e-05,
+                "eigen_tolerance_ha": 1.3109398639772546e-11,
+                "h_vectors": 74,
+                "iteration": 10,
+                "occupied_eigenvalue_change_ha": 7.113588736118448e-07,
+                "passed": false,
+                "residual_bound_ha": 5.3880912652393965e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 5.211612802116856e-09,
+                "davidson_iterations": 9,
+                "density_residual": 3.1121471851534864e-05,
+                "eigen_tolerance_ha": 2.0867351230903522e-12,
+                "h_vectors": 76,
+                "iteration": 11,
+                "occupied_eigenvalue_change_ha": 5.984209809420382e-07,
+                "passed": false,
+                "residual_bound_ha": 6.34815204993078e-12,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 1.7765026574571315e-09,
+                "davidson_iterations": 7,
+                "density_residual": 1.6870308300380416e-05,
+                "eigen_tolerance_ha": 1.1309052115159078e-12,
+                "h_vectors": 71,
+                "iteration": 12,
+                "occupied_eigenvalue_change_ha": 4.522569470657989e-07,
+                "passed": true,
+                "residual_bound_ha": 4.026960348101163e-12,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              }
+            ],
+            "criterion": "E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
+            "mode": "fixed_point",
+            "note": "delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate",
+            "passed": true
+          },
+          "ritz_f64_payload_bytes": 0,
+          "ritz_json_value_bytes_all_copies": 56,
+          "output_bytes": 593652,
+          "files": {
+            "stdout": 6792,
+            "stderr": 173,
+            "results.json": 212813,
+            "density.bin": 373248,
+            "density.json": 626
+          },
+          "parse_results_exit_code": 0
+        }
+      ],
+      "scientific_identity": true,
+      "baseline_identity": true,
+      "baseline_full_trace_identity": true,
+      "energy_delta_ha": 0.0,
+      "density_max_delta_e_bohr3": 0.0
+    },
+    "si16": {
+      "samples": [
+        {
+          "command": [
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/release/dft-cli",
+            "run",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si16.toml",
+            "--output-dir",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si16-0-off"
+          ],
+          "exit_code": 0,
+          "mode": "off",
+          "external_wall_s": 5.136839999999999,
+          "load_before": [
+            105.87744140625,
+            61.1953125,
+            28.74658203125
+          ],
+          "input_sha256": "57f0a476c76eb3d8f353097c9fa5be750f0be65cc5930ec9c9502671ef71dc07",
+          "density_sha256": "9f310307c366018c6b32b8c879fdca54e95689ee0540037e4bd6b5a331857d25",
+          "energy_ha": -63.129238894587246,
+          "steps": 12,
+          "verification": {
+            "attempts": [
+              {
+                "coulomb_error_ha": 1.8497844416260966e-08,
+                "davidson_iterations": 11,
+                "density_residual": 2.726566343883127e-05,
+                "eigen_tolerance_ha": 1.9834923037939178e-12,
+                "h_vectors": 143,
+                "iteration": 11,
+                "occupied_eigenvalue_change_ha": 3.5065288433999697e-06,
+                "passed": false,
+                "residual_bound_ha": 1.6800714904933704e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 3.087484818754847e-09,
+                "davidson_iterations": 11,
+                "density_residual": 9.35850006223906e-06,
+                "eigen_tolerance_ha": 1.9227269412530123e-13,
+                "h_vectors": 151,
+                "iteration": 12,
+                "occupied_eigenvalue_change_ha": 4.0909303861136337e-07,
+                "passed": true,
+                "residual_bound_ha": 1.1119612925406914e-12,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              }
+            ],
+            "criterion": "E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
+            "mode": "fixed_point",
+            "note": "delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate",
+            "passed": true
+          },
+          "ritz_f64_payload_bytes": 0,
+          "ritz_json_value_bytes_all_copies": 58,
+          "output_bytes": 974275,
+          "files": {
+            "stdout": 7865,
+            "stderr": 173,
+            "results.json": 219116,
+            "density.bin": 746496,
+            "density.json": 625
+          },
+          "parse_results_exit_code": 0
+        },
+        {
+          "command": [
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/release/dft-cli",
+            "run",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si16.toml",
+            "--output-dir",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si16-1-on"
+          ],
+          "exit_code": 0,
+          "mode": "on",
+          "external_wall_s": 4.406416374999999,
+          "load_before": [
+            102.68408203125,
+            61.27490234375,
+            28.96484375
+          ],
+          "input_sha256": "57f0a476c76eb3d8f353097c9fa5be750f0be65cc5930ec9c9502671ef71dc07",
+          "density_sha256": "9f310307c366018c6b32b8c879fdca54e95689ee0540037e4bd6b5a331857d25",
+          "energy_ha": -63.129238894587246,
+          "steps": 12,
+          "verification": {
+            "attempts": [
+              {
+                "coulomb_error_ha": 1.8497844416260966e-08,
+                "davidson_iterations": 11,
+                "density_residual": 2.726566343883127e-05,
+                "eigen_tolerance_ha": 1.9834923037939178e-12,
+                "h_vectors": 143,
+                "iteration": 11,
+                "occupied_eigenvalue_change_ha": 3.5065288433999697e-06,
+                "passed": false,
+                "residual_bound_ha": 1.6800714904933704e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 3.087484818754847e-09,
+                "davidson_iterations": 11,
+                "density_residual": 9.35850006223906e-06,
+                "eigen_tolerance_ha": 1.9227269412530123e-13,
+                "h_vectors": 151,
+                "iteration": 12,
+                "occupied_eigenvalue_change_ha": 4.0909303861136337e-07,
+                "passed": true,
+                "residual_bound_ha": 1.1119612925406914e-12,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              }
+            ],
+            "criterion": "E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
+            "mode": "fixed_point",
+            "note": "delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate",
+            "passed": true
+          },
+          "ritz_f64_payload_bytes": 17856,
+          "ritz_json_value_bytes_all_copies": 84414,
+          "output_bytes": 1139897,
+          "files": {
+            "stdout": 7865,
+            "stderr": 173,
+            "results.json": 384738,
+            "density.bin": 746496,
+            "density.json": 625
+          },
+          "parse_results_exit_code": 0
+        },
+        {
+          "command": [
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/release/dft-cli",
+            "run",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si16.toml",
+            "--output-dir",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si16-2-on"
+          ],
+          "exit_code": 0,
+          "mode": "on",
+          "external_wall_s": 4.159584040999999,
+          "load_before": [
+            102.68408203125,
+            61.27490234375,
+            28.96484375
+          ],
+          "input_sha256": "57f0a476c76eb3d8f353097c9fa5be750f0be65cc5930ec9c9502671ef71dc07",
+          "density_sha256": "9f310307c366018c6b32b8c879fdca54e95689ee0540037e4bd6b5a331857d25",
+          "energy_ha": -63.129238894587246,
+          "steps": 12,
+          "verification": {
+            "attempts": [
+              {
+                "coulomb_error_ha": 1.8497844416260966e-08,
+                "davidson_iterations": 11,
+                "density_residual": 2.726566343883127e-05,
+                "eigen_tolerance_ha": 1.9834923037939178e-12,
+                "h_vectors": 143,
+                "iteration": 11,
+                "occupied_eigenvalue_change_ha": 3.5065288433999697e-06,
+                "passed": false,
+                "residual_bound_ha": 1.6800714904933704e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 3.087484818754847e-09,
+                "davidson_iterations": 11,
+                "density_residual": 9.35850006223906e-06,
+                "eigen_tolerance_ha": 1.9227269412530123e-13,
+                "h_vectors": 151,
+                "iteration": 12,
+                "occupied_eigenvalue_change_ha": 4.0909303861136337e-07,
+                "passed": true,
+                "residual_bound_ha": 1.1119612925406914e-12,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              }
+            ],
+            "criterion": "E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
+            "mode": "fixed_point",
+            "note": "delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate",
+            "passed": true
+          },
+          "ritz_f64_payload_bytes": 17856,
+          "ritz_json_value_bytes_all_copies": 84414,
+          "output_bytes": 1139775,
+          "files": {
+            "stdout": 7865,
+            "stderr": 173,
+            "results.json": 384616,
+            "density.bin": 746496,
+            "density.json": 625
+          },
+          "parse_results_exit_code": 0
+        },
+        {
+          "command": [
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/release/dft-cli",
+            "run",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si16.toml",
+            "--output-dir",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si16-3-off"
+          ],
+          "exit_code": 0,
+          "mode": "off",
+          "external_wall_s": 3.0043967080000016,
+          "load_before": [
+            99.986328125,
+            61.40283203125,
+            29.19921875
+          ],
+          "input_sha256": "57f0a476c76eb3d8f353097c9fa5be750f0be65cc5930ec9c9502671ef71dc07",
+          "density_sha256": "9f310307c366018c6b32b8c879fdca54e95689ee0540037e4bd6b5a331857d25",
+          "energy_ha": -63.129238894587246,
+          "steps": 12,
+          "verification": {
+            "attempts": [
+              {
+                "coulomb_error_ha": 1.8497844416260966e-08,
+                "davidson_iterations": 11,
+                "density_residual": 2.726566343883127e-05,
+                "eigen_tolerance_ha": 1.9834923037939178e-12,
+                "h_vectors": 143,
+                "iteration": 11,
+                "occupied_eigenvalue_change_ha": 3.5065288433999697e-06,
+                "passed": false,
+                "residual_bound_ha": 1.6800714904933704e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 3.087484818754847e-09,
+                "davidson_iterations": 11,
+                "density_residual": 9.35850006223906e-06,
+                "eigen_tolerance_ha": 1.9227269412530123e-13,
+                "h_vectors": 151,
+                "iteration": 12,
+                "occupied_eigenvalue_change_ha": 4.0909303861136337e-07,
+                "passed": true,
+                "residual_bound_ha": 1.1119612925406914e-12,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              }
+            ],
+            "criterion": "E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
+            "mode": "fixed_point",
+            "note": "delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate",
+            "passed": true
+          },
+          "ritz_f64_payload_bytes": 0,
+          "ritz_json_value_bytes_all_copies": 58,
+          "output_bytes": 974308,
+          "files": {
+            "stdout": 7865,
+            "stderr": 173,
+            "results.json": 219149,
+            "density.bin": 746496,
+            "density.json": 625
+          },
+          "parse_results_exit_code": 0
+        }
+      ],
+      "scientific_identity": true,
+      "baseline_identity": true,
+      "baseline_full_trace_identity": true,
+      "energy_delta_ha": 0.0,
+      "density_max_delta_e_bohr3": 0.0
+    },
+    "si32": {
+      "samples": [
+        {
+          "command": [
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/release/dft-cli",
+            "run",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si32.toml",
+            "--output-dir",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si32-0-off"
+          ],
+          "exit_code": 0,
+          "mode": "off",
+          "external_wall_s": 16.73294075,
+          "load_before": [
+            96.2236328125,
+            61.26318359375,
+            29.33837890625
+          ],
+          "input_sha256": "d6baf461e3030144d6ed2c839e5ce4912b80cda2806b0110e469cc41a16367d8",
+          "density_sha256": "f203d6a770697c732d85f56a773f23a6fbc509593d481e474323cf383cfdf825",
+          "energy_ha": -126.70398595887112,
+          "steps": 12,
+          "verification": {
+            "attempts": [
+              {
+                "coulomb_error_ha": 5.6178333827386626e-08,
+                "davidson_iterations": 13,
+                "density_residual": 4.025426052485523e-05,
+                "eigen_tolerance_ha": 2.7686716637463066e-12,
+                "h_vectors": 277,
+                "iteration": 9,
+                "occupied_eigenvalue_change_ha": 3.3833314779796453e-06,
+                "passed": false,
+                "residual_bound_ha": 5.449682471155786e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 5.357965825503633e-08,
+                "davidson_iterations": 15,
+                "density_residual": 3.8835156032013654e-05,
+                "eigen_tolerance_ha": 1.9213657907303886e-12,
+                "h_vectors": 288,
+                "iteration": 10,
+                "occupied_eigenvalue_change_ha": 1.2938177686369623e-06,
+                "passed": false,
+                "residual_bound_ha": 1.959249781273353e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 3.8999103193777495e-08,
+                "davidson_iterations": 5,
+                "density_residual": 3.285293500022372e-05,
+                "eigen_tolerance_ha": 1.2242326496315002e-12,
+                "h_vectors": 268,
+                "iteration": 11,
+                "occupied_eigenvalue_change_ha": 7.614207448158883e-07,
+                "passed": false,
+                "residual_bound_ha": 1.373278254803448e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 1.0293023847445316e-09,
+                "davidson_iterations": 5,
+                "density_residual": 5.410402551945558e-06,
+                "eigen_tolerance_ha": 5e-14,
+                "h_vectors": 260,
+                "iteration": 12,
+                "occupied_eigenvalue_change_ha": 2.0350074185493394e-07,
+                "passed": true,
+                "residual_bound_ha": 8.619697745063722e-13,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              }
+            ],
+            "criterion": "E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
+            "mode": "fixed_point",
+            "note": "delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate",
+            "passed": true
+          },
+          "ritz_f64_payload_bytes": 0,
+          "ritz_json_value_bytes_all_copies": 62,
+          "output_bytes": 1751253,
+          "files": {
+            "stdout": 9868,
+            "stderr": 174,
+            "results.json": 247593,
+            "density.bin": 1492992,
+            "density.json": 626
+          },
+          "parse_results_exit_code": 0
+        },
+        {
+          "command": [
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/release/dft-cli",
+            "run",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si32.toml",
+            "--output-dir",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si32-1-on"
+          ],
+          "exit_code": 0,
+          "mode": "on",
+          "external_wall_s": 13.544443667000003,
+          "load_before": [
+            85.38330078125,
+            60.56689453125,
+            29.646484375
+          ],
+          "input_sha256": "d6baf461e3030144d6ed2c839e5ce4912b80cda2806b0110e469cc41a16367d8",
+          "density_sha256": "f203d6a770697c732d85f56a773f23a6fbc509593d481e474323cf383cfdf825",
+          "energy_ha": -126.70398595887112,
+          "steps": 12,
+          "verification": {
+            "attempts": [
+              {
+                "coulomb_error_ha": 5.6178333827386626e-08,
+                "davidson_iterations": 13,
+                "density_residual": 4.025426052485523e-05,
+                "eigen_tolerance_ha": 2.7686716637463066e-12,
+                "h_vectors": 277,
+                "iteration": 9,
+                "occupied_eigenvalue_change_ha": 3.3833314779796453e-06,
+                "passed": false,
+                "residual_bound_ha": 5.449682471155786e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 5.357965825503633e-08,
+                "davidson_iterations": 15,
+                "density_residual": 3.8835156032013654e-05,
+                "eigen_tolerance_ha": 1.9213657907303886e-12,
+                "h_vectors": 288,
+                "iteration": 10,
+                "occupied_eigenvalue_change_ha": 1.2938177686369623e-06,
+                "passed": false,
+                "residual_bound_ha": 1.959249781273353e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 3.8999103193777495e-08,
+                "davidson_iterations": 5,
+                "density_residual": 3.285293500022372e-05,
+                "eigen_tolerance_ha": 1.2242326496315002e-12,
+                "h_vectors": 268,
+                "iteration": 11,
+                "occupied_eigenvalue_change_ha": 7.614207448158883e-07,
+                "passed": false,
+                "residual_bound_ha": 1.373278254803448e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 1.0293023847445316e-09,
+                "davidson_iterations": 5,
+                "density_residual": 5.410402551945558e-06,
+                "eigen_tolerance_ha": 5e-14,
+                "h_vectors": 260,
+                "iteration": 12,
+                "occupied_eigenvalue_change_ha": 2.0350074185493394e-07,
+                "passed": true,
+                "residual_bound_ha": 8.619697745063722e-13,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              }
+            ],
+            "criterion": "E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
+            "mode": "fixed_point",
+            "note": "delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate",
+            "passed": true
+          },
+          "ritz_f64_payload_bytes": 52224,
+          "ritz_json_value_bytes_all_copies": 236815,
+          "output_bytes": 2188449,
+          "files": {
+            "stdout": 9869,
+            "stderr": 174,
+            "results.json": 684788,
+            "density.bin": 1492992,
+            "density.json": 626
+          },
+          "parse_results_exit_code": 0
+        },
+        {
+          "command": [
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/release/dft-cli",
+            "run",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si32.toml",
+            "--output-dir",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si32-2-on"
+          ],
+          "exit_code": 0,
+          "mode": "on",
+          "external_wall_s": 17.211210917000002,
+          "load_before": [
+            73.265625,
+            59.140625,
+            29.68017578125
+          ],
+          "input_sha256": "d6baf461e3030144d6ed2c839e5ce4912b80cda2806b0110e469cc41a16367d8",
+          "density_sha256": "f203d6a770697c732d85f56a773f23a6fbc509593d481e474323cf383cfdf825",
+          "energy_ha": -126.70398595887112,
+          "steps": 12,
+          "verification": {
+            "attempts": [
+              {
+                "coulomb_error_ha": 5.6178333827386626e-08,
+                "davidson_iterations": 13,
+                "density_residual": 4.025426052485523e-05,
+                "eigen_tolerance_ha": 2.7686716637463066e-12,
+                "h_vectors": 277,
+                "iteration": 9,
+                "occupied_eigenvalue_change_ha": 3.3833314779796453e-06,
+                "passed": false,
+                "residual_bound_ha": 5.449682471155786e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 5.357965825503633e-08,
+                "davidson_iterations": 15,
+                "density_residual": 3.8835156032013654e-05,
+                "eigen_tolerance_ha": 1.9213657907303886e-12,
+                "h_vectors": 288,
+                "iteration": 10,
+                "occupied_eigenvalue_change_ha": 1.2938177686369623e-06,
+                "passed": false,
+                "residual_bound_ha": 1.959249781273353e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 3.8999103193777495e-08,
+                "davidson_iterations": 5,
+                "density_residual": 3.285293500022372e-05,
+                "eigen_tolerance_ha": 1.2242326496315002e-12,
+                "h_vectors": 268,
+                "iteration": 11,
+                "occupied_eigenvalue_change_ha": 7.614207448158883e-07,
+                "passed": false,
+                "residual_bound_ha": 1.373278254803448e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 1.0293023847445316e-09,
+                "davidson_iterations": 5,
+                "density_residual": 5.410402551945558e-06,
+                "eigen_tolerance_ha": 5e-14,
+                "h_vectors": 260,
+                "iteration": 12,
+                "occupied_eigenvalue_change_ha": 2.0350074185493394e-07,
+                "passed": true,
+                "residual_bound_ha": 8.619697745063722e-13,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              }
+            ],
+            "criterion": "E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
+            "mode": "fixed_point",
+            "note": "delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate",
+            "passed": true
+          },
+          "ritz_f64_payload_bytes": 52224,
+          "ritz_json_value_bytes_all_copies": 236815,
+          "output_bytes": 2188497,
+          "files": {
+            "stdout": 9868,
+            "stderr": 174,
+            "results.json": 684837,
+            "density.bin": 1492992,
+            "density.json": 626
+          },
+          "parse_results_exit_code": 0
+        },
+        {
+          "command": [
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/release/dft-cli",
+            "run",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si32.toml",
+            "--output-dir",
+            "/Volumes/990-2TB/Develop/rust-dft-wt/I26-2-DIAGLEVEL/target/tmp/diaglevel/paired/si32-3-off"
+          ],
+          "exit_code": 0,
+          "mode": "off",
+          "external_wall_s": 25.832669750000008,
+          "load_before": [
+            65.95166015625,
+            58.17822265625,
+            29.84912109375
+          ],
+          "input_sha256": "d6baf461e3030144d6ed2c839e5ce4912b80cda2806b0110e469cc41a16367d8",
+          "density_sha256": "f203d6a770697c732d85f56a773f23a6fbc509593d481e474323cf383cfdf825",
+          "energy_ha": -126.70398595887112,
+          "steps": 12,
+          "verification": {
+            "attempts": [
+              {
+                "coulomb_error_ha": 5.6178333827386626e-08,
+                "davidson_iterations": 13,
+                "density_residual": 4.025426052485523e-05,
+                "eigen_tolerance_ha": 2.7686716637463066e-12,
+                "h_vectors": 277,
+                "iteration": 9,
+                "occupied_eigenvalue_change_ha": 3.3833314779796453e-06,
+                "passed": false,
+                "residual_bound_ha": 5.449682471155786e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 5.357965825503633e-08,
+                "davidson_iterations": 15,
+                "density_residual": 3.8835156032013654e-05,
+                "eigen_tolerance_ha": 1.9213657907303886e-12,
+                "h_vectors": 288,
+                "iteration": 10,
+                "occupied_eigenvalue_change_ha": 1.2938177686369623e-06,
+                "passed": false,
+                "residual_bound_ha": 1.959249781273353e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 3.8999103193777495e-08,
+                "davidson_iterations": 5,
+                "density_residual": 3.285293500022372e-05,
+                "eigen_tolerance_ha": 1.2242326496315002e-12,
+                "h_vectors": 268,
+                "iteration": 11,
+                "occupied_eigenvalue_change_ha": 7.614207448158883e-07,
+                "passed": false,
+                "residual_bound_ha": 1.373278254803448e-11,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              },
+              {
+                "coulomb_error_ha": 1.0293023847445316e-09,
+                "davidson_iterations": 5,
+                "density_residual": 5.410402551945558e-06,
+                "eigen_tolerance_ha": 5e-14,
+                "h_vectors": 260,
+                "iteration": 12,
+                "occupied_eigenvalue_change_ha": 2.0350074185493394e-07,
+                "passed": true,
+                "residual_bound_ha": 8.619697745063722e-13,
+                "strict_criteria_met": false,
+                "threshold_ha": 5e-09
+              }
+            ],
+            "criterion": "E_H[F(rho_out) - rho_out] < threshold_ha (and the residual estimate residual_bound_ha, an empirical estimator, not a bound, when BAANDI_STANDARD_RESIDUAL_GUARD=on); strict_criteria_met is information only",
+            "mode": "fixed_point",
+            "note": "delivered state is the converged step's own; a failed attempt continues SCF; work is also in the history entry's fixed_point_certificate",
+            "passed": true
+          },
+          "ritz_f64_payload_bytes": 0,
+          "ritz_json_value_bytes_all_copies": 62,
+          "output_bytes": 1751308,
+          "files": {
+            "stdout": 9866,
+            "stderr": 174,
+            "results.json": 247650,
+            "density.bin": 1492992,
+            "density.json": 626
+          },
+          "parse_results_exit_code": 0
+        }
+      ],
+      "scientific_identity": true,
+      "baseline_identity": true,
+      "baseline_full_trace_identity": true,
+      "energy_delta_ha": 0.0,
+      "density_max_delta_e_bohr3": 0.0
+    }
+  },
+  "source_base": "c2a143d524abcfafa860e78c3817d054b2589454",
+  "baseline_binary_sha256": "70317e333ab4655ddfd5d7eed90e827171e20ad082ce57b52f7993487875ab13",
+  "baseline_wall_limit": "Baseline ran while candidate build was active; timings are excluded from comparisons.",
+  "paired_wall_limit": "Shared Mac load, two crossed pairs only; no speed inference.",
+  "source_sha256": {
+    "crates/dft-solvers/src/ref_davidson.rs": "743cb92b4bc339431a3fa9c4d2e0ec35ee8537b93dc57d3c231d7bc8ef93ade5",
+    "crates/dft-engine/src/refscf/map.rs": "ed3208ae27a2e6cad6ddcc0756cd483e550cf26f5062e50d80e63af7d7dabce0",
+    "crates/dft-engine/src/refscf/driver.rs": "84712920a187c08fe5e99b23161892418eefe12353f205d12ca16522ff3981b9",
+    "crates/dft-engine/src/refscf/record.rs": "0a4ab80e2a82bdc3f44a43dce44a29f2d0631614e25f30d2d8676d1e945fca8a",
+    "crates/dft-cli/src/run.rs": "a4076adf9419cbf0bc1a82fd6dbd5d13882a22b746920ee36b5dc9ae54fc2396"
+  },
+  "source_diff_sha256": "c3e2b340a58db3815c9c9c7e66ac3beee730cdfc1cab29c6e3058036c60ed0a6",
+  "gates": {
+    "full": {
+      "command": "CHECK_SCCACHE=0 TMPDIR_990=\"$PWD/target/tmp\" scripts/check.sh full",
+      "exit_code": 1,
+      "build": "PASS",
+      "test": "FAIL",
+      "fmt": "PASS",
+      "clippy": "PASS",
+      "passed": 829,
+      "failed": 3,
+      "ignored": 191,
+      "wall_s": 348,
+      "reason": "Existing pseudo-cache tests require scratch outside repositories; this task requires scratch inside the worktree. ps load probe also denied by sandbox."
+    },
+    "solver_profile_identity": {
+      "exit_code": 0,
+      "passed": 1
+    },
+    "cli_diagnostic_selection": {
+      "exit_code": 0,
+      "passed": 1,
+      "selections": 5
+    },
+    "refscf_map_release": {
+      "exit_code": 0,
+      "passed": 4
+    },
+    "readme_generation": {
+      "exit_code": 0,
+      "tracked_diff": false
+    },
+    "readme_tests": {
+      "exit_code": 1,
+      "passed": 8,
+      "failed": 1,
+      "reason": "Existing test expects obsolete phrase: standard profile is unsupported."
+    },
+    "refscf_readers": {
+      "exit_code": 0,
+      "passed": 3
+    },
+    "isolated_existing_cache_failure": {
+      "exit_code": 101,
+      "failed": 1
+    },
+    "historical_baseline": {
+      "exit_code": 3,
+      "reason": "Historical baseline uses strict; current default uses standard. No scientific tolerance was relaxed."
+    }
+  },
+  "legacy_regression": {
+    "baseline": {
+      "note": "",
+      "binary": "baseline-cli",
+      "machine_note": "record host and commit in the note",
+      "energy_tolerance_ha": 1e-12,
+      "cases": {
+        "gamma": {
+          "operator_applications": 82,
+          "davidson_iterations": 17,
+          "certificate_applications": 11,
+          "certificate_iterations": 3,
+          "label": "Gamma only, 30 Ry",
+          "wall_s": [
+            0.044306333
+          ],
+          "wall_median_s": 0.044306333,
+          "engine_total_s": 0.021519875,
+          "phases_s": {
+            "density_s": 0.000944085,
+            "diagonalization_s": 0.010244457,
+            "mixing_s": 0.000299625,
+            "potential_s": 0.00261504,
+            "total_energy_s": 0.002233999
+          },
+          "engine_total_median_s": 0.021519875,
+          "phase_medians_s": {
+            "density_s": 0.000944085,
+            "diagonalization_s": 0.010244457,
+            "mixing_s": 0.000299625,
+            "potential_s": 0.00261504,
+            "total_energy_s": 0.002233999
+          },
+          "iterations": 4,
+          "total_energy_ha": -7.295530468166501,
+          "density_sha256": "10d8e9ed81a107c9345f67bcf74f8c53daff815565f4a5d10135b7b1467ba1ee",
+          "effective_profile": "standard",
+          "execution": {
+            "backend": {
+              "linear_algebra": "pure",
+              "mpi_feature": false,
+              "ranks": 1,
+              "threads": 1
+            },
+            "davidson_mode": "lean",
+            "effective_profile": "standard",
+            "effective_solver": "real_gamma_lean_davidson",
+            "lean_solves": 11,
+            "non_default_switches": {},
+            "parallel_model": "threads",
+            "path_reason": null,
+            "path_status": "applied",
+            "real_gamma": true,
+            "real_gamma_fallback_reason": null,
+            "requested": {
+              "gamma_real": "auto",
+              "reference_strict": false,
+              "standard_threshold_ha": null,
+              "threads": 1,
+              "verify": null
+            },
+            "solver_note": "lean applies to Ritz-value (standard-path) real-Gamma solves; residual-criterion solves (strict path, certificate) use the classic real Davidson; process totals including the cutoff-ladder coarse stage",
+            "standard_threshold_ha": 5e-09,
+            "verification": "fixed_point"
+          },
+          "switches_not_default": {}
+        },
+        "k222s": {
+          "operator_applications": 643,
+          "davidson_iterations": 102,
+          "certificate_applications": 77,
+          "certificate_iterations": 12,
+          "label": "2x2x2 shifted (4 k), 30 Ry",
+          "wall_s": [
+            0.173339833
+          ],
+          "wall_median_s": 0.173339833,
+          "engine_total_s": 0.166807917,
+          "phases_s": {
+            "density_s": 0.011173166,
+            "diagonalization_s": 0.120681875,
+            "mixing_s": 0.001124791,
+            "potential_s": 0.01989,
+            "total_energy_s": 0.00399925
+          },
+          "engine_total_median_s": 0.166807917,
+          "phase_medians_s": {
+            "density_s": 0.011173166,
+            "diagonalization_s": 0.120681875,
+            "mixing_s": 0.001124791,
+            "potential_s": 0.01989,
+            "total_energy_s": 0.00399925
+          },
+          "iterations": 8,
+          "total_energy_ha": -7.919423412083464,
+          "density_sha256": "0d75013c62a0432dcf0a54da8f218bdcb1e89fa98fec00403890e3f6571da4b8",
+          "effective_profile": "standard",
+          "execution": {
+            "backend": {
+              "linear_algebra": "pure",
+              "mpi_feature": false,
+              "ranks": 1,
+              "threads": 1
+            },
+            "davidson_mode": "lean",
+            "effective_profile": "standard",
+            "effective_solver": "complex_davidson",
+            "lean_solves": 0,
+            "non_default_switches": {},
+            "parallel_model": "threads",
+            "path_reason": null,
+            "path_status": "applied",
+            "real_gamma": false,
+            "real_gamma_fallback_reason": "multiple k points or shifted mesh",
+            "requested": {
+              "gamma_real": "auto",
+              "reference_strict": false,
+              "standard_threshold_ha": null,
+              "threads": 1,
+              "verify": null
+            },
+            "solver_note": "lean applies to Ritz-value (standard-path) real-Gamma solves; residual-criterion solves (strict path, certificate) use the classic real Davidson; process totals including the cutoff-ladder coarse stage",
+            "standard_threshold_ha": 5e-09,
+            "verification": "fixed_point"
+          },
+          "switches_not_default": {}
+        },
+        "si8": {
+          "operator_applications": 251,
+          "davidson_iterations": 26,
+          "certificate_applications": 55,
+          "certificate_iterations": 10,
+          "label": "8-atom conventional Gamma, 30 Ry",
+          "wall_s": [
+            0.167510834
+          ],
+          "wall_median_s": 0.167510834,
+          "engine_total_s": 0.117751583,
+          "phases_s": {
+            "density_s": 0.008449665,
+            "diagonalization_s": 0.090532041,
+            "mixing_s": 0.000824209,
+            "potential_s": 0.006522165,
+            "total_energy_s": 0.005935708
+          },
+          "engine_total_median_s": 0.117751583,
+          "phase_medians_s": {
+            "density_s": 0.008449665,
+            "diagonalization_s": 0.090532041,
+            "mixing_s": 0.000824209,
+            "potential_s": 0.006522165,
+            "total_energy_s": 0.005935708
+          },
+          "iterations": 4,
+          "total_energy_ha": -31.321803600056914,
+          "density_sha256": "290a652a10260735f4b5fd965519e4814be91f0a092e8547f3e3ca9b9748a93a",
+          "effective_profile": "standard",
+          "execution": {
+            "backend": {
+              "linear_algebra": "pure",
+              "mpi_feature": false,
+              "ranks": 1,
+              "threads": 1
+            },
+            "davidson_mode": "lean",
+            "effective_profile": "standard",
+            "effective_solver": "real_gamma_lean_davidson",
+            "lean_solves": 11,
+            "non_default_switches": {},
+            "parallel_model": "threads",
+            "path_reason": null,
+            "path_status": "applied",
+            "real_gamma": true,
+            "real_gamma_fallback_reason": null,
+            "requested": {
+              "gamma_real": "auto",
+              "reference_strict": false,
+              "standard_threshold_ha": null,
+              "threads": 1,
+              "verify": null
+            },
+            "solver_note": "lean applies to Ritz-value (standard-path) real-Gamma solves; residual-criterion solves (strict path, certificate) use the classic real Davidson; process totals including the cutoff-ladder coarse stage",
+            "standard_threshold_ha": 5e-09,
+            "verification": "fixed_point"
+          },
+          "switches_not_default": {}
+        }
+      }
+    },
+    "candidate": {
+      "note": "",
+      "binary": "dft-cli",
+      "machine_note": "record host and commit in the note",
+      "energy_tolerance_ha": 1e-12,
+      "cases": {
+        "gamma": {
+          "operator_applications": 82,
+          "davidson_iterations": 17,
+          "certificate_applications": 11,
+          "certificate_iterations": 3,
+          "label": "Gamma only, 30 Ry",
+          "wall_s": [
+            0.052392583000000006
+          ],
+          "wall_median_s": 0.052392583000000006,
+          "engine_total_s": 0.021475208,
+          "phases_s": {
+            "density_s": 0.000965874,
+            "diagonalization_s": 0.009987917,
+            "mixing_s": 0.000296208,
+            "potential_s": 0.002541584,
+            "total_energy_s": 0.002221833
+          },
+          "engine_total_median_s": 0.021475208,
+          "phase_medians_s": {
+            "density_s": 0.000965874,
+            "diagonalization_s": 0.009987917,
+            "mixing_s": 0.000296208,
+            "potential_s": 0.002541584,
+            "total_energy_s": 0.002221833
+          },
+          "iterations": 4,
+          "total_energy_ha": -7.295530468166501,
+          "density_sha256": "10d8e9ed81a107c9345f67bcf74f8c53daff815565f4a5d10135b7b1467ba1ee",
+          "effective_profile": "standard",
+          "execution": {
+            "backend": {
+              "linear_algebra": "pure",
+              "mpi_feature": false,
+              "ranks": 1,
+              "threads": 1
+            },
+            "davidson_mode": "lean",
+            "effective_profile": "standard",
+            "effective_solver": "real_gamma_lean_davidson",
+            "lean_solves": 11,
+            "non_default_switches": {},
+            "parallel_model": "threads",
+            "path_reason": null,
+            "path_status": "applied",
+            "real_gamma": true,
+            "real_gamma_fallback_reason": null,
+            "requested": {
+              "gamma_real": "auto",
+              "reference_strict": false,
+              "standard_threshold_ha": null,
+              "threads": 1,
+              "verify": null
+            },
+            "solver_note": "lean applies to Ritz-value (standard-path) real-Gamma solves; residual-criterion solves (strict path, certificate) use the classic real Davidson; process totals including the cutoff-ladder coarse stage",
+            "standard_threshold_ha": 5e-09,
+            "verification": "fixed_point"
+          },
+          "switches_not_default": {}
+        },
+        "k222s": {
+          "operator_applications": 643,
+          "davidson_iterations": 102,
+          "certificate_applications": 77,
+          "certificate_iterations": 12,
+          "label": "2x2x2 shifted (4 k), 30 Ry",
+          "wall_s": [
+            0.17076745799999998
+          ],
+          "wall_median_s": 0.17076745799999998,
+          "engine_total_s": 0.164231542,
+          "phases_s": {
+            "density_s": 0.011165543,
+            "diagonalization_s": 0.120117625,
+            "mixing_s": 0.001116458,
+            "potential_s": 0.018493418,
+            "total_energy_s": 0.003993001
+          },
+          "engine_total_median_s": 0.164231542,
+          "phase_medians_s": {
+            "density_s": 0.011165543,
+            "diagonalization_s": 0.120117625,
+            "mixing_s": 0.001116458,
+            "potential_s": 0.018493418,
+            "total_energy_s": 0.003993001
+          },
+          "iterations": 8,
+          "total_energy_ha": -7.919423412083464,
+          "density_sha256": "0d75013c62a0432dcf0a54da8f218bdcb1e89fa98fec00403890e3f6571da4b8",
+          "effective_profile": "standard",
+          "execution": {
+            "backend": {
+              "linear_algebra": "pure",
+              "mpi_feature": false,
+              "ranks": 1,
+              "threads": 1
+            },
+            "davidson_mode": "lean",
+            "effective_profile": "standard",
+            "effective_solver": "complex_davidson",
+            "lean_solves": 0,
+            "non_default_switches": {},
+            "parallel_model": "threads",
+            "path_reason": null,
+            "path_status": "applied",
+            "real_gamma": false,
+            "real_gamma_fallback_reason": "multiple k points or shifted mesh",
+            "requested": {
+              "gamma_real": "auto",
+              "reference_strict": false,
+              "standard_threshold_ha": null,
+              "threads": 1,
+              "verify": null
+            },
+            "solver_note": "lean applies to Ritz-value (standard-path) real-Gamma solves; residual-criterion solves (strict path, certificate) use the classic real Davidson; process totals including the cutoff-ladder coarse stage",
+            "standard_threshold_ha": 5e-09,
+            "verification": "fixed_point"
+          },
+          "switches_not_default": {}
+        },
+        "si8": {
+          "operator_applications": 251,
+          "davidson_iterations": 26,
+          "certificate_applications": 55,
+          "certificate_iterations": 10,
+          "label": "8-atom conventional Gamma, 30 Ry",
+          "wall_s": [
+            0.16941125
+          ],
+          "wall_median_s": 0.16941125,
+          "engine_total_s": 0.118615083,
+          "phases_s": {
+            "density_s": 0.008575959,
+            "diagonalization_s": 0.091059958,
+            "mixing_s": 0.000842874,
+            "potential_s": 0.006640751,
+            "total_energy_s": 0.006081793
+          },
+          "engine_total_median_s": 0.118615083,
+          "phase_medians_s": {
+            "density_s": 0.008575959,
+            "diagonalization_s": 0.091059958,
+            "mixing_s": 0.000842874,
+            "potential_s": 0.006640751,
+            "total_energy_s": 0.006081793
+          },
+          "iterations": 4,
+          "total_energy_ha": -31.321803600056914,
+          "density_sha256": "290a652a10260735f4b5fd965519e4814be91f0a092e8547f3e3ca9b9748a93a",
+          "effective_profile": "standard",
+          "execution": {
+            "backend": {
+              "linear_algebra": "pure",
+              "mpi_feature": false,
+              "ranks": 1,
+              "threads": 1
+            },
+            "davidson_mode": "lean",
+            "effective_profile": "standard",
+            "effective_solver": "real_gamma_lean_davidson",
+            "lean_solves": 11,
+            "non_default_switches": {},
+            "parallel_model": "threads",
+            "path_reason": null,
+            "path_status": "applied",
+            "real_gamma": true,
+            "real_gamma_fallback_reason": null,
+            "requested": {
+              "gamma_real": "auto",
+              "reference_strict": false,
+              "standard_threshold_ha": null,
+              "threads": 1,
+              "verify": null
+            },
+            "solver_note": "lean applies to Ritz-value (standard-path) real-Gamma solves; residual-criterion solves (strict path, certificate) use the classic real Davidson; process totals including the cutoff-ladder coarse stage",
+            "standard_threshold_ha": 5e-09,
+            "verification": "fixed_point"
+          },
+          "switches_not_default": {}
+        }
+      }
+    },
+    "exit_code": 0,
+    "scope": "Gamma, k222s, Si8, T=1, standard path; strict historical Si8 anchor skipped, parent energy/density identity required; no timing claim"
+  }
+}

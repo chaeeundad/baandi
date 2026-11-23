@@ -41,7 +41,8 @@ pub struct Options {
     pub max_iterations: usize,
     pub placement: ReducedPlacement,
     pub return_hx: bool,
-    /// Stage clocks only; work/communication accounting is always available.
+    /// Stage clocks and per-band Ritz history. Work/communication accounting
+    /// is always available; false allocates no Ritz history.
     pub profile: bool,
 }
 impl Options {
@@ -74,7 +75,7 @@ pub struct Solution {
     pub eigenvectors: RealMatrix,
     pub hx: Option<RealMatrix>,
     pub converged: Vec<bool>,
-    /// Per correction, absolute Ritz changes in Ha, retained for trajectory audits.
+    /// Per correction, absolute Ritz changes in Ha; empty when profile is false.
     pub ritz_changes_ha: Vec<Vec<f64>>,
     pub record: Record,
 }
@@ -157,10 +158,13 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     active.extend(0..n);
     let mut converged = vec![false; n];
     let mut iterations = 0;
-    let mut ritz_changes_ha = vec![vec![0.; n]; options.max_iterations];
-    for (step, ritz_changes) in ritz_changes_ha.iter_mut().enumerate() {
+    let mut ritz_changes_ha = if options.profile {
+        vec![vec![0.; n]; options.max_iterations]
+    } else {
+        Vec::new()
+    };
+    for (step, r) in record.iterations.iter_mut().enumerate() {
         let before = c.snapshot();
-        let r = &mut record.iterations[step];
         r.active_bands.extend_from_slice(&active);
         r.basis_before = m;
         // A smaller explicitly requested capacity may need a contraction before
@@ -202,7 +206,9 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         active.clear();
         for (i, flag) in converged.iter_mut().enumerate() {
             let change = (w.values[i] - w.old_values[i]).abs();
-            ritz_changes[i] = change;
+            if options.profile {
+                ritz_changes_ha[step][i] = change;
+            }
             *flag = change < options.band_threshold(i);
             if !*flag {
                 active.push(i);
@@ -247,4 +253,100 @@ pub fn preconditioner_denominator(hamiltonian_diagonal_ha: f64, eigenvalue_ha: f
     let x = 2.0 * (hamiltonian_diagonal_ha - eigenvalue_ha);
     let z = (x - 1.0).abs();
     0.25 * (if x >= 1.0 { 2.0 * x } else { 2.0 } + 1.0 / (z.hypot(1.0) + z))
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+
+    struct Tridiagonal(Vec<usize>);
+    impl DistributedRealOperator for Tridiagonal {
+        fn global_len(&self) -> usize {
+            self.0.len()
+        }
+        fn local_rows(&self) -> &[usize] {
+            &self.0
+        }
+        fn apply_block<C: Collective>(
+            &mut self,
+            _: &C,
+            x: &RealMatrix,
+            y: &mut RealMatrix,
+        ) -> Result<(), SolverError> {
+            for j in 0..x.cols() {
+                for i in 0..x.rows() {
+                    y[(i, j)] = (i + 1) as f64 * x[(i, j)];
+                    if i > 0 {
+                        y[(i, j)] += 0.1 * x[(i - 1, j)];
+                    }
+                    if i + 1 < x.rows() {
+                        y[(i, j)] += 0.1 * x[(i + 1, j)];
+                    }
+                }
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn optional_ritz_storage_and_clocks_preserve_science_and_work() {
+        dft_mpi::simulate(1, |comm| {
+            let mut op = Tridiagonal((0..12).collect());
+            let mut initial = RealMatrix::zeros(12, 3).unwrap();
+            for j in 0..3 {
+                for i in 0..12 {
+                    initial[(i, j)] = if i == j {
+                        1.
+                    } else {
+                        0.01 * ((i * 7 + j) as f64).sin()
+                    };
+                }
+            }
+            let diagonal: Vec<_> = (1..=12).map(f64::from).collect();
+            for budget in [1, 20] {
+                let mut options = Options::new(3, 1e-10, 2);
+                options.max_iterations = budget;
+                options.return_hx = true;
+                let light = solve(comm, &mut op, &initial, &diagonal, options).unwrap();
+                options.profile = true;
+                let full = solve(comm, &mut op, &initial, &diagonal, options).unwrap();
+                assert!(light.ritz_changes_ha.is_empty());
+                assert_eq!(light.ritz_changes_ha.capacity(), 0);
+                assert_eq!(light.record.total_seconds, 0.);
+                assert!(full.record.total_seconds > 0.);
+                assert_eq!(full.ritz_changes_ha.len(), full.record.iterations.len());
+                assert!(full.ritz_changes_ha.iter().all(|row| row.len() == 3));
+                assert_eq!(light.eigenvalues, full.eigenvalues);
+                assert_eq!(light.eigenvectors.as_slice(), full.eigenvectors.as_slice());
+                assert_eq!(light.hx.unwrap().as_slice(), full.hx.unwrap().as_slice());
+                assert_eq!(light.converged, full.converged);
+                assert_eq!(light.record.communication, full.record.communication);
+                assert_eq!(light.record.h_columns, full.record.h_columns);
+                assert_eq!(light.record.gemm_flops, full.record.gemm_flops);
+                assert_eq!(light.record.iterations.len(), full.record.iterations.len());
+                for (a, b) in std::iter::once(&light.record.setup)
+                    .chain(&light.record.iterations)
+                    .chain(std::iter::once(&light.record.finish))
+                    .zip(
+                        std::iter::once(&full.record.setup)
+                            .chain(&full.record.iterations)
+                            .chain(std::iter::once(&full.record.finish)),
+                    )
+                {
+                    assert_eq!(a.seconds, [0.; 8]);
+                    assert_eq!(a.active_bands, b.active_bands);
+                    assert_eq!(a.gemms, b.gemms);
+                    assert_eq!(a.reduced_order, b.reduced_order);
+                    assert_eq!(a.restarts, b.restarts);
+                    assert_eq!(a.repairs, b.repairs);
+                    assert_eq!(a.unconverged, b.unconverged);
+                }
+                if budget == 1 {
+                    assert!(full.converged.iter().any(|v| !v));
+                } else {
+                    assert!(full.converged.iter().all(|v| *v));
+                }
+            }
+        });
+    }
 }

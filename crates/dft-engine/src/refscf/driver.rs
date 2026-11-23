@@ -16,6 +16,7 @@ use crate::{
 use dft_mpi::Collective;
 
 pub struct Run {
+    pub full_diagnostics: bool,
     pub outcome: ScfOutcome,
     pub records: Vec<Record>,
     pub reference_stopped: bool,
@@ -41,6 +42,9 @@ pub fn run_with<K: Collective>(
     comm: &K,
 ) -> Result<Run, ScfError> {
     let start = Instant::now();
+    // Resolve once from this run's scope, never a process-cached profile flag.
+    let full_diagnostics = dft_numerics::switches::RunConfig::current()
+        .on(dft_numerics::switches::Id::DAVIDSON_STAGES);
     let profile = profile.validate()?;
     let o = input.options;
     if o.standard.is_none()
@@ -156,6 +160,7 @@ pub fn run_with<K: Collective>(
                 &occupations,
                 ethr,
                 iteration == 1 && !redo,
+                full_diagnostics,
                 &mut calls,
                 &mut timings,
             )?;
@@ -200,6 +205,7 @@ pub fn run_with<K: Collective>(
                 &occupations,
                 tol,
                 false,
+                full_diagnostics,
                 &mut verification_calls,
                 &mut t,
             )?;
@@ -458,6 +464,7 @@ pub fn run_with<K: Collective>(
                 total_time: start.elapsed(),
             };
             return Ok(Run {
+                full_diagnostics,
                 outcome: ScfOutcome { converged, result },
                 records,
                 reference_stopped: first_reference_stop.is_some(),
@@ -499,6 +506,7 @@ fn solve_map<K: Collective>(
     occupations: &[f64],
     ethr: f64,
     first: bool,
+    diagnostics: bool,
     calls: &mut Vec<SolveRecord>,
     timings: &mut PhaseTimings,
 ) -> Result<map::Map, ScfError> {
@@ -506,7 +514,7 @@ fn solve_map<K: Collective>(
     // than max(5, bands/4) roots remain. Keep every flag/count in the record;
     // SCF and the independent certificate still decide delivered convergence.
     for retry in 0..6 {
-        let step = map::evaluate(
+        let mut step = map::evaluate(
             state,
             comm,
             cell,
@@ -515,6 +523,7 @@ fn solve_map<K: Collective>(
             occupations,
             ethr,
             first && retry == 0,
+            diagnostics,
         )?;
         let r = &step.solve.record;
         let unconverged = step.solve.converged.iter().filter(|&&v| !v).count();
@@ -532,7 +541,19 @@ fn solve_map<K: Collective>(
                 .collect(),
             restarts: r.restarts,
             unconverged,
-            ritz_changes_ha: step.solve.ritz_changes_ha.clone(),
+            ritz_changes_ha: std::mem::take(&mut step.solve.ritz_changes_ha),
+            inner_clocks: diagnostics.then(|| {
+                let mut stages = [0.; 8];
+                for row in std::iter::once(&r.setup)
+                    .chain(&r.iterations)
+                    .chain(std::iter::once(&r.finish))
+                {
+                    for (sum, seconds) in stages.iter_mut().zip(row.seconds) {
+                        *sum += seconds;
+                    }
+                }
+                (r.total_seconds, stages)
+            }),
             repairs: r.iterations.iter().map(|i| i.repairs).sum(),
             dropped_corrections: r.iterations.iter().map(|i| i.dropped_corrections).sum(),
         });

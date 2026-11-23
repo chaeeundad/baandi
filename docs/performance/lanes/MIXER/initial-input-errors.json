@@ -1,0 +1,277 @@
+{
+  "count": 27,
+  "reason": "Unrecognized eigen_tolerance_ha CLI key; corrected to eigen_tolerance and all strict cases rerun under reference/.",
+  "commands": [
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si-elongated-602-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si-elongated-602-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/syn-gaussian-fcc-602-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/syn-gaussian-fcc-602-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/syn-p3-602-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/syn-p3-602-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si8-gamma-602-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si8-gamma-602-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si16-gamma-602-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si16-gamma-602-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si-skew-603-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si-skew-603-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si32-gamma-602-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si32-gamma-602-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si-long4-603-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si-long4-603-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si32-gamma-601-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si32-gamma-601-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si-slab-603-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si-slab-603-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si16-gamma-601-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si16-gamma-601-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si8-gamma-601-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si8-gamma-601-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/syn-p3-601-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/syn-p3-601-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/syn-gaussian-fcc-601-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/syn-gaussian-fcc-601-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si-elongated-601-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si-elongated-601-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si32-gamma-603-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si32-gamma-603-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si-long4-602-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si-long4-602-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si-slab-601-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si-slab-601-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si-skew-602-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si-skew-602-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si16-gamma-603-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si16-gamma-603-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si8-gamma-603-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si8-gamma-603-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/syn-p3-603-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/syn-p3-603-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si-elongated-603-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si-elongated-603-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/syn-gaussian-fcc-603-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/syn-gaussian-fcc-603-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si-skew-601-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si-skew-601-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si-slab-602-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si-slab-602-strict/out"
+      ],
+      "exit_code": 1
+    },
+    {
+      "command": [
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/target/scratch/dft-cli-baseline",
+        "run",
+        "target/scratch/mixer-baseline/si-long4-601-strict/input.toml",
+        "--output-dir",
+        "target/scratch/mixer-baseline/si-long4-601-strict/out"
+      ],
+      "exit_code": 1
+    }
+  ],
+  "example_stderr": "error: invalid TOML input: unknown field `eigen_tolerance_ha`, expected one of `start_wavefunctions`, `start_density`, `davidson_capacity_per_band`, `preconditioner`, `gamma_real`, `convergence_profile`, `standard_threshold_ha`, `standard_stall_guard`, `standard_density_forcing`, `verify`, `mixing_metric`, `spectral_guard`, `locking`, `threads`, `max_iterations`, `mixing`, `energy_tolerance_ha`, `density_residual_tolerance`, `mixing_beta`, `mixing_history`, `mixing_q0_inverse_bohr`, `nbands`, `extra_bands`, `eigen_tolerance`, `seed`, `cutoff_ladder`, `cutoff_ladder_fraction`\nin `scf`\n\n"
+}

@@ -789,6 +789,33 @@ impl DensityMixer for PulayMixer {
 mod tests {
     use super::*;
     #[test]
+    fn configured_beta_is_applied_to_plain_and_extrapolated_residuals() {
+        let x0 = [1.2, 0.8, 1.1, 0.9];
+        let y0 = [0.9, 1.1, 0.95, 1.05];
+        let x1 = [1.1, 0.9, 1.15, 0.85];
+        let y1 = [0.95, 1.05, 1.0, 1.0];
+        for incremental in [false, true] {
+            for beta in [0.2, 0.5, 0.8] {
+                let mut mixer = PulayMixer::new(beta, 6).unwrap();
+                mixer.set_incremental(incremental);
+                let first = mixer.mix(&x0, &y0, 1.0).unwrap();
+                for i in 0..4 {
+                    assert!((first[i] - (x0[i] + beta * (y0[i] - x0[i]))).abs() < 1e-14);
+                }
+                let next = mixer.mix(&x1, &y1, 1.0).unwrap();
+                // Independent scalar one-secant least squares (no eigensolver).
+                let r0: Vec<_> = y0.iter().zip(x0).map(|(y, x)| y - x).collect();
+                let r1: Vec<_> = y1.iter().zip(x1).map(|(y, x)| y - x).collect();
+                let dr: Vec<_> = r1.iter().zip(&r0).map(|(a, b)| a - b).collect();
+                let gamma = dot(&dr, &r1) / dot(&dr, &dr);
+                for i in 0..4 {
+                    let expected = x1[i] + beta * r1[i] - gamma * (x1[i] - x0[i] + beta * dr[i]);
+                    assert!((next[i] - expected).abs() < 1e-14, "density in Bohr^-3");
+                }
+            }
+        }
+    }
+    #[test]
     fn linear_rate_and_charge() {
         let mut mixer = LinearMixer { beta: 0.4 };
         let mut x = vec![1.4, 0.6];

@@ -1,0 +1,106 @@
+{
+  "commands": [
+    {
+      "command": "PATH=/opt/homebrew/opt/rustup/bin:$PATH TMPDIR=\"$PWD/target/scratch\" cargo build --release -p dft-cli --offline",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/MIXER/reproduce.py --binary target/scratch/dft-cli-baseline --upf /Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --work target/scratch/mixer-reference --evidence docs/performance/lanes/MIXER/reference --arms strict",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/MIXER/reproduce.py --binary target/release/dft-cli --upf /Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --work target/scratch/mixer-candidate --evidence docs/performance/lanes/MIXER/candidate --arms cell,coulomb,baseline",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/MIXER/reproduce.py --binary target/release/dft-cli --upf /Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --work target/scratch/mixer-combined --evidence docs/performance/lanes/MIXER/combined --arms strict-cell,cell-coulomb",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/MIXER/reproduce.py --binary target/release/dft-cli --upf /Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --work target/scratch/mixer-threads --evidence docs/performance/lanes/MIXER/threads --arms cell --threads 4",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/MIXER/reproduce.py --binary target/release/dft-cli --upf /Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --work target/scratch/mixer-final-off --evidence docs/performance/lanes/MIXER/final-off --arms baseline --seeds 601",
+      "exit_code": 0
+    },
+    {
+      "command": "PATH=/opt/homebrew/opt/rustup/bin:$PATH TMPDIR=\"$PWD/target/scratch\" cargo test --release -p dft-engine --lib cell_kerker_scale --offline -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "PATH=/opt/homebrew/opt/rustup/bin:$PATH TMPDIR=\"$PWD/target/scratch\" DFT_SI_UPF=/Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF BAANDI_MIX_CELL_KERKER=on M2_PROFILE_CASE=si16 M2_PROFILE_RANKS=2,3 M2_PROFILE_MODE=production M2_PROFILE_LADDER=on M2_PROFILE_ORBITALS=off cargo test --release -p dft-engine --test m2_entry_cost --offline -- --ignored --nocapture --test-threads=1",
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR_990=\"$PWD/target/scratch\" CHECK_SCCACHE=0 scripts/check.sh full",
+      "exit_code": 1
+    },
+    {
+      "command": "TMPDIR_990=\"$PWD/target/scratch\" CHECK_SCCACHE=0 scripts/check.sh full",
+      "exit_code": 1
+    },
+    {
+      "command": "python3 -I -m unittest discover -s scripts/tests -p test_readme_figures.py",
+      "exit_code": 1
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/MIXER/test_tools.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/MIXER/analyze.py",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "full_gate": {
+    "build": "PASS",
+    "test": "FAIL",
+    "fmt": "PASS",
+    "clippy": "PASS",
+    "passed": 798,
+    "failed": 3,
+    "ignored": 181,
+    "failures": [
+      "pseudo::tests::fetch_boundary_verifies_before_publication_and_never_overwrites",
+      "pseudo::cached_fetch_checks_hash_and_provenance",
+      "pseudo::cache_resolution_and_no_network_side_effects"
+    ],
+    "reason": "Existing cache guard rejects scratch paths inside this repository. Sandbox disallows outside-repository 990-volume scratch."
+  },
+  "readme_tests": {
+    "passed": 8,
+    "failed": 1,
+    "reason": "Existing test_structural_scope_and_sources expects obsolete phrase standard profile is unsupported; README freshness tests pass."
+  },
+  "collection_notes": [
+    "Collector exit 0 means all rows were recorded, not all SCFs converged. Per-run numerical exits are retained (stress cases exit 3).",
+    "Initial bad strict CLI key caused 27 exit-1 input errors, all corrected and rerun; see initial-input-errors.json."
+  ],
+  "m2": {
+    "simulated": true,
+    "case": "si16",
+    "ranks": [
+      2,
+      3
+    ],
+    "fine_maps": [
+      8,
+      8
+    ],
+    "davidson": [
+      36,
+      36
+    ],
+    "fine_h": [
+      619,
+      619
+    ],
+    "max_delta_energy_vs_serial_ha": 5.471e-13,
+    "rank_bit_identical": false
+  }
+}

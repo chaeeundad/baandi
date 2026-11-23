@@ -128,6 +128,7 @@ fn legacy_defaults_are_unchanged() {
         Id::PROJECT_WIDE,
         Id::B1_NARROW,
         Id::REFERENCE_STRICT,
+        Id::MIX_CELL_KERKER,
         Id::M2_B5,
         Id::LEAN_PROJ_CACHE,
         Id::DAVIDSON_PROFILE,
@@ -295,7 +296,7 @@ fn legacy_defaults_are_unchanged() {
     assert_eq!(value(Id::COLLECTIVE_TRACE), Value::Choice("off"));
     assert_eq!(value(Id::SERIAL_DENSITY_FUSED), Value::Choice("on"));
     assert_eq!(value(Id::BINARY_HASH_CACHE), Value::Choice("on"));
-    assert_eq!(TABLE.len(), 130);
+    assert_eq!(TABLE.len(), 131);
 }
 
 #[test]

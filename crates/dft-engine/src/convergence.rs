@@ -2,6 +2,23 @@
 use crate::scf::*;
 use dft_solvers::mixing::ResidualMetric;
 
+/// Geometry-only hypothesis, not a model of the material's dielectric response.
+/// Restore the equal-volume cube's lowest squared frequency in the denominator
+/// of the longest represented density mode. The existing Kerker adapter owns
+/// FFT normalization, conjugacy on skew/Nyquist grids and the zero-charge mode.
+pub(crate) fn cell_kerker_scale(cell: &Cell, basis: &PlaneWaveBasis) -> Option<f64> {
+    let g_min2 = basis
+        .vectors()
+        .iter()
+        .map(|g| g.norm_squared)
+        .filter(|g2| *g2 > 0.0)
+        .fold(f64::INFINITY, f64::min);
+    let cube2 = (2.0 * std::f64::consts::PI / cell.volume_bohr3().cbrt()).powi(2);
+    let q02 = cube2 - g_min2;
+    // Numerical equality guard only (cell inversion / volume / cbrt roundoff).
+    (q02 > 64.0 * f64::EPSILON * cube2).then(|| q02.sqrt())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StandardProfile {
     /// Total Coulomb residual energy, Ha; never normalized by electron count.
@@ -442,6 +459,31 @@ impl ResidualMetric for CoulombMetric {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cell_kerker_scale_is_geometric_and_cubic_is_inert() {
+        let scale = |rows| {
+            let c = Cell::from_user_rows_bohr(rows).unwrap();
+            let b = ScfOptions {
+                cutoff_hartree: 1.0,
+                ..ScfOptions::default()
+            }
+            .basis(&c, [0.0; 3], 4.0)
+            .unwrap();
+            cell_kerker_scale(&c, &b)
+        };
+        assert_eq!(scale([[8., 0., 0.], [0., 8., 0.], [0., 0., 8.]]), None);
+        let q = scale([[8., 0., 0.], [0., 8., 0.], [0., 0., 32.]]).unwrap();
+        let expected = ((2.0 * std::f64::consts::PI / 2048.0_f64.cbrt()).powi(2)
+            - (2.0 * std::f64::consts::PI / 32.0).powi(2))
+        .sqrt();
+        assert!((q - expected).abs() < 1e-14, "q0 in Bohr^-1");
+        let doubled = scale([[16., 0., 0.], [0., 16., 0.], [0., 0., 64.]]).unwrap();
+        assert!((2.0 * doubled - q).abs() < 1e-14);
+        // Unimodular re-basing: the shortest represented G need not be a column.
+        let rebased = scale([[8., 0., 0.], [8., 8., 0.], [0., 0., 32.]]).unwrap();
+        assert!((rebased - q).abs() < 1e-14);
+    }
 
     fn plateau_record() -> IterationRecord {
         IterationRecord {

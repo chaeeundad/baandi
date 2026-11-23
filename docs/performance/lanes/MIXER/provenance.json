@@ -1,0 +1,23 @@
+{
+  "baseline_commit": "6a060639934b60859c1a70f6bd8a918b9aac315f",
+  "baseline_binary_sha256": "43c4d0dc625e98001fb010041d5fa038cc22642621445423525bfc342482a327",
+  "final_binary_sha256": "6151bc0058842ce89e26032bbec29d82d891e8a7bc205261aad2c45b1f7af7c3",
+  "compiler": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "machine": "Mac Apple Silicon, pure Rust; no Mac timing acceptance",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "source_sha256": {
+    "crates/dft-cli/tests/all/run.rs": "ed8433cd5ad5944cbfad087173bb1cc698f60f7e00c35da9e57e0bd1d8af68dc",
+    "crates/dft-engine/src/convergence.rs": "b04ac63285b741198370d53acae748d2a8a1fbfc9c8ea4911e0885b0426e4639",
+    "crates/dft-engine/src/mix_dist.rs": "d23bffeca179e36cfc2f09894afba2314b6f5f8cee4c49ea727ce0ad6c778c6c",
+    "crates/dft-engine/src/scf.rs": "a41919be069e2255450550cf280812fed9ad539e062161cdf91557c8c3fd5a94",
+    "crates/dft-numerics/src/switches.rs": "e14987d0f1fd7288b9e396c19d2f64fe69b82da97c1d764f73a75f5556a5ddbc",
+    "crates/dft-numerics/tests/all/switches.rs": "88a4976873bce519bf3413a8b85c04ef20394cdb0198e75f17f370d6afeb6b1e",
+    "crates/dft-solvers/src/mixing.rs": "ab24dfd32b9a44c34eecc20259fa5b130dab11339e85cc9896542fe74dd62a78",
+    "docs/performance/attempts-ledger.md": "65f3bea16d40f3d55d36c4eb53c573903fbd0b00333e067bf6b7ee6ea6c34f6f"
+  },
+  "notes": [
+    "Per-run hashes identify the measured executable. The first cell candidate precedes the final diagnostic-only path note and added tests; final binary C thread checks and nine OFF checks reproduce its arithmetic.",
+    "Simulated ranks are correctness checks, not MPI timing evidence.",
+    "Synthetic UPFs live only under target/scratch and are not included in retained evidence."
+  ]
+}

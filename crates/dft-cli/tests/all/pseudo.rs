@@ -6,6 +6,7 @@ use std::{
     path::PathBuf,
     process::{Command, Output},
     sync::atomic::{AtomicUsize, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 fn fixture() -> String {
     let n = 401;
@@ -46,12 +47,30 @@ struct Test {
 }
 impl Test {
     fn new() -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "baandi-registry-{}-{}",
+        // Cache fixtures must be outside repositories, even when TMPDIR points
+        // into a checkout. check.sh supplies BAANDI_TEST_TMP on the external
+        // volume; direct cargo runs use the same safe external default.
+        let root = std::env::var_os("BAANDI_TEST_TMP")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/Volumes/990-2TB/Develop/rust-dft-scratch/tmp"));
+        assert!(root.is_absolute(), "BAANDI_TEST_TMP must be absolute");
+        fs::create_dir_all(&root).expect("BAANDI_TEST_TMP must be writable");
+        let dir = root.join(format!(
+            "baandi-registry-{}-{}-{}",
             std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
+            NEXT.fetch_add(1, Ordering::Relaxed),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
-        fs::create_dir(&dir).unwrap();
+        let mut builder = fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder.create(&dir).unwrap();
         let registry = dir.join("registry.json");
         let data = fixture();
         let entry = json!({"id":"synthetic-si", "element":"Si", "source":{"family":"Synthetic", "version":"1", "file_url":"https://example.invalid/synthetic.upf", "project_url":"https://example.invalid/"}, "license":{"identifier":"CC0-1.0","url":"https://example.invalid/license", "verified":true},"attribution":"Synthetic test only", "citations":["Not a scientific reference"], "formats":["UPF2"], "xc":"SLA PZ", "valence_electrons":4, "relativistic":"nonrelativistic", "pseudo_type":"NC", "nlcc":false, "spin_orbit":false,"paw":false,"ultrasoft":false, "projector_counts":{"0":1}, "suggested_cutoffs":{"wavefunction_ry":30,"density_ry":120,"source":"https://example.invalid/cutoffs"}, "sha256":format!("{:x}",Sha256::digest(data.as_bytes())),"size_bytes":data.len(),"date_checked":"2026-11-03","supported_by_engine":true,"support_reasons":[],"status":"verified"});
@@ -220,6 +239,16 @@ fn cache_resolution_and_no_network_side_effects() {
         assert!(out(&o).contains(expected), "{}", out(&o));
     }
     assert!(!t.dir.join("cache").exists());
+    let mut e = t.entry.clone();
+    e["license"]["verified"] = json!(false);
+    t.save(vec![e]);
+    assert!(out(&t.run(&["fetch", "synthetic-si", "--yes"])).contains("license unverified"));
+}
+#[test]
+fn cache_path_inside_repository_is_rejected() {
+    // Keep rejection independent of successful cache operations so it is still
+    // exercised in sandboxes whose only writable scratch is inside a checkout.
+    let t = Test::new();
     let o = t
         .command()
         .env(
@@ -229,11 +258,8 @@ fn cache_resolution_and_no_network_side_effects() {
         .args(["fetch", "synthetic-si", "--yes"])
         .output()
         .unwrap();
+    assert!(!o.status.success());
     assert!(out(&o).contains("outside repositories"));
-    let mut e = t.entry.clone();
-    e["license"]["verified"] = json!(false);
-    t.save(vec![e]);
-    assert!(out(&t.run(&["fetch", "synthetic-si", "--yes"])).contains("license unverified"));
 }
 #[test]
 fn cached_fetch_checks_hash_and_provenance() {

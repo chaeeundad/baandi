@@ -26,11 +26,20 @@
 #   TMPDIR_990=<dir>   scratch for logs (default /Volumes/990-2TB/Develop/rust-dft-scratch/tmp
 #                      when that volume exists; user rule 2026-11-19: no scratch on the
 #                      internal disk)
+#   BAANDI_TEST_TMP=<dir>  writable absolute test scratch root OUTSIDE any checkout;
+#                      defaults to TMPDIR_990 (or its external-volume default).
+#                      A private gate directory under it is exported as
+#                      BAANDI_TEST_TMP and TMPDIR (also for the source-local test).
+#                      For direct cargo tests, set both variables to a private root.
+#                      A sandbox may use $PWD/target/tmp, outside Cargo packages,
+#                      but cache success tests will still reject that checkout path.
 set -uo pipefail
 export PATH="/opt/homebrew/opt/rustup/bin:$PATH"
 here="$(cd "$(dirname "$0")" && pwd)"
-scratch="${TMPDIR_990:-/Volumes/990-2TB/Develop/rust-dft-scratch/tmp}"
-if [[ -d "$(dirname "$scratch")" ]] && mkdir -p "$scratch" 2>/dev/null; then export TMPDIR="$scratch"; fi
+scratch="${BAANDI_TEST_TMP:-${TMPDIR_990:-/Volumes/990-2TB/Develop/rust-dft-scratch/tmp}}"
+# Fail rather than silently writing test scratch to the internal disk.
+mkdir -p "$scratch" || exit 1
+export BAANDI_TEST_TMP="$scratch" TMPDIR="$scratch"
 # sccache (user-approved 2026-11-19): shared compile cache on the 990-2TB volume, safe across worktrees
 # because it keys on the full compiler input. CHECK_SCCACHE=0 disables. sccache cannot cache incremental
 # crates, so incremental is switched off for gate builds when it is used.
@@ -68,7 +77,11 @@ print(f"LOAD {l[0]:.1f} {l[1]:.1f} {l[2]:.1f} on {os.cpu_count()} cpus; {n} carg
 ' "$tier" "${pkg[*]:-}"
 
 start=$(date +%s)
-tmp="$(mktemp -d "${TMPDIR:-/tmp}/check.XXXXXX")"; trap 'rm -rf "$tmp"' EXIT
+tmp="$(mktemp -d "${TMPDIR:-/tmp}/check.XXXXXX")" || exit 1
+trap 'rm -rf "$tmp"' EXIT
+# Isolate cache fixtures per gate, including the source-local fetch test that
+# uses std::env::temp_dir(). The existing trap cleans up this private directory.
+export BAANDI_TEST_TMP="$tmp" TMPDIR="$tmp"
 fail=0
 report() { local name="$1" rc="$2" log="$3"; if [[ "$rc" == 0 ]]; then echo "PASS $name"; else echo "FAIL $name"; tail -40 "$log"; fail=1; fi; }
 

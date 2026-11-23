@@ -11,6 +11,7 @@ pub mod kerker;
 pub mod locking;
 pub mod mixing;
 pub mod real_davidson;
+pub mod ref_davidson;
 pub use real_davidson::{RealDavidson, RealEigenSolution};
 #[doc(hidden)]
 pub mod replay;

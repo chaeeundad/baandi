@@ -3126,3 +3126,96 @@ bounded dev08 falsification request: [filtered-subspace.md](../design/filtered-s
 Raw traces, input/binary/UPF hashes, command exits, failed inputs and reproducer:
 `docs/performance/lanes/MIXER/`. No UPF stored. Remote commands, A/A first,
 crossed AB/BA jobs and 600/7200 s caps: `lanes/MIXER/dev08-request.md`.
+
+## R-SCF-DAV — standalone reference-SCF inner solver (2026-11-23)
+
+**Implemented, not wired into the driver, no adopted default or speed claim.**
+New premise: the user-authorized reference-SCF block organization and explicit
+inner stopping semantics. Derived from note
+`docs/research/qe-study/davidson-iteration-structure-gamma.md` only; no QE source
+read. REL-SLICES, Advance/bounded-subspace, restart-keep, PR-CG, UPPER_BORDER,
+ROTATE_COLUMNS and packed reductions stay closed. The supplied motivation's
+183 reduced calls and 58 iterations have different stage scopes; no per-fine-map
+redundant-solve inference is made from their quotient.
+
+Fresh all-band H at entry, active-band corrections, bordered H/S, generalized
+reduced solve via the existing guarded Cholesky/faer adapter, capacity 2n,
+GEMM-only contraction of V/HV, and explicit occupied/empty Ritz-change thresholds.
+No retained H input. Root and replicated EVD are exposed for a same-problem
+measurement. Per-call/per-iteration H widths, active indices, EVD orders/calls,
+repairs/restarts, collective payloads and GEMM shapes/flops are returned; stage
+clocks are optional. Ordinary driver/legacy source remains untouched.
+
+**Correctness finding, not a speed optimization:** the ideal identity/diagonal
+reset after contraction/whitening accumulated 1.0154099783221682e-11 Ha error
+on a synthetic degenerate spectrum. Re-measuring H/S from rotated V/HV fixes
+it with no new H or extra EVD; the extra borders/factor work is charged. The
+original test tolerance was retained. Synthetic roots now differ from full EVD
+by at most 6.54e-14 Ha in the degenerate fixture, including ranks 1/2/3/8 and
+root/replicated placement; occupied projectors agree with dense and legacy.
+This refinement may affect speed and must be priced, not omitted from the model.
+
+Mac fixed-H evidence (not timing acceptance): 48/48 converged replay solves,
+Si8/16/32/skew x early/middle/late x simulated ranks 1/2/3/8; solver ethr 1e-12 Ha,
+200-iteration validation budget. Maximum occupied difference from strict legacy
+residual 1e-12 Ha reference **1.1123879595231756e-12 Ha**; maximum occupied
+principal-angle sine **7.747457492838181e-6**. The stopping ethr is not an absolute
+error bound (Si16 middle slightly exceeds ethr). Iteration/H pairs, identical
+across these rank counts: Si8 30/326,8/93,8/88; Si16 21/530,9/241,4/121;
+Si32 28/1045,9/487,3/209; skew 9/60,5/31,2/17. Full 679-coordinate skew middle
+oracle: <=6.189493362285248e-14 Ha, ranks 1/2/3/8. Complete degenerate occupied
+edge synthetic test passes; arbitrary spectrally incomplete invariant starts
+still require an independent driver-level audit.
+
+Negative stress retained: Si8 early, forcing ALL bands including empties to
+1e-13 Ha, exhausted 200 iterations, 17/20 flags, 1065 H columns (occupied error
+5.003e-15 Ha). No empty threshold or tolerance was relaxed to hide it. The
+normal first-step setting is loose; the default 20-call budget explicitly
+returns unconverged flags and the bench exits 5 on exhaustion.
+
+Si8 late simulated rank 3: profile off/on and root/replicated have identical
+bits, 5 iterations/62 H columns; default replay matches the HEAD example on
+four systems. Full check build/fmt/clippy pass; three pre-existing pseudo-cache
+tests fail with repository-local TMPDIR, as in preceding tasks. No workaround
+moves scratch outside the owned worktree. The allowed note does not contain
+the preconditioner formula; the implemented smooth formula is explicit in the
+design and needs architect confirmation before exact QE iteration claims.
+
+Evidence and exact dev08 capture/A-A/crossed A-B commands (Si64/Si128 MPI8):
+[request](lanes/RSCF/dav-dev08-request.md),
+[inner contract](../design/reference-scf.md#inner-solver),
+[stored Mac evidence](../../crates/dft-solvers/tests/ref_davidson_evidence.json).
+The dev08 stage-0 result, root-placement choice, and full-SCF integration are
+pending through the master; no Mac timing is used to choose a default.
+
+
+### R-SCF-DAV preconditioner addendum follow-up (2026-11-23)
+
+The main study-note addendum resolves the formula question above. The smooth
+Ha denominator was already algebraically correct; the physical replay supplied
+only kinetic energy. It now passes kinetic + mean total local potential + the
+real nonlocal projector-pair diagonal, with NC overlap 1, shared across Gamma
+pair coordinates without extra weights. The API now names this full diagonal
+explicitly. Existing solver comparison arms retain their kinetic inputs.
+Derived from note `davidson-iteration-structure-gamma.md`, addendum dated
+2026-11-23; no QE source consulted and no production default changed.
+
+All 48 physical snapshot solves converge on simulated ranks 1/2/3/8, with
+identical iteration and H-column counts across ranks. Early/mid/late iterations:
+Si8 28/8/8; Si16 21/10/4; Si32 30/9/3; skew 10/5/2.
+Maximum occupied error against strict legacy: 8.92924623e-13 Ha;
+maximum occupied principal-angle sine: 7.24731268e-6;
+maximum occupied rank difference: 4.41313652e-15 Ha.
+Synthetic tests: 5 pass, including degenerate occupied edge (48 iterations,
+237 H columns at every rank count) and the independent Ry formula/shift test.
+Dense skew and root/replicated/profile comparisons pass. These are correctness
+observations, not speed acceptance or measured QE iteration identity.
+
+`CHECK_SCCACHE=0 TMPDIR_990="$PWD/target/scratch" scripts/check.sh full`
+exits 1: build/fmt/clippy pass, 807 tests pass, 181 ignored, the same three
+pseudo-cache tests fail because their temporary cache is inside the repository.
+README generation exits 0 and produces no tracked changes; its Python test
+exits 1 on the existing missing phrase `standard profile is unsupported`.
+No unrelated test, tolerance or scope change was made. Evidence JSON and the
+request table above are refreshed; historical kinetic-only negative experiments
+remain explicitly labelled as historical. No dev08 measurements performed.

@@ -89,6 +89,16 @@ struct Args {
     /// settings may differ, a changed potential rounding recomputes H X),
     /// `legacy` (manifest without fingerprint, unchecked, labeled).
     replay_mode: ReplayMode,
+    // R-SCF-DAV: isolated fixed-H solver mode; absent preserves legacy replay.
+    ref_arm: Option<String>,
+    ref_profile: bool,
+    ref_dense: bool,
+    ref_hx: bool,
+    ref_root: bool,
+    ref_first_step: bool,
+    ref_tol: Option<f64>,
+    ref_capacity: usize,
+    ref_iterations: usize,
 }
 
 /// The parts of a snapshot manifest the replay needs.
@@ -176,6 +186,15 @@ fn parse_args() -> Args {
         cold_internal: false,
         snapshot: None,
         replay_mode: ReplayMode::Exact,
+        ref_arm: None,
+        ref_profile: false,
+        ref_dense: false,
+        ref_hx: false,
+        ref_root: false,
+        ref_first_step: false,
+        ref_tol: None,
+        ref_capacity: 0,
+        ref_iterations: 20,
     };
     let mut it = std::env::args().skip(1);
     while let Some(k) = it.next() {
@@ -201,6 +220,23 @@ fn parse_args() -> Args {
                     _ => usage("--cold-start is once or internal"),
                 }
             }
+            "--ref-arm" => a.ref_arm = Some(v()),
+            "--ref-profile" => a.ref_profile = true,
+            "--ref-dense" => a.ref_dense = true,
+            "--ref-hx" => a.ref_hx = true,
+            "--ref-root" => a.ref_root = true,
+            "--ref-first-step" => a.ref_first_step = true,
+            "--ref-tol" => a.ref_tol = Some(num(v())),
+            "--ref-capacity" => {
+                a.ref_capacity = v()
+                    .parse()
+                    .unwrap_or_else(|_| usage("invalid ref capacity"))
+            }
+            "--ref-iterations" => {
+                a.ref_iterations = v()
+                    .parse()
+                    .unwrap_or_else(|_| usage("invalid ref iterations"))
+            }
             "--snapshot" => a.snapshot = Some(v().into()),
             "--replay-mode" => {
                 a.replay_mode = match v().as_str() {
@@ -212,6 +248,15 @@ fn parse_args() -> Args {
             }
             _ => usage(&format!("unknown argument {k}")),
         }
+    }
+    if let Some(arm) = &a.ref_arm
+        && (!["new", "legacy", "validate"].contains(&arm.as_str())
+            || a.snapshot.is_none()
+            || a.replay_mode != ReplayMode::AbSamePhysics)
+    {
+        usage(
+            "--ref-arm new|legacy|validate requires --snapshot and --replay-mode ab; options: --ref-profile --ref-dense --ref-hx --ref-root --ref-first-step --ref-tol HA --ref-capacity N --ref-iterations N",
+        );
     }
     if a.input.as_os_str().is_empty() {
         usage("--input is required");
@@ -550,7 +595,7 @@ fn bench(args: &Args, comm: Option<&dyn Collective>, p: u64) -> RankOut {
             opts.grid_override = None;
         }
         let ranks = comm.map_or(1, |c| c.size());
-        if m.ranks != ranks {
+        if m.ranks != ranks && !(args.ref_arm.is_some() && m.ranks == 1) {
             usage(&format!(
                 "--snapshot was captured with {} ranks, this run has {ranks}",
                 m.ranks
@@ -605,6 +650,9 @@ fn bench(args: &Args, comm: Option<&dyn Collective>, p: u64) -> RankOut {
     let construct_s = t0.elapsed().as_secs_f64();
     dft_engine::profile::add_init(construct_s);
     if let Some(m) = &manifest {
+        if args.ref_arm.is_some() {
+            return reference_bench::run(args, m, &problem, comm, construct_s);
+        }
         return replay(args, m, &mut problem, comm, p, dims, electrons, construct_s);
     }
     let (rho0, base_density) = match &args.density {
@@ -1069,6 +1117,17 @@ fn report(
         "phase_profile": profile,
     });
     println!("DAVBENCH_JSON {doc}");
+    if args.ref_arm.is_some()
+        && out
+            .kinds
+            .iter()
+            .any(|(_, k)| k.repeats.iter().any(|r| r.converged != out.bands))
+    {
+        eprintln!(
+            "davidson_bench: reference fixed-H solve exhausted its iteration limit; see unconverged bands in the record"
+        );
+        std::process::exit(5);
+    }
     if unreproduced {
         eprintln!(
             "davidson_bench: exact replay did not reproduce the captured work/eigenvalues: FAILED"
@@ -1189,5 +1248,676 @@ fn main() {
             &map,
             profile,
         );
+    }
+}
+
+/// Isolated R-SCF-DAV replay; no reference-driver or production dispatch.
+mod reference_bench {
+    use super::*;
+    use dft_numerics::{RealMatrix, pool::WorkerPool};
+    use dft_solvers::distributed_davidson::{
+        DistributedKeptStart, DistributedRealOperator, DistributedStart, DistributedTuning,
+    };
+    use dft_solvers::ref_davidson::{self, Iteration, Options, Record, ReducedPlacement};
+    use dft_solvers::{
+        BandTolerances, RealDavidson, RealEigenSolution, RealLinearOperator, SolverError,
+    };
+    use std::cell::{Cell, RefCell};
+    struct Comm<'a> {
+        inner: Option<&'a dyn Collective>,
+        calls: Cell<[u64; 4]>,
+        doubles: Cell<[u64; 4]>,
+    }
+    impl Comm<'_> {
+        fn add(&self, k: usize, n: usize) {
+            let mut a = self.calls.get();
+            a[k] += 1;
+            self.calls.set(a);
+            let mut a = self.doubles.get();
+            a[k] += n as u64;
+            self.doubles.set(a);
+        }
+        fn reset(&self) {
+            self.calls.set([0; 4]);
+            self.doubles.set([0; 4]);
+        }
+        fn json(&self) -> Value {
+            json!({"operations":["sum","gather","broadcast","alltoall"],"calls":self.calls.get(),"payload_doubles_per_rank":self.doubles.get()})
+        }
+    }
+    impl Collective for Comm<'_> {
+        fn rank(&self) -> usize {
+            self.inner.map_or(0, |c| c.rank())
+        }
+        fn size(&self) -> usize {
+            self.inner.map_or(1, |c| c.size())
+        }
+        fn barrier(&self) -> Result<(), dft_mpi::MpiError> {
+            self.inner.map_or(Ok(()), |c| c.barrier())
+        }
+        fn tree_sum_f64(&self, a: &[f64], b: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
+            self.add(0, a.len());
+            if let Some(c) = self.inner {
+                c.tree_sum_f64(a, b)
+            } else {
+                b.copy_from_slice(a);
+                Ok(())
+            }
+        }
+        fn allgatherv_f64(
+            &self,
+            a: &[f64],
+            n: &[usize],
+            b: &mut [f64],
+        ) -> Result<(), dft_mpi::MpiError> {
+            self.add(1, a.len());
+            if let Some(c) = self.inner {
+                c.allgatherv_f64(a, n, b)
+            } else {
+                b.copy_from_slice(a);
+                Ok(())
+            }
+        }
+        fn bcast_f64(&self, a: &mut [f64], r: usize) -> Result<(), dft_mpi::MpiError> {
+            self.add(2, a.len());
+            self.inner.map_or(Ok(()), |c| c.bcast_f64(a, r))
+        }
+        fn alltoall_f64(
+            &self,
+            a: &[f64],
+            n: usize,
+            b: &mut [f64],
+        ) -> Result<(), dft_mpi::MpiError> {
+            self.add(3, a.len());
+            if let Some(c) = self.inner {
+                c.alltoall_f64(a, n, b)
+            } else {
+                b.copy_from_slice(a);
+                Ok(())
+            }
+        }
+    }
+    // One fixed-lifetime adapter per rank; never stored in an array.
+    #[allow(clippy::large_enum_variant)]
+    enum H {
+        Serial(dft_physics::real_gamma::RealHamiltonian),
+        Rows(dft_physics::distributed_real_gamma::DistributedRealHamiltonian),
+    }
+    struct Operator {
+        h: RefCell<H>,
+        rows: Vec<usize>,
+        n: usize,
+        pool: Arc<WorkerPool>,
+    }
+    impl RealLinearOperator for Operator {
+        fn dimension(&self) -> usize {
+            self.n
+        }
+        fn worker_pool(&self) -> Option<Arc<WorkerPool>> {
+            Some(self.pool.clone())
+        }
+        fn apply(&self, x: &[f64], y: &mut [f64]) -> Result<(), SolverError> {
+            let x = RealMatrix::new(x.len(), 1, x.to_vec())?;
+            let mut out = RealMatrix::zeros(x.rows(), 1)?;
+            RealLinearOperator::apply_block(self, &x, &mut out)?;
+            y.copy_from_slice(out.as_slice());
+            Ok(())
+        }
+        fn apply_block(&self, x: &RealMatrix, y: &mut RealMatrix) -> Result<(), SolverError> {
+            match &mut *self.h.borrow_mut() {
+                H::Serial(h) => h
+                    .apply_block(x, y)
+                    .map_err(|e| SolverError::Application(e.to_string())),
+                _ => unreachable!(),
+            }
+        }
+    }
+    impl DistributedRealOperator for Operator {
+        fn global_len(&self) -> usize {
+            self.n
+        }
+        fn local_rows(&self) -> &[usize] {
+            &self.rows
+        }
+        fn worker_pool(&self) -> Option<Arc<WorkerPool>> {
+            Some(self.pool.clone())
+        }
+        fn apply_block<C: Collective>(
+            &mut self,
+            c: &C,
+            x: &RealMatrix,
+            y: &mut RealMatrix,
+        ) -> Result<(), SolverError> {
+            match &mut *self.h.borrow_mut() {
+                H::Serial(h) => h
+                    .apply_block(x, y)
+                    .map_err(|e| SolverError::Application(e.to_string())),
+                H::Rows(h) => h
+                    .apply_block(c, x, y)
+                    .map_err(|e| SolverError::Application(e.to_string())),
+            }
+        }
+    }
+
+    pub fn run(
+        args: &Args,
+        m: &Manifest,
+        problem: &ScfProblem,
+        comm: Option<&dyn Collective>,
+        construct_s: f64,
+    ) -> RankOut {
+        let rho = dft_engine::snapshot::read_density_file(
+            &m.dir.join(m.density_file.as_ref().expect("density file")),
+            m.grid,
+        )
+        .expect("snapshot density");
+        let current = problem.operator_fingerprint(&rho);
+        let differences = m
+            .contract
+            .operator
+            .as_ref()
+            .expect("snapshot fingerprint")
+            .differences(&current);
+        if !differences.is_empty() || m.contract.density_fnv != Some(fnv(rho.as_slice().unwrap())) {
+            usage(&format!(
+                "reference replay physical identity mismatch: {differences:?}"
+            ));
+        }
+        if m.start == "none" {
+            usage("reference replay requires a captured start block (choose an ordinary warm map)");
+        }
+        let config = Config::parse(&std::fs::read_to_string(&args.input).unwrap()).unwrap();
+        let opts = dft_cli::run::options(&config).unwrap();
+        if opts.functional != dft_engine::Functional::LdaPz || problem.core_density().is_some() {
+            usage("reference replay currently supports LDA-PZ without core density");
+        }
+        let prepared = config.prepare().unwrap();
+        let cell = &prepared.cell;
+        let basis =
+            dft_basis::PlaneWaveBasis::new(cell, dft_units::Hartree(m.cutoff_hartree)).unwrap();
+        let grid =
+            dft_basis::FftGridSpec::new(&basis, &basis.density_basis(cell).unwrap(), Some(m.grid))
+                .unwrap();
+        let half = dft_basis::HalfSphere::new(&basis, &grid).unwrap();
+        let mut fft = dft_numerics::FftPlan3d::new(m.grid).unwrap();
+        let hartree = dft_physics::hartree::evaluate(&rho, cell, &mut fft).unwrap();
+        let xc = dft_physics::xc::evaluate(&rho, cell.volume_bohr3()).unwrap();
+        let mut potential = problem.ionic_potential().clone();
+        for ((v, h), x) in potential
+            .iter_mut()
+            .zip(&hartree.potential)
+            .zip(&xc.potential)
+        {
+            *v += h.re + x;
+        }
+        let potential_fnv = fnv(potential.as_slice().unwrap());
+        if m.ranks == 1 && m.contract.potential_fnv != Some(potential_fnv) {
+            usage("reference operator potential fingerprint mismatch");
+        }
+        let base = args.input.parent().unwrap();
+        let mut pps = Vec::new();
+        let mut positions = Vec::new();
+        for (label, path) in &config.pseudopotentials {
+            pps.push(
+                dft_upf::parse_upf(&std::fs::read_to_string(base.join(path)).unwrap()).unwrap(),
+            );
+            positions.push(
+                config
+                    .system
+                    .atoms
+                    .iter()
+                    .filter(|a| &a.species == label)
+                    .map(|a| {
+                        cell.fractional_to_cartesian_bohr(a.fractional.map(|v| v.rem_euclid(1.0)))
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        }
+        let species: Vec<_> = pps
+            .iter()
+            .zip(&positions)
+            .map(
+                |(potential, positions_bohr)| dft_physics::hamiltonian::Species {
+                    potential,
+                    positions_bohr,
+                },
+            )
+            .collect();
+        let nl =
+            dft_physics::hamiltonian::NonlocalOperator::new(&basis, cell.volume_bohr3(), &species)
+                .unwrap();
+        let h = dft_physics::hamiltonian::Hamiltonian::new_with_grid(
+            &basis,
+            grid.clone(),
+            potential,
+            nl,
+        )
+        .unwrap();
+        if opts.threads != 1 {
+            usage("reference replay currently requires one worker per rank");
+        }
+        let pool = WorkerPool::new(1).unwrap();
+        let c = Comm {
+            inner: comm,
+            calls: Cell::new([0; 4]),
+            doubles: Cell::new([0; 4]),
+        };
+        let (operator, rows) = if c.size() == 1 {
+            (
+                H::Serial(
+                    dft_physics::real_gamma::RealHamiltonian::from_complex(
+                        &h,
+                        &basis,
+                        m.bands,
+                        pool.clone(),
+                    )
+                    .unwrap(),
+                ),
+                (0..m.plane_waves).collect(),
+            )
+        } else {
+            let mut d = dft_physics::distributed_real_gamma::DistributedRealHamiltonian::new(
+                &h,
+                &basis,
+                m.bands,
+                c.rank(),
+                c.size(),
+                pool.clone(),
+            )
+            .unwrap();
+            d.set_dgemm(DistributedTuning::current().wide_gemm);
+            let rows = d.local_rows().to_vec();
+            (H::Rows(d), rows)
+        };
+        let mut op = Operator {
+            h: RefCell::new(operator),
+            rows,
+            n: m.plane_waves,
+            pool,
+        };
+        let mut diag = vec![0.0; op.n];
+        diag[0] = h.kinetic_diagonal()[0];
+        for (i, &p) in half.plus().iter().enumerate().skip(1) {
+            diag[2 * i - 1] = h.kinetic_diagonal()[p as usize];
+            diag[2 * i] = diag[2 * i - 1];
+        }
+        let diagonal: Vec<_> = op.rows.iter().map(|&i| diag[i]).collect();
+        // Study-note addendum: plane-wave diagonal in Ha, with s(G)=1 (NC).
+        // This is shared by the real/imaginary coordinates of each Gamma pair;
+        // it is not the diagonal of the transformed ORC operator.
+        let v0 = h.local_potential_values().iter().sum::<f64>()
+            / h.local_potential_values().len() as f64;
+        let mut full_diag = h.kinetic_diagonal().to_vec();
+        for (g, value) in full_diag.iter_mut().enumerate() {
+            *value += v0;
+            for atom in h.nonlocal().atoms() {
+                let beta = atom.columns();
+                let count = atom.channel_count();
+                for j in 0..count {
+                    for i in 0..count {
+                        *value += atom.coupling_hartree()[i + count * j]
+                            * (beta.column(i)[g] * beta.column(j)[g].conj()).re;
+                    }
+                }
+            }
+        }
+        let mut full_orc = vec![0.0; op.n];
+        full_orc[0] = full_diag[0];
+        for (i, &p) in half.plus().iter().enumerate().skip(1) {
+            full_orc[2 * i - 1] = full_diag[p as usize];
+            full_orc[2 * i] = full_orc[2 * i - 1];
+        }
+        let reference_diagonal: Vec<_> = op.rows.iter().map(|&i| full_orc[i]).collect();
+
+        let source_rank = if m.ranks == 1 { 0 } else { c.rank() };
+        let (captured, _, row_hash, layout) = dft_engine::snapshot::read_rank_file(
+            &m.dir.join(format!("{}.rank{source_rank}.bin", m.label)),
+        )
+        .expect("snapshot start");
+        if layout != m.layout || (m.ranks == 1 && layout != "orc_full") {
+            usage("reference snapshot layout mismatch");
+        }
+        let x = if m.ranks == 1 && c.size() > 1 {
+            if captured.rows() != op.n {
+                usage("serial snapshot dimension mismatch");
+            }
+            let mut local = RealMatrix::zeros(op.rows.len(), m.bands).unwrap();
+            for j in 0..m.bands {
+                for (i, &global) in op.rows.iter().enumerate() {
+                    local[(i, j)] = captured[(global, j)];
+                }
+            }
+            local
+        } else {
+            let expected_hash = if m.ranks == 1 {
+                0
+            } else {
+                dft_engine::snapshot::fnv_usize(&op.rows)
+            };
+            if row_hash != expected_hash || captured.rows() != op.rows.len() {
+                usage("reference replay row fingerprint mismatch");
+            }
+            captured
+        };
+        if x.cols() != m.bands {
+            usage("reference replay band count mismatch");
+        }
+        let occupied = (problem.electron_count() / 2.0).round() as usize;
+        let mut options = Options::new(m.bands, args.ref_tol.unwrap_or(m.tolerance), occupied);
+        options.first_step = args.ref_first_step;
+        options.capacity = args.ref_capacity;
+        options.max_iterations = args.ref_iterations;
+        options.profile = args.ref_profile;
+        options.placement = if args.ref_root {
+            ReducedPlacement::Root
+        } else {
+            ReducedPlacement::Replicated
+        };
+        options.return_hx = args.ref_hx;
+        let arm = args.ref_arm.as_deref().unwrap();
+        let reference = if arm == "validate" {
+            Some(legacy(&c, &mut op, &x, &diagonal, 1e-12, &opts, false, m))
+        } else {
+            None
+        };
+        let dense = if args.ref_dense {
+            Some(dense_reference(&c, &mut op, m.bands))
+        } else {
+            None
+        };
+        let mut repeats = Vec::new();
+        for rep in 0..=args.repeats {
+            c.barrier().unwrap();
+            c.reset();
+            let before = snap();
+            let t = Instant::now();
+            let (values, vectors, hx, iterations, h_columns, converged, record) = if arm == "legacy"
+            {
+                let s = legacy(
+                    &c,
+                    &mut op,
+                    &x,
+                    &diagonal,
+                    options.threshold,
+                    &opts,
+                    true,
+                    m,
+                );
+                (
+                    s.eigenvalues,
+                    s.eigenvectors,
+                    None,
+                    s.iterations,
+                    s.operator_applications,
+                    s.converged,
+                    None,
+                )
+            } else {
+                let s = ref_davidson::solve(&c, &mut op, &x, &reference_diagonal, options)
+                    .expect("reference Davidson");
+                let iterations = s.record.iterations.len();
+                let h = s.record.h_columns;
+                (
+                    s.eigenvalues,
+                    s.eigenvectors,
+                    s.hx,
+                    iterations,
+                    h,
+                    s.converged,
+                    Some(s.record),
+                )
+            };
+            let seconds = t.elapsed().as_secs_f64();
+            c.barrier().unwrap();
+            let after = snap();
+            let communication = c.json();
+            if rep == 0 {
+                continue;
+            }
+            let fresh_hx = hx.is_none();
+            let mut hx = hx.unwrap_or_else(|| RealMatrix::zeros(x.rows(), m.bands).unwrap());
+            if fresh_hx {
+                DistributedRealOperator::apply_block(&mut op, &c, &vectors, &mut hx).unwrap();
+            }
+            let mut residuals = vec![0.0; m.bands];
+            let mut sum = vec![0.0; m.bands];
+            for j in 0..m.bands {
+                for i in 0..x.rows() {
+                    sum[j] += (hx[(i, j)] - values[j] * vectors[(i, j)]).powi(2);
+                }
+            }
+            c.tree_sum_f64(&sum, &mut residuals).unwrap();
+            residuals.iter_mut().for_each(|v| *v = v.sqrt());
+            let (mut counters, mut stage_seconds) = delta(&before, &after, args.sim_ranks as u64);
+            counters.insert("reference_communication".into(), communication);
+            counters.insert("reference_replay".into(),json!({"manifest":args.snapshot,"arm":arm,
+                "captured_ranks":m.ranks,"layout":layout,"potential_exact":m.contract.potential_fnv==Some(potential_fnv),
+                "repartitioned":m.ranks!=c.size(),"hx_injected":false,"occupied":occupied,
+                "first_step":options.first_step,"capacity":options.capacity,"max_iterations":options.max_iterations,
+                "legacy_strict_bands":m.contract.strict_bands,"legacy_buffer_tolerance_ha":m.contract.buffer_tolerance,
+                "placement":format!("{:?}",options.placement),"returned_hx":options.return_hx}));
+            if let Some(record) = &record {
+                let local_record = record_json(record);
+                counters.insert("reference_record".into(), local_record.clone());
+                counters.insert(
+                    "reference_per_rank".into(),
+                    collect_records(&c, &local_record),
+                );
+                for (index, r) in std::iter::once(&record.setup)
+                    .chain(&record.iterations)
+                    .chain(std::iter::once(&record.finish))
+                    .enumerate()
+                {
+                    for (stage, &s) in ref_davidson::STAGES.iter().zip(&r.seconds) {
+                        stage_seconds.insert(format!("ref.{index}.{stage}"), s);
+                    }
+                }
+            }
+            if let Some(reference) = &reference {
+                let de = values
+                    .iter()
+                    .zip(&reference.eigenvalues)
+                    .take(occupied)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0, f64::max);
+                let angle = subspace_angle(&c, &vectors, &reference.eigenvectors, occupied);
+                counters.insert("reference_validation".into(),json!({"occupied_max_error_ha":de,"occupied_sin_theta_max":angle,
+                    "oracle":"legacy strict residual 1e-12 Ha on identical rebuilt H","oracle_iterations":reference.iterations,
+                    "oracle_h_columns":reference.operator_applications}));
+            }
+            if let Some((exact, q)) = &dense {
+                let de = values
+                    .iter()
+                    .zip(exact)
+                    .take(occupied)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0, f64::max);
+                let angle = subspace_angle(&c, &vectors, q, occupied);
+                counters.insert("reference_dense_validation".into(),json!({"occupied_max_error_ha":de,
+                    "occupied_sin_theta_max":angle,"oracle":"full coordinate-basis H, faer symmetric EVD"}));
+            }
+            repeats.push(Repeat {
+                diag_s: seconds,
+                map_s: seconds,
+                iterations,
+                h_columns,
+                eig_fnv: fnv(&values),
+                eigenvalues: values,
+                residuals,
+                converged: converged.iter().filter(|&&v| v).count(),
+                counters,
+                seconds: stage_seconds,
+            });
+        }
+        RankOut {
+            setup_s: construct_s,
+            base_density: format!("reference fixed-H snapshot {}", m.label),
+            electrons: problem.electron_count(),
+            bands: m.bands,
+            plane_waves: m.plane_waves,
+            grid: m.grid,
+            gamma_real: true,
+            warm_tol: options.threshold,
+            e_h_change: f64::NAN,
+            kinds: vec![(
+                format!("ref-{arm}"),
+                KindOut {
+                    tolerance: options.threshold,
+                    repeats,
+                },
+            )],
+            snapshot: None,
+        }
+    }
+    fn subspace_angle(c: &Comm<'_>, x: &RealMatrix, y: &RealMatrix, occupied: usize) -> f64 {
+        let mut overlap = RealMatrix::zeros(occupied, occupied).unwrap();
+        let mut sums = vec![0.0; occupied * occupied];
+        for j in 0..occupied {
+            for i in 0..occupied {
+                sums[i + j * occupied] = (0..x.rows()).map(|k| x[(k, i)] * y[(k, j)]).sum();
+            }
+        }
+        c.tree_sum_f64(&sums, overlap.as_mut_slice()).unwrap();
+        let sv = overlap.as_ref().singular_values().unwrap();
+        (1.0 - sv.iter().copied().fold(1.0, f64::min).powi(2))
+            .max(0.0)
+            .sqrt()
+    }
+    fn dense_reference(c: &Comm<'_>, op: &mut Operator, bands: usize) -> (Vec<f64>, RealMatrix) {
+        if op.n > 1024 {
+            usage(
+                "--ref-dense is limited to 1024 ORC coordinates; use the strict oracle for larger snapshots",
+            );
+        }
+        let mut h = RealMatrix::zeros(op.n, op.n).unwrap();
+        for from in (0..op.n).step_by(bands) {
+            let width = bands.min(op.n - from);
+            let mut x = RealMatrix::zeros(op.rows.len(), width).unwrap();
+            let mut hx = x.clone();
+            for (i, &g) in op.rows.iter().enumerate() {
+                if (from..from + width).contains(&g) {
+                    x[(i, g - from)] = 1.0;
+                }
+            }
+            DistributedRealOperator::apply_block(op, c, &x, &mut hx).unwrap();
+            for j in 0..width {
+                for (i, &g) in op.rows.iter().enumerate() {
+                    h[(g, from + j)] = hx[(i, j)];
+                }
+            }
+        }
+        let mut all = RealMatrix::zeros(op.n, op.n).unwrap();
+        c.tree_sum_f64(h.as_slice(), all.as_mut_slice()).unwrap();
+        let (values, vectors) =
+            dft_numerics::symmetric_eigh(&all).expect("dense symmetric reference");
+        let mut local = RealMatrix::zeros(op.rows.len(), bands).unwrap();
+        for j in 0..bands {
+            for (i, &g) in op.rows.iter().enumerate() {
+                local[(i, j)] = vectors[(g, j)];
+            }
+        }
+        (values, local)
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn legacy(
+        c: &Comm<'_>,
+        op: &mut Operator,
+        x: &RealMatrix,
+        diagonal: &[f64],
+        tolerance: f64,
+        opts: &dft_engine::ScfOptions,
+        ritz: bool,
+        manifest: &Manifest,
+    ) -> RealEigenSolution {
+        let solver = RealDavidson {
+            bands: x.cols(),
+            tolerance,
+            max_iterations: 400,
+            max_subspace: opts.davidson_subspace,
+            seed: opts.seed,
+        };
+        let policy = if ritz {
+            BandTolerances {
+                strict_bands: manifest.contract.strict_bands,
+                buffer_tolerance: manifest.contract.buffer_tolerance,
+            }
+        } else {
+            BandTolerances {
+                strict_bands: x.cols(),
+                buffer_tolerance: tolerance,
+            }
+        };
+        if c.size() == 1 {
+            solver
+                .solve_reusing(
+                    op,
+                    Some(x),
+                    diagonal,
+                    policy,
+                    ritz,
+                    !ritz,
+                    opts.davidson_capacity_per_band,
+                    &mut None,
+                )
+                .expect("legacy oracle")
+        } else {
+            let mut local = x.clone();
+            let mut kept = DistributedKeptStart::new();
+            let mut result = solver
+                .solve_distributed_rows_local(
+                    c,
+                    op,
+                    Some(DistributedStart::Local(x)),
+                    diagonal,
+                    policy,
+                    ritz,
+                    !ritz,
+                    opts.davidson_capacity_per_band,
+                    DistributedTuning::current(),
+                    &mut local,
+                    &mut kept,
+                    false,
+                )
+                .expect("legacy oracle");
+            result.eigenvectors = local;
+            result
+        }
+    }
+    // Outside the timed solve. Keep every rank's local GEMM shapes and
+    // collective payloads, rather than pretending rank 0 is a global count.
+    fn collect_records(c: &Comm<'_>, value: &Value) -> Value {
+        let encoded = serde_json::to_vec(value).unwrap();
+        let mut lengths = vec![0.0; c.size()];
+        c.allgatherv_f64(&[encoded.len() as f64], &vec![1; c.size()], &mut lengths)
+            .unwrap();
+        let counts: Vec<_> = lengths.iter().map(|&n| n as usize).collect();
+        let mut all = vec![0.0; counts.iter().sum()];
+        let local: Vec<_> = encoded.iter().map(|&b| b as f64).collect();
+        c.allgatherv_f64(&local, &counts, &mut all).unwrap();
+        let mut offset = 0;
+        let records: Vec<Value> = counts
+            .iter()
+            .map(|&n| {
+                let bytes: Vec<_> = all[offset..offset + n].iter().map(|&b| b as u8).collect();
+                offset += n;
+                serde_json::from_slice(&bytes).unwrap()
+            })
+            .collect();
+        json!(records)
+    }
+    fn iteration_json(r: &Iteration) -> Value {
+        json!({"active_bands":r.active_bands,"basis_before":r.basis_before,"h_calls":r.h_calls,"h_columns":r.h_columns,
+            "reduced_order":r.reduced_order,"reduced_solves":r.reduced_solves,"backend_solves":r.backend_solves,
+            "restarts":r.restarts,"repairs":r.repairs,"dropped_corrections":r.dropped_corrections,"unconverged":r.unconverged,
+            "reductions":r.communication.reductions,"reduction_bytes":r.communication.reduction_bytes,
+            "broadcasts":r.communication.broadcasts,"broadcast_bytes":r.communication.broadcast_bytes,
+            "gemms":r.gemms.iter().map(|g|json!({"stage":g.stage,"m":g.m,"n":g.n,"k":g.k,"flops":g.flops})).collect::<Vec<_>>()})
+    }
+    fn record_json(r: &Record) -> Value {
+        json!({"setup":iteration_json(&r.setup),"iterations":r.iterations.iter().map(iteration_json).collect::<Vec<_>>(),
+            "finish":iteration_json(&r.finish),"h_calls":r.h_calls,"h_columns":r.h_columns,"reduced_solves":r.reduced_solves,
+            "backend_solves":r.backend_solves,"restarts":r.restarts,"gemm_flops_per_rank":r.gemm_flops,
+            "reductions":r.communication.reductions,"reduction_bytes":r.communication.reduction_bytes,
+            "broadcasts":r.communication.broadcasts,"broadcast_bytes":r.communication.broadcast_bytes})
     }
 }

@@ -51,12 +51,31 @@ class ReadmeIsCurrent(unittest.TestCase):
         m = load()
         text = "\n".join(m.structural_results())
         for phrase in ("32 time-reversal representatives to 10", "inconclusive",
-                       "DFT+U forces are unsupported", "standard profile is unsupported",
+                       "DFT+U forces are unsupported",
                        "CLI spin-polarized or finite-temperature relaxation is unsupported",
                        "not an error bound", "Second scalar energy reimplementation",
                        "byte-identical", "Cutoff convergence is not claimed",
                        "not full-tensor relaxation", "no comparison with experiment or other codes"):
             self.assertIn(phrase, text)
+        self.assertNotIn("standard profile is unsupported", text)
+        # Current support requires verification; the stored structural oracles
+        # remain strict runs, not new measurements of the default path.
+        for heading, support, evidence, scope in (
+            ("Atomic forces", "forces also come from a standard state with a passed fixed-point verification",
+             "tests/reference/forces/manifest.json", "docs/validation/forces.md"),
+            ("Ionic relaxation", "default runs verify every step on the standard path",
+             "tests/reference/relaxation/manifest.json", "docs/validation/relaxation.md"),
+            ("Stress", "stress also comes from a standard state with a passed fixed-point verification",
+             "tests/reference/stress/validation.json", "docs/validation/stress.md"),
+        ):
+            with self.subTest(operation=heading):
+                section = next(s for s in text.split("### ") if s.startswith(heading))
+                self.assertIn(support, section)
+                self.assertIn("stored runs", section)
+                self.assertIn("strict", section)
+                self.assertIn("ADR 0043", section)
+                self.assertIn("](" + evidence + ")", section)
+                self.assertIn("](" + scope + ")", section)
         self.assertEqual(text.count("comparison with QE pending"), 5)
         for target in re.findall(r"\]\(([^)]+)\)", text):
             self.assertTrue(Path(ROOT, target).is_file(), target)

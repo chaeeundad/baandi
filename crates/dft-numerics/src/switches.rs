@@ -247,6 +247,8 @@ table! {
     // Adopted 2026-11-24 (dev08 MPI8 A/B at 0ce77fdc: si64 -5.4%, si128 -6.5%, elongated/rskew neutral; attempts ledger).
     REFSCF_VERIFY_GATE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "reference SCF only: defer predicted failing verification attempts using observed error/estimator scaling; never deliver without a passing attempt";
+    REFSCF_VERIFY_GATE_FIRST: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "reference SCF only, requires REFSCF_VERIFY_GATE: predict the first verification from density/residual secants; undefined predictions attempt and the passing criterion is unchanged";
     VERIFY_REUSE: Kind::Choice { allowed: &["off", "warm", "feed", "feed2", "replace", "half"], default: "half" }, "half", "off, warm, feed, feed2, replace, half",
         "reuse of a failed fixed-point verification solve (F at the delivered density rho_out): warm = the next SCF step starts from its orbitals (so the REUSE_PSI kept start is taken); feed = warm and the pair (rho_out, F(rho_out)) also enters the mixer after the step's own pair, so the next input density is mixed from it (the verification map counts as an SCF map); off = discarded; rounding class (trajectory changes, acceptance still needs a passed verification)";
     // MPI entry cost (docs/performance/mpi-entry-cost-analysis.md). Adopted 2026-11-15 on dev08 A/B: M2_DGEMM, M2_ORTHO=serial and M2_LEAN default on; M2_FFT stays rust (neutral).

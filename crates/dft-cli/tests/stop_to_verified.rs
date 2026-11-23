@@ -220,11 +220,14 @@ fn cli_roundtrip(active: bool) {
     } else {
         text.to_string()
     };
-    for (variant, reuse, gate) in [
-        ("default", "off", "off"),
-        ("reuse", "on", "off"),
-        ("gate", "off", "on"),
-        ("both", "on", "on"),
+    for (variant, reuse, gate, first) in [
+        ("off", "off", "off", "off"),
+        ("default", "off", "on", "off"),
+        ("first", "off", "on", "on"),
+        ("first_inert", "off", "off", "on"),
+        ("reuse", "on", "off", "off"),
+        ("gate", "off", "on", "off"),
+        ("both", "on", "on", "off"),
     ] {
         for (level, profile) in [
             ("lightweight", ""),
@@ -241,9 +244,12 @@ fn cli_roundtrip(active: bool) {
                     command.env_remove(key);
                 }
             }
-            command
-                .env("BAANDI_REFSCF_VERIFY_REUSE", reuse)
-                .env("BAANDI_REFSCF_VERIFY_GATE", gate);
+            if variant != "default" {
+                command
+                    .env("BAANDI_REFSCF_VERIFY_REUSE", reuse)
+                    .env("BAANDI_REFSCF_VERIFY_GATE", gate)
+                    .env("BAANDI_REFSCF_VERIFY_GATE_FIRST", first);
+            }
             let output_dir = format!("{level}-{variant}");
             let output = command
                 .current_dir(&dir)
@@ -262,8 +268,17 @@ fn cli_roundtrip(active: bool) {
             assert_eq!(r["stop_to_verified_clock"], "reference-scf-wall-1");
             let expected = reader::stop_to_verified_summary(&doc).unwrap();
             assert_eq!(expected["status"], "VERIFIED");
+            if variant == "first" {
+                let first_stop = expected["first_stop_map"].as_u64().unwrap() as usize - 1;
+                for field in ["first_prediction_ha", "contraction_prediction_ha"] {
+                    let mut invalid = doc.clone();
+                    invalid["reference_scf"]["iterations"][first_stop]["verification_cost"]
+                        [field] = json!(-1.);
+                    assert!(reader::stop_to_verified_summary(&invalid).is_err());
+                }
+            }
             let costs = &r["verification_cost"];
-            if variant == "default" {
+            if variant == "off" || variant == "first_inert" {
                 assert!(r.get("verification_cost").is_none());
                 assert!(expected.get("skipped").is_none());
             } else {
@@ -330,11 +345,14 @@ fn cli_roundtrip(active: bool) {
                     map.get("verification_cost"),
                     history["reference_scf"].get("verification_cost")
                 );
-                if variant == "default" {
+                if variant == "off" || variant == "first_inert" {
                     assert!(map.get("verification_cost").is_none());
                 } else {
                     let cost = &map["verification_cost"];
-                    assert_eq!(cost.as_object().unwrap().len(), 5);
+                    assert_eq!(
+                        cost.as_object().unwrap().len(),
+                        if variant == "first" { 8 } else { 5 }
+                    );
                     assert_eq!(cost["gate_enabled"], gate == "on");
                     let attempt = r["verification"]["attempts"]
                         .as_array()
@@ -343,6 +361,28 @@ fn cli_roundtrip(active: bool) {
                         .find(|a| a["iteration"] == map["iteration"]);
                     if let Some(attempt) = attempt {
                         assert_eq!(cost["actual_error_ha"], attempt["coulomb_error_ha"]);
+                        if variant == "first" {
+                            assert!(cost["first_prediction_ha"].as_f64().is_some());
+                            let prediction = expected["verification_predictions"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .find(|p| p["iteration"] == map["iteration"])
+                                .unwrap();
+                            assert_eq!(prediction["actual_error_ha"], cost["actual_error_ha"]);
+                            assert_eq!(
+                                prediction["first_prediction_ha"],
+                                cost["first_prediction_ha"]
+                            );
+                            assert_eq!(
+                                prediction["contraction_prediction_ha"],
+                                cost["contraction_prediction_ha"]
+                            );
+                            assert_eq!(
+                                prediction["predicted_error_ha"],
+                                cost["predicted_error_ha"]
+                            );
+                        }
                     } else {
                         assert!(cost["actual_error_ha"].is_null());
                     }

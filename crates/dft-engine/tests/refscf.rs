@@ -707,19 +707,51 @@ fn stop_to_verified_si8_displaced() {
     };
     let mut science = None;
     let mut baseline = None;
-    for (level, reuse, gate) in [
-        ("off", "off", "off"),
-        ("on", "off", "off"),
-        ("off", "on", "off"),
-        ("off", "off", "on"),
-        ("off", "on", "on"),
+    for (variant, level, pairs) in [
+        (
+            "off",
+            "off",
+            vec![
+                ("refscf_verify_reuse", "off"),
+                ("refscf_verify_gate", "off"),
+            ],
+        ),
+        (
+            "off",
+            "on",
+            vec![
+                ("refscf_verify_reuse", "off"),
+                ("refscf_verify_gate", "off"),
+            ],
+        ),
+        ("default", "off", vec![]),
+        ("default", "on", vec![]),
+        ("first", "off", vec![("refscf_verify_gate_first", "on")]),
+        (
+            "reuse",
+            "off",
+            vec![("refscf_verify_reuse", "on"), ("refscf_verify_gate", "off")],
+        ),
+        ("gate", "off", vec![("refscf_verify_gate", "on")]),
+        (
+            "both",
+            "off",
+            vec![("refscf_verify_reuse", "on"), ("refscf_verify_gate", "on")],
+        ),
     ] {
-        let scope = RunConfig::from_pairs(&[
-            ("davidson_stages", level),
-            ("refscf_verify_reuse", reuse),
-            ("refscf_verify_gate", gate),
-        ])
-        .unwrap();
+        let mut pairs = pairs;
+        pairs.push(("davidson_stages", level));
+        let scope = RunConfig::from_pairs(&pairs).unwrap();
+        let reuse = if scope.on(dft_numerics::switches::Id::REFSCF_VERIFY_REUSE) {
+            "on"
+        } else {
+            "off"
+        };
+        let gate = if scope.on(dft_numerics::switches::Id::REFSCF_VERIFY_GATE) {
+            "on"
+        } else {
+            "off"
+        };
         let _guard = scope.enter();
         let run = driver::run(
             dft_engine::refstart::StartInput {
@@ -774,12 +806,6 @@ fn stop_to_verified_si8_displaced() {
                 .filter(|r| r.first_iteration_redo)
                 .count();
         let map_requests = ordinary_requests + attempts.len();
-        let variant = match (reuse, gate) {
-            ("on", "on") => "both",
-            ("on", _) => "reuse",
-            (_, "on") => "gate",
-            _ => "default",
-        };
         if reuse == "on" {
             assert!(reused > 0);
         }
@@ -822,8 +848,120 @@ fn verification_cost_predictor_fallback_and_refresh() {
 }
 
 #[test]
+fn first_prediction_linear_oracle_and_read_only_history() {
+    use dft_engine::refscf::broyden::PredictionScratch;
+    use dft_engine::refscf::driver::contraction_prediction;
+    let profile = Profile {
+        history: 2,
+        beta: 0.7,
+        ..Default::default()
+    };
+    let new = || Broyden::new(profile, &[1.; 2], &[true; 2], 1., 2.).unwrap();
+    let mut mix = new();
+    let mut control = new();
+    let mut metric = Metric::new(1. / (8. * PI), &[1.; 2], &[true; 2], 1, 350).unwrap();
+    let mut scratch = PredictionScratch::new(2);
+    // F(x)=b-2x amplifies every direction by -2. Its residual f=b-3x
+    // gives an independent exact oracle, including an initially failing
+    // candidate followed by the mandatory next-candidate attempt.
+    let residual = |x: &[C]| [c(2.) - 3. * x[0], c(3.) - 3. * x[1]];
+    let mut out = [c(0.); 2];
+    let mut expected = out;
+    assert_eq!(
+        mix.predict_output_error(&Serial, &mut metric, &out, &residual(&out), &mut scratch)
+            .unwrap(),
+        None
+    );
+    for x in [[c(0.), c(0.)], [c(1.), c(0.)]] {
+        mix.update(&Serial, &mut metric, &x, &residual(&x), &mut out)
+            .unwrap();
+        control
+            .update(&Serial, &mut metric, &x, &residual(&x), &mut expected)
+            .unwrap();
+    }
+    let x = [c(1.), c(1.)];
+    let f = residual(&x);
+    let actual = residual(&[x[0] + f[0], x[1] + f[1]]);
+    let actual_ha = metric.norm(&Serial, &actual).unwrap() / 2.;
+    let gamma = mix.gamma().to_vec();
+    let predicted = mix
+        .predict_output_error(&Serial, &mut metric, &x, &f, &mut scratch)
+        .unwrap()
+        .unwrap();
+    assert!((predicted - actual_ha).abs() < 1e-14);
+    let threshold = actual_ha / 2.;
+    assert!(metric.norm(&Serial, &f).unwrap() / 2. < threshold);
+    let mut gate = dft_engine::refscf::driver::VerificationPredictor::default();
+    assert!(gate.skip(Some(predicted), threshold));
+    assert!(!gate.skip(Some(predicted), threshold));
+    assert_eq!(mix.gamma(), gamma);
+    // A zero density secant makes the observed gain undefined.
+    assert_eq!(
+        mix.predict_output_error(&Serial, &mut metric, &[c(1.), c(0.)], &f, &mut scratch)
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        mix.predict_output_error(&Serial, &mut metric, &x, &[c(f64::NAN); 2], &mut scratch)
+            .unwrap(),
+        None
+    );
+    mix.update(&Serial, &mut metric, &x, &f, &mut out).unwrap();
+    control
+        .update(&Serial, &mut metric, &x, &f, &mut expected)
+        .unwrap();
+    assert_eq!(out, expected);
+    assert_eq!(mix.gamma(), control.gamma());
+    assert_eq!(mix.occupancy(), control.occupancy());
+    println!("FIRST_PREDICTION linear predicted_ha={predicted:.17e} actual_ha={actual_ha:.17e}");
+    assert_eq!(contraction_prediction(1e-7, 1e-8), Some(5e-10));
+    for bad in [0., -1., f64::NAN, f64::INFINITY, 1e-8] {
+        assert_eq!(contraction_prediction(bad, 1e-8), None);
+        assert_eq!(contraction_prediction(1e-8, bad), None);
+    }
+}
+
+#[test]
 fn verification_cost_small_fixture() {
     verification_cost_fixture(false);
+}
+
+#[test]
+fn first_prediction_eviction_and_preconditioner_independence() {
+    use dft_engine::refscf::broyden::PredictionScratch;
+    for preconditioning in [Preconditioning::Plain, Preconditioning::ThomasFermi] {
+        let profile = Profile {
+            history: 1,
+            preconditioning,
+            ..Default::default()
+        };
+        let mut mixer = Broyden::new(profile, &[1.], &[true], 1., 2.).unwrap();
+        let mut metric = metric(&[1.], &[true]);
+        let mut scratch = PredictionScratch::new(1);
+        let mut out = [c(0.)];
+        mixer
+            .update(&Serial, &mut metric, &[c(0.)], &[c(4.)], &mut out)
+            .unwrap();
+        // Delta x=-1, Delta f=3, hence squared gain 4 and energy 4/2.
+        assert_eq!(
+            mixer
+                .predict_output_error(&Serial, &mut metric, &[c(1.)], &[c(1.)], &mut scratch)
+                .unwrap(),
+            Some(2.)
+        );
+        mixer
+            .update(&Serial, &mut metric, &[c(1.)], &[c(1.)], &mut out)
+            .unwrap();
+        // The new secant replaces that gain: Delta x=-1, Delta f=0.5,
+        // squared gain 0.25, current norm 0.25, predicted Ha=0.03125.
+        assert_eq!(
+            mixer
+                .predict_output_error(&Serial, &mut metric, &[c(2.)], &[c(0.5)], &mut scratch)
+                .unwrap(),
+            Some(0.03125)
+        );
+        assert_eq!(mixer.occupancy(), 1);
+    }
 }
 
 #[test]
@@ -876,8 +1014,11 @@ fn verification_cost_fixture(active: bool) {
     };
     let mut baseline = None;
     let mut fingerprint = None;
+    let mut off_fingerprint = None;
     for (name, pairs) in [
         ("default", vec![]),
+        ("first_off", vec![("refscf_verify_gate_first", "off")]),
+        ("first", vec![("refscf_verify_gate_first", "on")]),
         (
             "off",
             vec![
@@ -885,7 +1026,17 @@ fn verification_cost_fixture(active: bool) {
                 ("refscf_verify_gate", "off"),
             ],
         ),
-        ("reuse", vec![("refscf_verify_reuse", "on")]),
+        (
+            "first_inert",
+            vec![
+                ("refscf_verify_gate", "off"),
+                ("refscf_verify_gate_first", "on"),
+            ],
+        ),
+        (
+            "reuse",
+            vec![("refscf_verify_reuse", "on"), ("refscf_verify_gate", "off")],
+        ),
         ("gate", vec![("refscf_verify_gate", "on")]),
         (
             "both",
@@ -916,12 +1067,26 @@ fn verification_cost_fixture(active: bool) {
             fingerprint = Some(stop_to_verified_science(&run));
         }
         // The default equals the gate-on arm since the 2026-11-24 adoption.
-        if name == "gate" {
+        if name == "gate" || name == "first_off" {
             assert_eq!(
                 fingerprint.as_ref().unwrap(),
                 &stop_to_verified_science(&run)
             );
         }
+        if name == "off" {
+            off_fingerprint = Some(stop_to_verified_science(&run));
+        }
+        if name == "first_inert" {
+            assert_eq!(
+                off_fingerprint.as_ref().unwrap(),
+                &stop_to_verified_science(&run)
+            );
+        }
+        assert!(
+            !RunConfig::from_pairs(&[])
+                .unwrap()
+                .on(Id::REFSCF_VERIFY_GATE_FIRST)
+        );
         verify_cost_contract(&run);
         let attempts = &run.outcome.result.verification.as_ref().unwrap().attempts;
         let reused = run
@@ -945,7 +1110,8 @@ fn verification_cost_fixture(active: bool) {
         } else {
             match name {
                 "reuse" | "both" => (29, 30, 2, 1, 0),
-                "gate" | "default" => (28, 30, 2, 0, 1),
+                "gate" | "default" | "first_off" => (28, 30, 2, 0, 1),
+                "first" => (27, 28, 1, 0, 1),
                 _ => (27, 29, 2, 0, 0),
             }
         };
@@ -953,8 +1119,40 @@ fn verification_cost_fixture(active: bool) {
             (run.records.len(), solves, attempts.len(), reused, skipped),
             expected
         );
-        if active && (name == "gate" || name == "reuse") {
-            let max_iterations = if name == "gate" {
+        if active && name == "first" {
+            assert_eq!(run.first_reference_stop, Some(23));
+            assert_eq!(attempts[0].iteration, 27);
+            assert!(run.records[22].verification_cost.as_ref().unwrap().skipped);
+            assert!(
+                run.records[26]
+                    .verification_cost
+                    .as_ref()
+                    .unwrap()
+                    .predicted_error_ha
+                    .unwrap()
+                    >= 5e-9
+            );
+        }
+        for r in run
+            .records
+            .iter()
+            .filter(|r| r.dr2_ry < profile.threshold_ry)
+        {
+            if let Some(cost) = &r.verification_cost {
+                println!(
+                    "FIRST_PREDICTION active={active} variant={name} iteration={} dr2_ry={:.9e} prediction_ha={:?} secant_ha={:?} contraction_ha={:?} actual_ha={:?} skipped={}",
+                    r.iteration,
+                    r.dr2_ry,
+                    cost.predicted_error_ha,
+                    cost.first_prediction_ha,
+                    cost.contraction_prediction_ha,
+                    cost.actual_error_ha,
+                    cost.skipped
+                );
+            }
+        }
+        if active && (name == "gate" || name == "reuse" || (name == "first" && skipped > 0)) {
+            let max_iterations = if name == "gate" || name == "first" {
                 run.records
                     .iter()
                     .find(|r| r.verification_cost.as_ref().unwrap().skipped)
@@ -988,7 +1186,7 @@ fn verification_cost_fixture(active: bool) {
                     .passed()
             );
             assert_eq!(exhausted.records.len(), max_iterations);
-            if name == "gate" {
+            if name == "gate" || name == "first" {
                 assert!(
                     exhausted
                         .records
@@ -1049,8 +1247,13 @@ fn verify_cost_contract(run: &dft_engine::refscf::driver::Run) {
             assert_eq!(c.actual_error_ha, Some(attempt.coulomb_error_ha));
         }
     }
+    let mut skipped_previous_candidate = false;
     for r in &run.records {
         if let Some(c) = &r.verification_cost {
+            if r.dr2_ry < 1e-8 {
+                assert!(!(skipped_previous_candidate && c.skipped));
+                skipped_previous_candidate = c.skipped;
+            }
             if c.skipped {
                 assert!(c.gate_enabled && c.predicted_error_ha.unwrap() >= 5e-9);
                 assert!(

@@ -22,6 +22,22 @@ struct Solve {
     q: RealMatrix,
     lambda: Vec<f64>,
 }
+/// Optional scratch for a read-only secant amplification model. Allocated once per
+/// opted-in run; no density history is inserted by a prediction.
+pub struct PredictionScratch {
+    dx: Vec<C>,
+    df: Vec<C>,
+    forms: [f64; 3 * 25 + 1],
+}
+impl PredictionScratch {
+    pub fn new(len: usize) -> Self {
+        Self {
+            dx: vec![C::default(); len],
+            df: vec![C::default(); len],
+            forms: [0.; 3 * 25 + 1],
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Diagnostics {
     pub iteration: usize,
@@ -101,6 +117,76 @@ impl Broyden {
     }
     pub fn gamma(&self) -> &[f64] {
         &self.gamma[..self.occupancy()]
+    }
+    /// Estimate the next unmixed residual energy from the largest observed
+    /// amplification ||Delta F(x)||_H^2 / ||Delta x||_H^2 in the mixer history.
+    /// Include the current secant virtually, with ordinary ring eviction.
+    /// This is exact for a scalar linear map, not a nonlinear upper bound.
+    /// Mixer history, factor scratch, gamma and iteration are read-only.
+    pub fn predict_output_error<K: Collective>(
+        &self,
+        comm: &K,
+        metric: &mut Metric,
+        x: &[C],
+        f: &[C],
+        scratch: &mut PredictionScratch,
+    ) -> Result<Option<f64>, Error> {
+        if x.len() != self.previous_x.len() || f.len() != x.len() || scratch.dx.len() != x.len() {
+            return Err(invalid("prediction vector shape"));
+        }
+        if self.iteration == 0 {
+            return Ok(None);
+        }
+        let p = self.iteration.min(self.profile.history);
+        let slot = (self.iteration - 1) % self.profile.history;
+        for j in 0..x.len() {
+            scratch.dx[j] = self.previous_x[j] - x[j];
+            scratch.df[j] = self.previous_f[j] - f[j];
+        }
+        let dx = |i: usize| {
+            if i == slot {
+                &scratch.dx[..]
+            } else {
+                &self.dx[i][..]
+            }
+        };
+        let df = |i: usize| {
+            if i == slot {
+                &scratch.df[..]
+            } else {
+                &self.df[i][..]
+            }
+        };
+        // Observed amplification of the unmixed map F along each stored
+        // density secant: ||S + D||_H^2 / ||S||_H^2. Unlike the mixed dr2
+        // ratio, this measures F itself, without a fitted multiplier.
+        let mut pairs: [(&[C], &[C]); 76] = [(&[], &[]); 76];
+        for i in 0..p {
+            pairs[3 * i] = (dx(i), dx(i));
+            pairs[3 * i + 1] = (dx(i), df(i));
+            pairs[3 * i + 2] = (df(i), df(i));
+        }
+        pairs[3 * p] = (f, f);
+        let n = 3 * p + 1;
+        if !metric.prediction_batch(comm, &pairs[..n], &mut scratch.forms[..n])? {
+            return Ok(None);
+        }
+        let mut amplification = 0_f64;
+        for i in 0..p {
+            let [xx, xf, ff] = [
+                scratch.forms[3 * i],
+                scratch.forms[3 * i + 1],
+                scratch.forms[3 * i + 2],
+            ];
+            let yy = xx + 2. * xf + ff;
+            let ratio = yy / xx;
+            if xx <= 0. || yy < 0. || !ratio.is_finite() {
+                return Ok(None);
+            }
+            amplification = amplification.max(ratio);
+        }
+        let predicted = amplification * (scratch.forms[3 * p] / 2.);
+        Ok(predicted.is_finite().then_some(predicted))
     }
     /// Call only for an accepted mixing step: neither convergence nor the
     /// first-map redo inserts history. An error terminates this mixer instance.

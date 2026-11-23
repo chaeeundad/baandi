@@ -371,6 +371,12 @@ pub fn stop_to_verified(path: &Path) -> Result<(), RunError> {
 struct WallVerificationCost {
     gate_enabled: bool,
     skipped: bool,
+    #[serde(default)]
+    first_gate_enabled: bool,
+    first_prediction_ha: Option<f64>,
+    contraction_prediction_ha: Option<f64>,
+    predicted_error_ha: Option<f64>,
+    actual_error_ha: Option<f64>,
 }
 #[derive(serde::Deserialize)]
 struct WallMap {
@@ -555,6 +561,45 @@ pub fn stop_to_verified_summary(doc: &Value) -> Result<Value, RunError> {
     });
     if gate_enabled {
         summary["skipped"] = json!(skipped);
+    }
+    if run.iterations.iter().any(|m| {
+        m.verification_cost
+            .as_ref()
+            .is_some_and(|c| c.first_gate_enabled)
+    }) {
+        let mut predictions = Vec::new();
+        for map in &run.iterations {
+            if let Some(cost) = &map.verification_cost {
+                require(
+                    !cost.first_gate_enabled || cost.gate_enabled,
+                    "first gate without verification gate",
+                )?;
+                for value in [
+                    cost.first_prediction_ha,
+                    cost.contraction_prediction_ha,
+                    cost.predicted_error_ha,
+                    cost.actual_error_ha,
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    require(
+                        value.is_finite() && value >= 0.,
+                        "invalid verification prediction/error",
+                    )?;
+                }
+                if map.dr2_ry < run.threshold_ry {
+                    predictions.push(json!({
+                        "iteration":map.iteration, "skipped":cost.skipped,
+                        "first_prediction_ha":cost.first_prediction_ha,
+                        "contraction_prediction_ha":cost.contraction_prediction_ha,
+                        "predicted_error_ha":cost.predicted_error_ha,
+                        "actual_error_ha":cost.actual_error_ha
+                    }));
+                }
+            }
+        }
+        summary["verification_predictions"] = json!(predictions);
     }
     Ok(summary)
 }

@@ -55,6 +55,18 @@ impl Metric {
         pairs: &[(&[C], &[C])],
         out: &mut [f64],
     ) -> Result<(), Error> {
+        self.prediction_batch(comm, pairs, out)?
+            .then_some(())
+            .ok_or_else(|| numerical("nonfinite metric"))
+    }
+    /// Predictor-only form: nonfinite arithmetic is undefined, while shape and
+    /// collective errors still propagate. All ranks inspect the same sums.
+    pub fn prediction_batch<K: Collective>(
+        &mut self,
+        comm: &K,
+        pairs: &[(&[C], &[C])],
+        out: &mut [f64],
+    ) -> Result<bool, Error> {
         let n = pairs.len();
         if n > self.local.len()
             || out.len() != n
@@ -94,10 +106,7 @@ impl Metric {
                 *o += v;
             }
         }
-        if out.iter().any(|v| !v.is_finite()) {
-            return Err(numerical("nonfinite metric"));
-        }
-        Ok(())
+        Ok(out.iter().all(|v| v.is_finite()))
     }
     pub fn norm<K: Collective>(&mut self, comm: &K, f: &[C]) -> Result<f64, Error> {
         let mut out = [0.0];

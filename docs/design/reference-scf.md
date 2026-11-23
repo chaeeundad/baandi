@@ -815,10 +815,11 @@ recovery. This is a pending measurement, not new Si8 timing evidence. See the
 
 I25-VERIFY-COST (2026-11-24) adds two independent, run-owned switches,
 `BAANDI_REFSCF_VERIFY_REUSE=on|off` and `BAANDI_REFSCF_VERIFY_GATE=on|off`
-(input `[performance] refscf_verify_reuse/refscf_verify_gate`). Both default
-to **off**, affect only this reference driver, and can be combined for
-correctness checks. The legacy `VERIFY_REUSE`/`VERIFY_SCHEDULE` switches do
-not select these experiments. No acceptance or default promotion is implied.
+(input `[performance] refscf_verify_reuse/refscf_verify_gate`). Reuse defaults
+to **off**; the empirical gate defaults to **on** following the 2026-11-24
+dev08 adoption (attempts ledger, I25-VERIFY-COST). Both affect only this
+reference driver and can be combined for correctness checks. The legacy `VERIFY_REUSE`/`VERIFY_SCHEDULE` switches do
+not select these experiments. The new first-attempt variant below remains experimental and default off.
 
 The shared `assess_fixed_point` call is unchanged: a candidate's own output
 state is deliverable only after a fresh map at that density, at
@@ -884,15 +885,123 @@ mixing. After one skipped eligible candidate, the next eligible candidate
 always attempts, even if predicted to fail, refreshing calibration and
 preventing indefinite deferral by a stale model. Non-stopping iterations do
 not consume that refresh. Every actual attempt updates `(d_a,e_a)`; passing
-still depends solely on the unchanged verifier. This rule intentionally
-cannot save the first failed attempt without empirical calibration.
+still depends solely on the unchanged verifier. This rule alone cannot save the first failed attempt without empirical calibration.
+
+### V3: first-attempt secant amplification (I25-FIRST-ATTEMPT)
+
+`BAANDI_REFSCF_VERIFY_GATE_FIRST=on|off` (input
+`[performance] refscf_verify_gate_first`) defaults to **off** and is effective
+only with `REFSCF_VERIFY_GATE=on`. It changes only the pre-calibration branch
+of V2. The adopted error/estimator predictor still controls every candidate
+after the first actual attempt. Both branches share the no-consecutive-skips
+state: a skipped first candidate forces an actual attempt at the next eligible
+candidate, regardless of its prediction. Undefined means attempt. `verify=off`
+performs no prediction or verification.
+
+Write `f(x)=F(x)-x`, `y=x+f`, and `J=df/dx`. Verification needs `f(y)`, locally
+`f + J f`, not `J^-1 f`. The candidate predictors were evaluated as follows:
+
+1. **Inverse Broyden:** its inverse-Jacobian model is
+   `H=-beta I+(S+beta D)(D^T W D)^-1 D^T W`, with stored density/residual
+   differences `S,D` and Hartree metric `W`. Direct `H f` is a Newton
+   displacement, not the required residual. To estimate the latter, the
+   evaluated prototype used Woodbury:
+   `(D^T W S) alpha=D^T W f`,
+   `r_hat=(1-1/beta)f+(D+S/beta)alpha`. It used scaled normal equations and
+   the existing symmetric EVD adapter, with the existing numerical-rank rule
+   and no regularization. The failed-first synthetic fixture's first prediction
+   was **1.504757613e-10 Ha** versus actual **1.783487664e-8 Ha**; the first-pass
+   control was undefined by the rank guard. No first skip or map saving.
+2. **Forward directional secant fit:**
+   `alpha=(S^T W S)^-1 S^T W f` with the same expression for `r_hat`, i.e.
+   a least-change forward Jacobian with prior `-I/beta`. First predictions
+   were **6.375661735e-10 Ha** (failed-first) and **5.666906701e-11 Ha**
+   (first-pass, actual **1.649390463e-10 Ha**). Again no first skip or saving.
+   Both directional prototypes were exact to 1.12e-16 Ha on a spanning,
+   nonnormal linear two-dimensional oracle, but that did not predict the
+   incomplete-history SCF behavior. These prototypes are removed, not hidden
+   alternative production paths. Neither inverse application nor inversion
+   is promoted on that evidence.
+3. **Scalar dr2 contraction:** record `p_contract=(d/d_previous)*d/2` Ha
+   for positive finite decreasing consecutive ordinary-map dr2 values. These
+   belong to *mixed* iterates, not the unmixed verification. Once
+   `d<threshold_ry`, this predictor is necessarily below `threshold_ry/2`.
+   It cannot detect a first failure. Min with it suppresses useful skips;
+   max adds no failing prediction. It is retained for audit only.
+4. **Selected: observed unmixed-map amplification envelope.** Each Broyden
+   secant already supplies `s=x_previous-x`, `q=f_previous-f`, hence
+   `s+q=F(x_previous)-F(x)`. Unlike a mixed dr2 ratio, their norm ratio measures
+   the response of F itself. Use the largest squared amplification in the
+   retained history, including the current virtual secant:
+
+   ```
+   a_i = <s_i,s_i>_W
+   b_i = <s_i,q_i>_W
+   c_i = <q_i,q_i>_W
+   L2 = max_i (a_i + 2 b_i + c_i) / a_i
+   p_first = L2 * <f,f>_W / 2                       [Ha]
+   ```
+
+The exact identity `f(y)=F(y)-F(x)` follows from `y=F(x)`, while the
+input separation is `y-x=f(x)`. Thus the needed error is the response of F
+to a known separation, motivating scaling its squared norm by an observed
+squared gain. For a scalar linear map this is exact. For multiple modes it
+uses the largest *observed* gain rather than assuming the current residual lies in a reliably
+reconstructed Jacobian subspace. It is neither a global Lipschitz bound nor a
+certificate; unobserved directions, old secants, eigensolve noise and
+nonlinearity can invalidate it. No material, size, rank, safety multiplier or
+fitted constant enters. History length is the existing user's mixing history.
+Both plain and Thomas-Fermi mixing supply raw secants, so the formula is
+independent of the preconditioner. It replaces the two directional models
+based on the synthetic evidence: first prediction **5.504054419e-9 Ha** skips
+the measured failing candidate, while **3.951894732e-10 Ha** permits the
+first-pass control. The passing refresh is badly overpredicted
+(**1.755352352e-8** predicted versus **4.378277166e-11 Ha** actual), which
+explicitly demonstrates why the mandatory attempt must remain.
+
+Virtually evict exactly the slot the next ordinary mixer update would replace.
+The predictor borrows the mixer immutably: no insertion, gamma/factor change,
+iteration advance, density/orbital mutation or extra mixing. Two complex
+vectors and 76 scalars are allocated/reserved once only when V3 is effective.
+One batched scalar collective forms the three products per secant plus the
+current norm (at most 76 products); no extra map, FFT, factorization, JSON or
+I/O is introduced. All ranks inspect the same gathered products. With V3 off
+there is no added predictor allocation or collective and default arithmetic
+and work decisions are unchanged.
+
+No history, any nonpositive density-secant norm, negative reconstructed output
+norm (including cancellation), nonfinite product/ratio/prediction yields null
+and an actual attempt. Collective/shape failures remain errors. A singular
+multisecant matrix is irrelevant: no matrix is inverted in the selected rule.
+The same model is evaluated on every eligible V3 candidate for audit, including
+later actual attempts whose scheduling remains V2. There is no fitted waiting
+count. This is different from the legacy LANE-VERIFY first-tail experiment
+(2026-11-20 ledger: 16 wrong skips, 419 -> 444 maps, negative Si64 evidence):
+that model used scalar mixed-iterate contraction; this one measures unmixed
+output changes from reference-driver Broyden vector history.
+
+Local counters and the staged protocol are in
+[first-attempt-dev08-request.md](../performance/lanes/RSCF/first-attempt-dev08-request.md).
+Two synthetic fixtures are insufficient for promotion. V3 remains off; no
+strict-reference accuracy or dev08 speed claim follows from these observations.
 
 ### Records and validation boundary
 
-When either switch is on, each iteration has a `verification_cost`
+When reuse or the gate is on, each iteration has a `verification_cost`
 record: `gate_enabled`, `skipped`, `predicted_error_ha` (null when undefined),
 `actual_error_ha` (null without an attempt), and `reused_from` (null unless
-consumed). The existing verification report retains only actual attempts;
+consumed). Effective V3 additionally exports `first_gate_enabled=true`,
+`first_prediction_ha` and `contraction_prediction_ha` on every record. Predictions
+are computed before the attempt on every eligible candidate; undefined values
+stay null. `predicted_error_ha` is the value actually used for the decision:
+secant amplification before any actual attempt, V2 scaling afterwards. A forced
+refresh may run despite a predicted failure. Skips have no actual error; a
+baseline-arm counterfactual is labelled separately, never inserted as a measured
+attempt in the skipped arm. The CLI interval reader exports
+`verification_predictions` with the three estimates, actual error, iteration
+and skip flag. With V3 off these additive JSON fields are absent, preserving
+the previous reference-history cost fields and numerical/work decisions. The existing
+verification report retains only actual attempts;
 skipped candidates have no verification call range or attempt timestamps.
 The CLI exports these fields in both reference-history copies and an aggregate
 `reference_scf.verification_cost` object with attempts/skipped/reused, logical

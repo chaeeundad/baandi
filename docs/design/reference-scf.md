@@ -558,3 +558,146 @@ and [stored validation](../../crates/dft-solvers/tests/ref_davidson_evidence.jso
 
 ## Rank-count acceptance for the reference driver (orchestrator, 2026-11-23)
 R-SCF-2 validation: 24 system/rank combinations converge and pass the independent fixed-point verification, maximum energy difference to the strict legacy reference 1.69e-9 Ha (inside the standard class 5e-9 Ha); legacy default bit-identical. One combination (si16, 3 simulated ranks) took a different discrete branch in the last Davidson call (2 versus 3 iterations: a Ritz-value change sits at the threshold, and the rank-dependent rounding of the reductions decides which side), ending with a final density difference of 8.2e-8 e/bohr^3 while still converging and certifying. QE has the same property (its own np8 versus np1 floor flips discrete decisions near thresholds). Acceptance rule from now on: across rank counts, the delivered result must stay inside the accuracy class and pass the certificate; trajectories must agree within rounding EXCEPT at documented branch points where a discrete test sits within rounding of its threshold (recorded with the margin). Bit-identical trajectories across rank counts are not required for the reference driver.
+
+Issue #26 / I26-1-RANKRULE makes this rule executable in
+`crates/dft-engine/tests/reference_driver.rs` and its test-only
+`common/rank_rule.rs`. Compare every layout to one rank, including verification
+maps in chronological order. Before the first divergent predicate, require the
+existing dr2 (`1e-11 Ry + 1e-8 relative`) and ethr (`1e-13 Ry + 1e-8 relative`)
+agreement, Ritz-change agreement (`1e-11 Ha + 1e-8 relative`), identical incoming
+active-band indices, correction work, repairs, drops, reduced orders, redo and
+restart decisions. A missing trace or unexplained count difference fails.
+
+At the first divergent Davidson correction, **every** differing band predicate
+must straddle the strict `<` test. For each, retain both previous/current Ritz
+values, both absolute changes, both actual band thresholds (including the
+empty-band/first-step rules), and signed margins `change - threshold`, in Ha.
+The test-only rounding envelope is
+`32 * f64::EPSILON * max(1 Ha, abs(all four Ritz values))`.
+Both margins, the cross-rank change difference and the threshold difference
+must fit this envelope. It scales with the subtraction operands rather than the
+small cancelled difference, is independent of material and rank count, and is
+not an eigensolver tolerance or an absolute error bound. The test reports map,
+ordinary/verification phase, call and correction (one-based), and band
+(zero-based). A near-threshold event later in a trajectory cannot excuse an
+earlier work or numerical mismatch.
+
+Only after this evidence passes may subsequent trajectories/counts and the
+cross-rank density maximum differ. Without an explained ordinary-map branch the existing
+`1e-9 e/Bohr^3` density check remains: a verification-only branch cannot
+explain a change in the density already delivered. In both cases **each** delivered run must
+converge, pass its independent fixed-point verification on the final map, remain
+within the standard `5e-9 Ha` energy class against the tight legacy oracle,
+conserve charge within `1e-10 e`, and have finite delivered density/eigenvalues
+and map energies. The strict `1e-10 Ha` class is unchanged. Failed verification
+attempts, retries and recovery stay in the delivered wall and work; the matrix
+prints total wall, summed verification wall and attempt/work counts.
+
+Each of the six cases is run **twice at each of 1, 2, 3 and 8 simulated ranks**.
+The fixed-layout assertion compares full density, orbitals, eigenvalues,
+occupations, energy, verification and scientific histories/decision traces
+exactly, stripping clocks only. This is repeatability at a fixed build/layout;
+it does not promise cross-rank or cross-backend bit identity. Fast negative
+tests reject a threshold crossing outside the rounding envelope, earlier work
+divergence, and missing/nonfinite evidence. No default or numerical decision is
+changed; the added production fields only record existing operands and work.
+
+Release command (the external UPF is never committed):
+
+```sh
+DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release -p dft-engine \
+  --test reference_driver -- --include-ignored --nocapture --test-threads=1
+```
+
+`RSCF_MATRIX` emits one delivered-state row per case/layout and `RSCF_BRANCH`
+emits the first divergent correction's per-band margins. `RSCF_RANKS` and
+`RSCF_MATRIX_CASE` may narrow diagnostic runs; a full acceptance run leaves both
+unset (one rank is always included as the baseline).
+
+
+### I26-1-RANKRULE local release evidence
+
+Release matrix **exit 0**, six tests passed (four fast acceptance tests and two
+full-SCF tests), 24 case/layout combinations, each repeated twice. macOS arm64,
+pure Rust, simulated collectives, rustc 1.99.1; base `c2a143d5` plus this patch.
+Exact commands, exit code, UPF SHA-256, full precision values and delivered/verification wall
+seconds are in [the evidence record](../../crates/dft-engine/tests/common/rank_rule_evidence.json).
+These are local correctness observations, not native MPI/dev08 measurements or
+QE reference results. No default is promoted or numerical threshold changed.
+
+The following differences are against the tight legacy energy; verification is
+the independent fixed-point Coulomb error of the delivered state. `PASS` means
+energy class, convergence, final independent verification, finite state and charge
+checks all passed; all rows also passed exact fixed-layout repetition. Margins
+are `one rank / compared rank`. A dash means no discrete divergence, so no
+rounding exception was used. Map/call/correction are one-based; band is zero-based.
+
+| Case | Ranks | First map/call/correction (band) | Margins (Ha) | Energy difference (Ha) | Verification (Ha) | Charge error (e) | Delivered / repeat |
+| --- | ---: | --- | --- | ---: | ---: | ---: | --- |
+| si8 | 1 | none | — | +1.437996389e-10 | 1.776502657e-09 | +2.132e-14 | PASS / bits equal |
+| si8 | 2 | none | — | +1.438138497e-10 | 1.776502656e-09 | +3.553e-14 | PASS / bits equal |
+| si8 | 3 | none | — | +1.438422714e-10 | 1.776502658e-09 | +2.132e-14 | PASS / bits equal |
+| si8 | 8 | none | — | +1.438849040e-10 | 1.776502657e-09 | +3.553e-14 | PASS / bits equal |
+| si16 | 1 | none | — | +1.089119905e-10 | 3.087484819e-09 | -1.137e-13 | PASS / bits equal |
+| si16 | 2 | none | — | +1.091464696e-10 | 3.087484818e-09 | -7.816e-14 | PASS / bits equal |
+| si16 | 3 | 12/1/2 (31, SCF) | +8.648192699e-16 / -5.111474669e-17 | +1.002860017e-10 | 2.585725270e-09 | +0.000e+00 | PASS / bits equal |
+| si16 | 8 | none | — | +1.094662139e-10 | 3.087484819e-09 | -1.421e-13 | PASS / bits equal |
+| si32 | 1 | none | — | +3.232969448e-11 | 1.029302385e-09 | +3.126e-13 | PASS / bits equal |
+| si32 | 2 | 12/1/4 (55, verify) | +4.873920448e-16 / -3.996389187e-17 | +3.754507816e-11 | 1.028119408e-09 | +3.126e-13 | PASS / bits equal |
+| si32 | 3 | 12/1/3 (50, verify) | +2.098362887e-16 / -6.771946748e-17 | +3.761613243e-11 | 1.027209407e-09 | +3.126e-13 | PASS / bits equal |
+| si32 | 8 | none | — | +3.809930149e-11 | 1.029302385e-09 | +2.274e-13 | PASS / bits equal |
+| skew | 1 | none | — | +7.590550410e-11 | 9.689380252e-11 | +3.553e-15 | PASS / bits equal |
+| skew | 2 | none | — | +7.594724849e-11 | 9.689372736e-11 | -2.665e-15 | PASS / bits equal |
+| skew | 3 | none | — | +7.593570217e-11 | 9.689353486e-11 | -4.441e-15 | PASS / bits equal |
+| skew | 8 | none | — | +7.593037310e-11 | 9.689345296e-11 | +1.776e-15 | PASS / bits equal |
+| elongated | 1 | none | — | +5.967137895e-11 | 4.657857559e-09 | +8.527e-14 | PASS / bits equal |
+| elongated | 2 | none | — | +5.965716809e-11 | 4.657857558e-09 | +9.948e-14 | PASS / bits equal |
+| elongated | 3 | none | — | +6.069456049e-11 | 4.657857564e-09 | +8.527e-14 | PASS / bits equal |
+| elongated | 8 | none | — | +6.046718681e-11 | 4.657857558e-09 | +9.948e-14 | PASS / bits equal |
+| synthetic | 1 | none | — | +1.692470719e-09 | 3.366433472e-10 | +8.882e-16 | PASS / bits equal |
+| synthetic | 2 | none | — | +1.692470386e-09 | 3.366433473e-10 | +0.000e+00 | PASS / bits equal |
+| synthetic | 3 | none | — | +1.692470386e-09 | 3.366433473e-10 | +0.000e+00 | PASS / bits equal |
+| synthetic | 8 | none | — | +1.692470608e-09 | 3.366433473e-10 | -2.220e-16 | PASS / bits equal |
+
+si16/3 first diverged: the two Ritz changes were `1.98435712306377354e-12 Ha` / `1.98344118906845779e-12 Ha`, at thresholds `1.98349230379391778e-12 Ha` / `1.98349230381514659e-12 Ha`. Both signed margins and their difference fit the `7.10542735760100186e-15 Ha` rounding envelope.
+
+si32/2 first diverged: the two Ritz changes were `5.04873920448289937e-14 Ha` / `4.99600361081320443e-14 Ha`, at thresholds `5.00000000000000015e-14 Ha` / `5.00000000000000015e-14 Ha`. Both signed margins and their difference fit the `7.10542735760100186e-15 Ha` rounding envelope.
+
+si32/3 first diverged: the two Ritz changes were `5.02098362886727045e-14 Ha` / `4.99322805325164154e-14 Ha`, at thresholds `5.00000000000000015e-14 Ha` / `5.00000000000000015e-14 Ha`. Both signed margins and their difference fit the `7.10542735760100186e-15 Ha` rounding envelope.
+
+Si16/3 has cross-rank density maximum `8.174729508592105e-8 e/Bohr^3`; this is
+accepted only with the recorded threshold evidence and delivered-state checks.
+All other layouts retain the density cap, including the two Si32
+verification-only branches. Verification was actually retried in this matrix (the evidence includes every attempt count); failed attempts and
+recovery remain charged to each run's total wall and H-column count. Each
+layout also rejects a copy whose final verification is deliberately marked
+failed, including the Si16 rounding-exception case.
+
+
+Final full gate: `TMPDIR="$PWD/target/tmp" TMPDIR_990="$PWD/target/tmp"
+CHECK_SCCACHE=0 CARGO_NET_OFFLINE=true scripts/check.sh full` exits **1**:
+build, fmt and clippy pass; 832 tests pass, 3 fail, 191 are ignored.
+The three existing CLI cache tests reject a cache inside a repository, while
+this ticket requires scratch inside the worktree. A targeted rerun of
+`pseudo::tests::fetch_boundary_verifies_before_publication_and_never_overwrites`
+exits 101 with the same explicit cache-location error. The other two are
+`pseudo::cache_resolution_and_no_network_side_effects` and
+`pseudo::cached_fetch_checks_hash_and_provenance`. No cache policy or test was
+changed. The gate's informational load probe also cannot run `ps` in this
+sandbox; the four gates still execute. README/dashboard/ledger files are outside
+this ticket's owned paths and remain unchanged.
+
+Default-path preservation was also checked against a pristine `git archive` of
+`c2a143d5` built inside `target/tmp/pristine` with the same debug toolchain and
+vendor dependencies. Archived Rust files were touched before building to avoid
+Cargo reusing newer artifacts by mtime. Four identical CLI inputs (Si2, skewed
+Si2, elongated Si2, Si8; 30 Ry; default SCF settings) have byte-identical complete
+`density.bin` files and bit-identical parsed floating-point energy audits,
+eigenvalues, occupations, convergence histories and independent-verification
+records. Only clocks and the clock-derived coarse/fine wall equivalent were
+excluded. Three cases converge and verify; elongated Si2 exhausts the default
+budget identically in both builds (exit 3). This preserves that failure; it is
+not a new convergence result. Default CLI runs do not emit orbital arrays, so
+that comparison makes no orbital-file claim; the reference matrix separately
+compares its full delivered orbitals. Exact inputs and hashes are in the same
+evidence JSON. No solver/default arithmetic or threshold changed.

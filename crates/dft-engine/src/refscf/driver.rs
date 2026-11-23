@@ -1,7 +1,7 @@
 //! Independent final-cutoff reference SCF. No ScfProblem/session/ladder or
 //! legacy solver dispatch is constructed, including during verification.
 use super::{
-    broyden::{Broyden, Diagnostics},
+    broyden::{Broyden, Diagnostics, PredictionScratch},
     density::DensityPlan,
     map,
     metric::{Metric, Serial},
@@ -51,6 +51,22 @@ impl VerificationPredictor {
     }
 }
 
+/// Scalar mixed-map contraction candidate, retained for audit only. dr2 is a
+/// squared norm in Ry; this assumes the next *unmixed* map contracts likewise,
+/// which Broyden does not guarantee.
+pub fn contraction_prediction(previous: f64, current: f64) -> Option<f64> {
+    if !previous.is_finite()
+        || previous <= 0.
+        || !current.is_finite()
+        || current <= 0.
+        || current >= previous
+    {
+        return None;
+    }
+    let value = (current / previous) * (current / 2.);
+    value.is_finite().then_some(value)
+}
+
 pub struct Run {
     pub full_diagnostics: bool,
     pub outcome: ScfOutcome,
@@ -84,6 +100,7 @@ pub fn run_with<K: Collective>(
     let full_diagnostics = config.on(Id::DAVIDSON_STAGES);
     let reuse = config.on(Id::REFSCF_VERIFY_REUSE);
     let gate = config.on(Id::REFSCF_VERIFY_GATE);
+    let gate_first = gate && config.on(Id::REFSCF_VERIFY_GATE_FIRST);
     let profile = profile.validate()?;
     let o = input.options;
     if o.standard.is_none()
@@ -132,6 +149,7 @@ pub fn run_with<K: Collective>(
     let mut y = x.clone();
     let mut f = x.clone();
     let mut next = x.clone();
+    let mut prediction_scratch = gate_first.then(|| PredictionScratch::new(x.len()));
     let mut next_planes = vec![0.; n.len()];
     plan.forward(comm, &n, &mut x)?;
     set_zero(&plan, &mut x, state.electrons / volume);
@@ -159,7 +177,8 @@ pub fn run_with<K: Collective>(
                 + 16 * dims.iter().product::<usize>()
                 + 16 * x.len() * (2 * profile.history + 12)
                 + 8 * state.operator.local_len() * (5 * cap + 3 * bands),
-        );
+        )
+        + if gate_first { 32 * x.len() + 8 * 76 } else { 0 };
     let mut peaks = vec![0.; comm.size()];
     let mut local_peak = peaks.clone();
     local_peak[comm.rank()] = peak as f64;
@@ -236,6 +255,7 @@ pub fn run_with<K: Collective>(
             }
             break (step, dr2);
         };
+        let previous_dr2 = last_dr2;
         last_dr2 = dr2;
         let stopped = dr2 < profile.threshold_ry;
         let estimator_s = start.elapsed().as_secs_f64();
@@ -243,8 +263,27 @@ pub fn run_with<K: Collective>(
             first_reference_stop = Some(iteration);
         }
         let mut certificate = None;
+        // Compute before the attempt and before inserting this iterate into
+        // the mixer. Later attempts retain the adopted empirical gate.
+        let first_prediction_ha = if stopped
+            && verification.is_some()
+            && let Some(scratch) = &mut prediction_scratch
+        {
+            mixer.predict_output_error(comm, &mut metric, &x, &f, scratch)?
+        } else {
+            None
+        };
+        let contraction_prediction_ha = if gate_first && stopped && verification.is_some() {
+            contraction_prediction(previous_dr2, dr2)
+        } else {
+            None
+        };
         let predicted_error_ha = if gate && stopped && verification.is_some() {
-            predictor.predict(dr2)
+            if predictor.observed.is_none() && gate_first {
+                first_prediction_ha
+            } else {
+                predictor.predict(dr2)
+            }
         } else {
             None
         };
@@ -438,6 +477,9 @@ pub fn run_with<K: Collective>(
             iteration,
             verification_cost: (reuse || gate).then_some(VerificationCost {
                 gate_enabled: gate,
+                first_gate_enabled: gate_first,
+                first_prediction_ha,
+                contraction_prediction_ha,
                 skipped,
                 predicted_error_ha,
                 actual_error_ha,

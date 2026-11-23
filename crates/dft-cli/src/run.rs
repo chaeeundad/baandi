@@ -1844,6 +1844,9 @@ fn execute_mode_inner(
                 "evaluated_maps":ordinary_maps + verification_maps,
                 "solver_calls":ordinary_maps + verification_maps
             });
+            if costs().any(|c| c.first_gate_enabled) {
+                result["reference_scf"]["verification_cost"]["first_gate_enabled"] = json!(true);
+            }
         }
     }
     if let Some(l) = &ladder_report {
@@ -3214,6 +3217,12 @@ fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
             "actual_error_ha":c.actual_error_ha,
             "reused_from":c.reused_from,
         });
+        if c.first_gate_enabled {
+            record["verification_cost"]["first_gate_enabled"] = json!(true);
+            record["verification_cost"]["first_prediction_ha"] = json!(c.first_prediction_ha);
+            record["verification_cost"]["contraction_prediction_ha"] =
+                json!(c.contraction_prediction_ha);
+        }
     }
     record
 }

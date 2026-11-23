@@ -37,6 +37,11 @@ pub struct SolveRecord {
 #[derive(Clone, Debug)]
 pub struct VerificationCost {
     pub gate_enabled: bool,
+    pub first_gate_enabled: bool,
+    /// Observed secant amplification estimate, also audited on later actual attempts.
+    pub first_prediction_ha: Option<f64>,
+    /// Mixed-map scalar contraction candidate; never used to skip.
+    pub contraction_prediction_ha: Option<f64>,
     pub skipped: bool,
     pub predicted_error_ha: Option<f64>,
     pub actual_error_ha: Option<f64>,

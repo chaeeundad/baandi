@@ -72,3 +72,6 @@ pub use gamma_real::{
 
 /// Research radial conventions; default variants retain the legacy path.
 pub use dft_upf::radial::{LocalMesh, RadialEvenRule};
+
+/// Final-cutoff, explicitly selected distributed reference initialization.
+pub mod refstart;

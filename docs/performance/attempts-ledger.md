@@ -3159,3 +3159,93 @@ reimplementing historical hotspots; remaining input-boundary memory is distinct
 from already-resident warm maps and previously adopted construction savings.
 [Audit](lanes/OWNED/audit.md), [validation](lanes/OWNED/validation.md),
 [evidence](lanes/OWNED/mac-evidence.json), [dev08](lanes/OWNED/dev08-request.md).
+
+## R-SCF-START — final-cutoff owned initialization (2026-11-23)
+
+**Explicit library entry only; defaults unchanged; dev08 timing/RSS pending.**
+Base d97d86430fd943ed6abfd1cfbacdb580846f6cef, uncommitted worktree.
+Derived from initialization principles in the own-words note
+`docs/research/qe-study/qe-scf-cycle.md`; no QE source read. This is a new
+reference-driver start, not a revival of the rejected coarse owned handoff.
+It has no coarse/fine transfer or padded coarse-to-fine exchange.
+
+Motivation is the ticket's relayed startup/memory decomposition and the
+INIT/LAUNCHIO/OWNED audits. The additional saving is eliminating replicated
+serial problem/operator/BandDensity state and full atomic Q/HQ/start blocks;
+previously adopted sparse projectors/lazy serial real H are not re-credited.
+`M2_OWNED_INPUT` remains default off and is not used by the new entry. The new
+function directly builds local projector/ORC rows, owned charge and potential,
+uses the existing guarded CholQR2 factorization and distributed H with chunked
+atomic HQ/Ritz, and retains final-cutoff state. No randomization; deterministic
+kinetic completion. The existing Ewald split/order is reused before allocating
+large fields. Density metadata and sparse projector source are explicitly
+released before the atomic block peak. Detailed byte/frequency audit and
+numerical/unsupported-input contracts: `docs/design/reference-scf.md#start`.
+
+### Measured local correctness (no Mac speed claim)
+
+Stored evidence: `crates/dft-engine/tests/refstart-evidence.json`, pure Rust,
+Rust 1.99.1, six release tests, **126 per-rank comparison records**. Si8/16/32
+and skew Si8 at final 15 Ha, deterministic 1e-4 fractional displacements;
+local/nonlocal synthetic PPs, library LDA-PW, missing-band completion and empty
+owners; 1/2/3/8 simulated ranks. Dependence/unsupported-input rejection and
+same-seed/different-unused-seed determinism also pass. External Si UPF SHA-256:
+`e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217`.
+The reference is existing BAANDI at the same final cutoff, **not QE**.
+
+| Quantity | Maximum absolute discrepancy | Gate |
+| --- | ---: | ---: |
+| Starting density | 8.326673e-16 electrons/Bohr^3 | 2e-12 |
+| First potential | 1.632028e-14 Ha | 2e-11 |
+| Gram minus identity | 1.709743e-14, dimensionless | 2e-12 |
+| Selected atomic-Ritz span column projection residual | 6.282379e-12, dimensionless | 2e-8 |
+| Initial Ritz energies | 9.769963e-15 Ha | 2e-11 |
+
+Zero mode is bit-equal to N_el/Omega; normalized charge meets relative 2e-12.
+Eigenvector signs/degenerate rotations are not physical discrepancies; tests
+compare the subspace and Ritz spectrum rather than requiring arbitrary gauges.
+No cap was relaxed after observing results.
+
+Legacy standard-driver continuation from the rank-3 owned start, imported
+through its unchanged warm-checkpoint API: **8/8 SCF steps**, both fixed-point
+verifications pass. Legacy energy -0.623797726375388772 Ha, new-start energy
+-0.623797726375388439 Ha, |delta| **3.330669e-16 Ha** (internal cap 1e-12 Ha).
+This end-to-end check is synthetic, not a new Si or external-code SCF oracle.
+
+### Per-rank bytes: named-array bounds, not RSS
+
+Actual rank maxima at P=8 from the final-cutoff correctness fixtures:
+
+| Case | Owned output block, bytes | New principal envelope, bytes | Legacy principal envelope, bytes |
+| --- | ---: | ---: | ---: |
+| Si8 | 60,160 | 1,514,144 | 15,547,616 |
+| Si16 | 216,576 | 4,176,768 | 51,848,992 |
+| Si32 | 810,560 | 13,033,792 | 187,091,936 |
+| skew Si8 | 60,320 | 1,522,784 | 15,554,400 |
+
+The output block counter is exactly 8*L_r*B. The envelopes are conservative
+named-array overlap formulas, **not measured allocator peaks**. FFT/GEMM/XC/EVD
+scratch, communication buffers, metadata, radial caches, allocator and MPI
+are excluded; the full-indexed 8F operator potential remains. These numbers
+must not be reported as process memory or RSS ratios. Full high-water RSS is
+requested on dev08, per rank. The large serial `8F(B+1)` idle density payload
+is absent, independently of whether zero pages would have been resident.
+
+### Commands and unresolved gates
+
+All scratch stayed in `target/scratch/refstart` inside the worktree.
+
+- `DFT_SI_UPF="$PWD/../pseudo/Si.pz-vbc.UPF" cargo test --offline --release -p dft-engine --test refstart -- --include-ignored --nocapture --test-threads=1`: **exit 0**, 6 passed, 0 failed. Record contains no timing claim.
+- `CHECK_SCCACHE=0 TMPDIR_990="$PWD/target/scratch" scripts/check.sh dft-engine`: **exit 0**, build/test/fmt/clippy PASS; 271 passed, 0 failed, 79 ignored.
+- `CHECK_SCCACHE=0 TMPDIR_990="$PWD/target/scratch" scripts/check.sh full`: **exit 1**, build/fmt/clippy PASS; **808 passed, 3 failed, 185 ignored**. Existing CLI tests `pseudo::cached_fetch_checks_hash_and_provenance`, `pseudo::cache_resolution_and_no_network_side_effects`, and `pseudo::tests::fetch_boundary_verifies_before_publication_and_never_overwrites` reject their in-repository temporary cache with "pseudopotential cache must be outside repositories". Same pre-existing conflict recorded in G-OWNED-ROWS. No test/path guard weakened; files outside ticket ownership left unchanged. The optional load report also cannot run `ps` in this sandbox; gates still execute.
+- `python3 -I scripts/make_readme_figures.py`: **exit 0**, generated files unchanged. New evidence is in the ticket-owned tests directory; extending the shared README evidence generator is outside this ticket's ownership.
+- `python3 -I scripts/tests/test_readme_figures.py`: **exit 1**, 8 passed / 1 failed; existing `test_structural_scope_and_sources` still expects the outdated phrase "standard profile is unsupported". No README/test wording changed to mask it.
+- Initial compilation exposed test sharing/type errors, corrected before the numerical runs; first full Clippy found the new helper placed after a test module, corrected by moving it before the module. Final Clippy passes; all failed attempts remain in worktree scratch logs.
+
+[Dev08 request](lanes/RSCF/start-dev08-request.md): Si64/128/216 MPI8, one case
+per job, A/A floor then crossed A/B, same final-cutoff atomic start, first
+Davidson boundary including workspace setup and all-rank RSS. A host adapter
+must consume `StartState` directly before legacy problem construction; this
+ticket does not add a CLI flag or edit the R-SCF-1 driver. LDA without NLCC is
+implemented; PBE, NLCC and frozen strain reject explicitly. No new default,
+speed claim, full allocation-peak claim, or QE result is adopted.

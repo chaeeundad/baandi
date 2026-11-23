@@ -1,0 +1,1 @@
+cell=si8-np1 np=1 k=1 mode=mix mixing_beta=1.0 rc=0 start=2026-11-23 17:06:57 end=2026-11-23 17:06:58

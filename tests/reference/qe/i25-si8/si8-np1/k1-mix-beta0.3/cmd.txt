@@ -1,0 +1,1 @@
+taskset -c 0 /home/mino/fq/builds/orig-mpi-dfti/PW/src/pw.x -input /data/sig-dft/i25/si8-np1/k1-mix-beta0.3/input.in

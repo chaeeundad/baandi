@@ -1,0 +1,39 @@
+[system]
+name = "si8-gamma"
+lattice_unit = "bohr"
+lattice_vectors = [[10.261212856717933, 0, 0], [0, 10.261212856717933, 0], [0, 0, 10.261212856717933]]
+[[system.atoms]]
+species = "Si"
+fractional = [0.9992102689475646, 0.9997106070535452, 0.0006016594584669142]
+[[system.atoms]]
+species = "Si"
+fractional = [0.9999873540117459, 0.49999285393389137, 0.5006104968350948]
+[[system.atoms]]
+species = "Si"
+fractional = [0.4992661222499344, 0.9996634624529898, 0.49941811936810937]
+[[system.atoms]]
+species = "Si"
+fractional = [0.5007229067374915, 0.49996003581815845, 0.0002722139014017305]
+[[system.atoms]]
+species = "Si"
+fractional = [0.24959821767651919, 0.25016746838811255, 0.24920326482890445]
+[[system.atoms]]
+species = "Si"
+fractional = [0.2508952843421861, 0.7496695530850341, 0.7495622443253607]
+[[system.atoms]]
+species = "Si"
+fractional = [0.750954449499119, 0.2500347911359316, 0.750189050329399]
+[[system.atoms]]
+species = "Si"
+fractional = [0.7504273406204958, 0.7499934202722052, 0.2509452218927162]
+[pseudopotentials]
+Si = "/path/to/Si.pz-vbc.UPF"
+[basis]
+ecutwfc_ry = 30
+kpoints = [[0.0, 0.0, 0.0]]
+[xc]
+functional = "lda-pz"
+[scf]
+seed = 801
+threads = 1
+max_iterations = 100

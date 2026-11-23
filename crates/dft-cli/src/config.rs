@@ -425,9 +425,16 @@ impl Config {
     /// standard path with the fixed-point verification. The strict path is
     /// reached only through the reference switch `BAANDI_REFERENCE_STRICT=on`.
     pub fn scf_path(&self) -> Result<ScfPath, ConfigError> {
-        self.scf_path_with(dft_numerics::switches::on(
-            dft_numerics::switches::Id::REFERENCE_STRICT,
-        ))
+        // The independent density driver always uses the explicitly mapped
+        // standard threshold; the legacy strict switch cannot relabel it.
+        let reference = dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_SCF)
+            || self
+                .scf
+                .as_ref()
+                .is_some_and(|s| s.driver.as_deref() == Some("reference"));
+        self.scf_path_with(
+            !reference && dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_STRICT),
+        )
     }
     /// `scf_path` with the reference switch given explicitly (`true` = the
     /// strict reference path, as under `BAANDI_REFERENCE_STRICT=on`), for
@@ -645,6 +652,10 @@ impl Config {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scf {
+    /// Independent issue #25 driver; absent/legacy keeps the existing path.
+    pub driver: Option<String>,
+    /// Reference-driver-only screening: plain (default) or tf.
+    pub reference_preconditioning: Option<String>,
     pub start_wavefunctions: Option<String>,
     pub start_density: Option<String>,
     pub davidson_capacity_per_band: Option<usize>,
@@ -1251,6 +1262,21 @@ impl Config {
     /// Validate active physical settings and cell geometry. SCF/output are type-checked only.
     pub fn validate(&self) -> Result<(), ConfigError> {
         self.validate_reference_scope()?;
+        if let Some(s) = &self.scf {
+            if !matches!(s.driver.as_deref(), None | Some("legacy" | "reference")) {
+                return Err(ConfigError::Invalid(
+                    "scf.driver must be legacy or reference".into(),
+                ));
+            }
+            if !matches!(
+                s.reference_preconditioning.as_deref(),
+                None | Some("plain" | "tf")
+            ) {
+                return Err(ConfigError::Invalid(
+                    "scf.reference_preconditioning must be plain or tf".into(),
+                ));
+            }
+        }
         if self.symmetry.density_group == DensityGroup::Crystal {
             if self.symmetry.mode != SymmetryMode::Auto {
                 return Err(ConfigError::Invalid(

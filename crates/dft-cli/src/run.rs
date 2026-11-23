@@ -59,10 +59,119 @@ pub fn sha256(bytes: &[u8]) -> String {
 /// `BAANDI_REFERENCE_STRICT=on` (ADR 0043, single path complete since
 /// ONEPATH-4). The path fields are set explicitly from `Config::scf_path`.
 pub fn options(config: &Config) -> Result<ScfOptions, RunError> {
+    if reference_requested(config) {
+        return reference_options(config);
+    }
     options_with_reference(
         config,
         dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_STRICT),
     )
+}
+pub fn reference_requested(config: &Config) -> bool {
+    dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_SCF)
+        || config
+            .scf
+            .as_ref()
+            .is_some_and(|s| s.driver.as_deref() == Some("reference"))
+}
+
+/// Independent profile resolution: no legacy session tuning or ladder reads.
+pub fn reference_profile(
+    config: &Config,
+) -> Result<dft_engine::refscf::profile::Profile, RunError> {
+    use dft_engine::refscf::profile::{Preconditioning, Profile};
+    let s = config.scf.as_ref();
+    if s.and_then(|s| s.mixing.as_deref())
+        .is_some_and(|m| !matches!(m, "plain" | "broyden" | "pulay"))
+    {
+        return Err(error(
+            1,
+            "reference SCF mixing must be plain/broyden (pulay is an alias for the difference-history method)",
+        ));
+    }
+    Profile {
+        beta: s.and_then(|s| s.mixing_beta).unwrap_or(0.7),
+        history: s.and_then(|s| s.mixing_history).unwrap_or(8),
+        threshold_ry: 2.0 * s.and_then(|s| s.standard_threshold_ha).unwrap_or(5e-9),
+        preconditioning: if s.and_then(|s| s.reference_preconditioning.as_deref()) == Some("tf") {
+            Preconditioning::ThomasFermi
+        } else {
+            Preconditioning::Plain
+        },
+    }
+    .validate()
+    .map_err(|e| error(1, e))
+}
+
+fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {
+    let profile = reference_profile(config)?;
+    let s = config.scf.as_ref();
+    let points = config.resolved_points().map_err(|e| error(1, e))?;
+    if config.collinear()
+        || config
+            .finite_temperature()
+            .map_err(|e| error(1, e))?
+            .is_some()
+        || points.len() != 1
+        || points[0].fractional != [0.0; 3]
+        || config.relax.is_some()
+        || config.output.as_ref().is_some_and(|o| o.forces || o.stress)
+        || s.and_then(|s| s.gamma_real.as_deref()) == Some("off")
+        || s.and_then(|s| s.start_density.as_deref()) == Some("uniform")
+    {
+        return Err(error(
+            1,
+            "reference SCF supports only real Gamma, integer occupations, unpolarized NC, atomic density at final cutoff; no forces/stress/relaxation",
+        ));
+    }
+    let mut o = ScfOptions {
+        compat_mode: if config.compat.reference() {
+            dft_engine::CompatMode::Reference
+        } else {
+            dft_engine::CompatMode::None
+        },
+        crystal_density_group: config.symmetry.density_group
+            == crate::config::DensityGroup::Crystal,
+        start_density: dft_engine::StartDensity::Atomic,
+        start_wavefunctions: dft_engine::StartWavefunctions::Atomic,
+        gamma_real: dft_engine::GammaReal::On,
+        functional: config.xc.functional.engine(),
+        cutoff_hartree: config.basis.ecutwfc_ry / 2.0,
+        grid_override: if config.symmetry.mode == crate::config::SymmetryMode::Auto {
+            Some(config.prepare().map_err(|e| error(1, e))?.grid.dims())
+        } else {
+            config.basis.fft_grid
+        },
+        pw92_prefactor: config.xc.prefactor().map_err(|e| error(1, e))?,
+        local_mesh: config.pseudo.local_mesh().map_err(|e| error(1, e))?,
+        radial_even_rule: config.pseudo.radial_even_rule().map_err(|e| error(1, e))?,
+        allow_functional_override: config.xc.allow_functional_override,
+        standard: Some(dft_engine::StandardProfile {
+            threshold_ha: profile.threshold_ry / 2.0,
+        }),
+        mixing: dft_engine::Mixing::Pulay {
+            beta: profile.beta,
+            history: profile.history,
+        },
+        ..ScfOptions::default()
+    };
+    if let Some(s) = s {
+        o.threads = s.threads.unwrap_or(1);
+        o.bands = s.nbands;
+        o.extra_bands = s.extra_bands.unwrap_or(o.extra_bands);
+        o.seed = s.seed.unwrap_or(o.seed);
+        o.max_iterations = usize::try_from(s.max_iterations.unwrap_or(o.max_iterations as i64))
+            .map_err(|_| error(1, "max_iterations must be positive"))?;
+        o.verification = if s.verify().map_err(|e| error(1, e))? == Some(false) {
+            dft_engine::Verification::Off
+        } else {
+            dft_engine::Verification::FixedPoint
+        };
+    }
+    if o.max_iterations == 0 {
+        return Err(error(1, "max_iterations must be positive"));
+    }
+    Ok(o)
 }
 /// `options` with the reference switch given explicitly (`true` = the strict
 /// reference path of `BAANDI_REFERENCE_STRICT=on`): the options a child
@@ -1222,6 +1331,13 @@ fn execute_mode_inner(
     // ADR 0043 ONEPATH-4: the observe/agent runtime modes run the same single
     // standard path with the verification as a classic run (checkpoint v1
     // carries the verification option and its attempts).
+    let reference = reference_requested(&config);
+    if reference && (mode.observe || mode.agent) {
+        return Err(error(
+            1,
+            "reference SCF patch 1 supports Classic execution only",
+        ));
+    }
     let opts = options(&config)?;
     let scf_path = config.scf_path().map_err(|e| error(1, e.to_string()))?;
     let mut potentials = Vec::new();
@@ -1420,8 +1536,14 @@ fn execute_mode_inner(
     // BREAKTHROUGH-0-INSTRUMENT: problem construction is the `init` bucket.
     dft_engine::profile::add_init(setup);
     let clock_start = dft_engine::phase_clock::snapshot();
-    let ladder = crate::config::Scf::cutoff_ladder(config.scf.as_ref())
-        .map_err(|e| error(1, e.to_string()))?;
+    let ladder = if reference {
+        None
+    } else {
+        crate::config::Scf::cutoff_ladder(config.scf.as_ref())
+            .map_err(|e| error(1, e.to_string()))?
+    };
+    let mut reference_records = Vec::new();
+    let mut reference_status = None;
     let mut ladder_report = None;
     let atomic_density_built = problem.atomic_superposition_density().is_some();
     // LAZY-RESULT: a classic run without forces, stress or orbital volumetric
@@ -1445,21 +1567,29 @@ fn execute_mode_inner(
     let outcome = if mode.observe || mode.agent {
         crate::telemetry::drive(problem, mode, &out)?
     } else {
-        let run = match ladder {
-            Some(fraction) => dft_engine::cutoff_ladder::run_ladder(
-                problem,
-                &refs,
-                &dft_engine::cutoff_ladder::CutoffLadderOptions {
-                    fraction,
-                    ..Default::default()
-                },
-                true,
-            )
-            .map(|l| {
-                ladder_report = Some(l.report);
-                l.outcome
-            }),
-            None => problem.run_outcome(),
+        let run = if reference {
+            dft_engine::refscf::driver::run(problem, reference_profile(&config)?).map(|run| {
+                reference_records = run.records;
+                reference_status = Some((run.reference_stopped, run.exit_reason));
+                run.outcome
+            })
+        } else {
+            match ladder {
+                Some(fraction) => dft_engine::cutoff_ladder::run_ladder(
+                    problem,
+                    &refs,
+                    &dft_engine::cutoff_ladder::CutoffLadderOptions {
+                        fraction,
+                        ..Default::default()
+                    },
+                    true,
+                )
+                .map(|l| {
+                    ladder_report = Some(l.report);
+                    l.outcome
+                }),
+                None => problem.run_outcome(),
+            }
         };
         match run {
             Ok(outcome) => outcome,
@@ -1523,7 +1653,17 @@ fn execute_mode_inner(
         "units":"electrons per Bohr^3","ordering":"C: (i*n2+j)*n3+k; k fastest","endianness":"little","dtype":"f64",
         "normalization":{"expected_electrons":electrons,"integral_electrons":integral},"sha256":launch::timed("density_sha256", || sha256(&density_bytes))});
     let history: Vec<_> = launch::timed("history_json", || {
-        r.history.iter().map(history_json).collect()
+        r.history
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let mut row = history_json(r);
+                if let Some(v) = reference_records.get(i) {
+                    row["reference_scf"] = reference_record_json(v);
+                }
+                row
+            })
+            .collect()
     });
     let last = history.last().cloned();
     let mut phases = PhaseTimings::default();
@@ -1594,6 +1734,13 @@ fn execute_mode_inner(
         "threading":{"threads":opts.threads.max(1),"threads_requested":opts.threads,"threads_used":opts.threads.max(1),"outer_threads":opts.threads.max(1).min(r.k_points.len()),"inner_threads":opts.threads.max(1),"backend":"persistent Rayon pool shared by k points and fixed inner pieces; sequential faer and serial FFT per worker"},
         "memory_estimate":{"basis_bytes":npw*std::mem::size_of_val(&prepared.wavefunctions.vectors()[0]),"density_basis_bytes":prepared.density.vectors().len()*std::mem::size_of_val(&prepared.density.vectors()[0]),"density_grid_bytes":ngrid*8,"one_complex_grid_bytes":ngrid*16,"orbital_bytes":npw*bands*16,"peak_rss_bytes":null,"note":"array payload estimates only; scratch, projectors, allocator overhead excluded; peak RSS unavailable in-process"},
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
+    result["scf"]["driver"] = json!(if reference { "reference" } else { "legacy" });
+    if let Some((stopped, reason)) = &reference_status {
+        result["reference_scf"] = json!({"reference_stopped":stopped,"exit_reason":reason,
+            "verification":"unavailable in patch 1; TODO issue #25 patch 2",
+            "density_role":"last map output (also on exhaustion); energies refer to this output",
+            "threshold_ry":reference_profile(&config)?.threshold_ry});
+    }
     if let Some(l) = &ladder_report {
         result["convergence"]["work"]["cutoff_ladder"] = json!({
             "used":l.used,"fallback_reason":l.fallback_reason,"fraction":l.fraction,
@@ -1853,6 +2000,9 @@ fn execute_mode_inner(
         });
     }
     let mut console = grid_report(&config, &prepared);
+    if let Some((_, reason)) = &reference_status {
+        writeln!(console, "Reference SCF: {reason}").unwrap();
+    }
     writeln!(
         console,
         "Spectral completeness: {}",
@@ -2824,6 +2974,19 @@ fn algebra_stream_json() -> serde_json::Value {
         "narrow_projections":c.narrow_projections,"narrow_reduced_borders":c.narrow_reduced,
         "b5_parallel_updates":c.b5_parallel
     })
+}
+
+fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
+    json!({"iteration":r.iteration,"dr2_ry":r.dr2_ry,"dr2_ha":r.dr2_ry/2.0,
+        "ethr_ry":r.ethr_ry,"ethr_ha":r.ethr_ry/2.0,"beta":r.beta,
+        "first_iteration_redo":r.first_iteration_redo,"history_occupancy":r.mixing.occupancy,
+        "history_inserted_slot":r.mixing.inserted_slot,"gamma_l2":r.mixing.gamma_l2,
+        "gamma_max":r.mixing.gamma_max,"a_condition_2":r.mixing.condition,
+        "davidson_iterations":r.davidson_iterations,"h_columns":r.h_columns,
+        "descf_ha":r.descf_ha,"descf_ry":2.0*r.descf_ha,
+        "variational_energy_ha":r.variational_energy_ha,
+        "wall_s":{"map":r.map_s,"density_transform":r.density_transform_s,"metric":r.metric_s,
+            "mixing_and_inverse":r.mixing_s,"energy_correction":r.correction_s}})
 }
 
 #[cfg(test)]

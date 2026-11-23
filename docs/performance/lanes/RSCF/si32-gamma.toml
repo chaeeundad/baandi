@@ -1,0 +1,111 @@
+[system]
+name = "si32-gamma"
+lattice_unit = "bohr"
+lattice_vectors = [[20.522425713435865, 0, 0], [0, 20.522425713435865, 0], [0, 0, 10.261212856717933]]
+[[system.atoms]]
+species = "Si"
+fractional = [0.9992102689475646, 0.9997106070535452, 0.0006016594584669142]
+[[system.atoms]]
+species = "Si"
+fractional = [0.9999873540117459, 0.24999285393389137, 0.5006104968350948]
+[[system.atoms]]
+species = "Si"
+fractional = [0.24926612224993439, 0.9996634624529898, 0.49941811936810937]
+[[system.atoms]]
+species = "Si"
+fractional = [0.2507229067374916, 0.24996003581815845, 0.0002722139014017305]
+[[system.atoms]]
+species = "Si"
+fractional = [0.12459821767651919, 0.12516746838811255, 0.24920326482890445]
+[[system.atoms]]
+species = "Si"
+fractional = [0.1258952843421861, 0.37466955308503413, 0.7495622443253607]
+[[system.atoms]]
+species = "Si"
+fractional = [0.3759544494991191, 0.12503479113593155, 0.750189050329399]
+[[system.atoms]]
+species = "Si"
+fractional = [0.37542734062049576, 0.37499342027220517, 0.2509452218927162]
+[[system.atoms]]
+species = "Si"
+fractional = [0.9995859853553273, 0.49977199656371935, 0.00011509966451023115]
+[[system.atoms]]
+species = "Si"
+fractional = [0.9997106806925504, 0.7495340964917039, 0.5003596356235234]
+[[system.atoms]]
+species = "Si"
+fractional = [0.2505950197731846, 0.5009919276001501, 0.5006952829531032]
+[[system.atoms]]
+species = "Si"
+fractional = [0.250038404029113, 0.7503793216199748, 0.9991953649741041]
+[[system.atoms]]
+species = "Si"
+fractional = [0.12441019684173296, 0.6255193574426641, 0.25073288417197903]
+[[system.atoms]]
+species = "Si"
+fractional = [0.12467082093761866, 0.8757897081385447, 0.7509727596279725]
+[[system.atoms]]
+species = "Si"
+fractional = [0.37576611389100906, 0.6258868950273463, 0.7500263792606455]
+[[system.atoms]]
+species = "Si"
+fractional = [0.37526262294823476, 0.8742509895448383, 0.250059407997325]
+[[system.atoms]]
+species = "Si"
+fractional = [0.500451552198508, 0.9999130428973473, 1.4549361365180603e-05]
+[[system.atoms]]
+species = "Si"
+fractional = [0.4995615219506907, 0.25056468160464174, 0.4999642857086793]
+[[system.atoms]]
+species = "Si"
+fractional = [0.7491389922546372, 0.9999609700652471, 0.5009082887163544]
+[[system.atoms]]
+species = "Si"
+fractional = [0.7504309849470242, 0.24945660086260998, 0.9996466139075999]
+[[system.atoms]]
+species = "Si"
+fractional = [0.6253588861900464, 0.12497850251954787, 0.24901098331091726]
+[[system.atoms]]
+species = "Si"
+fractional = [0.625753647526091, 0.37509937074628713, 0.7490876071783357]
+[[system.atoms]]
+species = "Si"
+fractional = [0.8756244358571297, 0.12417092178888212, 0.7506155513976074]
+[[system.atoms]]
+species = "Si"
+fractional = [0.8749230217868988, 0.3747248128212368, 0.2497914156947484]
+[[system.atoms]]
+species = "Si"
+fractional = [0.5006601892788295, 0.5004270744268007, 0.9992526017626718]
+[[system.atoms]]
+species = "Si"
+fractional = [0.49952203462353073, 0.7508511813391039, 0.49974237846762415]
+[[system.atoms]]
+species = "Si"
+fractional = [0.75081466002828, 0.500831950576847, 0.5008549483470442]
+[[system.atoms]]
+species = "Si"
+fractional = [0.7494730425648609, 0.7496929134015656, 0.00033483651312990947]
+[[system.atoms]]
+species = "Si"
+fractional = [0.6251677328419527, 0.6241267505873234, 0.2500472224409003]
+[[system.atoms]]
+species = "Si"
+fractional = [0.6253449181166524, 0.8746015740282328, 0.7494185974986487]
+[[system.atoms]]
+species = "Si"
+fractional = [0.8752600804859686, 0.6256506739055949, 0.7491536324758452]
+[[system.atoms]]
+species = "Si"
+fractional = [0.8740029042451648, 0.8756903575374976, 0.24918391802473877]
+[pseudopotentials]
+Si = "/path/to/Si.pz-vbc.UPF"
+[basis]
+ecutwfc_ry = 30
+kpoints = [[0.0, 0.0, 0.0]]
+[xc]
+functional = "lda-pz"
+[scf]
+seed = 801
+threads = 1
+max_iterations = 100

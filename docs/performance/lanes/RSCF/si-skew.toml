@@ -1,0 +1,21 @@
+[system]
+name = "si-skew"
+lattice_unit = "bohr"
+lattice_vectors = [[0.7, 5.130606428358966, 5.130606428358966], [5.130606428358966, 0, 5.130606428358966], [5.130606428358966, 5.130606428358966, 0.3]]
+[[system.atoms]]
+species = "Si"
+fractional = [0.9992102689475646, 0.9997106070535452, 0.0006016594584669142]
+[[system.atoms]]
+species = "Si"
+fractional = [0.2499873540117459, 0.24999285393389137, 0.2506104968350948]
+[pseudopotentials]
+Si = "/path/to/Si.pz-vbc.UPF"
+[basis]
+ecutwfc_ry = 30
+kpoints = [[0.0, 0.0, 0.0]]
+[xc]
+functional = "lda-pz"
+[scf]
+seed = 801
+threads = 1
+max_iterations = 100

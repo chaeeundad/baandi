@@ -75,3 +75,4 @@ pub use dft_upf::radial::{LocalMesh, RadialEvenRule};
 
 /// Final-cutoff, explicitly selected distributed reference initialization.
 pub mod refstart;
+pub use scf::refscf;

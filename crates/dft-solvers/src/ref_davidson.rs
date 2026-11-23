@@ -12,7 +12,10 @@
 
 mod accounting;
 mod workspace;
-pub use accounting::{Communication, Gemm, Iteration, Record, STAGES};
+pub use accounting::{
+    APPLY_H_STAGES, ApplyH, Communication, Gemm, Iteration, Record, STAGES, apply_h_active,
+    record_apply_h, take_apply_h_solves,
+};
 use accounting::{Counted, clock, elapsed};
 use workspace::Workspace;
 
@@ -99,6 +102,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     hamiltonian_diagonal: &[f64],
     options: Options,
 ) -> Result<Solution, SolverError> {
+    let apply_h_scope = accounting::ApplyHScope::new(options.profile, options.max_iterations + 1);
     let total_clock = clock(options.profile);
     let c = Counted::new(comm);
     let n = options.bands;
@@ -267,6 +271,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     record.communication = c.snapshot();
     record.total_seconds = elapsed(total_clock);
     record.summarize();
+    record.apply_h = apply_h_scope.finish();
     Ok(Solution {
         ritz_values_ha,
         band_thresholds_ha: (0..n).map(|i| options.band_threshold(i)).collect(),

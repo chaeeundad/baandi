@@ -99,6 +99,7 @@ impl Iteration {
 }
 #[derive(Debug)]
 pub struct Record {
+    pub apply_h: Option<ApplyH>,
     pub setup: Iteration,
     pub iterations: Vec<Iteration>,
     pub finish: Iteration,
@@ -116,6 +117,7 @@ pub struct Record {
 impl Record {
     pub(crate) fn new(it: usize, cap: usize, profile: bool, placement: ReducedPlacement) -> Self {
         Self {
+            apply_h: None,
             setup: Iteration::new(cap),
             iterations: (0..it).map(|_| Iteration::new(cap)).collect(),
             finish: Iteration::new(cap),
@@ -204,4 +206,105 @@ impl<C: Collective> Collective for Counted<'_, C> {
         self.counts.set(s);
         self.inner.alltoall_f64(a, block, b)
     }
+}
+
+/// Rank-local H-application totals for one reference solve. No numerical code
+/// reads these counters. FFT entries follow `real::fft_profile::NAMES`.
+#[derive(Clone, Debug, Default)]
+pub struct ApplyH {
+    pub seconds: [f64; 9],
+    pub fft: dft_numerics::real::fft_profile::Snapshot,
+    pub columns_per_call: Vec<usize>,
+    pub pairs: usize,
+    pub odd_tails: usize,
+    pub wide_calls: usize,
+    pub direct_calls: usize,
+}
+pub const APPLY_H_STAGES: [&str; 9] = [
+    "total",
+    "mirror",
+    "pack",
+    "unpack",
+    "kinetic",
+    "projection",
+    "projection_reduce",
+    "coupling",
+    "back_and_add",
+];
+thread_local! {
+    static APPLY_H: std::cell::RefCell<Option<ApplyH>> = const { std::cell::RefCell::new(None) };
+    static APPLY_H_SOLVES: std::cell::RefCell<Vec<ApplyH>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+/// Scope is owned by the solve, including early-error cleanup. Storage is
+/// reserved before entering the Davidson loop; no per-H-call allocation.
+pub(crate) struct ApplyHScope(bool);
+impl ApplyHScope {
+    pub fn new(enabled: bool, max_calls: usize) -> Self {
+        if enabled {
+            APPLY_H.with(|s| {
+                assert!(s.borrow().is_none(), "nested reference H profiling");
+                *s.borrow_mut() = Some(ApplyH {
+                    columns_per_call: Vec::with_capacity(max_calls),
+                    ..ApplyH::default()
+                });
+            });
+        }
+        Self(enabled)
+    }
+    pub fn finish(mut self) -> Option<ApplyH> {
+        if !self.0 {
+            return None;
+        }
+        self.0 = false;
+        let record = APPLY_H
+            .with(|s| s.borrow_mut().take())
+            .expect("active H profile");
+        APPLY_H_SOLVES.with(|s| s.borrow_mut().push(record.clone()));
+        Some(record)
+    }
+}
+impl Drop for ApplyHScope {
+    fn drop(&mut self) {
+        if self.0 {
+            APPLY_H.with(|s| {
+                s.borrow_mut().take();
+            });
+        }
+    }
+}
+/// Consume completed records at the reporting boundary, never in a hot loop.
+pub fn take_apply_h_solves() -> Vec<ApplyH> {
+    APPLY_H_SOLVES.with(|s| std::mem::take(&mut *s.borrow_mut()))
+}
+/// True only inside a profiled reference solve on this rank/thread.
+pub fn apply_h_active() -> bool {
+    APPLY_H.with(|s| s.borrow().is_some())
+}
+pub fn record_apply_h(
+    seconds: [f64; 9],
+    fft: dft_numerics::real::fft_profile::Snapshot,
+    columns: usize,
+    wide: bool,
+    nonlocal: bool,
+) {
+    APPLY_H.with(|s| {
+        if let Some(s) = s.borrow_mut().as_mut() {
+            for (a, b) in s.seconds.iter_mut().zip(seconds) {
+                *a += b;
+            }
+            s.fft.add(fft);
+            // Capacity is max_iterations + setup; exceeding it is a contract bug.
+            assert!(s.columns_per_call.len() < s.columns_per_call.capacity());
+            s.columns_per_call.push(columns);
+            s.pairs += columns.div_ceil(2);
+            s.odd_tails += columns % 2;
+            if nonlocal {
+                if wide {
+                    s.wide_calls += 2;
+                } else {
+                    s.direct_calls += 2;
+                }
+            }
+        }
+    });
 }

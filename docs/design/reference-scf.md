@@ -1128,3 +1128,67 @@ into this output-rank interval. All output remains inside external wall.
 Small-fixture and optional displaced-Si8 checks, exact counters, limitations,
 and the pending dev08 protocol are recorded in
 [verify-cost-dev08-request.md](../performance/lanes/RSCF/verify-cost-dev08-request.md).
+
+## Setup and output cost
+
+P3-SETUP adds coarse `Instant` clocks at **every** diagnostic level, including
+`DAVIDSON_STAGES=off`, `PHASE_PROFILE=off`, and `STAGE_TIMERS=off`. No barrier,
+rank reduction, JSON, logging or file I/O is added to a numerical loop. These
+are rank-local elapsed seconds, including arrival waits in existing collectives;
+they are not CPU time or synchronized inter-rank timestamps.
+
+`reference_scf.setup_s` records CLI input read/parse/hash, the inclusive
+preflight (cell/basis/grid plus UPF validation), the subsequent UPF
+read/parse/hash, CLI remainder, and the driver setup. Preflight internals are
+outside this ticket's ownership and remain explicitly grouped. `bootstrap`
+records MPI initialization, arguments, initial switch-input parsing and dispatch.
+`main_to_first_map` starts at the first statement in Rust `main`, not at exec
+or mpirun: dynamic loading/process launch is outside that interval. Library
+callers without `main` stamps receive null bootstrap/main intervals.
+
+The engine phases distinguish species validation, basis/G-vector metadata,
+Ewald, field FFT planning, owned rows, nonlocal tables, operator FFT plans and
+real tables, the nonlocal diagonal, local/atomic coefficient tables and structure
+factors, atomic density transforms/normalization, initial potential, potential
+redistribution, and the atomic block. Its children separate raw orbital fill,
+orthonormalization/completion, H application/Gram, and diagonalization/rotation.
+Density-plan construction and mixer/metric buffers plus the initial transform
+close the interval before the first SCF map. `atomic_block_total` contains its
+four children; `collectives_nested` overlaps the phases. Never sum parents and
+children or add nested communication to the wall total. Plan construction
+necessarily includes its internal layout work. Tiny validation/clock overhead
+can remain between coarse spans; retain the inclusive total as denominator.
+
+`reference_scf.output_s` separates engine density gather, orbital gather/unpack,
+result assembly, nested collectives, and CLI delivery/encoding/hash, requested
+volumetric writes, mandatory density.bin/metadata writes, binary identity/run
+manifest and reporting collectives (including their packing). CLI remainder
+includes ordinary JSON-value/console construction, optional postprocessing and
+profiling. Existing map `energy_s` remains separate; energy evaluation is not
+part of setup or delivery and no energy formula changes here.
+
+The reference writer serializes and writes the large result body once, then
+appends `output_s`. `json_serialize_body` and `json_write_body` are actual measured
+spans, including file creation in the latter. The small timing trailer, file
+close, optional launch-profile patch, console delivery, MPI finalization and
+process exit are excluded explicitly. This avoids a second whole-file rewrite
+merely to time the first one. External process wall is still the acceptance
+denominator. Every rank's existing results file carries its own setup/output
+record; collect all rank files for min/max/critical-rank analysis.
+
+Validation and remote campaign: [P3-SETUP request](../performance/lanes/RSCF/setup-dev08-request.md).
+
+The engine output object also reports `driver_return_remainder`: host-measured
+driver-call wall minus its last map boundary and engine delivery span. This
+exposes state destruction after constructing the return value, plus the small
+dispatch/argument overhead; it is not attributed to a numerical kernel.
+
+`BAANDI_REFSCF_SETUP_PHASE_REUSE=on` is an explicit **default-off** experiment.
+It retains the direct structure factor for one atom/G pair and reuses it for
+the atomic-charge and ionic sums, and across the magnetic channels of each
+atomic orbital. Multiplication, atom/column order, radial quadrature and
+orthonormalization are unchanged; there is no phase factorization or radial
+interpolation. Scratch is bounded by `16 * max(owned_rows, atom_count)` bytes
+and included conservatively in the named-array peak envelope. The atomic
+coefficient builder still works on owned G rows only. Real MPI/MKL timing and
+identity remain dev08 gates even though the pure-Rust local tests are exact.

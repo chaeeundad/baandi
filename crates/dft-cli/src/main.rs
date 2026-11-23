@@ -349,7 +349,9 @@ fn main() -> ExitCode {
         eprintln!("error: {e}");
         return ExitCode::from(1);
     }
-    launch::begin(main_entry, mpi_ready, args_ready, std::time::Instant::now());
+    let config_ready = std::time::Instant::now();
+    dft_cli::run::reference_launch_begin(main_entry, mpi_ready, args_ready, config_ready);
+    launch::begin(main_entry, mpi_ready, args_ready, config_ready);
     match dft_numerics::switches::choice(dft_numerics::switches::Id::MPI_TREE) {
         "rd" => dft_mpi::set_tree_sum(dft_mpi::TreeSum::RecursiveDoubling),
         "rhd" => dft_mpi::set_tree_sum(dft_mpi::TreeSum::HalvingDoubling),

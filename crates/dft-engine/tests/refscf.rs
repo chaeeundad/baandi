@@ -1278,3 +1278,208 @@ fn verify_cost_contract(run: &dft_engine::refscf::driver::Run) {
     }
     stop_to_verified_clocks(run);
 }
+
+#[test]
+fn setup_phase_clocks_cover_small_start() {
+    let pp = common::potential_with_atomic_start(4., 1.8, true, 161, "SLA PZ");
+    for (label, rows) in [
+        ("cubic", [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]]),
+        ("skew", [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]]),
+        ("elongated", [[5., 0., 0.], [0., 5., 0.], [0., 0., 10.]]),
+    ] {
+        let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+        let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+        let potentials = [dft_engine::SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let options = dft_engine::ScfOptions {
+            gamma_real: dft_engine::GammaReal::On,
+            start_density: dft_engine::StartDensity::Atomic,
+            cutoff_hartree: 2.,
+            bands: Some(5),
+            max_iterations: 1,
+            verification: dft_engine::Verification::Off,
+            ..Default::default()
+        };
+        let run = dft_engine::refscf::driver::run_with(
+            dft_engine::refstart::StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            Profile::default(),
+            &Serial,
+        )
+        .unwrap();
+        assert!(run.setup.total_s > 0.);
+        assert!(run.setup.collective_s >= 0. && run.setup.collective_s < run.setup.total_s);
+        for key in [
+            "basis_gvectors",
+            "field_fft_plan",
+            "distribution_owned_rows",
+            "nonlocal_tables",
+            "atomic_density",
+            "atomic_orbital_fill",
+            "atomic_orthonormalize_complete",
+            "atomic_diagonalize_rotate",
+            "density_fft_plan",
+        ] {
+            assert!(run.setup.phases[key] > 0., "{key}");
+        }
+        assert!(run.records[0].map_start_s >= run.setup.total_s);
+        assert!(run.output.phases["density_gather"] > 0.);
+        assert!(run.output.phases["orbital_gather_unpack"] > 0.);
+        eprintln!(
+            "P3-SETUP observation {label}: {:?}; output {:?}",
+            run.setup, run.output
+        );
+    }
+}
+
+#[test]
+fn setup_phase_reuse_preserves_owned_start_bits() {
+    use dft_engine::refstart::{StartInput, start};
+    use dft_numerics::switches::RunConfig;
+    let shapes = [
+        [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+        [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]],
+        [[5., 0., 0.], [0., 5., 0.], [0., 0., 10.]],
+        [[8., 0., 0.], [0., 8., 0.], [0., 0., 4.]],
+    ];
+    for (shape, rows) in shapes.into_iter().enumerate() {
+        let pp = common::potential_with_atomic_start(4., 1.8, shape % 2 == 0, 161, "SLA PZ");
+        let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+        let atoms = [
+            dft_geometry::Atom::new("Xx", [0., 0., 0.]),
+            dft_geometry::Atom::new("Xx", [0.43, 0.51, 0.32]),
+        ];
+        let potentials = [dft_engine::SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        for ranks in [1, 3] {
+            let build = |reuse, threads| {
+                dft_mpi::simulate(ranks, |comm| {
+                    let config = RunConfig::from_pairs(&[
+                        ("refscf_setup_phase_reuse", reuse),
+                        ("stage_timers", "off"),
+                        ("phase_profile", "off"),
+                        ("davidson_stages", "off"),
+                    ])
+                    .unwrap();
+                    let _scope = config.enter();
+                    let options = dft_engine::ScfOptions {
+                        cutoff_hartree: 2.,
+                        bands: Some(9),
+                        threads,
+                        gamma_real: dft_engine::GammaReal::On,
+                        ..Default::default()
+                    };
+                    let s = start(
+                        StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &potentials,
+                            options: &options,
+                        },
+                        comm,
+                    )
+                    .unwrap();
+                    assert!(s.setup.total_s > 0. && s.setup.phases["atomic_orbital_fill"] > 0.);
+                    assert!(s.setup.collective_s >= 0. && s.setup.collective_s < s.setup.total_s);
+                    let bits: Vec<_> = s
+                        .orbitals
+                        .as_slice()
+                        .iter()
+                        .chain(&s.ritz_values_hartree)
+                        .chain(&s.density)
+                        .chain(&s.ionic)
+                        .chain(&s.potential)
+                        .chain(&s.diagonal_static)
+                        .map(|x| x.to_bits())
+                        .chain(
+                            s.density_g
+                                .iter()
+                                .flat_map(|z| [z.re.to_bits(), z.im.to_bits()]),
+                        )
+                        .collect();
+                    (
+                        bits,
+                        s.setup.phases["atomic_orbital_fill"],
+                        s.setup.phases["atomic_local_tables_structure_factors"],
+                    )
+                })
+            };
+            let off = build("off", 1);
+            for threads in [1, 2] {
+                let on = build("on", threads);
+                for (rank, (a, b)) in off.iter().zip(&on).enumerate() {
+                    assert_eq!(
+                        a.0, b.0,
+                        "shape={shape} ranks={ranks} rank={rank} threads={threads}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn setup_phase_reuse_preserves_verified_science_at_both_diagnostic_levels() {
+    use dft_numerics::switches::RunConfig;
+    let pp = common::potential_with_atomic_start(2., 1.8, false, 161, "SLA PZ");
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]])
+            .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [dft_engine::SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = dft_engine::ScfOptions {
+        cutoff_hartree: 2.,
+        bands: Some(2),
+        max_iterations: 100,
+        gamma_real: dft_engine::GammaReal::On,
+        ..Default::default()
+    };
+    let mut baseline = None;
+    for reuse in ["off", "on"] {
+        for diagnostics in ["off", "on"] {
+            let config = RunConfig::from_pairs(&[
+                ("refscf_setup_phase_reuse", reuse),
+                ("davidson_stages", diagnostics),
+            ])
+            .unwrap();
+            let _scope = config.enter();
+            let run = dft_engine::refscf::driver::run_with(
+                dft_engine::refstart::StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                Profile::default(),
+                &Serial,
+            )
+            .unwrap();
+            assert!(
+                run.outcome.converged && run.outcome.result.verification.as_ref().unwrap().passed()
+            );
+            assert!(run.setup.total_s > 0. && run.output.total_s > 0.);
+            let science = stop_to_verified_science(&run);
+            if let Some(previous) = &baseline {
+                assert_eq!(&science, previous);
+            } else {
+                baseline = Some(science);
+            }
+            eprintln!(
+                "P3-SETUP verified reuse={reuse} diagnostics={diagnostics}: E={:.17e} Ha maps={}",
+                run.outcome.result.energy.total_hartree(),
+                run.records.len()
+            );
+        }
+    }
+}

@@ -21,6 +21,68 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
+// Bootstrap stamps are also retained when detailed profiling is disabled.
+// Library callers have no main() boundary and report that interval as null.
+thread_local! {
+    static REFERENCE_LAUNCH: std::cell::Cell<Option<[Instant; 4]>> = const { std::cell::Cell::new(None) };
+}
+pub fn reference_launch_begin(start: Instant, mpi: Instant, args: Instant, config: Instant) {
+    REFERENCE_LAUNCH.with(|v| v.set(Some([start, mpi, args, config])));
+}
+type PhaseSeconds = std::collections::BTreeMap<&'static str, f64>;
+fn phase<T>(
+    enabled: bool,
+    seconds: &mut PhaseSeconds,
+    name: &'static str,
+    f: impl FnOnce() -> T,
+) -> T {
+    if !enabled {
+        return f();
+    }
+    let clock = Instant::now();
+    let out = f();
+    *seconds.entry(name).or_default() += clock.elapsed().as_secs_f64();
+    out
+}
+fn boundary_json(t: &dft_engine::refscf::record::SetupTimings) -> Value {
+    json!({"phases":t.phases,"collectives_nested":t.collective_s,"total":t.total_s})
+}
+
+/// Write the large body once, then append the small timing trailer. The clocks
+/// truthfully exclude that trailer and close; no second full serialization or
+/// rewrite is performed to make a results file describe its own write.
+fn write_reference_results(
+    path: &Path,
+    mut result: Value,
+    mut output: Value,
+) -> Result<(), RunError> {
+    use std::io::Write;
+    let clock = Instant::now();
+    let reference = result
+        .as_object_mut()
+        .expect("results object")
+        .remove("reference_scf")
+        .expect("reference object");
+    let body = serde_json::to_vec_pretty(&result).map_err(|e| error(5, e))?;
+    let reference = serde_json::to_vec_pretty(&reference).map_err(|e| error(5, e))?;
+    output["json_serialize_body"] = json!(clock.elapsed().as_secs_f64());
+    let clock = Instant::now();
+    let mut file = fs::File::create(path)?;
+    file.write_all(&body[..body.len() - 1])?;
+    file.write_all(b",\n\"reference_scf\":")?;
+    file.write_all(&reference[..reference.len() - 1])?;
+    output["json_write_body"] = json!(clock.elapsed().as_secs_f64());
+    output["json_scope"] = json!(
+        "body serialization and write including file create; excludes small output_s trailer, close, launch profile patch and MPI finalization"
+    );
+    file.write_all(b",\n\"output_s\":")?;
+    let trailer = serde_json::to_vec(&output).map_err(|e| error(5, e))?;
+    file.write_all(&trailer)?;
+    // The existing launch-profile appender requires a final brace, no newline.
+    file.write_all(b"}}")?;
+    Ok(())
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("{cause}")]
 pub struct RunError {
@@ -1273,6 +1335,9 @@ fn execute_mode_inner(
 ) -> Result<RunReport, RunError> {
     mode.validate()?;
     let start = Instant::now();
+    let mut setup_seconds = PhaseSeconds::new();
+    let mut output_seconds = PhaseSeconds::new();
+    let phase_clock = Instant::now();
     launch::mark("run_entry");
     let input_clock = launch::clock();
     let bytes = launch::timed("input_read", || fs::read(input))
@@ -1280,11 +1345,15 @@ fn execute_mode_inner(
     let text = std::str::from_utf8(&bytes).map_err(|e| error(1, e))?;
     let config = launch::timed("input_parse", || Config::parse(text)).map_err(|e| error(1, e))?;
     launch::elapsed("input_read_parse", input_clock);
+    setup_seconds.insert("input_read_parse", phase_clock.elapsed().as_secs_f64());
     let config_clock = launch::clock();
     // RUN-CONFIG: this run's switch configuration (the process object in the
     // CLI binary; a thread scope for in-process callers with other values).
     let (run_config, _run_scope) = crate::run_config::for_run(&config).map_err(|e| error(1, e))?;
     launch::elapsed("run_config", config_clock);
+    let reference = reference_requested(&config);
+    let input_digest =
+        reference.then(|| phase(true, &mut setup_seconds, "input_hash", || sha256(&bytes)));
     // Phase 0 only: no storage or additional clock reads when profiling is off.
     // Keep rank-local file records; do not add collectives to measure redundant I/O.
     let mut upf_records = dft_engine::profile::enabled().then(Vec::new);
@@ -1308,7 +1377,13 @@ fn execute_mode_inner(
         ));
     }
     let preflight_clock = launch::clock();
-    let mut preflight = crate::config::preflight::check(&config, input).map_err(|e| error(1, e))?;
+    let mut preflight = phase(
+        reference,
+        &mut setup_seconds,
+        "preflight_cell_basis_upf",
+        || crate::config::preflight::check(&config, input),
+    )
+    .map_err(|e| error(1, e))?;
     launch::elapsed("preflight_including_prepare_and_upf", preflight_clock);
     let prepare_clock = launch::clock();
     if mode.events.as_deref() == Some("-") {
@@ -1333,7 +1408,6 @@ fn execute_mode_inner(
     // ADR 0043 ONEPATH-4: the observe/agent runtime modes run the same single
     // standard path with the verification as a classic run (checkpoint v1
     // carries the verification option and its attempts).
-    let reference = reference_requested(&config);
     if reference && (mode.observe || mode.agent) {
         return Err(error(1, "reference SCF supports Classic execution only"));
     }
@@ -1346,11 +1420,17 @@ fn execute_mode_inner(
     for (name, path) in &config.pseudopotentials {
         let path = input.parent().unwrap_or(Path::new(".")).join(path);
         let read_clock = upf_records.as_ref().map(|_| Instant::now());
-        let data = fs::read(&path).map_err(|e| error(5, format!("{}: {e}", path.display())))?;
+        let data = phase(reference, &mut setup_seconds, "upf_read", || {
+            fs::read(&path)
+        })
+        .map_err(|e| error(5, format!("{}: {e}", path.display())))?;
         let read_s = read_clock.map(|t| t.elapsed().as_secs_f64());
         let parse_clock = upf_records.as_ref().map(|_| Instant::now());
-        let p = parse_upf(std::str::from_utf8(&data).map_err(|e| error(2, e))?)
-            .map_err(|e| error(2, format!("{}: {e}", path.display())))?;
+        let upf_text = std::str::from_utf8(&data).map_err(|e| error(2, e))?;
+        let p = phase(reference, &mut setup_seconds, "upf_parse", || {
+            parse_upf(upf_text)
+        })
+        .map_err(|e| error(2, format!("{}: {e}", path.display())))?;
         let parse_s = parse_clock.map(|t| t.elapsed().as_secs_f64());
         if !opts.functional.matches_upf(p.functional()) && !opts.allow_functional_override {
             if opts.functional == dft_engine::Functional::LdaPz {
@@ -1372,7 +1452,7 @@ fn execute_mode_inner(
         }
         let path = fs::canonicalize(path)?;
         let hash_clock = upf_records.as_ref().map(|_| Instant::now());
-        let digest = sha256(&data);
+        let digest = phase(reference, &mut setup_seconds, "upf_hash", || sha256(&data));
         let hash_s = hash_clock.map(|t| t.elapsed().as_secs_f64());
         if let Some(records) = &mut upf_records {
             records.push(
@@ -1568,6 +1648,9 @@ fn execute_mode_inner(
         crate::config::Scf::cutoff_ladder(config.scf.as_ref())
             .map_err(|e| error(1, e.to_string()))?
     };
+    let mut reference_return = None;
+    let mut reference_setup = Value::Null;
+    let mut reference_output = Value::Null;
     let mut reference_records = Vec::new();
     let mut reference_status = None;
     let mut reference_summary = None;
@@ -1596,6 +1679,8 @@ fn execute_mode_inner(
     dft_engine::gamma_real::set_delivered_orbitals(orbitals_needed);
     let scf_clock = launch::clock();
     launch::mark("scf_entry");
+    let driver_entry = Instant::now();
+    let driver_entry_s = driver_entry.duration_since(start).as_secs_f64();
     let outcome = if mode.observe || mode.agent {
         crate::telemetry::drive(problem.take().expect("legacy mode"), mode, &out)?
     } else {
@@ -1603,7 +1688,27 @@ fn execute_mode_inner(
             dft_engine::refscf::driver::run(dft_engine::refstart::StartInput {
                 cell: &prepared.cell, atoms: &atoms, potentials: &refs, options: &opts,
             }, reference_profile(&config)?).map(|run| {
+                reference_return = Some(Instant::now());
                 reference_diagnostics = run.full_diagnostics;
+                reference_setup = json!({
+                    "schema":"reference-setup-1", "rank":crate::parallel::rank(),
+                    "scope":"rank-local inclusive phases; atomic_block_total contains atomic_* children; collectives_nested overlaps phases; no barriers added",
+                    "cli":setup_seconds,"cli_total":driver_entry_s,
+                    "cli_other":driver_entry_s - setup_seconds.values().sum::<f64>(),
+                    "preflight_scope":"includes cell/basis/grid and preflight UPF validation; upf_* is the subsequent engine parse; preflight internals are not separately timed",
+                    "engine":boundary_json(&run.setup),
+                    "run_entry_to_first_map":driver_entry_s + run.records.first().map_or(run.start_s, |r| r.map_start_s)
+                });
+                REFERENCE_LAUNCH.with(|v| {
+                    let stamps = v.get();
+                    reference_setup["main_to_run_entry"] = json!(stamps.map(|s| start.duration_since(s[0]).as_secs_f64()));
+                    reference_setup["main_to_first_map"] = json!(stamps.map(|s| start.duration_since(s[0]).as_secs_f64() + driver_entry_s + run.records.first().map_or(run.start_s, |r| r.map_start_s)));
+                    reference_setup["bootstrap"] = stamps.map_or(Value::Null, |s| json!({"mpi_init":(s[1]-s[0]).as_secs_f64(),"arguments":(s[2]-s[1]).as_secs_f64(),"switch_input_read_parse":(s[3]-s[2]).as_secs_f64(),"dispatch":start.duration_since(s[3]).as_secs_f64()}));
+                });
+                reference_output = boundary_json(&run.output);
+                reference_output["driver_return_remainder"] = json!(reference_return.unwrap().duration_since(driver_entry).as_secs_f64()
+                    - run.records.last().map_or(run.start_s, |r| r.map_end_s) - run.output_s);
+                reference_output["driver_return_remainder_scope"] = json!("includes driver state teardown and dispatch/argument overhead outside the engine output clock");
                 let mut seconds = [0.; 8];
                 for call in run.records.iter().flat_map(|r| &r.calls).chain(&run.verification_calls) {
                     if let Some((_, stages)) = call.inner_clocks {
@@ -1696,18 +1801,26 @@ fn execute_mode_inner(
     run_config.freeze_consulted();
     // Everything from here to the results file is output materialization.
     let io_clock = Instant::now();
+    if let Some(clock) = reference_return {
+        output_seconds.insert(
+            "driver_return_to_cli_output",
+            io_clock.duration_since(clock).as_secs_f64(),
+        );
+    }
     let ngrid = r.density.len();
     let bands = r.occupations.len();
     let npw = prepared.wavefunctions.vectors().len();
     let volume = prepared.cell.volume_bohr3();
     let cell = prepared.cell.lattice_columns_bohr();
-    let density_bytes: Vec<u8> = launch::timed("density_encode", || {
-        r.density.iter().flat_map(|x| x.to_le_bytes()).collect()
+    let density_bytes: Vec<u8> = phase(reference, &mut output_seconds, "density_encode", || {
+        launch::timed("density_encode", || {
+            r.density.iter().flat_map(|x| x.to_le_bytes()).collect()
+        })
     });
     let integral = r.density.iter().sum::<f64>() * volume / ngrid as f64;
     let density_meta = json!({"schema_version":1,"fft_grid":prepared.grid.dims(),"lattice_columns_bohr":cell,"volume_bohr3":volume,
         "units":"electrons per Bohr^3","ordering":"C: (i*n2+j)*n3+k; k fastest","endianness":"little","dtype":"f64",
-        "normalization":{"expected_electrons":electrons,"integral_electrons":integral},"sha256":launch::timed("density_sha256", || sha256(&density_bytes))});
+        "normalization":{"expected_electrons":electrons,"integral_electrons":integral},"sha256":phase(reference, &mut output_seconds, "density_hash", || launch::timed("density_sha256", || sha256(&density_bytes)))});
     let history: Vec<_> = launch::timed("history_json", || {
         r.history
             .iter()
@@ -1759,7 +1872,7 @@ fn execute_mode_inner(
         })
         .collect();
     let mut result = json!({"preflight":preflight,"schema_version":1,"tool":{"name":"dft-cli","version":env!("CARGO_PKG_VERSION"),"git_commit":env!("DFT_GIT_COMMIT"),"rustc_version":env!("DFT_RUSTC_VERSION")},
-        "timestamp":timestamp(SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|error(5,e))?.as_secs()),"input_sha256":sha256(&bytes),"species":species,
+        "timestamp":timestamp(SystemTime::now().duration_since(UNIX_EPOCH).map_err(|e|error(5,e))?.as_secs()),"input_sha256":input_digest.unwrap_or_else(|| sha256(&bytes)),"species":species,
         "cell":{"lattice_columns_bohr":cell,"volume_bohr3":volume,"reciprocal_columns_inverse_bohr":prepared.cell.reciprocal_columns_inverse_bohr()},
         "atoms":config.system.atoms.iter().map(|a|json!({"species":a.species,"fractional":a.fractional,"cartesian_bohr":prepared.cell.fractional_to_cartesian_bohr(a.fractional)})).collect::<Vec<_>>(),
         "cutoff":{"ecutwfc_ry":config.basis.ecutwfc_ry,"ecutwfc_ha":opts.cutoff_hartree},
@@ -1771,7 +1884,7 @@ fn execute_mode_inner(
                 "certificate_davidson_iterations":r.history.iter().filter_map(|h|h.fixed_point_certificate.as_ref()).map(|c|c.davidson_iterations).sum::<usize>(),
                 "certificate_solves":r.history.iter().filter(|h|h.fixed_point_certificate.is_some()).count(),
                 "second_vector_columns":dft_engine::second_vector_columns(),
-                "davidson_stages":over_ranks(davidson_stages_json())?,
+                "davidson_stages":phase(reference, &mut output_seconds, "report_collectives_with_pack", || over_ranks(davidson_stages_json()))?,
                 "b1":b1_json(),
                 "b5":{"mode":dft_numerics::switches::choice(dft_numerics::switches::Id::B5),"bordered":dft_engine::b5_counters().bordered,"declined":dft_engine::b5_counters().declined,"full":dft_engine::b5_counters().full},
                 "ortho":{"mode":dft_numerics::switches::text(dft_numerics::switches::Id::ORTHO).unwrap_or("dgks:0.1 (default)"),"second_pass_skipped":dft_engine::ortho_counters().0,"second_pass_repeated":dft_engine::ortho_counters().1},
@@ -1792,9 +1905,13 @@ fn execute_mode_inner(
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
     result["scf"]["driver"] = json!(if reference { "reference" } else { "legacy" });
     if let Some((stopped, reason)) = &reference_status {
-        result["convergence"]["work"]["davidson_stages"] =
-            over_ranks(reference_stages.take().expect("reference stages"))?;
-        result["reference_scf"] = json!({"reference_stopped":stopped,"exit_reason":reason,
+        result["convergence"]["work"]["davidson_stages"] = phase(
+            reference,
+            &mut output_seconds,
+            "report_collectives_with_pack",
+            || over_ranks(reference_stages.take().expect("reference stages")),
+        )?;
+        result["reference_scf"] = json!({"setup_s":reference_setup,"reference_stopped":stopped,"exit_reason":reason,
             "stop_to_verified_clock":"reference-scf-wall-1",
             "diagnostics":{"schema":"reference-scf-diagnostics-1",
                 "level":if reference_diagnostics {"full"} else {"lightweight"},
@@ -2295,16 +2412,32 @@ fn execute_mode_inner(
         "FFT/H psi included in enclosing phases; not separately measured."
     )
     .unwrap();
-    launch::timed("volumetric_write", || {
-        volumetric_out::write_outputs(&config, &prepared, &refs, &r, &out)
-    })
+    phase(
+        reference,
+        &mut output_seconds,
+        "requested_volumetric_writes",
+        || {
+            launch::timed("volumetric_write", || {
+                volumetric_out::write_outputs(&config, &prepared, &refs, &r, &out)
+            })
+        },
+    )
     .map_err(|e| error(5, e))?;
-    launch::timed("density_bin_write", || {
-        fs::write(out.join("density.bin"), density_bytes)
+    phase(reference, &mut output_seconds, "density_write", || {
+        launch::timed("density_bin_write", || {
+            fs::write(out.join("density.bin"), density_bytes)
+        })
     })?;
-    launch::timed("density_json_write", || {
-        write_json(&out.join("density.json"), &density_meta)
-    })?;
+    phase(
+        reference,
+        &mut output_seconds,
+        "density_metadata_write",
+        || {
+            launch::timed("density_json_write", || {
+                write_json(&out.join("density.json"), &density_meta)
+            })
+        },
+    )?;
     if let Some(force) = requested_forces(
         &config,
         &prepared.cell,
@@ -2433,6 +2566,7 @@ fn execute_mode_inner(
     result["scf"]["switches"] = switches_json();
     launch::elapsed("switch_manifest", manifest_clock);
     let run_block_clock = launch::clock();
+    let identity_clock = Instant::now();
     result["run"] = run_block(
         run_config,
         if outcome.converged {
@@ -2441,12 +2575,21 @@ fn execute_mode_inner(
             "not_converged"
         },
     );
+    output_seconds.insert(
+        "binary_hash_and_run_manifest",
+        identity_clock.elapsed().as_secs_f64(),
+    );
     launch::elapsed("run_block", run_block_clock);
     if reference {
         let sum = |get: fn(&dft_engine::refscf::record::Record) -> f64| {
             reference_records.iter().map(get).sum::<f64>()
         };
-        result["reference_scf"]["run"]["peak_rss_bytes_per_rank"] = json!(reference_peak_rss()?);
+        result["reference_scf"]["run"]["peak_rss_bytes_per_rank"] = json!(phase(
+            reference,
+            &mut output_seconds,
+            "report_collectives_with_pack",
+            reference_peak_rss
+        )?);
         result["reference_scf"]["run"]["peak_rss_scope"] = json!(
             "Linux /proc/self/status VmHWM through output preparation, before final JSON serialization/write; null where unavailable; use external per-rank high-water measurements for the complete process"
         );
@@ -2464,9 +2607,19 @@ fn execute_mode_inner(
     }
     let result_path = out.join("results.json");
     let serialize_clock = launch::clock();
-    let data = serde_json::to_vec_pretty(&result).map_err(|e| error(5, e))?;
-    launch::elapsed("results_serialize", serialize_clock);
-    launch::timed("results_write", || fs::write(&result_path, data))?;
+    if reference {
+        let total = io_clock.elapsed().as_secs_f64();
+        let output = json!({"schema":"reference-output-1","rank":crate::parallel::rank(),
+            "engine":reference_output,"cli":output_seconds,"cli_before_json":total + output_seconds.get("driver_return_to_cli_output").copied().unwrap_or(0.),
+            "cli_other_before_json":total + output_seconds.get("driver_return_to_cli_output").copied().unwrap_or(0.) - output_seconds.values().sum::<f64>(),
+            "scope":"rank-local; requested_volumetric_writes includes density/orbital formats selected by input; density.bin and metadata are mandatory outputs"});
+        write_reference_results(&result_path, result, output)?;
+        launch::elapsed("results_serialize_and_write", serialize_clock);
+    } else {
+        let data = serde_json::to_vec_pretty(&result).map_err(|e| error(5, e))?;
+        launch::elapsed("results_serialize", serialize_clock);
+        launch::timed("results_write", || fs::write(&result_path, data))?;
+    }
     launch::output(&result_path);
     launch::mark("outputs_complete");
     Ok(RunReport {
@@ -3230,6 +3383,25 @@ fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn reference_output_writer_records_body_cost_without_duplicate_json() {
+        let path = std::env::temp_dir().join(format!("p3-setup-json-{}.json", std::process::id()));
+        let input = json!({"science":[1.,2.,3.],"reference_scf":{"setup_s":{"total":0.25},"iterations":[1,2]}});
+        write_reference_results(&path, input.clone(), json!({"engine":{"total":0.1}})).unwrap();
+        let bytes = fs::read(&path).unwrap();
+        assert_eq!(bytes.last(), Some(&b'}'), "launch appender contract");
+        let mut read: Value = serde_json::from_slice(&bytes).unwrap();
+        let output = read["reference_scf"]
+            .as_object_mut()
+            .unwrap()
+            .remove("output_s")
+            .unwrap();
+        assert_eq!(read, input);
+        assert!(output["json_serialize_body"].as_f64().unwrap() > 0.);
+        assert!(output["json_write_body"].as_f64().unwrap() > 0.);
+        assert_eq!(output["engine"]["total"], 0.1);
+        fs::remove_file(path).unwrap();
+    }
     #[test]
     fn streamed_binary_hash_matches_whole_file_at_chunk_boundaries() {
         let path = std::env::temp_dir().join(format!("binary-hash-{}", std::process::id()));

@@ -91,3 +91,17 @@ pub struct Record {
     pub variational_hartree_ha: f64,
     pub variational_xc_ha: f64,
 }
+
+/// Coarse rank-local phase clocks, always collected (seconds). Collective time
+/// is nested inside these phases; it must not be added to their sum.
+#[derive(Clone, Debug, Default)]
+pub struct SetupTimings {
+    pub phases: std::collections::BTreeMap<&'static str, f64>,
+    pub collective_s: f64,
+    pub total_s: f64,
+}
+impl SetupTimings {
+    pub fn record(&mut self, name: &'static str, clock: std::time::Instant) {
+        *self.phases.entry(name).or_default() += clock.elapsed().as_secs_f64();
+    }
+}

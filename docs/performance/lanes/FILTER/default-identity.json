@@ -1,0 +1,135 @@
+{
+  "candidate_binary_sha256": "44eee6543970bac8d190f0d836bb8f9f79d26afb160b7510bd7c51cb3a0a4291",
+  "cases": [
+    {
+      "case": "si8",
+      "command": [
+        "target/release/dft-cli",
+        "run",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-FILTER-REPLAY/target/scratch/si8.toml",
+        "--output-dir",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-FILTER-REPLAY/target/scratch/si8-candidate-default"
+      ],
+      "exit_code": 0,
+      "baseline_energy": {
+        "ev": -852.3089599718384,
+        "ha": -31.32177656320248,
+        "ry": -62.64355312640496
+      },
+      "candidate_energy": {
+        "ev": -852.3089599718384,
+        "ha": -31.32177656320248,
+        "ry": -62.64355312640496
+      },
+      "energy_bits_equal": true,
+      "density_sha256": "064590998686925703a43cf47cae6985df8c66ee369ff87e1da7f80fa9b41791",
+      "density_bits_equal": true,
+      "baseline_verified": true,
+      "candidate_verified": true
+    },
+    {
+      "case": "si16",
+      "command": [
+        "target/release/dft-cli",
+        "run",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-FILTER-REPLAY/target/scratch/si16.toml",
+        "--output-dir",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-FILTER-REPLAY/target/scratch/si16-candidate-default"
+      ],
+      "exit_code": 0,
+      "baseline_energy": {
+        "ev": -1717.830200035938,
+        "ha": -63.12909546419047,
+        "ry": -126.25819092838094
+      },
+      "candidate_energy": {
+        "ev": -1717.830200035938,
+        "ha": -63.12909546419047,
+        "ry": -126.25819092838094
+      },
+      "energy_bits_equal": true,
+      "density_sha256": "dbe2a91e5df2fb50421ff37c9c3572209a43b0f163fad62944e03583164e15d0",
+      "density_bits_equal": true,
+      "baseline_verified": true,
+      "candidate_verified": true
+    },
+    {
+      "case": "si32",
+      "command": [
+        "target/release/dft-cli",
+        "run",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-FILTER-REPLAY/target/scratch/si32.toml",
+        "--output-dir",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-FILTER-REPLAY/target/scratch/si32-candidate-default"
+      ],
+      "exit_code": 0,
+      "baseline_energy": {
+        "ev": -3447.7760282045365,
+        "ha": -126.70343204998849,
+        "ry": -253.40686409997699
+      },
+      "candidate_energy": {
+        "ev": -3447.7760282045365,
+        "ha": -126.70343204998849,
+        "ry": -253.40686409997699
+      },
+      "energy_bits_equal": true,
+      "density_sha256": "25acbc89261520e1a7543c845e60594416691edf2f4d11422658ead9d71a6cf1",
+      "density_bits_equal": true,
+      "baseline_verified": true,
+      "candidate_verified": true
+    },
+    {
+      "case": "si64",
+      "command": [
+        "target/release/dft-cli",
+        "run",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-FILTER-REPLAY/target/scratch/si64.toml",
+        "--output-dir",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-FILTER-REPLAY/target/scratch/si64-candidate-default"
+      ],
+      "exit_code": 0,
+      "baseline_energy": {
+        "ev": -6894.771188162753,
+        "ha": -253.37816772121624,
+        "ry": -506.7563354424325
+      },
+      "candidate_energy": {
+        "ev": -6894.771188162753,
+        "ha": -253.37816772121624,
+        "ry": -506.7563354424325
+      },
+      "energy_bits_equal": true,
+      "density_sha256": "535e69cb2328bdf38c536b88086ebe0ae389c03810226b5400971f06b77b6122",
+      "density_bits_equal": true,
+      "baseline_verified": true,
+      "candidate_verified": true
+    },
+    {
+      "case": "si-skew",
+      "command": [
+        "target/release/dft-cli",
+        "run",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-FILTER-REPLAY/target/scratch/si-skew.toml",
+        "--output-dir",
+        "/Volumes/990-2TB/Develop/rust-dft-wt/G-FILTER-REPLAY/target/scratch/si-skew-candidate-default"
+      ],
+      "exit_code": 0,
+      "baseline_energy": {
+        "ev": -197.29900284214634,
+        "ha": -7.2506046203814964,
+        "ry": -14.501209240762993
+      },
+      "candidate_energy": {
+        "ev": -197.29900284214634,
+        "ha": -7.2506046203814964,
+        "ry": -14.501209240762993
+      },
+      "energy_bits_equal": true,
+      "density_sha256": "cf8f9af96189e4cdfedd67668af861a6e1ce92cc3ce7d1f5e5414ed15fd710fb",
+      "density_bits_equal": true,
+      "baseline_verified": true,
+      "candidate_verified": true
+    }
+  ]
+}

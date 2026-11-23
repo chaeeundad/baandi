@@ -3057,3 +3057,58 @@ memory or time. Measure all-rank RSS and actual convergence before admitting
 Si512 or inferring a scaling law. Full size tables, formula assumptions,
 reproducer and same-model np8/np16 A/A-first requests:
 [fixtures-si128.md](lanes/fixtures-si128.md). Changes left uncommitted.
+## G-FILTER-REPLAY — resident block Chebyshev, stage 1 (2026-11-23)
+
+**STOP integration; replay artifact only.** New premise versus the older
+Chebyshev warning: price a resident fixed-width block against the relayed Si64
+MPI8 2.953 s Gram/eigen/rotation budget (183 EVDs), rather than reopen PR-CG
+TRACK-A0, REL-SLICES, Advance, restart-keep or rejected GEMM-shape changes.
+No production caller/default/dependency changed; existing paired Gamma H and
+wide rotation kernels are used. Degree grid 4/8/12/16 plus spectrum/tolerance
+auto, 24 counted bound H columns, scaled recurrence, existing CGS2 QR, one RR
+per sweep plus setup RR, exact captured stopping profile, recorded fallback to
+Davidson from the original snapshot. All failed work is charged.
+
+Mac counts (not timing acceptance): 15 snapshots, 75 arms on Si8/16/32/64/skew;
+actual fine map counts 11/10/10/13/8. Serial captured solves reproduce H counts
+and eigenvalue FNV. Si64 early/mid/late Davidson H = 593/289/235; d4 =
+5436/1608/1608, d8 = 4380/3192/2136. Frequencies 5/4/4 scaled to 11 maps give
+33883.38 H (d4), 36564 (d8), 53094.46 (d12), 70518.46 (d16), 56208.31 (auto,
+including fallback), versus the relayed **MPI8** fine baseline 3504 columns.
+This is a count projection across machines, never a mixed-model timing ratio.
+
+Relayed prices: 2.782 s / 6025 H columns, DGEMM 64–108 GFLOP/s,
+STREAM 12.97 GB/s/core. Over-crediting all 2.953 s to the fine replacement and
+allowing ideal cached QR, faster nonlocal work and maximal baseline EVD orders
+still gives net savings d4/d8/d12/d16/auto =
+**-9.8693/-10.8026/-17.6246/-24.8206/-20.5793 s**. Conditional pessimistic d4
+is -35.5381 s. These are cost estimates, not dev08 measurements; omitted opaque
+allocation/accuracy-repair work is nonnegative and cannot rescue the verdict.
+Stop under the issue's nonpositive-optimistic exit rule. No degree or threshold
+was retuned to Si to evade rejection.
+
+Accuracy limits are explicit: energy is a fixed-H occupied band sum, not total
+SCF energy. Early/mid/late standard 5e-9 Ha gates pass 5/25, 20/25, 25/25 arms;
+strict 1e-10 Ha gates pass 2/25, 4/25, 22/25. Captured early Davidson also fails
+these absolute frozen-energy gates; matching its profile does not make early
+maps certified. Principal angles are degeneracy-safe; density errors/units and
+all failures are retained. No full candidate SCF or total-energy acceptance.
+Simulated np2/4 exercise rank-local payloads/fallback; exact engine replay needs
+M2_LOCAL_FIELDS=off (capture disables owned fields). Reconstructed MPI operator
+rounding differs (HX <=3.89e-16 Ha); its baseline is marked non-exact and stale
+HX is dropped. No claim of exact MPI filter identity or rigorous spectral bound.
+
+Implementation delivery is **blocked at the bench ownership boundary**: the
+ticket names nonexistent `dft-solvers/examples/davidson_bench.rs`, while the real
+harness is in dft-cli. Correction requested, no answer yet; the actual CLI file
+was not edited. The tested patch and scratch-only builder are reviewable in
+`lanes/FILTER/`; they do not claim an installed CLI mode. `gh issue view 24`
+failed (network), so issue scope is taken only from the supplied ticket.
+
+Tests: solver 4/4; prepared bench principal-angle oracle 1/1 and clippy pass;
+profile off/on has identical counts/accuracy/residuals/sweeps. Five default
+SCFs retain identical energy values and density SHA-256, all verified. Full
+check exit 1: build/fmt/clippy pass, 799 pass, 3 known in-repo TMPDIR pseudo-cache
+failures, 181 ignored. No commit. Details, reproducible tables/model and a
+bounded dev08 falsification request: [filtered-subspace.md](../design/filtered-subspace.md),
+[summary.json](lanes/FILTER/summary.json), [dev08-request.md](lanes/FILTER/dev08-request.md).

@@ -1,0 +1,123 @@
+{
+  "task_id": "G-FILTER-REPLAY",
+  "status": "BLOCKED",
+  "changed_files": [
+    "crates/dft-solvers/src/filtered_subspace.rs",
+    "crates/dft-solvers/src/lib.rs",
+    "docs/design/filtered-subspace.md",
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/lanes/FILTER/bench.patch",
+    "docs/performance/lanes/FILTER/build_replay.py",
+    "docs/performance/lanes/FILTER/capture-index.json",
+    "docs/performance/lanes/FILTER/check-full.log",
+    "docs/performance/lanes/FILTER/default-identity.json",
+    "docs/performance/lanes/FILTER/dev08-request.md",
+    "docs/performance/lanes/FILTER/profile-smoke.json",
+    "docs/performance/lanes/FILTER/provenance.json",
+    "docs/performance/lanes/FILTER/replay-summary.csv",
+    "docs/performance/lanes/FILTER/run_replays.py",
+    "docs/performance/lanes/FILTER/si-skew-early.json",
+    "docs/performance/lanes/FILTER/si-skew-late.json",
+    "docs/performance/lanes/FILTER/si-skew-mid.json",
+    "docs/performance/lanes/FILTER/si16-early.json",
+    "docs/performance/lanes/FILTER/si16-late.json",
+    "docs/performance/lanes/FILTER/si16-mid.json",
+    "docs/performance/lanes/FILTER/si32-early.json",
+    "docs/performance/lanes/FILTER/si32-late.json",
+    "docs/performance/lanes/FILTER/si32-mid.json",
+    "docs/performance/lanes/FILTER/si64-early.json",
+    "docs/performance/lanes/FILTER/si64-late.json",
+    "docs/performance/lanes/FILTER/si64-mid.json",
+    "docs/performance/lanes/FILTER/si8-early.json",
+    "docs/performance/lanes/FILTER/si8-late.json",
+    "docs/performance/lanes/FILTER/si8-mid.json",
+    "docs/performance/lanes/FILTER/si8-sim2.json",
+    "docs/performance/lanes/FILTER/si8-sim4.json",
+    "docs/performance/lanes/FILTER/summarize.py",
+    "docs/performance/lanes/FILTER/summary.json",
+    "docs/performance/lanes/FILTER/closing-report.json"
+  ],
+  "design_choices": [
+    "Scientific verdict STOP integration: every optimistic 11-map Si64 MPI8 estimate is negative; retain only replay research evidence.",
+    "Scaled Chebyshev on the existing real-Gamma operator interface, two reusable recurrence buffers, counted power bounds, existing two-pass panel QR, one RR per sweep plus initial RR, exact captured stopping profile and executed Davidson fallback.",
+    "No production dispatch, dependency, switch or default change. Optional phase clocks live only in the bench observer.",
+    "Actual CLI replay bench is outside the ticket's misspelled OWNED_FILES path. Prepared bench.patch and scratch-only builder are tested; source patch remains unapplied pending the requested ownership correction.",
+    "Frequency weighting uses actual fine-map group sizes; MPI8 costs are projections from counts and relayed MPI8 prices, never mixed-parallel-model timing ratios."
+  ],
+  "commands": [
+    {
+      "command": "gh issue view 24",
+      "exit_code": 1
+    },
+    {
+      "command": "cargo build --release -p dft-cli --bin dft-cli --example davidson_bench (pristine baseline)",
+      "exit_code": 0
+    },
+    {
+      "command": "BAANDI_SNAPSHOT_DIR=<existing absolute directory> target/release/dft-cli run target/scratch/<case>.toml --output-dir target/scratch/<case>-captured; cases si8,si16,si32,si64,si-skew",
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR=$PWD/target/scratch cargo test -p dft-solvers --lib filtered_subspace",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/FILTER/build_replay.py --check",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/FILTER/run_replays.py --binary target/scratch/davidson_bench_filter --case <case>; all five cases",
+      "exit_code": 0
+    },
+    {
+      "command": "BAANDI_M2_LOCAL_FIELDS=off target/scratch/davidson_bench_filter --input target/scratch/si8.toml --snapshot <same-rank snapshot> --sim-ranks <2 or 4> --repeats 1 --filter-replay",
+      "exit_code": 0
+    },
+    {
+      "command": "target/scratch/prepared_filter_bench --input target/scratch/si8.toml --snapshot target/scratch/si8-snapshots/s011-fine-ordinary-it07.json --repeats 1 --filter-degrees 4 [--filter-profile]; paired diagnostic identity",
+      "exit_code": 0
+    },
+    {
+      "command": "CHECK_SCCACHE=0 TMPDIR_990=$PWD/target/scratch scripts/check.sh full (final source)",
+      "exit_code": 1
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/FILTER/summarize.py",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    },
+    {
+      "command": "git apply --check docs/performance/lanes/FILTER/bench.patch",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "15 serial snapshots, 75 degree arms; 15/15 captured H-count and eigenvalue-FNV baselines exact. Fine-map counts Si8/16/32/64/skew: 11/10/10/13/8.",
+    "Si64 early/mid/late H columns: Davidson 593/289/235; degree 4 filter 5436/1608/1608; degree 8 filter 4380/3192/2136.",
+    "Si64 11-map d4 charged H=33883.38 columns, RR calls=73.6154, bound H=264 columns, terminal H=8265.23 columns. Fractions are weighted estimates, not literal calls.",
+    "Relayed MPI8 H price 2.782 s/6025 columns; 2.953 s all-stage dense-algebra ceiling. d4 optimistic net saving -9.8693 s; conditional pessimistic -35.5381 s. Other optimistic degree8/12/16/auto: -10.8026/-17.6246/-24.8206/-20.5793 s.",
+    "Fixed-H occupied band-sum standard 5e-9 Ha gates: early 5/25, middle 20/25, late 25/25; strict 1e-10 Ha gates 2/25, 4/25, 22/25. These are not total SCF energies.",
+    "Si64 late band-sum errors d4/d8/d12/d16: 6.21e-12/9.22e-13/1.24e-13/8.90e-15 Ha.",
+    "Five default SCFs retain identical energy values and density SHA-256 and remain verified; no default caller changed.",
+    "Solver tests 4 passed; prepared bench angle test 1 passed; profile off/on scientific fields identical. Full gate: 799 passed, 3 known pseudo-cache TMPDIR failures, 181 ignored; build/fmt/clippy pass; final gate wall 36 s (Mac observation)."
+  ],
+  "reference_comparison": "Separate fixed-H Davidson with 1e-11 Ha true residual tolerance on every band. No new QE run. MPI prices are relayed facts from the requested brief, not locally measured. Simulated rank engine replay is exact, but the reconstructed MPI comparison has potential rounding differences and drops stale HX (max HX difference <=3.89e-16 Ha).",
+  "limitations": [
+    "Bench mode is prepared/tested in a patch, not installed in the actual unowned CLI example. The named solver example does not exist.",
+    "Issue #24 text could not be fetched; ticket and local briefs were read, not the original issue.",
+    "Absolute frozen-band-energy gates fail on many early/middle candidates and on captured early Davidson; no candidate SCF/certificate or total-energy acceptance claim.",
+    "No dev08 MPI8 filter timing or exact reconstructed-MPI operator identity; model is a three-snapshot projection, conditional on stated rates/cache/latency assumptions.",
+    "Upper spectral bound is heuristic, not an enclosure or completeness certificate. Fallback full EVD order histogram is unavailable (count and sum m^3 recorded).",
+    "Opaque backend allocation/accuracy-repair costs are unmeasured nonnegative terms; setting them to zero favors the rejected candidate.",
+    "Full check remains exit 1 due to three preexisting CLI cache tests rejecting repository-local TMPDIR; external-volume scratch outside this worktree is not writable in the sandbox.",
+    "Dashboard/session/README state files are outside ticket ownership. No G-FILTER-REPLAY run entry/delegate report exists in this checkout; no dashboard upload or recurring session timer was created.",
+    "Binary snapshots remain in target/scratch; no UPF committed. Local timing fields are observations only."
+  ],
+  "open_questions": [
+    "Master/user: correct owned replay bench path to crates/dft-cli/examples/davidson_bench.rs, or retain the unapplied patch as the closed experiment. Recommend correcting the path only to archive the tested replay mode; do not integrate into production."
+  ],
+  "commit": "Uncommitted as requested. No remote or git metadata changes."
+}

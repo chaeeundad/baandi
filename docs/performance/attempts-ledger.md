@@ -3499,3 +3499,25 @@ Bytes: light removes ~6.9 MB (si64) and ~13.9 MB (si128) of output per run (resu
 MB and 2.13 -> 0.40 MB). Lesson: at MPI8 on dev08 the diagnostic payload costs below the 0.5 % floor;
 the QE gap is not explained by tracing. The lightweight default stays (smaller output, no cost).
 Evidence: /data/sig-dft/i26/diaglevel/{si64,si128}/ on dev08 (TABLE.md, table.json, samples-*.tsv).
+
+### I25-VERIFY-COST dev08 A/B (2026-11-24): V2 predicted-fail skip ADOPTED, V1 reuse kept off
+
+Reference driver, standard 5e-9 Ha, fixed-point verification criterion unchanged. dev08 MPI8, release
+mpi,mkl 0ce77fdc (sha 12011068...), one thread per rank, lightweight diagnostics. 20 A/A + 30 crossed
+pairs per variant and case, 672 samples, all VERIFIED, |E - E_strict| <= 2.4e-10 Ha, science identical
+to each arm's setup run. Beyond noise = |mean|/SE >= 3 and |mean| >= 3F.
+
+| case | A/A floor F | V1 reuse log(B/A) | V2 gate log(B/A) | median wall A -> V1 / V2 (s) |
+|---|---|---|---|---|
+| rskew (2 atoms) | 0.0229 | +0.0062 +- 0.0170 inconclusive | +0.0057 +- 0.0157 inconclusive | 0.176 |
+| elongated (24) | 0.0095 | +0.0600 +- 0.0090 slower | -0.0106 +- 0.0081 inconclusive | 1.511 -> 1.621 / 1.504 |
+| si64 | 0.0058 | -0.0927 +- 0.0044 faster | -0.0557 +- 0.0057 faster | 9.448 -> 8.637 / 8.929 |
+| si128 | 0.0066 | +0.0443 +- 0.0039 slower | -0.0670 +- 0.0043 faster | 56.63 -> 59.47 / 53.06 |
+
+V2 skips one predicted-failing attempt (prediction = previous attempt error scaled by the dr2 ratio; no
+constant tuned to a system) and never delivers without a pass: faster on si64 and si128, neutral elsewhere
+-> default on (REFSCF_VERIFY_GATE). V1 helps only when reuse removes an attempt (si64); on si128 and the
+elongated cell it adds 2 to 3 logical iterations and recovery time -> stays off. Limitation: all cells are
+Si with one pseudopotential; the slab cell needs smearing and was excluded. Lesson: the first attempt
+after the estimator stop fails by 10-30x; a predictor for the FIRST attempt is the next lever.
+Evidence: dev08 /data/sig-dft/vc/<case>/{TABLE.md,table.json}, setup.md.

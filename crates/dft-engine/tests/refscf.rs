@@ -839,8 +839,9 @@ fn verification_cost_fixture(active: bool) {
             .unwrap()
             .on(Id::REFSCF_VERIFY_REUSE)
     );
+    // Default on since 2026-11-24 (dev08 A/B); each arm below sets it explicitly.
     assert!(
-        !RunConfig::from_pairs(&[])
+        RunConfig::from_pairs(&[])
             .unwrap()
             .on(Id::REFSCF_VERIFY_GATE)
     );

@@ -196,7 +196,61 @@ impl DistributedRealHamiltonian {
         if source.basis_momenta() != basis.momenta() || rank >= ranks {
             return Err(DistributedRealError::Shape);
         }
-        let grid = source.fft_grid();
+        Self::from_parts(
+            source.fft_grid(),
+            basis,
+            source.nonlocal(),
+            source.local_potential_values().to_vec(),
+            source.operator_identity(),
+            capacity,
+            rank,
+            ranks,
+            pool,
+        )
+    }
+
+    /// Construct without a serial Hamiltonian, serial FFTs or full complex
+    /// projector table. Potential entries start as poison; the caller must set
+    /// owned planes before applying H. The current FFT apply contract still
+    /// requires a full-indexed potential allocation (8*grid_points bytes).
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_owned(
+        basis: &PlaneWaveBasis,
+        grid: &dft_basis::FftGridSpec,
+        nonlocal: &crate::hamiltonian::NonlocalOperator,
+        capacity: usize,
+        rank: usize,
+        ranks: usize,
+        pool: Arc<WorkerPool>,
+    ) -> Result<Self, DistributedRealError> {
+        if ranks == 0 || rank >= ranks || capacity == 0 || basis.k_fractional() != [0.; 3] {
+            return Err(DistributedRealError::Shape);
+        }
+        Self::from_parts(
+            grid,
+            basis,
+            nonlocal,
+            vec![f64::NAN; grid.dims().iter().product()],
+            Arc::new(()),
+            capacity,
+            rank,
+            ranks,
+            pool,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_parts(
+        grid: &dft_basis::FftGridSpec,
+        basis: &PlaneWaveBasis,
+        nl: &crate::hamiltonian::NonlocalOperator,
+        potential: Vec<f64>,
+        source_identity: Arc<()>,
+        capacity: usize,
+        rank: usize,
+        ranks: usize,
+        pool: Arc<WorkerPool>,
+    ) -> Result<Self, DistributedRealError> {
         let half = HalfSphere::new(basis, grid)?;
         let (plus, minus) = (half.plus(), half.minus());
         let n = half.full_len();
@@ -290,21 +344,19 @@ impl DistributedRealHamiltonian {
 
         // Kinetic diagonal in ORC order (as RealHamiltonian) of the local rows
         // only (ISSUE-20: the same copied values, no full-length vector).
-        let kd = source.kinetic_diagonal();
         let kinetic = rows
             .iter()
             .map(|&r| {
                 if r == 0 {
-                    kd[0]
+                    0.5 * basis.momenta()[0].norm_squared
                 } else {
-                    kd[plus[r.div_ceil(2)] as usize]
+                    0.5 * basis.momenta()[plus[r.div_ceil(2)] as usize].norm_squared
                 }
             })
             .collect();
 
         // Projector rows of the local rows only (ISSUE-20: packed directly,
         // validated over all representatives as `pack_projector`).
-        let nl = source.nonlocal();
         let count = nl.projector_count();
         let mut projectors = RealMatrix::zeros(n_loc, count)?;
         let mut coupling = Vec::new();
@@ -351,7 +403,7 @@ impl DistributedRealHamiltonian {
             n_global: n,
             capacity,
             kinetic,
-            potential: source.local_potential_values().to_vec(),
+            potential,
             owned_epoch: None,
             src,
             reps,
@@ -372,7 +424,7 @@ impl DistributedRealHamiltonian {
             gemm: RealGemmWorkspace::with_pool(n_loc, count.max(capacity), pool.clone())?,
             dgemm: dft_numerics::switches::on(dft_numerics::switches::Id::M2_DGEMM),
             lane: lane_profile::Profile::new(coupling.iter().map(|c| c.count)),
-            source_identity: source.operator_identity(),
+            source_identity,
             pool,
             projectors,
             coupling,

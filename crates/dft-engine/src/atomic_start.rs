@@ -977,6 +977,45 @@ pub(super) fn ritz(
     Ok((guess, report))
 }
 
+// R-SCF-START: the owned-row builder reuses the legacy factor/guard contract.
+// This changes no call or arithmetic in the legacy start.
+impl AtomicStartReport {
+    pub(crate) fn owned_qr_transform(
+        gram: &dft_numerics::RealMatrix,
+        first: bool,
+    ) -> Result<Option<dft_numerics::RealMatrix>, ScfError> {
+        let n = gram.cols();
+        let scale: Vec<f64> = (0..n)
+            .map(|j| if first { gram[(j, j)].sqrt() } else { 1. })
+            .collect();
+        if scale.iter().any(|s| !s.is_finite() || *s == 0.) {
+            return Ok(None);
+        }
+        let mut g: Vec<_> = gram
+            .as_slice()
+            .iter()
+            .map(|&v| Complex64::new(v, 0.))
+            .collect();
+        for j in 0..n {
+            for i in 0..n {
+                g[j * n + i] /= scale[i] * scale[j];
+            }
+        }
+        let Some(r) = cholesky_upper(&g, n, if first { BLOCK_PIVOT_GUARD } else { 0.5 }) else {
+            return Ok(None);
+        };
+        let mut t = upper_inverse(&r, n);
+        for j in 0..n {
+            for i in 0..n {
+                t[j * n + i] /= scale[i];
+            }
+        }
+        dft_numerics::RealMatrix::new(n, n, t.into_iter().map(|v| v.re).collect())
+            .map(Some)
+            .map_err(numerical)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

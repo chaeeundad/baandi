@@ -1,5 +1,93 @@
+# Performance experiment protocol
+
+## Current state — 2026-11-20..24 (issues #25 and #26)
+
+- Active work: the new reference SCF path, issue #25. The threads lane is
+  dropped; measurements cover one core and MPI against the same model only.
+  No default is changed or promoted by these documentation updates.
+- The `baandi-dev08` session operates dev08 through the orchestrator; the
+  `dft5090` relay is retired. Implementers send requests, not remote commands.
+- Measurements use an exclusive socket 0 window: np8 on physical cores 0-7,
+  np16 on cores 0-15, one thread per rank. Record actual binding and load.
+  The gate runs on socket 1 from `/scr/mino/gate/gate.sh`, queued as
+  `final-a0-gate-<hash>`; serialize it with measurement jobs. The older
+  [gate request](requests/gate-on-dev08.md) retains its original commands;
+  its 2026-11-23 update supplies the current location/operator.
+- Stop keepalive when there is no real work; do not manufacture jobs to keep
+  a runner busy. Local scratch stays inside the worktree, for example
+  `TMPDIR_990="$PWD/target/scratch"`. Mac work is compilation, correctness,
+  equivalence and counters only. All profiling and A/B timing use dev08.
+
+## Protocol map (live)
+
+Choose by the question being answered, not by the harness's default duration.
+This map governs the brief, lane charter and final-table instructions.
+
+| Question | Required experiment | Scope of the conclusion |
+| --- | --- | --- |
+| Kernel arithmetic, data movement or communication | Fixed-H replay: stage 0, one captured Hamiltonian and matched starting state; exact replay first, then labelled algorithm A/B | Local kernel/solve effect only; retain operator, density, layout, tolerance and start identity checks |
+| Density-update discrepancy | Common-input replay at the disputed boundary: identical input density and conventions for the output-density map; identical input/output density pair and history for the mixer | Isolate the map or mixer; unrelated trajectories at the same step number cannot identify the cause |
+| Tail, verification, stopping, mixing, start, ladder or any trajectory change | Full convergence on the affected input, independent fixed-point verification retained, all attempts and recovery charged | Delivered result, accuracy, convergence and total delivered wall; a truncated screen cannot accept or reject the effect |
+
+Fixed-H details: [snapshot replay](#snapshot-replay-exact-replay-vs-algorithm-ab-issue-18-2026-11-17)
+and the reference-path [fixed-potential request](lanes/RSCF/dav-dev08-request.md).
+Common-input details: [output-density replay](lanes/RSCF/map-dev08-request.md)
+and the [mixing replay record](lanes/RSCF/dev08-request.md); the latter is a
+historical request, not current limits or operations. Preserve its measured
+floors and source provenance; do not substitute a nominal input or infer a
+potential/mixer error from a whole-trajectory mismatch. Full-run details:
+[reference SCF request](lanes/RSCF/run-dev08-request.md) and
+[final measurement protocol](final-measurement-protocol.md). Historical requests
+remain unchanged; apply the current operator, binding and job classes above.
+
+A ten-step SCF screen is an optional follow-up for a kernel that passed fixed-H
+replay, restricted to work actually reached in those ten steps. It is not a
+replacement for common-input diagnosis or full convergence. The preserved
+[ten-step lesson](#lesson-2026-11-19-ten-step-fixed-screens-do-not-see-the-convergence-tail)
+reports a 1.2% gain at ten steps versus 22% at full length; it is motivation for
+this distinction, not new adoption evidence.
+
+## Job classes and promotion (live)
+
+- **Fast class: 600 s per job.** Size stage 0/1/2 screens as one case and one
+  rank count per job, three alternating pairs initially. Split widening grids
+  into jobs; stage totals are not per-job time allowances.
+- **Long class: authorized `final-` jobs, up to 7200 s per job.** This includes
+  full-convergence/tail/verification diagnostics, reference-SCF diagnostics and
+  final comparison runs, not only publication tables. State the question,
+  case, rank count, full input, timeout and evidence requested before queuing.
+  Do not truncate a tail experiment to fit 600 s or silently extend a fast job;
+  send it through the orchestrator in the named longer class. Keep one case per
+  diagnostic/measurement job. Gate jobs also use the named `final-` class.
+- **Promotion:** screens and replays are diagnostic only. Stage 3 requires
+  full-convergence dev08 evidence on multiple systems (cell shapes, sizes,
+  k meshes, bands and projector structures), strict **1e-10 Ha** and standard
+  **5e-9 Ha** accuracy classes, independent fixed-point verification,
+  convergence and applicable determinism gates. A Si-only win cannot promote
+  a default. The 1e-12 Ha cross-path regression check on unique-solution
+  fixtures is additional evidence, not a replacement adoption class.
+- **Timing:** use [comparison rules](comparison-rules.md#statistics-and-delivered-wall)
+  for both engines and [final-table reporting](final-measurement-protocol.md).
+  Charge failed verification attempts, failed attempts and recovery to delivered
+  wall; report verification separately as well. A run that never delivers a
+  verified result stays a failure, not a successful timing sample.
+- **Independence:** no QE source access or copying. Use genuine QE outputs with
+  command/version/input/UPF hashes; preserve historical requests and raw evidence.
+
+## Historical instructions and harness reference
+
+Dated measurements and harness mechanics below are preserved. Explicitly marked
+historical instructions do not override the live map, job classes or operations.
+Harness verdicts are screening labels, never default-promotion decisions.
+
 ## Fixed-step SCF screens (user, 2026-11-17)
+<details>
+<summary>Historical — 2026-11-17 blanket fixed-step instruction; use the live protocol map; superseded, not live instructions</summary>
+
 For ideas that change only how a quantity is computed (arithmetic, data movement, communication, kernels) and not the SCF convergence structure, run the SCF for a fixed number of steps (about 10; `scf.max_iterations = 10`, the run then reports non-convergence, which is expected and not a failure of the screen) instead of to convergence. Compare time per step, work counters per step and the step-by-step energy and density residual history against the default (they must agree within the rounding class step by step). Only ideas that change the convergence structure (mixer, stop rule, verification, ladder, start, tolerances) are run to convergence and must report convergence, verification and accuracy. The screen harnesses accept a `--steps N` option for this; a run that stops at N steps is valid, a crash or a diverging residual is not.
+
+</details>
+
 
 ## Two lanes: iteration lane and pre-push gate (user, 2026-11-17; gate tiers 2026-11-19)
 Rule for every agent (AGENTS.md-compatible): **iterate with `scripts/check.sh fast`; push with `scripts/check.sh full`.** Both print one PASS/FAIL line per gate (build, test, fmt, clippy), exit nonzero on any failure, and start with a `LOAD` line (load average, CPU count, running cargo/rustc processes) and end with a `WALL` line.
@@ -13,17 +101,22 @@ Rule for every agent (AGENTS.md-compatible): **iterate with `scripts/check.sh fa
 
 - Coverage is the same in both tiers for the crates checked: the same test binaries, the same tolerances, the same lints (`-D warnings`), the same ignored set. `fast` only narrows the crate set. A crate that is not a direct dependent of a changed crate (for example `dft-cli` when only `dft-numerics` changed) is checked by `full`, which is why `full` stays the push gate.
 - Base of the diff: the nearer of `git merge-base HEAD main` and `git merge-base HEAD origin/main` (agent branches fork from a local `main` that is often ahead of `origin/main`); `CHECK_BASE=<rev>` overrides it. Workspace files (`Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `.cargo/`) select the whole workspace. A changed file outside `crates/` (docs, scripts, `tests/reference`, AGENTS.md) selects the crates whose `.rs` sources mention its file name, because some tests read those files; with no crate affected only `fmt` has work.
-- Environment: `CHECK_NICE=1` (default) runs the test phase under `nice -n 10` so a gate does not starve dev08 hand-offs or other sessions; `CHECK_TEST_JOBS` (default 4); scratch goes to `TMPDIR_990` (default `/Volumes/990-2TB/Develop/rust-dft-scratch/tmp`; user rule 2026-11-19: no build or scratch output on the internal disk).
+- **Historical scratch default (override with worktree-local `TMPDIR_990`):** Environment: `CHECK_NICE=1` (default) runs the test phase under `nice -n 10` so a gate does not starve dev08 hand-offs or other sessions; `CHECK_TEST_JOBS` (default 4); scratch goes to `TMPDIR_990` (default `/Volumes/990-2TB/Develop/rust-dft-scratch/tmp`; user rule 2026-11-19: no build or scratch output on the internal disk).
 - `scripts/check.sh <crate>` (one crate, every gate) is kept for existing notes and tickets; it is `fast <crate>` without the dependents.
-- **Iteration lane (while the logic is being changed):** only speed and work counters on short, one-case runs (10 minutes at most), plus a seconds-long identity smoke (energy bits and density hash against the baseline on one input; for rounding-class changes the energy within the class), and `scripts/check.sh fast`. A speed number on a result that no longer matches is worthless, so the identity smoke stays in this lane.
+- **Historical iteration-lane summary (scope superseded by the live map and job classes):** only speed and work counters on short, one-case runs (10 minutes at most), plus a seconds-long identity smoke (energy bits and density hash against the baseline on one input; for rounding-class changes the energy within the class), and `scripts/check.sh fast`. A speed number on a result that no longer matches is worthless, so the identity smoke stays in this lane.
 - **Pre-push gate (once per push):** `scripts/check.sh full` (on the Mac or on dev08), the accuracy gates against the strict reference (strict 1e-10 Ha, standard 5e-9 Ha, verification), and for a default change the dev08 performance confirmation. A tree that an agent already passed with the full check and that is fast-forwarded without change is not checked again; a merged tree is checked once.
 - Implementers: run `fast` while iterating and `full` once at the end; do not re-run `full` after every small edit.
 - After a merge or rejection: `python3 -I scripts/wt_cleanup.py --dry-run`, then without `--dry-run` (removes `target/` of finished Codex worktrees and of merged, clean, idle Claude worktrees under `.claude/worktrees`; `--check-dirs` clears only `target/check-nested` and `target/check-clippy`).
+
+<details>
+<summary>Historical — 2026-11-17 final-table-only exception; use the live job classes; superseded, not live instructions</summary>
 
 ## Hard rule (user, 2026-11-17): everything except the final benchmark finishes in 10 minutes
 - Every stage 0, stage 1 and stage 2 job must be sized to finish within 10 minutes (the dev08 queue runner kills jobs of these classes at 600 s and moves them to failed/). Only the final QE comparison tables (job names starting with `final-`) may run longer.
 - Stage 0 is ONE case, ONE rank count (np=8 for MPI ideas, T=1 for single-process ideas), candidate against default, 3 alternating pairs, one diagonalization. The np 2/4/8, si64 and multi-arm grids are stage 2, run only after a stage-0/1 CANDIDATE.
 - A request document that lists a larger grid is cut down by the orchestrator before it is queued; implementers write requests that fit the rule from the start (a stage-0 request lists one point, an expansion list is separate).
+
+</details>
 
 # Fast optimization loop: screen on one case, confirm on the set (user request, 2026-11-16)
 
@@ -43,7 +136,7 @@ Harness: `crates/dft-cli/examples/davidson_bench.rs` (the benchmark binary) and 
 
 What one process does (in-process, deterministic):
 - Builds the case once from a CLI input (`fast_screen_dav.py` writes it from `benchmarks/cases/<case>.toml` with the stage-1 displacement stream: seed 601, amplitude 1e-3, T=1 by default) exactly as `dft-cli run` builds it: `dft_cli::run::options` (single standard path, Ritz-change solves, lean Davidson by default, REUSE-PSI, the MPI capacity rule), real Gamma path. The cutoff ladder is not used: every solve runs at the full cutoff.
-- Base density rho0: the `density.bin` of a converged `dft-cli run` of the same input (`--cli <dft-cli binary>` runs it once and caches it in `--work`; or `--density FILE`), else the problem's start density (the superposition of atomic densities, or the uniform density when the UPF carries no atomic charge, as Si.pz-vbc). The JSON field `base_density` records which. Use the converged density for threads screens (late-SCF warm solve); the start density gives a step-2-like warm solve.
+- Base density rho0: the `density.bin` of a converged `dft-cli run` of the same input (`--cli <dft-cli binary>` runs it once and caches it in `--work`; or `--density FILE`), else the problem's start density (the superposition of atomic densities, or the uniform density when the UPF carries no atomic charge, as Si.pz-vbc). The JSON field `base_density` records which. Historical threads-lane instruction (superseded): Use the converged density for threads screens (late-SCF warm solve); the start density gives a step-2-like warm solve.
 - Setup (untimed): the atomic-start vectors at rho0 (computed once by the SCF's routine, `ScfProblem::atomic_start_vectors`, measurement hook, not used by the SCF), one map at rho0 from them at `--prev-tol` (1e-8 Ha) giving X_prev and rho_out; warm density rho_w = rho0 + 0.5 (rho_out - rho0); warm tolerance = the standard ratchet after that map, ratchet(1e-8, E_H[rho_out - rho0], N_e).
 - **cold** solve: the map at rho0 from the atomic start at the standard first-step tolerance 5e-3 Ha (`StandardProfile::CAP_HA`). The vectors are passed to the map, so the solve is identical to a map that recomputes them (`--cold-start internal`, checked: same eigenvalue FNV).
 - **warm** solve: an untimed re-arm map at rho0 from X_prev (2 Davidson iterations; it leaves X, H X and psi(r) kept for REUSE-PSI as an SCF step does), then the timed map at rho_w from the re-arm orbitals at the ratchet tolerance: the typical mid-SCF solve with the kept start taken.
@@ -59,7 +152,7 @@ Testable at stage 0 (kernel ideas, the solve or map changes at a fixed Hamiltoni
 
 A stage-0 result is never adoption evidence. A CANDIDATE goes to stage 1 (does the SCF-level wall move?) and then stage 2/3; a REJECT row is written to the ledger (section "Stage-0 Davidson screens") and not repeated without new evidence.
 
-Commands (Mac, pure build):
+Historical Mac timing examples (retained for harness syntax; current Mac use is correctness/counters only):
 ```
 python3 -I scripts/fast_screen_dav.py --upf <Si.pz-vbc.UPF> --case si32 --cli target/release/dft-cli \
     --work <scratch dir> --b BAANDI_DAVIDSON=classic                       # threads, T=1
@@ -69,6 +162,9 @@ python3 -I scripts/fast_screen_mpi.py --level solve --upf <UPF> --case si32 --ra
     --b BAANDI_M2_PANEL_GS=fused --expect collectives.tree_sum.calls:down  # simulated ranks
 ```
 Options of `fast_screen_dav.py`: `--case si8|si16|si32|si64|<path>`, `--seed`, `--amp`, `--threads`, `--ranks` (simulated), `--pairs`, `--repeats`, `--kinds cold,warm`, `--a/--b NAME=value[,..]`, `--expect counter:down|up` (summed over kinds), `--min-drop` (0.05), `--density`, `--cli`, `--features mkl`, `--binary`, `--bench-args` (passes `--prev-tol`, `--mix`, `--cold-tol`, `--warm-tol`, `--cold-start` to the binary), `--emit-input PATH` (write the CLI input and exit), `--json-out`, `--all-counters`.
+
+<details>
+<summary>Historical — launch examples with retired thread/grid/scratch choices; superseded, not live instructions</summary>
 
 ### dev08 usage (master session; exact commands)
 Build once per commit (pure, MKL, MPI; separate target directories as usual), record the sha256 of each binary:
@@ -98,6 +194,8 @@ done; done
 ```
 (alternate the arm order per pair as the screen does; three pairs per np). Each process takes seconds (si32) and prints `solve_ms` per repeat, the per-rank counters (`coll.*`, `dist.*`) and the eigenvalue FNV; `BAANDI_MPI_TREE=rd` is read by the binary at MPI start like the CLI. Report: binary sha256, the JSON lines, load before and after.
 
+</details>
+
 ### Snapshot replay: exact replay vs algorithm A/B (ISSUE-18, 2026-11-17)
 `davidson_bench --snapshot <manifest.json> [--replay-mode exact|ab|legacy]` (`ScfProblem::replay_checked`). The manifest carries a versioned `operator_fingerprint` (cell, ordered positions, pseudopotential content as the operator sees it: local ionic field, core density, projectors and couplings; XC, spin, occupations, cutoff, ordered reciprocal basis, grid, input density, convention); the rank files carry each rank's row-list hash.
 - **exact** (default): before any injection the current fingerprint and density bytes must equal the captured ones; at the solver entry each rank's rows and layout, dimensions, effective-potential bits, stopping profile (tolerance, strict bands, buffer tolerance, criterion) and kept-H X status must match. The verdict is agreed over all ranks (tree sum of the mismatch classes) before any solve, so a rank-local mismatch is one agreed error. Mismatch: exit 3. An exact replay that does not reproduce the captured Davidson iterations, H columns and eigenvalue FNV: exit 4 (after the report).
@@ -106,7 +204,7 @@ done; done
 Tests: `crates/dft-engine/tests/snapshot_identity.rs`.
 
 ## Stage 1: screen (minutes, one case, one binary)
-- One representative case per parallel model: threads = si32 standard f1e-3 seed 601 T=1 (and T=8 when the idea touches threading); MPI = si32 standard np=4 seed 601; add si64 only for ideas about large-N terms (EVD, memory).
+- **Historical case selection (threads lane dropped; current screen uses one core or MPI np8):** One representative case per parallel model: threads = si32 standard f1e-3 seed 601 T=1 (and T=8 when the idea touches threading); MPI = si32 standard np=4 seed 601; add si64 only for ideas about large-N terms (EVD, memory).
 - Same binary, environment A/B (switch off/on), three alternating pairs, load gate as before. Report the median per-arm wall, the spread and the deterministic counters.
 - Prune first on the deterministic counters, which have no noise: Davidson/H columns, GEMM FLOPs, FFT counts, collective counts and bytes, allocations. An idea that does not move a counter in the intended direction is dropped without any wall measurement.
 - Pass to stage 2 when the median wall improves beyond the spread, or the counter drop is large and the wall effect is below the spread of one case.
@@ -124,11 +222,11 @@ si16, si32, si64 (standard), k444s, mgo-40, one skewed or slab case; paired env 
 Only candidates that survived stage 2 run the full generality set and the accuracy classes (strict 1e-10 Ha, standard 5e-9 Ha, certificate, thread independence). Stacked candidates are confirmed together in one run where the code paths are independent.
 
 ## Rules
-- Implementers measure stage 1 locally where possible (Mac observation, label O) before asking dev08 for stage 2; dev08 requests list the stage explicitly.
+- **Historical, superseded by dev08-only timing:** Implementers measure stage 1 locally where possible (Mac observation, label O) before asking dev08 for stage 2; dev08 requests list the stage explicitly.
 - A stage-1 negative result is recorded in the ledger as a short row (idea, counter, wall, spread) so that it is not repeated.
 - Screening results are never adoption evidence. Never skip stage 3 for a default change.
 
-## Harness (MPI)
+## Harness (MPI; historical Mac timing/verdict workflow)
 `scripts/fast_screen_mpi.py` (python3 -I, no network; added 2026-11-16) is the stage-1 MPI screen on this Mac. It builds the release test binary of `crates/dft-engine/tests/m2_entry_cost.rs` once (sha256 printed), then runs the SAME binary on N alternating pairs (A B, B A, ...) with an environment A/B. Default case: si32, np=4 simulated ranks (threads of one process), production mode (`ScfOptions::default()`: standard 5e-9 Ha, fixed-point verification, Pulay 0.5) with the CLI capacity rule (3 per band at four or more ranks) and the C1 ladder, i.e. the CLI default path. Options: `--case si8|si16|si32|si64`, `--ranks`, `--mode production|standard|strict`, `--ladder on|off`, `--pairs`, `--a/--b NAME=value[,..]`, `--expect counter:down|up` (repeatable), `--min-drop` (default 0.10), `--json-out`, `--binary` (skip the build), `--all-counters`.
 - The harness prints one `M2SCREEN_JSON` line per run (per-rank values): wall, energy bits, density FNV-1a, SCF / Davidson / H columns, rotation FLOPs, reduced solves and sum of m^3, `parallel.reductions` per site (calls, doubles), `parallel.collectives` per operation (calls, payload bytes, seconds), Davidson and M2 stage seconds, M2 counters.
 - Self-check (mandatory): a counter that is zero on both arms is listed as "unusable (all zero)"; an `--expect` counter that is unusable makes the verdict UNUSABLE, never "no difference". Counters must be identical between repeats of one arm (a note is printed otherwise); the density hash must be identical between repeats of one arm (determinism contract) or the verdict is REJECT.
@@ -137,7 +235,7 @@ Only candidates that survived stage 2 run the full generality set and the accura
 - Example: `python3 -I scripts/fast_screen_mpi.py --upf <Si.pz-vbc.UPF> --b BAANDI_M2_PANEL_GS=fused --expect collectives.tree_sum.calls:down` (3 pairs, about 30 s). Unit tests of the verdict logic: `python3 -I scripts/tests/test_fast_screen_mpi.py`.
 - Sizing knob of the harness only: `M2_PROFILE_VERIFY=off` (production without the verification, to measure its cost; never an adoption arm).
 
-## Harness: `scripts/fast_screen.py` (stage 1, added 2026-11-16)
+## Harness: `scripts/fast_screen.py` (historical Mac workflow, added 2026-11-16)
 Standard library only (`python3 -I`), no network. One case, two arms, N alternating pairs (AB, BA, AB, ...; default 3).
 ```
 python3 -I scripts/fast_screen.py --binary target/release/dft-cli --upf /path/Si.pz-vbc.UPF \
@@ -152,6 +250,10 @@ python3 -I scripts/fast_screen.py ... --scf-b "davidson_capacity_per_band = 3"  
 - One si32 T=1 run takes 5 to 6 s on the Mac (2026-11-16, pure build), so a three-pair screen is under a minute. Pick a seed whose verification fails when the idea concerns the verification (si32 f1e-3 seed 603: 4 attempts, 13 fine steps; seed 601: 1 attempt).
 
 ## Lesson 2026-11-19: ten-step fixed screens do not see the convergence tail
+
+Historical measurement and rule wording preserved below. The live job classes
+above supersede its ten-minute wording for authorized longer diagnostics.
+
 The same binary (6c31696) took 7.57 s on the ten-step input (rc 3, NOT CONVERGED) and 10.86 s on the converging input of the final table (identical cell, basis and tolerances; only `max_iterations` 10 vs 100). A later A/B pair showed -22 % on the final table with identical SCF/Davidson/H counts but only -1.2 % on the ten-step screen: a change that lives in the part of the run a ten-step input never reaches (verification passes/fails, materialization, the coarse-to-fine tail) cannot be seen by the screen. Rules: (1) a ten-step A/B can prove or reject effects on maps that execute inside ten steps (kernel, grid-stage and init changes), never effects on verification, output, the tail or the stop rule; (2) before adopting or rejecting anything attributed to those parts, run the converging input (one case per job, still within the ten-minute rule for si32 and smaller; si64 converging runs take about 8 to 11 s on dev08); (3) when two tables disagree, decompose per phase bucket on the converging input before citing either.
 
 ## Rule 2026-11-19: si64 np=8 wall reproduces about 5 % inside a window and about 20 % across windows

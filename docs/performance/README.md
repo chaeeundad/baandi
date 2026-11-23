@@ -1,5 +1,19 @@
 # Performance: rules, measurements and the optimization log
 
+## Current state — 2026-11-20..24 (issue #26)
+
+The new reference SCF path (issue #25) is the active work; the threads lane is
+dropped. Defaults are unchanged by this reconciliation. dev08 is operated by
+`baandi-dev08`; the `dft5090` relay is retired. See the
+[current operations and protocol map](fast-loop-protocol.md#current-state--2026-11-2024-issues-25-and-26).
+Use fixed-H replay for kernels, common-input replay for density-update
+discrepancies, and full convergence for tail, verification or trajectory changes.
+Timing uses [the same median for both engines](comparison-rules.md#statistics-and-delivered-wall);
+fast jobs are limited to 600 s, authorized `final-` jobs to 7200 s.
+
+<details>
+<summary>Historical — 2026-11-05 status and speed claims, not current results; superseded, not live instructions</summary>
+
 ## Reconciled status — 2026-11-05
 
 Source checkout: `b5d515a` on `task/P12A-STATUS-RECONCILIATION`. Presence is
@@ -38,7 +52,41 @@ that is provisional relayed evidence. Local `tests/reference/runtime/benchmark.j
 retains its own failed/inconclusive targets. The remote raw JSON and independent
 reproduction are still TODOs. See [evidence map](../validation/evidence-map.md).
 
+</details>
+
 Read this before touching a hot path (anything on the Hamiltonian apply, the eigensolver, FFTs, density accumulation). Physics correctness always comes first; a change that is faster but not equivalent is a bug.
+
+## Rules for every agent (live)
+
+1. Read [AGENT-BRIEF.md](AGENT-BRIEF.md), the ledger/backlog and your ticket.
+   Diagnose/profile on dev08 through `baandi-dev08`; Mac work is compilation,
+   correctness/equivalence and counters. Instrumented profiles are separate
+   from acceptance timing. No optimization on a guess.
+2. Follow the [protocol map](fast-loop-protocol.md#protocol-map-live): fixed-H
+   replay for kernels, common-input replay for density-update discrepancies,
+   full convergence for tail/verification/trajectory changes. Fixed-step SCF
+   screens are limited to the work reached, never default-promotion evidence.
+3. Prove equivalence and retain independent fixed-point verification. Strict
+   **1e-10 Ha** and standard **5e-9 Ha** are the accuracy classes; unique-solution
+   cross-path 1e-12 Ha is an additional internal regression check. Overhead-only
+   changes retain bit-identical results. Preserve convergence and applicable
+   determinism gates; promotion requires multi-system evidence, not Si alone.
+4. Timing follows [comparison rules](comparison-rules.md#statistics-and-delivered-wall):
+   same model/conditions, median for both engines, all failed attempts,
+   verification and recovery included in delivered wall. Use the
+   [final campaign](final-measurement-protocol.md) for final tables and the
+   [600 s / authorized `final-` 7200 s classes](fast-loop-protocol.md#job-classes-and-promotion-live)
+   for queue requests. Never infer dev08 performance from Mac timing.
+5. Keep allocation, logging and I/O out of numerical hot loops, reuse work
+   arrays, and prefer maintained libraries. Keep physics-facing APIs stable;
+   changes to their contracts require an ADR. No QE source access or copying.
+6. Record profiles, exact commands, source/binary/input hashes, raw samples,
+   equivalence, failed/rejected attempts and limitations in the optimization
+   log/ledger within ownership. Update baselines only through a recorded
+   decision, never to hide a regression. Defaults stay unchanged until approved.
+
+<details>
+<summary>Historical — older profiling, regression and cross-machine reporting instructions; superseded, not live instructions</summary>
 
 ## Rules for every agent
 1. Measure first. Profile with `sample` (macOS) or `perf` (Linux) on a release build with debug symbols (`CARGO_PROFILE_RELEASE_DEBUG=true`), read the time at the top of the stack, and write the finding into [optimization-log.md](optimization-log.md) before changing code. No optimization on a guess.
@@ -49,11 +97,19 @@ Read this before touching a hot path (anything on the Hamiltonian apply, the eig
 6. Record every accepted optimization in [optimization-log.md](optimization-log.md): what the profile showed, what changed, before and after numbers from `scripts/bench_scf.py` on the same machine, equivalence evidence, and what was tried and rejected. Update `baseline.json` only through the decision recorded in the log (never to hide a regression).
 7. Report speedups only from measured runs on a quiet machine, with the machine and commit stated; the cross-machine comparison with QE is in `docs/validation.md` R7 and README.
 
+</details>
+
 ## Tools
 - `scripts/bench_scf.py` (standard library only): runs the release `dft-cli` on fixed Si cases (`gamma`, `k222s`, `k222`, `k444s`), reports median wall time, engine and diagonalization time, iterations, energy and the density hash, and compares with the baseline. The pseudopotential path is passed with `--upf` (the file is not in the repository).
-- Baselines: [baseline.json](baseline.json) is the state before any optimization (macOS Apple Silicon, release, 1 thread); [baseline-after-o4.json](baseline-after-o4.json) is the state after the Davidson product-reuse change (O4b changed the arithmetic of the residual, so density files differ bit-wise from the first baseline while the energy agrees to 8e-15 Ha): use it for `--require-identical` checks of later overhead-only steps. Timings on the shared Mac are indicative; accepted timings come from the quiet dev08 node (docs/validation.md R7 describes it).
+- **Historical baseline provenance (Mac timings are not current performance evidence):** Baselines: [baseline.json](baseline.json) is the state before any optimization (macOS Apple Silicon, release, 1 thread); [baseline-after-o4.json](baseline-after-o4.json) is the state after the Davidson product-reuse change (O4b changed the arithmetic of the residual, so density files differ bit-wise from the first baseline while the energy agrees to 8e-15 Ha): use it for `--require-identical` checks of later overhead-only steps. Timings on the shared Mac are indicative; accepted timings come from the quiet dev08 node (docs/validation.md R7 describes it).
 
 ## P10I deterministic intra-k linear algebra
+
+**Historical scope for P10I–P10M below:** these are implementation and evidence
+records, not current timing instructions. Their reproduction recipes (including
+`/tmp` paths, thread grids and fixed-step timing ratios) are preserved as history.
+Use the live protocol map, worktree-local scratch and dev08-only timing for new
+work; the dropped threads lane is not reopened by these examples.
 
 Historical implementation; P10J below supersedes its worker scheduling and MKL path.
 

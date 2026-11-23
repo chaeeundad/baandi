@@ -915,7 +915,8 @@ fn verification_cost_fixture(active: bool) {
         if name == "default" {
             fingerprint = Some(stop_to_verified_science(&run));
         }
-        if name == "off" {
+        // The default equals the gate-on arm since the 2026-11-24 adoption.
+        if name == "gate" {
             assert_eq!(
                 fingerprint.as_ref().unwrap(),
                 &stop_to_verified_science(&run)
@@ -944,7 +945,7 @@ fn verification_cost_fixture(active: bool) {
         } else {
             match name {
                 "reuse" | "both" => (29, 30, 2, 1, 0),
-                "gate" => (28, 30, 2, 0, 1),
+                "gate" | "default" => (28, 30, 2, 0, 1),
                 _ => (27, 29, 2, 0, 0),
             }
         };

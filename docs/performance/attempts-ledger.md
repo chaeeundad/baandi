@@ -3521,3 +3521,17 @@ elongated cell it adds 2 to 3 logical iterations and recovery time -> stays off.
 Si with one pseudopotential; the slab cell needs smearing and was excluded. Lesson: the first attempt
 after the estimator stop fails by 10-30x; a predictor for the FIRST attempt is the next lever.
 Evidence: dev08 /data/sig-dft/vc/<case>/{TABLE.md,table.json}, setup.md.
+
+### I25-FIRST-ATTEMPT dev08 screen (2026-11-24): first-attempt predictor REJECTED (stays off)
+
+REFSCF_VERIFY_GATE_FIRST (secant estimate of the fixed-point residual from the Broyden history) at
+de2f1d29, untimed screen, MPI8 mpi,mkl, four cells, all VERIFIED, |E - E_strict| <= 1.2e-10 Ha.
+Evaluated maps default -> first: si64 16 -> 16, si128 20 -> 20, elongated 18 -> 16, rskew 9 -> 10.
+The doomed first attempt is skipped correctly (si64 predicted 5.17e-8 vs counterfactual 5.80e-8), but the
+next candidate still misses (6.75e-9 / 3.09e-8 vs 5e-9), so the failure only moves one map later. On
+first-pass cells the secant overpredicts 50-700x (rskew 6.48e-8 vs actual 9.69e-11) and costs a map.
+Pre-registered stop: no timing run. Lesson: with the criterion fixed, skipping attempts is exhausted;
+the remaining tail cost is the 2 extra maps needed to bring the delivered fixed-point error from 10-30x
+the threshold to below it. Also found: maps after a skipped attempt are counted as "unassigned" by the
+stop-to-verified reader (si8 0.041 s); to be fixed with the next reader change.
+Evidence: dev08 /data/sig-dft/fa/SCREEN.md, screen.json.

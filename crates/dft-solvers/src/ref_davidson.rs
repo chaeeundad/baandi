@@ -135,6 +135,13 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         ));
     }
     let mut w = Workspace::new(operator, n, cap)?;
+    // Resolve once per solve. The reference workspace resets C to identity
+    // on contraction, even though it remeasures S/H and their factor afterward.
+    // Only the immediately following correction can use these stored Ritz rows.
+    let reuse_restart =
+        dft_numerics::switches::on(dft_numerics::switches::Id::REF_DAV_RESTART_CORRECTIONS);
+    let mut restart_scratch = reuse_restart.then(|| (vec![0.0; n], vec![0.0; n]));
+    let mut contracted = false;
     let mut record = Record::new(
         options.max_iterations,
         cap,
@@ -181,13 +188,29 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         if m + active.len() > cap && m > n {
             w.contract(&c, m, r, options.profile)?;
             m = n;
+            contracted = true;
         }
         if m + active.len() > cap && cap < dim {
             return Err(SolverError::InvalidParameter(
                 "capacity cannot hold the active correction block; use at least 2*bands",
             ));
         }
-        w.corrections(&c, hamiltonian_diagonal, &active, m, r, options.profile)?;
+        if let Some((norms, sums)) = restart_scratch.as_mut().filter(|_| contracted) {
+            restart_corrections(
+                &c,
+                &mut w,
+                hamiltonian_diagonal,
+                &active,
+                norms,
+                sums,
+                r,
+                options.profile,
+            )?;
+        } else {
+            w.corrections(&c, hamiltonian_diagonal, &active, m, r, options.profile)?;
+        }
+        // Neither a new reduced solve nor rank repair preserves identity C.
+        contracted = false;
         let mut k = w.e.cols();
         // Exact eigenvectors have zero corrections; appending them would make S
         // singular. The general rank-repair path handles this too.
@@ -233,6 +256,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         if m + active.len() > cap {
             w.contract(&c, m, r, options.profile)?;
             m = n;
+            contracted = true;
             r.communication = c.snapshot().difference(before);
         }
     }
@@ -253,6 +277,57 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         ritz_changes_ha,
         record,
     })
+}
+
+/// C is exactly identity immediately after contract; V/HV already are the
+/// retained Ritz vectors/products. Keep the baseline residual, summation,
+/// normalization, compaction and drop tests in their original order. This is
+/// not stale-band locking and does not skip the measured restart refresh.
+#[allow(clippy::too_many_arguments)]
+fn restart_corrections<C: Collective>(
+    c: &C,
+    w: &mut Workspace,
+    diagonal: &[f64],
+    active: &[usize],
+    norms: &mut [f64],
+    sums: &mut [f64],
+    r: &mut Iteration,
+    profile: bool,
+) -> Result<(), SolverError> {
+    let t = clock(profile);
+    let rows = w.v.rows();
+    let k = active.len();
+    w.e.reshape_within_storage(rows, k)?;
+    norms[..k].fill(0.0);
+    for (j, &band) in active.iter().enumerate() {
+        for (i, &h) in diagonal.iter().enumerate() {
+            let z = (w.hv[(i, band)] - w.values[band] * w.v[(i, band)])
+                / preconditioner_denominator(h, w.values[band]);
+            w.e[(i, j)] = z;
+            norms[j] += z * z;
+        }
+    }
+    c.tree_sum_f64(&norms[..k], &mut sums[..k]).map_err(error)?;
+    let mut kept = 0;
+    for (j, sum) in sums[..k].iter().enumerate() {
+        let norm = sum.sqrt();
+        if !norm.is_finite() {
+            return Err(SolverError::Application(
+                "nonfinite reference correction".into(),
+            ));
+        }
+        if norm <= 32.0 * f64::EPSILON {
+            r.dropped_corrections += 1;
+            continue;
+        }
+        for i in 0..rows {
+            w.e[(i, kept)] = w.e[(i, j)] / norm;
+        }
+        kept += 1;
+    }
+    w.e.reshape_within_storage(rows, kept)?;
+    r.seconds[4] += elapsed(t);
+    Ok(())
 }
 
 fn error(e: dft_mpi::MpiError) -> SolverError {
@@ -298,6 +373,198 @@ mod diagnostic_tests {
                 }
             }
             Ok(())
+        }
+    }
+
+    struct Partitioned {
+        dim: usize,
+        rows: Vec<usize>,
+        clustered: bool,
+    }
+    impl Partitioned {
+        fn diagonal(&self, row: usize) -> f64 {
+            if self.clustered && row < 2 {
+                1.0
+            } else {
+                1.0 + row as f64 * 0.4
+            }
+        }
+    }
+    impl DistributedRealOperator for Partitioned {
+        fn global_len(&self) -> usize {
+            self.dim
+        }
+        fn local_rows(&self) -> &[usize] {
+            &self.rows
+        }
+        fn apply_block<C: Collective>(
+            &mut self,
+            c: &C,
+            x: &RealMatrix,
+            y: &mut RealMatrix,
+        ) -> Result<(), SolverError> {
+            for j in 0..x.cols() {
+                let dot: f64 = self
+                    .rows
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &row)| ((row + 1) as f64).sin() * x[(i, j)])
+                    .sum();
+                let mut sum = [0.0];
+                c.tree_sum_f64(&[dot], &mut sum).map_err(error)?;
+                for (i, &row) in self.rows.iter().enumerate() {
+                    y[(i, j)] =
+                        self.diagonal(row) * x[(i, j)] + 0.03 * ((row + 1) as f64).sin() * sum[0];
+                }
+            }
+            Ok(())
+        }
+    }
+
+    fn same_bits(a: &[f64], b: &[f64]) {
+        assert_eq!(
+            a.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            b.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn restart_corrections_preserve_decisions_columns_and_remove_identity_flops() {
+        use dft_numerics::switches::RunConfig;
+        let off = RunConfig::from_pairs(&[("ref_dav_restart_corrections", "off")]).unwrap();
+        let on = RunConfig::from_pairs(&[("ref_dav_restart_corrections", "on")]).unwrap();
+        for (dim, n, clustered) in [(12, 3, false), (17, 5, true), (7, 4, true)] {
+            for ranks in [1, 2, 3, 8] {
+                dft_mpi::simulate(ranks, |comm| {
+                    // Cyclic partition deliberately differs from the usual block rows.
+                    let rows: Vec<_> = (comm.rank()..dim).step_by(ranks).collect();
+                    let mut op = Partitioned {
+                        dim,
+                        rows,
+                        clustered,
+                    };
+                    let mut x = RealMatrix::zeros(op.rows.len(), n).unwrap();
+                    for j in 0..n {
+                        for (i, &row) in op.rows.iter().enumerate() {
+                            x[(i, j)] = if row == j {
+                                1.0
+                            } else {
+                                0.03 * ((row * 7 + j * 13 + 1) as f64).sin()
+                            };
+                        }
+                    }
+                    let diag: Vec<_> = op
+                        .rows
+                        .iter()
+                        .map(|&row| op.diagonal(row) + 0.03 * ((row + 1) as f64).sin().powi(2))
+                        .collect();
+                    for placement in [ReducedPlacement::Root, ReducedPlacement::Replicated] {
+                        for budget in [1, 40] {
+                            let mut options = Options::new(n, 1e-10, n - 1);
+                            options.max_iterations = budget;
+                            options.placement = placement;
+                            options.profile = true;
+                            options.return_hx = true;
+                            let a = {
+                                let _scope = off.enter();
+                                solve(comm, &mut op, &x, &diag, options).unwrap()
+                            };
+                            let b = {
+                                let _scope = on.enter();
+                                solve(comm, &mut op, &x, &diag, options).unwrap()
+                            };
+                            same_bits(&a.eigenvalues, &b.eigenvalues);
+                            same_bits(a.eigenvectors.as_slice(), b.eigenvectors.as_slice());
+                            same_bits(
+                                a.hx.as_ref().unwrap().as_slice(),
+                                b.hx.as_ref().unwrap().as_slice(),
+                            );
+                            assert_eq!(a.converged, b.converged);
+                            assert_eq!(a.ritz_values_ha, b.ritz_values_ha);
+                            assert_eq!(a.ritz_changes_ha, b.ritz_changes_ha);
+                            assert_eq!(a.record.communication, b.record.communication);
+                            assert_eq!(a.record.h_columns, b.record.h_columns);
+                            assert_eq!(a.record.h_calls, b.record.h_calls);
+                            assert_eq!(a.record.restarts, b.record.restarts);
+                            assert_eq!(a.record.iterations.len(), b.record.iterations.len());
+                            let mut saved = 0;
+                            let mut restart = false;
+                            for (ar, br) in a.record.iterations.iter().zip(&b.record.iterations) {
+                                assert_eq!(ar.active_bands, br.active_bands);
+                                assert_eq!(ar.h_columns, br.h_columns);
+                                assert_eq!(ar.reduced_order, br.reduced_order);
+                                assert_eq!(ar.restarts, br.restarts);
+                                assert_eq!(ar.repairs, br.repairs);
+                                assert_eq!(ar.dropped_corrections, br.dropped_corrections);
+                                assert_eq!(ar.unconverged, br.unconverged);
+                                let omitted: Vec<_> = ar
+                                    .gemms
+                                    .iter()
+                                    .filter(|g| {
+                                        restart && matches!(g.stage, "residual_x" | "residual_hx")
+                                    })
+                                    .collect();
+                                if restart {
+                                    assert_eq!(omitted.len(), 2);
+                                    let expected = 4
+                                        * op.rows.len() as u64
+                                        * n as u64
+                                        * ar.active_bands.len() as u64;
+                                    assert_eq!(
+                                        omitted.iter().map(|g| g.flops).sum::<u64>(),
+                                        expected
+                                    );
+                                    let payload: u64 = omitted
+                                        .iter()
+                                        .map(|g| 8 * (g.m * g.k + g.k * g.n + g.m * g.n) as u64)
+                                        .sum();
+                                    let rows = op.rows.len() as u64;
+                                    let width = ar.active_bands.len() as u64;
+                                    assert_eq!(
+                                        payload,
+                                        16 * (rows * n as u64 + n as u64 * width + rows * width)
+                                    );
+                                    saved += expected;
+                                }
+                                let retained: Vec<_> = ar
+                                    .gemms
+                                    .iter()
+                                    .filter(|g| {
+                                        !restart || !matches!(g.stage, "residual_x" | "residual_hx")
+                                    })
+                                    .collect();
+                                assert_eq!(retained, br.gemms.iter().collect::<Vec<_>>());
+                                restart = ar.restarts > 0;
+                            }
+                            assert_eq!(a.record.gemm_flops - b.record.gemm_flops, saved);
+                            if budget > 1 {
+                                assert!(a.converged.iter().all(|v| *v));
+                                assert!(saved > 0 || op.rows.is_empty());
+                                if dim < 2 * n {
+                                    assert!(a.record.iterations.iter().any(|it| it.repairs > 0));
+                                    assert!(
+                                        a.record
+                                            .iterations
+                                            .iter()
+                                            .any(|it| it.dropped_corrections > 0)
+                                    );
+                                }
+                            } else {
+                                assert_eq!(saved, 0);
+                            }
+                            if comm.rank() == 0 && placement == ReducedPlacement::Root && budget > 1
+                            {
+                                eprintln!(
+                                    "DAV_DENSE dim={dim} bands={n} ranks={ranks} iterations={} h_columns={} restarts={} saved_flops_rank0={saved} delta_e_ha=0 bits=identical",
+                                    a.record.iterations.len(),
+                                    a.record.h_columns,
+                                    a.record.restarts
+                                );
+                            }
+                        }
+                    }
+                });
+            }
         }
     }
 

@@ -604,6 +604,112 @@ Mac evidence, the replay interface, exact counts and the outstanding dev08
 comparison are in [the request](../performance/lanes/RSCF/dav-dev08-request.md)
 and [stored validation](../../crates/dft-solvers/tests/ref_davidson_evidence.json).
 
+## Inner solver cost accounting
+
+P3-DAV-DENSE, 2026-11-24. This accounts for the reference solver at
+`2aee083`, specifically `ref_davidson/workspace.rs`, not the older
+`distributed_davidson/workspace.rs`. The reference solver shares the operator
+trait and lean factor adapters; it does not call that older workspace.
+Derived from the own-words notes
+[davidson-iteration-structure-gamma.md](../research/qe-study/davidson-iteration-structure-gamma.md)
+(including the preconditioner addendum),
+[davidson-gemm-accounting.md](../research/qe-study/davidson-gemm-accounting.md)
+and [qe-solvers-and-subspace.md](../research/qe-study/qe-solvers-and-subspace.md).
+No QE source was read. Historical complex-solver counts in the latter two
+notes are not measurements of this real reference implementation.
+
+Let n be requested bands, m the current basis width, r this rank's ORC rows,
+u incoming unconverged roots, k accepted corrections (k <= u <= n), and
+q=m+k. Default capacity is min(global rows, 2n); explicitly larger capacities
+are supported and the same formulas hold. All products are real, one
+multiply/add counts as two FLOPs. A GEMM (a x b)(b x c) has 2abc nominal
+FLOPs and a logical operand/output payload of
+`8*(ab+bc+ac)` bytes (each operand once, aliases counted separately, output
+write once). This is not measured DRAM traffic: adapter packing, tile rereads, zero fills, cache reuse
+and backend scratch change physical traffic. A copy of t doubles moves
+16t logical read+write bytes. Collective payload is input bytes per rank,
+not wire traffic; all ranks replicate small matrices.
+
+| Stage, baseline | Dense work per occurrence, per rank | Logical data movement / collectives | Algorithmic minimum and retained constraints |
+| --- | --- | --- | --- |
+| Corrections | Two GEMMs `(r,m)(m,u)`: 4rmu FLOPs. Pack selected C columns, precondition and normalize u residuals; no converged-band rotations. | GEMM payload `16*(rm+mu+ru)` bytes; C copy 16mu; residual pass reads X/HX/diagonal and writes E (32ru bytes, scalar caches excluded), normalization/compaction 16rk bytes. One sum of 8u bytes. | General C needs both products. Immediately after restart C=I, so stored V/HV columns already are X/HX; neither GEMM nor packing is necessary. Denominator, norm, zero-direction cutoff and accepted-root order must remain unchanged. |
+| New borders | S: `V_q^T E`, H: `V_q^T HE`, each `(q,r)(r,k)`, total 4rqk FLOPs. | GEMM payload `16*(rq+rk+qk)` bytes; two sums of 8qk bytes each; upper triangle mirrored to both halves (48d read/store bytes for both matrices, d=qk-k(k-1)/2, counting the two diagonal stores). Appending E/HE adds 32rk copy bytes (charged to glue/apply, not the border clock). | Already incremental and one rectangle per matrix. k(k-1)/2 unused lower-triangle entries per product are computed, but splitting those products repeats the rejected upper-border experiment; not reopened here. S and its pivot decision precede H application, so their normal-step collectives cannot simply be fused without changing failure work. |
+| Restart | Rotate V and HV by C: 4rmn FLOPs. Then fresh S/H: 4rn^2 FLOPs; factor S; two small refresh-transform GEMMs: 4n^3 FLOPs. No H call or EVD. | Rotation payload `16*(rm+mn+rn)` bytes; copies into V/HV: 32rn bytes. Fresh Gram payload `16*(2rn+n^2)` bytes and two sums totaling 16n^2 bytes, plus 48n^2 reset-store bytes, 16n^2 HR-to-H copy bytes and adapter-owned small-matrix/factor work. | Required physical rotations: two, not three. The note's ideal diagonal-H/unit-S reset eliminates the measured refresh, but that was already falsified by a 1.0154e-11 Ha degenerate-fixture drift. Preserve measured refresh and its factor; do not repeat that rejection. |
+| Return | X=VC: 2rmn FLOPs; optional HX adds another 2rmn. | Per product `8*(rm+mn+rn)` bytes; no collective or gather. Owned local output buffers are returned. | Already minimal for a general final C. No unconditional final restart or reapplication of H. Optional HX is caller-required work, not removable duplication. |
+
+Elementwise correction work, outside GEMM totals, is 2ru multiply/subtract
+operations for HX-eX, ru residual divisions, 2ru norm multiply/adds and rk
+normalization divisions, plus u square roots after reduction. Per entry the
+unchanged denominator evaluates x=2(h-e), z=abs(x-1), one hypot(z,1), a
+branch-dependent multiply/add, a reciprocal and final scaling. Hypot is a
+library operation, not assigned a fictitious fixed FLOP count; comparisons,
+abs, indexing and copies are not FLOPs. Mirroring borders, restart matrix
+resets and return ownership transfer add no arithmetic FLOPs.
+
+The `restart` timer charges the two large rotations, copies and resets only.
+Fresh contracted Gram work belongs to `border`; refresh factor and transformed
+H belong to `factor`. Thus the ticket's restart/border seconds cannot be read
+as independent algorithmic causes or compared one-for-one with QE labels.
+The ticket-relayed Si128 MPI8 numbers (8.500 / 5.495 / 5.953 / 3.874 s for
+restart/border/corrections/return) motivate this work, not a reproduced timing
+claim. Rank maxima from different stages need not add to critical-rank wall.
+
+Setup costs n H columns, two n-square Gram GEMMs (4rn^2 FLOPs), factor and
+initial reduced solve. Each ordinary step applies H to k accepted columns,
+not u attempted ones. The default cap forces a restart after the first full
+n-column expansion if another correction is needed. Exact-zero drops and
+rank repair invalidate an unconditional 2n minimum-H claim.
+
+For completeness, at a factor panel starting at p with width b<=64, the
+adapter records W=2p^2b, Gram=2pb^2, U=2p^2b and inverse=2pb^2 nominal
+GEMM FLOPs when reached. The first panel's small Cholesky/inverse uses the
+existing library/factor adapter. Those scalar operations are not included
+in `gemm_flops`. The reduced border transforms cost 4q^2k and Ritz
+coefficients cost 2q^2n; full symmetric EVD backend work is not a GEMM count.
+Repair separately whitens V/HV (4rm^2), transforms coefficients (4m^2n),
+remeasures the m-square borders (4rm^2), refactors/transforms (4m^3 plus
+factor), and projects the correction block twice (8rmu), followed by
+in-panel two-pass dots/subtractions/norms. Its reductions and dropped
+columns stay visible; repair must not be disguised as restart savings.
+
+### Implemented switch and boundary
+
+`BAANDI_REF_DAV_RESTART_CORRECTIONS=on|off` (input key
+`ref_dav_restart_corrections`) is resolved once at reference solve entry and
+**defaults off**. It affects only the first correction immediately after a
+successful contraction: compute the unchanged preconditioned residual from
+the selected retained V/HV columns directly. A solve-local flag is cleared
+before any rank repair or reduced solve; fresh starts and subsequent ordinary
+steps always use the general-coefficient path. Fresh S/H, guarded overlap
+factor, active-band selection, thresholds, capacity, iteration limit, all H
+applications and final rotations are retained. Two norm buffers (16n bytes)
+are reserved once only when enabled; no new per-iteration allocation,
+collective, logging or I/O is added. The existing backend may still allocate.
+
+Per affected correction this removes **4rnu FLOPs**, two rotation calls,
+16nu bytes of coefficient copying and `16*(rn+nu+ru)` logical GEMM payload
+bytes. The residual still reads the same number of selected row entries,
+now directly from V/HV, with the same row summation order and one u-norm sum.
+These are arithmetic/data-movement counts, not predicted speedups. Existing
+GEMM records omit the unexecuted `residual_x` and `residual_hx` calls, so the
+saving is observable without inventing a new timing category.
+
+Skipping identity multiplication can change signed zero behavior and depends
+on the floating-point backend; no cross-backend bit-identity claim is made.
+The switch stays off pending dev08. Fixed-layout tests compare every value's
+bits, every incoming active set, Ritz operands, drop/repair/restart decisions,
+iteration/H-column counts and communication. They also sum actual removed
+GEMM records against 4rnu. Any dev08 divergence requires the first-branch
+operands/margins and the existing rank-rule envelope; agreement of final
+energies alone is insufficient. The old distributed and strict solver paths
+never consult this switch.
+
+The workspace's private buffers and methods lie outside the original ticket
+ownership. No workspace copy/fusion experiment is implemented by this change;
+removing its measured Gram refresh is deliberately excluded by prior evidence.
+See the [dev08 request](../performance/lanes/RSCF/dav-dense-dev08-request.md)
+for independent arms, full-run verification and remaining measurement gates.
+
 ## Rank-count acceptance for the reference driver (orchestrator, 2026-11-23)
 R-SCF-2 validation: 24 system/rank combinations converge and pass the independent fixed-point verification, maximum energy difference to the strict legacy reference 1.69e-9 Ha (inside the standard class 5e-9 Ha); legacy default bit-identical. One combination (si16, 3 simulated ranks) took a different discrete branch in the last Davidson call (2 versus 3 iterations: a Ritz-value change sits at the threshold, and the rank-dependent rounding of the reductions decides which side), ending with a final density difference of 8.2e-8 e/bohr^3 while still converging and certifying. QE has the same property (its own np8 versus np1 floor flips discrete decisions near thresholds). Acceptance rule from now on: across rank counts, the delivered result must stay inside the accuracy class and pass the certificate; trajectories must agree within rounding EXCEPT at documented branch points where a discrete test sits within rounding of its threshold (recorded with the margin). Bit-identical trajectories across rank counts are not required for the reference driver.
 

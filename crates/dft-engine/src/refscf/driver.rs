@@ -7,7 +7,7 @@ use super::{
     metric::{Metric, Serial},
     numerical,
     profile::{Profile, next_ethr_ry},
-    record::{Record, SolveRecord},
+    record::{CorrectionRecord, Record, SolveRecord},
 };
 use crate::{
     refstart::{self, StartInput, StartState},
@@ -137,6 +137,7 @@ pub fn run_with<K: Collective>(
     let mut verification_calls = Vec::new();
     let mut first_reference_stop = None;
     for iteration in 1..=o.max_iterations {
+        let verification_call_start = verification_calls.len();
         if iteration > 1 {
             ethr = next_ethr_ry(
                 if iteration == 2 { 1e-2 } else { ethr },
@@ -359,6 +360,7 @@ pub fn run_with<K: Collective>(
             beta: profile.beta,
             mixing: diagnostics,
             calls,
+            verification_calls: verification_call_start..verification_calls.len(),
             davidson_iterations: dav,
             h_columns: columns,
             map_s,
@@ -554,6 +556,21 @@ fn solve_map<K: Collective>(
                 }
                 (r.total_seconds, stages)
             }),
+            ritz_values_ha: std::mem::take(&mut step.solve.ritz_values_ha),
+            band_thresholds_ha: step.solve.band_thresholds_ha.clone(),
+            corrections: r
+                .iterations
+                .iter()
+                .map(|i| CorrectionRecord {
+                    active_bands: i.active_bands.clone(),
+                    basis_before: i.basis_before,
+                    h_columns: i.h_columns,
+                    reduced_order: i.reduced_order,
+                    repairs: i.repairs,
+                    dropped_corrections: i.dropped_corrections,
+                    restarts: i.restarts,
+                })
+                .collect(),
             repairs: r.iterations.iter().map(|i| i.repairs).sum(),
             dropped_corrections: r.iterations.iter().map(|i| i.dropped_corrections).sum(),
         });

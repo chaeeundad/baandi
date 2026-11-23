@@ -600,7 +600,16 @@ fn rotate(
 ) -> Result<(), SolverError> {
     out.reshape_within_storage(v.rows(), k)?;
     r.gemm(stage, v.rows(), k, m);
-    g.multiply_slices_into(
+    // The plain entry falls back to the pure-Rust kernel whenever the whole
+    // output (rows x k) exceeds the scratch square, which is every rotation of
+    // a real cell (dev08 si128: 186 GFLOP per rank on that route).
+    let entry = if dft_numerics::switches::on(dft_numerics::switches::Id::REF_DAV_WIDE_ROTATE) {
+        RealGemmWorkspace::multiply_slices_wide_into
+    } else {
+        RealGemmWorkspace::multiply_slices_into
+    };
+    entry(
+        g,
         GemmSite::Rotate,
         v.as_slice(),
         v.rows(),

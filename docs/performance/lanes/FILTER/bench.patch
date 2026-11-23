@@ -1,0 +1,791 @@
+--- a/crates/dft-cli/examples/davidson_bench.rs
++++ b/crates/dft-cli/examples/davidson_bench.rs
+@@ -89,6 +89,8 @@
+     /// settings may differ, a changed potential rounding recomputes H X),
+     /// `legacy` (manifest without fingerprint, unchecked, labeled).
+     replay_mode: ReplayMode,
++    filter_degrees: Vec<Option<usize>>,
++    filter_profile: bool,
+ }
+ 
+ /// The parts of a snapshot manifest the replay needs.
+@@ -157,7 +159,7 @@
+ 
+ fn usage(msg: &str) -> ! {
+     eprintln!(
+-        "davidson_bench: {msg}\nusage: davidson_bench --input FILE.toml [--density density.bin] [--repeats N] [--kinds cold,warm] [--sim-ranks P] [--prev-tol X] [--mix X] [--cold-tol X] [--warm-tol X] [--cold-start once|internal] [--snapshot MANIFEST.json [--replay-mode exact|ab|legacy]]"
++        "davidson_bench: {msg}\nusage: davidson_bench --input FILE.toml [--density density.bin] [--repeats N] [--kinds cold,warm] [--sim-ranks P] [--prev-tol X] [--mix X] [--cold-tol X] [--warm-tol X] [--cold-start once|internal] [--snapshot MANIFEST.json [--replay-mode exact|ab|legacy] [--filter-replay | --filter-degrees 4,8,12,16,auto] [--filter-profile]]"
+     );
+     std::process::exit(2)
+ }
+@@ -176,6 +178,8 @@
+         cold_internal: false,
+         snapshot: None,
+         replay_mode: ReplayMode::Exact,
++        filter_degrees: Vec::new(),
++        filter_profile: false,
+     };
+     let mut it = std::env::args().skip(1);
+     while let Some(k) = it.next() {
+@@ -201,6 +205,22 @@
+                     _ => usage("--cold-start is once or internal"),
+                 }
+             }
++            "--filter-profile" => a.filter_profile = true,
++            "--filter-replay" => {
++                a.filter_degrees = vec![Some(4), Some(8), Some(12), Some(16), None]
++            }
++            "--filter-degrees" => {
++                a.filter_degrees = v()
++                    .split(',')
++                    .map(|s| {
++                        if s == "auto" {
++                            None
++                        } else {
++                            Some(s.parse().expect("degree"))
++                        }
++                    })
++                    .collect()
++            }
+             "--snapshot" => a.snapshot = Some(v().into()),
+             "--replay-mode" => {
+                 a.replay_mode = match v().as_str() {
+@@ -215,6 +235,16 @@
+     }
+     if a.input.as_os_str().is_empty() {
+         usage("--input is required");
++    }
++    if !a.filter_degrees.is_empty() && a.snapshot.is_none() {
++        usage("--filter-replay requires --snapshot");
++    }
++    if a.filter_degrees
++        .iter()
++        .flatten()
++        .any(|d| !(2..=64).contains(d))
++    {
++        usage("filter degrees must be 2..64 or auto");
+     }
+     if a.snapshot.is_some() {
+         a.kinds = vec!["replay".into()];
+@@ -908,6 +938,22 @@
+             seconds,
+         });
+     }
++    let filter = if args.filter_degrees.is_empty() {
++        None
++    } else {
++        Some(filter_replay::gather(
++            comm,
++            filter_replay::run(
++                args,
++                m,
++                problem,
++                comm,
++                &rho,
++                x.as_ref().expect("warm snapshot required"),
++                hx.as_ref(),
++            ),
++        ))
++    };
+     let bands = m.bands;
+     RankOut {
+         setup_s,
+@@ -927,6 +973,7 @@
+             },
+         )],
+         snapshot: Some(json!({
++            "filter_replay": filter,
+             "manifest": args.snapshot.as_ref().map(|p| p.display().to_string()),
+             "label": m.label, "stage": m.stage, "kind": m.kind, "iteration": m.iteration,
+             "start": m.start, "kept_armed": m.kept_armed, "layout": layout,
+@@ -1191,3 +1238,690 @@
+         );
+     }
+ }
++
++// Replay-only adapter. Production SCF dispatch is untouched.
++mod filter_replay {
++    use super::*;
++    use dft_numerics::{RealGemmWorkspace, RealMatrix, pool::WorkerPool, real::symmetric_eigh};
++    use dft_solvers::distributed_davidson::{
++        DistributedKeptStart, DistributedRealOperator, DistributedStart, DistributedTuning,
++    };
++    use dft_solvers::filtered_subspace::{self as filter, Options, Profile};
++    use dft_solvers::{
++        BandTolerances, RealDavidson, RealEigenSolution, RealLinearOperator, SolverError,
++    };
++    use std::cell::{Cell, RefCell};
++
++    thread_local! {
++        static PHASE_START: RefCell<[Option<Instant>;6]> = const { RefCell::new([None;6]) };
++        static PHASE_SECONDS: Cell<[f64;6]> = const { Cell::new([0.0;6]) };
++        static APPLY_SECONDS: Cell<f64> = const { Cell::new(0.0) };
++        static APPLY_WIDTH_SECONDS: RefCell<Vec<f64>> = const { RefCell::new(Vec::new()) };
++    }
++    fn observe(phase: filter::Phase, start: bool) {
++        let k = phase as usize;
++        PHASE_START.with(|s| {
++            let mut s = s.borrow_mut();
++            if start {
++                s[k] = Some(Instant::now());
++            } else if let Some(t) = s[k].take() {
++                PHASE_SECONDS.with(|v| {
++                    let mut a = v.get();
++                    a[k] += t.elapsed().as_secs_f64();
++                    v.set(a);
++                });
++            }
++        });
++    }
++    struct ApplySpan(Option<Instant>, usize);
++    impl Drop for ApplySpan {
++        fn drop(&mut self) {
++            if let Some(t) = self.0 {
++                let elapsed = t.elapsed().as_secs_f64();
++                APPLY_SECONDS.with(|v| v.set(v.get() + elapsed));
++                APPLY_WIDTH_SECONDS.with(|v| {
++                    if let Some(s) = v.borrow_mut().get_mut(self.1) {
++                        *s += elapsed;
++                    }
++                });
++            }
++        }
++    }
++    struct Comm<'a> {
++        inner: Option<&'a dyn Collective>,
++        calls: Cell<[u64; 4]>,
++        doubles: Cell<[u64; 4]>,
++    }
++    impl Comm<'_> {
++        fn add(&self, k: usize, n: usize) {
++            let mut a = self.calls.get();
++            a[k] += 1;
++            self.calls.set(a);
++            let mut a = self.doubles.get();
++            a[k] += n as u64;
++            self.doubles.set(a);
++        }
++        fn reset(&self) {
++            self.calls.set([0; 4]);
++            self.doubles.set([0; 4]);
++        }
++        fn json(&self) -> Value {
++            json!({"operations":["sum","gather","broadcast","alltoall"],"calls":self.calls.get(),"payload_doubles_per_rank":self.doubles.get()})
++        }
++    }
++    impl Collective for Comm<'_> {
++        fn rank(&self) -> usize {
++            self.inner.map_or(0, |c| c.rank())
++        }
++        fn size(&self) -> usize {
++            self.inner.map_or(1, |c| c.size())
++        }
++        fn barrier(&self) -> Result<(), dft_mpi::MpiError> {
++            self.inner.map_or(Ok(()), |c| c.barrier())
++        }
++        fn tree_sum_f64(&self, a: &[f64], b: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
++            self.add(0, a.len());
++            if let Some(c) = self.inner {
++                c.tree_sum_f64(a, b)
++            } else {
++                b.copy_from_slice(a);
++                Ok(())
++            }
++        }
++        fn allgatherv_f64(
++            &self,
++            a: &[f64],
++            n: &[usize],
++            b: &mut [f64],
++        ) -> Result<(), dft_mpi::MpiError> {
++            self.add(1, a.len());
++            if let Some(c) = self.inner {
++                c.allgatherv_f64(a, n, b)
++            } else {
++                b.copy_from_slice(a);
++                Ok(())
++            }
++        }
++        fn bcast_f64(&self, a: &mut [f64], r: usize) -> Result<(), dft_mpi::MpiError> {
++            self.add(2, a.len());
++            self.inner.map_or(Ok(()), |c| c.bcast_f64(a, r))
++        }
++        fn alltoall_f64(
++            &self,
++            a: &[f64],
++            n: usize,
++            b: &mut [f64],
++        ) -> Result<(), dft_mpi::MpiError> {
++            self.add(3, a.len());
++            if let Some(c) = self.inner {
++                c.alltoall_f64(a, n, b)
++            } else {
++                b.copy_from_slice(a);
++                Ok(())
++            }
++        }
++    }
++    // One fixed-lifetime adapter per rank; never stored in an array.
++    #[allow(clippy::large_enum_variant)]
++    enum H {
++        Serial(dft_physics::real_gamma::RealHamiltonian),
++        Rows(dft_physics::distributed_real_gamma::DistributedRealHamiltonian),
++    }
++    struct Operator {
++        h: RefCell<H>,
++        rows: Vec<usize>,
++        n: usize,
++        pool: Arc<WorkerPool>,
++        widths: RefCell<Vec<u64>>,
++        profile: bool,
++    }
++    impl Operator {
++        fn count(&self, b: usize) {
++            self.widths.borrow_mut()[b] += 1;
++        }
++        fn reset(&self) {
++            self.widths.borrow_mut().fill(0);
++        }
++    }
++    impl RealLinearOperator for Operator {
++        fn dimension(&self) -> usize {
++            self.n
++        }
++        fn worker_pool(&self) -> Option<Arc<WorkerPool>> {
++            Some(self.pool.clone())
++        }
++        fn apply(&self, x: &[f64], y: &mut [f64]) -> Result<(), SolverError> {
++            let x = RealMatrix::new(x.len(), 1, x.to_vec())?;
++            let mut out = RealMatrix::zeros(x.rows(), 1)?;
++            RealLinearOperator::apply_block(self, &x, &mut out)?;
++            y.copy_from_slice(out.as_slice());
++            Ok(())
++        }
++        fn apply_block(&self, x: &RealMatrix, y: &mut RealMatrix) -> Result<(), SolverError> {
++            let _span = ApplySpan(self.profile.then(Instant::now), x.cols());
++            self.count(x.cols());
++            match &mut *self.h.borrow_mut() {
++                H::Serial(h) => h
++                    .apply_block(x, y)
++                    .map_err(|e| SolverError::Application(e.to_string())),
++                _ => unreachable!(),
++            }
++        }
++    }
++    impl DistributedRealOperator for Operator {
++        fn global_len(&self) -> usize {
++            self.n
++        }
++        fn local_rows(&self) -> &[usize] {
++            &self.rows
++        }
++        fn worker_pool(&self) -> Option<Arc<WorkerPool>> {
++            Some(self.pool.clone())
++        }
++        fn apply_block<C: Collective>(
++            &mut self,
++            c: &C,
++            x: &RealMatrix,
++            y: &mut RealMatrix,
++        ) -> Result<(), SolverError> {
++            let _span = ApplySpan(self.profile.then(Instant::now), x.cols());
++            self.count(x.cols());
++            match &mut *self.h.borrow_mut() {
++                H::Serial(h) => h
++                    .apply_block(x, y)
++                    .map_err(|e| SolverError::Application(e.to_string())),
++                H::Rows(h) => h
++                    .apply_block(c, x, y)
++                    .map_err(|e| SolverError::Application(e.to_string())),
++            }
++        }
++    }
++    fn davidson(
++        c: &Comm<'_>,
++        op: &mut Operator,
++        x: &RealMatrix,
++        hx: Option<&RealMatrix>,
++        diagonal: &[f64],
++        profile: Profile,
++        opts: &dft_engine::ScfOptions,
++    ) -> RealEigenSolution {
++        let solver = RealDavidson {
++            bands: x.cols(),
++            tolerance: profile.tolerance,
++            max_iterations: opts.davidson_max_iterations.max(400),
++            max_subspace: opts.davidson_subspace,
++            seed: opts.seed,
++        };
++        let policy = BandTolerances {
++            strict_bands: profile.strict_bands,
++            buffer_tolerance: profile.buffer_tolerance,
++        };
++        if c.size() == 1 {
++            let mut ws = None;
++            if let Some(hx) = hx {
++                let w = solver
++                    .prepare_workspace(op, opts.davidson_capacity_per_band, &mut ws)
++                    .unwrap();
++                w.load_kept_start(x, hx).unwrap();
++            }
++            solver
++                .solve_reusing(
++                    op,
++                    Some(x),
++                    diagonal,
++                    policy,
++                    profile.ritz,
++                    !profile.ritz,
++                    opts.davidson_capacity_per_band,
++                    &mut ws,
++                )
++                .expect("Davidson")
++        } else {
++            let mut kept = hx.map_or_else(DistributedKeptStart::new, |h| {
++                DistributedKeptStart::with_stored(h.clone())
++            });
++            if hx.is_some() {
++                kept.arm();
++            }
++            let mut local = x.clone();
++            let mut solution = solver
++                .solve_distributed_rows_local(
++                    c,
++                    op,
++                    Some(DistributedStart::Local(x)),
++                    diagonal,
++                    policy,
++                    profile.ritz,
++                    !profile.ritz,
++                    opts.davidson_capacity_per_band,
++                    DistributedTuning::current(),
++                    &mut local,
++                    &mut kept,
++                    false,
++                )
++                .expect("distributed Davidson");
++            solution.eigenvectors = local;
++            solution
++        }
++    }
++    fn full(c: &Comm<'_>, op: &Operator, x: &RealMatrix) -> RealMatrix {
++        let mut local = vec![0.0; op.n * x.cols()];
++        for j in 0..x.cols() {
++            for (i, &g) in op.rows.iter().enumerate() {
++                local[g + j * op.n] = x[(i, j)];
++            }
++        }
++        let mut out = vec![0.0; local.len()];
++        c.tree_sum_f64(&local, &mut out).unwrap();
++        RealMatrix::new(op.n, x.cols(), out).unwrap()
++    }
++    fn density(
++        x: &RealMatrix,
++        half: &dft_basis::HalfSphere,
++        grid: &dft_basis::FftGridSpec,
++        volume: f64,
++        occ: usize,
++    ) -> Array3<f64> {
++        let mut cols = Vec::new();
++        for j in 0..occ {
++            let mut v = vec![dft_physics::data::Complex64::default(); x.rows()];
++            half.unpack(&x.as_slice()[j * x.rows()..(j + 1) * x.rows()], &mut v)
++                .unwrap();
++            cols.push(v);
++        }
++        let mut fft = dft_numerics::FftPlan3d::new(grid.dims()).unwrap();
++        dft_physics::density::from_orbitals(&cols, &vec![2.0; occ], grid, volume, &mut fft).unwrap()
++    }
++    // Stable sin(principal angles) from (I-XX^T)Y, including degenerate occupied
++    // clusters. No individual eigenvector comparison or acos near one.
++    fn angles(x: &RealMatrix, y: &RealMatrix, occ: usize) -> Vec<f64> {
++        let n = x.rows();
++        let x = RealMatrix::new(n, occ, x.as_slice()[..n * occ].to_vec()).unwrap();
++        let mut r = RealMatrix::new(n, occ, y.as_slice()[..n * occ].to_vec()).unwrap();
++        let mut gram = RealMatrix::zeros(occ, occ).unwrap();
++        let mut projected = RealMatrix::zeros(n, occ).unwrap();
++        let mut ws =
++            RealGemmWorkspace::with_pool(n.max(occ), occ, WorkerPool::new(1).unwrap()).unwrap();
++        ws.multiply_into(
++            x.as_ref(),
++            dft_numerics::RealOp::Transpose,
++            r.as_ref(),
++            gram.as_mut(),
++        )
++        .unwrap();
++        dft_solvers::distributed::rotate_local_with(&mut ws, &x, &gram, &mut projected, true)
++            .unwrap();
++        for (a, b) in r.as_mut_slice().iter_mut().zip(projected.as_slice()) {
++            *a -= b;
++        }
++        ws.multiply_into(
++            r.as_ref(),
++            dft_numerics::RealOp::Transpose,
++            r.as_ref(),
++            gram.as_mut(),
++        )
++        .unwrap();
++        for j in 0..occ {
++            for i in 0..j {
++                let v = 0.5 * (gram[(i, j)] + gram[(j, i)]);
++                gram[(i, j)] = v;
++                gram[(j, i)] = v;
++            }
++        }
++        let (s, _) = symmetric_eigh(&gram).unwrap();
++        s.iter()
++            .map(|s| s.max(0.0).sqrt().min(1.0).asin())
++            .collect()
++    }
++    #[allow(clippy::too_many_arguments)]
++    fn accuracy(
++        x: &RealMatrix,
++        values: &[f64],
++        reference: &RealEigenSolution,
++        reference_density: &Array3<f64>,
++        half: &dft_basis::HalfSphere,
++        grid: &dft_basis::FftGridSpec,
++        volume: f64,
++        occ: usize,
++    ) -> Value {
++        let rho = density(x, half, grid, volume, occ);
++        let max = rho
++            .iter()
++            .zip(reference_density)
++            .map(|(a, b)| (a - b).abs())
++            .fold(0.0, f64::max);
++        let l2 = (rho
++            .iter()
++            .zip(reference_density)
++            .map(|(a, b)| (a - b).powi(2))
++            .sum::<f64>()
++            * volume
++            / rho.len() as f64)
++            .sqrt();
++        let error = values[..occ]
++            .iter()
++            .zip(&reference.eigenvalues)
++            .map(|(a, b)| (a - b).abs())
++            .fold(0.0, f64::max);
++        let band_energy = 2.0
++            * values[..occ]
++                .iter()
++                .zip(&reference.eigenvalues)
++                .map(|(a, b)| a - b)
++                .sum::<f64>();
++        let theta = angles(&reference.eigenvectors, x, occ);
++        json!({"occupied_eigenvalue_max_error_ha":error,"all_eigenvalue_max_error_ha":values.iter().zip(&reference.eigenvalues).map(|(a,b)|(a-b).abs()).fold(0.0,f64::max),
++  "frozen_band_energy_error_ha":band_energy,"strict_band_energy_gate":band_energy.abs()<=1e-10,"standard_band_energy_gate":band_energy.abs()<=5e-9,
++  "total_scf_energy_error_ha":null,"principal_angles_rad":theta,"projector_spectral_error":theta.iter().copied().fold(0.0,f64::max).sin(),
++  "density_max_error_e_per_bohr3":max,"density_l2_error_e_per_bohr3_over2":l2})
++    }
++    fn work(w: &filter::Work) -> Value {
++        json!({"h_calls_by_width":w.h_calls_by_width,"h_columns":w.h_columns(),"bound_h_columns":w.bound_h_columns,
++ "terminal_h_columns":w.terminal_h_columns,"qr_calls":w.qr_calls,"qr_flops_local":w.qr_flops,
++ "gram_flops_local":w.gram_flops,"rotate_flops_local":w.rotate_flops,"recurrence_flops_local":w.recurrence_flops,
++ "eigen_orders":w.eigen_orders,"reduction_calls":w.reduction_calls,"reduction_doubles":w.reduction_doubles,"copy_bytes_local":w.copy_bytes})
++    }
++    pub fn gather(comm: Option<&dyn Collective>, value: Value) -> Value {
++        let Some(c) = comm else {
++            return value;
++        };
++        let bytes = serde_json::to_vec(&value).unwrap();
++        let mut lengths = vec![0.0; c.size()];
++        c.allgatherv_f64(&[bytes.len() as f64], &vec![1; c.size()], &mut lengths)
++            .unwrap();
++        let counts: Vec<_> = lengths.iter().map(|v| *v as usize).collect();
++        let mut all = vec![0.0; counts.iter().sum()];
++        let local: Vec<_> = bytes.iter().map(|v| *v as f64).collect();
++        c.allgatherv_f64(&local, &counts, &mut all).unwrap();
++        let mut offset = 0;
++        let mut ranks = Vec::new();
++        for count in counts {
++            let bytes: Vec<_> = all[offset..offset + count]
++                .iter()
++                .map(|v| *v as u8)
++                .collect();
++            ranks.push(serde_json::from_slice::<Value>(&bytes).unwrap());
++            offset += count;
++        }
++        let mut first = ranks[0].clone();
++        first["per_rank"] = json!(ranks);
++        first
++    }
++    pub fn run(
++        args: &Args,
++        m: &Manifest,
++        problem: &ScfProblem,
++        comm: Option<&dyn Collective>,
++        rho: &Array3<f64>,
++        x: &RealMatrix,
++        hx: Option<&RealMatrix>,
++    ) -> Value {
++        let config = Config::parse(&std::fs::read_to_string(&args.input).unwrap()).unwrap();
++        let opts = dft_cli::run::options(&config).unwrap();
++        if opts.functional != dft_engine::Functional::LdaPz || problem.core_density().is_some() {
++            usage("filter replay supports LDA-PZ without core density");
++        }
++        let prepared = config.prepare().unwrap();
++        let cell = &prepared.cell;
++        let basis =
++            dft_basis::PlaneWaveBasis::new(cell, dft_units::Hartree(m.cutoff_hartree)).unwrap();
++        let grid =
++            dft_basis::FftGridSpec::new(&basis, &basis.density_basis(cell).unwrap(), Some(m.grid))
++                .unwrap();
++        let half = dft_basis::HalfSphere::new(&basis, &grid).unwrap();
++        let mut fft = dft_numerics::FftPlan3d::new(m.grid).unwrap();
++        let hartree = dft_physics::hartree::evaluate(rho, cell, &mut fft).unwrap();
++        let xc = dft_physics::xc::evaluate(rho, cell.volume_bohr3()).unwrap();
++        let mut potential = problem.ionic_potential().clone();
++        for ((v, h), x) in potential
++            .iter_mut()
++            .zip(&hartree.potential)
++            .zip(&xc.potential)
++        {
++            *v += h.re + x;
++        }
++        let potential_fnv = fnv(potential.as_slice().unwrap());
++        if m.ranks == 1 && m.contract.potential_fnv != Some(potential_fnv) {
++            usage("filter operator potential fingerprint mismatch");
++        }
++        let base = args.input.parent().unwrap();
++        let mut pps = Vec::new();
++        let mut positions = Vec::new();
++        for (label, path) in &config.pseudopotentials {
++            pps.push(
++                dft_upf::parse_upf(&std::fs::read_to_string(base.join(path)).unwrap()).unwrap(),
++            );
++            positions.push(
++                config
++                    .system
++                    .atoms
++                    .iter()
++                    .filter(|a| &a.species == label)
++                    .map(|a| {
++                        cell.fractional_to_cartesian_bohr(a.fractional.map(|v| v.rem_euclid(1.0)))
++                    })
++                    .collect::<Vec<_>>(),
++            );
++        }
++        let species: Vec<_> = pps
++            .iter()
++            .zip(&positions)
++            .map(
++                |(potential, positions_bohr)| dft_physics::hamiltonian::Species {
++                    potential,
++                    positions_bohr,
++                },
++            )
++            .collect();
++        let nl =
++            dft_physics::hamiltonian::NonlocalOperator::new(&basis, cell.volume_bohr3(), &species)
++                .unwrap();
++        let h = dft_physics::hamiltonian::Hamiltonian::new_with_grid(
++            &basis,
++            grid.clone(),
++            potential,
++            nl,
++        )
++        .unwrap();
++        let pool = WorkerPool::new(1).unwrap();
++        let c = Comm {
++            inner: comm,
++            calls: Cell::new([0; 4]),
++            doubles: Cell::new([0; 4]),
++        };
++        let (operator, rows) = if c.size() == 1 {
++            (
++                H::Serial(
++                    dft_physics::real_gamma::RealHamiltonian::from_complex(
++                        &h,
++                        &basis,
++                        m.bands,
++                        pool.clone(),
++                    )
++                    .unwrap(),
++                ),
++                (0..m.plane_waves).collect(),
++            )
++        } else {
++            let mut d = dft_physics::distributed_real_gamma::DistributedRealHamiltonian::new(
++                &h,
++                &basis,
++                m.bands,
++                c.rank(),
++                c.size(),
++                pool.clone(),
++            )
++            .unwrap();
++            d.set_dgemm(DistributedTuning::current().wide_gemm);
++            let rows = d.local_rows().to_vec();
++            (H::Rows(d), rows)
++        };
++        let mut op = Operator {
++            h: RefCell::new(operator),
++            rows,
++            n: m.plane_waves,
++            pool,
++            widths: RefCell::new(vec![0; m.bands + 1]),
++            profile: args.filter_profile,
++        };
++        let mut diag = vec![0.0; op.n];
++        diag[0] = h.kinetic_diagonal()[0];
++        for (i, &p) in half.plus().iter().enumerate().skip(1) {
++            diag[2 * i - 1] = h.kinetic_diagonal()[p as usize];
++            diag[2 * i] = diag[2 * i - 1];
++        }
++        let diagonal: Vec<_> = op.rows.iter().map(|&i| diag[i]).collect();
++        let profile = Profile {
++            tolerance: m.tolerance,
++            strict_bands: m.contract.strict_bands,
++            buffer_tolerance: m.contract.buffer_tolerance,
++            ritz: m.contract.ritz,
++            occupied: (problem.electron_count() / 2.0) as usize,
++        };
++        let mut check_hx = RealMatrix::zeros(x.rows(), x.cols()).unwrap();
++        DistributedRealOperator::apply_block(&mut op, &c, x, &mut check_hx).unwrap();
++        let hx_error = hx.map(|h| {
++            h.as_slice()
++                .iter()
++                .zip(check_hx.as_slice())
++                .map(|(a, b)| (a - b).abs())
++                .fold(0.0, f64::max)
++        });
++        if hx_error.is_some_and(|e| e > 1e-11) {
++            usage("rebuilt filter operator does not match captured HX");
++        }
++        // Exact replay already checked engine identity. Rebuilt MPI potential can
++        // differ by FFT rounding: record that explicitly and never inject stale HX.
++        let use_hx =
++            hx.filter(|_| c.size() == 1 || m.contract.potential_fnv == Some(potential_fnv));
++        op.reset();
++        c.reset();
++        let before = snap();
++        let t = Instant::now();
++        let baseline = davidson(&c, &mut op, x, use_hx, &diagonal, profile, &opts);
++        let baseline_s = t.elapsed().as_secs_f64();
++        let baseline_work = delta(&before, &snap(), 1).0;
++        let baseline_widths = op.widths.borrow().clone();
++        let baseline_comm = c.json();
++        let rebuilt_exact = format!("{:#018x}", fnv(&baseline.eigenvalues)) == m.result_eigen_fnv;
++        if c.size() == 1
++            && (!rebuilt_exact || baseline.operator_applications as u64 != m.result_h_columns)
++        {
++            usage("rebuilt Davidson does not reproduce captured solve");
++        }
++        let strict = Profile {
++            tolerance: 1e-11,
++            strict_bands: m.bands,
++            buffer_tolerance: 1e-11,
++            ritz: false,
++            ..profile
++        };
++        let mut reference = davidson(&c, &mut op, x, None, &diagonal, strict, &opts);
++        reference.eigenvectors = full(&c, &op, &reference.eigenvectors);
++        let reference_density = density(
++            &reference.eigenvectors,
++            &half,
++            &grid,
++            cell.volume_bohr3(),
++            profile.occupied,
++        );
++        let bfull = full(&c, &op, &baseline.eigenvectors);
++        let baseline_accuracy = accuracy(
++            &bfull,
++            &baseline.eigenvalues,
++            &reference,
++            &reference_density,
++            &half,
++            &grid,
++            cell.volume_bohr3(),
++            profile.occupied,
++        );
++        let mut candidates = Vec::new();
++        for degree in args.filter_degrees.iter().copied() {
++            PHASE_SECONDS.with(|v| v.set([0.0; 6]));
++            APPLY_SECONDS.with(|v| v.set(0.0));
++            APPLY_WIDTH_SECONDS.with(|v| {
++                let mut v = v.borrow_mut();
++                v.clear();
++                v.resize(m.bands + 1, 0.0);
++            });
++            op.reset();
++            c.reset();
++            let t = Instant::now();
++            let attempt = filter::solve(
++                &c,
++                &mut op,
++                x,
++                use_hx,
++                profile,
++                Options {
++                    degree,
++                    observer: args.filter_profile.then_some(observe),
++                    ..Options::default()
++                },
++            )
++            .expect("filter attempt");
++            let filter_s = t.elapsed().as_secs_f64();
++            let filter_comm = c.json();
++            let mut fallback_work = None;
++            let mut fallback_s = 0.0;
++            let (vectors, values, residuals) = if attempt.fallback.is_some() {
++                let before = snap();
++                let t = Instant::now();
++                let result = davidson(&c, &mut op, x, use_hx, &diagonal, profile, &opts);
++                fallback_s = t.elapsed().as_secs_f64();
++                fallback_work = Some(
++                    json!({"h_columns":result.operator_applications,"iterations":result.iterations,"counters":delta(&before,&snap(),1).0}),
++                );
++                (result.eigenvectors, result.eigenvalues, result.residuals)
++            } else {
++                (attempt.vectors, attempt.eigenvalues, attempt.residuals)
++            };
++            let charged_widths = op.widths.borrow().clone();
++            let charged_comm = c.json();
++            let vectors = full(&c, &op, &vectors);
++            let acc = accuracy(
++                &vectors,
++                &values,
++                &reference,
++                &reference_density,
++                &half,
++                &grid,
++                cell.volume_bohr3(),
++                profile.occupied,
++            );
++            let sweeps:Vec<_>=attempt.sweeps.iter().map(|s|json!({"degree":s.degree,"max_residual_ha":s.max_residual_ha,"max_occupied_change_ha":s.max_occupied_change_ha,"gap_ha":s.gap_ha,"converged":s.converged,"h_columns":s.h_columns,"failure":s.failure})).collect();
++            candidates.push(json!({"degree":degree,"filter_work":work(&attempt.work),"filter_collectives":filter_comm,"charged_h_calls_by_width":charged_widths,"charged_collectives":charged_comm,
++    "sweeps":sweeps,"fallback":attempt.fallback,"fallback_work":fallback_work,"accuracy":acc,"residuals_ha":residuals,
++    "bounds_ha":{"lower":attempt.lower_ha,"upper_estimate":attempt.upper_estimate_ha,"cutoff":attempt.cutoff_ha,"rigorous":false},
++    "profile_seconds_per_rank":if args.filter_profile {Some(json!({"phase_labels":["setup","bounds","filter","qr","terminal_apply","rayleigh_ritz"],"exclusive_phases":PHASE_SECONDS.with(|v|v.get()),"h_apply_including_fallback_inclusive":APPLY_SECONDS.with(|v|v.get()),"h_apply_seconds_by_width":APPLY_WIDTH_SECONDS.with(|v|v.borrow().clone()),"note":"H apply overlaps phase/fallback times; never add it twice. Validation reference is excluded."}))}else{None},
++    "observation_seconds":{"filter":filter_s,"fallback":fallback_s,"total":filter_s+fallback_s}}));
++        }
++        json!({"schema":"filter-replay-1","rank":c.rank(),"ranks":c.size(),"snapshot":m.label,"stage":m.stage,"map":m.iteration,"bands":m.bands,"occupied":profile.occupied,
++  "local_rows":op.rows.len(),"global_rows":op.n,"profile":{"ritz":profile.ritz,"tolerance_ha":profile.tolerance,"strict_bands":profile.strict_bands,"buffer_tolerance_ha":profile.buffer_tolerance},
++  "rebuilt_baseline_exact":rebuilt_exact,"rebuilt_hx_max_error_ha":hx_error,"potential_exact":m.contract.potential_fnv==Some(potential_fnv),
++  "baseline":{"h_columns":baseline.operator_applications,"h_calls_by_width":baseline_widths,"iterations":baseline.iterations,"counters":baseline_work,"collectives":baseline_comm,"accuracy":baseline_accuracy,"observation_seconds":baseline_s},
++  "reference":{"residual_tolerance_ha":1e-11,"residual_max_ha":reference.residuals.iter().copied().fold(0.0,f64::max),"h_columns":reference.operator_applications,"excluded_from_candidate_cost":true},
++  "candidates":candidates,"timing_scope":"observation only; reconstructed operator; no speed adoption claim","energy_scope":"frozen occupied band sum, not self-consistent total energy"})
++    }
++    #[cfg(test)]
++    mod tests {
++        use super::*;
++        #[test]
++        fn principal_angles_ignore_degenerate_basis_rotation() {
++            let x = RealMatrix::new(4, 2, vec![1., 0., 0., 0., 0., 1., 0., 0.]).unwrap();
++            let a = 0.6_f64;
++            let y = RealMatrix::new(
++                4,
++                2,
++                vec![a.cos(), a.sin(), 0., 0., -a.sin(), a.cos(), 0., 0.],
++            )
++            .unwrap();
++            assert!(angles(&x, &y, 2).iter().all(|v| v.abs() < 1e-14));
++            let y = RealMatrix::new(4, 2, vec![a.cos(), 0., a.sin(), 0., 0., 1., 0., 0.]).unwrap();
++            let theta = angles(&x, &y, 2);
++            assert!(theta[0].abs() < 1e-14);
++            assert!((theta[1] - a).abs() < 1e-14);
++        }
++    }
++}

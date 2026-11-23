@@ -1,0 +1,55 @@
+Traceback (most recent call last):
+  File "<string>", line 4, in <module>
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 505, in run
+    with Popen(*popenargs, **kwargs) as process:
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 951, in __init__
+    self._execute_child(args, executable, preexec_fn, close_fds,
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 1821, in _execute_child
+    raise child_exception_type(errno_num, err_msg, err_filename)
+PermissionError: [Errno 1] Operation not permitted: 'ps'
+PASS build
+FAIL test
+
+test result: FAILED. 62 passed; 2 failed; 34 ignored; 0 measured; 0 filtered out; finished in 2.21s
+
+---- dft-cli bin dft-cli (exit 101) ----
+
+running 1 test
+test pseudo::tests::fetch_boundary_verifies_before_publication_and_never_overwrites ... FAILED
+
+failures:
+
+---- pseudo::tests::fetch_boundary_verifies_before_publication_and_never_overwrites stdout ----
+License: {"identifier":"CC-BY-SA-4.0","url":"https://www.quantum-simulation.org/potentials/sg15_oncv/","verified":true}
+Attribution: "SG15: acknowledge the original file authors; file-level attribution awaits inspection."
+Citations: ["M. Schlipf and F. Gygi, Comput. Phys. Commun. 196, 36 (2015), doi:10.1016/j.cpc.2015.05.011","https://www.quantum-simulation.org/potentials/sg15_oncv/"]
+Project: "https://www.quantum-simulation.org/potentials/sg15_oncv/"
+License: {"identifier":"CC-BY-SA-4.0","url":"https://www.quantum-simulation.org/potentials/sg15_oncv/","verified":true}
+Attribution: "SG15: acknowledge the original file authors; file-level attribution awaits inspection."
+Citations: ["M. Schlipf and F. Gygi, Comput. Phys. Commun. 196, 36 (2015), doi:10.1016/j.cpc.2015.05.011","https://www.quantum-simulation.org/potentials/sg15_oncv/"]
+Project: "https://www.quantum-simulation.org/potentials/sg15_oncv/"
+License: {"identifier":"CC-BY-SA-4.0","url":"https://www.quantum-simulation.org/potentials/sg15_oncv/","verified":true}
+Attribution: "SG15: acknowledge the original file authors; file-level attribution awaits inspection."
+Citations: ["M. Schlipf and F. Gygi, Comput. Phys. Commun. 196, 36 (2015), doi:10.1016/j.cpc.2015.05.011","https://www.quantum-simulation.org/potentials/sg15_oncv/"]
+Project: "https://www.quantum-simulation.org/potentials/sg15_oncv/"
+License: {"identifier":"CC-BY-SA-4.0","url":"https://www.quantum-simulation.org/potentials/sg15_oncv/","verified":true}
+Attribution: "SG15: acknowledge the original file authors; file-level attribution awaits inspection."
+Citations: ["M. Schlipf and F. Gygi, Comput. Phys. Commun. 196, 36 (2015), doi:10.1016/j.cpc.2015.05.011","https://www.quantum-simulation.org/potentials/sg15_oncv/"]
+Project: "https://www.quantum-simulation.org/potentials/sg15_oncv/"
+
+thread 'pseudo::tests::fetch_boundary_verifies_before_publication_and_never_overwrites' (56550125) panicked at crates/dft-cli/src/pseudo.rs:611:61:
+called `Result::unwrap()` on an `Err` value: "pseudopotential cache must be outside repositories"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    pseudo::tests::fetch_boundary_verifies_before_publication_and_never_overwrites
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+87 binaries, 799 passed, 3 failed, 181 ignored, 14 s wall with 4 jobs; slowest: dft-physics lib dft_physics 5 s, dft-solvers test all 5 s, dft-engine test distributed_scf 4 s
+failed binaries: dft-cli test all, dft-cli bin dft-cli
+  failed binaries: dft-cli test all, dft-cli bin dft-cli
+PASS fmt
+PASS clippy
+WALL 36 s (full)

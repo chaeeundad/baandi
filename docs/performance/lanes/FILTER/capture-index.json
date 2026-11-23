@@ -1,0 +1,394 @@
+{
+  "schema": "filter-capture-index-1",
+  "source_commit": "3b9303fd94066d1777316d3602907470b5689488",
+  "binary_sha256": "ae77aa8da3caff097e82b3c2bba1e0dbeb18554e8496457d83057f94680efe32",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "sampling": "fine ordinary maps split in chronological terciles; first early, central middle, last late; exact group frequencies",
+  "cases": [
+    {
+      "case": "si8",
+      "fine_maps": 11,
+      "fine_h_columns": 430,
+      "samples": [
+        {
+          "phase": "early",
+          "weight_actual": 4,
+          "weight_11": 4.0,
+          "manifest": "target/scratch/si8-snapshots/s005-fine-ordinary-it01.json",
+          "sha256": "38098ae918de3bbe8bc8999d72930426c137c7ce20dc5730f19b38e0ff0cbeda",
+          "map": 1,
+          "tolerance_ha": 1.5280156078879174e-07,
+          "h_columns": 114,
+          "eigenvalue_fnv": "0x1b0a5440324a74a2",
+          "data_files": [
+            {
+              "path": "target/scratch/si8-snapshots/s005-fine-ordinary-it01.density.bin",
+              "bytes": 373248,
+              "sha256": "26164939937c6292353a0028d0d0bcc5ea0af782ce1ee6320dad9e17baf84dfb"
+            },
+            {
+              "path": "target/scratch/si8-snapshots/s005-fine-ordinary-it01.rank0.bin",
+              "bytes": 475088,
+              "sha256": "0a5562e04cbea84db48dd05144862039dd546f9b95810d36336a508cab7e041b"
+            }
+          ]
+        },
+        {
+          "phase": "mid",
+          "weight_actual": 4,
+          "weight_11": 4.0,
+          "manifest": "target/scratch/si8-snapshots/s011-fine-ordinary-it07.json",
+          "sha256": "e0689cc3a311c34174a18a1772a3f73043bd4dec6082da92435751695c14fc84",
+          "map": 7,
+          "tolerance_ha": 4.002458298158268e-10,
+          "h_columns": 20,
+          "eigenvalue_fnv": "0x7f155df10214490d",
+          "data_files": [
+            {
+              "path": "target/scratch/si8-snapshots/s011-fine-ordinary-it07.density.bin",
+              "bytes": 373248,
+              "sha256": "7f1c2065a6371cd5e63ca2522a866c35af2184b3d0abfccc8e7d81942da59d46"
+            },
+            {
+              "path": "target/scratch/si8-snapshots/s011-fine-ordinary-it07.rank0.bin",
+              "bytes": 950128,
+              "sha256": "af537e5683ae8371d3d23399f1f0f1b932c24809c22ed052b91167d76bd2bd0a"
+            }
+          ]
+        },
+        {
+          "phase": "late",
+          "weight_actual": 3,
+          "weight_11": 3.0,
+          "manifest": "target/scratch/si8-snapshots/s016-fine-ordinary-it11.json",
+          "sha256": "c935bef92722a3a2aa01c5d0d2f8ae3905d9484a686f9cde7b09a8dd98b7f5b6",
+          "map": 11,
+          "tolerance_ha": 1.0220379746458542e-11,
+          "h_columns": 42,
+          "eigenvalue_fnv": "0xd129a71d95f28c5e",
+          "data_files": [
+            {
+              "path": "target/scratch/si8-snapshots/s016-fine-ordinary-it11.density.bin",
+              "bytes": 373248,
+              "sha256": "21052333170061ff792a68f6d4fc538eb1606801b29d4b19b39f812480c2dcde"
+            },
+            {
+              "path": "target/scratch/si8-snapshots/s016-fine-ordinary-it11.rank0.bin",
+              "bytes": 950128,
+              "sha256": "aa82b9bab2b62a6af24d225b2afcf2e663e9bafc67bfee0cb2f4ecdb0efcea66"
+            }
+          ]
+        }
+      ],
+      "input_sha256": "9d3da02b83fef46d13ad19e12d31b06857b4ba8988b234a82e3d1ef4a11305ed"
+    },
+    {
+      "case": "si16",
+      "fine_maps": 10,
+      "fine_h_columns": 916,
+      "samples": [
+        {
+          "phase": "early",
+          "weight_actual": 4,
+          "weight_11": 4.4,
+          "manifest": "target/scratch/si16-snapshots/s010-fine-ordinary-it01.json",
+          "sha256": "46913eb28bdfc4de64f3438d79707a4ae7cbb3538d6552982ad049b1deca036b",
+          "map": 1,
+          "tolerance_ha": 4.850167634561326e-07,
+          "h_columns": 194,
+          "eigenvalue_fnv": "0x4b09305ef3e7c46a",
+          "data_files": [
+            {
+              "path": "target/scratch/si16-snapshots/s010-fine-ordinary-it01.density.bin",
+              "bytes": 746496,
+              "sha256": "3931ef4064d1897b88734e2d2de9b5bafc19963e326245659e2bffddbf905ea0"
+            },
+            {
+              "path": "target/scratch/si16-snapshots/s010-fine-ordinary-it01.rank0.bin",
+              "bytes": 1703568,
+              "sha256": "5764bcbdc9010a50e9e0c9932f3cdfa61ac7b54f11bc4d7e817beb21a0131171"
+            }
+          ]
+        },
+        {
+          "phase": "mid",
+          "weight_actual": 3,
+          "weight_11": 3.3,
+          "manifest": "target/scratch/si16-snapshots/s015-fine-ordinary-it06.json",
+          "sha256": "90680810411f145795afcd8cc60a3e62a7d7d9edfcdb7f563a8709a86a4e0fbd",
+          "map": 6,
+          "tolerance_ha": 1.1454441755947094e-09,
+          "h_columns": 56,
+          "eigenvalue_fnv": "0x17391fa74869f864",
+          "data_files": [
+            {
+              "path": "target/scratch/si16-snapshots/s015-fine-ordinary-it06.density.bin",
+              "bytes": 746496,
+              "sha256": "82ab64401fb0ab8a6d5f928c0c31ab40597e81afc9fbd3856ab9bafde5e0567f"
+            },
+            {
+              "path": "target/scratch/si16-snapshots/s015-fine-ordinary-it06.rank0.bin",
+              "bytes": 3407088,
+              "sha256": "a13d65b94eacdc6c6ce08c844243501e6100b051ee108efb551108e07b4bc633"
+            }
+          ]
+        },
+        {
+          "phase": "late",
+          "weight_actual": 3,
+          "weight_11": 3.3,
+          "manifest": "target/scratch/si16-snapshots/s020-fine-ordinary-it10.json",
+          "sha256": "ad55d49ad63f5ca4c495121cacbc6bce2adaf1bdf93ab625fb7503dc451b1df3",
+          "map": 10,
+          "tolerance_ha": 8.030127487280835e-13,
+          "h_columns": 93,
+          "eigenvalue_fnv": "0x928482e37fed7ba8",
+          "data_files": [
+            {
+              "path": "target/scratch/si16-snapshots/s020-fine-ordinary-it10.density.bin",
+              "bytes": 746496,
+              "sha256": "62a8cf0f11e3c6a4acedbf8c26f020cf9c6277c868759c80e332af5a04ba5b71"
+            },
+            {
+              "path": "target/scratch/si16-snapshots/s020-fine-ordinary-it10.rank0.bin",
+              "bytes": 3407088,
+              "sha256": "746f845a30f3f9b108cfea8eea10784e06d9ca8db2dde4672f82a10268420ffe"
+            }
+          ]
+        }
+      ],
+      "input_sha256": "a06193dd9ebae5429a23cdd5f3750435394a6bd258276f760502c1af0e9ad8a8"
+    },
+    {
+      "case": "si32",
+      "fine_maps": 10,
+      "fine_h_columns": 1717,
+      "samples": [
+        {
+          "phase": "early",
+          "weight_actual": 4,
+          "weight_11": 4.4,
+          "manifest": "target/scratch/si32-snapshots/s007-fine-ordinary-it01.json",
+          "sha256": "9a4c97ccc776c8c9fc69cd90cad2b6e39df7c48c41e9abb82e7ab26b73d9bce3",
+          "map": 1,
+          "tolerance_ha": 9.590990907414154e-08,
+          "h_columns": 403,
+          "eigenvalue_fnv": "0xc32a078f5db18979",
+          "data_files": [
+            {
+              "path": "target/scratch/si32-snapshots/s007-fine-ordinary-it01.density.bin",
+              "bytes": 1492992,
+              "sha256": "bee64e959224255d33d656097819c05f4f1765c6a6d67a523a3d1d4bba1e7343"
+            },
+            {
+              "path": "target/scratch/si32-snapshots/s007-fine-ordinary-it01.rank0.bin",
+              "bytes": 6461136,
+              "sha256": "689fe4ce739caa8a1387fbe9e1f3192083dbe9f0a85d11b4a52c54ccf0d33c3e"
+            }
+          ]
+        },
+        {
+          "phase": "mid",
+          "weight_actual": 3,
+          "weight_11": 3.3,
+          "manifest": "target/scratch/si32-snapshots/s012-fine-ordinary-it06.json",
+          "sha256": "3bc06463113e9d0246becc078853b49a3d6327cebfbae9de341cdd1a87b65216",
+          "map": 6,
+          "tolerance_ha": 1.2399191114585194e-09,
+          "h_columns": 112,
+          "eigenvalue_fnv": "0x224ee39ae38b0cc4",
+          "data_files": [
+            {
+              "path": "target/scratch/si32-snapshots/s012-fine-ordinary-it06.density.bin",
+              "bytes": 1492992,
+              "sha256": "bd659e52fdcc1b932827740b210c19d8bc845b43f25018e72f3ea1d87cf8ef81"
+            },
+            {
+              "path": "target/scratch/si32-snapshots/s012-fine-ordinary-it06.rank0.bin",
+              "bytes": 12922224,
+              "sha256": "43ac30ad010a9e453878834eca56296557573e1bd283630b1cbd7d35f6cb9145"
+            }
+          ]
+        },
+        {
+          "phase": "late",
+          "weight_actual": 3,
+          "weight_11": 3.3,
+          "manifest": "target/scratch/si32-snapshots/s016-fine-ordinary-it10.json",
+          "sha256": "c2fbb1cd4ca7c0f5fa965f4aa6d4a99fb21b86faa708e7452eaafb9385e90f74",
+          "map": 10,
+          "tolerance_ha": 5.895919599770663e-12,
+          "h_columns": 98,
+          "eigenvalue_fnv": "0x359596ad4c7b1832",
+          "data_files": [
+            {
+              "path": "target/scratch/si32-snapshots/s016-fine-ordinary-it10.density.bin",
+              "bytes": 1492992,
+              "sha256": "6f3b0a391443f939e93ca25b266e4b2621ae687aaad031132fa2dd51ad67aa80"
+            },
+            {
+              "path": "target/scratch/si32-snapshots/s016-fine-ordinary-it10.rank0.bin",
+              "bytes": 12922224,
+              "sha256": "7764a3489dc2c707361d37b17b739376f6c8dd3aebe1b6a005064e72c1325041"
+            }
+          ]
+        }
+      ],
+      "input_sha256": "a34cba3f80788eb18acd238db099e4c47808dddf6f304a136d1bb77a8bfd2e2d"
+    },
+    {
+      "case": "si64",
+      "fine_maps": 13,
+      "fine_h_columns": 3871,
+      "samples": [
+        {
+          "phase": "early",
+          "weight_actual": 5,
+          "weight_11": 4.230769230769231,
+          "manifest": "target/scratch/si64-snapshots/s006-fine-ordinary-it01.json",
+          "sha256": "fcae51ea238a21f9b166e25eae47e706cc18a29533338267a7fff10fa1e8d206",
+          "map": 1,
+          "tolerance_ha": 4.296279381163524e-06,
+          "h_columns": 593,
+          "eigenvalue_fnv": "0xfe35f3d41a66e967",
+          "data_files": [
+            {
+              "path": "target/scratch/si64-snapshots/s006-fine-ordinary-it01.density.bin",
+              "bytes": 2985984,
+              "sha256": "63a07c3815429fa5a0b1c0f24c63ea6634f9a2a48c1a9c2d5bcfb64e0224e90d"
+            },
+            {
+              "path": "target/scratch/si64-snapshots/s006-fine-ordinary-it01.rank0.bin",
+              "bytes": 25207824,
+              "sha256": "3634eac6973637159e460f3acfc0e5b8843e8f8d1126353a62145cfe50553de9"
+            }
+          ]
+        },
+        {
+          "phase": "mid",
+          "weight_actual": 4,
+          "weight_11": 3.3846153846153846,
+          "manifest": "target/scratch/si64-snapshots/s013-fine-ordinary-it08.json",
+          "sha256": "1f826eb0afe69ca88b4ee7bf35d489c91b5cf861fe0efc20d3bfd1fd0a1bce3e",
+          "map": 8,
+          "tolerance_ha": 8.159470596354062e-11,
+          "h_columns": 289,
+          "eigenvalue_fnv": "0x16a3f3875d3930f9",
+          "data_files": [
+            {
+              "path": "target/scratch/si64-snapshots/s013-fine-ordinary-it08.density.bin",
+              "bytes": 2985984,
+              "sha256": "21d265332776600deda155361bad80b30b6d0d7b713b42257336d11372132880"
+            },
+            {
+              "path": "target/scratch/si64-snapshots/s013-fine-ordinary-it08.rank0.bin",
+              "bytes": 50415600,
+              "sha256": "c767a32ffc2f21517c29302bf4737d192dbc14635953a4fce4578f3ab20e5172"
+            }
+          ]
+        },
+        {
+          "phase": "late",
+          "weight_actual": 4,
+          "weight_11": 3.3846153846153846,
+          "manifest": "target/scratch/si64-snapshots/s019-fine-ordinary-it13.json",
+          "sha256": "205eef2be27d08550958c7b53fa048e94432ca3bdf500786740bd32356cffb5b",
+          "map": 13,
+          "tolerance_ha": 1.245278367148285e-13,
+          "h_columns": 235,
+          "eigenvalue_fnv": "0x73d5e7da3f407e35",
+          "data_files": [
+            {
+              "path": "target/scratch/si64-snapshots/s019-fine-ordinary-it13.density.bin",
+              "bytes": 2985984,
+              "sha256": "e35ff0f1e5eb55d892eb17f5cc6597bd70ad7f129075236fa7b04a3595c160c7"
+            },
+            {
+              "path": "target/scratch/si64-snapshots/s019-fine-ordinary-it13.rank0.bin",
+              "bytes": 50415600,
+              "sha256": "e3cdd481921b702c0777881deceb0673d02359a3dd1c5ee63d67261588f5e86a"
+            }
+          ]
+        }
+      ],
+      "input_sha256": "5a9edde399a6082583be185a634f6197b5187134cf937e951818251c94703512"
+    },
+    {
+      "case": "si-skew",
+      "fine_maps": 8,
+      "fine_h_columns": 121,
+      "samples": [
+        {
+          "phase": "early",
+          "weight_actual": 3,
+          "weight_11": 4.125,
+          "manifest": "target/scratch/si-skew-snapshots/s011-fine-ordinary-it01.json",
+          "sha256": "b96fa0578404ea3adc103bb55e34ce2ccc8bd646994b576bacf03f9d1b028582",
+          "map": 1,
+          "tolerance_ha": 1.817639839003431e-08,
+          "h_columns": 45,
+          "eigenvalue_fnv": "0x36d617d78b412cf4",
+          "data_files": [
+            {
+              "path": "target/scratch/si-skew-snapshots/s011-fine-ordinary-it01.density.bin",
+              "bytes": 125000,
+              "sha256": "bdbf0951fe5fbb5f13bb5ca5c62e8d4040b3d36baf754089934b117dc9f2bd6b"
+            },
+            {
+              "path": "target/scratch/si-skew-snapshots/s011-fine-ordinary-it01.rank0.bin",
+              "bytes": 43504,
+              "sha256": "1d04b616ebe45d62aeea485a915be3bf3c80d386cc23b521f134732ebcb18dd3"
+            }
+          ]
+        },
+        {
+          "phase": "mid",
+          "weight_actual": 3,
+          "weight_11": 4.125,
+          "manifest": "target/scratch/si-skew-snapshots/s015-fine-ordinary-it05.json",
+          "sha256": "55fe2fb981350532646626875eea3f851cd9c1660a80952e02415ff27332664b",
+          "map": 5,
+          "tolerance_ha": 2.8910142258632834e-09,
+          "h_columns": 8,
+          "eigenvalue_fnv": "0xcdcc954773f65644",
+          "data_files": [
+            {
+              "path": "target/scratch/si-skew-snapshots/s015-fine-ordinary-it05.density.bin",
+              "bytes": 125000,
+              "sha256": "1dc29487748b8b7c1ca8ced4c59f10aefbc51c20f5eb92747f7a746f6fe6192c"
+            },
+            {
+              "path": "target/scratch/si-skew-snapshots/s015-fine-ordinary-it05.rank0.bin",
+              "bytes": 86960,
+              "sha256": "3f703ce551b1626c129c298221542d96e804d7f73ecce5bee1106799e0a42b72"
+            }
+          ]
+        },
+        {
+          "phase": "late",
+          "weight_actual": 2,
+          "weight_11": 2.75,
+          "manifest": "target/scratch/si-skew-snapshots/s020-fine-ordinary-it08.json",
+          "sha256": "5b4b0936f7125a51a581a3fd0ead30108b7f594beb296a83ef96c85b5b56dd94",
+          "map": 8,
+          "tolerance_ha": 1.0639286531628882e-12,
+          "h_columns": 9,
+          "eigenvalue_fnv": "0x2b0e51d8c036d13c",
+          "data_files": [
+            {
+              "path": "target/scratch/si-skew-snapshots/s020-fine-ordinary-it08.density.bin",
+              "bytes": 125000,
+              "sha256": "905f46b2e8feda265bbae10050ab34833a76b2a7acb0449bab2e1145d0e93025"
+            },
+            {
+              "path": "target/scratch/si-skew-snapshots/s020-fine-ordinary-it08.rank0.bin",
+              "bytes": 86960,
+              "sha256": "f8ce901274765c2dab6e759d51c17627828e6d09193232dac8eb123a3359fe0b"
+            }
+          ]
+        }
+      ],
+      "input_sha256": "6949a0e2e87c4b754d519b3d7ca22858f4e7cc44a3e5ad5d89f700e6f8b96fe0"
+    }
+  ]
+}

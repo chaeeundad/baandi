@@ -4,6 +4,8 @@ pub mod davidson_stages;
 pub mod distributed;
 pub mod distributed_davidson;
 pub mod distributed_fft;
+/// Fixed-potential replay experiment; no production dispatch.
+pub mod filtered_subspace;
 #[path = "mixing/kerker.rs"]
 pub mod kerker;
 pub mod locking;

@@ -1,0 +1,17 @@
+{
+  "source_commit": "3b9303fd94066d1777316d3602907470b5689488",
+  "sha256": {
+    "crates/dft-solvers/src/filtered_subspace.rs": "2d71c16d44311930e059a0a407f04880922693ddc0791e2065813e09ccb538b1",
+    "crates/dft-solvers/src/lib.rs": "c6a5a3e4363c8bc974689fd3954b9f2ef46e479f8f5fda16a87a3f174adaaf95",
+    "target/scratch/prepared_filter_bench": "657ada6c2cf6902a971c573799cef6f2cd5ea87d0a8bdd6afcc7db30481e59b3",
+    "docs/performance/lanes/FILTER/build_replay.py": "41c5b4e295ed0da94e872437cdf3e06f1483d7e802669a1dc5d9f88a6dbba34c",
+    "docs/performance/lanes/FILTER/run_replays.py": "5e07e45cb0bff0bab4f60bd7e79575ac4e42b3845afb60601c18cf2530e8bda7",
+    "docs/performance/lanes/FILTER/summarize.py": "42af980c88a67e1de48d0309a7680add10a1713ec664289cfb001f31db713a0c",
+    "docs/performance/lanes/FILTER/bench.patch": "348fc832ddc77ff70ce040f53900ee475ce5935405c13ddda8e69613b3f45c4a"
+  },
+  "notes": [
+    "Detailed 75-arm counters were collected before the optional observer was added; profile off/on identity confirms unchanged arithmetic on the smoke.",
+    "Unprofiled raw case records contain Mac observation wall times only.",
+    "Prepared patch was compiled and linted outside the unmodified CLI source file."
+  ]
+}

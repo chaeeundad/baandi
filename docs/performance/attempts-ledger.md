@@ -3028,3 +3028,59 @@ BAANDI_BINARY_HASH_CACHE (cache of the executable SHA-256 in a sidecar keyed by 
 
 ### GLUE-SERIAL-DENSITY-FUSED-DEFAULT-ON (2026-11-20, dev08 via master; ledger by orchestrator)
 BAANDI_SERIAL_DENSITY_FUSED (standard path, single process, one-core lane: the per-band density accumulation avoids the intermediate density array; band order and FFTs unchanged) default flipped on. dev08 crossed pairs, 6 per cell, A/A floor first, 1 core: si64 -2.0801 s (|mean|/SE 62.44, 6/6 positive, -4.77 % of the same-window A median 43.6417 s), si32 -0.2949 s (119.19, 6/6, -3.73 % of 7.9103 s), si16 -0.085344 s (7.83, 6/6, -3.65 % of 2.3397 s), si-skew -0.001713 s (3.43, 5/6, -1.03 %, resolution edge, A/A ratio 2.78); si8 first attempt aborted by the A/A guard (window suspect), retest queued. No resolved loss. Energies bit identical in every cell (|dE| 0), SCF/H/verified identical. Counters exact: logical bytes halved (si32 5.25 GB -> 2.62 GB, si64 26.8 GB -> 13.4 GB), eligible calls all fused. Prediction for si64 0.884 s, measured 2.080 s (2.35x). The gain applies to the one-core lane only (no effect with MPI ranks). Mac full gate 798 passed, 0 failed. Lesson: the winning lane candidate removed intermediate-array memory traffic; those changing GEMM shapes lost, those reducing communication volume were neutral.
+
+## G-FILTER-REPLAY — resident block Chebyshev, stage 1 (2026-11-23)
+
+**STOP integration; replay artifact only.** New premise versus the older
+Chebyshev warning: price a resident fixed-width block against the relayed Si64
+MPI8 2.953 s Gram/eigen/rotation budget (183 EVDs), rather than reopen PR-CG
+TRACK-A0, REL-SLICES, Advance, restart-keep or rejected GEMM-shape changes.
+No production caller/default/dependency changed; existing paired Gamma H and
+wide rotation kernels are used. Degree grid 4/8/12/16 plus spectrum/tolerance
+auto, 24 counted bound H columns, scaled recurrence, existing CGS2 QR, one RR
+per sweep plus setup RR, exact captured stopping profile, recorded fallback to
+Davidson from the original snapshot. All failed work is charged.
+
+Mac counts (not timing acceptance): 15 snapshots, 75 arms on Si8/16/32/64/skew;
+actual fine map counts 11/10/10/13/8. Serial captured solves reproduce H counts
+and eigenvalue FNV. Si64 early/mid/late Davidson H = 593/289/235; d4 =
+5436/1608/1608, d8 = 4380/3192/2136. Frequencies 5/4/4 scaled to 11 maps give
+33883.38 H (d4), 36564 (d8), 53094.46 (d12), 70518.46 (d16), 56208.31 (auto,
+including fallback), versus the relayed **MPI8** fine baseline 3504 columns.
+This is a count projection across machines, never a mixed-model timing ratio.
+
+Relayed prices: 2.782 s / 6025 H columns, DGEMM 64–108 GFLOP/s,
+STREAM 12.97 GB/s/core. Over-crediting all 2.953 s to the fine replacement and
+allowing ideal cached QR, faster nonlocal work and maximal baseline EVD orders
+still gives net savings d4/d8/d12/d16/auto =
+**-9.8693/-10.8026/-17.6246/-24.8206/-20.5793 s**. Conditional pessimistic d4
+is -35.5381 s. These are cost estimates, not dev08 measurements; omitted opaque
+allocation/accuracy-repair work is nonnegative and cannot rescue the verdict.
+Stop under the issue's nonpositive-optimistic exit rule. No degree or threshold
+was retuned to Si to evade rejection.
+
+Accuracy limits are explicit: energy is a fixed-H occupied band sum, not total
+SCF energy. Early/mid/late standard 5e-9 Ha gates pass 5/25, 20/25, 25/25 arms;
+strict 1e-10 Ha gates pass 2/25, 4/25, 22/25. Captured early Davidson also fails
+these absolute frozen-energy gates; matching its profile does not make early
+maps certified. Principal angles are degeneracy-safe; density errors/units and
+all failures are retained. No full candidate SCF or total-energy acceptance.
+Simulated np2/4 exercise rank-local payloads/fallback; exact engine replay needs
+M2_LOCAL_FIELDS=off (capture disables owned fields). Reconstructed MPI operator
+rounding differs (HX <=3.89e-16 Ha); its baseline is marked non-exact and stale
+HX is dropped. No claim of exact MPI filter identity or rigorous spectral bound.
+
+Implementation delivery is **blocked at the bench ownership boundary**: the
+ticket names nonexistent `dft-solvers/examples/davidson_bench.rs`, while the real
+harness is in dft-cli. Correction requested, no answer yet; the actual CLI file
+was not edited. The tested patch and scratch-only builder are reviewable in
+`lanes/FILTER/`; they do not claim an installed CLI mode. `gh issue view 24`
+failed (network), so issue scope is taken only from the supplied ticket.
+
+Tests: solver 4/4; prepared bench principal-angle oracle 1/1 and clippy pass;
+profile off/on has identical counts/accuracy/residuals/sweeps. Five default
+SCFs retain identical energy values and density SHA-256, all verified. Full
+check exit 1: build/fmt/clippy pass, 799 pass, 3 known in-repo TMPDIR pseudo-cache
+failures, 181 ignored. No commit. Details, reproducible tables/model and a
+bounded dev08 falsification request: [filtered-subspace.md](../design/filtered-subspace.md),
+[summary.json](lanes/FILTER/summary.json), [dev08-request.md](lanes/FILTER/dev08-request.md).

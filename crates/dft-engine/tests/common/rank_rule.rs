@@ -276,6 +276,13 @@ pub fn fingerprint(run: &Run) -> String {
         r.mixing_s = 0.;
         r.correction_s = 0.;
         r.verification_s = 0.;
+        for c in &mut r.calls {
+            c.inner_clocks = None;
+        }
+    }
+    let mut verification_calls = run.verification_calls.clone();
+    for c in &mut verification_calls {
+        c.inner_clocks = None;
     }
     let r = &run.outcome.result;
     let mut history = r.history.clone();
@@ -299,7 +306,7 @@ pub fn fingerprint(run: &Run) -> String {
             run.first_reference_stop,
             &run.exit_reason,
             records,
-            &run.verification_calls,
+            verification_calls,
             history,
             verification,
             (

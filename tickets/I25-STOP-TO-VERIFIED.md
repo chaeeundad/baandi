@@ -14,8 +14,12 @@ OWNED_FILES:
   - crates/dft-engine/tests/refscf.rs
   - docs/design/reference-scf.md   # a "Stop-to-verified interval" section only
   - docs/performance/lanes/RSCF/stop-to-verified-dev08-request.md
-TEST_COMMANDS:
-  - scripts/check.sh full
+TEST_COMMANDS:   # Mac rule (user, 2026-11-24): only these; never scripts/check.sh full or release matrices on the Mac
+  - cargo check --workspace --tests
+  - cargo test -p dft-engine --test refscf
+  - cargo test -p dft-cli <your new test name>
+  - cargo fmt --check && cargo clippy -p dft-engine -p dft-cli --all-targets -- -D warnings
+  - (orchestrator, on dev08) scripts/check.sh full and the release si8 displaced run
 ACCEPTANCE_CRITERIA: timestamps recorded at all diagnostic levels, parts sum to the interval, si8 displaced shows nonzero recovery and a first-pass case shows zero, defaults bit-identical, dev08 request ready.
 GIT: leave changes uncommitted.
 RETURN_FORMAT: docs/schemas/report.schema.json

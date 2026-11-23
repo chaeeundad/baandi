@@ -242,6 +242,10 @@ table! {
         "SCF_ADVANCE research: adapt the block budget from the previous advanced map's inner/SCF ratio (off: the budget stays at SCF_ADVANCE_BLOCKS)";
     SCF_ADVANCE_SCOPE: Kind::Choice { allowed: &["all", "fine"], default: "all" }, "all", "all, fine",
         "SCF_ADVANCE research: advanced maps in every standard session (all) or only outside the cutoff-ladder coarse stage (fine)";
+    REFSCF_VERIFY_REUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "reference SCF only: consume a failed verification map as the next ordinary Broyden iterate; passing criterion unchanged";
+    REFSCF_VERIFY_GATE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "reference SCF only: defer predicted failing verification attempts using observed error/estimator scaling; never deliver without a passing attempt";
     VERIFY_REUSE: Kind::Choice { allowed: &["off", "warm", "feed", "feed2", "replace", "half"], default: "half" }, "half", "off, warm, feed, feed2, replace, half",
         "reuse of a failed fixed-point verification solve (F at the delivered density rho_out): warm = the next SCF step starts from its orbitals (so the REUSE_PSI kept start is taken); feed = warm and the pair (rho_out, F(rho_out)) also enters the mixer after the step's own pair, so the next input density is mixed from it (the verification map counts as an SCF map); off = discarded; rounding class (trajectory changes, acceptance still needs a passed verification)";
     // MPI entry cost (docs/performance/mpi-entry-cost-analysis.md). Adopted 2026-11-15 on dev08 A/B: M2_DGEMM, M2_ORTHO=serial and M2_LEAN default on; M2_FFT stays rust (neutral).

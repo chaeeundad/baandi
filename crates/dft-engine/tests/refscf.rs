@@ -706,8 +706,20 @@ fn stop_to_verified_si8_displaced() {
         ..Default::default()
     };
     let mut science = None;
-    for level in ["off", "on"] {
-        let scope = RunConfig::from_pairs(&[("davidson_stages", level)]).unwrap();
+    let mut baseline = None;
+    for (level, reuse, gate) in [
+        ("off", "off", "off"),
+        ("on", "off", "off"),
+        ("off", "on", "off"),
+        ("off", "off", "on"),
+        ("off", "on", "on"),
+    ] {
+        let scope = RunConfig::from_pairs(&[
+            ("davidson_stages", level),
+            ("refscf_verify_reuse", reuse),
+            ("refscf_verify_gate", gate),
+        ])
+        .unwrap();
         let _guard = scope.enter();
         let run = driver::run(
             dft_engine::refstart::StartInput {
@@ -720,23 +732,344 @@ fn stop_to_verified_si8_displaced() {
         )
         .unwrap();
         let attempts = &run.outcome.result.verification.as_ref().unwrap().attempts;
-        assert_eq!(run.first_reference_stop, Some(10));
-        assert_eq!(
-            attempts
+        verify_cost_contract(&run);
+        let energy = run.outcome.result.total_hartree();
+        let base = *baseline.get_or_insert(energy);
+        assert!((energy - base).abs() < 5e-9);
+        if reuse == "off" && gate == "off" {
+            assert_eq!(run.first_reference_stop, Some(10));
+            assert_eq!(
+                attempts
+                    .iter()
+                    .map(|a| (a.iteration, a.passed))
+                    .collect::<Vec<_>>(),
+                [(10, false), (11, false), (12, true)]
+            );
+            let value = stop_to_verified_science(&run);
+            if let Some(s) = &science {
+                assert_eq!(&value, s);
+            }
+            science = Some(value);
+        }
+        let reused = run
+            .records
+            .iter()
+            .filter(|r| {
+                r.verification_cost
+                    .as_ref()
+                    .is_some_and(|c| c.reused_from.is_some())
+            })
+            .count();
+        let skipped = run
+            .records
+            .iter()
+            .filter(|r| r.verification_cost.as_ref().is_some_and(|c| c.skipped))
+            .count();
+        let solves =
+            run.records.iter().map(|r| r.calls.len()).sum::<usize>() + run.verification_calls.len();
+        let ordinary_requests = run.records.len() - reused
+            + run
+                .records
                 .iter()
-                .map(|a| (a.iteration, a.passed))
-                .collect::<Vec<_>>(),
-            [(10, false), (11, false), (12, true)]
-        );
+                .filter(|r| r.first_iteration_redo)
+                .count();
+        let map_requests = ordinary_requests + attempts.len();
+        let variant = match (reuse, gate) {
+            ("on", "on") => "both",
+            ("on", _) => "reuse",
+            (_, "on") => "gate",
+            _ => "default",
+        };
+        if reuse == "on" {
+            assert!(reused > 0);
+        }
         let (interval, verification, recovery, other) = stop_to_verified_clocks(&run);
         assert!(recovery > 0.);
-        let value = stop_to_verified_science(&run);
-        if let Some(s) = science {
-            assert_eq!(value, s);
-        }
-        science = Some(value);
         println!(
-            "STOP_TO_VERIFIED si8 diagnostics={level} first=10 passing=12 attempts=3 interval_s={interval:.9} verification_s={verification:.9} recovery_s={recovery:.9} unassigned_s={other:.9}"
+            "STOP_TO_VERIFIED si8 variant={variant} diagnostics={level} reuse={reuse} gate={gate} first={:?} passing={} attempts={} evaluated_maps={solves} map_requests={map_requests} solves={solves} reused={reused} skipped={skipped} energy_ha={energy:.17e} delta_ha={:.9e} interval_s={interval:.9} verification_s={verification:.9} recovery_s={recovery:.9} unassigned_s={other:.9}",
+            run.first_reference_stop,
+            run.records.len(),
+            attempts.len(),
+            energy - base
         );
     }
+}
+
+#[test]
+fn verification_cost_predictor_fallback_and_refresh() {
+    use dft_engine::refscf::driver::VerificationPredictor;
+    let mut p = VerificationPredictor::default();
+    assert_eq!(p.predict(1e-9), None);
+    assert!(!p.skip(None, 5e-9));
+    p.observe(1e-8, 1e-7);
+    assert_eq!(p.predict(5e-9), Some(5e-8));
+    assert!(p.skip(p.predict(5e-9), 5e-9));
+    assert!(!p.skip(p.predict(4e-9), 5e-9)); // refresh after one skip
+    p.observe(4e-9, 2e-8);
+    assert!(!p.skip(p.predict(1e-10), 5e-9));
+    for invalid in [0., -1., f64::NAN, f64::INFINITY, 4e-9, 5e-9] {
+        assert_eq!(p.predict(invalid), None);
+        assert!(!p.skip(p.predict(invalid), 5e-9));
+    }
+    for invalid in [0., -1., f64::NAN, f64::INFINITY] {
+        p.observe(invalid, 1e-7);
+        assert_eq!(p.predict(1e-9), None);
+    }
+    p.observe(1e-8, f64::NAN);
+    assert_eq!(p.predict(1e-9), None);
+    assert!(!p.skip(Some(f64::NAN), 5e-9));
+    assert!(p.skip(Some(5e-9), 5e-9)); // equality cannot pass the strict '<'
+}
+
+#[test]
+fn verification_cost_small_fixture() {
+    verification_cost_fixture(false);
+}
+
+#[test]
+fn verification_cost_failed_attempt_fixture() {
+    verification_cost_fixture(true);
+}
+
+fn verification_cost_fixture(active: bool) {
+    use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, StartDensity, refscf::driver};
+    use dft_numerics::switches::{Id, RunConfig};
+    assert!(
+        !RunConfig::from_pairs(&[])
+            .unwrap()
+            .on(Id::REFSCF_VERIFY_REUSE)
+    );
+    assert!(
+        !RunConfig::from_pairs(&[])
+            .unwrap()
+            .on(Id::REFSCF_VERIFY_GATE)
+    );
+    let (z, rc, length, bands) = if active {
+        (4., 1.2, 11., 3)
+    } else {
+        (2., 1.8, 7., 2)
+    };
+    let profile = Profile {
+        history: if active { 4 } else { 8 },
+        ..Default::default()
+    };
+    let pp = common::potential_with_atomic_start(z, rc, active, 161, "SLA PZ");
+    let cell = dft_geometry::Cell::from_user_rows_bohr([
+        [length, 0., 0.],
+        [0.2, length, 0.],
+        [0., 0.1, length],
+    ])
+    .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let species = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        start_density: StartDensity::Atomic,
+        gamma_real: GammaReal::On,
+        cutoff_hartree: 2.,
+        bands: Some(bands),
+        max_iterations: 100,
+        ..Default::default()
+    };
+    let mut baseline = None;
+    let mut fingerprint = None;
+    for (name, pairs) in [
+        ("default", vec![]),
+        (
+            "off",
+            vec![
+                ("refscf_verify_reuse", "off"),
+                ("refscf_verify_gate", "off"),
+            ],
+        ),
+        ("reuse", vec![("refscf_verify_reuse", "on")]),
+        ("gate", vec![("refscf_verify_gate", "on")]),
+        (
+            "both",
+            vec![("refscf_verify_reuse", "on"), ("refscf_verify_gate", "on")],
+        ),
+    ] {
+        let config = RunConfig::from_pairs(&pairs).unwrap();
+        let _guard = config.enter();
+        let run = driver::run(
+            dft_engine::refstart::StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &species,
+                options: &options,
+            },
+            profile,
+        )
+        .unwrap();
+        assert!(run.outcome.converged, "{name}: {}", run.exit_reason);
+        let energy = run.outcome.result.total_hartree();
+        let base = *baseline.get_or_insert(energy);
+        assert!(
+            (energy - base).abs() < 5e-9,
+            "{name}: delta={} Ha",
+            energy - base
+        );
+        if name == "default" {
+            fingerprint = Some(stop_to_verified_science(&run));
+        }
+        if name == "off" {
+            assert_eq!(
+                fingerprint.as_ref().unwrap(),
+                &stop_to_verified_science(&run)
+            );
+        }
+        verify_cost_contract(&run);
+        let attempts = &run.outcome.result.verification.as_ref().unwrap().attempts;
+        let reused = run
+            .records
+            .iter()
+            .filter(|r| {
+                r.verification_cost
+                    .as_ref()
+                    .is_some_and(|c| c.reused_from.is_some())
+            })
+            .count();
+        let skipped = run
+            .records
+            .iter()
+            .filter(|r| r.verification_cost.as_ref().is_some_and(|c| c.skipped))
+            .count();
+        let solves: usize =
+            run.records.iter().map(|r| r.calls.len()).sum::<usize>() + run.verification_calls.len();
+        let expected = if !active {
+            (6, 7, 1, 0, 0)
+        } else {
+            match name {
+                "reuse" | "both" => (29, 30, 2, 1, 0),
+                "gate" => (28, 30, 2, 0, 1),
+                _ => (27, 29, 2, 0, 0),
+            }
+        };
+        assert_eq!(
+            (run.records.len(), solves, attempts.len(), reused, skipped),
+            expected
+        );
+        if active && (name == "gate" || name == "reuse") {
+            let max_iterations = if name == "gate" {
+                run.records
+                    .iter()
+                    .find(|r| r.verification_cost.as_ref().unwrap().skipped)
+                    .unwrap()
+                    .iteration
+            } else {
+                attempts[0].iteration
+            };
+            let limited = ScfOptions {
+                max_iterations,
+                ..options.clone()
+            };
+            let exhausted = driver::run(
+                dft_engine::refstart::StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &species,
+                    options: &limited,
+                },
+                profile,
+            )
+            .unwrap();
+            assert!(!exhausted.outcome.converged);
+            assert!(
+                !exhausted
+                    .outcome
+                    .result
+                    .verification
+                    .as_ref()
+                    .unwrap()
+                    .passed()
+            );
+            assert_eq!(exhausted.records.len(), max_iterations);
+            if name == "gate" {
+                assert!(
+                    exhausted
+                        .records
+                        .last()
+                        .unwrap()
+                        .verification_cost
+                        .as_ref()
+                        .unwrap()
+                        .skipped
+                );
+            }
+        }
+        if active && name == "reuse" {
+            assert!(reused > 0);
+        }
+        if active && name == "gate" {
+            assert!(skipped > 0);
+        }
+        println!(
+            "VERIFY_COST active={active} variant={name} energy_ha={energy:.17e} delta_ha={:.9e} iterations={} solves={solves} attempts={} reused={reused} skipped={skipped} error_ha={:.9e}",
+            energy - base,
+            run.records.len(),
+            attempts.len(),
+            attempts.last().unwrap().coulomb_error_ha
+        );
+    }
+}
+
+fn verify_cost_contract(run: &dft_engine::refscf::driver::Run) {
+    let attempts = &run.outcome.result.verification.as_ref().unwrap().attempts;
+    let pass = attempts.last().unwrap();
+    assert!(pass.passed);
+    assert_eq!(pass.iteration, run.records.len());
+    assert_eq!(
+        run.outcome.result.total_hartree().to_bits(),
+        run.records.last().unwrap().energy.total_hartree().to_bits()
+    );
+    for attempt in attempts {
+        assert_eq!(attempt.threshold_ha, 5e-9);
+        assert_eq!(
+            attempt.passed,
+            attempt.coulomb_error_ha.is_finite()
+                && attempt.coulomb_error_ha < 5e-9
+                && attempt
+                    .residual_bound_ha
+                    .is_none_or(|b| b.is_finite() && b < 5e-9)
+        );
+        let map = &run.records[attempt.iteration - 1];
+        assert_eq!(
+            attempt.eigen_tolerance_ha,
+            next_ethr_ry(
+                map.ethr_ry,
+                map.dr2_ry,
+                run.outcome.result.occupations.iter().sum()
+            ) / 2.
+        );
+        if let Some(c) = &map.verification_cost {
+            assert_eq!(c.actual_error_ha, Some(attempt.coulomb_error_ha));
+        }
+    }
+    for r in &run.records {
+        if let Some(c) = &r.verification_cost {
+            if c.skipped {
+                assert!(c.gate_enabled && c.predicted_error_ha.unwrap() >= 5e-9);
+                assert!(
+                    c.actual_error_ha.is_none()
+                        && r.verification_start_s.is_none()
+                        && r.verification_end_s.is_none()
+                );
+                assert!(r.verification_calls.is_empty());
+            }
+            if let Some(source) = c.reused_from {
+                assert_eq!(source + 1, r.iteration);
+                let a = attempts.iter().find(|a| a.iteration == source).unwrap();
+                assert!(!a.passed);
+                assert_eq!(r.ethr_ry, 2. * a.eigen_tolerance_ha);
+                assert!(r.calls.is_empty());
+                assert_eq!(r.h_columns, 0);
+                assert_eq!(r.map_s, 0.);
+                assert_eq!(run.records[source - 1].descf_ha, 0.);
+                assert!((r.dr2_ry / 2. - a.coulomb_error_ha).abs() < 1e-20);
+            }
+        }
+    }
+    stop_to_verified_clocks(run);
 }

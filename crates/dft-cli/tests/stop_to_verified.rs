@@ -163,14 +163,24 @@ mod common;
 
 #[test]
 fn stop_to_verified_cli_records_at_both_diagnostic_levels() {
+    cli_roundtrip(false);
+}
+
+#[test]
+fn stop_to_verified_cli_skips_and_reuses_at_both_diagnostic_levels() {
+    cli_roundtrip(true);
+}
+
+fn cli_roundtrip(active: bool) {
     use std::{fs, process::Command};
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
-        "../../target/tmp/stop-to-verified-cli-{}",
+        "../../target/tmp/stop-to-verified-cli-{}-{active}",
         std::process::id()
     ));
     fs::create_dir_all(&dir).unwrap();
+    let (z, rc) = if active { (4., 1.2_f64) } else { (2., 1.8_f64) };
     let mut pp =
-        common::gaussian_with(2., 1.8, false, 161).replace("element=\"Xx\"", "element=\"He\"");
+        common::gaussian_with(z, rc, active, 161).replace("element=\"Xx\"", "element=\"He\"");
     let parsed = dft_upf::parse_upf(&pp).unwrap();
     let array = |f: &dyn Fn(f64) -> f64| {
         parsed
@@ -186,84 +196,233 @@ fn stop_to_verified_cli_records_at_both_diagnostic_levels() {
     pp.replace_range(
         start..end,
         &array(&|r| {
-            8. / (std::f64::consts::PI.sqrt() * 1.8_f64.powi(3))
-                * r
-                * r
-                * (-(r / 1.8).powi(2)).exp()
+            4. * z / (std::f64::consts::PI.sqrt() * rc.powi(3)) * r * r * (-(r / rc).powi(2)).exp()
         }),
     );
     pp = pp.replace("number_of_wfc=\"0\"","number_of_wfc=\"1\"").replace("</UPF>",&format!("<PP_PSWFC><PP_CHI.1 l=\"0\" label=\"s\" occupation=\"2\">{}</PP_CHI.1></PP_PSWFC></UPF>",array(&|r|r*(-0.6*r*r).exp())));
+    if active {
+        pp = pp
+            .replace("number_of_wfc=\"1\"", "number_of_wfc=\"2\"")
+            .replace(
+                "</PP_PSWFC>",
+                &format!(
+                    "<PP_CHI.2 l=\"1\" label=\"p\" occupation=\"2\">{}</PP_CHI.2></PP_PSWFC>",
+                    array(&|r| r * r * (-0.5 * r * r).exp())
+                ),
+            );
+    }
     fs::write(dir.join("syn.xml"), pp).unwrap();
     let text = "[system]\nname='reference test'\nlattice_unit='bohr'\nlattice_vectors=[[7.0,0.0,0.0],[0.2,7.0,0.0],[0.0,0.1,7.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=4.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=3\nmax_iterations=100\nmixing='broyden'\nmixing_beta=0.7\nmixing_history=8\n";
 
-    for (level, profile) in [
-        ("lightweight", ""),
-        ("full", "[profile]\ndavidson_stages=true\n"),
+    let text = if active {
+        text.replace("7.0", "11.0")
+            .replace("mixing_history=8", "mixing_history=4")
+    } else {
+        text.to_string()
+    };
+    for (variant, reuse, gate) in [
+        ("default", "off", "off"),
+        ("reuse", "on", "off"),
+        ("gate", "off", "on"),
+        ("both", "on", "on"),
     ] {
-        fs::write(
-            dir.join("in.toml"),
-            format!("{text}driver='reference'\n{profile}"),
-        )
-        .unwrap();
-        let mut command = Command::new(env!("CARGO_BIN_EXE_dft-cli"));
-        for (key, _) in std::env::vars_os() {
-            if key.to_string_lossy().starts_with("BAANDI_") {
-                command.env_remove(key);
+        for (level, profile) in [
+            ("lightweight", ""),
+            ("full", "[profile]\ndavidson_stages=true\n"),
+        ] {
+            fs::write(
+                dir.join("in.toml"),
+                format!("{text}driver='reference'\n{profile}"),
+            )
+            .unwrap();
+            let mut command = Command::new(env!("CARGO_BIN_EXE_dft-cli"));
+            for (key, _) in std::env::vars_os() {
+                if key.to_string_lossy().starts_with("BAANDI_") {
+                    command.env_remove(key);
+                }
             }
-        }
-        let output = command
-            .current_dir(&dir)
-            .args(["run", "in.toml", "--output-dir", level])
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let path = dir.join(level).join("results.json");
-        let doc: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        let r = &doc["reference_scf"];
-        assert_eq!(r["diagnostics"]["level"], level);
-        assert_eq!(r["stop_to_verified_clock"], "reference-scf-wall-1");
-        let expected = reader::stop_to_verified_summary(&doc).unwrap();
-        assert_eq!(expected["status"], "VERIFIED");
-        for (map, history) in r["iterations"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .zip(doc["convergence"]["history"].as_array().unwrap())
-        {
-            for key in [
-                "map_start_s",
-                "estimator_s",
-                "verification_start_s",
-                "verification_end_s",
-                "map_end_s",
-            ] {
-                assert!(map.get(key).is_some(), "{level}: missing {key}");
-                assert_eq!(map[key], history["reference_scf"][key]);
+            command
+                .env("BAANDI_REFSCF_VERIFY_REUSE", reuse)
+                .env("BAANDI_REFSCF_VERIFY_GATE", gate);
+            let output_dir = format!("{level}-{variant}");
+            let output = command
+                .current_dir(&dir)
+                .args(["run", "in.toml", "--output-dir", &output_dir])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let path = dir.join(&output_dir).join("results.json");
+            let doc: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            let r = &doc["reference_scf"];
+            assert_eq!(r["diagnostics"]["level"], level);
+            assert_eq!(r["stop_to_verified_clock"], "reference-scf-wall-1");
+            let expected = reader::stop_to_verified_summary(&doc).unwrap();
+            assert_eq!(expected["status"], "VERIFIED");
+            let costs = &r["verification_cost"];
+            if variant == "default" {
+                assert!(r.get("verification_cost").is_none());
+                assert!(expected.get("skipped").is_none());
+            } else {
+                let maps = r["iterations"].as_array().unwrap();
+                let reused = maps
+                    .iter()
+                    .filter(|m| !m["verification_cost"]["reused_from"].is_null())
+                    .count();
+                let skipped = maps
+                    .iter()
+                    .filter(|m| m["verification_cost"]["skipped"] == true)
+                    .count();
+                assert_eq!(costs["reused"], reused);
+                assert_eq!(costs["skipped"], skipped);
+                assert_eq!(costs["attempts"], expected["attempt_count"]);
+                assert_eq!(costs["logical_scf_iterations"], maps.len());
+                let ordinary = maps.len() - reused
+                    + maps
+                        .iter()
+                        .filter(|m| m["first_iteration_redo"] == true)
+                        .count();
+                assert_eq!(costs["ordinary_map_requests"], ordinary);
+                assert_eq!(
+                    costs["map_requests"],
+                    ordinary as u64 + expected["attempt_count"].as_u64().unwrap()
+                );
+                let calls = maps
+                    .iter()
+                    .map(|m| m["calls"].as_array().unwrap().len())
+                    .sum::<usize>()
+                    + r["run"]["verification_calls"].as_array().unwrap().len();
+                assert_eq!(costs["solver_calls"], calls);
+                assert_eq!(costs["evaluated_maps"], calls);
+                assert_eq!(
+                    costs["verification_maps"],
+                    r["run"]["verification_calls"].as_array().unwrap().len()
+                );
+                assert_eq!(
+                    costs["evaluated_ordinary_maps"],
+                    maps.iter()
+                        .map(|m| m["calls"].as_array().unwrap().len())
+                        .sum::<usize>()
+                );
+                if gate == "on" {
+                    assert_eq!(expected["skipped"], skipped);
+                }
+                if active && variant == "gate" {
+                    assert!(skipped > 0);
+                }
+                if active && variant == "reuse" {
+                    assert!(reused > 0);
+                }
+                eprintln!(
+                    "CLI_VERIFY_COST active={active} level={level} variant={variant} counts={costs}"
+                );
             }
+            for (map, history) in r["iterations"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(doc["convergence"]["history"].as_array().unwrap())
+            {
+                assert_eq!(
+                    map.get("verification_cost"),
+                    history["reference_scf"].get("verification_cost")
+                );
+                if variant == "default" {
+                    assert!(map.get("verification_cost").is_none());
+                } else {
+                    let cost = &map["verification_cost"];
+                    assert_eq!(cost.as_object().unwrap().len(), 5);
+                    assert_eq!(cost["gate_enabled"], gate == "on");
+                    let attempt = r["verification"]["attempts"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .find(|a| a["iteration"] == map["iteration"]);
+                    if let Some(attempt) = attempt {
+                        assert_eq!(cost["actual_error_ha"], attempt["coulomb_error_ha"]);
+                    } else {
+                        assert!(cost["actual_error_ha"].is_null());
+                    }
+                    if cost["skipped"] == true {
+                        assert!(cost["predicted_error_ha"].as_f64().unwrap() >= 5e-9);
+                        assert!(attempt.is_none());
+                    }
+                }
+                for key in [
+                    "map_start_s",
+                    "estimator_s",
+                    "verification_start_s",
+                    "verification_end_s",
+                    "map_end_s",
+                ] {
+                    assert!(map.get(key).is_some(), "{level}: missing {key}");
+                    assert_eq!(map[key], history["reference_scf"][key]);
+                }
+            }
+            let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+                .args(["refscf-check", "--stop-to-verified"])
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let actual: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(actual, expected);
+            // Completed JSON must bypass TOML input parsing, while QE replay keeps its required flag.
+            let missing_mode = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+                .arg("refscf-check")
+                .arg(&path)
+                .output()
+                .unwrap();
+            assert!(!missing_mode.status.success());
         }
-        let output = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
-            .args(["refscf-check", "--stop-to-verified"])
-            .arg(&path)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let actual: Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(actual, expected);
-        // Completed JSON must bypass TOML input parsing, while QE replay keeps its required flag.
-        let missing_mode = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
-            .arg("refscf-check")
-            .arg(&path)
-            .output()
-            .unwrap();
-        assert!(!missing_mode.status.success());
     }
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn stop_to_verified_skipped_attempt_partition() {
+    let mut doc = record();
+    // First stop is skipped: its work remains in the interval, not an attempt.
+    let map = &mut doc["reference_scf"]["iterations"][9];
+    map["verification_start_s"] = Value::Null;
+    map["verification_end_s"] = Value::Null;
+    map["verification_cost"] = json!({"gate_enabled":true,"skipped":true});
+    doc["reference_scf"]["verification"]["attempts"]
+        .as_array_mut()
+        .unwrap()
+        .remove(0);
+    let summary = reader::stop_to_verified_summary(&doc).unwrap();
+    assert_eq!(summary["status"], "VERIFIED");
+    assert_eq!(summary["first_stop_map"], 10);
+    assert_eq!(summary["skipped"], 1);
+    assert_eq!(summary["attempt_count"], 2);
+    assert_eq!(summary["interval_wall_s"], 23.);
+    assert_eq!(summary["verification_attempts_s"], 4.);
+    assert_eq!(summary["ordinary_scf_after_failure_s"], 6.);
+    assert_eq!(summary["unassigned_s"], 13.);
+    assert_eq!(summary["closure_error_s"], 0.);
+    let mut bad = doc.clone();
+    bad["reference_scf"]["iterations"][9]["verification_cost"]["gate_enabled"] = json!(false);
+    assert!(reader::stop_to_verified_summary(&bad).is_err());
+    let mut bad = doc.clone();
+    bad["reference_scf"]["iterations"][9]["verification_start_s"] = json!(93.);
+    bad["reference_scf"]["iterations"][9]["verification_end_s"] = json!(95.);
+    assert!(reader::stop_to_verified_summary(&bad).is_err());
+    doc["reference_scf"]["iterations"]
+        .as_array_mut()
+        .unwrap()
+        .truncate(10);
+    doc["reference_scf"]["verification"]["attempts"] = json!([]);
+    doc["reference_scf"]["verification"]["passed"] = json!(false);
+    assert_eq!(
+        reader::stop_to_verified_summary(&doc).unwrap()["status"],
+        "UNVERIFIED"
+    );
 }

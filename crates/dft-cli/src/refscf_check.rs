@@ -368,6 +368,11 @@ pub fn stop_to_verified(path: &Path) -> Result<(), RunError> {
 }
 
 #[derive(serde::Deserialize)]
+struct WallVerificationCost {
+    gate_enabled: bool,
+    skipped: bool,
+}
+#[derive(serde::Deserialize)]
 struct WallMap {
     iteration: usize,
     dr2_ry: f64,
@@ -376,6 +381,7 @@ struct WallMap {
     verification_start_s: Option<f64>,
     verification_end_s: Option<f64>,
     map_end_s: f64,
+    verification_cost: Option<WallVerificationCost>,
 }
 #[derive(serde::Deserialize)]
 struct WallAttempt {
@@ -425,6 +431,8 @@ pub fn stop_to_verified_summary(doc: &Value) -> Result<Value, RunError> {
     let mut interval_end = None;
     let mut previous_end = 0.;
     let mut attempted = 0;
+    let mut skipped = 0;
+    let mut gate_enabled = false;
     let mut failed = false;
     let mut verification_s = 0.;
     let mut recovery_s = 0.;
@@ -448,6 +456,22 @@ pub fn stop_to_verified_summary(doc: &Value) -> Result<Value, RunError> {
         )?;
         previous_end = map.map_end_s;
         let stopped = map.dr2_ry < run.threshold_ry;
+        let skip = map.verification_cost.as_ref().is_some_and(|c| c.skipped);
+        let gate = map
+            .verification_cost
+            .as_ref()
+            .is_some_and(|c| c.gate_enabled);
+        gate_enabled |= gate;
+        require(
+            !skip
+                || (gate
+                    && stopped
+                    && run.verification.is_some()
+                    && map.verification_start_s.is_none()
+                    && map.verification_end_s.is_none()),
+            "invalid skipped verification",
+        )?;
+        skipped += usize::from(skip);
         if stopped && first_stop.is_none() {
             first_stop = Some(map.iteration);
             interval_start = Some(map.estimator_s);
@@ -485,7 +509,7 @@ pub fn stop_to_verified_summary(doc: &Value) -> Result<Value, RunError> {
             }
             (None, None) => {
                 require(
-                    !(stopped && run.verification.is_some()),
+                    !stopped || run.verification.is_none() || skip,
                     "missing verification timestamps",
                 )?;
                 if failed {
@@ -514,7 +538,7 @@ pub fn stop_to_verified_summary(doc: &Value) -> Result<Value, RunError> {
         )?;
         require(total >= 0., "negative stop-to-verified interval")?;
     }
-    Ok(json!({
+    let mut summary = json!({
         "schema":"stop-to-verified-1",
         "status":if passing_map.is_some() {"VERIFIED"} else {"UNVERIFIED"},
         "first_stop_map":first_stop,"passing_map":passing_map,
@@ -528,7 +552,11 @@ pub fn stop_to_verified_summary(doc: &Value) -> Result<Value, RunError> {
         "unassigned_s":unassigned,"closure_error_s":closure_error,
         "parts_sum_checked":interval.is_some(),
         "diagnostic_on_off_delta":"separate measurement; may overlap this interval"
-    }))
+    });
+    if gate_enabled {
+        summary["skipped"] = json!(skipped);
+    }
+    Ok(summary)
 }
 
 #[cfg(test)]

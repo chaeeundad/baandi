@@ -7,13 +7,49 @@ use super::{
     metric::{Metric, Serial},
     numerical,
     profile::{Profile, next_ethr_ry},
-    record::{CorrectionRecord, Record, SolveRecord},
+    record::{CorrectionRecord, Record, SolveRecord, VerificationCost},
 };
 use crate::{
     refstart::{self, StartInput, StartState},
     scf::*,
 };
 use dft_mpi::Collective;
+
+/// Empirical verification-error/SCF-estimator scaling, never a certificate.
+/// A skipped candidate is followed by an actual observation at the next
+/// eligible candidate, bounding how long stale calibration can defer a check.
+#[derive(Default)]
+pub struct VerificationPredictor {
+    observed: Option<(f64, f64)>,
+    skipped_last: bool,
+}
+impl VerificationPredictor {
+    pub fn observe(&mut self, dr2_ry: f64, error_ha: f64) {
+        self.observed = Some((dr2_ry, error_ha));
+        self.skipped_last = false;
+    }
+    pub fn predict(&self, dr2_ry: f64) -> Option<f64> {
+        let (previous, error) = self.observed?;
+        if !previous.is_finite()
+            || previous <= 0.
+            || !error.is_finite()
+            || error < 0.
+            || !dr2_ry.is_finite()
+            || dr2_ry <= 0.
+            || dr2_ry >= previous
+        {
+            return None;
+        }
+        let prediction = error * (dr2_ry / previous);
+        prediction.is_finite().then_some(prediction)
+    }
+    pub fn skip(&mut self, prediction: Option<f64>, threshold_ha: f64) -> bool {
+        let skip =
+            !self.skipped_last && prediction.is_some_and(|p| p.is_finite() && p >= threshold_ha);
+        self.skipped_last = skip;
+        skip
+    }
+}
 
 pub struct Run {
     pub full_diagnostics: bool,
@@ -43,8 +79,11 @@ pub fn run_with<K: Collective>(
 ) -> Result<Run, ScfError> {
     let start = Instant::now();
     // Resolve once from this run's scope, never a process-cached profile flag.
-    let full_diagnostics = dft_numerics::switches::RunConfig::current()
-        .on(dft_numerics::switches::Id::DAVIDSON_STAGES);
+    use dft_numerics::switches::{Id, RunConfig};
+    let config = RunConfig::current();
+    let full_diagnostics = config.on(Id::DAVIDSON_STAGES);
+    let reuse = config.on(Id::REFSCF_VERIFY_REUSE);
+    let gate = config.on(Id::REFSCF_VERIFY_GATE);
     let profile = profile.validate()?;
     let o = input.options;
     if o.standard.is_none()
@@ -136,10 +175,17 @@ pub fn run_with<K: Collective>(
         (o.verification == Verification::FixedPoint).then(VerificationReport::default);
     let mut verification_calls = Vec::new();
     let mut first_reference_stop = None;
+    let mut pending: Option<(map::Map, f64, usize)> = None;
+    let mut predictor = VerificationPredictor::default();
     for iteration in 1..=o.max_iterations {
         let map_start_s = start.elapsed().as_secs_f64();
         let verification_call_start = verification_calls.len();
-        if iteration > 1 {
+        let reused_from = pending.as_ref().map(|(_, _, source)| *source);
+        if let Some((_, tolerance, _)) = &pending {
+            // Already solved at precisely the next-ratchet tolerance. Do not
+            // ratchet it a second time (including the iteration-two reset).
+            ethr = *tolerance;
+        } else if iteration > 1 {
             ethr = next_ethr_ry(
                 if iteration == 2 { 1e-2 } else { ethr },
                 last_dr2,
@@ -153,20 +199,25 @@ pub fn run_with<K: Collective>(
         let (mut map_s, mut transform_s, mut metric_s) = (0., 0., 0.);
         let (mut step, dr2) = loop {
             let clock = Instant::now();
-            let step = solve_map(
-                &mut state,
-                comm,
-                cell,
-                o.functional,
-                &n,
-                &occupations,
-                ethr,
-                iteration == 1 && !redo,
-                full_diagnostics,
-                &mut calls,
-                &mut timings,
-            )?;
-            map_s += clock.elapsed().as_secs_f64();
+            let step = if let Some((step, _, _)) = pending.take() {
+                step
+            } else {
+                let step = solve_map(
+                    &mut state,
+                    comm,
+                    cell,
+                    o.functional,
+                    &n,
+                    &occupations,
+                    ethr,
+                    iteration == 1 && !redo,
+                    full_diagnostics,
+                    &mut calls,
+                    &mut timings,
+                )?;
+                map_s += clock.elapsed().as_secs_f64();
+                step
+            };
             let clock = Instant::now();
             plan.forward(comm, &step.density, &mut y)?;
             set_zero(&plan, &mut y, state.electrons / volume);
@@ -192,9 +243,22 @@ pub fn run_with<K: Collective>(
             first_reference_stop = Some(iteration);
         }
         let mut certificate = None;
+        let predicted_error_ha = if gate && stopped && verification.is_some() {
+            predictor.predict(dr2)
+        } else {
+            None
+        };
+        let skipped = gate
+            && stopped
+            && verification.is_some()
+            && predictor.skip(predicted_error_ha, profile.threshold_ry / 2.);
+        let mut actual_error_ha = None;
         let mut verification_s = 0.;
         let (mut verification_start_s, mut verification_end_s) = (None, None);
-        if stopped && let Some(report) = &mut verification {
+        if stopped
+            && !skipped
+            && let Some(report) = &mut verification
+        {
             verification_start_s = Some(start.elapsed().as_secs_f64());
             let clock = Instant::now();
             state.orbitals = step.solve.eigenvectors.clone();
@@ -221,6 +285,10 @@ pub fn run_with<K: Collective>(
                 *v -= y;
             }
             let error = metric.norm(comm, &checked)? / 2.;
+            actual_error_ha = Some(error);
+            if gate {
+                predictor.observe(dr2, error);
+            }
             let mut l2 = [0.];
             comm.tree_sum_f64(
                 &[check
@@ -263,6 +331,9 @@ pub fn run_with<K: Collective>(
                 &record,
                 clock.elapsed(),
             );
+            if reuse && !attempt.passed && iteration < o.max_iterations {
+                pending = Some((check, tol, iteration));
+            }
             report.attempts.push(attempt);
             certificate = Some(record);
             verification_s = clock.elapsed().as_secs_f64();
@@ -285,7 +356,14 @@ pub fn run_with<K: Collective>(
                 Err(e) => failure = Some(e.to_string()),
             }
             if failure.is_none() {
-                plan.inverse(comm, &next, &mut next_planes)?;
+                if pending.is_some() {
+                    // Keep the original pair in history, but choose the input
+                    // of the cached map instead of the mixer's proposal.
+                    next.copy_from_slice(&y);
+                    next_planes.copy_from_slice(&step.density);
+                } else {
+                    plan.inverse(comm, &next, &mut next_planes)?;
+                }
             }
             mixing_s = clock.elapsed().as_secs_f64();
             if failure.is_none() {
@@ -358,6 +436,13 @@ pub fn run_with<K: Collective>(
         });
         records.push(Record {
             iteration,
+            verification_cost: (reuse || gate).then_some(VerificationCost {
+                gate_enabled: gate,
+                skipped,
+                predicted_error_ha,
+                actual_error_ha,
+                reused_from,
+            }),
             map_start_s,
             estimator_s,
             verification_start_s,

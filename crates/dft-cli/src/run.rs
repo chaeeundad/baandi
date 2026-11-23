@@ -1810,6 +1810,41 @@ fn execute_mode_inner(
             "threshold_ha":reference_profile(&config)?.threshold_ry/2.,
             "density_role":"last map output (also on exhaustion); energies refer to this output",
             "threshold_ry":reference_profile(&config)?.threshold_ry});
+        if reference_records
+            .iter()
+            .any(|r| r.verification_cost.is_some())
+        {
+            let costs = || {
+                reference_records
+                    .iter()
+                    .filter_map(|r| r.verification_cost.as_ref())
+            };
+            let reused = costs().filter(|c| c.reused_from.is_some()).count();
+            let skipped = costs().filter(|c| c.skipped).count();
+            let attempts = r.verification.as_ref().map_or(0, |v| v.attempts.len());
+            let ordinary_requests = reference_records.len() - reused
+                + reference_records
+                    .iter()
+                    .filter(|r| r.first_iteration_redo)
+                    .count();
+            let ordinary_maps = reference_records
+                .iter()
+                .map(|r| r.calls.len())
+                .sum::<usize>();
+            let verification_maps = result["reference_scf"]["run"]["verification_calls"]
+                .as_array()
+                .expect("reference verification calls")
+                .len();
+            result["reference_scf"]["verification_cost"] = json!({
+                "gate_enabled":costs().any(|c| c.gate_enabled),
+                "attempts":attempts,"skipped":skipped,"reused":reused,
+                "logical_scf_iterations":reference_records.len(),
+                "ordinary_map_requests":ordinary_requests,"map_requests":ordinary_requests + attempts,
+                "evaluated_ordinary_maps":ordinary_maps,"verification_maps":verification_maps,
+                "evaluated_maps":ordinary_maps + verification_maps,
+                "solver_calls":ordinary_maps + verification_maps
+            });
+        }
     }
     if let Some(l) = &ladder_report {
         result["convergence"]["work"]["cutoff_ladder"] = json!({
@@ -3171,6 +3206,15 @@ fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
     record["verification_start_s"] = json!(r.verification_start_s);
     record["verification_end_s"] = json!(r.verification_end_s);
     record["map_end_s"] = json!(r.map_end_s);
+    if let Some(c) = &r.verification_cost {
+        record["verification_cost"] = json!({
+            "gate_enabled":c.gate_enabled,
+            "skipped":c.skipped,
+            "predicted_error_ha":c.predicted_error_ha,
+            "actual_error_ha":c.actual_error_ha,
+            "reused_from":c.reused_from,
+        });
+    }
     record
 }
 

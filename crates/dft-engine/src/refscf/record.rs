@@ -35,8 +35,20 @@ pub struct SolveRecord {
     pub dropped_corrections: usize,
 }
 #[derive(Clone, Debug)]
+pub struct VerificationCost {
+    pub gate_enabled: bool,
+    pub skipped: bool,
+    pub predicted_error_ha: Option<f64>,
+    pub actual_error_ha: Option<f64>,
+    /// Previous iteration whose failed verification supplied this map. Its
+    /// solves and timings are charged there, never counted twice here.
+    pub reused_from: Option<usize>,
+}
+#[derive(Clone, Debug)]
 pub struct Record {
     pub iteration: usize,
+    /// Present only when a verification-cost experiment is enabled.
+    pub verification_cost: Option<VerificationCost>,
     /// Monotonic seconds since this rank entered the driver, at every diagnostic level.
     pub map_start_s: f64,
     /// Boundary after the stopping estimator is available, before verification.

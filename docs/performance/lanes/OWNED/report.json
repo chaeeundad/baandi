@@ -1,0 +1,89 @@
+{
+  "task_id": "G-OWNED-ROWS",
+  "status": "DONE",
+  "changed_files": [
+    "crates/dft-engine/src/gamma_real.rs",
+    "crates/dft-numerics/src/switches.rs",
+    "crates/dft-numerics/tests/all/switches.rs",
+    "crates/dft-cli/tests/all/run.rs",
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/lanes/OWNED/audit.md",
+    "docs/performance/lanes/OWNED/dev08-request.md",
+    "docs/performance/lanes/OWNED/mac-evidence.json",
+    "docs/performance/lanes/OWNED/prepare_input.py",
+    "docs/performance/lanes/OWNED/validation.md",
+    "docs/performance/lanes/OWNED/report.json"
+  ],
+  "design_choices": [
+    "Current HEAD already implements direct owned kinetic/projector rows and adopted lazy serial construction; defaults preserved.",
+    "Added independent default-off M2_OWNED_INPUT for full complex to owned ORC workspace starts. All-column validation and arithmetic preserved.",
+    "No repeated geometry/FFT rebuild on stable maps was found; no new cache. Idle serial BandDensity memory is documented for a separately owned follow-up."
+  ],
+  "commands": [
+    {
+      "command": "gh issue view 20",
+      "exit_code": 1
+    },
+    {
+      "command": "gh issue view 24",
+      "exit_code": 1
+    },
+    {
+      "command": "cargo test --offline -p dft-engine --lib owned_input_tests -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_SI_UPF=\"$PWD/../pseudo/Si.pz-vbc.UPF\" cargo test --release --offline -p dft-engine --lib owned_input_tests -- --include-ignored --nocapture --test-threads=1",
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR_990=\"$PWD/target/scratch\" CHECK_SCCACHE=0 scripts/check.sh full",
+      "exit_code": 1
+    },
+    {
+      "command": "TMPDIR_990=\"$PWD/target/scratch\" CHECK_SCCACHE=0 scripts/check.sh dft-engine",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 1
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/OWNED/prepare_input.py --case si128 --upf ../pseudo/Si.pz-vbc.UPF --output target/scratch/owned-si128.toml",
+      "exit_code": 0
+    },
+    {
+      "command": "target/debug/dft-cli validate target/scratch/owned-si128.toml --json",
+      "exit_code": 0
+    },
+    {
+      "command": "target/debug/dft-cli grid target/scratch/owned-si128.toml",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "22 A/B pairs / 68 per-rank records: energy difference 0 Ha; exact density, non-timing scientific histories and eigen-solutions.",
+    "Si8/16/32/si-skew at simulated ranks 1/2/3/8; rank 1 serial negative control. Six synthetic local/nonlocal standard, M1 fallback and strict pairs.",
+    "Active Si32 bridge saves 6,461,088 bytes/rank/entry, exact allocation-request counter/model equality.",
+    "Predicted fine Si64/Si128 saving 25,207,776 / 99,530,080 bytes/rank/entry; not RSS or timing measurements.",
+    "Full gate: 797 passed, 3 known scratch-policy failures, 183 ignored. Engine gate: 265 passed, 0 failed, 77 ignored.",
+    "Si128 preflight: 47,851 PW, 383,423 density PW, FFT 72 x 72 x 144."
+  ],
+  "reference_comparison": "Same-build off/on correctness control, not QE. Historical dev08 envelopes are attributed in audit.md. GitHub issues were read through the connected API after gh network failures.",
+  "limitations": [
+    "No dev08/MKL/real-MPI timing or peak RSS; default remains off. No substantiated 0.15 s prediction; memory qualifies the experiment.",
+    "Full gate remains nonzero due to three unmodified repository-scratch cache tests. README suite has one pre-existing obsolete expected-phrase failure; regenerated outputs have no diff.",
+    "Active-session communicator/rank migration is unsupported; tests reconstruct layouts. No new geometry cache.",
+    "Global session/dashboard artifacts are outside OWNED_FILES; this worktree has no G-OWNED-ROWS registry entry. Master handles registry and dev08 relay."
+  ],
+  "open_questions": [],
+  "commit": "Uncommitted as requested; master review/commit and dev08 A/B pending."
+}

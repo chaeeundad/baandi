@@ -1389,22 +1389,66 @@ pub(crate) fn solve_real_gamma(
         }
         (m, _, _) => m,
     };
+    // Only the workspace branch below accepts DistributedStart::Local.
+    // Resolve once at solve entry; no cache of geometry/layout is introduced.
+    let owned_input_eligible = comm.is_some()
+        && state.dist.is_some()
+        && options.standard.is_some()
+        && (m2_reuse() || lazy_path)
+        && (tuning.workspace || tuning.selected_roots || tuning.lean_algebra);
+    let owned_input = owned_input_eligible
+        && dft_numerics::switches::on(dft_numerics::switches::Id::M2_OWNED_INPUT);
+    let input_profile = dft_numerics::switches::InitProfile::current();
     let packed = if let Some(p) = injected_packed.take() {
         Some(p)
     } else if let Some(initial) = initial {
-        let mut packed = RealMatrix::zeros(n, initial.cols()).map_err(SolverError::from)?;
-        if let Err(e) = pool.install(|| {
-            pair_columns(initial.as_slice(), packed.as_mut_slice(), n, &|src, dst| {
-                half.pack(src, dst)
+        let rows = state.dist.as_ref().map(|d| d.local_rows());
+        let out_rows = if owned_input { rows.unwrap().len() } else { n };
+        let mut packed = RealMatrix::zeros(out_rows, initial.cols()).map_err(SolverError::from)?;
+        if owned_input_eligible && let Some(p) = input_profile {
+            use dft_numerics::switches::RunCounter as C;
+            let local_bytes = 8 * rows.unwrap().len() * initial.cols();
+            let full_bytes = 8 * n * initial.cols();
+            p.count(C::OwnedInputCalls, 1);
+            p.count(C::OwnedInputDirectCalls, usize::from(owned_input));
+            p.count(C::OwnedInputBaselineBytes, full_bytes + local_bytes);
+            p.count(
+                C::OwnedInputSavedBytes,
+                if owned_input { full_bytes } else { 0 },
+            );
+            p.count(C::OwnedInputAllocatedBytes, 8 * packed.as_slice().len());
+        }
+        let converted = if owned_input {
+            // Validate every full column, even on ranks owning no rows, before
+            // exposing the local start. No full-length ORC temporary.
+            (0..initial.cols()).try_for_each(|j| {
+                pack_orbital_rows(
+                    half,
+                    initial.column(j),
+                    rows.unwrap(),
+                    &mut packed.as_mut_slice()[j * out_rows..(j + 1) * out_rows],
+                )
             })
-        }) {
+        } else {
+            pool.install(|| {
+                pair_columns(initial.as_slice(), packed.as_mut_slice(), n, &|src, dst| {
+                    half.pack(src, dst)
+                })
+            })
+        };
+        if let Err(e) = converted {
             diagnostics.fallback(
                 option,
                 format!("warm start is not ORC-compatible (1e-14 absolute): {e}"),
             )?;
             return Ok(None);
         }
-        Some(packed)
+        if owned_input {
+            lazy_start = Some(packed);
+            None
+        } else {
+            Some(packed)
+        }
     } else {
         None
     };
@@ -1626,6 +1670,14 @@ pub(crate) fn solve_real_gamma(
                 ),
                 (None, None) => None,
             };
+            if owned_input_eligible
+                && let (Some(p), Some(start_rows)) = (input_profile, start_rows.as_ref())
+            {
+                p.count(
+                    dft_numerics::switches::RunCounter::OwnedInputAllocatedBytes,
+                    8 * start_rows.as_slice().len(),
+                );
+            }
             let x_rows: Option<&RealMatrix> = lazy_start.as_ref().or(start_rows.as_ref());
             // BREAKTHROUGH-4: clock of the interface after the solver call.
             let t_finish;
@@ -2258,6 +2310,48 @@ fn prepare_m2_kept_start(
 
 // Boundary conversions use the same fixed pair partition as local application.
 // They need only disjoint output slices; all storage belongs to the caller.
+/// Owned-row form of HalfSphere::pack. Keep its full-column validation and
+/// arithmetic exactly: projector packing has a different tolerance contract
+/// and must not be substituted here. Rows come from the current operator.
+fn pack_orbital_rows(
+    half: &dft_basis::HalfSphere,
+    full: &[Complex64],
+    rows: &[usize],
+    out: &mut [f64],
+) -> Result<(), dft_basis::HalfSphereError> {
+    use dft_basis::{HalfSphereError as E, ORC_TOLERANCE};
+    use std::f64::consts::SQRT_2;
+    if full.len() != half.full_len()
+        || out.len() != rows.len()
+        || rows.iter().any(|&r| r >= half.full_len())
+    {
+        return Err(E::Dimension);
+    }
+    if full.iter().any(|z| !z.re.is_finite() || !z.im.is_finite())
+        || full[0].im.abs() > ORC_TOLERANCE
+    {
+        return Err(E::InvalidCoefficients);
+    }
+    for (&p, &m) in half.plus().iter().zip(half.minus()).skip(1) {
+        let z = full[p as usize];
+        if (z - full[m as usize].conj()).norm() > ORC_TOLERANCE
+            || !(z.re * SQRT_2).is_finite()
+            || !(z.im * SQRT_2).is_finite()
+        {
+            return Err(E::InvalidCoefficients);
+        }
+    }
+    for (out, &r) in out.iter_mut().zip(rows) {
+        *out = if r == 0 {
+            full[0].re
+        } else {
+            let z = full[half.plus()[r.div_ceil(2)] as usize];
+            SQRT_2 * if r % 2 == 1 { z.re } else { z.im }
+        };
+    }
+    Ok(())
+}
+
 fn pair_columns<T: Sync, U: Send, E: Send>(
     input: &[T],
     output: &mut [U],
@@ -2908,6 +3002,399 @@ mod owned_handoff_tests {
                     assert_eq!(actual, expected, "P={ranks} defect={defect}");
                     crate::parallel::set_communicator(None);
                 });
+            }
+        }
+    }
+}
+
+// The existing scf::pool_fixture is private; keep this test-only import local
+// rather than change that unrelated module's visibility outside the ticket.
+#[cfg(test)]
+#[allow(dead_code, clippy::duplicate_mod)]
+#[path = "../tests/common/mod.rs"]
+mod owned_input_fixtures;
+
+#[cfg(test)]
+mod owned_input_tests {
+    use super::*;
+    use crate::{ScfProblem, ScfResult, SpeciesPotential};
+    use dft_basis::{FftGridSpec, HalfSphere};
+    use dft_geometry::{Atom, Cell};
+    use dft_mpi::{SimRank, simulate};
+    use dft_numerics::switches::{RunConfig, RunCounter as C};
+
+    #[test]
+    fn owned_pack_matches_full_validation_and_bits() {
+        for lattice in [
+            [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],
+            [[5., 0.3, 0.], [0., 7., 0.4], [0.2, 0., 9.]],
+            [[4., 0., 0.], [0., 4., 0.], [0., 0., 16.]],
+        ] {
+            let cell = Cell::from_user_rows_bohr(lattice).unwrap();
+            for cutoff_hartree in [1.2, 2.5] {
+                let basis = ScfOptions {
+                    cutoff_hartree,
+                    ..ScfOptions::default()
+                }
+                .basis(&cell, [0.; 3], 1.)
+                .unwrap();
+                let grid =
+                    FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None).unwrap();
+                let half = HalfSphere::new(&basis, &grid).unwrap();
+                let n = half.full_len();
+                let real: Vec<_> = (0..n)
+                    .map(|i| match i % 5 {
+                        0 => -0.0,
+                        1 => 1e-310,
+                        _ => (i as f64).sin() * 0.01,
+                    })
+                    .collect();
+                let mut full = vec![Complex64::default(); n];
+                half.unpack(&real, &mut full).unwrap();
+                for defect in 0..7 {
+                    let mut x = full.clone();
+                    match defect {
+                        1 => x[0].im = dft_basis::ORC_TOLERANCE,
+                        2 => x[0].im = 2. * dft_basis::ORC_TOLERANCE,
+                        3 => x[n - 1].re = f64::NAN,
+                        4 => x[n - 1].im = f64::INFINITY,
+                        5 => x[half.minus()[1] as usize].re += 1e-10,
+                        6 => {
+                            x[half.plus()[1] as usize] = Complex64::new(f64::MAX, 0.);
+                            x[half.minus()[1] as usize] = Complex64::new(f64::MAX, -0.);
+                        }
+                        _ => {}
+                    }
+                    let mut reference = vec![42.; n];
+                    let verdict = half.pack(&x, &mut reference);
+                    for ranks in [1, 2, 3, 8] {
+                        for rank in 0..ranks {
+                            let owners = dft_solvers::distributed_fft::position_owners(
+                                grid.dims(),
+                                grid.g_to_fft(),
+                                ranks,
+                            )
+                            .unwrap();
+                            let rows: Vec<_> = (0..n)
+                                .filter(|&r| {
+                                    let g = if r == 0 {
+                                        0
+                                    } else {
+                                        half.plus()[r.div_ceil(2)] as usize
+                                    };
+                                    owners[g] == rank
+                                })
+                                .collect();
+                            let mut got = vec![42.; rows.len()];
+                            assert_eq!(pack_orbital_rows(&half, &x, &rows, &mut got), verdict);
+                            for (&r, v) in rows.iter().zip(got) {
+                                assert_eq!(v.to_bits(), reference[r].to_bits());
+                            }
+                        }
+                    }
+                    // An empty owner still checks every coefficient.
+                    assert_eq!(pack_orbital_rows(&half, &x, &[], &mut []), verdict);
+                }
+                assert_eq!(
+                    pack_orbital_rows(&half, &full, &[n], &mut [0.]),
+                    Err(dft_basis::HalfSphereError::Dimension)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn owned_input_descriptor_invalidation() {
+        use dft_physics::data::Array3;
+        use dft_physics::hamiltonian::{NonlocalOperator, Species};
+        let pool = WorkerPool::new(1).unwrap();
+        let mut state = None;
+        let mut old_half = None;
+        // Each immutable model/layout change supplies a new Hamiltonian. No
+        // content cache may accept it merely because its dimensions match.
+        for change in 0..6 {
+            let edge = if change == 1 { 6.3 } else { 6. };
+            let cell =
+                Cell::from_user_rows_bohr([[edge, 0., 0.], [0., 6., 0.], [0., 0., 6.]]).unwrap();
+            let options = ScfOptions {
+                cutoff_hartree: if change == 4 { 2. } else { 1.2 },
+                ..ScfOptions::default()
+            };
+            let basis = options.basis(&cell, [0.; 3], 1.).unwrap();
+            let density = basis.density_basis(&cell).unwrap();
+            let initial_grid = FftGridSpec::new(&basis, &density, None).unwrap();
+            let override_dims = (change == 5).then(|| initial_grid.dims().map(|n| n * 2));
+            let grid = FftGridSpec::new(&basis, &density, override_dims).unwrap();
+            let pp = super::owned_input_fixtures::potential(
+                if change == 3 { 2. } else { 4. },
+                1.,
+                true,
+                101,
+            );
+            let positions = [[if change == 2 { 0.4 } else { 0.3 }, 0.7, 1.2]];
+            let nl = NonlocalOperator::new(
+                &basis,
+                cell.volume_bohr3(),
+                &[Species {
+                    potential: &pp,
+                    positions_bohr: &positions,
+                }],
+            )
+            .unwrap();
+            let mut h =
+                Hamiltonian::new_with_grid(&basis, grid.clone(), Array3::zeros(grid.dims()), nl)
+                    .unwrap();
+            ensure_state_with(&h, &basis, 3, 6, &options, &pool, &mut state, false).unwrap();
+            let half = state.as_ref().unwrap().half.clone();
+            if let Some(old) = &old_half {
+                assert!(!Arc::ptr_eq(old, &half));
+            }
+            assert!(state.as_ref().unwrap().op.is_none());
+            // Density-dependent potential must NOT invalidate geometry.
+            h.set_local_potential(Array3::from_elem(grid.dims(), 0.125))
+                .unwrap();
+            ensure_state_with(&h, &basis, 3, 6, &options, &pool, &mut state, false).unwrap();
+            assert!(Arc::ptr_eq(&half, &state.as_ref().unwrap().half));
+            // New rank layouts are constructed, never cached by this bridge.
+            for ranks in [1, 2, 3, 8] {
+                let mut seen = vec![false; half.full_len()];
+                for rank in 0..ranks {
+                    let d =
+                        DistributedRealHamiltonian::new(&h, &basis, 2, rank, ranks, pool.clone())
+                            .unwrap();
+                    assert!(d.same_operator(&h, &basis));
+                    for &row in d.local_rows() {
+                        assert!(!seen[row]);
+                        seen[row] = true;
+                    }
+                }
+                assert!(seen.into_iter().all(|x| x));
+            }
+            old_half = Some(half);
+        }
+    }
+
+    fn history(r: &ScfResult) -> String {
+        let mut history = r.history.clone();
+        for h in &mut history {
+            h.timings = Default::default();
+            if let Some(c) = h.fixed_point_certificate.as_mut() {
+                c.timings = Default::default();
+            }
+        }
+        format!("{history:?}")
+    }
+
+    fn run_pair(
+        cell: &Cell,
+        atoms: &[Atom],
+        pp: &dft_upf::Pseudopotential,
+        ranks: usize,
+        options: &ScfOptions,
+        fallback: bool,
+    ) {
+        let run = |direct| {
+            simulate(ranks, |comm: &SimRank| {
+                let config = RunConfig::from_pairs(&[
+                    ("m2_owned_input", if direct { "on" } else { "off" }),
+                    ("init_profile", "on"),
+                    ("stage_timers", "off"),
+                    // Fallback may not consume an owned potential.
+                    ("m2_local_fields", if fallback { "off" } else { "on" }),
+                    ("m2_local_density", if fallback { "off" } else { "on" }),
+                ])
+                .unwrap();
+                let _scope = config.enter();
+                crate::parallel::set_m2_override(Some(true));
+                crate::parallel::set_communicator(Some(Arc::new(comm.clone())));
+                set_m2_dist_disabled_for_tests(fallback);
+                // Synthetic fixtures lack atomic orbitals. Exercise their
+                // materialized warm inputs instead of the already-local bypass.
+                if pp.atomic_wavefunctions().is_none_or(|w| w.is_empty()) {
+                    set_m2_lazy_override(Some(false));
+                }
+                let problem = ScfProblem::new(
+                    cell,
+                    atoms,
+                    &[SpeciesPotential {
+                        label: "Xx",
+                        potential: pp,
+                    }],
+                    options.clone(),
+                )
+                .unwrap();
+                let result = problem.run().unwrap();
+                set_m2_dist_disabled_for_tests(false);
+                set_m2_lazy_override(None);
+                crate::parallel::set_communicator(None);
+                crate::parallel::set_m2_override(None);
+                (result, config.counters())
+            })
+        };
+        let a = run(false);
+        let b = run(true);
+        for (rank, ((a, ca), (b, cb))) in a.iter().zip(&b).enumerate() {
+            assert_eq!(a.total_hartree().to_bits(), b.total_hartree().to_bits());
+            assert_eq!(
+                a.density.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+                b.density.iter().map(|x| x.to_bits()).collect::<Vec<_>>()
+            );
+            assert_eq!(history(a), history(b));
+            assert_eq!(
+                format!("{:?}", a.k_points[0].solution),
+                format!("{:?}", b.k_points[0].solution)
+            );
+            if options.standard.is_some() {
+                assert!(b.verification.as_ref().unwrap().passed());
+            }
+            let g = |c: &[u64], k: C| c[k as usize];
+            assert_eq!(g(ca, C::OwnedInputDirectCalls), 0);
+            assert_eq!(g(ca, C::OwnedInputSavedBytes), 0);
+            assert_eq!(
+                g(ca, C::OwnedInputAllocatedBytes),
+                g(ca, C::OwnedInputBaselineBytes)
+            );
+            assert_eq!(
+                g(cb, C::OwnedInputAllocatedBytes) + g(cb, C::OwnedInputSavedBytes),
+                g(cb, C::OwnedInputBaselineBytes)
+            );
+            assert_eq!(
+                g(ca, C::OwnedInputBaselineBytes),
+                g(cb, C::OwnedInputBaselineBytes)
+            );
+            if ranks > 1 && !fallback && options.standard.is_some() {
+                assert!(g(cb, C::OwnedInputCalls) > 0);
+                assert_eq!(g(cb, C::OwnedInputCalls), g(cb, C::OwnedInputDirectCalls));
+                let basis = options.basis(cell, [0.; 3], 1.).unwrap();
+                let grid =
+                    FftGridSpec::new(&basis, &basis.density_basis(cell).unwrap(), None).unwrap();
+                let half = HalfSphere::new(&basis, &grid).unwrap();
+                let owners = dft_solvers::distributed_fft::position_owners(
+                    grid.dims(),
+                    grid.g_to_fft(),
+                    ranks,
+                )
+                .unwrap();
+                let local = (0..half.full_len())
+                    .filter(|&r| {
+                        let p = if r == 0 {
+                            0
+                        } else {
+                            half.plus()[r.div_ceil(2)] as usize
+                        };
+                        owners[p] == rank
+                    })
+                    .count();
+                let bands = b.k_points[0].solution.eigenvalues.len();
+                let calls = g(cb, C::OwnedInputCalls);
+                assert_eq!(
+                    g(cb, C::OwnedInputSavedBytes),
+                    calls * (8 * half.full_len() * bands) as u64
+                );
+                assert_eq!(
+                    g(cb, C::OwnedInputAllocatedBytes),
+                    calls * (8 * local * bands) as u64
+                );
+            } else {
+                assert_eq!(g(cb, C::OwnedInputCalls), 0);
+            }
+            println!(
+                "OWNED ranks={ranks} rank={rank} atoms={} fallback={fallback} energy_bits={:016x} scf={} calls={} baseline_bytes={} allocated_bytes={} saved_bytes={}",
+                atoms.len(),
+                b.total_hartree().to_bits(),
+                b.history.len(),
+                g(cb, C::OwnedInputCalls),
+                g(cb, C::OwnedInputBaselineBytes),
+                g(cb, C::OwnedInputAllocatedBytes),
+                g(cb, C::OwnedInputSavedBytes)
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "verified synthetic SCF, fallback and strict controls; run in release"]
+    fn owned_input_synthetic_fallback_and_strict() {
+        let cell =
+            Cell::from_user_rows_bohr([[6.2, 0., 0.], [1.1, 5.7, 0.], [0.4, 0.7, 6.6]]).unwrap();
+        let atoms = [
+            Atom::new("Xx", [0.13, 0.21, 0.32]),
+            Atom::new("Xx", [0.61, 0.57, 0.74]),
+        ];
+        for nonlocal in [false, true] {
+            let pp = super::owned_input_fixtures::potential(4., 1., nonlocal, 101);
+            for mode in 0..3 {
+                let options = ScfOptions {
+                    cutoff_hartree: 3.,
+                    bands: Some(6),
+                    ..if mode == 2 {
+                        ScfOptions::strict_reference()
+                    } else {
+                        ScfOptions::default()
+                    }
+                };
+                run_pair(&cell, &atoms, &pp, 2, &options, mode == 1);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "full verified SCF matrix; run release with DFT_SI_UPF (see OWNED audit)"]
+    fn owned_input_si_matrix() {
+        let pp = dft_upf::parse_upf(
+            &std::fs::read_to_string(
+                std::env::var("DFT_SI_UPF").expect("external Si.pz-vbc.UPF required"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let base = [
+            [0., 0., 0.],
+            [0., 0.5, 0.5],
+            [0.5, 0., 0.5],
+            [0.5, 0.5, 0.],
+            [0.25, 0.25, 0.25],
+            [0.25, 0.75, 0.75],
+            [0.75, 0.25, 0.75],
+            [0.75, 0.75, 0.25],
+        ];
+        for (rx, ry, skew) in [(1, 1, false), (2, 1, false), (2, 2, false), (1, 1, true)] {
+            let a = 10.261_212_856_717_933;
+            let mut cell = Cell::from_user_rows_bohr([
+                [a * rx as f64, 0., 0.],
+                [if skew { 0.7 } else { 0. }, a * ry as f64, 0.],
+                [0., if skew { 0.3 } else { 0. }, a],
+            ])
+            .unwrap();
+            let mut atoms = Vec::new();
+            for x in 0..rx {
+                for y in 0..ry {
+                    for p in base {
+                        atoms.push(Atom::new(
+                            "Xx",
+                            [
+                                (p[0] + x as f64) / rx as f64,
+                                (p[1] + y as f64) / ry as f64,
+                                p[2],
+                            ],
+                        ));
+                    }
+                }
+            }
+            let options = ScfOptions {
+                cutoff_hartree: 15.,
+                start_wavefunctions: crate::StartWavefunctions::Atomic,
+                davidson_capacity_per_band: 3,
+                ..ScfOptions::default()
+            };
+            if skew {
+                // Existing benchmarks/cases/si-skew.toml, not a newly strained
+                // conventional cell with an unqualified convergence trajectory.
+                let h = 5.130_606_428_358_966;
+                cell = Cell::from_user_rows_bohr([[0.7, h, h], [h, 0., h], [h, h, 0.3]]).unwrap();
+                atoms = vec![Atom::new("Xx", [0.; 3]), Atom::new("Xx", [0.25; 3])];
+            }
+            for ranks in [1, 2, 3, 8] {
+                run_pair(&cell, &atoms, &pp, ranks, &options, false);
             }
         }
     }

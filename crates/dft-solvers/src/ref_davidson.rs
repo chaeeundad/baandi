@@ -76,6 +76,10 @@ pub struct Solution {
     pub converged: Vec<bool>,
     /// Per correction, absolute Ritz changes in Ha, retained for trajectory audits.
     pub ritz_changes_ha: Vec<Vec<f64>>,
+    /// Previous/current Ritz values per correction and band (Ha), for rounding audits.
+    pub ritz_values_ha: Vec<Vec<[f64; 2]>>,
+    /// Actual strict-inequality thresholds, including the empty-band rule (Ha).
+    pub band_thresholds_ha: Vec<f64>,
     pub record: Record,
 }
 
@@ -158,6 +162,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     let mut converged = vec![false; n];
     let mut iterations = 0;
     let mut ritz_changes_ha = vec![vec![0.; n]; options.max_iterations];
+    let mut ritz_values_ha = vec![vec![[0.; 2]; n]; options.max_iterations];
     for (step, ritz_changes) in ritz_changes_ha.iter_mut().enumerate() {
         let before = c.snapshot();
         let r = &mut record.iterations[step];
@@ -203,6 +208,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         for (i, flag) in converged.iter_mut().enumerate() {
             let change = (w.values[i] - w.old_values[i]).abs();
             ritz_changes[i] = change;
+            ritz_values_ha[step][i] = [w.old_values[i], w.values[i]];
             *flag = change < options.band_threshold(i);
             if !*flag {
                 active.push(i);
@@ -222,11 +228,14 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     }
     record.iterations.truncate(iterations);
     ritz_changes_ha.truncate(iterations);
+    ritz_values_ha.truncate(iterations);
     w.finish(m, options.return_hx, &mut record.finish, options.profile)?;
     record.communication = c.snapshot();
     record.total_seconds = elapsed(total_clock);
     record.summarize();
     Ok(Solution {
+        ritz_values_ha,
+        band_thresholds_ha: (0..n).map(|i| options.band_threshold(i)).collect(),
         eigenvalues: w.values[..n].to_vec(),
         eigenvectors: w.x,
         hx: options.return_hx.then_some(w.hx),

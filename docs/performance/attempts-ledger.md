@@ -3480,3 +3480,22 @@ README generation exits 0/no tracked change; its old scope-text test fails.
 Si32/64 np1, matching full QE references, one case per `final-` job, 7200 s,
 full trajectory/verification/rank-memory evidence. No remote run performed;
 no default or speed decision is justified yet.
+
+### I26-2-DIAGLEVEL dev08 A/B (2026-11-24): diagnostic level, no measurable wall effect
+
+Hypothesis: forced full diagnostics (per-band Ritz traces, inner clocks, duplicated JSON) inflate
+delivered wall of the reference driver. Change: lightweight level is the default since main 6cdda2e;
+full via BAANDI_DAVIDSON_STAGES=on. dev08, release mpi,mkl binary sha 6c599b30..., MPI np8 bound to
+cores, one thread per rank, verification on in both arms, wall around the whole mpirun incl. output.
+A/A 20 pairs then crossed A/B 30 pairs per case; 206/206 deliveries verified, science identical
+(density.bin byte-identical on every rank).
+
+| case | A/A floor F | median full / light (s) | mean log(light/full) +- SE | abs/SE | verdict |
+|---|---|---|---|---|---|
+| si64 np8 | 0.00536 | 9.491 / 9.540 | +0.00293 +- 0.00479 | 0.61 | inconclusive |
+| si128 np8 | 0.00560 | 56.469 / 56.367 | -0.00141 +- 0.00447 | 0.31 | inconclusive |
+
+Bytes: light removes ~6.9 MB (si64) and ~13.9 MB (si128) of output per run (results.json 1.16 -> 0.30
+MB and 2.13 -> 0.40 MB). Lesson: at MPI8 on dev08 the diagnostic payload costs below the 0.5 % floor;
+the QE gap is not explained by tracing. The lightweight default stays (smaller output, no cost).
+Evidence: /data/sig-dft/i26/diaglevel/{si64,si128}/ on dev08 (TABLE.md, table.json, samples-*.tsv).

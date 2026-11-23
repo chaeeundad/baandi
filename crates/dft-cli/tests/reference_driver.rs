@@ -3,6 +3,24 @@
 mod common;
 use serde_json::Value;
 use std::{fs, process::Command};
+
+fn scientific(value: &Value) -> Value {
+    match value {
+        Value::Array(a) => Value::Array(a.iter().map(scientific).collect()),
+        Value::Object(o) => Value::Object(
+            o.iter()
+                .filter(|(k, _)| {
+                    !matches!(
+                        k.as_str(),
+                        "timings" | "wall_s" | "ritz_changes_ha" | "inner_clocks"
+                    ) && !k.ends_with("_s")
+                })
+                .map(|(k, v)| (k.clone(), scientific(v)))
+                .collect(),
+        ),
+        _ => value.clone(),
+    }
+}
 #[test]
 fn broyden_reference_inputs_and_verified_records() {
     let dir = std::env::temp_dir().join(format!("rscf2-cli-{}", std::process::id()));
@@ -34,15 +52,50 @@ fn broyden_reference_inputs_and_verified_records() {
     fs::write(dir.join("syn.xml"), pp).unwrap();
     let text = "[system]\nname='reference test'\nlattice_unit='bohr'\nlattice_vectors=[[7.0,0.0,0.0],[0.2,7.0,0.0],[0.0,0.1,7.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=4.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=3\nmax_iterations=100\nmixing='broyden'\nmixing_beta=0.7\nmixing_history=8\n";
     let mut previous: Option<Value> = None;
-    for (name, driver, env) in [("input", "reference", "off"), ("env", "legacy", "on")] {
-        fs::write(dir.join("in.toml"), format!("{text}driver='{driver}'\n")).unwrap();
-        let out = Command::new(env!("CARGO_BIN_EXE_dft-cli"))
+    for (name, driver, env, input_profile, env_profile, full) in [
+        ("input", "reference", "off", "", None, false),
+        ("env", "legacy", "on", "", None, false),
+        (
+            "full",
+            "reference",
+            "off",
+            "[profile]\ndavidson_stages=true\n",
+            None,
+            true,
+        ),
+        (
+            "override",
+            "reference",
+            "off",
+            "[profile]\ndavidson_stages=true\n",
+            Some("off"),
+            false,
+        ),
+        (
+            "env-full",
+            "reference",
+            "off",
+            "[profile]\ndavidson_stages=false\n",
+            Some("on"),
+            true,
+        ),
+    ] {
+        fs::write(
+            dir.join("in.toml"),
+            format!("{text}driver='{driver}'\n{input_profile}"),
+        )
+        .unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_dft-cli"));
+        command
             .current_dir(&dir)
             .env("BAANDI_REFERENCE_SCF", env)
             .env("BAANDI_REFERENCE_STRICT", "off")
-            .args(["run", "in.toml", "--output-dir", name])
-            .output()
-            .unwrap();
+            .env_remove("BAANDI_DAVIDSON_STAGES")
+            .args(["run", "in.toml", "--output-dir", name]);
+        if let Some(value) = env_profile {
+            command.env("BAANDI_DAVIDSON_STAGES", value);
+        }
+        let out = command.output().unwrap();
         assert!(
             out.status.success(),
             "{}",
@@ -56,6 +109,15 @@ fn broyden_reference_inputs_and_verified_records() {
         assert_eq!(v["scf"]["mixing_metric"], "hartree");
         assert_eq!(v["execution"]["davidson_mode"], "reference_generalized");
         assert_eq!(v["verified"], true);
+        assert_eq!(v["run"]["completed"], true);
+        assert_eq!(
+            v["reference_scf"]["diagnostics"]["schema"],
+            "reference-scf-diagnostics-1"
+        );
+        assert_eq!(
+            v["reference_scf"]["diagnostics"]["level"],
+            if full { "full" } else { "lightweight" }
+        );
         assert_eq!(
             v["execution"]["effective_solver"],
             "reference_block_davidson"
@@ -71,6 +133,55 @@ fn broyden_reference_inputs_and_verified_records() {
             assert!(row["active_bands_sum"].as_u64().unwrap() > 0);
             assert!(!row["reduced_problem_orders"].as_array().unwrap().is_empty());
             assert!(row["energies_ha"]["total"].as_f64().unwrap().is_finite());
+            // Preserve both historical trace-reader paths, including full Ritz
+            // matrices. No reader must infer missing work from an empty trace.
+            let i = row["iteration"].as_u64().unwrap() as usize - 1;
+            assert_eq!(*row, v["convergence"]["history"][i]["reference_scf"]);
+        }
+        for call in rows
+            .iter()
+            .flat_map(|r| r["calls"].as_array().unwrap())
+            .chain(
+                v["reference_scf"]["run"]["verification_calls"]
+                    .as_array()
+                    .unwrap(),
+            )
+        {
+            let trace = call["ritz_changes_ha"].as_array().unwrap();
+            if full {
+                assert_eq!(
+                    trace.len(),
+                    call["davidson_iterations"].as_u64().unwrap() as usize
+                );
+                assert!(trace.iter().all(|row| row.as_array().unwrap().len() == 3));
+                assert!(call["inner_clocks"]["total_s"].as_f64().unwrap() > 0.);
+                assert_eq!(
+                    call["inner_clocks"]["stage_s"].as_object().unwrap().len(),
+                    8
+                );
+            } else {
+                assert!(trace.is_empty());
+                assert!(call["inner_clocks"].is_null());
+            }
+        }
+        for stage in dft_engine::refscf::record::INNER_STAGES {
+            let expected: f64 = rows
+                .iter()
+                .flat_map(|r| r["calls"].as_array().unwrap())
+                .chain(
+                    v["reference_scf"]["run"]["verification_calls"]
+                        .as_array()
+                        .unwrap(),
+                )
+                .map(|c| c["inner_clocks"]["stage_s"][stage].as_f64().unwrap_or(0.))
+                .sum();
+            let actual = v["convergence"]["work"]["davidson_stages"]["stage_s"][stage]
+                .as_f64()
+                .unwrap();
+            assert!(
+                (expected - actual).abs() < 1e-12,
+                "stage {stage} must include verification"
+            );
         }
         assert!(
             v["reference_scf"]["wall_s"]["verification"]
@@ -80,9 +191,22 @@ fn broyden_reference_inputs_and_verified_records() {
         );
         if let Some(p) = previous {
             assert_eq!(v["total_energy"], p["total_energy"]);
+            assert_eq!(v["eigenvalues"], p["eigenvalues"]);
+            assert_eq!(
+                scientific(&v["verification"]),
+                scientific(&p["verification"])
+            );
+            assert_eq!(
+                scientific(&v["convergence"]["history"]),
+                scientific(&p["convergence"]["history"])
+            );
+            assert_eq!(
+                scientific(&v["reference_scf"]["run"]["verification_calls"]),
+                scientific(&p["reference_scf"]["run"]["verification_calls"])
+            );
             assert_eq!(
                 fs::read(dir.join("input/density.bin")).unwrap(),
-                fs::read(dir.join("env/density.bin")).unwrap()
+                fs::read(dir.join(name).join("density.bin")).unwrap()
             );
         }
         previous = Some(v);

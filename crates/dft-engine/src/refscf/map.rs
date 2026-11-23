@@ -113,6 +113,7 @@ pub(super) fn evaluate<K: Collective>(
     occupations: &[f64],
     ethr_ry: f64,
     first_step: bool,
+    diagnostics: bool,
 ) -> Result<Map, ScfError> {
     let mut timings = PhaseTimings::default();
     let clock = Instant::now();
@@ -148,7 +149,7 @@ pub(super) fn evaluate<K: Collective>(
     );
     options.first_step = first_step;
     options.return_hx = true;
-    options.profile = true;
+    options.profile = diagnostics;
     let solve = ref_davidson::solve(
         comm,
         &mut state.operator,

@@ -334,6 +334,7 @@ mod tests {
             restarts: 0,
             unconverged: usize::from(change >= 5e-9),
             ritz_changes_ha: vec![vec![change]],
+            inner_clocks: None,
             ritz_values_ha: vec![vec![[0., change]]],
             band_thresholds_ha: vec![5e-9],
             repairs: 0,

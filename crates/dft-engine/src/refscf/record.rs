@@ -1,6 +1,7 @@
 //! Plain in-memory diagnostics; formatting and file I/O belong to the CLI.
 use super::broyden::Diagnostics;
 use crate::energy::EnergyAudit;
+pub use dft_solvers::ref_davidson::STAGES as INNER_STAGES;
 /// Discrete work before/after each Ritz stopping decision; no timers or payloads.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CorrectionRecord {
@@ -24,6 +25,9 @@ pub struct SolveRecord {
     pub restarts: usize,
     pub unconverged: usize,
     pub ritz_changes_ha: Vec<Vec<f64>>,
+    /// Full diagnostics only: inclusive solve wall and exclusive stage seconds
+    /// in ref_davidson::STAGES order. None means unmeasured, not zero cost.
+    pub inner_clocks: Option<(f64, [f64; 8])>,
     pub ritz_values_ha: Vec<Vec<[f64; 2]>>,
     pub band_thresholds_ha: Vec<f64>,
     pub corrections: Vec<CorrectionRecord>,

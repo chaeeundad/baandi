@@ -1571,6 +1571,8 @@ fn execute_mode_inner(
     let mut reference_records = Vec::new();
     let mut reference_status = None;
     let mut reference_summary = None;
+    let mut reference_diagnostics = false;
+    let mut reference_stages = None;
     let mut ladder_report = None;
     let atomic_density_built = reference
         || problem
@@ -1601,6 +1603,21 @@ fn execute_mode_inner(
             dft_engine::refscf::driver::run(dft_engine::refstart::StartInput {
                 cell: &prepared.cell, atoms: &atoms, potentials: &refs, options: &opts,
             }, reference_profile(&config)?).map(|run| {
+                reference_diagnostics = run.full_diagnostics;
+                let mut seconds = [0.; 8];
+                for call in run.records.iter().flat_map(|r| &r.calls).chain(&run.verification_calls) {
+                    if let Some((_, stages)) = call.inner_clocks {
+                        for (sum, value) in seconds.iter_mut().zip(stages) {
+                            *sum += value;
+                        }
+                    }
+                }
+                reference_stages = Some(json!({
+                    "schema":"reference-davidson-stages-1",
+                    "stage_s":dft_engine::refscf::record::INNER_STAGES.into_iter().zip(seconds).map(|(name, seconds)|(name.to_string(), json!(seconds))).collect::<serde_json::Map<_, _>>(),
+                    "measured":run.full_diagnostics,
+                    "note":"exclusive reference Davidson stages; includes every SCF/retry/verification call; rank max with min_over_ranks; total process wall includes output"
+                }));
                 reference_summary = Some(json!({
                     "start_s":run.start_s,"materialize_s":run.output_s,"first_estimator_stop_iteration":run.first_reference_stop,
                     "peak_bytes_per_rank":run.peak_payload_bytes_per_rank,
@@ -1775,7 +1792,15 @@ fn execute_mode_inner(
         "units":"Ha, Ry, eV, Bohr, seconds and bytes as keyed; density_residual in Bohr^-3/2; electrons/occupations in electron counts; relative errors and fractions dimensionless; see docs/cli.md"});
     result["scf"]["driver"] = json!(if reference { "reference" } else { "legacy" });
     if let Some((stopped, reason)) = &reference_status {
+        result["convergence"]["work"]["davidson_stages"] =
+            over_ranks(reference_stages.take().expect("reference stages"))?;
         result["reference_scf"] = json!({"reference_stopped":stopped,"exit_reason":reason,
+            "diagnostics":{"schema":"reference-scf-diagnostics-1",
+                "level":if reference_diagnostics {"full"} else {"lightweight"},
+                "setting":"profile.davidson_stages / BAANDI_DAVIDSON_STAGES",
+                "ritz_changes":"per correction in Ha; empty when not collected",
+                "inner_clocks":"null when not measured; per-call clocks are local to the output rank",
+                "iteration_alias":"convergence.history[].reference_scf duplicates reference_scf.iterations[] for compatibility"},
             "mixing_input":config.scf.as_ref().and_then(|s|s.reference_mixing_input.as_ref().or(s.mixing.as_ref())),
             "mixing_implementation":"modified_broyden_difference_history",
             "verification":r.verification.as_ref().map(verification_json),
@@ -3114,7 +3139,11 @@ fn reference_solve_json(c: &dft_engine::refscf::record::SolveRecord) -> Value {
         "active_bands_per_iteration":c.active_bands,"active_bands_sum":c.active_bands.iter().sum::<usize>(),
         "h_columns":c.h_columns,"reduced_problem_orders":c.reduced_orders,
         "restarts":c.restarts,"unconverged_bands":c.unconverged,
-        "ritz_changes_ha":c.ritz_changes_ha,"repairs":c.repairs,"dropped_corrections":c.dropped_corrections})
+        "ritz_changes_ha":c.ritz_changes_ha,
+        "inner_clocks":c.inner_clocks.map(|(total, stages)| json!({"total_s":total,
+            "stage_s":dft_engine::refscf::record::INNER_STAGES.into_iter().zip(stages)
+                .map(|(name, seconds)|(name.to_string(), json!(seconds))).collect::<serde_json::Map<_, _>>()})),
+        "repairs":c.repairs,"dropped_corrections":c.dropped_corrections})
 }
 fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
     json!({"iteration":r.iteration,"dr2_ry":r.dr2_ry,"dr2_ha":r.dr2_ry/2.,

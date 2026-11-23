@@ -26,6 +26,54 @@ A new module `crates/dft-engine/src/refscf/` (no session/ladder control flow or 
 ## Rules
 No QE source to implementers; equations and conventions from the note and the literature only, the note's INFERRED items verified against QE reference data. Same parallel model on both sides. No constant tuned to silicon. The legacy driver stays the default until the new path passes the gates on the generality set; then the old driver and its switches are removed in one step.
 
+## Diagnostics level
+
+I26-2-DIAGLEVEL: the reference driver resolves the existing run-owned
+`[profile] davidson_stages = true|false` setting once at entry and passes it
+explicitly to every inner solve, including bounded re-entry, first-step redo
+and every independent verification attempt. `BAANDI_DAVIDSON_STAGES=on|off`
+overrides the input, with the existing registry default `off`. In-process
+callers use `RunConfig::enter`; no process-cached flag selects this level.
+This changes diagnostic collection only. The reference driver remains opt-in;
+all numerical defaults and the strict 1e-10 Ha / standard 5e-9 Ha classes stay
+unchanged. Verification is independent of diagnostics and remains on by default.
+
+- **Lightweight (default):** no per-band Ritz-history allocation and no inner
+  Davidson stage-clock reads. `ritz_changes_ha` is an empty array and
+  `inner_clocks` is null (unmeasured, not zero physical cost). Per-call iteration,
+  active-width, H-column, reduced-order, restart, repair and unconverged-root
+  counters remain available. Solver work/communication accounting remains on.
+- **Full:** every correction has one Ritz change in Ha per band, including
+  empty bands and unconverged/exhausted calls. Each call also reports inclusive
+  solve time and eight exclusive stage times (seconds, local output rank).
+  Ownership of the Ritz matrix moves into the driver record without a clone.
+  `convergence.work.davidson_stages` aggregates all SCF and verification calls;
+  MPI uses the existing rank maximum/minimum convention.
+
+Coarse phase clocks, all scientific history, density, eigenvalues, energies,
+verification attempts (including failures and recovery), run provenance and
+`run.completed` remain present in both modes. The engine total includes all
+attempts and recovery; it is not delivered wall. External timing must extend
+through required files, console output, final JSON write, and process/MPI exit.
+
+Reader contract: `reference_scf.diagnostics.schema` is
+`reference-scf-diagnostics-1`, with explicit `level`. All existing iteration and
+call keys, array types and locations are preserved. In full mode both historic
+paths (`reference_scf.iterations[]` and
+`convergence.history[].reference_scf`) still contain identical complete rows;
+`convergence.last_iteration` retains its usual copy. The duplication is retained
+for compatibility and is included in byte counts and external timings. An empty
+Ritz array in lightweight mode means **not collected**, never zero iterations
+or successful convergence. Consumers requiring per-band evidence must request
+full mode; absence of the new metadata identifies the historical always-full
+writer. `inner_clocks` and the diagnostics descriptor are additive fields.
+No existing trace shape is removed or relocated. `refscf-check` and
+`refscf-map` read QE density/stdout records, not this JSON; their four-record
+density and `refscf-map-1` contracts are unaffected and covered by their tests.
+
+Reproducer, byte definitions, Mac evidence and the pending dev08 A/B protocol:
+[diaglevel-dev08-request.md](../performance/lanes/RSCF/diaglevel-dev08-request.md).
+
 ## Start
 
 R-SCF-START (2026-11-23), explicit library entry

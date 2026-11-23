@@ -1,6 +1,8 @@
 //! R-SCF-2 full-path evidence. Slow matrix (real external PP, pure Rust):
-//! DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release -p dft-engine
-//! --test reference_driver -- --include-ignored --nocapture --test-threads=1
+//! BAANDI_DAVIDSON_STAGES=on DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release
+//! -p dft-engine --test reference_driver -- --include-ignored --nocapture --test-threads=1
+//! The rank-count rule reads per-band Ritz values and thresholds, which are full
+//! diagnostics (I26-2): the matrix requires BAANDI_DAVIDSON_STAGES=on.
 #[allow(dead_code)]
 mod common;
 #[path = "common/rank_rule.rs"]
@@ -68,6 +70,10 @@ fn check(
             })
         };
         let runs = run_layout();
+        assert!(
+            runs.iter().all(|r| r.full_diagnostics),
+            "rank-count rule needs full diagnostics: set BAANDI_DAVIDSON_STAGES=on"
+        );
         let repeated = run_layout();
         for (run, repeat) in runs.iter().zip(&repeated) {
             assert_eq!(

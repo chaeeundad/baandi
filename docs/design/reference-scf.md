@@ -810,3 +810,106 @@ The Si8 displaced full SCF is release-only on dev08 under the Mac test policy;
 its test asserts attempts fail at maps 10 and 11, pass at map 12 and positive
 recovery. This is a pending measurement, not new Si8 timing evidence. See the
 [dev08 request](../performance/lanes/RSCF/stop-to-verified-dev08-request.md).
+
+## Verification cost variants
+
+I25-VERIFY-COST (2026-11-24) adds two independent, run-owned switches,
+`BAANDI_REFSCF_VERIFY_REUSE=on|off` and `BAANDI_REFSCF_VERIFY_GATE=on|off`
+(input `[performance] refscf_verify_reuse/refscf_verify_gate`). Both default
+to **off**, affect only this reference driver, and can be combined for
+correctness checks. The legacy `VERIFY_REUSE`/`VERIFY_SCHEDULE` switches do
+not select these experiments. No acceptance or default promotion is implied.
+
+The shared `assess_fixed_point` call is unchanged: a candidate's own output
+state is deliverable only after a fresh map at that density, at
+`next_ethr_ry(ethr, dr2, electrons)`, passes the Coulomb error test
+`E_H[F(rho_out)-rho_out] < threshold_ry/2` and the existing occupied residual
+estimate guard. The default threshold remains **5e-9 Ha**. Energy, density,
+eigenvalues and orbitals all belong to that candidate, never to its passing
+verification output. Prediction cannot mark convergence. Exhaustion, mixer
+failure, and `verify=off` retain their explicit existing meanings.
+
+### V1: consume a failed verification as the next iterate
+
+For an ordinary pair `(x,y=F(x))` whose verification `z=F(y)` fails:
+
+1. Run the ordinary Broyden update for `(x,y-x)` exactly once. This saves the
+   pair and inserts its secant against the preceding pair in the existing
+   circular history; do not clear, replace or regularize any history.
+2. Choose `x_next=y`, overriding the computed mixed proposal. Use the actual
+   real-space `y` and its already transformed reciprocal coefficients, with
+   the usual fixed G=0 charge. Retain the verification map `z` and its
+   eigenpairs/audit in memory. No new solve is done at this boundary.
+3. The next logical SCF iteration consumes that map as `(y,z-y)` instead of
+   evaluating a new map. Its ethr is the tolerance actually used in the
+   failed verification, with **no second ratchet** or iteration-two reset.
+   Its `dr2` is evaluated by the ordinary transform/metric path. From then on
+   the ordinary next-ratchet rule applies to this iterate's ethr and dr2.
+4. If this iterate continues, append `(y,z-y)` with the ordinary Broyden
+   update, including normal history eviction and conditioning/error checks.
+   If its estimator stops, independently verify **z** before delivery. A
+   failed verification can itself be consumed next. As for all final
+   converged iterates, no unused final mixing/history insertion is performed.
+
+Energy accounting follows the input actually selected: for the source
+iterate the existing correction `-integral (x_next-y) V_Hxc[x_next]` is zero
+because `x_next=y`; the Hartree/XC terms are evaluated there. For the consumed
+iterate, use its own map's band sum and double counting, then the ordinary
+correction at its selected next input. Its map energy remains the energy of
+its own output. Never reuse the source iterate's energy/audit for the new
+iterate. The max-iteration budget counts logical SCF iterates, including
+consumed maps; a failed final-budget check is not queued for nonexistent work.
+
+The expensive map and its solver retries are counted/timed **only** in the
+source verification attempt. The consumed iteration has no new solver calls,
+zero map/solve/density/potential/energy work clocks, and `reused_from` points
+to the source iteration. Its transform, metric, mixing, correction and any
+new verification are charged normally. This preserves wall-interval closure
+without counting the already computed map twice. Logical iteration count is
+therefore distinct from evaluated-map count and solver-call count.
+
+### V2: empirical gate with mandatory refresh
+
+Let the last actual attempt have SCF estimator `d_a` (Ry) and measured
+verification Coulomb error `e_a` (Ha). At a new eligible stopping candidate
+with estimator `d`, predict `p=e_a*(d/d_a)` Ha. This estimates a locally
+constant verification-error/SCF-estimator ratio. It uses no material, size,
+rank or fitted constant. It is undefined until an actual attempt exists, or
+if any input is nonfinite, `d_a<=0`, `e_a<0`, `d<=0`, or `d>=d_a`
+(noncontracting relative to the calibration). Undefined means **attempt**.
+No claim of an upper bound is made; the residual guard may fail independently.
+
+If defined and `p>=threshold_ry/2`, skip this attempt and do ordinary SCF
+mixing. After one skipped eligible candidate, the next eligible candidate
+always attempts, even if predicted to fail, refreshing calibration and
+preventing indefinite deferral by a stale model. Non-stopping iterations do
+not consume that refresh. Every actual attempt updates `(d_a,e_a)`; passing
+still depends solely on the unchanged verifier. This rule intentionally
+cannot save the first failed attempt without empirical calibration.
+
+### Records and validation boundary
+
+When either switch is on, each iteration has a `verification_cost`
+record: `gate_enabled`, `skipped`, `predicted_error_ha` (null when undefined),
+`actual_error_ha` (null without an attempt), and `reused_from` (null unless
+consumed). The existing verification report retains only actual attempts;
+skipped candidates have no verification call range or attempt timestamps.
+The CLI exports these fields in both reference-history copies and an aggregate
+`reference_scf.verification_cost` object with attempts/skipped/reused, logical
+SCF iterations, map requests, evaluated maps and solver calls. Map requests
+exclude bounded retries; evaluated maps include each retry (one solver call
+per evaluation). Reuse is charged only at its source attempt.
+With both switches off the optional record is absent and numerical arithmetic
+and work decisions follow the previous path.
+
+The stop-to-verified interval still starts at the first estimator stop,
+including a skipped one, and ends at the passing verification's end. A
+skipped candidate after a failure is ordinary recovery; pre-first-attempt
+skipped work belongs to the existing unassigned interval part. The reader
+accepts missing attempt clocks only with an explicit valid skipped record and
+adds `skipped` when gate diagnostics are present. No rank maxima are mixed
+into this output-rank interval. All output remains inside external wall.
+
+Small-fixture and optional displaced-Si8 checks, exact counters, limitations,
+and the pending dev08 protocol are recorded in
+[verify-cost-dev08-request.md](../performance/lanes/RSCF/verify-cost-dev08-request.md).

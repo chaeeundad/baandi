@@ -57,6 +57,9 @@ fi
 mkdir -p "$wt/target/tmp"
 export TMPDIR="$wt/target/tmp" TMP="$wt/target/tmp" TEMP="$wt/target/tmp"
 export CARGO_TARGET_DIR="$wt/target"
+# Load cap (2026-11-23: four parallel runs drove the 12-core Mac to load 147).
+# Each run builds with 3 jobs and runs gate tests with 2 binaries at a time.
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-3}" CHECK_TEST_JOBS="${CHECK_TEST_JOBS:-2}"
 export SCCACHE_DIR="${SCCACHE_DIR:-/Volumes/990-2TB/Develop/rust-dft-cache/sccache}"
 common=(-C "$wt" -s workspace-write --json -c "model_reasoning_effort=\"${CODEX_EFFORT:-high}\""
         --output-schema "$repo/docs/schemas/report.schema.json"

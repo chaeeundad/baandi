@@ -73,3 +73,7 @@ test binaries concurrently).
 - Never mixed with performance jobs on the same cores at the same time: the gate takes the cores
   the queue gives it, and a timed job never runs beside a gate.
 - A gate result is valid for `HASH` only. A merge commit is a new hash and gets its own gate.
+
+
+## Update 2026-11-23: who runs the gate
+Since 2026-11-23 the measurement queue and the gate are operated by the `baandi-dev08` session (the dft5090 relay is retired). The gate runs on socket 1 from `/scr/mino/gate/gate.sh` (not `$HOME/baandi-gate`); measurements run on socket 0. A gate job in the queue is named `final-a0-gate-<hash>` and calls that script, so no measurement runs next to a gate. Paths for artifacts stay under `/scr` (the root filesystem under `$HOME` is small).

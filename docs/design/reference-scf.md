@@ -9,13 +9,13 @@ The dev08 decomposition (docs/performance/requests/si64-gap-attribution-2026-11-
 Real-Gamma, integer occupations, spin-unpolarized, norm-conserving, LDA/PBE: the cases of the benchmark suite (Si8...Si216, skew, slab, elongated, MgO Gamma, synthetic PPs). Everything else (k points, spin, smearing, DFT+U, forces/stress outputs) keeps using the legacy driver until the new one covers it; the CLI chooses by profile.
 
 ## Architecture
-A new module `crates/dft-engine/src/refscf/` (no dependency on `session.rs`, `cutoff_ladder.rs` or the switch registry beyond one profile switch):
+A new module `crates/dft-engine/src/refscf/` (no session/ladder control flow or legacy orchestration switches; the pure verification assessment is shared with `session.rs`):
 
 1. `profile`: default-off execution profile `BAANDI_REFERENCE_SCF=on` (input `[scf] driver = "reference"`), resolved once, recorded in results.json (`scf.driver`). The CLI branch sits where `run.rs` chooses between `run_ladder` and `run_outcome`; output schema stays the same (`ScfOutcome`), plus a `reference_scf` block per iteration.
 2. `density`: the mixed quantity in reciprocal space exactly as defined in the note (half-sphere storage for real Gamma, G=0 handling, which G shells are mixed and what happens to the rest, normalization, units), distributed by G vectors under MPI (owned G slabs from the existing grid plan; no full-grid replication).
 3. `metric`: the Hartree-like inner product used for the residual norm (the SCF accuracy estimate) and for the history overlap matrix, with its exact weight in |G|^2, the G=0 rule and the half-sphere weights; one reduction per inner product, batched.
 4. `broyden`: the modified Broyden/Anderson update (Johnson, PRB 38, 12807 (1988)) with the startup step, beta, history length, insertion/eviction order and the linear solve, as specified in the note; deterministic reductions (fixed order) so results are rank-count independent within rounding.
-5. `driver`: the loop. Input n_1 = atomic superposition at the FINAL cutoff (no coarse ladder in the reference arm). For each iteration k: inner threshold from the QE-equivalent rule (initial value, update from the previous accuracy estimate and the electron count, floor), one fixed-point map `ScfProblem::step_session(n_k, warm, threshold)` (the existing distributed Hamiltonian/Davidson/density kernels), accuracy estimate dr2 = metric(n_out - n_in), the first-iteration redo rule, stop when dr2 is below the threshold that the standard accuracy class maps to (decision 3 of 2026-11-11: match QE's conv_thr 1e-8 Ry equivalent), otherwise mix. After the stop: BAANDI's independent fixed-point verification (certificate), counted in the delivered wall.
+5. `driver`: `run(StartInput, Profile)` / `run_with(StartInput, Profile, Collective)` consume parsed input directly, build `refstart` once, and run the owned-row map with `ref_davidson`, the residual metric and patch-1 Broyden. No `ScfProblem`, session or ladder is constructed. After an estimator stop, a fresh map at the delivered output is assessed by the shared fixed-point function extracted from `session.rs`; all attempts are charged. See Driver below.
 6. `record`: per iteration: dr2, threshold, Davidson iterations and H columns, beta and history occupancy, step norm, energy terms, wall per phase; plus run totals. This is the comparison surface with QE (estimated scf accuracy, ethr, avg # of iterations).
 
 ## Patches (issue #25)
@@ -175,6 +175,10 @@ defaults are **0.7** and **8** (m in 1..25). `reference_preconditioning="tf"`
 enables Thomas-Fermi screening; `plain` is the default. The optional mixing
 names `plain`, `broyden`, and `pulay` denote this one difference-history method.
 There is no legacy mixer selection or damping/positivity recovery in this arm.
+The config parser validates reference-only names and retains `mixing_input`,
+then resolves `broyden`/`plain` to the historical `pulay` alias solely for the
+shared preflight vocabulary. The reference driver always constructs its own
+Broyden implementation; legacy input parsing is unchanged when the selector is off.
 
 Only the own-words [density specification](../research/qe-study/qe-density-mixing-spec.md)
 was used for QE conventions; no QE source was consulted. The method references
@@ -254,63 +258,115 @@ r_s=(3 Omega/(4 pi N_el))^(1/3), a=(12/pi)^(2/3)/r_s in bohr^-2. It does not
 act on dx. The plain profile carries G=0 without special projection; TF's
 zero factor applies to its residual, as in the stated formula.
 
-### Driver, energy, and explicit patch-1 limits
+### Driver (R-SCF-2, patch 2 part A)
 
-The start is the atomic valence superposition at the final cutoff. Missing
-PP_RHOATOM is an input error, not a uniform fallback. Each iteration uses one
-existing `ScfProblem::step_session` map, with the single first-iteration redo
-allowed by the specification. All ethr quantities below are in Ry:
+`driver::run(StartInput, Profile)` selects the registered communicator or serial
+collective; `run_with` accepts an explicit communicator for simulated-rank tests.
+The CLI branches **before** legacy problem construction. `refstart::start` owns
+the final-cutoff atomic charge/orbital initialization, local projector rows and
+FFT planes. Neither the ordinary loop nor its verification constructs a
+`ScfProblem`, `ScfSession`, cutoff ladder, legacy mixer or legacy eigensolver.
+`map.rs` calls the distributed real Hamiltonian, plane-density and LDA kernels
+explicitly, also at one rank. Previous output orbitals become the next start;
+H products are not retained between calls. Full density/orbitals are gathered
+only at delivery. Immutable basis/layout metadata remains replicated.
 
-* k=1 starts at 1e-2. If dr2<ethr*max(1,N_el), redo once at
-  max(0.1*dr2/max(1,N_el),1e-13), with unchanged density and empty history.
-* k=2 resets the previous cap to 1e-2, then applies the update. Thereafter,
-  ethr=max(min(ethr,0.1*dr2_previous/max(1,N_el)),1e-13).
-* The existing map receives ethr/2 in Ha. Stop when dr2<2*standard_threshold_ha,
-  thus default 5e-9 Ha maps to conv_thr=1e-8 Ry. No extra legacy residual guard,
-  ladder, stall schedule, mixer reset, or positivity damping is used by the
-  new driver. Kernel internals still use their existing backend configurations;
-  this patch does not rewrite the Hamiltonian/Davidson internals.
+Only LDA-PZ / modified LDA-PW, real Gamma, fixed integral occupations and NC
+atomic data are implemented. Missing atomic orbitals/charge, NLCC, PBE,
+symmetry, density floors, spin, smearing, forces/stress/relaxation reject.
+Hamiltonian/FFT/backend kernel implementations remain shared; legacy SCF
+scheduling, reuse, mixing and solver switches are not consulted by this loop.
+The default driver is unchanged. `mixing="broyden"` is accepted with either
+reference selector, including general validation; `plain` and `pulay` remain
+aliases. Legacy validation still rejects `broyden` when reference is off.
 
-On mixing, the recorded first-order correction is
+All schedule quantities here are **Ry** (solver boundary divides by two):
 
-\[
- dE_{scf}=-\frac{\Omega}{N_r}\sum_r(x_{next}-y)
- [V_H[x_{next}]+V_{xc}[x_{next}]],
-\]
+- First call: ethr=1e-2, all bands treated as occupied.
+- First-step redo once if dr2 < ethr*max(1,N_el), with the **same density and
+  potential**, empty Broyden history and the just-computed orbitals. The redo
+  uses max(0.1*dr2/max(1,N_el),1e-13) and the actual occupied/empty flags.
+- At step 2 reset the cap to 1e-2; from then on use
+  max(min(previous,0.1*previous_dr2/max(1,N_el)),1e-13).
+- Occupied bands use ethr; empty bands use max(5*ethr,1e-5 Ry). `ref_davidson`
+  uses the full owned plane-wave diagonal: kinetic + nonlocal projector-pair
+  diagonal + current mean local potential, all in Ha, without Gamma weights.
+- Each call permits 20 corrections. As described in `qe-scf-cycle.md`, retry
+  from returned orbitals if more than max(5,bands/4) flags remain, at most six
+  calls; exhaustion fails explicitly. Every call and remaining flag is recorded.
+- Estimator stop: dr2 < 2*`standard_threshold_ha`. Default **5e-9 Ha maps
+  explicitly to conv_thr=1e-8 Ry**, matching the relayed dev08 Si128 input.
+  This is an estimator threshold, not an absolute-energy proof.
 
-in Ha (Ry is twice this). The recorded variational energy is
-E_band - integral y(V_H[x]+V_xc[x]) + E_H[x_next]+E_xc[x_next]+E_ewald+dE_scf.
-The ionic potential is density independent and cancels from this correction.
-At the stop, dE_scf=0. Existing `energies` remain the direct orbital functional
-of the last output y; these intermediate variational values are additive
-`reference_scf` diagnostics. Even on exhaustion, the ordinary delivered
-`density.bin` remains the last **output** density to keep it consistent with
-that energy/orbital schema; it is not the note's unconverged QE restart file.
-The computed mixed-next-input is used for every subsequent map.
+The new map retains signed mixed density. LDA evaluates its absolute value,
+as specified in the own-words SCF-cycle note; neither Broyden output nor its
+charge is clipped, rescaled or damped. The direct energy audit uses the
+nonnegative orbital output. Input double counting uses the original signed
+input potential and output density. A low-cutoff synthetic negative-ringing
+probe is therefore handled without changing the mixer or tolerances.
 
-**Verification TODO (issue #25 patch 2):** the existing fixed-point verifier
-is coupled to session switch state, scheduling, predictor and reuse behavior.
-It is not called or silently substituted here. With the default requested
-verification, reaching the reference stop returns `converged=false`, an empty
-(unpassed) verification report, a clear console/results reason, and CLI exit 3.
-With explicit `verify="off"`, the estimator stop returns success but is never
-certified. No production accuracy or speed acceptance follows from these runs.
+The QE-style energy per iteration is
 
-Real Gamma, integer occupation and unpolarized NC are checked. Runtime control,
-forces/stress/relaxation and a complex-Gamma request reject. Serial LDA/PBE reuse
-the existing map. MPI patch 1 additionally requires the existing owned LDA
-map's eligibility (no NLCC/core floor, symmetry, snapshot; M2 grid/local-field/
-local-density kernels available). Unsupported MPI inputs reject explicitly;
-there is no replicated-density fallback. Mixing owns G rows from the same
-full-grid `DistributedPairFft` plan as `grid_dist`; transforms own real planes.
-The inverse fills only the positive half and forms 2 Re(sum_half)-rho0, avoiding
-conjugate full-grid replication. Existing construction/atomic start may still
-hold full arrays; a full density is materialized at final output only.
+`E_band - integral y(V_H[x]+V_xc[x]) + E_H[x_next]+E_xc[x_next]+E_ewald+descf`,
 
-Per-iteration JSON records include dr2 and ethr in Ry/Ha, beta, history slot
-and occupancy, gamma norms, A condition number, Davidson/H counts **including
-redo work**, and map/FFT/metric/mixing/energy-correction seconds. Stop records
-have no solve condition/gamma because no history solve was performed.
+where `descf = -Omega/N_r sum (x_next-y)(V_H[x_next]+V_xc[x_next])` in Ha.
+On a successful stop, x_next=y and descf=0. The ordinary result energy remains
+the independently accumulated orbital functional of y (kinetic, ionic local,
+nonlocal, output Hartree/XC, Ewald). The direct and variational energies are
+both retained; intermediates must not be compared under the same label.
+On exhaustion the delivered density is the last **output**, consistent with
+its energy and orbitals, not QE's unconverged restart mixed density.
+
+#### Independent verification and continuation
+
+`session::assess_fixed_point` is the extracted, callable ADR 0043 assessment;
+the legacy verifier calls it with its original map and retains its original
+predictor/clipping/test overrides. No legacy ordering or numerical path changes.
+The reference driver evaluates a fresh map at y, warm-started from the stop
+orbitals, at the next ratchet threshold. It measures E_H[F(y)-y], the occupied
+residual-square estimate, density L2 change and occupied eigenvalue change.
+The same standard threshold and residual guard decide pass; strict certificate
+criteria remain information, so `certified=false` and `verified=true` have
+their established distinct meanings. The output state is never replaced by
+the verification output. The reference solver's explicit empty-band policy
+also applies during verification; no legacy solver switches are inherited.
+
+ADR 0043 V5 applies: after a failure, discard the verification output, keep
+Broyden history, mix the original input/output pair and continue, within the
+configured iteration budget. Every attempt and the first estimator-stop index
+are recorded. This is essential: the displaced Si8 validation first stops at
+step 10 but needs step 12 to pass. `verify="off"` delivers the first estimator
+stop and creates no passing certificate. No predictor/reuse/scheduling heuristic
+is used. All verification maps and output materialization are in engine wall.
+
+#### Records and memory boundary
+
+`results.json.reference_scf.iterations` (also each ordinary history row's
+`reference_scf`) records dr2 in Ry/Ha, initial requested ethr and final used
+ethr, redo, every call's ethr/iterations/active-band widths and sums, H columns,
+reduced orders, restarts, repair/drop counts and unconverged flags. Per-correction
+Ritz changes are retained to diagnose threshold straddles across ranks.
+Mixing records beta, history occupancy/slot, coefficients' norms and condition.
+Energy keys distinguish output functional terms and the mixed-density
+Hartree/XC terms used in the QE-style variational energy. Console reference
+lines use `ethr`, `avg # of iterations`, `total energy` (Ry) and `estimated scf
+accuracy`; Gamma has one k point, so a call's average is its iteration count.
+
+Phase seconds separate start, solve, density, potential, audit, transform,
+metric, mixing, energy correction, verification and output. `map_s` is inclusive;
+do not add it to its phases. Output covers delivery plus CLI work before the
+final JSON serialization; an external timer is required for the final write
+and process lifetime. `peak_bytes_per_rank` is explicitly a conservative named
+array payload envelope, **not RSS or allocator high water**. It includes owned
+Davidson blocks/small matrices, reference start, fields, mixing history and
+the current replicated output-materialization buffers; opaque backend/FFT/allocator
+storage is excluded. On Linux, `peak_rss_bytes_per_rank` records `/proc/self/status`
+VmHWM through output preparation, gathered once at the I/O boundary. On macOS it
+is null (unavailable). External dev08 rank wrappers must measure the complete
+process high water, including final serialization/write and MPI finalization.
+
+Validation and remaining rank-tail exception: [patch-2 validation](../performance/lanes/RSCF/patch2-validation.md).
+No speed claim or default promotion is made.
 
 ### Reference files and tolerance
 
@@ -372,10 +428,19 @@ norm/Miller ordering. The ten lowest nonzero shells are checked separately.
 Charge differences versus QE are -3.74849e-15, -3.74849e-15, 0 electrons;
 absolute total charge agrees with 32 electrons within 1.43e-14 electrons.
 Maximum shell relative max/RMS errors are 6.4000e-16 / 9.6936e-16.
-Regression limits: max and RMS density errors <= 1e-19 + 1e-13 times the
-reference group's maximum amplitude, and charge error < 1e-12 electrons.
-These give rounding headroom over the measured errors without accepting
-physics-scale discrepancies. dr2 must match the printed rounded value within
+The original Si8-only regression used 1e-19 + 1e-13 times amplitude.
+R-SCF-2 replaces it, as explicitly authorized by the task, with
+**1e-17 + 1e-12 times the reference group's maximum amplitude** for same-rank
+next-density replay (max and RMS), charge error < 1e-12 electrons and unchanged
+G=0. Evidence is the relayed patch-1 dev08 floor at main 29beda5: Si128/Si8,
+k=1..6, max 4.9e-18 e/Bohr^3, RMS around 1e-20; the old failure was only a
+Si128 k=5 lowest-shell coefficient (1.6e-18 absolute, 3.8e-13 relative,
+condition 6689). Patch 1 is passed. For **cross-rank QE density comparisons**
+use 1e-16 + 1e-12 times amplitude: the measured QE Si8 np8/np1 floor is
+1.7e-17..6.8e-17 in output and 7.3e-18..1.7e-17 in mixed density. These are
+user-relayed measurements, not runs performed on this Mac. This replay floor
+is not an SCF energy tolerance or permission to conceal a late Ritz-branch
+trajectory difference. dr2 must match the printed rounded value within
 half its last decimal place plus 1e-14 Ry, even though QE prints '<'.
 CLI general diagnostic defaults remain unchanged; this fixture is tested at
 the tighter measured limits. Native MPI/MKL Si128 remains a dev08 check.
@@ -384,21 +449,19 @@ CLI command (replace the replay TOML's UPF placeholder with the local file):
 
 ```sh
 target/release/dft-cli refscf-check target/scratch/si8-qe-replay.toml \
-  --qe tests/reference/qe/i25-si8/si8-np1 --steps 3 --atol 1e-19 --rtol 1e-13
+  --qe tests/reference/qe/i25-si8/si8-np1 --steps 3 --atol 1e-17 --rtol 1e-12
 ```
 
 Exit 0; no failing term. Machine-readable per-shell errors and diagnostics:
 [qe-si8-validation.json](../performance/lanes/RSCF/qe-si8-validation.json), [qe-si8-cli.jsonl](../performance/lanes/RSCF/qe-si8-cli.jsonl).
 Final full gate: exit 1, 813 passed / 3 known cache failures / 181 ignored;
 build, fmt and clippy pass. The orchestrator explicitly accepts those TMPDIR
-failures as an environment limitation. Fixed-point verification remains the
-accepted patch-2 TODO. No commit was created.
+failures as an environment limitation. That patch-1 verification TODO is superseded by the Driver section above. No commit was created.
 
 ## Inner solver
 
 R-SCF-DAV adds `dft_solvers::ref_davidson::solve(comm, operator, start,
-hamiltonian_diagonal, options)`. It is a standalone call; **R-SCF-1 must explicitly wire it
-into its driver**. No existing solver, dispatch default, or SCF stopping rule
+hamiltonian_diagonal, options)`. It is a standalone call, wired directly into the reference driver by R-SCF-2. No existing solver, dispatch default, or SCF stopping rule
 is changed. The algorithm organization is derived only from
 `research/qe-study/davidson-iteration-structure-gamma.md`, not QE source.
 
@@ -492,3 +555,6 @@ the occupied edge. The SCF driver still owns independent final verification.
 Mac evidence, the replay interface, exact counts and the outstanding dev08
 comparison are in [the request](../performance/lanes/RSCF/dav-dev08-request.md)
 and [stored validation](../../crates/dft-solvers/tests/ref_davidson_evidence.json).
+
+## Rank-count acceptance for the reference driver (orchestrator, 2026-11-23)
+R-SCF-2 validation: 24 system/rank combinations converge and pass the independent fixed-point verification, maximum energy difference to the strict legacy reference 1.69e-9 Ha (inside the standard class 5e-9 Ha); legacy default bit-identical. One combination (si16, 3 simulated ranks) took a different discrete branch in the last Davidson call (2 versus 3 iterations: a Ritz-value change sits at the threshold, and the rank-dependent rounding of the reductions decides which side), ending with a final density difference of 8.2e-8 e/bohr^3 while still converging and certifying. QE has the same property (its own np8 versus np1 floor flips discrete decisions near thresholds). Acceptance rule from now on: across rank counts, the delivered result must stay inside the accuracy class and pass the certificate; trajectories must agree within rounding EXCEPT at documented branch points where a discrete test sits within rounding of its threshold (recorded with the margin). Bit-identical trajectories across rank counts are not required for the reference driver.

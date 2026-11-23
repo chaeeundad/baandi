@@ -1,0 +1,113 @@
+{
+  "task_id": "R-SCF-2",
+  "status": "FAILED",
+  "changed_files": [
+    "crates/dft-cli/src/config.rs",
+    "crates/dft-cli/src/run.rs",
+    "crates/dft-cli/tests/reference_driver.rs",
+    "crates/dft-engine/src/lib.rs",
+    "crates/dft-engine/src/refscf/driver.rs",
+    "crates/dft-engine/src/refscf/map.rs",
+    "crates/dft-engine/src/refscf/mod.rs",
+    "crates/dft-engine/src/refscf/record.rs",
+    "crates/dft-engine/src/refstart.rs",
+    "crates/dft-engine/src/session.rs",
+    "crates/dft-engine/tests/common/mod.rs",
+    "crates/dft-engine/tests/reference_driver.rs",
+    "crates/dft-engine/tests/refscf.rs",
+    "crates/dft-solvers/src/ref_davidson.rs",
+    "docs/design/reference-scf.md",
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/lanes/RSCF/dev08-request.md",
+    "docs/performance/lanes/RSCF/patch2-check-full.txt",
+    "docs/performance/lanes/RSCF/patch2-report.json",
+    "docs/performance/lanes/RSCF/patch2-si16-ritz.txt",
+    "docs/performance/lanes/RSCF/patch2-si8-reference.json",
+    "docs/performance/lanes/RSCF/patch2-validation.json",
+    "docs/performance/lanes/RSCF/patch2-validation.md",
+    "docs/performance/lanes/RSCF/run-dev08-request.md"
+  ],
+  "design_choices": [
+    "Direct StartInput -> refstart -> owned-row ref_davidson -> difference-history Broyden; no legacy problem/session/ladder construction. Warm orbitals retained between maps; defaults unchanged.",
+    "Shared pure fixed-point assessment extracted from session.rs; legacy assessment overrides preserved. Fresh reference map verification, with failed attempts continuing original history under ADR 0043 V5.",
+    "Default 5e-9 Ha standard threshold explicitly maps to 1e-8 Ry conv_thr; exact Ritz < ethr rule retained. Reference broyden/plain names normalize to the preflight pulay vocabulary only; numerical driver stays Broyden.",
+    "Complete per-call work/energy/phase records; per-band Ritz deltas diagnose rank branches. Payload envelopes are separate from Linux VmHWM through output preparation; Mac RSS null.",
+    "User-relayed patch-1 pass retained; measured-floor replay limits documented at 1e-17+1e-12*amplitude same-rank and 1e-16+1e-12*amplitude cross-QE-rank; no SCF energy or rank-trajectory tolerance relaxation."
+  ],
+  "commands": [
+    {
+      "command": "TMPDIR_990=\"$PWD/target/scratch/rscf2\" CHECK_SCCACHE=0 scripts/check.sh full",
+      "exit_code": 1
+    },
+    {
+      "command": "DFT_SI_UPF=\"$PWD/../pseudo/Si.pz-vbc.UPF\" cargo test --offline --release -p dft-engine --test reference_driver -- --include-ignored --nocapture --test-threads=1",
+      "exit_code": 101
+    },
+    {
+      "command": "DFT_SI_UPF=\"$PWD/../pseudo/Si.pz-vbc.UPF\" cargo test --offline --release -p dft-cli --test reference_driver -- --include-ignored --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --offline --release -p dft-engine --test refscf -- --include-ignored",
+      "exit_code": 0
+    },
+    {
+      "command": "DFT_SI_UPF=\"$PWD/../pseudo/Si.pz-vbc.UPF\" cargo test --offline --release -p dft-engine --test refstart -- --include-ignored",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test --offline --release -p dft-solvers --test ref_davidson",
+      "exit_code": 0
+    },
+    {
+      "command": "target/release/dft-cli run target/scratch/rscf2/qe-si8.toml --output-dir target/scratch/rscf2/qe-si8-final",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary \"$PWD/target/release/dft-cli\" --upf \"$PWD/../pseudo/Si.pz-vbc.UPF\" --cases gamma --repeats 1 --baseline target/scratch/rscf2/pristine-bench.json --require-identical",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/bench_scf.py --binary \"$PWD/target/release/dft-cli\" --upf \"$PWD/../pseudo/Si.pz-vbc.UPF\" --cases gamma --repeats 1 --baseline docs/performance/baseline.json --require-identical",
+      "exit_code": 3
+    },
+    {
+      "command": "BAANDI_REFERENCE_STRICT=on python3 -I scripts/bench_scf.py --binary \"$PWD/target/release/dft-cli\" --upf \"$PWD/../pseudo/Si.pz-vbc.UPF\" --cases gamma --repeats 1 --baseline docs/performance/baseline.json --require-identical",
+      "exit_code": 5
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I scripts/tests/test_readme_figures.py",
+      "exit_code": 1
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "All 24 case/rank combinations converge and pass independent fixed-point verification and the 5e-9 Ha class. Maximum energy difference vs strict legacy: 1.6924707191279253e-9 Ha.",
+    "Maximum absolute strict energy differences (Ha), Si8/16/32/skew/elongated/synthetic: 1.43884904e-10 / 1.09466214e-10 / 3.80993015e-11 / 7.59472485e-11 / 6.06945605e-11 / 1.69247072e-9.",
+    "Si16 np3 fails trajectory identity at map12: 2 vs 3 Davidson corrections, 92 vs 93 H columns; dr2 delta -3.15849833477692152e-11 Ry, final density max delta 8.174729508592105e-8 e/Bohr^3.",
+    "The occupied Ritz-change difference is 9.159339953156e-16 Ha across np1/np3 and straddles ethr about 1.9834923038e-12 Ha. No stopping-rule modification was introduced.",
+    "Full gate: build/fmt/clippy pass; 825 passed, 3 pre-existing cache failures, 188 ignored. Release CLI 2/2; refscf 10/10; refstart 6/6; ref_davidson 5/5.",
+    "Four pristine-vs-candidate default CLI cases: bit-identical densities, energies and eigenvalues; histories and verification identical excluding timings."
+  ],
+  "reference_comparison": "Genuine committed QE 7.6 Si8 np1 k1..k3 stdout (manifest/input/UPF hash retained). First divergence is map1: dr2 0.43855533 Ry QE vs 0.4347506747835862 Ry BAANDI, with ethr 0.01 Ry and 3 corrections in both. Initial rho(G) already differs by max 8.640452553275752e-7 e/Bohr^3 before solving. Steps1..3 iteration counts agree 3/1/4; later ethr follows different dr2. Startup radial table/direct-integral/clipping contributions are not separately isolated. Patch-1 density replay remains passed; no full-QE-trajectory identity or timing claim.",
+  "limitations": [
+    "Acceptance is incomplete: the silicon matrix intentionally exits 101 on the Si16 np3 rank branch. All final energy/certificate checks pass, but these cannot substitute for the requested trajectory gate.",
+    "Full gate exits 1 because worktree-local TMPDIR conflicts with three pre-existing pseudo-cache outside-repository tests; sandbox ps is denied in the nonfatal load report. No exclusions or cache-policy changes.",
+    "README generator ran without tracked changes; existing Python test expects obsolete standard-profile wording and fails. New adoption-result types, registry/dashboard generation/upload and task-title updates are outside OWNED_FILES and left to the master orchestrator.",
+    "Only Mac pure-Rust and simulated MPI validated. Linux VmHWM collection, real MPI/MKL and requested full dev08 cases remain unexecuted. Request is ready in run-dev08-request.md.",
+    "Payload counters exclude opaque backend/allocator storage; external per-rank RSS/timing needed through final JSON write and process exit.",
+    "Exploratory z4 synthetic and sheared conventional Si8 had nonconvergent strict oracles; final matrix uses closed-shell z2 and established skew Si2. Historical strict benchmark density differs despite 3.55e-15 Ha energy agreement; same-HEAD identity passes."
+  ],
+  "open_questions": [
+    "Resolve the measured Si16 rank threshold straddle using rank-reproducible arithmetic or a separately approved stopping/determinism contract; current < ethr and test caps remain unchanged.",
+    "Isolate startup density differences with matched radial/start potential and initial-Ritz/output-density snapshots on dev08 before claiming QE trajectory equivalence."
+  ],
+  "commit": "None. Changes intentionally left uncommitted; no git metadata writes or remote actions."
+}

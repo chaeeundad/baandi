@@ -25,7 +25,7 @@ pub mod policy;
 pub mod runtime;
 pub mod state_view;
 pub use events::{ExecutionConfig, ExecutionMode};
-pub use session::{CompletionMode, ScfSession, StepReport, StepStatus};
+pub use session::{CompletionMode, ScfSession, StepReport, StepStatus, assess_fixed_point};
 
 pub mod diagnostics;
 pub mod phase_clock;

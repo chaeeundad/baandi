@@ -78,6 +78,38 @@ pub fn potential_with_orbitals(
         );
     parse_upf(&text).unwrap()
 }
+/// Synthetic PP with both charge and orbitals for the reference driver.
+#[allow(dead_code)]
+pub fn potential_with_atomic_start(
+    z: f64,
+    rc: f64,
+    nonlocal: bool,
+    points: usize,
+    functional: &str,
+) -> Pseudopotential {
+    let text = build_text(z, rc, nonlocal, points, functional, true);
+    let pp = parse_upf(&text).unwrap();
+    let chi = |l: i32, a: f64| {
+        array(
+            &pp.mesh()
+                .r()
+                .iter()
+                .map(|r| r.powi(l + 1) * (-a * r * r).exp())
+                .collect::<Vec<_>>(),
+        )
+    };
+    let text = text
+        .replace("number_of_wfc=\"0\"", "number_of_wfc=\"2\"")
+        .replace(
+            "</UPF>",
+            &format!(
+                "<PP_PSWFC><PP_CHI.1 l=\"0\" label=\"s\" occupation=\"2\">{}</PP_CHI.1><PP_CHI.2 l=\"1\" label=\"p\" occupation=\"2\">{}</PP_CHI.2></PP_PSWFC></UPF>",
+                chi(0, 0.6),
+                chi(1, 0.5)
+            ),
+        );
+    parse_upf(&text).unwrap()
+}
 fn build(
     z: f64,
     rc: f64,

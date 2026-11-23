@@ -75,6 +75,9 @@ pub struct StartState {
     pub density_g: Vec<C>,
     pub ionic: Vec<f64>,
     pub potential: Vec<f64>,
+    /// Kinetic plus nonlocal plane-wave diagonal in Ha, in owned ORC row order.
+    /// Add the current mean local potential at each solve. No pair weights.
+    pub diagonal_static: Vec<f64>,
     pub orbitals: RealMatrix,
     pub ritz_values_hartree: Vec<f64>,
     pub electrons: f64,
@@ -318,6 +321,28 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
     .map_err(err)?;
     let projector_count = nl.projector_count();
     let complex_projector_bytes = nl.table_bytes();
+    let mut diagonal_static = Vec::with_capacity(operator.local_len());
+    for &row in operator.local_rows() {
+        let g = if row == 0 {
+            0
+        } else {
+            half.plus()[row.div_ceil(2)] as usize
+        };
+        let mut value = basis.vectors()[g].norm_squared / 2.;
+        let mut offset = 0;
+        for atom in nl.atoms() {
+            let count = atom.channel_count();
+            for j in 0..count {
+                for i in 0..count {
+                    let bi = nl.owned_value(offset + i, g).expect("owned representative");
+                    let bj = nl.owned_value(offset + j, g).expect("owned representative");
+                    value += atom.coupling_hartree()[i + count * j] * (bi * bj.conj()).re;
+                }
+            }
+            offset += count;
+        }
+        diagonal_static.push(value);
+    }
     drop(nl);
     let coeff = atomic_fields(&fields, &db, &dg, volume, &species, o);
     agree(
@@ -410,7 +435,7 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
     let g = fields.fft.local_len();
     let n = basis.vectors().len();
     let k = j.max(bands);
-    let retained_field_bytes = 8 * (3 * f + points) + 16 * g;
+    let retained_field_bytes = 8 * (3 * f + points + l) + 16 * g;
     let start_block_bytes = 8 * l * bands;
     // Named array live upper envelope; Q + next-Q/HQ + raw backup + selected,
     // Gram/EVD/rotation matrices, owned fields and both projector formats.
@@ -458,6 +483,7 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
         density_g,
         ionic,
         potential,
+        diagonal_static,
         orbitals,
         ritz_values_hartree,
         electrons,

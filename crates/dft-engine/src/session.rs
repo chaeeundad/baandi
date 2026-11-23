@@ -3078,12 +3078,6 @@ fn verify_fixed_point_inner(
             .collect()
     };
     let strict_residuals_per_k = residuals(false);
-    let strict_criteria_met = density_residual <= problem.options.density_tolerance
-        && occupied_eigenvalue_change_ha <= CERT_EIGENVALUE_LIMIT_HA
-        && strict_residuals_per_k
-            .iter()
-            .flatten()
-            .all(|r| *r <= 0.1 * problem.options.eigen_tolerance);
     let davidson_iterations = check.k_points.iter().map(|k| k.solution.iterations).sum();
     let operator_applications = check
         .k_points
@@ -3109,24 +3103,17 @@ fn verify_fixed_point_inner(
             .collect(),
         timings: check.timings,
     };
-    let attempt = VerificationAttempt {
+    let mut attempt = assess_fixed_point(
+        &problem.options,
         iteration,
-        passed: passed && clipped.is_none(),
+        eigen_tolerance,
         coulomb_error_ha,
-        threshold_ha: threshold,
-        eigen_tolerance_ha: eigen_tolerance,
         residual_bound_ha,
-        density_residual,
-        occupied_eigenvalue_change_ha,
-        strict_criteria_met,
-        davidson_iterations,
-        operator_applications,
-        wall: clock.elapsed(),
-        spin_density_residual: None,
-        occupation_change_electrons: None,
-        chemical_potential_change_ha: None,
-        moment_change: None,
-    };
+        &record,
+        clock.elapsed(),
+    );
+    // Preserve legacy predictor, forced-test failure and clipping decisions.
+    attempt.passed = passed && clipped.is_none();
     vp::mark(trace, 6);
     Ok((
         attempt,
@@ -3134,6 +3121,54 @@ fn verify_fixed_point_inner(
         clipped,
         (check.k_points, check.density, check.owned_density),
     ))
+}
+
+/// Shared ADR 0043 fixed-point assessment, independent of a session or solver.
+/// The caller must first evaluate a fresh map at the delivered output density,
+/// at the next ratchet tolerance, and supply its measured certificate metrics.
+/// This function does not replace that map with an estimator or alter the
+/// delivered state. The reference driver uses it without legacy switches.
+#[allow(clippy::too_many_arguments)]
+pub fn assess_fixed_point(
+    options: &ScfOptions,
+    iteration: usize,
+    eigen_tolerance_ha: f64,
+    coulomb_error_ha: f64,
+    residual_bound_ha: Option<f64>,
+    record: &FixedPointCertificate,
+    wall: Duration,
+) -> VerificationAttempt {
+    let threshold_ha = options
+        .standard
+        .expect("standard verification")
+        .threshold_ha;
+    let strict_criteria_met = record.density_residual <= options.density_tolerance
+        && record.occupied_eigenvalue_change <= CERT_EIGENVALUE_LIMIT_HA
+        && record
+            .strict_residuals_per_k
+            .iter()
+            .flatten()
+            .all(|r| *r <= 0.1 * options.eigen_tolerance);
+    VerificationAttempt {
+        iteration,
+        passed: coulomb_error_ha.is_finite()
+            && coulomb_error_ha < threshold_ha
+            && residual_bound_ha.is_none_or(|b| b.is_finite() && b < threshold_ha),
+        coulomb_error_ha,
+        threshold_ha,
+        eigen_tolerance_ha,
+        residual_bound_ha,
+        density_residual: record.density_residual,
+        occupied_eigenvalue_change_ha: record.occupied_eigenvalue_change,
+        strict_criteria_met,
+        davidson_iterations: record.davidson_iterations,
+        operator_applications: record.operator_applications,
+        wall,
+        spin_density_residual: None,
+        occupation_change_electrons: None,
+        chemical_potential_change_ha: None,
+        moment_change: None,
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

@@ -1,0 +1,602 @@
+{
+  "task_id": "R-SCF-2",
+  "status": "FAILED",
+  "host": "arm64 macOS",
+  "backend": "pure Rust; simulated MPI only",
+  "base_commit": "5c3c9db49fbdb754e7f9bfcc76ddb2cebb8e4b0d",
+  "source_sha256": {
+    "crates/dft-cli/src/config.rs": "e5a6511da469efa951378f8b26cd6f3751c37e028a12df9d1c5f4b935e382117",
+    "crates/dft-cli/src/run.rs": "a162080b3084a35cefb136a111db730f53b1bbb9bb468dfb21650f7f01fd37a0",
+    "crates/dft-engine/src/lib.rs": "3ec3d8ee05be39a86874f129289be4b26ca3539e883e1cd5e5d62ecfe1be266d",
+    "crates/dft-engine/src/refscf/driver.rs": "9367c4d0c5361704bfd950edcf474d8a0fbbe11bd4c3755489f98cf0fcc19518",
+    "crates/dft-engine/src/refscf/mod.rs": "2de0190bd37a54087895725a74723943cd84f7f438c8cee45a94679a66f534c2",
+    "crates/dft-engine/src/refscf/record.rs": "de3433b8b266311ae6b1cb055bca15a940af35ca6b9a973a3597866c018bdff6",
+    "crates/dft-engine/src/refstart.rs": "dcda53a2e183228918b10ee8e331e943428d09a4f34be95c294bc9289658a1df",
+    "crates/dft-engine/src/session.rs": "890817caaf4b1f5c8498a84bd90fa8c9ebbdb0cf4e02bada60cca1d3070d7a8c",
+    "crates/dft-engine/tests/common/mod.rs": "82c5e713e6f2e5682032be8a8113df4708afd97d6e9535a4bf82d8b17072c6f9",
+    "crates/dft-engine/tests/refscf.rs": "4851a78fc646fe0c7b0634ccf2452f674ca54e8ee3eabdd8e8da99da33c76bba",
+    "crates/dft-solvers/src/ref_davidson.rs": "135276511c065f4835868de6cbf85c7266bd64d5ef0313152e2ab7f6aed99966",
+    "crates/dft-engine/src/refscf/map.rs": "f92606dcbbcf908b78d4109bca0eed4d239fdba7b3680f62157fee0e557df3bb",
+    "crates/dft-engine/tests/reference_driver.rs": "1172092ac14590ea2f704415fb44f88fd8925dc4203c610382d4781cf8ed3ec5",
+    "crates/dft-cli/tests/reference_driver.rs": "e4903eb3478f2459a5164847e0522af6ca9464ce3df0f57227ab901ce042b608"
+  },
+  "binary_sha256": "7f10b33bd9042154df06b860defc2c6b44940a4893d08149e3760662c8dc2260",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "generality_runs": [
+    {
+      "case": "si8",
+      "ranks": 1,
+      "steps": 12,
+      "energy_ha": -31.32180199746883,
+      "strict_energy_ha": -31.32180199761263,
+      "delta_ha": 1.4379963886312908e-10,
+      "dr2_ry": 7.23779335370181e-10,
+      "verify_ha": 1.7765026574571315e-09,
+      "residual_bound_ha": 4.026960348101163e-12,
+      "verified": true,
+      "charge_error_e": 2.132e-14
+    },
+    {
+      "case": "si8",
+      "ranks": 2,
+      "steps": 12,
+      "energy_ha": -31.321801997468818,
+      "strict_energy_ha": -31.32180199761263,
+      "delta_ha": 1.4381384971784428e-10,
+      "dr2_ry": 7.237793351843573e-10,
+      "verify_ha": 1.7765026564258443e-09,
+      "residual_bound_ha": 4.026960342387335e-12,
+      "verified": true,
+      "charge_error_e": 3.553e-14
+    },
+    {
+      "case": "si8",
+      "ranks": 3,
+      "steps": 12,
+      "energy_ha": -31.32180199746879,
+      "strict_energy_ha": -31.32180199761263,
+      "delta_ha": 1.4384227142727468e-10,
+      "dr2_ry": 7.237793354964045e-10,
+      "verify_ha": 1.776502657678741e-09,
+      "residual_bound_ha": 4.026960345406129e-12,
+      "verified": true,
+      "charge_error_e": 2.132e-14
+    },
+    {
+      "case": "si8",
+      "ranks": 8,
+      "steps": 12,
+      "energy_ha": -31.321801997468746,
+      "strict_energy_ha": -31.32180199761263,
+      "delta_ha": 1.438849039914203e-10,
+      "dr2_ry": 7.237793352567686e-10,
+      "verify_ha": 1.7765026566116228e-09,
+      "residual_bound_ha": 4.026960345574561e-12,
+      "verified": true,
+      "charge_error_e": 3.553e-14
+    },
+    {
+      "case": "si16",
+      "ranks": 1,
+      "steps": 12,
+      "energy_ha": -63.129238894587246,
+      "strict_energy_ha": -63.12923889469616,
+      "delta_ha": 1.0891199053730816e-10,
+      "dr2_ry": 2.4610904848038556e-10,
+      "verify_ha": 3.087484818754847e-09,
+      "residual_bound_ha": 1.1119612925406914e-12,
+      "verified": true,
+      "charge_error_e": -1.137e-13
+    },
+    {
+      "case": "si16",
+      "ranks": 2,
+      "steps": 12,
+      "energy_ha": -63.12923889458701,
+      "strict_energy_ha": -63.12923889469616,
+      "delta_ha": 1.0914646964010899e-10,
+      "dr2_ry": 2.4610904843024575e-10,
+      "verify_ha": 3.0874848184864776e-09,
+      "residual_bound_ha": 1.1119612918153073e-12,
+      "verified": true,
+      "charge_error_e": -7.816e-14
+    },
+    {
+      "case": "si16",
+      "ranks": 3,
+      "steps": 12,
+      "energy_ha": -63.12923889459587,
+      "strict_energy_ha": -63.12923889469616,
+      "delta_ha": 1.0028600172518054e-10,
+      "dr2_ry": 2.1452406513261635e-10,
+      "verify_ha": 2.5857252697596186e-09,
+      "residual_bound_ha": 9.950913807940986e-13,
+      "verified": true,
+      "charge_error_e": 0.0
+    },
+    {
+      "case": "si16",
+      "ranks": 8,
+      "steps": 12,
+      "energy_ha": -63.12923889458669,
+      "strict_energy_ha": -63.12923889469616,
+      "delta_ha": 1.0946621387120103e-10,
+      "dr2_ry": 2.4610904847665493e-10,
+      "verify_ha": 3.087484818831674e-09,
+      "residual_bound_ha": 1.1119612919136594e-12,
+      "verified": true,
+      "charge_error_e": -1.421e-13
+    },
+    {
+      "case": "si32",
+      "ranks": 1,
+      "steps": 12,
+      "energy_ha": -126.70398595887112,
+      "strict_energy_ha": -126.70398595890344,
+      "delta_ha": 3.232969447708456e-11,
+      "dr2_ry": 8.421454464880853e-11,
+      "verify_ha": 1.0293023847445316e-09,
+      "residual_bound_ha": 8.619697745063722e-13,
+      "verified": true,
+      "charge_error_e": 3.126e-13
+    },
+    {
+      "case": "si32",
+      "ranks": 2,
+      "steps": 12,
+      "energy_ha": -126.7039859588659,
+      "strict_energy_ha": -126.70398595890344,
+      "delta_ha": 3.7545078157563694e-11,
+      "dr2_ry": 8.421454464812499e-11,
+      "verify_ha": 1.0281194081222345e-09,
+      "residual_bound_ha": 8.802476111468767e-13,
+      "verified": true,
+      "charge_error_e": 3.126e-13
+    },
+    {
+      "case": "si32",
+      "ranks": 3,
+      "steps": 12,
+      "energy_ha": -126.70398595886583,
+      "strict_energy_ha": -126.70398595890344,
+      "delta_ha": 3.7616132431139704e-11,
+      "dr2_ry": 8.421454466743523e-11,
+      "verify_ha": 1.0272094066751106e-09,
+      "residual_bound_ha": 8.969941272884533e-13,
+      "verified": true,
+      "charge_error_e": 3.126e-13
+    },
+    {
+      "case": "si32",
+      "ranks": 8,
+      "steps": 12,
+      "energy_ha": -126.70398595886535,
+      "strict_energy_ha": -126.70398595890344,
+      "delta_ha": 3.809930149145657e-11,
+      "dr2_ry": 8.421454460707757e-11,
+      "verify_ha": 1.0293023845874128e-09,
+      "residual_bound_ha": 8.619697744022746e-13,
+      "verified": true,
+      "charge_error_e": 2.274e-13
+    },
+    {
+      "case": "skew",
+      "ranks": 1,
+      "steps": 8,
+      "energy_ha": -7.2504067434538495,
+      "strict_energy_ha": -7.250406743529755,
+      "delta_ha": 7.59055041044121e-11,
+      "dr2_ry": 5.130529594122655e-10,
+      "verify_ha": 9.689380252414407e-11,
+      "residual_bound_ha": 3.3656390136558375e-12,
+      "verified": true,
+      "charge_error_e": 3.553e-15
+    },
+    {
+      "case": "skew",
+      "ranks": 2,
+      "steps": 8,
+      "energy_ha": -7.250406743453808,
+      "strict_energy_ha": -7.250406743529755,
+      "delta_ha": 7.594724849013801e-11,
+      "dr2_ry": 5.13052948697979e-10,
+      "verify_ha": 9.689372735614348e-11,
+      "residual_bound_ha": 3.3656388699934913e-12,
+      "verified": true,
+      "charge_error_e": -2.665e-15
+    },
+    {
+      "case": "skew",
+      "ranks": 3,
+      "steps": 8,
+      "energy_ha": -7.250406743453819,
+      "strict_energy_ha": -7.250406743529755,
+      "delta_ha": 7.593570217068191e-11,
+      "dr2_ry": 5.130529104902037e-10,
+      "verify_ha": 9.689353485584291e-11,
+      "residual_bound_ha": 3.365638333867032e-12,
+      "verified": true,
+      "charge_error_e": -4.441e-15
+    },
+    {
+      "case": "skew",
+      "ranks": 8,
+      "steps": 8,
+      "energy_ha": -7.250406743453825,
+      "strict_energy_ha": -7.250406743529755,
+      "delta_ha": 7.59303731001637e-11,
+      "dr2_ry": 5.130528949180148e-10,
+      "verify_ha": 9.689345295687956e-11,
+      "residual_bound_ha": 3.3656381188779477e-12,
+      "verified": true,
+      "charge_error_e": 1.776e-15
+    },
+    {
+      "case": "elongated",
+      "ranks": 1,
+      "steps": 13,
+      "energy_ha": -94.75442722857719,
+      "strict_energy_ha": -94.75442722863686,
+      "delta_ha": 5.967137894913321e-11,
+      "dr2_ry": 1.5435637927681504e-10,
+      "verify_ha": 4.657857558816092e-09,
+      "residual_bound_ha": 6.630186424900496e-13,
+      "verified": true,
+      "charge_error_e": 8.527e-14
+    },
+    {
+      "case": "elongated",
+      "ranks": 2,
+      "steps": 13,
+      "energy_ha": -94.7544272285772,
+      "strict_energy_ha": -94.75442722863686,
+      "delta_ha": 5.965716809441801e-11,
+      "dr2_ry": 1.5435637926339187e-10,
+      "verify_ha": 4.6578575575989215e-09,
+      "residual_bound_ha": 6.630186407472231e-13,
+      "verified": true,
+      "charge_error_e": 9.948e-14
+    },
+    {
+      "case": "elongated",
+      "ranks": 3,
+      "steps": 13,
+      "energy_ha": -94.75442722857616,
+      "strict_energy_ha": -94.75442722863686,
+      "delta_ha": 6.069456048862776e-11,
+      "dr2_ry": 1.5435637938244854e-10,
+      "verify_ha": 4.657857563569651e-09,
+      "residual_bound_ha": 6.630186422003595e-13,
+      "verified": true,
+      "charge_error_e": 8.527e-14
+    },
+    {
+      "case": "elongated",
+      "ranks": 8,
+      "steps": 13,
+      "energy_ha": -94.75442722857639,
+      "strict_energy_ha": -94.75442722863686,
+      "delta_ha": 6.046718681318453e-11,
+      "dr2_ry": 1.5435637925614667e-10,
+      "verify_ha": 4.657857557773653e-09,
+      "residual_bound_ha": 6.630186420105471e-13,
+      "verified": true,
+      "charge_error_e": 9.948e-14
+    },
+    {
+      "case": "synthetic",
+      "ranks": 1,
+      "steps": 10,
+      "energy_ha": -0.8543339773395443,
+      "strict_energy_ha": -0.854333979032015,
+      "delta_ha": 1.6924707191279253e-09,
+      "dr2_ry": 2.5606498740959245e-09,
+      "verify_ha": 3.3664334724372115e-10,
+      "residual_bound_ha": 2.0398275136874498e-11,
+      "verified": true,
+      "charge_error_e": 8.882e-16
+    },
+    {
+      "case": "synthetic",
+      "ranks": 2,
+      "steps": 10,
+      "energy_ha": -0.8543339773395446,
+      "strict_energy_ha": -0.854333979032015,
+      "delta_ha": 1.692470386061018e-09,
+      "dr2_ry": 2.5606498996673628e-09,
+      "verify_ha": 3.366433472557058e-10,
+      "residual_bound_ha": 2.0398275152036838e-11,
+      "verified": true,
+      "charge_error_e": 0.0
+    },
+    {
+      "case": "synthetic",
+      "ranks": 3,
+      "steps": 10,
+      "energy_ha": -0.8543339773395446,
+      "strict_energy_ha": -0.854333979032015,
+      "delta_ha": 1.692470386061018e-09,
+      "dr2_ry": 2.5606499068838184e-09,
+      "verify_ha": 3.366433472854103e-10,
+      "residual_bound_ha": 2.0398275150889093e-11,
+      "verified": true,
+      "charge_error_e": 0.0
+    },
+    {
+      "case": "synthetic",
+      "ranks": 8,
+      "steps": 10,
+      "energy_ha": -0.8543339773395444,
+      "strict_energy_ha": -0.854333979032015,
+      "delta_ha": 1.6924706081056229e-09,
+      "dr2_ry": 2.560649896213378e-09,
+      "verify_ha": 3.366433473247868e-10,
+      "residual_bound_ha": 2.039827514178897e-11,
+      "verified": true,
+      "charge_error_e": -2.22e-16
+    }
+  ],
+  "rank_comparisons": [
+    {
+      "case": "si8",
+      "ranks": 2,
+      "max_dr2_ry": 1.3100631690576847e-14,
+      "max_ethr_ry": 4.098284211995207e-17,
+      "density_max_e_bohr3": 5.065392549852277e-16
+    },
+    {
+      "case": "si8",
+      "ranks": 3,
+      "max_dr2_ry": 1.4099832412739488e-14,
+      "max_ethr_ry": 4.401860820291148e-17,
+      "density_max_e_bohr3": 5.828670879282072e-16
+    },
+    {
+      "case": "si8",
+      "ranks": 8,
+      "max_dr2_ry": 1.176836406102666e-14,
+      "max_ethr_ry": 3.686287386450715e-17,
+      "density_max_e_bohr3": 8.049116928532385e-16
+    },
+    {
+      "case": "si16",
+      "ranks": 2,
+      "max_dr2_ry": 7.627232179174825e-14,
+      "max_ethr_ry": 1.192622389734055e-16,
+      "density_max_e_bohr3": 3.7470027081099033e-16
+    },
+    {
+      "case": "si16",
+      "ranks": 3,
+      "max_dr2_ry": 3.1584983347769215e-11,
+      "max_ethr_ry": 1.3877787807814457e-17,
+      "density_max_e_bohr3": 8.174729508592105e-08
+    },
+    {
+      "case": "si16",
+      "ranks": 8,
+      "max_dr2_ry": 2.942091015256665e-14,
+      "max_ethr_ry": 4.683753385137379e-17,
+      "density_max_e_bohr3": 2.498001805406602e-16
+    },
+    {
+      "case": "si32",
+      "ranks": 2,
+      "max_dr2_ry": 6.639133687258436e-14,
+      "max_ethr_ry": 5.2909066017292616e-17,
+      "density_max_e_bohr3": 2.498001805406602e-16
+    },
+    {
+      "case": "si32",
+      "ranks": 3,
+      "max_dr2_ry": 1.4876988529977098e-14,
+      "max_ethr_ry": 1.1600963245594897e-17,
+      "density_max_e_bohr3": 2.914335439641036e-16
+    },
+    {
+      "case": "si32",
+      "ranks": 8,
+      "max_dr2_ry": 4.6407322429331543e-14,
+      "max_ethr_ry": 3.621235256101585e-17,
+      "density_max_e_bohr3": 2.3592239273284576e-16
+    },
+    {
+      "case": "skew",
+      "ranks": 2,
+      "max_dr2_ry": 5.589557717672084e-13,
+      "max_ethr_ry": 3.4680589015267196e-17,
+      "density_max_e_bohr3": 7.653599976009673e-14
+    },
+    {
+      "case": "skew",
+      "ranks": 3,
+      "max_dr2_ry": 2.6851872894656124e-12,
+      "max_ethr_ry": 1.6663863798046572e-16,
+      "density_max_e_bohr3": 2.876865412559937e-13
+    },
+    {
+      "case": "skew",
+      "ranks": 8,
+      "max_dr2_ry": 3.5354625979503557e-12,
+      "max_ethr_ry": 2.1941761909308641e-16,
+      "density_max_e_bohr3": 3.7569947153315297e-13
+    },
+    {
+      "case": "elongated",
+      "ranks": 2,
+      "max_dr2_ry": 1.2323475573339238e-14,
+      "max_ethr_ry": 1.4094628242311558e-17,
+      "density_max_e_bohr3": 2.7755575615628914e-16
+    },
+    {
+      "case": "elongated",
+      "ranks": 3,
+      "max_dr2_ry": 2.1871393585115584e-14,
+      "max_ethr_ry": 2.3418766925686896e-17,
+      "density_max_e_bohr3": 3.469446951953614e-16
+    },
+    {
+      "case": "elongated",
+      "ranks": 8,
+      "max_dr2_ry": 8.374425014123082e-15,
+      "max_ethr_ry": 8.723360713200524e-18,
+      "density_max_e_bohr3": 3.0531133177191805e-16
+    },
+    {
+      "case": "synthetic",
+      "ranks": 2,
+      "max_dr2_ry": 5.995204332975845e-15,
+      "max_ethr_ry": 2.3418766925686896e-17,
+      "density_max_e_bohr3": 5.2562121322097255e-16
+    },
+    {
+      "case": "synthetic",
+      "ranks": 3,
+      "max_dr2_ry": 8.271161533457416e-15,
+      "max_ethr_ry": 2.938950217088246e-17,
+      "density_max_e_bohr3": 6.904199434387692e-16
+    },
+    {
+      "case": "synthetic",
+      "ranks": 8,
+      "max_dr2_ry": 5.9396931817445875e-15,
+      "max_ethr_ry": 2.2451614118600095e-17,
+      "density_max_e_bohr3": 5.707240235963695e-16
+    }
+  ],
+  "rank_failures": [
+    "RSCF_RANK_FAILURE case=si16 ranks=3 step=12 dr2_delta_ry=-3.15849833477692152e-11 dav=2/3 h=92/93"
+  ],
+  "qe_comparison": [
+    {
+      "iteration": 1,
+      "qe_stdout": "tests/reference/qe/i25-si8/si8-np1/k1-mix/stdout.txt",
+      "qe_stdout_sha256": "5b7b02639792742bde88dea18e2bb7aa07357d2474b7759bdf4dec3f743432c8",
+      "qe_dr2_ry_printed": 0.43855533,
+      "qe_ethr_ry_printed": 0.01,
+      "qe_davidson_iterations_printed": 3.0,
+      "qe_total_ry_printed": -62.61942841,
+      "baandi_dr2_ry": 0.4347506747835862,
+      "baandi_ethr_ry": 0.01,
+      "baandi_davidson_iterations": 3,
+      "baandi_variational_total_ry": -62.62000017134319
+    },
+    {
+      "iteration": 2,
+      "qe_stdout": "tests/reference/qe/i25-si8/si8-np1/k2-mix/stdout.txt",
+      "qe_stdout_sha256": "c9667522455dc6943be7930b3c03e1cf061e6f98db62e48560fd1c91ffbbbf72",
+      "qe_dr2_ry_printed": 0.01956404,
+      "qe_ethr_ry_printed": 0.00137,
+      "qe_davidson_iterations_printed": 1.0,
+      "qe_total_ry_printed": -62.64131413,
+      "baandi_dr2_ry": 0.01980782493916525,
+      "baandi_ethr_ry": 0.001358595858698707,
+      "baandi_davidson_iterations": 1,
+      "baandi_variational_total_ry": -62.64154670773554
+    },
+    {
+      "iteration": 3,
+      "qe_stdout": "tests/reference/qe/i25-si8/si8-np1/k3-mix/stdout.txt",
+      "qe_stdout_sha256": "3e8894beb055e836751c61a3c23e47cd481d03b620168a88f009a8ab68817707",
+      "qe_dr2_ry_printed": 0.00085399,
+      "qe_ethr_ry_printed": 6.11e-05,
+      "qe_davidson_iterations_printed": 4.0,
+      "qe_total_ry_printed": -62.64319427,
+      "baandi_dr2_ry": 0.000881418344485175,
+      "baandi_ethr_ry": 6.189945293489141e-05,
+      "baandi_davidson_iterations": 4,
+      "baandi_variational_total_ry": -62.64316797941382
+    }
+  ],
+  "qe_start_density": {
+    "max_e_bohr3": 8.640452553275752e-07,
+    "rms_e_bohr3": 1.7334542038502398e-08,
+    "zero_delta_e_bohr3": 5.585809592645319e-16,
+    "worst_miller": [
+      1,
+      -1,
+      -1
+    ],
+    "scope": "Initial density recovered from committed QE first mixed/output densities; differs before the eigensolver. Direct radial transform vs QE table and start clipping not isolated."
+  },
+  "rank_straddle": {
+    "case": "si16",
+    "ranks": [
+      1,
+      3
+    ],
+    "scf_iteration": 12,
+    "davidson_correction": 2,
+    "occupied_band_zero_based": 31,
+    "ritz_change_ha": [
+      1.9843571230637735e-12,
+      1.9834411890684578e-12
+    ],
+    "threshold_ha": [
+      1.9834923037939178e-12,
+      1.9834923038151466e-12
+    ],
+    "difference_in_ritz_change_ha": 9.159339953156e-16,
+    "threshold_rule_unchanged": true
+  },
+  "legacy_identity": [
+    {
+      "case": "si8-gamma",
+      "density_bit_identical": true,
+      "density_sha256": "505e76ff5a1971b5146c5c6eb62db41d2f82ed2cdbeeaa29e7435c6169da3010",
+      "energy_bit_identical": true,
+      "eigenvalues_bit_identical": true,
+      "history_equal_excluding_timings": true,
+      "verification_equal_excluding_timings": true
+    },
+    {
+      "case": "si16-gamma",
+      "density_bit_identical": true,
+      "density_sha256": "d139379f007dff222faee3db1a489cde8b248912094a678328b5982246d8b4e6",
+      "energy_bit_identical": true,
+      "eigenvalues_bit_identical": true,
+      "history_equal_excluding_timings": true,
+      "verification_equal_excluding_timings": true
+    },
+    {
+      "case": "si32-gamma",
+      "density_bit_identical": true,
+      "density_sha256": "517f74150ca6a24d49d5b75c72e339582942a2e028456987ccd723bd2d0e1888",
+      "energy_bit_identical": true,
+      "eigenvalues_bit_identical": true,
+      "history_equal_excluding_timings": true,
+      "verification_equal_excluding_timings": true
+    },
+    {
+      "case": "si-skew",
+      "density_bit_identical": true,
+      "density_sha256": "3d484426e0313c03782f87f618abfff1729636246bee0ac4a42c9d34a8dba359",
+      "energy_bit_identical": true,
+      "eigenvalues_bit_identical": true,
+      "history_equal_excluding_timings": true,
+      "verification_equal_excluding_timings": true
+    }
+  ],
+  "full_gate": {
+    "exit_code": 1,
+    "build": 0,
+    "fmt": 0,
+    "clippy": 0,
+    "test": 1,
+    "passed": 825,
+    "failed": 3,
+    "ignored": 188,
+    "failures": [
+      "pseudo::tests::fetch_boundary_verifies_before_publication_and_never_overwrites",
+      "pseudo::cache_resolution_and_no_network_side_effects",
+      "pseudo::cached_fetch_checks_hash_and_provenance"
+    ],
+    "reason": "Worktree-local TMPDIR conflicts with pre-existing cache-outside-repositories requirement."
+  },
+  "notes": [
+    "No timing claims. Phase walls are instrumentation observations only.",
+    "Linux VmHWM path implemented but not executed on this Mac; Mac RSS null.",
+    "Generality energy/certificate passes for all 24 case/rank combinations; exact rank trajectory gate fails Si16 np3.",
+    "Patch-1 floor is user-relayed dev08 evidence, not newly measured on Mac."
+  ]
+}

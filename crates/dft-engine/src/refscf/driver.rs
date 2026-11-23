@@ -137,6 +137,7 @@ pub fn run_with<K: Collective>(
     let mut verification_calls = Vec::new();
     let mut first_reference_stop = None;
     for iteration in 1..=o.max_iterations {
+        let map_start_s = start.elapsed().as_secs_f64();
         let verification_call_start = verification_calls.len();
         if iteration > 1 {
             ethr = next_ethr_ry(
@@ -186,12 +187,15 @@ pub fn run_with<K: Collective>(
         };
         last_dr2 = dr2;
         let stopped = dr2 < profile.threshold_ry;
+        let estimator_s = start.elapsed().as_secs_f64();
         if stopped && first_reference_stop.is_none() {
             first_reference_stop = Some(iteration);
         }
         let mut certificate = None;
         let mut verification_s = 0.;
+        let (mut verification_start_s, mut verification_end_s) = (None, None);
         if stopped && let Some(report) = &mut verification {
+            verification_start_s = Some(start.elapsed().as_secs_f64());
             let clock = Instant::now();
             state.orbitals = step.solve.eigenvectors.clone();
             let tol = next_ethr_ry(ethr, dr2, state.electrons);
@@ -262,6 +266,7 @@ pub fn run_with<K: Collective>(
             report.attempts.push(attempt);
             certificate = Some(record);
             verification_s = clock.elapsed().as_secs_f64();
+            verification_end_s = Some(start.elapsed().as_secs_f64());
         }
         let finish = stopped && verification.as_ref().is_none_or(VerificationReport::passed);
         let mut diagnostics = Diagnostics {
@@ -353,6 +358,11 @@ pub fn run_with<K: Collective>(
         });
         records.push(Record {
             iteration,
+            map_start_s,
+            estimator_s,
+            verification_start_s,
+            verification_end_s,
+            map_end_s: start.elapsed().as_secs_f64(),
             dr2_ry: dr2,
             ethr_requested_ry: requested,
             ethr_ry: ethr,
@@ -396,6 +406,7 @@ pub fn run_with<K: Collective>(
                 }
             });
             let clock = Instant::now();
+            records.last_mut().expect("current map").map_end_s = start.elapsed().as_secs_f64();
             let density = state.fields.gather(comm, &step.density)?;
             let orbitals = gather_orbitals(&state, comm, &step.solve.eigenvectors)?;
             let point = KPoint {
@@ -481,6 +492,7 @@ pub fn run_with<K: Collective>(
         std::mem::swap(&mut x, &mut next);
         n.copy_from_slice(&next_planes);
         state.orbitals = step.solve.eigenvectors;
+        records.last_mut().expect("current map").map_end_s = start.elapsed().as_secs_f64();
     }
     unreachable!("positive budget checked")
 }

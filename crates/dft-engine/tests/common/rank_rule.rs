@@ -266,6 +266,11 @@ pub fn density_delta(a: &Run, b: &Run) -> f64 {
 pub fn fingerprint(run: &Run) -> String {
     let mut records = run.records.clone();
     for r in &mut records {
+        r.map_start_s = 0.;
+        r.estimator_s = 0.;
+        r.verification_start_s = r.verification_start_s.map(|_| 0.);
+        r.verification_end_s = r.verification_end_s.map(|_| 0.);
+        r.map_end_s = 0.;
         r.map_s = 0.;
         r.solve_s = 0.;
         r.density_s = 0.;

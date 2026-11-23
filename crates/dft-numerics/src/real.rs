@@ -2171,10 +2171,11 @@ pub mod fft_profile {
     impl Probe {
         pub fn new(n: [usize; 3]) -> Self {
             let cfg = RunConfig::current();
-            let enabled = cfg.on(Id::FFT_PROFILE) && cfg.on(Id::PHASE_PROFILE);
+            let full = cfg.on(Id::DAVIDSON_STAGES);
+            let enabled = full || (cfg.on(Id::FFT_PROFILE) && cfg.on(Id::PHASE_PROFILE));
             Self {
                 enabled,
-                clocks: enabled && cfg.on(Id::STAGE_TIMERS),
+                clocks: enabled && (full || cfg.on(Id::STAGE_TIMERS)),
                 shape: n,
                 work_per_point: if enabled {
                     n.map(|v| 5. * (v as f64).log2())

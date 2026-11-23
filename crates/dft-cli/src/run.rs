@@ -1656,6 +1656,10 @@ fn execute_mode_inner(
     let mut reference_summary = None;
     let mut reference_diagnostics = false;
     let mut reference_stages = None;
+    if reference {
+        // Isolate the apply_h JSON from earlier in-process reference runs.
+        dft_physics::distributed_real_gamma::take_apply_h_solves();
+    }
     let mut ladder_report = None;
     let atomic_density_built = reference
         || problem
@@ -1719,6 +1723,7 @@ fn execute_mode_inner(
                 }
                 reference_stages = Some(json!({
                     "schema":"reference-davidson-stages-1",
+                    "apply_h":reference_apply_h_json(),
                     "stage_s":dft_engine::refscf::record::INNER_STAGES.into_iter().zip(seconds).map(|(name, seconds)|(name.to_string(), json!(seconds))).collect::<serde_json::Map<_, _>>(),
                     "measured":run.full_diagnostics,
                     "note":"exclusive reference Davidson stages; includes every SCF/retry/verification call; rank max with min_over_ranks; total process wall includes output"
@@ -3325,6 +3330,55 @@ fn algebra_stream_json() -> serde_json::Value {
     })
 }
 
+/// Per-solve operator records are consumed once after the reference driver.
+/// The surrounding over_ranks merge computes extrema of rank-local totals.
+fn reference_apply_h_json() -> Value {
+    use dft_physics::distributed_real_gamma::{APPLY_H_STAGES, ApplyH, take_apply_h_solves};
+    let solves = take_apply_h_solves();
+    let block = |s: &ApplyH| {
+        let f = |indices: &[usize]| {
+            indices
+                .iter()
+                .map(|&i| s.fft.0[i][0] as f64 * 1e-9)
+                .sum::<f64>()
+        };
+        json!({
+            "stage_s": APPLY_H_STAGES.iter().zip(s.seconds).map(|(k,v)| (k.to_string(),json!(v))).collect::<serde_json::Map<_,_>>(),
+            "fft": {
+                "measured": s.fft.0.iter().any(|v| v[0] > 0),
+                "inverse_s": f(&[0,1,2,3,4,5,6,7]),
+                "forward_s": f(&[9,10,11,12,13,14,15,16]),
+                "inverse_local_1d_s": f(&[1]), "inverse_local_2d_s": f(&[5,7]),
+                "inverse_alltoall_s": f(&[3]), "inverse_transpose_pack_unpack_s": f(&[2,4]),
+                "forward_local_1d_s": f(&[15]), "forward_local_2d_s": f(&[9,11]),
+                "forward_alltoall_s": f(&[13]), "forward_transpose_pack_unpack_s": f(&[12,14]),
+                "grid_pack_unpack_s": f(&[0,6,10,16]), "potential_multiply_s": f(&[8]),
+                "stages": dft_numerics::real::fft_profile::NAMES.iter().zip(s.fft.0).map(|(k,v)| (k.to_string(),json!({"s":v[0] as f64*1e-9,"calls":v[1]}))).collect::<serde_json::Map<_,_>>()
+            },
+            "calls":s.columns_per_call.len(), "columns":s.columns_per_call.iter().sum::<usize>(),
+            "columns_per_call":s.columns_per_call, "complex_pairs_per_direction":s.pairs,
+            "two_band_pairs":s.pairs-s.odd_tails, "single_band_tails":s.odd_tails,
+            "nonlocal_wide_entry_calls":s.wide_calls, "nonlocal_direct_pure_calls":s.direct_calls
+        })
+    };
+    let mut total = ApplyH::default();
+    for s in &solves {
+        for (a, b) in total.seconds.iter_mut().zip(s.seconds) {
+            *a += b;
+        }
+        total.fft.add(s.fft);
+        total
+            .columns_per_call
+            .extend_from_slice(&s.columns_per_call);
+        total.pairs += s.pairs;
+        total.odd_tails += s.odd_tails;
+        total.wide_calls += s.wide_calls;
+        total.direct_calls += s.direct_calls;
+    }
+    json!({"totals":block(&total),"solves":solves.iter().map(block).collect::<Vec<_>>(),
+        "note":"Full diagnostics only; DAVIDSON_STAGES enables FFT clocks independently of the other profile switches; FFT measured=false means no timed FFT work was recorded on this rank. Rank-local seconds, outer rank max/min after summing solves. SCF, retry and verification solves in execution order. total is inclusive; FFT child timers are exclusive. Pairing is adjacent bands with a zero partner for odd tails. Wide entry is a request, not proof of MKL dispatch; inspect gemm_dispatch for effective routes."})
+}
+
 fn reference_solve_json(c: &dft_engine::refscf::record::SolveRecord) -> Value {
     json!({"ethr_ry":c.ethr_ry,"ethr_ha":c.ethr_ry/2.,"first_step_all_occupied":c.first_step,
         "davidson_iterations":c.iterations,"avg_iterations":c.iterations as f64,
@@ -3421,10 +3475,24 @@ mod tests {
         let out = dft_mpi::simulate(3, |comm: &dft_mpi::SimRank| {
             let r = comm.rank();
             let v = json!({"note":"x","a":{"s":0.5 + r as f64,"calls":10 - r as u64},
-                "list":[r as f64 * 2.0, -(r as f64)]});
+                "list":[r as f64 * 2.0, -(r as f64)],
+                "apply_h":{"totals":{"stage_s":{"kinetic":0.25+r as f64},
+                    "columns_per_call":[3,2], "complex_pairs_per_direction":3},
+                    "solves":[{"fft":{"inverse_s":0.5+r as f64,"forward_s":2.5-r as f64}}]}});
             over_ranks_with(comm, v).unwrap()
         });
         for o in &out {
+            assert_eq!(o["apply_h"]["totals"]["stage_s"]["kinetic"], 2.25);
+            assert_eq!(
+                o["min_over_ranks"]["apply_h"]["totals"]["stage_s"]["kinetic"],
+                0.25
+            );
+            assert_eq!(o["apply_h"]["totals"]["columns_per_call"], json!([3, 2]));
+            assert_eq!(o["apply_h"]["solves"][0]["fft"]["forward_s"], 2.5);
+            assert_eq!(
+                o["min_over_ranks"]["apply_h"]["solves"][0]["fft"]["inverse_s"],
+                0.5
+            );
             assert_eq!(o["ranks"], 3);
             assert_eq!(o["note"], "x");
             assert_eq!(o["a"]["s"], 2.5);

@@ -60,6 +60,7 @@ use dft_mpi::{Collective, MpiError};
 use dft_numerics::linalg::LinalgError;
 use dft_numerics::{FftError, GemmSite, RealGemmWorkspace, RealMatrix, RealOp, pool::WorkerPool};
 use dft_solvers::distributed_fft::{DistFftError, DistributedPairFft, position_owners};
+pub use dft_solvers::ref_davidson::{APPLY_H_STAGES, ApplyH, take_apply_h_solves};
 use num_complex::Complex64 as C;
 use std::f64::consts::SQRT_2;
 use std::sync::Arc;
@@ -155,6 +156,8 @@ pub struct DistributedRealHamiltonian {
     gemm: RealGemmWorkspace,
     /// `BAANDI_M2_DGEMM=on`: projector products through the per-panel dgemm route.
     dgemm: bool,
+    reference_profile: bool,
+    apply_times: Option<[f64; 9]>,
     lane: lane_profile::Profile,
     source_identity: Arc<()>,
     pool: Arc<WorkerPool>,
@@ -423,6 +426,10 @@ impl DistributedRealHamiltonian {
             image: RealMatrix::zeros(n_loc, capacity)?,
             gemm: RealGemmWorkspace::with_pool(n_loc, count.max(capacity), pool.clone())?,
             dgemm: dft_numerics::switches::on(dft_numerics::switches::Id::M2_DGEMM),
+            reference_profile: dft_numerics::switches::on(
+                dft_numerics::switches::Id::DAVIDSON_STAGES,
+            ),
+            apply_times: None,
             lane: lane_profile::Profile::new(coupling.iter().map(|c| c.count)),
             source_identity,
             pool,
@@ -908,6 +915,15 @@ impl DistributedRealHamiltonian {
         Ok(())
     }
 
+    fn apply_clock(&self) -> Option<Instant> {
+        self.apply_times.is_some().then(Instant::now)
+    }
+    fn apply_elapsed(&mut self, slot: usize, start: Option<Instant>) {
+        if let (Some(times), Some(start)) = (&mut self.apply_times, start) {
+            times[slot] += start.elapsed().as_secs_f64();
+        }
+    }
+
     /// `reduced` = sum over ranks of P_local^T x (count x m), identical on all ranks.
     fn projections_reduced<K: Collective>(
         &mut self,
@@ -919,6 +935,7 @@ impl DistributedRealHamiltonian {
         let span = self
             .lane
             .start(lane_profile::Stage::Projection, n_loc, count, m);
+        let apply_clock = self.apply_clock();
         let arrival_start = dft_numerics::stage_clock::arrival::clock();
         if n_loc > 0 && self.dgemm {
             self.gemm.multiply_slices_wide_into(
@@ -943,6 +960,7 @@ impl DistributedRealHamiltonian {
         } else {
             self.projections.as_mut_slice()[..count * m].fill(0.);
         }
+        self.apply_elapsed(5, apply_clock);
         dft_numerics::stage_clock::arrival::stage(
             301,
             dft_numerics::stage_clock::elapsed_ns(arrival_start),
@@ -955,10 +973,12 @@ impl DistributedRealHamiltonian {
         let _span = self
             .lane
             .start(lane_profile::Stage::Reduce, n_loc, count, m);
+        let apply_clock = self.apply_clock();
         comm.tree_sum_f64(
             &self.projections.as_slice()[..count * m],
             &mut self.reduced.as_mut_slice()[..count * m],
         )?;
+        self.apply_elapsed(6, apply_clock);
         Ok(())
     }
 
@@ -1033,12 +1053,15 @@ impl DistributedRealHamiltonian {
 
         // (1) mirror rows to the ranks that own the minus positions.
         let t0 = dft_numerics::stage_clock::start();
+        let apply_clock = self.apply_clock();
         self.exchange_mirror_rows(comm, xs, m)?;
+        self.apply_elapsed(1, apply_clock);
         stage_add(Stage::Mirror, t0);
 
         // (2) pack every pair, distributed local-potential apply (one transpose per
         // direction for the whole block when batched), stage mirror h.
         let t0 = dft_numerics::stage_clock::start();
+        let apply_clock = self.apply_clock();
         for t in 0..pairs {
             Self::pack_pair(
                 &self.src,
@@ -1050,6 +1073,7 @@ impl DistributedRealHamiltonian {
                 &mut self.hbuf[t * local_len..(t + 1) * local_len],
             );
         }
+        self.apply_elapsed(2, apply_clock);
         stage_add(Stage::PackUnpack, t0);
         let t0 = dft_numerics::stage_clock::start();
         if self.batched {
@@ -1086,6 +1110,7 @@ impl DistributedRealHamiltonian {
             let span = self
                 .lane
                 .start(lane_profile::Stage::Coupling, n_loc, count, m);
+            let apply_clock = self.apply_clock();
             for atom in &self.coupling {
                 for band in 0..m {
                     for j in 0..atom.count {
@@ -1098,7 +1123,9 @@ impl DistributedRealHamiltonian {
                     }
                 }
             }
+            self.apply_elapsed(7, apply_clock);
             drop(span);
+            let apply_clock = self.apply_clock();
             let span = self.lane.start(lane_profile::Stage::Back, n_loc, count, m);
             if n_loc > 0 && self.dgemm {
                 self.gemm.multiply_slices_wide_into(
@@ -1131,6 +1158,7 @@ impl DistributedRealHamiltonian {
                     *y += v;
                 }
             }
+            self.apply_elapsed(8, apply_clock);
         }
         stage_add(Stage::Nonlocal, t0);
         parts.lap(dft_numerics::work_timers::DistPart::Back);
@@ -1161,6 +1189,7 @@ impl DistributedRealHamiltonian {
         let local_len = self.fft.local_len();
         let (mi, ranks) = (self.max_items, self.ranks);
         let t0 = dft_numerics::stage_clock::start();
+        let apply_clock = self.apply_clock();
         for t in 0..pairs {
             let out = &self.hbuf[t * local_len..(t + 1) * local_len];
             for &(k, id) in &self.in_items {
@@ -1169,18 +1198,22 @@ impl DistributedRealHamiltonian {
                 self.hsend[off + 1] = out[k].im;
             }
         }
+        self.apply_elapsed(3, apply_clock);
         stage_add(Stage::PackUnpack, t0);
         if mi > 0 {
             let t0 = dft_numerics::stage_clock::start();
             let blk = mi * 2 * pairs;
+            let apply_clock = self.apply_clock();
             comm.alltoall_f64(
                 &self.hsend[..ranks * blk],
                 blk,
                 &mut self.hrecv[..ranks * blk],
             )?;
+            self.apply_elapsed(1, apply_clock);
             stage_add(Stage::Mirror, t0);
         }
         let t0 = dft_numerics::stage_clock::start();
+        let apply_clock = self.apply_clock();
         let ys = y.as_mut_slice();
         for t in 0..pairs {
             let (ca, cb) = (2 * t, (2 * t + 1 < m).then_some(2 * t + 1));
@@ -1211,11 +1244,14 @@ impl DistributedRealHamiltonian {
                 }
             }
         }
+        self.apply_elapsed(3, apply_clock);
+        let apply_clock = self.apply_clock();
         if let Some(xs) = kinetic_x {
-            for (j, (x, y)) in xs.iter().zip(ys.iter_mut()).enumerate() {
+            for (j, (x, y)) in xs.iter().zip(y.as_mut_slice().iter_mut()).enumerate() {
                 *y += self.kinetic[j % n_loc] * x;
             }
         }
+        self.apply_elapsed(4, apply_clock);
         stage_add(Stage::PackUnpack, t0);
         Ok(())
     }
@@ -1463,8 +1499,26 @@ impl dft_solvers::distributed_davidson::DistributedRealOperator for DistributedR
         x_local: &RealMatrix,
         y_local: &mut RealMatrix,
     ) -> Result<(), dft_solvers::SolverError> {
-        DistributedRealHamiltonian::apply_block(self, comm, x_local, y_local)
-            .map_err(|e| dft_solvers::SolverError::Application(e.to_string()))
+        use dft_numerics::real::fft_profile;
+        use dft_solvers::ref_davidson::{apply_h_active, record_apply_h};
+        let profile = self.reference_profile && apply_h_active();
+        let before = profile.then(fft_profile::snapshot);
+        self.apply_times = profile.then_some([0.; 9]);
+        let start = self.apply_clock();
+        let result = DistributedRealHamiltonian::apply_block(self, comm, x_local, y_local);
+        self.apply_elapsed(0, start);
+        if let Some(times) = self.apply_times.take()
+            && result.is_ok()
+        {
+            record_apply_h(
+                times,
+                fft_profile::snapshot().since(before.unwrap()),
+                x_local.cols(),
+                self.dgemm,
+                self.count > 0 && !self.rows.is_empty(),
+            );
+        }
+        result.map_err(|e| dft_solvers::SolverError::Application(e.to_string()))
     }
 }
 
@@ -1689,6 +1743,128 @@ mod lane_identity_tests {
     use dft_geometry::Cell;
     use dft_numerics::switches::RunConfig;
     use dft_units::Hartree;
+
+    #[test]
+    fn reference_h_apply_profile_is_bit_identical() {
+        use dft_solvers::ref_davidson::{Options, solve, take_apply_h_solves};
+        let universe = dft_mpi::Universe::init().unwrap();
+        let comm = universe.world();
+        for bands in [2, 3] {
+            let cell =
+                Cell::from_user_rows_bohr([[6., 0.4, 0.2], [1., 7., 0.3], [0.5, 0.7, 8.]]).unwrap();
+            let basis = PlaneWaveBasis::new(&cell, Hartree(1.2)).unwrap();
+            let grid =
+                dft_basis::FftGridSpec::new(&basis, &basis.density_basis(&cell).unwrap(), None)
+                    .unwrap();
+            let columns = (0..3)
+                .map(|j| {
+                    basis
+                        .momenta()
+                        .iter()
+                        .map(|g| {
+                            C::from_polar(
+                                0.1 / (1. + g.norm_squared),
+                                g.cartesian[0] * (j + 1) as f64 * 0.13,
+                            )
+                        })
+                        .collect()
+                })
+                .collect();
+            let nl = NonlocalOperator::from_columns(
+                basis.momenta().to_vec(),
+                vec![(
+                    columns,
+                    vec![0.7, -0.03, 0., -0.03, 0.6, 0.02, 0., 0.02, 0.8],
+                )],
+                3,
+            );
+            let potential = ndarray::Array3::from_shape_fn(grid.dims(), |(i, j, k)| {
+                0.1 * ((i + 2 * j + 3 * k) as f64).sin()
+            });
+            let source = Hamiltonian::new(&cell, &basis, potential, nl).unwrap();
+            let mut baseline = None;
+            for mode in ["off", "on", "fft"] {
+                let config = RunConfig::from_pairs(&[
+                    ("davidson_stages", if mode == "off" { "off" } else { "on" }),
+                    ("phase_profile", if mode == "fft" { "on" } else { "off" }),
+                    ("fft_profile", if mode == "fft" { "on" } else { "off" }),
+                    ("stage_timers", if mode == "fft" { "on" } else { "off" }),
+                ])
+                .unwrap();
+                let _scope = config.enter();
+                take_apply_h_solves();
+                let mut op = DistributedRealHamiltonian::new(
+                    &source,
+                    &basis,
+                    bands,
+                    0,
+                    1,
+                    WorkerPool::new(1).unwrap(),
+                )
+                .unwrap();
+                let rows = op.local_len();
+                let x = RealMatrix::new(
+                    rows,
+                    bands,
+                    (0..rows * bands)
+                        .map(|i| ((i * 17 % 113) as f64 - 56.) / 113.)
+                        .collect(),
+                )
+                .unwrap();
+                let diagonal = op.kinetic.clone();
+                let mut options = Options::new(bands, 1e-7, bands);
+                options.profile = mode != "off";
+                options.return_hx = true;
+                let fft_before = dft_numerics::real::fft_profile::snapshot();
+                let result = solve(&comm, &mut op, &x, &diagonal, options).unwrap();
+                let bits = result
+                    .eigenvalues
+                    .iter()
+                    .chain(result.eigenvectors.as_slice())
+                    .chain(result.hx.as_ref().unwrap().as_slice())
+                    .map(|v| v.to_bits())
+                    .collect::<Vec<_>>();
+                if let Some(previous) = &baseline {
+                    assert_eq!(&bits, previous);
+                } else {
+                    baseline = Some(bits);
+                }
+                let records = take_apply_h_solves();
+                if mode == "off" {
+                    assert_eq!(
+                        dft_numerics::real::fft_profile::snapshot().since(fft_before),
+                        dft_numerics::real::fft_profile::Snapshot::default()
+                    );
+                    assert!(records.is_empty());
+                    assert!(result.record.apply_h.is_none());
+                } else {
+                    assert_eq!(records.len(), 1);
+                    let a = &records[0];
+                    assert_eq!(a.columns_per_call.len(), result.record.h_calls);
+                    assert_eq!(
+                        a.columns_per_call.iter().sum::<usize>(),
+                        result.record.h_columns
+                    );
+                    assert_eq!(2 * a.pairs - a.odd_tails, result.record.h_columns);
+                    assert_eq!(a.wide_calls, 2 * result.record.h_calls);
+                    assert_eq!(a.direct_calls, 0);
+                    if mode != "off" {
+                        for i in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] {
+                            assert!(a.fft.0[i][1] > 0, "missing FFT stage {i}");
+                            assert!(a.fft.0[i][0] > 0, "missing FFT clock {i}");
+                        }
+                        assert_eq!(a.fft.0[0][1] as usize, a.pairs);
+                        assert_eq!(a.fft.0[16][1] as usize, a.pairs);
+                    }
+                    assert!(a.seconds[0] > 0. && a.seconds[5] > 0. && a.seconds[8] > 0.);
+                    println!(
+                        "P3-HAPPLY mode={mode} bands={bands} calls={} columns={} pairs={} odd_tails={} bit-identical",
+                        result.record.h_calls, result.record.h_columns, a.pairs, a.odd_tails
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn nonlocal_profile_preserves_operator_and_energy_bits() {

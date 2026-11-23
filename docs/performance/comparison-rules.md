@@ -33,6 +33,18 @@ fast jobs are limited to 600 s, authorized `final-` jobs to 7200 s.
    elsewhere retain provenance; their superseded instructions do not authorize
    a new mixed-model comparison.
 
+## Diagnostics level: QE comparison versus hypothesis A/B (user rule, 2026-11-23)
+
+- A run timed against QE uses fully identical conditions on both sides, including the
+  output level: BAANDI runs with detailed profiling OFF (production output only: required
+  results, lightweight counters, the verification record and completion marker). Inner
+  clocks, per-band Ritz traces and extra trace JSON are never on in a QE-comparison run.
+- Detailed profiling is a tool for testing an improvement hypothesis only. In such an A/B
+  both arms (before and after the change) run with it ON, so its cost is the same in both;
+  these numbers are never put in a QE comparison table.
+- The fixed-point verification is a production step (decision 2026-11-14), not profiling;
+  it stays in the timed QE-comparison run and is charged as described below.
+
 ## Statistics and delivered wall
 
 Use **the median for both BAANDI and QE**, with the same repetition/geometry

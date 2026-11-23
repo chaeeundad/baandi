@@ -1,0 +1,36 @@
+# ISSUE-25 QE reference densities, written 2026-11-23 17:06:58 by job final-i25-100-qe-ref (dev08 socket 0)
+pw.x /home/mino/fq/builds/orig-mpi-dfti/PW/src/pw.x sha256 07c7cd7935f42b15157500ab719a5c3948825d8ce8a4487d992d7501c659658f
+pw.x version Program PWSCF v.7.6
+UPF Si.pz-vbc.UPF sha256 e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217 (not to be committed)
+si8 base input sha256 37a33708b242aac87a5559c16450efea19397d726324a0c63e59ea285b1e2f38 (generated, final4.py qe_input, bigsrc f5265883c1a89bb3dc76b1c651437cd597cc3a01)
+launch: mpirun -np 8 --map-by core --bind-to core (Open MPI 5.0.8), np1: taskset -c 0; OMP/MKL threads 1
+per run: <cell>/<name>/{input.in,cmd.txt,run.txt(start/end/rc),time.txt(wall s, maxRSS KiB),stdout.txt,stderr.txt,charge-density.dat,data-file-schema.xml}
+modes: mix = scf_must_converge .true. (stores mixed rho_in(k+1)); out = .false. (stores rho_out(k))
+si8/k1-mix-beta0.3 cell=si8 np=8 k=1 mode=mix mixing_beta=0.3 rc=0 start=2026-11-23 17:06:54 end=2026-11-23 17:06:54
+si8/k1-mix-beta1.0 cell=si8 np=8 k=1 mode=mix mixing_beta=1.0 rc=0 start=2026-11-23 17:06:55 end=2026-11-23 17:06:55
+si8/k1-mix cell=si8 np=8 k=1 mode=mix mixing_beta=0.7 rc=0 start=2026-11-23 17:06:52 end=2026-11-23 17:06:52
+si8/k1-out cell=si8 np=8 k=1 mode=out mixing_beta=0.7 rc=0 start=2026-11-23 17:06:52 end=2026-11-23 17:06:52
+si8/k2-mix cell=si8 np=8 k=2 mode=mix mixing_beta=0.7 rc=0 start=2026-11-23 17:06:52 end=2026-11-23 17:06:52
+si8/k2-out cell=si8 np=8 k=2 mode=out mixing_beta=0.7 rc=0 start=2026-11-23 17:06:52 end=2026-11-23 17:06:52
+si8/k3-mix cell=si8 np=8 k=3 mode=mix mixing_beta=0.7 rc=0 start=2026-11-23 17:06:52 end=2026-11-23 17:06:53
+si8/k3-out cell=si8 np=8 k=3 mode=out mixing_beta=0.7 rc=0 start=2026-11-23 17:06:53 end=2026-11-23 17:06:53
+si8/k4-mix cell=si8 np=8 k=4 mode=mix mixing_beta=0.7 rc=0 start=2026-11-23 17:06:53 end=2026-11-23 17:06:53
+si8/k4-out cell=si8 np=8 k=4 mode=out mixing_beta=0.7 rc=0 start=2026-11-23 17:06:53 end=2026-11-23 17:06:53
+si8/k5-mix cell=si8 np=8 k=5 mode=mix mixing_beta=0.7 rc=0 start=2026-11-23 17:06:53 end=2026-11-23 17:06:54
+si8/k5-out cell=si8 np=8 k=5 mode=out mixing_beta=0.7 rc=0 start=2026-11-23 17:06:54 end=2026-11-23 17:06:54
+si8/k6-mix cell=si8 np=8 k=6 mode=mix mixing_beta=0.7 rc=0 start=2026-11-23 17:06:54 end=2026-11-23 17:06:54
+si8/k6-out cell=si8 np=8 k=6 mode=out mixing_beta=0.7 rc=0 start=2026-11-23 17:06:54 end=2026-11-23 17:06:54
+si8-np1/k1-mix-beta0.3 cell=si8-np1 np=1 k=1 mode=mix mixing_beta=0.3 rc=0 start=2026-11-23 17:06:57 end=2026-11-23 17:06:57
+si8-np1/k1-mix-beta1.0 cell=si8-np1 np=1 k=1 mode=mix mixing_beta=1.0 rc=0 start=2026-11-23 17:06:57 end=2026-11-23 17:06:58
+si8-np1/k1-mix cell=si8-np1 np=1 k=1 mode=mix mixing_beta=0.7 rc=0 start=2026-11-23 17:06:55 end=2026-11-23 17:06:55
+si8-np1/k1-out cell=si8-np1 np=1 k=1 mode=out mixing_beta=0.7 rc=0 start=2026-11-23 17:06:55 end=2026-11-23 17:06:55
+si8-np1/k2-mix cell=si8-np1 np=1 k=2 mode=mix mixing_beta=0.7 rc=0 start=2026-11-23 17:06:55 end=2026-11-23 17:06:55
+si8-np1/k2-out cell=si8-np1 np=1 k=2 mode=out mixing_beta=0.7 rc=0 start=2026-11-23 17:06:55 end=2026-11-23 17:06:55
+si8-np1/k3-mix cell=si8-np1 np=1 k=3 mode=mix mixing_beta=0.7 rc=0 start=2026-11-23 17:06:55 end=2026-11-23 17:06:56
+si8-np1/k3-out cell=si8-np1 np=1 k=3 mode=out mixing_beta=0.7 rc=0 start=2026-11-23 17:06:56 end=2026-11-23 17:06:56
+si8-np1/k4-mix cell=si8-np1 np=1 k=4 mode=mix mixing_beta=0.7 rc=0 start=2026-11-23 17:06:56 end=2026-11-23 17:06:56
+si8-np1/k4-out cell=si8-np1 np=1 k=4 mode=out mixing_beta=0.7 rc=0 start=2026-11-23 17:06:56 end=2026-11-23 17:06:56
+si8-np1/k5-mix cell=si8-np1 np=1 k=5 mode=mix mixing_beta=0.7 rc=0 start=2026-11-23 17:06:56 end=2026-11-23 17:06:56
+si8-np1/k5-out cell=si8-np1 np=1 k=5 mode=out mixing_beta=0.7 rc=0 start=2026-11-23 17:06:56 end=2026-11-23 17:06:57
+si8-np1/k6-mix cell=si8-np1 np=1 k=6 mode=mix mixing_beta=0.7 rc=0 start=2026-11-23 17:06:57 end=2026-11-23 17:06:57
+si8-np1/k6-out cell=si8-np1 np=1 k=6 mode=out mixing_beta=0.7 rc=0 start=2026-11-23 17:06:57 end=2026-11-23 17:06:57

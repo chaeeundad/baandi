@@ -3126,3 +3126,40 @@ bounded dev08 falsification request: [filtered-subspace.md](../design/filtered-s
 Raw traces, input/binary/UPF hashes, command exits, failed inputs and reproducer:
 `docs/performance/lanes/MIXER/`. No UPF stored. Remote commands, A/A first,
 crossed AB/BA jobs and 600/7200 s caps: `lanes/MIXER/dev08-request.md`.
+
+## R-SCF-1 — independent reciprocal-density reference driver (2026-11-23)
+
+Derived from note `docs/research/qe-study/qe-density-mixing-spec.md`; no QE
+source was accessed. This is issue #25 patch 1, an opt-in verification surface,
+not an adopted optimization and not a revival of a rejected mixing heuristic.
+The motivating dev08 map-count/overhead decomposition is recorded in
+`docs/design/reference-scf.md`; no new Mac timing claim is made here.
+
+| Attempt | Measured correctness/work | Decision and lesson |
+| --- | --- | --- |
+| Reciprocal half-sphere Broyden, unnormalized secants, beta=0.7, m=8, spectral symmetric solve | Closed-form 2D linear fixed point and ring eviction pass. Three-step synthetic file replay has maximum next-density error 2.168404344971009e-19 e/bohr^3; largest relative shell error 2.168404344971009e-16; charge difference 0 electrons. Serial and simulated MPI3 replay agree. Fourier/metric tests cover simulated ranks 1/2/3/8; owned driver exercises the cold-map verification boundary and two maps at MPI2. | Default off. Singular/numerically rank-deficient A is reported, never regularized or silently reset. Real QE data and measured tolerance are still pending dev08. |
+| Final-cutoff atomic-start driver, same rule in Ry and Ha | Seed 801, fractional displacement amplitude 1e-3, 1 thread: Si8 stops in 10 iterations, E=-31.32178356464003 Ha, dr2=9.025138772492297e-9 Ry; Si16 9 iterations, E=-63.12910143369001 Ha, dr2=6.809305771391534e-9 Ry. `verify=off` exits 0. Default requested verification exits 3 with an explicit patch-2 TODO and no convergence/certification claim. | Runnable skeleton; not delivered-accuracy or speed evidence. Fixed-point verification is too coupled to session control to expose unchanged without importing the legacy switches. No default promotion. |
+| Legacy default isolation, base c534359c7ca6a7b2ee18694f905c453839bcb764 | Si8/Si16/Si32/skew: dE=0 Ha, density bytes, eigenvalues and all scientific iteration history fields bit-identical (wall fields excluded); 11/10/12/8 iterations respectively. Separate `bench_scf.py --cases si8 --require-identical` also passes, dE=0 Ha. | No default numerical change. Four fingerprints and reproduction inputs in `lanes/RSCF/local-validation.json`. |
+| Synthetic low-cutoff negative-ringing probe | A narrow Gaussian atomic charge (rc=0.7 Bohr, cutoff 2 Ha, deliberately small test cell) generated -0.0014546618092563957 e/bohr^3 after mixing and correctly failed the existing density validator. A resolved broad Gaussian (rc=1.8 Bohr) tests the two-map serial/MPI bridge. | No clipping or tolerance change was added to make the unresolved synthetic model run. Such inputs remain explicit errors; reference mixing is not a positivity-preserving method. |
+
+Native MPI/MKL and QE 7.6 density comparison are requested in
+`lanes/RSCF/dev08-request.md`. The new mixer keeps only owned numerical G rows
+and owned FFT planes during MPI iterations; inherited problem construction and
+final delivery still use the existing engine's full-array boundary. MPI PBE,
+NLCC/floor and symmetry bridges are not implemented and fail explicitly.
+Kernel internals retain their existing backend settings; the new orchestration
+uses no `ScfSession`, cutoff ladder, or legacy mixer/stop scheduling.
+
+Whole-workspace validation with worktree-local TMPDIR: build/fmt/clippy pass;
+813 tests pass, 3 existing pseudopotential-cache tests fail because they require
+a cache outside every repository while the ticket requires scratch inside this
+worktree. Those files are outside this ticket's ownership. README regeneration
+has no diff; its existing specification test also fails on the stale expected
+phrase `standard profile is unsupported` (current generated text supports the
+standard path after ADR 0043). These failures are retained in the local
+validation record, not reported as passing. Dashboard/session/README result-type
+updates require orchestrator-owned files; no numerical gate is claimed adopted.
+
+### R-SCF-1 delivered reference follow-up (2026-11-23)
+
+Production Broyden replay of genuine QE 7.6 Si8 k1..3 passes: max density error 3.46945e-18 e/bohr^3; all ten lowest shells, charge and rounded dr2 pass. Initial beta 0.7/0.3 recovery and beta 1 output pass. See [measured evidence](lanes/RSCF/qe-si8-validation.json). No timing claim. Full gate retains three accepted local TMPDIR cache failures; patch-2 verification TODO remains.

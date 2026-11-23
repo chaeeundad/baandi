@@ -2,6 +2,7 @@
 mod bands;
 #[path = "dos.rs"]
 mod dos;
+mod refscf_check;
 use dft_cli::checkpoint_io;
 #[path = "pseudo.rs"]
 mod pseudo;
@@ -20,6 +21,18 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Command {
+    /// Replay independent Broyden mixing against a QE density trajectory.
+    RefscfCheck {
+        input: PathBuf,
+        #[arg(long)]
+        qe: PathBuf,
+        #[arg(long, default_value_t = 6)]
+        steps: usize,
+        #[arg(long, default_value_t = 1e-12)]
+        atol: f64,
+        #[arg(long, default_value_t = 1e-9)]
+        rtol: f64,
+    },
     /// Relax atomic positions (and optionally the cell) with forces from verified SCF states.
     Relax {
         input: PathBuf,
@@ -133,6 +146,24 @@ enum Command {
 }
 fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match &cli.command {
+        Command::RefscfCheck {
+            input,
+            qe,
+            steps,
+            atol,
+            rtol,
+        } => {
+            return refscf_check::execute(
+                input,
+                qe,
+                *steps,
+                refscf_check::Tolerance {
+                    absolute: *atol,
+                    relative: *rtol,
+                },
+            )
+            .map_err(Into::into);
+        }
         Command::Validate {
             input,
             json,
@@ -248,6 +279,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Relax { .. }
+        | Command::RefscfCheck { .. }
         | Command::Convert { .. } => {
             unreachable!()
         }
@@ -270,6 +302,7 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         | Command::Dos { .. }
         | Command::Run { .. }
         | Command::Relax { .. }
+        | Command::RefscfCheck { .. }
         | Command::Convert { .. } => {
             unreachable!()
         }
@@ -352,7 +385,8 @@ fn input_of(command: &Command) -> Option<&std::path::Path> {
         | Command::Dos { input, .. }
         | Command::Run { input, .. }
         | Command::Validate { input, .. }
-        | Command::Grid { input } => Some(input),
+        | Command::Grid { input }
+        | Command::RefscfCheck { input, .. } => Some(input),
         Command::PreflightReview { .. }
         | Command::Eval { .. }
         | Command::Convert { .. }

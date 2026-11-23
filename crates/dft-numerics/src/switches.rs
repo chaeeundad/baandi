@@ -428,6 +428,8 @@ table! {
         "overrides scf.cutoff_ladder / fraction of the input file";
     RELAX_EXTRAPOLATION: Kind::Override { valid: relax_extrapolation_valid }, "config",
         "none, first_order, second_order", "overrides the relaxation density extrapolation of the input file";
+    REFERENCE_SCF: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "issue #25 independent reciprocal-density SCF driver (opt-in; patch 1 verification pending)";
     REFERENCE_STRICT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "ADR 0043 (2026-11-16): force the strict reference SCF path with its fixed-point certificate (accuracy gates and tests); off = the single standard path with verification";
     DGEMM_TIMERS: Kind::Presence, "off", "any value (presence)",

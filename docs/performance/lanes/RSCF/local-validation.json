@@ -1,0 +1,825 @@
+{
+  "task_id": "R-SCF-1",
+  "source_base_commit": "c534359c7ca6a7b2ee18694f905c453839bcb764",
+  "host_scope": "Mac correctness only, actual dev08 QE density replay; no timing acceptance",
+  "upf_sha256": "e8d933754cd51c6bb4b2a809151f89e0647e53d878bab88d26e1b5a5d68d5217",
+  "legacy_default_identity": [
+    {
+      "case": "si8-gamma",
+      "exit_code": 0,
+      "energy_ha": -31.32178356644924,
+      "energy_delta_ha": 0.0,
+      "density_identical": true,
+      "density_sha256": "505e76ff5a1971b5146c5c6eb62db41d2f82ed2cdbeeaa29e7435c6169da3010",
+      "eigenvalues_identical": true,
+      "history_identical": true,
+      "iterations": 11,
+      "input_sha256": "6b9f3fa93de2a8a2024c323bbd70cd166c6b9f3d5d3d395005520f1b07386be4",
+      "reproduction_input": "docs/performance/lanes/RSCF/si8-gamma.toml"
+    },
+    {
+      "case": "si16-gamma",
+      "exit_code": 0,
+      "energy_ha": -63.12910143585995,
+      "energy_delta_ha": 0.0,
+      "density_identical": true,
+      "density_sha256": "d139379f007dff222faee3db1a489cde8b248912094a678328b5982246d8b4e6",
+      "eigenvalues_identical": true,
+      "history_identical": true,
+      "iterations": 10,
+      "input_sha256": "213273435f12778aa30d7bd286f4c470e2877288344dc22eabbaaaf54eaa1fa8",
+      "reproduction_input": "docs/performance/lanes/RSCF/si16-gamma.toml"
+    },
+    {
+      "case": "si32-gamma",
+      "exit_code": 0,
+      "energy_ha": -126.7034940572733,
+      "energy_delta_ha": 0.0,
+      "density_identical": true,
+      "density_sha256": "517f74150ca6a24d49d5b75c72e339582942a2e028456987ccd723bd2d0e1888",
+      "eigenvalues_identical": true,
+      "history_identical": true,
+      "iterations": 12,
+      "input_sha256": "355cce0748b4d2659db197776faeb30a6477b78c309dd95ab50ec4e72db8a199",
+      "reproduction_input": "docs/performance/lanes/RSCF/si32-gamma.toml"
+    },
+    {
+      "case": "si-skew",
+      "exit_code": 0,
+      "energy_ha": -7.250406743528824,
+      "energy_delta_ha": 0.0,
+      "density_identical": true,
+      "density_sha256": "3d484426e0313c03782f87f618abfff1729636246bee0ac4a42c9d34a8dba359",
+      "eigenvalues_identical": true,
+      "history_identical": true,
+      "iterations": 8,
+      "input_sha256": "912eabec0dc1492b0f5c086778d813d00c3ae4cd337a0189327be4feee1f651e",
+      "reproduction_input": "docs/performance/lanes/RSCF/si-skew.toml"
+    }
+  ],
+  "reference_driver": [
+    {
+      "case": "si8-gamma",
+      "verify": "off",
+      "command": [
+        "target/release/dft-cli",
+        "run",
+        "target/scratch/si8-gamma-reference-off.toml",
+        "--output-dir",
+        "target/scratch/si8-gamma-reference-final-off"
+      ],
+      "exit_code": 0,
+      "energy_ha": -31.32178356464003,
+      "iterations": 10,
+      "record": {
+        "a_condition_2": null,
+        "beta": 0.7,
+        "davidson_iterations": 7,
+        "descf_ha": 0.0,
+        "descf_ry": 0.0,
+        "dr2_ha": 4.512569386246148e-09,
+        "dr2_ry": 9.025138772492297e-09,
+        "ethr_ha": 4.523184066604627e-11,
+        "ethr_ry": 9.046368133209255e-11,
+        "first_iteration_redo": false,
+        "gamma_l2": 0.0,
+        "gamma_max": 0.0,
+        "h_columns": 41,
+        "history_inserted_slot": null,
+        "history_occupancy": 8,
+        "iteration": 10,
+        "variational_energy_ha": -31.321783564639908
+      },
+      "status": {
+        "density_role": "last map output (also on exhaustion); energies refer to this output",
+        "exit_reason": "reference estimator stop reached; verification explicitly off",
+        "reference_stopped": true,
+        "threshold_ry": 1e-08,
+        "verification": "unavailable in patch 1; TODO issue #25 patch 2"
+      }
+    },
+    {
+      "case": "si8-gamma",
+      "verify": "fixed_point",
+      "command": [
+        "target/release/dft-cli",
+        "run",
+        "target/scratch/si8-gamma-reference-fixed_point.toml",
+        "--output-dir",
+        "target/scratch/si8-gamma-reference-final-fixed_point"
+      ],
+      "exit_code": 3,
+      "energy_ha": -31.32178356464003,
+      "iterations": 10,
+      "record": {
+        "a_condition_2": null,
+        "beta": 0.7,
+        "davidson_iterations": 7,
+        "descf_ha": 0.0,
+        "descf_ry": 0.0,
+        "dr2_ha": 4.512569386246148e-09,
+        "dr2_ry": 9.025138772492297e-09,
+        "ethr_ha": 4.523184066604627e-11,
+        "ethr_ry": 9.046368133209255e-11,
+        "first_iteration_redo": false,
+        "gamma_l2": 0.0,
+        "gamma_max": 0.0,
+        "h_columns": 41,
+        "history_inserted_slot": null,
+        "history_occupancy": 8,
+        "iteration": 10,
+        "variational_energy_ha": -31.321783564639908
+      },
+      "status": {
+        "density_role": "last map output (also on exhaustion); energies refer to this output",
+        "exit_reason": "reference stop reached; fixed-point verification unavailable in patch 1 (TODO issue #25 patch 2); result is NOT verified",
+        "reference_stopped": true,
+        "threshold_ry": 1e-08,
+        "verification": "unavailable in patch 1; TODO issue #25 patch 2"
+      }
+    },
+    {
+      "case": "si16-gamma",
+      "verify": "off",
+      "command": [
+        "target/release/dft-cli",
+        "run",
+        "target/scratch/si16-gamma-reference-off.toml",
+        "--output-dir",
+        "target/scratch/si16-gamma-reference-final-off"
+      ],
+      "exit_code": 0,
+      "energy_ha": -63.12910143369001,
+      "iterations": 9,
+      "record": {
+        "a_condition_2": null,
+        "beta": 0.7,
+        "davidson_iterations": 3,
+        "descf_ha": 0.0,
+        "descf_ry": 0.0,
+        "dr2_ha": 3.404652885695767e-09,
+        "dr2_ry": 6.809305771391534e-09,
+        "ethr_ha": 6.701824242827594e-11,
+        "ethr_ry": 1.3403648485655188e-10,
+        "first_iteration_redo": false,
+        "gamma_l2": 0.0,
+        "gamma_max": 0.0,
+        "h_columns": 54,
+        "history_inserted_slot": null,
+        "history_occupancy": 7,
+        "iteration": 9,
+        "variational_energy_ha": -63.129101433689655
+      },
+      "status": {
+        "density_role": "last map output (also on exhaustion); energies refer to this output",
+        "exit_reason": "reference estimator stop reached; verification explicitly off",
+        "reference_stopped": true,
+        "threshold_ry": 1e-08,
+        "verification": "unavailable in patch 1; TODO issue #25 patch 2"
+      }
+    },
+    {
+      "case": "si16-gamma",
+      "verify": "fixed_point",
+      "command": [
+        "target/release/dft-cli",
+        "run",
+        "target/scratch/si16-gamma-reference-fixed_point.toml",
+        "--output-dir",
+        "target/scratch/si16-gamma-reference-final-fixed_point"
+      ],
+      "exit_code": 3,
+      "energy_ha": -63.12910143369001,
+      "iterations": 9,
+      "record": {
+        "a_condition_2": null,
+        "beta": 0.7,
+        "davidson_iterations": 3,
+        "descf_ha": 0.0,
+        "descf_ry": 0.0,
+        "dr2_ha": 3.404652885695767e-09,
+        "dr2_ry": 6.809305771391534e-09,
+        "ethr_ha": 6.701824242827594e-11,
+        "ethr_ry": 1.3403648485655188e-10,
+        "first_iteration_redo": false,
+        "gamma_l2": 0.0,
+        "gamma_max": 0.0,
+        "h_columns": 54,
+        "history_inserted_slot": null,
+        "history_occupancy": 7,
+        "iteration": 9,
+        "variational_energy_ha": -63.129101433689655
+      },
+      "status": {
+        "density_role": "last map output (also on exhaustion); energies refer to this output",
+        "exit_reason": "reference stop reached; fixed-point verification unavailable in patch 1 (TODO issue #25 patch 2); result is NOT verified",
+        "reference_stopped": true,
+        "threshold_ry": 1e-08,
+        "verification": "unavailable in patch 1; TODO issue #25 patch 2"
+      }
+    }
+  ],
+  "synthetic_replay": {
+    "source": "synthetic analytic fixed point; NOT QE",
+    "command": [
+      "/Volumes/990-2TB/Develop/rust-dft-wt/R-SCF-1/target/release/dft-cli",
+      "refscf-check",
+      "/Volumes/990-2TB/Develop/rust-dft-wt/R-SCF-1/target/scratch/synthetic-replay-final/input.toml",
+      "--qe",
+      "/Volumes/990-2TB/Develop/rust-dft-wt/R-SCF-1/target/scratch/synthetic-replay-final",
+      "--steps",
+      "3",
+      "--atol",
+      "1e-14",
+      "--rtol",
+      "1e-12"
+    ],
+    "success_exit": 0,
+    "injected_dr2_failure_exit": 1,
+    "first_failing_term": "error: refscf-check first failing term: k=2 dr2: BAANDI 1.4026909108896347e-2 Ry, QE = 9.9000000000000000e1 Ry (printed rounding 5.000e-10 Ry)",
+    "records": [
+      {
+        "beta_one_cross_checked": true,
+        "charge_electrons": 2.0,
+        "g_vectors": 10,
+        "ranks": 1,
+        "reader": "QE four-record Gamma/nspin=1",
+        "tolerance": {
+          "absolute_e_bohr3": 1e-14,
+          "relative": 1e-12,
+          "status": "provisional; calibrate with QE rank-count replay"
+        }
+      },
+      {
+        "a_condition_2": null,
+        "all_g": {
+          "count": 10,
+          "max_e_bohr3": 0.0,
+          "relative_max": 0.0,
+          "relative_rms": 0.0,
+          "rms_e_bohr3": 0.0
+        },
+        "dr2_ha": 0.040522181870145,
+        "dr2_ry": 0.08104436374029,
+        "g0": {
+          "count": 1,
+          "max_e_bohr3": 0.0,
+          "relative_max": 0.0,
+          "relative_rms": 0.0,
+          "rms_e_bohr3": 0.0
+        },
+        "gamma_l2": -0.0,
+        "gamma_max": 0.0,
+        "history_occupancy": 0,
+        "iteration": 1,
+        "lowest_10_nonzero_shells": [
+          {
+            "difference": {
+              "count": 3,
+              "max_e_bohr3": 0.0,
+              "relative_max": 0.0,
+              "relative_rms": 0.0,
+              "rms_e_bohr3": 0.0
+            },
+            "g2_bohr_minus2": 1.0
+          },
+          {
+            "difference": {
+              "count": 6,
+              "max_e_bohr3": 0.0,
+              "relative_max": 0.0,
+              "relative_rms": 0.0,
+              "rms_e_bohr3": 0.0
+            },
+            "g2_bohr_minus2": 2.0
+          }
+        ],
+        "qe_printed_dr2_ry": 0.08104436374029,
+        "qe_printed_is_upper_bound": false,
+        "total_charge": {
+          "actual_e": 2.0,
+          "difference_e": 0.0,
+          "expected_e": 2.0
+        }
+      },
+      {
+        "a_condition_2": 1.0,
+        "all_g": {
+          "count": 10,
+          "max_e_bohr3": 1.0842021724855044e-19,
+          "relative_max": 1.3446829014987077e-17,
+          "relative_rms": 1.3252629973485524e-17,
+          "rms_e_bohr3": 3.4285483091569347e-20
+        },
+        "dr2_ha": 0.007013454554448174,
+        "dr2_ry": 0.014026909108896347,
+        "g0": {
+          "count": 1,
+          "max_e_bohr3": 0.0,
+          "relative_max": 0.0,
+          "relative_rms": 0.0,
+          "rms_e_bohr3": 0.0
+        },
+        "gamma_l2": 0.27835051546391754,
+        "gamma_max": 0.27835051546391754,
+        "history_occupancy": 1,
+        "iteration": 2,
+        "lowest_10_nonzero_shells": [
+          {
+            "difference": {
+              "count": 3,
+              "max_e_bohr3": 1.0842021724855044e-19,
+              "relative_max": 1.0842021724855044e-16,
+              "relative_rms": 7.826132259623924e-17,
+              "rms_e_bohr3": 6.25964416140483e-20
+            },
+            "g2_bohr_minus2": 1.0
+          },
+          {
+            "difference": {
+              "count": 6,
+              "max_e_bohr3": 0.0,
+              "relative_max": 0.0,
+              "relative_rms": 0.0,
+              "rms_e_bohr3": 0.0
+            },
+            "g2_bohr_minus2": 2.0
+          }
+        ],
+        "qe_printed_dr2_ry": 0.014026909108896347,
+        "qe_printed_is_upper_bound": false,
+        "total_charge": {
+          "actual_e": 2.0,
+          "difference_e": 0.0,
+          "expected_e": 2.0
+        }
+      },
+      {
+        "a_condition_2": 66.5320428702784,
+        "all_g": {
+          "count": 10,
+          "max_e_bohr3": 2.168404344971009e-19,
+          "relative_max": 2.6893658029974153e-17,
+          "relative_rms": 2.648928045695634e-17,
+          "rms_e_bohr3": 6.857096618313869e-20
+        },
+        "dr2_ha": 4.770550446218336e-05,
+        "dr2_ry": 9.541100892436672e-05,
+        "g0": {
+          "count": 1,
+          "max_e_bohr3": 0.0,
+          "relative_max": 0.0,
+          "relative_rms": 0.0,
+          "rms_e_bohr3": 0.0
+        },
+        "gamma_l2": 0.07619047619047654,
+        "gamma_max": 0.07619047619047654,
+        "history_occupancy": 2,
+        "iteration": 3,
+        "lowest_10_nonzero_shells": [
+          {
+            "difference": {
+              "count": 3,
+              "max_e_bohr3": 2.168404344971009e-19,
+              "relative_max": 2.1684043449710089e-16,
+              "relative_rms": 1.5332934166833741e-16,
+              "rms_e_bohr3": 1.251928832280966e-19
+            },
+            "g2_bohr_minus2": 1.0
+          },
+          {
+            "difference": {
+              "count": 6,
+              "max_e_bohr3": 0.0,
+              "relative_max": 0.0,
+              "relative_rms": 0.0,
+              "rms_e_bohr3": 0.0
+            },
+            "g2_bohr_minus2": 2.0
+          }
+        ],
+        "qe_printed_dr2_ry": 9.54110089243667e-05,
+        "qe_printed_is_upper_bound": false,
+        "total_charge": {
+          "actual_e": 2.0,
+          "difference_e": 0.0,
+          "expected_e": 2.0
+        }
+      }
+    ]
+  },
+  "qe_reference": {
+    "available": false,
+    "reason": "No data/i25-si8-qe branch or tests/reference/qe/i25-si8/k1-out in this checkout; fixture test explicitly skips."
+  },
+  "scope_limits": [
+    "Fixed-point verification extraction intentionally deferred to issue #25 patch 2; default request fails closed, exit 3 at estimator stop.",
+    "MPI driver currently needs the existing owned LDA map; no NLCC, density floor or symmetry in that bridge. Mixer/metric tested with simulated ranks 1,2,3,8; no native MPI/MKL executed here.",
+    "Unconverged results deliver the last map output with matching orbital/energy schema, not a QE mixed-next-input restart.",
+    "Legacy map internals retain their existing backend switches; the new driver has no legacy session/ladder control flow.",
+    "Transient numeric data and builds are under target/scratch or target, no UPF copied or committed."
+  ],
+  "binary_sha256": "32d824f289568c179c559c099b0d40050dc1767d6320b204a8ef924c428730ce",
+  "baseline_binary_sha256": "6d49252a3565d4badf52a2f480d8572c5c245064ed25fe5ec3746fd4947cc6e6",
+  "gate": {
+    "command": "TMPDIR_990=\"$PWD/target/scratch\" CHECK_SCCACHE=0 scripts/check.sh full",
+    "exit_code": 1,
+    "build": "PASS",
+    "fmt": "PASS",
+    "clippy": "PASS",
+    "test": {
+      "passed": 813,
+      "failed": 3,
+      "ignored": 181,
+      "pre_existing_failures": [
+        "pseudo::tests::fetch_boundary_verifies_before_publication_and_never_overwrites",
+        "pseudo::cache_resolution_and_no_network_side_effects",
+        "pseudo::cached_fetch_checks_hash_and_provenance"
+      ],
+      "reason": "cache tests require outside-repository paths; ticket requires worktree-local TMPDIR"
+    },
+    "load_report": "ps blocked by sandbox; gates still run"
+  },
+  "readme": {
+    "regeneration_exit": 0,
+    "generated_diff": false,
+    "test_exit": 1,
+    "passed": 8,
+    "failed": 1,
+    "reason": "pre-existing stale phrase: standard profile is unsupported"
+  },
+  "targeted_tests": {
+    "engine_command": "cargo test -p dft-engine --test refscf -- --nocapture",
+    "engine_exit": 0,
+    "harness_passed": 10,
+    "real_qe_fixture_runtime_skip": true,
+    "cli_command": "cargo test -p dft-cli --bin dft-cli refscf_check::tests -- --nocapture",
+    "cli_exit": 0,
+    "cli_passed": 1
+  },
+  "source_sha256": {
+    "crates/dft-cli/src/config.rs": "c3c6bb1140b5fdf5e69542a95e9da0babe18c779bcd1bdd7a509f0c5eab9f64a",
+    "crates/dft-cli/src/main.rs": "7e4e03ff216c463c5534322bc06f6b80d07617e0069c3c3ba9b7f9584764e166",
+    "crates/dft-cli/src/refscf_check.rs": "ffc545ab1cd627ebacf9818c6a3b6d8dfdb5b26886d90ffd7e48a4f71f60d8b9",
+    "crates/dft-cli/src/run.rs": "81fea11e1ad182b3216efda07452fff4bb7d9600e376f52feaa4a08dae39e1ae",
+    "crates/dft-engine/src/lib.rs": "187c46e521496eb4959ad8491c27d21fe5e8385a8d566118c05902f2f8979127",
+    "crates/dft-engine/src/refscf/broyden.rs": "2e80fdcd0e463ce98ecdfcd79456bbc2b74decac8d675eea45cab1db463c0702",
+    "crates/dft-engine/src/refscf/density.rs": "03e4501e1045128d9106bab00e5f67d45ebb2c80556972025c971c298e46761a",
+    "crates/dft-engine/src/refscf/driver.rs": "26864e07ec58a0225084cfbc320bb3acc9292c49cbd9ffce60fb2df14321888e",
+    "crates/dft-engine/src/refscf/metric.rs": "927543736a7ff5022d4594a1ab7f4562d7d785b02c4c31ee25d014102bb10feb",
+    "crates/dft-engine/src/refscf/mod.rs": "dfe9837fd40f10cfc62d5152f0ef9acaf88a97f71b61d1e3e025db6c905b82bc",
+    "crates/dft-engine/src/refscf/profile.rs": "34db53ef047e8fb6924c2d7a1743b92cd5d5905169009261cdb321027fc4a30a",
+    "crates/dft-engine/src/refscf/qe_reference.rs": "b9ce8ed9b71c89b440e7b13b668285cd7229c2d9c0fe7b12a98d7d66bedc5e28",
+    "crates/dft-engine/src/refscf/record.rs": "6ce3e3a0c9f81a68d269cdbcf7f2345c09b393f3e0cd6f5af7fdeecd0e36c4ac",
+    "crates/dft-engine/src/scf.rs": "609f74d77886eedc23238a7df7887d327e4923a4a0f4b55fef0ef285157e1828",
+    "crates/dft-numerics/src/switches.rs": "9dd1b90e7b5814ab67f8acfa3daeff5b9b48946a52194f60c9db9cd641e2f599"
+  },
+  "delivered_qe_followup": {
+    "source": "QE 7.6 dev08 final-i25-100-qe-ref, committed Si8 one-rank fixture",
+    "fixture_files": 46,
+    "fixture_bytes": 2806532,
+    "copy_byte_identical": true,
+    "density_units": "electrons/bohr^3",
+    "tolerance": {
+      "absolute": 1e-19,
+      "relative": 1e-13,
+      "charge_electrons": 1e-12,
+      "dr2": "half last printed decimal resolution + 1e-14 Ry"
+    },
+    "differences": [
+      {
+        "label": "startup_beta03",
+        "count": 11936.0,
+        "max": 3.469446951953614e-18,
+        "rms": 4.4725479296071074e-20,
+        "relative_max": 1.1714030839373773e-16,
+        "relative_rms": 1.5215738384853247e-16
+      },
+      {
+        "label": "startup_beta1",
+        "count": 11936.0,
+        "max": 3.8332335417084355e-20,
+        "rms": 7.555998869831058e-22,
+        "relative_max": 1.2942297877421157e-18,
+        "relative_rms": 2.4290774479813504e-18
+      },
+      {
+        "label": "k1_all",
+        "count": 11936.0,
+        "max": 3.469446951953614e-18,
+        "rms": 3.1898492196489773e-20,
+        "relative_max": 1.1714030839373773e-16,
+        "relative_rms": 1.0462686179992654e-16
+      },
+      {
+        "label": "k1_g0",
+        "count": 1.0,
+        "max": 3.469446951953614e-18,
+        "rms": 3.469446951953614e-18,
+        "relative_max": 1.1714030839373773e-16,
+        "relative_rms": 1.1714030839373773e-16
+      },
+      {
+        "label": "k1_shell1",
+        "count": 3.0,
+        "max": 0.0,
+        "rms": 0.0,
+        "relative_max": 0.0,
+        "relative_rms": 0.0
+      },
+      {
+        "label": "k1_shell2",
+        "count": 6.0,
+        "max": 2.117582368135751e-22,
+        "rms": 1.222586750274381e-22,
+        "relative_max": 6.149946464201394e-18,
+        "relative_rms": 6.696871327657464e-18
+      },
+      {
+        "label": "k1_shell3",
+        "count": 4.0,
+        "max": 0.0,
+        "rms": 0.0,
+        "relative_max": 0.0,
+        "relative_rms": 0.0
+      },
+      {
+        "label": "k1_shell4",
+        "count": 3.0,
+        "max": 2.117582368135751e-22,
+        "rms": 1.7289987634156778e-22,
+        "relative_max": 1.0343901544131431e-17,
+        "relative_rms": 1.2909747840386586e-17
+      },
+      {
+        "label": "k1_shell5",
+        "count": 12.0,
+        "max": 1.0587911840678754e-22,
+        "rms": 3.056466875685952e-23,
+        "relative_max": 6.40785256405196e-18,
+        "relative_rms": 2.9844956846026617e-18
+      },
+      {
+        "label": "k1_shell6",
+        "count": 12.0,
+        "max": 2.117582368135751e-22,
+        "rms": 8.644993817078389e-23,
+        "relative_max": 1.2493820855150848e-17,
+        "relative_rms": 1.1074906291759933e-17
+      },
+      {
+        "label": "k1_shell7",
+        "count": 6.0,
+        "max": 2.710505431213761e-20,
+        "rms": 1.1065623744727954e-20,
+        "relative_max": 3.9154871925534386e-16,
+        "relative_rms": 1.6571865525474165e-16
+      },
+      {
+        "label": "k1_shell8",
+        "count": 15.0,
+        "max": 1.6940658945086007e-21,
+        "rms": 5.602596326782424e-22,
+        "relative_max": 1.6788126051870587e-16,
+        "relative_rms": 1.0128980543110065e-16
+      },
+      {
+        "label": "k1_shell9",
+        "count": 12.0,
+        "max": 2.117582368135751e-22,
+        "rms": 6.301067884827393e-23,
+        "relative_max": 2.1242315618307566e-17,
+        "relative_rms": 1.2533179945391072e-17
+      },
+      {
+        "label": "k1_shell10",
+        "count": 12.0,
+        "max": 1.5332934166833742e-19,
+        "rms": 6.25964416140483e-20,
+        "relative_max": 1.245146135354239e-16,
+        "relative_rms": 5.0940338079366094e-17
+      },
+      {
+        "label": "k2_all",
+        "count": 11936.0,
+        "max": 3.469446951953614e-18,
+        "rms": 3.354351828001767e-20,
+        "relative_max": 1.1714030839373778e-16,
+        "relative_rms": 1.0898386640192345e-16
+      },
+      {
+        "label": "k2_g0",
+        "count": 1.0,
+        "max": 3.469446951953614e-18,
+        "rms": 3.469446951953614e-18,
+        "relative_max": 1.1714030839373778e-16,
+        "relative_rms": 1.1714030839373778e-16
+      },
+      {
+        "label": "k2_shell1",
+        "count": 3.0,
+        "max": 6.776263578034403e-21,
+        "rms": 5.868416401317028e-21,
+        "relative_max": 1.1688767814087823e-16,
+        "relative_rms": 1.4689638792605435e-16
+      },
+      {
+        "label": "k2_shell2",
+        "count": 6.0,
+        "max": 1.6940658945086007e-21,
+        "rms": 7.20704260273518e-22,
+        "relative_max": 4.854227277561622e-17,
+        "relative_rms": 3.930754141449562e-17
+      },
+      {
+        "label": "k2_shell3",
+        "count": 4.0,
+        "max": 8.673617379884035e-19,
+        "rms": 4.336808689942018e-19,
+        "relative_max": 1.2278172125179166e-16,
+        "relative_rms": 6.155374049698818e-17
+      },
+      {
+        "label": "k2_shell4",
+        "count": 3.0,
+        "max": 8.470329472543003e-22,
+        "rms": 5.040854307861914e-22,
+        "relative_max": 4.129430948008782e-17,
+        "relative_rms": 3.7282092171436664e-17
+      },
+      {
+        "label": "k2_shell5",
+        "count": 12.0,
+        "max": 3.3881317890172014e-21,
+        "rms": 1.3068183178850292e-21,
+        "relative_max": 1.8296906633426032e-16,
+        "relative_rms": 1.1111543543044104e-16
+      },
+      {
+        "label": "k2_shell6",
+        "count": 12.0,
+        "max": 1.7462031549538564e-21,
+        "rms": 1.1070993888518351e-21,
+        "relative_max": 7.245148013255537e-17,
+        "relative_rms": 8.542592843783828e-17
+      },
+      {
+        "label": "k2_shell7",
+        "count": 6.0,
+        "max": 5.421052221300379e-20,
+        "rms": 4.426264799628857e-20,
+        "relative_max": 1.7853828455176371e-16,
+        "relative_rms": 1.482844432722134e-16
+      },
+      {
+        "label": "k2_shell8",
+        "count": 15.0,
+        "max": 1.8940232492426095e-21,
+        "rms": 1.1074368677162052e-21,
+        "relative_max": 9.776195542759881e-17,
+        "relative_rms": 1.1633027285990074e-16
+      },
+      {
+        "label": "k2_shell9",
+        "count": 12.0,
+        "max": 3.492406309907713e-21,
+        "rms": 1.0793266990777313e-21,
+        "relative_max": 2.0220061394815594e-16,
+        "relative_rms": 1.2117497976978287e-16
+      },
+      {
+        "label": "k2_shell10",
+        "count": 12.0,
+        "max": 3.0665868333667484e-19,
+        "rms": 1.656146174683464e-19,
+        "relative_max": 2.1135568648592526e-16,
+        "relative_rms": 1.1445504148309723e-16
+      },
+      {
+        "label": "k3_all",
+        "count": 11936.0,
+        "max": 8.673617379884035e-19,
+        "rms": 1.1039236077721756e-20,
+        "relative_max": 2.928507709843443e-17,
+        "relative_rms": 3.5864988578164377e-17
+      },
+      {
+        "label": "k3_g0",
+        "count": 1.0,
+        "max": 0.0,
+        "rms": 0.0,
+        "relative_max": 0.0,
+        "relative_rms": 0.0
+      },
+      {
+        "label": "k3_shell1",
+        "count": 3.0,
+        "max": 1.8245648072149098e-20,
+        "rms": 1.6940658945086007e-20,
+        "relative_max": 6.399974796831013e-16,
+        "relative_rms": 9.693527340820808e-16
+      },
+      {
+        "label": "k3_shell2",
+        "count": 6.0,
+        "max": 3.3881317890172014e-21,
+        "rms": 1.9206632711261723e-21,
+        "relative_max": 9.556032331471109e-17,
+        "relative_rms": 1.0227516182729196e-16
+      },
+      {
+        "label": "k3_shell3",
+        "count": 4.0,
+        "max": 8.673617379884035e-19,
+        "rms": 4.336808689942018e-19,
+        "relative_max": 1.2309897895886523e-16,
+        "relative_rms": 6.170005369912648e-17
+      },
+      {
+        "label": "k3_shell4",
+        "count": 3.0,
+        "max": 2.117582368135751e-21,
+        "rms": 1.680778898034727e-21,
+        "relative_max": 1.0832104761543934e-16,
+        "relative_rms": 1.3215579160835804e-16
+      },
+      {
+        "label": "k3_shell5",
+        "count": 12.0,
+        "max": 7.286452924183252e-21,
+        "rms": 4.401736789805944e-21,
+        "relative_max": 3.5297028051013613e-16,
+        "relative_rms": 4.2370863130856117e-16
+      },
+      {
+        "label": "k3_shell6",
+        "count": 12.0,
+        "max": 1.0166600942724097e-20,
+        "rms": 6.232195169856209e-21,
+        "relative_max": 4.87874023593086e-16,
+        "relative_rms": 7.951385623711234e-16
+      },
+      {
+        "label": "k3_shell7",
+        "count": 6.0,
+        "max": 5.421021202175318e-20,
+        "rms": 2.213494071056858e-20,
+        "relative_max": 1.5604407047564972e-16,
+        "relative_rms": 6.470158019841461e-17
+      },
+      {
+        "label": "k3_shell8",
+        "count": 15.0,
+        "max": 3.995446421313683e-21,
+        "rms": 1.9668073420438182e-21,
+        "relative_max": 1.7467977087165714e-16,
+        "relative_rms": 1.979542489707132e-16
+      },
+      {
+        "label": "k3_shell9",
+        "count": 12.0,
+        "max": 4.282545306366671e-21,
+        "rms": 2.058979104816433e-21,
+        "relative_max": 2.550174214078409e-16,
+        "relative_rms": 2.426343585241156e-16
+      },
+      {
+        "label": "k3_shell10",
+        "count": 12.0,
+        "max": 4.84869951806108e-19,
+        "rms": 2.168404344971009e-19,
+        "relative_max": 3.3000991515013115e-16,
+        "relative_rms": 1.4793422123796176e-16
+      }
+    ],
+    "steps": [
+      {
+        "k": 1.0,
+        "dr2_ry": 0.43855533196919916,
+        "printed_ry": 0.43855533,
+        "dr2_delta_ry": 1.969199137086264e-09,
+        "charge_e": 32.0,
+        "charge_delta_e": -3.748489868599607e-15,
+        "condition": "None"
+      },
+      {
+        "k": 2.0,
+        "dr2_ry": 0.019564039711984147,
+        "printed_ry": 0.01956404,
+        "dr2_delta_ry": -2.880158542217792e-10,
+        "charge_e": 31.999999999999986,
+        "charge_delta_e": -3.748489868599607e-15,
+        "condition": "Some(1.0)"
+      },
+      {
+        "k": 3.0,
+        "dr2_ry": 0.0008539880468766092,
+        "printed_ry": 0.00085399,
+        "dr2_delta_ry": -1.9531233907748788e-09,
+        "charge_e": 32.0,
+        "charge_delta_e": 0.0,
+        "condition": "Some(67.57922895744)"
+      }
+    ]
+  }
+}

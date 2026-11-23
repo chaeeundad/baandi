@@ -1,0 +1,123 @@
+{
+  "task_id": "R-SCF-1",
+  "status": "DONE",
+  "changed_files": [
+    "crates/dft-cli/src/config.rs",
+    "crates/dft-cli/src/main.rs",
+    "crates/dft-cli/src/refscf_check.rs",
+    "crates/dft-cli/src/run.rs",
+    "crates/dft-cli/tests/all/run.rs",
+    "crates/dft-engine/src/lib.rs",
+    "crates/dft-engine/src/refscf/broyden.rs",
+    "crates/dft-engine/src/refscf/density.rs",
+    "crates/dft-engine/src/refscf/driver.rs",
+    "crates/dft-engine/src/refscf/metric.rs",
+    "crates/dft-engine/src/refscf/mod.rs",
+    "crates/dft-engine/src/refscf/profile.rs",
+    "crates/dft-engine/src/refscf/qe_reference.rs",
+    "crates/dft-engine/src/refscf/record.rs",
+    "crates/dft-engine/src/scf.rs",
+    "crates/dft-engine/tests/refscf.rs",
+    "crates/dft-numerics/src/switches.rs",
+    "crates/dft-numerics/tests/all/switches.rs",
+    "docs/design/reference-scf.md",
+    "docs/performance/attempts-ledger.md",
+    "docs/performance/lanes/RSCF/dev08-request.md",
+    "docs/performance/lanes/RSCF/local-validation.json",
+    "docs/performance/lanes/RSCF/local-validation.md",
+    "docs/performance/lanes/RSCF/report.json",
+    "docs/performance/lanes/RSCF/si-skew.toml",
+    "docs/performance/lanes/RSCF/si16-gamma.toml",
+    "docs/performance/lanes/RSCF/si32-gamma.toml",
+    "docs/performance/lanes/RSCF/si8-gamma.toml",
+    "docs/performance/lanes/RSCF/synthetic-replay.py",
+    "docs/performance/lanes/RSCF/si8-qe-replay.toml",
+    "docs/performance/lanes/RSCF/qe-si8-validation.json",
+    "docs/performance/lanes/RSCF/qe-si8-cli.jsonl",
+    "tests/reference/qe/i25-si8/ (46 byte-identical delivered files)"
+  ],
+  "design_choices": [
+    "Implemented independent reciprocal half-sphere density, batched Hartree metric, preallocated ring Broyden and symmetric spectral solve, TF opt-in, final-cutoff atomic-start driver, CLI selection and per-iteration records. Default remains off.",
+    "Module is a child of scf only for existing private map access; no session or ladder orchestration is used. No dependencies or QE source were added.",
+    "History singularity fails explicitly without regularization; CLI replay uses Miller matching and teacher-forced QE x/F. Genuine committed fixture drives the production Broyden routine, including beta 0.3/1.0 startup checks.",
+    "Fixed-point verification is deliberately left as the ticket-permitted patch-2 TODO. Default verification request fails closed at the reference stop (exit 3); explicit verify=off permits an unverified estimator result."
+  ],
+  "commands": [
+    {
+      "command": "cargo build --release -p dft-cli",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-engine --test refscf -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "cargo test -p dft-cli --bin dft-cli refscf_check::tests -- --nocapture",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I docs/performance/lanes/RSCF/synthetic-replay.py --binary target/release/dft-cli --scratch target/scratch/synthetic-replay-final",
+      "exit_code": 0
+    },
+    {
+      "command": "target/release/dft-cli refscf-check target/scratch/synthetic-replay-final/input.toml --qe target/scratch/synthetic-replay-final --steps 3 --atol 1e-14 --rtol 1e-12",
+      "exit_code": 0
+    },
+    {
+      "command": "target/release/dft-cli run target/scratch/si8-gamma-reference-off.toml --output-dir target/scratch/si8-gamma-reference-final-off",
+      "exit_code": 0
+    },
+    {
+      "command": "target/release/dft-cli run target/scratch/si16-gamma-reference-off.toml --output-dir target/scratch/si16-gamma-reference-final-off",
+      "exit_code": 0
+    },
+    {
+      "command": "target/release/dft-cli run target/scratch/si8-gamma-reference-fixed_point.toml --output-dir target/scratch/si8-gamma-reference-final-fixed_point",
+      "exit_code": 3
+    },
+    {
+      "command": "target/release/dft-cli run target/scratch/si16-gamma-reference-fixed_point.toml --output-dir target/scratch/si16-gamma-reference-final-fixed_point",
+      "exit_code": 3
+    },
+    {
+      "command": "TMPDIR=\"$PWD/target/scratch\" python3 -I scripts/bench_scf.py --binary target/release/dft-cli --upf /Volumes/990-2TB/Develop/rust-dft-wt/pseudo/Si.pz-vbc.UPF --cases si8 --repeats 1 --baseline target/scratch/bench-baseline.json --require-identical",
+      "exit_code": 0
+    },
+    {
+      "command": "TMPDIR_990=\"$PWD/target/scratch\" CHECK_SCCACHE=0 scripts/check.sh full",
+      "exit_code": 1
+    },
+    {
+      "command": "python3 -I scripts/make_readme_figures.py",
+      "exit_code": 0
+    },
+    {
+      "command": "python3 -I -m unittest discover -s scripts/tests -p test_readme_figures.py",
+      "exit_code": 1
+    },
+    {
+      "command": "target/release/dft-cli refscf-check target/scratch/si8-qe-replay.toml --qe tests/reference/qe/i25-si8/si8-np1 --steps 3 --atol 1e-19 --rtol 1e-13",
+      "exit_code": 0
+    }
+  ],
+  "numerical_outputs": [
+    "Si8: 10 iterations; E=-31.32178356464003 Ha; dr2=9.025138772492297e-9 Ry (4.512569386246148e-9 Ha).",
+    "Si16: 9 iterations; E=-63.12910143369001 Ha; dr2=6.809305771391534e-9 Ry (3.404652885695767e-9 Ha).",
+    "Legacy Si8/Si16/Si32/skew: maximum energy difference 0 Ha; density bytes, eigenvalues and scientific histories bit-identical; 11/10/12/8 iterations.",
+    "Synthetic replay: maximum density difference 2.168404344971009e-19 electrons/bohr^3; maximum relative shell error 2.168404344971009e-16; charge error 0 electrons.",
+    "Targeted engine: 10 passed, real QE fixture executed. Full gate: 813 passed, 3 accepted existing cache-test failures, 181 ignored; build/fmt/clippy pass.",
+    "QE Si8 k1/k2/k3 max density errors: 3.46944695e-18 / 3.46944695e-18 / 8.67361738e-19 e/bohr^3; RMS 3.18984922e-20 / 3.35435183e-20 / 1.10392361e-20 e/bohr^3.",
+    "QE Si8 dr2: 0.438555331969199 / 0.0195640397119841 / 0.000853988046876609 Ry; all match stdout rounding."
+  ],
+  "reference_comparison": "Actual QE 7.6 dev08 Si8 np1 k1..3 production replay passes; all G, G0, total charge, lowest 10 shells and rounded dr2 verified. Beta 0.7/0.3 initial recoveries and beta 1 output cross-check pass. CLI exit 0; no first failing term. Detailed per-k/per-shell measurements in qe-si8-validation.json and qe-si8-cli.jsonl.",
+  "limitations": [
+    "Full gate exit 1: three known repository-local TMPDIR cache tests fail, explicitly accepted by the orchestrator as nonblocking; reported to pass on dev08.",
+    "Existing README test has one stale scope-text failure; regeneration succeeds with no diff.",
+    "Native MPI/MKL Si128/full six-step validation remains remote; local real QE Si8 k1..3 tolerance is measured. Simulated ranks cover 1/2/3/8.",
+    "MPI bridge supports existing owned LDA eligibility only; NLCC/floor/symmetry/PBE MPI cases reject explicitly. Shared construction/final delivery retain inherited full-array boundaries.",
+    "Unconverged ordinary output is the last map output with matching energies/orbitals, not a mixed QE restart.",
+    "The task registry/report is absent in this worktree; dashboard, README new-result types and git metadata are outside ownership. Master-session bookkeeping/upload remains with the orchestrator."
+  ],
+  "open_questions": [],
+  "commit": "Uncommitted as requested; no git metadata modified."
+}

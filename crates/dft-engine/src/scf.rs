@@ -1,5 +1,7 @@
 #[path = "atomic_start.rs"]
 mod atomic_start;
+#[path = "refscf/mod.rs"]
+pub mod refscf;
 #[path = "start_density.rs"]
 mod start_density;
 pub use atomic_start::{AtomicStartReport, StartWavefunctions};

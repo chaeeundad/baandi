@@ -1,147 +1,168 @@
-//! Independent final-cutoff loop. The only reused SCF operation is one map.
-//! TODO(issue #25 patch 2): extract the fixed-point verification contract from
-//! session.rs without its scheduling, predictor and reuse switches. Until then
-//! a requested verification fails closed at the reference stop: the output is
-//! explicitly unverified and `ScfOutcome.converged` is false. `verify=off`
-//! exposes the estimator stop for patch-1 trajectory comparisons.
+//! Independent final-cutoff reference SCF. No ScfProblem/session/ladder or
+//! legacy solver dispatch is constructed, including during verification.
 use super::{
     broyden::{Broyden, Diagnostics},
     density::DensityPlan,
-    invalid,
+    map,
     metric::{Metric, Serial},
     numerical,
     profile::{Profile, next_ethr_ry},
-    record::Record,
+    record::{Record, SolveRecord},
 };
-use crate::scf::*;
+use crate::{
+    refstart::{self, StartInput, StartState},
+    scf::*,
+};
 use dft_mpi::Collective;
 
 pub struct Run {
     pub outcome: ScfOutcome,
     pub records: Vec<Record>,
     pub reference_stopped: bool,
+    pub first_reference_stop: Option<usize>,
     pub exit_reason: String,
+    pub start_s: f64,
+    pub output_s: f64,
+    pub verification_calls: Vec<SolveRecord>,
+    /// Conservative named-array payload envelope, not allocator high water/RSS.
+    pub peak_payload_bytes_per_rank: Vec<usize>,
 }
-pub fn run(problem: ScfProblem, profile: Profile) -> Result<Run, ScfError> {
-    let profile = profile.validate()?;
+pub fn run(input: StartInput<'_>, profile: Profile) -> Result<Run, ScfError> {
     if let Some(comm) = crate::parallel::SharedComm::active() {
-        drive(problem, profile, &comm)
+        run_with(input, profile, &comm)
     } else {
-        drive(problem, profile, &Serial)
+        run_with(input, profile, &Serial)
     }
 }
-fn drive<K: Collective>(
-    mut problem: ScfProblem,
+/// Identical parsed input on every rank; also supports simulated collectives.
+pub fn run_with<K: Collective>(
+    input: StartInput<'_>,
     profile: Profile,
     comm: &K,
 ) -> Result<Run, ScfError> {
     let start = Instant::now();
-    if problem.states.len() != 1
-        || problem.states[0].point.fractional != [0.0; 3]
-        || problem.options.gamma_real != crate::GammaReal::On
-        || problem.options.standard.is_none()
+    let profile = profile.validate()?;
+    let o = input.options;
+    if o.standard.is_none()
+        || o.gamma_real != crate::GammaReal::On
+        || o.crystal_density_group
+        || o.max_iterations == 0
     {
         return Err(ScfError::InvalidInput(
-            "reference SCF requires real Gamma and the standard accuracy class",
+            "reference SCF requires real Gamma, standard class, no symmetry and positive iteration budget",
         ));
     }
-    if problem.start_density.is_none() {
-        return Err(ScfError::InvalidInput(
-            "reference SCF requires an atomic valence superposition (PP_RHOATOM); no uniform fallback",
-        ));
-    }
-    problem.options.standard = Some(StandardProfile {
-        threshold_ha: profile.threshold_ry / 2.0,
+    let mut options = o.clone();
+    options.standard = Some(StandardProfile {
+        threshold_ha: profile.threshold_ry / 2.,
     });
-    let volume = problem.cell.volume_bohr3();
-    let dims = problem.grid.dims();
+    let cell = input.cell;
+    let mut state = refstart::start(
+        StartInput {
+            options: &options,
+            ..input
+        },
+        comm,
+    )?;
+    let dims = state.grid.dims();
+    let volume = cell.volume_bohr3();
+    let dv = volume / dims.iter().product::<usize>() as f64;
+    let bands = state.orbitals.cols();
+    let occupied = state.electrons as usize / 2;
+    let occupations: Vec<_> = (0..bands)
+        .map(|b| if b < occupied { 2. } else { 0. })
+        .collect();
     let mut plan = DensityPlan::new(
         comm,
-        &problem.cell,
+        cell,
         dims,
-        4.0 * problem.options.cutoff_hartree,
-        4.0 * problem.options.cutoff_hartree,
+        4. * o.cutoff_hartree,
+        4. * o.cutoff_hartree,
     )?;
-    let mut metric = Metric::new(volume, &plan.g2, &plan.smooth, comm.size(), 350)?;
-    let mut mixer = Broyden::new(profile, &plan.g2, &plan.smooth, volume, problem.electrons)?;
-    let mut input = problem.starting_density();
-    let mut input_planes = vec![0.; plan.plane_len()];
-    let mut output_planes = vec![0.; plan.plane_len()];
-    let mut next_planes = vec![0.; plan.plane_len()];
-    let mut ionic_planes = vec![0.; plan.plane_len()];
-    plan.planes_from_full(&input, &mut input_planes)?;
-    plan.planes_from_full(&problem.ionic_real, &mut ionic_planes)?;
-    if comm.size() > 1 {
-        if !problem.owned_density_eligible() {
-            return Err(ScfError::InvalidInput(
-                "reference SCF MPI requires the owned-density map kernel (LDA PZ/PW, no NLCC/floor/symmetry/snapshot; M2 grid/local fields/local density enabled); no replicated fallback",
-            ));
-        }
-        if problem.grid_plan()?.1.first_axis() != plan.first_axis() {
-            return Err(ScfError::InvalidInput(
-                "reference/engine owned FFT layouts differ",
-            ));
-        }
-        problem.owned.density_mode = true;
-        problem.owned.input = Some(crate::grid_dist::Owned {
-            epoch: problem.owned.next_epoch(),
-            values: input_planes.clone(),
-        });
-        input = Array3::zeros((0, 0, 0));
+    if plan.first_axis() != state.fields.first_axis() || plan.plane_len() != state.density.len() {
+        return Err(ScfError::InvalidInput("reference field layouts differ"));
     }
+    let mut metric = Metric::new(volume, &plan.g2, &plan.smooth, comm.size(), 350)?;
+    let mut mixer = Broyden::new(profile, &plan.g2, &plan.smooth, volume, state.electrons)?;
+    let mut n = std::mem::take(&mut state.density);
     let mut x = vec![Complex64::default(); plan.miller.len()];
     let mut y = x.clone();
     let mut f = x.clone();
     let mut next = x.clone();
-    plan.forward(comm, &input_planes, &mut x)?;
-    let mut correction_density = if comm.size() == 1 {
-        Array3::zeros(dims)
-    } else {
-        Array3::zeros((0, 0, 0))
-    };
-    let mut history = Vec::with_capacity(problem.options.max_iterations);
-    let mut records = Vec::with_capacity(problem.options.max_iterations);
-    let mut previous: Option<Vec<KPointSolution>> = None;
+    let mut next_planes = vec![0.; n.len()];
+    plan.forward(comm, &n, &mut x)?;
+    set_zero(&plan, &mut x, state.electrons / volume);
+    // Peak envelope: startup, owned Davidson arrays/factors plus current field,
+    // mixer/history buffers. Excludes backend/FFT metadata, stacks and allocator.
+    let cap = (2 * bands).min(state.basis.vectors().len());
+    let peak = state
+        .memory
+        .principal_peak_bound_bytes
+        .max(
+            state.memory.retained_field_bytes
+                + state.memory.real_projector_bytes
+                + 8 * state.operator.local_len() * (5 * cap + 3 * bands)
+                + 8 * (20 * cap * cap + 4 * cap)
+                + 8 * state.operator.local_len().div_ceil(256) * cap * cap
+                + 16 * x.len() * (2 * profile.history + 12)
+                + 8 * n.len() * 16,
+        )
+        .max(
+            // Delivery currently materializes both public orbital copies and the
+            // reduction's full real input/output buffers on every rank.
+            state.memory.retained_field_bytes
+                + state.memory.real_projector_bytes
+                + 64 * state.basis.vectors().len() * bands
+                + 16 * dims.iter().product::<usize>()
+                + 16 * x.len() * (2 * profile.history + 12)
+                + 8 * state.operator.local_len() * (5 * cap + 3 * bands),
+        );
+    let mut peaks = vec![0.; comm.size()];
+    let mut local_peak = peaks.clone();
+    local_peak[comm.rank()] = peak as f64;
+    comm.tree_sum_f64(&local_peak, &mut peaks)
+        .map_err(numerical)?;
+    let peak_payload_bytes_per_rank = peaks.into_iter().map(|v| v as usize).collect();
+    let start_time = start.elapsed();
+    let mut history = Vec::<IterationRecord>::with_capacity(o.max_iterations);
+    let mut records = Vec::with_capacity(o.max_iterations);
     let mut ethr = 1e-2;
     let mut last_dr2 = f64::INFINITY;
-    for iteration in 1..=problem.options.max_iterations {
+    let mut verification =
+        (o.verification == Verification::FixedPoint).then(VerificationReport::default);
+    let mut verification_calls = Vec::new();
+    let mut first_reference_stop = None;
+    for iteration in 1..=o.max_iterations {
         if iteration > 1 {
             ethr = next_ethr_ry(
                 if iteration == 2 { 1e-2 } else { ethr },
                 last_dr2,
-                problem.electrons,
+                state.electrons,
             );
         }
+        let requested = ethr;
         let mut redo = false;
-        let (mut dav, mut columns) = (0, 0);
+        let mut calls = Vec::new();
+        let mut timings = PhaseTimings::default();
         let (mut map_s, mut transform_s, mut metric_s) = (0., 0., 0.);
-        let mut phases = PhaseTimings::default();
         let (mut step, dr2) = loop {
             let clock = Instant::now();
-            let (warm, lazy) = split_warm(previous.as_deref());
-            let step = problem.step_session(&input, warm.as_deref(), &lazy, ethr / 2.0, false)?;
+            let step = solve_map(
+                &mut state,
+                comm,
+                cell,
+                o.functional,
+                &n,
+                &occupations,
+                ethr,
+                iteration == 1 && !redo,
+                &mut calls,
+                &mut timings,
+            )?;
             map_s += clock.elapsed().as_secs_f64();
-            dav += step
-                .k_points
-                .iter()
-                .map(|k| k.solution.iterations)
-                .sum::<usize>();
-            columns += step
-                .k_points
-                .iter()
-                .map(|k| k.solution.operator_applications)
-                .sum::<usize>();
-            phases.potential += step.timings.potential;
-            phases.diagonalization += step.timings.diagonalization;
-            phases.density += step.timings.density;
-            phases.energy += step.timings.energy;
             let clock = Instant::now();
-            if let Some(o) = &step.owned_density {
-                output_planes.copy_from_slice(&o.values);
-            } else {
-                plan.planes_from_full(&step.density, &mut output_planes)?;
-            }
-            plan.forward(comm, &output_planes, &mut y)?;
+            plan.forward(comm, &step.density, &mut y)?;
+            set_zero(&plan, &mut y, state.electrons / volume);
             for ((v, y), x) in f.iter_mut().zip(&y).zip(&x) {
                 *v = y - x;
             }
@@ -149,18 +170,93 @@ fn drive<K: Collective>(
             let clock = Instant::now();
             let dr2 = metric.norm(comm, &f)?;
             metric_s += clock.elapsed().as_secs_f64();
-            if iteration == 1 && !redo && dr2 < ethr * problem.electrons.max(1.0) {
-                ethr = next_ethr_ry(ethr, dr2, problem.electrons);
+            if iteration == 1 && !redo && dr2 < ethr * state.electrons.max(1.) {
+                ethr = next_ethr_ry(ethr, dr2, state.electrons);
                 redo = true;
-                previous = Some(step.k_points);
+                state.orbitals = step.solve.eigenvectors;
                 continue;
             }
             break (step, dr2);
         };
         last_dr2 = dr2;
         let stopped = dr2 < profile.threshold_ry;
-        let (residual, output_sum, input_sum, min_density) =
-            problem.step_metrics(&input, &step.density, step.owned_density.as_ref())?;
+        if stopped && first_reference_stop.is_none() {
+            first_reference_stop = Some(iteration);
+        }
+        let mut certificate = None;
+        let mut verification_s = 0.;
+        if stopped && let Some(report) = &mut verification {
+            let clock = Instant::now();
+            state.orbitals = step.solve.eigenvectors.clone();
+            let tol = next_ethr_ry(ethr, dr2, state.electrons);
+            let mut t = PhaseTimings::default();
+            let first_call = verification_calls.len();
+            let check = solve_map(
+                &mut state,
+                comm,
+                cell,
+                o.functional,
+                &step.density,
+                &occupations,
+                tol,
+                false,
+                &mut verification_calls,
+                &mut t,
+            )?;
+            let current_calls = &verification_calls[first_call..];
+            let mut checked = y.clone();
+            plan.forward(comm, &check.density, &mut checked)?;
+            for (v, y) in checked.iter_mut().zip(&y) {
+                *v -= y;
+            }
+            let error = metric.norm(comm, &checked)? / 2.;
+            let mut l2 = [0.];
+            comm.tree_sum_f64(
+                &[check
+                    .density
+                    .iter()
+                    .zip(&step.density)
+                    .map(|(a, b)| (a - b).powi(2))
+                    .sum::<f64>()],
+                &mut l2,
+            )
+            .map_err(numerical)?;
+            let record = FixedPointCertificate {
+                strict_residuals_per_k: vec![check.residuals[..occupied].to_vec()],
+                buffer_residuals_per_k: vec![check.residuals[occupied..].to_vec()],
+                density_residual: (dv * l2[0]).sqrt(),
+                occupied_eigenvalue_change: check
+                    .solve
+                    .eigenvalues
+                    .iter()
+                    .zip(&step.solve.eigenvalues)
+                    .take(occupied)
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0., f64::max),
+                davidson_iterations: current_calls.iter().map(|c| c.iterations).sum(),
+                operator_applications: current_calls.iter().map(|c| c.h_columns).sum(),
+                davidson_iterations_per_k: vec![current_calls.iter().map(|c| c.iterations).sum()],
+                operator_applications_per_k: vec![current_calls.iter().map(|c| c.h_columns).sum()],
+                timings: t,
+            };
+            let bound = StandardProfile::residual_energy_estimate(
+                std::iter::once((1., check.residuals.as_slice())),
+                &occupations,
+            );
+            let attempt = crate::assess_fixed_point(
+                &options,
+                iteration,
+                tol / 2.,
+                error,
+                Some(bound),
+                &record,
+                clock.elapsed(),
+            );
+            report.attempts.push(attempt);
+            certificate = Some(record);
+            verification_s = clock.elapsed().as_secs_f64();
+        }
+        let finish = stopped && verification.as_ref().is_none_or(VerificationReport::passed);
         let mut diagnostics = Diagnostics {
             iteration,
             occupancy: mixer.occupancy(),
@@ -168,8 +264,9 @@ fn drive<K: Collective>(
         };
         let (mut mixing_s, mut correction_s, mut descf) = (0., 0., 0.);
         let mut variational = step.energy.band_form;
+        let (mut vh, mut vx) = (step.energy.hartree, step.energy.xc);
         let mut failure = None;
-        if !stopped {
+        if !finish {
             let clock = Instant::now();
             match mixer.update(comm, &mut metric, &x, &f, &mut next) {
                 Ok(d) => diagnostics = d,
@@ -179,177 +276,302 @@ fn drive<K: Collective>(
                 plan.inverse(comm, &next, &mut next_planes)?;
             }
             mixing_s = clock.elapsed().as_secs_f64();
-            phases.mixing += std::time::Duration::from_secs_f64(mixing_s);
             if failure.is_none() {
                 let clock = Instant::now();
-                let (h, xc) = if comm.size() == 1 {
-                    plan.write_serial_full(&next_planes, &mut correction_density)?;
-                    let next_full = &correction_density;
-                    let (h, xc, _) = problem.input_fields(next_full)?;
-                    descf = -volume / next_full.len() as f64
-                        * next_full
-                            .iter()
-                            .zip(&step.density)
-                            .zip(h.potential.iter().zip(&xc.potential))
-                            .map(|((n, y), (h, x))| (n - y) * (h.re + x))
-                            .sum::<f64>();
-                    (h.energy.0, xc.energy.0)
-                } else {
-                    // Existing plane-local potential kernel, no full density gather.
-                    let grid = problem.grid_dist.as_mut().expect("owned map built grid");
-                    let (h, xc, _) = grid.potential_field(
-                        comm,
-                        crate::grid_dist::Field::Planes(&next_planes),
-                        problem.ionic_real.as_slice().expect("standard"),
-                        None,
-                    )?;
-                    let local = -volume / dims.iter().product::<usize>() as f64
-                        * next_planes
-                            .iter()
-                            .zip(&output_planes)
-                            .zip(grid.effective_planes().iter().zip(&ionic_planes))
-                            .map(|((n, y), (v, ion))| (n - y) * (v - ion))
-                            .sum::<f64>();
-                    let mut total = [0.];
-                    comm.tree_sum_f64(&[local], &mut total).map_err(numerical)?;
-                    descf = total[0];
-                    (h, xc)
-                };
+                let fields = map::fields(&mut state, comm, cell, o.functional, &next_planes)?;
+                let local = -dv
+                    * next_planes
+                        .iter()
+                        .zip(&step.density)
+                        .zip(&fields.hxc)
+                        .map(|((n, y), v)| (n - y) * v)
+                        .sum::<f64>();
+                let mut total = [0.];
+                comm.tree_sum_f64(&[local], &mut total).map_err(numerical)?;
+                descf = total[0];
+                vh = fields.hartree;
+                vx = fields.xc;
                 variational = step.energy.band_sum - step.energy.double_counting
-                    + h
-                    + xc
+                    + vh
+                    + vx
                     + step.energy.ewald
                     + descf;
                 correction_s = clock.elapsed().as_secs_f64();
             }
         }
-        let energy_change = history
-            .last()
-            .map(|r: &IterationRecord| step.energy.total_hartree() - r.energy.total_hartree());
+        let mut sums = [0.; 3];
+        comm.tree_sum_f64(
+            &[
+                n.iter()
+                    .zip(&step.density)
+                    .map(|(n, y)| (n - y).powi(2))
+                    .sum::<f64>(),
+                n.iter().sum::<f64>(),
+                step.density.iter().sum::<f64>(),
+            ],
+            &mut sums,
+        )
+        .map_err(numerical)?;
+        let dav = calls.iter().map(|c| c.iterations).sum();
+        let columns = calls.iter().map(|c| c.h_columns).sum();
+        timings.mixing = Duration::from_secs_f64(mixing_s);
         history.push(IterationRecord {
             iteration,
             energy: step.energy.clone(),
-            energy_change,
+            energy_change: history
+                .last()
+                .map(|r| step.energy.total_hartree() - r.energy.total_hartree()),
             standard_error_ha: Some(dr2 / 2.),
             standard_redo: redo,
-            density_residual: residual,
-            max_eigen_residual: step
-                .k_points
-                .iter()
-                .flat_map(|k| &k.solution.residuals)
-                .copied()
-                .fold(0., f64::max),
+            density_residual: (dv * sums[0]).sqrt(),
+            max_eigen_residual: step.residuals.iter().copied().fold(0., f64::max),
             requested_eigen_tolerance: ethr / 2.,
             davidson_iterations: dav,
             operator_applications: columns,
             davidson_iterations_per_k: vec![dav],
             operator_applications_per_k: vec![columns],
-            charge_error: output_sum * volume / dims.iter().product::<usize>() as f64
-                - problem.electrons,
-            input_charge_error: input_sum * volume / dims.iter().product::<usize>() as f64
-                - problem.electrons,
-            min_density,
-            mixing_fraction: 1.0,
+            charge_error: dv * sums[2] - state.electrons,
+            input_charge_error: dv * sums[1] - state.electrons,
+            min_density: global_min(comm, &step.density)?,
+            mixing_fraction: 1.,
             mixer_reset: false,
             density_contraction: None,
             mixing_history_used: Some(diagnostics.occupancy),
             mixing_resets: 0,
             mixing_raw_recovery: false,
-            fixed_point_certificate: None,
-            timings: phases,
+            fixed_point_certificate: certificate,
+            timings: timings.clone(),
             advance: None,
             pulay: None,
         });
         records.push(Record {
             iteration,
             dr2_ry: dr2,
+            ethr_requested_ry: requested,
             ethr_ry: ethr,
             first_iteration_redo: redo,
             beta: profile.beta,
             mixing: diagnostics,
+            calls,
             davidson_iterations: dav,
             h_columns: columns,
             map_s,
+            solve_s: timings.diagonalization.as_secs_f64(),
+            density_s: timings.density.as_secs_f64(),
+            potential_s: timings.potential.as_secs_f64(),
+            energy_s: timings.energy.as_secs_f64(),
             density_transform_s: transform_s,
             metric_s,
             mixing_s,
             correction_s,
+            verification_s,
             descf_ha: descf,
             variational_energy_ha: variational,
+            energy: step.energy.clone(),
+            variational_hartree_ha: vh,
+            variational_xc_ha: vx,
         });
-        if stopped || failure.is_some() || iteration == problem.options.max_iterations {
-            let verified_off = problem.options.verification == Verification::Off;
-            let exit_reason = failure.unwrap_or_else(|| if stopped && !verified_off {
-                "reference stop reached; fixed-point verification unavailable in patch 1 (TODO issue #25 patch 2); result is NOT verified".into()
-            } else if stopped { "reference estimator stop reached; verification explicitly off".into() }
-            else { "reference SCF maximum iterations reached".into() });
-            if let Some(o) = &step.owned_density {
-                step.density = problem.materialize_owned(o)?;
-            }
-            problem.materialize_orbitals(&mut step.k_points)?;
-            let first = &step.k_points[0];
-            let charge = step.density.sum() * volume / step.density.len() as f64;
+        if finish || failure.is_some() || iteration == o.max_iterations {
+            let verified = verification.as_ref().is_none_or(VerificationReport::passed);
+            let converged = stopped && verified && failure.is_none();
+            let exit_reason = failure.unwrap_or_else(|| {
+                if !stopped {
+                    "reference SCF maximum iterations reached".into()
+                } else if !verified {
+                    "reference estimator stop reached; independent fixed-point verification failed"
+                        .into()
+                } else if verification.is_none() {
+                    "reference estimator stop reached; verification explicitly off".into()
+                } else {
+                    "reference estimator stop and independent fixed-point verification passed"
+                        .into()
+                }
+            });
+            let clock = Instant::now();
+            let density = state.fields.gather(comm, &step.density)?;
+            let orbitals = gather_orbitals(&state, comm, &step.solve.eigenvectors)?;
+            let point = KPoint {
+                fractional: [0.; 3],
+                weight: 1.,
+            };
+            let k = KPointSolution {
+                point,
+                lazy: None,
+                solution: EigenSolution {
+                    locking: None,
+                    spectral_completeness: None,
+                    eigenvalues: std::mem::take(&mut step.solve.eigenvalues),
+                    eigenvectors: orbitals.clone(),
+                    residuals: step.residuals,
+                    converged: step.solve.converged,
+                    buffer: occupations.iter().map(|&f| f == 0.).collect(),
+                    residuals_certified: false,
+                    iterations: dav,
+                    history: Vec::new(),
+                    operator_applications: columns,
+                },
+            };
+            let identity = crate::force_identity::ModelDescription::new(
+                cell,
+                input.atoms,
+                input.potentials,
+                &options,
+                dims,
+                vec![point],
+            );
             let result = ScfResult {
-                atomic_start: problem.atomic_start.clone(),
-                compat_mode: problem.options.compat_mode,
-                crystal_density_group: problem.options.crystal_density_group,
+                atomic_start: AtomicStartReport {
+                    atomic_orbitals: state.memory.atomic_columns,
+                    initial_h_applications: state.memory.atomic_columns.max(bands),
+                    ..Default::default()
+                },
+                compat_mode: options.compat_mode,
+                crystal_density_group: false,
                 standard_stall_guard: false,
                 standard_density_forcing: false,
-                pw92_prefactor: problem.options.pw92_prefactor,
-                local_mesh: problem.options.local_mesh,
-                radial_even_rule: problem.options.radial_even_rule,
-                gamma_real_used: problem.states[0].gamma_real.gamma_real_used,
-                gamma_real_fallback_reason: problem.states[0].gamma_real.fallback_reason.clone(),
-                force_identity: problem.force_model.with_policy(
-                    crate::force_identity::OccupationIdentity::new(
-                        &[&problem.occupations],
-                        None,
-                        None,
-                    ),
+                pw92_prefactor: options.pw92_prefactor,
+                local_mesh: options.local_mesh,
+                radial_even_rule: options.radial_even_rule,
+                gamma_real_used: true,
+                gamma_real_fallback_reason: None,
+                force_identity: identity.with_policy(
+                    crate::force_identity::OccupationIdentity::new(&[&occupations], None, None),
                 ),
-                standard: problem.options.standard,
+                standard: options.standard,
                 certified: false,
-                verification: (!verified_off).then(VerificationReport::default),
+                verification,
                 spectral_completeness: None,
-                eigenvalues: first.solution.eigenvalues.clone(),
-                orbitals: first.solution.eigenvectors.clone(),
-                occupations: problem.occupations.clone(),
-                gap_hartree: problem.check_gap(&step.k_points)?,
-                k_points: step.k_points,
+                eigenvalues: k.solution.eigenvalues.clone(),
+                orbitals,
+                occupations,
+                gap_hartree: (bands > occupied).then(|| {
+                    k.solution.eigenvalues[occupied] - k.solution.eigenvalues[occupied - 1]
+                }),
+                k_points: vec![k],
                 energy: step.energy,
                 energy_identity: None,
-                density: step.density,
-                charge,
+                charge: density.sum() * dv,
+                density,
                 history,
-                ewald_breakdown: problem.ewald,
-                setup_time: problem.setup_time,
-                total_time: start.elapsed() + problem.setup_time,
+                ewald_breakdown: state.ewald,
+                setup_time: start_time,
+                total_time: start.elapsed(),
             };
             return Ok(Run {
-                outcome: ScfOutcome {
-                    converged: stopped && verified_off,
-                    result,
-                },
+                outcome: ScfOutcome { converged, result },
                 records,
-                reference_stopped: stopped,
+                reference_stopped: first_reference_stop.is_some(),
+                first_reference_stop,
                 exit_reason,
+                start_s: start_time.as_secs_f64(),
+                output_s: clock.elapsed().as_secs_f64(),
+                verification_calls,
+                peak_payload_bytes_per_rank,
             });
         }
         std::mem::swap(&mut x, &mut next);
-        input_planes.copy_from_slice(&next_planes);
-        if comm.size() == 1 {
-            plan.write_serial_full(&input_planes, &mut input)?;
-        } else {
-            let epoch = problem.owned.next_epoch();
-            let owned = problem
-                .owned
-                .input
-                .as_mut()
-                .expect("owned input retained by map");
-            owned.epoch = epoch;
-            owned.values.copy_from_slice(&input_planes);
-        }
-        previous = Some(step.k_points);
+        n.copy_from_slice(&next_planes);
+        state.orbitals = step.solve.eigenvectors;
     }
-    Err(invalid("zero iteration budget").into())
+    unreachable!("positive budget checked")
+}
+fn set_zero(plan: &DensityPlan, values: &mut [Complex64], charge: f64) {
+    for (v, m) in values.iter_mut().zip(&plan.miller) {
+        if *m == [0; 3] {
+            *v = Complex64::new(charge, 0.);
+        }
+    }
+}
+fn global_min<K: Collective>(comm: &K, values: &[f64]) -> Result<f64, ScfError> {
+    let mut local = vec![0.; comm.size()];
+    local[comm.rank()] = values.iter().copied().fold(f64::MAX, f64::min);
+    let mut all = local.clone();
+    comm.tree_sum_f64(&local, &mut all).map_err(numerical)?;
+    Ok(all.into_iter().fold(f64::MAX, f64::min))
+}
+#[allow(clippy::too_many_arguments)]
+fn solve_map<K: Collective>(
+    state: &mut StartState,
+    comm: &K,
+    cell: &Cell,
+    functional: Functional,
+    n: &[f64],
+    occupations: &[f64],
+    ethr: f64,
+    first: bool,
+    calls: &mut Vec<SolveRecord>,
+    timings: &mut PhaseTimings,
+) -> Result<map::Map, ScfError> {
+    // QE's documented bounded re-entry: at most six calls, retry when more
+    // than max(5, bands/4) roots remain. Keep every flag/count in the record;
+    // SCF and the independent certificate still decide delivered convergence.
+    for retry in 0..6 {
+        let step = map::evaluate(
+            state,
+            comm,
+            cell,
+            functional,
+            n,
+            occupations,
+            ethr,
+            first && retry == 0,
+        )?;
+        let r = &step.solve.record;
+        let unconverged = step.solve.converged.iter().filter(|&&v| !v).count();
+        calls.push(SolveRecord {
+            ethr_ry: ethr,
+            first_step: first && retry == 0,
+            iterations: r.iterations.len(),
+            active_bands: r.iterations.iter().map(|i| i.active_bands.len()).collect(),
+            h_columns: r.h_columns,
+            reduced_orders: std::iter::once(&r.setup)
+                .chain(&r.iterations)
+                .chain(std::iter::once(&r.finish))
+                .filter(|i| i.reduced_solves > 0)
+                .map(|i| i.reduced_order)
+                .collect(),
+            restarts: r.restarts,
+            unconverged,
+            ritz_changes_ha: step.solve.ritz_changes_ha.clone(),
+            repairs: r.iterations.iter().map(|i| i.repairs).sum(),
+            dropped_corrections: r.iterations.iter().map(|i| i.dropped_corrections).sum(),
+        });
+        timings.potential += step.timings.potential;
+        timings.diagonalization += step.timings.diagonalization;
+        timings.density += step.timings.density;
+        timings.energy += step.timings.energy;
+        if unconverged <= 5.max(occupations.len() / 4) {
+            return Ok(step);
+        }
+        if retry == 5 {
+            return Err(ScfError::Numerical(format!(
+                "reference Davidson exhausted six calls: {unconverged} unconverged bands"
+            )));
+        }
+        state.orbitals = step.solve.eigenvectors;
+    }
+    unreachable!()
+}
+fn gather_orbitals<K: Collective>(
+    state: &StartState,
+    comm: &K,
+    x: &dft_numerics::RealMatrix,
+) -> Result<ComplexMatrix, ScfError> {
+    let n = state.basis.vectors().len();
+    let mut local = vec![0.; n * x.cols()];
+    for j in 0..x.cols() {
+        for (i, &r) in state.operator.local_rows().iter().enumerate() {
+            local[j * n + r] = x[(i, j)];
+        }
+    }
+    let mut full = local.clone();
+    comm.tree_sum_f64(&local, &mut full).map_err(numerical)?;
+    let mut out = ComplexMatrix::zeros(n, x.cols()).map_err(numerical)?;
+    for j in 0..x.cols() {
+        state
+            .half
+            .unpack(&full[j * n..(j + 1) * n], out.column_mut(j))
+            .map_err(numerical)?;
+    }
+    Ok(out)
 }

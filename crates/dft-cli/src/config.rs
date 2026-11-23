@@ -678,6 +678,9 @@ pub struct Scf {
     pub threads: Option<usize>,
     pub max_iterations: Option<i64>,
     pub mixing: Option<String>,
+    /// Original reference-only spelling before the shared preflight adapter.
+    #[serde(skip)]
+    pub reference_mixing_input: Option<String>,
     pub energy_tolerance_ha: Option<f64>,
     pub density_residual_tolerance: Option<f64>,
     pub mixing_beta: Option<f64>,
@@ -844,6 +847,32 @@ impl Scf {
 
     pub fn mixing_strategy(&self) -> Result<dft_engine::Mixing, ConfigError> {
         let invalid = |message: &str| ConfigError::Invalid(message.into());
+        if self.driver.as_deref() == Some("reference")
+            || dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_SCF)
+        {
+            if !matches!(
+                self.mixing.as_deref(),
+                None | Some("plain" | "broyden" | "pulay")
+            ) || self.mixing_q0_inverse_bohr.is_some()
+            {
+                return Err(invalid(
+                    "reference mixing must be broyden/plain/pulay; use reference_preconditioning for screening",
+                ));
+            }
+            let profile = dft_engine::refscf::profile::Profile {
+                beta: self.mixing_beta.unwrap_or(0.7),
+                history: self.mixing_history.unwrap_or(8),
+                ..Default::default()
+            }
+            .validate()
+            .map_err(|e| invalid(&e.to_string()))?;
+            // Adapter compatibility value only; the reference driver uses its
+            // own Broyden profile, never constructs this legacy mixer.
+            return Ok(dft_engine::Mixing::Pulay {
+                beta: profile.beta,
+                history: profile.history,
+            });
+        }
         let beta = self.mixing_beta.unwrap_or(0.3);
         let history = self.mixing_history.unwrap_or(6);
         if !beta.is_finite() || beta <= 0.0 {
@@ -1190,6 +1219,19 @@ impl Config {
             .and_then(|s| s.get("density_group"))
             .cloned();
         let mut config: Self = value.try_into()?;
+        if let Some(s) = &mut config.scf
+            && (s.driver.as_deref() == Some("reference")
+                || dft_numerics::switches::on(dft_numerics::switches::Id::REFERENCE_SCF))
+        {
+            s.mixing_strategy()?;
+            // The shared preflight understands the historical pulay spelling.
+            // Resolve aliases only for this opt-in driver; its numerical mixer
+            // remains the independent difference-history Broyden implementation.
+            s.reference_mixing_input = s.mixing.clone();
+            if matches!(s.mixing.as_deref(), Some("broyden" | "plain")) {
+                s.mixing = Some("pulay".into());
+            }
+        }
         match config.compat.mode.as_deref().unwrap_or("none") {
             "none" => {}
             "reference" => {

@@ -74,6 +74,8 @@ pub struct Solution {
     pub eigenvectors: RealMatrix,
     pub hx: Option<RealMatrix>,
     pub converged: Vec<bool>,
+    /// Per correction, absolute Ritz changes in Ha, retained for trajectory audits.
+    pub ritz_changes_ha: Vec<Vec<f64>>,
     pub record: Record,
 }
 
@@ -155,7 +157,8 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
     active.extend(0..n);
     let mut converged = vec![false; n];
     let mut iterations = 0;
-    for step in 0..options.max_iterations {
+    let mut ritz_changes_ha = vec![vec![0.; n]; options.max_iterations];
+    for (step, ritz_changes) in ritz_changes_ha.iter_mut().enumerate() {
         let before = c.snapshot();
         let r = &mut record.iterations[step];
         r.active_bands.extend_from_slice(&active);
@@ -198,7 +201,9 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         }
         active.clear();
         for (i, flag) in converged.iter_mut().enumerate() {
-            *flag = (w.values[i] - w.old_values[i]).abs() < options.band_threshold(i);
+            let change = (w.values[i] - w.old_values[i]).abs();
+            ritz_changes[i] = change;
+            *flag = change < options.band_threshold(i);
             if !*flag {
                 active.push(i);
             }
@@ -216,6 +221,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         }
     }
     record.iterations.truncate(iterations);
+    ritz_changes_ha.truncate(iterations);
     w.finish(m, options.return_hx, &mut record.finish, options.profile)?;
     record.communication = c.snapshot();
     record.total_seconds = elapsed(total_clock);
@@ -225,6 +231,7 @@ pub fn solve<C: Collective, O: DistributedRealOperator>(
         eigenvectors: w.x,
         hx: options.return_hx.then_some(w.hx),
         converged,
+        ritz_changes_ha,
         record,
     })
 }

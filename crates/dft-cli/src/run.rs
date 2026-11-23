@@ -115,6 +115,8 @@ fn reference_options(config: &Config) -> Result<ScfOptions, RunError> {
         || points.len() != 1
         || points[0].fractional != [0.0; 3]
         || config.relax.is_some()
+        || config.symmetry.mode != crate::config::SymmetryMode::Off
+        || config.xc.density_floor.is_some()
         || config.output.as_ref().is_some_and(|o| o.forces || o.stress)
         || s.and_then(|s| s.gamma_real.as_deref()) == Some("off")
         || s.and_then(|s| s.start_density.as_deref()) == Some("uniform")
@@ -1333,10 +1335,7 @@ fn execute_mode_inner(
     // carries the verification option and its attempts).
     let reference = reference_requested(&config);
     if reference && (mode.observe || mode.agent) {
-        return Err(error(
-            1,
-            "reference SCF patch 1 supports Classic execution only",
-        ));
+        return Err(error(1, "reference SCF supports Classic execution only"));
     }
     let opts = options(&config)?;
     let scf_path = config.scf_path().map_err(|e| error(1, e.to_string()))?;
@@ -1502,34 +1501,61 @@ fn execute_mode_inner(
     }
     launch::mark("engine_constructor_entry");
     let constructor_clock = launch::clock();
-    let mut problem = if config.basis.legacy_gamma() {
-        ScfProblem::new(&prepared.cell, &atoms, &refs, opts.clone())
+    // Reference initialization owns its final-cutoff state directly. Do not
+    // construct the legacy problem (or its replicated band-density workspace).
+    let mut problem = if reference {
+        None
     } else {
-        ScfProblem::with_kpoints(
-            &prepared.cell,
-            &atoms,
-            &refs,
-            opts.clone(),
-            &points,
-            dft_engine::OccupationPolicy::Insulator {
-                minimum_gap_hartree: 1e-7,
-            },
-        )
-    }
-    .map_err(engine_error)?;
-    if let Some(symmetry) = config.prepared_symmetry().map_err(|e| error(1, e))? {
-        problem
-            .enable_prepared_symmetry(&symmetry)
+        Some({
+            let mut problem = if config.basis.legacy_gamma() {
+                ScfProblem::new(&prepared.cell, &atoms, &refs, opts.clone())
+            } else {
+                ScfProblem::with_kpoints(
+                    &prepared.cell,
+                    &atoms,
+                    &refs,
+                    opts.clone(),
+                    &points,
+                    dft_engine::OccupationPolicy::Insulator {
+                        minimum_gap_hartree: 1e-7,
+                    },
+                )
+            }
             .map_err(engine_error)?;
-    }
-    let density_floor = config
-        .xc
-        .density_floor
-        .or_else(|| problem.core_density().map(|_| 1e-10));
-    if let Some(floor) = density_floor {
-        problem.set_density_floor(floor).map_err(engine_error)?;
-    }
-    let electrons = problem.electron_count();
+            if let Some(symmetry) = config.prepared_symmetry().map_err(|e| error(1, e))? {
+                problem
+                    .enable_prepared_symmetry(&symmetry)
+                    .map_err(engine_error)?;
+            }
+            let density_floor = config
+                .xc
+                .density_floor
+                .or_else(|| problem.core_density().map(|_| 1e-10));
+            if let Some(floor) = density_floor {
+                problem.set_density_floor(floor).map_err(engine_error)?;
+            }
+            problem
+        })
+    };
+    let density_floor = config.xc.density_floor.or_else(|| {
+        problem
+            .as_ref()
+            .and_then(|p| p.core_density().map(|_| 1e-10))
+    });
+    let electrons = if let Some(p) = &problem {
+        p.electron_count()
+    } else {
+        atoms
+            .iter()
+            .map(|a| {
+                refs.iter()
+                    .find(|p| p.label == a.species)
+                    .expect("validated species")
+                    .potential
+                    .z_valence()
+            })
+            .sum()
+    };
     launch::elapsed("engine_construction", constructor_clock);
     launch::mark("engine_ready");
     let setup = start.elapsed().as_secs_f64();
@@ -1544,8 +1570,12 @@ fn execute_mode_inner(
     };
     let mut reference_records = Vec::new();
     let mut reference_status = None;
+    let mut reference_summary = None;
     let mut ladder_report = None;
-    let atomic_density_built = problem.atomic_superposition_density().is_some();
+    let atomic_density_built = reference
+        || problem
+            .as_ref()
+            .is_some_and(|p| p.atomic_superposition_density().is_some());
     // LAZY-RESULT: a classic run without forces, stress or orbital volumetric
     // output never reads the delivered orbitals, so an M2 result may keep them
     // distributed (no N x B gather on every rank). Replicated: every rank
@@ -1565,10 +1595,19 @@ fn execute_mode_inner(
     let scf_clock = launch::clock();
     launch::mark("scf_entry");
     let outcome = if mode.observe || mode.agent {
-        crate::telemetry::drive(problem, mode, &out)?
+        crate::telemetry::drive(problem.take().expect("legacy mode"), mode, &out)?
     } else {
         let run = if reference {
-            dft_engine::refscf::driver::run(problem, reference_profile(&config)?).map(|run| {
+            dft_engine::refscf::driver::run(dft_engine::refstart::StartInput {
+                cell: &prepared.cell, atoms: &atoms, potentials: &refs, options: &opts,
+            }, reference_profile(&config)?).map(|run| {
+                reference_summary = Some(json!({
+                    "start_s":run.start_s,"materialize_s":run.output_s,"first_estimator_stop_iteration":run.first_reference_stop,
+                    "peak_bytes_per_rank":run.peak_payload_bytes_per_rank,
+                    "peak_kind":"conservative principal array payload envelope; not RSS; backend/FFT/allocator storage excluded",
+                    "peak_rss_bytes_per_rank":null,
+                    "verification_calls":run.verification_calls.iter().map(reference_solve_json).collect::<Vec<_>>()
+                }));
                 reference_records = run.records;
                 reference_status = Some((run.reference_stopped, run.exit_reason));
                 run.outcome
@@ -1576,7 +1615,7 @@ fn execute_mode_inner(
         } else {
             match ladder {
                 Some(fraction) => dft_engine::cutoff_ladder::run_ladder(
-                    problem,
+                    problem.take().expect("legacy mode"),
                     &refs,
                     &dft_engine::cutoff_ladder::CutoffLadderOptions {
                         fraction,
@@ -1588,7 +1627,7 @@ fn execute_mode_inner(
                     ladder_report = Some(l.report);
                     l.outcome
                 }),
-                None => problem.run_outcome(),
+                None => problem.take().expect("legacy mode").run_outcome(),
             }
         };
         match run {
@@ -1737,7 +1776,12 @@ fn execute_mode_inner(
     result["scf"]["driver"] = json!(if reference { "reference" } else { "legacy" });
     if let Some((stopped, reason)) = &reference_status {
         result["reference_scf"] = json!({"reference_stopped":stopped,"exit_reason":reason,
-            "verification":"unavailable in patch 1; TODO issue #25 patch 2",
+            "mixing_input":config.scf.as_ref().and_then(|s|s.reference_mixing_input.as_ref().or(s.mixing.as_ref())),
+            "mixing_implementation":"modified_broyden_difference_history",
+            "verification":r.verification.as_ref().map(verification_json),
+            "iterations":reference_records.iter().map(reference_record_json).collect::<Vec<_>>(),
+            "run":reference_summary,
+            "threshold_ha":reference_profile(&config)?.threshold_ry/2.,
             "density_role":"last map output (also on exhaustion); energies refer to this output",
             "threshold_ry":reference_profile(&config)?.threshold_ry});
     }
@@ -1873,8 +1917,12 @@ fn execute_mode_inner(
     };
     let (model, replicated) = parallel_model(
         crate::parallel::size(),
-        dft_engine::parallel::distributed_solves(),
-        dft_engine::parallel::m2_enabled(),
+        if reference {
+            reference_records.iter().map(|r| r.calls.len()).sum()
+        } else {
+            dft_engine::parallel::distributed_solves()
+        },
+        reference || dft_engine::parallel::m2_enabled(),
         replicated_reason,
     );
     if model == "mpi_replicated" && crate::parallel::rank() == 0 {
@@ -1893,8 +1941,22 @@ fn execute_mode_inner(
             parallel_model: model,
         },
     );
+    if reference {
+        result["scf"]["mixing"] = json!({
+            "method":"broyden", "beta":reference_profile(&config)?.beta,
+            "history":reference_profile(&config)?.history
+        });
+        result["scf"]["mixing_metric"] = json!("hartree");
+        result["execution"]["davidson_mode"] = json!("reference_generalized");
+        result["execution"]["effective_solver"] = json!("reference_block_davidson");
+        result["execution"]["solver_note"] = json!(
+            "refstart and owned-row ref_davidson; no legacy session/ladder/solver switches; fresh-map fixed-point assessment from session.rs"
+        );
+        result["eigensolver_stopping_rule"] =
+            json!("Ritz change: occupied ethr; empty max(5*ethr,1e-5 Ry); first call all occupied");
+    }
     if crate::parallel::size() > 1 {
-        let m2_on = dft_engine::parallel::m2_enabled();
+        let m2_on = reference || dft_engine::parallel::m2_enabled();
         let (m2_counts, m2_stages) = dft_engine::parallel::m2_stats();
         let s = dft_engine::parallel::reduced_solve_stats();
         let reduced_solves = json!({
@@ -2002,6 +2064,24 @@ fn execute_mode_inner(
     let mut console = grid_report(&config, &prepared);
     if let Some((_, reason)) = &reference_status {
         writeln!(console, "Reference SCF: {reason}").unwrap();
+        for record in &reference_records {
+            writeln!(console, "reference iteration # {}", record.iteration).unwrap();
+            for call in &record.calls {
+                writeln!(
+                    console,
+                    "ethr = {:.6e} Ry, avg # of iterations = {:.1}",
+                    call.ethr_ry, call.iterations as f64
+                )
+                .unwrap();
+            }
+            writeln!(
+                console,
+                "total energy = {:.12} Ry; estimated scf accuracy < {:.8e} Ry",
+                2. * record.variational_energy_ha,
+                record.dr2_ry
+            )
+            .unwrap();
+        }
     }
     writeln!(
         console,
@@ -2298,6 +2378,26 @@ fn execute_mode_inner(
         },
     );
     launch::elapsed("run_block", run_block_clock);
+    if reference {
+        let sum = |get: fn(&dft_engine::refscf::record::Record) -> f64| {
+            reference_records.iter().map(get).sum::<f64>()
+        };
+        result["reference_scf"]["run"]["peak_rss_bytes_per_rank"] = json!(reference_peak_rss()?);
+        result["reference_scf"]["run"]["peak_rss_scope"] = json!(
+            "Linux /proc/self/status VmHWM through output preparation, before final JSON serialization/write; null where unavailable; use external per-rank high-water measurements for the complete process"
+        );
+        result["reference_scf"]["wall_s"] = json!({
+            "start":result["reference_scf"]["run"]["start_s"],
+            "solve":sum(|r|r.solve_s),"density":sum(|r|r.density_s),
+            "potential":sum(|r|r.potential_s),"energy":sum(|r|r.energy_s),
+            "mix":sum(|r|r.mixing_s),"density_transform":sum(|r|r.density_transform_s),
+            "metric":sum(|r|r.metric_s),"energy_correction":sum(|r|r.correction_s),
+            "verification":sum(|r|r.verification_s),
+            "output":io_clock.elapsed().as_secs_f64()+result["reference_scf"]["run"]["materialize_s"].as_f64().unwrap_or(0.),
+            "output_scope":"materialization and output preparation/writes before final results serialization; external wall includes the final write too",
+            "elapsed_to_results_serialize":start.elapsed().as_secs_f64()
+        });
+    }
     let result_path = out.join("results.json");
     let serialize_clock = launch::clock();
     let data = serde_json::to_vec_pretty(&result).map_err(|e| error(5, e))?;
@@ -2309,6 +2409,38 @@ fn execute_mode_inner(
         console,
         converged: outcome.converged,
     })
+}
+
+/// Process high water at the output boundary, never sampled inside a kernel.
+fn reference_peak_rss() -> Result<Vec<Option<u64>>, RunError> {
+    use dft_mpi::Collective;
+    #[cfg(target_os = "linux")]
+    let bytes = fs::read_to_string("/proc/self/status").ok().and_then(|s| {
+        s.lines().find_map(|line| {
+            let rest = line.strip_prefix("VmHWM:")?;
+            rest.split_whitespace()
+                .next()?
+                .parse::<u64>()
+                .ok()?
+                .checked_mul(1024)
+        })
+    });
+    #[cfg(target_os = "linux")]
+    let local = [bytes.unwrap_or(0) as f64];
+    #[cfg(not(target_os = "linux"))]
+    let local = [0.];
+    let values = if let Some(comm) = dft_engine::parallel::SharedComm::active() {
+        let mut values = vec![0.; comm.size()];
+        comm.allgatherv_f64(&local, &vec![1; comm.size()], &mut values)
+            .map_err(|e| error(5, e))?;
+        values
+    } else {
+        local.to_vec()
+    };
+    Ok(values
+        .into_iter()
+        .map(|n| (n > 0.).then_some(n as u64))
+        .collect())
 }
 
 /// ONEPATH-3: standard-path records of the collinear and Fermi-Dirac drivers
@@ -2976,17 +3108,34 @@ fn algebra_stream_json() -> serde_json::Value {
     })
 }
 
+fn reference_solve_json(c: &dft_engine::refscf::record::SolveRecord) -> Value {
+    json!({"ethr_ry":c.ethr_ry,"ethr_ha":c.ethr_ry/2.,"first_step_all_occupied":c.first_step,
+        "davidson_iterations":c.iterations,"avg_iterations":c.iterations as f64,
+        "active_bands_per_iteration":c.active_bands,"active_bands_sum":c.active_bands.iter().sum::<usize>(),
+        "h_columns":c.h_columns,"reduced_problem_orders":c.reduced_orders,
+        "restarts":c.restarts,"unconverged_bands":c.unconverged,
+        "ritz_changes_ha":c.ritz_changes_ha,"repairs":c.repairs,"dropped_corrections":c.dropped_corrections})
+}
 fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
-    json!({"iteration":r.iteration,"dr2_ry":r.dr2_ry,"dr2_ha":r.dr2_ry/2.0,
-        "ethr_ry":r.ethr_ry,"ethr_ha":r.ethr_ry/2.0,"beta":r.beta,
+    json!({"iteration":r.iteration,"dr2_ry":r.dr2_ry,"dr2_ha":r.dr2_ry/2.,
+        "ethr_requested_ry":r.ethr_requested_ry,"ethr_requested_ha":r.ethr_requested_ry/2.,
+        "ethr_ry":r.ethr_ry,"ethr_ha":r.ethr_ry/2.,"ethr_used_ry":r.ethr_ry,"beta":r.beta,
         "first_iteration_redo":r.first_iteration_redo,"history_occupancy":r.mixing.occupancy,
         "history_inserted_slot":r.mixing.inserted_slot,"gamma_l2":r.mixing.gamma_l2,
         "gamma_max":r.mixing.gamma_max,"a_condition_2":r.mixing.condition,
         "davidson_iterations":r.davidson_iterations,"h_columns":r.h_columns,
-        "descf_ha":r.descf_ha,"descf_ry":2.0*r.descf_ha,
-        "variational_energy_ha":r.variational_energy_ha,
-        "wall_s":{"map":r.map_s,"density_transform":r.density_transform_s,"metric":r.metric_s,
-            "mixing_and_inverse":r.mixing_s,"energy_correction":r.correction_s}})
+        "active_bands_sum":r.calls.iter().flat_map(|c|&c.active_bands).sum::<usize>(),
+        "reduced_problem_orders":r.calls.iter().flat_map(|c|&c.reduced_orders).collect::<Vec<_>>(),
+        "restarts":r.calls.iter().map(|c|c.restarts).sum::<usize>(),
+        "calls":r.calls.iter().map(reference_solve_json).collect::<Vec<_>>(),
+        "descf_ha":r.descf_ha,"descf_ry":2.*r.descf_ha,
+        "variational_energy_ha":r.variational_energy_ha,"variational_energy_ry":2.*r.variational_energy_ha,
+        "energies_ha":{"total":r.energy.total_hartree(),"band":r.energy.band_sum,
+            "hartree":r.energy.hartree,"xc":r.energy.xc,"double_counting":r.energy.double_counting,
+            "mixed_hartree":r.variational_hartree_ha,"mixed_xc":r.variational_xc_ha},
+        "wall_s":{"map":r.map_s,"solve":r.solve_s,"density":r.density_s,"potential":r.potential_s,
+            "energy":r.energy_s,"density_transform":r.density_transform_s,"metric":r.metric_s,
+            "mix":r.mixing_s,"energy_correction":r.correction_s,"verification":r.verification_s}})
 }
 
 #[cfg(test)]

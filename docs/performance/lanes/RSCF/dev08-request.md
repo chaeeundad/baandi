@@ -1,5 +1,11 @@
 # R-SCF-1 / issue #25 patch 1: dev08 density replay
 
+Historical patch-1 request. R-SCF-2 supersedes the driver TODO and the old
+`1e-19 + 1e-13 * amplitude` replay limit: see [full-run request](run-dev08-request.md)
+and the measured-floor section of [the design](../../../design/reference-scf.md).
+Patch 1 is accepted by the user on the relayed dev08 evidence; keep the
+commands/results below as historical context, not current acceptance limits.
+
 Execute through the master/dft5090 session. No server change or QE source access
 was performed by this implementer. This is a numerical comparison request,
 not a speed acceptance request. Do not compare MPI with threads in any column.

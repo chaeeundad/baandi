@@ -3377,3 +3377,59 @@ exits 1 on the existing missing phrase `standard profile is unsupported`.
 No unrelated test, tolerance or scope change was made. Evidence JSON and the
 request table above are refreshed; historical kinetic-only negative experiments
 remain explicitly labelled as historical. No dev08 measurements performed.
+
+### R-SCF-2 — independent full reference SCF (2026-11-23)
+
+Integration only; **not adopted as default, acceptance incomplete**. Derived
+from the own-words notes `qe-density-mixing-spec.md`,
+`davidson-iteration-structure-gamma.md` and `qe-scf-cycle.md`; no QE source read.
+The opt-in driver now consumes parsed input directly and uses refstart +
+owned-row ref_davidson + patch-1 Broyden, with orbitals retained between maps,
+Ry/Ha threshold mapping, first-step redo and a fresh fixed-point verification.
+A failed verification continues the original history (ADR 0043 V5); Si8 first
+stops at 10, fails verification at 3.06723442e-8 Ha, and passes at step 12.
+Records expose every call/active width/order/H column, energies, history
+conditioning and verification cost. Memory payload bounds are distinguished
+from Linux VmHWM (Mac null) and external whole-process measurements.
+
+Mac correctness matrix: Si8/16/32, established skew Si2, elongated Si24 and
+closed-shell synthetic nonlocal PP, each at simulated ranks 1/2/3/8. All 24
+converge and pass the fixed-point/5e-9 Ha class checks. Maximum strict-oracle
+energy differences by case: 1.43884904e-10, 1.09466214e-10, 3.80993015e-11,
+7.59472485e-11, 6.06945605e-11 and 1.69247072e-9 Ha. Exploratory open-shell
+single-atom z=4 and sheared Si8 strict oracles did not converge; no result is
+claimed for them. The accepted fixture set and all caveats are in
+[patch2-validation.md](lanes/RSCF/patch2-validation.md).
+
+**Unresolved:** Si16 rank 3 differs at SCF step 12. A 9.15933995e-16 Ha Ritz
+change difference straddles ethr: 2 versus 3 corrections, 92 versus 93 H
+columns; dr2 differs 3.15849833e-11 Ry and final density 8.17472951e-8 e/Bohr^3.
+Other five cases pass trajectory tests. No threshold/tolerance widening or
+forced extra iteration was introduced. Lesson: a passed delivered accuracy
+class does not establish rank-identical threshold branches; preserve the
+failing test and per-band Ritz evidence before a determinism decision.
+
+Genuine committed QE Si8 stdout: first divergence at step 1 (dr2
+0.43855533 versus 0.4347506747835862 Ry); ethr/correction counts agree initially
+(0.01 Ry, 3). Already before solving, recovered initial rho(G) differs by
+8.64045255e-7 e/Bohr^3 max. Direct radial integration/start clipping versus
+QE's documented table/no-clipping start has not been separated further;
+no claim that Broyden caused the full-trajectory mismatch. The user's relayed
+patch-1 pass is retained with measured-floor density-replay limits
+1e-17 + 1e-12*amplitude (same rank), 1e-16 + 1e-12*amplitude (cross-QE-rank).
+
+Pristine same-HEAD comparisons: four default CLI cases have bit-identical
+density/energy/eigenvalues and timing-stripped histories/verification records;
+`bench_scf.py` gamma same-HEAD identity passes. The historical baseline rejects
+standard-versus-strict (exit 3); strict mode differs in density with energy
+3.55e-15 Ha (exit 5 with require-identical), so it cannot establish identity of
+this patch. No timing ratio is used. `scripts/check.sh full` exits 1:
+build/fmt/clippy pass, 825 tests pass, 188 ignored, the same three worktree-cache
+tests fail. New release CLI tests 2/2, Broyden tests 10/10, refstart 6/6 and
+ref_davidson 5/5 pass. Full matrix exits 101 on the retained Si16 rank failure.
+README generation exits 0/no tracked change; its old scope-text test fails.
+
+[Full dev08 request](lanes/RSCF/run-dev08-request.md): Si128/64/216 np8 and
+Si32/64 np1, matching full QE references, one case per `final-` job, 7200 s,
+full trajectory/verification/rank-memory evidence. No remote run performed;
+no default or speed decision is justified yet.

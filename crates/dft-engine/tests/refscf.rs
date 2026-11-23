@@ -327,8 +327,8 @@ fn qe_si8_committed_trajectory() {
             d.relative_rms
         );
         // Measured QE 7.6 Si8: max 3.47e-18; shell relative RMS < 9.70e-16.
-        assert!(d.max <= 1e-19 + 1e-13 * d.scale, "{label}: {d:?}");
-        assert!(d.rms <= 1e-19 + 1e-13 * d.scale, "{label} RMS: {d:?}");
+        assert!(d.max <= 1e-17 + 1e-12 * d.scale, "{label}: {d:?}");
+        assert!(d.rms <= 1e-17 + 1e-12 * d.scale, "{label} RMS: {d:?}");
         d
     };
     check("startup_beta03", &x, &recovered03, &all);
@@ -403,43 +403,42 @@ fn qe_si8_committed_trajectory() {
 #[allow(dead_code)]
 mod common;
 #[test]
-fn driver_owned_maps_and_verification_fail_closed() {
+fn driver_owned_maps_and_real_verification() {
     use dft_engine::{
-        GammaReal, ScfOptions, ScfProblem, SpeciesPotential, StartDensity, Verification,
-        refscf::driver,
+        GammaReal, ScfOptions, SpeciesPotential, StartDensity, Verification, refscf::driver,
     };
     use std::sync::Arc;
     // A broad Gaussian is resolved at this deliberately small test cutoff.
     // A narrow rc=0.7 fixture produces negative Fourier ringing after mixing
     // and is correctly rejected; no clipping or tolerance relaxation is used.
-    let pp = common::potential_with_atomic_charge(4., 1.8, true, 161);
+    let pp = common::potential_with_atomic_start(4., 1.8, true, 161, "SLA PZ");
     let cell =
         dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]])
             .unwrap();
     let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
     let run = |verify, max_iterations, threshold_ry| {
-        let problem = ScfProblem::new(
-            &cell,
-            &atoms,
-            &[SpeciesPotential {
-                label: "Xx",
-                potential: &pp,
-            }],
-            ScfOptions {
-                start_density: StartDensity::Atomic,
-                gamma_real: GammaReal::On,
-                cutoff_hartree: 2.,
-                bands: Some(3),
-                max_iterations,
-                verification: verify,
-                ..Default::default()
-            },
-        )
-        .unwrap();
+        let species = [SpeciesPotential {
+            label: "Xx",
+            potential: &pp,
+        }];
+        let options = ScfOptions {
+            start_density: StartDensity::Atomic,
+            gamma_real: GammaReal::On,
+            cutoff_hartree: 2.,
+            bands: Some(3),
+            max_iterations,
+            verification: verify,
+            ..Default::default()
+        };
         // Large stop threshold is a control-flow fixture, never a production
         // convergence tolerance. It forces the verification boundary in one map.
         driver::run(
-            problem,
+            dft_engine::refstart::StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &species,
+                options: &options,
+            },
             Profile {
                 threshold_ry,
                 ..Default::default()
@@ -450,8 +449,13 @@ fn driver_owned_maps_and_verification_fail_closed() {
     let off = run(Verification::Off, 1, 1e6);
     assert!(off.reference_stopped && off.outcome.converged);
     let on = run(Verification::FixedPoint, 1, 1e6);
-    assert!(on.reference_stopped && !on.outcome.converged);
-    assert!(on.exit_reason.contains("NOT verified"));
+    assert!(on.reference_stopped && on.outcome.converged);
+    assert!(on.outcome.result.verification.as_ref().unwrap().passed());
+    assert!(
+        on.outcome.result.history[0]
+            .fixed_point_certificate
+            .is_some()
+    );
     let values = dft_mpi::simulate(2, |comm| {
         dft_engine::parallel::set_communicator(Some(Arc::new(comm.clone())));
         let run = run(Verification::Off, 1, 1e6);

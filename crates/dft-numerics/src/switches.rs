@@ -175,6 +175,8 @@ table! {
         "certificate solve reuses the screen's Hartree/XC fields";
     MIX_GROWTH_RESET: Kind::Number { default: None, valid: growth_reset_valid }, "none", "number > 1",
         "reset the mixing history when the residual grows by more than this factor";
+    MIX_CELL_KERKER: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "G-MIXER-DIVERGENCE: replace plain Pulay by Kerker-Pulay only when the density basis has wavelengths longer than the equal-volume cube: q0^2 = max(0, (2*pi/volume^(1/3))^2 - min_nonzero_G^2); beta/history unchanged, charge mode removed, acceptance unchanged; replicated mixer (including on MPI), not a physical dielectric model";
     EIGEN_FACTOR: Kind::Number { default: Some(0.1), valid: eigen_factor_valid }, "0.1", "number in [1e-3, 1]",
         "eigen tolerance = factor x density residual";
     EMPTY_LOOSE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",

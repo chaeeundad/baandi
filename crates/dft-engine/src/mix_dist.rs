@@ -803,6 +803,47 @@ mod tests {
     use dft_mpi::{SimRank, simulate};
     use dft_solvers::mixing::PulayMixer;
 
+    #[test]
+    fn configured_beta_is_applied_on_distributed_chunks_and_planes() {
+        for ranks in 1..=3 {
+            for beta in [0.2, 0.5, 0.8] {
+                for planes in [false, true] {
+                    let runs = simulate(ranks, move |comm| {
+                        let size = 2 * CHUNK;
+                        let x = vec![1.0; size];
+                        let y: Vec<_> = (0..size)
+                            .map(|i| if i % 2 == 0 { 1.2 } else { 0.8 })
+                            .collect();
+                        let mut m = if planes {
+                            // Even plane lengths keep each local residual charge zero.
+                            let counts: Vec<_> = (0..ranks)
+                                .map(|r| CHUNK / ranks + usize::from(r < CHUNK % ranks))
+                                .collect();
+                            DistributedPulay::new_planes(comm.clone(), beta, 6, size, 2, &counts)
+                                .unwrap()
+                        } else {
+                            DistributedPulay::new(comm.clone(), beta, 6, size).unwrap()
+                        };
+                        let next = if planes {
+                            m.mix_block(&x[..m.block_len()], &y[..m.block_len()], 1.0)
+                                .unwrap()
+                        } else {
+                            m.mix(&x, &y, 1.0).unwrap()
+                        };
+                        for (i, v) in next.iter().enumerate() {
+                            assert!((v - (x[i] + beta * (y[i] - x[i]))).abs() < 2e-13);
+                        }
+                        let d = m.last_step.as_ref().unwrap();
+                        assert!((d.step_norm / d.residual_norm - beta).abs() < 2e-13);
+                        assert_eq!(d.differences, 0);
+                        d.predicted_ratio
+                    });
+                    assert!(runs.iter().all(|r| *r == 1.0));
+                }
+            }
+        }
+    }
+
     fn lcg(s: &mut u64) -> f64 {
         *s = s
             .wrapping_mul(6364136223846793005)

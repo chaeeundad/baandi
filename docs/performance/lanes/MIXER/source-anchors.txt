@@ -1,0 +1,54 @@
+crates/dft-solvers/src/mixing.rs:52:                .map(|(a, b)| a + self.beta * (b - a))
+crates/dft-solvers/src/mixing.rs:105:    pub predicted_ratio: f64,
+crates/dft-solvers/src/mixing.rs:111:    pub coulomb_predicted_ratio: Option<f64>,
+crates/dft-solvers/src/mixing.rs:337:    fn incremental_update(
+crates/dft-solvers/src/mixing.rs:502:    fn coulomb_guard(
+crates/dft-solvers/src/mixing.rs:557:            *n = input[i] + beta * r[i];
+crates/dft-solvers/src/mixing.rs:626:            .map(|(a, r)| a + self.beta * r)
+crates/dft-solvers/src/mixing.rs:716:                    *n -= gamma[j] * (dx[j][i] + self.beta * dr[j][i]);
+crates/dft-solvers/src/mixing.rs:759:                predicted_ratio: if f.rr_fit > 0.0 {
+crates/dft-solvers/src/mixing.rs:765:                coulomb_predicted_ratio: coulomb.0,
+crates/dft-solvers/src/mixing.rs:774:                predicted_ratio: 1.0,
+crates/dft-solvers/src/mixing.rs:776:                coulomb_predicted_ratio: None,
+crates/dft-solvers/src/mixing.rs:812:                    let expected = x1[i] + beta * r1[i] - gamma * (x1[i] - x0[i] + beta * dr[i]);
+crates/dft-solvers/src/mixing.rs:1205:    fn incremental_update_is_bit_identical_to_the_plain_update() {
+crates/dft-solvers/src/mixing.rs:1230:    fn incremental_update_keeps_one_difference_per_history_entry() {
+crates/dft-solvers/src/mixing.rs:1303:    fn coulomb_guard_trace_is_inert_and_on_refits_only_a_predicted_growth() {
+crates/dft-engine/src/mix_dist.rs:197:    fn coulomb_guard(
+crates/dft-engine/src/mix_dist.rs:269:            *n = x[i] + beta * r[i];
+crates/dft-engine/src/mix_dist.rs:609:        let mut next: Vec<f64> = x.iter().zip(&r).map(|(a, r)| a + beta * r).collect();
+crates/dft-engine/src/mix_dist.rs:702:                    predicted_ratio: if rr_fit > 0.0 {
+crates/dft-engine/src/mix_dist.rs:708:                    coulomb_predicted_ratio: coulomb.0,
+crates/dft-engine/src/mix_dist.rs:718:                predicted_ratio: 1.0,
+crates/dft-engine/src/mix_dist.rs:720:                coulomb_predicted_ratio: None,
+crates/dft-engine/src/mix_dist.rs:1067:    fn coulomb_guard_matches_the_replicated_guard_for_every_rank_count() {
+crates/dft-engine/src/convergence.rs:9:pub(crate) fn cell_kerker_scale(cell: &Cell, basis: &PlaneWaveBasis) -> Option<f64> {
+crates/dft-engine/src/convergence.rs:40:    pub fn ratchet(previous: f64, error_ha: f64, electrons: f64) -> f64 {
+crates/dft-engine/src/convergence.rs:464:    fn cell_kerker_scale_is_geometric_and_cubic_is_inert() {
+crates/dft-engine/src/convergence.rs:520:            mixing_fraction: 1.0,
+crates/dft-engine/src/scf.rs:219:    pub divergence_factor: f64,
+crates/dft-engine/src/scf.rs:220:    pub divergence_patience: usize,
+crates/dft-engine/src/scf.rs:306:            divergence_factor: 20.0,
+crates/dft-engine/src/scf.rs:307:            divergence_patience: 3,
+crates/dft-engine/src/scf.rs:376:    pub mixing_fraction: f64,
+crates/dft-engine/src/scf.rs:1377:            || options.divergence_patience == 0
+crates/dft-engine/src/scf.rs:1378:            || !options.divergence_factor.is_finite()
+crates/dft-engine/src/scf.rs:1379:            || options.divergence_factor <= 1.0
+crates/dft-engine/src/scf.rs:1470:        if run.on(dft_numerics::switches::Id::MIX_CELL_KERKER) {
+crates/dft-engine/src/scf.rs:1481:                        Id::MIX_CELL_KERKER,
+crates/dft-engine/src/scf.rs:1487:                        Id::MIX_CELL_KERKER,
+crates/dft-engine/src/scf.rs:4287:pub fn density_distance(a: &Array3<f64>, b: &Array3<f64>, volume: f64, electrons: f64) -> f64 {
+crates/dft-engine/src/scf.rs:4716:            mixing_fraction: 1.0,
+crates/dft-engine/src/session.rs:379:    fn make_mixer(&self, mixing: &Mixing) -> Result<Box<dyn MixerHistory>, ScfError> {
+crates/dft-engine/src/session.rs:582:            let ordinary = history.last().map_or(first, |r| {
+crates/dft-engine/src/session.rs:837:            mixing_fraction: 1.0,
+crates/dft-engine/src/session.rs:922:            > self.problem.options.divergence_factor
+crates/dft-engine/src/session.rs:930:        if *growing >= self.problem.options.divergence_patience {
+crates/dft-engine/src/session.rs:932:                reason: "density residual exceeded growth limit".into(),
+crates/dft-engine/src/session.rs:1441:        // Experimental guard (BAANDI_MIX_GROWTH_RESET=<factor>, default off): a density
+crates/dft-engine/src/session.rs:1521:                record.mixing_fraction = fraction;
+crates/dft-engine/src/session.rs:1596:                record.mixing_fraction = fraction;
+crates/dft-engine/src/session.rs:2426:            || c.growing >= c.options.divergence_patience
+crates/dft-engine/src/session.rs:3175:    /// `BAANDI_MIX_GROWTH_RESET`.
+crates/dft-engine/src/session.rs:3240:            growth_reset: run.number(Id::MIX_GROWTH_RESET),
+crates/dft-engine/src/session.rs:3273:// (bit-identical either way). MIX_GROWTH_RESET: `SessionSwitches::growth_reset`.

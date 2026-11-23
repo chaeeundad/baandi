@@ -1,0 +1,16 @@
+   Compiling serde_json v1.0.154
+   Compiling anstream v1.0.0
+   Compiling env_logger v0.11.11
+   Compiling validify v2.0.0
+   Compiling upf v0.1.1
+   Compiling dft-upf v0.1.0 (/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/crates/dft-upf)
+   Compiling dft-physics v0.1.0 (/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/crates/dft-physics)
+   Compiling dft-engine v0.1.0 (/Volumes/990-2TB/Develop/rust-dft-wt/G-MIXER-DIVERGENCE/crates/dft-engine)
+    Finished `release` profile [optimized] target(s) in 10.77s
+     Running unittests src/lib.rs (target/release/deps/dft_engine-5a2965bdd204a9df)
+
+running 1 test
+test scf::convergence::tests::cell_kerker_scale_is_geometric_and_cubic_is_inert ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 88 filtered out; finished in 0.00s
+

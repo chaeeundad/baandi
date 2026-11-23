@@ -1,0 +1,829 @@
+{
+  "rows": [
+    {
+      "case": "si-elongated",
+      "seed": 601,
+      "baseline_maps": 100,
+      "candidate_maps": 100,
+      "candidate_converged": false,
+      "baseline_h": 2184,
+      "candidate_h": 1922,
+      "cell_error_ha": null,
+      "baseline_error_ha": null,
+      "coulomb_error_ha": null,
+      "reference_converged": false
+    },
+    {
+      "case": "si-elongated",
+      "seed": 602,
+      "baseline_maps": 100,
+      "candidate_maps": 100,
+      "candidate_converged": false,
+      "baseline_h": 2808,
+      "candidate_h": 2459,
+      "cell_error_ha": null,
+      "baseline_error_ha": null,
+      "coulomb_error_ha": null,
+      "reference_converged": false
+    },
+    {
+      "case": "si-elongated",
+      "seed": 603,
+      "baseline_maps": 100,
+      "candidate_maps": 100,
+      "candidate_converged": false,
+      "baseline_h": 2041,
+      "candidate_h": 1930,
+      "cell_error_ha": null,
+      "baseline_error_ha": null,
+      "coulomb_error_ha": null,
+      "reference_converged": false
+    },
+    {
+      "case": "si-slab",
+      "seed": 601,
+      "baseline_maps": 100,
+      "candidate_maps": 100,
+      "candidate_converged": false,
+      "baseline_h": 2310,
+      "candidate_h": 2050,
+      "cell_error_ha": null,
+      "baseline_error_ha": null,
+      "coulomb_error_ha": null,
+      "reference_converged": false
+    },
+    {
+      "case": "si-slab",
+      "seed": 602,
+      "baseline_maps": 100,
+      "candidate_maps": 100,
+      "candidate_converged": false,
+      "baseline_h": 2126,
+      "candidate_h": 1991,
+      "cell_error_ha": null,
+      "baseline_error_ha": null,
+      "coulomb_error_ha": null,
+      "reference_converged": false
+    },
+    {
+      "case": "si-slab",
+      "seed": 603,
+      "baseline_maps": 100,
+      "candidate_maps": 100,
+      "candidate_converged": false,
+      "baseline_h": 2165,
+      "candidate_h": 3267,
+      "cell_error_ha": null,
+      "baseline_error_ha": null,
+      "coulomb_error_ha": null,
+      "reference_converged": false
+    },
+    {
+      "case": "si-long4",
+      "seed": 601,
+      "baseline_maps": 26,
+      "candidate_maps": 8,
+      "candidate_converged": true,
+      "baseline_h": 8533,
+      "candidate_h": 2578,
+      "cell_error_ha": 2.1302071218087804e-11,
+      "baseline_error_ha": 1.894306933536427e-11,
+      "coulomb_error_ha": 2.3987922759260982e-11,
+      "reference_converged": true
+    },
+    {
+      "case": "si-long4",
+      "seed": 602,
+      "baseline_maps": 79,
+      "candidate_maps": 9,
+      "candidate_converged": true,
+      "baseline_h": 21876,
+      "candidate_h": 2475,
+      "cell_error_ha": 1.2988721209694631e-11,
+      "baseline_error_ha": 3.0183855415089056e-11,
+      "coulomb_error_ha": 2.8819613362429664e-11,
+      "reference_converged": true
+    },
+    {
+      "case": "si-long4",
+      "seed": 603,
+      "baseline_maps": 37,
+      "candidate_maps": 9,
+      "candidate_converged": true,
+      "baseline_h": 10125,
+      "candidate_h": 2532,
+      "cell_error_ha": 3.3296032597718295e-11,
+      "baseline_error_ha": 1.1240786079724785e-11,
+      "coulomb_error_ha": 2.6190605240117293e-11,
+      "reference_converged": true
+    },
+    {
+      "case": "si8-gamma",
+      "seed": 601,
+      "baseline_maps": 11,
+      "candidate_maps": 11,
+      "candidate_converged": true,
+      "baseline_h": 769,
+      "candidate_h": 769,
+      "cell_error_ha": 8.673239904055663e-11,
+      "baseline_error_ha": 8.673239904055663e-11,
+      "coulomb_error_ha": 8.673239904055663e-11,
+      "reference_converged": true
+    },
+    {
+      "case": "si8-gamma",
+      "seed": 602,
+      "baseline_maps": 9,
+      "candidate_maps": 9,
+      "candidate_converged": true,
+      "baseline_h": 763,
+      "candidate_h": 763,
+      "cell_error_ha": 1.3303136370268476e-10,
+      "baseline_error_ha": 1.3303136370268476e-10,
+      "coulomb_error_ha": 1.3303136370268476e-10,
+      "reference_converged": true
+    },
+    {
+      "case": "si8-gamma",
+      "seed": 603,
+      "baseline_maps": 9,
+      "candidate_maps": 9,
+      "candidate_converged": true,
+      "baseline_h": 761,
+      "candidate_h": 761,
+      "cell_error_ha": 1.0505374348213081e-10,
+      "baseline_error_ha": 1.0505374348213081e-10,
+      "coulomb_error_ha": 1.0505374348213081e-10,
+      "reference_converged": true
+    },
+    {
+      "case": "si16-gamma",
+      "seed": 601,
+      "baseline_maps": 10,
+      "candidate_maps": 7,
+      "candidate_converged": true,
+      "baseline_h": 1823,
+      "candidate_h": 1212,
+      "cell_error_ha": 5.778133527201135e-11,
+      "baseline_error_ha": 6.9505290412053e-11,
+      "coulomb_error_ha": 5.9827698351000436e-12,
+      "reference_converged": true
+    },
+    {
+      "case": "si16-gamma",
+      "seed": 602,
+      "baseline_maps": 10,
+      "candidate_maps": 6,
+      "candidate_converged": true,
+      "baseline_h": 1788,
+      "candidate_h": 1031,
+      "cell_error_ha": 1.6735910435272672e-09,
+      "baseline_error_ha": 1.0893330681938096e-10,
+      "coulomb_error_ha": 1.4942713733034907e-11,
+      "reference_converged": true
+    },
+    {
+      "case": "si16-gamma",
+      "seed": 603,
+      "baseline_maps": 10,
+      "candidate_maps": 7,
+      "candidate_converged": true,
+      "baseline_h": 1668,
+      "candidate_h": 1216,
+      "cell_error_ha": 1.241247105099319e-10,
+      "baseline_error_ha": 3.61666252501891e-11,
+      "coulomb_error_ha": 1.532072246845928e-10,
+      "reference_converged": true
+    },
+    {
+      "case": "si32-gamma",
+      "seed": 601,
+      "baseline_maps": 10,
+      "candidate_maps": 9,
+      "candidate_converged": true,
+      "baseline_h": 3064,
+      "candidate_h": 2547,
+      "cell_error_ha": 3.9051428757375106e-11,
+      "baseline_error_ha": 1.0508927061891882e-10,
+      "coulomb_error_ha": 1.6758860965637723e-10,
+      "reference_converged": true
+    },
+    {
+      "case": "si32-gamma",
+      "seed": 602,
+      "baseline_maps": 10,
+      "candidate_maps": 8,
+      "candidate_converged": true,
+      "baseline_h": 3077,
+      "candidate_h": 2409,
+      "cell_error_ha": 5.789502210973296e-11,
+      "baseline_error_ha": 1.3487522210198222e-10,
+      "coulomb_error_ha": 1.2448708730516955e-11,
+      "reference_converged": true
+    },
+    {
+      "case": "si32-gamma",
+      "seed": 603,
+      "baseline_maps": 11,
+      "candidate_maps": 8,
+      "candidate_converged": true,
+      "baseline_h": 3217,
+      "candidate_h": 2414,
+      "cell_error_ha": 4.490630090003833e-11,
+      "baseline_error_ha": 6.431832844100427e-11,
+      "coulomb_error_ha": 5.172751116333529e-12,
+      "reference_converged": true
+    },
+    {
+      "case": "si-skew",
+      "seed": 601,
+      "baseline_maps": 8,
+      "candidate_maps": 8,
+      "candidate_converged": true,
+      "baseline_h": 278,
+      "candidate_h": 278,
+      "cell_error_ha": 2.616573624436569e-12,
+      "baseline_error_ha": 2.616573624436569e-12,
+      "coulomb_error_ha": 4.89386309254769e-13,
+      "reference_converged": true
+    },
+    {
+      "case": "si-skew",
+      "seed": 602,
+      "baseline_maps": 8,
+      "candidate_maps": 8,
+      "candidate_converged": true,
+      "baseline_h": 280,
+      "candidate_h": 280,
+      "cell_error_ha": 2.666311615939776e-12,
+      "baseline_error_ha": 2.666311615939776e-12,
+      "coulomb_error_ha": 2.1049828546892968e-13,
+      "reference_converged": true
+    },
+    {
+      "case": "si-skew",
+      "seed": 603,
+      "baseline_maps": 8,
+      "candidate_maps": 8,
+      "candidate_converged": true,
+      "baseline_h": 276,
+      "candidate_h": 276,
+      "cell_error_ha": 1.4344081478157023e-12,
+      "baseline_error_ha": 1.4344081478157023e-12,
+      "coulomb_error_ha": 1.6342482922482304e-13,
+      "reference_converged": true
+    },
+    {
+      "case": "syn-gaussian-fcc",
+      "seed": 601,
+      "baseline_maps": 8,
+      "candidate_maps": 8,
+      "candidate_converged": true,
+      "baseline_h": 338,
+      "candidate_h": 338,
+      "cell_error_ha": 2.2027712986982806e-11,
+      "baseline_error_ha": 2.2027712986982806e-11,
+      "coulomb_error_ha": 4.11359835084113e-11,
+      "reference_converged": true
+    },
+    {
+      "case": "syn-gaussian-fcc",
+      "seed": 602,
+      "baseline_maps": 9,
+      "candidate_maps": 9,
+      "candidate_converged": true,
+      "baseline_h": 367,
+      "candidate_h": 367,
+      "cell_error_ha": 4.686029342337861e-12,
+      "baseline_error_ha": 4.686029342337861e-12,
+      "coulomb_error_ha": 3.345412835642492e-11,
+      "reference_converged": true
+    },
+    {
+      "case": "syn-gaussian-fcc",
+      "seed": 603,
+      "baseline_maps": 8,
+      "candidate_maps": 8,
+      "candidate_converged": true,
+      "baseline_h": 355,
+      "candidate_h": 355,
+      "cell_error_ha": 3.2384761539105966e-11,
+      "baseline_error_ha": 3.2384761539105966e-11,
+      "coulomb_error_ha": 5.831246596699202e-11,
+      "reference_converged": true
+    },
+    {
+      "case": "syn-p3",
+      "seed": 601,
+      "baseline_maps": 5,
+      "candidate_maps": 5,
+      "candidate_converged": true,
+      "baseline_h": 13,
+      "candidate_h": 13,
+      "cell_error_ha": 6.055600465515454e-12,
+      "baseline_error_ha": 6.055600465515454e-12,
+      "coulomb_error_ha": 6.055600465515454e-12,
+      "reference_converged": true
+    },
+    {
+      "case": "syn-p3",
+      "seed": 602,
+      "baseline_maps": 5,
+      "candidate_maps": 5,
+      "candidate_converged": true,
+      "baseline_h": 13,
+      "candidate_h": 13,
+      "cell_error_ha": 5.8610893916011264e-12,
+      "baseline_error_ha": 5.8610893916011264e-12,
+      "coulomb_error_ha": 5.8610893916011264e-12,
+      "reference_converged": true
+    },
+    {
+      "case": "syn-p3",
+      "seed": 603,
+      "baseline_maps": 5,
+      "candidate_maps": 5,
+      "candidate_converged": true,
+      "baseline_h": 13,
+      "candidate_h": 13,
+      "cell_error_ha": 5.914380096783134e-12,
+      "baseline_error_ha": 5.914380096783134e-12,
+      "coulomb_error_ha": 5.914380096783134e-12,
+      "reference_converged": true
+    }
+  ],
+  "identity": [
+    {
+      "case": "si-elongated",
+      "seed": 601,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si-elongated",
+      "seed": 602,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si-elongated",
+      "seed": 603,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si-slab",
+      "seed": 601,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si-slab",
+      "seed": 602,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si-slab",
+      "seed": 603,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si-long4",
+      "seed": 601,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si-long4",
+      "seed": 602,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si-long4",
+      "seed": 603,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si8-gamma",
+      "seed": 601,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si8-gamma",
+      "seed": 602,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si8-gamma",
+      "seed": 603,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si16-gamma",
+      "seed": 601,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si16-gamma",
+      "seed": 602,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si16-gamma",
+      "seed": 603,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si32-gamma",
+      "seed": 601,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si32-gamma",
+      "seed": 602,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si32-gamma",
+      "seed": 603,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si-skew",
+      "seed": 601,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si-skew",
+      "seed": 602,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "si-skew",
+      "seed": 603,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "syn-gaussian-fcc",
+      "seed": 601,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "syn-gaussian-fcc",
+      "seed": 602,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "syn-gaussian-fcc",
+      "seed": 603,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "syn-p3",
+      "seed": 601,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "syn-p3",
+      "seed": 602,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    },
+    {
+      "case": "syn-p3",
+      "seed": 603,
+      "energy": true,
+      "density": true,
+      "history": true,
+      "work": true
+    }
+  ],
+  "additional": [
+    {
+      "case": "si-elongated",
+      "seed": 601,
+      "strict_error_ha": null,
+      "thread_identity": true,
+      "combined_maps": 100,
+      "combined_error_ha": null
+    },
+    {
+      "case": "si-elongated",
+      "seed": 602,
+      "strict_error_ha": null,
+      "thread_identity": true,
+      "combined_maps": 100,
+      "combined_error_ha": null
+    },
+    {
+      "case": "si-elongated",
+      "seed": 603,
+      "strict_error_ha": null,
+      "thread_identity": true,
+      "combined_maps": 100,
+      "combined_error_ha": null
+    },
+    {
+      "case": "si-slab",
+      "seed": 601,
+      "strict_error_ha": null,
+      "thread_identity": true,
+      "combined_maps": 100,
+      "combined_error_ha": null
+    },
+    {
+      "case": "si-slab",
+      "seed": 602,
+      "strict_error_ha": null,
+      "thread_identity": true,
+      "combined_maps": 100,
+      "combined_error_ha": null
+    },
+    {
+      "case": "si-slab",
+      "seed": 603,
+      "strict_error_ha": null,
+      "thread_identity": true,
+      "combined_maps": 100,
+      "combined_error_ha": null
+    },
+    {
+      "case": "si-long4",
+      "seed": 601,
+      "strict_error_ha": 3.979039320256561e-13,
+      "thread_identity": true,
+      "combined_maps": 8,
+      "combined_error_ha": 2.1302071218087804e-11
+    },
+    {
+      "case": "si-long4",
+      "seed": 602,
+      "strict_error_ha": 2.5579538487363607e-13,
+      "thread_identity": true,
+      "combined_maps": 9,
+      "combined_error_ha": 1.2988721209694631e-11
+    },
+    {
+      "case": "si-long4",
+      "seed": 603,
+      "strict_error_ha": 3.836930773104541e-13,
+      "thread_identity": true,
+      "combined_maps": 9,
+      "combined_error_ha": 3.3296032597718295e-11
+    },
+    {
+      "case": "si8-gamma",
+      "seed": 601,
+      "strict_error_ha": 0.0,
+      "thread_identity": true,
+      "combined_maps": 11,
+      "combined_error_ha": 8.673239904055663e-11
+    },
+    {
+      "case": "si8-gamma",
+      "seed": 602,
+      "strict_error_ha": 0.0,
+      "thread_identity": true,
+      "combined_maps": 9,
+      "combined_error_ha": 1.3303136370268476e-10
+    },
+    {
+      "case": "si8-gamma",
+      "seed": 603,
+      "strict_error_ha": 0.0,
+      "thread_identity": true,
+      "combined_maps": 9,
+      "combined_error_ha": 1.0505374348213081e-10
+    },
+    {
+      "case": "si16-gamma",
+      "seed": 601,
+      "strict_error_ha": 2.842170943040401e-14,
+      "thread_identity": true,
+      "combined_maps": 7,
+      "combined_error_ha": 5.778133527201135e-11
+    },
+    {
+      "case": "si16-gamma",
+      "seed": 602,
+      "strict_error_ha": 3.552713678800501e-14,
+      "thread_identity": true,
+      "combined_maps": 6,
+      "combined_error_ha": 1.6735910435272672e-09
+    },
+    {
+      "case": "si16-gamma",
+      "seed": 603,
+      "strict_error_ha": 2.8421709430404007e-13,
+      "thread_identity": true,
+      "combined_maps": 7,
+      "combined_error_ha": 1.241247105099319e-10
+    },
+    {
+      "case": "si32-gamma",
+      "seed": 601,
+      "strict_error_ha": 7.105427357601002e-14,
+      "thread_identity": true,
+      "combined_maps": 9,
+      "combined_error_ha": 3.9051428757375106e-11
+    },
+    {
+      "case": "si32-gamma",
+      "seed": 602,
+      "strict_error_ha": 9.947598300641403e-14,
+      "thread_identity": true,
+      "combined_maps": 8,
+      "combined_error_ha": 5.789502210973296e-11
+    },
+    {
+      "case": "si32-gamma",
+      "seed": 603,
+      "strict_error_ha": 6.252776074688882e-13,
+      "thread_identity": true,
+      "combined_maps": 8,
+      "combined_error_ha": 4.490630090003833e-11
+    },
+    {
+      "case": "si-skew",
+      "seed": 601,
+      "strict_error_ha": 0.0,
+      "thread_identity": true,
+      "combined_maps": 9,
+      "combined_error_ha": 4.89386309254769e-13
+    },
+    {
+      "case": "si-skew",
+      "seed": 602,
+      "strict_error_ha": 0.0,
+      "thread_identity": true,
+      "combined_maps": 9,
+      "combined_error_ha": 2.1049828546892968e-13
+    },
+    {
+      "case": "si-skew",
+      "seed": 603,
+      "strict_error_ha": 0.0,
+      "thread_identity": true,
+      "combined_maps": 9,
+      "combined_error_ha": 1.6342482922482304e-13
+    },
+    {
+      "case": "syn-gaussian-fcc",
+      "seed": 601,
+      "strict_error_ha": 0.0,
+      "thread_identity": true,
+      "combined_maps": 9,
+      "combined_error_ha": 4.11359835084113e-11
+    },
+    {
+      "case": "syn-gaussian-fcc",
+      "seed": 602,
+      "strict_error_ha": 0.0,
+      "thread_identity": true,
+      "combined_maps": 8,
+      "combined_error_ha": 3.345412835642492e-11
+    },
+    {
+      "case": "syn-gaussian-fcc",
+      "seed": 603,
+      "strict_error_ha": 0.0,
+      "thread_identity": true,
+      "combined_maps": 9,
+      "combined_error_ha": 5.831246596699202e-11
+    },
+    {
+      "case": "syn-p3",
+      "seed": 601,
+      "strict_error_ha": 0.0,
+      "thread_identity": true,
+      "combined_maps": 5,
+      "combined_error_ha": 6.055600465515454e-12
+    },
+    {
+      "case": "syn-p3",
+      "seed": 602,
+      "strict_error_ha": 0.0,
+      "thread_identity": true,
+      "combined_maps": 5,
+      "combined_error_ha": 5.8610893916011264e-12
+    },
+    {
+      "case": "syn-p3",
+      "seed": 603,
+      "strict_error_ha": 0.0,
+      "thread_identity": true,
+      "combined_maps": 5,
+      "combined_error_ha": 5.914380096783134e-12
+    }
+  ],
+  "final_identity": [
+    {
+      "case": "si-elongated",
+      "identity": true
+    },
+    {
+      "case": "si-slab",
+      "identity": true
+    },
+    {
+      "case": "si-long4",
+      "identity": true
+    },
+    {
+      "case": "si8-gamma",
+      "identity": true
+    },
+    {
+      "case": "si16-gamma",
+      "identity": true
+    },
+    {
+      "case": "si32-gamma",
+      "identity": true
+    },
+    {
+      "case": "si-skew",
+      "identity": true
+    },
+    {
+      "case": "syn-gaussian-fcc",
+      "identity": true
+    },
+    {
+      "case": "syn-p3",
+      "identity": true
+    }
+  ]
+}

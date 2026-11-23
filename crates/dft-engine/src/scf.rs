@@ -369,7 +369,10 @@ pub struct IterationRecord {
     pub charge_error: f64,
     pub input_charge_error: f64,
     pub min_density: f64,
-    /// Pulay feasibility damping; one means the full proposal was accepted.
+    /// Additional Pulay feasibility damping; one means the full proposal was
+    /// accepted. This is NOT the configured beta: beta already multiplies the
+    /// residual in x + beta R - (Delta x + beta Delta R) gamma. A Pulay step
+    /// need not be parallel to R, so it has no single effective scalar beta.
     pub mixing_fraction: f64,
     pub mixer_reset: bool,
     /// Raw SCF residual ratio to the previous iteration; None initially/after zero.
@@ -1249,7 +1252,7 @@ impl ScfProblem {
         cell: &Cell,
         atoms: &[Atom],
         potentials: &[SpeciesPotential<'_>],
-        options: ScfOptions,
+        mut options: ScfOptions,
         points: &[KPoint],
         minimum_gap: Option<f64>,
         channel: Option<usize>,
@@ -1461,6 +1464,33 @@ impl ScfProblem {
         let part = crate::profile::clock();
         let gamma = options.basis(cell, [0.; 3], 1.0)?;
         let density_basis = options.basis(cell, [0.; 3], 4.0)?;
+        // G-MIXER-DIVERGENCE: geometry-only residual filtering. Resolve once
+        // at construction, before the session chooses its mixer/owned layout.
+        // A cubic cell takes the original Pulay path, without an FFT round trip.
+        if run.on(dft_numerics::switches::Id::MIX_CELL_KERKER) {
+            use dft_numerics::switches::Id;
+            if let Mixing::Pulay { beta, history } = options.mixing {
+                if let Some(q0_inverse_bohr) = convergence::cell_kerker_scale(cell, &density_basis)
+                {
+                    options.mixing = Mixing::KerkerPulay {
+                        beta,
+                        history,
+                        q0_inverse_bohr,
+                    };
+                    run.note_path(
+                        Id::MIX_CELL_KERKER,
+                        &format!("replicated Kerker-Pulay, q0={q0_inverse_bohr:.17e} Bohr^-1"),
+                        None,
+                    );
+                } else {
+                    run.note_path(
+                        Id::MIX_CELL_KERKER,
+                        "plain Pulay",
+                        Some("no represented mode longer than the equal-volume cube"),
+                    );
+                }
+            }
+        }
         let grid = FftGridSpec::new(&gamma, &density_basis, options.grid_override)?;
         let dg = FftGridSpec::new(&density_basis, &density_basis, Some(grid.dims()))?;
         if let Some(p) = init_profile {

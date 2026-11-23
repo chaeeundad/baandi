@@ -482,3 +482,261 @@ fn driver_owned_maps_and_real_verification() {
         assert!((e - serial.outcome.result.total_hartree()).abs() < 1e-10);
     }
 }
+
+fn stop_to_verified_clocks(run: &dft_engine::refscf::driver::Run) -> (f64, f64, f64, f64) {
+    let attempts = &run.outcome.result.verification.as_ref().unwrap().attempts;
+    let first = run.first_reference_stop.unwrap();
+    let last = attempts.last().unwrap();
+    assert!(last.passed);
+    let start = run.records[first - 1].estimator_s;
+    let end = run.records[last.iteration - 1].verification_end_s.unwrap();
+    let (mut verify, mut recovery, mut previous_end) = (0., 0., 0.);
+    let mut failed = false;
+    for r in &run.records {
+        assert!(previous_end <= r.map_start_s && r.map_start_s <= r.estimator_s);
+        assert!(r.estimator_s <= r.map_end_s);
+        previous_end = r.map_end_s;
+        match (r.verification_start_s, r.verification_end_s) {
+            (Some(a), Some(b)) => {
+                assert!(r.estimator_s <= a && a <= b && b <= r.map_end_s);
+                if failed {
+                    recovery += a - r.map_start_s;
+                }
+                verify += b - a;
+                let attempt = attempts
+                    .iter()
+                    .find(|a| a.iteration == r.iteration)
+                    .unwrap();
+                if !attempt.passed {
+                    failed = true;
+                    recovery += r.map_end_s - b;
+                }
+            }
+            (None, None) => {
+                if failed {
+                    recovery += r.map_end_s - r.map_start_s;
+                }
+            }
+            _ => panic!("partial attempt clock"),
+        }
+    }
+    let interval = end - start;
+    let other = interval - verify - recovery;
+    assert!(other >= -64. * f64::EPSILON * end.max(1.));
+    assert!((verify + recovery + other - interval).abs() <= 64. * f64::EPSILON * end.max(1.));
+    (interval, verify, recovery, other)
+}
+
+fn stop_to_verified_science(run: &dft_engine::refscf::driver::Run) -> String {
+    let r = &run.outcome.result;
+    let mut records = run.records.clone();
+    for map in &mut records {
+        map.map_start_s = 0.;
+        map.estimator_s = 0.;
+        map.verification_start_s = map.verification_start_s.map(|_| 0.);
+        map.verification_end_s = map.verification_end_s.map(|_| 0.);
+        map.map_end_s = 0.;
+        map.map_s = 0.;
+        map.solve_s = 0.;
+        map.density_s = 0.;
+        map.potential_s = 0.;
+        map.energy_s = 0.;
+        map.density_transform_s = 0.;
+        map.metric_s = 0.;
+        map.mixing_s = 0.;
+        map.correction_s = 0.;
+        map.verification_s = 0.;
+    }
+    let mut calls = run.verification_calls.clone();
+    for c in records
+        .iter_mut()
+        .flat_map(|r| &mut r.calls)
+        .chain(&mut calls)
+    {
+        c.inner_clocks = None;
+        c.ritz_changes_ha.clear();
+        c.ritz_values_ha.clear();
+    }
+    let mut history = r.history.clone();
+    for h in &mut history {
+        h.timings = Default::default();
+        if let Some(c) = &mut h.fixed_point_certificate {
+            c.timings = Default::default();
+        }
+    }
+    let mut verdict = r.verification.clone();
+    for a in &mut verdict.as_mut().unwrap().attempts {
+        a.wall = Default::default();
+    }
+    format!(
+        "{:?}",
+        (
+            run.outcome.converged,
+            run.first_reference_stop,
+            &r.energy,
+            r.density.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+            r.orbitals
+                .as_slice()
+                .iter()
+                .map(|v| (v.re.to_bits(), v.im.to_bits()))
+                .collect::<Vec<_>>(),
+            &r.eigenvalues,
+            &r.occupations,
+            history,
+            verdict,
+            records,
+            calls
+        )
+    )
+}
+
+#[test]
+fn stop_to_verified_first_pass_all_diagnostics() {
+    use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, StartDensity, refscf::driver};
+    use dft_numerics::switches::RunConfig;
+    let pp = common::potential_with_atomic_start(4., 1.8, true, 161, "SLA PZ");
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]])
+            .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let species = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        start_density: StartDensity::Atomic,
+        gamma_real: GammaReal::On,
+        cutoff_hartree: 2.,
+        bands: Some(3),
+        max_iterations: 1,
+        ..Default::default()
+    };
+    let mut previous = None;
+    for level in ["off", "on"] {
+        let scope = RunConfig::from_pairs(&[("davidson_stages", level)]).unwrap();
+        let _guard = scope.enter();
+        // Control-flow fixture only: the existing first-pass case, not a new default.
+        let run = driver::run(
+            dft_engine::refstart::StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &species,
+                options: &options,
+            },
+            Profile {
+                threshold_ry: 1e6,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let (interval, verification, recovery, other) = stop_to_verified_clocks(&run);
+        assert_eq!(run.first_reference_stop, Some(1));
+        assert_eq!(
+            run.outcome
+                .result
+                .verification
+                .as_ref()
+                .unwrap()
+                .attempts
+                .len(),
+            1
+        );
+        assert_eq!(recovery, 0.);
+        assert!(verification > 0.);
+        let science = stop_to_verified_science(&run);
+        if let Some(p) = previous {
+            assert_eq!(science, p);
+        }
+        previous = Some(science);
+        println!(
+            "STOP_TO_VERIFIED first_pass diagnostics={level} first=1 passing=1 attempts=1 interval_s={interval:.9} verification_s={verification:.9} recovery_s={recovery:.9} unassigned_s={other:.9}"
+        );
+    }
+}
+
+/// dev08 only: DFT_SI_UPF=/absolute/Si.pz-vbc.UPF cargo test --release
+/// -p dft-engine --test refscf stop_to_verified_si8_displaced -- --ignored --nocapture
+#[test]
+#[ignore = "external Si UPF and full SCFs; release on dev08, never a Mac matrix"]
+fn stop_to_verified_si8_displaced() {
+    use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, StartDensity, refscf::driver};
+    use dft_numerics::switches::RunConfig;
+    let pp = dft_upf::parse_upf(
+        &std::fs::read_to_string(std::env::var("DFT_SI_UPF").expect("DFT_SI_UPF required"))
+            .unwrap(),
+    )
+    .unwrap();
+    let a = 10.261_212_856_717_933;
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[a, 0., 0.], [0., a, 0.], [0., 0., a]]).unwrap();
+    let base = [
+        [0., 0., 0.],
+        [0., 0.5, 0.5],
+        [0.5, 0., 0.5],
+        [0.5, 0.5, 0.],
+        [0.25, 0.25, 0.25],
+        [0.25, 0.75, 0.75],
+        [0.75, 0.25, 0.75],
+        [0.75, 0.75, 0.25],
+    ];
+    let atoms: Vec<_> = base
+        .into_iter()
+        .enumerate()
+        .map(|(i, p)| {
+            dft_geometry::Atom::new(
+                "Si",
+                [
+                    p[0] + 1e-4 * ((i * 7 + 1) as f64).sin(),
+                    p[1] + 1e-4 * ((i * 11 + 3) as f64).sin(),
+                    p[2] + 1e-4 * ((i * 13 + 5) as f64).sin(),
+                ],
+            )
+        })
+        .collect();
+    let species = [SpeciesPotential {
+        label: "Si",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 15.,
+        bands: Some(20),
+        start_density: StartDensity::Atomic,
+        gamma_real: GammaReal::On,
+        max_iterations: 200,
+        ..Default::default()
+    };
+    let mut science = None;
+    for level in ["off", "on"] {
+        let scope = RunConfig::from_pairs(&[("davidson_stages", level)]).unwrap();
+        let _guard = scope.enter();
+        let run = driver::run(
+            dft_engine::refstart::StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &species,
+                options: &options,
+            },
+            Profile::default(),
+        )
+        .unwrap();
+        let attempts = &run.outcome.result.verification.as_ref().unwrap().attempts;
+        assert_eq!(run.first_reference_stop, Some(10));
+        assert_eq!(
+            attempts
+                .iter()
+                .map(|a| (a.iteration, a.passed))
+                .collect::<Vec<_>>(),
+            [(10, false), (11, false), (12, true)]
+        );
+        let (interval, verification, recovery, other) = stop_to_verified_clocks(&run);
+        assert!(recovery > 0.);
+        let value = stop_to_verified_science(&run);
+        if let Some(s) = science {
+            assert_eq!(value, s);
+        }
+        science = Some(value);
+        println!(
+            "STOP_TO_VERIFIED si8 diagnostics={level} first=10 passing=12 attempts=3 interval_s={interval:.9} verification_s={verification:.9} recovery_s={recovery:.9} unassigned_s={other:.9}"
+        );
+    }
+}

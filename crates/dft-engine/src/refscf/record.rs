@@ -37,6 +37,14 @@ pub struct SolveRecord {
 #[derive(Clone, Debug)]
 pub struct Record {
     pub iteration: usize,
+    /// Monotonic seconds since this rank entered the driver, at every diagnostic level.
+    pub map_start_s: f64,
+    /// Boundary after the stopping estimator is available, before verification.
+    pub estimator_s: f64,
+    pub verification_start_s: Option<f64>,
+    pub verification_end_s: Option<f64>,
+    /// Includes post-failure mixing and state handoff; excludes final delivery.
+    pub map_end_s: f64,
     pub dr2_ry: f64,
     pub ethr_requested_ry: f64,
     pub ethr_ry: f64,

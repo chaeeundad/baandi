@@ -749,3 +749,64 @@ not a new convergence result. Default CLI runs do not emit orbital arrays, so
 that comparison makes no orbital-file claim; the reference matrix separately
 compares its full delivered orbitals. Exact inputs and hashes are in the same
 evidence JSON. No solver/default arithmetic or threshold changed.
+
+## Stop-to-verified interval
+
+Integration includes CLI option wiring, timestamp JSON serialization and
+clock exclusion in the existing rank-rule fingerprint, authorized by the
+orchestrator on 2026-11-24. Verification and numerical defaults are unchanged.
+
+I25 adds the additive `reference-scf-wall-1` contract, named by
+`reference_scf.stop_to_verified_clock`. Every iteration (both the canonical
+`reference_scf.iterations` array and its historical history alias) contains
+`map_start_s`, `estimator_s`, `verification_start_s`, `verification_end_s`, and
+`map_end_s`. These are seconds from **one output rank's monotonic driver-start
+clock**, retained with both lightweight and full diagnostics. No MPI reduction,
+barrier, rank maximum, logging or numerical-kernel timer is added. They do not
+share an origin across ranks or with an external launcher clock. The new
+contract is additive; old phase durations and scientific schemas are unchanged.
+
+Map start precedes the threshold schedule and ordinary solve, including any
+redo/retry. Estimator time is sampled immediately after the final ordinary-map
+`dr2 < threshold_ry` decision. Verification start precedes cloning the candidate
+orbitals and setting up the independent solve; verification end follows the
+unchanged fixed-point density assessment and recording its verdict. Both are
+null when no attempt ran. Map end includes failed-attempt mixing, energy
+correction, bookkeeping and state handoff, but excludes final public output
+materialization. Existing `wall_s.map` is a different, narrower solve-map cost;
+it is not the difference between the new map boundaries.
+
+The offline reader is `dft-cli refscf-check --stop-to-verified results.json`.
+It prints one `stop-to-verified-1` JSON row with first stop map, passing map,
+attempt count and seconds. It uses the stored independent verdict, never a new
+energy-based passing rule. The interval starts at the first stopping
+estimator's `estimator_s` and ends at the passing attempt's
+`verification_end_s`. Its disjoint parts are:
+
+1. **Verification attempts:** sum of every attempt's `[start,end]`, including
+   failures and the passing attempt.
+2. **Ordinary SCF after failure:** each failed map's `[verification_end,map_end]`,
+   followed by each later map's `[map_start,verification_start]` when it attempts
+   verification or `[map_start,map_end]` when it does not. This includes mixing
+   after failure on the first stopping map. It is exactly zero on a first pass.
+3. **Unassigned:** interval minus the two parts above, including the first
+   estimator-to-verification gap and gaps between maps. No overlapping legacy
+   phase duration is added. The reader checks ordering, complete attempt/verdict
+   pairing and closure within `64 * EPSILON * max(1 second, interval_end_s)`.
+
+If no attempt passes, status is `UNVERIFIED`, passing map is null, and the
+interval ends at the last completed map (explicitly labelled, not time to a
+pass). When no estimator stop occurred, interval fields are null and no closure
+is claimed. Verification-off runs cannot be labelled verified. Incomplete
+results, old records without the clock contract, missing boundaries, overlapping
+maps, unordered attempts and maps after a pass are errors, not zero durations.
+
+All driver work, failed attempts, recovery and all output remain in externally
+measured delivered wall. The I26-2 full/lightweight diagnostic delta is a
+**separate** paired-run measurement; it can overlap this interval and must never
+be added to or subtracted from these parts. Local tests use independent exact
+wall fixtures and a live first-pass synthetic control at both diagnostic levels.
+The Si8 displaced full SCF is release-only on dev08 under the Mac test policy;
+its test asserts attempts fail at maps 10 and 11, pass at map 12 and positive
+recovery. This is a pending measurement, not new Si8 timing evidence. See the
+[dev08 request](../performance/lanes/RSCF/stop-to-verified-dev08-request.md).

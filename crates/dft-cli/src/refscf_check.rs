@@ -356,6 +356,181 @@ fn report_difference<K: Collective>(
     )
 }
 
+/// Offline reader: never constructs a problem or changes the verification verdict.
+/// The file must be a completed results.json with the additive clock contract.
+pub fn stop_to_verified(path: &Path) -> Result<(), RunError> {
+    let doc: Value = serde_json::from_slice(&fs::read(path).map_err(fail)?).map_err(fail)?;
+    let summary = stop_to_verified_summary(&doc)?;
+    if dft_cli::parallel::rank() == 0 {
+        println!("{summary}");
+    }
+    Ok(())
+}
+
+#[derive(serde::Deserialize)]
+struct WallMap {
+    iteration: usize,
+    dr2_ry: f64,
+    map_start_s: f64,
+    estimator_s: f64,
+    verification_start_s: Option<f64>,
+    verification_end_s: Option<f64>,
+    map_end_s: f64,
+}
+#[derive(serde::Deserialize)]
+struct WallAttempt {
+    iteration: usize,
+    passed: bool,
+}
+#[derive(serde::Deserialize)]
+struct WallVerification {
+    mode: String,
+    passed: bool,
+    attempts: Vec<WallAttempt>,
+}
+#[derive(serde::Deserialize)]
+struct WallRun {
+    stop_to_verified_clock: String,
+    threshold_ry: f64,
+    iterations: Vec<WallMap>,
+    verification: Option<WallVerification>,
+}
+
+pub fn stop_to_verified_summary(doc: &Value) -> Result<Value, RunError> {
+    let require = |ok, why| if ok { Ok(()) } else { Err(fail(why)) };
+    require(doc["run"]["completed"] == true, "incomplete results record")?;
+    let run: WallRun = serde_json::from_value(doc["reference_scf"].clone()).map_err(fail)?;
+    require(
+        run.stop_to_verified_clock == "reference-scf-wall-1",
+        "unsupported or missing driver clock contract",
+    )?;
+    require(
+        run.threshold_ry.is_finite() && run.threshold_ry > 0. && !run.iterations.is_empty(),
+        "invalid threshold or empty map history",
+    )?;
+    let attempts = run
+        .verification
+        .as_ref()
+        .map_or(&[][..], |v| v.attempts.as_slice());
+    if let Some(v) = &run.verification {
+        require(v.mode == "fixed_point", "verification is not fixed_point")?;
+        require(
+            v.passed == attempts.last().is_some_and(|a| a.passed),
+            "inconsistent verification verdict",
+        )?;
+    }
+    let mut first_stop = None;
+    let mut passing_map = None;
+    let mut interval_start = None;
+    let mut interval_end = None;
+    let mut previous_end = 0.;
+    let mut attempted = 0;
+    let mut failed = false;
+    let mut verification_s = 0.;
+    let mut recovery_s = 0.;
+    for (i, map) in run.iterations.iter().enumerate() {
+        require(
+            map.iteration == i + 1,
+            "missing, duplicate or unordered map",
+        )?;
+        require(passing_map.is_none(), "map after passing verification")?;
+        require(
+            [map.map_start_s, map.estimator_s, map.map_end_s, map.dr2_ry]
+                .into_iter()
+                .all(|x| x.is_finite() && x >= 0.),
+            "nonfinite or negative map clock/estimator",
+        )?;
+        require(
+            previous_end <= map.map_start_s
+                && map.map_start_s <= map.estimator_s
+                && map.estimator_s <= map.map_end_s,
+            "overlapping maps or reversed map boundaries",
+        )?;
+        previous_end = map.map_end_s;
+        let stopped = map.dr2_ry < run.threshold_ry;
+        if stopped && first_stop.is_none() {
+            first_stop = Some(map.iteration);
+            interval_start = Some(map.estimator_s);
+        }
+        match (map.verification_start_s, map.verification_end_s) {
+            (Some(start), Some(end)) => {
+                require(
+                    stopped && run.verification.is_some(),
+                    "attempt without estimator stop or verification mode",
+                )?;
+                require(
+                    start.is_finite()
+                        && end.is_finite()
+                        && map.estimator_s <= start
+                        && start <= end
+                        && end <= map.map_end_s,
+                    "invalid verification boundaries",
+                )?;
+                let attempt = attempts
+                    .get(attempted)
+                    .ok_or_else(|| fail("missing verification verdict"))?;
+                require(attempt.iteration == map.iteration, "attempt/map mismatch")?;
+                if failed {
+                    recovery_s += start - map.map_start_s;
+                }
+                verification_s += end - start;
+                attempted += 1;
+                if attempt.passed {
+                    passing_map = Some(map.iteration);
+                    interval_end = Some(end);
+                } else {
+                    failed = true;
+                    recovery_s += map.map_end_s - end;
+                }
+            }
+            (None, None) => {
+                require(
+                    !(stopped && run.verification.is_some()),
+                    "missing verification timestamps",
+                )?;
+                if failed {
+                    recovery_s += map.map_end_s - map.map_start_s;
+                }
+            }
+            _ => return Err(fail("incomplete verification timestamp pair")),
+        }
+    }
+    require(
+        attempted == attempts.len(),
+        "extra or unordered verification verdicts",
+    )?;
+    // Exhausted/off runs end at the last completed map, never a fabricated pass.
+    let end = interval_start.map(|_| interval_end.unwrap_or(previous_end));
+    let interval = interval_start.zip(end).map(|(a, b)| b - a);
+    let unassigned = interval.map(|total| total - verification_s - recovery_s);
+    let closure_error = interval
+        .zip(unassigned)
+        .map(|(total, other)| verification_s + recovery_s + other - total);
+    if let Some(total) = interval {
+        let tolerance = 64. * f64::EPSILON * end.unwrap().max(1.);
+        require(
+            unassigned.unwrap() >= -tolerance && closure_error.unwrap().abs() <= tolerance,
+            "stop-to-verified parts do not close",
+        )?;
+        require(total >= 0., "negative stop-to-verified interval")?;
+    }
+    Ok(json!({
+        "schema":"stop-to-verified-1",
+        "status":if passing_map.is_some() {"VERIFIED"} else {"UNVERIFIED"},
+        "first_stop_map":first_stop,"passing_map":passing_map,
+        "attempt_count":attempted,
+        "clock":"output rank monotonic seconds since driver start; no rank maxima",
+        "interval_start_s":interval_start,"interval_end_s":end,"interval_wall_s":interval,
+        "interval_end_kind":if passing_map.is_some() {"passing_verification_end"}
+            else if first_stop.is_some() {"last_completed_map_unverified"} else {"no_estimator_stop"},
+        "verification_attempts_s":interval.map(|_| verification_s),
+        "ordinary_scf_after_failure_s":interval.map(|_| recovery_s),
+        "unassigned_s":unassigned,"closure_error_s":closure_error,
+        "parts_sum_checked":interval.is_some(),
+        "diagnostic_on_off_delta":"separate measurement; may overlap this interval"
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

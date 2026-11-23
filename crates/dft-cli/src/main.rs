@@ -27,8 +27,15 @@ enum Command {
     /// Replay independent Broyden mixing against a QE density trajectory.
     RefscfCheck {
         input: PathBuf,
+        #[arg(
+            long,
+            required_unless_present = "stop_to_verified",
+            conflicts_with = "stop_to_verified"
+        )]
+        qe: Option<PathBuf>,
+        /// Read a completed reference-driver results.json; no SCF or QE replay.
         #[arg(long)]
-        qe: PathBuf,
+        stop_to_verified: bool,
         #[arg(long, default_value_t = 6)]
         steps: usize,
         #[arg(long, default_value_t = 1e-12)]
@@ -153,13 +160,17 @@ fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Command::RefscfCheck {
             input,
             qe,
+            stop_to_verified,
             steps,
             atol,
             rtol,
         } => {
+            if *stop_to_verified {
+                return refscf_check::stop_to_verified(input).map_err(Into::into);
+            }
             return refscf_check::execute(
                 input,
-                qe,
+                qe.as_deref().expect("clap requires --qe for replay"),
                 *steps,
                 refscf_check::Tolerance {
                     absolute: *atol,
@@ -385,6 +396,10 @@ fn main() -> ExitCode {
 fn input_of(command: &Command) -> Option<&std::path::Path> {
     match command {
         Command::RefscfMap(args) => Some(&args.input),
+        Command::RefscfCheck {
+            stop_to_verified: true,
+            ..
+        } => None,
         Command::Relax { input, .. }
         | Command::Checkpoint { input, .. }
         | Command::Restart { input, .. }

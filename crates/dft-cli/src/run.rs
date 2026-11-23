@@ -1795,6 +1795,7 @@ fn execute_mode_inner(
         result["convergence"]["work"]["davidson_stages"] =
             over_ranks(reference_stages.take().expect("reference stages"))?;
         result["reference_scf"] = json!({"reference_stopped":stopped,"exit_reason":reason,
+            "stop_to_verified_clock":"reference-scf-wall-1",
             "diagnostics":{"schema":"reference-scf-diagnostics-1",
                 "level":if reference_diagnostics {"full"} else {"lightweight"},
                 "setting":"profile.davidson_stages / BAANDI_DAVIDSON_STAGES",
@@ -3146,7 +3147,7 @@ fn reference_solve_json(c: &dft_engine::refscf::record::SolveRecord) -> Value {
         "repairs":c.repairs,"dropped_corrections":c.dropped_corrections})
 }
 fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
-    json!({"iteration":r.iteration,"dr2_ry":r.dr2_ry,"dr2_ha":r.dr2_ry/2.,
+    let mut record = json!({"iteration":r.iteration,"dr2_ry":r.dr2_ry,"dr2_ha":r.dr2_ry/2.,
         "ethr_requested_ry":r.ethr_requested_ry,"ethr_requested_ha":r.ethr_requested_ry/2.,
         "ethr_ry":r.ethr_ry,"ethr_ha":r.ethr_ry/2.,"ethr_used_ry":r.ethr_ry,"beta":r.beta,
         "first_iteration_redo":r.first_iteration_redo,"history_occupancy":r.mixing.occupancy,
@@ -3164,7 +3165,13 @@ fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
             "mixed_hartree":r.variational_hartree_ha,"mixed_xc":r.variational_xc_ha},
         "wall_s":{"map":r.map_s,"solve":r.solve_s,"density":r.density_s,"potential":r.potential_s,
             "energy":r.energy_s,"density_transform":r.density_transform_s,"metric":r.metric_s,
-            "mix":r.mixing_s,"energy_correction":r.correction_s,"verification":r.verification_s}})
+            "mix":r.mixing_s,"energy_correction":r.correction_s,"verification":r.verification_s}});
+    record["map_start_s"] = json!(r.map_start_s);
+    record["estimator_s"] = json!(r.estimator_s);
+    record["verification_start_s"] = json!(r.verification_start_s);
+    record["verification_end_s"] = json!(r.verification_end_s);
+    record["map_end_s"] = json!(r.map_end_s);
+    record
 }
 
 #[cfg(test)]

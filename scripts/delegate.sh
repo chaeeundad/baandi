@@ -51,6 +51,13 @@ fi
 
 # User rule 2026-11-19: Codex has plenty of tokens, use the high reasoning effort by default
 # (override with CODEX_EFFORT=medium|high|xhigh; model comes from ~/.codex/config.toml).
+# 990 volume only (user rule 2026-11-19/23): builds, temporaries and caches of
+# the agent stay on the 990 SSD inside the worktree (the sandbox can write
+# there); never on the main volume.
+mkdir -p "$wt/target/tmp"
+export TMPDIR="$wt/target/tmp" TMP="$wt/target/tmp" TEMP="$wt/target/tmp"
+export CARGO_TARGET_DIR="$wt/target"
+export SCCACHE_DIR="${SCCACHE_DIR:-/Volumes/990-2TB/Develop/rust-dft-cache/sccache}"
 common=(-C "$wt" -s workspace-write --json -c "model_reasoning_effort=\"${CODEX_EFFORT:-high}\""
         --output-schema "$repo/docs/schemas/report.schema.json"
         -o "$out/report.json")

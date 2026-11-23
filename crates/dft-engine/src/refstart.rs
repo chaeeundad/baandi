@@ -21,6 +21,7 @@ use std::{
     collections::BTreeMap,
     f64::consts::{PI, SQRT_2},
     sync::Arc,
+    time::Instant,
 };
 
 fn err(e: impl std::fmt::Display) -> ScfError {
@@ -66,6 +67,7 @@ pub struct StartMemory {
 /// ringing included). G=0 is exactly N_el/Omega. `density` and `potential` use
 /// `fields.plane_offsets()` order; the operator receives its own plane layout.
 pub struct StartState {
+    pub setup: crate::refscf::record::SetupTimings,
     pub basis: PlaneWaveBasis,
     pub grid: FftGridSpec,
     pub half: HalfSphere,
@@ -179,6 +181,64 @@ fn sum<K: Collective>(comm: &K, v: &[f64]) -> Result<Vec<f64>, ScfError> {
     Ok(out)
 }
 
+/// Timing adapter used only at setup/delivery boundaries. It delegates exactly
+/// one operation, without barriers or changes to the reduction association.
+pub(crate) struct TimedCollective<'a, K> {
+    inner: &'a K,
+    seconds: std::cell::Cell<f64>,
+}
+impl<'a, K> TimedCollective<'a, K> {
+    pub(crate) fn new(inner: &'a K) -> Self {
+        Self {
+            inner,
+            seconds: std::cell::Cell::new(0.),
+        }
+    }
+    pub(crate) fn seconds(&self) -> f64 {
+        self.seconds.get()
+    }
+    fn timed<T>(&self, f: impl FnOnce() -> T) -> T {
+        let clock = Instant::now();
+        let out = f();
+        self.seconds
+            .set(self.seconds.get() + clock.elapsed().as_secs_f64());
+        out
+    }
+}
+impl<K: Collective> Collective for TimedCollective<'_, K> {
+    fn rank(&self) -> usize {
+        self.inner.rank()
+    }
+    fn size(&self) -> usize {
+        self.inner.size()
+    }
+    fn barrier(&self) -> Result<(), dft_mpi::MpiError> {
+        self.timed(|| self.inner.barrier())
+    }
+    fn tree_sum_f64(&self, local: &[f64], out: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
+        self.timed(|| self.inner.tree_sum_f64(local, out))
+    }
+    fn allgatherv_f64(
+        &self,
+        local: &[f64],
+        counts: &[usize],
+        out: &mut [f64],
+    ) -> Result<(), dft_mpi::MpiError> {
+        self.timed(|| self.inner.allgatherv_f64(local, counts, out))
+    }
+    fn bcast_f64(&self, data: &mut [f64], root: usize) -> Result<(), dft_mpi::MpiError> {
+        self.timed(|| self.inner.bcast_f64(data, root))
+    }
+    fn alltoall_f64(
+        &self,
+        send: &[f64],
+        block: usize,
+        recv: &mut [f64],
+    ) -> Result<(), dft_mpi::MpiError> {
+        self.timed(|| self.inner.alltoall_f64(send, block, recv))
+    }
+}
+
 /// Build the final-cutoff cold start, collective on `comm` (including size 1).
 /// Atomic charge/orbitals are required, never silently replaced with uniform
 /// density or random waves. Currently LDA-PZ and library LDA-PW without NLCC;
@@ -187,6 +247,16 @@ fn sum<K: Collective>(comm: &K, v: &[f64]) -> Result<Vec<f64>, ScfError> {
 /// order; missing bands are completed by deterministic kinetic-ordered ORC
 /// cosine/sine waves, as in the legacy atomic start. Seed is not consumed.
 pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartState, ScfError> {
+    let clock = Instant::now();
+    let timed = TimedCollective::new(comm);
+    let mut state = start_inner(input, &timed)?;
+    state.setup.total_s = clock.elapsed().as_secs_f64();
+    state.setup.collective_s = timed.seconds();
+    Ok(state)
+}
+fn start_inner<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartState, ScfError> {
+    let mut setup = crate::refscf::record::SetupTimings::default();
+    let clock = Instant::now();
     let StartInput {
         cell,
         atoms,
@@ -263,6 +333,8 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
             positions_bohr: r,
         })
         .collect();
+    setup.record("validate_species", clock);
+    let clock = Instant::now();
     let basis = o.basis(cell, [0.; 3], 1.)?;
     let db = o.basis(cell, [0.; 3], 4.)?;
     let grid = FftGridSpec::new(&basis, &db, o.grid_override)?;
@@ -285,13 +357,21 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
             "reference start: incompatible atomic rank/bands",
         ));
     }
+    setup.record("basis_gvectors", clock);
+    let clock = Instant::now();
     let (ewald, ewald_terms_bytes) = ewald_owned(cell, &ions, comm)?;
     drop(ions);
+    setup.record("ewald", clock);
+    let clock = Instant::now();
     let mut fields = StartFields::new(grid.dims(), comm)?;
     let volume = cell.volume_bohr3();
     let points = grid.dims().iter().product::<usize>();
+    setup.record("field_fft_plan", clock);
+    let clock = Instant::now();
     let indices = owned_projector_indices(&basis, &grid, comm.rank(), comm.size()).map_err(err)?;
     let pool = WorkerPool::new(o.threads).map_err(err)?;
+    setup.record("distribution_owned_rows", clock);
+    let clock = Instant::now();
     let nl = NonlocalOperator::new_owned_with_rule(
         &basis,
         volume,
@@ -306,6 +386,8 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
     )?;
     let nl = nl?;
     drop(indices);
+    setup.record("nonlocal_tables", clock);
+    let clock = Instant::now();
     // H is applied in chunks of B during the initial Ritz solve; allocating
     // capacity J here would retain atomic-span-sized FFT batches for the run.
     let capacity = bands;
@@ -319,6 +401,8 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
         pool.clone(),
     )
     .map_err(err)?;
+    setup.record("operator_fft_plans_and_tables", clock);
+    let clock = Instant::now();
     let projector_count = nl.projector_count();
     let complex_projector_bytes = nl.table_bytes();
     let mut diagonal_static = Vec::with_capacity(operator.local_len());
@@ -344,6 +428,8 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
         diagonal_static.push(value);
     }
     drop(nl);
+    setup.record("nonlocal_diagonal", clock);
+    let clock = Instant::now();
     let coeff = atomic_fields(&fields, &db, &dg, volume, &species, o);
     agree(
         comm,
@@ -353,6 +439,8 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
     let (rho_hat, ion_hat) = coeff?;
     drop(db);
     drop(dg);
+    setup.record("atomic_local_tables_structure_factors", clock);
+    let clock = Instant::now();
     let ionic = fields.inverse(comm, &ion_hat)?;
     let mut density = fields.inverse(comm, &rho_hat)?;
     drop(rho_hat);
@@ -375,6 +463,8 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
             *z = C::new(electrons / volume, 0.);
         }
     }
+    setup.record("atomic_density", clock);
+    let clock = Instant::now();
     let b = cell.reciprocal_columns_inverse_bohr();
     let dims = grid.dims();
     let vh_hat: Vec<_> = density_g
@@ -407,6 +497,8 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
         *v = ion + (*v + x);
     }
     drop(xc);
+    setup.record("initial_potential", clock);
+    let clock = Instant::now();
     let mut map = crate::grid_dist::PlaneMap::new(
         dims,
         comm.rank(),
@@ -419,6 +511,8 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
     operator.set_owned_potential(&op_planes, 0).map_err(err)?;
     drop(op_planes);
     drop(map);
+    setup.record("potential_distribution", clock);
+    let clock = Instant::now();
     let (orbitals, ritz_values_hartree) = atomic_block(
         cell,
         &basis,
@@ -429,7 +523,9 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
         &mut operator,
         comm,
         pool,
+        &mut setup,
     )?;
+    setup.record("atomic_block_total", clock);
     let l = operator.local_len();
     let f = fields.fft.plane_points();
     let g = fields.fft.local_len();
@@ -439,14 +535,21 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
     let start_block_bytes = 8 * l * bands;
     // Named array live upper envelope; Q + next-Q/HQ + raw backup + selected,
     // Gram/EVD/rotation matrices, owned fields and both projector formats.
-    let principal_peak_bound_bytes = (retained_field_bytes
-        + 8 * l * (3 * k + bands)
-        + 64 * k * k
-        + 8 * l * projector_count
-        + complex_projector_bytes
-        + 32 * g
-        + 16 * f)
-        .max(ewald_terms_bytes);
+    let phase_scratch_bytes =
+        if dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_SETUP_PHASE_REUSE) {
+            16 * l.max(atoms.len())
+        } else {
+            0
+        };
+    let principal_peak_bound_bytes = phase_scratch_bytes
+        + (retained_field_bytes
+            + 8 * l * (3 * k + bands)
+            + 64 * k * k
+            + 8 * l * projector_count
+            + complex_projector_bytes
+            + 32 * g
+            + 16 * f)
+            .max(ewald_terms_bytes);
     let legacy_idle_band_density_bytes = 8 * points * (bands + 1);
     let legacy_principal_peak_bound_bytes = (legacy_idle_band_density_bytes
         + 16 * n * (2 * k + bands)
@@ -474,6 +577,7 @@ pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartStat
         legacy_idle_band_density_bytes,
     };
     Ok(StartState {
+        setup,
         basis,
         grid,
         half,
@@ -546,6 +650,18 @@ fn atomic_fields(
         })
         .collect();
     drop(owned);
+    let reuse = dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_SETUP_PHASE_REUSE);
+    let mut phases = if reuse {
+        Vec::with_capacity(
+            species
+                .iter()
+                .map(|s| s.positions_bohr.len())
+                .max()
+                .unwrap_or(0),
+        )
+    } else {
+        Vec::new()
+    };
     let mut rho = vec![C::default(); fields.fft.local_len()];
     let mut ion = rho.clone();
     for s in species {
@@ -579,11 +695,24 @@ fn atomic_fields(
                 cache.insert(g.norm_squared.to_bits(), (r, v));
                 (r, v)
             };
-            // Preserve the charge builder's atom accumulation order.
-            for &pos in s.positions_bohr {
-                rho[i] += structure_factor(g.cartesian, &[pos])? * r;
+            // Preserve every charge multiply/add and the ionic sum order.
+            // Only reuse direct phases: no axis factorization or interpolation.
+            if reuse {
+                phases.clear();
             }
-            ion[i] += v * structure_factor(g.cartesian, s.positions_bohr)?;
+            for &pos in s.positions_bohr {
+                let phase = structure_factor(g.cartesian, &[pos])?;
+                rho[i] += phase * r;
+                if reuse {
+                    phases.push(phase);
+                }
+            }
+            let factor = if reuse {
+                phases.iter().copied().sum()
+            } else {
+                structure_factor(g.cartesian, s.positions_bohr)?
+            };
+            ion[i] += v * factor;
         }
     }
     Ok((rho, ion))
@@ -685,7 +814,9 @@ fn atomic_block<K: Collective>(
     op: &mut DistributedRealHamiltonian,
     comm: &K,
     pool: Arc<WorkerPool>,
+    setup: &mut crate::refscf::record::SetupTimings,
 ) -> Result<(RealMatrix, Vec<f64>), ScfError> {
+    let clock = Instant::now();
     let rows = op.local_rows().to_vec();
     let l = rows.len();
     let j: usize = species
@@ -700,6 +831,12 @@ fn atomic_block<K: Collective>(
                     .sum::<usize>()
         })
         .sum();
+    let reuse = dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_SETUP_PHASE_REUSE);
+    let mut phases = if reuse {
+        vec![C::default(); l]
+    } else {
+        Vec::new()
+    };
     let mut raw = RealMatrix::zeros(l, j).map_err(err)?;
     let mut col = 0;
     let filled = (|| -> Result<(), ScfError> {
@@ -707,6 +844,16 @@ fn atomic_block<K: Collective>(
             for c in sp.potential.atomic_wavefunctions().unwrap() {
                 let mut radial = BTreeMap::new();
                 for &pos in sp.positions_bohr {
+                    if reuse {
+                        for (i, &row) in rows.iter().enumerate() {
+                            let g = if row == 0 {
+                                0
+                            } else {
+                                half.plus()[row.div_ceil(2)] as usize
+                            };
+                            phases[i] = structure_factor(basis.momenta()[g].cartesian, &[pos])?;
+                        }
+                    }
                     for m in -(c.l as isize)..=c.l as isize {
                         let il = C::new(0., -1.).powu(c.l as u32);
                         for (i, &row) in rows.iter().enumerate() {
@@ -736,7 +883,12 @@ fn atomic_block<K: Collective>(
                             } else {
                                 real_spherical_harmonic(c.l, m, g.cartesian).map_err(err)?
                             };
-                            let z = il * structure_factor(g.cartesian, &[pos])? * (r * y);
+                            let phase = if reuse {
+                                phases[i]
+                            } else {
+                                structure_factor(g.cartesian, &[pos])?
+                            };
+                            let z = il * phase * (r * y);
                             raw[(i, col)] = if row == 0 {
                                 z.re
                             } else if row % 2 == 1 {
@@ -758,12 +910,15 @@ fn atomic_block<K: Collective>(
         "reference start: atomic orbital transform failed",
     )?;
     filled?;
+    drop(phases);
     // All ranks agree on a bad local fill before the Gram reductions.
     agree(
         comm,
         f64::from(raw.as_slice().iter().any(|v| !v.is_finite())),
         "nonfinite atomic span",
     )?;
+    setup.record("atomic_orbital_fill", clock);
+    let clock = Instant::now();
     let mut ws = RealGemmWorkspace::with_pool(l, j.max(bands), pool).map_err(err)?;
     let mut q = orthogonalize(comm, &mut ws, &raw)?;
     drop(raw);
@@ -835,6 +990,8 @@ fn atomic_block<K: Collective>(
         }
         q = data;
     }
+    setup.record("atomic_orthonormalize_complete", clock);
+    let clock = Instant::now();
     let k = q.cols();
     let mut small = RealMatrix::zeros(k, k).map_err(err)?;
     for first in (0..k).step_by(bands) {
@@ -857,10 +1014,13 @@ fn atomic_block<K: Collective>(
             small[(j, i)] = v;
         }
     }
+    setup.record("atomic_h_apply_gram", clock);
+    let clock = Instant::now();
     let (mut values, rot) = dft_numerics::real::symmetric_eigh(&small).map_err(err)?;
     let selected = RealMatrix::new(k, bands, rot.as_slice()[..k * bands].to_vec()).map_err(err)?;
     let out = rotate(&mut ws, &q, &selected)?;
     values.truncate(bands);
+    setup.record("atomic_diagonalize_rotate", clock);
     Ok((out, values))
 }
 

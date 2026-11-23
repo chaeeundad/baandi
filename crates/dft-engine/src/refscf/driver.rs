@@ -74,6 +74,8 @@ pub struct Run {
     pub reference_stopped: bool,
     pub first_reference_stop: Option<usize>,
     pub exit_reason: String,
+    pub setup: super::record::SetupTimings,
+    pub output: super::record::SetupTimings,
     pub start_s: f64,
     pub output_s: f64,
     pub verification_calls: Vec<SolveRecord>,
@@ -124,6 +126,9 @@ pub fn run_with<K: Collective>(
         },
         comm,
     )?;
+    let mut setup = std::mem::take(&mut state.setup);
+    let prep_comm = refstart::TimedCollective::new(comm);
+    let clock = Instant::now();
     let dims = state.grid.dims();
     let volume = cell.volume_bohr3();
     let dv = volume / dims.iter().product::<usize>() as f64;
@@ -133,7 +138,7 @@ pub fn run_with<K: Collective>(
         .map(|b| if b < occupied { 2. } else { 0. })
         .collect();
     let mut plan = DensityPlan::new(
-        comm,
+        &prep_comm,
         cell,
         dims,
         4. * o.cutoff_hartree,
@@ -142,6 +147,8 @@ pub fn run_with<K: Collective>(
     if plan.first_axis() != state.fields.first_axis() || plan.plane_len() != state.density.len() {
         return Err(ScfError::InvalidInput("reference field layouts differ"));
     }
+    setup.record("density_fft_plan", clock);
+    let clock = Instant::now();
     let mut metric = Metric::new(volume, &plan.g2, &plan.smooth, comm.size(), 350)?;
     let mut mixer = Broyden::new(profile, &plan.g2, &plan.smooth, volume, state.electrons)?;
     let mut n = std::mem::take(&mut state.density);
@@ -151,7 +158,7 @@ pub fn run_with<K: Collective>(
     let mut next = x.clone();
     let mut prediction_scratch = gate_first.then(|| PredictionScratch::new(x.len()));
     let mut next_planes = vec![0.; n.len()];
-    plan.forward(comm, &n, &mut x)?;
+    plan.forward(&prep_comm, &n, &mut x)?;
     set_zero(&plan, &mut x, state.electrons / volume);
     // Peak envelope: startup, owned Davidson arrays/factors plus current field,
     // mixer/history buffers. Excludes backend/FFT metadata, stacks and allocator.
@@ -182,10 +189,14 @@ pub fn run_with<K: Collective>(
     let mut peaks = vec![0.; comm.size()];
     let mut local_peak = peaks.clone();
     local_peak[comm.rank()] = peak as f64;
-    comm.tree_sum_f64(&local_peak, &mut peaks)
+    prep_comm
+        .tree_sum_f64(&local_peak, &mut peaks)
         .map_err(numerical)?;
     let peak_payload_bytes_per_rank = peaks.into_iter().map(|v| v as usize).collect();
+    setup.record("mixer_workspace_initial_transform", clock);
+    setup.collective_s += prep_comm.seconds();
     let start_time = start.elapsed();
+    setup.total_s = start_time.as_secs_f64();
     let mut history = Vec::<IterationRecord>::with_capacity(o.max_iterations);
     let mut records = Vec::with_capacity(o.max_iterations);
     let mut ethr = 1e-2;
@@ -534,8 +545,16 @@ pub fn run_with<K: Collective>(
             });
             let clock = Instant::now();
             records.last_mut().expect("current map").map_end_s = start.elapsed().as_secs_f64();
-            let density = state.fields.gather(comm, &step.density)?;
-            let orbitals = gather_orbitals(&state, comm, &step.solve.eigenvectors)?;
+            let mut output = super::record::SetupTimings::default();
+            let delivery_comm = refstart::TimedCollective::new(comm);
+            let phase = Instant::now();
+            let density = state.fields.gather(&delivery_comm, &step.density)?;
+            output.record("density_gather", phase);
+            let phase = Instant::now();
+            let orbitals = gather_orbitals(&state, &delivery_comm, &step.solve.eigenvectors)?;
+            output.record("orbital_gather_unpack", phase);
+            output.collective_s = delivery_comm.seconds();
+            let phase = Instant::now();
             let point = KPoint {
                 fractional: [0.; 3],
                 weight: 1.,
@@ -603,7 +622,11 @@ pub fn run_with<K: Collective>(
                 setup_time: start_time,
                 total_time: start.elapsed(),
             };
+            output.record("result_assembly", phase);
+            output.total_s = clock.elapsed().as_secs_f64();
             return Ok(Run {
+                setup,
+                output,
                 full_diagnostics,
                 outcome: ScfOutcome { converged, result },
                 records,

@@ -486,6 +486,8 @@ table! {
         "first-correction-block residual diagnostic (review E3): before every warm real Gamma solve a small Rayleigh-Ritz on the kept B vectors, the occupied residual block R_o = H X_o - X_o A_o, its singular values and effective ranks, and the unconverged-root counts of the Ritz-change rule against the true residual; read-only (the solve is unchanged; B extra H columns per solve when no kept H X exists)";
     SNAPSHOT_DIR: Kind::Path, "unset", "absolute directory",
         "SCF snapshot capture: every real Gamma solve of the run writes the state that replays it (input density, this rank's orbital rows, kept H X and its armed flag, tolerance, policy, layout hash, context) to this directory outside the timed map phases; replay with davidson_bench --snapshot <manifest.json>";
+    REFSCF_SETUP_PHASE_REUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-SETUP: reference start reuses identical direct structure factors across atomic charge/local potential and magnetic orbital channels; same arithmetic, default off pending dev08 A/B";
 }
 
 struct Resolved {

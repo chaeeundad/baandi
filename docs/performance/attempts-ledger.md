@@ -3126,3 +3126,36 @@ bounded dev08 falsification request: [filtered-subspace.md](../design/filtered-s
 Raw traces, input/binary/UPF hashes, command exits, failed inputs and reproducer:
 `docs/performance/lanes/MIXER/`. No UPF stored. Remote commands, A/A first,
 crossed AB/BA jobs and 600/7200 s caps: `lanes/MIXER/dev08-request.md`.
+
+## G-OWNED-ROWS — owned input packing (2026-11-23)
+
+**Default OFF; dev08 A/B requested; no speed/adoption claim.** Base f526588.
+Issue #20's direct kinetic/projector rows and lazy serial real operator are
+already implemented/adopted; do not re-credit them. Current audit finds no
+new substantiated >=0.15 s scoped lever, but the remaining full complex -> full
+ORC -> local input bridge allocates 8GB extra bytes per eligible entry/rank.
+`M2_OWNED_INPUT` packs the selected rows directly on the standard M2 workspace
+path, preserving the full HalfSphere validation and coefficient arithmetic.
+Strict/M1/serial/non-workspace and already-local inputs retain their paths.
+No new geometry cache; no ionic or atomic orthogonalization arithmetic change.
+
+Mac correctness: Si8/16/32/si-skew x simulated ranks 1/2/3/8, plus six synthetic
+local/nonlocal standard/fallback/strict pairs: **22 A/B pairs, 68 rank records,
+0 Ha energy difference**, exact density/scientific history/eigen-solutions;
+standard verification passes. Rank one is the unchanged serial negative control.
+Calls/allocation-request counters agree exactly with independently reconstructed
+G/L_r/B shapes. Active Si32 saves 6,461,088 B/rank/entry. Static Si128 prediction
+99,530,080 B/rank/entry; not RSS. Existing idle serial BandDensity grids total
+1,558,683,648 B/rank at Si128, a higher-memory follow-up requiring another owner.
+
+Final full gate exit **1**: build/fmt/clippy PASS, 797 passed / 3 known CLI
+in-repository scratch-cache failures / 183 ignored. Scoped engine gate exit 0:
+265 passed / 0 failed / 77 ignored, all four gates PASS. README regeneration leaves
+no diff; its separate test suite has an unrelated stale expected-phrase failure
+(8 passed / 1 failed). No tolerances or failing tests weakened. Dev08 request:
+Si32/64/16/128 MPI8, A/A first, crossed pairs, exact counters, all-rank RSS and
+whole-run |mean|/SE>=3; defaults unchanged. Lesson: audit the current HEAD before
+reimplementing historical hotspots; remaining input-boundary memory is distinct
+from already-resident warm maps and previously adopted construction savings.
+[Audit](lanes/OWNED/audit.md), [validation](lanes/OWNED/validation.md),
+[evidence](lanes/OWNED/mac-evidence.json), [dev08](lanes/OWNED/dev08-request.md).

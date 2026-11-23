@@ -449,6 +449,8 @@ table! {
         "exclusive nested phase profile per rank (init / coarse SCF / fine ordinary SCF / verification pass and fail / materialization; map phases and solve stages inside; maximum over ranks and imbalance); clocks follow BAANDI_STAGE_TIMERS (off: counts only); printed by dft-cli (results.json phase_profile, parallel.phases), m2_entry_cost and davidson_bench";
     M2_LIGHT_STATE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "BREAKTHROUGH-4: on the M2 path the replicated serial real Gamma Hamiltonian of a solve state (rebuilt at every new problem and ladder stage) is built with the minimal block capacity 2 instead of the Davidson capacity: one pair FFT plan and scratch instead of capacity / 2 full-grid plans per rank; it only supplies the ORC half sphere there and is never applied (the full operator is built if the distributed operator is unavailable); bit-identical";
+    M2_OWNED_INPUT: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "G-OWNED-ROWS: pack a replicated complex warm start directly into owned ORC rows for the standard M2 workspace path; retain full-column validation and coefficient arithmetic; other paths retain global packing; bit-identical, default off pending dev08";
     M2_LAZY_SERIAL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "ISSUE-20: an M2 real Gamma solve state owns only the ORC half-sphere descriptor and the distributed operator; the serial real Gamma Hamiltonian (pair plans, real projector table) is built lazily only when a fallback applies it (distributed operator unavailable, threads path); supersedes M2_LIGHT_STATE on the M2 path when on; bit-identical";
     M2_LAYOUT_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
@@ -1024,8 +1026,13 @@ pub enum RunCounter {
     GlueDensityPairedPoints = 170,
     GlueDensityLogicalBytes = 171,
     GlueDensitySavedBytes = 172,
+    OwnedInputCalls = 173,
+    OwnedInputDirectCalls = 174,
+    OwnedInputAllocatedBytes = 175,
+    OwnedInputBaselineBytes = 176,
+    OwnedInputSavedBytes = 177,
 }
-pub const RUN_COUNTERS: usize = 173;
+pub const RUN_COUNTERS: usize = 178;
 pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
     "stop_kept",
     "stop_fft",
@@ -1200,6 +1207,11 @@ pub const RUN_COUNTER_LABELS: [&str; RUN_COUNTERS] = [
     "glue_lane.density.paired_band_points",
     "glue_lane.density.logical_bytes",
     "glue_lane.density.saved_bytes",
+    "owned_lane.input.calls",
+    "owned_lane.input.direct_calls",
+    "owned_lane.input.allocated_bytes",
+    "owned_lane.input.baseline_bytes",
+    "owned_lane.input.saved_bytes",
 ];
 
 /// Lane GLUE diagnostics, cached at plan/mixer construction. Disabled hooks

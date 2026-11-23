@@ -8,7 +8,7 @@ use crate::{Functional, ScfError, ScfOptions, SpeciesPotential};
 use dft_basis::{FftGridSpec, HalfSphere, PlaneWaveBasis};
 use dft_geometry::{Atom, Cell};
 use dft_mpi::Collective;
-use dft_numerics::{RealGemmWorkspace, RealMatrix, RealOp, pool::WorkerPool};
+use dft_numerics::{GemmSite, RealGemmWorkspace, RealMatrix, RealOp, pool::WorkerPool};
 use dft_physics::{
     data::{Array3, Complex64 as C},
     distributed_real_gamma::{DistributedRealHamiltonian, owned_projector_indices},
@@ -718,6 +718,13 @@ fn atomic_fields(
     Ok((rho, ion))
 }
 
+/// REFSTART_MKL: route the atomic-start Gram and rotation products through the
+/// dispatching GEMM entries (MKL panels in mkl builds) instead of the direct
+/// pure-Rust kernel (dev08 si128: 7 calls, 17 GFLOP per rank on pure_direct).
+fn mkl_start() -> bool {
+    dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_MKL)
+}
+
 fn gram<K: Collective>(
     comm: &K,
     ws: &mut RealGemmWorkspace,
@@ -726,8 +733,24 @@ fn gram<K: Collective>(
 ) -> Result<RealMatrix, ScfError> {
     let mut g = RealMatrix::zeros(a.cols(), b.cols()).map_err(err)?;
     if a.rows() > 0 {
-        ws.multiply_into(a.as_ref(), RealOp::Transpose, b.as_ref(), g.as_mut())
+        if mkl_start() {
+            ws.multiply_slices_into(
+                GemmSite::Other,
+                a.as_slice(),
+                a.rows(),
+                a.cols(),
+                a.rows(),
+                RealOp::Transpose,
+                b.as_slice(),
+                b.cols(),
+                b.rows(),
+                g.as_mut(),
+            )
             .map_err(err)?;
+        } else {
+            ws.multiply_into(a.as_ref(), RealOp::Transpose, b.as_ref(), g.as_mut())
+                .map_err(err)?;
+        }
     }
     let out = sum(comm, g.as_slice())?;
     g.as_mut_slice().copy_from_slice(&out);
@@ -740,8 +763,24 @@ fn rotate(
 ) -> Result<RealMatrix, ScfError> {
     let mut q = RealMatrix::zeros(a.rows(), t.cols()).map_err(err)?;
     if a.rows() > 0 {
-        ws.multiply_into(a.as_ref(), RealOp::Identity, t.as_ref(), q.as_mut())
+        if mkl_start() {
+            ws.multiply_slices_wide_into(
+                GemmSite::Rotate,
+                a.as_slice(),
+                a.rows(),
+                a.cols(),
+                a.rows(),
+                RealOp::Identity,
+                t.as_slice(),
+                t.cols(),
+                t.rows(),
+                q.as_mut(),
+            )
             .map_err(err)?;
+        } else {
+            ws.multiply_into(a.as_ref(), RealOp::Identity, t.as_ref(), q.as_mut())
+                .map_err(err)?;
+        }
     }
     Ok(q)
 }

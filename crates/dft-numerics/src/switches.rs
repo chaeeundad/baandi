@@ -244,6 +244,8 @@ table! {
         "SCF_ADVANCE research: advanced maps in every standard session (all) or only outside the cutoff-ladder coarse stage (fine)";
     REF_DAV_RESTART_CORRECTIONS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "reference Davidson only: form the first post-contraction corrections directly from retained V/HV, omitting identity-coefficient GEMMs; measured H/S refresh and band decisions unchanged";
+    REFSTART_MKL: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "reference SCF atomic start only: Gram and rotation products through the dispatching GEMM entries (MKL panels) instead of the direct pure-Rust kernel; rounding class";
     REF_DAV_WIDE_ROTATE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "reference Davidson only: route the V C / HV C rotations through the wide GEMM entry (MKL panels) instead of the whole-output-bound pure-Rust fallback; rounding class";
     REFSCF_VERIFY_REUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",

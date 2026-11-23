@@ -1692,6 +1692,9 @@ mod lane_identity_tests {
 
     #[test]
     fn nonlocal_profile_preserves_operator_and_energy_bits() {
+        // One Universe for the whole test: its Drop finalizes MPI, so it must
+        // outlive every loop iteration (with --features mpi).
+        let universe = dft_mpi::Universe::init().unwrap();
         let mut comparisons = 0;
         for lattice in [
             [[6., 0., 0.], [0., 6., 0.], [0., 0., 6.]],
@@ -1746,7 +1749,7 @@ mod lane_identity_tests {
                     WorkerPool::new(1).unwrap(),
                 )
                 .unwrap();
-                let comm = dft_mpi::Universe::init().unwrap().world();
+                let comm = universe.world();
                 for m in [0, 1, 2, 3, 17] {
                     let n = op.rows.len();
                     let x = RealMatrix::new(

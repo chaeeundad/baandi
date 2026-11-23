@@ -244,6 +244,8 @@ table! {
         "SCF_ADVANCE research: advanced maps in every standard session (all) or only outside the cutoff-ladder coarse stage (fine)";
     REF_DAV_RESTART_CORRECTIONS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "reference Davidson only: form the first post-contraction corrections directly from retained V/HV, omitting identity-coefficient GEMMs; measured H/S refresh and band decisions unchanged";
+    REF_DAV_WIDE_ROTATE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "reference Davidson only: route the V C / HV C rotations through the wide GEMM entry (MKL panels) instead of the whole-output-bound pure-Rust fallback; rounding class";
     REFSCF_VERIFY_REUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "reference SCF only: consume a failed verification map as the next ordinary Broyden iterate; passing criterion unchanged";
     // Adopted 2026-11-24 (dev08 MPI8 A/B at 0ce77fdc: si64 -5.4%, si128 -6.5%, elongated/rskew neutral; attempts ledger).

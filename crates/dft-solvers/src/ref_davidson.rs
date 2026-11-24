@@ -870,6 +870,16 @@ mod diagnostic_tests {
     #[test]
     fn davrem_one_correction_has_analytic_row_work_and_error_cleanup() {
         dft_mpi::simulate(1, |comm| {
+            // The analytic counts below describe the P3-DAVREM baseline passes; the
+            // P3-STREAM switches (default on since 2026-11-25) change the counters.
+            let pinned = dft_numerics::switches::RunConfig::from_pairs(&[
+                ("ref_dav_sqrt", "off"),
+                ("ref_dav_fused_append", "off"),
+                ("ref_dav_check_append", "off"),
+                ("ref_dav_reuse_rows", "off"),
+            ])
+            .unwrap();
+            let _scope = pinned.enter();
             let mut op = Tridiagonal((0..12).collect());
             let mut x = RealMatrix::zeros(12, 3).unwrap();
             for j in 0..3 {

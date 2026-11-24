@@ -9,6 +9,7 @@ use dft_physics::data::Complex64 as C;
 use std::f64::consts::PI;
 
 pub struct Metric {
+    identity: u64,
     weights: Vec<f64>,
     local: Vec<f64>,
     gathered: Vec<f64>,
@@ -43,11 +44,20 @@ impl Metric {
             })
             .collect();
         Ok(Self {
+            identity: {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
             weights,
             local: vec![0.; max_batch],
             gathered: vec![0.; ranks * max_batch],
             counts: vec![0; ranks],
         })
+    }
+    /// Immutable geometry identity for the mixer's exact Gram cache. A new
+    /// metric invalidates it even when the vector lengths happen to agree.
+    pub(super) fn identity(&self) -> u64 {
+        self.identity
     }
     pub fn batch<K: Collective>(
         &mut self,

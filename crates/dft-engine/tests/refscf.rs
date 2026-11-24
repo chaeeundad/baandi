@@ -2913,12 +2913,13 @@ fn setup4_fft_plan_cache_and_workspace_identity() {
 fn setup4_start_switches_preserve_fields_and_ritz() {
     use dft_engine::refstart::{StartInput, start};
     use dft_numerics::switches::{Id, RunConfig};
-    for id in [
-        Id::REFSTART_FFT_SHARE,
-        Id::REFSTART_SINGLE_GEMM,
-        Id::REFSTART_LOCAL_SHELLS,
+    // FFT_SHARE and SINGLE_GEMM default on since 2026-11-26; LOCAL_SHELLS stays off.
+    for (id, default_on) in [
+        (Id::REFSTART_FFT_SHARE, true),
+        (Id::REFSTART_SINGLE_GEMM, true),
+        (Id::REFSTART_LOCAL_SHELLS, false),
     ] {
-        assert!(!RunConfig::from_pairs(&[]).unwrap().on(id));
+        assert_eq!(RunConfig::from_pairs(&[]).unwrap().on(id), default_on);
     }
     for (shape, rows) in [
         [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
@@ -3182,4 +3183,195 @@ fn setup4_shared_density_plan_verified_trajectory() {
             });
         }
     }
+}
+
+#[test]
+fn permap_preserves_delivery_and_counts() {
+    use dft_engine::refscf::driver::run_with;
+    use dft_engine::{ScfOptions, SpeciesPotential, Verification, refstart::StartInput};
+    use dft_numerics::switches::RunConfig;
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    for rows in [
+        [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]],
+        [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]],
+        [[5., 0., 0.], [0., 5., 0.], [0., 0., 12.]],
+    ] {
+        let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+        for (verification, max_iterations, energy_rule) in [
+            (Verification::Off, 100, "off"),
+            (Verification::FixedPoint, 100, "off"),
+            (Verification::FixedPoint, 100, "on"),
+            (Verification::Off, 1, "off"),
+        ] {
+            dft_mpi::simulate(2, |comm| {
+                let options = ScfOptions {
+                    cutoff_hartree: 1.,
+                    bands: Some(3),
+                    gamma_real: dft_engine::GammaReal::On,
+                    max_iterations,
+                    verification,
+                    ..Default::default()
+                };
+                let run = |permap| {
+                    let config = RunConfig::from_pairs(&[
+                        ("refscf_permap", permap),
+                        ("refscf_verify_energy", energy_rule),
+                    ])
+                    .unwrap();
+                    let _scope = config.enter();
+                    run_with(
+                        StartInput {
+                            cell: &cell,
+                            atoms: &atoms,
+                            potentials: &potentials,
+                            options: &options,
+                        },
+                        Profile::default(),
+                        comm,
+                    )
+                    .unwrap()
+                };
+                let a = run("off");
+                let b = run("on");
+                assert_eq!(a.first_reference_stop, b.first_reference_stop);
+                assert_eq!(a.verification_calls.len(), b.verification_calls.len());
+                assert_eq!(a.records.len(), b.records.len());
+                for (a, b) in a.records.iter().zip(&b.records) {
+                    assert_eq!(a.descf_ha.to_bits(), b.descf_ha.to_bits());
+                    assert_eq!(
+                        a.variational_energy_ha.to_bits(),
+                        b.variational_energy_ha.to_bits()
+                    );
+                    assert_eq!(a.dr2_ry.to_bits(), b.dr2_ry.to_bits());
+                    if !b.energy.kinetic.is_finite() {
+                        assert!(b.energy.band_sum.is_finite());
+                        assert!(b.energy.double_counting.is_finite());
+                        assert!(b.energy.functional_difference_bound.is_nan());
+                    }
+                }
+                let ar = &a.outcome.result;
+                let br = &b.outcome.result;
+                assert_eq!(a.outcome.converged, b.outcome.converged);
+                assert_eq!(
+                    ar.energy.total_hartree().to_bits(),
+                    br.energy.total_hartree().to_bits()
+                );
+                assert_eq!(
+                    ar.density.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                    br.density.iter().map(|v| v.to_bits()).collect::<Vec<_>>()
+                );
+                assert_eq!(ar.history.len(), br.history.len());
+                for (a, b) in ar.history.iter().zip(&br.history) {
+                    assert_eq!(a.davidson_iterations, b.davidson_iterations);
+                    assert_eq!(a.operator_applications, b.operator_applications);
+                    assert_eq!(a.standard_error_ha, b.standard_error_ha);
+                }
+                assert!(
+                    br.history
+                        .last()
+                        .unwrap()
+                        .energy
+                        .total_hartree()
+                        .is_finite()
+                );
+            });
+        }
+    }
+}
+
+#[test]
+fn permap_gram_cache_ring_and_metric_invalidation() {
+    use dft_numerics::switches::RunConfig;
+    use std::cell::RefCell;
+    struct Counted(RefCell<Vec<usize>>);
+    impl Collective for Counted {
+        fn rank(&self) -> usize {
+            0
+        }
+        fn size(&self) -> usize {
+            1
+        }
+        fn barrier(&self) -> Result<(), dft_mpi::MpiError> {
+            Ok(())
+        }
+        fn allgatherv_f64(
+            &self,
+            a: &[f64],
+            n: &[usize],
+            b: &mut [f64],
+        ) -> Result<(), dft_mpi::MpiError> {
+            self.0.borrow_mut().push(a.len());
+            Serial.allgatherv_f64(a, n, b)
+        }
+        fn tree_sum_f64(&self, a: &[f64], b: &mut [f64]) -> Result<(), dft_mpi::MpiError> {
+            Serial.tree_sum_f64(a, b)
+        }
+        fn bcast_f64(&self, a: &mut [f64], root: usize) -> Result<(), dft_mpi::MpiError> {
+            Serial.bcast_f64(a, root)
+        }
+        fn alltoall_f64(
+            &self,
+            a: &[f64],
+            n: usize,
+            b: &mut [f64],
+        ) -> Result<(), dft_mpi::MpiError> {
+            Serial.alltoall_f64(a, n, b)
+        }
+    }
+    let run = |arm| {
+        let cfg = RunConfig::from_pairs(&[("refscf_permap", arm)]).unwrap();
+        let _scope = cfg.enter();
+        let comm = Counted(RefCell::new(Vec::new()));
+        let g2: Vec<_> = (0..24).map(|i| i as f64).collect();
+        let smooth: Vec<_> = (0..24).map(|i| i < 22).collect();
+        let mut mix = Broyden::new(
+            Profile {
+                history: 4,
+                ..Default::default()
+            },
+            &g2,
+            &smooth,
+            10.,
+            2.,
+        )
+        .unwrap();
+        let mut m = Metric::new(10., &g2, &smooth, 1, 350).unwrap();
+        let mut outputs = Vec::new();
+        for k in 0..12 {
+            if k == 7 {
+                // New geometry, same vector lengths: cached Gram is invalid.
+                m = Metric::new(11., &g2, &smooth, 1, 350).unwrap();
+            }
+            let x: Vec<_> = (0..24)
+                .map(|i| C::new(((i + 1) * (k + 1)) as f64 * 0.03, (i as f64 * 0.2).cos()))
+                .collect();
+            let f: Vec<_> = (0..24)
+                .map(|i| C::new(((i + 1) * (k + 1)) as f64, 0.2).sin())
+                .collect();
+            let mut next = x.clone();
+            let d = mix.update(&comm, &mut m, &x, &f, &mut next).unwrap();
+            outputs.push((next, mix.gamma().to_vec(), d.condition));
+        }
+        (outputs, comm.0.into_inner())
+    };
+    let (a, old) = run("off");
+    let (b, new) = run("on");
+    assert_eq!(
+        a, b,
+        "identical arithmetic including ring overwrite and changed metric"
+    );
+    assert_eq!(old[3], 14); // p=4: ten Gram forms plus four RHS forms.
+    assert_eq!(new[3], 8); // Only the newest Gram row and the RHS.
+    assert_eq!(new[6], 14); // Replaced metric forces a full refresh.
+    assert!(new.iter().sum::<usize>() < old.iter().sum::<usize>());
+    eprintln!(
+        "P3-PERMAP Gram forms: {} -> {} (12 updates, history 4, one metric replacement)",
+        old.iter().sum::<usize>(),
+        new.iter().sum::<usize>()
+    );
 }

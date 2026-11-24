@@ -567,13 +567,19 @@ table! {
         "P3-RMM: maximum DIIS steps per sweep; default four, experimental overrides require multi-system evidence";
     REFSCF_RMM_BLOCK: Kind::Number { default: Some(16.), valid: |v| (1. ..=64.).contains(&v) && v.fract() == 0. }, "16", "integer 1..64",
         "P3-RMM: band-order Gram-Schmidt panel width; default sixteen";
-    REFSTART_FFT_SHARE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-26 (dev08 one-run P3t: si128 setup 2.34 -> 2.25 s, density FFT plan 0.25 -> 0.12 s; rounding class).
+    REFSTART_FFT_SHARE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-SETUP4: run-owned FFT kernel cache and shared start/density layout; bit-identical, pending dev08";
-    REFSTART_SINGLE_GEMM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-26 (dev08 one-run P3t: si128 setup 2.34 -> 2.25 s, density FFT plan 0.25 -> 0.12 s; rounding class).
+    REFSTART_SINGLE_GEMM: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-SETUP4: one MKL call per atomic overlap/H Gram rectangle; requires REFSTART_MKL, rounding class";
     REFSTART_LOCAL_SHELLS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P3-SETUP4: dense owned-shell indexing reused across species and batched direct ionic phases; bit-identical";
 
+    FFT_KERNEL_BY_LENGTH: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-PERMAP: calibrate rustfft/MKL per actual lane length, batch and direction once per run; pure builds retain rustfft";
+    REFSCF_PERMAP: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-PERMAP: cache unchanged Broyden Gram entries and fuse descf with map diagnostic passes/reduction";
 }
 
 struct Resolved {

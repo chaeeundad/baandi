@@ -3655,3 +3655,11 @@ Gram-Schmidt 3.9, DIIS 2.3) against QE rrmmdiagg 6.6 s for 10 calls; QE rmm itse
 QE Davidson on these cells (si128 21.89 vs 22.40 s). Lesson: on Si up to 128 atoms the Davidson trajectory
 already matches QE's; RMM pays only if its sweep overheads (GS, DIIS) are brought to QE's level and the map
 count does not grow. Kept as a switchable module (generality rule). Evidence: dev08 /scr/mino/rustdft/p3r/.
+
+### P3t (2026-11-26): REFSTART_FFT_SHARE and REFSTART_SINGLE_GEMM ADOPTED, REFSTART_LOCAL_SHELLS kept off
+
+dev08 MPI8 one profiled run per arm at 79cf8703 (all three on vs off): all verified, counts identical,
+|E - E_D| <= 2.3e-13 Ha; not bit-identical on dev08 MKL (Mac pure build was), so rounding class. Wall
+si64 6.56 -> 6.66 (noise), si128 32.47 -> 32.15, elongated 1.35 -> 1.17. si128 setup 2.343 -> 2.254 s:
+density FFT plan 0.252 -> 0.115 (FFT_SHARE), atomic overlap Gram 0.086 -> 0.062 (SINGLE_GEMM); LOCAL_SHELLS
+showed no gain (local tables 0.415 -> 0.457) and stays off. Evidence: dev08 /data/sig-dft/p3t/REPORT.md.

@@ -248,6 +248,7 @@ fn run_inner<K: Collective>(
     let mut pending: Option<(map::Map, f64, usize)> = None;
     let mut predictor = VerificationPredictor::default();
     let lean = config.on(Id::REFSCF_LEAN_ENERGY);
+    let permap = config.on(Id::REFSCF_PERMAP);
     let mut field_cache = None;
     for iteration in 1..=o.max_iterations {
         let map_start_s = start.elapsed().as_secs_f64();
@@ -484,6 +485,7 @@ fn run_inner<K: Collective>(
         let mut variational = step.energy.band_form;
         let (mut vh, mut vx) = (step.energy.hartree, step.energy.xc);
         let mut failure = None;
+        let mut fused_local = None;
         if !finish {
             if full_diagnostics {
                 qe_mixing_calls += 1;
@@ -514,16 +516,36 @@ fn run_inner<K: Collective>(
                     &next_planes,
                     &mut field_cache,
                 )?;
-                let local = -dv
-                    * next_planes
+                if permap {
+                    // Reuse the exact LEAN_ENERGY cache entry. Each accumulator
+                    // retains its original point order; one grid pass and one
+                    // four-scalar tree sum replace four passes and two sums.
+                    let mut local = [0.; 4];
+                    for (((n, y), next), v) in n
                         .iter()
                         .zip(&step.density)
+                        .zip(&next_planes)
                         .zip(&fields.hxc)
-                        .map(|((n, y), v)| (n - y) * v)
-                        .sum::<f64>();
-                let mut total = [0.];
-                comm.tree_sum_f64(&[local], &mut total).map_err(numerical)?;
-                descf = total[0];
+                    {
+                        local[0] += (n - y).powi(2);
+                        local[1] += n;
+                        local[2] += y;
+                        local[3] += (next - y) * v;
+                    }
+                    local[3] *= -dv;
+                    fused_local = Some(local);
+                } else {
+                    let local = -dv
+                        * next_planes
+                            .iter()
+                            .zip(&step.density)
+                            .zip(&fields.hxc)
+                            .map(|((n, y), v)| (n - y) * v)
+                            .sum::<f64>();
+                    let mut total = [0.];
+                    comm.tree_sum_f64(&[local], &mut total).map_err(numerical)?;
+                    descf = total[0];
+                }
                 vh = fields.hartree;
                 vx = fields.xc;
                 variational = step.energy.band_sum - step.energy.double_counting
@@ -554,18 +576,32 @@ fn run_inner<K: Collective>(
             vx = step.energy.xc;
         }
         let mut sums = [0.; 3];
-        comm.tree_sum_f64(
-            &[
-                n.iter()
-                    .zip(&step.density)
-                    .map(|(n, y)| (n - y).powi(2))
-                    .sum::<f64>(),
-                n.iter().sum::<f64>(),
-                step.density.iter().sum::<f64>(),
-            ],
-            &mut sums,
-        )
-        .map_err(numerical)?;
+        if let Some(local) = fused_local {
+            let clock = Instant::now();
+            let mut total = [0.; 4];
+            comm.tree_sum_f64(&local, &mut total).map_err(numerical)?;
+            sums.copy_from_slice(&total[..3]);
+            descf = total[3];
+            variational = step.energy.band_sum - step.energy.double_counting
+                + vh
+                + vx
+                + step.energy.ewald
+                + descf;
+            correction_s += clock.elapsed().as_secs_f64();
+        } else {
+            comm.tree_sum_f64(
+                &[
+                    n.iter()
+                        .zip(&step.density)
+                        .map(|(n, y)| (n - y).powi(2))
+                        .sum::<f64>(),
+                    n.iter().sum::<f64>(),
+                    step.density.iter().sum::<f64>(),
+                ],
+                &mut sums,
+            )
+            .map_err(numerical)?;
+        }
         let dav = calls.iter().map(|c| c.iterations).sum();
         let columns = calls.iter().map(|c| c.h_columns).sum();
         timings.mixing = Duration::from_secs_f64(mixing_s);

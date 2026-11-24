@@ -245,7 +245,8 @@ table! {
     // Adopted 2026-11-24 (dev08 MPI8 A/B at 0e8b08da; attempts ledger "P3 timed").
     REF_DAV_RESTART_CORRECTIONS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "reference Davidson only: form the first post-contraction corrections directly from retained V/HV, omitting identity-coefficient GEMMs; measured H/S refresh and band decisions unchanged";
-    REFSTART_MKL: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-24 (dev08 MPI8 A/B at 66d45e6: si64 -1.8%, si128 -3.4%, others neutral).
+    REFSTART_MKL: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "reference SCF atomic start only: Gram and rotation products through the dispatching GEMM entries (MKL panels) instead of the direct pure-Rust kernel; rounding class";
     // Adopted 2026-11-24 (dev08 MPI8 A/B at 0e8b08da; attempts ledger "P3 timed").
     REF_DAV_WIDE_ROTATE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",

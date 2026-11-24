@@ -3557,3 +3557,12 @@ Adoption rule (2026-11-10): faster where measurable, no regression beyond noise 
 default on (W is rounding class: H columns 14204 vs 14203 on si128, energies unchanged). Lesson: check
 gemm_dispatch routes first whenever a dense stage is slow; the pure fallbacks are silent.
 Evidence: dev08 /data/sig-dft/p3/<case>/TABLE.md, table.json, SCREEN.md.
+
+### REFSTART_MKL (2026-11-24): ADOPTED
+
+Atomic-start Gram and rotation products moved from the direct pure-Rust kernel (si128: 7 calls, 17 GFLOP
+per rank, route pure_direct) to the dispatching GEMM entries. dev08 MPI8 mpi,mkl 66d45e6, lightweight
+diagnostics, 20 A/A + 30 crossed pairs per case, all samples VERIFIED and identical to their arm's setup.
+si64 log ratio -0.0178 +- 0.0036 (x0.982, 7.951 -> 7.826 s); si128 -0.0347 +- 0.0034 (x0.966,
+40.501 -> 39.075 s); elongated and rskew inconclusive. Not slower anywhere -> default on. Setup on si128
+4.83 -> 3.36 s (profiled screen). Evidence: dev08 /data/sig-dft/p3b/<case>/TABLE.md.

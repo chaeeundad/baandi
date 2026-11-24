@@ -4895,3 +4895,471 @@ fn p4_start_verified_trajectories_and_dependent_rejection() {
         }
     }
 }
+
+/// Memory-only replay of the existing density/store traversal. This separates
+/// slab allocation/first touch from repeated stores; no FFT or SCF speed claim.
+/// Run release, one arm/process with /usr/bin/time -l for process page faults:
+/// DENSKEEP_PROBE_ARM=plain|fused|split DENSKEEP_PROBE_MIB=185|500
+/// cargo test --release -p dft-engine --test refscf denskeep_store_probe -- --ignored --nocapture
+#[test]
+#[ignore = "large memory diagnostic; use the documented release command"]
+fn denskeep_store_probe() {
+    use std::{hint::black_box, time::Instant};
+    let arm = std::env::var("DENSKEEP_PROBE_ARM").unwrap_or_else(|_| "fused".into());
+    assert!(["plain", "fused", "split"].contains(&arm.as_str()));
+    let mib: usize = std::env::var("DENSKEEP_PROBE_MIB")
+        .unwrap_or_else(|_| "185".into())
+        .parse()
+        .unwrap();
+    let maps: usize = std::env::var("DENSKEEP_PROBE_MAPS")
+        .unwrap_or_else(|_| "16".into())
+        .parse()
+        .unwrap();
+    assert!(mib > 0 && mib <= 512 && maps > 0);
+    let pairs = 128;
+    let line = 4096;
+    let planes = (mib * 1024 * 1024 / (16 * pairs)).div_ceil(line);
+    let points = planes * line;
+    let elements = pairs * points;
+    let slab: Vec<_> = (0..line)
+        .map(|j| C::new((j as f64 * 0.3).sin(), (j as f64 * 0.7).cos()))
+        .collect();
+    let mut density = vec![0.; points];
+    let mut keep = Vec::new();
+    let start = Instant::now();
+    if arm != "plain" {
+        keep.resize(elements, C::default());
+    }
+    // Force the initialized allocation to be observable separately from writes.
+    black_box(&mut keep);
+    let allocation = start.elapsed().as_secs_f64();
+    let mut samples = Vec::new();
+    for _ in 0..maps {
+        density.fill(0.);
+        let start = Instant::now();
+        for t in 0..pairs {
+            for i in 0..planes {
+                let base = i * line;
+                let source = black_box(&slab);
+                if arm == "fused" {
+                    for (j, (dst, v)) in keep[t * points + base..t * points + base + line]
+                        .iter_mut()
+                        .zip(source)
+                        .enumerate()
+                    {
+                        *dst = *v;
+                        density[base + j] += 2. * v.re * v.re / 343.;
+                        density[base + j] += 2. * v.im * v.im / 343.;
+                    }
+                } else {
+                    if arm == "split" {
+                        keep[t * points + base..t * points + base + line].copy_from_slice(source);
+                    }
+                    for (j, v) in source.iter().enumerate() {
+                        density[base + j] += 2. * v.re * v.re / 343.;
+                    }
+                    for (j, v) in source.iter().enumerate() {
+                        density[base + j] += 2. * v.im * v.im / 343.;
+                    }
+                }
+            }
+        }
+        black_box((&mut keep, &mut density));
+        samples.push(start.elapsed().as_secs_f64());
+    }
+    let mut expected = vec![0.; line];
+    for _ in 0..pairs {
+        for (d, v) in expected.iter_mut().zip(&slab) {
+            *d += 2. * v.re * v.re / 343.;
+            *d += 2. * v.im * v.im / 343.;
+        }
+    }
+    assert!(density.chunks(line).all(|d| {
+        d.iter()
+            .zip(&expected)
+            .all(|(a, b)| a.to_bits() == b.to_bits())
+    }));
+    let first = samples[0];
+    samples.sort_by(f64::total_cmp);
+    let median = samples[samples.len() / 2];
+    eprintln!(
+        "DENSKEEP_STORE arm={arm} maps={maps} pairs={pairs} points={points} line={line} payload_bytes={} store_bytes_per_map={} allocation_s={allocation:.9} first_s={first:.9} median_s={median:.9} logical_store_GB_s={:.6} density_bits=identical",
+        keep.len() * 16,
+        keep.len() * 16,
+        keep.len() as f64 * 16. / median / 1e9
+    );
+}
+
+// P4-DENSKEEP: recomputation changes storage/FFT work, not precision. Check the
+// actual cache path (including zero-plane ranks and an odd unoccupied tail).
+#[test]
+fn fast_order_denskeep_recompute_products_and_counts() {
+    use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, refscf::kept_hx::KeptHx, refstart};
+    use dft_numerics::{
+        RealMatrix,
+        stage_clock::local,
+        switches::{Id, RunConfig},
+    };
+    assert!(
+        !RunConfig::from_pairs(&[])
+            .unwrap()
+            .on(Id::REFSCF_KEPT_RECOMPUTE)
+    );
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]])
+            .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    for ranks in [1, 2, 9] {
+        for bands in [3, 4] {
+            let options = ScfOptions {
+                cutoff_hartree: 1.,
+                bands: Some(bands),
+                gamma_real: GammaReal::On,
+                ..Default::default()
+            };
+            dft_mpi::simulate(ranks, |comm| {
+                let mut state = refstart::start(
+                    refstart::StartInput {
+                        cell: &cell,
+                        atoms: &atoms,
+                        potentials: &potentials,
+                        options: &options,
+                    },
+                    comm,
+                )
+                .unwrap();
+                local::enable(true);
+                let x = &state.orbitals;
+                let op = &mut state.operator;
+                let old: Vec<_> = op
+                    .plane_grid_offsets()
+                    .iter()
+                    .map(|&g| 0.03 * (g as f64).sin())
+                    .collect();
+                let new: Vec<_> = op
+                    .plane_grid_offsets()
+                    .iter()
+                    .map(|&g| 0.04 * (0.7 * g as f64).cos())
+                    .collect();
+                op.set_owned_potential(&old, 1).unwrap();
+                let mut hx = RealMatrix::zeros(x.rows(), bands).unwrap();
+                op.apply_block(comm, x, &mut hx).unwrap();
+                let mut kept = Vec::new();
+                let mut densities = Vec::new();
+                for arm in ["off", "on"] {
+                    let _scope = RunConfig::from_pairs(&[("refscf_kept_recompute", arm)])
+                        .unwrap()
+                        .enter();
+                    let mut cache = KeptHx::new(true);
+                    let mut density = vec![0.; old.len()];
+                    let before = local::snapshot();
+                    let mut weights = vec![0.; bands];
+                    weights[0] = 2.;
+                    cache
+                        .density(
+                            comm,
+                            op,
+                            x,
+                            &hx,
+                            &old,
+                            &weights,
+                            cell.volume_bohr3(),
+                            &mut density,
+                        )
+                        .unwrap();
+                    let counts = local::snapshot().since(&before);
+                    assert_eq!(counts.calls[local::OP_COUNT + 3], bands.div_ceil(2) as u64);
+                    assert_eq!(counts.calls[local::OP_COUNT + 2], 0);
+                    kept.push(cache);
+                    densities.push(density);
+                }
+                assert_eq!(densities[0], densities[1]);
+                op.set_owned_potential(&new, 2).unwrap();
+                let mut products = Vec::new();
+                for (i, cache) in kept.iter_mut().enumerate() {
+                    let before = local::snapshot();
+                    products.push(cache.prepare(comm, op, x, &new).unwrap().unwrap());
+                    let counts = local::snapshot().since(&before);
+                    assert_eq!(counts.calls[local::OP_COUNT], 0, "no full H");
+                    assert_eq!(counts.calls[local::OP_COUNT + 1], bands as u64);
+                    assert_eq!(counts.calls[local::OP_COUNT + 2], bands.div_ceil(2) as u64);
+                    assert_eq!(
+                        counts.calls[local::OP_COUNT + 3],
+                        if i == 0 { bands % 2 } else { bands.div_ceil(2) } as u64
+                    );
+                    let report = cache.report(comm).unwrap();
+                    assert_eq!(report.full_h_starting_columns_replaced, bands);
+                    assert_eq!(report.cache_hits, 1);
+                    if i == 1 {
+                        assert!(report.retained_slab_bytes_per_rank.iter().all(|&b| b == 0));
+                    }
+                }
+                assert!(
+                    products[0]
+                        .as_slice()
+                        .iter()
+                        .zip(products[1].as_slice())
+                        .all(|(a, b)| a.to_bits() == b.to_bits()),
+                    "recomputed HX bits"
+                );
+                let mut direct = RealMatrix::zeros(x.rows(), bands).unwrap();
+                op.apply_block(comm, x, &mut direct).unwrap();
+                let local_error = [
+                    products[1]
+                        .as_slice()
+                        .iter()
+                        .zip(direct.as_slice())
+                        .map(|(a, b)| (a - b).powi(2))
+                        .sum(),
+                    direct.as_slice().iter().map(|v| v * v).sum(),
+                ];
+                let mut total = [0.; 2];
+                comm.tree_sum_f64(&local_error, &mut total).unwrap();
+                let relative = (total[0] / total[1]).sqrt();
+                assert!(relative < 1e-13);
+                if comm.rank() == 0 {
+                    eprintln!(
+                        "DENSKEEP_PRODUCT ranks={ranks} bands={bands} relative_HX={relative:.17e} recompute_delta=0 inverse_per_hit={}->{} replaced={bands} slab_bytes=0",
+                        bands % 2,
+                        bands.div_ceil(2)
+                    );
+                }
+                // A miss cannot turn an invalid block into a hit in either arm.
+                if comm.rank() == 0 {
+                    kept[1].invalidate();
+                }
+                assert!(kept[1].prepare(comm, op, x, &new).unwrap().is_none());
+            });
+        }
+    }
+}
+
+fn denskeep_delivery(label: &str, rows: [[f64; 3]; 3], nonlocal: bool) {
+    use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, refscf::driver, refstart};
+    use dft_numerics::switches::RunConfig;
+    let pp = common::potential_with_atomic_start(2., 1.8, nonlocal, 161, "SLA PZ");
+    let cell = dft_geometry::Cell::from_user_rows_bohr(rows).unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 1.,
+        bands: Some(3),
+        max_iterations: 120,
+        gamma_real: GammaReal::On,
+        ..Default::default()
+    };
+    dft_mpi::simulate(2, |comm| {
+        let run = |arm| {
+            let _scope =
+                RunConfig::from_pairs(&[("refscf_kept_hx", "on"), ("refscf_kept_recompute", arm)])
+                    .unwrap()
+                    .enter();
+            driver::run_with(
+                refstart::StartInput {
+                    cell: &cell,
+                    atoms: &atoms,
+                    potentials: &potentials,
+                    options: &options,
+                },
+                Profile {
+                    threshold_ry: 1e-12,
+                    ..Default::default()
+                },
+                comm,
+            )
+            .unwrap()
+        };
+        let baseline = run("off");
+        let candidate = run("on");
+        for r in [&baseline, &candidate] {
+            assert!(r.outcome.converged, "{label}: {}", r.exit_reason);
+            assert!(r.outcome.result.verification.as_ref().unwrap().passed());
+            assert!(r.kept_hx.cache_hits > 0);
+        }
+        let a = &baseline.outcome.result;
+        let b = &candidate.outcome.result;
+        let delta = b.total_hartree() - a.total_hartree();
+        assert!(delta.abs() <= 1e-10, "{label}: {delta:e} Ha");
+        assert_eq!(a.total_hartree().to_bits(), b.total_hartree().to_bits());
+        assert!(
+            a.density
+                .iter()
+                .zip(&b.density)
+                .all(|(a, b)| a.to_bits() == b.to_bits())
+        );
+        assert_eq!(baseline.records.len(), candidate.records.len());
+        for (a, b) in baseline.records.iter().zip(&candidate.records) {
+            assert_eq!(
+                (a.davidson_iterations, a.h_columns, a.warm_start),
+                (b.davidson_iterations, b.h_columns, b.warm_start)
+            );
+            assert_eq!(a.calls.len(), b.calls.len());
+            for (a, b) in a.calls.iter().zip(&b.calls) {
+                assert_eq!(a.corrections, b.corrections);
+            }
+        }
+        assert_eq!(
+            baseline.verification_calls.len(),
+            candidate.verification_calls.len()
+        );
+        for (a, b) in baseline
+            .verification_calls
+            .iter()
+            .zip(&candidate.verification_calls)
+        {
+            assert_eq!((a.iterations, a.h_columns), (b.iterations, b.h_columns));
+        }
+        assert_eq!(baseline.kept_hx.cache_hits, candidate.kept_hx.cache_hits);
+        assert_eq!(
+            baseline.kept_hx.full_h_starting_columns_replaced,
+            candidate.kept_hx.full_h_starting_columns_replaced
+        );
+        assert!(
+            candidate
+                .kept_hx
+                .retained_slab_bytes_per_rank
+                .iter()
+                .all(|&n| n == 0)
+        );
+        if comm.rank() == 0 {
+            eprintln!(
+                "DENSKEEP_DELIVERY {label} E={:.17e} Ha dE={delta:.1e} Ha maps={} Davidson={} full_H={} hits={} replaced={} slabs={:?}->0 verification=passed density_bits=identical",
+                b.total_hartree(),
+                candidate.records.len(),
+                candidate
+                    .records
+                    .iter()
+                    .map(|r| r.davidson_iterations)
+                    .sum::<usize>(),
+                candidate.records.iter().map(|r| r.h_columns).sum::<usize>(),
+                candidate.kept_hx.cache_hits,
+                candidate.kept_hx.full_h_starting_columns_replaced,
+                baseline.kept_hx.retained_slab_bytes_per_rank
+            );
+        }
+    });
+}
+#[test]
+fn fast_order_denskeep_delivery_cubic() {
+    denskeep_delivery("cubic", [[7., 0., 0.], [0., 7., 0.], [0., 0., 7.]], false);
+}
+#[test]
+fn fast_order_denskeep_delivery_skew_nonlocal() {
+    denskeep_delivery(
+        "skew-nonlocal",
+        [[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]],
+        true,
+    );
+}
+#[test]
+fn fast_order_denskeep_delivery_elongated() {
+    denskeep_delivery(
+        "elongated",
+        [[5., 0., 0.], [0., 5., 0.], [0., 0., 10.]],
+        false,
+    );
+}
+#[test]
+fn fast_order_denskeep_delivery_slab() {
+    // The thin direction still resolves the p_z atomic starting orbital at
+    // this cutoff; z=4 Bohr would make the pre-existing start rank deficient.
+    denskeep_delivery("slab", [[10., 0., 0.], [0., 10., 0.], [0., 0., 5.]], false);
+}
+
+/// Common-input density replay on a real synthetic operator (FFT included).
+/// cargo test --release -p dft-engine --test refscf denskeep_density_probe -- --ignored --nocapture
+#[test]
+#[ignore = "density timing diagnostic; run in release separately from builds"]
+fn denskeep_density_probe() {
+    use dft_engine::{GammaReal, ScfOptions, SpeciesPotential, refscf::kept_hx::KeptHx, refstart};
+    use dft_numerics::{RealMatrix, stage_clock::local, switches::RunConfig};
+    use std::time::Instant;
+    let pp = common::potential_with_atomic_start(2., 1.8, true, 161, "SLA PZ");
+    let cell =
+        dft_geometry::Cell::from_user_rows_bohr([[7., 0., 0.], [0.2, 7., 0.], [0., 0.1, 7.]])
+            .unwrap();
+    let atoms = [dft_geometry::Atom::new("Xx", [0.13, 0.21, 0.32])];
+    let potentials = [SpeciesPotential {
+        label: "Xx",
+        potential: &pp,
+    }];
+    let options = ScfOptions {
+        cutoff_hartree: 1.,
+        bands: Some(16),
+        grid_override: Some([64, 64, 64]),
+        gamma_real: GammaReal::On,
+        ..Default::default()
+    };
+    dft_mpi::simulate(2, |comm| {
+        let mut state = refstart::start(
+            refstart::StartInput {
+                cell: &cell,
+                atoms: &atoms,
+                potentials: &potentials,
+                options: &options,
+            },
+            comm,
+        )
+        .unwrap();
+        let x = &state.orbitals;
+        let op = &mut state.operator;
+        let potential = vec![0.03; op.plane_points()];
+        op.set_owned_potential(&potential, 1).unwrap();
+        let mut hx = RealMatrix::zeros(x.rows(), x.cols()).unwrap();
+        op.apply_block(comm, x, &mut hx).unwrap();
+        let mut out = vec![0.; potential.len()];
+        let mut weights = vec![0.; x.cols()];
+        weights[0] = 2.;
+        let mut oracle = Vec::new();
+        local::enable(true);
+        for arm in ["off", "on"] {
+            let _scope = RunConfig::from_pairs(&[("refscf_kept_recompute", arm)])
+                .unwrap()
+                .enter();
+            let mut kept = KeptHx::new(true);
+            let before = local::snapshot();
+            let mut times = Vec::new();
+            for _ in 0..16 {
+                let start = Instant::now();
+                kept.density(
+                    comm,
+                    op,
+                    x,
+                    &hx,
+                    &potential,
+                    &weights,
+                    cell.volume_bohr3(),
+                    &mut out,
+                )
+                .unwrap();
+                times.push(start.elapsed().as_secs_f64());
+            }
+            let counters = local::snapshot().since(&before);
+            assert_eq!(counters.calls[local::OP_COUNT + 3], 128);
+            assert_eq!(counters.calls[local::OP_COUNT + 2], 0);
+            let bits: Vec<_> = out.iter().map(|v| v.to_bits()).collect();
+            if arm == "off" {
+                oracle = bits;
+            } else {
+                assert_eq!(oracle, bits);
+            }
+            let report = kept.report(comm).unwrap();
+            let first = times.remove(0);
+            times.sort_by(f64::total_cmp);
+            eprintln!(
+                "DENSKEEP_DENSITY rank={} recompute={arm} grid=64x64x64 bands=16 maps=16 inverse=128 forward=0 bytes_per_map={} first_s={first:.9} warm_median_s={:.9} density_bits=identical",
+                comm.rank(),
+                report.retained_slab_bytes_per_rank[comm.rank()],
+                times[times.len() / 2]
+            );
+        }
+    });
+}

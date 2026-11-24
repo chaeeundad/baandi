@@ -600,6 +600,8 @@ table! {
     REFSTART_PARTITION_CACHE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "P4-START: constructor-scoped exact FFT partition reuse between owned projector lookup and operator plans; no shared mutable buffers";
 
+    REFSCF_KEPT_RECOMPUTE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P4-DENSKEEP: keep Ritz HX but recompute f64 inverse planes for the local-potential delta; no retained slabs; requires REFSCF_KEPT_HX";
 }
 
 struct Resolved {

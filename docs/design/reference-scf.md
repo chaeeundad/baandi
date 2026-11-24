@@ -2498,6 +2498,46 @@ and repeatability. Mac evidence is correctness only; the exact four-run dev08
 request and evidence limits are in
 [the P3-KEPTHX2 request](../performance/lanes/RSCF/kepthx2-dev08-request.md).
 
+
+### P4-DENSKEEP: optional slab recomputation
+
+`BAANDI_REFSCF_KEPT_RECOMPUTE=on` (`[performance]
+refscf_kept_recompute="on"`), default **off**, sets the retained pair count to
+zero for the lifetime of a new `KeptHx` stage. It requires kept HX to be
+enabled. X, HX, the old potential, identity/epoch checks, invalidation and
+verification preservation are unchanged. The existing f64 zero-kept-pair
+fallback reconstructs the inverse planes only when applying the local change;
+no compressed arithmetic or new transform implementation is introduced.
+Density takes the existing no-store traversal and allocates no slab. The
+reported retained slab high water is zero (X/HX/potential are still retained).
+
+For B bands and K previously retained complete pairs, density still executes
+ceil(B/2) inverse pairs and zero forward pairs. Each warm hit still replaces B
+full-H columns, but now executes K more inverse pairs, plus the existing
+mirror-row exchange and inverse transpose when the stored arm needed none.
+The forward pair count is unchanged. Thus the memory saving is exact; retention
+of the previously observed solve-time gain is **not established** without a
+dev08 measurement. No material-dependent cutoff or auto-selection is installed.
+
+The storage is already contiguous `[pair][owned plane][row][z]`: 16-byte
+complex stride, 16*P-byte pair stride. All K*P values are consumed by the
+local-change kernel, including zero-occupation buffer bands; there is no
+unused local subregion to omit generally. Storage costs 16*K*P bytes written
+per ordinary map and the same payload initialized once per stage. Mac replay
+and process page-fault observations confirm first touch rather than recurring
+faults; they do not measure hardware cache misses or DRAM transactions.
+
+`fast_order_denskeep_*` checks 1/2/9 simulated ranks (including zero-plane
+ranks), 3/4 bands, bit-identical starting HX and density versus stored f64,
+and <=1e-13 relative Frobenius error versus direct H. Four two-rank synthetic
+full SCFs (cubic, skew/nonlocal, elongated, slab) have exactly zero energy
+difference, identical density bits and Davidson/H-column counts, and pass
+independent verification. The strict 1e-10 Ha difference gate is unchanged.
+Two ignored release diagnostics isolate actual common-input density work and
+large memory-only traversal/first-touch work; commands, numbers, rejected
+alternatives and the one-run-per-arm remote screen are in the
+[P4-DENSKEEP request](../performance/lanes/RSCF/p4-denskeep-dev08-request.md).
+
 ## Warm verification maps
 
 P3-VERWARM adds `BAANDI_REFSCF_VERIFY_WARM=on|off` (input

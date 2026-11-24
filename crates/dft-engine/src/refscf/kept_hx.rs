@@ -52,6 +52,7 @@ struct Entry {
 /// in the operator's layout and must already have been installed on the operator.
 pub struct KeptHx {
     enabled: bool,
+    recompute_slabs: bool,
     preserve_input: bool,
     entry: Option<Entry>,
     // Storage belongs to the stage, not the single-use entry. Invalidation
@@ -65,6 +66,9 @@ impl KeptHx {
     pub fn new(enabled: bool) -> Self {
         Self {
             enabled,
+            recompute_slabs: dft_numerics::switches::on(
+                dft_numerics::switches::Id::REFSCF_KEPT_RECOMPUTE,
+            ),
             preserve_input: false,
             entry: None,
             slabs: Vec::new(),
@@ -172,7 +176,14 @@ impl KeptHx {
         // A replicated upper bound ensures the same pair count on every rank.
         let max_points =
             dims[axis].div_ceil(comm.size()) * dims.iter().product::<usize>() / dims[axis];
-        let pairs = (x.cols() / 2).min(SLAB_LIMIT_BYTES / (16 * max_points.max(1)));
+        // Memory/work tradeoff: retain exact X/HX and the old potential, but
+        // regenerate the inverse planes inside apply_local_change. Zero pairs
+        // uses the existing f64 fallback and makes density the plain path.
+        let pairs = if self.recompute_slabs {
+            0
+        } else {
+            (x.cols() / 2).min(SLAB_LIMIT_BYTES / (16 * max_points.max(1)))
+        };
         self.slabs
             .resize(pairs * operator.plane_points(), Complex64::default());
         operator

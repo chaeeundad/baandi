@@ -560,6 +560,12 @@ table! {
     REFSCF_LEAN_ENERGY: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "Reference SCF intermediate band energy with full delivery and verification audits";
 
+    REFSCF_RMM: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+        "P3-RMM: bounded RMM-DIIS sweeps between Davidson SCF iterations 1, 2 and multiples of five; verification always Davidson";
+    REFSCF_RMM_STEPS: Kind::Number { default: Some(4.), valid: |v| (1. ..=16.).contains(&v) && v.fract() == 0. }, "4", "integer 1..16",
+        "P3-RMM: maximum DIIS steps per sweep; default four, experimental overrides require multi-system evidence";
+    REFSCF_RMM_BLOCK: Kind::Number { default: Some(16.), valid: |v| (1. ..=64.).contains(&v) && v.fract() == 0. }, "16", "integer 1..64",
+        "P3-RMM: band-order Gram-Schmidt panel width; default sixteen";
 }
 
 struct Resolved {

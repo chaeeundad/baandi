@@ -10,12 +10,12 @@
 //! independently verify the final SCF. An iteration limit returns an explicitly
 //! unconverged result, so the driver can retry with the returned vectors.
 
-mod accounting;
+pub(crate) mod accounting;
 mod ideal_reset;
 pub use ideal_reset::ResetStats;
 mod stream;
 pub mod work;
-mod workspace;
+pub(crate) mod workspace;
 pub use accounting::{
     APPLY_H_STAGES, ApplyH, Communication, Gemm, Iteration, QeClockScope, QeCounters, Record,
     STAGES, apply_h_active, qe_clock_end, qe_clock_start, record_apply_h, take_apply_h_solves,

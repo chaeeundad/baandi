@@ -118,6 +118,7 @@ pub(super) fn evaluate<K: Collective>(
     diagnostics: bool,
     cache: &mut Option<(Vec<f64>, Fields)>,
     lean: bool,
+    rmm: Option<dft_solvers::ref_rmm::Options>,
 ) -> Result<Map, ScfError> {
     let mut timings = PhaseTimings::default();
     let clock = Instant::now();
@@ -154,13 +155,35 @@ pub(super) fn evaluate<K: Collective>(
     options.first_step = first_step;
     options.return_hx = true;
     options.profile = diagnostics;
-    let solve = ref_davidson::solve(
-        comm,
-        &mut state.operator,
-        &state.orbitals,
-        &diagonal,
-        options,
-    )?;
+    let solve = if let Some(mut rmm) = rmm {
+        // The RMM preconditioner needs bare t_G, not Davidson's full H diagonal.
+        let kinetic: Vec<_> = state
+            .operator
+            .local_rows()
+            .iter()
+            .map(|&row| {
+                let g = if row == 0 {
+                    0
+                } else {
+                    state.half.plus()[row.div_ceil(2)] as usize
+                };
+                state.basis.vectors()[g].norm_squared / 2.
+            })
+            .collect();
+        rmm.bands = options.bands;
+        rmm.occupied = options.occupied;
+        rmm.threshold_ha = options.threshold;
+        rmm.profile = options.profile;
+        dft_solvers::ref_rmm::solve(comm, &mut state.operator, &state.orbitals, &kinetic, rmm)?
+    } else {
+        ref_davidson::solve(
+            comm,
+            &mut state.operator,
+            &state.orbitals,
+            &diagonal,
+            options,
+        )?
+    };
     // An exhausted inner solve must never be silently labelled converged.
     // Re-entry policy belongs to the caller and is recorded as another call.
     timings.diagonalization = clock.elapsed();

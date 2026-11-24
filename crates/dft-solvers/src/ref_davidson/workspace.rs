@@ -20,7 +20,7 @@ thread_local! {
     static ROWS: std::cell::RefCell<Option<Rows>> = const { std::cell::RefCell::new(None) };
 }
 
-pub(super) struct Workspace {
+pub(crate) struct Workspace {
     rows: usize,
     n: usize,
     cap: usize,
@@ -41,7 +41,7 @@ pub(super) struct Workspace {
     reduced: Vec<f64>,
     norms: Vec<f64>,
     sums: Vec<f64>,
-    gemm: RealGemmWorkspace,
+    pub(crate) gemm: RealGemmWorkspace,
     evd: RealEighWorkspace,
     single_gemm: bool,
     swap_buffers: bool,
@@ -900,7 +900,7 @@ impl Workspace {
     }
 }
 #[allow(clippy::too_many_arguments)]
-fn rotate(
+pub(crate) fn rotate(
     g: &mut RealGemmWorkspace,
     v: &RealMatrix,
     c: &RealMatrix,
@@ -935,7 +935,7 @@ fn rotate(
     )?;
     Ok(())
 }
-fn agree_apply<C: Collective>(
+pub(crate) fn agree_apply<C: Collective>(
     c: &C,
     result: Result<(), SolverError>,
     y: &RealMatrix,

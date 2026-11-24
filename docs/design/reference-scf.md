@@ -2265,3 +2265,76 @@ fixtures converge and verify but fail that stricter comparison (maximum
 6.115339346e-10 Ha). This is a recorded acceptance blocker, not a relaxed
 test or a basis for default adoption; explicit ignored failure reproducers
 remain in `tests/refscf.rs` and the request gives their command and results.
+
+## Cutoff ladder
+
+P3-LADDER adds the run-scoped `BAANDI_REFSCF_LADDER=on|off` switch
+(`[performance] refscf_ladder="on"`), **default off**. The legacy ladder
+switch and its behavior are unchanged. The new switch acts only at the
+reference driver's entry, including `run_with` and simulated collectives.
+It does not recursively invoke the ladder or construct a legacy session.
+
+The coarse cutoff is **0.5 times the requested cutoff**, C1's pre-registered
+fraction, with an automatically generated smaller density grid. The fine
+input grid override, if present, remains the fine grid. Coarse Broyden beta,
+history length, preconditioning, Davidson rules and stopping estimator are
+those of the reference driver. Its estimator threshold is **100 times the
+fine threshold in Ry**: a fixed two-order separation, not fitted to any
+material or cell. Its budget is `min(30, max_iterations)`, following the C1
+cost bound. The coarse stage has verification off because it supplies only
+a start. On budget exhaustion it exports its last output and records
+`coarse_stopped=false`; numerical failures are errors, not silent fallback.
+There is no change to the fine iteration budget. An insufficient coarse
+basis (for example fewer plane waves than requested bands) fails explicitly;
+no fraction search or system-specific cutoff adjustment is implemented.
+
+The coarse output density and orbitals belong to the same last map. The
+owned real Gamma rows are injected by Miller index, using the shared C1
+mapping helper, and redistributed to their fine FFT-stick owners. Row
+values are copied with no coefficient arithmetic, normalization or QR.
+Both members of each Gamma pair keep their orientation and their real/imaginary
+row weights. New rows are zero. Thus overlaps and Hermitian symmetry are
+preserved (overlap sums themselves can differ by floating-point association).
+The density uses the shared C1 Fourier-padding convention: forward-normalized
+coefficients, signed frequencies, and removal of even-grid Nyquist planes,
+which lie outside the coarse density sphere. Fine inverse FFT roundoff is
+not clipped or charge-rescaled. LDA on the initial prolonged density uses
+the same absolute-density rule as the reference map. Transfer is one
+padded equal-block all-to-all for orbitals and one for density coefficients;
+no full orbital or density value array is gathered. Rank-local ownership
+can change with grid and rank count, including empty owners.
+
+Fine setup builds its own Hamiltonian, ionic potential and fine-grid fields,
+but skips the atomic orbital solve. It consumes the prolonged density and
+owned orbitals and constructs an empty Broyden history. S2 secant seeding is
+not enabled. The first fine call, first-step redo, ethr reset/ratchet,
+stopping estimator, fine energy audit and verification/recovery logic remain
+unchanged. The public result and verification are exclusively fine-stage
+outputs. `verify="off"` still returns the fine estimator stop without a
+passing certificate. Fine atomic-start H applications are recorded as zero
+when the orbitals were prolonged.
+
+Every record has `stage="fine"` or `stage="coarse"`, with stage-local
+iteration numbers. To preserve existing consumers, `Run.records`,
+`reference_scf.iterations`, `convergence.history` and verification attempts
+remain **fine only**. Coarse rows are in
+`reference_scf.cutoff_ladder.iterations`; that block also reports fraction,
+coarse threshold, convergence flag, setup phases, coarse seconds, coarse/fine
+map counts and separate solve-call counts (redo/retry calls are not extra
+outer maps). No coarse verification or public-result assembly is performed.
+Davidson stage totals include both stages. Coarse setup/maps/export are in
+the run's wall; fine setup includes the redistribution/inverse transform.
+All map timestamps share the original driver-entry origin. `wall_s.start`
+is inclusive through the first fine map and contains the separately exposed
+`coarse_in_start` subtotal; do not add that subtotal twice. With the ladder
+enabled, `peak_bytes_per_rank` describes the fine-stage
+arrays only and explicitly excludes the coarse/transfer workspace; use the
+whole-process RSS measurement for a whole-run peak. The QE-clock
+proxy table remains the fine stage's; coarse phase evidence is in the ladder
+block. `refscf-check --stop-to-verified` accepts historical rows without a
+stage and current fine rows, and rejects coarse rows in the fine history.
+Its interval is still first **fine** estimator stop to passing verification.
+
+Local tests and the one-run-per-arm dev08 request are recorded in
+[ladder-dev08-request.md](../performance/lanes/RSCF/ladder-dev08-request.md).
+No performance promotion follows from Mac correctness or map counts.

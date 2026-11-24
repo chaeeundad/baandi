@@ -380,6 +380,8 @@ struct WallVerificationCost {
 }
 #[derive(serde::Deserialize)]
 struct WallMap {
+    #[serde(default)]
+    stage: Option<String>,
     iteration: usize,
     dr2_ry: f64,
     map_start_s: f64,
@@ -446,6 +448,10 @@ pub fn stop_to_verified_summary(doc: &Value) -> Result<Value, RunError> {
     let mut verification_s = 0.;
     let mut recovery_s = 0.;
     for (i, map) in run.iterations.iter().enumerate() {
+        require(
+            map.stage.as_deref().is_none_or(|s| s == "fine"),
+            "stop-to-verified requires fine-stage maps",
+        )?;
         require(
             map.iteration == i + 1,
             "missing, duplicate or unordered map",
@@ -714,4 +720,25 @@ mod tests {
         assert!(error.cause.contains("k=2 dr2"), "{}", error.cause);
         fs::remove_dir_all(&dir).unwrap();
     }
+}
+
+#[cfg(test)]
+#[test]
+fn reference_stage_field_keeps_stop_clock_fine_only() {
+    let mut doc = json!({"run":{"completed":true},"reference_scf":{
+        "stop_to_verified_clock":"reference-scf-wall-1","threshold_ry":1e-8,
+        "verification":null,
+        "cutoff_ladder":{"iterations":[{"stage":"coarse","iteration":1}]},
+        "iterations":[{"stage":"fine","iteration":1,"dr2_ry":1e-9,
+            "map_start_s":3.0,"estimator_s":4.0,"map_end_s":4.0,
+            "verification_start_s":null,"verification_end_s":null,"verification_cost":null}]
+    }});
+    let fine = stop_to_verified_summary(&doc).unwrap();
+    doc["reference_scf"]["iterations"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("stage");
+    assert_eq!(fine, stop_to_verified_summary(&doc).unwrap());
+    doc["reference_scf"]["iterations"][0]["stage"] = json!("coarse");
+    assert!(stop_to_verified_summary(&doc).is_err());
 }

@@ -1654,6 +1654,7 @@ fn execute_mode_inner(
     let mut reference_records = Vec::new();
     let mut reference_status = None;
     let mut reference_summary = None;
+    let mut reference_ladder = Value::Null;
     let mut reference_diagnostics = false;
     let mut reference_qe_clock = Vec::new();
     let mut reference_stages = None;
@@ -1719,8 +1720,20 @@ fn execute_mode_inner(
                 reference_output["driver_return_remainder"] = json!(reference_return.unwrap().duration_since(driver_entry).as_secs_f64()
                     - run.records.last().map_or(run.start_s, |r| r.map_end_s) - run.output_s);
                 reference_output["driver_return_remainder_scope"] = json!("includes driver state teardown and dispatch/argument overhead outside the engine output clock");
+                reference_ladder = run.ladder.as_ref().map_or(Value::Null, |l| json!({
+                    "fraction":dft_engine::refscf::ladder::FRACTION,
+                    "coarse_threshold_ry":l.coarse_threshold_ry,
+                    "coarse_stopped":l.coarse_stopped,
+                    "coarse_seconds":l.coarse_seconds,
+                    "coarse_setup":boundary_json(&l.coarse_setup),
+                    "coarse_maps":l.coarse_records.len(),
+                    "fine_maps":run.records.len(),
+                    "coarse_solve_calls":l.coarse_records.iter().map(|r|r.calls.len()).sum::<usize>(),
+                    "fine_solve_calls":run.records.iter().map(|r|r.calls.len()).sum::<usize>(),
+                    "iterations":l.coarse_records.iter().map(reference_record_json).collect::<Vec<_>>()
+                }));
                 let mut seconds = [0.; 8];
-                for call in run.records.iter().flat_map(|r| &r.calls).chain(&run.verification_calls) {
+                for call in run.records.iter().chain(run.ladder.iter().flat_map(|l| &l.coarse_records)).flat_map(|r| &r.calls).chain(&run.verification_calls) {
                     if let Some((_, stages)) = call.inner_clocks {
                         for (sum, value) in seconds.iter_mut().zip(stages) {
                             *sum += value;
@@ -1738,7 +1751,7 @@ fn execute_mode_inner(
                 reference_summary = Some(json!({
                     "start_s":run.start_s,"materialize_s":run.output_s,"first_estimator_stop_iteration":run.first_reference_stop,
                     "peak_bytes_per_rank":run.peak_payload_bytes_per_rank,
-                    "peak_kind":"conservative principal array payload envelope; not RSS; backend/FFT/allocator storage excluded",
+                    "peak_kind":if run.ladder.is_some() { "fine-stage principal array payload estimate only; coarse stage and transfer workspace excluded; not a whole-run peak or RSS" } else { "conservative principal array payload envelope; not RSS; backend/FFT/allocator storage excluded" },
                     "peak_rss_bytes_per_rank":null,
                     "verification_calls":run.verification_calls.iter().map(reference_solve_json).collect::<Vec<_>>()
                 }));
@@ -1933,6 +1946,7 @@ fn execute_mode_inner(
         }
         result["reference_scf"] = json!({"setup_s":reference_setup,"reference_stopped":stopped,"exit_reason":reason,
             "stop_to_verified_clock":"reference-scf-wall-1",
+            "cutoff_ladder":reference_ladder,
             "diagnostics":{"schema":"reference-scf-diagnostics-1",
                 "level":if reference_diagnostics {"full"} else {"lightweight"},
                 "setting":"profile.davidson_stages / BAANDI_DAVIDSON_STAGES",
@@ -2640,6 +2654,8 @@ fn execute_mode_inner(
         );
         result["reference_scf"]["wall_s"] = json!({
             "start":result["reference_scf"]["run"]["start_s"],
+            "coarse_in_start":result["reference_scf"]["cutoff_ladder"]["coarse_seconds"],
+            "start_scope":"inclusive run entry to first fine map; includes coarse stage and handoff when enabled",
             "solve":sum(|r|r.solve_s),"density":sum(|r|r.density_s),
             "potential":sum(|r|r.potential_s),"energy":sum(|r|r.energy_s),
             "mix":sum(|r|r.mixing_s),"density_transform":sum(|r|r.density_transform_s),
@@ -3686,7 +3702,7 @@ fn reference_solve_json(c: &dft_engine::refscf::record::SolveRecord) -> Value {
         "repairs":c.repairs,"dropped_corrections":c.dropped_corrections})
 }
 fn reference_record_json(r: &dft_engine::refscf::record::Record) -> Value {
-    let mut record = json!({"iteration":r.iteration,"dr2_ry":r.dr2_ry,"dr2_ha":r.dr2_ry/2.,
+    let mut record = json!({"stage":r.stage,"iteration":r.iteration,"dr2_ry":r.dr2_ry,"dr2_ha":r.dr2_ry/2.,
         "ethr_requested_ry":r.ethr_requested_ry,"ethr_requested_ha":r.ethr_requested_ry/2.,
         "ethr_ry":r.ethr_ry,"ethr_ha":r.ethr_ry/2.,"ethr_used_ry":r.ethr_ry,"beta":r.beta,
         "first_iteration_redo":r.first_iteration_redo,"history_occupancy":r.mixing.occupancy,
@@ -3897,6 +3913,70 @@ mod tests {
             }
             dft_engine::parallel::set_communicator(None);
         });
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn reference_ladder_records_and_fine_stop_clock() {
+        let dir = std::env::temp_dir().join(format!("p3-ladder-cli-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let mut pp = crate::test_fixtures::gaussian_with(2., 1.8, false, 161)
+            .replace("element=\"Xx\"", "element=\"He\"");
+        let parsed = dft_upf::parse_upf(&pp).unwrap();
+        let array = |f: &dyn Fn(f64) -> f64| {
+            parsed
+                .mesh()
+                .r()
+                .iter()
+                .map(|&r| format!("{:.17e}", f(r)))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let start = pp.find("<PP_RHOATOM>").unwrap() + "<PP_RHOATOM>".len();
+        let end = pp.find("</PP_RHOATOM>").unwrap();
+        pp.replace_range(
+            start..end,
+            &array(&|r| {
+                8. / (std::f64::consts::PI.sqrt() * 1.8_f64.powi(3))
+                    * r
+                    * r
+                    * (-(r / 1.8).powi(2)).exp()
+            }),
+        );
+        pp = pp.replace("number_of_wfc=\"0\"", "number_of_wfc=\"1\"").replace("</UPF>",
+            &format!("<PP_PSWFC><PP_CHI.1 l=\"0\" label=\"s\" occupation=\"2\">{}</PP_CHI.1></PP_PSWFC></UPF>", array(&|r| r * (-0.6 * r * r).exp())));
+        fs::write(dir.join("syn.xml"), pp).unwrap();
+
+        let base = "[system]\nname='ladder'\nlattice_unit='bohr'\nlattice_vectors=[[7.0,0.0,0.0],[0.2,7.0,0.0],[0.0,0.1,7.0]]\n[[system.atoms]]\nspecies='He'\nfractional=[0.13,0.21,0.32]\n[pseudopotentials]\nHe='syn.xml'\n[basis]\necutwfc_ry=4.0\nkpoints=[[0.0,0.0,0.0]]\n[xc]\nfunctional='lda-pz'\n[scf]\nnbands=3\nmax_iterations=80\ndriver='reference'\n";
+        for verify in ["fixed_point", "off"] {
+            let input = dir.join(format!("{verify}.toml"));
+            fs::write(
+                &input,
+                format!("{base}verify='{verify}'\n[performance]\nrefscf_ladder='on'\n"),
+            )
+            .unwrap();
+            let out = dir.join(verify);
+            execute(&input, Some(&out)).unwrap();
+            let result: Value =
+                serde_json::from_slice(&fs::read(out.join("results.json")).unwrap()).unwrap();
+            assert_eq!(result["convergence"]["converged"], true);
+            let r = &result["reference_scf"];
+            let coarse = r["cutoff_ladder"]["iterations"].as_array().unwrap();
+            let fine = r["iterations"].as_array().unwrap();
+            assert!(!coarse.is_empty() && !fine.is_empty());
+            assert!(coarse.iter().all(|r| r["stage"] == "coarse"));
+            assert!(fine.iter().all(|r| r["stage"] == "fine"));
+            assert_eq!(
+                fine.len(),
+                result["convergence"]["history"].as_array().unwrap().len()
+            );
+            assert_eq!(r["cutoff_ladder"]["fine_maps"], fine.len());
+            assert_eq!(r["cutoff_ladder"]["coarse_maps"], coarse.len());
+            assert!(
+                r["wall_s"]["start"].as_f64().unwrap()
+                    >= r["cutoff_ladder"]["coarse_seconds"].as_f64().unwrap()
+            );
+        }
         fs::remove_dir_all(dir).unwrap();
     }
 

@@ -1,4 +1,4 @@
-//! Independent final-cutoff reference SCF. No ScfProblem/session/ladder or
+//! Independent reference SCF with an optional coarse start. No ScfProblem/session or
 //! legacy solver dispatch is constructed, including during verification.
 // Reporting bridge for the CLI, whose production dependency is the engine.
 pub use dft_solvers::ref_rmm::{
@@ -73,6 +73,7 @@ pub fn contraction_prediction(previous: f64, current: f64) -> Option<f64> {
 }
 
 pub struct Run {
+    pub ladder: Option<super::ladder::Report>,
     pub qe_clock: Vec<super::record::QeClock>,
     pub full_diagnostics: bool,
     pub outcome: ScfOutcome,
@@ -113,6 +114,63 @@ fn run_inner<K: Collective>(
     owned_comm: Option<crate::parallel::SharedComm>,
 ) -> Result<Run, ScfError> {
     let start = Instant::now();
+    use super::ladder::{FRACTION, MAX_COARSE_MAPS, THRESHOLD_RATIO};
+    let ladder = dft_numerics::switches::on(dft_numerics::switches::Id::REFSCF_LADDER);
+    let (seed, report) = if ladder {
+        let mut coarse = input.options.clone();
+        coarse.cutoff_hartree *= FRACTION;
+        coarse.grid_override = None;
+        coarse.verification = Verification::Off;
+        coarse.max_iterations = coarse.max_iterations.min(MAX_COARSE_MAPS);
+        let coarse_profile = Profile {
+            threshold_ry: profile.threshold_ry * THRESHOLD_RATIO,
+            ..profile
+        }
+        .validate()?;
+        let StageRun::Coarse(seed, mut report) = run_stage(
+            StartInput {
+                options: &coarse,
+                ..input
+            },
+            coarse_profile,
+            comm,
+            None,
+            None,
+            true,
+            start,
+        )?
+        else {
+            unreachable!()
+        };
+        report.coarse_seconds = start.elapsed().as_secs_f64();
+        (Some(*seed), Some(report))
+    } else {
+        (None, None)
+    };
+    let StageRun::Fine(mut run) = run_stage(input, profile, comm, owned_comm, seed, false, start)?
+    else {
+        unreachable!()
+    };
+    run.ladder = report;
+    Ok(*run)
+}
+
+enum StageRun {
+    Fine(Box<Run>),
+    Coarse(Box<super::ladder::Seed>, super::ladder::Report),
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_stage<K: Collective>(
+    input: StartInput<'_>,
+    profile: Profile,
+    comm: &K,
+    owned_comm: Option<crate::parallel::SharedComm>,
+    seed: Option<super::ladder::Seed>,
+    coarse: bool,
+    start: Instant,
+) -> Result<StageRun, ScfError> {
+    let stage_start = Instant::now();
     // Resolve once from this run's scope, never a process-cached profile flag.
     use dft_numerics::switches::{Id, RunConfig};
     let config = RunConfig::current();
@@ -155,12 +213,14 @@ fn run_inner<K: Collective>(
         threshold_ha: profile.threshold_ry / 2.,
     });
     let cell = input.cell;
-    let mut state = refstart::start(
+    let prolonged_start = seed.is_some();
+    let mut state = refstart::start_prolonged(
         StartInput {
             options: &options,
             ..input
         },
         comm,
+        seed,
     )?;
     let mut setup = std::mem::take(&mut state.setup);
     let prep_comm = refstart::TimedCollective::new(comm);
@@ -236,7 +296,7 @@ fn run_inner<K: Collective>(
     setup.record("mixer_workspace_initial_transform", clock);
     setup.collective_s += prep_comm.seconds();
     let start_time = start.elapsed();
-    setup.total_s = start_time.as_secs_f64();
+    setup.total_s = stage_start.elapsed().as_secs_f64();
     let mut history = Vec::<IterationRecord>::with_capacity(o.max_iterations);
     let mut records = Vec::with_capacity(o.max_iterations);
     let mut ethr = 1e-2;
@@ -636,6 +696,7 @@ fn run_inner<K: Collective>(
             pulay: None,
         });
         records.push(Record {
+            stage: if coarse { "coarse" } else { "fine" },
             iteration,
             verification_cost: (reuse || gate).then_some(VerificationCost {
                 gate_enabled: gate,
@@ -682,6 +743,7 @@ fn run_inner<K: Collective>(
         if finish || failure.is_some() || iteration == o.max_iterations {
             let verified = verification.as_ref().is_none_or(VerificationReport::passed);
             let converged = stopped && verified && failure.is_none();
+            let failed = failure.is_some();
             let exit_reason = failure.unwrap_or_else(|| {
                 if !stopped {
                     "reference SCF maximum iterations reached".into()
@@ -700,6 +762,31 @@ fn run_inner<K: Collective>(
                         .into()
                 }
             });
+            if coarse {
+                if failed {
+                    return Err(ScfError::Numerical(exit_reason));
+                }
+                let density_g = state.fields.forward(comm, &step.density)?;
+                let seed = super::ladder::Seed {
+                    basis: state.basis,
+                    grid: state.grid,
+                    half: state.half,
+                    rows: state.operator.local_rows().to_vec(),
+                    orbitals: step.solve.eigenvectors,
+                    indices: state.fields.reciprocal_indices().to_vec(),
+                    density_g,
+                };
+                return Ok(StageRun::Coarse(
+                    Box::new(seed),
+                    super::ladder::Report {
+                        coarse_records: records,
+                        coarse_setup: setup,
+                        coarse_seconds: stage_start.elapsed().as_secs_f64(),
+                        coarse_threshold_ry: profile.threshold_ry,
+                        coarse_stopped: stopped,
+                    },
+                ));
+            }
             let clock = Instant::now();
             records.last_mut().expect("current map").map_end_s = start.elapsed().as_secs_f64();
             let mut output = super::record::SetupTimings::default();
@@ -764,8 +851,16 @@ fn run_inner<K: Collective>(
             );
             let result = ScfResult {
                 atomic_start: AtomicStartReport {
-                    atomic_orbitals: state.memory.atomic_columns,
-                    initial_h_applications: state.memory.atomic_columns.max(bands),
+                    atomic_orbitals: if prolonged_start {
+                        0
+                    } else {
+                        state.memory.atomic_columns
+                    },
+                    initial_h_applications: if prolonged_start {
+                        0
+                    } else {
+                        state.memory.atomic_columns.max(bands)
+                    },
                     ..Default::default()
                 },
                 compat_mode: options.compat_mode,
@@ -812,7 +907,8 @@ fn run_inner<K: Collective>(
                     scope.snapshot().without(qe_verification),
                 )
             });
-            return Ok(Run {
+            return Ok(StageRun::Fine(Box::new(Run {
+                ladder: None,
                 qe_clock,
                 setup,
                 output,
@@ -826,7 +922,7 @@ fn run_inner<K: Collective>(
                 output_s: clock.elapsed().as_secs_f64(),
                 verification_calls,
                 peak_payload_bytes_per_rank,
-            });
+            })));
         }
         std::mem::swap(&mut x, &mut next);
         n.copy_from_slice(&next_planes);

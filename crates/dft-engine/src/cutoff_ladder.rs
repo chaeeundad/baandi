@@ -1058,20 +1058,7 @@ pub fn prolong_orbitals(
             "cutoff_ladder: orbital rows differ from the coarse basis",
         ));
     }
-    let index: HashMap<[i32; 3], usize> = fine
-        .vectors()
-        .iter()
-        .enumerate()
-        .map(|(i, g)| (g.miller, i))
-        .collect();
-    let map = coarse
-        .vectors()
-        .iter()
-        .map(|g| index.get(&g.miller).copied())
-        .collect::<Option<Vec<_>>>()
-        .ok_or(ScfError::InvalidInput(
-            "cutoff_ladder: coarse basis is not a subset of the fine basis",
-        ))?;
+    let map = prolong_indices(coarse, fine)?;
     let rows = fine.vectors().len();
     let mut out = ComplexMatrix::zeros(rows, orbitals.cols())
         .map_err(|e| ScfError::Numerical(format!("cutoff_ladder: {e}")))?;
@@ -1082,6 +1069,27 @@ pub fn prolong_orbitals(
         }
     }
     Ok(out)
+}
+
+/// Shared exact Miller injection; no coefficient arithmetic.
+pub(crate) fn prolong_indices(
+    coarse: &PlaneWaveBasis,
+    fine: &PlaneWaveBasis,
+) -> Result<Vec<usize>, ScfError> {
+    let index: HashMap<[i32; 3], usize> = fine
+        .vectors()
+        .iter()
+        .enumerate()
+        .map(|(i, g)| (g.miller, i))
+        .collect();
+    coarse
+        .vectors()
+        .iter()
+        .map(|g| index.get(&g.miller).copied())
+        .collect::<Option<Vec<_>>>()
+        .ok_or(ScfError::InvalidInput(
+            "cutoff_ladder: coarse basis is not a subset of the fine basis",
+        ))
 }
 
 /// Fourier interpolation of a real periodic field from the coarse FFT grid to a
@@ -1098,18 +1106,12 @@ pub fn prolong_density(
     let mut reciprocal = Array3::<Complex64>::zeros(cd);
     fft.to_reciprocal(&input, &mut reciprocal)?;
     let mut padded = Array3::<Complex64>::zeros(fine_dims);
-    let signed = |i: usize, n: usize| -> Option<i32> {
-        if n.is_multiple_of(2) && i == n / 2 {
-            None
-        } else if i <= (n - 1) / 2 {
-            Some(i as i32)
-        } else {
-            Some(i as i32 - n as i32)
-        }
-    };
     for ((i, j, k), z) in reciprocal.indexed_iter() {
-        let (Some(a), Some(b), Some(c)) = (signed(i, cd[0]), signed(j, cd[1]), signed(k, cd[2]))
-        else {
+        let (Some(a), Some(b), Some(c)) = (
+            prolong_frequency(i, cd[0]),
+            prolong_frequency(j, cd[1]),
+            prolong_frequency(k, cd[2]),
+        ) else {
             continue;
         };
         let [p, q, r] = FftGridSpec::map_miller([a, b, c], fine_dims).map_err(|_| {
@@ -1121,6 +1123,18 @@ pub fn prolong_density(
     let mut fine_fft = FftPlan3d::new(fine_dims)?;
     fine_fft.to_real(&padded, &mut real)?;
     Ok(real.mapv(|z| z.re))
+}
+
+/// Shared Fourier-padding convention; an even-grid Nyquist plane is absent
+/// from the representable density sphere. Used by both ladder drivers.
+pub(crate) fn prolong_frequency(i: usize, n: usize) -> Option<i32> {
+    if n.is_multiple_of(2) && i == n / 2 {
+        None
+    } else if i <= (n - 1) / 2 {
+        Some(i as i32)
+    } else {
+        Some(i as i32 - n as i32)
+    }
 }
 
 /// F-LADDER-FRACTION: setup-only experimental rules, resolved from this run.

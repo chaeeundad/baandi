@@ -250,17 +250,28 @@ impl<K: Collective> Collective for TimedCollective<'_, K> {
 /// order; missing bands are completed by deterministic kinetic-ordered ORC
 /// cosine/sine waves, as in the legacy atomic start. Seed is not consumed.
 pub fn start<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartState, ScfError> {
+    start_prolonged(input, comm, None)
+}
+pub(crate) fn start_prolonged<K: Collective>(
+    input: StartInput<'_>,
+    comm: &K,
+    seed: Option<crate::refscf::ladder::Seed>,
+) -> Result<StartState, ScfError> {
     let clock = Instant::now();
     let cache = dft_numerics::switches::on(dft_numerics::switches::Id::REFSTART_FFT_SHARE)
         .then(PlanCache::default);
     let _plans = cache.as_ref().map(PlanCache::enter);
     let timed = TimedCollective::new(comm);
-    let mut state = start_inner(input, &timed)?;
+    let mut state = start_inner(input, &timed, seed)?;
     state.setup.total_s = clock.elapsed().as_secs_f64();
     state.setup.collective_s = timed.seconds();
     Ok(state)
 }
-fn start_inner<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartState, ScfError> {
+fn start_inner<K: Collective>(
+    input: StartInput<'_>,
+    comm: &K,
+    seed: Option<crate::refscf::ladder::Seed>,
+) -> Result<StartState, ScfError> {
     let mut setup = crate::refscf::record::SetupTimings::default();
     let clock = Instant::now();
     let StartInput {
@@ -488,27 +499,37 @@ fn start_inner<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartSt
     setup.record("atomic_local_tables_structure_factors", clock);
     let clock = Instant::now();
     let ionic = fields.inverse(comm, &ion_hat)?;
-    let mut density = fields.inverse(comm, &rho_hat)?;
-    drop(rho_hat);
     drop(ion_hat);
-    for x in &mut density {
-        *x = x.max(0.);
-    }
-    let charge = sum(comm, &[density.iter().sum::<f64>()])?[0] * volume / points as f64;
-    if !charge.is_finite() || charge <= 0. {
-        return Err(ScfError::InvalidInput(
-            "reference start: invalid atomic charge",
-        ));
-    }
-    for x in &mut density {
-        *x *= electrons / charge;
-    }
-    let mut density_g = fields.forward(comm, &density)?;
-    for (z, &g) in density_g.iter_mut().zip(fields.reciprocal_indices()) {
-        if g == 0 {
-            *z = C::new(electrons / volume, 0.);
+    let prolonged = seed
+        .map(|s| s.inject(&basis, &grid, &half, operator.local_rows(), &fields, comm))
+        .transpose()?;
+    let (density, density_g, warm_orbitals) = if let Some((density_g, orbitals)) = prolonged {
+        drop(rho_hat);
+        let density = fields.inverse(comm, &density_g)?;
+        (density, density_g, Some(orbitals))
+    } else {
+        let mut density = fields.inverse(comm, &rho_hat)?;
+        drop(rho_hat);
+        for x in &mut density {
+            *x = x.max(0.);
         }
-    }
+        let charge = sum(comm, &[density.iter().sum::<f64>()])?[0] * volume / points as f64;
+        if !charge.is_finite() || charge <= 0. {
+            return Err(ScfError::InvalidInput(
+                "reference start: invalid atomic charge",
+            ));
+        }
+        for x in &mut density {
+            *x *= electrons / charge;
+        }
+        let mut density_g = fields.forward(comm, &density)?;
+        for (z, &g) in density_g.iter_mut().zip(fields.reciprocal_indices()) {
+            if g == 0 {
+                *z = C::new(electrons / volume, 0.);
+            }
+        }
+        (density, density_g, None)
+    };
     setup.record("atomic_density", clock);
     let clock = Instant::now();
     let b = cell.reciprocal_columns_inverse_bohr();
@@ -536,7 +557,16 @@ fn start_inner<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartSt
         .collect();
     let mut potential = fields.inverse(comm, &vh_hat)?;
     drop(vh_hat);
-    let xc = local_xc(o.functional, &density);
+    // Prolongation is not clipped or rescaled. Signed Fourier roundoff uses
+    // the same absolute-density LDA evaluation as a reference SCF map.
+    let xc = if warm_orbitals.is_some() {
+        local_xc(
+            o.functional,
+            &density.iter().map(|v| v.abs()).collect::<Vec<_>>(),
+        )
+    } else {
+        local_xc(o.functional, &density)
+    };
     agree(comm, f64::from(xc.is_err()), "reference start: XC failed")?;
     let xc = xc?;
     for ((v, &ion), &x) in potential.iter_mut().zip(&ionic).zip(&xc) {
@@ -559,18 +589,22 @@ fn start_inner<K: Collective>(input: StartInput<'_>, comm: &K) -> Result<StartSt
     drop(map);
     setup.record("potential_distribution", clock);
     let clock = Instant::now();
-    let (orbitals, ritz_values_hartree) = atomic_block(
-        cell,
-        &basis,
-        &half,
-        &species,
-        o,
-        bands,
-        &mut operator,
-        comm,
-        pool,
-        &mut setup,
-    )?;
+    let (orbitals, ritz_values_hartree) = if let Some(orbitals) = warm_orbitals {
+        (orbitals, Vec::new())
+    } else {
+        atomic_block(
+            cell,
+            &basis,
+            &half,
+            &species,
+            o,
+            bands,
+            &mut operator,
+            comm,
+            pool,
+            &mut setup,
+        )?
+    };
     setup.record("atomic_block_total", clock);
     let l = operator.local_len();
     let f = fields.fft.plane_points();

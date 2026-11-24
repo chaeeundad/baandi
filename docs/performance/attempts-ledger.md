@@ -3535,3 +3535,25 @@ the remaining tail cost is the 2 extra maps needed to bring the delivered fixed-
 the threshold to below it. Also found: maps after a skipped attempt are counted as "unassigned" by the
 stop-to-verified reader (si8 0.041 s); to be fixed with the next reader change.
 Evidence: dev08 /data/sig-dft/fa/SCREEN.md, screen.json.
+
+### P3 timed (2026-11-24): REF_DAV_WIDE_ROTATE, REF_DAV_RESTART_CORRECTIONS, REFSCF_SETUP_PHASE_REUSE ADOPTED
+
+Cause found from the dev08 gap profile: the reference Davidson's rotations (V C, HV C; si128 184 calls,
+186 GFLOP per rank) went through the plain GEMM entry, whose whole-output bound sent every real-cell
+rotation to the pure-Rust kernel (~15 GFLOP/s per core). W routes them through the wide entry (MKL
+panels). R omits the identity rotations right after a restart (4rnu FLOPs per affected correction).
+S reuses structure factors in the atomic start. dev08 MPI8, mpi,mkl 0e8b08da (sha 5e8b1a3e...),
+lightweight diagnostics, verify on; 20 A/A + 30 crossed pairs per comparison; 842 samples all
+VERIFIED, |E - E_strict| < 5e-9, maps/attempts identical across arms.
+
+| case | W vs default log ratio (x) | X=W+R+S vs W log ratio (x) | median wall default -> W -> X (s) |
+|---|---|---|---|
+| rskew | -0.0005 +- 0.0221 inconclusive | -0.0162 +- 0.0201 inconclusive | 0.177 |
+| elongated | -0.0009 +- 0.0064 inconclusive | -0.0162 +- 0.0049 (1.8F) inconclusive | 1.484 -> 1.503 |
+| si64 | -0.1048 +- 0.0063 faster (x0.900) | -0.0089 +- 0.0047 inconclusive | 8.915 -> 8.000 |
+| si128 | -0.2515 +- 0.0040 faster (x0.778) | -0.0290 +- 0.0042 faster (x0.971) | 52.719 -> 41.126 -> 40.056 |
+
+Adoption rule (2026-11-10): faster where measurable, no regression beyond noise anywhere -> all three
+default on (W is rounding class: H columns 14204 vs 14203 on si128, energies unchanged). Lesson: check
+gemm_dispatch routes first whenever a dense stage is slow; the pure fallbacks are silent.
+Evidence: dev08 /data/sig-dft/p3/<case>/TABLE.md, table.json, SCREEN.md.

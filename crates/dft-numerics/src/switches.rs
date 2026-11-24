@@ -242,11 +242,13 @@ table! {
         "SCF_ADVANCE research: adapt the block budget from the previous advanced map's inner/SCF ratio (off: the budget stays at SCF_ADVANCE_BLOCKS)";
     SCF_ADVANCE_SCOPE: Kind::Choice { allowed: &["all", "fine"], default: "all" }, "all", "all, fine",
         "SCF_ADVANCE research: advanced maps in every standard session (all) or only outside the cutoff-ladder coarse stage (fine)";
-    REF_DAV_RESTART_CORRECTIONS: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-24 (dev08 MPI8 A/B at 0e8b08da; attempts ledger "P3 timed").
+    REF_DAV_RESTART_CORRECTIONS: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "reference Davidson only: form the first post-contraction corrections directly from retained V/HV, omitting identity-coefficient GEMMs; measured H/S refresh and band decisions unchanged";
     REFSTART_MKL: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "reference SCF atomic start only: Gram and rotation products through the dispatching GEMM entries (MKL panels) instead of the direct pure-Rust kernel; rounding class";
-    REF_DAV_WIDE_ROTATE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-24 (dev08 MPI8 A/B at 0e8b08da; attempts ledger "P3 timed").
+    REF_DAV_WIDE_ROTATE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "reference Davidson only: route the V C / HV C rotations through the wide GEMM entry (MKL panels) instead of the whole-output-bound pure-Rust fallback; rounding class";
     REFSCF_VERIFY_REUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
         "reference SCF only: consume a failed verification map as the next ordinary Broyden iterate; passing criterion unchanged";
@@ -492,7 +494,8 @@ table! {
         "first-correction-block residual diagnostic (review E3): before every warm real Gamma solve a small Rayleigh-Ritz on the kept B vectors, the occupied residual block R_o = H X_o - X_o A_o, its singular values and effective ranks, and the unconverged-root counts of the Ritz-change rule against the true residual; read-only (the solve is unchanged; B extra H columns per solve when no kept H X exists)";
     SNAPSHOT_DIR: Kind::Path, "unset", "absolute directory",
         "SCF snapshot capture: every real Gamma solve of the run writes the state that replays it (input density, this rank's orbital rows, kept H X and its armed flag, tolerance, policy, layout hash, context) to this directory outside the timed map phases; replay with davidson_bench --snapshot <manifest.json>";
-    REFSCF_SETUP_PHASE_REUSE: Kind::Choice { allowed: ON_OFF, default: "off" }, "off", "on, off",
+    // Adopted 2026-11-24 (dev08 MPI8 A/B at 0e8b08da; attempts ledger "P3 timed").
+    REFSCF_SETUP_PHASE_REUSE: Kind::Choice { allowed: ON_OFF, default: "on" }, "on", "on, off",
         "P3-SETUP: reference start reuses identical direct structure factors across atomic charge/local potential and magnetic orbital channels; same arithmetic, default off pending dev08 A/B";
 }
 
